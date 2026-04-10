@@ -58,6 +58,7 @@ WeaveIntel is a modular monorepo that provides composable building blocks for bu
 ```bash
 git clone https://github.com/gibyvarghese/weaveintel.git
 cd weaveintel
+cp .env.example .env   # then fill in your API keys
 npm install
 npm run build
 ```
