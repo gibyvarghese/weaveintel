@@ -1,0 +1,23 @@
+{
+  "name": "@weaveintel/agents",
+  "version": "0.0.1",
+  "description": "Agent runtime — tool-calling loop, planner-executor, hierarchical supervisor-worker",
+  "type": "module",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@weaveintel/core": "*",
+    "@weaveintel/models": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

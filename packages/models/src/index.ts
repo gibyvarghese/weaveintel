@@ -1,0 +1,16 @@
+export {
+  registerModelProvider,
+  getModelProvider,
+  createModel,
+  registerEmbeddingProvider,
+  getEmbeddingProvider,
+  createEmbeddingModel,
+  modelObservabilityMiddleware,
+  streamObservabilityMiddleware,
+  selectModelByCapability,
+  selectEmbeddingByCapability,
+  type CreateModelOptions,
+  type CreateEmbeddingModelOptions,
+  type ModelFactory,
+  type EmbeddingModelFactory,
+} from './router.js';

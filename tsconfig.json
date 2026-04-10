@@ -1,0 +1,18 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/models" },
+    { "path": "packages/agents" },
+    { "path": "packages/memory" },
+    { "path": "packages/retrieval" },
+    { "path": "packages/observability" },
+    { "path": "packages/redaction" },
+    { "path": "packages/mcp-client" },
+    { "path": "packages/mcp-server" },
+    { "path": "packages/a2a" },
+    { "path": "packages/evals" },
+    { "path": "packages/testing" },
+    { "path": "packages/provider-openai" }
+  ]
+}

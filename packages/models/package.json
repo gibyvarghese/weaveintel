@@ -1,0 +1,25 @@
+{
+  "name": "@weaveintel/models",
+  "version": "0.0.1",
+  "description": "Model runtime with unified invocation, routing, fallback, and streaming",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@weaveintel/core": "*"
+  },
+  "license": "MIT"
+}
