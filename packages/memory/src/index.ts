@@ -4,3 +4,17 @@ export {
   weaveSemanticMemory,
   weaveEntityMemory,
 } from './memory.js';
+
+export { weaveGovernancePolicy } from './governance.js';
+export type { GovernanceRule } from './governance.js';
+
+export { setProvenance, getProvenance, withProvenance, filterByConfidence } from './provenance.js';
+export type { ProvenanceInfo } from './provenance.js';
+
+export { deduplicateExact, deduplicateByKey } from './dedup.js';
+export type { DeduplicationStrategy } from './dedup.js';
+
+export { recordCorrection, getCorrections, applyCorrection } from './correction.js';
+export type { Correction } from './correction.js';
+
+export { isExpired, filterExpired, enforceRetention, forgetUser, forgetSession } from './expiry.js';

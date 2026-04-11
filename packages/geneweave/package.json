@@ -35,6 +35,9 @@
     "@weaveintel/contracts": "*",
     "@weaveintel/prompts": "*",
     "@weaveintel/routing": "*",
+    "@weaveintel/cache": "*",
+    "@weaveintel/identity": "*",
+    "@weaveintel/memory": "*",
     "better-sqlite3": "^11.9.1"
   },
   "devDependencies": {

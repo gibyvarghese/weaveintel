@@ -29,6 +29,10 @@ import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
 import { createTemplate } from '@weaveintel/prompts';
 import { SmartModelRouter, ModelHealthTracker } from '@weaveintel/routing';
 import type { ModelCostInfo, ModelQualityInfo } from '@weaveintel/routing';
+import { weaveInMemoryCacheStore } from '@weaveintel/cache';
+import { weaveCacheKeyBuilder } from '@weaveintel/cache';
+import { shouldBypass, resolvePolicy } from '@weaveintel/cache';
+import type { CachePolicy } from '@weaveintel/core';
 
 // ─── Model pricing (per 1 M tokens) ─────────────────────────
 
@@ -137,6 +141,8 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
 
 export class ChatEngine {
   private readonly healthTracker = new ModelHealthTracker();
+  private readonly responseCache = weaveInMemoryCacheStore();
+  private readonly cacheKeyBuilder = weaveCacheKeyBuilder({ namespace: 'gw-chat' });
 
   constructor(
     private readonly config: ChatEngineConfig,
@@ -226,10 +232,24 @@ export class ChatEngine {
     const history = await this.db.getMessages(chatId);
     const messages = historyToMessages(history);
 
-    let assistantContent: string;
+    let assistantContent: string = '';
     let usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
     let steps: AgentStep[] | undefined;
+    let cacheHit = false;
 
+    // ── Cache lookup ──
+    const cachePolicy = await this.resolveActiveCache(settings.mode);
+    const cacheKey = this.cacheKeyBuilder.build({ model: modelId, prompt: processedContent });
+    if (cachePolicy && !shouldBypass(cachePolicy, processedContent)) {
+      const cached = this.responseCache.get(cacheKey);
+      if (cached) {
+        assistantContent = (cached as any).content;
+        usage = (cached as any).usage ?? usage;
+        cacheHit = true;
+      }
+    }
+
+    if (!cacheHit) {
     if (settings.mode === 'agent' || settings.mode === 'supervisor') {
       // ── Agent / Supervisor mode ──
       const result = await this.runAgent(ctx, model, messages, processedContent, settings);
@@ -252,6 +272,12 @@ export class ChatEngine {
       const response = await model.generate(ctx, request);
       assistantContent = response.content;
       usage = { ...response.usage };
+    }
+    } // end if (!cacheHit)
+
+    // ── Cache store ──
+    if (!cacheHit && cachePolicy) {
+      this.responseCache.set(cacheKey, { content: assistantContent!, usage }, cachePolicy.ttlMs);
     }
 
     const latencyMs = Date.now() - startMs;
@@ -996,6 +1022,30 @@ export class ChatEngine {
       );
 
       return { provider: decision.providerId, modelId: decision.modelId };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Resolve the best-matching cache policy from admin-configured policies.
+   */
+  private async resolveActiveCache(mode: string): Promise<CachePolicy | null> {
+    try {
+      const rows = await this.db.listCachePolicies();
+      const enabled = rows.filter(r => r.enabled);
+      if (!enabled.length) return null;
+      const policies: CachePolicy[] = enabled.map(r => ({
+        id: r.id,
+        name: r.name,
+        scope: (r.scope as CachePolicy['scope']) ?? 'global',
+        ttlMs: r.ttl_ms ?? 300_000,
+        maxEntries: r.max_entries ?? 1000,
+        bypassPatterns: r.bypass_patterns ? JSON.parse(r.bypass_patterns) : [],
+        invalidateOnEvents: r.invalidate_on ? JSON.parse(r.invalidate_on) : [],
+        enabled: true,
+      }));
+      return resolvePolicy(policies, {}) ?? null;
     } catch {
       return null;
     }

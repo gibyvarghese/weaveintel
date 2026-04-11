@@ -563,6 +563,190 @@ describe('Admin Contracts', () => {
   });
 });
 
+// ─── Admin: Cache Policies CRUD ─────────────────────────────
+
+describe('Admin Cache Policies', () => {
+  let policyId: string;
+
+  it('lists cache policies', async () => {
+    const { status, data } = await api('GET', '/api/admin/cache-policies');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['cache-policies'])).toBe(true);
+  });
+
+  it('creates a cache policy', async () => {
+    const { status, data } = await api('POST', '/api/admin/cache-policies', {
+      name: 'Test Cache Policy',
+      description: 'Integration test cache policy',
+      scope: 'session',
+      ttl_ms: 60000,
+      max_entries: 500,
+      bypass_patterns: ['password', 'secret'],
+      invalidate_on: ['model-change'],
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const policy = data['cache-policy'] as Record<string, unknown>;
+    expect(policy?.['id']).toBeDefined();
+    expect(policy?.['name']).toBe('Test Cache Policy');
+    expect(policy?.['scope']).toBe('session');
+    policyId = policy['id'] as string;
+  });
+
+  it('gets a cache policy by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/cache-policies/${policyId}`);
+    expect(status).toBe(200);
+    const policy = data['cache-policy'] as Record<string, unknown>;
+    expect(policy?.['name']).toBe('Test Cache Policy');
+  });
+
+  it('updates a cache policy', async () => {
+    const { status, data } = await api('PUT', `/api/admin/cache-policies/${policyId}`, {
+      name: 'Updated Cache Policy',
+      ttl_ms: 120000,
+    });
+    expect(status).toBe(200);
+    const policy = data['cache-policy'] as Record<string, unknown>;
+    expect(policy?.['name']).toBe('Updated Cache Policy');
+  });
+
+  it('verifies update', async () => {
+    const { data } = await api('GET', `/api/admin/cache-policies/${policyId}`);
+    const policy = data['cache-policy'] as Record<string, unknown>;
+    expect(policy?.['name']).toBe('Updated Cache Policy');
+    expect(policy?.['ttl_ms']).toBe(120000);
+  });
+
+  it('deletes a cache policy', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/cache-policies/${policyId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin: Identity Rules CRUD ─────────────────────────────
+
+describe('Admin Identity Rules', () => {
+  let ruleId: string;
+
+  it('lists identity rules', async () => {
+    const { status, data } = await api('GET', '/api/admin/identity-rules');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['identity-rules'])).toBe(true);
+  });
+
+  it('creates an identity rule', async () => {
+    const { status, data } = await api('POST', '/api/admin/identity-rules', {
+      name: 'Test Identity Rule',
+      description: 'Integration test identity rule',
+      resource: 'test:*',
+      action: 'read',
+      roles: ['tester'],
+      scopes: ['test'],
+      result: 'allow',
+      priority: 50,
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const rule = data['identity-rule'] as Record<string, unknown>;
+    expect(rule?.['id']).toBeDefined();
+    expect(rule?.['name']).toBe('Test Identity Rule');
+    expect(rule?.['resource']).toBe('test:*');
+    ruleId = rule['id'] as string;
+  });
+
+  it('gets an identity rule by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/identity-rules/${ruleId}`);
+    expect(status).toBe(200);
+    const rule = data['identity-rule'] as Record<string, unknown>;
+    expect(rule?.['name']).toBe('Test Identity Rule');
+  });
+
+  it('updates an identity rule', async () => {
+    const { status, data } = await api('PUT', `/api/admin/identity-rules/${ruleId}`, {
+      name: 'Updated Identity Rule',
+      priority: 25,
+    });
+    expect(status).toBe(200);
+    const rule = data['identity-rule'] as Record<string, unknown>;
+    expect(rule?.['name']).toBe('Updated Identity Rule');
+  });
+
+  it('verifies update', async () => {
+    const { data } = await api('GET', `/api/admin/identity-rules/${ruleId}`);
+    const rule = data['identity-rule'] as Record<string, unknown>;
+    expect(rule?.['name']).toBe('Updated Identity Rule');
+    expect(rule?.['priority']).toBe(25);
+  });
+
+  it('deletes an identity rule', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/identity-rules/${ruleId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin: Memory Governance CRUD ──────────────────────────
+
+describe('Admin Memory Governance', () => {
+  let ruleId: string;
+
+  it('lists memory governance rules', async () => {
+    const { status, data } = await api('GET', '/api/admin/memory-governance');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['memory-governance'])).toBe(true);
+  });
+
+  it('creates a memory governance rule', async () => {
+    const { status, data } = await api('POST', '/api/admin/memory-governance', {
+      name: 'Test Memory Governance',
+      description: 'Integration test memory governance',
+      memory_types: ['conversation', 'entity'],
+      tenant_id: 'test-tenant',
+      block_patterns: ['password', 'ssn'],
+      redact_patterns: ['\\b\\d{3}-\\d{2}-\\d{4}\\b'],
+      max_age: 'P30D',
+      max_entries: 1000,
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const rule = data['memory-governance-rule'] as Record<string, unknown>;
+    expect(rule?.['id']).toBeDefined();
+    expect(rule?.['name']).toBe('Test Memory Governance');
+    ruleId = rule['id'] as string;
+  });
+
+  it('gets a memory governance rule by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/memory-governance/${ruleId}`);
+    expect(status).toBe(200);
+    const rule = data['memory-governance-rule'] as Record<string, unknown>;
+    expect(rule?.['name']).toBe('Test Memory Governance');
+  });
+
+  it('updates a memory governance rule', async () => {
+    const { status, data } = await api('PUT', `/api/admin/memory-governance/${ruleId}`, {
+      name: 'Updated Memory Governance',
+      max_entries: 2000,
+    });
+    expect(status).toBe(200);
+    const rule = data['memory-governance-rule'] as Record<string, unknown>;
+    expect(rule?.['name']).toBe('Updated Memory Governance');
+  });
+
+  it('verifies update', async () => {
+    const { data } = await api('GET', `/api/admin/memory-governance/${ruleId}`);
+    const rule = data['memory-governance-rule'] as Record<string, unknown>;
+    expect(rule?.['name']).toBe('Updated Memory Governance');
+    expect(rule?.['max_entries']).toBe(2000);
+  });
+
+  it('deletes a memory governance rule', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/memory-governance/${ruleId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
 // ─── Seed ───────────────────────────────────────────────────
 
 describe('Seed', () => {

@@ -1,0 +1,25 @@
+{
+  "name": "@weaveintel/identity",
+  "version": "0.0.1",
+  "description": "Identity, delegation, and access-control runtime",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@weaveintel/core": "*"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
+}

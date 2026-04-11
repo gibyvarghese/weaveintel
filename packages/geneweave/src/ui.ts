@@ -418,8 +418,8 @@ let state = {
   showProfile:false,
   traces:[],
   // Admin state
-  adminTab:'prompts', // 'prompts' | 'guardrails' | 'routing' | 'workflows' | 'tools' | 'workflow-runs' | 'guardrail-evals'
-  adminData:{prompts:[],guardrails:[],routing:[],workflows:[],tools:[],'workflow-runs':[],'guardrail-evals':[]},
+  adminTab:'prompts', // 'prompts' | 'guardrails' | 'routing' | 'workflows' | 'tools' | 'workflow-runs' | 'guardrail-evals' | 'task-policies' | 'contracts' | 'cache-policies' | 'identity-rules' | 'memory-governance'
+  adminData:{prompts:[],guardrails:[],routing:[],workflows:[],tools:[],'workflow-runs':[],'guardrail-evals':[],'task-policies':[],'contracts':[],'cache-policies':[],'identity-rules':[],'memory-governance':[]},
   adminEditing:null, adminForm:{}
 };
 
@@ -876,7 +876,7 @@ function renderApp(){
 
 async function loadAdmin(){
   try{
-    const [p,g,r,w,t,wr,ge,tp,ct] = await Promise.all([
+    const [p,g,r,w,t,wr,ge,tp,ct,cp,ir,mg] = await Promise.all([
       api.get('/admin/prompts').then(r=>r.json()),
       api.get('/admin/guardrails').then(r=>r.json()),
       api.get('/admin/routing').then(r=>r.json()),
@@ -886,12 +886,17 @@ async function loadAdmin(){
       api.get('/guardrail-evals').then(r=>r.json()).catch(()=>({evals:[]})),
       api.get('/admin/task-policies').then(r=>r.json()).catch(()=>({taskPolicies:[]})),
       api.get('/admin/contracts').then(r=>r.json()).catch(()=>({contracts:[]})),
+      api.get('/admin/cache-policies').then(r=>r.json()).catch(()=>({'cache-policies':[]})),
+      api.get('/admin/identity-rules').then(r=>r.json()).catch(()=>({'identity-rules':[]})),
+      api.get('/admin/memory-governance').then(r=>r.json()).catch(()=>({'memory-governance':[]})),
     ]);
     state.adminData = {
       prompts:p.prompts||[], guardrails:g.guardrails||[],
       routing:r.policies||[], workflows:w.workflows||[], tools:t.tools||[],
       'workflow-runs':wr.runs||[], 'guardrail-evals':ge.evals||[],
-      'task-policies':tp.taskPolicies||[], contracts:ct.contracts||[]
+      'task-policies':tp.taskPolicies||[], contracts:ct.contracts||[],
+      'cache-policies':cp['cache-policies']||[], 'identity-rules':ir['identity-rules']||[],
+      'memory-governance':mg['memory-governance']||[]
     };
   }catch(e){ console.error('Failed to load admin data',e); }
   render();
@@ -935,6 +940,22 @@ async function adminSave(tab){
     } else if(tab==='contracts'){
       const payload = {name:f.name,description:f.description,input_schema:f.input_schema||null,output_schema:f.output_schema||null,acceptance_criteria:f.acceptance_criteria||'[]',max_attempts:f.max_attempts?parseInt(f.max_attempts):null,timeout_ms:f.timeout_ms?parseInt(f.timeout_ms):null,evidence_required:f.evidence_required||null,min_confidence:f.min_confidence?parseFloat(f.min_confidence):null,require_human_review:!!f.require_human_review,enabled:f.enabled!==false};
       resp = isEdit ? await api.put('/admin/contracts/'+state.adminEditing,payload) : await api.post('/admin/contracts',payload);
+    } else if(tab==='cache-policies'){
+      let byp = null; try{byp=f.bypass_patterns?JSON.parse(f.bypass_patterns):null;}catch{}
+      let inv = null; try{inv=f.invalidate_on?JSON.parse(f.invalidate_on):null;}catch{}
+      const payload = {name:f.name,description:f.description,scope:f.scope||'global',ttl_ms:f.ttl_ms?parseInt(f.ttl_ms):300000,max_entries:f.max_entries?parseInt(f.max_entries):1000,bypass_patterns:byp,invalidate_on:inv,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/cache-policies/'+state.adminEditing,payload) : await api.post('/admin/cache-policies',payload);
+    } else if(tab==='identity-rules'){
+      let roles = null; try{roles=f.roles?JSON.parse(f.roles):null;}catch{}
+      let scopes = null; try{scopes=f.scopes?JSON.parse(f.scopes):null;}catch{}
+      const payload = {name:f.name,description:f.description,resource:f.resource||'*',action:f.action||'*',roles:roles,scopes:scopes,result:f.result||'allow',priority:parseInt(f.priority)||0,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/identity-rules/'+state.adminEditing,payload) : await api.post('/admin/identity-rules',payload);
+    } else if(tab==='memory-governance'){
+      let memTypes = null; try{memTypes=f.memory_types?JSON.parse(f.memory_types):null;}catch{}
+      let blockPat = null; try{blockPat=f.block_patterns?JSON.parse(f.block_patterns):null;}catch{}
+      let redPat = null; try{redPat=f.redact_patterns?JSON.parse(f.redact_patterns):null;}catch{}
+      const payload = {name:f.name,description:f.description,memory_types:memTypes,tenant_id:f.tenant_id||null,block_patterns:blockPat,redact_patterns:redPat,max_age:f.max_age||null,max_entries:f.max_entries?parseInt(f.max_entries):null,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/memory-governance/'+state.adminEditing,payload) : await api.post('/admin/memory-governance',payload);
     }
     if(resp && resp.ok){
       state.adminEditing=null; state.adminForm={};
@@ -948,7 +969,7 @@ async function adminSave(tab){
 
 async function adminDelete(tab,id){
   if(!confirm('Delete this item?')) return;
-  const paths = {prompts:'prompts',guardrails:'guardrails',routing:'routing',workflows:'workflows',tools:'tools','task-policies':'task-policies',contracts:'contracts'};
+  const paths = {prompts:'prompts',guardrails:'guardrails',routing:'routing',workflows:'workflows',tools:'tools','task-policies':'task-policies',contracts:'contracts','cache-policies':'cache-policies','identity-rules':'identity-rules','memory-governance':'memory-governance'};
   try{
     await api.del('/admin/'+paths[tab]+'/'+id);
     await loadAdmin();
@@ -964,6 +985,9 @@ function adminEdit(tab,item){
   if(tab==='routing'){ if(f.constraints){try{f.constraints=typeof f.constraints==='string'?f.constraints:JSON.stringify(f.constraints,null,2);}catch{}} if(f.weights){try{f.weights=typeof f.weights==='string'?f.weights:JSON.stringify(f.weights,null,2);}catch{}} }
   if(tab==='workflows'){ if(f.steps){try{f.steps=typeof f.steps==='string'?f.steps:JSON.stringify(f.steps,null,2);}catch{}} if(f.metadata){try{f.metadata=typeof f.metadata==='string'?f.metadata:JSON.stringify(f.metadata,null,2);}catch{}} }
   if(tab==='contracts'){ if(f.input_schema){try{f.input_schema=typeof f.input_schema==='string'?f.input_schema:JSON.stringify(f.input_schema,null,2);}catch{}} if(f.output_schema){try{f.output_schema=typeof f.output_schema==='string'?f.output_schema:JSON.stringify(f.output_schema,null,2);}catch{}} if(f.acceptance_criteria){try{f.acceptance_criteria=typeof f.acceptance_criteria==='string'?f.acceptance_criteria:JSON.stringify(f.acceptance_criteria,null,2);}catch{}} if(f.evidence_required){try{f.evidence_required=typeof f.evidence_required==='string'?f.evidence_required:JSON.stringify(f.evidence_required,null,2);}catch{}} }
+  if(tab==='cache-policies'){ if(f.bypass_patterns){try{f.bypass_patterns=typeof f.bypass_patterns==='string'?f.bypass_patterns:JSON.stringify(f.bypass_patterns,null,2);}catch{}} if(f.invalidate_on){try{f.invalidate_on=typeof f.invalidate_on==='string'?f.invalidate_on:JSON.stringify(f.invalidate_on,null,2);}catch{}} }
+  if(tab==='identity-rules'){ if(f.roles){try{f.roles=typeof f.roles==='string'?f.roles:JSON.stringify(f.roles,null,2);}catch{}} if(f.scopes){try{f.scopes=typeof f.scopes==='string'?f.scopes:JSON.stringify(f.scopes,null,2);}catch{}} }
+  if(tab==='memory-governance'){ if(f.memory_types){try{f.memory_types=typeof f.memory_types==='string'?f.memory_types:JSON.stringify(f.memory_types,null,2);}catch{}} if(f.block_patterns){try{f.block_patterns=typeof f.block_patterns==='string'?f.block_patterns:JSON.stringify(f.block_patterns,null,2);}catch{}} if(f.redact_patterns){try{f.redact_patterns=typeof f.redact_patterns==='string'?f.redact_patterns:JSON.stringify(f.redact_patterns,null,2);}catch{}} }
   state.adminForm = f;
   render();
 }
@@ -1018,7 +1042,7 @@ function inp(label,key,opts){
 function renderAdminForm(tab){
   const form = h('div',{style:'background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:20px;margin-bottom:16px'});
   const title = state.adminEditing?'Edit':'New';
-  var singulars={'prompts':'Prompt','guardrails':'Guardrail','routing':'Routing Policy','workflows':'Workflow','tools':'Tool','task-policies':'Task Policy','contracts':'Contract'};
+  var singulars={'prompts':'Prompt','guardrails':'Guardrail','routing':'Routing Policy','workflows':'Workflow','tools':'Tool','task-policies':'Task Policy','contracts':'Contract','cache-policies':'Cache Policy','identity-rules':'Identity Rule','memory-governance':'Memory Governance'};
   var tabLabel = singulars[tab]||(tab.slice(0,1).toUpperCase()+tab.slice(1).replace(/s$/,''));
   form.appendChild(h('h3',{style:'margin:0 0 14px;font-size:15px;color:#1E293B'},title+' '+tabLabel));
 
@@ -1087,6 +1111,35 @@ function renderAdminForm(tab){
     form.appendChild(inp('Evidence Required (JSON)','evidence_required',{textarea:true,rows:2}));
     form.appendChild(inp('Min Confidence (0-1)','min_confidence',{type:'number'}));
     form.appendChild(inp('Require Human Review','require_human_review',{type:'checkbox'}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='cache-policies'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Scope','scope',{options:['global','tenant','user','session','agent']}));
+    form.appendChild(inp('TTL (ms)','ttl_ms',{type:'number'}));
+    form.appendChild(inp('Max Entries','max_entries',{type:'number'}));
+    form.appendChild(inp('Bypass Patterns (JSON array)','bypass_patterns',{textarea:true,rows:3}));
+    form.appendChild(inp('Invalidate On (JSON array)','invalidate_on',{textarea:true,rows:3}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='identity-rules'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Resource','resource'));
+    form.appendChild(inp('Action','action',{options:['*','read','write','delete','execute']}));
+    form.appendChild(inp('Roles (JSON array)','roles',{textarea:true,rows:2}));
+    form.appendChild(inp('Scopes (JSON array)','scopes',{textarea:true,rows:2}));
+    form.appendChild(inp('Result','result',{options:['allow','deny','challenge']}));
+    form.appendChild(inp('Priority','priority',{type:'number'}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='memory-governance'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Memory Types (JSON array)','memory_types',{textarea:true,rows:2}));
+    form.appendChild(inp('Tenant ID','tenant_id'));
+    form.appendChild(inp('Block Patterns (JSON array)','block_patterns',{textarea:true,rows:3}));
+    form.appendChild(inp('Redact Patterns (JSON array)','redact_patterns',{textarea:true,rows:3}));
+    form.appendChild(inp('Max Age (ISO 8601, e.g. P30D)','max_age'));
+    form.appendChild(inp('Max Entries','max_entries',{type:'number'}));
     form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
   }
 
@@ -1159,6 +1212,9 @@ function getAdminCols(tab){
   if(tab==='guardrail-evals') return [{key:'stage',label:'Stage',w:'0.8fr'},{key:'overall_decision',label:'Decision',w:'0.7fr'},{key:'input_preview',label:'Input',w:'1.5fr'},{key:'chat_id',label:'Chat',w:'0.8fr'},{key:'created_at',label:'Time',w:'1fr'}];
   if(tab==='task-policies') return [{key:'name',label:'Name',w:'1.2fr'},{key:'trigger',label:'Trigger',w:'0.9fr'},{key:'task_type',label:'Type',w:'0.7fr'},{key:'default_priority',label:'Priority',w:'0.7fr'},{key:'assignment_strategy',label:'Strategy',w:'0.9fr'},{key:'enabled',label:'On',w:'0.4fr'}];
   if(tab==='contracts') return [{key:'name',label:'Name',w:'1.5fr'},{key:'max_attempts',label:'Attempts',w:'0.6fr'},{key:'min_confidence',label:'Confidence',w:'0.7fr'},{key:'require_human_review',label:'Review',w:'0.6fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='cache-policies') return [{key:'name',label:'Name',w:'1.5fr'},{key:'scope',label:'Scope',w:'0.7fr'},{key:'ttl_ms',label:'TTL (ms)',w:'0.7fr'},{key:'max_entries',label:'Max',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='identity-rules') return [{key:'name',label:'Name',w:'1.5fr'},{key:'resource',label:'Resource',w:'0.9fr'},{key:'action',label:'Action',w:'0.6fr'},{key:'result',label:'Result',w:'0.6fr'},{key:'priority',label:'Priority',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='memory-governance') return [{key:'name',label:'Name',w:'1.5fr'},{key:'tenant_id',label:'Tenant',w:'0.7fr'},{key:'max_age',label:'Max Age',w:'0.7fr'},{key:'max_entries',label:'Max',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
   return [];
 }
 
@@ -1184,7 +1240,10 @@ function renderAdmin(){
     {key:'task-policies',label:'Task Policies',icon:'\\uD83D\\uDC64'},
     {key:'contracts',label:'Contracts',icon:'\\uD83D\\uDCDC'},
     {key:'workflow-runs',label:'Workflow Runs',icon:'\\u25B6'},
-    {key:'guardrail-evals',label:'Guardrail Evals',icon:'\\u2714'}
+    {key:'guardrail-evals',label:'Guardrail Evals',icon:'\\u2714'},
+    {key:'cache-policies',label:'Cache',icon:'\\uD83D\\uDCE6'},
+    {key:'identity-rules',label:'Identity',icon:'\\uD83D\\uDD11'},
+    {key:'memory-governance',label:'Memory Gov',icon:'\\uD83E\\uDDE0'}
   ];
   tabDefs.forEach(function(t){
     const active = state.adminTab===t.key;

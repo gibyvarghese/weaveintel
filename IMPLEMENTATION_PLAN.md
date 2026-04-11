@@ -470,7 +470,8 @@ packages/identity/src/
 
 ---
 
-### Phase 5 — Tool Lifecycle, Advanced Retrieval & Observability
+### Phase 5 — Tool Lifecycle, Advanced Retrieval & Observability & MCP
+All tools should be called via MCP
 **Priority: MEDIUM-HIGH — operational maturity**
 
 #### 5A. `@weaveintel/tools` (extended tool registry)

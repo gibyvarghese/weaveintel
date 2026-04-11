@@ -208,6 +208,50 @@ export interface TaskContractRow {
   updated_at: string;
 }
 
+export interface CachePolicyRow {
+  id: string;
+  name: string;
+  description: string | null;
+  scope: string;               // 'global' | 'tenant' | 'user' | 'session' | 'agent'
+  ttl_ms: number;
+  max_entries: number;
+  bypass_patterns: string | null;  // JSON array
+  invalidate_on: string | null;    // JSON array of event types
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IdentityRuleRow {
+  id: string;
+  name: string;
+  description: string | null;
+  resource: string;
+  action: string;
+  roles: string | null;           // JSON array
+  scopes: string | null;          // JSON array
+  result: string;                 // 'allow' | 'deny' | 'challenge'
+  priority: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryGovernanceRow {
+  id: string;
+  name: string;
+  description: string | null;
+  memory_types: string | null;    // JSON array
+  tenant_id: string | null;
+  block_patterns: string | null;  // JSON array
+  redact_patterns: string | null; // JSON array
+  max_age: string | null;         // ISO 8601 duration
+  max_entries: number | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MetricsSummary {
   total_tokens: number;
   total_cost: number;
@@ -401,6 +445,27 @@ export interface DatabaseAdapter {
   listTaskContracts(): Promise<TaskContractRow[]>;
   updateTaskContract(id: string, fields: Partial<Omit<TaskContractRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteTaskContract(id: string): Promise<void>;
+
+  // ─── Admin: Cache Policies ─────────────────────────────────
+  createCachePolicy(p: Omit<CachePolicyRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getCachePolicy(id: string): Promise<CachePolicyRow | null>;
+  listCachePolicies(): Promise<CachePolicyRow[]>;
+  updateCachePolicy(id: string, fields: Partial<Omit<CachePolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteCachePolicy(id: string): Promise<void>;
+
+  // ─── Admin: Identity Rules ─────────────────────────────────
+  createIdentityRule(r: Omit<IdentityRuleRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getIdentityRule(id: string): Promise<IdentityRuleRow | null>;
+  listIdentityRules(): Promise<IdentityRuleRow[]>;
+  updateIdentityRule(id: string, fields: Partial<Omit<IdentityRuleRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteIdentityRule(id: string): Promise<void>;
+
+  // ─── Admin: Memory Governance ──────────────────────────────
+  createMemoryGovernance(g: Omit<MemoryGovernanceRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getMemoryGovernance(id: string): Promise<MemoryGovernanceRow | null>;
+  listMemoryGovernance(): Promise<MemoryGovernanceRow[]>;
+  updateMemoryGovernance(id: string, fields: Partial<Omit<MemoryGovernanceRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteMemoryGovernance(id: string): Promise<void>;
 
   // ─── Admin: Seed data ──────────────────────────────────────
   seedDefaultData(): Promise<void>;
@@ -622,6 +687,50 @@ CREATE TABLE IF NOT EXISTS task_contracts (
   evidence_required TEXT,
   min_confidence REAL,
   require_human_review INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS cache_policies (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  scope TEXT NOT NULL DEFAULT 'global',
+  ttl_ms INTEGER NOT NULL DEFAULT 300000,
+  max_entries INTEGER NOT NULL DEFAULT 1000,
+  bypass_patterns TEXT,
+  invalidate_on TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS identity_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  resource TEXT NOT NULL,
+  action TEXT NOT NULL DEFAULT '*',
+  roles TEXT,
+  scopes TEXT,
+  result TEXT NOT NULL DEFAULT 'allow',
+  priority INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS memory_governance (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  memory_types TEXT,
+  tenant_id TEXT,
+  block_patterns TEXT,
+  redact_patterns TEXT,
+  max_age TEXT,
+  max_entries INTEGER,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -1146,13 +1255,112 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM task_contracts WHERE id = ?').run(id);
   }
 
+  // ─── Admin: Cache Policies ─────────────────────────────────
+
+  async createCachePolicy(p: Omit<CachePolicyRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO cache_policies (id, name, description, scope, ttl_ms, max_entries, bypass_patterns, invalidate_on, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.name, p.description ?? null, p.scope, p.ttl_ms, p.max_entries, p.bypass_patterns ?? null, p.invalidate_on ?? null, p.enabled);
+  }
+
+  async getCachePolicy(id: string): Promise<CachePolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM cache_policies WHERE id = ?').get(id) as CachePolicyRow) ?? null;
+  }
+
+  async listCachePolicies(): Promise<CachePolicyRow[]> {
+    return this.d.prepare('SELECT * FROM cache_policies ORDER BY name ASC').all() as CachePolicyRow[];
+  }
+
+  async updateCachePolicy(id: string, fields: Partial<Omit<CachePolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE cache_policies SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteCachePolicy(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM cache_policies WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Identity Rules ─────────────────────────────────
+
+  async createIdentityRule(r: Omit<IdentityRuleRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO identity_rules (id, name, description, resource, action, roles, scopes, result, priority, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(r.id, r.name, r.description ?? null, r.resource, r.action, r.roles ?? null, r.scopes ?? null, r.result, r.priority, r.enabled);
+  }
+
+  async getIdentityRule(id: string): Promise<IdentityRuleRow | null> {
+    return (this.d.prepare('SELECT * FROM identity_rules WHERE id = ?').get(id) as IdentityRuleRow) ?? null;
+  }
+
+  async listIdentityRules(): Promise<IdentityRuleRow[]> {
+    return this.d.prepare('SELECT * FROM identity_rules ORDER BY priority DESC, name ASC').all() as IdentityRuleRow[];
+  }
+
+  async updateIdentityRule(id: string, fields: Partial<Omit<IdentityRuleRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE identity_rules SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteIdentityRule(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM identity_rules WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Memory Governance ──────────────────────────────
+
+  async createMemoryGovernance(g: Omit<MemoryGovernanceRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO memory_governance (id, name, description, memory_types, tenant_id, block_patterns, redact_patterns, max_age, max_entries, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(g.id, g.name, g.description ?? null, g.memory_types ?? null, g.tenant_id ?? null, g.block_patterns ?? null, g.redact_patterns ?? null, g.max_age ?? null, g.max_entries ?? null, g.enabled);
+  }
+
+  async getMemoryGovernance(id: string): Promise<MemoryGovernanceRow | null> {
+    return (this.d.prepare('SELECT * FROM memory_governance WHERE id = ?').get(id) as MemoryGovernanceRow) ?? null;
+  }
+
+  async listMemoryGovernance(): Promise<MemoryGovernanceRow[]> {
+    return this.d.prepare('SELECT * FROM memory_governance ORDER BY name ASC').all() as MemoryGovernanceRow[];
+  }
+
+  async updateMemoryGovernance(id: string, fields: Partial<Omit<MemoryGovernanceRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE memory_governance SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteMemoryGovernance(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM memory_governance WHERE id = ?').run(id);
+  }
+
   // ─── Seed default data ─────────────────────────────────────
 
   async seedDefaultData(): Promise<void> {
-    const existing = this.d.prepare('SELECT COUNT(*) as cnt FROM prompts').get() as { cnt: number };
-    if (existing.cnt > 0) return; // Already seeded
+    const cnt = (tbl: string) => (this.d.prepare(`SELECT COUNT(*) as cnt FROM ${tbl}`).get() as { cnt: number }).cnt;
 
     // Prompts
+    if (cnt('prompts') === 0) {
     const prompts: Omit<PromptRow, 'created_at' | 'updated_at'>[] = [
       {
         id: 'prompt-general-assistant', name: 'General Assistant', description: 'Default conversational assistant prompt',
@@ -1176,8 +1384,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const p of prompts) await this.createPrompt(p);
+    }
 
     // Guardrails
+    if (cnt('guardrails') === 0) {
     const guardrails: Omit<GuardrailRow, 'created_at' | 'updated_at'>[] = [
       {
         id: 'guard-pii-redact', name: 'PII Redaction', description: 'Redact personal identifiable information before sending to LLM',
@@ -1197,8 +1407,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const g of guardrails) await this.createGuardrail(g);
+    }
 
     // Routing policies
+    if (cnt('routing_policies') === 0) {
     const policies: Omit<RoutingPolicyRow, 'created_at' | 'updated_at'>[] = [
       {
         id: 'route-cost-optimized', name: 'Cost Optimized', description: 'Route to the cheapest model that meets quality thresholds',
@@ -1217,8 +1429,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const r of policies) await this.createRoutingPolicy(r);
+    }
 
     // Workflow definitions
+    if (cnt('workflow_defs') === 0) {
     const workflows: Omit<WorkflowDefRow, 'created_at' | 'updated_at'>[] = [
       {
         id: 'wf-code-review', name: 'Code Review Pipeline', description: 'Automated code review with human approval gate',
@@ -1243,8 +1457,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const w of workflows) await this.createWorkflowDef(w);
+    }
 
     // Tool configs
+    if (cnt('tool_configs') === 0) {
     const tools: Omit<ToolConfigRow, 'created_at' | 'updated_at'>[] = [
       {
         id: 'tool-web-search', name: 'Web Search', description: 'Search the web for current information',
@@ -1268,8 +1484,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const t of tools) await this.createToolConfig(t);
+    }
 
     // Workflow runs (sample completed and in-progress runs)
+    if (cnt('workflow_runs') === 0) {
     const runs: Omit<WorkflowRunRow, 'completed_at'>[] = [
       {
         id: 'run-001', workflow_id: 'wf-code-review', status: 'completed',
@@ -1291,8 +1509,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const r of runs) await this.createWorkflowRun(r);
+    }
 
     // Guardrail evaluations (sample evaluations)
+    if (cnt('guardrail_evals') === 0) {
     const evals: Omit<GuardrailEvalRow, 'created_at'>[] = [
       {
         id: 'geval-001', chat_id: null, message_id: null, stage: 'pre-execution',
@@ -1313,8 +1533,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const e of evals) await this.createGuardrailEval(e);
+    }
 
     // Human Task Policies
+    if (cnt('human_task_policies') === 0) {
     const taskPolicies: Omit<HumanTaskPolicyRow, 'created_at' | 'updated_at'>[] = [
       {
         id: 'htp-high-risk-tool', name: 'High-Risk Tool Approval', description: 'Require human approval before executing high-risk tools (code execution, DB writes)',
@@ -1338,8 +1560,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const tp of taskPolicies) await this.createHumanTaskPolicy(tp);
+    }
 
     // Task Contracts
+    if (cnt('task_contracts') === 0) {
     const contracts: Omit<TaskContractRow, 'created_at' | 'updated_at'>[] = [
       {
         id: 'tc-code-review', name: 'Code Review Contract', description: 'Contract for AI-assisted code review tasks',
@@ -1377,6 +1601,109 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const c of contracts) await this.createTaskContract(c);
+    }
+
+    // Cache Policies
+    if (cnt('cache_policies') === 0) {
+    const cachePolicies: Omit<CachePolicyRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'cp-global-default', name: 'Global Default Cache', description: 'Default caching policy for all responses — 5 minute TTL',
+        scope: 'global', ttl_ms: 300000, max_entries: 1000,
+        bypass_patterns: JSON.stringify(['password', 'secret', 'token', 'key']),
+        invalidate_on: JSON.stringify(['model_change', 'prompt_update']),
+        enabled: 1,
+      },
+      {
+        id: 'cp-session-short', name: 'Session Short-Lived', description: 'Short TTL cache scoped to individual sessions',
+        scope: 'session', ttl_ms: 60000, max_entries: 100,
+        bypass_patterns: null, invalidate_on: JSON.stringify(['session_end']),
+        enabled: 1,
+      },
+      {
+        id: 'cp-semantic-lookup', name: 'Semantic Query Cache', description: 'Cache semantically similar queries to avoid redundant LLM calls',
+        scope: 'global', ttl_ms: 600000, max_entries: 500,
+        bypass_patterns: JSON.stringify(['real-time', 'current date', 'current time']),
+        invalidate_on: JSON.stringify(['knowledge_update']),
+        enabled: 1,
+      },
+      {
+        id: 'cp-user-personalised', name: 'User Personalised Cache', description: 'Per-user cache that respects personalisation context',
+        scope: 'user', ttl_ms: 120000, max_entries: 200,
+        bypass_patterns: null, invalidate_on: JSON.stringify(['preference_change']),
+        enabled: 0,
+      },
+    ];
+    for (const cp of cachePolicies) await this.createCachePolicy(cp);
+    }
+
+    // Identity Rules
+    if (cnt('identity_rules') === 0) {
+    const identityRules: Omit<IdentityRuleRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'ident-admin-all', name: 'Admin Full Access', description: 'Admins have unrestricted access to all resources',
+        resource: '*', action: '*', roles: JSON.stringify(['admin']), scopes: null,
+        result: 'allow', priority: 100, enabled: 1,
+      },
+      {
+        id: 'ident-user-chat', name: 'User Chat Access', description: 'Regular users can read and write in chat',
+        resource: 'chat:*', action: '*', roles: JSON.stringify(['user', 'agent']), scopes: JSON.stringify(['chat']),
+        result: 'allow', priority: 50, enabled: 1,
+      },
+      {
+        id: 'ident-agent-tools', name: 'Agent Tool Access', description: 'AI agents can use tools within defined scopes',
+        resource: 'tools:*', action: 'execute', roles: JSON.stringify(['agent']), scopes: JSON.stringify(['tools']),
+        result: 'allow', priority: 50, enabled: 1,
+      },
+      {
+        id: 'ident-deny-admin-panel', name: 'Deny Non-Admin Panel', description: 'Non-admins cannot access admin settings',
+        resource: 'admin:*', action: '*', roles: null, scopes: null,
+        result: 'deny', priority: 10, enabled: 1,
+      },
+      {
+        id: 'ident-sensitive-challenge', name: 'Sensitive Data Challenge', description: 'Challenge access to sensitive data requiring additional verification',
+        resource: 'data:sensitive', action: 'read', roles: null, scopes: null,
+        result: 'challenge', priority: 60, enabled: 1,
+      },
+    ];
+    for (const ir of identityRules) await this.createIdentityRule(ir);
+    }
+
+    // Memory Governance
+    if (cnt('memory_governance') === 0) {
+    const memGov: Omit<MemoryGovernanceRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'mgov-pii-block', name: 'Block PII in Memory', description: 'Prevent storage of messages containing PII patterns',
+        memory_types: JSON.stringify(['conversation', 'semantic']),
+        tenant_id: null,
+        block_patterns: JSON.stringify(['\\b\\d{3}-\\d{2}-\\d{4}\\b', '\\b\\d{16}\\b']),
+        redact_patterns: JSON.stringify(['[\\w.+-]+@[\\w-]+\\.[\\w.]+', '\\b\\d{3}[-.]?\\d{3}[-.]?\\d{4}\\b']),
+        max_age: null, max_entries: null, enabled: 1,
+      },
+      {
+        id: 'mgov-conversation-retention', name: 'Conversation Retention', description: 'Limit conversation memory to 30 days with max 10000 entries',
+        memory_types: JSON.stringify(['conversation']),
+        tenant_id: null,
+        block_patterns: null, redact_patterns: null,
+        max_age: 'P30D', max_entries: 10000, enabled: 1,
+      },
+      {
+        id: 'mgov-semantic-retention', name: 'Semantic Memory Retention', description: 'Semantic facts retained for 90 days with a cap of 5000 entries',
+        memory_types: JSON.stringify(['semantic']),
+        tenant_id: null,
+        block_patterns: null, redact_patterns: null,
+        max_age: 'P90D', max_entries: 5000, enabled: 1,
+      },
+      {
+        id: 'mgov-entity-no-secrets', name: 'No Secrets in Entity Memory', description: 'Block secrets and API keys from being stored as entity facts',
+        memory_types: JSON.stringify(['entity']),
+        tenant_id: null,
+        block_patterns: JSON.stringify(['api[_\\s-]?key', 'secret[_\\s-]?key', 'password', 'bearer\\s+\\S+']),
+        redact_patterns: null,
+        max_age: null, max_entries: null, enabled: 1,
+      },
+    ];
+    for (const g of memGov) await this.createMemoryGovernance(g);
+    }
   }
 }
 

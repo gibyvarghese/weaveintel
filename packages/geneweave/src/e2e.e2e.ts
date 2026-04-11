@@ -365,6 +365,99 @@ test.describe('Admin Contracts', () => {
   });
 });
 
+/* ── Admin: Cache Policies Tab ───────────────────────────── */
+
+test.describe('Admin Cache Policies', () => {
+  test('cache tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Cache' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new cache policy via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Cache' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Cache Policy' })).toBeVisible({ timeout: 3000 });
+    await m.locator('input[type="text"]').first().fill('PW-Test-Cache-Policy');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Cache Policy' })).not.toBeVisible({ timeout: 5000 });
+  });
+});
+
+/* ── Admin: Identity Rules Tab ───────────────────────────── */
+
+test.describe('Admin Identity Rules', () => {
+  test('identity tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Identity' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new identity rule via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Identity' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Identity Rule' })).toBeVisible({ timeout: 3000 });
+    await m.locator('input[type="text"]').first().fill('PW-Test-Identity-Rule');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Identity Rule' })).not.toBeVisible({ timeout: 5000 });
+  });
+});
+
+/* ── Admin: Memory Governance Tab ────────────────────────── */
+
+test.describe('Admin Memory Governance', () => {
+  test('memory governance tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Memory Gov' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new memory governance rule via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Memory Gov' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Memory Governance' })).toBeVisible({ timeout: 3000 });
+    await m.locator('input[type="text"]').first().fill('PW-Test-Memory-Governance');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Memory Governance' })).not.toBeVisible({ timeout: 5000 });
+  });
+});
+
 /* ── Dashboard ───────────────────────────────────────────── */
 
 test.describe('Dashboard', () => {

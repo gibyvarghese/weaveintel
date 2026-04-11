@@ -922,6 +922,196 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
+  // ── Admin: Cache Policies ──────────────────────────────────
+
+  router.get('/api/admin/cache-policies', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listCachePolicies();
+    json(res, 200, { 'cache-policies': items });
+  });
+
+  router.get('/api/admin/cache-policies/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getCachePolicy(params['id']!);
+    if (!c) { json(res, 404, { error: 'Cache policy not found' }); return; }
+    json(res, 200, { 'cache-policy': c });
+  });
+
+  router.post('/api/admin/cache-policies', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'cp-' + randomUUID().slice(0, 8);
+    await db.createCachePolicy({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      scope: (body['scope'] as string) ?? 'global',
+      ttl_ms: (body['ttl_ms'] as number) ?? 300000,
+      max_entries: (body['max_entries'] as number) ?? 1000,
+      bypass_patterns: body['bypass_patterns'] ? (typeof body['bypass_patterns'] === 'string' ? body['bypass_patterns'] as string : JSON.stringify(body['bypass_patterns'])) : '[]',
+      invalidate_on: body['invalidate_on'] ? (typeof body['invalidate_on'] === 'string' ? body['invalidate_on'] as string : JSON.stringify(body['invalidate_on'])) : '[]',
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getCachePolicy(id);
+    json(res, 201, { 'cache-policy': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/cache-policies/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getCachePolicy(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Cache policy not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['scope'] !== undefined) fields['scope'] = body['scope'];
+    if (body['ttl_ms'] !== undefined) fields['ttl_ms'] = body['ttl_ms'];
+    if (body['max_entries'] !== undefined) fields['max_entries'] = body['max_entries'];
+    if (body['bypass_patterns'] !== undefined) fields['bypass_patterns'] = typeof body['bypass_patterns'] === 'string' ? body['bypass_patterns'] : JSON.stringify(body['bypass_patterns']);
+    if (body['invalidate_on'] !== undefined) fields['invalidate_on'] = typeof body['invalidate_on'] === 'string' ? body['invalidate_on'] : JSON.stringify(body['invalidate_on']);
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateCachePolicy(params['id']!, fields as any);
+    const item = await db.getCachePolicy(params['id']!);
+    json(res, 200, { 'cache-policy': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/cache-policies/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteCachePolicy(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Identity Rules ──────────────────────────────────
+
+  router.get('/api/admin/identity-rules', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listIdentityRules();
+    json(res, 200, { 'identity-rules': items });
+  });
+
+  router.get('/api/admin/identity-rules/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getIdentityRule(params['id']!);
+    if (!c) { json(res, 404, { error: 'Identity rule not found' }); return; }
+    json(res, 200, { 'identity-rule': c });
+  });
+
+  router.post('/api/admin/identity-rules', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'ident-' + randomUUID().slice(0, 8);
+    await db.createIdentityRule({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      resource: (body['resource'] as string) ?? '*',
+      action: (body['action'] as string) ?? '*',
+      roles: body['roles'] ? (typeof body['roles'] === 'string' ? body['roles'] as string : JSON.stringify(body['roles'])) : '["*"]',
+      scopes: body['scopes'] ? (typeof body['scopes'] === 'string' ? body['scopes'] as string : JSON.stringify(body['scopes'])) : '["*"]',
+      result: (body['result'] as string) ?? 'allow',
+      priority: (body['priority'] as number) ?? 100,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getIdentityRule(id);
+    json(res, 201, { 'identity-rule': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/identity-rules/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getIdentityRule(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Identity rule not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['resource'] !== undefined) fields['resource'] = body['resource'];
+    if (body['action'] !== undefined) fields['action'] = body['action'];
+    if (body['roles'] !== undefined) fields['roles'] = typeof body['roles'] === 'string' ? body['roles'] : JSON.stringify(body['roles']);
+    if (body['scopes'] !== undefined) fields['scopes'] = typeof body['scopes'] === 'string' ? body['scopes'] : JSON.stringify(body['scopes']);
+    if (body['result'] !== undefined) fields['result'] = body['result'];
+    if (body['priority'] !== undefined) fields['priority'] = body['priority'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateIdentityRule(params['id']!, fields as any);
+    const item = await db.getIdentityRule(params['id']!);
+    json(res, 200, { 'identity-rule': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/identity-rules/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteIdentityRule(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Memory Governance ───────────────────────────────
+
+  router.get('/api/admin/memory-governance', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listMemoryGovernance();
+    json(res, 200, { 'memory-governance': items });
+  });
+
+  router.get('/api/admin/memory-governance/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getMemoryGovernance(params['id']!);
+    if (!c) { json(res, 404, { error: 'Memory governance rule not found' }); return; }
+    json(res, 200, { 'memory-governance-rule': c });
+  });
+
+  router.post('/api/admin/memory-governance', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'mgov-' + randomUUID().slice(0, 8);
+    await db.createMemoryGovernance({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      memory_types: body['memory_types'] ? (typeof body['memory_types'] === 'string' ? body['memory_types'] as string : JSON.stringify(body['memory_types'])) : '["*"]',
+      tenant_id: (body['tenant_id'] as string) ?? null,
+      block_patterns: body['block_patterns'] ? (typeof body['block_patterns'] === 'string' ? body['block_patterns'] as string : JSON.stringify(body['block_patterns'])) : '[]',
+      redact_patterns: body['redact_patterns'] ? (typeof body['redact_patterns'] === 'string' ? body['redact_patterns'] as string : JSON.stringify(body['redact_patterns'])) : '[]',
+      max_age: (body['max_age'] as string) ?? null,
+      max_entries: (body['max_entries'] as number) ?? null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getMemoryGovernance(id);
+    json(res, 201, { 'memory-governance-rule': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/memory-governance/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getMemoryGovernance(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Memory governance rule not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['memory_types'] !== undefined) fields['memory_types'] = typeof body['memory_types'] === 'string' ? body['memory_types'] : JSON.stringify(body['memory_types']);
+    if (body['tenant_id'] !== undefined) fields['tenant_id'] = body['tenant_id'];
+    if (body['block_patterns'] !== undefined) fields['block_patterns'] = typeof body['block_patterns'] === 'string' ? body['block_patterns'] : JSON.stringify(body['block_patterns']);
+    if (body['redact_patterns'] !== undefined) fields['redact_patterns'] = typeof body['redact_patterns'] === 'string' ? body['redact_patterns'] : JSON.stringify(body['redact_patterns']);
+    if (body['max_age'] !== undefined) fields['max_age'] = body['max_age'];
+    if (body['max_entries'] !== undefined) fields['max_entries'] = body['max_entries'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateMemoryGovernance(params['id']!, fields as any);
+    const item = await db.getMemoryGovernance(params['id']!);
+    json(res, 200, { 'memory-governance-rule': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/memory-governance/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteMemoryGovernance(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
   // ── Admin: Seed data ───────────────────────────────────────
 
   router.post('/api/admin/seed', async (_req, res, _params, auth) => {

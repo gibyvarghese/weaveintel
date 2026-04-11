@@ -16,6 +16,9 @@
     { "path": "../human-tasks" },
     { "path": "../contracts" },
     { "path": "../prompts" },
-    { "path": "../routing" }
+    { "path": "../routing" },
+    { "path": "../cache" },
+    { "path": "../identity" },
+    { "path": "../memory" }
   ]
 }
