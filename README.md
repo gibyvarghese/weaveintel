@@ -15,20 +15,36 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     Your Application                     │
-├──────────┬──────────┬──────────┬──────────┬─────────────┤
-│  agents  │ retrieval│  memory  │   evals  │ observability│
-├──────────┴──────────┴──────────┴──────────┴─────────────┤
-│                     models (router)                      │
-├──────────┬──────────┬──────────┬──────────┬─────────────┤
-│  openai  │ anthropic│  (azure) │mcp-client│  mcp-server │
-├──────────┴──────────┴──────────┴──────────┴─────────────┤
-│                    core (contracts)                       │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                           Your Application                               │
+├──────────┬───────────┬──────────┬───────────┬────────────┬──────────────┤
+│  recipes │  devtools  │ geneweave│ ui-prims  │ triggers   │ collaboration│
+├──────────┴───────────┴──────────┴───────────┴────────────┴──────────────┤
+│                        Agent Layer                                       │
+│   agents · workflows · human-tasks · contracts · prompts · routing       │
+├─────────────────────────────────────────────────────────────────────────┤
+│                        Capability Layer                                  │
+│   retrieval · memory · graph · extraction · cache · artifacts · evals    │
+├─────────────────────────────────────────────────────────────────────────┤
+│                        Tool Layer                                        │
+│   tools · tools-search · tools-browser · tools-http · tools-enterprise   │
+│   tools-social · mcp-client · mcp-server · a2a · plugins                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                        Safety & Governance                               │
+│   guardrails · redaction · compliance · sandbox · identity · tenancy     │
+│   reliability · replay · observability                                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│                        Model Layer                                       │
+│   models (router) · provider-openai · provider-anthropic                 │
+├─────────────────────────────────────────────────────────────────────────┤
+│                        core (contracts & types)                          │
+│   testing                                                                │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Packages
+## Packages (42)
+
+### Core & Models
 
 | Package | Description |
 |---|---|
@@ -36,16 +52,75 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 | [`@weaveintel/models`](packages/models) | Unified model router with fallback chains, streaming, middleware, capability selection |
 | [`@weaveintel/provider-openai`](packages/provider-openai) | OpenAI adapter — chat, streaming, embeddings, image, audio, structured output, vision |
 | [`@weaveintel/provider-anthropic`](packages/provider-anthropic) | Anthropic adapter — chat, streaming, tool use, extended thinking, vision, token counting, batches, computer use, prompt caching |
+| [`@weaveintel/testing`](packages/testing) | Fake models, embeddings, vector stores, and MCP transports for deterministic tests |
+
+### Agent Orchestration
+
+| Package | Description |
+|---|---|
 | [`@weaveintel/agents`](packages/agents) | Agent runtime — ReAct tool-calling loop, supervisor-worker hierarchies |
+| [`@weaveintel/workflows`](packages/workflows) | Multi-step workflow engine with conditional branching, checkpointing, and compensation |
+| [`@weaveintel/human-tasks`](packages/human-tasks) | Human-in-the-loop — approval tasks, review queues, escalation, decision logging, policy evaluation |
+| [`@weaveintel/contracts`](packages/contracts) | Completion contracts with evidence bundles and completion reports |
+| [`@weaveintel/prompts`](packages/prompts) | Versioned prompt templates, A/B experiments, instruction bundles, scoped resolution |
+| [`@weaveintel/routing`](packages/routing) | Smart model routing — health tracking, capability matching, weighted scoring, explainable decisions |
+
+### Knowledge & Retrieval
+
+| Package | Description |
+|---|---|
 | [`@weaveintel/retrieval`](packages/retrieval) | Document chunking (6 strategies), embedding pipeline, vector retrieval with reranking |
 | [`@weaveintel/memory`](packages/memory) | Conversation, semantic, and entity memory implementations |
-| [`@weaveintel/observability`](packages/observability) | Tracing, spans, cost/token usage tracking |
-| [`@weaveintel/redaction`](packages/redaction) | PII detection (email, phone, SSN, CC, etc.), policy engine, reversible tokenization |
+| [`@weaveintel/graph`](packages/graph) | Knowledge graph — entity nodes, relationship edges, entity linking, timeline, graph retrieval |
+| [`@weaveintel/extraction`](packages/extraction) | Document extraction pipeline — entity, metadata, timeline, table, code, and task stages |
+| [`@weaveintel/cache`](packages/cache) | Semantic caching with TTL, LRU eviction, and embedding-based lookup |
+| [`@weaveintel/artifacts`](packages/artifacts) | Artifact storage — versioned blobs with metadata, tagging, and lifecycle management |
+
+### Tools & Connectivity
+
+| Package | Description |
+|---|---|
+| [`@weaveintel/tools`](packages/tools) | Extended tool registry — versioning, risk tagging, health tracking, test harness |
+| [`@weaveintel/tools-search`](packages/tools-search) | Web search tools — DuckDuckGo, Brave, with structured result parsing |
+| [`@weaveintel/tools-browser`](packages/tools-browser) | Browser tools — URL fetching, content extraction, page rendering |
+| [`@weaveintel/tools-http`](packages/tools-http) | HTTP endpoint tools — REST client with auth, rate limiting, schema validation |
+| [`@weaveintel/tools-enterprise`](packages/tools-enterprise) | Enterprise connectors — Jira, Slack, GitHub, database query tools |
+| [`@weaveintel/tools-social`](packages/tools-social) | Social media tools — Twitter/X, LinkedIn, with content formatting |
 | [`@weaveintel/mcp-client`](packages/mcp-client) | MCP protocol client — discover and invoke remote tools, resources, prompts |
 | [`@weaveintel/mcp-server`](packages/mcp-server) | MCP protocol server — expose tools, resources, and prompts |
 | [`@weaveintel/a2a`](packages/a2a) | Agent-to-agent protocol — remote HTTP + in-process bus for multi-agent systems |
+| [`@weaveintel/plugins`](packages/plugins) | Plugin lifecycle — register, enable/disable, validate, dependency resolution |
+
+### Safety & Governance
+
+| Package | Description |
+|---|---|
+| [`@weaveintel/guardrails`](packages/guardrails) | Guardrail pipeline — risk classification, cost guards, governance context, runtime policies |
+| [`@weaveintel/redaction`](packages/redaction) | PII detection (email, phone, SSN, CC, etc.), policy engine, reversible tokenization |
+| [`@weaveintel/compliance`](packages/compliance) | Data retention engine, GDPR/CCPA deletion, legal holds, consent management, audit export |
+| [`@weaveintel/sandbox`](packages/sandbox) | Sandboxed execution — policy enforcement, resource limits, allowed/blocked module lists |
+| [`@weaveintel/identity`](packages/identity) | Identity management — delegation chains, ACL enforcement, scoped access |
+| [`@weaveintel/tenancy`](packages/tenancy) | Multi-tenancy — tenant isolation, budget management, scoped configuration |
+| [`@weaveintel/reliability`](packages/reliability) | Reliability patterns — idempotency, retry budgets, dead-letter queues, health checking, backpressure |
+
+### Observability & Evaluation
+
+| Package | Description |
+|---|---|
+| [`@weaveintel/observability`](packages/observability) | Tracing, spans, event bus, cost/token usage tracking |
 | [`@weaveintel/evals`](packages/evals) | Evaluation runner with 6 assertion types (exact, contains, regex, schema, latency, cost) |
-| [`@weaveintel/testing`](packages/testing) | Fake models, embeddings, vector stores, and MCP transports for deterministic tests |
+| [`@weaveintel/replay`](packages/replay) | Trace replay — record and replay agent interactions for debugging and regression testing |
+
+### Application Layer
+
+| Package | Description |
+|---|---|
+| [`@weaveintel/recipes`](packages/recipes) | Pre-built agent factories — governed assistant, approval-driven, workflow, eval-routed, safe execution |
+| [`@weaveintel/devtools`](packages/devtools) | Developer tools — scaffolding, inspection, validation, mock runtimes, migration planning |
+| [`@weaveintel/ui-primitives`](packages/ui-primitives) | UI streaming events, widgets (table, chart, form, code, timeline), artifacts, citations, progress |
+| [`@weaveintel/triggers`](packages/triggers) | Trigger system — cron schedules, webhooks, queue-based triggers with filtering |
+| [`@weaveintel/collaboration`](packages/collaboration) | Session management — multi-user handoff, shared context, agent collaboration |
+| [`@weaveintel/geneweave`](packages/geneweave) | Full-stack demo app — chat UI, admin dashboard, tools, auth, SQLite backend |
 
 ## Quick Start
 
@@ -563,16 +638,45 @@ weaveintel/
 │   ├── provider-openai/    # OpenAI adapter
 │   ├── provider-anthropic/ # Anthropic adapter (Claude)
 │   ├── agents/             # Tool-calling agent, supervisor
-│   ├── retrieval/          # Chunking, embedding pipeline, retriever
+│   ├── workflows/          # Multi-step workflow engine
+│   ├── human-tasks/        # Approval, review, escalation
+│   ├── contracts/          # Completion contracts & evidence
+│   ├── prompts/            # Versioned templates, A/B experiments
+│   ├── routing/            # Smart model routing & health
+│   ├── retrieval/          # Chunking, embedding, retriever
 │   ├── memory/             # Conversation, semantic, entity memory
-│   ├── observability/      # Tracer, spans, usage tracking
-│   ├── redaction/          # PII detection & policy engine
+│   ├── graph/              # Knowledge graph & entity linking
+│   ├── extraction/         # Document extraction pipeline
+│   ├── cache/              # Semantic caching
+│   ├── artifacts/          # Versioned artifact storage
+│   ├── tools/              # Extended tool registry
+│   ├── tools-search/       # Web search (DuckDuckGo, Brave)
+│   ├── tools-browser/      # URL fetch & content extraction
+│   ├── tools-http/         # REST client tools
+│   ├── tools-enterprise/   # Jira, Slack, GitHub connectors
+│   ├── tools-social/       # Social media tools
 │   ├── mcp-client/         # MCP protocol client
 │   ├── mcp-server/         # MCP protocol server
 │   ├── a2a/                # Agent-to-agent communication
+│   ├── plugins/            # Plugin lifecycle management
+│   ├── guardrails/         # Risk classification & cost guards
+│   ├── redaction/          # PII detection & policy engine
+│   ├── compliance/         # Retention, deletion, legal holds
+│   ├── sandbox/            # Sandboxed execution
+│   ├── identity/           # Identity & ACL
+│   ├── tenancy/            # Multi-tenant isolation
+│   ├── reliability/        # Idempotency, retries, DLQ
+│   ├── observability/      # Tracer, spans, usage tracking
 │   ├── evals/              # Evaluation runner & assertions
-│   └── testing/            # Fakes & test harnesses
-├── examples/               # 11 runnable examples
+│   ├── replay/             # Trace replay & debugging
+│   ├── recipes/            # Pre-built agent factories
+│   ├── devtools/           # Scaffolding, inspection, mocks
+│   ├── ui-primitives/      # Streaming events & widgets
+│   ├── triggers/           # Cron, webhooks, queue triggers
+│   ├── collaboration/      # Session management & handoff
+│   ├── testing/            # Fakes & test harnesses
+│   └── geneweave/          # Full-stack demo app
+├── examples/               # 20 runnable examples
 ├── turbo.json              # Turborepo config
 ├── tsconfig.base.json      # Shared TypeScript config
 └── package.json            # Workspace root
@@ -602,7 +706,7 @@ npm run clean
 All examples can be run directly with `tsx`:
 
 ```bash
-# No API key needed (uses fake models)
+# No API key needed (uses fake models / in-memory)
 npx tsx examples/02-tool-calling-agent.ts
 npx tsx examples/03-rag-pipeline.ts
 npx tsx examples/04-hierarchical-agents.ts
@@ -612,12 +716,23 @@ npx tsx examples/07-memory-augmented-agent.ts
 npx tsx examples/08-pii-redaction.ts
 npx tsx examples/09-eval-suite.ts
 npx tsx examples/10-observability.ts
+npx tsx examples/13-workflow-engine.ts
+npx tsx examples/14-smart-routing.ts
+npx tsx examples/15-tool-ecosystem.ts
+npx tsx examples/16-human-in-the-loop.ts
+npx tsx examples/17-prompt-management.ts
+npx tsx examples/18-knowledge-graph.ts
+npx tsx examples/19-compliance-sandbox.ts
+npx tsx examples/20-recipes-devtools.ts
 
 # Requires OPENAI_API_KEY
 OPENAI_API_KEY=sk-... npx tsx examples/01-simple-chat.ts
 
 # Requires ANTHROPIC_API_KEY
 ANTHROPIC_API_KEY=sk-ant-... npx tsx examples/11-anthropic-provider.ts
+
+# Full-stack demo (requires .env with database config)
+npx tsx examples/12-geneweave.ts
 ```
 
 ### Adding a New Provider
@@ -636,21 +751,30 @@ ANTHROPIC_API_KEY=sk-ant-... npx tsx examples/11-anthropic-provider.ts
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 11 runnable demonstrations:
+The [`examples/`](examples/) directory contains 20 runnable demonstrations:
 
-| # | File | What It Shows | API Key |
-|---|---|---|---|
-| 01 | [Simple Chat](examples/01-simple-chat.ts) | Basic completion, streaming, structured output | OpenAI |
-| 02 | [Tool-Calling Agent](examples/02-tool-calling-agent.ts) | ReAct loop, tool registry, fake model | None |
-| 03 | [RAG Pipeline](examples/03-rag-pipeline.ts) | Chunking, embedding, vector search, RAG | None |
-| 04 | [Hierarchical Agents](examples/04-hierarchical-agents.ts) | Supervisor-worker delegation | None |
-| 05 | [MCP Integration](examples/05-mcp-integration.ts) | MCP server + client, tool bridge | None |
-| 06 | [A2A Communication](examples/06-a2a-communication.ts) | Agent-to-agent bus, discovery, task delegation | None |
-| 07 | [Memory-Augmented Agent](examples/07-memory-augmented-agent.ts) | Conversation, semantic, and entity memory | None |
-| 08 | [PII Redaction](examples/08-pii-redaction.ts) | Detection, replacement, restoration, policy engine | None |
-| 09 | [Eval Suite](examples/09-eval-suite.ts) | Assertions, scoring, aggregate results | None |
-| 10 | [Observability](examples/10-observability.ts) | Tracing, spans, event bus, usage tracking | None |
-| 11 | [Anthropic Provider](examples/11-anthropic-provider.ts) | Chat, streaming, tools, thinking, vision, caching, batches, computer use (77 tests) | Anthropic |
+| # | File | What It Shows | Packages Used | API Key |
+|---|---|---|---|---|
+| 01 | [Simple Chat](examples/01-simple-chat.ts) | Basic completion, streaming, structured output | core, provider-openai | OpenAI |
+| 02 | [Tool-Calling Agent](examples/02-tool-calling-agent.ts) | ReAct loop, tool registry, fake model | core, agents, testing | None |
+| 03 | [RAG Pipeline](examples/03-rag-pipeline.ts) | Chunking, embedding, vector search, RAG | core, retrieval, testing | None |
+| 04 | [Hierarchical Agents](examples/04-hierarchical-agents.ts) | Supervisor-worker delegation | core, agents, testing | None |
+| 05 | [MCP Integration](examples/05-mcp-integration.ts) | MCP server + client, tool bridge | mcp-server, mcp-client, testing | None |
+| 06 | [A2A Communication](examples/06-a2a-communication.ts) | Agent-to-agent bus, discovery, task delegation | a2a, agents, testing | None |
+| 07 | [Memory-Augmented Agent](examples/07-memory-augmented-agent.ts) | Conversation, semantic, and entity memory | memory, agents, testing | None |
+| 08 | [PII Redaction](examples/08-pii-redaction.ts) | Detection, replacement, restoration, policy engine | redaction | None |
+| 09 | [Eval Suite](examples/09-eval-suite.ts) | Assertions, scoring, aggregate results | evals, testing | None |
+| 10 | [Observability](examples/10-observability.ts) | Tracing, spans, event bus, usage tracking | observability | None |
+| 11 | [Anthropic Provider](examples/11-anthropic-provider.ts) | Chat, streaming, tools, thinking, vision, caching, batches, computer use (77 tests) | provider-anthropic, core | Anthropic |
+| 12 | [GeneWeave App](examples/12-geneweave.ts) | Full-stack chat app with admin, recipes, devtools | geneweave | OpenAI |
+| 13 | [Workflow Engine](examples/13-workflow-engine.ts) | Multi-step workflows, conditional branching, checkpoints, compensation, guardrails | workflows, guardrails, core | None |
+| 14 | [Smart Routing](examples/14-smart-routing.ts) | Model routing, health tracking, weighted scoring, capability filtering, explainable decisions | routing | None |
+| 15 | [Tool Ecosystem](examples/15-tool-ecosystem.ts) | Extended tool registry, web search, browser, HTTP tools, agent with multi-tool research | tools, tools-search, tools-browser, tools-http, agents, testing | None |
+| 16 | [Human-in-the-Loop](examples/16-human-in-the-loop.ts) | Approval tasks, review queues, escalation, decision logging, policy evaluation, contracts, evidence bundles | human-tasks, contracts, agents, testing | None |
+| 17 | [Prompt Management](examples/17-prompt-management.ts) | Versioned templates, A/B experiments, instruction bundles, scoped resolution | prompts, agents, testing | None |
+| 18 | [Knowledge Graph](examples/18-knowledge-graph.ts) | Entity nodes, relationships, entity linking, timeline, graph retrieval, extraction pipeline | graph, extraction, agents, testing | None |
+| 19 | [Compliance & Sandbox](examples/19-compliance-sandbox.ts) | Data retention, legal holds, consent, audit export, sandboxed execution, idempotency, retries, DLQ, health checking | compliance, sandbox, reliability | None |
+| 20 | [Recipes & DevTools](examples/20-recipes-devtools.ts) | Pre-built agents, scaffolding, inspection, validation, mock runtime, streaming events, widgets, artifacts, citations, progress | recipes, devtools, ui-primitives | None |
 
 ## Tech Stack
 
