@@ -216,6 +216,27 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { tools: getAvailableTools() });
   });
 
+  // ── User preferences routes ────────────────────────────────
+
+  router.get('/api/user/preferences', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const prefs = await db.getUserPreferences(auth.userId);
+    json(res, 200, { preferences: prefs ?? { default_mode: 'direct' } });
+  });
+
+  router.post('/api/user/preferences', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const mode = (body['default_mode'] as string) || 'direct';
+    if (!['direct', 'agent', 'supervisor'].includes(mode)) {
+      json(res, 400, { error: 'default_mode must be "direct", "agent", or "supervisor"' }); return;
+    }
+    await db.saveUserPreferences(auth.userId, mode);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
   // ── Chat settings routes ───────────────────────────────────
 
   router.get('/api/chats/:chatId/settings', async (_req, res, params, auth) => {

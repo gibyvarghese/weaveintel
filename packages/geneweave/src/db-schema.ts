@@ -74,6 +74,12 @@ CREATE TABLE IF NOT EXISTS eval_results (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  default_mode TEXT NOT NULL DEFAULT 'direct',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS chat_settings (
   chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
   mode TEXT NOT NULL DEFAULT 'direct',

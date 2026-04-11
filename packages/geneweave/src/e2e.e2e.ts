@@ -30,7 +30,8 @@ async function registerAndEnter(page: Page, email?: string) {
 }
 
 async function goAdmin(page: Page) {
-  await page.locator('button.nav-btn', { hasText: 'Admin' }).click();
+  await page.locator('.profile-avatar').click();
+  await page.locator('.pf-btn', { hasText: 'Admin' }).click();
   await expect(page.locator('h2', { hasText: 'Administration' })).toBeVisible({ timeout: 5000 });
 }
 
@@ -463,7 +464,8 @@ test.describe('Admin Memory Governance', () => {
 test.describe('Dashboard', () => {
   test('navigates to dashboard', async ({ page }) => {
     await registerAndEnter(page);
-    await page.locator('button.nav-btn', { hasText: 'Dashboard' }).click();
+    await page.locator('.profile-avatar').click();
+    await page.locator('.pf-btn', { hasText: 'Dashboard' }).click();
     await page.waitForTimeout(1000);
     await expect(page.locator('.main')).toBeVisible();
   });

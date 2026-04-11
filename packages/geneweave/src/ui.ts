@@ -418,7 +418,7 @@ let state = {
   streaming:false, models:[], selectedModel:'',
   dashboard:null, authMode:'login', authError:'',
   // New: settings, tools, traces
-  chatSettings:null, availableTools:[], showSettings:false,
+  chatSettings:null, availableTools:[], showSettings:false, defaultMode:'direct',
   showProfile:false,
   traces:[],
   // Admin state
@@ -456,14 +456,14 @@ async function doLogin(email,password){
   const d = await r.json();
   if(!r.ok){ state.authError = d.error||'Login failed'; render(); return; }
   state.user = d.user; state.csrfToken = d.csrfToken; state.authError='';
-  await loadChats(); await Promise.all([loadModels(), loadTools()]); render();
+  await loadChats(); await Promise.all([loadModels(), loadTools(), loadUserPreferences()]); render();
 }
 async function doRegister(name,email,password){
   const r = await api.post('/auth/register',{name,email,password});
   const d = await r.json();
   if(!r.ok){ state.authError = d.error||'Register failed'; render(); return; }
   state.user = d.user; state.csrfToken = d.csrfToken; state.authError='';
-  await loadChats(); await Promise.all([loadModels(), loadTools()]); render();
+  await loadChats(); await Promise.all([loadModels(), loadTools(), loadUserPreferences()]); render();
 }
 async function doLogout(){
   await api.post('/auth/logout',{});
@@ -504,16 +504,27 @@ async function loadChatSettings(chatId){
       };
     } else {
       console.warn('loadChatSettings: non-ok response', r.status);
-      state.chatSettings = { mode:'direct', systemPrompt:'', enabledTools:[], redactionEnabled:false, redactionPatterns:['email','phone','ssn','credit_card'], workers:[] };
+      state.chatSettings = { mode:state.defaultMode||'direct', systemPrompt:'', enabledTools:[], redactionEnabled:false, redactionPatterns:['email','phone','ssn','credit_card'], workers:[] };
     }
   }catch(e){
     console.warn('loadChatSettings error', e);
-    state.chatSettings = { mode:'direct', systemPrompt:'', enabledTools:[], redactionEnabled:false, redactionPatterns:['email','phone','ssn','credit_card'], workers:[] };
+    state.chatSettings = { mode:state.defaultMode||'direct', systemPrompt:'', enabledTools:[], redactionEnabled:false, redactionPatterns:['email','phone','ssn','credit_card'], workers:[] };
   }
 }
 async function saveChatSettings(){
   if(!state.currentChatId||!state.chatSettings) return;
   await api.post('/chats/'+state.currentChatId+'/settings', state.chatSettings);
+  // Also persist mode as user default
+  if(state.chatSettings.mode && state.chatSettings.mode !== state.defaultMode){
+    state.defaultMode = state.chatSettings.mode;
+    api.post('/user/preferences', {default_mode:state.chatSettings.mode});
+  }
+}
+async function loadUserPreferences(){
+  try{
+    const r = await api.get('/user/preferences');
+    if(r.ok){ const d = await r.json(); state.defaultMode = d.preferences?.default_mode || 'direct'; }
+  }catch(e){ console.warn('loadUserPreferences error', e); }
 }
 async function loadChatTraces(chatId){
   const r = await api.get('/chats/'+chatId+'/traces');
@@ -522,7 +533,7 @@ async function loadChatTraces(chatId){
 async function createChat(){
   const mParts = state.selectedModel.split(':');
   const r = await api.post('/chats',{model:mParts[1]||state.selectedModel,provider:mParts[0]||''});
-  if(r.ok){ const d=await r.json(); state.chats.unshift(d.chat); state.currentChatId=d.chat.id; state.messages=[]; await loadChatSettings(d.chat.id); render(); }
+  if(r.ok){ const d=await r.json(); state.chats.unshift(d.chat); state.currentChatId=d.chat.id; state.messages=[]; await loadChatSettings(d.chat.id); if(state.chatSettings && state.defaultMode){ state.chatSettings.mode=state.defaultMode; saveChatSettings(); } render(); }
 }
 async function selectChat(id){
   state.currentChatId=id;
@@ -834,37 +845,98 @@ function renderAuth(){
   return card;
 }
 
+function renderTopBar(){
+  const headerLeft = h('div',{className:'chat-header-left'});
+  if(state.view==='chat'){
+    const modelSel = h('select',{className:'model-sel',onChange:function(){state.selectedModel=this.value;}});
+    state.models.forEach(m=>{
+      const val=m.provider+':'+m.id;
+      const opt=h('option',{value:val},m.provider+'/'+m.id);
+      if(val===state.selectedModel) opt.selected=true;
+      modelSel.appendChild(opt);
+    });
+    headerLeft.appendChild(modelSel);
+  } else {
+    const backBtn = h('button',{className:'hdr-icon-btn',title:'Back to Chat',onClick:()=>{state.view='chat';render();}},'\\u2190');
+    headerLeft.appendChild(backBtn);
+    headerLeft.appendChild(h('span',{style:'font-weight:600;font-size:15px;margin-left:8px'},state.view==='admin'?'Administration':'Dashboard'));
+  }
+
+  const headerRight = h('div',{className:'chat-header-right'});
+
+  /* Settings button + dropdown (chat only) */
+  if(state.view==='chat'){
+    const settingsAnchor = h('div',{className:'dropdown-anchor'});
+    const settingsBtn = h('button',{className:'hdr-icon-btn'+(state.showSettings?' active':''),title:'AI Settings',onClick:async(e)=>{
+      e.stopPropagation();
+      if(!state.chatSettings && state.currentChatId){
+        await loadChatSettings(state.currentChatId);
+      }
+      if(!state.chatSettings){
+        state.chatSettings = { mode:state.defaultMode||'direct', systemPrompt:'', enabledTools:[], redactionEnabled:false, redactionPatterns:['email','phone','ssn','credit_card'], workers:[] };
+      }
+      state.showSettings=!state.showSettings; state.showProfile=false; render();
+    }},'\\u2699');
+    settingsAnchor.appendChild(settingsBtn);
+    if(state.showSettings && state.chatSettings){
+      const dd = renderSettingsDropdown();
+      document.body.appendChild(dd);
+      requestAnimationFrame(()=>{
+        const r = settingsBtn.getBoundingClientRect();
+        dd.style.top = (r.bottom + 8) + 'px';
+        dd.style.right = (window.innerWidth - r.right) + 'px';
+      });
+    }
+    headerRight.appendChild(settingsAnchor);
+  }
+
+  /* Profile button + dropdown */
+  const profileAnchor = h('div',{className:'dropdown-anchor'});
+  const initials = state.user?.name ? state.user.name.charAt(0).toUpperCase() : (state.user?.email ? state.user.email.charAt(0).toUpperCase() : 'U');
+  const profileBtn = h('div',{className:'profile-avatar',title:state.user?.email||'Profile',onClick:(e)=>{
+    e.stopPropagation();
+    state.showProfile=!state.showProfile; state.showSettings=false; render();
+  }},initials);
+  profileAnchor.appendChild(profileBtn);
+  if(state.showProfile){
+    const dd = renderProfileDropdown();
+    document.body.appendChild(dd);
+    requestAnimationFrame(()=>{
+      const r = profileBtn.getBoundingClientRect();
+      dd.style.top = (r.bottom + 8) + 'px';
+      dd.style.right = (window.innerWidth - r.right) + 'px';
+    });
+  }
+  headerRight.appendChild(profileAnchor);
+
+  return h('div',{className:'chat-header'},headerLeft,headerRight);
+}
+
 function renderApp(){
   const wrap = h('div',{className:'app'});
 
-  /* Sidebar */
-  const sidebar = h('div',{className:'sidebar'},
-    h('div',{className:'sidebar-hdr'},
-      h('h2',null,Object.assign(document.createElement('span'),{innerHTML:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8A8A8A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/></svg>'}),' ',h('span',null,'gene'),'Weave'),
-      h('button',{className:'new-chat-btn',onClick:createChat},'+ New')
-    ),
-    h('div',{className:'chat-list'},
-      ...state.chats.map(c=>
-        h('div',{className:'chat-item'+(state.currentChatId===c.id?' active':''),onClick:()=>selectChat(c.id)},
-          h('span',null,c.title||'New Chat'),
-          h('span',{className:'del',onClick:e=>{e.stopPropagation();deleteChat(c.id);}},'\\u00D7')
+  /* Sidebar (chat view only) */
+  if(state.view==='chat'){
+    const sidebar = h('div',{className:'sidebar'},
+      h('div',{className:'sidebar-hdr'},
+        h('h2',null,Object.assign(document.createElement('span'),{innerHTML:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8A8A8A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/></svg>'}),' ',h('span',null,'gene'),'Weave'),
+        h('button',{className:'new-chat-btn',onClick:createChat},'+ New')
+      ),
+      h('div',{className:'chat-list'},
+        ...state.chats.map(c=>
+          h('div',{className:'chat-item'+(state.currentChatId===c.id?' active':''),onClick:()=>selectChat(c.id)},
+            h('span',null,c.title||'New Chat'),
+            h('span',{className:'del',onClick:e=>{e.stopPropagation();deleteChat(c.id);}},'\\u00D7')
+          )
         )
       )
-    ),
-    h('div',{className:'sidebar-footer'},
-      h('div',null,
-        h('button',{className:'nav-btn'+(state.view==='chat'?' active':''),onClick:()=>{state.view='chat';render();}},'Chat'),
-        ' ',
-        h('button',{className:'nav-btn'+(state.view==='dashboard'?' active':''),onClick:()=>{state.view='dashboard';loadDashboard();}},'Dashboard'),
-        ' ',
-        h('button',{className:'nav-btn'+(state.view==='admin'?' active':''),onClick:()=>{state.view='admin';loadAdmin();}},'Admin'),
-      )
-    )
-  );
-  wrap.appendChild(sidebar);
+    );
+    wrap.appendChild(sidebar);
+  }
 
   /* Main */
   const main = h('div',{className:'main'});
+  main.appendChild(renderTopBar());
   if(state.view==='dashboard'){
     main.appendChild(renderDashboard());
   } else if(state.view==='admin'){
@@ -1154,65 +1226,6 @@ function renderAdmin(){
 function renderChatView(){
   const view = h('div',{className:'chat-view'});
 
-  /* ── Top header bar ─── */
-  const headerLeft = h('div',{className:'chat-header-left'});
-  const modelSel = h('select',{className:'model-sel',onChange:function(){state.selectedModel=this.value;}});
-  state.models.forEach(m=>{
-    const val=m.provider+':'+m.id;
-    const opt=h('option',{value:val},m.provider+'/'+m.id);
-    if(val===state.selectedModel) opt.selected=true;
-    modelSel.appendChild(opt);
-  });
-  headerLeft.appendChild(modelSel);
-
-  const headerRight = h('div',{className:'chat-header-right'});
-
-  /* Settings button + dropdown */
-  const settingsAnchor = h('div',{className:'dropdown-anchor'});
-  const settingsBtn = h('button',{className:'hdr-icon-btn'+(state.showSettings?' active':''),title:'AI Settings',onClick:async(e)=>{
-    e.stopPropagation();
-    if(!state.chatSettings && state.currentChatId){
-      await loadChatSettings(state.currentChatId);
-    }
-    if(!state.chatSettings){
-      state.chatSettings = { mode:'direct', systemPrompt:'', enabledTools:[], redactionEnabled:false, redactionPatterns:['email','phone','ssn','credit_card'], workers:[] };
-    }
-    state.showSettings=!state.showSettings; state.showProfile=false; render();
-  }},'\\u2699');
-  settingsAnchor.appendChild(settingsBtn);
-  if(state.showSettings && state.chatSettings){
-    const dd = renderSettingsDropdown();
-    document.body.appendChild(dd);
-    requestAnimationFrame(()=>{
-      const r = settingsBtn.getBoundingClientRect();
-      dd.style.top = (r.bottom + 8) + 'px';
-      dd.style.right = (window.innerWidth - r.right) + 'px';
-    });
-  }
-  headerRight.appendChild(settingsAnchor);
-
-  /* Profile button + dropdown */
-  const profileAnchor = h('div',{className:'dropdown-anchor'});
-  const initials = state.user?.name ? state.user.name.charAt(0).toUpperCase() : (state.user?.email ? state.user.email.charAt(0).toUpperCase() : 'U');
-  const profileBtn = h('div',{className:'profile-avatar',title:state.user?.email||'Profile',onClick:(e)=>{
-    e.stopPropagation();
-    state.showProfile=!state.showProfile; state.showSettings=false; render();
-  }},initials);
-  profileAnchor.appendChild(profileBtn);
-  if(state.showProfile){
-    const dd = renderProfileDropdown();
-    document.body.appendChild(dd);
-    requestAnimationFrame(()=>{
-      const r = profileBtn.getBoundingClientRect();
-      dd.style.top = (r.bottom + 8) + 'px';
-      dd.style.right = (window.innerWidth - r.right) + 'px';
-    });
-  }
-  headerRight.appendChild(profileAnchor);
-
-  const header = h('div',{className:'chat-header'},headerLeft,headerRight);
-  view.appendChild(header);
-
   /* ── Messages ─── */
   const msgContainer = h('div',{className:'messages'});
   view.appendChild(msgContainer);
@@ -1302,6 +1315,8 @@ function renderProfileDropdown(){
     h('div',{className:'pf-email'},u.email||''),
     h('div',{className:'pf-divider'}),
     h('button',{className:'pf-btn',onClick:()=>{state.view='dashboard';state.showProfile=false;loadDashboard();}},'\\u{1F4CA} Dashboard'),
+    h('button',{className:'pf-btn',onClick:()=>{state.view='admin';state.showProfile=false;loadAdmin();}},'\\u{2699}\\u{FE0F} Admin'),
+    h('div',{className:'pf-divider'}),
     h('button',{className:'pf-btn danger',onClick:()=>{state.showProfile=false;doLogout();}},'\\u{1F6AA} Sign Out')
   );
   return dd;
@@ -1549,7 +1564,7 @@ document.addEventListener('click',()=>{
   if(r.ok){
     const d = await r.json();
     state.user = d.user; state.csrfToken = d.csrfToken;
-    await loadChats(); await Promise.all([loadModels(), loadTools()]);
+    await loadChats(); await Promise.all([loadModels(), loadTools(), loadUserPreferences()]);
   }
   render();
 })();

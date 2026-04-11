@@ -9,7 +9,7 @@ import { SCHEMA_SQL } from './db-schema.js';
 import type {
   DatabaseAdapter, DatabaseConfig,
   UserRow, SessionRow, ChatRow, MessageRow,
-  MetricRow, EvalRow, ChatSettingsRow, TraceRow,
+  MetricRow, EvalRow, ChatSettingsRow, TraceRow, UserPreferencesRow,
   PromptRow, GuardrailRow, RoutingPolicyRow, WorkflowDefRow,
   ToolConfigRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
   IdentityRuleRow, MemoryGovernanceRow, SearchProviderRow, HttpEndpointRow,
@@ -193,6 +193,20 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (to) { sql += ' AND created_at <= ?'; params.push(to); }
     sql += ' ORDER BY created_at DESC';
     return this.d.prepare(sql).all(...params) as EvalRow[];
+  }
+
+  // ── User Preferences ──────────────────────────────────────
+
+  async getUserPreferences(userId: string): Promise<UserPreferencesRow | null> {
+    return (this.d.prepare('SELECT * FROM user_preferences WHERE user_id = ?').get(userId) as UserPreferencesRow | undefined) ?? null;
+  }
+
+  async saveUserPreferences(userId: string, defaultMode: string): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO user_preferences (user_id, default_mode)
+       VALUES (?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET default_mode=excluded.default_mode, updated_at=datetime('now')`,
+    ).run(userId, defaultMode);
   }
 
   // ── Chat Settings ──────────────────────────────────────────
