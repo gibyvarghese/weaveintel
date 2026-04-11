@@ -3,13 +3,12 @@
  *
  * Demonstrates:
  *  • SmartModelRouter with multiple model candidates
- *  • Health tracking — mark models up/down, latency tracking
- *  • Capability-based filtering (chat, streaming, tool_calling, vision)
- *  • Weighted scoring (cost vs quality vs latency)
- *  • Fallback chain selection when primary model is unhealthy
- *  • Explainable routing decisions stored in decision log
+ *  • Cost and quality scoring
+ *  • Health tracking with latency and error metrics
+ *  • Routing policies (cost-optimized, quality-optimized, balanced)
+ *  • Decision store for audit trail
  *
- * No API keys needed — uses in-memory scoring and routing.
+ * No API keys needed — uses in-memory routing simulation.
  *
  * Run: npx tsx examples/14-smart-routing.ts
  */
@@ -18,11 +17,7 @@ import {
   SmartModelRouter,
   ModelHealthTracker,
   ModelScorer,
-  filterByConstraints,
-  roundRobinSelect,
-  fallbackCandidate,
   InMemoryDecisionStore,
-  type ModelCandidate,
 } from '@weaveintel/routing';
 
 /* ── Helpers ──────────────────────────────────────────── */
@@ -33,220 +28,176 @@ function header(title: string) {
   console.log('═'.repeat(60));
 }
 
-/* ── 1. Define Model Candidates ───────────────────────── */
+async function main() {
 
-header('1. Model Candidates');
+/* ── 1. Set up model candidates ──────────────────────── */
 
-const candidates: ModelCandidate[] = [
-  {
-    id: 'gpt-4o',
-    provider: 'openai',
-    capabilities: new Set(['chat', 'streaming', 'tool_calling', 'vision', 'json_mode']),
-    cost: { inputPer1k: 0.0025, outputPer1k: 0.01 },
-    quality: { score: 0.95, benchmark: 'mmlu' },
-    maxTokens: 128_000,
-  },
-  {
-    id: 'gpt-4o-mini',
-    provider: 'openai',
-    capabilities: new Set(['chat', 'streaming', 'tool_calling', 'json_mode']),
-    cost: { inputPer1k: 0.00015, outputPer1k: 0.0006 },
-    quality: { score: 0.82, benchmark: 'mmlu' },
-    maxTokens: 128_000,
-  },
-  {
-    id: 'claude-sonnet-4-20250514',
-    provider: 'anthropic',
-    capabilities: new Set(['chat', 'streaming', 'tool_calling', 'vision', 'extended_thinking']),
-    cost: { inputPer1k: 0.003, outputPer1k: 0.015 },
-    quality: { score: 0.93, benchmark: 'mmlu' },
-    maxTokens: 200_000,
-  },
-  {
-    id: 'claude-haiku-4-20250414',
-    provider: 'anthropic',
-    capabilities: new Set(['chat', 'streaming', 'tool_calling']),
-    cost: { inputPer1k: 0.0008, outputPer1k: 0.004 },
-    quality: { score: 0.78, benchmark: 'mmlu' },
-    maxTokens: 200_000,
-  },
-  {
-    id: 'gpt-4.1-nano',
-    provider: 'openai',
-    capabilities: new Set(['chat', 'streaming']),
-    cost: { inputPer1k: 0.0001, outputPer1k: 0.0004 },
-    quality: { score: 0.70, benchmark: 'mmlu' },
-    maxTokens: 128_000,
-  },
+header('1. Model Candidates & Cost/Quality Info');
+
+const candidates = [
+  { modelId: 'gpt-4o', providerId: 'openai', capabilities: ['chat', 'code', 'reasoning'] },
+  { modelId: 'gpt-4o-mini', providerId: 'openai', capabilities: ['chat', 'code'] },
+  { modelId: 'claude-sonnet-4-20250514', providerId: 'anthropic', capabilities: ['chat', 'code', 'reasoning'] },
+  { modelId: 'gemini-pro', providerId: 'google', capabilities: ['chat'] },
+];
+
+const costs = [
+  { modelId: 'gpt-4o', providerId: 'openai', inputCostPer1M: 2.50, outputCostPer1M: 10.00 },
+  { modelId: 'gpt-4o-mini', providerId: 'openai', inputCostPer1M: 0.15, outputCostPer1M: 0.60 },
+  { modelId: 'claude-sonnet-4-20250514', providerId: 'anthropic', inputCostPer1M: 3.00, outputCostPer1M: 15.00 },
+  { modelId: 'gemini-pro', providerId: 'google', inputCostPer1M: 0.50, outputCostPer1M: 1.50 },
+];
+
+const qualities = [
+  { modelId: 'gpt-4o', providerId: 'openai', qualityScore: 0.95 },
+  { modelId: 'gpt-4o-mini', providerId: 'openai', qualityScore: 0.75 },
+  { modelId: 'claude-sonnet-4-20250514', providerId: 'anthropic', qualityScore: 0.93 },
+  { modelId: 'gemini-pro', providerId: 'google', qualityScore: 0.80 },
 ];
 
 for (const c of candidates) {
-  console.log(`  ${c.provider}/${c.id} — quality: ${c.quality.score}, cost: $${c.cost.inputPer1k}/1k in, capabilities: [${[...c.capabilities].join(', ')}]`);
+  const cost = costs.find(x => x.modelId === c.modelId);
+  const quality = qualities.find(x => x.modelId === c.modelId);
+  console.log(`  ${c.modelId} (${c.providerId}) — quality: ${quality?.qualityScore}, input: $${cost?.inputCostPer1M}/1M, output: $${cost?.outputCostPer1M}/1M`);
 }
 
 /* ── 2. Health Tracking ───────────────────────────────── */
 
 header('2. Health Tracking');
 
-const healthTracker = new ModelHealthTracker();
+const healthTracker = new ModelHealthTracker({ windowSize: 100 });
 
-// Record some latencies and failures
-healthTracker.recordSuccess('gpt-4o', 450);
-healthTracker.recordSuccess('gpt-4o', 380);
-healthTracker.recordSuccess('gpt-4o', 520);
-healthTracker.recordSuccess('gpt-4o-mini', 120);
-healthTracker.recordSuccess('gpt-4o-mini', 95);
-healthTracker.recordSuccess('claude-sonnet-4-20250514', 600);
-healthTracker.recordSuccess('claude-sonnet-4-20250514', 550);
-healthTracker.recordFailure('claude-haiku-4-20250414'); // haiku having issues
-healthTracker.recordFailure('claude-haiku-4-20250414');
-healthTracker.recordSuccess('claude-haiku-4-20250414', 200);
-healthTracker.recordSuccess('gpt-4.1-nano', 50);
-healthTracker.recordSuccess('gpt-4.1-nano', 45);
+// Simulate historical health data
+const healthData = [
+  { modelId: 'gpt-4o', providerId: 'openai', successes: 95, failures: 5, avgLatency: 800 },
+  { modelId: 'gpt-4o-mini', providerId: 'openai', successes: 99, failures: 1, avgLatency: 200 },
+  { modelId: 'claude-sonnet-4-20250514', providerId: 'anthropic', successes: 90, failures: 10, avgLatency: 1200 },
+  { modelId: 'gemini-pro', providerId: 'google', successes: 85, failures: 15, avgLatency: 600 },
+];
 
-for (const c of candidates) {
-  const health = healthTracker.getHealth(c.id);
-  const status = health.healthy ? '🟢' : '🔴';
-  console.log(`  ${status} ${c.id} — avg latency: ${health.avgLatency.toFixed(0)}ms, success rate: ${(health.successRate * 100).toFixed(0)}%, requests: ${health.totalRequests}`);
+for (const h of healthData) {
+  for (let i = 0; i < h.successes; i++) {
+    healthTracker.record(h.modelId, h.providerId, { latencyMs: h.avgLatency + Math.random() * 200 - 100, success: true });
+  }
+  for (let i = 0; i < h.failures; i++) {
+    healthTracker.record(h.modelId, h.providerId, { latencyMs: h.avgLatency * 3, success: false });
+  }
 }
 
-/* ── 3. Capability Filtering ──────────────────────────── */
+const allHealth = healthTracker.listHealth();
+for (const h of allHealth) {
+  const successRate = ((1 - h.errorRate) * 100).toFixed(0);
+  console.log(`  ${h.modelId} (${h.providerId}): success=${successRate}%, avg latency=${h.avgLatencyMs}ms, available=${h.available}`);
+}
 
-header('3. Filter by Capabilities');
+/* ── 3. Smart Routing with Different Policies ─────────── */
 
-const visionModels = filterByConstraints(candidates, {
-  requiredCapabilities: new Set(['vision']),
-});
-console.log(`  Models with vision: ${visionModels.map(m => m.id).join(', ')}`);
-
-const toolAndStreamModels = filterByConstraints(candidates, {
-  requiredCapabilities: new Set(['tool_calling', 'streaming']),
-});
-console.log(`  Models with tool_calling + streaming: ${toolAndStreamModels.map(m => m.id).join(', ')}`);
-
-const cheapModels = filterByConstraints(candidates, {
-  maxCostPerInputToken: 0.001,
-});
-console.log(`  Budget models (< $0.001/1k input): ${cheapModels.map(m => m.id).join(', ')}`);
-
-/* ── 4. Scoring & Ranking ─────────────────────────────── */
-
-header('4. Weighted Scoring');
-
-const scorer = new ModelScorer();
-
-// Scenario A: Prioritize quality (complex reasoning task)
-const qualityRanked = scorer.rank(candidates, {
-  weights: { quality: 0.7, cost: 0.1, latency: 0.2 },
-  healthTracker,
-});
-console.log('  Quality-first ranking (complex reasoning):');
-qualityRanked.forEach((r, i) => {
-  console.log(`    ${i + 1}. ${r.candidate.id} — score: ${r.score.toFixed(3)} (q=${r.breakdown.quality.toFixed(2)}, c=${r.breakdown.cost.toFixed(2)}, l=${r.breakdown.latency.toFixed(2)})`);
-});
-
-// Scenario B: Prioritize cost (high-volume batch)
-const costRanked = scorer.rank(candidates, {
-  weights: { quality: 0.2, cost: 0.6, latency: 0.2 },
-  healthTracker,
-});
-console.log('\n  Cost-first ranking (batch processing):');
-costRanked.forEach((r, i) => {
-  console.log(`    ${i + 1}. ${r.candidate.id} — score: ${r.score.toFixed(3)}`);
-});
-
-// Scenario C: Prioritize latency (real-time chat)
-const latencyRanked = scorer.rank(candidates, {
-  weights: { quality: 0.2, cost: 0.2, latency: 0.6 },
-  healthTracker,
-});
-console.log('\n  Latency-first ranking (real-time chat):');
-latencyRanked.forEach((r, i) => {
-  console.log(`    ${i + 1}. ${r.candidate.id} — score: ${r.score.toFixed(3)}`);
-});
-
-/* ── 5. Router with Fallback ──────────────────────────── */
-
-header('5. Smart Router with Fallback');
+header('3. Smart Routing — Policy Comparison');
 
 const decisionStore = new InMemoryDecisionStore();
 
 const router = new SmartModelRouter({
   candidates,
-  healthTracker,
+  costs,
+  qualities,
   decisionStore,
-  defaultWeights: { quality: 0.4, cost: 0.3, latency: 0.3 },
 });
 
-// Route a complex task
-const complexRoute = router.route({
-  requiredCapabilities: new Set(['tool_calling', 'vision']),
-  taskComplexity: 'high',
-});
-console.log(`  Complex task (tool_calling + vision):`);
-console.log(`    Selected: ${complexRoute.selected.id} (score: ${complexRoute.score.toFixed(3)})`);
-console.log(`    Fallback: ${complexRoute.fallbacks.map(f => f.id).join(', ')}`);
+const policies = [
+  {
+    id: 'cost-opt', name: 'Cost Optimized', strategy: 'cost-optimized' as const, enabled: true,
+    weights: { cost: 0.7, latency: 0.1, quality: 0.1, reliability: 0.1 },
+  },
+  {
+    id: 'quality-first', name: 'Quality First', strategy: 'quality-optimized' as const, enabled: true,
+    weights: { cost: 0.1, latency: 0.1, quality: 0.7, reliability: 0.1 },
+  },
+  {
+    id: 'balanced', name: 'Balanced', strategy: 'balanced' as const, enabled: true,
+    weights: { cost: 0.25, latency: 0.25, quality: 0.25, reliability: 0.25 },
+  },
+];
 
-// Route a simple task
-const simpleRoute = router.route({
-  requiredCapabilities: new Set(['chat']),
-  taskComplexity: 'low',
-  preferCost: true,
-});
-console.log(`\n  Simple task (chat, prefer cheap):`);
-console.log(`    Selected: ${simpleRoute.selected.id} (score: ${simpleRoute.score.toFixed(3)})`);
-console.log(`    Fallback: ${simpleRoute.fallbacks.map(f => f.id).join(', ')}`);
-
-// Simulate primary going unhealthy
-console.log(`\n  Simulating ${complexRoute.selected.id} going down...`);
-for (let i = 0; i < 5; i++) healthTracker.recordFailure(complexRoute.selected.id);
-
-const failoverRoute = router.route({
-  requiredCapabilities: new Set(['tool_calling', 'vision']),
-  taskComplexity: 'high',
-});
-console.log(`    Failover selected: ${failoverRoute.selected.id}`);
-
-/* ── 6. Round-Robin Selection ─────────────────────────── */
-
-header('6. Round-Robin Load Balancing');
-
-const rrCandidates = filterByConstraints(candidates, {
-  requiredCapabilities: new Set(['chat', 'streaming']),
-});
-const selections: string[] = [];
-for (let i = 0; i < 8; i++) {
-  const selected = roundRobinSelect(rrCandidates, i);
-  selections.push(selected.id);
+for (const policy of policies) {
+  const decision = await router.route(
+    { prompt: 'Explain quantum computing in detail', context: { taskType: 'reasoning' } },
+    policy,
+  );
+  const key = `${decision.providerId}:${decision.modelId}`;
+  const score = decision.scores[key] ?? 0;
+  console.log(`  [${policy.name}] → ${decision.modelId} (${decision.providerId}), score: ${score.toFixed(3)}`);
+  if (decision.alternatives.length > 0) {
+    console.log(`    Alternatives: ${decision.alternatives.map(a => `${a.modelId}(${a.score.toFixed(3)})`).join(', ')}`);
+  }
 }
-console.log(`  8 round-robin selections: ${selections.join(' → ')}`);
 
-/* ── 7. Fallback Candidate ────────────────────────────── */
+/* ── 4. Routing with Constraints ──────────────────────── */
 
-header('7. Explicit Fallback Chain');
+header('4. Routing with Constraints');
 
-const primary = candidates.find(c => c.id === 'gpt-4o')!;
-const fb = fallbackCandidate(candidates, primary, healthTracker);
-console.log(`  Primary: ${primary.id}`);
-console.log(`  Fallback: ${fb?.id || 'none'}`);
+// Route with capability requirement
+const codeDecision = await router.route(
+  { prompt: 'Debug this Python script' },
+  {
+    id: 'code-quality', name: 'Code Quality', strategy: 'quality-optimized', enabled: true,
+    weights: { quality: 0.8, cost: 0.1, latency: 0.1 },
+    constraints: { requiredCapabilities: ['code'] },
+  },
+);
+console.log(`  Capability constraint (code) → ${codeDecision.modelId} (${codeDecision.providerId})`);
 
-/* ── 8. Decision Log ──────────────────────────────────── */
+// Route with cost limit
+const cheapDecision = await router.route(
+  { prompt: 'Simple greeting' },
+  {
+    id: 'cheap', name: 'Budget', strategy: 'cost-optimized', enabled: true,
+    weights: { cost: 0.9, latency: 0.05, quality: 0.05 },
+  },
+);
+console.log(`  Cost-optimized → ${cheapDecision.modelId} (${cheapDecision.providerId})`);
 
-header('8. Explainable Routing Decisions');
+/* ── 5. Record Outcomes for Learning ──────────────────── */
 
-const decisions = decisionStore.list();
-console.log(`  ${decisions.length} routing decisions logged:`);
-decisions.slice(0, 5).forEach((d, i) => {
-  console.log(`    ${i + 1}. selected=${d.selectedModelId}, task=${d.taskComplexity}, reason: ${d.reason}`);
-});
+header('5. Decision Store — Audit Trail');
+
+// Record outcomes for the decisions
+await router.recordOutcome(codeDecision, { latencyMs: 450, success: true, cost: 0.003 });
+await router.recordOutcome(cheapDecision, { latencyMs: 180, success: true, cost: 0.001 });
+
+const decisions = await decisionStore.list({ limit: 10 });
+console.log(`  Total routing decisions recorded: ${decisions.length}`);
+for (const d of decisions.slice(0, 5)) {
+  const key = `${d.providerId}:${d.modelId}`;
+  console.log(`    ${d.modelId} (${d.providerId}) — score: ${(d.scores[key] ?? 0).toFixed(3)}, reason: ${d.reason.slice(0, 60)}`);
+}
+
+/* ── 6. Model Scoring ─────────────────────────────────── */
+
+header('6. Model Scoring — Side-by-Side Comparison');
+
+const scorer = new ModelScorer();
+const scores = scorer.score(
+  candidates,
+  allHealth,
+  costs,
+  qualities,
+  { id: 'compare', name: 'Compare', strategy: 'balanced', enabled: true },
+);
+
+for (const s of scores) {
+  console.log(`  ${s.modelId} (${s.providerId}): overall=${s.overallScore.toFixed(3)}, cost=${s.costScore.toFixed(2)}, latency=${s.latencyScore.toFixed(2)}, quality=${s.qualityScore.toFixed(2)}, reliability=${s.reliabilityScore.toFixed(2)}`);
+}
 
 /* ── Summary ──────────────────────────────────────────── */
 
 header('Summary');
-console.log('✅ 5 model candidates across 2 providers');
-console.log('✅ Health tracking with latency and failure rates');
-console.log('✅ Capability-based filtering (vision, tool_calling, etc.)');
-console.log('✅ Weighted scoring (quality vs cost vs latency)');
-console.log('✅ Smart router with automatic fallback on failure');
-console.log('✅ Round-robin load balancing');
-console.log('✅ Explainable decision logs');
+console.log('✅ Model candidates with cost and quality metadata');
+console.log('✅ Health tracking with latency and error rates');
+console.log('✅ Smart routing with cost-optimized, quality-first, and balanced policies');
+console.log('✅ Routing with capability constraints');
+console.log('✅ Decision store for audit trail');
+console.log('✅ Model scoring for side-by-side comparison');
+}
+
+main().catch(console.error);
+

@@ -1,16 +1,14 @@
 /**
- * Example 18 — Knowledge Graph & Entity Extraction
+ * Example 18 — Knowledge Graph
  *
  * Demonstrates:
- *  • Entity node creation and relationship edges
- *  • Graph memory store for agent knowledge
- *  • Entity linking across documents
- *  • Timeline graphs for event ordering
- *  • Graph-based retrieval for agent queries
- *  • Document extraction pipeline (entity + timeline stages)
- *  • Agent using graph context for multi-hop reasoning
+ *  • Entity nodes and relationship edges
+ *  • In-memory graph store with search, neighbors, and traversal
+ *  • Document-to-entity linking with pattern extraction
+ *  • Graph-assisted retrieval (search and entity-based)
+ *  • Timeline graph for event ordering
  *
- * No API keys needed — uses in-memory graph and fake model.
+ * No API keys needed — uses in-memory graph primitives.
  *
  * Run: npx tsx examples/18-knowledge-graph.ts
  */
@@ -20,20 +18,9 @@ import {
   createRelationshipEdge,
   createGraphMemoryStore,
   createEntityLinker,
-  createTimelineGraph,
   createGraphRetriever,
+  createTimelineGraph,
 } from '@weaveintel/graph';
-
-import {
-  createDocumentTransformPipeline,
-  createEntityStage,
-  createTimelineStage,
-  createMetadataStage,
-} from '@weaveintel/extraction';
-
-import { weaveContext } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
-import { weaveFakeModel } from '@weaveintel/testing';
 
 /* ── Helpers ──────────────────────────────────────────── */
 
@@ -43,311 +30,202 @@ function header(title: string) {
   console.log('═'.repeat(60));
 }
 
-/* ── 1. Entity Nodes ──────────────────────────────────── */
+async function main() {
 
-header('1. Building a Knowledge Graph');
+/* ── 1. Build a Knowledge Graph ───────────────────────── */
+
+header('1. Entity Nodes & Relationships');
 
 const store = createGraphMemoryStore();
 
-// People
-const alice = createEntityNode({
-  id: 'person-alice',
-  type: 'person',
-  label: 'Alice Chen',
-  properties: { role: 'CEO', company: 'TechCorp', email: 'alice@techcorp.io' },
-});
-const bob = createEntityNode({
-  id: 'person-bob',
-  type: 'person',
-  label: 'Bob Kumar',
-  properties: { role: 'CTO', company: 'TechCorp', email: 'bob@techcorp.io' },
-});
-const carol = createEntityNode({
-  id: 'person-carol',
-  type: 'person',
-  label: 'Carol Davis',
-  properties: { role: 'VP Engineering', company: 'DataFlow Inc', email: 'carol@dataflow.io' },
-});
+// Create entity nodes
+const alice = createEntityNode('person-alice', 'person', 'Alice Chen', { role: 'CTO', department: 'Engineering' });
+const bob = createEntityNode('person-bob', 'person', 'Bob Williams', { role: 'Lead Engineer', department: 'Engineering' });
+const carol = createEntityNode('person-carol', 'person', 'Carol Davis', { role: 'Product Manager', department: 'Product' });
+const projectX = createEntityNode('project-x', 'project', 'Project X', { status: 'active', budget: 500000 });
+const projectY = createEntityNode('project-y', 'project', 'Project Y', { status: 'planning', budget: 200000 });
+const teamAlpha = createEntityNode('team-alpha', 'team', 'Alpha Team', { size: 8 });
+const techAI = createEntityNode('tech-ai', 'technology', 'Machine Learning', { category: 'AI' });
+const techCloud = createEntityNode('tech-cloud', 'technology', 'Kubernetes', { category: 'Infrastructure' });
 
-// Companies
-const techcorp = createEntityNode({
-  id: 'company-techcorp',
-  type: 'organization',
-  label: 'TechCorp',
-  properties: { industry: 'AI/ML', founded: 2019, hq: 'San Francisco' },
-});
-const dataflow = createEntityNode({
-  id: 'company-dataflow',
-  type: 'organization',
-  label: 'DataFlow Inc',
-  properties: { industry: 'Data Infrastructure', founded: 2017, hq: 'Seattle' },
-});
-
-// Products
-const nexus = createEntityNode({
-  id: 'product-nexus',
-  type: 'product',
-  label: 'Nexus AI Platform',
-  properties: { category: 'MLOps', version: '3.0', pricing: 'enterprise' },
-});
-const pipeline = createEntityNode({
-  id: 'product-pipeline',
-  type: 'product',
-  label: 'DataFlow Pipeline',
-  properties: { category: 'ETL', version: '5.2', pricing: 'usage-based' },
-});
-
-// Add all nodes
-const entities = [alice, bob, carol, techcorp, dataflow, nexus, pipeline];
-for (const entity of entities) {
-  store.addNode(entity);
+// Add nodes to store
+for (const node of [alice, bob, carol, projectX, projectY, teamAlpha, techAI, techCloud]) {
+  store.addNode(node);
 }
-console.log(`Added ${entities.length} entity nodes to graph`);
+console.log(`  Added ${store.nodeCount()} nodes`);
 
-/* ── 2. Relationships ─────────────────────────────────── */
-
-header('2. Creating Relationships');
-
+// Create relationships
 const relationships = [
-  createRelationshipEdge({ source: 'person-alice', target: 'company-techcorp', type: 'leads', properties: { since: '2019' } }),
-  createRelationshipEdge({ source: 'person-bob', target: 'company-techcorp', type: 'works_at', properties: { since: '2020' } }),
-  createRelationshipEdge({ source: 'person-carol', target: 'company-dataflow', type: 'works_at', properties: { since: '2018' } }),
-  createRelationshipEdge({ source: 'company-techcorp', target: 'product-nexus', type: 'develops', properties: {} }),
-  createRelationshipEdge({ source: 'company-dataflow', target: 'product-pipeline', type: 'develops', properties: {} }),
-  createRelationshipEdge({ source: 'company-techcorp', target: 'company-dataflow', type: 'partner', properties: { since: '2023', deal: 'Integration partnership' } }),
-  createRelationshipEdge({ source: 'person-alice', target: 'person-carol', type: 'knows', properties: { context: 'Met at AI Summit 2022' } }),
-  createRelationshipEdge({ source: 'product-nexus', target: 'product-pipeline', type: 'integrates_with', properties: { api: 'REST', since: '2023' } }),
+  createRelationshipEdge('person-alice', 'team-alpha', 'leads', 1.0),
+  createRelationshipEdge('person-bob', 'team-alpha', 'member-of', 0.8),
+  createRelationshipEdge('person-carol', 'project-x', 'manages', 1.0),
+  createRelationshipEdge('team-alpha', 'project-x', 'works-on', 0.9),
+  createRelationshipEdge('team-alpha', 'project-y', 'works-on', 0.5),
+  createRelationshipEdge('project-x', 'tech-ai', 'uses', 1.0),
+  createRelationshipEdge('project-x', 'tech-cloud', 'uses', 0.7),
+  createRelationshipEdge('project-y', 'tech-cloud', 'uses', 0.9),
+  createRelationshipEdge('person-alice', 'person-bob', 'mentors', 0.8),
 ];
 
-for (const rel of relationships) {
-  store.addEdge(rel);
+for (const edge of relationships) {
+  store.addEdge(edge);
 }
+console.log(`  Added ${store.edgeCount()} relationships`);
 
-console.log(`Added ${relationships.length} relationships:`);
-for (const rel of relationships) {
-  const src = store.getNode(rel.source);
-  const tgt = store.getNode(rel.target);
-  console.log(`  ${src?.label || rel.source} ──[${rel.type}]──> ${tgt?.label || rel.target}`);
+// Query the graph
+const persons = store.findNodes('person');
+console.log(`\n  Persons: ${persons.map(p => p.name).join(', ')}`);
+
+const projects = store.findNodes('project');
+console.log(`  Projects: ${projects.map(p => `${p.name} (${(p.properties as any).status})`).join(', ')}`);
+
+const techs = store.findNodes('technology');
+console.log(`  Technologies: ${techs.map(t => t.name).join(', ')}`);
+
+/* ── 2. Graph Traversal ───────────────────────────────── */
+
+header('2. Graph Traversal — Neighbors & Paths');
+
+// Direct neighbors (depth 1)
+const aliceNeighbors = store.getNeighbors('person-alice', 1);
+console.log(`  Alice's direct connections: ${aliceNeighbors.map(n => n.name).join(', ')}`);
+
+// Extended traversal (depth 2)
+const aliceExtended = store.getNeighbors('person-alice', 2);
+console.log(`  Alice's 2-hop reach: ${aliceExtended.map(n => n.name).join(', ')}`);
+
+// Edges from/to
+const alphaEdges = store.getEdgesFrom('team-alpha');
+console.log(`\n  Alpha Team outgoing edges: ${alphaEdges.map(e => `→ ${e.targetId} (${e.type})`).join(', ')}`);
+
+const projectXIncoming = store.getEdgesTo('project-x');
+console.log(`  Project X incoming: ${projectXIncoming.map(e => `← ${e.sourceId} (${e.type})`).join(', ')}`);
+
+// Edges between specific nodes
+const aliceBobEdges = store.getEdgesBetween('person-alice', 'person-bob');
+console.log(`\n  Alice ↔ Bob: ${aliceBobEdges.map(e => e.type).join(', ')}`);
+
+// Search
+const searchResults = store.searchNodes('machine');
+console.log(`  Search "machine": ${searchResults.map(n => `${n.name} (${n.type})`).join(', ')}`);
+
+/* ── 3. Entity Linking from Documents ─────────────────── */
+
+header('3. Entity Linking — Extracting from Text');
+
+const linker = createEntityLinker();
+
+const doc1 = `
+Project update from Alice Chen and Bob Williams:
+The Machine Learning pipeline is now running on Kubernetes.
+Please contact team@example.com for details.
+Meeting scheduled for 2025-03-15.
+Carol Davis approved the budget increase.
+`;
+
+const result1 = linker.extractAndLink('doc-001', doc1);
+console.log(`  Document "doc-001" entities found: ${result1.entities.length}`);
+for (const entity of result1.entities) {
+  console.log(`    - ${entity.name} (${entity.type})`);
 }
+console.log(`  Relationships created: ${result1.relationships.length}`);
 
-/* ── 3. Entity Linking ────────────────────────────────── */
-
-header('3. Entity Linking');
-
-const linker = createEntityLinker(store);
-
-// Simulate linking mentions from text to existing entities
-const mentions = [
-  { text: 'Alice Chen', hint: 'person' },
-  { text: 'TechCorp', hint: 'organization' },
-  { text: 'Nexus AI Platform', hint: 'product' },
-  { text: 'DataFlow', hint: 'organization' },
-];
-
-for (const mention of mentions) {
-  const linked = linker.link(mention.text, mention.hint);
-  if (linked) {
-    console.log(`  "${mention.text}" → ${linked.label} (${linked.id}) [${linked.type}]`);
-  } else {
-    console.log(`  "${mention.text}" → ❌ No match`);
-  }
-}
+// Link with existing entities for deduplication
+const doc2 = `Alice Chen presented findings at the 2025-06-01 meeting.`;
+const result2 = linker.extractAndLink('doc-002', doc2, result1.entities);
+console.log(`\n  Document "doc-002" — new entities: ${result2.entities.length}, relationships: ${result2.relationships.length}`);
 
 /* ── 4. Graph Retrieval ───────────────────────────────── */
 
-header('4. Graph-Based Retrieval');
+header('4. Graph-Assisted Retrieval');
 
 const retriever = createGraphRetriever(store);
 
-// Query: find everything related to TechCorp
-console.log('Query: "What is related to TechCorp?"');
-const techcorpContext = retriever.retrieve('company-techcorp', { depth: 2 });
-console.log(`  Found ${techcorpContext.nodes.length} nodes, ${techcorpContext.edges.length} edges (depth=2)`);
-for (const node of techcorpContext.nodes) {
-  console.log(`  📍 ${node.label} (${node.type})`);
-}
-for (const edge of techcorpContext.edges) {
-  const src = store.getNode(edge.source);
-  const tgt = store.getNode(edge.target);
-  console.log(`  🔗 ${src?.label} ──[${edge.type}]──> ${tgt?.label}`);
+// Text search retrieval
+const queryResults = retriever.retrieve('Alice', 5);
+console.log(`  Query "Alice" — ${queryResults.length} results:`);
+for (const r of queryResults) {
+  console.log(`    ${r.node.name} (score: ${r.score.toFixed(2)}, edges: ${r.connectedEdges.length})`);
 }
 
-// Query: path between Alice and DataFlow Pipeline
-console.log('\nQuery: "How is Alice connected to DataFlow Pipeline?"');
-const path = retriever.findPath('person-alice', 'product-pipeline');
-if (path) {
-  console.log('  Path found:');
-  for (const step of path) {
-    if (step.type === 'node') {
-      console.log(`    📍 ${step.label}`);
-    } else {
-      console.log(`    ──[${step.type}]──>`);
-    }
-  }
-} else {
-  console.log('  No path found');
+// Search for technology
+const techResults = retriever.retrieve('Machine Learning', 3);
+console.log(`\n  Query "Machine Learning" — ${techResults.length} results:`);
+for (const r of techResults) {
+  console.log(`    ${r.node.name} (score: ${r.score.toFixed(2)})`);
+}
+
+// Entity-based retrieval (find everything connected to Project X)
+const entityResults = retriever.retrieveByEntity('project-x', 2, 10);
+console.log(`\n  Entity retrieval from "project-x" — ${entityResults.length} connected nodes:`);
+for (const r of entityResults) {
+  console.log(`    ${r.node.name} (score: ${r.score.toFixed(2)}, path: ${r.path.join(' → ')})`);
 }
 
 /* ── 5. Timeline Graph ────────────────────────────────── */
 
-header('5. Timeline Graph');
+header('5. Timeline Graph — Event Ordering');
 
 const timeline = createTimelineGraph();
 
-const events = [
-  { id: 'ev1', timestamp: '2019-03-15', label: 'TechCorp founded', entity: 'company-techcorp', type: 'founding' },
-  { id: 'ev2', timestamp: '2020-06-01', label: 'Bob Kumar joins as CTO', entity: 'person-bob', type: 'hire' },
-  { id: 'ev3', timestamp: '2021-09-10', label: 'Nexus AI Platform v1.0 launched', entity: 'product-nexus', type: 'launch' },
-  { id: 'ev4', timestamp: '2022-11-05', label: 'Alice meets Carol at AI Summit', entity: 'person-alice', type: 'meeting' },
-  { id: 'ev5', timestamp: '2023-02-20', label: 'TechCorp–DataFlow partnership announced', entity: 'company-techcorp', type: 'partnership' },
-  { id: 'ev6', timestamp: '2023-06-15', label: 'Nexus–Pipeline integration shipped', entity: 'product-nexus', type: 'integration' },
-  { id: 'ev7', timestamp: '2024-01-10', label: 'Nexus AI Platform v3.0 released', entity: 'product-nexus', type: 'release' },
-];
+// Add events
+const e1 = timeline.addEvent('Project X Kickoff', new Date('2025-01-15').getTime(), { type: 'milestone', participants: 5 });
+const e2 = timeline.addEvent('Alpha Team Formed', new Date('2025-02-01').getTime(), { type: 'organizational' });
+const e3 = timeline.addEvent('ML Pipeline v1 Deployed', new Date('2025-03-10').getTime(), { type: 'release', version: '1.0' });
+const e4 = timeline.addEvent('Budget Review', new Date('2025-04-01').getTime(), { type: 'review', outcome: 'approved' });
+const e5 = timeline.addEvent('ML Pipeline v2 Released', new Date('2025-05-20').getTime(), { type: 'release', version: '2.0' });
+const e6 = timeline.addEvent('Project X Phase 2', new Date('2025-06-01').getTime(), { type: 'milestone' });
 
-for (const ev of events) {
-  timeline.addEvent(ev);
+// Link events to show causality
+timeline.linkEvents(e1.id, e2.id, 'led-to');
+timeline.linkEvents(e2.id, e3.id, 'resulted-in');
+timeline.linkEvents(e3.id, e4.id, 'triggered');
+timeline.linkEvents(e4.id, e5.id, 'enabled');
+timeline.linkEvents(e5.id, e6.id, 'preceded');
+
+// Get all events in order
+const allEvents = timeline.getEvents();
+console.log(`  Full timeline (${allEvents.length} events):`);
+for (const ev of allEvents) {
+  const date = new Date(ev.timestamp).toISOString().slice(0, 10);
+  console.log(`    ${date}: ${ev.label}`);
 }
 
-console.log('Full timeline:');
-for (const ev of timeline.getEvents()) {
-  console.log(`  📅 ${ev.timestamp} — ${ev.label}`);
-}
-
-// Query timeline range
-console.log('\nEvents in 2023:');
-const year2023 = timeline.getRange('2023-01-01', '2023-12-31');
-for (const ev of year2023) {
-  console.log(`  📅 ${ev.timestamp} — ${ev.label}`);
-}
-
-// Events for a specific entity
-console.log('\nNexus AI Platform timeline:');
-const nexusTimeline = timeline.getByEntity('product-nexus');
-for (const ev of nexusTimeline) {
-  console.log(`  📅 ${ev.timestamp} — ${ev.label}`);
-}
-
-/* ── 6. Document Extraction Pipeline ──────────────────── */
-
-header('6. Document Extraction Pipeline');
-
-const extractionPipeline = createDocumentTransformPipeline([
-  createMetadataStage(),
-  createEntityStage(),
-  createTimelineStage(),
-]);
-
-const document = {
-  id: 'doc-press-release',
-  content: `FOR IMMEDIATE RELEASE — February 20, 2023
-
-TechCorp and DataFlow Inc today announced a strategic partnership to integrate 
-the Nexus AI Platform with DataFlow Pipeline. The integration, led by CTO Bob Kumar 
-and VP Engineering Carol Davis, will enable enterprise customers to build end-to-end 
-ML pipelines with automated data transformation and model deployment.
-
-"This partnership represents the convergence of AI and data infrastructure," said 
-Alice Chen, CEO of TechCorp. "Our customers have been asking for native DataFlow 
-integration, and Carol's team has built exactly what the market needs."
-
-The initial integration shipped on June 15, 2023, with full GA expected in Q1 2024.`,
-  metadata: { source: 'press-release', date: '2023-02-20' },
-};
-
-const extracted = extractionPipeline.process(document);
-console.log('Extraction results:');
-console.log(`  Metadata: ${JSON.stringify(extracted.metadata)}`);
-console.log(`  Entities found: ${extracted.entities?.length || 0}`);
-if (extracted.entities) {
-  for (const e of extracted.entities) {
-    console.log(`    🏷️  ${e.text} (${e.type})`);
-  }
-}
-console.log(`  Timeline events: ${extracted.timeline?.length || 0}`);
-if (extracted.timeline) {
-  for (const t of extracted.timeline) {
-    console.log(`    📅 ${t.date} — ${t.description}`);
-  }
-}
-
-/* ── 7. Agent with Graph Context ──────────────────────── */
-
-header('7. Agent with Graph-Augmented Reasoning');
-
-const ctx = weaveContext({ userId: 'graph-demo', timeout: 30_000 });
-
-// Build context from graph for the agent
-const graphContext = retriever.retrieve('company-techcorp', { depth: 2 });
-const contextSummary = [
-  'Knowledge Graph Context:',
-  '',
-  'Entities:',
-  ...graphContext.nodes.map(n => `- ${n.label} (${n.type}): ${JSON.stringify(n.properties)}`),
-  '',
-  'Relationships:',
-  ...graphContext.edges.map(e => {
-    const src = store.getNode(e.source);
-    const tgt = store.getNode(e.target);
-    return `- ${src?.label} --[${e.type}]--> ${tgt?.label}`;
-  }),
-  '',
-  'Timeline:',
-  ...timeline.getEvents().map(e => `- ${e.timestamp}: ${e.label}`),
-].join('\n');
-
-const model = weaveFakeModel({
-  responses: [
-    `Based on the knowledge graph, here's the complete picture of TechCorp's ecosystem:
-
-**Company Overview:**
-TechCorp is an AI/ML company founded in 2019 in San Francisco. They develop the **Nexus AI Platform** (currently v3.0, enterprise pricing).
-
-**Key People:**
-- **Alice Chen** (CEO) — Leads the company, connected to Carol Davis from DataFlow Inc (met at AI Summit 2022)
-- **Bob Kumar** (CTO) — Joined in June 2020, led the DataFlow integration
-
-**Strategic Partnerships:**
-TechCorp partnered with **DataFlow Inc** (Seattle-based data infrastructure company) in February 2023. DataFlow develops the **DataFlow Pipeline** (ETL, v5.2, usage-based pricing).
-
-**Product Integration:**
-The Nexus AI Platform integrates with DataFlow Pipeline via REST API since 2023. This enables end-to-end ML pipelines combining TechCorp's AI capabilities with DataFlow's data transformation.
-
-**Timeline of Key Events:**
-1. 2019 — TechCorp founded
-2. 2020 — Bob Kumar joins as CTO
-3. 2021 — Nexus v1.0 launched
-4. 2022 — Alice meets Carol at AI Summit
-5. 2023 — Partnership announced → Integration shipped
-6. 2024 — Nexus v3.0 released
-
-**Connection Path (Alice → DataFlow Pipeline):**
-Alice Chen → leads TechCorp → partners with DataFlow Inc → develops DataFlow Pipeline`,
-  ],
-});
-
-const agent = weaveAgent({
-  model,
-  systemPrompt: `You are a research analyst. Use the knowledge graph context to answer questions with specific details, relationships, and timelines.\n\n${contextSummary}`,
-  maxSteps: 2,
-});
-
-const result = await agent.run(
-  { messages: [{ role: 'user', content: 'Give me a complete overview of TechCorp — their people, products, partnerships, and timeline.' }] },
-  ctx,
+// Filter by date range
+const q1Events = timeline.getEventsBetween(
+  new Date('2025-01-01').getTime(),
+  new Date('2025-03-31').getTime(),
 );
+console.log(`\n  Q1 2025 events: ${q1Events.map(e => e.label).join(', ')}`);
 
-console.log('Agent response (graph-augmented):');
-console.log(result.content);
+const q2Events = timeline.getEventsBetween(
+  new Date('2025-04-01').getTime(),
+  new Date('2025-06-30').getTime(),
+);
+console.log(`  Q2 2025 events: ${q2Events.map(e => e.label).join(', ')}`);
+
+/* ── 6. Graph Statistics ──────────────────────────────── */
+
+header('6. Graph Statistics');
+
+console.log(`  Total nodes: ${store.nodeCount()}`);
+console.log(`  Total edges: ${store.edgeCount()}`);
+console.log(`  Node types: ${[...new Set(store.findNodes('person').concat(store.findNodes('project'), store.findNodes('team'), store.findNodes('technology')).map(n => n.type))].join(', ')}`);
+
+// Remove a node and check cascade
+store.removeNode('project-y');
+console.log(`\n  After removing "Project Y":`);
+console.log(`    Nodes: ${store.nodeCount()}, Edges: ${store.edgeCount()}`);
 
 /* ── Summary ──────────────────────────────────────────── */
 
 header('Summary');
-console.log('✅ Entity nodes (person, organization, product)');
-console.log('✅ Relationship edges (leads, works_at, develops, partner, integrates_with)');
-console.log('✅ Graph memory store with add/get/query');
-console.log('✅ Entity linking from text mentions to graph nodes');
-console.log('✅ Graph retrieval with depth traversal');
-console.log('✅ Path finding between entities');
-console.log('✅ Timeline graph with range and entity queries');
-console.log('✅ Document extraction pipeline (metadata, entity, timeline stages)');
-console.log('✅ Agent using graph context for multi-hop reasoning');
+console.log('✅ Entity nodes with typed properties');
+console.log('✅ Relationship edges with weights');
+console.log('✅ Graph search and multi-hop traversal');
+console.log('✅ Document-to-entity linking with pattern extraction');
+console.log('✅ Graph-assisted retrieval (text and entity-based)');
+console.log('✅ Timeline graph with event ordering and date filtering');
+}
+
+main().catch(console.error);

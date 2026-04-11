@@ -2,24 +2,26 @@
  * Example 20 — Recipes, DevTools & UI Primitives
  *
  * Demonstrates:
- *  • Recipe factories — pre-built agent patterns (governed, approval-driven, workflow)
- *  • DevTools scaffolding and template listing
- *  • Agent inspection and report formatting
- *  • Validation rules for agent configurations
- *  • Mock runtime for testing agents without real APIs
- *  • UI primitives — streaming events, widgets, artifacts, citations
- *  • Progress tracking for long-running operations
+ *  • Pre-built agent recipes (governed assistant, workflow, event-driven)
+ *  • Project scaffolding from templates
+ *  • Configuration validation with rules
+ *  • Mock runtime for testing (model, bus, tools)
+ *  • Agent inspection and report generation
+ *  • UI stream events (text, status, errors, tool calls)
+ *  • Citations (document and web)
+ *  • Artifacts (JSON, code)
+ *  • Widgets (tables, charts, timelines)
+ *  • Progress tracking
+ *  • Tool approval payloads
  *
- * No API keys needed — all in-memory.
+ * No API keys needed — uses mock model and in-memory primitives.
  *
  * Run: npx tsx examples/20-recipes-devtools.ts
  */
 
 import {
   createGovernedAssistant,
-  createApprovalDrivenAgent,
-  createWorkflowAgent,
-  createEvalRoutedAssistant,
+  createEventDrivenAgent,
   createSafeExecutionAgent,
 } from '@weaveintel/recipes';
 
@@ -29,9 +31,13 @@ import {
   inspect,
   formatReport,
   createValidator,
+  requiredFields,
+  maxStepsInRange,
   createMockModel,
   createMockEventBus,
   createMockRuntime,
+  planMigration,
+  formatMigrationPlan,
 } from '@weaveintel/devtools';
 
 import {
@@ -45,14 +51,11 @@ import {
   toolApproval,
   documentCitation,
   webCitation,
-  deduplicateCitations,
   jsonArtifact,
   codeArtifact,
-  csvArtifact,
-  markdownArtifact,
   tableWidget,
   chartWidget,
-  createProgress,
+  timelineWidget,
   createProgressTracker,
 } from '@weaveintel/ui-primitives';
 
@@ -64,376 +67,275 @@ function header(title: string) {
   console.log('═'.repeat(60));
 }
 
-/* ── 1. Recipe Factories ──────────────────────────────── */
+async function main() {
+
+/* ── 1. Agent Recipes ─────────────────────────────────── */
 
 header('1. Pre-Built Agent Recipes');
 
-// Governed Assistant — built-in guardrails + audit logging
+const mockModel = createMockModel({ responses: ['Hello from governed assistant!', 'Event processed.'] });
+const mockBus = createMockEventBus();
+
 const governed = createGovernedAssistant({
-  name: 'Support Bot',
-  description: 'Customer support with governance policies',
-  guardrails: ['pii-filter', 'topic-restrict', 'cost-limit'],
-  auditLevel: 'full',
-  maxBudgetPerRequest: 0.10,
+  model: mockModel,
+  name: 'ComplianceBot',
+  governanceRules: ['No PII in responses', 'Cite sources for claims', 'Maximum 500 tokens per response'],
+  systemPrompt: 'You are a compliance-aware assistant.',
 });
+console.log(`  Governed assistant: "${governed.name}"`);
 
-console.log(`📦 ${governed.name}: ${governed.description}`);
-console.log(`   Guardrails: ${governed.guardrails.join(', ')}`);
-console.log(`   Audit: ${governed.auditLevel}`);
-console.log(`   Budget: $${governed.maxBudgetPerRequest}/request`);
-
-// Approval-Driven Agent — requires human approval for high-risk actions
-const approvalAgent = createApprovalDrivenAgent({
-  name: 'Data Manager',
-  description: 'Manages data with approval gates for destructive operations',
-  approvalRequired: ['delete', 'export', 'modify_schema'],
-  autoApprove: ['read', 'list', 'search'],
-  escalationPolicy: { maxWaitMinutes: 30, fallback: 'deny' },
+const eventAgent = createEventDrivenAgent({
+  model: mockModel,
+  bus: mockBus,
+  name: 'EventHandler',
+  listenTo: ['user:message', 'tool:result', 'error:*'],
+  systemPrompt: 'Process incoming events and produce summaries.',
 });
+console.log(`  Event-driven agent: "${eventAgent.name}"`);
 
-console.log(`\n📦 ${approvalAgent.name}: ${approvalAgent.description}`);
-console.log(`   Requires approval: ${approvalAgent.approvalRequired.join(', ')}`);
-console.log(`   Auto-approved: ${approvalAgent.autoApprove.join(', ')}`);
-console.log(`   Escalation: wait ${approvalAgent.escalationPolicy.maxWaitMinutes}min, fallback=${approvalAgent.escalationPolicy.fallback}`);
-
-// Workflow Agent — multi-step with checkpointing
-const workflowAgent = createWorkflowAgent({
-  name: 'Report Generator',
-  description: 'Generates weekly reports with data collection, analysis, and distribution',
-  steps: ['collect_data', 'analyze', 'generate_charts', 'compile_report', 'distribute'],
-  checkpointEnabled: true,
-  compensationEnabled: true,
-});
-
-console.log(`\n📦 ${workflowAgent.name}: ${workflowAgent.description}`);
-console.log(`   Steps: ${workflowAgent.steps.join(' → ')}`);
-console.log(`   Checkpoint: ${workflowAgent.checkpointEnabled ? 'Yes' : 'No'}`);
-console.log(`   Compensation: ${workflowAgent.compensationEnabled ? 'Yes' : 'No'}`);
-
-// Eval-Routed Assistant — routes to different models based on eval scores
-const evalRouted = createEvalRoutedAssistant({
-  name: 'Smart Router',
-  description: 'Routes requests to the best-performing model per task type',
-  routes: [
-    { taskType: 'code', preferredModel: 'gpt-4o', minEvalScore: 0.85 },
-    { taskType: 'creative', preferredModel: 'claude-3.5-sonnet', minEvalScore: 0.80 },
-    { taskType: 'analysis', preferredModel: 'gpt-4o', minEvalScore: 0.90 },
-    { taskType: 'simple', preferredModel: 'gpt-4o-mini', minEvalScore: 0.70 },
-  ],
-});
-
-console.log(`\n📦 ${evalRouted.name}: ${evalRouted.description}`);
-console.log('   Routes:');
-for (const r of evalRouted.routes) {
-  console.log(`     ${r.taskType} → ${r.preferredModel} (min score: ${r.minEvalScore})`);
-}
-
-// Safe Execution Agent — sandboxed + rate-limited
 const safeAgent = createSafeExecutionAgent({
-  name: 'Code Runner',
-  description: 'Executes user code in a sandboxed environment',
-  sandboxPolicy: 'strict',
-  maxExecutionMs: 10_000,
-  maxMemoryMb: 256,
-  rateLimit: { requestsPerMinute: 30 },
+  model: mockModel,
+  name: 'SafeRunner',
+  deniedTools: ['rm', 'delete-all', 'sudo'],
+  maxToolExecutionMs: 5000,
+  systemPrompt: 'Execute tasks safely.',
 });
+console.log(`  Safe execution agent: "${safeAgent.name}"`);
 
-console.log(`\n📦 ${safeAgent.name}: ${safeAgent.description}`);
-console.log(`   Policy: ${safeAgent.sandboxPolicy}`);
-console.log(`   Limits: ${safeAgent.maxExecutionMs}ms, ${safeAgent.maxMemoryMb}MB`);
-console.log(`   Rate: ${safeAgent.rateLimit.requestsPerMinute} req/min`);
+/* ── 2. Project Scaffolding ───────────────────────────── */
 
-/* ── 2. DevTools — Templates & Scaffolding ────────────── */
-
-header('2. DevTools — Scaffolding');
+header('2. Project Scaffolding');
 
 const templates = listTemplates();
-console.log(`Available templates: ${templates.length}`);
+console.log(`  Available templates (${templates.length}):`);
 for (const t of templates) {
-  console.log(`  📁 ${t.name}: ${t.description}`);
+  console.log(`    - ${t.type}: ${t.description}`);
 }
 
-// Scaffold a new agent project
-const scaffolded = scaffold({
-  template: 'basic-agent',
-  name: 'my-support-agent',
-  options: { tools: true, memory: true, observability: true },
+const project = scaffold({
+  projectName: 'my-ai-agent',
+  template: 'tool-calling-agent',
+  description: 'A tool-calling AI agent for data analysis',
+  includeTests: true,
+  includeDocker: true,
 });
 
-console.log(`\nScaffolded project: ${scaffolded.name}`);
-console.log('Generated files:');
-for (const file of scaffolded.files) {
-  console.log(`  📄 ${file.path} (${file.content.length} chars)`);
+console.log(`\n  Scaffolded "${project.name}" (${project.type}):`);
+console.log(`    Files: ${project.files.length}`);
+for (const f of project.files.slice(0, 5)) {
+  console.log(`      ${f.path} (${f.content.length} chars)`);
+}
+if (project.files.length > 5) console.log(`      ... and ${project.files.length - 5} more`);
+console.log(`    Dependencies: ${project.dependencies.join(', ')}`);
+console.log(`    Dev deps: ${project.devDependencies.join(', ')}`);
+
+/* ── 3. Configuration Validation ──────────────────────── */
+
+header('3. Configuration Validation');
+
+const validator = createValidator([
+  requiredFields('name', 'model', 'maxSteps'),
+  maxStepsInRange(1, 100),
+]);
+
+const goodConfig = { name: 'MyAgent', model: 'gpt-4', maxSteps: 10 };
+const goodResult = validator.validate(goodConfig);
+console.log(`  Good config: valid=${goodResult.valid}, issues=${goodResult.issues.length}`);
+
+const badConfig = { model: 'gpt-4' } as Record<string, unknown>;
+const badResult = validator.validate(badConfig);
+console.log(`  Bad config: valid=${badResult.valid}, issues=${badResult.issues.length}`);
+for (const issue of badResult.issues) {
+  console.log(`    [${issue.severity}] ${issue.message}${issue.suggestion ? ' — ' + issue.suggestion : ''}`);
 }
 
-/* ── 3. DevTools — Inspection ─────────────────────────── */
+/* ── 4. Mock Runtime ──────────────────────────────────── */
 
-header('3. DevTools — Agent Inspection');
+header('4. Mock Runtime for Testing');
 
-const inspectionTarget = {
-  name: 'Support Bot',
-  model: 'gpt-4o',
-  tools: ['search_docs', 'create_ticket', 'escalate'],
-  memory: { type: 'conversational', maxTokens: 4096 },
-  guardrails: ['pii-filter', 'cost-limit'],
-  systemPrompt: 'You are a helpful support agent...',
-};
-
-const inspectionResult = inspect(inspectionTarget);
-console.log('Inspection result:');
-console.log(`  Name: ${inspectionResult.name}`);
-console.log(`  Model: ${inspectionResult.model}`);
-console.log(`  Tools: ${inspectionResult.tools.length}`);
-console.log(`  Memory: ${inspectionResult.memory.type} (${inspectionResult.memory.maxTokens} tokens)`);
-console.log(`  Guardrails: ${inspectionResult.guardrails.length}`);
-console.log(`  Warnings: ${inspectionResult.warnings.length}`);
-
-const report = formatReport(inspectionResult);
-console.log('\nFormatted report:');
-console.log(report);
-
-/* ── 4. DevTools — Validation ─────────────────────────── */
-
-header('4. DevTools — Configuration Validation');
-
-const validator = createValidator();
-
-const validConfig = {
-  name: 'My Agent',
-  model: 'gpt-4o',
-  tools: ['search'],
-  systemPrompt: 'You are helpful.',
-  maxSteps: 5,
-};
-
-const invalidConfig = {
-  name: '',
-  model: '',
-  tools: [],
-  systemPrompt: '',
-  maxSteps: -1,
-};
-
-for (const [label, config] of [['Valid', validConfig], ['Invalid', invalidConfig]] as const) {
-  const result = validator.validate(config);
-  console.log(`${label} config: ${result.valid ? '✅ Valid' : '❌ Invalid'}`);
-  if (!result.valid) {
-    for (const err of result.errors) {
-      console.log(`  ⚠️  ${err.field}: ${err.message}`);
-    }
-  }
-}
-
-/* ── 5. DevTools — Mock Runtime ───────────────────────── */
-
-header('5. DevTools — Mock Runtime');
-
-const mockModel = createMockModel({
-  responses: [
-    'Hello! How can I help you today?',
-    'I\'d be happy to look that up for you.',
+const runtime = createMockRuntime({
+  responses: ['Analysis complete.', 'Summary: all metrics nominal.'],
+  tools: [
+    { name: 'analyze', result: { score: 0.95 } },
+    { name: 'summarize', result: { text: 'All clear.' } },
   ],
 });
 
-const mockEventBus = createMockEventBus();
-const mockRuntime = createMockRuntime({ model: mockModel, eventBus: mockEventBus });
+console.log(`  Mock model: ${runtime.model.name}`);
+console.log(`  Mock bus events so far: ${runtime.bus.events.length}`);
 
-// Simulate interactions
-const response1 = await mockRuntime.chat('Hi there!');
-const response2 = await mockRuntime.chat('What\'s the weather?');
+// Call the mock model
+const modelResult = await runtime.model.generate({ messages: [{ role: 'user', content: 'Analyze data' }] });
+console.log(`  Model response: "${typeof modelResult.content === 'string' ? modelResult.content : JSON.stringify(modelResult.content)}"`);
+console.log(`  Model call count: ${runtime.model.calls.length}`);
 
-console.log('Mock runtime interactions:');
-console.log(`  User: "Hi there!" → Agent: "${response1}"`);
-console.log(`  User: "What\'s the weather?" → Agent: "${response2}"`);
-console.log(`  Events captured: ${mockEventBus.events.length}`);
-for (const event of mockEventBus.events) {
-  console.log(`    📡 ${event.type}: ${JSON.stringify(event.data).slice(0, 60)}...`);
-}
+/* ── 5. Agent Inspection ──────────────────────────────── */
 
-/* ── 6. UI Primitives — Streaming Events ──────────────── */
+header('5. Agent Inspection & Reports');
 
-header('6. UI Primitives — Streaming Events');
-
-// Build a stream of events
-const stream = createStreamBuilder();
-
-stream.push(statusEvent({ status: 'thinking', message: 'Analyzing your request...' }));
-stream.push(textEvent({ text: 'Based on your question about pricing, ' }));
-stream.push(toolCallEvent({
-  toolName: 'search_pricing',
-  arguments: { product: 'Enterprise', region: 'US' },
-  status: 'executing',
-}));
-stream.push(toolCallEvent({
-  toolName: 'search_pricing',
-  arguments: { product: 'Enterprise', region: 'US' },
-  status: 'completed',
-  result: { price: '$499/mo', features: ['unlimited seats', 'priority support'] },
-}));
-stream.push(textEvent({ text: 'the Enterprise plan is $499/month with unlimited seats.' }));
-stream.push(stepUpdateEvent({ step: 1, total: 3, label: 'Research complete' }));
-
-console.log('Stream events:');
-for (const event of stream.events()) {
-  const wrapped = envelope(event);
-  console.log(`  ${wrapped.type}: ${JSON.stringify(wrapped.data).slice(0, 80)}`);
-}
-
-/* ── 7. UI Primitives — Tool Approval ─────────────────── */
-
-header('7. UI Primitives — Tool Approval Widget');
-
-const approval = toolApproval({
-  toolName: 'delete_records',
-  arguments: { userId: 'user-42', scope: 'all_conversations' },
-  risk: 'high',
-  message: 'This will permanently delete all conversations for user-42.',
+const report = inspect({
+  tools: runtime.tools,
+  bus: runtime.bus,
 });
 
-console.log('Approval widget:');
-console.log(`  Tool: ${approval.toolName}`);
-console.log(`  Risk: ${approval.risk}`);
-console.log(`  Message: ${approval.message}`);
-console.log(`  Args: ${JSON.stringify(approval.arguments)}`);
-
-/* ── 8. UI Primitives — Citations ─────────────────────── */
-
-header('8. UI Primitives — Citations');
-
-const citations = [
-  documentCitation({
-    title: 'API Rate Limits',
-    source: 'docs/api/rate-limits.md',
-    snippet: 'Enterprise customers: 100,000 requests/minute...',
-    relevance: 0.95,
-  }),
-  webCitation({
-    url: 'https://docs.example.com/pricing',
-    title: 'Pricing Page',
-    snippet: 'Enterprise: $499/mo with unlimited seats...',
-    fetchedAt: new Date().toISOString(),
-    relevance: 0.88,
-  }),
-  documentCitation({
-    title: 'API Rate Limits',
-    source: 'docs/api/rate-limits.md',
-    snippet: 'Burst allowance: 150% for 30 seconds...',
-    relevance: 0.82,
-  }),
-];
-
-const deduplicated = deduplicateCitations(citations);
-console.log(`Citations: ${citations.length} total, ${deduplicated.length} after dedup`);
-for (const c of deduplicated) {
-  const icon = c.type === 'document' ? '📄' : '🌐';
-  console.log(`  ${icon} ${c.title} (relevance: ${c.relevance})`);
-  console.log(`     "${c.snippet}"`);
+console.log(`  Inspection report:`);
+console.log(`    Tools: ${report.tools.length}`);
+for (const t of report.tools) {
+  console.log(`      - ${t.name} (params: ${t.parameterCount}, hasExecute: ${t.hasExecute})`);
 }
+console.log(`    Events: ${report.events.registeredHandlers} handlers`);
 
-/* ── 9. UI Primitives — Artifacts ─────────────────────── */
+const formatted = formatReport(report);
+console.log(`\n  Formatted report (${formatted.length} chars):`);
+const reportLines = formatted.split('\n').slice(0, 6);
+for (const line of reportLines) console.log(`    ${line}`);
 
-header('9. UI Primitives — Artifacts');
+/* ── 6. Migration Planning ────────────────────────────── */
 
-const artifacts = [
-  jsonArtifact({
-    name: 'search-results.json',
-    data: { results: [{ id: 1, title: 'Rate Limits' }, { id: 2, title: 'Pricing' }] },
-  }),
-  codeArtifact({
-    name: 'api-client.ts',
-    language: 'typescript',
-    code: `import { WeaveClient } from '@weaveintel/core';\n\nconst client = new WeaveClient({ apiKey: process.env.API_KEY });\nconst result = await client.chat('Hello!');`,
-  }),
-  csvArtifact({
-    name: 'usage-report.csv',
-    headers: ['Date', 'Requests', 'Tokens', 'Cost'],
-    rows: [
-      ['2025-01-01', '45000', '2.1M', '$12.50'],
-      ['2025-01-02', '52000', '2.8M', '$15.20'],
-      ['2025-01-03', '38000', '1.9M', '$10.80'],
-    ],
-  }),
-  markdownArtifact({
-    name: 'summary.md',
-    content: '# Weekly Summary\n\nTotal requests: 135,000\nAvg daily cost: $12.83\nUptime: 99.97%',
-  }),
-];
+header('6. Migration Planning');
 
-console.log(`Generated ${artifacts.length} artifacts:`);
-for (const a of artifacts) {
-  console.log(`  📎 ${a.name} (${a.type})`);
-}
+const migration = planMigration('0.1.0', '0.3.0');
+console.log(`  Migration from ${migration.from} → ${migration.to}:`);
+console.log(`    Total steps: ${migration.totalSteps}`);
+console.log(`    Breaking changes: ${migration.breakingChanges}`);
 
-/* ── 10. UI Primitives — Widgets ──────────────────────── */
+const migrationText = formatMigrationPlan(migration);
+const migrationLines = migrationText.split('\n').slice(0, 8);
+for (const line of migrationLines) console.log(`    ${line}`);
 
-header('10. UI Primitives — Widgets');
+/* ── 7. UI Stream Events ──────────────────────────────── */
 
-const table = tableWidget({
-  title: 'Model Performance',
-  columns: ['Model', 'Latency', 'Cost/1K', 'Quality'],
-  rows: [
-    ['gpt-4o', '320ms', '$0.015', '95%'],
-    ['gpt-4o-mini', '180ms', '$0.003', '88%'],
-    ['claude-3.5-sonnet', '410ms', '$0.018', '94%'],
+header('7. UI Stream Events');
+
+const text = textEvent('Processing your request...');
+console.log(`  Text event: type=${text.type}, data="${(text.data as any)?.text ?? text.data}"`);
+
+const status = statusEvent('analyzing', 'Scanning 1,500 documents');
+console.log(`  Status event: type=${status.type}`);
+
+const error = errorEvent('Rate limit exceeded', 'RATE_LIMIT');
+console.log(`  Error event: type=${error.type}, code=${(error.data as any)?.code ?? 'none'}`);
+
+const toolCall = toolCallEvent('search', { query: 'AI safety' }, { results: 42 });
+console.log(`  Tool call event: type=${toolCall.type}`);
+
+const step = stepUpdateEvent('step-3', 'Summarize', 'completed', 'Done in 2.1s');
+console.log(`  Step update: type=${step.type}`);
+
+// Envelope wrapping
+const env = envelope(text, { sessionId: 'sess-001', agentId: 'agent-x' });
+console.log(`  Envelope: seq=${env.sequence}, sessionId=${env.sessionId}`);
+
+// Stream builder
+const builder = createStreamBuilder({ sessionId: 'sess-002', agentId: 'bot-y' });
+const e1 = builder.text('Starting analysis...');
+const e2 = builder.status('working', 'Processing batch 1/3');
+const e3 = builder.text('Analysis complete.');
+console.log(`  Stream builder: 3 events, sequences ${e1.sequence}→${e2.sequence}→${e3.sequence}`);
+
+/* ── 8. Tool Approvals ────────────────────────────────── */
+
+header('8. Tool Approval Payloads');
+
+const approval = toolApproval('delete-records', { table: 'users', where: 'inactive > 1y' }, 'high');
+console.log(`  Approval: "${approval.title}"`);
+console.log(`  Risk: ${approval.riskLevel}, actions: ${approval.actions?.map((a: any) => a.label).join(', ') ?? 'default'}`);
+
+/* ── 9. Citations ─────────────────────────────────────── */
+
+header('9. Citations');
+
+const docCite = documentCitation('Revenue increased 15% YoY', 'Q3-Financial-Report.pdf', 12, 0.95);
+console.log(`  Document: "${docCite.text}" — ${docCite.source} p.${docCite.page} (${(docCite.confidence! * 100).toFixed(0)}%)`);
+
+const webCite = webCitation('Transformers outperform RNNs on long sequences', 'https://arxiv.org/abs/1706.03762', 'Attention Is All You Need', 0.99);
+console.log(`  Web: "${webCite.text}" — ${webCite.source} (${(webCite.confidence! * 100).toFixed(0)}%)`);
+
+/* ── 10. Artifacts ────────────────────────────────────── */
+
+header('10. Artifacts');
+
+const jsonArt = jsonArtifact('Analysis Results', {
+  accuracy: 0.94,
+  precision: 0.91,
+  recall: 0.96,
+  f1: 0.935,
+});
+console.log(`  JSON: "${jsonArt.title}" (type: ${jsonArt.type}, mime: ${jsonArt.mimeType})`);
+
+const codeArt = codeArtifact('Query Builder', `
+SELECT users.name, COUNT(orders.id) as order_count
+FROM users
+LEFT JOIN orders ON users.id = orders.user_id
+WHERE users.active = true
+GROUP BY users.name
+ORDER BY order_count DESC;
+`.trim(), 'sql');
+console.log(`  Code: "${codeArt.title}" (type: ${codeArt.type}, mime: ${codeArt.mimeType})`);
+
+/* ── 11. Widgets ──────────────────────────────────────── */
+
+header('11. Widgets');
+
+const table = tableWidget('Model Comparison', 
+  ['Model', 'Accuracy', 'Latency', 'Cost'],
+  [
+    ['GPT-4', '94%', '2.1s', '$0.06'],
+    ['Claude 3', '93%', '1.8s', '$0.04'],
+    ['Gemini Pro', '91%', '1.5s', '$0.03'],
   ],
-});
+  { sortable: true },
+);
+console.log(`  Table: "${table.title}" (${(table.data as any)?.rows?.length ?? 0} rows)`);
 
-console.log(`Table: ${table.title}`);
-console.log(`  Columns: ${table.columns.join(' | ')}`);
-for (const row of table.rows) {
-  console.log(`  ${row.join(' | ')}`);
-}
-
-const chart = chartWidget({
-  title: 'Daily Request Volume',
-  type: 'bar',
-  labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
-  datasets: [
-    { label: 'Requests', data: [45000, 52000, 38000, 61000, 48000] },
+const chart = chartWidget('Monthly Usage', 'bar',
+  ['Jan', 'Feb', 'Mar', 'Apr', 'May'],
+  [
+    { label: 'API Calls', data: [1200, 1500, 1800, 2100, 2400] },
+    { label: 'Token Usage (K)', data: [50, 65, 80, 95, 110] },
   ],
-});
+);
+console.log(`  Chart: "${chart.title}" type=${(chart.data as any)?.chartType ?? chart.type}`);
 
-console.log(`\nChart: ${chart.title} (${chart.type})`);
-console.log(`  Labels: ${chart.labels.join(', ')}`);
-console.log(`  Data: ${chart.datasets[0].data.join(', ')}`);
+const timeline = timelineWidget('Project Timeline', [
+  { time: '2025-01-15', label: 'Kickoff', description: 'Project started', status: 'completed' },
+  { time: '2025-02-01', label: 'Alpha', description: 'First prototype', status: 'completed' },
+  { time: '2025-03-10', label: 'Beta', description: 'Public beta release', status: 'completed' },
+  { time: '2025-04-01', label: 'GA', description: 'General availability', status: 'running' },
+]);
+console.log(`  Timeline: "${timeline.title}" (${(timeline.data as any)?.events?.length ?? 0} events)`);
 
-/* ── 11. UI Primitives — Progress Tracking ────────────── */
+/* ── 12. Progress Tracking ────────────────────────────── */
 
-header('11. Progress Tracking');
+header('12. Progress Tracking');
 
-const progress = createProgressTracker({
-  total: 5,
-  label: 'Processing documents',
-});
+const progress = createProgressTracker('Document Processing', 100);
+console.log(`  Tracker: "${progress.taskId}" — ${progress.current}/${progress.total}`);
 
-const steps = [
-  'Loading documents...',
-  'Extracting entities...',
-  'Building graph...',
-  'Computing embeddings...',
-  'Indexing for search...',
-];
+const p1 = progress.increment(25, 'Batch 1 complete');
+console.log(`  After +25: ${progress.current}/${progress.total} — ${(p1 as any).details ?? ''}`);
 
-for (let i = 0; i < steps.length; i++) {
-  progress.update(i + 1, steps[i]);
-  const state = progress.state();
-  const bar = '█'.repeat(Math.floor(state.percent / 5)) + '░'.repeat(20 - Math.floor(state.percent / 5));
-  console.log(`  [${bar}] ${state.percent}% — ${state.currentLabel}`);
-}
+const p2 = progress.increment(50, 'Batch 2-3 complete');
+console.log(`  After +50: ${progress.current}/${progress.total}`);
 
-console.log(`\n  ✅ Complete! ${progress.state().elapsed}ms elapsed`);
+const p3 = progress.complete('All documents processed');
+console.log(`  Complete: status=${p3.status}`);
 
 /* ── Summary ──────────────────────────────────────────── */
 
 header('Summary');
-console.log('✅ Recipe factories (governed, approval, workflow, eval-routed, safe)');
-console.log('✅ DevTools scaffolding with templates');
+console.log('✅ Pre-built agent recipes (governed, event-driven, safe execution)');
+console.log('✅ Project scaffolding from 7 templates');
+console.log('✅ Configuration validation with custom rules');
+console.log('✅ Mock runtime for testing (model, bus, tools)');
 console.log('✅ Agent inspection and formatted reports');
-console.log('✅ Configuration validation');
-console.log('✅ Mock runtime for testing');
-console.log('✅ Streaming events (text, tool call, status, step update)');
-console.log('✅ Tool approval widgets');
-console.log('✅ Citations (document + web) with deduplication');
-console.log('✅ Artifacts (JSON, code, CSV, markdown)');
-console.log('✅ Widgets (table, chart)');
-console.log('✅ Progress tracking');
+console.log('✅ Migration planning with breaking change detection');
+console.log('✅ UI stream events (text, status, error, tool call, step update)');
+console.log('✅ Tool approval payloads');
+console.log('✅ Document and web citations');
+console.log('✅ JSON and code artifacts');
+console.log('✅ Table, chart, and timeline widgets');
+console.log('✅ Progress tracking with increment/complete');
+}
+
+main().catch(console.error);

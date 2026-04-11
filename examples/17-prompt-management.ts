@@ -2,12 +2,11 @@
  * Example 17 — Prompt Management & A/B Testing
  *
  * Demonstrates:
- *  • Versioned prompt templates with variable extraction
- *  • Prompt registry with tag-based lookup
- *  • A/B experiments with weighted selection
- *  • Instruction bundles for composing agent personas
- *  • Scoped prompt resolution (project, model, user)
- *  • Agent using managed prompts for a customer-support scenario
+ *  • Template creation with {{variable}} substitution
+ *  • Prompt registry with versioning and filtering
+ *  • Instruction bundles for layered system prompts
+ *  • Prompt experiments (A/B testing) with weighted variants
+ *  • Prompt resolver with experiment-aware selection
  *
  * No API keys needed — all in-memory.
  *
@@ -18,17 +17,19 @@ import {
   createTemplate,
   extractVariables,
   InMemoryPromptRegistry,
-  PromptResolver,
-  InMemoryExperimentStore,
-  weightedSelect,
   InstructionBundleBuilder,
   composeInstructions,
   createInstructionBundle,
+  InMemoryExperimentStore,
+  PromptResolver,
 } from '@weaveintel/prompts';
 
-import { weaveContext } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
-import { weaveFakeModel } from '@weaveintel/testing';
+import type {
+  PromptDefinition,
+  PromptVersion,
+  PromptVariable,
+  PromptExperiment,
+} from '@weaveintel/core';
 
 /* ── Helpers ──────────────────────────────────────────── */
 
@@ -38,283 +39,244 @@ function header(title: string) {
   console.log('═'.repeat(60));
 }
 
-/* ── 1. Template Creation & Variable Extraction ───────── */
+async function main() {
 
-header('1. Prompt Templates');
+/* ── 1. Template engine ───────────────────────────────── */
 
-const supportTemplateV1 = createTemplate({
-  id: 'support-system',
-  name: 'Customer Support System Prompt',
-  version: '1.0',
-  tags: ['support', 'production'],
-  template: `You are {{agent_name}}, a customer support agent for {{company}}.
-Your role: {{role_description}}
+header('1. Template Creation & Rendering');
 
-Guidelines:
-- Always greet the customer by name: {{customer_name}}
-- Reference their plan: {{plan_type}}
-- Escalation threshold: {{max_attempts}} failed attempts
-- Language: {{language}}`,
+const summaryTemplate = createTemplate({
+  name: 'Document Summarizer',
+  template: 'Summarize the following {{documentType}} in {{language}}.\n\nContent: {{content}}\n\nProvide a {{length}} summary.',
+  variables: [
+    { name: 'documentType', type: 'string', required: true },
+    { name: 'language', type: 'string', required: true },
+    { name: 'content', type: 'string', required: true },
+    { name: 'length', type: 'string', required: false, defaultValue: 'concise' },
+  ],
 });
 
-const supportTemplateV2 = createTemplate({
-  id: 'support-system',
-  name: 'Customer Support System Prompt v2',
-  version: '2.0',
-  tags: ['support', 'experiment'],
-  template: `You are {{agent_name}}, a friendly and empathetic support agent for {{company}}.
+console.log(`  Template: "${summaryTemplate.name}"`);
+console.log(`  Variables: ${summaryTemplate.variables.map(v => v.name).join(', ')}`);
 
-Core directive: Resolve the customer's issue in the fewest messages possible.
-Customer context: {{customer_name}} on the {{plan_type}} plan.
-
-Tone: Warm, professional, solution-focused.
-Escalate after {{max_attempts}} unsuccessful attempts.
-Respond in: {{language}}.`,
+const rendered = summaryTemplate.render({
+  documentType: 'financial report',
+  language: 'English',
+  content: 'Q3 revenue increased 15% YoY to $2.3B...',
 });
+console.log(`  Rendered:\n    ${rendered.split('\n').join('\n    ')}`);
 
-// Extract variables from template
-const vars = extractVariables(supportTemplateV1.template);
-console.log('Template v1 variables:', vars);
-console.log(`  → ${vars.length} variables found: ${vars.join(', ')}`);
+// Auto-detect variables from template string
+const detectedVars = extractVariables('Hello {{name}}, welcome to {{organization}}!');
+console.log(`\n  Auto-detected variables: ${detectedVars.join(', ')}`);
 
 /* ── 2. Prompt Registry ───────────────────────────────── */
 
-header('2. Prompt Registry (Versioned)');
+header('2. Prompt Registry — Versioning & Filtering');
 
 const registry = new InMemoryPromptRegistry();
 
-// Register both versions
-registry.register(supportTemplateV1);
-registry.register(supportTemplateV2);
+// Register prompts with versions
+const summarizeDef: PromptDefinition = {
+  id: 'summarize',
+  name: 'Summarize',
+  description: 'Summarization prompts',
+  category: 'generation',
+  tags: ['summarize', 'nlp'],
+  currentVersion: '2.0',
+};
 
-// Register additional templates
-registry.register(createTemplate({
-  id: 'rag-system',
-  name: 'RAG System Prompt',
+const v1: PromptVersion = {
+  id: 'sum-v1',
+  promptId: 'summarize',
   version: '1.0',
-  tags: ['rag', 'production'],
-  template: `You answer questions using ONLY the provided context.
-Context: {{context}}
-If the answer is not in the context, say "I don't have that information."`,
-}));
+  template: 'Summarize this: {{content}}',
+  variables: [{ name: 'content', type: 'string', required: true }],
+  changelog: 'Initial version',
+  createdAt: new Date().toISOString(),
+};
 
-registry.register(createTemplate({
-  id: 'code-review',
-  name: 'Code Review Prompt',
+const v2: PromptVersion = {
+  id: 'sum-v2',
+  promptId: 'summarize',
+  version: '2.0',
+  template: 'You are a {{role}}. Summarize the following {{documentType}} concisely:\n\n{{content}}',
+  variables: [
+    { name: 'role', type: 'string', required: false, defaultValue: 'analyst' },
+    { name: 'documentType', type: 'string', required: true },
+    { name: 'content', type: 'string', required: true },
+  ],
+  changelog: 'Added role and documentType params',
+  createdAt: new Date().toISOString(),
+};
+
+await registry.register(summarizeDef, v1);
+await registry.register(summarizeDef, v2);
+
+const classifyDef: PromptDefinition = {
+  id: 'classify',
+  name: 'Classify',
+  description: 'Classification prompts',
+  category: 'classification',
+  tags: ['classify', 'nlp'],
+  currentVersion: '1.0',
+};
+
+const classifyV1: PromptVersion = {
+  id: 'cls-v1',
+  promptId: 'classify',
   version: '1.0',
-  tags: ['engineering', 'production'],
-  template: `Review the following {{language}} code for {{focus_areas}}.
-Severity levels: critical, warning, suggestion.
+  template: 'Classify this text into categories [{{categories}}]:\n\n{{text}}',
+  variables: [
+    { name: 'categories', type: 'string', required: true },
+    { name: 'text', type: 'string', required: true },
+  ],
+  createdAt: new Date().toISOString(),
+};
 
-Code:
-\`\`\`{{language}}
-{{code}}
-\`\`\``,
-}));
+await registry.register(classifyDef, classifyV1);
 
-// List all templates
-console.log('All registered templates:');
-for (const t of registry.list()) {
-  console.log(`  📝 ${t.name} (v${t.version}) [${t.tags.join(', ')}]`);
+// List and filter
+const allPrompts = await registry.list();
+console.log(`  Total prompts: ${allPrompts.length}`);
+for (const p of allPrompts) {
+  console.log(`    - ${p.name} (category: ${p.category}, tags: ${p.tags?.join(', ')})`);
 }
 
-// Lookup by tag
-const productionTemplates = registry.findByTag('production');
-console.log(`\nProduction templates: ${productionTemplates.length}`);
-for (const t of productionTemplates) {
-  console.log(`  📌 ${t.name} v${t.version}`);
-}
+const nlpPrompts = await registry.list({ tags: ['nlp'] });
+console.log(`  NLP tagged: ${nlpPrompts.length}`);
 
-/* ── 3. A/B Experiments ───────────────────────────────── */
+const genPrompts = await registry.list({ category: 'generation' });
+console.log(`  Generation category: ${genPrompts.length}`);
 
-header('3. A/B Prompt Experiments');
+// Resolve with variable substitution
+const resolved = await registry.resolve('summarize', {
+  role: 'data scientist',
+  documentType: 'research paper',
+  content: 'We present a novel approach to...',
+});
+console.log(`\n  Resolved (latest version):\n    ${resolved.split('\n').join('\n    ')}`);
+
+// Get specific version
+const oldVersion = await registry.get('summarize', '1.0');
+console.log(`\n  Version 1.0 template: "${oldVersion?.template}"`);
+
+/* ── 3. Instruction Bundles ───────────────────────────── */
+
+header('3. Instruction Bundles — Layered Prompts');
+
+const bundle = createInstructionBundle('assistant-v3', 'Research Assistant')
+  .system('You are a highly capable research assistant with expertise in scientific literature.')
+  .task('Analyze the provided research papers and produce a structured literature review.')
+  .formatting('Use markdown with headers. Cite papers as [Author, Year]. Maximum 2000 words.')
+  .guardrails('Never fabricate citations. If uncertain, say so. Do not speculate beyond the evidence.')
+  .examples(
+    'User: Analyze these 3 papers on transformer architectures.\nAssistant: ## Literature Review\n...',
+    'User: Compare these two conflicting studies.\nAssistant: ## Comparative Analysis\n...',
+  )
+  .build();
+
+console.log(`  Bundle: "${bundle.name}" (id: ${bundle.id})`);
+console.log(`  Sections: system, task, formatting, guardrails, ${bundle.examples?.length ?? 0} examples`);
+
+const composed = composeInstructions(bundle);
+console.log(`\n  Composed system prompt (${composed.length} chars):`);
+const lines = composed.split('\n');
+for (const line of lines.slice(0, 8)) console.log(`    ${line}`);
+if (lines.length > 8) console.log(`    ... (${lines.length - 8} more lines)`);
+
+// Also test direct builder pattern
+const simpleBundle = new InstructionBundleBuilder('simple', 'Simple')
+  .system('You are a helpful assistant.')
+  .guardrails('Be concise and accurate.')
+  .build();
+console.log(`\n  Simple bundle: "${simpleBundle.name}" — ${composeInstructions(simpleBundle).length} chars`);
+
+/* ── 4. Prompt Experiments ────────────────────────────── */
+
+header('4. A/B Testing — Prompt Experiments');
 
 const experimentStore = new InMemoryExperimentStore();
 
-// Create an experiment
-experimentStore.create({
-  id: 'support-prompt-test',
-  name: 'Support Prompt: Formal vs Empathetic',
+const experiment: PromptExperiment = {
+  id: 'exp-tone-test',
+  name: 'Tone Test: Formal vs Casual',
+  promptId: 'summarize',
   variants: [
-    { id: 'control', templateId: 'support-system', version: '1.0', weight: 50 },
-    { id: 'treatment', templateId: 'support-system', version: '2.0', weight: 50 },
+    { id: 'formal', promptId: 'summarize', versionId: 'sum-v2', weight: 0.5, label: 'Formal Tone' },
+    { id: 'casual', promptId: 'summarize', versionId: 'sum-v1', weight: 0.3, label: 'Casual Tone' },
+    { id: 'neutral', promptId: 'summarize', versionId: 'sum-v2', weight: 0.2, label: 'Neutral Tone' },
   ],
   status: 'active',
-  metrics: ['resolution_time', 'csat_score', 'escalation_rate'],
-});
+  startedAt: new Date().toISOString(),
+};
 
-const experiment = experimentStore.get('support-prompt-test');
-console.log(`Experiment: ${experiment!.name}`);
-console.log(`Status: ${experiment!.status}`);
-console.log('Variants:');
-for (const v of experiment!.variants) {
-  console.log(`  🧪 ${v.id}: template=${v.templateId} v${v.version} (weight=${v.weight}%)`);
+experimentStore.addExperiment(experiment);
+
+// Simulate variant selection 20 times
+const counts: Record<string, number> = {};
+for (let i = 0; i < 20; i++) {
+  const variant = await experimentStore.pickVariant('exp-tone-test');
+  if (variant) {
+    counts[variant.label] = (counts[variant.label] ?? 0) + 1;
+    await experimentStore.recordImpression('exp-tone-test', variant.id);
+    // Simulate scoring
+    const score = 0.6 + Math.random() * 0.4; // 0.6-1.0
+    await experimentStore.recordScore('exp-tone-test', variant.id, score);
+  }
 }
 
-// Simulate weighted selection over many requests
-const selections = { control: 0, treatment: 0 };
-for (let i = 0; i < 1000; i++) {
-  const variant = weightedSelect(experiment!.variants);
-  selections[variant.id as keyof typeof selections]++;
-}
-console.log('\nDistribution over 1000 selections:');
-console.log(`  Control:   ${selections.control} (${(selections.control / 10).toFixed(1)}%)`);
-console.log(`  Treatment: ${selections.treatment} (${(selections.treatment / 10).toFixed(1)}%)`);
-
-/* ── 4. Instruction Bundles ───────────────────────────── */
-
-header('4. Instruction Bundles (Agent Persona Composition)');
-
-const bundle = new InstructionBundleBuilder()
-  .setId('enterprise-support-agent')
-  .setName('Enterprise Support Agent')
-  .addInstruction({
-    id: 'base-persona',
-    priority: 1,
-    scope: 'global',
-    content: 'You are a professional customer support agent. Be concise, accurate, and helpful.',
-  })
-  .addInstruction({
-    id: 'tone-guide',
-    priority: 2,
-    scope: 'global',
-    content: 'Use a warm, empathetic tone. Mirror the customer\'s energy level.',
-  })
-  .addInstruction({
-    id: 'knowledge-boundaries',
-    priority: 3,
-    scope: 'global',
-    content: 'Only answer questions about our products and services. For anything else, politely redirect.',
-  })
-  .addInstruction({
-    id: 'enterprise-specifics',
-    priority: 4,
-    scope: 'project',
-    content: 'Enterprise customers get priority escalation. Always check SLA status first.',
-  })
-  .addInstruction({
-    id: 'compliance-notes',
-    priority: 5,
-    scope: 'project',
-    content: 'Never share customer data across accounts. Verify identity before account changes.',
-  })
-  .build();
-
-console.log(`Bundle: ${bundle.name} (${bundle.instructions.length} instructions)`);
-for (const inst of bundle.instructions) {
-  console.log(`  [${inst.scope}] P${inst.priority}: ${inst.content.slice(0, 70)}...`);
+console.log('  Variant selections (20 runs):');
+for (const [label, count] of Object.entries(counts)) {
+  console.log(`    ${label}: ${count} times`);
 }
 
-// Compose into a single system prompt
-const composedPrompt = composeInstructions(bundle);
-console.log('\nComposed system prompt:');
-console.log('─'.repeat(50));
-console.log(composedPrompt);
-console.log('─'.repeat(50));
+const expData = await experimentStore.getExperiment('exp-tone-test');
+if (expData?.results) {
+  console.log('\n  Experiment results:');
+  for (const [variantId, result] of Object.entries(expData.results)) {
+    const variant = experiment.variants.find(v => v.id === variantId);
+    console.log(`    ${variant?.label ?? variantId}: impressions=${result.impressions}, avg score=${result.score.toFixed(3)}`);
+  }
+}
 
-/* ── 5. Scoped Resolution ─────────────────────────────── */
+/* ── 5. Prompt Resolver ───────────────────────────────── */
 
-header('5. Scoped Prompt Resolution');
+header('5. Prompt Resolver — Experiment-Aware');
 
-const resolver = new PromptResolver(registry);
-
-// Resolve with variable substitution
-const resolved = resolver.resolve('support-system', '1.0', {
-  agent_name: 'Alex',
-  company: 'WeaveIntel',
-  role_description: 'helping customers with API integration, billing, and account issues',
-  customer_name: 'Sarah Chen',
-  plan_type: 'Enterprise',
-  max_attempts: '3',
-  language: 'English',
-});
-
-console.log('Resolved system prompt:');
-console.log('─'.repeat(50));
-console.log(resolved);
-console.log('─'.repeat(50));
-
-/* ── 6. Agent Using Managed Prompts ───────────────────── */
-
-header('6. Agent Using Managed Prompts');
-
-const ctx = weaveContext({ userId: 'prompt-demo', timeout: 30_000 });
-
-// Select variant for this "request"
-const selectedVariant = weightedSelect(experiment!.variants);
-const resolvedPrompt = resolver.resolve(
-  selectedVariant.templateId,
-  selectedVariant.version,
-  {
-    agent_name: 'Aria',
-    company: 'WeaveIntel',
-    role_description: 'resolving technical issues',
-    customer_name: 'Marcus Lee',
-    plan_type: 'Professional',
-    max_attempts: '3',
-    language: 'English',
+// Create a version store adapter from the registry
+const versionStore = {
+  async getVersion(promptId: string, version?: string) {
+    return registry.get(promptId, version);
   },
-);
+};
 
-console.log(`Selected variant: ${selectedVariant.id} (v${selectedVariant.version})`);
+const resolver = new PromptResolver(versionStore, experimentStore);
 
-const model = weaveFakeModel({
-  responses: [
-    `Hi Marcus! I'm Aria from WeaveIntel support. I can see you're on our Professional plan.
+// Without experiment — returns latest version
+const defaultVersion = await resolver.resolve('summarize', {});
+console.log(`  Default resolve: version "${defaultVersion.version}" (${defaultVersion.id})`);
 
-I'd be happy to help you with the API rate-limiting issue you're experiencing. Let me look into your account right away.
+// With experiment — picks variant
+const experimentVersion = await resolver.resolve('summarize', { experimentId: 'exp-tone-test' });
+console.log(`  Experiment resolve: version "${experimentVersion.version}" (${experimentVersion.id})`);
 
-Based on your Professional plan, you have a limit of 10,000 requests/minute. I can see from your recent usage that you've been hitting ~12,000 requests/minute during peak hours.
-
-**Here are your options:**
-
-1. **Upgrade to Enterprise** — 100,000 req/min, priority support, dedicated endpoint
-2. **Request a temporary limit increase** — I can approve a 48-hour bump to 15,000 req/min
-3. **Implement request batching** — Our SDK supports batch mode which can reduce your call count by ~60%
-
-Would you like me to proceed with any of these options? I'd recommend option 3 as a quick fix while we evaluate if an upgrade makes sense for your usage patterns.`,
-  ],
-});
-
-const agent = weaveAgent({
-  model,
-  systemPrompt: resolvedPrompt,
-  maxSteps: 2,
-});
-
-const result = await agent.run(
-  { messages: [{ role: 'user', content: 'I keep getting rate-limited on the API. This is affecting our production service.' }] },
-  ctx,
-);
-
-console.log(`\nAgent response (using ${selectedVariant.id} prompt):`);
-console.log(result.content);
-
-/* ── 7. Creating Instruction Bundle Inline ────────────── */
-
-header('7. Quick Instruction Bundle');
-
-const quickBundle = createInstructionBundle({
-  id: 'code-assistant',
-  name: 'Code Review Assistant',
-  instructions: [
-    { id: 'role', priority: 1, scope: 'global', content: 'You are a senior code reviewer.' },
-    { id: 'focus', priority: 2, scope: 'project', content: 'Focus on security, performance, and readability.' },
-    { id: 'format', priority: 3, scope: 'user', content: 'Output findings as a markdown table with severity, file, line, and suggestion.' },
-  ],
-});
-
-const quickComposed = composeInstructions(quickBundle);
-console.log(`Bundle "${quickBundle.name}" composed into ${quickComposed.length} chars`);
-console.log(quickComposed);
+// Multiple resolves show the weighted distribution
+const versionPicks: Record<string, number> = {};
+for (let i = 0; i < 10; i++) {
+  const v = await resolver.resolve('summarize', { experimentId: 'exp-tone-test' });
+  versionPicks[v.version] = (versionPicks[v.version] ?? 0) + 1;
+}
+console.log(`  10 experiment resolves: ${JSON.stringify(versionPicks)}`);
 
 /* ── Summary ──────────────────────────────────────────── */
 
 header('Summary');
-console.log('✅ Versioned prompt templates with {{variable}} extraction');
-console.log('✅ In-memory prompt registry with tag-based lookup');
-console.log('✅ A/B experiments with weighted variant selection');
-console.log('✅ Instruction bundle builder for persona composition');
-console.log('✅ Scoped prompt resolution with variable substitution');
-console.log('✅ Agent using experiment-selected prompts');
-console.log('✅ Full prompt management lifecycle demonstrated');
+console.log('✅ Template creation with {{variable}} substitution and auto-detection');
+console.log('✅ Prompt registry with versioning, categories, and tags');
+console.log('✅ Instruction bundles for layered system prompts');
+console.log('✅ A/B testing with weighted variant selection');
+console.log('✅ Experiment-aware prompt resolution');
+}
+
+main().catch(console.error);

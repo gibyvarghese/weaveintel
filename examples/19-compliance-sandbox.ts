@@ -2,16 +2,17 @@
  * Example 19 — Compliance, Sandbox & Reliability
  *
  * Demonstrates:
- *  • Data retention engine with configurable policies
- *  • Deletion manager for GDPR/CCPA compliance
- *  • Legal hold management (prevent deletion of held data)
- *  • Consent manager for tracking user consent
- *  • Audit export for compliance reporting
- *  • Sandboxed code execution with resource limits
- *  • Idempotency store for deduplication
- *  • Retry budgets with circuit-breaker behavior
+ *  • Data retention rules and evaluation
+ *  • Deletion requests (right-to-be-forgotten)
+ *  • Legal holds that block deletion
+ *  • Consent management (GDPR-style)
+ *  • Data residency constraints
+ *  • Audit export generation
+ *  • Code sandbox with execution policies/limits
+ *  • Retry budgets with exponential backoff
  *  • Dead-letter queues for failed operations
- *  • Health checking for service reliability
+ *  • Health checks for service monitoring
+ *  • Idempotency store for deduplication
  *
  * No API keys needed — all in-memory.
  *
@@ -23,21 +24,25 @@ import {
   createDeletionManager,
   createLegalHoldManager,
   createConsentManager,
+  createResidencyEngine,
   createAuditExportManager,
 } from '@weaveintel/compliance';
 
 import {
-  createSandboxPolicy,
   createSandbox,
-  enforceLimits,
+  createSandboxPolicy,
   createDefaultLimits,
+  enforceLimits,
+  aggregateResults,
+  isSuccessful,
+  validatePolicy,
 } from '@weaveintel/sandbox';
 
 import {
-  createIdempotencyStore,
   createRetryBudget,
   createDeadLetterQueue,
   createHealthChecker,
+  createIdempotencyStore,
 } from '@weaveintel/reliability';
 
 /* ── Helpers ──────────────────────────────────────────── */
@@ -48,379 +53,311 @@ function header(title: string) {
   console.log('═'.repeat(60));
 }
 
-/* ── 1. Data Retention Policies ───────────────────────── */
+async function main() {
 
-header('1. Data Retention Engine');
+/* ── 1. Data Retention ────────────────────────────────── */
+
+header('1. Data Retention Rules');
 
 const retention = createRetentionEngine();
 
-// Define retention policies
-retention.addPolicy({
-  id: 'chat-logs',
-  name: 'Chat Log Retention',
-  dataType: 'conversation',
-  retentionDays: 90,
-  action: 'archive',
-  description: 'Archive chat logs after 90 days, delete after 365 days',
+retention.addRule({
+  id: 'ret-logs', name: 'Log Retention', description: 'Delete logs after 90 days',
+  dataCategory: 'logs', retentionDays: 90, action: 'delete', enabled: true,
+});
+retention.addRule({
+  id: 'ret-analytics', name: 'Analytics Retention', description: 'Archive analytics after 1 year',
+  dataCategory: 'analytics', retentionDays: 365, action: 'archive', enabled: true,
+});
+retention.addRule({
+  id: 'ret-pii', name: 'PII Retention', description: 'Anonymize PII after 180 days',
+  dataCategory: 'pii', retentionDays: 180, action: 'anonymize', enabled: true,
 });
 
-retention.addPolicy({
-  id: 'pii-data',
-  name: 'PII Data Retention',
-  dataType: 'personal_data',
-  retentionDays: 30,
-  action: 'delete',
-  description: 'Delete PII data after 30 days per GDPR',
-});
+console.log(`  Rules: ${retention.listRules().length}`);
 
-retention.addPolicy({
-  id: 'audit-logs',
-  name: 'Audit Log Retention',
-  dataType: 'audit',
-  retentionDays: 2555, // 7 years
-  action: 'archive',
-  description: 'Retain audit logs for 7 years per SOX compliance',
-});
-
-console.log('Retention policies:');
-for (const policy of retention.listPolicies()) {
-  console.log(`  📋 ${policy.name}: ${policy.dataType} → ${policy.action} after ${policy.retentionDays}d`);
-}
-
-// Check if data should be retained
-const testRecords = [
-  { id: 'rec-1', dataType: 'conversation', createdAt: new Date(Date.now() - 100 * 86400000) }, // 100 days old
-  { id: 'rec-2', dataType: 'personal_data', createdAt: new Date(Date.now() - 10 * 86400000) }, // 10 days old
-  { id: 'rec-3', dataType: 'personal_data', createdAt: new Date(Date.now() - 45 * 86400000) }, // 45 days old
-  { id: 'rec-4', dataType: 'audit', createdAt: new Date(Date.now() - 300 * 86400000) }, // 300 days old
+// Evaluate data items
+const scenarios = [
+  { category: 'logs', daysOld: 100, label: '100-day-old logs' },
+  { category: 'logs', daysOld: 30, label: '30-day-old logs' },
+  { category: 'analytics', daysOld: 400, label: '400-day-old analytics' },
+  { category: 'pii', daysOld: 200, label: '200-day-old PII' },
+  { category: 'chat', daysOld: 500, label: '500-day-old chat (no rule)' },
 ];
 
-console.log('\nRetention check:');
-for (const rec of testRecords) {
-  const result = retention.check(rec);
-  const emoji = result.shouldAct ? '⚠️' : '✅';
-  const ageDays = Math.floor((Date.now() - rec.createdAt.getTime()) / 86400000);
-  console.log(`  ${emoji} ${rec.id} (${rec.dataType}, ${ageDays}d old): ${result.shouldAct ? result.action : 'retain'}`);
+for (const s of scenarios) {
+  const createdAt = Date.now() - s.daysOld * 24 * 60 * 60 * 1000;
+  const action = retention.evaluate(s.category, createdAt);
+  console.log(`  ${s.label}: ${action ?? 'no action'}`);
 }
 
-/* ── 2. Legal Holds ───────────────────────────────────── */
+/* ── 2. Deletion Requests ─────────────────────────────── */
 
-header('2. Legal Hold Management');
+header('2. Deletion Requests (Right to be Forgotten)');
 
-const legalHolds = createLegalHoldManager();
+const deletion = createDeletionManager();
 
-// Place legal holds
-legalHolds.placeHold({
-  id: 'hold-lawsuit-2025',
-  name: 'Smith v. TechCorp — Discovery',
-  reason: 'Litigation hold for ongoing lawsuit — preserve all communications',
-  scope: { users: ['user-42', 'user-78'], dataTypes: ['conversation', 'email'] },
-  placedBy: 'legal@techcorp.io',
-  placedAt: new Date().toISOString(),
+const req1 = deletion.create('user-123', 'admin@company.com', 'GDPR erasure request', ['pii', 'logs', 'analytics']);
+console.log(`  Created: ${req1.id} (status: ${req1.status})`);
+
+const req2 = deletion.create('user-456', 'user-456@email.com', 'Account deletion', ['pii', 'chat']);
+console.log(`  Created: ${req2.id} (status: ${req2.status})`);
+
+// Process and complete 
+const processed = deletion.process(req1.id);
+console.log(`  After process: ${processed?.status}`);
+
+const completed = deletion.complete(req1.id);
+console.log(`  After complete: ${completed?.status}`);
+
+console.log(`  All requests: ${deletion.list().length}`);
+
+/* ── 3. Legal Holds ───────────────────────────────────── */
+
+header('3. Legal Holds');
+
+const holds = createLegalHoldManager();
+
+const hold1 = holds.create({
+  id: 'hold-litigation', name: 'Ongoing Litigation', description: 'Discovery hold for case #2025-001',
+  subjectIds: ['user-123', 'user-789'],
+  dataCategories: ['pii', 'chat', 'logs'],
+  issuedBy: 'legal@company.com',
+  expiresAt: null,
 });
+console.log(`  Created: "${hold1.name}" (status: ${hold1.status})`);
 
-legalHolds.placeHold({
-  id: 'hold-investigation',
-  name: 'Internal Investigation — Q4 2024',
-  reason: 'Preserve audit logs for internal investigation',
-  scope: { dataTypes: ['audit', 'access_log'] },
-  placedBy: 'compliance@techcorp.io',
-  placedAt: new Date().toISOString(),
-});
-
-console.log('Active legal holds:');
-for (const hold of legalHolds.listHolds()) {
-  console.log(`  ⚖️  ${hold.name}`);
-  console.log(`     Reason: ${hold.reason}`);
-  console.log(`     Scope: ${JSON.stringify(hold.scope)}`);
-}
-
-// Check if data is under hold
-const holdChecks = [
-  { userId: 'user-42', dataType: 'conversation' },
-  { userId: 'user-99', dataType: 'conversation' },
-  { userId: 'user-78', dataType: 'audit' },
+// Check if data is held
+const checks = [
+  { subject: 'user-123', category: 'pii' },
+  { subject: 'user-123', category: 'analytics' },
+  { subject: 'user-456', category: 'pii' },
 ];
 
-console.log('\nHold checks:');
-for (const check of holdChecks) {
-  const isHeld = legalHolds.isHeld(check);
-  console.log(`  ${isHeld ? '🔒 HELD' : '🔓 Clear'}: user=${check.userId}, type=${check.dataType}`);
+for (const c of checks) {
+  const held = holds.isHeld(c.subject, c.category);
+  console.log(`  ${c.subject}/${c.category}: ${held ? '🔒 HELD' : '✅ not held'}`);
 }
 
-/* ── 3. Consent Management ────────────────────────────── */
+// Release hold
+holds.release('hold-litigation');
+console.log(`  After release: ${holds.get('hold-litigation')?.status}`);
 
-header('3. Consent Manager');
+/* ── 4. Consent Management ────────────────────────────── */
+
+header('4. Consent Management (GDPR)');
 
 const consent = createConsentManager();
 
-// Record user consents
-consent.record({
-  userId: 'user-42',
-  purpose: 'analytics',
-  granted: true,
-  timestamp: new Date().toISOString(),
-  source: 'cookie-banner',
-  version: '2.0',
+consent.grant('user-123', 'analytics', 'cookie-banner');
+consent.grant('user-123', 'personalization', 'settings-page');
+consent.grant('user-456', 'analytics', 'cookie-banner');
+consent.grant('user-456', 'marketing', 'email-opt-in', Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+console.log(`  user-123 analytics: ${consent.isGranted('user-123', 'analytics')}`);
+console.log(`  user-123 marketing: ${consent.isGranted('user-123', 'marketing')}`);
+console.log(`  user-456 marketing: ${consent.isGranted('user-456', 'marketing')}`);
+
+const user123Consents = consent.listBySubject('user-123');
+console.log(`  user-123 consents: ${user123Consents.map(c => c.purpose).join(', ')}`);
+
+consent.revoke('user-123', 'analytics');
+console.log(`  After revoke — user-123 analytics: ${consent.isGranted('user-123', 'analytics')}`);
+
+/* ── 5. Data Residency ────────────────────────────────── */
+
+header('5. Data Residency Constraints');
+
+const residency = createResidencyEngine();
+
+residency.addConstraint({
+  id: 'eu-pii', name: 'EU PII Residency', description: 'PII must stay in EU',
+  region: 'eu', dataCategories: ['pii'],
+  allowedRegions: ['eu-west-1', 'eu-central-1'], deniedRegions: ['us-east-1', 'ap-southeast-1'],
+  enabled: true,
 });
 
-consent.record({
-  userId: 'user-42',
-  purpose: 'marketing',
-  granted: false,
-  timestamp: new Date().toISOString(),
-  source: 'cookie-banner',
-  version: '2.0',
+residency.addConstraint({
+  id: 'us-analytics', name: 'US Analytics', description: 'Analytics can be US or EU',
+  region: 'us', dataCategories: ['analytics'],
+  allowedRegions: ['us-east-1', 'us-west-2', 'eu-west-1'], deniedRegions: [],
+  enabled: true,
 });
 
-consent.record({
-  userId: 'user-42',
-  purpose: 'ai_training',
-  granted: true,
-  timestamp: new Date().toISOString(),
-  source: 'settings-page',
-  version: '1.0',
-});
-
-console.log('Consent status for user-42:');
-const consents = consent.getConsents('user-42');
-for (const c of consents) {
-  console.log(`  ${c.granted ? '✅' : '❌'} ${c.purpose} (via ${c.source})`);
-}
-
-// Check specific consent
-console.log('\nConsent checks:');
-console.log(`  Analytics: ${consent.hasConsent('user-42', 'analytics') ? 'Granted' : 'Denied'}`);
-console.log(`  Marketing: ${consent.hasConsent('user-42', 'marketing') ? 'Granted' : 'Denied'}`);
-console.log(`  AI Training: ${consent.hasConsent('user-42', 'ai_training') ? 'Granted' : 'Denied'}`);
-
-/* ── 4. Deletion Manager ──────────────────────────────── */
-
-header('4. GDPR Deletion Manager');
-
-const deletion = createDeletionManager(legalHolds);
-
-// Attempt deletions (some blocked by legal hold)
-const deletionRequests = [
-  { userId: 'user-42', dataType: 'conversation', reason: 'GDPR erasure request' },
-  { userId: 'user-99', dataType: 'conversation', reason: 'Account closure' },
-  { userId: 'user-42', dataType: 'audit', reason: 'Data minimization' },
+const residencyChecks = [
+  { category: 'pii', region: 'eu-west-1' },
+  { category: 'pii', region: 'us-east-1' },
+  { category: 'analytics', region: 'us-east-1' },
+  { category: 'analytics', region: 'ap-southeast-1' },
 ];
 
-for (const req of deletionRequests) {
-  const result = deletion.requestDeletion(req);
-  const emoji = result.blocked ? '🔒' : result.executed ? '🗑️' : '⏳';
-  console.log(`  ${emoji} ${req.userId}/${req.dataType}: ${result.status}`);
-  if (result.blocked) {
-    console.log(`     Reason: ${result.blockReason}`);
-  }
+for (const c of residencyChecks) {
+  const allowed = residency.isAllowed(c.category, c.region);
+  console.log(`  ${c.category} → ${c.region}: ${allowed ? '✅ allowed' : '🚫 denied'}`);
 }
 
-/* ── 5. Audit Export ──────────────────────────────────── */
+const piiRegions = residency.getAllowedRegions('pii');
+console.log(`\n  Allowed regions for PII: ${piiRegions.join(', ')}`);
 
-header('5. Audit Export');
+/* ── 6. Audit Export ──────────────────────────────────── */
 
-const auditExport = createAuditExportManager();
+header('6. Audit Export');
 
-// Log audit events
-auditExport.log({ action: 'consent_recorded', userId: 'user-42', details: { purpose: 'analytics', granted: true }, timestamp: new Date().toISOString() });
-auditExport.log({ action: 'legal_hold_placed', userId: 'system', details: { holdId: 'hold-lawsuit-2025' }, timestamp: new Date().toISOString() });
-auditExport.log({ action: 'deletion_requested', userId: 'user-42', details: { dataType: 'conversation', blocked: true }, timestamp: new Date().toISOString() });
-auditExport.log({ action: 'deletion_executed', userId: 'user-99', details: { dataType: 'conversation', recordsDeleted: 47 }, timestamp: new Date().toISOString() });
+const audits = createAuditExportManager();
 
-const exportData = auditExport.export({ format: 'json' });
-console.log(`Audit export: ${exportData.entries.length} events`);
-for (const entry of exportData.entries) {
-  console.log(`  📝 ${entry.timestamp.slice(0, 19)} | ${entry.action} | user=${entry.userId}`);
-}
+const exportReq = audits.create(
+  'tenant-001', 'compliance@company.com', 'json',
+  ['pii', 'logs'], Date.now() - 30 * 24 * 60 * 60 * 1000, Date.now(),
+);
+console.log(`  Export created: ${exportReq.id} (status: ${exportReq.status})`);
 
-/* ── 6. Sandboxed Execution ───────────────────────────── */
+const ready = audits.markReady(exportReq.id, 1500, 2048000);
+console.log(`  Marked ready: ${ready?.records} records, ${(ready?.sizeBytes ?? 0) / 1024}KB`);
 
-header('6. Sandboxed Code Execution');
+/* ── 7. Code Sandbox ──────────────────────────────────── */
 
+header('7. Code Sandbox — Safe Execution');
+
+const sandbox = createSandbox();
 const policy = createSandboxPolicy({
-  name: 'agent-code-execution',
-  allowedModules: ['Math', 'JSON', 'Date'],
-  blockedModules: ['fs', 'child_process', 'net', 'http'],
-  maxExecutionMs: 5000,
-  maxMemoryMb: 128,
+  name: 'restricted',
+  networkAccess: false,
+  fileSystemAccess: 'none',
+  allowedModules: ['Math', 'JSON'],
 });
 
-console.log(`Sandbox policy: ${policy.name}`);
-console.log(`  Allowed: ${policy.allowedModules.join(', ')}`);
-console.log(`  Blocked: ${policy.blockedModules.join(', ')}`);
-console.log(`  Limits: ${policy.maxExecutionMs}ms, ${policy.maxMemoryMb}MB`);
+// Validate the policy
+const validation = validatePolicy(policy);
+console.log(`  Policy valid: ${validation.valid}${validation.errors.length ? ' — ' + validation.errors.join(', ') : ''}`);
 
-const sandbox = createSandbox(policy);
+// Execute safe code
+const result1 = await sandbox.execute('return 2 + 2;', policy);
+console.log(`  "2 + 2" → ${result1.output} (status: ${result1.status})`);
 
-// Safe execution
-const safeResult = sandbox.execute(() => {
-  const data = [3, 1, 4, 1, 5, 9, 2, 6, 5, 3];
-  return {
-    sum: data.reduce((a, b) => a + b, 0),
-    mean: data.reduce((a, b) => a + b, 0) / data.length,
-    max: Math.max(...data),
-    sorted: [...data].sort((a, b) => a - b),
-  };
-});
+const result2 = await sandbox.execute('return JSON.stringify({hello: "world"});', policy);
+console.log(`  JSON.stringify → ${result2.output} (status: ${result2.status})`);
 
-console.log(`\nSafe execution: ${safeResult.success ? '✅' : '❌'}`);
-if (safeResult.success) {
-  console.log(`  Result: ${JSON.stringify(safeResult.result)}`);
-}
+const result3 = await sandbox.execute('throw new Error("oops");', policy);
+console.log(`  throw Error → status: ${result3.status}, error: ${result3.error}`);
 
-// Resource limit enforcement
-const limits = createDefaultLimits({ maxExecutionMs: 100, maxMemoryMb: 64 });
-const enforced = enforceLimits(() => {
-  // Simulate computation
-  let result = 0;
-  for (let i = 0; i < 1000; i++) {
-    result += Math.sqrt(i);
-  }
-  return result;
-}, limits);
+// Check execution limits
+const limits = createDefaultLimits();
+console.log(`\n  Default limits: ${JSON.stringify(limits)}`);
 
-console.log(`\nEnforced execution: ${enforced.success ? '✅' : '❌'}`);
-if (enforced.success) {
-  console.log(`  Result: ${enforced.result.toFixed(2)}`);
-  console.log(`  Duration: ${enforced.durationMs}ms`);
-}
+const enforcement = enforceLimits(limits, { cpuMs: 50, memoryMb: 128, durationMs: 5000 });
+console.log(`  Normal usage: exceeded=${enforcement.exceeded}`);
 
-/* ── 7. Idempotency ───────────────────────────────────── */
+const overLimit = enforceLimits(limits, { cpuMs: 200000, memoryMb: 512, durationMs: 60000 });
+console.log(`  Over limit: exceeded=${overLimit.exceeded}, violations: ${overLimit.violations.join(', ')}`);
 
-header('7. Idempotency Store');
-
-const idempotency = createIdempotencyStore();
-
-// First execution
-const key1 = 'process-order-12345';
-const result1 = idempotency.executeOnce(key1, () => {
-  console.log('  ⚡ First execution: processing order 12345');
-  return { orderId: '12345', status: 'processed', amount: 99.99 };
-});
-
-// Duplicate execution (should return cached result)
-const result2 = idempotency.executeOnce(key1, () => {
-  console.log('  ⚡ This should NOT print — duplicate execution');
-  return { orderId: '12345', status: 'double-processed', amount: 199.98 };
-});
-
-console.log(`  Result 1: ${JSON.stringify(result1)}`);
-console.log(`  Result 2: ${JSON.stringify(result2)}`);
-console.log(`  Same result? ${JSON.stringify(result1) === JSON.stringify(result2) ? '✅ Yes' : '❌ No'}`);
+// Aggregate results
+const stats = aggregateResults([result1, result2, result3]);
+console.log(`\n  Aggregate: ${stats.total} runs, ${stats.succeeded} success, ${stats.failed} failed`);
 
 /* ── 8. Retry Budget ──────────────────────────────────── */
 
-header('8. Retry Budget');
+header('8. Retry Budget — Exponential Backoff');
 
-const retryBudget = createRetryBudget({
-  maxRetries: 3,
-  windowMs: 60_000,
-  backoffMs: 100,
-  backoffMultiplier: 2,
-});
+const retry = createRetryBudget({ maxRetries: 3, baseDelayMs: 100, maxDelayMs: 2000 });
 
-console.log('Simulating flaky operation (fails twice, succeeds on third try):');
-let attempt = 0;
-const retryResult = await retryBudget.execute(async () => {
-  attempt++;
-  if (attempt < 3) {
-    console.log(`  ❌ Attempt ${attempt}: simulated failure`);
-    throw new Error(`Transient error on attempt ${attempt}`);
-  }
-  console.log(`  ✅ Attempt ${attempt}: success!`);
-  return { data: 'operation completed', attempts: attempt };
-});
-
-console.log(`  Final result: ${JSON.stringify(retryResult)}`);
-console.log(`  Budget remaining: ${retryBudget.remaining()} retries`);
-
-/* ── 9. Dead Letter Queue ─────────────────────────────── */
-
-header('9. Dead Letter Queue');
-
-const dlq = createDeadLetterQueue<{ orderId: string; error: string }>();
-
-// Simulate failed operations going to DLQ
-dlq.enqueue({
-  item: { orderId: 'order-001', error: 'Payment gateway timeout' },
-  reason: 'Max retries exceeded after 3 attempts',
-  failedAt: new Date().toISOString(),
-  metadata: { originalQueue: 'order-processing', attempts: 3 },
-});
-
-dlq.enqueue({
-  item: { orderId: 'order-002', error: 'Invalid shipping address' },
-  reason: 'Validation error — not retryable',
-  failedAt: new Date().toISOString(),
-  metadata: { originalQueue: 'order-processing', attempts: 1 },
-});
-
-dlq.enqueue({
-  item: { orderId: 'order-003', error: 'Inventory service unavailable' },
-  reason: 'Circuit breaker open',
-  failedAt: new Date().toISOString(),
-  metadata: { originalQueue: 'inventory-check', attempts: 5 },
-});
-
-console.log(`Items in DLQ: ${dlq.size()}`);
-for (const item of dlq.list()) {
-  console.log(`  💀 ${item.item.orderId}: ${item.item.error}`);
-  console.log(`     Reason: ${item.reason}`);
+// Show backoff delays
+for (let attempt = 0; attempt <= 3; attempt++) {
+  const delay = retry.getDelay(attempt);
+  const shouldRetry = retry.shouldRetry('connection_error', attempt);
+  console.log(`  Attempt ${attempt}: delay=${delay}ms, shouldRetry=${shouldRetry}`);
 }
 
-// Process DLQ items
-console.log('\nProcessing DLQ:');
-const reprocessed = dlq.drain((entry) => {
-  console.log(`  🔄 Reprocessing ${entry.item.orderId}...`);
-  return entry.item.orderId !== 'order-002'; // order-002 fails again
-});
-console.log(`  Reprocessed: ${reprocessed.succeeded} succeeded, ${reprocessed.failed} failed`);
-console.log(`  Remaining in DLQ: ${dlq.size()}`);
-
-/* ── 10. Health Checker ───────────────────────────────── */
-
-header('10. Health Checker');
-
-const health = createHealthChecker();
-
-health.addCheck({
-  name: 'database',
-  check: async () => ({ healthy: true, latencyMs: 12, details: 'SQLite OK' }),
-});
-
-health.addCheck({
-  name: 'model-api',
-  check: async () => ({ healthy: true, latencyMs: 230, details: 'OpenAI reachable' }),
-});
-
-health.addCheck({
-  name: 'vector-store',
-  check: async () => ({ healthy: false, latencyMs: 5001, details: 'Connection timeout' }),
-});
-
-health.addCheck({
-  name: 'cache',
-  check: async () => ({ healthy: true, latencyMs: 3, details: 'Redis OK' }),
-});
-
-const report = await health.run();
-console.log(`Overall: ${report.healthy ? '✅ Healthy' : '⚠️ Degraded'}`);
-for (const check of report.checks) {
-  const emoji = check.healthy ? '✅' : '❌';
-  console.log(`  ${emoji} ${check.name}: ${check.details} (${check.latencyMs}ms)`);
+// Execute with retries
+let calls = 0;
+try {
+  const result = await retry.execute(async () => {
+    calls++;
+    if (calls < 3) throw new Error('transient failure');
+    return 'success!';
+  });
+  console.log(`  Retry result: "${result}" after ${calls} calls`);
+} catch (e: any) {
+  console.log(`  Retry failed after ${calls} calls: ${e.message}`);
 }
+
+/* ── 9. Dead-Letter Queue ─────────────────────────────── */
+
+header('9. Dead-Letter Queue');
+
+const dlq = createDeadLetterQueue();
+
+const dl1 = dlq.enqueue({ type: 'email', payload: { to: 'user@example.com', subject: 'Welcome' }, error: 'SMTP timeout', retryCount: 3 });
+const dl2 = dlq.enqueue({ type: 'webhook', payload: { url: 'https://api.example.com/hook', body: {} }, error: 'HTTP 503', retryCount: 2 });
+const dl3 = dlq.enqueue({ type: 'email', payload: { to: 'admin@example.com', subject: 'Alert' }, error: 'Invalid address', retryCount: 1 });
+
+console.log(`  Enqueued: ${dlq.list().length} records`);
+console.log(`  Email failures: ${dlq.list({ type: 'email' }).length}`);
+console.log(`  Unresolved: ${dlq.list({ resolved: false }).length}`);
+
+// Retry one
+const retried = await dlq.retry(dl1.id, async (payload) => {
+  console.log(`    Retrying email to ${(payload as any).to}...`);
+});
+console.log(`  Retry success: ${retried}`);
+console.log(`  Remaining unresolved: ${dlq.list({ resolved: false }).length}`);
+
+/* ── 10. Health Checks ────────────────────────────────── */
+
+header('10. Health Checks');
+
+const health = createHealthChecker('example-service');
+
+health.addCheck('database', async () => ({ ok: true, message: 'Connected to primary' }));
+health.addCheck('cache', async () => ({ ok: true, message: 'Redis responding' }));
+health.addCheck('external-api', async () => ({ ok: false, message: 'Timeout after 5000ms' }));
+
+const status = await health.run();
+console.log(`  Service: ${status.service}`);
+console.log(`  Healthy: ${status.healthy}`);
+for (const check of status.checks) {
+  console.log(`    ${check.ok ? '✅' : '❌'} ${check.name}: ${check.message ?? 'ok'} (${check.durationMs}ms)`);
+}
+
+const isHealthy = await health.isHealthy();
+console.log(`  Overall healthy: ${isHealthy}`);
+
+/* ── 11. Idempotency Store ────────────────────────────── */
+
+header('11. Idempotency Store');
+
+const idempotency = createIdempotencyStore({ ttlMs: 60000 });
+
+// First call — not a duplicate
+const check1 = idempotency.check('payment-abc-123');
+console.log(`  First check "payment-abc-123": isDuplicate=${check1.isDuplicate}`);
+
+// Record the result
+idempotency.record('payment-abc-123', { transactionId: 'tx-001', amount: 99.99 });
+
+// Second call — duplicate
+const check2 = idempotency.check('payment-abc-123');
+console.log(`  Second check "payment-abc-123": isDuplicate=${check2.isDuplicate}, previousResult=${JSON.stringify(check2.previousResult)}`);
+
+// Different key — not a duplicate
+const check3 = idempotency.check('payment-def-456');
+console.log(`  Check "payment-def-456": isDuplicate=${check3.isDuplicate}`);
+
+console.log(`  Policy: TTL=${idempotency.getPolicy().ttlMs}ms`);
 
 /* ── Summary ──────────────────────────────────────────── */
 
 header('Summary');
-console.log('✅ Data retention policies with age-based checks');
-console.log('✅ Legal hold management (place, check, prevent deletion)');
-console.log('✅ Consent tracking per user/purpose');
-console.log('✅ GDPR deletion manager with hold enforcement');
-console.log('✅ Audit export for compliance reporting');
-console.log('✅ Sandboxed code execution with policy enforcement');
+console.log('✅ Data retention rules with evaluate/delete/archive/anonymize');
+console.log('✅ Deletion requests with process/complete workflow');
+console.log('✅ Legal holds that block data deletion');
+console.log('✅ GDPR consent management with grant/revoke');
+console.log('✅ Data residency constraints by region');
+console.log('✅ Audit export generation');
+console.log('✅ Code sandbox with policy-based execution');
+console.log('✅ Retry budgets with exponential backoff');
+console.log('✅ Dead-letter queue for failed operations');
+console.log('✅ Health checks for service monitoring');
 console.log('✅ Idempotency store for deduplication');
-console.log('✅ Retry budget with exponential backoff');
-console.log('✅ Dead-letter queue with reprocessing');
-console.log('✅ Multi-service health checker');
+}
+
+main().catch(console.error);

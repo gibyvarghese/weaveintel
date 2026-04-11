@@ -1,15 +1,14 @@
 /**
- * Example 16 — Human-in-the-Loop with Contracts
+ * Example 16 — Human-in-the-Loop Tasks
  *
  * Demonstrates:
- *  • Human task creation (approval, review, escalation)
- *  • Task queue with priority ordering
+ *  • Creating approval, review, and escalation tasks
+ *  • Task queue with enqueue/dequeue/complete workflow
  *  • Decision logging with audit trail
- *  • Policy evaluation for automatic approvals
- *  • Completion contracts with evidence bundles
- *  • Agent with approval gates before executing risky tools
+ *  • Policy evaluator for automatic HITL triggers
+ *  • SLA deadline computation
  *
- * No API keys needed — uses in-memory queues and fake model.
+ * No API keys needed — uses in-memory task primitives.
  *
  * Run: npx tsx examples/16-human-in-the-loop.ts
  */
@@ -18,24 +17,13 @@ import {
   createApprovalTask,
   createReviewTask,
   createEscalationTask,
+  createHumanTask,
+  createDecision,
+  createPolicy,
   InMemoryTaskQueue,
   DecisionLog,
-  createDecision,
   PolicyEvaluator,
-  createPolicy,
 } from '@weaveintel/human-tasks';
-
-import {
-  createContract,
-  createEvidence,
-  createEvidenceBundle,
-  createCompletionReport,
-  defineContract,
-} from '@weaveintel/contracts';
-
-import { weaveContext, weaveToolRegistry, weaveTool } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
-import { weaveFakeModel } from '@weaveintel/testing';
 
 /* ── Helpers ──────────────────────────────────────────── */
 
@@ -45,341 +33,218 @@ function header(title: string) {
   console.log('═'.repeat(60));
 }
 
-/* ── 1. Approval Tasks ────────────────────────────────── */
+async function main() {
 
-header('1. Create Approval Tasks');
+/* ── 1. Create different task types ───────────────────── */
+
+header('1. Create Human Tasks');
+
+const approval = createApprovalTask({
+  title: 'Deploy to Production',
+  description: 'Approve production deployment of v2.3.0',
+  action: 'deploy-to-production',
+  context: { version: '2.3.0', environment: 'production', changedFiles: 42 },
+  riskLevel: 'high',
+  estimatedImpact: 'All production users affected',
+  priority: 'high',
+  assignee: 'lead-engineer',
+});
+console.log(`  Approval: "${approval.title}" (${approval.type}, priority: ${approval.priority})`);
+
+const review = createReviewTask({
+  title: 'Review AI Response Quality',
+  description: 'Review the quality of AI-generated summaries',
+  content: 'The quarterly report shows a 15% increase in revenue...',
+  contentType: 'text/plain',
+  criteria: ['accuracy', 'completeness', 'tone', 'no-hallucinations'],
+  originalInput: 'Summarize the Q3 financial report',
+  priority: 'medium',
+});
+console.log(`  Review: "${review.title}" (${review.type}, criteria: ${(review.data as any)?.criteria?.length ?? 0})`);
+
+const escalation = createEscalationTask({
+  title: 'Agent Stuck in Loop',
+  description: 'Agent exceeded max iterations without resolution',
+  reason: 'Max iterations (50) exceeded without satisfying exit condition',
+  agentId: 'research-agent-v2',
+  failureDetails: 'Loop detected between search and summarize steps',
+  priority: 'critical',
+});
+console.log(`  Escalation: "${escalation.title}" (${escalation.type}, priority: ${escalation.priority})`);
+
+const genericTask = createHumanTask({
+  type: 'input',
+  title: 'Provide Missing Context',
+  description: 'Agent needs additional context to proceed',
+  priority: 'medium',
+  data: { question: 'What is the target audience for this document?', options: ['technical', 'business', 'general'] },
+});
+console.log(`  Generic: "${genericTask.title}" (${genericTask.type})`);
+
+/* ── 2. Task Queue ────────────────────────────────────── */
+
+header('2. Task Queue — Enqueue & Process');
 
 const queue = new InMemoryTaskQueue();
 
-// Data deletion requires manager approval
-const deleteApproval = createApprovalTask({
-  title: 'Delete customer records — ACME Corp',
-  description: 'Request to permanently delete 1,200 customer records for ACME Corp per GDPR erasure request.',
-  requester: 'agent-data-cleanup',
-  approvers: ['manager-jane', 'compliance-officer'],
-  priority: 'high',
-  metadata: { customerId: 'acme-001', recordCount: 1200, regulation: 'GDPR Art. 17' },
+// Enqueue tasks
+const queued1 = await queue.enqueue({
+  type: approval.type,
+  title: approval.title,
+  description: approval.description,
+  priority: approval.priority,
+  assignee: 'lead-engineer',
+  status: 'pending',
+  data: approval.data,
 });
+console.log(`  Enqueued: "${queued1.title}" (id: ${queued1.id})`);
 
-// Model deployment requires team lead review
-const deployApproval = createApprovalTask({
-  title: 'Deploy fine-tuned model to production',
-  description: 'Deploy customer-sentiment-v3 model after eval score of 0.92.',
-  requester: 'agent-ml-pipeline',
-  approvers: ['team-lead-bob'],
-  priority: 'medium',
-  metadata: { modelId: 'customer-sentiment-v3', evalScore: 0.92, stage: 'production' },
+const queued2 = await queue.enqueue({
+  type: review.type,
+  title: review.title,
+  description: review.description,
+  priority: review.priority,
+  assignee: 'qa-reviewer',
+  status: 'pending',
+  data: review.data,
 });
+console.log(`  Enqueued: "${queued2.title}" (id: ${queued2.id})`);
 
-queue.enqueue(deleteApproval);
-queue.enqueue(deployApproval);
+const queued3 = await queue.enqueue({
+  type: escalation.type,
+  title: escalation.title,
+  description: escalation.description,
+  priority: escalation.priority,
+  assignee: 'on-call-engineer',
+  status: 'pending',
+  data: escalation.data,
+});
+console.log(`  Enqueued: "${queued3.title}" (id: ${queued3.id})`);
 
-console.log('Tasks in queue:');
-for (const task of queue.list()) {
-  console.log(`  📋 [${task.priority.toUpperCase()}] ${task.title}`);
-  console.log(`     Requester: ${task.requester} | Approvers: ${task.approvers.join(', ')}`);
-  console.log(`     Status: ${task.status}`);
+// List tasks
+const allTasks = await queue.list();
+console.log(`\n  Total tasks in queue: ${allTasks.length}`);
+
+// Dequeue for a specific assignee
+const nextTask = await queue.dequeue('lead-engineer');
+if (nextTask) console.log(`  Dequeued for lead-engineer: "${nextTask.title}"`);
+
+// Get stats
+const stats = await queue.stats();
+console.log(`  Queue stats: ${JSON.stringify(stats)}`);
+
+/* ── 3. Complete Tasks with Decisions ─────────────────── */
+
+header('3. Task Decisions');
+
+const approvalDecision = createDecision(queued1.id, 'lead-engineer', 'approved', {
+  reason: 'All tests passing, change set reviewed',
+  data: { reviewedAt: new Date().toISOString() },
+});
+console.log(`  Decision for "${queued1.title}": ${approvalDecision.decision} by ${approvalDecision.decidedBy}`);
+
+const reviewDecision = createDecision(queued2.id, 'qa-reviewer', 'approved', {
+  reason: 'Response quality meets criteria — accurate, complete, appropriate tone',
+});
+console.log(`  Decision for "${queued2.title}": ${reviewDecision.decision}`);
+
+const escalationDecision = createDecision(queued3.id, 'on-call-engineer', 'resolved', {
+  reason: 'Fixed by adding max-depth guard and fallback response',
+  data: { fix: 'Added circuit breaker with 10-step limit' },
+});
+console.log(`  Decision for "${queued3.title}": ${escalationDecision.decision}`);
+
+// Complete tasks in queue
+await queue.complete(queued1.id, approvalDecision);
+await queue.complete(queued2.id, reviewDecision);
+await queue.complete(queued3.id, escalationDecision);
+
+const remainingTasks = await queue.list({ status: 'pending' });
+console.log(`\n  Remaining pending tasks: ${remainingTasks.length}`);
+
+/* ── 4. Decision Log ──────────────────────────────────── */
+
+header('4. Decision Log — Audit Trail');
+
+const log = new DecisionLog();
+
+log.record(queued1, approvalDecision);
+log.record(queued2, reviewDecision);
+log.record(queued3, escalationDecision);
+
+const allDecisions = log.getAll();
+console.log(`  Total decisions logged: ${allDecisions.length}`);
+for (const d of allDecisions) {
+  console.log(`    [${d.taskType}] "${d.taskTitle}" → ${d.decision} by ${d.decidedBy}${d.reason ? ' — ' + d.reason.slice(0, 50) : ''}`);
 }
 
-/* ── 2. Review Tasks ──────────────────────────────────── */
+const engineerDecisions = log.getByDecider('lead-engineer');
+console.log(`\n  Decisions by lead-engineer: ${engineerDecisions.length}`);
 
-header('2. Code Review Tasks');
+/* ── 5. Policy Evaluator ──────────────────────────────── */
 
-const codeReview = createReviewTask({
-  title: 'Review PR #247: Add context-window pruning',
-  description: 'Agent-generated code for context-window pruning in the retrieval pipeline. Needs human verification before merge.',
-  requester: 'agent-code-gen',
-  reviewers: ['senior-dev-alice', 'senior-dev-charlie'],
-  priority: 'medium',
-  metadata: { prNumber: 247, filesChanged: 5, linesAdded: 180, linesRemoved: 30 },
-  criteria: ['correctness', 'performance', 'test-coverage'],
-});
+header('5. Policy Evaluator — Auto HITL Triggers');
 
-queue.enqueue(codeReview);
-console.log(`  📝 ${codeReview.title}`);
-console.log(`     Reviewers: ${codeReview.reviewers.join(', ')}`);
-console.log(`     Criteria: ${codeReview.criteria.join(', ')}`);
+const evaluator = new PolicyEvaluator();
 
-/* ── 3. Escalation Tasks ──────────────────────────────── */
-
-header('3. Escalation Tasks');
-
-const escalation = createEscalationTask({
-  title: 'Agent stuck — ambiguous customer request',
-  description: 'Customer asked "handle everything" — agent cannot determine scope without human clarification.',
-  agent: 'support-agent-7',
-  reason: 'Ambiguous request — cannot determine action scope',
-  severity: 'high',
-  context: {
-    customerId: 'customer-42',
-    conversationId: 'conv-8891',
-    lastMessage: 'Just handle everything for me',
-    agentAttempts: 3,
-  },
-});
-
-queue.enqueue(escalation);
-console.log(`  🚨 ${escalation.title}`);
-console.log(`     Severity: ${escalation.severity} | Agent: ${escalation.agent}`);
-console.log(`     Reason: ${escalation.reason}`);
-
-/* ── 4. Decision Logging ──────────────────────────────── */
-
-header('4. Decision Logging & Audit Trail');
-
-const decisionLog = new DecisionLog();
-
-// Simulate approvals and rejections
-decisionLog.record(createDecision({
-  taskId: deleteApproval.id,
-  reviewer: 'manager-jane',
-  decision: 'approved',
-  reasoning: 'GDPR request verified. 30-day retention period elapsed. Approved for deletion.',
-  timestamp: new Date().toISOString(),
+evaluator.addPolicy(createPolicy({
+  name: 'High Risk Approval',
+  description: 'Require human approval for high-risk actions',
+  trigger: 'high-risk',
+  taskType: 'approval',
+  defaultPriority: 'high',
+  slaHours: 4,
+  autoEscalateAfterHours: 8,
 }));
 
-decisionLog.record(createDecision({
-  taskId: deployApproval.id,
-  reviewer: 'team-lead-bob',
-  decision: 'rejected',
-  reasoning: 'Eval score is good (0.92) but need A/B test results first. Requesting additional evidence.',
-  timestamp: new Date().toISOString(),
+evaluator.addPolicy(createPolicy({
+  name: 'Low Confidence Review',
+  description: 'Require review when confidence is below threshold',
+  trigger: 'low-confidence',
+  taskType: 'review',
+  defaultPriority: 'medium',
+  slaHours: 24,
 }));
 
-decisionLog.record(createDecision({
-  taskId: codeReview.id,
-  reviewer: 'senior-dev-alice',
-  decision: 'approved_with_comments',
-  reasoning: 'Logic is correct. Minor suggestion: extract the pruning threshold to a config param.',
-  timestamp: new Date().toISOString(),
+evaluator.addPolicy(createPolicy({
+  name: 'Financial Transactions',
+  description: 'All financial operations need explicit approval',
+  trigger: 'financial',
+  taskType: 'approval',
+  defaultPriority: 'critical',
+  slaHours: 1,
+  autoEscalateAfterHours: 2,
 }));
 
-console.log('Decision log:');
-for (const d of decisionLog.list()) {
-  const emoji = d.decision === 'approved' ? '✅'
-    : d.decision === 'rejected' ? '❌'
-    : '🟡';
-  console.log(`  ${emoji} Task ${d.taskId.slice(0, 8)}... — ${d.decision} by ${d.reviewer}`);
-  console.log(`     "${d.reasoning}"`);
-}
-
-/* ── 5. Automatic Policy Evaluation ───────────────────── */
-
-header('5. Automatic Policy Evaluation');
-
-const policyEvaluator = new PolicyEvaluator();
-
-policyEvaluator.addPolicy(createPolicy({
-  id: 'auto-approve-low-risk',
-  name: 'Auto-approve low-risk read operations',
-  check: (ctx) => {
-    const risk = String(ctx['riskLevel'] || '');
-    const action = String(ctx['action'] || '');
-    if (risk === 'low' && /^(read|list|get)/.test(action)) {
-      return { autoApprove: true, reason: 'Low-risk read operation — auto-approved' };
-    }
-    return { autoApprove: false };
-  },
-}));
-
-policyEvaluator.addPolicy(createPolicy({
-  id: 'block-prod-without-review',
-  name: 'Block production changes without review',
-  check: (ctx) => {
-    const env = String(ctx['environment'] || '');
-    const hasReview = Boolean(ctx['hasReview']);
-    if (env === 'production' && !hasReview) {
-      return { autoApprove: false, block: true, reason: 'Production changes require review' };
-    }
-    return { autoApprove: false };
-  },
-}));
-
-const policyTests = [
-  { action: 'read_logs', riskLevel: 'low', environment: 'staging', hasReview: false },
-  { action: 'delete_records', riskLevel: 'high', environment: 'production', hasReview: false },
-  { action: 'deploy_model', riskLevel: 'medium', environment: 'production', hasReview: true },
-  { action: 'list_users', riskLevel: 'low', environment: 'production', hasReview: false },
+const policyChecks = [
+  { trigger: 'high-risk', riskLevel: 'high', confidence: 0.95 },
+  { trigger: 'low-confidence', confidence: 0.3 },
+  { trigger: 'financial', estimatedImpact: '$50,000 transaction' },
+  { trigger: 'routine', confidence: 0.99 },
 ];
 
-for (const test of policyTests) {
-  const result = policyEvaluator.evaluate(test);
-  const icon = result.autoApprove ? '🟢 Auto-approved' : result.block ? '🔴 Blocked' : '🟡 Needs human review';
-  console.log(`  ${icon}: ${test.action} (${test.riskLevel} risk, ${test.environment})`);
-  if (result.reason) console.log(`     ${result.reason}`);
+for (const check of policyChecks) {
+  const result = evaluator.check(check);
+  if (result.required) {
+    const sla = result.policy ? evaluator.computeSlaDeadline(result.policy) : undefined;
+    console.log(`  🛑 "${check.trigger}" → HITL required (${result.policy?.name})${sla ? ', SLA: ' + sla.slice(0, 19) : ''}`);
+  } else {
+    console.log(`  ✅ "${check.trigger}" → no HITL required`);
+  }
 }
 
-/* ── 6. Completion Contracts ──────────────────────────── */
-
-header('6. Completion Contracts with Evidence');
-
-const contract = defineContract({
-  id: 'data-deletion-contract',
-  name: 'GDPR Data Deletion Contract',
-  version: '1.0',
-  tasks: [
-    { id: 'verify-identity', name: 'Verify requester identity', required: true },
-    { id: 'backup-data', name: 'Create backup before deletion', required: true },
-    { id: 'delete-records', name: 'Delete records from all stores', required: true },
-    { id: 'verify-deletion', name: 'Verify records are gone', required: true },
-    { id: 'notify-requester', name: 'Notify requester of completion', required: true },
-  ],
-  acceptance: {
-    allRequired: true,
-    minEvidence: 3,
-  },
-});
-
-console.log(`Contract: ${contract.name} v${contract.version}`);
-console.log(`Tasks: ${contract.tasks.map(t => t.name).join(' → ')}`);
-
-// Create evidence for each task
-const evidenceBundle = createEvidenceBundle([
-  createEvidence({
-    taskId: 'verify-identity',
-    type: 'document',
-    description: 'GDPR erasure request document verified',
-    data: { requestId: 'gdpr-2025-001', verifiedBy: 'compliance-officer', verifiedAt: new Date().toISOString() },
-  }),
-  createEvidence({
-    taskId: 'backup-data',
-    type: 'artifact',
-    description: 'Backup created in cold storage',
-    data: { backupId: 'bk-acme-20250412', location: 's3://backups/acme/', sizeBytes: 45_000_000 },
-  }),
-  createEvidence({
-    taskId: 'delete-records',
-    type: 'log',
-    description: 'Deletion confirmed across 3 data stores',
-    data: { stores: ['primary-db', 'search-index', 'cache'], deletedCount: 1200, timestamp: new Date().toISOString() },
-  }),
-  createEvidence({
-    taskId: 'verify-deletion',
-    type: 'test',
-    description: 'Verification queries returned 0 results',
-    data: { queries: 3, resultsFound: 0, verifiedAt: new Date().toISOString() },
-  }),
-  createEvidence({
-    taskId: 'notify-requester',
-    type: 'notification',
-    description: 'Email sent to requester confirming deletion',
-    data: { recipient: 'legal@acme.com', sentAt: new Date().toISOString(), templateId: 'gdpr-completion' },
-  }),
-]);
-
-console.log(`\nEvidence bundle: ${evidenceBundle.items.length} items`);
-for (const ev of evidenceBundle.items) {
-  console.log(`  📎 [${ev.type}] ${ev.description}`);
-}
-
-// Generate completion report
-const report = createCompletionReport(contract, evidenceBundle);
-console.log(`\nCompletion report:`);
-console.log(`  Status: ${report.complete ? '✅ COMPLETE' : '❌ INCOMPLETE'}`);
-console.log(`  Tasks completed: ${report.completedTasks}/${report.totalTasks}`);
-console.log(`  Evidence items: ${report.evidenceCount}`);
-
-/* ── 7. Agent with Approval Gates ─────────────────────── */
-
-header('7. Agent with Approval-Gated Tool Calls');
-
-const ctx = weaveContext({ userId: 'agent-system', timeout: 30_000 });
-
-// The approval queue acts as a gate
-const approvalQueue = new InMemoryTaskQueue();
-const approvalLog = new DecisionLog();
-
-const tools = weaveToolRegistry();
-tools.register(
-  weaveTool({
-    name: 'read_customer_data',
-    description: 'Read customer data (low risk, auto-approved)',
-    parameters: {
-      type: 'object',
-      properties: { customerId: { type: 'string' } },
-      required: ['customerId'],
-    },
-    execute: async (args) => {
-      console.log(`    🟢 Auto-approved: reading customer ${args['customerId']}`);
-      return JSON.stringify({ id: args['customerId'], name: 'ACME Corp', plan: 'Enterprise' });
-    },
-  }),
-);
-tools.register(
-  weaveTool({
-    name: 'delete_customer_data',
-    description: 'Delete customer data (high risk, requires approval)',
-    parameters: {
-      type: 'object',
-      properties: { customerId: { type: 'string' }, reason: { type: 'string' } },
-      required: ['customerId', 'reason'],
-    },
-    execute: async (args) => {
-      // Create approval task
-      const task = createApprovalTask({
-        title: `Delete data for ${args['customerId']}`,
-        description: `Reason: ${args['reason']}`,
-        requester: 'agent-system',
-        approvers: ['manager'],
-        priority: 'high',
-      });
-      approvalQueue.enqueue(task);
-      // Simulate immediate approval
-      approvalLog.record(createDecision({
-        taskId: task.id,
-        reviewer: 'manager',
-        decision: 'approved',
-        reasoning: 'GDPR compliance — approved',
-        timestamp: new Date().toISOString(),
-      }));
-      console.log(`    ⏳ Approval requested and granted for deleting ${args['customerId']}`);
-      return JSON.stringify({ status: 'approved_and_executed', deletedRecords: 1200 });
-    },
-  }),
-);
-
-const agentModel = weaveFakeModel({
-  responses: [
-    // Step 1: Read customer data first
-    JSON.stringify({
-      content: null,
-      toolCalls: [{ id: 'tc1', name: 'read_customer_data', arguments: '{"customerId":"acme-001"}' }],
-    }),
-    // Step 2: Proceed with deletion
-    JSON.stringify({
-      content: null,
-      toolCalls: [{ id: 'tc2', name: 'delete_customer_data', arguments: '{"customerId":"acme-001","reason":"GDPR erasure request"}' }],
-    }),
-    // Step 3: Final response
-    'I\'ve completed the GDPR data deletion for ACME Corp (acme-001):\n\n1. **Verified** the customer record exists (Enterprise plan)\n2. **Submitted** a deletion request which was approved by the manager\n3. **Deleted** 1,200 records per the GDPR erasure request\n\nThe operation has been logged for compliance audit.',
-  ],
-});
-
-const agent = weaveAgent({
-  model: agentModel,
-  tools,
-  systemPrompt: 'You are a compliance agent. For read operations, proceed directly. For deletions, the tool will handle the approval workflow.',
-  maxSteps: 4,
-});
-
-console.log('Agent processing: "Delete all ACME Corp data per GDPR request"\n');
-const result = await agent.run(
-  { messages: [{ role: 'user', content: 'Process GDPR erasure request for customer acme-001 (ACME Corp)' }] },
-  ctx,
-);
-
-console.log(`\nAgent steps: ${result.steps?.length || 'N/A'}`);
-console.log(`Approval tasks created: ${approvalQueue.list().length}`);
-console.log(`Decisions logged: ${approvalLog.list().length}`);
-console.log(`\nFinal response:\n${result.content}`);
+const activePolicies = evaluator.listPolicies();
+console.log(`\n  Active policies: ${activePolicies.length}`);
 
 /* ── Summary ──────────────────────────────────────────── */
 
 header('Summary');
-console.log('✅ Approval, review, and escalation task types');
-console.log('✅ Priority task queue with ordering');
-console.log('✅ Decision logging with audit trail');
-console.log('✅ Automatic policy evaluation (auto-approve / block)');
-console.log('✅ Completion contracts with evidence bundles');
-console.log('✅ Agent with approval-gated tool calls');
-console.log('✅ Full GDPR data-deletion workflow end-to-end');
+console.log('✅ Approval, review, and escalation task creation');
+console.log('✅ Task queue with enqueue/dequeue/complete');
+console.log('✅ Decision recording with reason and metadata');
+console.log('✅ Decision log for full audit trail');
+console.log('✅ Policy evaluator for automatic HITL triggers');
+console.log('✅ SLA deadline computation');
+}
+
+main().catch(console.error);
