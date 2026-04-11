@@ -330,6 +330,57 @@ export interface ToolRegistryRow {
   updated_at: string;
 }
 
+export interface ReplayScenarioRow {
+  id: string;
+  name: string;
+  description: string | null;
+  golden_prompt: string;
+  golden_response: string;
+  model: string | null;
+  provider: string | null;
+  tags: string | null;           // JSON array
+  acceptance_criteria: string | null; // JSON object
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TriggerDefinitionRow {
+  id: string;
+  name: string;
+  description: string | null;
+  trigger_type: string;          // cron, webhook, queue, change, event
+  expression: string | null;     // cron expression or filter pattern
+  config: string | null;         // JSON object
+  target_workflow: string | null;
+  status: string;                // active, paused, disabled
+  last_fired_at: string | null;
+  fire_count: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TenantConfigRow {
+  id: string;
+  name: string;
+  description: string | null;
+  tenant_id: string;
+  scope: string;                 // global, organization, tenant, user
+  allowed_models: string | null; // JSON array
+  denied_models: string | null;  // JSON array
+  allowed_tools: string | null;  // JSON array
+  max_tokens_daily: number | null;
+  max_cost_daily: number | null;
+  max_tokens_monthly: number | null;
+  max_cost_monthly: number | null;
+  features: string | null;       // JSON array
+  config_overrides: string | null; // JSON object
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MetricsSummary {
   total_tokens: number;
   total_cost: number;
@@ -579,6 +630,27 @@ export interface DatabaseAdapter {
   listToolRegistry(): Promise<ToolRegistryRow[]>;
   updateToolRegistryEntry(id: string, fields: Partial<Omit<ToolRegistryRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteToolRegistryEntry(id: string): Promise<void>;
+
+  // ─── Admin: Replay Scenarios ─────────────────────────────────
+  createReplayScenario(s: Omit<ReplayScenarioRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getReplayScenario(id: string): Promise<ReplayScenarioRow | null>;
+  listReplayScenarios(): Promise<ReplayScenarioRow[]>;
+  updateReplayScenario(id: string, fields: Partial<Omit<ReplayScenarioRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteReplayScenario(id: string): Promise<void>;
+
+  // ─── Admin: Trigger Definitions ──────────────────────────────
+  createTriggerDefinition(t: Omit<TriggerDefinitionRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getTriggerDefinition(id: string): Promise<TriggerDefinitionRow | null>;
+  listTriggerDefinitions(): Promise<TriggerDefinitionRow[]>;
+  updateTriggerDefinition(id: string, fields: Partial<Omit<TriggerDefinitionRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteTriggerDefinition(id: string): Promise<void>;
+
+  // ─── Admin: Tenant Configs ───────────────────────────────────
+  createTenantConfig(c: Omit<TenantConfigRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getTenantConfig(id: string): Promise<TenantConfigRow | null>;
+  listTenantConfigs(): Promise<TenantConfigRow[]>;
+  updateTenantConfig(id: string, fields: Partial<Omit<TenantConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteTenantConfig(id: string): Promise<void>;
 
   // ─── Admin: Seed data ──────────────────────────────────────
   seedDefaultData(): Promise<void>;
@@ -922,6 +994,57 @@ CREATE TABLE IF NOT EXISTS tool_registry (
   requires_approval INTEGER NOT NULL DEFAULT 0,
   max_execution_ms INTEGER,
   rate_limit_per_min INTEGER,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS replay_scenarios (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  golden_prompt TEXT NOT NULL,
+  golden_response TEXT NOT NULL,
+  model TEXT,
+  provider TEXT,
+  tags TEXT,
+  acceptance_criteria TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS trigger_definitions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  trigger_type TEXT NOT NULL,
+  expression TEXT,
+  config TEXT,
+  target_workflow TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  last_fired_at TEXT,
+  fire_count INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS tenant_configs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  tenant_id TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'tenant',
+  allowed_models TEXT,
+  denied_models TEXT,
+  allowed_tools TEXT,
+  max_tokens_daily INTEGER,
+  max_cost_daily REAL,
+  max_tokens_monthly INTEGER,
+  max_cost_monthly REAL,
+  features TEXT,
+  config_overrides TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -1710,6 +1833,105 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM tool_registry WHERE id = ?').run(id);
   }
 
+  // ─── Admin: Replay Scenarios ─────────────────────────────────
+
+  async createReplayScenario(s: Omit<ReplayScenarioRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO replay_scenarios (id, name, description, golden_prompt, golden_response, model, provider, tags, acceptance_criteria, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(s.id, s.name, s.description ?? null, s.golden_prompt, s.golden_response, s.model ?? null, s.provider ?? null, s.tags ?? null, s.acceptance_criteria ?? null, s.enabled);
+  }
+
+  async getReplayScenario(id: string): Promise<ReplayScenarioRow | null> {
+    return (this.d.prepare('SELECT * FROM replay_scenarios WHERE id = ?').get(id) as ReplayScenarioRow) ?? null;
+  }
+
+  async listReplayScenarios(): Promise<ReplayScenarioRow[]> {
+    return this.d.prepare('SELECT * FROM replay_scenarios ORDER BY name ASC').all() as ReplayScenarioRow[];
+  }
+
+  async updateReplayScenario(id: string, fields: Partial<Omit<ReplayScenarioRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE replay_scenarios SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteReplayScenario(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM replay_scenarios WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Trigger Definitions ──────────────────────────────
+
+  async createTriggerDefinition(t: Omit<TriggerDefinitionRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO trigger_definitions (id, name, description, trigger_type, expression, config, target_workflow, status, last_fired_at, fire_count, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(t.id, t.name, t.description ?? null, t.trigger_type, t.expression ?? null, t.config ?? null, t.target_workflow ?? null, t.status, t.last_fired_at ?? null, t.fire_count, t.enabled);
+  }
+
+  async getTriggerDefinition(id: string): Promise<TriggerDefinitionRow | null> {
+    return (this.d.prepare('SELECT * FROM trigger_definitions WHERE id = ?').get(id) as TriggerDefinitionRow) ?? null;
+  }
+
+  async listTriggerDefinitions(): Promise<TriggerDefinitionRow[]> {
+    return this.d.prepare('SELECT * FROM trigger_definitions ORDER BY name ASC').all() as TriggerDefinitionRow[];
+  }
+
+  async updateTriggerDefinition(id: string, fields: Partial<Omit<TriggerDefinitionRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE trigger_definitions SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteTriggerDefinition(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM trigger_definitions WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Tenant Configs ───────────────────────────────────
+
+  async createTenantConfig(c: Omit<TenantConfigRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_configs (id, name, description, tenant_id, scope, allowed_models, denied_models, allowed_tools, max_tokens_daily, max_cost_daily, max_tokens_monthly, max_cost_monthly, features, config_overrides, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(c.id, c.name, c.description ?? null, c.tenant_id, c.scope, c.allowed_models ?? null, c.denied_models ?? null, c.allowed_tools ?? null, c.max_tokens_daily ?? null, c.max_cost_daily ?? null, c.max_tokens_monthly ?? null, c.max_cost_monthly ?? null, c.features ?? null, c.config_overrides ?? null, c.enabled);
+  }
+
+  async getTenantConfig(id: string): Promise<TenantConfigRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_configs WHERE id = ?').get(id) as TenantConfigRow) ?? null;
+  }
+
+  async listTenantConfigs(): Promise<TenantConfigRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_configs ORDER BY tenant_id ASC, name ASC').all() as TenantConfigRow[];
+  }
+
+  async updateTenantConfig(id: string, fields: Partial<Omit<TenantConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE tenant_configs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteTenantConfig(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM tenant_configs WHERE id = ?').run(id);
+  }
+
   // ─── Seed default data ─────────────────────────────────────
 
   async seedDefaultData(): Promise<void> {
@@ -2211,6 +2433,111 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const tr of toolReg) await this.createToolRegistryEntry(tr);
+    }
+
+    // Replay Scenarios
+    if (cnt('replay_scenarios') === 0) {
+    const replayScenarios: Omit<ReplayScenarioRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'rs-greeting', name: 'Greeting Test', description: 'Verify the assistant handles basic greetings correctly',
+        golden_prompt: 'Hello! How are you?',
+        golden_response: 'Hello! I\'m doing great, thanks for asking. How can I help you today?',
+        model: 'gpt-4o-mini', provider: 'openai',
+        tags: JSON.stringify(['basic', 'greeting', 'regression']),
+        acceptance_criteria: JSON.stringify({ min_match_rate: 0.7, max_duration_ms: 5000 }),
+        enabled: 1,
+      },
+      {
+        id: 'rs-code-review', name: 'Code Review Scenario', description: 'Test code review accuracy against a golden response',
+        golden_prompt: 'Review this JavaScript function for bugs:\\nfunction add(a, b) { return a - b; }',
+        golden_response: 'Bug found: The function is named "add" but performs subtraction (a - b). It should be return a + b;',
+        model: 'gpt-4o', provider: 'openai',
+        tags: JSON.stringify(['code', 'review', 'regression']),
+        acceptance_criteria: JSON.stringify({ min_match_rate: 0.6, required_step_matches: ['bug', 'subtraction'] }),
+        enabled: 1,
+      },
+      {
+        id: 'rs-summarization', name: 'Summarization Quality', description: 'Test document summarization quality and completeness',
+        golden_prompt: 'Summarize: AI is transforming healthcare through diagnostics, drug discovery, and personalized medicine. Key challenges include data privacy, bias, and regulatory compliance.',
+        golden_response: 'AI is revolutionizing healthcare in three areas: diagnostics, drug discovery, and personalized medicine. Main challenges are data privacy, algorithmic bias, and regulatory compliance.',
+        model: null, provider: null,
+        tags: JSON.stringify(['summarization', 'quality']),
+        acceptance_criteria: JSON.stringify({ min_match_rate: 0.5 }),
+        enabled: 1,
+      },
+    ];
+    for (const s of replayScenarios) await this.createReplayScenario(s);
+    }
+
+    // Trigger Definitions
+    if (cnt('trigger_definitions') === 0) {
+    const triggerDefs: Omit<TriggerDefinitionRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'trig-daily-eval', name: 'Daily Eval Sweep', description: 'Run evaluation suite every day at 2 AM UTC',
+        trigger_type: 'cron', expression: '0 2 * * *',
+        config: JSON.stringify({ timezone: 'UTC', skipIfRunning: true }),
+        target_workflow: 'wf-code-review', status: 'active', last_fired_at: null, fire_count: 0, enabled: 1,
+      },
+      {
+        id: 'trig-webhook-deploy', name: 'Deploy Webhook', description: 'Trigger workflow on deployment webhook from CI/CD',
+        trigger_type: 'webhook', expression: null,
+        config: JSON.stringify({ path: '/hooks/deploy', method: 'POST', requiredHeaders: ['X-Deploy-Token'] }),
+        target_workflow: 'wf-code-review', status: 'active', last_fired_at: null, fire_count: 0, enabled: 1,
+      },
+      {
+        id: 'trig-queue-analysis', name: 'Queue Analysis Jobs', description: 'Process queued data analysis requests',
+        trigger_type: 'queue', expression: null,
+        config: JSON.stringify({ queueName: 'analysis-jobs', concurrency: 3, pollIntervalMs: 5000 }),
+        target_workflow: null, status: 'active', last_fired_at: null, fire_count: 0, enabled: 1,
+      },
+      {
+        id: 'trig-model-change', name: 'Model Config Change', description: 'Re-run golden tests when model configuration changes',
+        trigger_type: 'change', expression: null,
+        config: JSON.stringify({ resourceType: 'model-config', changeTypes: ['updated'], debounceMs: 10000 }),
+        target_workflow: null, status: 'paused', last_fired_at: null, fire_count: 0, enabled: 0,
+      },
+    ];
+    for (const t of triggerDefs) await this.createTriggerDefinition(t);
+    }
+
+    // Tenant Configs
+    if (cnt('tenant_configs') === 0) {
+    const tenantConfigs: Omit<TenantConfigRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'tc-default', name: 'Default Tenant', description: 'Default tenant configuration with standard limits',
+        tenant_id: 'default', scope: 'global',
+        allowed_models: JSON.stringify(['gpt-4o', 'gpt-4o-mini', 'claude-sonnet-4-20250514']),
+        denied_models: null,
+        allowed_tools: JSON.stringify(['web-search', 'file-reader', 'api-caller']),
+        max_tokens_daily: 100000, max_cost_daily: 5.0,
+        max_tokens_monthly: 2000000, max_cost_monthly: 100.0,
+        features: JSON.stringify(['chat', 'agent', 'tools', 'eval']),
+        config_overrides: null, enabled: 1,
+      },
+      {
+        id: 'tc-enterprise', name: 'Enterprise Tenant', description: 'Enterprise tier with expanded limits and all features',
+        tenant_id: 'enterprise', scope: 'organization',
+        allowed_models: JSON.stringify(['gpt-4o', 'gpt-4o-mini', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514']),
+        denied_models: null,
+        allowed_tools: JSON.stringify(['web-search', 'file-reader', 'api-caller', 'code-exec', 'db-query']),
+        max_tokens_daily: 500000, max_cost_daily: 25.0,
+        max_tokens_monthly: 10000000, max_cost_monthly: 500.0,
+        features: JSON.stringify(['chat', 'agent', 'supervisor', 'tools', 'eval', 'workflows', 'replay']),
+        config_overrides: JSON.stringify({ max_concurrent_runs: 10 }), enabled: 1,
+      },
+      {
+        id: 'tc-trial', name: 'Trial Tenant', description: 'Free trial with limited access',
+        tenant_id: 'trial', scope: 'tenant',
+        allowed_models: JSON.stringify(['gpt-4o-mini']),
+        denied_models: JSON.stringify(['claude-opus-4-20250514']),
+        allowed_tools: JSON.stringify(['web-search']),
+        max_tokens_daily: 10000, max_cost_daily: 0.5,
+        max_tokens_monthly: 100000, max_cost_monthly: 5.0,
+        features: JSON.stringify(['chat']),
+        config_overrides: null, enabled: 1,
+      },
+    ];
+    for (const c of tenantConfigs) await this.createTenantConfig(c);
     }
   }
 }

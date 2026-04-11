@@ -1012,3 +1012,160 @@ describe('Admin Tool Registry', () => {
     expect(data['ok']).toBe(true);
   });
 });
+
+// ─── Admin: Replay Scenarios CRUD ────────────────────────────
+
+describe('Admin Replay Scenarios', () => {
+  let itemId: string;
+
+  it('lists replay scenarios', async () => {
+    const { status, data } = await api('GET', '/api/admin/replay-scenarios');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['replay-scenarios'])).toBe(true);
+  });
+
+  it('creates a replay scenario', async () => {
+    const { status, data } = await api('POST', '/api/admin/replay-scenarios', {
+      name: 'Test Replay',
+      description: 'Integration test scenario',
+      golden_prompt: 'What is 2+2?',
+      golden_response: 'The answer is 4.',
+      model: 'gpt-4o-mini',
+      provider: 'openai',
+      tags: ['test', 'math'],
+      acceptance_criteria: { min_match_rate: 0.7 },
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['replay-scenario'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a replay scenario by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/replay-scenarios/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['replay-scenario'] as Record<string, unknown>)?.['name']).toBe('Test Replay');
+  });
+
+  it('updates a replay scenario', async () => {
+    const { status, data } = await api('PUT', `/api/admin/replay-scenarios/${itemId}`, {
+      name: 'Updated Replay',
+      golden_prompt: 'What is 3+3?',
+    });
+    expect(status).toBe(200);
+    expect((data['replay-scenario'] as Record<string, unknown>)?.['name']).toBe('Updated Replay');
+  });
+
+  it('deletes a replay scenario', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/replay-scenarios/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin: Trigger Definitions CRUD ─────────────────────────
+
+describe('Admin Trigger Definitions', () => {
+  let itemId: string;
+
+  it('lists trigger definitions', async () => {
+    const { status, data } = await api('GET', '/api/admin/trigger-definitions');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['trigger-definitions'])).toBe(true);
+  });
+
+  it('creates a trigger definition', async () => {
+    const { status, data } = await api('POST', '/api/admin/trigger-definitions', {
+      name: 'Test Trigger',
+      description: 'Integration test trigger',
+      trigger_type: 'cron',
+      expression: '0 0 * * *',
+      config: { timezone: 'UTC' },
+      target_workflow: 'wf-test',
+      status: 'active',
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['trigger-definition'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a trigger definition by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/trigger-definitions/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['trigger-definition'] as Record<string, unknown>)?.['name']).toBe('Test Trigger');
+  });
+
+  it('updates a trigger definition', async () => {
+    const { status, data } = await api('PUT', `/api/admin/trigger-definitions/${itemId}`, {
+      name: 'Updated Trigger',
+      status: 'paused',
+    });
+    expect(status).toBe(200);
+    expect((data['trigger-definition'] as Record<string, unknown>)?.['name']).toBe('Updated Trigger');
+  });
+
+  it('deletes a trigger definition', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/trigger-definitions/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin: Tenant Configs CRUD ──────────────────────────────
+
+describe('Admin Tenant Configs', () => {
+  let itemId: string;
+
+  it('lists tenant configs', async () => {
+    const { status, data } = await api('GET', '/api/admin/tenant-configs');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['tenant-configs'])).toBe(true);
+  });
+
+  it('creates a tenant config', async () => {
+    const { status, data } = await api('POST', '/api/admin/tenant-configs', {
+      name: 'Test Tenant',
+      description: 'Integration test tenant',
+      tenant_id: 'test-tenant',
+      scope: 'tenant',
+      allowed_models: ['gpt-4o-mini'],
+      denied_models: [],
+      allowed_tools: ['web-search'],
+      max_tokens_daily: 50000,
+      max_cost_daily: 2.5,
+      max_tokens_monthly: 500000,
+      max_cost_monthly: 25.0,
+      features: ['chat', 'tools'],
+      config_overrides: { max_concurrent_runs: 2 },
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['tenant-config'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a tenant config by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/tenant-configs/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['tenant-config'] as Record<string, unknown>)?.['name']).toBe('Test Tenant');
+  });
+
+  it('updates a tenant config', async () => {
+    const { status, data } = await api('PUT', `/api/admin/tenant-configs/${itemId}`, {
+      name: 'Updated Tenant',
+      max_tokens_daily: 100000,
+    });
+    expect(status).toBe(200);
+    expect((data['tenant-config'] as Record<string, unknown>)?.['name']).toBe('Updated Tenant');
+  });
+
+  it('deletes a tenant config', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/tenant-configs/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});

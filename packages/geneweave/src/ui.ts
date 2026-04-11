@@ -876,7 +876,7 @@ function renderApp(){
 
 async function loadAdmin(){
   try{
-    const [p,g,r,w,t,wr,ge,tp,ct,cp,ir,mg,sp,he,sa,ec,tr] = await Promise.all([
+    const [p,g,r,w,t,wr,ge,tp,ct,cp,ir,mg,sp,he,sa,ec,tr,rs,td,tc] = await Promise.all([
       api.get('/admin/prompts').then(r=>r.json()),
       api.get('/admin/guardrails').then(r=>r.json()),
       api.get('/admin/routing').then(r=>r.json()),
@@ -894,6 +894,9 @@ async function loadAdmin(){
       api.get('/admin/social-accounts').then(r=>r.json()).catch(()=>({'social-accounts':[]})),
       api.get('/admin/enterprise-connectors').then(r=>r.json()).catch(()=>({'enterprise-connectors':[]})),
       api.get('/admin/tool-registry').then(r=>r.json()).catch(()=>({'tool-registry':[]})),
+      api.get('/admin/replay-scenarios').then(r=>r.json()).catch(()=>({'replay-scenarios':[]})),
+      api.get('/admin/trigger-definitions').then(r=>r.json()).catch(()=>({'trigger-definitions':[]})),
+      api.get('/admin/tenant-configs').then(r=>r.json()).catch(()=>({'tenant-configs':[]})),
     ]);
     state.adminData = {
       prompts:p.prompts||[], guardrails:g.guardrails||[],
@@ -904,7 +907,10 @@ async function loadAdmin(){
       'memory-governance':mg['memory-governance']||[],
       'search-providers':sp['search-providers']||[], 'http-endpoints':he['http-endpoints']||[],
       'social-accounts':sa['social-accounts']||[], 'enterprise-connectors':ec['enterprise-connectors']||[],
-      'tool-registry':tr['tool-registry']||[]
+      'tool-registry':tr['tool-registry']||[],
+      'replay-scenarios':rs['replay-scenarios']||[],
+      'trigger-definitions':td['trigger-definitions']||[],
+      'tenant-configs':tc['tenant-configs']||[]
     };
   }catch(e){ console.error('Failed to load admin data',e); }
   render();
@@ -987,6 +993,23 @@ async function adminSave(tab){
       let cfg = null; try{cfg=f.config?JSON.parse(f.config):null;}catch{}
       const payload = {name:f.name,description:f.description,package_name:f.package_name,version:f.version||'1.0.0',category:f.category||'general',risk_level:f.risk_level||'low',tags:tags,config:cfg,requires_approval:!!f.requires_approval,max_execution_ms:f.max_execution_ms?parseInt(f.max_execution_ms):null,rate_limit_per_min:f.rate_limit_per_min?parseInt(f.rate_limit_per_min):null,enabled:f.enabled!==false};
       resp = isEdit ? await api.put('/admin/tool-registry/'+state.adminEditing,payload) : await api.post('/admin/tool-registry',payload);
+    } else if(tab==='replay-scenarios'){
+      let tags = null; try{tags=f.tags?JSON.parse(f.tags):null;}catch{}
+      let ac = null; try{ac=f.acceptance_criteria?JSON.parse(f.acceptance_criteria):null;}catch{}
+      const payload = {name:f.name,description:f.description,golden_prompt:f.golden_prompt,golden_response:f.golden_response,model:f.model||null,provider:f.provider||null,tags:tags,acceptance_criteria:ac,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/replay-scenarios/'+state.adminEditing,payload) : await api.post('/admin/replay-scenarios',payload);
+    } else if(tab==='trigger-definitions'){
+      let cfg = null; try{cfg=f.config?JSON.parse(f.config):null;}catch{}
+      const payload = {name:f.name,description:f.description,trigger_type:f.trigger_type||'cron',expression:f.expression||null,config:cfg,target_workflow:f.target_workflow||null,status:f.status||'active',enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/trigger-definitions/'+state.adminEditing,payload) : await api.post('/admin/trigger-definitions',payload);
+    } else if(tab==='tenant-configs'){
+      let allowedModels = null; try{allowedModels=f.allowed_models?JSON.parse(f.allowed_models):null;}catch{}
+      let deniedModels = null; try{deniedModels=f.denied_models?JSON.parse(f.denied_models):null;}catch{}
+      let allowedTools = null; try{allowedTools=f.allowed_tools?JSON.parse(f.allowed_tools):null;}catch{}
+      let features = null; try{features=f.features?JSON.parse(f.features):null;}catch{}
+      let configOv = null; try{configOv=f.config_overrides?JSON.parse(f.config_overrides):null;}catch{}
+      const payload = {name:f.name,description:f.description,tenant_id:f.tenant_id,scope:f.scope||'tenant',allowed_models:allowedModels,denied_models:deniedModels,allowed_tools:allowedTools,max_tokens_daily:f.max_tokens_daily?parseInt(f.max_tokens_daily):null,max_cost_daily:f.max_cost_daily?parseFloat(f.max_cost_daily):null,max_tokens_monthly:f.max_tokens_monthly?parseInt(f.max_tokens_monthly):null,max_cost_monthly:f.max_cost_monthly?parseFloat(f.max_cost_monthly):null,features:features,config_overrides:configOv,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/tenant-configs/'+state.adminEditing,payload) : await api.post('/admin/tenant-configs',payload);
     }
     if(resp && resp.ok){
       state.adminEditing=null; state.adminForm={};
@@ -1000,7 +1023,7 @@ async function adminSave(tab){
 
 async function adminDelete(tab,id){
   if(!confirm('Delete this item?')) return;
-  const paths = {prompts:'prompts',guardrails:'guardrails',routing:'routing',workflows:'workflows',tools:'tools','task-policies':'task-policies',contracts:'contracts','cache-policies':'cache-policies','identity-rules':'identity-rules','memory-governance':'memory-governance','search-providers':'search-providers','http-endpoints':'http-endpoints','social-accounts':'social-accounts','enterprise-connectors':'enterprise-connectors','tool-registry':'tool-registry'};
+  const paths = {prompts:'prompts',guardrails:'guardrails',routing:'routing',workflows:'workflows',tools:'tools','task-policies':'task-policies',contracts:'contracts','cache-policies':'cache-policies','identity-rules':'identity-rules','memory-governance':'memory-governance','search-providers':'search-providers','http-endpoints':'http-endpoints','social-accounts':'social-accounts','enterprise-connectors':'enterprise-connectors','tool-registry':'tool-registry','replay-scenarios':'replay-scenarios','trigger-definitions':'trigger-definitions','tenant-configs':'tenant-configs'};
   try{
     await api.del('/admin/'+paths[tab]+'/'+id);
     await loadAdmin();
@@ -1024,6 +1047,9 @@ function adminEdit(tab,item){
   if(tab==='social-accounts'){ if(f.options){try{f.options=typeof f.options==='string'?f.options:JSON.stringify(f.options,null,2);}catch{}} }
   if(tab==='enterprise-connectors'){ if(f.auth_config){try{f.auth_config=typeof f.auth_config==='string'?f.auth_config:JSON.stringify(f.auth_config,null,2);}catch{}} if(f.options){try{f.options=typeof f.options==='string'?f.options:JSON.stringify(f.options,null,2);}catch{}} }
   if(tab==='tool-registry'){ if(f.tags){try{f.tags=typeof f.tags==='string'?f.tags:JSON.stringify(f.tags,null,2);}catch{}} if(f.config){try{f.config=typeof f.config==='string'?f.config:JSON.stringify(f.config,null,2);}catch{}} }
+  if(tab==='replay-scenarios'){ if(f.tags){try{f.tags=typeof f.tags==='string'?f.tags:JSON.stringify(f.tags,null,2);}catch{}} if(f.acceptance_criteria){try{f.acceptance_criteria=typeof f.acceptance_criteria==='string'?f.acceptance_criteria:JSON.stringify(f.acceptance_criteria,null,2);}catch{}} }
+  if(tab==='trigger-definitions'){ if(f.config){try{f.config=typeof f.config==='string'?f.config:JSON.stringify(f.config,null,2);}catch{}} }
+  if(tab==='tenant-configs'){ if(f.allowed_models){try{f.allowed_models=typeof f.allowed_models==='string'?f.allowed_models:JSON.stringify(f.allowed_models,null,2);}catch{}} if(f.denied_models){try{f.denied_models=typeof f.denied_models==='string'?f.denied_models:JSON.stringify(f.denied_models,null,2);}catch{}} if(f.allowed_tools){try{f.allowed_tools=typeof f.allowed_tools==='string'?f.allowed_tools:JSON.stringify(f.allowed_tools,null,2);}catch{}} if(f.features){try{f.features=typeof f.features==='string'?f.features:JSON.stringify(f.features,null,2);}catch{}} if(f.config_overrides){try{f.config_overrides=typeof f.config_overrides==='string'?f.config_overrides:JSON.stringify(f.config_overrides,null,2);}catch{}} }
   state.adminForm = f;
   render();
 }
@@ -1078,7 +1104,7 @@ function inp(label,key,opts){
 function renderAdminForm(tab){
   const form = h('div',{style:'background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:20px;margin-bottom:16px'});
   const title = state.adminEditing?'Edit':'New';
-  var singulars={'prompts':'Prompt','guardrails':'Guardrail','routing':'Routing Policy','workflows':'Workflow','tools':'Tool','task-policies':'Task Policy','contracts':'Contract','cache-policies':'Cache Policy','identity-rules':'Identity Rule','memory-governance':'Memory Governance','search-providers':'Search Provider','http-endpoints':'HTTP Endpoint','social-accounts':'Social Account','enterprise-connectors':'Enterprise Connector','tool-registry':'Tool Registry'};
+  var singulars={'prompts':'Prompt','guardrails':'Guardrail','routing':'Routing Policy','workflows':'Workflow','tools':'Tool','task-policies':'Task Policy','contracts':'Contract','cache-policies':'Cache Policy','identity-rules':'Identity Rule','memory-governance':'Memory Governance','search-providers':'Search Provider','http-endpoints':'HTTP Endpoint','social-accounts':'Social Account','enterprise-connectors':'Enterprise Connector','tool-registry':'Tool Registry','replay-scenarios':'Replay Scenario','trigger-definitions':'Trigger Definition','tenant-configs':'Tenant Config'};
   var tabLabel = singulars[tab]||(tab.slice(0,1).toUpperCase()+tab.slice(1).replace(/s$/,''));
   form.appendChild(h('h3',{style:'margin:0 0 14px;font-size:15px;color:#1E293B'},title+' '+tabLabel));
 
@@ -1230,6 +1256,40 @@ function renderAdminForm(tab){
     form.appendChild(inp('Max Execution (ms)','max_execution_ms',{type:'number'}));
     form.appendChild(inp('Rate Limit (/min)','rate_limit_per_min',{type:'number'}));
     form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='replay-scenarios'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Golden Prompt','golden_prompt',{textarea:true,rows:3}));
+    form.appendChild(inp('Golden Response','golden_response',{textarea:true,rows:4}));
+    form.appendChild(inp('Model','model',{options:['gpt-4o','gpt-4o-mini','claude-sonnet-4-20250514','claude-opus-4-20250514','']}));
+    form.appendChild(inp('Provider','provider',{options:['openai','anthropic','azure','google','']}));
+    form.appendChild(inp('Tags (JSON array)','tags',{textarea:true,rows:2}));
+    form.appendChild(inp('Acceptance Criteria (JSON)','acceptance_criteria',{textarea:true,rows:3}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='trigger-definitions'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Trigger Type','trigger_type',{options:['cron','webhook','queue','change','event','custom']}));
+    form.appendChild(inp('Expression','expression'));
+    form.appendChild(inp('Config (JSON)','config',{textarea:true,rows:4}));
+    form.appendChild(inp('Target Workflow','target_workflow'));
+    form.appendChild(inp('Status','status',{options:['active','paused','disabled']}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='tenant-configs'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Tenant ID','tenant_id'));
+    form.appendChild(inp('Scope','scope',{options:['global','organization','tenant','user']}));
+    form.appendChild(inp('Allowed Models (JSON array)','allowed_models',{textarea:true,rows:2}));
+    form.appendChild(inp('Denied Models (JSON array)','denied_models',{textarea:true,rows:2}));
+    form.appendChild(inp('Allowed Tools (JSON array)','allowed_tools',{textarea:true,rows:2}));
+    form.appendChild(inp('Max Tokens Daily','max_tokens_daily',{type:'number'}));
+    form.appendChild(inp('Max Cost Daily ($)','max_cost_daily',{type:'number'}));
+    form.appendChild(inp('Max Tokens Monthly','max_tokens_monthly',{type:'number'}));
+    form.appendChild(inp('Max Cost Monthly ($)','max_cost_monthly',{type:'number'}));
+    form.appendChild(inp('Features (JSON array)','features',{textarea:true,rows:2}));
+    form.appendChild(inp('Config Overrides (JSON)','config_overrides',{textarea:true,rows:3}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
   }
 
   const btns = h('div',{style:'display:flex;gap:8px;margin-top:14px'});
@@ -1309,6 +1369,9 @@ function getAdminCols(tab){
   if(tab==='social-accounts') return [{key:'name',label:'Name',w:'1.2fr'},{key:'platform',label:'Platform',w:'0.7fr'},{key:'base_url',label:'Base URL',w:'1fr'},{key:'enabled',label:'On',w:'0.4fr'}];
   if(tab==='enterprise-connectors') return [{key:'name',label:'Name',w:'1.2fr'},{key:'connector_type',label:'Type',w:'0.7fr'},{key:'base_url',label:'Base URL',w:'1fr'},{key:'auth_type',label:'Auth',w:'0.6fr'},{key:'enabled',label:'On',w:'0.4fr'}];
   if(tab==='tool-registry') return [{key:'name',label:'Name',w:'1.2fr'},{key:'package_name',label:'Package',w:'1fr'},{key:'category',label:'Category',w:'0.7fr'},{key:'risk_level',label:'Risk',w:'0.5fr'},{key:'requires_approval',label:'Approve',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='replay-scenarios') return [{key:'name',label:'Name',w:'1.2fr'},{key:'model',label:'Model',w:'0.8fr'},{key:'provider',label:'Provider',w:'0.6fr'},{key:'golden_prompt',label:'Prompt',w:'1.2fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='trigger-definitions') return [{key:'name',label:'Name',w:'1.2fr'},{key:'trigger_type',label:'Type',w:'0.6fr'},{key:'expression',label:'Expression',w:'0.8fr'},{key:'status',label:'Status',w:'0.6fr'},{key:'fire_count',label:'Fires',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='tenant-configs') return [{key:'name',label:'Name',w:'1.2fr'},{key:'tenant_id',label:'Tenant',w:'0.8fr'},{key:'scope',label:'Scope',w:'0.6fr'},{key:'max_tokens_daily',label:'Daily Tokens',w:'0.8fr'},{key:'max_cost_monthly',label:'Mo. Cost',w:'0.6fr'},{key:'enabled',label:'On',w:'0.4fr'}];
   return [];
 }
 
@@ -1342,7 +1405,10 @@ function renderAdmin(){
     {key:'http-endpoints',label:'HTTP',icon:'\\uD83C\\uDF10'},
     {key:'social-accounts',label:'Social',icon:'\\uD83D\\uDCAC'},
     {key:'enterprise-connectors',label:'Enterprise',icon:'\\uD83C\\uDFE2'},
-    {key:'tool-registry',label:'Registry',icon:'\\uD83D\\uDCE6'}
+    {key:'tool-registry',label:'Registry',icon:'\\uD83D\\uDCE6'},
+    {key:'replay-scenarios',label:'Replay',icon:'\\uD83D\\uDD04'},
+    {key:'trigger-definitions',label:'Triggers',icon:'\\u26A1'},
+    {key:'tenant-configs',label:'Tenants',icon:'\\uD83C\\uDFE2'}
   ];
   tabDefs.forEach(function(t){
     const active = state.adminTab===t.key;

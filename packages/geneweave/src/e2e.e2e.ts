@@ -719,3 +719,152 @@ test.describe('Admin Tool Registry', () => {
     }
   });
 });
+
+/* ── Admin: Replay Scenarios Tab ─────────────────────────── */
+
+test.describe('Admin Replay Scenarios', () => {
+  test('replay tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Replay' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new replay scenario via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Replay' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Replay Scenario' })).toBeVisible({ timeout: 3000 });
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Test-Replay');
+    const textareas = m.locator('textarea');
+    await textareas.nth(0).fill('What is 1+1?');
+    await textareas.nth(1).fill('The answer is 2.');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Replay Scenario' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded replay scenario', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Replay' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+/* ── Admin: Trigger Definitions Tab ──────────────────────── */
+
+test.describe('Admin Trigger Definitions', () => {
+  test('triggers tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Triggers' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new trigger definition via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Triggers' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Trigger Definition' })).toBeVisible({ timeout: 3000 });
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Test-Trigger');
+    await textInputs.nth(1).fill('0 6 * * *');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Trigger Definition' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded trigger definition', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Triggers' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+/* ── Admin: Tenant Configs Tab ───────────────────────────── */
+
+test.describe('Admin Tenant Configs', () => {
+  test('tenants tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Tenants' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new tenant config via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Tenants' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Tenant Config' })).toBeVisible({ timeout: 3000 });
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Test-Tenant');
+    await textInputs.nth(2).fill('pw-tenant-id');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Tenant Config' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded tenant config', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Tenants' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});

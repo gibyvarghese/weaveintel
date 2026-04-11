@@ -1435,6 +1435,205 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
+  // ── Admin: Replay Scenarios ─────────────────────────────────
+
+  router.get('/api/admin/replay-scenarios', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listReplayScenarios();
+    json(res, 200, { 'replay-scenarios': items });
+  });
+
+  router.get('/api/admin/replay-scenarios/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getReplayScenario(params['id']!);
+    if (!c) { json(res, 404, { error: 'Replay scenario not found' }); return; }
+    json(res, 200, { 'replay-scenario': c });
+  });
+
+  router.post('/api/admin/replay-scenarios', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name'] || !body['golden_prompt'] || !body['golden_response']) { json(res, 400, { error: 'name, golden_prompt and golden_response required' }); return; }
+    const id = 'rs-' + randomUUID().slice(0, 8);
+    await db.createReplayScenario({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      golden_prompt: body['golden_prompt'] as string, golden_response: body['golden_response'] as string,
+      model: (body['model'] as string) ?? null, provider: (body['provider'] as string) ?? null,
+      tags: body['tags'] ? (typeof body['tags'] === 'string' ? body['tags'] as string : JSON.stringify(body['tags'])) : null,
+      acceptance_criteria: body['acceptance_criteria'] ? (typeof body['acceptance_criteria'] === 'string' ? body['acceptance_criteria'] as string : JSON.stringify(body['acceptance_criteria'])) : null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getReplayScenario(id);
+    json(res, 201, { 'replay-scenario': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/replay-scenarios/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getReplayScenario(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Replay scenario not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['golden_prompt'] !== undefined) fields['golden_prompt'] = body['golden_prompt'];
+    if (body['golden_response'] !== undefined) fields['golden_response'] = body['golden_response'];
+    if (body['model'] !== undefined) fields['model'] = body['model'];
+    if (body['provider'] !== undefined) fields['provider'] = body['provider'];
+    if (body['tags'] !== undefined) fields['tags'] = typeof body['tags'] === 'string' ? body['tags'] : JSON.stringify(body['tags']);
+    if (body['acceptance_criteria'] !== undefined) fields['acceptance_criteria'] = typeof body['acceptance_criteria'] === 'string' ? body['acceptance_criteria'] : JSON.stringify(body['acceptance_criteria']);
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateReplayScenario(params['id']!, fields as any);
+    const item = await db.getReplayScenario(params['id']!);
+    json(res, 200, { 'replay-scenario': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/replay-scenarios/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteReplayScenario(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Trigger Definitions ────────────────────────────
+
+  router.get('/api/admin/trigger-definitions', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listTriggerDefinitions();
+    json(res, 200, { 'trigger-definitions': items });
+  });
+
+  router.get('/api/admin/trigger-definitions/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getTriggerDefinition(params['id']!);
+    if (!c) { json(res, 404, { error: 'Trigger definition not found' }); return; }
+    json(res, 200, { 'trigger-definition': c });
+  });
+
+  router.post('/api/admin/trigger-definitions', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name'] || !body['trigger_type']) { json(res, 400, { error: 'name and trigger_type required' }); return; }
+    const id = 'trig-' + randomUUID().slice(0, 8);
+    await db.createTriggerDefinition({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      trigger_type: body['trigger_type'] as string,
+      expression: (body['expression'] as string) ?? null,
+      config: body['config'] ? (typeof body['config'] === 'string' ? body['config'] as string : JSON.stringify(body['config'])) : null,
+      target_workflow: (body['target_workflow'] as string) ?? null,
+      status: (body['status'] as string) ?? 'active',
+      last_fired_at: null, fire_count: 0,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getTriggerDefinition(id);
+    json(res, 201, { 'trigger-definition': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/trigger-definitions/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getTriggerDefinition(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Trigger definition not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['trigger_type'] !== undefined) fields['trigger_type'] = body['trigger_type'];
+    if (body['expression'] !== undefined) fields['expression'] = body['expression'];
+    if (body['config'] !== undefined) fields['config'] = typeof body['config'] === 'string' ? body['config'] : JSON.stringify(body['config']);
+    if (body['target_workflow'] !== undefined) fields['target_workflow'] = body['target_workflow'];
+    if (body['status'] !== undefined) fields['status'] = body['status'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateTriggerDefinition(params['id']!, fields as any);
+    const item = await db.getTriggerDefinition(params['id']!);
+    json(res, 200, { 'trigger-definition': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/trigger-definitions/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteTriggerDefinition(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Tenant Configs ─────────────────────────────────
+
+  router.get('/api/admin/tenant-configs', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listTenantConfigs();
+    json(res, 200, { 'tenant-configs': items });
+  });
+
+  router.get('/api/admin/tenant-configs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getTenantConfig(params['id']!);
+    if (!c) { json(res, 404, { error: 'Tenant config not found' }); return; }
+    json(res, 200, { 'tenant-config': c });
+  });
+
+  router.post('/api/admin/tenant-configs', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name'] || !body['tenant_id']) { json(res, 400, { error: 'name and tenant_id required' }); return; }
+    const id = 'tc-' + randomUUID().slice(0, 8);
+    await db.createTenantConfig({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      tenant_id: body['tenant_id'] as string,
+      scope: (body['scope'] as string) ?? 'tenant',
+      allowed_models: body['allowed_models'] ? (typeof body['allowed_models'] === 'string' ? body['allowed_models'] as string : JSON.stringify(body['allowed_models'])) : null,
+      denied_models: body['denied_models'] ? (typeof body['denied_models'] === 'string' ? body['denied_models'] as string : JSON.stringify(body['denied_models'])) : null,
+      allowed_tools: body['allowed_tools'] ? (typeof body['allowed_tools'] === 'string' ? body['allowed_tools'] as string : JSON.stringify(body['allowed_tools'])) : null,
+      max_tokens_daily: (body['max_tokens_daily'] as number) ?? null,
+      max_cost_daily: (body['max_cost_daily'] as number) ?? null,
+      max_tokens_monthly: (body['max_tokens_monthly'] as number) ?? null,
+      max_cost_monthly: (body['max_cost_monthly'] as number) ?? null,
+      features: body['features'] ? (typeof body['features'] === 'string' ? body['features'] as string : JSON.stringify(body['features'])) : null,
+      config_overrides: body['config_overrides'] ? (typeof body['config_overrides'] === 'string' ? body['config_overrides'] as string : JSON.stringify(body['config_overrides'])) : null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getTenantConfig(id);
+    json(res, 201, { 'tenant-config': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/tenant-configs/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getTenantConfig(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Tenant config not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['tenant_id'] !== undefined) fields['tenant_id'] = body['tenant_id'];
+    if (body['scope'] !== undefined) fields['scope'] = body['scope'];
+    if (body['allowed_models'] !== undefined) fields['allowed_models'] = typeof body['allowed_models'] === 'string' ? body['allowed_models'] : JSON.stringify(body['allowed_models']);
+    if (body['denied_models'] !== undefined) fields['denied_models'] = typeof body['denied_models'] === 'string' ? body['denied_models'] : JSON.stringify(body['denied_models']);
+    if (body['allowed_tools'] !== undefined) fields['allowed_tools'] = typeof body['allowed_tools'] === 'string' ? body['allowed_tools'] : JSON.stringify(body['allowed_tools']);
+    if (body['max_tokens_daily'] !== undefined) fields['max_tokens_daily'] = body['max_tokens_daily'];
+    if (body['max_cost_daily'] !== undefined) fields['max_cost_daily'] = body['max_cost_daily'];
+    if (body['max_tokens_monthly'] !== undefined) fields['max_tokens_monthly'] = body['max_tokens_monthly'];
+    if (body['max_cost_monthly'] !== undefined) fields['max_cost_monthly'] = body['max_cost_monthly'];
+    if (body['features'] !== undefined) fields['features'] = typeof body['features'] === 'string' ? body['features'] : JSON.stringify(body['features']);
+    if (body['config_overrides'] !== undefined) fields['config_overrides'] = typeof body['config_overrides'] === 'string' ? body['config_overrides'] : JSON.stringify(body['config_overrides']);
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateTenantConfig(params['id']!, fields as any);
+    const item = await db.getTenantConfig(params['id']!);
+    json(res, 200, { 'tenant-config': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/tenant-configs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteTenantConfig(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
   // ── Admin: Seed data ───────────────────────────────────────
 
   router.post('/api/admin/seed', async (_req, res, _params, auth) => {

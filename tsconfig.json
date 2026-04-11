@@ -29,6 +29,9 @@
     { "path": "packages/tools-browser" },
     { "path": "packages/tools-social" },
     { "path": "packages/tools-enterprise" },
+    { "path": "packages/replay" },
+    { "path": "packages/triggers" },
+    { "path": "packages/tenancy" },
     { "path": "packages/geneweave" }
   ]
 }
