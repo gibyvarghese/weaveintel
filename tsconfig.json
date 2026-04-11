@@ -19,6 +19,8 @@
     { "path": "packages/guardrails" },
     { "path": "packages/human-tasks" },
     { "path": "packages/contracts" },
+    { "path": "packages/prompts" },
+    { "path": "packages/routing" },
     { "path": "packages/geneweave" }
   ]
 }

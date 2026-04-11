@@ -33,6 +33,8 @@
     "@weaveintel/workflows": "*",
     "@weaveintel/human-tasks": "*",
     "@weaveintel/contracts": "*",
+    "@weaveintel/prompts": "*",
+    "@weaveintel/routing": "*",
     "better-sqlite3": "^11.9.1"
   },
   "devDependencies": {

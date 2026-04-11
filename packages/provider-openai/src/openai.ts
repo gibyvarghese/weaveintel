@@ -189,6 +189,13 @@ function buildOpenAIMessages(messages: ModelRequest['messages']): unknown[] {
       const m: Record<string, unknown> = { role: msg.role, content: msg.content };
       if (msg.name) m['name'] = msg.name;
       if (msg.toolCallId) m['tool_call_id'] = msg.toolCallId;
+      if (msg.toolCalls?.length) {
+        m['tool_calls'] = msg.toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: tc.arguments },
+        }));
+      }
       return m;
     }
     // Multimodal content parts

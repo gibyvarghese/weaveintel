@@ -4,7 +4,7 @@
  * Tests run against the deployed Azure API.
  * Requires the server to be running at BASE_URL.
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 const BASE_URL = process.env['API_URL'] ?? 'https://anyweave-api.livelyrock-3622bbbd.westus2.azurecontainerapps.io';
 
@@ -225,20 +225,193 @@ describe('Guardrail Evaluations', () => {
 // ─── Admin: Prompts CRUD ────────────────────────────────────
 
 describe('Admin Prompts', () => {
+  let promptId: string;
+
   it('lists prompts', async () => {
     const { status, data } = await api('GET', '/api/admin/prompts');
     expect(status).toBe(200);
     expect(Array.isArray(data['prompts'])).toBe(true);
+  });
+
+  it('creates a prompt', async () => {
+    const { status, data } = await api('POST', '/api/admin/prompts', {
+      name: 'Test Prompt',
+      description: 'Integration test prompt',
+      category: 'test',
+      template: 'Hello {{name}}, you are a {{role}}.',
+      variables: JSON.stringify([
+        { name: 'name', type: 'string', required: true },
+        { name: 'role', type: 'string', required: true },
+      ]),
+      version: '1.0',
+      is_default: false,
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const prompt = data['prompt'] as Record<string, unknown>;
+    expect(prompt?.['id']).toBeDefined();
+    expect(prompt?.['name']).toBe('Test Prompt');
+    promptId = prompt['id'] as string;
+  });
+
+  it('gets a prompt by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/prompts/${promptId}`);
+    expect(status).toBe(200);
+    const prompt = data['prompt'] as Record<string, unknown>;
+    expect(prompt?.['name']).toBe('Test Prompt');
+    expect(prompt?.['template']).toContain('{{name}}');
+  });
+
+  it('updates a prompt', async () => {
+    const { status } = await api('PUT', `/api/admin/prompts/${promptId}`, {
+      name: 'Updated Prompt',
+      template: 'Goodbye {{name}}!',
+    });
+    expect(status).toBe(200);
+  });
+
+  it('verifies update', async () => {
+    const { data } = await api('GET', `/api/admin/prompts/${promptId}`);
+    const prompt = data['prompt'] as Record<string, unknown>;
+    expect(prompt?.['name']).toBe('Updated Prompt');
+    expect(prompt?.['template']).toContain('Goodbye');
+  });
+
+  it('deletes a prompt', async () => {
+    const { status } = await api('DELETE', `/api/admin/prompts/${promptId}`);
+    expect(status).toBe(200);
+  });
+});
+
+// ─── Prompt Resolution ──────────────────────────────────────
+
+describe('Prompt Resolution', () => {
+  let resolvePromptId: string;
+
+  beforeAll(async () => {
+    // Create a prompt to resolve
+    const { data } = await api('POST', '/api/admin/prompts', {
+      name: 'Resolve Test',
+      description: 'For resolve testing',
+      category: 'test',
+      template: 'Hello {{user}}, welcome to {{app}}.',
+      variables: JSON.stringify([
+        { name: 'user', type: 'string', required: true },
+        { name: 'app', type: 'string', required: true },
+      ]),
+      version: '1.0',
+      is_default: false,
+      enabled: true,
+    });
+    resolvePromptId = ((data['prompt'] as Record<string, unknown>)?.['id'] as string);
+  });
+
+  it('resolves a prompt with variables', async () => {
+    const { status, data } = await api('POST', '/api/prompts/resolve', {
+      promptId: resolvePromptId,
+      variables: { user: 'Alice', app: 'WeaveIntel' },
+    });
+    expect(status).toBe(200);
+    expect(data['rendered']).toBe('Hello Alice, welcome to WeaveIntel.');
+    expect(data['template']).toContain('{{user}}');
+    expect(data['variables']).toBeDefined();
+  });
+
+  it('returns 400 for missing required variable', async () => {
+    const { status, data } = await api('POST', '/api/prompts/resolve', {
+      promptId: resolvePromptId,
+      variables: { user: 'Alice' },
+    });
+    expect(status).toBe(400);
+    expect(data['error']).toContain('Missing required variable');
+  });
+
+  it('returns 404 for unknown prompt', async () => {
+    const { status } = await api('POST', '/api/prompts/resolve', {
+      promptId: 'nonexistent-id',
+    });
+    expect(status).toBe(404);
+  });
+
+  it('returns 400 when promptId missing', async () => {
+    const { status } = await api('POST', '/api/prompts/resolve', {});
+    expect(status).toBe(400);
+  });
+
+  afterAll(async () => {
+    if (resolvePromptId) await api('DELETE', `/api/admin/prompts/${resolvePromptId}`);
   });
 });
 
 // ─── Admin: Routing CRUD ────────────────────────────────────
 
 describe('Admin Routing', () => {
+  let policyId: string;
+
   it('lists routing policies', async () => {
     const { status, data } = await api('GET', '/api/admin/routing');
     expect(status).toBe(200);
     expect(Array.isArray(data['policies'])).toBe(true);
+  });
+
+  it('creates a routing policy', async () => {
+    const { status, data } = await api('POST', '/api/admin/routing', {
+      name: 'Test Routing Policy',
+      description: 'Integration test policy',
+      strategy: 'cost-optimized',
+      constraints: JSON.stringify({ excludeProviders: [] }),
+      weights: JSON.stringify({ cost: 0.7, latency: 0.2, quality: 0.1 }),
+      fallback_model: 'gpt-4o-mini',
+      fallback_provider: 'openai',
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const policy = data['policy'] as Record<string, unknown>;
+    expect(policy?.['id']).toBeDefined();
+    expect(policy?.['name']).toBe('Test Routing Policy');
+    policyId = policy['id'] as string;
+  });
+
+  it('gets a routing policy by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/routing/${policyId}`);
+    expect(status).toBe(200);
+    const policy = data['policy'] as Record<string, unknown>;
+    expect(policy?.['name']).toBe('Test Routing Policy');
+    expect(policy?.['strategy']).toBe('cost-optimized');
+  });
+
+  it('updates a routing policy', async () => {
+    const { status } = await api('PUT', `/api/admin/routing/${policyId}`, {
+      name: 'Updated Routing Policy',
+      strategy: 'quality-first',
+    });
+    expect(status).toBe(200);
+  });
+
+  it('verifies update', async () => {
+    const { data } = await api('GET', `/api/admin/routing/${policyId}`);
+    const policy = data['policy'] as Record<string, unknown>;
+    expect(policy?.['name']).toBe('Updated Routing Policy');
+    expect(policy?.['strategy']).toBe('quality-first');
+  });
+
+  it('deletes a routing policy', async () => {
+    const { status } = await api('DELETE', `/api/admin/routing/${policyId}`);
+    expect(status).toBe(200);
+  });
+});
+
+// ─── Routing Active Policies ────────────────────────────────
+
+describe('Routing Active', () => {
+  it('lists active routing policies', async () => {
+    const { status, data } = await api('GET', '/api/routing/active');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['active'])).toBe(true);
+    // All returned should be enabled (SQLite stores as 1)
+    for (const p of data['active'] as Array<Record<string, unknown>>) {
+      expect(p['enabled']).toBeTruthy();
+    }
   });
 });
 

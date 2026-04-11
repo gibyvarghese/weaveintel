@@ -584,6 +584,37 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
+  // ── Prompt resolution ──────────────────────────────────────
+
+  router.post('/api/prompts/resolve', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const promptId = body['promptId'] as string;
+    if (!promptId) { json(res, 400, { error: 'promptId required' }); return; }
+    const prompt = await db.getPrompt(promptId);
+    if (!prompt) { json(res, 404, { error: 'Prompt not found' }); return; }
+    const { createTemplate: ct } = await import('@weaveintel/prompts');
+    const tpl = ct({ id: prompt.id, name: prompt.name, template: prompt.template });
+    const variables = (body['variables'] as Record<string, unknown>) ?? {};
+    try {
+      const rendered = tpl.render(variables);
+      json(res, 200, { rendered, template: prompt.template, variables: prompt.variables ? JSON.parse(prompt.variables) : [] });
+    } catch (e: unknown) {
+      json(res, 400, { error: e instanceof Error ? e.message : 'Render error' });
+    }
+  }, { auth: true, csrf: true });
+
+  // ── Routing test ───────────────────────────────────────────
+
+  router.get('/api/routing/active', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const policies = await db.listRoutingPolicies();
+    const active = policies.filter(p => p.enabled);
+    json(res, 200, { active });
+  });
+
   // ── Admin: Workflows ───────────────────────────────────────
 
   router.get('/api/admin/workflows', async (_req, res, _params, auth) => {

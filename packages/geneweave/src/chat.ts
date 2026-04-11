@@ -23,9 +23,12 @@ import { weaveInMemoryTracer, weaveUsageTracker } from '@weaveintel/observabilit
 import { weaveRedactor } from '@weaveintel/redaction';
 import { weaveEvalRunner } from '@weaveintel/evals';
 import { createGuardrailPipeline, hasDeny, hasWarning, getDenyReason } from '@weaveintel/guardrails';
-import type { DatabaseAdapter, MessageRow, ChatSettingsRow, GuardrailRow, HumanTaskPolicyRow } from './db.js';
+import type { DatabaseAdapter, MessageRow, ChatSettingsRow, GuardrailRow, HumanTaskPolicyRow, PromptRow, RoutingPolicyRow } from './db.js';
 import { createToolRegistry } from './tools.js';
 import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
+import { createTemplate } from '@weaveintel/prompts';
+import { SmartModelRouter, ModelHealthTracker } from '@weaveintel/routing';
+import type { ModelCostInfo, ModelQualityInfo } from '@weaveintel/routing';
 
 // ─── Model pricing (per 1 M tokens) ─────────────────────────
 
@@ -84,7 +87,7 @@ export async function getOrCreateModel(
     }
     case 'openai': {
       const mod = await import('@weaveintel/provider-openai');
-      model = (mod as any).weaveOpenAIModel({ apiKey, model: modelId });
+      model = (mod as any).weaveOpenAIModel(modelId, { apiKey });
       break;
     }
     default:
@@ -133,6 +136,8 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
 }
 
 export class ChatEngine {
+  private readonly healthTracker = new ModelHealthTracker();
+
   constructor(
     private readonly config: ChatEngineConfig,
     private readonly db: DatabaseAdapter,
@@ -156,10 +161,22 @@ export class ChatEngine {
     traceId?: string;
     guardrail?: { decision: 'allow' | 'deny' | 'warn'; reason?: string };
     policyChecks?: Array<{ tool: string; policy: string; taskType: string; priority: string }>;
+    routingDecision?: { provider: string; model: string; reason: string };
   }> {
     let provider = opts?.provider ?? this.config.defaultProvider;
     let modelId = opts?.model ?? this.config.defaultModel;
     let providerCfg = this.config.providers[provider];
+    let routingInfo: { provider: string; model: string; reason: string } | undefined;
+
+    // Try routing from DB policy
+    const routed = await this.routeModel(opts);
+    if (routed && this.config.providers[routed.provider]) {
+      provider = routed.provider;
+      modelId = routed.modelId;
+      providerCfg = this.config.providers[provider];
+      routingInfo = { provider, model: modelId, reason: 'Selected by routing policy' };
+    }
+
     if (!providerCfg) {
       // Fall back to default provider when stored provider isn't configured
       provider = this.config.defaultProvider;
@@ -176,6 +193,7 @@ export class ChatEngine {
 
     const model = await getOrCreateModel(provider, modelId, providerCfg.apiKey);
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
+    const resolvedPrompt = await this.resolveSystemPrompt(settings);
     const traceId = randomUUID();
     const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
     const startMs = Date.now();
@@ -225,8 +243,8 @@ export class ChatEngine {
     } else {
       // ── Direct mode ──
       const request: ModelRequest = {
-        messages: settings.systemPrompt
-          ? [{ role: 'system', content: settings.systemPrompt }, ...messages]
+        messages: resolvedPrompt
+          ? [{ role: 'system', content: resolvedPrompt }, ...messages]
           : messages,
         maxTokens: opts?.maxTokens ?? 4096,
         temperature: opts?.temperature,
@@ -238,6 +256,9 @@ export class ChatEngine {
 
     const latencyMs = Date.now() - startMs;
     const cost = calculateCost(modelId, usage.promptTokens, usage.completionTokens);
+
+    // Record health outcome
+    this.recordModelOutcome(modelId, provider, latencyMs, true);
 
     // Human-task policy checks on tool calls
     const policyChecks = steps ? await this.evaluateTaskPolicies(steps) : undefined;
@@ -288,7 +309,7 @@ export class ChatEngine {
     // Record traces
     await this.recordTraceSpans(userId, chatId, assistMsgId, traceId, settings.mode, startMs, latencyMs, steps);
 
-    return { assistantContent, usage, cost, latencyMs, redaction: redactionInfo, eval: evalInfo, steps, traceId, guardrail: guardrailInfo, policyChecks };
+    return { assistantContent, usage, cost, latencyMs, redaction: redactionInfo, eval: evalInfo, steps, traceId, guardrail: guardrailInfo, policyChecks, routingDecision: routingInfo };
   }
 
   // ── Stream mode ─────────────────────────────────────────────
@@ -303,6 +324,15 @@ export class ChatEngine {
     let provider = opts?.provider ?? this.config.defaultProvider;
     let modelId = opts?.model ?? this.config.defaultModel;
     let providerCfg = this.config.providers[provider];
+
+    // Try routing from DB policy
+    const routed = await this.routeModel(opts);
+    if (routed && this.config.providers[routed.provider]) {
+      provider = routed.provider;
+      modelId = routed.modelId;
+      providerCfg = this.config.providers[provider];
+    }
+
     if (!providerCfg) {
       // Fall back to default provider when stored provider isn't configured
       provider = this.config.defaultProvider;
@@ -319,6 +349,7 @@ export class ChatEngine {
 
     const model = await getOrCreateModel(provider, modelId, providerCfg.apiKey);
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
+    const resolvedPrompt = await this.resolveSystemPrompt(settings);
     const traceId = randomUUID();
     const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
 
@@ -382,8 +413,8 @@ export class ChatEngine {
       } else {
         // ── Direct streaming ──
         const request: ModelRequest = {
-          messages: settings.systemPrompt
-            ? [{ role: 'system', content: settings.systemPrompt }, ...messages]
+          messages: resolvedPrompt
+            ? [{ role: 'system', content: resolvedPrompt }, ...messages]
             : messages,
           maxTokens: opts?.maxTokens ?? 4096,
           temperature: opts?.temperature,
@@ -418,6 +449,9 @@ export class ChatEngine {
 
     const latencyMs = Date.now() - startMs;
     const cost = calculateCost(modelId, finalUsage.promptTokens, finalUsage.completionTokens);
+
+    // Record health outcome
+    this.recordModelOutcome(modelId, provider, latencyMs, true);
 
     // Human-task policy checks on tool calls
     const policyChecks = steps.length ? await this.evaluateTaskPolicies(steps) : undefined;
@@ -857,6 +891,121 @@ export class ChatEngine {
     } catch {
       return [];
     }
+  }
+
+  // ── Prompt resolution from DB ───────────────────────────────
+
+  /**
+   * Resolve system prompt: if the settings reference a prompt by name/id,
+   * look it up in the prompts table and render its template. Falls back to
+   * the plain system_prompt string.
+   */
+  private async resolveSystemPrompt(settings: ChatSettings): Promise<string | undefined> {
+    if (!settings.systemPrompt) return undefined;
+
+    try {
+      // Check if the system prompt references a DB prompt by name
+      const rows = await this.db.listPrompts();
+      const match = rows.find(
+        r => r.enabled && (r.id === settings.systemPrompt || r.name === settings.systemPrompt),
+      );
+      if (match) {
+        // Render the template (variables may be empty for simple prompts)
+        const tpl = createTemplate({ id: match.id, name: match.name, template: match.template });
+        const vars: Record<string, unknown> = {};
+        // Parse variable names from the prompt; provide empty defaults for optional ones
+        if (match.variables) {
+          const varNames: string[] = JSON.parse(match.variables);
+          for (const v of varNames) vars[v] = `[${v}]`;
+        }
+        return tpl.render(vars);
+      }
+    } catch {
+      // Fall through to plain text
+    }
+
+    return settings.systemPrompt;
+  }
+
+  // ── Model routing from DB ───────────────────────────────────
+
+  /**
+   * Select model + provider using the active routing policy from the DB.
+   * Returns null if no enabled policy exists (caller falls back to default).
+   */
+  private async routeModel(opts?: { provider?: string; model?: string }): Promise<{ provider: string; modelId: string } | null> {
+    try {
+      const policies = await this.db.listRoutingPolicies();
+      const active = policies.find(p => p.enabled);
+      if (!active) return null;
+
+      // Build candidate list from configured providers
+      const candidates = this.getAvailableModels().map(m => ({
+        modelId: m.id,
+        providerId: m.provider,
+      }));
+
+      if (candidates.length === 0) return null;
+
+      // Cost data from PRICING table
+      const costs: ModelCostInfo[] = candidates.map(c => {
+        const p = PRICING[c.modelId];
+        return {
+          modelId: c.modelId,
+          providerId: c.providerId,
+          inputCostPer1M: p ? p.input : 10,
+          outputCostPer1M: p ? p.output : 30,
+        };
+      });
+
+      // Quality estimates (static for now — higher-tier models get higher scores)
+      const qualityMap: Record<string, number> = {
+        'claude-opus-4-20250514': 0.95, 'gpt-4o': 0.9, 'gpt-4.1': 0.9,
+        'claude-sonnet-4-20250514': 0.85, 'o3': 0.85,
+        'gpt-4o-mini': 0.75, 'gpt-4.1-mini': 0.75, 'o4-mini': 0.75,
+        'claude-haiku-4-20250414': 0.7, 'gpt-4.1-nano': 0.6,
+      };
+      const qualities: ModelQualityInfo[] = candidates.map(c => ({
+        modelId: c.modelId,
+        providerId: c.providerId,
+        qualityScore: qualityMap[c.modelId] ?? 0.7,
+      }));
+
+      const router = new SmartModelRouter({ candidates, costs, qualities });
+
+      // Copy health data
+      for (const h of this.healthTracker.listHealth()) {
+        router.recordOutcome(
+          { modelId: h.modelId, providerId: h.providerId, reason: '', scores: {}, alternatives: [], timestamp: '' },
+          { latencyMs: h.avgLatencyMs, success: h.errorRate < 0.5 },
+        );
+      }
+
+      const decision = await router.route(
+        { prompt: '' },
+        {
+          id: active.id,
+          name: active.name,
+          strategy: active.strategy as any,
+          constraints: active.constraints ? JSON.parse(active.constraints) : undefined,
+          weights: active.weights ? JSON.parse(active.weights) : undefined,
+          fallbackModelId: active.fallback_model ?? undefined,
+          fallbackProviderId: active.fallback_provider ?? undefined,
+          enabled: true,
+        },
+      );
+
+      return { provider: decision.providerId, modelId: decision.modelId };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Record model outcome for health tracking.
+   */
+  recordModelOutcome(modelId: string, providerId: string, latencyMs: number, success: boolean): void {
+    this.healthTracker.record(modelId, providerId, { latencyMs, success });
   }
 }
 

@@ -160,6 +160,111 @@ test.describe('Admin Guardrail CRUD', () => {
   });
 });
 
+/* ── Admin: Prompts Tab ───────────────────────────────────── */
+
+test.describe('Admin Prompts', () => {
+  test('prompts tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    // Prompts is the default tab, should show items
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new prompt via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    // Prompts is default tab — click + New
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Prompt' })).toBeVisible({ timeout: 3000 });
+    // Fill Name input
+    await m.locator('input[type="text"]').first().fill('PW-Test-Prompt');
+    // Fill Template textarea
+    const textareas = m.locator('textarea');
+    if ((await textareas.count()) > 0) {
+      await textareas.first().fill('Hello {{user}}!');
+    }
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Prompt' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded prompt', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    // Click first Edit button in the prompts table
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      // Should show the edit form with pre-filled data
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+/* ── Admin: Routing Tab ──────────────────────────────────── */
+
+test.describe('Admin Routing', () => {
+  test('routing tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Routing' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new routing policy via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Routing' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Routing Policy' })).toBeVisible({ timeout: 3000 });
+    // Fill Name input
+    await m.locator('input[type="text"]').first().fill('PW-Test-Routing');
+    // Select the Strategy from the dropdown
+    const selects = m.locator('select');
+    if ((await selects.count()) > 0) {
+      await selects.first().selectOption({ index: 1 });
+    }
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Routing Policy' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded routing policy', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Routing' }).click();
+    await page.waitForTimeout(500);
+    // Click first Edit button in the routing table
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
 /* ── Admin: Read-only Tabs ───────────────────────────────── */
 
 test.describe('Admin Read-only Tabs', () => {
