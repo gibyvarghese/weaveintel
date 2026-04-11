@@ -196,7 +196,7 @@ function semanticBoundaryChunk(
 
 // ─── Public chunker factory ──────────────────────────────────
 
-export function createChunker(config?: Partial<ChunkerConfig>): Chunker {
+export function weaveChunker(config?: Partial<ChunkerConfig>): Chunker {
   const strategy: ChunkingStrategy = config?.strategy ?? 'semantic_boundary';
   const chunkSize = config?.chunkSize ?? 1000;
   const chunkOverlap = config?.chunkOverlap ?? 100;

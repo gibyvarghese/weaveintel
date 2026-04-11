@@ -20,8 +20,8 @@ import type {
   Indexer,
   EventBus,
 } from '@weaveintel/core';
-import { createEvent, EventTypes } from '@weaveintel/core';
-import { createChunker } from './chunker.js';
+import { weaveEvent, EventTypes } from '@weaveintel/core';
+import { weaveChunker } from './chunker.js';
 import type { ChunkerConfig } from '@weaveintel/core';
 
 // ─── Embedding pipeline ──────────────────────────────────────
@@ -34,11 +34,11 @@ export interface EmbeddingPipelineConfig {
   eventBus?: EventBus;
 }
 
-export function createEmbeddingPipeline(config: EmbeddingPipelineConfig): Indexer & {
+export function weaveEmbeddingPipeline(config: EmbeddingPipelineConfig): Indexer & {
   ingestDocument(ctx: ExecutionContext, doc: Document): Promise<DocumentChunk[]>;
   ingestText(ctx: ExecutionContext, text: string, metadata?: Record<string, unknown>): Promise<DocumentChunk[]>;
 } {
-  const chunker = createChunker(config.chunkerConfig);
+  const chunker = weaveChunker(config.chunkerConfig);
   const batchSize = config.batchSize ?? 100;
 
   async function embedAndStore(ctx: ExecutionContext, chunks: DocumentChunk[]): Promise<DocumentChunk[]> {
@@ -50,7 +50,7 @@ export function createEmbeddingPipeline(config: EmbeddingPipelineConfig): Indexe
       const texts = batch.map((c) => c.content);
 
       config.eventBus?.emit(
-        createEvent(EventTypes.IndexingStart, { batchIndex: i, batchSize: batch.length }, ctx),
+        weaveEvent(EventTypes.IndexingStart, { batchIndex: i, batchSize: batch.length }, ctx),
       );
 
       const embeddingResponse = await config.embeddingModel.embed(ctx, { input: texts });
@@ -75,7 +75,7 @@ export function createEmbeddingPipeline(config: EmbeddingPipelineConfig): Indexe
       await config.vectorStore.upsert(ctx, records);
 
       config.eventBus?.emit(
-        createEvent(EventTypes.IndexingEnd, { indexed: records.length }, ctx),
+        weaveEvent(EventTypes.IndexingEnd, { indexed: records.length }, ctx),
       );
     }
 
@@ -122,7 +122,7 @@ export interface VectorRetrieverConfig {
   eventBus?: EventBus;
 }
 
-export function createVectorRetriever(config: VectorRetrieverConfig): Retriever {
+export function weaveRetriever(config: VectorRetrieverConfig): Retriever {
   const defaultTopK = config.defaultTopK ?? 5;
 
   return {
@@ -130,7 +130,7 @@ export function createVectorRetriever(config: VectorRetrieverConfig): Retriever 
       const topK = query.topK ?? defaultTopK;
 
       config.eventBus?.emit(
-        createEvent(EventTypes.RetrieverQueryStart, { query: query.query, topK }, ctx),
+        weaveEvent(EventTypes.RetrieverQueryStart, { query: query.query, topK }, ctx),
       );
 
       // Embed the query
@@ -177,7 +177,7 @@ export function createVectorRetriever(config: VectorRetrieverConfig): Retriever 
       }));
 
       config.eventBus?.emit(
-        createEvent(
+        weaveEvent(
           EventTypes.RetrieverQueryEnd,
           { query: query.query, resultsCount: chunks.length },
           ctx,

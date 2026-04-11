@@ -4,15 +4,15 @@
  * Demonstrates basic model invocation with the OpenAI provider.
  * Shows request/response, streaming, and structured output.
  */
-import { createExecutionContext, createEventBus } from '@weaveintel/core';
-import { createOpenAIModel } from '@weaveintel/provider-openai';
+import { weaveContext, weaveEventBus } from '@weaveintel/core';
+import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 
 async function main() {
-  const bus = createEventBus();
-  const ctx = createExecutionContext({ userId: 'demo-user' });
+  const bus = weaveEventBus();
+  const ctx = weaveContext({ userId: 'demo-user' });
 
   // Create a model instance
-  const model = createOpenAIModel({
+  const model = weaveOpenAIModel({
     apiKey: process.env['OPENAI_API_KEY']!,
     model: 'gpt-4o-mini',
   });

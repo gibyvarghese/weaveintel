@@ -5,40 +5,36 @@
  * working together to give an agent persistent context.
  */
 import {
-  createExecutionContext,
-  createEventBus,
-  createToolRegistry,
-  defineTool,
+  weaveContext,
 } from '@weaveintel/core';
 import {
-  createInMemoryStore,
-  createConversationMemory,
-  createSemanticMemory,
-  createEntityMemory,
+  weaveConversationMemory,
+  weaveSemanticMemory,
+  weaveEntityMemory,
 } from '@weaveintel/memory';
-import { createFakeEmbeddingModel } from '@weaveintel/testing';
+import { weaveFakeEmbedding } from '@weaveintel/testing';
 
 async function main() {
-  const ctx = createExecutionContext({ userId: 'demo-user' });
+  const ctx = weaveContext({ userId: 'demo-user' });
 
   // --- Conversation Memory ---
   console.log('=== Conversation Memory ===');
-  const conversationMemory = createConversationMemory({ maxTurns: 50 });
+  const conversationMemory = weaveConversationMemory({ maxHistory: 50 });
 
   // Simulate a multi-turn conversation
-  await conversationMemory.addMessage({ role: 'user', content: 'My name is Alice.' }, ctx);
-  await conversationMemory.addMessage({
+  await conversationMemory.addMessage(ctx, { role: 'user', content: 'My name is Alice.' });
+  await conversationMemory.addMessage(ctx, {
     role: 'assistant',
     content: 'Nice to meet you, Alice! How can I help?',
-  }, ctx);
-  await conversationMemory.addMessage({
+  });
+  await conversationMemory.addMessage(ctx, {
     role: 'user',
     content: 'I work at Acme Corp on the AI team.',
-  }, ctx);
-  await conversationMemory.addMessage({
+  });
+  await conversationMemory.addMessage(ctx, {
     role: 'assistant',
     content: 'That sounds exciting! What are you working on?',
-  }, ctx);
+  });
 
   const history = await conversationMemory.getMessages(ctx);
   console.log(`Stored ${history.length} messages`);
@@ -48,43 +44,50 @@ async function main() {
 
   // --- Semantic Memory ---
   console.log('\n=== Semantic Memory ===');
-  const embeddingModel = createFakeEmbeddingModel({ dimensions: 64 });
-  const store = createInMemoryStore();
-  const semanticMemory = createSemanticMemory({ store, embeddingModel });
+  const embeddingModel = weaveFakeEmbedding({ dimensions: 64 });
+  const semanticMemory = weaveSemanticMemory(embeddingModel);
 
   // Store some knowledge
-  await semanticMemory.store('Alice prefers TypeScript over Python.', {}, ctx);
-  await semanticMemory.store('Alice is working on a RAG pipeline at Acme Corp.', {}, ctx);
-  await semanticMemory.store('The team meeting is every Tuesday at 10am.', {}, ctx);
-  await semanticMemory.store('Project deadline is end of Q4 2025.', {}, ctx);
+  await semanticMemory.store(ctx, 'Alice prefers TypeScript over Python.');
+  await semanticMemory.store(ctx, 'Alice is working on a RAG pipeline at Acme Corp.');
+  await semanticMemory.store(ctx, 'The team meeting is every Tuesday at 10am.');
+  await semanticMemory.store(ctx, 'Project deadline is end of Q4 2025.');
 
   // Recall relevant memories
-  const recalled = await semanticMemory.recall('What is Alice working on?', 2, ctx);
+  const recalled = await semanticMemory.recall(ctx, 'What is Alice working on?', 2);
   console.log('Recalled memories for "What is Alice working on?":');
   for (const mem of recalled) {
-    console.log(`  [score=${mem.score?.toFixed(3)}] ${mem.content}`);
+    console.log(`  ${mem.content}`);
   }
 
   // --- Entity Memory ---
   console.log('\n=== Entity Memory ===');
-  const entityMemory = createEntityMemory();
+  const entityMemory = weaveEntityMemory();
 
-  await entityMemory.setFact('Alice', 'role', 'AI Engineer', ctx);
-  await entityMemory.setFact('Alice', 'company', 'Acme Corp', ctx);
-  await entityMemory.setFact('Alice', 'preference', 'TypeScript > Python', ctx);
-  await entityMemory.setFact('Acme Corp', 'industry', 'Technology', ctx);
-  await entityMemory.setFact('Acme Corp', 'team_size', '15 engineers', ctx);
+  await entityMemory.upsertEntity(ctx, 'Alice', {
+    role: 'AI Engineer',
+    company: 'Acme Corp',
+    preference: 'TypeScript > Python',
+  });
+  await entityMemory.upsertEntity(ctx, 'Acme Corp', {
+    industry: 'Technology',
+    team_size: '15 engineers',
+  });
 
-  const aliceFacts = await entityMemory.getFacts('Alice', ctx);
+  const aliceEntry = await entityMemory.getEntity(ctx, 'Alice');
   console.log('Facts about Alice:');
-  for (const [key, value] of Object.entries(aliceFacts)) {
-    console.log(`  ${key}: ${value}`);
+  if (aliceEntry?.metadata) {
+    for (const [key, value] of Object.entries(aliceEntry.metadata)) {
+      console.log(`  ${key}: ${value}`);
+    }
   }
 
-  const acmeFacts = await entityMemory.getFacts('Acme Corp', ctx);
+  const acmeEntry = await entityMemory.getEntity(ctx, 'Acme Corp');
   console.log('Facts about Acme Corp:');
-  for (const [key, value] of Object.entries(acmeFacts)) {
-    console.log(`  ${key}: ${value}`);
+  if (acmeEntry?.metadata) {
+    for (const [key, value] of Object.entries(acmeEntry.metadata)) {
+      console.log(`  ${key}: ${value}`);
+    }
   }
 
   // --- Combined: Build a rich prompt from all memories ---
@@ -95,13 +98,14 @@ async function main() {
     .map((m) => `${m.role}: ${m.content}`)
     .join('\n');
 
-  const semanticContext = (await semanticMemory.recall(query, 3, ctx))
+  const semanticContext = (await semanticMemory.recall(ctx, query, 3))
     .map((m) => m.content)
     .join('\n');
 
-  const entityContext = Object.entries(await entityMemory.getFacts('Alice', ctx))
-    .map(([k, v]) => `${k}: ${v}`)
-    .join('\n');
+  const aliceEntity = await entityMemory.getEntity(ctx, 'Alice');
+  const entityContext = aliceEntity?.metadata
+    ? Object.entries(aliceEntity.metadata).map(([k, v]) => `${k}: ${v}`).join('\n')
+    : '';
 
   console.log('Conversation context:\n', conversationContext);
   console.log('\nSemantic context:\n', semanticContext);

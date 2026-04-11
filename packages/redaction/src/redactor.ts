@@ -33,7 +33,7 @@ const BUILTIN_PATTERNS: Record<string, RegExp> = {
 
 // ─── Redactor implementation ─────────────────────────────────
 
-export function createRedactor(policy: RedactionPolicy): Redactor {
+export function weaveRedactor(policy: RedactionPolicy): Redactor {
   const compiledPatterns = policy.patterns.map((p) => compilePattern(p));
 
   return {
@@ -138,7 +138,7 @@ function compilePattern(p: RedactionPattern): { pattern: RegExp; type: string; r
 
 // ─── Policy engine implementation ────────────────────────────
 
-export function createPolicyEngine(): PolicyEngine {
+export function weavePolicyEngine(): PolicyEngine {
   const rules: PolicyRule[] = [];
 
   return {

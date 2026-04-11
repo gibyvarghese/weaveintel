@@ -5,18 +5,17 @@
  * and retrieval-augmented generation (query → retrieve → generate).
  * Uses fake models and vector store for deterministic execution.
  */
-import { createExecutionContext } from '@weaveintel/core';
+import { weaveContext } from '@weaveintel/core';
 import type { Document } from '@weaveintel/core';
-import { createChunker, createEmbeddingPipeline, createVectorRetriever } from '@weaveintel/retrieval';
-import { createFakeEmbeddingModel, createFakeVectorStore, createFakeModel } from '@weaveintel/testing';
+import { weaveEmbeddingPipeline, weaveRetriever } from '@weaveintel/retrieval';
+import { weaveFakeEmbedding, weaveFakeVectorStore, weaveFakeModel } from '@weaveintel/testing';
 
 async function main() {
-  const ctx = createExecutionContext({ userId: 'demo-user' });
+  const ctx = weaveContext({ userId: 'demo-user' });
 
   // Setup
-  const embeddingModel = createFakeEmbeddingModel({ dimensions: 128 });
-  const vectorStore = createFakeVectorStore();
-  const chunker = createChunker({ strategy: 'fixed_size', chunkSize: 200, overlap: 50 });
+  const embeddingModel = weaveFakeEmbedding({ dimensions: 128 });
+  const vectorStore = weaveFakeVectorStore();
 
   // --- Ingest documents ---
   console.log('=== Document Ingestion ===');
@@ -48,39 +47,39 @@ async function main() {
     },
   ];
 
-  const pipeline = createEmbeddingPipeline({
-    chunker,
+  const pipeline = weaveEmbeddingPipeline({
+    chunkerConfig: { strategy: 'fixed_size', chunkSize: 200, overlap: 50 },
     embeddingModel,
     vectorStore,
   });
 
   for (const doc of documents) {
-    const chunks = await pipeline.ingest(doc, ctx);
+    const chunks = await pipeline.ingestDocument(ctx, doc);
     console.log(`  Ingested "${doc.metadata.title}" → ${chunks.length} chunks`);
   }
 
   // --- Retrieve ---
   console.log('\n=== Retrieval ===');
 
-  const retriever = createVectorRetriever({
+  const retriever = weaveRetriever({
     embeddingModel,
     vectorStore,
-    topK: 3,
+    defaultTopK: 3,
   });
 
   const query = 'Who created TypeScript?';
-  const results = await retriever.retrieve(query, ctx);
+  const results = await retriever.retrieve(ctx, { query });
 
   console.log(`Query: "${query}"`);
-  console.log(`Retrieved ${results.length} chunks:`);
-  for (const chunk of results) {
-    console.log(`  [score=${chunk.score?.toFixed(3)}] ${chunk.content.slice(0, 80)}...`);
+  console.log(`Retrieved ${results.chunks.length} chunks:`);
+  for (const chunk of results.chunks) {
+    console.log(`  ${chunk.content.slice(0, 80)}...`);
   }
 
   // --- Generate answer with context ---
   console.log('\n=== Generation ===');
 
-  const model = createFakeModel({
+  const model = weaveFakeModel({
     responses: [
       {
         content: 'TypeScript was developed by Microsoft and first released in 2012.',
@@ -89,8 +88,9 @@ async function main() {
     ],
   });
 
-  const context = results.map((r) => r.content).join('\n\n');
-  const answer = await model.chat(
+  const context = results.chunks.map((r) => r.content).join('\n\n');
+  const answer = await model.generate(
+    ctx,
     {
       messages: [
         {
@@ -100,7 +100,6 @@ async function main() {
         { role: 'user', content: query },
       ],
     },
-    ctx,
   );
 
   console.log(`Answer: ${answer.content}`);

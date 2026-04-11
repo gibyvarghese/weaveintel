@@ -24,7 +24,7 @@ import type {
   Middleware,
   CapabilityId,
 } from '@weaveintel/core';
-import { composeMiddleware, WeaveIntelError, createEvent, EventTypes } from '@weaveintel/core';
+import { weaveMiddleware, WeaveIntelError, weaveEvent, EventTypes } from '@weaveintel/core';
 
 // ─── Chat model provider registry ────────────────────────────
 
@@ -135,7 +135,7 @@ function wrapEmbeddingWithFallback(
           const response = await model.embed(ctx, request);
           if (i > 0 && eventBus) {
             eventBus.emit(
-              createEvent('embedding.fallback.used', {
+              weaveEvent('embedding.fallback.used', {
                 primaryModel: primary.info.modelId,
                 fallbackModel: model.info.modelId,
                 fallbackIndex: i,
@@ -187,7 +187,7 @@ function wrapWithFallback(
           const response = await model.generate(ctx, request);
           if (i > 0 && eventBus) {
             eventBus.emit(
-              createEvent('model.fallback.used', {
+              weaveEvent('model.fallback.used', {
                 primaryModel: primary.info.modelId,
                 fallbackModel: model.info.modelId,
                 fallbackIndex: i,
@@ -242,7 +242,7 @@ async function* streamWithFallback(
 
       if (i > 0 && eventBus) {
         eventBus.emit(
-          createEvent('model.stream.fallback.used', {
+          weaveEvent('model.stream.fallback.used', {
             primaryModel: primaryModelId,
             fallbackModel: model.info.modelId,
             fallbackIndex: i,
@@ -275,7 +275,7 @@ function wrapWithMiddleware(
   model: Model,
   middlewares: Middleware<ModelRequest, ModelResponse>[],
 ): Model {
-  const handler = composeMiddleware(middlewares, (ctx, req) => model.generate(ctx, req));
+  const handler = weaveMiddleware(middlewares, (ctx, req) => model.generate(ctx, req));
 
   return {
     info: model.info,
@@ -357,7 +357,7 @@ export function modelObservabilityMiddleware(
   return async (ctx, request, next) => {
     const startTime = Date.now();
     eventBus.emit(
-      createEvent(
+      weaveEvent(
         EventTypes.ModelRequestStart,
         { messages: request.messages.length, hasTools: !!request.tools?.length },
         ctx,
@@ -369,7 +369,7 @@ export function modelObservabilityMiddleware(
       const durationMs = Date.now() - startTime;
 
       eventBus.emit(
-        createEvent(
+        weaveEvent(
           EventTypes.ModelRequestEnd,
           {
             model: response.model,
@@ -383,7 +383,7 @@ export function modelObservabilityMiddleware(
 
       if (response.usage) {
         eventBus.emit(
-          createEvent(
+          weaveEvent(
             EventTypes.ModelTokenUsage,
             {
               model: response.model,
@@ -399,7 +399,7 @@ export function modelObservabilityMiddleware(
       return response;
     } catch (err) {
       eventBus.emit(
-        createEvent(
+        weaveEvent(
           EventTypes.ModelRequestError,
           { error: err instanceof Error ? err.message : String(err), durationMs: Date.now() - startTime },
           ctx,
@@ -421,7 +421,7 @@ export function streamObservabilityMiddleware(
     return (async function* (): AsyncIterable<StreamChunk> {
       const startTime = Date.now();
       eventBus.emit(
-        createEvent(
+        weaveEvent(
           EventTypes.ModelRequestStart,
           { messages: request.messages.length, streaming: true },
           ctx,
@@ -444,7 +444,7 @@ export function streamObservabilityMiddleware(
 
         const durationMs = Date.now() - startTime;
         eventBus.emit(
-          createEvent(
+          weaveEvent(
             EventTypes.ModelRequestEnd,
             {
               model: 'stream',
@@ -460,12 +460,12 @@ export function streamObservabilityMiddleware(
 
         if (usage) {
           eventBus.emit(
-            createEvent(EventTypes.ModelTokenUsage, { ...usage, streaming: true }, ctx),
+            weaveEvent(EventTypes.ModelTokenUsage, { ...usage, streaming: true }, ctx),
           );
         }
       } catch (err) {
         eventBus.emit(
-          createEvent(
+          weaveEvent(
             EventTypes.ModelRequestError,
             { error: err instanceof Error ? err.message : String(err), durationMs: Date.now() - startTime, streaming: true },
             ctx,

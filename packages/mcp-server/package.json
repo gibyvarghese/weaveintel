@@ -1,12 +1,28 @@
 {
   "name": "@weaveintel/mcp-server",
   "version": "0.0.1",
-  "description": "MCP server — expose tools/resources/prompts via MCP protocol",
+  "description": "MCP server \u2014 expose tools/resources/prompts via MCP protocol",
   "type": "module",
-  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "scripts": { "build": "tsc -b", "typecheck": "tsc --noEmit", "test": "vitest run", "clean": "rm -rf dist" },
-  "dependencies": { "@weaveintel/core": "*" },
-  "devDependencies": { "typescript": "^5.7.0", "vitest": "^3.0.0" }
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@weaveintel/core": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
 }

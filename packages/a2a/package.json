@@ -1,12 +1,28 @@
 {
   "name": "@weaveintel/a2a",
   "version": "0.0.1",
-  "description": "A2A protocol — agent-to-agent communication client and server",
+  "description": "A2A protocol \u2014 agent-to-agent communication client and server",
   "type": "module",
-  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "scripts": { "build": "tsc -b", "typecheck": "tsc --noEmit", "test": "vitest run", "clean": "rm -rf dist" },
-  "dependencies": { "@weaveintel/core": "*" },
-  "devDependencies": { "typescript": "^5.7.0", "vitest": "^3.0.0" }
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@weaveintel/core": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
 }

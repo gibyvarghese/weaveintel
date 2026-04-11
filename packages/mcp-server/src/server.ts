@@ -20,7 +20,7 @@ import type {
   MCPTransport,
   ExecutionContext,
 } from '@weaveintel/core';
-import { createExecutionContext } from '@weaveintel/core';
+import { weaveContext } from '@weaveintel/core';
 
 interface JsonRpcRequest {
   jsonrpc: '2.0';
@@ -36,7 +36,7 @@ interface JsonRpcResponse {
   error?: { code: number; message: string; data?: unknown };
 }
 
-export function createMCPServer(config: MCPServerConfig): MCPServer {
+export function weaveMCPServer(config: MCPServerConfig): MCPServer {
   const tools = new Map<string, { definition: MCPToolDefinition; handler: MCPToolHandler }>();
   const resources = new Map<string, { resource: MCPResource; handler: MCPResourceHandler }>();
   const prompts = new Map<string, { prompt: MCPPrompt; handler: MCPPromptHandler }>();
@@ -77,7 +77,7 @@ export function createMCPServer(config: MCPServerConfig): MCPServer {
           if (!tool) {
             error = { code: -32602, message: `Tool not found: ${name}` };
           } else {
-            const ctx = createExecutionContext();
+            const ctx = weaveContext();
             result = await tool.handler(ctx, args);
           }
           break;

@@ -5,71 +5,76 @@
  * connecting an MCP client, and invoking tools via the MCP protocol.
  * Uses the fake in-memory transport pair for testing.
  */
-import { createExecutionContext, createToolRegistry, defineTool } from '@weaveintel/core';
-import { createMCPServer } from '@weaveintel/mcp-server';
-import { createMCPClient, mcpToolsToRegistry } from '@weaveintel/mcp-client';
-import { createFakeTransportPair } from '@weaveintel/testing';
+import { weaveContext } from '@weaveintel/core';
+import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { weaveMCPClient, weaveMCPTools } from '@weaveintel/mcp-client';
+import { weaveFakeTransport } from '@weaveintel/testing';
 
 async function main() {
-  const ctx = createExecutionContext({ userId: 'demo-user' });
+  const ctx = weaveContext({ userId: 'demo-user' });
 
   // Create a transport pair (client ↔ server linked in memory)
-  const { clientTransport, serverTransport } = createFakeTransportPair();
+  const { client: clientTransport, server: serverTransport } = weaveFakeTransport();
 
   // --- Server side ---
-  const server = createMCPServer({
+  const server = weaveMCPServer({
     name: 'demo-server',
     version: '1.0.0',
-    transport: serverTransport,
   });
 
-  server.addTool({
-    name: 'greet',
-    description: 'Greet someone by name',
-    inputSchema: {
-      type: 'object',
-      properties: { name: { type: 'string' } },
-      required: ['name'],
+  server.addTool(
+    {
+      name: 'greet',
+      description: 'Greet someone by name',
+      inputSchema: {
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required: ['name'],
+      },
     },
-    handler: async (args) => ({
+    async (_ctx, args) => ({
       content: [{ type: 'text', text: `Hello, ${(args as { name: string }).name}! Welcome to WeaveIntel.` }],
     }),
-  });
+  );
 
-  server.addTool({
-    name: 'add',
-    description: 'Add two numbers',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        a: { type: 'number' },
-        b: { type: 'number' },
+  server.addTool(
+    {
+      name: 'add',
+      description: 'Add two numbers',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          a: { type: 'number' },
+          b: { type: 'number' },
+        },
+        required: ['a', 'b'],
       },
-      required: ['a', 'b'],
     },
-    handler: async (args) => {
+    async (_ctx, args) => {
       const { a, b } = args as { a: number; b: number };
       return { content: [{ type: 'text', text: String(a + b) }] };
     },
-  });
+  );
 
-  server.addResource({
-    uri: 'config://app/version',
-    name: 'App Version',
-    description: 'Current application version',
-    handler: async () => ({
-      contents: [{ uri: 'config://app/version', text: '1.0.0-beta', mimeType: 'text/plain' }],
+  server.addResource(
+    {
+      uri: 'config://app/version',
+      name: 'App Version',
+      description: 'Current application version',
+    },
+    async () => ({
+      uri: 'config://app/version',
+      text: '1.0.0-beta',
+      mimeType: 'text/plain',
     }),
-  });
+  );
 
-  // Start the server
-  await server.start();
+  // Start the server on the server-side transport
+  await server.start(serverTransport);
 
   // --- Client side ---
-  const client = await createMCPClient({
-    transport: clientTransport,
-    clientInfo: { name: 'demo-client', version: '1.0.0' },
-  });
+  const client = weaveMCPClient();
+  await client.connect(clientTransport);
 
   // List available tools
   console.log('=== Available MCP Tools ===');
@@ -80,11 +85,11 @@ async function main() {
 
   // Call a tool
   console.log('\n=== Tool Calls ===');
-  const greetResult = await client.callTool('greet', { name: 'Alice' });
-  console.log('greet:', greetResult);
+  const greetResult = await client.callTool(ctx, { name: 'greet', arguments: { name: 'Alice' } });
+  console.log('greet:', JSON.stringify(greetResult));
 
-  const addResult = await client.callTool('add', { a: 17, b: 25 });
-  console.log('add:', addResult);
+  const addResult = await client.callTool(ctx, { name: 'add', arguments: { a: 17, b: 25 } });
+  console.log('add:', JSON.stringify(addResult));
 
   // List and read resources
   console.log('\n=== Resources ===');
@@ -93,17 +98,19 @@ async function main() {
     console.log(`  ${res.uri}: ${res.name}`);
   }
   const versionResource = await client.readResource('config://app/version');
-  console.log('Version:', versionResource);
+  console.log('Version:', JSON.stringify(versionResource));
 
   // Bridge MCP tools into WeaveIntel ToolRegistry
   console.log('\n=== MCP → WeaveIntel Bridge ===');
-  const registry = await mcpToolsToRegistry(client);
+  const registry = weaveMCPTools(client, tools);
   const bridgedTools = registry.list();
   console.log(`Bridged ${bridgedTools.length} tools into ToolRegistry`);
 
-  // Call a bridged tool
-  const bridgedResult = await registry.get('greet')!.execute({ name: 'Bob' }, ctx);
-  console.log('Bridged greet:', bridgedResult);
+  // Call a bridged tool via the WeaveIntel Tool.invoke interface
+  const bridgedResult = await registry.get('greet')!.invoke(ctx, { name: 'greet', arguments: { name: 'Bob' } });
+  console.log('Bridged greet:', JSON.stringify(bridgedResult));
+
+  await client.disconnect();
 }
 
 main().catch(console.error);

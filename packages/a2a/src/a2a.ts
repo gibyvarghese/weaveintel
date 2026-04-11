@@ -15,11 +15,11 @@ import type {
   InternalA2ABus,
   ExecutionContext,
 } from '@weaveintel/core';
-import { createExecutionContext, WeaveIntelError } from '@weaveintel/core';
+import { weaveContext, WeaveIntelError } from '@weaveintel/core';
 
 // ─── HTTP-based A2A client ───────────────────────────────────
 
-export function createA2AClient(): A2AClient {
+export function weaveA2AClient(): A2AClient {
   return {
     async discover(url: string): Promise<AgentCard> {
       const wellKnown = url.replace(/\/$/, '') + '/.well-known/agent.json';
@@ -113,7 +113,7 @@ export function createA2AClient(): A2AClient {
 
 // ─── Internal A2A bus (in-process delegation) ────────────────
 
-export function createInternalA2ABus(): InternalA2ABus {
+export function weaveA2ABus(): InternalA2ABus {
   const agents = new Map<string, A2AServer>();
 
   return {

@@ -56,6 +56,27 @@ export const Capabilities = {
   MemoryEpisodic: capabilityId('memory.episodic'),
   MemoryEntity: capabilityId('memory.entity'),
 
+  // Responses / Agentic loop capabilities
+  Responses: capabilityId('model.responses'),
+  WebSearch: capabilityId('model.web_search'),
+  FileSearch: capabilityId('model.file_search'),
+  CodeInterpreter: capabilityId('model.code_interpreter'),
+  ComputerUse: capabilityId('model.computer_use'),
+
+  // File & storage capabilities
+  FileUpload: capabilityId('storage.file_upload'),
+  FileDownload: capabilityId('storage.file_download'),
+
+  // Managed vector store capabilities
+  ManagedVectorStore: capabilityId('vector.managed'),
+  ManagedVectorSearch: capabilityId('vector.managed_search'),
+
+  // Moderation capabilities
+  Moderation: capabilityId('moderation.classify'),
+
+  // Fine-tuning capabilities
+  FineTuning: capabilityId('model.fine_tuning'),
+
   // Agent capabilities
   AgentPlanning: capabilityId('agent.planning'),
   AgentToolUse: capabilityId('agent.tool_use'),

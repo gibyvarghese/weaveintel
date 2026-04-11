@@ -81,7 +81,7 @@ function createSpanImpl(
 
 // ─── Console tracer ──────────────────────────────────────────
 
-export function createConsoleTracer(): Tracer & { sink: TraceSink } {
+export function weaveConsoleTracer(): Tracer & { sink: TraceSink } {
   const sink: TraceSink = {
     record(span: SpanRecord): void {
       const dur = span.endTime - span.startTime;
@@ -123,7 +123,7 @@ export function createConsoleTracer(): Tracer & { sink: TraceSink } {
 
 // ─── In-memory tracer (for testing) ──────────────────────────
 
-export function createInMemoryTracer(): Tracer & { spans: SpanRecord[]; clear(): void; sink: TraceSink } {
+export function weaveInMemoryTracer(): Tracer & { spans: SpanRecord[]; clear(): void; sink: TraceSink } {
   const spans: SpanRecord[] = [];
 
   const sink: TraceSink = {
@@ -169,7 +169,7 @@ export function createInMemoryTracer(): Tracer & { spans: SpanRecord[]; clear():
 
 // ─── Usage tracker implementation ────────────────────────────
 
-export function createUsageTracker(): UsageTracker {
+export function weaveUsageTracker(): UsageTracker {
   const records: UsageRecord[] = [];
   const totals = new Map<string, UsageRecord>();
 

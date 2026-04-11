@@ -24,7 +24,7 @@ import type {
 
 // ─── In-memory store ─────────────────────────────────────────
 
-export function createInMemoryStore(): MemoryStore {
+export function weaveMemoryStore(): MemoryStore {
   const entries = new Map<string, MemoryEntry>();
 
   function matchesFilter(entry: MemoryEntry, filter?: MemoryFilter): boolean {
@@ -100,7 +100,7 @@ export function createInMemoryStore(): MemoryStore {
 
 // ─── Conversation memory ─────────────────────────────────────
 
-export function createConversationMemory(opts?: {
+export function weaveConversationMemory(opts?: {
   maxHistory?: number;
 }): ConversationMemory & AgentMemory {
   const messages: Message[] = [];
@@ -144,11 +144,11 @@ export function createConversationMemory(opts?: {
 
 // ─── Semantic memory ─────────────────────────────────────────
 
-export function createSemanticMemory(
+export function weaveSemanticMemory(
   embeddingModel: EmbeddingModel,
   store?: MemoryStore,
 ): SemanticMemory {
-  const memStore = store ?? createInMemoryStore();
+  const memStore = store ?? weaveMemoryStore();
   let idCounter = 0;
 
   return {
@@ -180,8 +180,8 @@ export function createSemanticMemory(
 
 // ─── Entity memory ───────────────────────────────────────────
 
-export function createEntityMemory(store?: MemoryStore): EntityMemory {
-  const memStore = store ?? createInMemoryStore();
+export function weaveEntityMemory(store?: MemoryStore): EntityMemory {
+  const memStore = store ?? weaveMemoryStore();
 
   return {
     async upsertEntity(ctx: ExecutionContext, name: string, facts: Record<string, unknown>): Promise<void> {

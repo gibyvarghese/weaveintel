@@ -24,17 +24,18 @@ import type {
   ExecutionContext,
   CapabilityId,
 } from '@weaveintel/core';
-import { createCapabilitySet, Capabilities } from '@weaveintel/core';
+import { weaveCapabilities, Capabilities } from '@weaveintel/core';
 
 // ─── Fake model ──────────────────────────────────────────────
 
+/** A single canned response — either a plain string or an object with content + toolCalls. */
+export type FakeResponse = string | { content: string; toolCalls?: Array<{ id: string; function: { name: string; arguments: string } }> };
+
 export interface FakeModelOptions {
-  /** Predefined responses. Cycled through in order. */
-  responses?: string[];
+  /** Predefined responses. Cycled through in order. Accepts plain strings or rich objects. */
+  responses?: FakeResponse[];
   /** Function to generate responses dynamically */
   responseFn?: (request: ModelRequest) => string;
-  /** Fake tool calls to return */
-  toolCalls?: ModelResponse['toolCalls'];
   /** Simulated latency in ms */
   latencyMs?: number;
   /** Model info overrides */
@@ -42,8 +43,8 @@ export interface FakeModelOptions {
   provider?: string;
 }
 
-export function createFakeModel(opts: FakeModelOptions = {}): Model {
-  const responses = opts.responses ?? ['This is a fake response.'];
+export function weaveFakeModel(opts: FakeModelOptions = {}): Model {
+  const rawResponses = opts.responses ?? ['This is a fake response.'];
   let callIndex = 0;
 
   const info: ModelInfo = {
@@ -54,7 +55,25 @@ export function createFakeModel(opts: FakeModelOptions = {}): Model {
     maxOutputTokens: 4096,
   };
 
-  const capSet = createCapabilitySet(Capabilities.Chat);
+  const capSet = weaveCapabilities(Capabilities.Chat);
+
+  function resolveResponse(request: ModelRequest): { content: string; toolCalls?: ModelResponse['toolCalls'] } {
+    if (opts.responseFn) {
+      return { content: opts.responseFn(request) };
+    }
+    const raw = rawResponses[callIndex % rawResponses.length]!;
+    if (typeof raw === 'string') {
+      return { content: raw };
+    }
+    return {
+      content: raw.content,
+      toolCalls: raw.toolCalls?.map((tc) => ({
+        id: tc.id,
+        name: tc.function.name,
+        arguments: tc.function.arguments,
+      })),
+    };
+  }
 
   return {
     info,
@@ -65,9 +84,7 @@ export function createFakeModel(opts: FakeModelOptions = {}): Model {
         await new Promise((resolve) => setTimeout(resolve, opts.latencyMs));
       }
 
-      const content = opts.responseFn
-        ? opts.responseFn(request)
-        : responses[callIndex % responses.length]!;
+      const { content, toolCalls } = resolveResponse(request);
       callIndex++;
 
       const usage: TokenUsage = {
@@ -79,8 +96,8 @@ export function createFakeModel(opts: FakeModelOptions = {}): Model {
       return {
         id: `fake_${callIndex}`,
         content,
-        toolCalls: opts.toolCalls,
-        finishReason: opts.toolCalls ? 'tool_calls' : 'stop',
+        toolCalls,
+        finishReason: toolCalls && toolCalls.length > 0 ? 'tool_calls' : 'stop',
         usage,
         model: info.modelId,
       };
@@ -91,9 +108,7 @@ export function createFakeModel(opts: FakeModelOptions = {}): Model {
         await new Promise((resolve) => setTimeout(resolve, opts.latencyMs));
       }
 
-      const content = opts.responseFn
-        ? opts.responseFn(request)
-        : responses[callIndex % responses.length]!;
+      const { content } = resolveResponse(request);
       callIndex++;
 
       // Stream character by character
@@ -117,7 +132,7 @@ export function createFakeModel(opts: FakeModelOptions = {}): Model {
 
 // ─── Fake embedding model ────────────────────────────────────
 
-export function createFakeEmbeddingModel(opts?: {
+export function weaveFakeEmbedding(opts?: {
   dimensions?: number;
   modelId?: string;
 }): EmbeddingModel {
@@ -128,7 +143,7 @@ export function createFakeEmbeddingModel(opts?: {
     capabilities: new Set([Capabilities.Embedding]),
   };
 
-  const capSet = createCapabilitySet(Capabilities.Embedding);
+  const capSet = weaveCapabilities(Capabilities.Embedding);
 
   return {
     info,
@@ -162,10 +177,10 @@ export function createFakeEmbeddingModel(opts?: {
 
 // ─── Fake vector store ───────────────────────────────────────
 
-export function createFakeVectorStore(opts?: { dimensions?: number }): VectorStore {
+export function weaveFakeVectorStore(opts?: { dimensions?: number }): VectorStore {
   const records = new Map<string, VectorRecord>();
   const dims = opts?.dimensions ?? 384;
-  const capSet = createCapabilitySet(Capabilities.VectorSearch);
+  const capSet = weaveCapabilities(Capabilities.VectorSearch);
 
   function cosineSim(a: number[], b: number[]): number {
     let dot = 0, normA = 0, normB = 0;
@@ -219,7 +234,7 @@ export function createFakeVectorStore(opts?: { dimensions?: number }): VectorSto
 
 import type { MCPTransport } from '@weaveintel/core';
 
-export function createFakeTransportPair(): { client: MCPTransport; server: MCPTransport } {
+export function weaveFakeTransport(): { client: MCPTransport; server: MCPTransport } {
   let clientHandler: ((msg: unknown) => void) | null = null;
   let serverHandler: ((msg: unknown) => void) | null = null;
 

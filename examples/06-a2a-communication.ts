@@ -5,24 +5,32 @@
  * Two agents (summarizer and translator) communicate via the bus.
  */
 import {
-  createExecutionContext,
-  createEventBus,
-  createToolRegistry,
+  weaveContext,
+  weaveEventBus,
+  weaveToolRegistry,
 } from '@weaveintel/core';
-import type { AgentCard } from '@weaveintel/core';
-import { createInternalA2ABus } from '@weaveintel/a2a';
-import { createToolCallingAgent } from '@weaveintel/agents';
-import { createFakeModel } from '@weaveintel/testing';
+import type { AgentCard, A2AServer, A2ATask, A2ATaskResult, ExecutionContext } from '@weaveintel/core';
+import { weaveA2ABus } from '@weaveintel/a2a';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveFakeModel } from '@weaveintel/testing';
+
+/** Helper to extract text from an A2ATask input */
+function taskText(task: A2ATask): string {
+  return task.input.parts
+    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+    .map((p) => p.text)
+    .join('\n');
+}
 
 async function main() {
-  const bus = createEventBus();
-  const ctx = createExecutionContext({ userId: 'demo-user' });
+  const bus = weaveEventBus();
+  const ctx = weaveContext({ userId: 'demo-user' });
 
   // Create the A2A bus
-  const a2aBus = createInternalA2ABus();
+  const a2aBus = weaveA2ABus();
 
   // --- Register Agent 1: Summarizer ---
-  const summarizerModel = createFakeModel({
+  const summarizerModel = weaveFakeModel({
     responses: [
       {
         content: 'Summary: WeaveIntel is a modular, protocol-first AI framework for TypeScript.',
@@ -31,32 +39,40 @@ async function main() {
     ],
   });
 
-  const summarizerAgent = createToolCallingAgent({
+  const summarizerAgent = weaveAgent({
     model: summarizerModel,
-    tools: createToolRegistry(),
+    tools: weaveToolRegistry(),
     bus,
     systemPrompt: 'You summarize text concisely.',
     maxSteps: 3,
   });
 
-  const summarizerCard: AgentCard = {
-    name: 'summarizer',
-    description: 'Summarizes text into concise bullet points',
-    url: 'a2a://internal/summarizer',
-    capabilities: ['text.summarize'],
-    version: '1.0.0',
+  const summarizerServer: A2AServer = {
+    card: {
+      name: 'summarizer',
+      description: 'Summarizes text into concise bullet points',
+      url: 'a2a://internal/summarizer',
+      capabilities: ['text.summarize'],
+      version: '1.0.0',
+    },
+    async handleTask(taskCtx: ExecutionContext, task: A2ATask): Promise<A2ATaskResult> {
+      const result = await summarizerAgent.run(taskCtx, {
+        messages: [{ role: 'user', content: taskText(task) }],
+      });
+      return {
+        id: task.id,
+        status: 'completed',
+        output: { role: 'agent', parts: [{ type: 'text', text: result.output }] },
+      };
+    },
+    async start() {},
+    async stop() {},
   };
 
-  a2aBus.register(summarizerCard, async (task) => {
-    const result = await summarizerAgent.run(
-      { messages: [{ role: 'user', content: task.input }] },
-      ctx,
-    );
-    return { ...task, status: 'completed', output: result.output };
-  });
+  a2aBus.register('summarizer', summarizerServer);
 
   // --- Register Agent 2: Translator ---
-  const translatorModel = createFakeModel({
+  const translatorModel = weaveFakeModel({
     responses: [
       {
         content: 'Translation (French): WeaveIntel est un framework IA modulaire pour TypeScript.',
@@ -65,54 +81,77 @@ async function main() {
     ],
   });
 
-  const translatorAgent = createToolCallingAgent({
+  const translatorAgent = weaveAgent({
     model: translatorModel,
-    tools: createToolRegistry(),
+    tools: weaveToolRegistry(),
     bus,
     systemPrompt: 'You translate text to the requested language.',
     maxSteps: 3,
   });
 
-  const translatorCard: AgentCard = {
-    name: 'translator',
-    description: 'Translates text to other languages',
-    url: 'a2a://internal/translator',
-    capabilities: ['text.translate'],
-    version: '1.0.0',
+  const translatorServer: A2AServer = {
+    card: {
+      name: 'translator',
+      description: 'Translates text to other languages',
+      url: 'a2a://internal/translator',
+      capabilities: ['text.translate'],
+      version: '1.0.0',
+    },
+    async handleTask(taskCtx: ExecutionContext, task: A2ATask): Promise<A2ATaskResult> {
+      const result = await translatorAgent.run(taskCtx, {
+        messages: [{ role: 'user', content: taskText(task) }],
+      });
+      return {
+        id: task.id,
+        status: 'completed',
+        output: { role: 'agent', parts: [{ type: 'text', text: result.output }] },
+      };
+    },
+    async start() {},
+    async stop() {},
   };
 
-  a2aBus.register(translatorCard, async (task) => {
-    const result = await translatorAgent.run(
-      { messages: [{ role: 'user', content: task.input }] },
-      ctx,
-    );
-    return { ...task, status: 'completed', output: result.output };
-  });
+  a2aBus.register('translator', translatorServer);
 
   // --- Use the bus ---
   console.log('=== Discover Agents ===');
-  const agents = a2aBus.discover();
+  const agents = a2aBus.listAgents();
   for (const card of agents) {
     console.log(`  ${card.name}: ${card.description} [${card.capabilities.join(', ')}]`);
   }
 
   // Send a task to the summarizer
   console.log('\n=== Summarize ===');
-  const summaryTask = await a2aBus.send('summarizer', {
+  const summaryResult = await a2aBus.send(ctx, 'summarizer', {
     id: 'task-1',
-    input: 'WeaveIntel is a production-grade, protocol-first, capability-driven AI framework written in TypeScript. It supports multiple LLM types, vector stores, agents, MCP, A2A, memory, redaction, and observability.',
-    status: 'pending',
+    input: {
+      role: 'user',
+      parts: [{
+        type: 'text',
+        text: 'WeaveIntel is a production-grade, protocol-first, capability-driven AI framework written in TypeScript. It supports multiple LLM types, vector stores, agents, MCP, A2A, memory, redaction, and observability.',
+      }],
+    },
   });
-  console.log('Result:', summaryTask.output);
+  const summaryText = summaryResult.output?.parts
+    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+    .map((p) => p.text)
+    .join('') ?? '';
+  console.log('Result:', summaryText);
 
   // Send to translator
   console.log('\n=== Translate ===');
-  const translateTask = await a2aBus.send('translator', {
+  const translateResult = await a2aBus.send(ctx, 'translator', {
     id: 'task-2',
-    input: `Translate to French: ${summaryTask.output}`,
-    status: 'pending',
+    input: {
+      role: 'user',
+      parts: [{ type: 'text', text: `Translate to French: ${summaryText}` }],
+    },
   });
-  console.log('Result:', translateTask.output);
+  const translateText = translateResult.output?.parts
+    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+    .map((p) => p.text)
+    .join('') ?? '';
+  console.log('Result:', translateText);
 }
 
 main().catch(console.error);

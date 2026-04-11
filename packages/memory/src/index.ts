@@ -1,6 +1,6 @@
 export {
-  createInMemoryStore,
-  createConversationMemory,
-  createSemanticMemory,
-  createEntityMemory,
+  weaveMemoryStore,
+  weaveConversationMemory,
+  weaveSemanticMemory,
+  weaveEntityMemory,
 } from './memory.js';

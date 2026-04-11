@@ -1,7 +1,7 @@
-export { createChunker } from './chunker.js';
+export { weaveChunker } from './chunker.js';
 export {
-  createEmbeddingPipeline,
-  createVectorRetriever,
+  weaveEmbeddingPipeline,
+  weaveRetriever,
   type EmbeddingPipelineConfig,
   type VectorRetrieverConfig,
 } from './pipeline.js';

@@ -1,2 +1,2 @@
-export { createToolCallingAgent, type ToolCallingAgentOptions } from './agent.js';
-export { createSupervisor, type SupervisorOptions } from './supervisor.js';
+export { weaveAgent, type ToolCallingAgentOptions } from './agent.js';
+export { weaveSupervisor, type SupervisorOptions, type WorkerDefinition } from './supervisor.js';

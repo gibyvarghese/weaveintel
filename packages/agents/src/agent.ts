@@ -30,27 +30,43 @@ import type {
 import {
   WeaveIntelError,
   isExpired,
-  childContext,
-  createEvent,
+  weaveChildContext,
+  weaveEvent,
   EventTypes,
-  createToolRegistry,
+  weaveToolRegistry,
 } from '@weaveintel/core';
 
 // ─── Agent builder ───────────────────────────────────────────
 
 export interface ToolCallingAgentOptions {
-  config: AgentConfig;
+  /** Model to use for generation */
   model: Model;
+  /** Tool registry */
   tools?: ToolRegistry;
+  /** Event bus for observability */
+  bus?: EventBus;
+  /** System prompt / instructions */
+  systemPrompt?: string;
+  /** Maximum number of tool-call loops before stopping */
+  maxSteps?: number;
+  /** Agent name */
+  name?: string;
+  /** Agent memory */
   memory?: AgentMemory;
+  /** Policy for approval / budget */
   policy?: AgentPolicy;
-  eventBus?: EventBus;
 }
 
-export function createToolCallingAgent(opts: ToolCallingAgentOptions): Agent {
-  const { config, model, tools, memory, policy, eventBus } = opts;
+export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
+  const config: AgentConfig = {
+    name: opts.name ?? 'tool-agent',
+    instructions: opts.systemPrompt,
+    maxSteps: opts.maxSteps ?? 20,
+  };
+  const { model, memory, policy } = opts;
+  const eventBus = opts.bus;
   const maxSteps = config.maxSteps ?? 20;
-  const toolReg = tools ?? createToolRegistry();
+  const toolReg = opts.tools ?? weaveToolRegistry();
 
   return {
     config,
@@ -62,7 +78,7 @@ export function createToolCallingAgent(opts: ToolCallingAgentOptions): Agent {
       let totalCompletionTokens = 0;
       let toolCallCount = 0;
 
-      eventBus?.emit(createEvent(EventTypes.AgentRunStart, { agent: config.name, goal: input.goal }, ctx));
+      eventBus?.emit(weaveEvent(EventTypes.AgentRunStart, { agent: config.name, goal: input.goal }, ctx));
 
       // Build conversation from history + input
       const messages: Message[] = [];
@@ -102,7 +118,7 @@ export function createToolCallingAgent(opts: ToolCallingAgentOptions): Agent {
           }
 
           const stepStart = Date.now();
-          eventBus?.emit(createEvent(EventTypes.AgentStepStart, { agent: config.name, stepIndex: stepIdx }, ctx));
+          eventBus?.emit(weaveEvent(EventTypes.AgentStepStart, { agent: config.name, stepIndex: stepIdx }, ctx));
 
           // Call model
           const response = await model.generate(ctx, {
@@ -137,7 +153,7 @@ export function createToolCallingAgent(opts: ToolCallingAgentOptions): Agent {
               });
             }
 
-            eventBus?.emit(createEvent(EventTypes.AgentStepEnd, {
+            eventBus?.emit(weaveEvent(EventTypes.AgentStepEnd, {
               agent: config.name,
               stepIndex: stepIdx,
               type: 'tool_call',
@@ -155,7 +171,7 @@ export function createToolCallingAgent(opts: ToolCallingAgentOptions): Agent {
           };
           steps.push(responseStep);
 
-          eventBus?.emit(createEvent(EventTypes.AgentStepEnd, {
+          eventBus?.emit(weaveEvent(EventTypes.AgentStepEnd, {
             agent: config.name,
             stepIndex: stepIdx,
             type: 'response',
@@ -169,7 +185,7 @@ export function createToolCallingAgent(opts: ToolCallingAgentOptions): Agent {
             await memory.addMessage(ctx, { role: 'assistant', content: response.content });
           }
 
-          eventBus?.emit(createEvent(EventTypes.AgentRunEnd, {
+          eventBus?.emit(weaveEvent(EventTypes.AgentRunEnd, {
             agent: config.name,
             status: 'completed',
             steps: steps.length,
@@ -181,7 +197,7 @@ export function createToolCallingAgent(opts: ToolCallingAgentOptions): Agent {
         // Max steps exceeded
         return buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'failed');
       } catch (err) {
-        eventBus?.emit(createEvent(EventTypes.AgentRunEnd, {
+        eventBus?.emit(weaveEvent(EventTypes.AgentRunEnd, {
           agent: config.name,
           status: 'failed',
           error: err instanceof Error ? err.message : String(err),
@@ -342,7 +358,7 @@ async function executeToolCall(
 ): Promise<AgentStep> {
   const tool = toolReg.get(tc.name);
 
-  eventBus?.emit(createEvent(EventTypes.ToolCallStart, { tool: tc.name, agent: agentName }, ctx));
+  eventBus?.emit(weaveEvent(EventTypes.ToolCallStart, { tool: tc.name, agent: agentName }, ctx));
 
   let resultContent: string;
 
@@ -354,7 +370,7 @@ async function executeToolCall(
       const decision = await policy.approveToolCall(ctx, tool.schema, JSON.parse(tc.arguments));
       if (!decision.approved) {
         resultContent = `Tool call denied by policy: ${decision.reason ?? 'no reason'}`;
-        eventBus?.emit(createEvent(EventTypes.ToolCallError, { tool: tc.name, reason: 'policy_denied' }, ctx));
+        eventBus?.emit(weaveEvent(EventTypes.ToolCallError, { tool: tc.name, reason: 'policy_denied' }, ctx));
         return {
           index: 0,
           type: 'tool_call',
@@ -373,7 +389,7 @@ async function executeToolCall(
     }
   }
 
-  eventBus?.emit(createEvent(EventTypes.ToolCallEnd, { tool: tc.name, agent: agentName }, ctx));
+  eventBus?.emit(weaveEvent(EventTypes.ToolCallEnd, { tool: tc.name, agent: agentName }, ctx));
 
   return {
     index: 0,

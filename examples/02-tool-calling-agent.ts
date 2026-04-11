@@ -5,23 +5,23 @@
  * Uses a fake model for deterministic, no-API-key-needed execution.
  */
 import {
-  createExecutionContext,
-  createEventBus,
-  createToolRegistry,
-  defineTool,
+  weaveContext,
+  weaveEventBus,
+  weaveToolRegistry,
+  weaveTool,
 } from '@weaveintel/core';
-import { createToolCallingAgent } from '@weaveintel/agents';
-import { createFakeModel } from '@weaveintel/testing';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveFakeModel } from '@weaveintel/testing';
 
 async function main() {
-  const bus = createEventBus();
-  const ctx = createExecutionContext({ userId: 'demo-user' });
+  const bus = weaveEventBus();
+  const ctx = weaveContext({ userId: 'demo-user' });
 
   // Define tools
-  const tools = createToolRegistry();
+  const tools = weaveToolRegistry();
 
   tools.register(
-    defineTool({
+    weaveTool({
       name: 'get_weather',
       description: 'Get current weather for a city',
       parameters: {
@@ -45,7 +45,7 @@ async function main() {
   );
 
   tools.register(
-    defineTool({
+    weaveTool({
       name: 'calculate',
       description: 'Evaluate a math expression',
       parameters: {
@@ -65,7 +65,7 @@ async function main() {
   );
 
   // Create the agent with a fake model that returns tool calls
-  const model = createFakeModel({
+  const model = weaveFakeModel({
     responses: [
       // Step 1: model calls the weather tool
       {
@@ -85,7 +85,7 @@ async function main() {
     ],
   });
 
-  const agent = createToolCallingAgent({
+  const agent = weaveAgent({
     model,
     tools,
     bus,
@@ -95,14 +95,14 @@ async function main() {
 
   // Run the agent
   const result = await agent.run(
-    { messages: [{ role: 'user', content: 'What is the weather in Paris?' }] },
     ctx,
+    { messages: [{ role: 'user', content: 'What is the weather in Paris?' }] },
   );
 
   console.log('Agent result:', result.output);
   console.log('Steps taken:', result.steps.length);
   for (const step of result.steps) {
-    console.log(`  Step: ${step.action} → ${step.observation}`);
+    console.log(`  Step [${step.type}]: ${step.content ?? step.toolCall?.name ?? ''}`);
   }
 }
 

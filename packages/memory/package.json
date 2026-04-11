@@ -1,9 +1,15 @@
 {
   "name": "@weaveintel/memory",
   "version": "0.0.1",
-  "description": "Memory implementations — conversation, semantic, entity",
+  "description": "Memory implementations \u2014 conversation, semantic, entity",
   "type": "module",
-  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {

@@ -30,47 +30,69 @@ import type {
 import {
   WeaveIntelError,
   isExpired,
-  childContext,
-  createEvent,
+  weaveChildContext,
+  weaveEvent,
   EventTypes,
-  defineTool,
-  createToolRegistry,
+  weaveTool,
+  weaveToolRegistry,
 } from '@weaveintel/core';
-import { createToolCallingAgent } from './agent.js';
+import { weaveAgent } from './agent.js';
 
-export interface SupervisorOptions {
-  config: SupervisorConfig;
+export interface WorkerDefinition {
+  name: string;
+  description: string;
   model: Model;
-  workerModels?: Record<string, Model>;
-  workerTools?: Record<string, ToolRegistry>;
-  policy?: AgentPolicy;
-  memory?: AgentMemory;
-  eventBus?: EventBus;
+  tools?: ToolRegistry;
 }
 
-export function createSupervisor(opts: SupervisorOptions): Agent {
-  const { config, model, workerModels, workerTools, policy, memory, eventBus } = opts;
-  const maxDelegations = config.maxDelegations ?? 10;
+export interface SupervisorOptions {
+  /** Model the supervisor uses for reasoning / delegation */
+  model: Model;
+  /** Event bus for observability */
+  bus?: EventBus;
+  /** Worker agent definitions */
+  workers: WorkerDefinition[];
+  /** Maximum supervisor steps */
+  maxSteps?: number;
+  /** Policy */
+  policy?: AgentPolicy;
+  /** Memory */
+  memory?: AgentMemory;
+  /** Name */
+  name?: string;
+}
+
+export function weaveSupervisor(opts: SupervisorOptions): Agent {
+  const eventBus = opts.bus;
+  const { model, policy, memory } = opts;
+  const maxDelegations = (opts.maxSteps ?? 10);
+
+  const config: SupervisorConfig = {
+    name: opts.name ?? 'supervisor',
+    maxSteps: opts.maxSteps ?? 30,
+    maxDelegations,
+    workers: Object.fromEntries(
+      opts.workers.map((w) => [w.name, { name: w.name, description: w.description }]),
+    ),
+  };
 
   // Build worker agents
   const workers = new Map<string, Agent>();
-  for (const [name, workerConfig] of Object.entries(config.workers)) {
-    const workerModel = workerModels?.[name] ?? model;
-    const workerToolReg = workerTools?.[name];
-    workers.set(name, createToolCallingAgent({
-      config: { ...workerConfig, name: workerConfig.name ?? name },
-      model: workerModel,
-      tools: workerToolReg,
-      eventBus,
+  for (const w of opts.workers) {
+    workers.set(w.name, weaveAgent({
+      name: w.name,
+      model: w.model,
+      tools: w.tools,
+      bus: eventBus,
     }));
   }
 
   // Create a delegation tool that the supervisor model can call
   const delegationResults: DelegationResult[] = [];
 
-  const supervisorTools = createToolRegistry();
+  const supervisorTools = weaveToolRegistry();
 
-  supervisorTools.register(defineTool<{ worker: string; goal: string }>({
+  supervisorTools.register(weaveTool<{ worker: string; goal: string }>({
     name: 'delegate_to_worker',
     description: `Delegate a task to a worker agent. Available workers: ${[...workers.keys()].join(', ')}. Each worker has specialized capabilities. Describe the goal clearly.`,
     parameters: {
@@ -108,14 +130,14 @@ export function createSupervisor(opts: SupervisorOptions): Agent {
         }
       }
 
-      eventBus?.emit(createEvent(EventTypes.AgentDelegation, {
+      eventBus?.emit(weaveEvent(EventTypes.AgentDelegation, {
         supervisor: config.name,
         worker: args.worker,
         goal: args.goal,
       }, ctx));
 
       const delegateStart = Date.now();
-      const childCtx = childContext(ctx, {
+      const childCtx = weaveChildContext(ctx, {
         metadata: { delegatedBy: config.name, delegatedTo: args.worker },
       });
 
@@ -150,17 +172,15 @@ export function createSupervisor(opts: SupervisorOptions): Agent {
   ].join('\n');
 
   // The supervisor IS a tool-calling agent, but its only tool is delegation
-  const innerAgent = createToolCallingAgent({
-    config: {
-      ...config,
-      instructions: supervisorInstructions,
-      maxSteps: config.maxSteps ?? 30,
-    },
+  const innerAgent = weaveAgent({
+    name: config.name,
+    systemPrompt: supervisorInstructions,
+    maxSteps: config.maxSteps ?? 30,
     model,
     tools: supervisorTools,
     memory,
     policy,
-    eventBus,
+    bus: eventBus,
   });
 
   return {

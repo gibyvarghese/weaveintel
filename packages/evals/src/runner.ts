@@ -129,7 +129,7 @@ export interface CreateEvalRunnerOptions {
   customEvaluators?: Record<string, AssertionEvaluator>;
 }
 
-export function createEvalRunner(opts: CreateEvalRunnerOptions): EvalRunner {
+export function weaveEvalRunner(opts: CreateEvalRunnerOptions): EvalRunner {
   const allEvaluators = { ...evaluators, ...opts.customEvaluators };
 
   return {

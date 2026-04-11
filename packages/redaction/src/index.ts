@@ -1,1 +1,1 @@
-export { createRedactor, createPolicyEngine } from './redactor.js';
+export { weaveRedactor, weavePolicyEngine } from './redactor.js';

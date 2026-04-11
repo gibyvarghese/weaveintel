@@ -1,17 +1,20 @@
 {
   "name": "@weaveintel/provider-openai",
   "version": "0.0.1",
-  "description": "OpenAI provider for WeaveIntel — chat, embeddings, image generation, audio",
+  "description": "OpenAI provider for WeaveIntel \u2014 chat, embeddings, image generation, audio",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -b",
     "test": "vitest run",

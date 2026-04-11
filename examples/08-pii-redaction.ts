@@ -4,14 +4,24 @@
  * Demonstrates the redaction pipeline for detecting and masking
  * personally identifiable information before sending to LLMs.
  */
-import { createRedactor, createPolicyEngine } from '@weaveintel/redaction';
+import { weaveContext } from '@weaveintel/core';
+import { weaveRedactor, weavePolicyEngine } from '@weaveintel/redaction';
 
 async function main() {
+  const ctx = weaveContext({ userId: 'demo-user' });
+
   // --- Basic PII Redaction ---
   console.log('=== Basic PII Redaction ===');
 
-  const redactor = createRedactor({
-    patterns: ['email', 'phone', 'ssn', 'credit_card', 'ipv4'],
+  const redactor = weaveRedactor({
+    patterns: [
+      { name: 'email', type: 'builtin', builtinType: 'email' },
+      { name: 'phone', type: 'builtin', builtinType: 'phone' },
+      { name: 'ssn', type: 'builtin', builtinType: 'ssn' },
+      { name: 'credit_card', type: 'builtin', builtinType: 'credit_card' },
+      { name: 'ipv4', type: 'builtin', builtinType: 'ipv4' },
+    ],
+    reversible: true,
   });
 
   const input = `
@@ -24,70 +34,79 @@ async function main() {
     Notes: Please process this refund to the card above.
   `;
 
-  const redacted = redactor.redact(input);
+  const redacted = await redactor.redact(ctx, input);
   console.log('Original:\n', input);
-  console.log('Redacted:\n', redacted.text);
+  console.log('Redacted:\n', redacted.redacted);
   console.log('Detections:');
   for (const det of redacted.detections) {
-    console.log(`  ${det.type}: "${det.original}" → "${det.replacement}"`);
+    console.log(`  ${det.type}: "${det.original}" → "${det.token}"`);
   }
 
   // --- Restore original values ---
   console.log('\n=== Restore ===');
-  const restored = redactor.restore(redacted.text, redacted.detections);
+  const restored = await redactor.restore!(ctx, redacted.redacted, redacted.detections);
   console.log('Restored:\n', restored);
 
   // --- Allowlist ---
   console.log('\n=== Allowlist ===');
-  const redactorWithAllow = createRedactor({
-    patterns: ['email', 'phone'],
+  const redactorWithAllow = weaveRedactor({
+    patterns: [
+      { name: 'email', type: 'builtin', builtinType: 'email' },
+      { name: 'phone', type: 'builtin', builtinType: 'phone' },
+    ],
     allowlist: ['john.doe@example.com'], // This email is allowed
   });
 
-  const result = redactorWithAllow.redact('Contact john.doe@example.com or jane@secret.com, call 555-0199');
-  console.log('With allowlist:', result.text);
+  const result = await redactorWithAllow.redact(ctx, 'Contact john.doe@example.com or jane@secret.com, call 555-0199');
+  console.log('With allowlist:', result.redacted);
   console.log('Detections:', result.detections.length);
 
   // --- Policy Engine ---
   console.log('\n=== Policy Engine ===');
 
-  const policy = createPolicyEngine();
+  const policy = weavePolicyEngine();
 
   policy.addRule({
-    id: 'no-pii-in-prompts',
+    name: 'no-pii-in-prompts',
     description: 'Prompts must not contain PII',
-    evaluate: (input: string) => {
+    evaluate: async (_ctx, input) => {
+      const text = input.data?.['text'] as string ?? '';
       const piiPatterns = [
         /\b\d{3}-\d{2}-\d{4}\b/,       // SSN
         /\b\d{4}-\d{4}-\d{4}-\d{4}\b/, // Credit card
       ];
-      const violations = piiPatterns
-        .filter((p) => p.test(input))
-        .map((p) => `PII pattern detected: ${p.source}`);
-      return { passed: violations.length === 0, violations };
+      const hasViolation = piiPatterns.some((p) => p.test(text));
+      return {
+        allowed: !hasViolation,
+        reason: hasViolation ? 'PII detected in input' : undefined,
+        policies: ['no-pii-in-prompts'],
+      };
     },
   });
 
   policy.addRule({
-    id: 'max-length',
+    name: 'max-length',
     description: 'Prompt must not exceed 10,000 characters',
-    evaluate: (input: string) => ({
-      passed: input.length <= 10_000,
-      violations: input.length > 10_000 ? [`Prompt too long: ${input.length} chars`] : [],
-    }),
+    evaluate: async (_ctx, input) => {
+      const text = input.data?.['text'] as string ?? '';
+      const tooLong = text.length > 10_000;
+      return {
+        allowed: !tooLong,
+        reason: tooLong ? `Prompt too long: ${text.length} chars` : undefined,
+        policies: ['max-length'],
+      };
+    },
   });
 
   // Test clean input
-  const cleanResult = await policy.evaluate('What is the weather today?');
-  console.log('Clean input:', cleanResult.passed ? 'PASS' : 'FAIL');
+  const cleanResult = await policy.evaluate(ctx, { action: 'prompt', data: { text: 'What is the weather today?' } });
+  console.log('Clean input:', cleanResult.allowed ? 'PASS' : 'FAIL');
 
   // Test PII input
-  const piiResult = await policy.evaluate('My SSN is 123-45-6789');
-  console.log('PII input:', piiResult.passed ? 'PASS' : 'FAIL');
-  if (!piiResult.passed) {
-    for (const v of piiResult.violations) {
-      console.log(`  Violation: ${v}`);
-    }
+  const piiResult = await policy.evaluate(ctx, { action: 'prompt', data: { text: 'My SSN is 123-45-6789' } });
+  console.log('PII input:', piiResult.allowed ? 'PASS' : 'FAIL');
+  if (!piiResult.allowed) {
+    console.log(`  Reason: ${piiResult.reason}`);
   }
 }
 

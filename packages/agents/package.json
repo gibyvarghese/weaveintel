@@ -1,9 +1,15 @@
 {
   "name": "@weaveintel/agents",
   "version": "0.0.1",
-  "description": "Agent runtime — tool-calling loop, planner-executor, hierarchical supervisor-worker",
+  "description": "Agent runtime \u2014 tool-calling loop, planner-executor, hierarchical supervisor-worker",
   "type": "module",
-  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {

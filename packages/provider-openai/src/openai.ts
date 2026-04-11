@@ -22,12 +22,12 @@ import type {
 } from '@weaveintel/core';
 import {
   Capabilities,
-  createCapabilitySet,
+  weaveCapabilities,
   WeaveIntelError,
   normalizeError,
   deadlineSignal,
 } from '@weaveintel/core';
-import { registerModelProvider, registerEmbeddingProvider } from '@weaveintel/models';
+import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/models';
 
 // ─── Configuration ───────────────────────────────────────────
 
@@ -237,7 +237,7 @@ function determineCapabilities(modelId: string): CapabilityId[] {
   return caps;
 }
 
-export function createOpenAIModel(
+export function weaveOpenAIModel(
   modelId: string,
   providerOptions?: OpenAIProviderOptions,
 ): Model {
@@ -245,7 +245,7 @@ export function createOpenAIModel(
   const apiKey = resolveApiKey(opts);
   const baseUrl = opts.baseUrl ?? DEFAULT_BASE_URL;
   const headers = makeHeaders(opts, apiKey);
-  const caps = createCapabilitySet(...determineCapabilities(modelId));
+  const caps = weaveCapabilities(...determineCapabilities(modelId));
 
   const info: ModelInfo = {
     provider: 'openai',
@@ -379,7 +379,7 @@ export function createOpenAIModel(
 
 // ─── OpenAI Embedding model ──────────────────────────────────
 
-export function createOpenAIEmbedding(
+export function weaveOpenAIEmbeddingModel(
   modelId: string = 'text-embedding-3-small',
   providerOptions?: OpenAIProviderOptions,
 ): EmbeddingModel {
@@ -387,7 +387,7 @@ export function createOpenAIEmbedding(
   const apiKey = resolveApiKey(opts);
   const baseUrl = opts.baseUrl ?? DEFAULT_BASE_URL;
   const headers = makeHeaders(opts, apiKey);
-  const caps = createCapabilitySet(Capabilities.Embedding);
+  const caps = weaveCapabilities(Capabilities.Embedding);
 
   return {
     info: {
@@ -443,26 +443,26 @@ function mapFinishReason(reason: string): ModelResponse['finishReason'] {
 
 let providerOpts: OpenAIProviderOptions = {};
 
-export function configureOpenAI(options: OpenAIProviderOptions): void {
+export function weaveOpenAIConfig(options: OpenAIProviderOptions): void {
   providerOpts = options;
 }
 
-registerModelProvider('openai', (modelId, options) =>
-  createOpenAIModel(modelId, { ...providerOpts, ...(options as OpenAIProviderOptions) }),
+weaveRegisterModel('openai', (modelId, options) =>
+  weaveOpenAIModel(modelId, { ...providerOpts, ...(options as OpenAIProviderOptions) }),
 );
 
-registerEmbeddingProvider('openai', (modelId, options) =>
-  createOpenAIEmbedding(modelId, { ...providerOpts, ...(options as OpenAIProviderOptions) }),
+weaveRegisterEmbedding('openai', (modelId, options) =>
+  weaveOpenAIEmbeddingModel(modelId, { ...providerOpts, ...(options as OpenAIProviderOptions) }),
 );
 
 /** Convenience function matching the ergonomic API */
-export function openai(modelId: string, options?: OpenAIProviderOptions): Model {
-  return createOpenAIModel(modelId, { ...providerOpts, ...options });
+export function weaveOpenAI(modelId: string, options?: OpenAIProviderOptions): Model {
+  return weaveOpenAIModel(modelId, { ...providerOpts, ...options });
 }
 
-export function openaiEmbedding(
+export function weaveOpenAIEmbedding(
   modelId?: string,
   options?: OpenAIProviderOptions,
 ): EmbeddingModel {
-  return createOpenAIEmbedding(modelId, { ...providerOpts, ...options });
+  return weaveOpenAIEmbeddingModel(modelId, { ...providerOpts, ...options });
 }

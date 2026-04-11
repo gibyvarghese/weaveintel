@@ -1,7 +1,7 @@
 export {
-  createFakeModel,
-  createFakeEmbeddingModel,
-  createFakeVectorStore,
-  createFakeTransportPair,
+  weaveFakeModel,
+  weaveFakeEmbedding,
+  weaveFakeVectorStore,
+  weaveFakeTransport,
   type FakeModelOptions,
 } from './fakes.js';

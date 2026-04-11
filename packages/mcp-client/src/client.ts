@@ -20,7 +20,7 @@ import type {
   ToolRegistry,
   ExecutionContext,
 } from '@weaveintel/core';
-import { createToolRegistry } from '@weaveintel/core';
+import { weaveToolRegistry } from '@weaveintel/core';
 
 // ─── JSON-RPC message types ──────────────────────────────────
 
@@ -40,7 +40,7 @@ interface JsonRpcResponse {
 
 // ─── MCP client ──────────────────────────────────────────────
 
-export function createMCPClient(): MCPClient {
+export function weaveMCPClient(): MCPClient {
   let transport: MCPTransport | null = null;
   let nextId = 1;
   const pendingRequests = new Map<number, {
@@ -83,7 +83,8 @@ export function createMCPClient(): MCPClient {
         clientInfo: { name: 'weaveintel-mcp-client', version: '0.0.1' },
       });
 
-      await send('notifications/initialized');
+      // Send initialized notification (no id, no response expected)
+      await transport!.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
     },
 
     async listTools(): Promise<MCPToolDefinition[]> {
@@ -130,11 +131,11 @@ export function createMCPClient(): MCPClient {
 
 // ─── Bridge: MCP tools → WeaveIntel tools ────────────────────
 
-export function mcpToolsToRegistry(
+export function weaveMCPTools(
   client: MCPClient,
   tools: MCPToolDefinition[],
 ): ToolRegistry {
-  const registry = createToolRegistry();
+  const registry = weaveToolRegistry();
 
   for (const toolDef of tools) {
     const tool: Tool = {

@@ -5,22 +5,22 @@
  * The supervisor decides which worker to route each sub-task to.
  */
 import {
-  createExecutionContext,
-  createEventBus,
-  createToolRegistry,
-  defineTool,
+  weaveContext,
+  weaveEventBus,
+  weaveToolRegistry,
+  weaveTool,
 } from '@weaveintel/core';
-import { createSupervisor } from '@weaveintel/agents';
-import { createFakeModel } from '@weaveintel/testing';
+import { weaveSupervisor } from '@weaveintel/agents';
+import { weaveFakeModel } from '@weaveintel/testing';
 
 async function main() {
-  const bus = createEventBus();
-  const ctx = createExecutionContext({ userId: 'demo-user' });
+  const bus = weaveEventBus();
+  const ctx = weaveContext({ userId: 'demo-user' });
 
   // Worker tools
-  const researchTools = createToolRegistry();
+  const researchTools = weaveToolRegistry();
   researchTools.register(
-    defineTool({
+    weaveTool({
       name: 'search_web',
       description: 'Search the web for information',
       parameters: {
@@ -33,9 +33,9 @@ async function main() {
     }),
   );
 
-  const writerTools = createToolRegistry();
+  const writerTools = weaveToolRegistry();
   writerTools.register(
-    defineTool({
+    weaveTool({
       name: 'write_document',
       description: 'Write a document from given notes',
       parameters: {
@@ -49,7 +49,7 @@ async function main() {
   );
 
   // Supervisor model: first delegates to researcher, then to writer, then summarizes
-  const supervisorModel = createFakeModel({
+  const supervisorModel = weaveFakeModel({
     responses: [
       // Step 1: supervisor delegates to researcher
       {
@@ -61,7 +61,7 @@ async function main() {
               name: 'delegate_to_worker',
               arguments: JSON.stringify({
                 worker: 'researcher',
-                task: 'Search for popular AI frameworks',
+                goal: 'Search for popular AI frameworks',
               }),
             },
           },
@@ -77,7 +77,7 @@ async function main() {
               name: 'delegate_to_worker',
               arguments: JSON.stringify({
                 worker: 'writer',
-                task: 'Write a brief summary about AI frameworks',
+                goal: 'Write a brief summary about AI frameworks',
               }),
             },
           },
@@ -92,7 +92,7 @@ async function main() {
   });
 
   // Worker models
-  const researcherModel = createFakeModel({
+  const researcherModel = weaveFakeModel({
     responses: [
       {
         content: '',
@@ -110,7 +110,7 @@ async function main() {
     ],
   });
 
-  const writerModel = createFakeModel({
+  const writerModel = weaveFakeModel({
     responses: [
       {
         content: '',
@@ -128,7 +128,7 @@ async function main() {
     ],
   });
 
-  const supervisor = createSupervisor({
+  const supervisor = weaveSupervisor({
     model: supervisorModel,
     bus,
     workers: [
@@ -149,6 +149,7 @@ async function main() {
   });
 
   const result = await supervisor.run(
+    ctx,
     {
       messages: [
         {
@@ -157,14 +158,13 @@ async function main() {
         },
       ],
     },
-    ctx,
   );
 
   console.log('=== Supervisor Result ===');
   console.log('Output:', result.output);
   console.log(`\nTotal steps: ${result.steps.length}`);
   for (const step of result.steps) {
-    console.log(`  [${step.action}] → ${step.observation?.slice(0, 80)}...`);
+    console.log(`  [${step.type}] → ${(step.content ?? step.toolCall?.name ?? '')?.slice(0, 80)}...`);
   }
 }
 

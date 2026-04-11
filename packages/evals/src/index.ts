@@ -1,1 +1,1 @@
-export { createEvalRunner, type CreateEvalRunnerOptions } from './runner.js';
+export { weaveEvalRunner, type CreateEvalRunnerOptions } from './runner.js';

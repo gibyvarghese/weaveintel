@@ -1,1 +1,1 @@
-export { createMCPClient, mcpToolsToRegistry } from './client.js';
+export { weaveMCPClient, weaveMCPTools } from './client.js';

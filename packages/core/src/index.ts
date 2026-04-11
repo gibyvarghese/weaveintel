@@ -9,15 +9,15 @@ export {
   type HasCapabilities,
   Capabilities,
   capabilityId,
-  createCapabilitySet,
+  createCapabilitySet as weaveCapabilities,
 } from './capabilities.js';
 
 // Execution context
 export {
   type ExecutionContext,
   type ExecutionBudget,
-  createExecutionContext,
-  childContext,
+  createExecutionContext as weaveContext,
+  childContext as weaveChildContext,
   isExpired,
   deadlineSignal,
 } from './context.js';
@@ -37,17 +37,17 @@ export {
   type EventBus,
   type Unsubscribe,
   EventTypes,
-  createEventBus,
-  createEvent,
+  createEventBus as weaveEventBus,
+  createEvent as weaveEvent,
 } from './events.js';
 
 // Middleware pipeline
 export {
   type Middleware,
-  Pipeline,
-  composeMiddleware,
-  timeoutMiddleware,
-  retryMiddleware,
+  Pipeline as WeavePipeline,
+  composeMiddleware as weaveMiddleware,
+  timeoutMiddleware as weaveTimeout,
+  retryMiddleware as weaveRetry,
 } from './middleware.js';
 
 // Plugin registry
@@ -56,7 +56,7 @@ export {
   type PluginType,
   type Plugin,
   type PluginRegistry,
-  createPluginRegistry,
+  createPluginRegistry as weavePluginRegistry,
 } from './registry.js';
 
 // Model contracts
@@ -105,8 +105,8 @@ export {
   type ToolPolicy,
   type PolicyDecision,
   type ToolRegistry,
-  createToolRegistry,
-  defineTool,
+  createToolRegistry as weaveToolRegistry,
+  defineTool as weaveTool,
 } from './tools.js';
 
 // Document contracts
@@ -270,3 +270,57 @@ export {
   type EvalSuiteResult,
   type EvalRunner,
 } from './evals.js';
+
+// Responses API contracts (agentic loop)
+export {
+  type ResponseModel,
+  type ResponseRequest,
+  type ResponseResult,
+  type ResponseInputItem,
+  type ResponseOutputItem,
+  type ResponseToolDefinition,
+  type ResponseStreamEvent,
+  type ResponseTextFormat,
+} from './responses.js';
+
+// File storage contracts
+export {
+  type FileStorage,
+  type FileUploadRequest,
+  type FileObject,
+  type FilePurpose,
+  type FileListOptions,
+} from './files.js';
+
+// Moderation contracts
+export {
+  type ModerationModel,
+  type ModerationRequest,
+  type ModerationResponse,
+  type ModerationResult,
+  type ModerationCategory,
+  type ModerationInput,
+} from './moderation.js';
+
+// Fine-tuning contracts
+export {
+  type FineTuningProvider,
+  type FineTuneRequest,
+  type FineTuneJob,
+  type FineTuneEvent,
+  type FineTuneStatus,
+  type FineTuneHyperparameters,
+  type FineTuneListOptions,
+} from './finetuning.js';
+
+// Managed vector store contracts
+export {
+  type ManagedVectorStore,
+  type ManagedVectorStoreConfig,
+  type ManagedVectorStoreInfo,
+  type ManagedVectorStoreFile,
+  type ManagedVectorSearchOptions,
+  type ManagedVectorSearchResult,
+  type ManagedChunkingStrategy,
+  type ManagedFileBatch,
+} from './managed-vectorstore.js';

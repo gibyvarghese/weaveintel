@@ -1,1 +1,1 @@
-export { createMCPServer } from './server.js';
+export { weaveMCPServer } from './server.js';

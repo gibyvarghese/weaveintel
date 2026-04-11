@@ -1,5 +1,5 @@
 export {
-  createConsoleTracer,
-  createInMemoryTracer,
-  createUsageTracker,
+  weaveConsoleTracer,
+  weaveInMemoryTracer,
+  weaveUsageTracker,
 } from './tracer.js';

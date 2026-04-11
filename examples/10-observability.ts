@@ -5,50 +5,60 @@
  * to monitor and debug AI workflows.
  */
 import {
-  createExecutionContext,
-  createEventBus,
+  weaveContext,
+  weaveEventBus,
   EventTypes,
-  createToolRegistry,
-  defineTool,
+  weaveToolRegistry,
+  weaveTool,
 } from '@weaveintel/core';
 import {
-  createConsoleTracer,
-  createInMemoryTracer,
-  createUsageTracker,
+  weaveConsoleTracer,
+  weaveInMemoryTracer,
+  weaveUsageTracker,
 } from '@weaveintel/observability';
-import { createToolCallingAgent } from '@weaveintel/agents';
-import { createFakeModel } from '@weaveintel/testing';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveFakeModel } from '@weaveintel/testing';
 
 async function main() {
-  const bus = createEventBus();
-  const ctx = createExecutionContext({ userId: 'demo-user' });
+  const bus = weaveEventBus();
+  const ctx = weaveContext({ userId: 'demo-user' });
 
   // --- Console Tracer ---
   console.log('=== Console Tracer ===');
-  const consoleTracer = createConsoleTracer();
+  const consoleTracer = weaveConsoleTracer();
 
-  const span1 = consoleTracer.startSpan('model-call', { model: 'gpt-4o-mini' });
+  const span1 = consoleTracer.startSpan(ctx, 'model-call', { model: 'gpt-4o-mini' });
   // Simulate some work
   span1.addEvent('request-sent', { tokens: 150 });
   span1.addEvent('response-received', { tokens: 85 });
-  consoleTracer.endSpan(span1.id, { status: 'ok' });
+  span1.end();
 
   // --- In-Memory Tracer ---
   console.log('\n=== In-Memory Tracer ===');
-  const memTracer = createInMemoryTracer();
+  const memTracer = weaveInMemoryTracer();
 
-  const span2 = memTracer.startSpan('rag-pipeline', { query: 'What is WeaveIntel?' });
-  const childSpan = memTracer.startSpan('embedding', { parentId: span2.id, model: 'text-embedding-3-small' });
-  memTracer.endSpan(childSpan.id, { status: 'ok', chunkCount: 5 });
-  const childSpan2 = memTracer.startSpan('vector-search', { parentId: span2.id, topK: 3 });
-  memTracer.endSpan(childSpan2.id, { status: 'ok', results: 3 });
-  memTracer.endSpan(span2.id, { status: 'ok' });
+  const span2 = memTracer.startSpan(ctx, 'rag-pipeline', { query: 'What is WeaveIntel?' });
+  const childSpan = memTracer.startSpan(
+    { ...ctx, parentSpanId: span2.spanId } as any,
+    'embedding',
+    { model: 'text-embedding-3-small' },
+  );
+  childSpan.end();
 
-  const traces = memTracer.getSpans();
+  const childSpan2 = memTracer.startSpan(
+    { ...ctx, parentSpanId: span2.spanId } as any,
+    'vector-search',
+    { topK: 3 },
+  );
+  childSpan2.end();
+  span2.end();
+
+  const traces = memTracer.spans;
   console.log(`Recorded ${traces.length} spans:`);
   for (const t of traces) {
-    const indent = t.parentId ? '  ' : '';
-    console.log(`${indent}[${t.name}] ${t.durationMs?.toFixed(1) ?? '?'}ms - ${t.attributes?.status ?? 'pending'}`);
+    const indent = t.parentSpanId ? '  ' : '';
+    const dur = t.endTime - t.startTime;
+    console.log(`${indent}[${t.name}] ${dur}ms - ${t.status}`);
   }
 
   // --- Event Bus ---
@@ -76,9 +86,9 @@ async function main() {
   });
 
   // Run an agent to generate events
-  const tools = createToolRegistry();
+  const tools = weaveToolRegistry();
   tools.register(
-    defineTool({
+    weaveTool({
       name: 'lookup',
       description: 'Look up information',
       parameters: {
@@ -90,7 +100,7 @@ async function main() {
     }),
   );
 
-  const model = createFakeModel({
+  const model = weaveFakeModel({
     responses: [
       {
         content: '',
@@ -98,11 +108,11 @@ async function main() {
           { id: 'c1', function: { name: 'lookup', arguments: '{"topic":"WeaveIntel"}' } },
         ],
       },
-      { content: 'WeaveIntel is great!', toolCalls: [] },
+      { content: 'WeaveIntel is great!' },
     ],
   });
 
-  const agent = createToolCallingAgent({
+  const agent = weaveAgent({
     model,
     tools,
     bus,
@@ -110,10 +120,7 @@ async function main() {
     maxSteps: 5,
   });
 
-  await agent.run(
-    { messages: [{ role: 'user', content: 'Tell me about WeaveIntel' }] },
-    ctx,
-  );
+  await agent.run(ctx, { messages: [{ role: 'user', content: 'Tell me about WeaveIntel' }] });
 
   console.log(`Captured ${events.length} events:`);
   for (const e of events) {
@@ -122,38 +129,39 @@ async function main() {
 
   // --- Usage Tracker ---
   console.log('\n=== Usage Tracker ===');
-  const tracker = createUsageTracker();
+  const tracker = weaveUsageTracker();
 
-  tracker.track({
+  tracker.record({
     executionId: ctx.executionId,
     model: 'gpt-4o-mini',
+    provider: 'openai',
     promptTokens: 150,
     completionTokens: 85,
     totalTokens: 235,
     costUsd: 0.0003,
-    latencyMs: 320,
+    timestamp: Date.now(),
   });
 
-  tracker.track({
+  tracker.record({
     executionId: ctx.executionId,
     model: 'text-embedding-3-small',
+    provider: 'openai',
     promptTokens: 500,
     completionTokens: 0,
     totalTokens: 500,
     costUsd: 0.00005,
-    latencyMs: 45,
+    timestamp: Date.now(),
   });
 
-  const totals = tracker.getTotals(ctx.executionId);
+  const totals = tracker.getTotal(ctx.executionId);
   console.log('Execution totals:');
-  console.log(`  Total tokens: ${totals.totalTokens}`);
-  console.log(`  Total cost: $${totals.costUsd.toFixed(5)}`);
-  console.log(`  Total latency: ${totals.latencyMs}ms`);
+  console.log(`  Total tokens: ${totals?.totalTokens ?? 0}`);
+  console.log(`  Total cost: $${(totals?.costUsd ?? 0).toFixed(5)}`);
 
-  const allRecords = tracker.getRecords(ctx.executionId);
+  const allRecords = tracker.getAll();
   console.log(`\nDetailed records (${allRecords.length}):`);
   for (const rec of allRecords) {
-    console.log(`  ${rec.model}: ${rec.totalTokens} tokens, $${rec.costUsd.toFixed(5)}, ${rec.latencyMs}ms`);
+    console.log(`  ${rec.model}: ${rec.totalTokens} tokens, $${(rec.costUsd ?? 0).toFixed(5)}`);
   }
 }
 

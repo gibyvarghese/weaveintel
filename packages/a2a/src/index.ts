@@ -1,1 +1,1 @@
-export { createA2AClient, createInternalA2ABus } from './a2a.js';
+export { weaveA2AClient, weaveA2ABus } from './a2a.js';
