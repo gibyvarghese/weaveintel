@@ -1169,3 +1169,206 @@ describe('Admin Tenant Configs', () => {
     expect(data['ok']).toBe(true);
   });
 });
+
+// ─── Admin Sandbox Policies ─────────────────────────────────
+
+describe('Admin Sandbox Policies', () => {
+  let itemId: string;
+
+  it('lists sandbox policies', async () => {
+    const { status, data } = await api('GET', '/api/admin/sandbox-policies');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['sandbox-policies'])).toBe(true);
+  });
+
+  it('creates a sandbox policy', async () => {
+    const { status, data } = await api('POST', '/api/admin/sandbox-policies', {
+      name: 'Test Sandbox',
+      description: 'Integration test sandbox policy',
+      max_cpu_ms: 10000,
+      max_memory_mb: 128,
+      max_duration_ms: 30000,
+      max_output_bytes: 65536,
+      allowed_modules: ['Math', 'Date', 'JSON'],
+      denied_modules: ['fs', 'net', 'child_process'],
+      network_access: false,
+      filesystem_access: 'none',
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['sandbox-policy'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a sandbox policy by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/sandbox-policies/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['sandbox-policy'] as Record<string, unknown>)?.['name']).toBe('Test Sandbox');
+  });
+
+  it('updates a sandbox policy', async () => {
+    const { status, data } = await api('PUT', `/api/admin/sandbox-policies/${itemId}`, {
+      name: 'Updated Sandbox',
+      max_duration_ms: 60000,
+    });
+    expect(status).toBe(200);
+    expect((data['sandbox-policy'] as Record<string, unknown>)?.['name']).toBe('Updated Sandbox');
+  });
+
+  it('deletes a sandbox policy', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/sandbox-policies/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin Extraction Pipelines ─────────────────────────────
+
+describe('Admin Extraction Pipelines', () => {
+  let itemId: string;
+
+  it('lists extraction pipelines', async () => {
+    const { status, data } = await api('GET', '/api/admin/extraction-pipelines');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['extraction-pipelines'])).toBe(true);
+  });
+
+  it('creates an extraction pipeline', async () => {
+    const { status, data } = await api('POST', '/api/admin/extraction-pipelines', {
+      name: 'Test Pipeline',
+      description: 'Integration test extraction pipeline',
+      stages: [
+        { type: 'metadata', enabled: true, order: 1 },
+        { type: 'entities', enabled: true, order: 2 },
+      ],
+      input_mime_types: ['text/plain', 'text/markdown'],
+      max_input_size_bytes: 5242880,
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['extraction-pipeline'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets an extraction pipeline by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/extraction-pipelines/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['extraction-pipeline'] as Record<string, unknown>)?.['name']).toBe('Test Pipeline');
+  });
+
+  it('updates an extraction pipeline', async () => {
+    const { status, data } = await api('PUT', `/api/admin/extraction-pipelines/${itemId}`, {
+      name: 'Updated Pipeline',
+      max_input_size_bytes: 10485760,
+    });
+    expect(status).toBe(200);
+    expect((data['extraction-pipeline'] as Record<string, unknown>)?.['name']).toBe('Updated Pipeline');
+  });
+
+  it('deletes an extraction pipeline', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/extraction-pipelines/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin Artifact Policies ────────────────────────────────
+
+describe('Admin Artifact Policies', () => {
+  let itemId: string;
+
+  it('lists artifact policies', async () => {
+    const { status, data } = await api('GET', '/api/admin/artifact-policies');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['artifact-policies'])).toBe(true);
+  });
+
+  it('creates an artifact policy', async () => {
+    const { status, data } = await api('POST', '/api/admin/artifact-policies', {
+      name: 'Test Artifact Policy',
+      description: 'Integration test artifact policy',
+      max_size_bytes: 104857600,
+      allowed_types: ['text', 'json', 'csv', 'image'],
+      retention_days: 90,
+      require_versioning: true,
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['artifact-policy'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets an artifact policy by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/artifact-policies/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['artifact-policy'] as Record<string, unknown>)?.['name']).toBe('Test Artifact Policy');
+  });
+
+  it('updates an artifact policy', async () => {
+    const { status, data } = await api('PUT', `/api/admin/artifact-policies/${itemId}`, {
+      name: 'Updated Artifact Policy',
+      retention_days: 180,
+    });
+    expect(status).toBe(200);
+    expect((data['artifact-policy'] as Record<string, unknown>)?.['name']).toBe('Updated Artifact Policy');
+  });
+
+  it('deletes an artifact policy', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/artifact-policies/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin Reliability Policies ─────────────────────────────
+
+describe('Admin Reliability Policies', () => {
+  let itemId: string;
+
+  it('lists reliability policies', async () => {
+    const { status, data } = await api('GET', '/api/admin/reliability-policies');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['reliability-policies'])).toBe(true);
+  });
+
+  it('creates a reliability policy', async () => {
+    const { status, data } = await api('POST', '/api/admin/reliability-policies', {
+      name: 'Test Retry Policy',
+      description: 'Integration test reliability policy',
+      policy_type: 'retry',
+      max_retries: 3,
+      initial_delay_ms: 1000,
+      max_delay_ms: 30000,
+      backoff_multiplier: 2.0,
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['reliability-policy'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a reliability policy by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/reliability-policies/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['reliability-policy'] as Record<string, unknown>)?.['name']).toBe('Test Retry Policy');
+  });
+
+  it('updates a reliability policy', async () => {
+    const { status, data } = await api('PUT', `/api/admin/reliability-policies/${itemId}`, {
+      name: 'Updated Retry Policy',
+      max_retries: 5,
+    });
+    expect(status).toBe(200);
+    expect((data['reliability-policy'] as Record<string, unknown>)?.['name']).toBe('Updated Retry Policy');
+  });
+
+  it('deletes a reliability policy', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/reliability-policies/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});

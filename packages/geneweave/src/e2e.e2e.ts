@@ -868,3 +868,195 @@ test.describe('Admin Tenant Configs', () => {
     }
   });
 });
+
+// ─── Admin Sandbox Policies ─────────────────────────────────
+
+test.describe('Admin Sandbox Policies', () => {
+  test('shows seeded sandbox policies', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Sandbox' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new sandbox policy via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Sandbox' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Sandbox Policy' })).toBeVisible({ timeout: 3000 });
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Sandbox');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Sandbox Policy' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded sandbox policy', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Sandbox' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+// ─── Admin Extraction Pipelines ─────────────────────────────
+
+test.describe('Admin Extraction Pipelines', () => {
+  test('shows seeded extraction pipelines', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Extraction' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new extraction pipeline via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Extraction' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Extraction Pipeline' })).toBeVisible({ timeout: 3000 });
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Pipeline');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Extraction Pipeline' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded extraction pipeline', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Extraction' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+// ─── Admin Artifact Policies ────────────────────────────────
+
+test.describe('Admin Artifact Policies', () => {
+  test('shows seeded artifact policies', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Artifacts' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new artifact policy via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Artifacts' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Artifact Policy' })).toBeVisible({ timeout: 3000 });
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Artifact-Policy');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Artifact Policy' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded artifact policy', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Artifacts' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+// ─── Admin Reliability Policies ─────────────────────────────
+
+test.describe('Admin Reliability Policies', () => {
+  test('shows seeded reliability policies', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Reliability' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new reliability policy via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Reliability' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Reliability Policy' })).toBeVisible({ timeout: 3000 });
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Reliability');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Reliability Policy' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded reliability policy', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Reliability' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});

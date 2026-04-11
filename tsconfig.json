@@ -32,6 +32,10 @@
     { "path": "packages/replay" },
     { "path": "packages/triggers" },
     { "path": "packages/tenancy" },
+    { "path": "packages/sandbox" },
+    { "path": "packages/extraction" },
+    { "path": "packages/artifacts" },
+    { "path": "packages/reliability" },
     { "path": "packages/geneweave" }
   ]
 }

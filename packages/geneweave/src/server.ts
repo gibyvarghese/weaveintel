@@ -1634,6 +1634,262 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
+  // ── Admin: Sandbox Policies ────────────────────────────────
+
+  router.get('/api/admin/sandbox-policies', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listSandboxPolicies();
+    json(res, 200, { 'sandbox-policies': items });
+  });
+
+  router.get('/api/admin/sandbox-policies/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getSandboxPolicy(params['id']!);
+    if (!c) { json(res, 404, { error: 'Sandbox policy not found' }); return; }
+    json(res, 200, { 'sandbox-policy': c });
+  });
+
+  router.post('/api/admin/sandbox-policies', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'sbx-' + randomUUID().slice(0, 8);
+    await db.createSandboxPolicy({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      max_cpu_ms: (body['max_cpu_ms'] as number) ?? null,
+      max_memory_mb: (body['max_memory_mb'] as number) ?? null,
+      max_duration_ms: (body['max_duration_ms'] as number) ?? 30000,
+      max_output_bytes: (body['max_output_bytes'] as number) ?? null,
+      allowed_modules: body['allowed_modules'] ? (typeof body['allowed_modules'] === 'string' ? body['allowed_modules'] as string : JSON.stringify(body['allowed_modules'])) : null,
+      denied_modules: body['denied_modules'] ? (typeof body['denied_modules'] === 'string' ? body['denied_modules'] as string : JSON.stringify(body['denied_modules'])) : null,
+      network_access: body['network_access'] ? 1 : 0,
+      filesystem_access: (body['filesystem_access'] as string) ?? 'none',
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getSandboxPolicy(id);
+    json(res, 201, { 'sandbox-policy': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/sandbox-policies/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getSandboxPolicy(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Sandbox policy not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['max_cpu_ms'] !== undefined) fields['max_cpu_ms'] = body['max_cpu_ms'];
+    if (body['max_memory_mb'] !== undefined) fields['max_memory_mb'] = body['max_memory_mb'];
+    if (body['max_duration_ms'] !== undefined) fields['max_duration_ms'] = body['max_duration_ms'];
+    if (body['max_output_bytes'] !== undefined) fields['max_output_bytes'] = body['max_output_bytes'];
+    if (body['allowed_modules'] !== undefined) fields['allowed_modules'] = typeof body['allowed_modules'] === 'string' ? body['allowed_modules'] : JSON.stringify(body['allowed_modules']);
+    if (body['denied_modules'] !== undefined) fields['denied_modules'] = typeof body['denied_modules'] === 'string' ? body['denied_modules'] : JSON.stringify(body['denied_modules']);
+    if (body['network_access'] !== undefined) fields['network_access'] = body['network_access'] ? 1 : 0;
+    if (body['filesystem_access'] !== undefined) fields['filesystem_access'] = body['filesystem_access'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateSandboxPolicy(params['id']!, fields as any);
+    const item = await db.getSandboxPolicy(params['id']!);
+    json(res, 200, { 'sandbox-policy': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/sandbox-policies/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteSandboxPolicy(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Extraction Pipelines ────────────────────────────
+
+  router.get('/api/admin/extraction-pipelines', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listExtractionPipelines();
+    json(res, 200, { 'extraction-pipelines': items });
+  });
+
+  router.get('/api/admin/extraction-pipelines/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getExtractionPipeline(params['id']!);
+    if (!c) { json(res, 404, { error: 'Extraction pipeline not found' }); return; }
+    json(res, 200, { 'extraction-pipeline': c });
+  });
+
+  router.post('/api/admin/extraction-pipelines', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'ext-' + randomUUID().slice(0, 8);
+    await db.createExtractionPipeline({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      stages: body['stages'] ? (typeof body['stages'] === 'string' ? body['stages'] as string : JSON.stringify(body['stages'])) : '[]',
+      input_mime_types: body['input_mime_types'] ? (typeof body['input_mime_types'] === 'string' ? body['input_mime_types'] as string : JSON.stringify(body['input_mime_types'])) : null,
+      max_input_size_bytes: (body['max_input_size_bytes'] as number) ?? null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getExtractionPipeline(id);
+    json(res, 201, { 'extraction-pipeline': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/extraction-pipelines/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getExtractionPipeline(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Extraction pipeline not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['stages'] !== undefined) fields['stages'] = typeof body['stages'] === 'string' ? body['stages'] : JSON.stringify(body['stages']);
+    if (body['input_mime_types'] !== undefined) fields['input_mime_types'] = typeof body['input_mime_types'] === 'string' ? body['input_mime_types'] : JSON.stringify(body['input_mime_types']);
+    if (body['max_input_size_bytes'] !== undefined) fields['max_input_size_bytes'] = body['max_input_size_bytes'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateExtractionPipeline(params['id']!, fields as any);
+    const item = await db.getExtractionPipeline(params['id']!);
+    json(res, 200, { 'extraction-pipeline': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/extraction-pipelines/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteExtractionPipeline(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Artifact Policies ───────────────────────────────
+
+  router.get('/api/admin/artifact-policies', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listArtifactPolicies();
+    json(res, 200, { 'artifact-policies': items });
+  });
+
+  router.get('/api/admin/artifact-policies/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getArtifactPolicy(params['id']!);
+    if (!c) { json(res, 404, { error: 'Artifact policy not found' }); return; }
+    json(res, 200, { 'artifact-policy': c });
+  });
+
+  router.post('/api/admin/artifact-policies', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'artpol-' + randomUUID().slice(0, 8);
+    await db.createArtifactPolicy({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      max_size_bytes: (body['max_size_bytes'] as number) ?? null,
+      allowed_types: body['allowed_types'] ? (typeof body['allowed_types'] === 'string' ? body['allowed_types'] as string : JSON.stringify(body['allowed_types'])) : null,
+      retention_days: (body['retention_days'] as number) ?? null,
+      require_versioning: body['require_versioning'] ? 1 : 0,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getArtifactPolicy(id);
+    json(res, 201, { 'artifact-policy': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/artifact-policies/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getArtifactPolicy(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Artifact policy not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['max_size_bytes'] !== undefined) fields['max_size_bytes'] = body['max_size_bytes'];
+    if (body['allowed_types'] !== undefined) fields['allowed_types'] = typeof body['allowed_types'] === 'string' ? body['allowed_types'] : JSON.stringify(body['allowed_types']);
+    if (body['retention_days'] !== undefined) fields['retention_days'] = body['retention_days'];
+    if (body['require_versioning'] !== undefined) fields['require_versioning'] = body['require_versioning'] ? 1 : 0;
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateArtifactPolicy(params['id']!, fields as any);
+    const item = await db.getArtifactPolicy(params['id']!);
+    json(res, 200, { 'artifact-policy': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/artifact-policies/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteArtifactPolicy(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Reliability Policies ────────────────────────────
+
+  router.get('/api/admin/reliability-policies', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listReliabilityPolicies();
+    json(res, 200, { 'reliability-policies': items });
+  });
+
+  router.get('/api/admin/reliability-policies/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getReliabilityPolicy(params['id']!);
+    if (!c) { json(res, 404, { error: 'Reliability policy not found' }); return; }
+    json(res, 200, { 'reliability-policy': c });
+  });
+
+  router.post('/api/admin/reliability-policies', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'rel-' + randomUUID().slice(0, 8);
+    await db.createReliabilityPolicy({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      policy_type: (body['policy_type'] as string) ?? 'retry',
+      max_retries: (body['max_retries'] as number) ?? null,
+      initial_delay_ms: (body['initial_delay_ms'] as number) ?? null,
+      max_delay_ms: (body['max_delay_ms'] as number) ?? null,
+      backoff_multiplier: (body['backoff_multiplier'] as number) ?? null,
+      max_concurrent: (body['max_concurrent'] as number) ?? null,
+      queue_size: (body['queue_size'] as number) ?? null,
+      strategy: (body['strategy'] as string) ?? null,
+      ttl_ms: (body['ttl_ms'] as number) ?? null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getReliabilityPolicy(id);
+    json(res, 201, { 'reliability-policy': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/reliability-policies/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getReliabilityPolicy(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Reliability policy not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['policy_type'] !== undefined) fields['policy_type'] = body['policy_type'];
+    if (body['max_retries'] !== undefined) fields['max_retries'] = body['max_retries'];
+    if (body['initial_delay_ms'] !== undefined) fields['initial_delay_ms'] = body['initial_delay_ms'];
+    if (body['max_delay_ms'] !== undefined) fields['max_delay_ms'] = body['max_delay_ms'];
+    if (body['backoff_multiplier'] !== undefined) fields['backoff_multiplier'] = body['backoff_multiplier'];
+    if (body['max_concurrent'] !== undefined) fields['max_concurrent'] = body['max_concurrent'];
+    if (body['queue_size'] !== undefined) fields['queue_size'] = body['queue_size'];
+    if (body['strategy'] !== undefined) fields['strategy'] = body['strategy'];
+    if (body['ttl_ms'] !== undefined) fields['ttl_ms'] = body['ttl_ms'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateReliabilityPolicy(params['id']!, fields as any);
+    const item = await db.getReliabilityPolicy(params['id']!);
+    json(res, 200, { 'reliability-policy': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/reliability-policies/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteReliabilityPolicy(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
   // ── Admin: Seed data ───────────────────────────────────────
 
   router.post('/api/admin/seed', async (_req, res, _params, auth) => {

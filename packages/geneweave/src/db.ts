@@ -381,6 +381,66 @@ export interface TenantConfigRow {
   updated_at: string;
 }
 
+export interface SandboxPolicyRow {
+  id: string;
+  name: string;
+  description: string | null;
+  max_cpu_ms: number | null;
+  max_memory_mb: number | null;
+  max_duration_ms: number;
+  max_output_bytes: number | null;
+  allowed_modules: string | null;    // JSON array
+  denied_modules: string | null;     // JSON array
+  network_access: number;
+  filesystem_access: string;         // 'none' | 'read-only' | 'read-write'
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ExtractionPipelineRow {
+  id: string;
+  name: string;
+  description: string | null;
+  stages: string;                    // JSON array of stage configs
+  input_mime_types: string | null;   // JSON array
+  max_input_size_bytes: number | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ArtifactPolicyRow {
+  id: string;
+  name: string;
+  description: string | null;
+  max_size_bytes: number | null;
+  allowed_types: string | null;      // JSON array of ArtifactType
+  retention_days: number | null;
+  require_versioning: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReliabilityPolicyRow {
+  id: string;
+  name: string;
+  description: string | null;
+  policy_type: string;               // 'retry' | 'idempotency' | 'concurrency' | 'backpressure'
+  max_retries: number | null;
+  initial_delay_ms: number | null;
+  max_delay_ms: number | null;
+  backoff_multiplier: number | null;
+  max_concurrent: number | null;
+  queue_size: number | null;
+  strategy: string | null;           // 'reject' | 'queue' | 'shed-oldest'
+  ttl_ms: number | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MetricsSummary {
   total_tokens: number;
   total_cost: number;
@@ -651,6 +711,34 @@ export interface DatabaseAdapter {
   listTenantConfigs(): Promise<TenantConfigRow[]>;
   updateTenantConfig(id: string, fields: Partial<Omit<TenantConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteTenantConfig(id: string): Promise<void>;
+
+  // ─── Admin: Sandbox Policies ─────────────────────────────────
+  createSandboxPolicy(p: Omit<SandboxPolicyRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getSandboxPolicy(id: string): Promise<SandboxPolicyRow | null>;
+  listSandboxPolicies(): Promise<SandboxPolicyRow[]>;
+  updateSandboxPolicy(id: string, fields: Partial<Omit<SandboxPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteSandboxPolicy(id: string): Promise<void>;
+
+  // ─── Admin: Extraction Pipelines ─────────────────────────────
+  createExtractionPipeline(p: Omit<ExtractionPipelineRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getExtractionPipeline(id: string): Promise<ExtractionPipelineRow | null>;
+  listExtractionPipelines(): Promise<ExtractionPipelineRow[]>;
+  updateExtractionPipeline(id: string, fields: Partial<Omit<ExtractionPipelineRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteExtractionPipeline(id: string): Promise<void>;
+
+  // ─── Admin: Artifact Policies ────────────────────────────────
+  createArtifactPolicy(p: Omit<ArtifactPolicyRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getArtifactPolicy(id: string): Promise<ArtifactPolicyRow | null>;
+  listArtifactPolicies(): Promise<ArtifactPolicyRow[]>;
+  updateArtifactPolicy(id: string, fields: Partial<Omit<ArtifactPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteArtifactPolicy(id: string): Promise<void>;
+
+  // ─── Admin: Reliability Policies ─────────────────────────────
+  createReliabilityPolicy(p: Omit<ReliabilityPolicyRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getReliabilityPolicy(id: string): Promise<ReliabilityPolicyRow | null>;
+  listReliabilityPolicies(): Promise<ReliabilityPolicyRow[]>;
+  updateReliabilityPolicy(id: string, fields: Partial<Omit<ReliabilityPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteReliabilityPolicy(id: string): Promise<void>;
 
   // ─── Admin: Seed data ──────────────────────────────────────
   seedDefaultData(): Promise<void>;
@@ -1045,6 +1133,66 @@ CREATE TABLE IF NOT EXISTS tenant_configs (
   max_cost_monthly REAL,
   features TEXT,
   config_overrides TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sandbox_policies (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  max_cpu_ms INTEGER,
+  max_memory_mb INTEGER,
+  max_duration_ms INTEGER NOT NULL DEFAULT 30000,
+  max_output_bytes INTEGER,
+  allowed_modules TEXT,
+  denied_modules TEXT,
+  network_access INTEGER NOT NULL DEFAULT 0,
+  filesystem_access TEXT NOT NULL DEFAULT 'none',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS extraction_pipelines (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  stages TEXT NOT NULL,
+  input_mime_types TEXT,
+  max_input_size_bytes INTEGER,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS artifact_policies (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  max_size_bytes INTEGER,
+  allowed_types TEXT,
+  retention_days INTEGER,
+  require_versioning INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS reliability_policies (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  policy_type TEXT NOT NULL DEFAULT 'retry',
+  max_retries INTEGER,
+  initial_delay_ms INTEGER,
+  max_delay_ms INTEGER,
+  backoff_multiplier REAL,
+  max_concurrent INTEGER,
+  queue_size INTEGER,
+  strategy TEXT,
+  ttl_ms INTEGER,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -1932,6 +2080,138 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM tenant_configs WHERE id = ?').run(id);
   }
 
+  // ─── Admin: Sandbox Policies ─────────────────────────────────
+
+  async createSandboxPolicy(p: Omit<SandboxPolicyRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO sandbox_policies (id, name, description, max_cpu_ms, max_memory_mb, max_duration_ms, max_output_bytes, allowed_modules, denied_modules, network_access, filesystem_access, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.name, p.description ?? null, p.max_cpu_ms ?? null, p.max_memory_mb ?? null, p.max_duration_ms, p.max_output_bytes ?? null, p.allowed_modules ?? null, p.denied_modules ?? null, p.network_access, p.filesystem_access, p.enabled);
+  }
+
+  async getSandboxPolicy(id: string): Promise<SandboxPolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM sandbox_policies WHERE id = ?').get(id) as SandboxPolicyRow) ?? null;
+  }
+
+  async listSandboxPolicies(): Promise<SandboxPolicyRow[]> {
+    return this.d.prepare('SELECT * FROM sandbox_policies ORDER BY name ASC').all() as SandboxPolicyRow[];
+  }
+
+  async updateSandboxPolicy(id: string, fields: Partial<Omit<SandboxPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE sandbox_policies SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteSandboxPolicy(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM sandbox_policies WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Extraction Pipelines ─────────────────────────────
+
+  async createExtractionPipeline(p: Omit<ExtractionPipelineRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO extraction_pipelines (id, name, description, stages, input_mime_types, max_input_size_bytes, enabled) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.name, p.description ?? null, p.stages, p.input_mime_types ?? null, p.max_input_size_bytes ?? null, p.enabled);
+  }
+
+  async getExtractionPipeline(id: string): Promise<ExtractionPipelineRow | null> {
+    return (this.d.prepare('SELECT * FROM extraction_pipelines WHERE id = ?').get(id) as ExtractionPipelineRow) ?? null;
+  }
+
+  async listExtractionPipelines(): Promise<ExtractionPipelineRow[]> {
+    return this.d.prepare('SELECT * FROM extraction_pipelines ORDER BY name ASC').all() as ExtractionPipelineRow[];
+  }
+
+  async updateExtractionPipeline(id: string, fields: Partial<Omit<ExtractionPipelineRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE extraction_pipelines SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteExtractionPipeline(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM extraction_pipelines WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Artifact Policies ────────────────────────────────
+
+  async createArtifactPolicy(p: Omit<ArtifactPolicyRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO artifact_policies (id, name, description, max_size_bytes, allowed_types, retention_days, require_versioning, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.name, p.description ?? null, p.max_size_bytes ?? null, p.allowed_types ?? null, p.retention_days ?? null, p.require_versioning, p.enabled);
+  }
+
+  async getArtifactPolicy(id: string): Promise<ArtifactPolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM artifact_policies WHERE id = ?').get(id) as ArtifactPolicyRow) ?? null;
+  }
+
+  async listArtifactPolicies(): Promise<ArtifactPolicyRow[]> {
+    return this.d.prepare('SELECT * FROM artifact_policies ORDER BY name ASC').all() as ArtifactPolicyRow[];
+  }
+
+  async updateArtifactPolicy(id: string, fields: Partial<Omit<ArtifactPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE artifact_policies SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteArtifactPolicy(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM artifact_policies WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Reliability Policies ─────────────────────────────
+
+  async createReliabilityPolicy(p: Omit<ReliabilityPolicyRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO reliability_policies (id, name, description, policy_type, max_retries, initial_delay_ms, max_delay_ms, backoff_multiplier, max_concurrent, queue_size, strategy, ttl_ms, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.name, p.description ?? null, p.policy_type, p.max_retries ?? null, p.initial_delay_ms ?? null, p.max_delay_ms ?? null, p.backoff_multiplier ?? null, p.max_concurrent ?? null, p.queue_size ?? null, p.strategy ?? null, p.ttl_ms ?? null, p.enabled);
+  }
+
+  async getReliabilityPolicy(id: string): Promise<ReliabilityPolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM reliability_policies WHERE id = ?').get(id) as ReliabilityPolicyRow) ?? null;
+  }
+
+  async listReliabilityPolicies(): Promise<ReliabilityPolicyRow[]> {
+    return this.d.prepare('SELECT * FROM reliability_policies ORDER BY name ASC').all() as ReliabilityPolicyRow[];
+  }
+
+  async updateReliabilityPolicy(id: string, fields: Partial<Omit<ReliabilityPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE reliability_policies SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteReliabilityPolicy(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM reliability_policies WHERE id = ?').run(id);
+  }
+
   // ─── Seed default data ─────────────────────────────────────
 
   async seedDefaultData(): Promise<void> {
@@ -2538,6 +2818,124 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const c of tenantConfigs) await this.createTenantConfig(c);
+    }
+
+    // Sandbox Policies
+    if (cnt('sandbox_policies') === 0) {
+    const sandboxPolicies: Omit<SandboxPolicyRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'sbx-strict', name: 'Strict Sandbox', description: 'Highly restrictive sandbox for untrusted code execution',
+        max_cpu_ms: 5000, max_memory_mb: 64, max_duration_ms: 10000, max_output_bytes: 65536,
+        allowed_modules: JSON.stringify(['Math', 'Date', 'JSON']),
+        denied_modules: JSON.stringify(['fs', 'net', 'child_process', 'http', 'https', 'crypto']),
+        network_access: 0, filesystem_access: 'none', enabled: 1,
+      },
+      {
+        id: 'sbx-moderate', name: 'Moderate Sandbox', description: 'Balanced sandbox allowing read-only filesystem and select modules',
+        max_cpu_ms: 30000, max_memory_mb: 256, max_duration_ms: 60000, max_output_bytes: 1048576,
+        allowed_modules: JSON.stringify(['Math', 'Date', 'JSON', 'crypto', 'path', 'url']),
+        denied_modules: JSON.stringify(['child_process', 'net', 'cluster', 'worker_threads']),
+        network_access: 0, filesystem_access: 'read-only', enabled: 1,
+      },
+      {
+        id: 'sbx-permissive', name: 'Permissive Sandbox', description: 'Relaxed sandbox for trusted internal code with network access',
+        max_cpu_ms: 120000, max_memory_mb: 512, max_duration_ms: 300000, max_output_bytes: 10485760,
+        allowed_modules: null, denied_modules: JSON.stringify(['child_process', 'cluster']),
+        network_access: 1, filesystem_access: 'read-write', enabled: 1,
+      },
+    ];
+    for (const p of sandboxPolicies) await this.createSandboxPolicy(p);
+    }
+
+    // Extraction Pipelines
+    if (cnt('extraction_pipelines') === 0) {
+    const extractionPipelines: Omit<ExtractionPipelineRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'ext-full', name: 'Full Extraction', description: 'Runs all extraction stages: metadata, language, entities, tables, code, tasks, timeline',
+        stages: JSON.stringify([
+          { type: 'metadata', enabled: true, order: 1 },
+          { type: 'language', enabled: true, order: 2 },
+          { type: 'entities', enabled: true, order: 3 },
+          { type: 'tables', enabled: true, order: 4 },
+          { type: 'code', enabled: true, order: 5 },
+          { type: 'tasks', enabled: true, order: 6 },
+          { type: 'timeline', enabled: true, order: 7 },
+        ]),
+        input_mime_types: JSON.stringify(['text/plain', 'text/markdown', 'text/html', 'application/pdf']),
+        max_input_size_bytes: 10485760, enabled: 1,
+      },
+      {
+        id: 'ext-code-only', name: 'Code Extraction', description: 'Extracts code blocks and related entities from technical documents',
+        stages: JSON.stringify([
+          { type: 'metadata', enabled: true, order: 1 },
+          { type: 'code', enabled: true, order: 2 },
+          { type: 'entities', enabled: true, order: 3 },
+        ]),
+        input_mime_types: JSON.stringify(['text/plain', 'text/markdown']),
+        max_input_size_bytes: 5242880, enabled: 1,
+      },
+      {
+        id: 'ext-tasks-timeline', name: 'Tasks & Timeline', description: 'Extracts tasks, deadlines, and chronological events',
+        stages: JSON.stringify([
+          { type: 'metadata', enabled: true, order: 1 },
+          { type: 'tasks', enabled: true, order: 2 },
+          { type: 'timeline', enabled: true, order: 3 },
+          { type: 'entities', enabled: true, order: 4 },
+        ]),
+        input_mime_types: JSON.stringify(['text/plain', 'text/markdown', 'text/html']),
+        max_input_size_bytes: 5242880, enabled: 1,
+      },
+    ];
+    for (const p of extractionPipelines) await this.createExtractionPipeline(p);
+    }
+
+    // Artifact Policies
+    if (cnt('artifact_policies') === 0) {
+    const artifactPolicies: Omit<ArtifactPolicyRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'artpol-default', name: 'Default Artifact Policy', description: 'Standard artifact policy with 100MB limit and 90-day retention',
+        max_size_bytes: 104857600, allowed_types: JSON.stringify(['text', 'csv', 'json', 'html', 'markdown', 'image', 'code', 'report']),
+        retention_days: 90, require_versioning: 1, enabled: 1,
+      },
+      {
+        id: 'artpol-strict', name: 'Strict Artifact Policy', description: 'Restrictive policy for sensitive environments — small size limit, short retention',
+        max_size_bytes: 10485760, allowed_types: JSON.stringify(['text', 'json', 'csv']),
+        retention_days: 30, require_versioning: 1, enabled: 1,
+      },
+      {
+        id: 'artpol-large', name: 'Large Artifact Policy', description: 'Policy for large outputs — PDFs, reports, diagrams — with extended retention',
+        max_size_bytes: 1073741824, allowed_types: JSON.stringify(['text', 'csv', 'json', 'html', 'markdown', 'image', 'pdf', 'diagram', 'code', 'report', 'custom']),
+        retention_days: 365, require_versioning: 1, enabled: 1,
+      },
+    ];
+    for (const p of artifactPolicies) await this.createArtifactPolicy(p);
+    }
+
+    // Reliability Policies
+    if (cnt('reliability_policies') === 0) {
+    const reliabilityPolicies: Omit<ReliabilityPolicyRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'rel-retry-default', name: 'Default Retry', description: 'Standard exponential backoff retry for transient failures',
+        policy_type: 'retry', max_retries: 3, initial_delay_ms: 1000, max_delay_ms: 30000, backoff_multiplier: 2.0,
+        max_concurrent: null, queue_size: null, strategy: null, ttl_ms: null, enabled: 1,
+      },
+      {
+        id: 'rel-retry-aggressive', name: 'Aggressive Retry', description: 'More retries with shorter delays for critical operations',
+        policy_type: 'retry', max_retries: 5, initial_delay_ms: 500, max_delay_ms: 15000, backoff_multiplier: 1.5,
+        max_concurrent: null, queue_size: null, strategy: null, ttl_ms: null, enabled: 1,
+      },
+      {
+        id: 'rel-concurrency-std', name: 'Standard Concurrency', description: 'Limit concurrent executions with queuing for overflow',
+        policy_type: 'concurrency', max_retries: null, initial_delay_ms: null, max_delay_ms: null, backoff_multiplier: null,
+        max_concurrent: 10, queue_size: 50, strategy: 'queue', ttl_ms: 60000, enabled: 1,
+      },
+      {
+        id: 'rel-idempotency', name: 'Idempotency Guard', description: 'Prevent duplicate processing within a 5-minute window',
+        policy_type: 'idempotency', max_retries: null, initial_delay_ms: null, max_delay_ms: null, backoff_multiplier: null,
+        max_concurrent: null, queue_size: null, strategy: null, ttl_ms: 300000, enabled: 1,
+      },
+    ];
+    for (const p of reliabilityPolicies) await this.createReliabilityPolicy(p);
     }
   }
 }
