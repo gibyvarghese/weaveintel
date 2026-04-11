@@ -23,6 +23,12 @@
     { "path": "packages/routing" },
     { "path": "packages/cache" },
     { "path": "packages/identity" },
+    { "path": "packages/tools" },
+    { "path": "packages/tools-search" },
+    { "path": "packages/tools-http" },
+    { "path": "packages/tools-browser" },
+    { "path": "packages/tools-social" },
+    { "path": "packages/tools-enterprise" },
     { "path": "packages/geneweave" }
   ]
 }

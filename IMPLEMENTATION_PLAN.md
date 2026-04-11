@@ -470,22 +470,23 @@ packages/identity/src/
 
 ---
 
-### Phase 5 — Tool Lifecycle, Advanced Retrieval & Observability & MCP
-All tools should be called via MCP
+### Phase 5 — MCP Tool Ecosystem, Advanced Retrieval & Observability
+**All tools are exposed and invoked via MCP** — every capability registers as an MCP tool, discoverable by any MCP-compatible agent or client.
 **Priority: MEDIUM-HIGH — operational maturity**
 
-#### 5A. `@weaveintel/tools` (extended tool registry)
-**Why:** Tools need risk classification, versioning, health tracking, and test harnesses for production safety.
+#### 5A. `@weaveintel/tools` (extended tool registry + MCP bridge)
+**Why:** Tools need risk classification, versioning, health tracking, test harnesses, and automatic MCP exposure for production safety and interoperability.
 
 **Package structure:**
 ```
 packages/tools/src/
   ├── index.ts              # Public API
-  ├── registry.ts           # Extended ToolRegistry with versioning and discovery
-  ├── descriptor.ts         # ToolDescriptor — rich metadata, risk level, side effects
-  ├── lifecycle.ts          # ToolLifecyclePolicy — approval, deprecation
-  ├── health.ts             # ToolHealth telemetry
-  └── harness.ts            # ToolTestHarness — test tools in isolation
+  ├── registry.ts           # Extended ToolRegistry with versioning, discovery, and MCP auto-registration
+  ├── descriptor.ts         # ToolDescriptor — rich metadata, risk level, side effects, rate limits
+  ├── lifecycle.ts          # ToolLifecyclePolicy — approval workflows, deprecation, sunset schedules
+  ├── health.ts             # ToolHealth telemetry — uptime, latency, error rates, circuit breaker
+  ├── harness.ts            # ToolTestHarness — test tools in isolation with mock contexts
+  └── mcp-bridge.ts         # MCPToolBridge — auto-exposes all registered tools as MCP tools, routes MCP calls to implementations
 ```
 
 **Tool risk categories:**
@@ -496,7 +497,238 @@ packages/tools/src/
 - `financial` — monetary impact
 - `external-side-effect` — calls external services
 
-#### 5B. Advanced retrieval (extend `@weaveintel/retrieval`)
+**MCP integration:**
+- Every tool registered via `ToolRegistry` is automatically available as an MCP tool
+- MCP tool calls route through the same lifecycle (risk check → approval → execute → audit)
+- Remote MCP servers can be mounted as tool namespaces (e.g., `search.*`, `social.*`)
+
+#### 5B. `@weaveintel/tools-search` (web search via MCP)
+**Why:** Agents need web search to answer real-time questions, research topics, and verify facts. Each provider is an MCP tool, allowing agents to pick the best source for a query.
+
+**Package structure:**
+```
+packages/tools-search/src/
+  ├── index.ts              # Public API — re-exports all search tools
+  ├── base.ts               # BaseSearchTool — shared interface, result normalisation, rate limiting
+  ├── types.ts              # SearchResult, SearchOptions, SearchProvider config types
+  ├── providers/
+  │   ├── searxng.ts        # SearXNG — self-hosted meta-search (configurable instance URL)
+  │   ├── google-pse.ts     # Google Programmable Search Engine (API key + CX ID)
+  │   ├── brave.ts          # Brave Search API
+  │   ├── kagi.ts           # Kagi Search API
+  │   ├── mojeek.ts         # Mojeek Search API
+  │   ├── tavily.ts         # Tavily AI-optimised search
+  │   ├── perplexity.ts     # Perplexity Sonar search API
+  │   ├── serpstack.ts      # serpstack SERP API
+  │   ├── serper.ts         # Serper.dev Google SERP API
+  │   ├── serply.ts         # Serply search API
+  │   ├── duckduckgo.ts     # DuckDuckGo Instant Answer API
+  │   ├── searchapi.ts      # SearchApi.io multi-engine
+  │   ├── serpapi.ts         # SerpApi multi-engine
+  │   ├── bing.ts           # Bing Web Search API (Azure Cognitive Services key)
+  │   ├── jina.ts           # Jina AI reader / search API
+  │   ├── exa.ts            # Exa neural search API
+  │   ├── sogou.ts          # Sogou Search API (Chinese web)
+  │   └── azure-ai-search.ts # Azure AI Search (index-based, vector + keyword hybrid)
+  ├── router.ts             # SearchRouter — pick best provider by query type, region, cost, availability
+  └── mcp.ts                # MCP registration — exposes each provider as `search.<provider>` MCP tool and a unified `search.query` meta-tool
+```
+
+**Normalised result shape** (all providers map to this):
+```ts
+interface SearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+  source: string;          // provider name
+  publishedAt?: string;
+  score?: number;
+  metadata?: Record<string, unknown>;
+}
+```
+
+**MCP tools exposed:**
+| MCP Tool Name | Description |
+|---|---|
+| `search.query` | Unified meta-search — picks best provider(s) via `SearchRouter`, deduplicates and ranks results |
+| `search.searxng` | Query a SearXNG instance |
+| `search.google` | Google Programmable Search Engine |
+| `search.brave` | Brave Search |
+| `search.kagi` | Kagi Search |
+| `search.mojeek` | Mojeek Search |
+| `search.tavily` | Tavily AI search |
+| `search.perplexity` | Perplexity Sonar |
+| `search.serpstack` | serpstack SERP |
+| `search.serper` | Serper.dev |
+| `search.serply` | Serply |
+| `search.duckduckgo` | DuckDuckGo Instant Answer |
+| `search.searchapi` | SearchApi.io |
+| `search.serpapi` | SerpApi |
+| `search.bing` | Bing Web Search |
+| `search.jina` | Jina reader/search |
+| `search.exa` | Exa neural search |
+| `search.sogou` | Sogou Search |
+| `search.azure_ai_search` | Azure AI Search (hybrid vector + keyword) |
+
+#### 5C. `@weaveintel/tools-http` (REST API calling via MCP)
+**Why:** Agents need to call arbitrary REST APIs — internal microservices, third-party SaaS, webhooks. This provides a secure, auditable HTTP tool with schema validation, auth injection, and retry.
+
+**Package structure:**
+```
+packages/tools-http/src/
+  ├── index.ts              # Public API
+  ├── types.ts              # HTTPToolConfig, RequestTemplate, AuthConfig types
+  ├── client.ts             # HTTPTool — make GET/POST/PUT/PATCH/DELETE requests with configurable auth, headers, body templates
+  ├── auth.ts               # Auth strategies: API key, Bearer token, OAuth2 client-credentials, Basic, custom header
+  ├── schema.ts             # Request/response JSON Schema validation
+  ├── retry.ts              # Retry policy with exponential backoff, circuit breaker
+  ├── transform.ts          # Response transformers — extract JSON path, XML→JSON, HTML→text
+  └── mcp.ts                # MCP registration — exposes `http.request`, `http.get`, `http.post` as MCP tools
+```
+
+**MCP tools exposed:**
+| MCP Tool Name | Description |
+|---|---|
+| `http.request` | Generic HTTP request (method, url, headers, body, auth config) |
+| `http.get` | Convenience GET with query params |
+| `http.post` | Convenience POST with JSON/form body |
+| `http.graphql` | GraphQL query/mutation executor |
+
+#### 5D. `@weaveintel/tools-browser` (web extraction via MCP)
+**Why:** Agents need to read web pages, extract structured data, take screenshots, and interact with dynamic content for research, monitoring, and data gathering.
+
+**Package structure:**
+```
+packages/tools-browser/src/
+  ├── index.ts              # Public API
+  ├── types.ts              # BrowserConfig, ExtractionResult, ScreenshotOptions types
+  ├── fetcher.ts            # SimpleFetcher — lightweight HTTP fetch + Readability extraction (no browser needed)
+  ├── scraper.ts            # BrowserScraper — Playwright-based full browser: render, extract, screenshot
+  ├── extractor.ts          # ContentExtractor — HTML→markdown, HTML→structured JSON, CSS/XPath selectors
+  ├── readability.ts        # ReadabilityExtractor — article text, title, author, date via Readability algorithm
+  ├── screenshot.ts         # ScreenshotTool — full-page or element screenshot, PDF export
+  ├── sitemap.ts            # SitemapCrawler — discover pages from sitemap.xml
+  └── mcp.ts                # MCP registration — exposes browser tools as MCP tools
+```
+
+**MCP tools exposed:**
+| MCP Tool Name | Description |
+|---|---|
+| `browser.fetch` | Lightweight HTTP fetch + Readability text extraction (no JS rendering) |
+| `browser.scrape` | Full Playwright-based page render, wait for selectors, extract content |
+| `browser.screenshot` | Capture screenshot of a URL or element (PNG/JPEG) |
+| `browser.extract` | Extract structured data from HTML using CSS/XPath selectors |
+| `browser.pdf` | Render a URL to PDF |
+| `browser.sitemap` | Crawl sitemap.xml and return page list |
+
+#### 5E. `@weaveintel/tools-social` (social media platform APIs via MCP)
+**Why:** Agents need to read, post, and manage content across social platforms. Each platform adapter wraps its REST/Graph API and exposes actions as MCP tools with proper OAuth and rate-limit handling.
+
+**Package structure:**
+```
+packages/tools-social/src/
+  ├── index.ts              # Public API
+  ├── types.ts              # SocialPost, SocialProfile, SocialComment, MediaAttachment, PaginatedResult types
+  ├── base.ts               # BaseSocialAdapter — shared auth, rate limiting, pagination, error handling
+  ├── platforms/
+  │   ├── instagram.ts      # Instagram Graph API — read profile, feed, stories, comments; post media; reply to comments
+  │   ├── facebook.ts       # Facebook Graph API — read pages/groups, posts, comments; create posts; manage page messages
+  │   ├── tiktok.ts         # TikTok API — read user info, videos, comments; post videos; analytics
+  │   ├── twitter.ts        # X/Twitter API v2 — read tweets, timelines, mentions; post tweets; search
+  │   ├── linkedin.ts       # LinkedIn API — read profile, posts, company pages; create shares/posts
+  │   └── youtube.ts        # YouTube Data API — search videos, read comments, channel info; post comments
+  ├── auth/
+  │   ├── oauth2.ts         # OAuth2 authorization code + refresh token flow (Instagram, Facebook, TikTok, LinkedIn)
+  │   └── token-store.ts    # Encrypted token storage and refresh scheduler
+  └── mcp.ts                # MCP registration — exposes each platform as `social.<platform>.<action>` MCP tools
+```
+
+**MCP tools exposed (per platform — Instagram shown as example, same pattern for all):**
+| MCP Tool Name | Description |
+|---|---|
+| `social.instagram.profile` | Get user profile info |
+| `social.instagram.feed` | Read user's media feed (paginated) |
+| `social.instagram.post` | Publish a photo/video/carousel |
+| `social.instagram.comments` | Read comments on a post |
+| `social.instagram.reply` | Reply to a comment |
+| `social.instagram.stories` | Read user's stories |
+| `social.instagram.insights` | Get post/account insights (business accounts) |
+| `social.facebook.*` | Same pattern — pages, groups, posts, comments, messenger |
+| `social.tiktok.*` | Same pattern — user, videos, comments, analytics |
+| `social.twitter.*` | Same pattern — tweets, timelines, search, post |
+| `social.linkedin.*` | Same pattern — profile, posts, shares, company pages |
+| `social.youtube.*` | Same pattern — search, videos, comments, channels |
+
+#### 5F. `@weaveintel/tools-enterprise` (enterprise connectors via MCP)
+**Why:** Agents need access to enterprise knowledge bases, documents, and communication — SharePoint, Confluence, email (Gmail, Microsoft 365). Each connector provides read/write MCP tools with proper auth (OAuth2, service account, API tokens).
+
+**Package structure:**
+```
+packages/tools-enterprise/src/
+  ├── index.ts              # Public API
+  ├── types.ts              # Document, Page, Email, Attachment, DriveItem, CalendarEvent types
+  ├── base.ts               # BaseEnterpriseAdapter — shared auth, pagination, error mapping
+  ├── connectors/
+  │   ├── sharepoint.ts     # SharePoint Online REST API — sites, lists, document libraries, pages, search
+  │   ├── confluence.ts     # Confluence REST API v2 — spaces, pages, blog posts, comments, search, attachments
+  │   ├── gmail.ts          # Gmail API — list/read/send/draft/reply emails, labels, attachments, search
+  │   ├── microsoft-mail.ts # Microsoft Graph Mail API — list/read/send/draft/reply emails, folders, attachments, search
+  │   ├── microsoft-drive.ts # Microsoft Graph OneDrive/SharePoint Files — list/read/upload/download files
+  │   ├── microsoft-calendar.ts # Microsoft Graph Calendar — list/create/update events, availability
+  │   ├── google-drive.ts   # Google Drive API — list/read/upload/download files, permissions
+  │   ├── google-calendar.ts # Google Calendar API — list/create/update events
+  │   ├── notion.ts         # Notion API — databases, pages, blocks, search
+  │   ├── slack.ts          # Slack Web API — channels, messages, threads, files, search
+  │   └── teams.ts          # Microsoft Teams API — teams, channels, messages, files
+  ├── auth/
+  │   ├── oauth2-enterprise.ts # OAuth2 flows: authorization code, client credentials, on-behalf-of
+  │   ├── service-account.ts   # Service account / app-only auth (Google, Microsoft)
+  │   └── token-store.ts       # Encrypted token persistence and auto-refresh
+  └── mcp.ts                # MCP registration — exposes each connector as `enterprise.<platform>.<action>` MCP tools
+```
+
+**MCP tools exposed:**
+| MCP Tool Name | Description |
+|---|---|
+| **SharePoint** | |
+| `enterprise.sharepoint.search` | Search across SharePoint sites |
+| `enterprise.sharepoint.list_sites` | List available sites |
+| `enterprise.sharepoint.get_page` | Read a SharePoint page |
+| `enterprise.sharepoint.list_documents` | List documents in a library |
+| `enterprise.sharepoint.read_document` | Read/download a document |
+| `enterprise.sharepoint.upload_document` | Upload a document to a library |
+| **Confluence** | |
+| `enterprise.confluence.search` | Search Confluence content (CQL) |
+| `enterprise.confluence.get_page` | Read a Confluence page (body, metadata) |
+| `enterprise.confluence.create_page` | Create a new page |
+| `enterprise.confluence.update_page` | Update an existing page |
+| `enterprise.confluence.get_comments` | Read page comments |
+| `enterprise.confluence.add_comment` | Add a comment to a page |
+| **Gmail** | |
+| `enterprise.gmail.search` | Search emails (Gmail query syntax) |
+| `enterprise.gmail.read` | Read an email (headers, body, attachments) |
+| `enterprise.gmail.send` | Send an email |
+| `enterprise.gmail.draft` | Create a draft |
+| `enterprise.gmail.reply` | Reply to a thread |
+| `enterprise.gmail.labels` | List/manage labels |
+| **Microsoft Mail** | |
+| `enterprise.microsoft_mail.search` | Search emails (Microsoft Graph) |
+| `enterprise.microsoft_mail.read` | Read an email |
+| `enterprise.microsoft_mail.send` | Send an email |
+| `enterprise.microsoft_mail.draft` | Create a draft |
+| `enterprise.microsoft_mail.reply` | Reply to a message |
+| **Microsoft Drive / Google Drive** | |
+| `enterprise.onedrive.*` | List, read, upload, download, search files |
+| `enterprise.google_drive.*` | Same pattern |
+| **Calendar** | |
+| `enterprise.google_calendar.*` | List, create, update events; check availability |
+| `enterprise.microsoft_calendar.*` | Same pattern |
+| **Collaboration** | |
+| `enterprise.notion.*` | Databases, pages, blocks, search |
+| `enterprise.slack.*` | Channels, messages, threads, files, search |
+| `enterprise.teams.*` | Teams, channels, messages, chat |
+
+#### 5G. Advanced retrieval (extend `@weaveintel/retrieval`)
 **New files in `packages/retrieval/src/`:**
 ```
   ├── hybrid.ts             # HybridRetrieverPlan — semantic + keyword fusion
@@ -509,7 +741,7 @@ packages/tools/src/
   └── diagnostics.ts        # RetrievalDiagnostic — explain retrieval decisions
 ```
 
-#### 5C. Enhanced observability (extend `@weaveintel/observability`)
+#### 5H. Enhanced observability (extend `@weaveintel/observability`)
 **New files in `packages/observability/src/`:**
 ```
   ├── otlp.ts               # OpenTelemetry sink
@@ -520,6 +752,28 @@ packages/tools/src/
       ├── json-sink.ts      # JSON file/stream sink
       └── console-sink.ts   # Enhanced console with tree rendering
 ```
+
+#### 5I. geneWeave integration
+**Admin UI tabs and DB tables for Phase 5 tool configuration:**
+
+| Admin Tab | DB Table | Purpose |
+|---|---|---|
+| Search Providers | `search_providers` | Enable/disable search providers, API keys, rate limits, priority |
+| HTTP Endpoints | `http_endpoints` | Registered REST API endpoints with auth configs, schemas, retry policies |
+| Social Accounts | `social_accounts` | Connected social platform accounts, OAuth tokens, permissions |
+| Enterprise Connectors | `enterprise_connectors` | SharePoint sites, Confluence spaces, email accounts, Drive configs |
+| Tool Registry | `tool_registry` | All registered tools — risk level, health, enabled/disabled, MCP namespace |
+
+**Chat integration:**
+- Agent can invoke any registered MCP tool during conversation
+- Tool calls show in chat as collapsible execution cards (tool name, input, output, duration)
+- Search results render as rich link cards with title, snippet, source
+- Social/enterprise results render with platform-specific formatting
+
+**Seed data:**
+- Default search provider configs (SearXNG local, DuckDuckGo as fallback)
+- Sample HTTP endpoint (JSONPlaceholder for testing)
+- Sample tool registry entries for all built-in tools
 
 ---
 

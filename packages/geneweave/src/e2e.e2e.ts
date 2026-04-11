@@ -81,11 +81,11 @@ test.describe('Chat', () => {
 /* ── Admin: Navigation ───────────────────────────────────── */
 
 test.describe('Admin Navigation', () => {
-  test('shows all 9 admin tabs', async ({ page }) => {
+  test('shows all 17 admin tabs', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    for (const label of ['Prompts', 'Guardrails', 'Routing', 'Workflows', 'Tools', 'Workflow Runs', 'Guardrail Evals', 'Task Policies', 'Contracts']) {
+    for (const label of ['Prompts', 'Guardrails', 'Routing', 'Workflows', 'Tools', 'Workflow Runs', 'Guardrail Evals', 'Task Policies', 'Contracts', 'Cache', 'Identity', 'Memory Gov', 'Search', 'HTTP', 'Social', 'Enterprise', 'Registry']) {
       await expect(m.locator('button', { hasText: label })).toBeVisible();
     }
   });
@@ -466,5 +466,256 @@ test.describe('Dashboard', () => {
     await page.locator('button.nav-btn', { hasText: 'Dashboard' }).click();
     await page.waitForTimeout(1000);
     await expect(page.locator('.main')).toBeVisible();
+  });
+});
+
+/* ── Admin: Search Providers Tab ─────────────────────────── */
+
+test.describe('Admin Search Providers', () => {
+  test('search tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Search' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new search provider via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Search' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Search Provider' })).toBeVisible({ timeout: 3000 });
+    await m.locator('input[type="text"]').first().fill('PW-Test-Search');
+    const selects = m.locator('select');
+    if ((await selects.count()) > 0) {
+      await selects.first().selectOption({ index: 1 });
+    }
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Search Provider' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded search provider', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Search' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+/* ── Admin: HTTP Endpoints Tab ───────────────────────────── */
+
+test.describe('Admin HTTP Endpoints', () => {
+  test('http tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'HTTP' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new http endpoint via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'HTTP' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New HTTP Endpoint' })).toBeVisible({ timeout: 3000 });
+    const httpInputs = m.locator('input[type="text"]');
+    await httpInputs.nth(0).fill('PW-Test-HTTP');
+    await httpInputs.nth(2).fill('https://example.com/api/test');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New HTTP Endpoint' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded http endpoint', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'HTTP' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+/* ── Admin: Social Accounts Tab ──────────────────────────── */
+
+test.describe('Admin Social Accounts', () => {
+  test('social tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Social' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new social account via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Social' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Social Account' })).toBeVisible({ timeout: 3000 });
+    await m.locator('input[type="text"]').first().fill('PW-Test-Social');
+    const selects = m.locator('select');
+    if ((await selects.count()) > 0) {
+      await selects.first().selectOption({ index: 1 });
+    }
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Social Account' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded social account', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Social' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+/* ── Admin: Enterprise Connectors Tab ────────────────────── */
+
+test.describe('Admin Enterprise Connectors', () => {
+  test('enterprise tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Enterprise' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new enterprise connector via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Enterprise' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Enterprise Connector' })).toBeVisible({ timeout: 3000 });
+    await m.locator('input[type="text"]').first().fill('PW-Test-Enterprise');
+    const selects = m.locator('select');
+    if ((await selects.count()) > 0) {
+      await selects.first().selectOption({ index: 1 });
+    }
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Enterprise Connector' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded enterprise connector', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Enterprise' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+/* ── Admin: Tool Registry Tab ────────────────────────────── */
+
+test.describe('Admin Tool Registry', () => {
+  test('registry tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Registry' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new tool registry entry via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Registry' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Tool Registry' })).toBeVisible({ timeout: 3000 });
+    const regInputs = m.locator('input[type="text"]');
+    await regInputs.nth(0).fill('PW-Test-Registry');
+    await regInputs.nth(2).fill('@weaveintel/tools-test');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Tool Registry' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded tool registry entry', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Registry' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
   });
 });

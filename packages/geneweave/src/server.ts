@@ -1112,6 +1112,329 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
+  // ── Admin: Search Providers ────────────────────────────────
+
+  router.get('/api/admin/search-providers', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listSearchProviders();
+    json(res, 200, { 'search-providers': items });
+  });
+
+  router.get('/api/admin/search-providers/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getSearchProvider(params['id']!);
+    if (!c) { json(res, 404, { error: 'Search provider not found' }); return; }
+    json(res, 200, { 'search-provider': c });
+  });
+
+  router.post('/api/admin/search-providers', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name'] || !body['provider_type']) { json(res, 400, { error: 'name and provider_type required' }); return; }
+    const id = 'sp-' + randomUUID().slice(0, 8);
+    await db.createSearchProvider({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      provider_type: body['provider_type'] as string,
+      api_key: (body['api_key'] as string) ?? null,
+      base_url: (body['base_url'] as string) ?? null,
+      priority: (body['priority'] as number) ?? 0,
+      options: body['options'] ? (typeof body['options'] === 'string' ? body['options'] as string : JSON.stringify(body['options'])) : null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getSearchProvider(id);
+    json(res, 201, { 'search-provider': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/search-providers/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getSearchProvider(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Search provider not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['provider_type'] !== undefined) fields['provider_type'] = body['provider_type'];
+    if (body['api_key'] !== undefined) fields['api_key'] = body['api_key'];
+    if (body['base_url'] !== undefined) fields['base_url'] = body['base_url'];
+    if (body['priority'] !== undefined) fields['priority'] = body['priority'];
+    if (body['options'] !== undefined) fields['options'] = typeof body['options'] === 'string' ? body['options'] : JSON.stringify(body['options']);
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateSearchProvider(params['id']!, fields as any);
+    const item = await db.getSearchProvider(params['id']!);
+    json(res, 200, { 'search-provider': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/search-providers/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteSearchProvider(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: HTTP Endpoints ──────────────────────────────────
+
+  router.get('/api/admin/http-endpoints', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listHttpEndpoints();
+    json(res, 200, { 'http-endpoints': items });
+  });
+
+  router.get('/api/admin/http-endpoints/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getHttpEndpoint(params['id']!);
+    if (!c) { json(res, 404, { error: 'HTTP endpoint not found' }); return; }
+    json(res, 200, { 'http-endpoint': c });
+  });
+
+  router.post('/api/admin/http-endpoints', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name'] || !body['url']) { json(res, 400, { error: 'name and url required' }); return; }
+    const id = 'he-' + randomUUID().slice(0, 8);
+    await db.createHttpEndpoint({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      url: body['url'] as string, method: (body['method'] as string) ?? 'GET',
+      auth_type: (body['auth_type'] as string) ?? null,
+      auth_config: body['auth_config'] ? (typeof body['auth_config'] === 'string' ? body['auth_config'] as string : JSON.stringify(body['auth_config'])) : null,
+      headers: body['headers'] ? (typeof body['headers'] === 'string' ? body['headers'] as string : JSON.stringify(body['headers'])) : null,
+      body_template: (body['body_template'] as string) ?? null,
+      response_transform: (body['response_transform'] as string) ?? null,
+      retry_count: (body['retry_count'] as number) ?? 2,
+      rate_limit_rpm: (body['rate_limit_rpm'] as number) ?? null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getHttpEndpoint(id);
+    json(res, 201, { 'http-endpoint': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/http-endpoints/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getHttpEndpoint(params['id']!);
+    if (!existing) { json(res, 404, { error: 'HTTP endpoint not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['url'] !== undefined) fields['url'] = body['url'];
+    if (body['method'] !== undefined) fields['method'] = body['method'];
+    if (body['auth_type'] !== undefined) fields['auth_type'] = body['auth_type'];
+    if (body['auth_config'] !== undefined) fields['auth_config'] = typeof body['auth_config'] === 'string' ? body['auth_config'] : JSON.stringify(body['auth_config']);
+    if (body['headers'] !== undefined) fields['headers'] = typeof body['headers'] === 'string' ? body['headers'] : JSON.stringify(body['headers']);
+    if (body['body_template'] !== undefined) fields['body_template'] = body['body_template'];
+    if (body['response_transform'] !== undefined) fields['response_transform'] = body['response_transform'];
+    if (body['retry_count'] !== undefined) fields['retry_count'] = body['retry_count'];
+    if (body['rate_limit_rpm'] !== undefined) fields['rate_limit_rpm'] = body['rate_limit_rpm'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateHttpEndpoint(params['id']!, fields as any);
+    const item = await db.getHttpEndpoint(params['id']!);
+    json(res, 200, { 'http-endpoint': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/http-endpoints/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteHttpEndpoint(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Social Accounts ─────────────────────────────────
+
+  router.get('/api/admin/social-accounts', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listSocialAccounts();
+    json(res, 200, { 'social-accounts': items });
+  });
+
+  router.get('/api/admin/social-accounts/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getSocialAccount(params['id']!);
+    if (!c) { json(res, 404, { error: 'Social account not found' }); return; }
+    json(res, 200, { 'social-account': c });
+  });
+
+  router.post('/api/admin/social-accounts', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name'] || !body['platform']) { json(res, 400, { error: 'name and platform required' }); return; }
+    const id = 'sa-' + randomUUID().slice(0, 8);
+    await db.createSocialAccount({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      platform: body['platform'] as string,
+      api_key: (body['api_key'] as string) ?? null,
+      api_secret: (body['api_secret'] as string) ?? null,
+      base_url: (body['base_url'] as string) ?? null,
+      options: body['options'] ? (typeof body['options'] === 'string' ? body['options'] as string : JSON.stringify(body['options'])) : null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getSocialAccount(id);
+    json(res, 201, { 'social-account': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/social-accounts/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getSocialAccount(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Social account not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['platform'] !== undefined) fields['platform'] = body['platform'];
+    if (body['api_key'] !== undefined) fields['api_key'] = body['api_key'];
+    if (body['api_secret'] !== undefined) fields['api_secret'] = body['api_secret'];
+    if (body['base_url'] !== undefined) fields['base_url'] = body['base_url'];
+    if (body['options'] !== undefined) fields['options'] = typeof body['options'] === 'string' ? body['options'] : JSON.stringify(body['options']);
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateSocialAccount(params['id']!, fields as any);
+    const item = await db.getSocialAccount(params['id']!);
+    json(res, 200, { 'social-account': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/social-accounts/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteSocialAccount(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Enterprise Connectors ───────────────────────────
+
+  router.get('/api/admin/enterprise-connectors', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listEnterpriseConnectors();
+    json(res, 200, { 'enterprise-connectors': items });
+  });
+
+  router.get('/api/admin/enterprise-connectors/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getEnterpriseConnector(params['id']!);
+    if (!c) { json(res, 404, { error: 'Enterprise connector not found' }); return; }
+    json(res, 200, { 'enterprise-connector': c });
+  });
+
+  router.post('/api/admin/enterprise-connectors', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name'] || !body['connector_type']) { json(res, 400, { error: 'name and connector_type required' }); return; }
+    const id = 'ec-' + randomUUID().slice(0, 8);
+    await db.createEnterpriseConnector({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      connector_type: body['connector_type'] as string,
+      base_url: (body['base_url'] as string) ?? null,
+      auth_type: (body['auth_type'] as string) ?? null,
+      auth_config: body['auth_config'] ? (typeof body['auth_config'] === 'string' ? body['auth_config'] as string : JSON.stringify(body['auth_config'])) : null,
+      options: body['options'] ? (typeof body['options'] === 'string' ? body['options'] as string : JSON.stringify(body['options'])) : null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getEnterpriseConnector(id);
+    json(res, 201, { 'enterprise-connector': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/enterprise-connectors/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getEnterpriseConnector(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Enterprise connector not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['connector_type'] !== undefined) fields['connector_type'] = body['connector_type'];
+    if (body['base_url'] !== undefined) fields['base_url'] = body['base_url'];
+    if (body['auth_type'] !== undefined) fields['auth_type'] = body['auth_type'];
+    if (body['auth_config'] !== undefined) fields['auth_config'] = typeof body['auth_config'] === 'string' ? body['auth_config'] : JSON.stringify(body['auth_config']);
+    if (body['options'] !== undefined) fields['options'] = typeof body['options'] === 'string' ? body['options'] : JSON.stringify(body['options']);
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateEnterpriseConnector(params['id']!, fields as any);
+    const item = await db.getEnterpriseConnector(params['id']!);
+    json(res, 200, { 'enterprise-connector': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/enterprise-connectors/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteEnterpriseConnector(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Tool Registry ───────────────────────────────────
+
+  router.get('/api/admin/tool-registry', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listToolRegistry();
+    json(res, 200, { 'tool-registry': items });
+  });
+
+  router.get('/api/admin/tool-registry/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getToolRegistryEntry(params['id']!);
+    if (!c) { json(res, 404, { error: 'Tool registry entry not found' }); return; }
+    json(res, 200, { 'tool-registry-entry': c });
+  });
+
+  router.post('/api/admin/tool-registry', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name'] || !body['package_name']) { json(res, 400, { error: 'name and package_name required' }); return; }
+    const id = 'tr-' + randomUUID().slice(0, 8);
+    await db.createToolRegistryEntry({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      package_name: body['package_name'] as string, version: (body['version'] as string) ?? '1.0.0',
+      category: (body['category'] as string) ?? 'custom', risk_level: (body['risk_level'] as string) ?? 'low',
+      tags: body['tags'] ? (typeof body['tags'] === 'string' ? body['tags'] as string : JSON.stringify(body['tags'])) : null,
+      config: body['config'] ? (typeof body['config'] === 'string' ? body['config'] as string : JSON.stringify(body['config'])) : null,
+      requires_approval: body['requires_approval'] ? 1 : 0,
+      max_execution_ms: (body['max_execution_ms'] as number) ?? null,
+      rate_limit_per_min: (body['rate_limit_per_min'] as number) ?? null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getToolRegistryEntry(id);
+    json(res, 201, { 'tool-registry-entry': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/tool-registry/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getToolRegistryEntry(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Tool registry entry not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['package_name'] !== undefined) fields['package_name'] = body['package_name'];
+    if (body['version'] !== undefined) fields['version'] = body['version'];
+    if (body['category'] !== undefined) fields['category'] = body['category'];
+    if (body['risk_level'] !== undefined) fields['risk_level'] = body['risk_level'];
+    if (body['tags'] !== undefined) fields['tags'] = typeof body['tags'] === 'string' ? body['tags'] : JSON.stringify(body['tags']);
+    if (body['config'] !== undefined) fields['config'] = typeof body['config'] === 'string' ? body['config'] : JSON.stringify(body['config']);
+    if (body['requires_approval'] !== undefined) fields['requires_approval'] = body['requires_approval'] ? 1 : 0;
+    if (body['max_execution_ms'] !== undefined) fields['max_execution_ms'] = body['max_execution_ms'];
+    if (body['rate_limit_per_min'] !== undefined) fields['rate_limit_per_min'] = body['rate_limit_per_min'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateToolRegistryEntry(params['id']!, fields as any);
+    const item = await db.getToolRegistryEntry(params['id']!);
+    json(res, 200, { 'tool-registry-entry': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/tool-registry/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteToolRegistryEntry(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
   // ── Admin: Seed data ───────────────────────────────────────
 
   router.post('/api/admin/seed', async (_req, res, _params, auth) => {

@@ -252,6 +252,84 @@ export interface MemoryGovernanceRow {
   updated_at: string;
 }
 
+export interface SearchProviderRow {
+  id: string;
+  name: string;
+  description: string | null;
+  provider_type: string;          // e.g. 'duckduckgo','brave','google','tavily','bing','searxng','jina','exa','serper'
+  api_key: string | null;
+  base_url: string | null;
+  priority: number;
+  options: string | null;         // JSON object
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HttpEndpointRow {
+  id: string;
+  name: string;
+  description: string | null;
+  url: string;
+  method: string;                 // GET, POST, PUT, DELETE, PATCH
+  auth_type: string | null;       // api_key, bearer, basic, oauth2
+  auth_config: string | null;     // JSON object
+  headers: string | null;         // JSON object
+  body_template: string | null;
+  response_transform: string | null;
+  retry_count: number;
+  rate_limit_rpm: number | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SocialAccountRow {
+  id: string;
+  name: string;
+  description: string | null;
+  platform: string;               // slack, discord, github
+  api_key: string | null;
+  api_secret: string | null;
+  base_url: string | null;
+  options: string | null;         // JSON object
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EnterpriseConnectorRow {
+  id: string;
+  name: string;
+  description: string | null;
+  connector_type: string;         // jira, confluence, salesforce, notion
+  base_url: string | null;
+  auth_type: string | null;       // bearer, oauth2, api_key, basic, service_account
+  auth_config: string | null;     // JSON object
+  options: string | null;         // JSON object
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ToolRegistryRow {
+  id: string;
+  name: string;
+  description: string | null;
+  package_name: string;           // npm package or internal identifier
+  version: string;
+  category: string;
+  risk_level: string;             // low, medium, high, critical
+  tags: string | null;            // JSON array
+  config: string | null;          // JSON object
+  requires_approval: number;
+  max_execution_ms: number | null;
+  rate_limit_per_min: number | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MetricsSummary {
   total_tokens: number;
   total_cost: number;
@@ -466,6 +544,41 @@ export interface DatabaseAdapter {
   listMemoryGovernance(): Promise<MemoryGovernanceRow[]>;
   updateMemoryGovernance(id: string, fields: Partial<Omit<MemoryGovernanceRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteMemoryGovernance(id: string): Promise<void>;
+
+  // ─── Admin: Search Providers ─────────────────────────────────
+  createSearchProvider(p: Omit<SearchProviderRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getSearchProvider(id: string): Promise<SearchProviderRow | null>;
+  listSearchProviders(): Promise<SearchProviderRow[]>;
+  updateSearchProvider(id: string, fields: Partial<Omit<SearchProviderRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteSearchProvider(id: string): Promise<void>;
+
+  // ─── Admin: HTTP Endpoints ─────────────────────────────────
+  createHttpEndpoint(e: Omit<HttpEndpointRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getHttpEndpoint(id: string): Promise<HttpEndpointRow | null>;
+  listHttpEndpoints(): Promise<HttpEndpointRow[]>;
+  updateHttpEndpoint(id: string, fields: Partial<Omit<HttpEndpointRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteHttpEndpoint(id: string): Promise<void>;
+
+  // ─── Admin: Social Accounts ────────────────────────────────
+  createSocialAccount(a: Omit<SocialAccountRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getSocialAccount(id: string): Promise<SocialAccountRow | null>;
+  listSocialAccounts(): Promise<SocialAccountRow[]>;
+  updateSocialAccount(id: string, fields: Partial<Omit<SocialAccountRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteSocialAccount(id: string): Promise<void>;
+
+  // ─── Admin: Enterprise Connectors ──────────────────────────
+  createEnterpriseConnector(c: Omit<EnterpriseConnectorRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getEnterpriseConnector(id: string): Promise<EnterpriseConnectorRow | null>;
+  listEnterpriseConnectors(): Promise<EnterpriseConnectorRow[]>;
+  updateEnterpriseConnector(id: string, fields: Partial<Omit<EnterpriseConnectorRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteEnterpriseConnector(id: string): Promise<void>;
+
+  // ─── Admin: Tool Registry ──────────────────────────────────
+  createToolRegistryEntry(t: Omit<ToolRegistryRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getToolRegistryEntry(id: string): Promise<ToolRegistryRow | null>;
+  listToolRegistry(): Promise<ToolRegistryRow[]>;
+  updateToolRegistryEntry(id: string, fields: Partial<Omit<ToolRegistryRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteToolRegistryEntry(id: string): Promise<void>;
 
   // ─── Admin: Seed data ──────────────────────────────────────
   seedDefaultData(): Promise<void>;
@@ -731,6 +844,84 @@ CREATE TABLE IF NOT EXISTS memory_governance (
   redact_patterns TEXT,
   max_age TEXT,
   max_entries INTEGER,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS search_providers (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  provider_type TEXT NOT NULL,
+  api_key TEXT,
+  base_url TEXT,
+  priority INTEGER NOT NULL DEFAULT 0,
+  options TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS http_endpoints (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  url TEXT NOT NULL,
+  method TEXT NOT NULL DEFAULT 'GET',
+  auth_type TEXT,
+  auth_config TEXT,
+  headers TEXT,
+  body_template TEXT,
+  response_transform TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 2,
+  rate_limit_rpm INTEGER,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS social_accounts (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  platform TEXT NOT NULL,
+  api_key TEXT,
+  api_secret TEXT,
+  base_url TEXT,
+  options TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS enterprise_connectors (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  connector_type TEXT NOT NULL,
+  base_url TEXT,
+  auth_type TEXT,
+  auth_config TEXT,
+  options TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS tool_registry (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  package_name TEXT NOT NULL,
+  version TEXT NOT NULL DEFAULT '1.0',
+  category TEXT NOT NULL DEFAULT 'custom',
+  risk_level TEXT NOT NULL DEFAULT 'low',
+  tags TEXT,
+  config TEXT,
+  requires_approval INTEGER NOT NULL DEFAULT 0,
+  max_execution_ms INTEGER,
+  rate_limit_per_min INTEGER,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -1354,6 +1545,171 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM memory_governance WHERE id = ?').run(id);
   }
 
+  // ─── Admin: Search Providers ───────────────────────────────
+
+  async createSearchProvider(p: Omit<SearchProviderRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO search_providers (id, name, description, provider_type, api_key, base_url, priority, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.name, p.description ?? null, p.provider_type, p.api_key ?? null, p.base_url ?? null, p.priority, p.options ?? null, p.enabled);
+  }
+
+  async getSearchProvider(id: string): Promise<SearchProviderRow | null> {
+    return (this.d.prepare('SELECT * FROM search_providers WHERE id = ?').get(id) as SearchProviderRow) ?? null;
+  }
+
+  async listSearchProviders(): Promise<SearchProviderRow[]> {
+    return this.d.prepare('SELECT * FROM search_providers ORDER BY priority DESC, name ASC').all() as SearchProviderRow[];
+  }
+
+  async updateSearchProvider(id: string, fields: Partial<Omit<SearchProviderRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE search_providers SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteSearchProvider(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM search_providers WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: HTTP Endpoints ─────────────────────────────────
+
+  async createHttpEndpoint(e: Omit<HttpEndpointRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO http_endpoints (id, name, description, url, method, auth_type, auth_config, headers, body_template, response_transform, retry_count, rate_limit_rpm, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(e.id, e.name, e.description ?? null, e.url, e.method, e.auth_type ?? null, e.auth_config ?? null, e.headers ?? null, e.body_template ?? null, e.response_transform ?? null, e.retry_count, e.rate_limit_rpm ?? null, e.enabled);
+  }
+
+  async getHttpEndpoint(id: string): Promise<HttpEndpointRow | null> {
+    return (this.d.prepare('SELECT * FROM http_endpoints WHERE id = ?').get(id) as HttpEndpointRow) ?? null;
+  }
+
+  async listHttpEndpoints(): Promise<HttpEndpointRow[]> {
+    return this.d.prepare('SELECT * FROM http_endpoints ORDER BY name ASC').all() as HttpEndpointRow[];
+  }
+
+  async updateHttpEndpoint(id: string, fields: Partial<Omit<HttpEndpointRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE http_endpoints SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteHttpEndpoint(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM http_endpoints WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Social Accounts ────────────────────────────────
+
+  async createSocialAccount(a: Omit<SocialAccountRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO social_accounts (id, name, description, platform, api_key, api_secret, base_url, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(a.id, a.name, a.description ?? null, a.platform, a.api_key ?? null, a.api_secret ?? null, a.base_url ?? null, a.options ?? null, a.enabled);
+  }
+
+  async getSocialAccount(id: string): Promise<SocialAccountRow | null> {
+    return (this.d.prepare('SELECT * FROM social_accounts WHERE id = ?').get(id) as SocialAccountRow) ?? null;
+  }
+
+  async listSocialAccounts(): Promise<SocialAccountRow[]> {
+    return this.d.prepare('SELECT * FROM social_accounts ORDER BY name ASC').all() as SocialAccountRow[];
+  }
+
+  async updateSocialAccount(id: string, fields: Partial<Omit<SocialAccountRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE social_accounts SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteSocialAccount(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM social_accounts WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Enterprise Connectors ──────────────────────────
+
+  async createEnterpriseConnector(c: Omit<EnterpriseConnectorRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO enterprise_connectors (id, name, description, connector_type, base_url, auth_type, auth_config, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(c.id, c.name, c.description ?? null, c.connector_type, c.base_url ?? null, c.auth_type ?? null, c.auth_config ?? null, c.options ?? null, c.enabled);
+  }
+
+  async getEnterpriseConnector(id: string): Promise<EnterpriseConnectorRow | null> {
+    return (this.d.prepare('SELECT * FROM enterprise_connectors WHERE id = ?').get(id) as EnterpriseConnectorRow) ?? null;
+  }
+
+  async listEnterpriseConnectors(): Promise<EnterpriseConnectorRow[]> {
+    return this.d.prepare('SELECT * FROM enterprise_connectors ORDER BY name ASC').all() as EnterpriseConnectorRow[];
+  }
+
+  async updateEnterpriseConnector(id: string, fields: Partial<Omit<EnterpriseConnectorRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE enterprise_connectors SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteEnterpriseConnector(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM enterprise_connectors WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Tool Registry ─────────────────────────────────
+
+  async createToolRegistryEntry(t: Omit<ToolRegistryRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tool_registry (id, name, description, package_name, version, category, risk_level, tags, config, requires_approval, max_execution_ms, rate_limit_per_min, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(t.id, t.name, t.description ?? null, t.package_name, t.version, t.category, t.risk_level, t.tags ?? null, t.config ?? null, t.requires_approval, t.max_execution_ms ?? null, t.rate_limit_per_min ?? null, t.enabled);
+  }
+
+  async getToolRegistryEntry(id: string): Promise<ToolRegistryRow | null> {
+    return (this.d.prepare('SELECT * FROM tool_registry WHERE id = ?').get(id) as ToolRegistryRow) ?? null;
+  }
+
+  async listToolRegistry(): Promise<ToolRegistryRow[]> {
+    return this.d.prepare('SELECT * FROM tool_registry ORDER BY category ASC, name ASC').all() as ToolRegistryRow[];
+  }
+
+  async updateToolRegistryEntry(id: string, fields: Partial<Omit<ToolRegistryRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE tool_registry SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteToolRegistryEntry(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM tool_registry WHERE id = ?').run(id);
+  }
+
   // ─── Seed default data ─────────────────────────────────────
 
   async seedDefaultData(): Promise<void> {
@@ -1703,6 +2059,158 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const g of memGov) await this.createMemoryGovernance(g);
+    }
+
+    // Search Providers
+    if (cnt('search_providers') === 0) {
+    const searchProviders: Omit<SearchProviderRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'sp-duckduckgo', name: 'DuckDuckGo', description: 'Free web search via DuckDuckGo Instant Answer API — no API key required',
+        provider_type: 'duckduckgo', api_key: null, base_url: null, priority: 10,
+        options: JSON.stringify({ safesearch: 'moderate', region: 'wt-wt' }), enabled: 1,
+      },
+      {
+        id: 'sp-brave', name: 'Brave Search', description: 'Privacy-focused web search with Brave Search API',
+        provider_type: 'brave', api_key: '', base_url: null, priority: 20,
+        options: JSON.stringify({ count: 10, freshness: 'none' }), enabled: 0,
+      },
+      {
+        id: 'sp-tavily', name: 'Tavily AI Search', description: 'AI-optimised search engine designed for LLM applications',
+        provider_type: 'tavily', api_key: '', base_url: null, priority: 30,
+        options: JSON.stringify({ search_depth: 'basic', include_answer: true }), enabled: 0,
+      },
+      {
+        id: 'sp-google-pse', name: 'Google Custom Search', description: 'Google Programmable Search Engine for custom search experiences',
+        provider_type: 'google', api_key: '', base_url: null, priority: 15,
+        options: JSON.stringify({ cx: '', num: 10 }), enabled: 0,
+      },
+      {
+        id: 'sp-serper', name: 'Serper (Google SERP)', description: 'Fast Google search results via Serper API',
+        provider_type: 'serper', api_key: '', base_url: null, priority: 25,
+        options: JSON.stringify({ gl: 'us', hl: 'en', num: 10 }), enabled: 0,
+      },
+    ];
+    for (const sp of searchProviders) await this.createSearchProvider(sp);
+    }
+
+    // HTTP Endpoints
+    if (cnt('http_endpoints') === 0) {
+    const httpEndpoints: Omit<HttpEndpointRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'he-jsonplaceholder', name: 'JSONPlaceholder Posts', description: 'Sample REST endpoint for testing — free JSON API',
+        url: 'https://jsonplaceholder.typicode.com/posts', method: 'GET',
+        auth_type: null, auth_config: null, headers: null,
+        body_template: null, response_transform: '$[0:5]', retry_count: 2, rate_limit_rpm: 60, enabled: 1,
+      },
+      {
+        id: 'he-weather', name: 'Open-Meteo Weather', description: 'Free weather API — no key needed. Returns current weather for a location.',
+        url: 'https://api.open-meteo.com/v1/forecast?latitude={{lat}}&longitude={{lon}}&current_weather=true', method: 'GET',
+        auth_type: null, auth_config: null, headers: null,
+        body_template: null, response_transform: '$.current_weather', retry_count: 2, rate_limit_rpm: 30, enabled: 1,
+      },
+      {
+        id: 'he-ip-info', name: 'IP Info', description: 'Get geolocation data from an IP address',
+        url: 'https://ipapi.co/{{ip}}/json/', method: 'GET',
+        auth_type: null, auth_config: null, headers: null,
+        body_template: null, response_transform: null, retry_count: 1, rate_limit_rpm: 30, enabled: 1,
+      },
+    ];
+    for (const he of httpEndpoints) await this.createHttpEndpoint(he);
+    }
+
+    // Social Accounts
+    if (cnt('social_accounts') === 0) {
+    const socialAccounts: Omit<SocialAccountRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'sa-slack-default', name: 'Slack Workspace', description: 'Default Slack workspace integration for team messaging',
+        platform: 'slack', api_key: '', api_secret: null, base_url: null,
+        options: JSON.stringify({ default_channel: '#general' }), enabled: 0,
+      },
+      {
+        id: 'sa-discord-default', name: 'Discord Server', description: 'Discord server bot integration',
+        platform: 'discord', api_key: '', api_secret: null, base_url: null,
+        options: JSON.stringify({ guild_id: '' }), enabled: 0,
+      },
+      {
+        id: 'sa-github-default', name: 'GitHub', description: 'GitHub integration for repository and issue management',
+        platform: 'github', api_key: '', api_secret: null, base_url: null,
+        options: JSON.stringify({ default_owner: '', default_repo: '' }), enabled: 0,
+      },
+    ];
+    for (const sa of socialAccounts) await this.createSocialAccount(sa);
+    }
+
+    // Enterprise Connectors
+    if (cnt('enterprise_connectors') === 0) {
+    const connectors: Omit<EnterpriseConnectorRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'ec-jira', name: 'Jira', description: 'Atlassian Jira for issue tracking and project management',
+        connector_type: 'jira', base_url: '', auth_type: 'basic',
+        auth_config: JSON.stringify({ username: '', token: '' }),
+        options: JSON.stringify({ default_project: '' }), enabled: 0,
+      },
+      {
+        id: 'ec-confluence', name: 'Confluence', description: 'Atlassian Confluence for team documentation and knowledge base',
+        connector_type: 'confluence', base_url: '', auth_type: 'basic',
+        auth_config: JSON.stringify({ username: '', token: '' }),
+        options: JSON.stringify({ default_space: '' }), enabled: 0,
+      },
+      {
+        id: 'ec-salesforce', name: 'Salesforce', description: 'Salesforce CRM integration for customer data and opportunities',
+        connector_type: 'salesforce', base_url: '', auth_type: 'oauth2',
+        auth_config: JSON.stringify({ client_id: '', client_secret: '', token_url: '' }),
+        options: null, enabled: 0,
+      },
+      {
+        id: 'ec-notion', name: 'Notion', description: 'Notion workspace integration for docs and databases',
+        connector_type: 'notion', base_url: null, auth_type: 'bearer',
+        auth_config: JSON.stringify({ token: '' }),
+        options: null, enabled: 0,
+      },
+    ];
+    for (const ec of connectors) await this.createEnterpriseConnector(ec);
+    }
+
+    // Tool Registry
+    if (cnt('tool_registry') === 0) {
+    const toolReg: Omit<ToolRegistryRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'tr-search', name: 'Web Search Tools', description: 'Search provider toolkit with multi-engine routing',
+        package_name: '@weaveintel/tools-search', version: '1.0.0', category: 'search', risk_level: 'low',
+        tags: JSON.stringify(['search', 'web', 'retrieval']),
+        config: JSON.stringify({ defaultProvider: 'duckduckgo', maxResults: 10 }),
+        requires_approval: 0, max_execution_ms: 15000, rate_limit_per_min: 30, enabled: 1,
+      },
+      {
+        id: 'tr-http', name: 'HTTP Endpoint Tools', description: 'Dynamic HTTP request toolkit with auth, retry, and transforms',
+        package_name: '@weaveintel/tools-http', version: '1.0.0', category: 'integration', risk_level: 'medium',
+        tags: JSON.stringify(['http', 'api', 'rest']),
+        config: JSON.stringify({ defaultRetries: 2, defaultTimeout: 10000 }),
+        requires_approval: 0, max_execution_ms: 20000, rate_limit_per_min: 30, enabled: 1,
+      },
+      {
+        id: 'tr-browser', name: 'Browser & Scraping Tools', description: 'Web page fetching, content extraction, and readability tools',
+        package_name: '@weaveintel/tools-browser', version: '1.0.0', category: 'browser', risk_level: 'low',
+        tags: JSON.stringify(['browser', 'scrape', 'extract', 'readability']),
+        config: JSON.stringify({ defaultTimeout: 10000, maxBodySize: 1048576 }),
+        requires_approval: 0, max_execution_ms: 15000, rate_limit_per_min: 20, enabled: 1,
+      },
+      {
+        id: 'tr-social', name: 'Social Platform Tools', description: 'Slack, Discord, and GitHub integrations',
+        package_name: '@weaveintel/tools-social', version: '1.0.0', category: 'social', risk_level: 'medium',
+        tags: JSON.stringify(['slack', 'discord', 'github', 'social']),
+        config: null,
+        requires_approval: 0, max_execution_ms: 10000, rate_limit_per_min: 20, enabled: 1,
+      },
+      {
+        id: 'tr-enterprise', name: 'Enterprise Connector Tools', description: 'Jira, Confluence, Salesforce, and Notion integrations',
+        package_name: '@weaveintel/tools-enterprise', version: '1.0.0', category: 'enterprise', risk_level: 'medium',
+        tags: JSON.stringify(['jira', 'confluence', 'salesforce', 'notion', 'enterprise']),
+        config: null,
+        requires_approval: 0, max_execution_ms: 20000, rate_limit_per_min: 15, enabled: 1,
+      },
+    ];
+    for (const tr of toolReg) await this.createToolRegistryEntry(tr);
     }
   }
 }

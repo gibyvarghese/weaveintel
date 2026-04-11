@@ -756,3 +756,259 @@ describe('Seed', () => {
     expect(data['ok']).toBe(true);
   });
 });
+
+// ─── Admin: Search Providers CRUD ────────────────────────────
+
+describe('Admin Search Providers', () => {
+  let itemId: string;
+
+  it('lists search providers', async () => {
+    const { status, data } = await api('GET', '/api/admin/search-providers');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['search-providers'])).toBe(true);
+  });
+
+  it('creates a search provider', async () => {
+    const { status, data } = await api('POST', '/api/admin/search-providers', {
+      name: 'Test Provider',
+      description: 'Integration test provider',
+      provider_type: 'brave',
+      api_key: 'test-key-123',
+      base_url: 'https://api.search.brave.com',
+      priority: 5,
+      options: { safesearch: true },
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['search-provider'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a search provider by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/search-providers/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['search-provider'] as Record<string, unknown>)?.['name']).toBe('Test Provider');
+  });
+
+  it('updates a search provider', async () => {
+    const { status, data } = await api('PUT', `/api/admin/search-providers/${itemId}`, {
+      name: 'Updated Provider',
+      priority: 10,
+    });
+    expect(status).toBe(200);
+    expect((data['search-provider'] as Record<string, unknown>)?.['name']).toBe('Updated Provider');
+  });
+
+  it('deletes a search provider', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/search-providers/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin: HTTP Endpoints CRUD ──────────────────────────────
+
+describe('Admin HTTP Endpoints', () => {
+  let itemId: string;
+
+  it('lists http endpoints', async () => {
+    const { status, data } = await api('GET', '/api/admin/http-endpoints');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['http-endpoints'])).toBe(true);
+  });
+
+  it('creates an http endpoint', async () => {
+    const { status, data } = await api('POST', '/api/admin/http-endpoints', {
+      name: 'Test Endpoint',
+      description: 'Integration test endpoint',
+      url: 'https://httpbin.org/get',
+      method: 'GET',
+      auth_type: 'none',
+      auth_config: null,
+      headers: { 'Accept': 'application/json' },
+      retry_count: 2,
+      rate_limit_rpm: 30,
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['http-endpoint'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets an http endpoint by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/http-endpoints/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['http-endpoint'] as Record<string, unknown>)?.['name']).toBe('Test Endpoint');
+  });
+
+  it('updates an http endpoint', async () => {
+    const { status, data } = await api('PUT', `/api/admin/http-endpoints/${itemId}`, {
+      name: 'Updated Endpoint',
+      method: 'POST',
+    });
+    expect(status).toBe(200);
+    expect((data['http-endpoint'] as Record<string, unknown>)?.['name']).toBe('Updated Endpoint');
+  });
+
+  it('deletes an http endpoint', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/http-endpoints/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin: Social Accounts CRUD ─────────────────────────────
+
+describe('Admin Social Accounts', () => {
+  let itemId: string;
+
+  it('lists social accounts', async () => {
+    const { status, data } = await api('GET', '/api/admin/social-accounts');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['social-accounts'])).toBe(true);
+  });
+
+  it('creates a social account', async () => {
+    const { status, data } = await api('POST', '/api/admin/social-accounts', {
+      name: 'Test Slack',
+      description: 'Integration test slack account',
+      platform: 'slack',
+      api_key: 'xoxb-test-key',
+      api_secret: '',
+      base_url: 'https://slack.com/api',
+      options: { default_channel: '#general' },
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['social-account'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a social account by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/social-accounts/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['social-account'] as Record<string, unknown>)?.['name']).toBe('Test Slack');
+  });
+
+  it('updates a social account', async () => {
+    const { status, data } = await api('PUT', `/api/admin/social-accounts/${itemId}`, {
+      name: 'Updated Slack',
+      platform: 'discord',
+    });
+    expect(status).toBe(200);
+    expect((data['social-account'] as Record<string, unknown>)?.['name']).toBe('Updated Slack');
+  });
+
+  it('deletes a social account', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/social-accounts/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin: Enterprise Connectors CRUD ───────────────────────
+
+describe('Admin Enterprise Connectors', () => {
+  let itemId: string;
+
+  it('lists enterprise connectors', async () => {
+    const { status, data } = await api('GET', '/api/admin/enterprise-connectors');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['enterprise-connectors'])).toBe(true);
+  });
+
+  it('creates an enterprise connector', async () => {
+    const { status, data } = await api('POST', '/api/admin/enterprise-connectors', {
+      name: 'Test Jira',
+      description: 'Integration test Jira connector',
+      connector_type: 'jira',
+      base_url: 'https://test.atlassian.net',
+      auth_type: 'bearer',
+      auth_config: { token: 'test-token-123' },
+      options: { project: 'TEST' },
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['enterprise-connector'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets an enterprise connector by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/enterprise-connectors/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['enterprise-connector'] as Record<string, unknown>)?.['name']).toBe('Test Jira');
+  });
+
+  it('updates an enterprise connector', async () => {
+    const { status, data } = await api('PUT', `/api/admin/enterprise-connectors/${itemId}`, {
+      name: 'Updated Jira',
+      connector_type: 'confluence',
+    });
+    expect(status).toBe(200);
+    expect((data['enterprise-connector'] as Record<string, unknown>)?.['name']).toBe('Updated Jira');
+  });
+
+  it('deletes an enterprise connector', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/enterprise-connectors/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin: Tool Registry CRUD ───────────────────────────────
+
+describe('Admin Tool Registry', () => {
+  let itemId: string;
+
+  it('lists tool registry entries', async () => {
+    const { status, data } = await api('GET', '/api/admin/tool-registry');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['tool-registry'])).toBe(true);
+  });
+
+  it('creates a tool registry entry', async () => {
+    const { status, data } = await api('POST', '/api/admin/tool-registry', {
+      name: 'Test Tool',
+      description: 'Integration test tool',
+      package_name: '@weaveintel/tools-test',
+      version: '0.1.0',
+      category: 'custom',
+      risk_level: 'low',
+      tags: ['test', 'integration'],
+      config: { timeout: 5000 },
+      requires_approval: false,
+      max_execution_ms: 10000,
+      rate_limit_per_min: 100,
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['tool-registry-entry'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a tool registry entry by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/tool-registry/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['tool-registry-entry'] as Record<string, unknown>)?.['name']).toBe('Test Tool');
+  });
+
+  it('updates a tool registry entry', async () => {
+    const { status, data } = await api('PUT', `/api/admin/tool-registry/${itemId}`, {
+      name: 'Updated Tool',
+      risk_level: 'medium',
+    });
+    expect(status).toBe(200);
+    expect((data['tool-registry-entry'] as Record<string, unknown>)?.['name']).toBe('Updated Tool');
+  });
+
+  it('deletes a tool registry entry', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/tool-registry/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});

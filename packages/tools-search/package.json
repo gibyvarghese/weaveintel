@@ -1,0 +1,27 @@
+{
+  "name": "@weaveintel/tools-search",
+  "version": "0.0.1",
+  "description": "Web search tool providers — SearXNG, Google, Brave, Bing, DuckDuckGo, Tavily, and more",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@weaveintel/core": "*",
+    "@weaveintel/tools": "*"
+  },
+  "license": "MIT"
+}

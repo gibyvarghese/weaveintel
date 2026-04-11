@@ -876,7 +876,7 @@ function renderApp(){
 
 async function loadAdmin(){
   try{
-    const [p,g,r,w,t,wr,ge,tp,ct,cp,ir,mg] = await Promise.all([
+    const [p,g,r,w,t,wr,ge,tp,ct,cp,ir,mg,sp,he,sa,ec,tr] = await Promise.all([
       api.get('/admin/prompts').then(r=>r.json()),
       api.get('/admin/guardrails').then(r=>r.json()),
       api.get('/admin/routing').then(r=>r.json()),
@@ -889,6 +889,11 @@ async function loadAdmin(){
       api.get('/admin/cache-policies').then(r=>r.json()).catch(()=>({'cache-policies':[]})),
       api.get('/admin/identity-rules').then(r=>r.json()).catch(()=>({'identity-rules':[]})),
       api.get('/admin/memory-governance').then(r=>r.json()).catch(()=>({'memory-governance':[]})),
+      api.get('/admin/search-providers').then(r=>r.json()).catch(()=>({'search-providers':[]})),
+      api.get('/admin/http-endpoints').then(r=>r.json()).catch(()=>({'http-endpoints':[]})),
+      api.get('/admin/social-accounts').then(r=>r.json()).catch(()=>({'social-accounts':[]})),
+      api.get('/admin/enterprise-connectors').then(r=>r.json()).catch(()=>({'enterprise-connectors':[]})),
+      api.get('/admin/tool-registry').then(r=>r.json()).catch(()=>({'tool-registry':[]})),
     ]);
     state.adminData = {
       prompts:p.prompts||[], guardrails:g.guardrails||[],
@@ -896,7 +901,10 @@ async function loadAdmin(){
       'workflow-runs':wr.runs||[], 'guardrail-evals':ge.evals||[],
       'task-policies':tp.taskPolicies||[], contracts:ct.contracts||[],
       'cache-policies':cp['cache-policies']||[], 'identity-rules':ir['identity-rules']||[],
-      'memory-governance':mg['memory-governance']||[]
+      'memory-governance':mg['memory-governance']||[],
+      'search-providers':sp['search-providers']||[], 'http-endpoints':he['http-endpoints']||[],
+      'social-accounts':sa['social-accounts']||[], 'enterprise-connectors':ec['enterprise-connectors']||[],
+      'tool-registry':tr['tool-registry']||[]
     };
   }catch(e){ console.error('Failed to load admin data',e); }
   render();
@@ -956,6 +964,29 @@ async function adminSave(tab){
       let redPat = null; try{redPat=f.redact_patterns?JSON.parse(f.redact_patterns):null;}catch{}
       const payload = {name:f.name,description:f.description,memory_types:memTypes,tenant_id:f.tenant_id||null,block_patterns:blockPat,redact_patterns:redPat,max_age:f.max_age||null,max_entries:f.max_entries?parseInt(f.max_entries):null,enabled:f.enabled!==false};
       resp = isEdit ? await api.put('/admin/memory-governance/'+state.adminEditing,payload) : await api.post('/admin/memory-governance',payload);
+    } else if(tab==='search-providers'){
+      let opts = null; try{opts=f.options?JSON.parse(f.options):null;}catch{}
+      const payload = {name:f.name,description:f.description,provider_type:f.provider_type||'duckduckgo',api_key:f.api_key||'',base_url:f.base_url||'',priority:parseInt(f.priority)||0,options:opts,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/search-providers/'+state.adminEditing,payload) : await api.post('/admin/search-providers',payload);
+    } else if(tab==='http-endpoints'){
+      let authCfg = null; try{authCfg=f.auth_config?JSON.parse(f.auth_config):null;}catch{}
+      let hdrs = null; try{hdrs=f.headers?JSON.parse(f.headers):null;}catch{}
+      const payload = {name:f.name,description:f.description,url:f.url,method:f.method||'GET',auth_type:f.auth_type||'none',auth_config:authCfg,headers:hdrs,body_template:f.body_template||null,response_transform:f.response_transform||null,retry_count:f.retry_count?parseInt(f.retry_count):0,rate_limit_rpm:f.rate_limit_rpm?parseInt(f.rate_limit_rpm):60,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/http-endpoints/'+state.adminEditing,payload) : await api.post('/admin/http-endpoints',payload);
+    } else if(tab==='social-accounts'){
+      let opts = null; try{opts=f.options?JSON.parse(f.options):null;}catch{}
+      const payload = {name:f.name,description:f.description,platform:f.platform||'slack',api_key:f.api_key||'',api_secret:f.api_secret||'',base_url:f.base_url||'',options:opts,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/social-accounts/'+state.adminEditing,payload) : await api.post('/admin/social-accounts',payload);
+    } else if(tab==='enterprise-connectors'){
+      let authCfg = null; try{authCfg=f.auth_config?JSON.parse(f.auth_config):null;}catch{}
+      let opts = null; try{opts=f.options?JSON.parse(f.options):null;}catch{}
+      const payload = {name:f.name,description:f.description,connector_type:f.connector_type||'jira',base_url:f.base_url||'',auth_type:f.auth_type||'bearer',auth_config:authCfg,options:opts,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/enterprise-connectors/'+state.adminEditing,payload) : await api.post('/admin/enterprise-connectors',payload);
+    } else if(tab==='tool-registry'){
+      let tags = null; try{tags=f.tags?JSON.parse(f.tags):null;}catch{}
+      let cfg = null; try{cfg=f.config?JSON.parse(f.config):null;}catch{}
+      const payload = {name:f.name,description:f.description,package_name:f.package_name,version:f.version||'1.0.0',category:f.category||'general',risk_level:f.risk_level||'low',tags:tags,config:cfg,requires_approval:!!f.requires_approval,max_execution_ms:f.max_execution_ms?parseInt(f.max_execution_ms):null,rate_limit_per_min:f.rate_limit_per_min?parseInt(f.rate_limit_per_min):null,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/tool-registry/'+state.adminEditing,payload) : await api.post('/admin/tool-registry',payload);
     }
     if(resp && resp.ok){
       state.adminEditing=null; state.adminForm={};
@@ -969,7 +1000,7 @@ async function adminSave(tab){
 
 async function adminDelete(tab,id){
   if(!confirm('Delete this item?')) return;
-  const paths = {prompts:'prompts',guardrails:'guardrails',routing:'routing',workflows:'workflows',tools:'tools','task-policies':'task-policies',contracts:'contracts','cache-policies':'cache-policies','identity-rules':'identity-rules','memory-governance':'memory-governance'};
+  const paths = {prompts:'prompts',guardrails:'guardrails',routing:'routing',workflows:'workflows',tools:'tools','task-policies':'task-policies',contracts:'contracts','cache-policies':'cache-policies','identity-rules':'identity-rules','memory-governance':'memory-governance','search-providers':'search-providers','http-endpoints':'http-endpoints','social-accounts':'social-accounts','enterprise-connectors':'enterprise-connectors','tool-registry':'tool-registry'};
   try{
     await api.del('/admin/'+paths[tab]+'/'+id);
     await loadAdmin();
@@ -988,6 +1019,11 @@ function adminEdit(tab,item){
   if(tab==='cache-policies'){ if(f.bypass_patterns){try{f.bypass_patterns=typeof f.bypass_patterns==='string'?f.bypass_patterns:JSON.stringify(f.bypass_patterns,null,2);}catch{}} if(f.invalidate_on){try{f.invalidate_on=typeof f.invalidate_on==='string'?f.invalidate_on:JSON.stringify(f.invalidate_on,null,2);}catch{}} }
   if(tab==='identity-rules'){ if(f.roles){try{f.roles=typeof f.roles==='string'?f.roles:JSON.stringify(f.roles,null,2);}catch{}} if(f.scopes){try{f.scopes=typeof f.scopes==='string'?f.scopes:JSON.stringify(f.scopes,null,2);}catch{}} }
   if(tab==='memory-governance'){ if(f.memory_types){try{f.memory_types=typeof f.memory_types==='string'?f.memory_types:JSON.stringify(f.memory_types,null,2);}catch{}} if(f.block_patterns){try{f.block_patterns=typeof f.block_patterns==='string'?f.block_patterns:JSON.stringify(f.block_patterns,null,2);}catch{}} if(f.redact_patterns){try{f.redact_patterns=typeof f.redact_patterns==='string'?f.redact_patterns:JSON.stringify(f.redact_patterns,null,2);}catch{}} }
+  if(tab==='search-providers'){ if(f.options){try{f.options=typeof f.options==='string'?f.options:JSON.stringify(f.options,null,2);}catch{}} }
+  if(tab==='http-endpoints'){ if(f.auth_config){try{f.auth_config=typeof f.auth_config==='string'?f.auth_config:JSON.stringify(f.auth_config,null,2);}catch{}} if(f.headers){try{f.headers=typeof f.headers==='string'?f.headers:JSON.stringify(f.headers,null,2);}catch{}} }
+  if(tab==='social-accounts'){ if(f.options){try{f.options=typeof f.options==='string'?f.options:JSON.stringify(f.options,null,2);}catch{}} }
+  if(tab==='enterprise-connectors'){ if(f.auth_config){try{f.auth_config=typeof f.auth_config==='string'?f.auth_config:JSON.stringify(f.auth_config,null,2);}catch{}} if(f.options){try{f.options=typeof f.options==='string'?f.options:JSON.stringify(f.options,null,2);}catch{}} }
+  if(tab==='tool-registry'){ if(f.tags){try{f.tags=typeof f.tags==='string'?f.tags:JSON.stringify(f.tags,null,2);}catch{}} if(f.config){try{f.config=typeof f.config==='string'?f.config:JSON.stringify(f.config,null,2);}catch{}} }
   state.adminForm = f;
   render();
 }
@@ -1042,7 +1078,7 @@ function inp(label,key,opts){
 function renderAdminForm(tab){
   const form = h('div',{style:'background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:20px;margin-bottom:16px'});
   const title = state.adminEditing?'Edit':'New';
-  var singulars={'prompts':'Prompt','guardrails':'Guardrail','routing':'Routing Policy','workflows':'Workflow','tools':'Tool','task-policies':'Task Policy','contracts':'Contract','cache-policies':'Cache Policy','identity-rules':'Identity Rule','memory-governance':'Memory Governance'};
+  var singulars={'prompts':'Prompt','guardrails':'Guardrail','routing':'Routing Policy','workflows':'Workflow','tools':'Tool','task-policies':'Task Policy','contracts':'Contract','cache-policies':'Cache Policy','identity-rules':'Identity Rule','memory-governance':'Memory Governance','search-providers':'Search Provider','http-endpoints':'HTTP Endpoint','social-accounts':'Social Account','enterprise-connectors':'Enterprise Connector','tool-registry':'Tool Registry'};
   var tabLabel = singulars[tab]||(tab.slice(0,1).toUpperCase()+tab.slice(1).replace(/s$/,''));
   form.appendChild(h('h3',{style:'margin:0 0 14px;font-size:15px;color:#1E293B'},title+' '+tabLabel));
 
@@ -1141,6 +1177,59 @@ function renderAdminForm(tab){
     form.appendChild(inp('Max Age (ISO 8601, e.g. P30D)','max_age'));
     form.appendChild(inp('Max Entries','max_entries',{type:'number'}));
     form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='search-providers'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Provider Type','provider_type',{options:['duckduckgo','brave','google-pse','tavily','bing','searxng','jina','exa','serper']}));
+    form.appendChild(inp('API Key','api_key'));
+    form.appendChild(inp('Base URL','base_url'));
+    form.appendChild(inp('Priority','priority',{type:'number'}));
+    form.appendChild(inp('Options (JSON)','options',{textarea:true,rows:3}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='http-endpoints'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('URL','url'));
+    form.appendChild(inp('Method','method',{options:['GET','POST','PUT','PATCH','DELETE','HEAD']}));
+    form.appendChild(inp('Auth Type','auth_type',{options:['none','bearer','basic','api-key','oauth2']}));
+    form.appendChild(inp('Auth Config (JSON)','auth_config',{textarea:true,rows:3}));
+    form.appendChild(inp('Headers (JSON)','headers',{textarea:true,rows:3}));
+    form.appendChild(inp('Body Template','body_template',{textarea:true,rows:3}));
+    form.appendChild(inp('Response Transform','response_transform',{textarea:true,rows:2}));
+    form.appendChild(inp('Retry Count','retry_count',{type:'number'}));
+    form.appendChild(inp('Rate Limit (req/min)','rate_limit_rpm',{type:'number'}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='social-accounts'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Platform','platform',{options:['slack','discord','github','twitter','linkedin']}));
+    form.appendChild(inp('API Key','api_key'));
+    form.appendChild(inp('API Secret','api_secret'));
+    form.appendChild(inp('Base URL','base_url'));
+    form.appendChild(inp('Options (JSON)','options',{textarea:true,rows:3}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='enterprise-connectors'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Connector Type','connector_type',{options:['jira','confluence','salesforce','notion','sharepoint','servicenow']}));
+    form.appendChild(inp('Base URL','base_url'));
+    form.appendChild(inp('Auth Type','auth_type',{options:['bearer','basic','oauth2','api-key']}));
+    form.appendChild(inp('Auth Config (JSON)','auth_config',{textarea:true,rows:3}));
+    form.appendChild(inp('Options (JSON)','options',{textarea:true,rows:3}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='tool-registry'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Package Name','package_name'));
+    form.appendChild(inp('Version','version'));
+    form.appendChild(inp('Category','category',{options:['search','http','browser','social','enterprise','general','custom']}));
+    form.appendChild(inp('Risk Level','risk_level',{options:['low','medium','high','critical']}));
+    form.appendChild(inp('Tags (JSON array)','tags',{textarea:true,rows:2}));
+    form.appendChild(inp('Config (JSON)','config',{textarea:true,rows:3}));
+    form.appendChild(inp('Requires Approval','requires_approval',{type:'checkbox'}));
+    form.appendChild(inp('Max Execution (ms)','max_execution_ms',{type:'number'}));
+    form.appendChild(inp('Rate Limit (/min)','rate_limit_per_min',{type:'number'}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
   }
 
   const btns = h('div',{style:'display:flex;gap:8px;margin-top:14px'});
@@ -1215,6 +1304,11 @@ function getAdminCols(tab){
   if(tab==='cache-policies') return [{key:'name',label:'Name',w:'1.5fr'},{key:'scope',label:'Scope',w:'0.7fr'},{key:'ttl_ms',label:'TTL (ms)',w:'0.7fr'},{key:'max_entries',label:'Max',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
   if(tab==='identity-rules') return [{key:'name',label:'Name',w:'1.5fr'},{key:'resource',label:'Resource',w:'0.9fr'},{key:'action',label:'Action',w:'0.6fr'},{key:'result',label:'Result',w:'0.6fr'},{key:'priority',label:'Priority',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
   if(tab==='memory-governance') return [{key:'name',label:'Name',w:'1.5fr'},{key:'tenant_id',label:'Tenant',w:'0.7fr'},{key:'max_age',label:'Max Age',w:'0.7fr'},{key:'max_entries',label:'Max',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='search-providers') return [{key:'name',label:'Name',w:'1.2fr'},{key:'provider_type',label:'Provider',w:'0.8fr'},{key:'base_url',label:'Base URL',w:'1fr'},{key:'priority',label:'Priority',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='http-endpoints') return [{key:'name',label:'Name',w:'1.2fr'},{key:'url',label:'URL',w:'1.5fr'},{key:'method',label:'Method',w:'0.5fr'},{key:'auth_type',label:'Auth',w:'0.6fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='social-accounts') return [{key:'name',label:'Name',w:'1.2fr'},{key:'platform',label:'Platform',w:'0.7fr'},{key:'base_url',label:'Base URL',w:'1fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='enterprise-connectors') return [{key:'name',label:'Name',w:'1.2fr'},{key:'connector_type',label:'Type',w:'0.7fr'},{key:'base_url',label:'Base URL',w:'1fr'},{key:'auth_type',label:'Auth',w:'0.6fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='tool-registry') return [{key:'name',label:'Name',w:'1.2fr'},{key:'package_name',label:'Package',w:'1fr'},{key:'category',label:'Category',w:'0.7fr'},{key:'risk_level',label:'Risk',w:'0.5fr'},{key:'requires_approval',label:'Approve',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
   return [];
 }
 
@@ -1243,7 +1337,12 @@ function renderAdmin(){
     {key:'guardrail-evals',label:'Guardrail Evals',icon:'\\u2714'},
     {key:'cache-policies',label:'Cache',icon:'\\uD83D\\uDCE6'},
     {key:'identity-rules',label:'Identity',icon:'\\uD83D\\uDD11'},
-    {key:'memory-governance',label:'Memory Gov',icon:'\\uD83E\\uDDE0'}
+    {key:'memory-governance',label:'Memory Gov',icon:'\\uD83E\\uDDE0'},
+    {key:'search-providers',label:'Search',icon:'\\uD83D\\uDD0D'},
+    {key:'http-endpoints',label:'HTTP',icon:'\\uD83C\\uDF10'},
+    {key:'social-accounts',label:'Social',icon:'\\uD83D\\uDCAC'},
+    {key:'enterprise-connectors',label:'Enterprise',icon:'\\uD83C\\uDFE2'},
+    {key:'tool-registry',label:'Registry',icon:'\\uD83D\\uDCE6'}
   ];
   tabDefs.forEach(function(t){
     const active = state.adminTab===t.key;
