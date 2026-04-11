@@ -38,6 +38,9 @@
     "@weaveintel/cache": "*",
     "@weaveintel/identity": "*",
     "@weaveintel/memory": "*",
+    "@weaveintel/ui-primitives": "*",
+    "@weaveintel/devtools": "*",
+    "@weaveintel/recipes": "*",
     "better-sqlite3": "^11.9.1"
   },
   "devDependencies": {

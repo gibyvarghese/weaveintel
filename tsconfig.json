@@ -40,6 +40,9 @@
     { "path": "packages/compliance" },
     { "path": "packages/graph" },
     { "path": "packages/plugins" },
+    { "path": "packages/ui-primitives" },
+    { "path": "packages/devtools" },
+    { "path": "packages/recipes" },
     { "path": "packages/geneweave" }
   ]
 }

@@ -17,6 +17,7 @@ import type {
   TriggerDefinitionRow, TenantConfigRow, SandboxPolicyRow, ExtractionPipelineRow,
   ArtifactPolicyRow, ReliabilityPolicyRow,
   CollaborationSessionRow, ComplianceRuleRow, GraphConfigRow, PluginConfigRow,
+  ScaffoldTemplateRow, RecipeConfigRow, WidgetConfigRow, ValidationRuleRow,
   MetricsSummary, WorkflowRunRow, GuardrailEvalRow,
 } from './db-types.js';
 
@@ -1179,6 +1180,126 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM plugin_configs WHERE id = ?').run(id);
   }
 
+  // ─── Phase 9: Scaffold Templates ────────────────────────────
+
+  async createScaffoldTemplate(t: Omit<ScaffoldTemplateRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO scaffold_templates (id, name, description, template_type, files, dependencies, dev_dependencies, variables, post_install, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(t.id, t.name, t.description ?? null, t.template_type, t.files ?? null, t.dependencies ?? null, t.dev_dependencies ?? null, t.variables ?? null, t.post_install ?? null, t.enabled);
+  }
+
+  async getScaffoldTemplate(id: string): Promise<ScaffoldTemplateRow | null> {
+    return (this.d.prepare('SELECT * FROM scaffold_templates WHERE id = ?').get(id) as ScaffoldTemplateRow) ?? null;
+  }
+
+  async listScaffoldTemplates(): Promise<ScaffoldTemplateRow[]> {
+    return this.d.prepare('SELECT * FROM scaffold_templates ORDER BY name ASC').all() as ScaffoldTemplateRow[];
+  }
+
+  async updateScaffoldTemplate(id: string, fields: Partial<Omit<ScaffoldTemplateRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) { sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE scaffold_templates SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteScaffoldTemplate(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM scaffold_templates WHERE id = ?').run(id);
+  }
+
+  // ─── Phase 9: Recipe Configs ─────────────────────────────────
+
+  async createRecipeConfig(r: Omit<RecipeConfigRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO recipe_configs (id, name, description, recipe_type, model, provider, system_prompt, tools, guardrails, max_steps, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(r.id, r.name, r.description ?? null, r.recipe_type, r.model ?? null, r.provider ?? null, r.system_prompt ?? null, r.tools ?? null, r.guardrails ?? null, r.max_steps ?? null, r.options ?? null, r.enabled);
+  }
+
+  async getRecipeConfig(id: string): Promise<RecipeConfigRow | null> {
+    return (this.d.prepare('SELECT * FROM recipe_configs WHERE id = ?').get(id) as RecipeConfigRow) ?? null;
+  }
+
+  async listRecipeConfigs(): Promise<RecipeConfigRow[]> {
+    return this.d.prepare('SELECT * FROM recipe_configs ORDER BY name ASC').all() as RecipeConfigRow[];
+  }
+
+  async updateRecipeConfig(id: string, fields: Partial<Omit<RecipeConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) { sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE recipe_configs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteRecipeConfig(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM recipe_configs WHERE id = ?').run(id);
+  }
+
+  // ─── Phase 9: Widget Configs ─────────────────────────────────
+
+  async createWidgetConfig(w: Omit<WidgetConfigRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO widget_configs (id, name, description, widget_type, default_options, allowed_contexts, max_data_points, refresh_interval_ms, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(w.id, w.name, w.description ?? null, w.widget_type, w.default_options ?? null, w.allowed_contexts ?? null, w.max_data_points ?? null, w.refresh_interval_ms ?? null, w.enabled);
+  }
+
+  async getWidgetConfig(id: string): Promise<WidgetConfigRow | null> {
+    return (this.d.prepare('SELECT * FROM widget_configs WHERE id = ?').get(id) as WidgetConfigRow) ?? null;
+  }
+
+  async listWidgetConfigs(): Promise<WidgetConfigRow[]> {
+    return this.d.prepare('SELECT * FROM widget_configs ORDER BY name ASC').all() as WidgetConfigRow[];
+  }
+
+  async updateWidgetConfig(id: string, fields: Partial<Omit<WidgetConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) { sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE widget_configs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteWidgetConfig(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM widget_configs WHERE id = ?').run(id);
+  }
+
+  // ─── Phase 9: Validation Rules ───────────────────────────────
+
+  async createValidationRule(r: Omit<ValidationRuleRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO validation_rules (id, name, description, rule_type, target, condition, severity, message, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(r.id, r.name, r.description ?? null, r.rule_type, r.target, r.condition ?? null, r.severity, r.message ?? null, r.enabled);
+  }
+
+  async getValidationRule(id: string): Promise<ValidationRuleRow | null> {
+    return (this.d.prepare('SELECT * FROM validation_rules WHERE id = ?').get(id) as ValidationRuleRow) ?? null;
+  }
+
+  async listValidationRules(): Promise<ValidationRuleRow[]> {
+    return this.d.prepare('SELECT * FROM validation_rules ORDER BY name ASC').all() as ValidationRuleRow[];
+  }
+
+  async updateValidationRule(id: string, fields: Partial<Omit<ValidationRuleRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) { sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE validation_rules SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteValidationRule(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM validation_rules WHERE id = ?').run(id);
+  }
+
   // ─── Seed default data ─────────────────────────────────────
 
   async seedDefaultData(): Promise<void> {
@@ -2019,6 +2140,209 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const p of pluginConfigs) await this.createPluginConfig(p);
+    }
+
+    // Scaffold Templates (Phase 9)
+    if (cnt('scaffold_templates') === 0) {
+    const scaffoldTemplates: Omit<ScaffoldTemplateRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'scaf-basic-agent', name: 'Basic Agent', description: 'Minimal conversational agent with a single model',
+        template_type: 'basic-agent',
+        files: JSON.stringify({ 'src/index.ts': 'import { createAgent } from "@weaveintel/agents";\n\nconst agent = createAgent({ name: "{{name}}", model: "{{model}}" });\n' }),
+        dependencies: JSON.stringify({ '@weaveintel/agents': '*', '@weaveintel/core': '*' }),
+        dev_dependencies: JSON.stringify({ 'typescript': '^5.0.0' }),
+        variables: JSON.stringify(['name', 'model']),
+        post_install: null, enabled: 1,
+      },
+      {
+        id: 'scaf-tool-agent', name: 'Tool-Calling Agent', description: 'Agent with tool registration and execution capabilities',
+        template_type: 'tool-calling-agent',
+        files: JSON.stringify({ 'src/index.ts': 'import { createAgent } from "@weaveintel/agents";\nimport { defineTool } from "@weaveintel/core";\n' }),
+        dependencies: JSON.stringify({ '@weaveintel/agents': '*', '@weaveintel/core': '*' }),
+        dev_dependencies: JSON.stringify({ 'typescript': '^5.0.0' }),
+        variables: JSON.stringify(['name', 'model']),
+        post_install: null, enabled: 1,
+      },
+      {
+        id: 'scaf-rag-pipeline', name: 'RAG Pipeline', description: 'Retrieval-augmented generation pipeline with vector search',
+        template_type: 'rag-pipeline',
+        files: JSON.stringify({ 'src/index.ts': 'import { createAgent } from "@weaveintel/agents";\nimport { createRetriever } from "@weaveintel/retrieval";\n' }),
+        dependencies: JSON.stringify({ '@weaveintel/agents': '*', '@weaveintel/core': '*', '@weaveintel/retrieval': '*' }),
+        dev_dependencies: JSON.stringify({ 'typescript': '^5.0.0' }),
+        variables: JSON.stringify(['name', 'model', 'collection']),
+        post_install: null, enabled: 1,
+      },
+      {
+        id: 'scaf-workflow', name: 'Workflow', description: 'Multi-step workflow with agent orchestration',
+        template_type: 'workflow',
+        files: JSON.stringify({ 'src/index.ts': 'import { createWorkflow } from "@weaveintel/workflows";\n' }),
+        dependencies: JSON.stringify({ '@weaveintel/agents': '*', '@weaveintel/core': '*', '@weaveintel/workflows': '*' }),
+        dev_dependencies: JSON.stringify({ 'typescript': '^5.0.0' }),
+        variables: JSON.stringify(['name']),
+        post_install: null, enabled: 1,
+      },
+      {
+        id: 'scaf-multi-agent', name: 'Multi-Agent', description: 'Supervisor with multiple worker agents',
+        template_type: 'multi-agent',
+        files: JSON.stringify({ 'src/index.ts': 'import { createSupervisor } from "@weaveintel/agents";\n' }),
+        dependencies: JSON.stringify({ '@weaveintel/agents': '*', '@weaveintel/core': '*' }),
+        dev_dependencies: JSON.stringify({ 'typescript': '^5.0.0' }),
+        variables: JSON.stringify(['name', 'workers']),
+        post_install: null, enabled: 1,
+      },
+      {
+        id: 'scaf-mcp-server', name: 'MCP Server', description: 'Model Context Protocol server exposing tools over stdio/SSE',
+        template_type: 'mcp-server',
+        files: JSON.stringify({ 'src/index.ts': 'import { createMcpServer } from "@weaveintel/mcp-server";\n' }),
+        dependencies: JSON.stringify({ '@weaveintel/mcp-server': '*', '@weaveintel/core': '*' }),
+        dev_dependencies: JSON.stringify({ 'typescript': '^5.0.0' }),
+        variables: JSON.stringify(['name', 'transport']),
+        post_install: null, enabled: 1,
+      },
+      {
+        id: 'scaf-full-stack', name: 'Full-Stack App', description: 'Complete application with geneWeave UI, agents, tools, and observability',
+        template_type: 'full-stack',
+        files: JSON.stringify({ 'src/index.ts': 'import { startGeneWeave } from "@weaveintel/geneweave";\n' }),
+        dependencies: JSON.stringify({ '@weaveintel/geneweave': '*', '@weaveintel/agents': '*', '@weaveintel/core': '*', '@weaveintel/observability': '*' }),
+        dev_dependencies: JSON.stringify({ 'typescript': '^5.0.0', '@playwright/test': '^1.59.0' }),
+        variables: JSON.stringify(['name', 'model', 'provider']),
+        post_install: 'npx playwright install', enabled: 1,
+      },
+    ];
+    for (const t of scaffoldTemplates) await this.createScaffoldTemplate(t);
+    }
+
+    // Recipe Configs (Phase 9)
+    if (cnt('recipe_configs') === 0) {
+    const recipeConfigs: Omit<RecipeConfigRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'rcp-workflow', name: 'Workflow Agent', description: 'Workflow-aware agent with step-by-step execution',
+        recipe_type: 'workflow', model: 'gpt-4o', provider: 'openai',
+        system_prompt: 'You are a workflow executor. Follow the steps precisely.',
+        tools: JSON.stringify(['web-search', 'file-reader']),
+        guardrails: JSON.stringify(['guard-token-limit']),
+        max_steps: 10, options: null, enabled: 1,
+      },
+      {
+        id: 'rcp-governed', name: 'Governed Assistant', description: 'Assistant with governance rules enforced in system prompt',
+        recipe_type: 'governed', model: 'gpt-4o', provider: 'openai',
+        system_prompt: 'You are a governed assistant. Follow all policies strictly.',
+        tools: null,
+        guardrails: JSON.stringify(['guard-pii-redact', 'guard-toxicity']),
+        max_steps: 5, options: JSON.stringify({ governanceLevel: 'strict' }), enabled: 1,
+      },
+      {
+        id: 'rcp-approval', name: 'Approval-Driven Agent', description: 'Agent that requires human approval for high-risk actions',
+        recipe_type: 'approval', model: 'gpt-4o', provider: 'openai',
+        system_prompt: null,
+        tools: JSON.stringify(['code-exec', 'db-query']),
+        guardrails: null,
+        max_steps: 8, options: JSON.stringify({ approvalPolicy: 'htp-high-risk-tool' }), enabled: 1,
+      },
+      {
+        id: 'rcp-acl-rag', name: 'ACL-Aware RAG', description: 'Retrieval agent with access-control-scoped collections',
+        recipe_type: 'acl-rag', model: 'gpt-4o-mini', provider: 'openai',
+        system_prompt: 'You answer questions using only the provided context.',
+        tools: JSON.stringify(['web-search']),
+        guardrails: JSON.stringify(['guard-hallucination']),
+        max_steps: 5, options: JSON.stringify({ collection: 'default' }), enabled: 1,
+      },
+      {
+        id: 'rcp-safe-exec', name: 'Safe Execution Agent', description: 'Agent with denied tools and defensive execution limits',
+        recipe_type: 'safe-exec', model: 'gpt-4o-mini', provider: 'openai',
+        system_prompt: 'You are a safe execution agent. Never execute dangerous operations.',
+        tools: JSON.stringify(['file-reader', 'api-caller']),
+        guardrails: JSON.stringify(['guard-pii-redact', 'guard-token-limit']),
+        max_steps: 5, options: JSON.stringify({ maxExecutionTime: 30000, deniedTools: ['code-exec'] }), enabled: 1,
+      },
+    ];
+    for (const r of recipeConfigs) await this.createRecipeConfig(r);
+    }
+
+    // Widget Configs (Phase 9)
+    if (cnt('widget_configs') === 0) {
+    const widgetConfigs: Omit<WidgetConfigRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'wgt-table', name: 'Data Table', description: 'Sortable, filterable data table for structured results',
+        widget_type: 'table',
+        default_options: JSON.stringify({ sortable: true, filterable: true, pageSize: 25 }),
+        allowed_contexts: JSON.stringify(['chat', 'dashboard', 'admin']),
+        max_data_points: 10000, refresh_interval_ms: null, enabled: 1,
+      },
+      {
+        id: 'wgt-chart', name: 'Chart', description: 'Line, bar, or pie chart for data visualization',
+        widget_type: 'chart',
+        default_options: JSON.stringify({ chartType: 'line', showLegend: true, responsive: true }),
+        allowed_contexts: JSON.stringify(['chat', 'dashboard']),
+        max_data_points: 5000, refresh_interval_ms: 30000, enabled: 1,
+      },
+      {
+        id: 'wgt-form', name: 'Dynamic Form', description: 'Interactive form widget for collecting structured input',
+        widget_type: 'form',
+        default_options: JSON.stringify({ submitLabel: 'Submit', resetLabel: 'Reset' }),
+        allowed_contexts: JSON.stringify(['chat']),
+        max_data_points: null, refresh_interval_ms: null, enabled: 1,
+      },
+      {
+        id: 'wgt-code', name: 'Code Block', description: 'Syntax-highlighted code viewer with copy and download',
+        widget_type: 'code',
+        default_options: JSON.stringify({ lineNumbers: true, theme: 'dark', wordWrap: false }),
+        allowed_contexts: JSON.stringify(['chat', 'dashboard', 'admin']),
+        max_data_points: null, refresh_interval_ms: null, enabled: 1,
+      },
+      {
+        id: 'wgt-timeline', name: 'Timeline', description: 'Chronological event timeline for workflow and trace visualisation',
+        widget_type: 'timeline',
+        default_options: JSON.stringify({ direction: 'vertical', showDuration: true }),
+        allowed_contexts: JSON.stringify(['chat', 'dashboard']),
+        max_data_points: 500, refresh_interval_ms: 10000, enabled: 1,
+      },
+      {
+        id: 'wgt-image', name: 'Image', description: 'Image display widget with zoom and lightbox support',
+        widget_type: 'image',
+        default_options: JSON.stringify({ maxWidth: '100%', lightbox: true }),
+        allowed_contexts: JSON.stringify(['chat']),
+        max_data_points: null, refresh_interval_ms: null, enabled: 1,
+      },
+    ];
+    for (const w of widgetConfigs) await this.createWidgetConfig(w);
+    }
+
+    // Validation Rules (Phase 9)
+    if (cnt('validation_rules') === 0) {
+    const validationRules: Omit<ValidationRuleRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'val-agent-name', name: 'Agent Name Required', description: 'Every agent config must have a non-empty name',
+        rule_type: 'required', target: 'agent-config',
+        condition: JSON.stringify({ field: 'name', operator: 'exists' }),
+        severity: 'error', message: 'Agent name is required', enabled: 1,
+      },
+      {
+        id: 'val-agent-steps', name: 'Agent Max Steps Range', description: 'Max steps must be between 1 and 100',
+        rule_type: 'range', target: 'agent-config',
+        condition: JSON.stringify({ field: 'maxSteps', min: 1, max: 100 }),
+        severity: 'error', message: 'Max steps must be between 1 and 100', enabled: 1,
+      },
+      {
+        id: 'val-workflow-entry', name: 'Workflow Entry Step', description: 'Workflow must define a valid entry step ID',
+        rule_type: 'required', target: 'workflow-config',
+        condition: JSON.stringify({ field: 'entry_step_id', operator: 'exists' }),
+        severity: 'error', message: 'Workflow must have an entry step', enabled: 1,
+      },
+      {
+        id: 'val-tool-risk', name: 'Tool Risk Level', description: 'High-risk tools should require approval',
+        rule_type: 'custom', target: 'tool-config',
+        condition: JSON.stringify({ if: { field: 'risk_level', equals: 'high' }, then: { field: 'requires_approval', equals: true } }),
+        severity: 'warning', message: 'High-risk tools should require approval', enabled: 1,
+      },
+      {
+        id: 'val-json-fields', name: 'Valid JSON Fields', description: 'Fields marked as JSON must contain valid JSON or be null',
+        rule_type: 'custom', target: 'agent-config',
+        condition: JSON.stringify({ fields: ['tools', 'guardrails', 'metadata'], validate: 'json' }),
+        severity: 'error', message: 'JSON fields must contain valid JSON', enabled: 1,
+      },
+    ];
+    for (const r of validationRules) await this.createValidationRule(r);
     }
   }
 }

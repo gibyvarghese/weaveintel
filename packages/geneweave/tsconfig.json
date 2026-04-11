@@ -19,6 +19,9 @@
     { "path": "../routing" },
     { "path": "../cache" },
     { "path": "../identity" },
-    { "path": "../memory" }
+    { "path": "../memory" },
+    { "path": "../ui-primitives" },
+    { "path": "../devtools" },
+    { "path": "../recipes" }
   ]
 }

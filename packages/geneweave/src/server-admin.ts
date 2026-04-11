@@ -1771,6 +1771,262 @@ export function registerAdminRoutes(
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
+  // ── Admin: Scaffold Templates ────────────────────────────────
+
+  router.get('/api/admin/scaffold-templates', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listScaffoldTemplates();
+    json(res, 200, { 'scaffold-templates': items });
+  });
+
+  router.get('/api/admin/scaffold-templates/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getScaffoldTemplate(params['id']!);
+    if (!c) { json(res, 404, { error: 'Scaffold template not found' }); return; }
+    json(res, 200, { 'scaffold-template': c });
+  });
+
+  router.post('/api/admin/scaffold-templates', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'scaf-' + randomUUID().slice(0, 8);
+    await db.createScaffoldTemplate({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      template_type: (body['template_type'] as string) ?? 'basic-agent',
+      files: body['files'] != null ? (typeof body['files'] === 'string' ? body['files'] as string : JSON.stringify(body['files'])) : null,
+      dependencies: body['dependencies'] != null ? (typeof body['dependencies'] === 'string' ? body['dependencies'] as string : JSON.stringify(body['dependencies'])) : null,
+      dev_dependencies: body['dev_dependencies'] != null ? (typeof body['dev_dependencies'] === 'string' ? body['dev_dependencies'] as string : JSON.stringify(body['dev_dependencies'])) : null,
+      variables: body['variables'] != null ? (typeof body['variables'] === 'string' ? body['variables'] as string : JSON.stringify(body['variables'])) : null,
+      post_install: (body['post_install'] as string) ?? null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getScaffoldTemplate(id);
+    json(res, 201, { 'scaffold-template': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/scaffold-templates/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getScaffoldTemplate(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Scaffold template not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['template_type'] !== undefined) fields['template_type'] = body['template_type'];
+    if (body['files'] !== undefined) fields['files'] = body['files'] != null ? (typeof body['files'] === 'string' ? body['files'] : JSON.stringify(body['files'])) : null;
+    if (body['dependencies'] !== undefined) fields['dependencies'] = body['dependencies'] != null ? (typeof body['dependencies'] === 'string' ? body['dependencies'] : JSON.stringify(body['dependencies'])) : null;
+    if (body['dev_dependencies'] !== undefined) fields['dev_dependencies'] = body['dev_dependencies'] != null ? (typeof body['dev_dependencies'] === 'string' ? body['dev_dependencies'] : JSON.stringify(body['dev_dependencies'])) : null;
+    if (body['variables'] !== undefined) fields['variables'] = body['variables'] != null ? (typeof body['variables'] === 'string' ? body['variables'] : JSON.stringify(body['variables'])) : null;
+    if (body['post_install'] !== undefined) fields['post_install'] = body['post_install'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateScaffoldTemplate(params['id']!, fields as any);
+    const item = await db.getScaffoldTemplate(params['id']!);
+    json(res, 200, { 'scaffold-template': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/scaffold-templates/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteScaffoldTemplate(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Recipe Configs ──────────────────────────────────
+
+  router.get('/api/admin/recipe-configs', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listRecipeConfigs();
+    json(res, 200, { 'recipe-configs': items });
+  });
+
+  router.get('/api/admin/recipe-configs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getRecipeConfig(params['id']!);
+    if (!c) { json(res, 404, { error: 'Recipe config not found' }); return; }
+    json(res, 200, { 'recipe-config': c });
+  });
+
+  router.post('/api/admin/recipe-configs', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'rcp-' + randomUUID().slice(0, 8);
+    await db.createRecipeConfig({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      recipe_type: (body['recipe_type'] as string) ?? 'workflow',
+      model: (body['model'] as string) ?? null,
+      provider: (body['provider'] as string) ?? null,
+      system_prompt: (body['system_prompt'] as string) ?? null,
+      tools: body['tools'] != null ? (typeof body['tools'] === 'string' ? body['tools'] as string : JSON.stringify(body['tools'])) : null,
+      guardrails: body['guardrails'] != null ? (typeof body['guardrails'] === 'string' ? body['guardrails'] as string : JSON.stringify(body['guardrails'])) : null,
+      max_steps: body['max_steps'] != null ? Number(body['max_steps']) : 10,
+      options: body['options'] != null ? (typeof body['options'] === 'string' ? body['options'] as string : JSON.stringify(body['options'])) : null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getRecipeConfig(id);
+    json(res, 201, { 'recipe-config': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/recipe-configs/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getRecipeConfig(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Recipe config not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['recipe_type'] !== undefined) fields['recipe_type'] = body['recipe_type'];
+    if (body['model'] !== undefined) fields['model'] = body['model'];
+    if (body['provider'] !== undefined) fields['provider'] = body['provider'];
+    if (body['system_prompt'] !== undefined) fields['system_prompt'] = body['system_prompt'];
+    if (body['tools'] !== undefined) fields['tools'] = body['tools'] != null ? (typeof body['tools'] === 'string' ? body['tools'] : JSON.stringify(body['tools'])) : null;
+    if (body['guardrails'] !== undefined) fields['guardrails'] = body['guardrails'] != null ? (typeof body['guardrails'] === 'string' ? body['guardrails'] : JSON.stringify(body['guardrails'])) : null;
+    if (body['max_steps'] !== undefined) fields['max_steps'] = Number(body['max_steps']);
+    if (body['options'] !== undefined) fields['options'] = body['options'] != null ? (typeof body['options'] === 'string' ? body['options'] : JSON.stringify(body['options'])) : null;
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateRecipeConfig(params['id']!, fields as any);
+    const item = await db.getRecipeConfig(params['id']!);
+    json(res, 200, { 'recipe-config': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/recipe-configs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteRecipeConfig(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Widget Configs ──────────────────────────────────
+
+  router.get('/api/admin/widget-configs', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listWidgetConfigs();
+    json(res, 200, { 'widget-configs': items });
+  });
+
+  router.get('/api/admin/widget-configs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getWidgetConfig(params['id']!);
+    if (!c) { json(res, 404, { error: 'Widget config not found' }); return; }
+    json(res, 200, { 'widget-config': c });
+  });
+
+  router.post('/api/admin/widget-configs', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'wgt-' + randomUUID().slice(0, 8);
+    await db.createWidgetConfig({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      widget_type: (body['widget_type'] as string) ?? 'table',
+      default_options: body['default_options'] != null ? (typeof body['default_options'] === 'string' ? body['default_options'] as string : JSON.stringify(body['default_options'])) : null,
+      allowed_contexts: body['allowed_contexts'] != null ? (typeof body['allowed_contexts'] === 'string' ? body['allowed_contexts'] as string : JSON.stringify(body['allowed_contexts'])) : null,
+      max_data_points: body['max_data_points'] != null ? Number(body['max_data_points']) : null,
+      refresh_interval_ms: body['refresh_interval_ms'] != null ? Number(body['refresh_interval_ms']) : null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getWidgetConfig(id);
+    json(res, 201, { 'widget-config': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/widget-configs/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getWidgetConfig(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Widget config not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['widget_type'] !== undefined) fields['widget_type'] = body['widget_type'];
+    if (body['default_options'] !== undefined) fields['default_options'] = body['default_options'] != null ? (typeof body['default_options'] === 'string' ? body['default_options'] : JSON.stringify(body['default_options'])) : null;
+    if (body['allowed_contexts'] !== undefined) fields['allowed_contexts'] = body['allowed_contexts'] != null ? (typeof body['allowed_contexts'] === 'string' ? body['allowed_contexts'] : JSON.stringify(body['allowed_contexts'])) : null;
+    if (body['max_data_points'] !== undefined) fields['max_data_points'] = body['max_data_points'] != null ? Number(body['max_data_points']) : null;
+    if (body['refresh_interval_ms'] !== undefined) fields['refresh_interval_ms'] = body['refresh_interval_ms'] != null ? Number(body['refresh_interval_ms']) : null;
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateWidgetConfig(params['id']!, fields as any);
+    const item = await db.getWidgetConfig(params['id']!);
+    json(res, 200, { 'widget-config': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/widget-configs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteWidgetConfig(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Validation Rules ────────────────────────────────
+
+  router.get('/api/admin/validation-rules', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listValidationRules();
+    json(res, 200, { 'validation-rules': items });
+  });
+
+  router.get('/api/admin/validation-rules/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getValidationRule(params['id']!);
+    if (!c) { json(res, 404, { error: 'Validation rule not found' }); return; }
+    json(res, 200, { 'validation-rule': c });
+  });
+
+  router.post('/api/admin/validation-rules', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'val-' + randomUUID().slice(0, 8);
+    await db.createValidationRule({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      rule_type: (body['rule_type'] as string) ?? 'required',
+      target: (body['target'] as string) ?? 'agent-config',
+      condition: body['condition'] != null ? (typeof body['condition'] === 'string' ? body['condition'] as string : JSON.stringify(body['condition'])) : null,
+      severity: (body['severity'] as string) ?? 'error',
+      message: (body['message'] as string) ?? null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getValidationRule(id);
+    json(res, 201, { 'validation-rule': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/validation-rules/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getValidationRule(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Validation rule not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['rule_type'] !== undefined) fields['rule_type'] = body['rule_type'];
+    if (body['target'] !== undefined) fields['target'] = body['target'];
+    if (body['condition'] !== undefined) fields['condition'] = body['condition'] != null ? (typeof body['condition'] === 'string' ? body['condition'] : JSON.stringify(body['condition'])) : null;
+    if (body['severity'] !== undefined) fields['severity'] = body['severity'];
+    if (body['message'] !== undefined) fields['message'] = body['message'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateValidationRule(params['id']!, fields as any);
+    const item = await db.getValidationRule(params['id']!);
+    json(res, 200, { 'validation-rule': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/validation-rules/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteValidationRule(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
   // ── Admin: Seed data ───────────────────────────────────────
 
   router.post('/api/admin/seed', async (_req, res, _params, auth) => {

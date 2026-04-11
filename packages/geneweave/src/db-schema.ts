@@ -524,5 +524,67 @@ CREATE TABLE IF NOT EXISTS plugin_configs (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ── Phase 9: Developer Experience ──────────────────────────
+
+CREATE TABLE IF NOT EXISTS scaffold_templates (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  template_type TEXT NOT NULL DEFAULT 'basic-agent',
+  files TEXT,
+  dependencies TEXT,
+  dev_dependencies TEXT,
+  variables TEXT,
+  post_install TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS recipe_configs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  recipe_type TEXT NOT NULL DEFAULT 'workflow',
+  model TEXT,
+  provider TEXT,
+  system_prompt TEXT,
+  tools TEXT,
+  guardrails TEXT,
+  max_steps INTEGER DEFAULT 10,
+  options TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS widget_configs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  widget_type TEXT NOT NULL DEFAULT 'table',
+  default_options TEXT,
+  allowed_contexts TEXT,
+  max_data_points INTEGER DEFAULT 1000,
+  refresh_interval_ms INTEGER,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS validation_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  rule_type TEXT NOT NULL DEFAULT 'required',
+  target TEXT NOT NULL DEFAULT 'agent-config',
+  condition TEXT,
+  severity TEXT NOT NULL DEFAULT 'error',
+  message TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 

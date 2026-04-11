@@ -1577,3 +1577,207 @@ describe('Admin Plugin Configs', () => {
     expect(data['ok']).toBe(true);
   });
 });
+
+// ─── Admin Scaffold Templates ───────────────────────────────
+
+describe('Admin Scaffold Templates', () => {
+  let itemId: string;
+
+  it('lists scaffold templates', async () => {
+    const { status, data } = await api('GET', '/api/admin/scaffold-templates');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['scaffold-templates'])).toBe(true);
+  });
+
+  it('creates a scaffold template', async () => {
+    const { status, data } = await api('POST', '/api/admin/scaffold-templates', {
+      name: 'Test Scaffold',
+      description: 'Integration test scaffold template',
+      template_type: 'basic-agent',
+      files: '{"index.ts":"console.log()"}',
+      dependencies: '{"@weaveintel/core":"*"}',
+      dev_dependencies: '{"typescript":"^5"}',
+      variables: '{"name":"my-agent"}',
+      post_install: 'npm install',
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['scaffold-template'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a scaffold template by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/scaffold-templates/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['scaffold-template'] as Record<string, unknown>)?.['name']).toBe('Test Scaffold');
+  });
+
+  it('updates a scaffold template', async () => {
+    const { status, data } = await api('PUT', `/api/admin/scaffold-templates/${itemId}`, {
+      name: 'Updated Scaffold',
+      template_type: 'rag-pipeline',
+    });
+    expect(status).toBe(200);
+    expect((data['scaffold-template'] as Record<string, unknown>)?.['name']).toBe('Updated Scaffold');
+  });
+
+  it('deletes a scaffold template', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/scaffold-templates/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin Recipe Configs ───────────────────────────────────
+
+describe('Admin Recipe Configs', () => {
+  let itemId: string;
+
+  it('lists recipe configs', async () => {
+    const { status, data } = await api('GET', '/api/admin/recipe-configs');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['recipe-configs'])).toBe(true);
+  });
+
+  it('creates a recipe config', async () => {
+    const { status, data } = await api('POST', '/api/admin/recipe-configs', {
+      name: 'Test Recipe',
+      description: 'Integration test recipe config',
+      recipe_type: 'workflow',
+      model: 'gpt-4o',
+      provider: 'openai',
+      system_prompt: 'You are a test agent',
+      tools: '["search","calculate"]',
+      guardrails: '["pii-filter"]',
+      max_steps: 5,
+      options: '{"verbose":true}',
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['recipe-config'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a recipe config by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/recipe-configs/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['recipe-config'] as Record<string, unknown>)?.['name']).toBe('Test Recipe');
+  });
+
+  it('updates a recipe config', async () => {
+    const { status, data } = await api('PUT', `/api/admin/recipe-configs/${itemId}`, {
+      name: 'Updated Recipe',
+      max_steps: 20,
+    });
+    expect(status).toBe(200);
+    expect((data['recipe-config'] as Record<string, unknown>)?.['name']).toBe('Updated Recipe');
+  });
+
+  it('deletes a recipe config', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/recipe-configs/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin Widget Configs ───────────────────────────────────
+
+describe('Admin Widget Configs', () => {
+  let itemId: string;
+
+  it('lists widget configs', async () => {
+    const { status, data } = await api('GET', '/api/admin/widget-configs');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['widget-configs'])).toBe(true);
+  });
+
+  it('creates a widget config', async () => {
+    const { status, data } = await api('POST', '/api/admin/widget-configs', {
+      name: 'Test Widget',
+      description: 'Integration test widget config',
+      widget_type: 'chart',
+      default_options: '{"theme":"dark"}',
+      allowed_contexts: '["dashboard","chat"]',
+      max_data_points: 100,
+      refresh_interval_ms: 5000,
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['widget-config'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a widget config by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/widget-configs/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['widget-config'] as Record<string, unknown>)?.['name']).toBe('Test Widget');
+  });
+
+  it('updates a widget config', async () => {
+    const { status, data } = await api('PUT', `/api/admin/widget-configs/${itemId}`, {
+      name: 'Updated Widget',
+      max_data_points: 500,
+    });
+    expect(status).toBe(200);
+    expect((data['widget-config'] as Record<string, unknown>)?.['name']).toBe('Updated Widget');
+  });
+
+  it('deletes a widget config', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/widget-configs/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin Validation Rules ─────────────────────────────────
+
+describe('Admin Validation Rules', () => {
+  let itemId: string;
+
+  it('lists validation rules', async () => {
+    const { status, data } = await api('GET', '/api/admin/validation-rules');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['validation-rules'])).toBe(true);
+  });
+
+  it('creates a validation rule', async () => {
+    const { status, data } = await api('POST', '/api/admin/validation-rules', {
+      name: 'Test Rule',
+      description: 'Integration test validation rule',
+      rule_type: 'required',
+      target: 'agent-config',
+      condition: '{"field":"name","op":"not_empty"}',
+      severity: 'error',
+      message: 'Name is required',
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['validation-rule'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a validation rule by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/validation-rules/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['validation-rule'] as Record<string, unknown>)?.['name']).toBe('Test Rule');
+  });
+
+  it('updates a validation rule', async () => {
+    const { status, data } = await api('PUT', `/api/admin/validation-rules/${itemId}`, {
+      name: 'Updated Rule',
+      severity: 'warning',
+    });
+    expect(status).toBe(200);
+    expect((data['validation-rule'] as Record<string, unknown>)?.['name']).toBe('Updated Rule');
+  });
+
+  it('deletes a validation rule', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/validation-rules/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
