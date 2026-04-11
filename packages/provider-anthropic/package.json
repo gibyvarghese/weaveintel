@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/provider-anthropic",
   "version": "0.0.1",
-  "description": "Anthropic provider for WeaveIntel — chat, tool use, vision, PDF, extended thinking, citations, batches, computer use",
+  "description": "Anthropic provider for weaveIntel — chat, tool use, vision, PDF, extended thinking, citations, batches, computer use",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

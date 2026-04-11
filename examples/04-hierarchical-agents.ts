@@ -29,7 +29,7 @@ async function main() {
         required: ['query'],
       },
       execute: async (args) =>
-        `Results for "${(args as { query: string }).query}": AI frameworks include LangChain, WeaveIntel, LlamaIndex.`,
+        `Results for "${(args as { query: string }).query}": AI frameworks include LangChain, weaveIntel, LlamaIndex.`,
     }),
   );
 
@@ -85,7 +85,7 @@ async function main() {
       },
       // Step 3: supervisor produces final answer
       {
-        content: 'The research team found that popular AI frameworks include LangChain, WeaveIntel, and LlamaIndex. A report has been generated.',
+        content: 'The research team found that popular AI frameworks include LangChain, weaveIntel, and LlamaIndex. A report has been generated.',
         toolCalls: [],
       },
     ],
@@ -106,7 +106,7 @@ async function main() {
           },
         ],
       },
-      { content: 'Found: LangChain, WeaveIntel, LlamaIndex are popular AI frameworks.', toolCalls: [] },
+      { content: 'Found: LangChain, weaveIntel, LlamaIndex are popular AI frameworks.', toolCalls: [] },
     ],
   });
 
@@ -119,7 +119,7 @@ async function main() {
             id: 'wc_2',
             function: {
               name: 'write_document',
-              arguments: '{"notes":"Popular AI frameworks: LangChain, WeaveIntel, LlamaIndex"}',
+              arguments: '{"notes":"Popular AI frameworks: LangChain, weaveIntel, LlamaIndex"}',
             },
           },
         ],

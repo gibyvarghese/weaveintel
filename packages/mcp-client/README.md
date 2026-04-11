@@ -13,7 +13,7 @@ await client.connect(transport);
 // Discover available tools
 const tools = await client.listTools();
 
-// Bridge MCP tools into a WeaveIntel ToolRegistry
+// Bridge MCP tools into a weaveIntel ToolRegistry
 const registry = mcpToolsToRegistry(client, tools);
 
 // Invoke a tool

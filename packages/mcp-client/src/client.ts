@@ -3,7 +3,7 @@
  *
  * Connects to MCP servers via any transport (stdio, HTTP, WebSocket).
  * Discovers tools, resources, and prompts, then exposes them through
- * the WeaveIntel Tool interface for seamless agent integration.
+ * the weaveIntel Tool interface for seamless agent integration.
  */
 
 import type {
@@ -129,7 +129,7 @@ export function weaveMCPClient(): MCPClient {
   };
 }
 
-// ─── Bridge: MCP tools → WeaveIntel tools ────────────────────
+// ─── Bridge: MCP tools → weaveIntel tools ────────────────────
 
 export function weaveMCPTools(
   client: MCPClient,

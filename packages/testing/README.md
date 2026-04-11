@@ -1,6 +1,6 @@
 # @weaveintel/testing
 
-Deterministic fakes and test harnesses for WeaveIntel — no API keys needed.
+Deterministic fakes and test harnesses for weaveIntel — no API keys needed.
 
 ## Exports
 

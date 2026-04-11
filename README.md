@@ -1,10 +1,10 @@
-# WeaveIntel
+# weaveIntel
 
 **Protocol-first, capability-driven AI framework for TypeScript.**
 
-WeaveIntel is a modular monorepo that provides composable building blocks for building production-grade AI applications — from simple chat completions to multi-agent orchestration with tool calling, RAG, memory, observability, and inter-agent communication.
+weaveIntel is a modular monorepo that provides composable building blocks for building production-grade AI applications — from simple chat completions to multi-agent orchestration with tool calling, RAG, memory, observability, and inter-agent communication.
 
-## Why WeaveIntel?
+## Why weaveIntel?
 
 - **Protocol-first** — Core defines contracts (interfaces), not implementations. Swap providers without changing application code.
 - **Capability-driven** — Models, agents, and tools declare capabilities. The router selects the right model for the job.
@@ -211,7 +211,7 @@ server.addTool(
 const client = weaveMCPClient(transport);
 await client.connect();
 const tools = await client.listTools();
-const result = await client.callTool('greet', { name: 'WeaveIntel' });
+const result = await client.callTool('greet', { name: 'weaveIntel' });
 ```
 
 > **Run it:** `npx tsx examples/05-mcp-integration.ts`

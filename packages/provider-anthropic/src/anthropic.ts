@@ -137,9 +137,35 @@ function buildAnthropicMessages(
     const role = msg.role === 'assistant' ? 'assistant' : 'user';
 
     if (typeof msg.content === 'string') {
-      anthropicMessages.push({ role, content: msg.content });
+      // If assistant message has toolCalls, include tool_use blocks
+      if (role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+        const blocks: AnthropicContentBlock[] = [];
+        if (msg.content) blocks.push({ type: 'text', text: msg.content });
+        for (const tc of msg.toolCalls) {
+          blocks.push({
+            type: 'tool_use',
+            id: tc.id,
+            name: tc.name,
+            input: JSON.parse(tc.arguments || '{}'),
+          });
+        }
+        anthropicMessages.push({ role, content: blocks });
+      } else {
+        anthropicMessages.push({ role, content: msg.content });
+      }
     } else {
       const blocks: AnthropicContentBlock[] = msg.content.map(partToAnthropicBlock);
+      // Also append tool_use blocks if present
+      if (role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+        for (const tc of msg.toolCalls) {
+          blocks.push({
+            type: 'tool_use',
+            id: tc.id,
+            name: tc.name,
+            input: JSON.parse(tc.arguments || '{}'),
+          });
+        }
+      }
       anthropicMessages.push({ role, content: blocks });
     }
   }
@@ -441,7 +467,7 @@ function* parseStreamEvent(evt: AnthropicSSEEvent): Iterable<StreamChunk> {
 // ─── Main model factory ──────────────────────────────────────
 
 /**
- * Creates an Anthropic chat model implementing the WeaveIntel Model interface.
+ * Creates an Anthropic chat model implementing the weaveIntel Model interface.
  *
  * Supports all Anthropic Messages API features:
  * - Chat completion with tool use

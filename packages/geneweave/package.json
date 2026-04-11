@@ -1,0 +1,41 @@
+{
+  "name": "@weaveintel/geneweave",
+  "version": "0.0.1",
+  "description": "geneWeave — AI chatbot application with streaming, auth, observability dashboard, built on weaveIntel",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@weaveintel/core": "*",
+    "@weaveintel/agents": "*",
+    "@weaveintel/observability": "*",
+    "@weaveintel/redaction": "*",
+    "@weaveintel/evals": "*",
+    "better-sqlite3": "^11.9.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13"
+  },
+  "peerDependencies": {
+    "@weaveintel/provider-openai": "*",
+    "@weaveintel/provider-anthropic": "*"
+  },
+  "peerDependenciesMeta": {
+    "@weaveintel/provider-openai": { "optional": true },
+    "@weaveintel/provider-anthropic": { "optional": true }
+  },
+  "license": "MIT"
+}

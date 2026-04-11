@@ -1,6 +1,6 @@
 # @weaveintel/core
 
-Core contracts, types, and runtime primitives for the WeaveIntel AI framework.
+Core contracts, types, and runtime primitives for the weaveIntel AI framework.
 
 **This package has zero vendor dependencies.** It defines the interfaces that all other packages implement or consume.
 

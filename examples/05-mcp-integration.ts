@@ -33,7 +33,7 @@ async function main() {
       },
     },
     async (_ctx, args) => ({
-      content: [{ type: 'text', text: `Hello, ${(args as { name: string }).name}! Welcome to WeaveIntel.` }],
+      content: [{ type: 'text', text: `Hello, ${(args as { name: string }).name}! Welcome to weaveIntel.` }],
     }),
   );
 
@@ -100,13 +100,13 @@ async function main() {
   const versionResource = await client.readResource('config://app/version');
   console.log('Version:', JSON.stringify(versionResource));
 
-  // Bridge MCP tools into WeaveIntel ToolRegistry
-  console.log('\n=== MCP → WeaveIntel Bridge ===');
+  // Bridge MCP tools into weaveIntel ToolRegistry
+  console.log('\n=== MCP → weaveIntel Bridge ===');
   const registry = weaveMCPTools(client, tools);
   const bridgedTools = registry.list();
   console.log(`Bridged ${bridgedTools.length} tools into ToolRegistry`);
 
-  // Call a bridged tool via the WeaveIntel Tool.invoke interface
+  // Call a bridged tool via the weaveIntel Tool.invoke interface
   const bridgedResult = await registry.get('greet')!.invoke(ctx, { name: 'greet', arguments: { name: 'Bob' } });
   console.log('Bridged greet:', JSON.stringify(bridgedResult));
 

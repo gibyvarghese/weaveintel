@@ -6,3 +6,6 @@ coverage/
 .env
 .env.local
 .DS_Store
+geneweave.db
+geneweave.db-shm
+geneweave.db-wal

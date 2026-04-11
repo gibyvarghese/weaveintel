@@ -136,6 +136,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             messages.push({
               role: 'assistant',
               content: response.content || '',
+              toolCalls: response.toolCalls,
             });
 
             for (const tc of response.toolCalls) {
@@ -249,7 +250,15 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
               yield { type: 'text_chunk', text: chunk.text };
             }
             if (chunk.type === 'tool_call' && chunk.toolCall) {
-              accToolCalls.push(chunk.toolCall as ToolCall);
+              const tc = chunk.toolCall as ToolCall;
+              if (tc.id && tc.name) {
+                // New tool call start
+                accToolCalls.push({ id: tc.id, name: tc.name, arguments: tc.arguments || '' });
+              } else if (tc.arguments && accToolCalls.length > 0) {
+                // Incremental arguments delta — append to last tool call
+                const last = accToolCalls[accToolCalls.length - 1]!;
+                (last as { id: string; name: string; arguments: string }).arguments += tc.arguments;
+              }
             }
             if (chunk.type === 'usage' && chunk.usage) {
               finalUsage = { prompt: chunk.usage.promptTokens, completion: chunk.usage.completionTokens };
@@ -260,7 +269,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           totalCompletionTokens += finalUsage.completion;
 
           if (accToolCalls.length > 0) {
-            messages.push({ role: 'assistant', content: accText || '' });
+            messages.push({ role: 'assistant', content: accText || '', toolCalls: accToolCalls });
 
             for (const tc of accToolCalls) {
               yield { type: 'tool_start', step: { index: steps.length, type: 'tool_call', content: tc.name, durationMs: 0 } };
@@ -304,7 +313,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         totalCompletionTokens += response.usage.completionTokens;
 
         if (response.toolCalls && response.toolCalls.length > 0) {
-          messages.push({ role: 'assistant', content: response.content || '' });
+          messages.push({ role: 'assistant', content: response.content || '', toolCalls: response.toolCalls });
 
           for (const tc of response.toolCalls) {
             yield { type: 'tool_start', step: { index: steps.length, type: 'tool_call', content: tc.name, durationMs: 0 } };

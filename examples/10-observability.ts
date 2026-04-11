@@ -37,7 +37,7 @@ async function main() {
   console.log('\n=== In-Memory Tracer ===');
   const memTracer = weaveInMemoryTracer();
 
-  const span2 = memTracer.startSpan(ctx, 'rag-pipeline', { query: 'What is WeaveIntel?' });
+  const span2 = memTracer.startSpan(ctx, 'rag-pipeline', { query: 'What is weaveIntel?' });
   const childSpan = memTracer.startSpan(
     { ...ctx, parentSpanId: span2.spanId } as any,
     'embedding',
@@ -105,10 +105,10 @@ async function main() {
       {
         content: '',
         toolCalls: [
-          { id: 'c1', function: { name: 'lookup', arguments: '{"topic":"WeaveIntel"}' } },
+          { id: 'c1', function: { name: 'lookup', arguments: '{"topic":"weaveIntel"}' } },
         ],
       },
-      { content: 'WeaveIntel is great!' },
+      { content: 'weaveIntel is great!' },
     ],
   });
 
@@ -120,7 +120,7 @@ async function main() {
     maxSteps: 5,
   });
 
-  await agent.run(ctx, { messages: [{ role: 'user', content: 'Tell me about WeaveIntel' }] });
+  await agent.run(ctx, { messages: [{ role: 'user', content: 'Tell me about weaveIntel' }] });
 
   console.log(`Captured ${events.length} events:`);
   for (const e of events) {

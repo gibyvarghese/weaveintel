@@ -1,6 +1,6 @@
 # @weaveintel/provider-openai
 
-OpenAI provider adapter for WeaveIntel — chat completions, embeddings, and streaming.
+OpenAI provider adapter for weaveIntel — chat completions, embeddings, and streaming.
 
 ## Features
 

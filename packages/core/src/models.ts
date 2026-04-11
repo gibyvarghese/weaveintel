@@ -50,6 +50,7 @@ export interface Message {
   readonly content: string | ContentPart[];
   readonly name?: string;
   readonly toolCallId?: string;
+  readonly toolCalls?: readonly ToolCall[];
 }
 
 // ─── Tool calling types ──────────────────────────────────────

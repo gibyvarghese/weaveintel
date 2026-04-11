@@ -33,7 +33,7 @@ async function main() {
   const summarizerModel = weaveFakeModel({
     responses: [
       {
-        content: 'Summary: WeaveIntel is a modular, protocol-first AI framework for TypeScript.',
+        content: 'Summary: weaveIntel is a modular, protocol-first AI framework for TypeScript.',
         toolCalls: [],
       },
     ],
@@ -75,7 +75,7 @@ async function main() {
   const translatorModel = weaveFakeModel({
     responses: [
       {
-        content: 'Translation (French): WeaveIntel est un framework IA modulaire pour TypeScript.',
+        content: 'Translation (French): weaveIntel est un framework IA modulaire pour TypeScript.',
         toolCalls: [],
       },
     ],
@@ -128,7 +128,7 @@ async function main() {
       role: 'user',
       parts: [{
         type: 'text',
-        text: 'WeaveIntel is a production-grade, protocol-first, capability-driven AI framework written in TypeScript. It supports multiple LLM types, vector stores, agents, MCP, A2A, memory, redaction, and observability.',
+        text: 'weaveIntel is a production-grade, protocol-first, capability-driven AI framework written in TypeScript. It supports multiple LLM types, vector stores, agents, MCP, A2A, memory, redaction, and observability.',
       }],
     },
   });
