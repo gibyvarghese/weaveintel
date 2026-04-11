@@ -83,7 +83,10 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     db,
   );
 
-  // 3. HTTP server
+  // 3. Seed default admin data (no-op if already seeded)
+  await db.seedDefaultData();
+
+  // 4. HTTP server
   const server = createGeneWeaveServer({
     db,
     chatEngine,
@@ -91,7 +94,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     corsOrigin: config.corsOrigin,
   });
 
-  // 4. Listen
+  // 5. Listen
   await new Promise<void>((resolve) => {
     server.listen(port, host, () => {
       console.log(`\n  🧬 geneWeave running → http://${host === '0.0.0.0' ? 'localhost' : host}:${port}\n`);
@@ -116,7 +119,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
 // ─── Re-exports for advanced usage ───────────────────────────
 
-export type { DatabaseAdapter, DatabaseConfig, UserRow, SessionRow, ChatRow, MessageRow, MetricRow, EvalRow, MetricsSummary, ChatSettingsRow, TraceRow } from './db.js';
+export type { DatabaseAdapter, DatabaseConfig, UserRow, SessionRow, ChatRow, MessageRow, MetricRow, EvalRow, MetricsSummary, ChatSettingsRow, TraceRow, PromptRow, GuardrailRow, RoutingPolicyRow, WorkflowDefRow, ToolConfigRow, WorkflowRunRow, GuardrailEvalRow } from './db.js';
 export { SQLiteAdapter, createDatabaseAdapter } from './db.js';
 export type { ProviderConfig, ChatEngineConfig, ChatSettings } from './chat.js';
 export { ChatEngine, calculateCost } from './chat.js';

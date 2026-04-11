@@ -324,3 +324,274 @@ export {
   type ManagedChunkingStrategy,
   type ManagedFileBatch,
 } from './managed-vectorstore.js';
+
+// Workflow orchestration contracts
+export {
+  type WorkflowStepType,
+  type WorkflowStep,
+  type WorkflowDefinition,
+  type WorkflowRunStatus,
+  type WorkflowState,
+  type WorkflowStepResult,
+  type WorkflowRun,
+  type WorkflowCheckpoint,
+  type WorkflowTriggerType,
+  type WorkflowTrigger,
+  type WorkflowScheduler,
+  type WorkflowPolicy,
+  type WorkflowCompensation,
+  type WorkflowEventType,
+  type WorkflowEvent,
+  type ApprovalStatus,
+  type WorkflowApprovalTask,
+  type WorkflowEngine,
+} from './workflows.js';
+
+// Guardrail & governance contracts
+export {
+  type GuardrailDecision,
+  type GuardrailStage,
+  type GuardrailType,
+  type GuardrailResult,
+  type Guardrail,
+  type GuardrailPipeline,
+  type RiskLevel,
+  type RiskClassifier,
+  type ConfidenceGate,
+  type ActionGate,
+  type GovernanceRule,
+  type GovernanceContext,
+  type RuntimePolicy,
+} from './guardrails.js';
+
+// Human-in-the-loop contracts
+export {
+  type HumanTaskStatus,
+  type HumanTaskType,
+  type HumanTaskPriority,
+  type HumanTask,
+  type ApprovalTask,
+  type ReviewTask,
+  type EscalationTask,
+  type HumanDecision,
+  type HumanTaskQueue,
+  type HumanTaskFilter,
+  type HumanTaskPolicy,
+} from './human-tasks.js';
+
+// Completion contracts
+export {
+  type TaskContract,
+  type AcceptanceCriteria,
+  type CompletionContract,
+  type CompletionReport,
+  type ValidationResult,
+  type EvidenceBundle,
+  type EvidenceItem,
+  type TaskOutcomeStatus,
+  type TaskOutcome,
+  type FailureReason,
+  type CompletionValidator,
+} from './contracts.js';
+
+// Prompt management contracts
+export {
+  type PromptDefinition,
+  type PromptVersion,
+  type PromptVariable,
+  type PromptTemplate,
+  type PromptRegistry,
+  type InstructionBundle,
+  type PromptVariant,
+  type PromptExperiment,
+  type PromptResolver,
+} from './prompts.js';
+
+// Model routing contracts
+export {
+  type RoutingDecision,
+  type RoutingStrategy,
+  type RoutingPolicy,
+  type RoutingConstraints,
+  type ModelHealth,
+  type ModelScore,
+  type RoutingContext,
+  type ModelRouter,
+  type FallbackPlan,
+} from './routing.js';
+
+// Cache contracts
+export {
+  type CacheStore,
+  type SemanticCache,
+  type SemanticCacheHit,
+  type CacheScopeType,
+  type CachePolicy,
+  type CacheKeyBuilder,
+  type CacheInvalidationRule,
+  type CacheScope,
+} from './cache.js';
+
+// Identity & access contracts
+export {
+  type RuntimeIdentity,
+  type IdentityContext,
+  type DelegationContext,
+  type AccessDecisionResult,
+  type PermissionDescriptor,
+  type AccessDecision,
+  type SecretScope,
+  type AccessTokenResolver,
+} from './identity.js';
+
+// Tool lifecycle contracts
+export {
+  type ToolRiskLevel,
+  type ToolDescriptor,
+  type ToolVersion,
+  type ToolLifecyclePolicy,
+  type ToolTestCase,
+  type ToolTestResult,
+  type ToolTestHarness,
+  type ToolHealth,
+  type ToolExecutionPolicy,
+} from './tool-lifecycle.js';
+
+// Replay & evaluation contracts
+export {
+  type ReplayScenario,
+  type ReplayEngine,
+  type ReplayResult,
+  type BenchmarkSuite,
+  type EvalScenario,
+  type EvalRegression,
+  type RegressionItem,
+  type ComparisonRun,
+  type GoldenCase,
+  type RunArtifact,
+} from './replay.js';
+
+// Event trigger contracts
+export {
+  type TriggerType,
+  type TriggerDefinition,
+  type EventTrigger,
+  type TriggerSubscription,
+  type EventEnvelope,
+  type TriggerHandler,
+  type EventDrivenWorkflowBinding,
+} from './triggers.js';
+
+// Multi-tenancy contracts
+export {
+  type ConfigScopeLevel,
+  type ConfigScope,
+  type EffectiveConfig,
+  type ConfigResolver,
+  type OverrideLayer,
+  type EntitlementPolicy,
+  type TenantPolicy,
+  type TenantCapabilityMap,
+} from './tenancy.js';
+
+// Sandbox contracts
+export {
+  type Sandbox,
+  type SandboxPolicy,
+  type ExecutionLimits,
+  type SandboxResult,
+  type ExecutionArtifact,
+  type RestrictedEnvironment,
+} from './sandbox.js';
+
+// Document extraction contracts
+export {
+  type DocumentTransformPipeline,
+  type DocumentInput,
+  type ExtractionStageType,
+  type ExtractionStage,
+  type ExtractedEntity,
+  type ExtractedTask,
+  type ExtractedTimeline,
+  type ExtractionResult,
+  type TransformationArtifact,
+} from './extraction.js';
+
+// Collaboration contracts
+export {
+  type SharedSession,
+  type SessionParticipant,
+  type CollaborationEventType,
+  type CollaborationEvent,
+  type SharedContext,
+  type RunSubscription,
+  type PresenceState,
+} from './collaboration.js';
+
+// Plugin system contracts
+export {
+  type PluginManifest,
+  type PluginCapability,
+  type PluginCompatibilityResult,
+  type PluginTrustLevel,
+  type PluginLifecycle,
+  type PluginInstaller,
+} from './plugins.js';
+
+// Artifact contracts
+export {
+  type ArtifactType,
+  type Artifact,
+  type ArtifactVersion,
+  type ArtifactStore,
+  type ArtifactReference,
+  type ArtifactPolicy,
+} from './artifacts.js';
+
+// Reliability contracts
+export {
+  type IdempotencyPolicy,
+  type RetryBudget,
+  type DeadLetterRecord,
+  type ConcurrencyPolicy,
+  type BackpressureSignal,
+  type HealthStatusState,
+  type HealthStatus,
+  type HealthCheck,
+  type FailureEnvelope,
+} from './reliability.js';
+
+// Compliance contracts
+export {
+  type CompliancePolicy,
+  type RetentionRule,
+  type DeletionStatus,
+  type DeletionRequest,
+  type LegalHold,
+  type ResidencyConstraint,
+  type AuditExport,
+  type ConsentFlag,
+} from './compliance.js';
+
+// Knowledge graph contracts
+export {
+  type EntityNode,
+  type RelationshipEdge,
+  type GraphMemoryStore,
+  type EntityLinker,
+  type TimelineGraph,
+  type GraphRetriever,
+} from './graph.js';
+
+// UI event contracts
+export {
+  type UiEventType,
+  type UiEvent,
+  type StreamEnvelope,
+  type ProgressUpdate,
+  type ApprovalUiPayload,
+  type CitationPayload,
+  type ArtifactPayload,
+  type WidgetType,
+  type WidgetPayload,
+} from './ui-events.js';

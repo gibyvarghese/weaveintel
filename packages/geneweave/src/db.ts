@@ -105,6 +105,109 @@ export interface TraceRow {
   created_at: string;
 }
 
+// ─── Admin config row types ──────────────────────────────────
+
+export interface PromptRow {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  template: string;
+  variables: string | null;       // JSON array
+  version: string;
+  is_default: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GuardrailRow {
+  id: string;
+  name: string;
+  description: string | null;
+  type: string;
+  stage: string;
+  config: string | null;          // JSON object
+  priority: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoutingPolicyRow {
+  id: string;
+  name: string;
+  description: string | null;
+  strategy: string;
+  constraints: string | null;     // JSON object
+  weights: string | null;         // JSON object
+  fallback_model: string | null;
+  fallback_provider: string | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowDefRow {
+  id: string;
+  name: string;
+  description: string | null;
+  version: string;
+  steps: string;                  // JSON array
+  entry_step_id: string;
+  metadata: string | null;        // JSON object
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ToolConfigRow {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string | null;
+  risk_level: string;
+  requires_approval: number;
+  max_execution_ms: number | null;
+  rate_limit_per_min: number | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HumanTaskPolicyRow {
+  id: string;
+  name: string;
+  description: string | null;
+  trigger: string;
+  task_type: string;
+  default_priority: string;
+  sla_hours: number | null;
+  auto_escalate_after_hours: number | null;
+  assignment_strategy: string;
+  assign_to: string | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TaskContractRow {
+  id: string;
+  name: string;
+  description: string | null;
+  input_schema: string | null;           // JSON object
+  output_schema: string | null;          // JSON object
+  acceptance_criteria: string;           // JSON array
+  max_attempts: number | null;
+  timeout_ms: number | null;
+  evidence_required: string | null;      // JSON array
+  min_confidence: number | null;
+  require_human_review: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MetricsSummary {
   total_tokens: number;
   total_cost: number;
@@ -113,6 +216,28 @@ export interface MetricsSummary {
   total_chats: number;
   by_model: Array<{ model: string; provider: string; tokens: number; cost: number; count: number }>;
   by_day: Array<{ date: string; tokens: number; cost: number; count: number }>;
+}
+
+export interface WorkflowRunRow {
+  id: string;
+  workflow_id: string;
+  status: string;
+  state: string;
+  input: string | null;
+  error: string | null;
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface GuardrailEvalRow {
+  id: string;
+  chat_id: string | null;
+  message_id: string | null;
+  stage: string;
+  input_preview: string | null;
+  results: string;
+  overall_decision: string;
+  created_at: string;
 }
 
 // ─── Adapter interface ───────────────────────────────────────
@@ -214,6 +339,71 @@ export interface DatabaseAdapter {
   }): Promise<void>;
   getChatTraces(chatId: string): Promise<TraceRow[]>;
   getUserTraces(userId: string, limit?: number): Promise<TraceRow[]>;
+
+  // Agent activity: assistant messages with parsed metadata
+  getAgentActivity(userId: string, limit?: number): Promise<Array<MessageRow & { chat_title: string; chat_model: string; chat_provider: string }>>;
+
+  // ─── Admin: Prompts ────────────────────────────────────────
+  createPrompt(p: Omit<PromptRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getPrompt(id: string): Promise<PromptRow | null>;
+  listPrompts(): Promise<PromptRow[]>;
+  updatePrompt(id: string, fields: Partial<Omit<PromptRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deletePrompt(id: string): Promise<void>;
+
+  // ─── Admin: Guardrails ─────────────────────────────────────
+  createGuardrail(g: Omit<GuardrailRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getGuardrail(id: string): Promise<GuardrailRow | null>;
+  listGuardrails(): Promise<GuardrailRow[]>;
+  updateGuardrail(id: string, fields: Partial<Omit<GuardrailRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteGuardrail(id: string): Promise<void>;
+
+  // ─── Admin: Routing policies ───────────────────────────────
+  createRoutingPolicy(r: Omit<RoutingPolicyRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getRoutingPolicy(id: string): Promise<RoutingPolicyRow | null>;
+  listRoutingPolicies(): Promise<RoutingPolicyRow[]>;
+  updateRoutingPolicy(id: string, fields: Partial<Omit<RoutingPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteRoutingPolicy(id: string): Promise<void>;
+
+  // ─── Admin: Workflow definitions ───────────────────────────
+  createWorkflowDef(w: Omit<WorkflowDefRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getWorkflowDef(id: string): Promise<WorkflowDefRow | null>;
+  listWorkflowDefs(): Promise<WorkflowDefRow[]>;
+  updateWorkflowDef(id: string, fields: Partial<Omit<WorkflowDefRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteWorkflowDef(id: string): Promise<void>;
+
+  // ─── Admin: Tool configs ───────────────────────────────────
+  createToolConfig(t: Omit<ToolConfigRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getToolConfig(id: string): Promise<ToolConfigRow | null>;
+  listToolConfigs(): Promise<ToolConfigRow[]>;
+  updateToolConfig(id: string, fields: Partial<Omit<ToolConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteToolConfig(id: string): Promise<void>;
+
+  // ─── Workflow Runs ─────────────────────────────────────────
+  createWorkflowRun(r: Omit<WorkflowRunRow, 'completed_at'>): Promise<void>;
+  getWorkflowRun(id: string): Promise<WorkflowRunRow | null>;
+  listWorkflowRuns(workflowId?: string): Promise<WorkflowRunRow[]>;
+  updateWorkflowRun(id: string, fields: Partial<Omit<WorkflowRunRow, 'id' | 'started_at'>>): Promise<void>;
+
+  // ─── Guardrail Evaluations ─────────────────────────────────
+  createGuardrailEval(e: Omit<GuardrailEvalRow, 'created_at'>): Promise<void>;
+  listGuardrailEvals(chatId?: string, limit?: number): Promise<GuardrailEvalRow[]>;
+
+  // ─── Admin: Human Task Policies ────────────────────────────
+  createHumanTaskPolicy(p: Omit<HumanTaskPolicyRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getHumanTaskPolicy(id: string): Promise<HumanTaskPolicyRow | null>;
+  listHumanTaskPolicies(): Promise<HumanTaskPolicyRow[]>;
+  updateHumanTaskPolicy(id: string, fields: Partial<Omit<HumanTaskPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteHumanTaskPolicy(id: string): Promise<void>;
+
+  // ─── Admin: Task Contracts ─────────────────────────────────
+  createTaskContract(c: Omit<TaskContractRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getTaskContract(id: string): Promise<TaskContractRow | null>;
+  listTaskContracts(): Promise<TaskContractRow[]>;
+  updateTaskContract(id: string, fields: Partial<Omit<TaskContractRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteTaskContract(id: string): Promise<void>;
+
+  // ─── Admin: Seed data ──────────────────────────────────────
+  seedDefaultData(): Promise<void>;
 }
 
 // ─── SQLite adapter ──────────────────────────────────────────
@@ -312,6 +502,129 @@ CREATE TABLE IF NOT EXISTS traces (
   attributes TEXT,
   events TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS prompts (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  category TEXT,
+  template TEXT NOT NULL,
+  variables TEXT,
+  version TEXT NOT NULL DEFAULT '1.0',
+  is_default INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS guardrails (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  type TEXT NOT NULL,
+  stage TEXT NOT NULL DEFAULT 'pre',
+  config TEXT,
+  priority INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS routing_policies (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  strategy TEXT NOT NULL DEFAULT 'priority',
+  constraints TEXT,
+  weights TEXT,
+  fallback_model TEXT,
+  fallback_provider TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS workflow_defs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  version TEXT NOT NULL DEFAULT '1.0',
+  steps TEXT NOT NULL,
+  entry_step_id TEXT NOT NULL,
+  metadata TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS tool_configs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  category TEXT,
+  risk_level TEXT NOT NULL DEFAULT 'low',
+  requires_approval INTEGER NOT NULL DEFAULT 0,
+  max_execution_ms INTEGER,
+  rate_limit_per_min INTEGER,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id TEXT PRIMARY KEY,
+  workflow_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  state TEXT NOT NULL DEFAULT '{}',
+  input TEXT,
+  error TEXT,
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS guardrail_evals (
+  id TEXT PRIMARY KEY,
+  chat_id TEXT,
+  message_id TEXT,
+  stage TEXT NOT NULL,
+  input_preview TEXT,
+  results TEXT NOT NULL DEFAULT '[]',
+  overall_decision TEXT NOT NULL DEFAULT 'allow',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS human_task_policies (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  trigger TEXT NOT NULL,
+  task_type TEXT NOT NULL DEFAULT 'approval',
+  default_priority TEXT NOT NULL DEFAULT 'normal',
+  sla_hours REAL,
+  auto_escalate_after_hours REAL,
+  assignment_strategy TEXT NOT NULL DEFAULT 'round-robin',
+  assign_to TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS task_contracts (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  input_schema TEXT,
+  output_schema TEXT,
+  acceptance_criteria TEXT NOT NULL DEFAULT '[]',
+  max_attempts INTEGER,
+  timeout_ms INTEGER,
+  evidence_required TEXT,
+  min_confidence REAL,
+  require_human_review INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `;
 
@@ -542,6 +855,528 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async getUserTraces(userId: string, limit?: number): Promise<TraceRow[]> {
     const sql = 'SELECT * FROM traces WHERE user_id = ? ORDER BY start_time DESC LIMIT ?';
     return this.d.prepare(sql).all(userId, limit ?? 100) as TraceRow[];
+  }
+
+  async getAgentActivity(userId: string, limit?: number): Promise<Array<MessageRow & { chat_title: string; chat_model: string; chat_provider: string }>> {
+    const sql = `
+      SELECT m.*, c.title AS chat_title, c.model AS chat_model, c.provider AS chat_provider
+      FROM messages m
+      JOIN chats c ON c.id = m.chat_id
+      WHERE c.user_id = ? AND m.role = 'assistant' AND m.metadata IS NOT NULL
+      ORDER BY m.created_at DESC
+      LIMIT ?
+    `;
+    return this.d.prepare(sql).all(userId, limit ?? 50) as Array<MessageRow & { chat_title: string; chat_model: string; chat_provider: string }>;
+  }
+
+  // ─── Admin: Prompts ────────────────────────────────────────
+
+  async createPrompt(p: Omit<PromptRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO prompts (id, name, description, category, template, variables, version, is_default, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.name, p.description ?? null, p.category ?? null, p.template, p.variables ?? null, p.version, p.is_default, p.enabled);
+  }
+
+  async getPrompt(id: string): Promise<PromptRow | null> {
+    return (this.d.prepare('SELECT * FROM prompts WHERE id = ?').get(id) as PromptRow) ?? null;
+  }
+
+  async listPrompts(): Promise<PromptRow[]> {
+    return this.d.prepare('SELECT * FROM prompts ORDER BY name ASC').all() as PromptRow[];
+  }
+
+  async updatePrompt(id: string, fields: Partial<Omit<PromptRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE prompts SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deletePrompt(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM prompts WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Guardrails ─────────────────────────────────────
+
+  async createGuardrail(g: Omit<GuardrailRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO guardrails (id, name, description, type, stage, config, priority, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(g.id, g.name, g.description ?? null, g.type, g.stage, g.config ?? null, g.priority, g.enabled);
+  }
+
+  async getGuardrail(id: string): Promise<GuardrailRow | null> {
+    return (this.d.prepare('SELECT * FROM guardrails WHERE id = ?').get(id) as GuardrailRow) ?? null;
+  }
+
+  async listGuardrails(): Promise<GuardrailRow[]> {
+    return this.d.prepare('SELECT * FROM guardrails ORDER BY priority DESC, name ASC').all() as GuardrailRow[];
+  }
+
+  async updateGuardrail(id: string, fields: Partial<Omit<GuardrailRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE guardrails SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteGuardrail(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM guardrails WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Routing policies ───────────────────────────────
+
+  async createRoutingPolicy(r: Omit<RoutingPolicyRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO routing_policies (id, name, description, strategy, constraints, weights, fallback_model, fallback_provider, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(r.id, r.name, r.description ?? null, r.strategy, r.constraints ?? null, r.weights ?? null, r.fallback_model ?? null, r.fallback_provider ?? null, r.enabled);
+  }
+
+  async getRoutingPolicy(id: string): Promise<RoutingPolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM routing_policies WHERE id = ?').get(id) as RoutingPolicyRow) ?? null;
+  }
+
+  async listRoutingPolicies(): Promise<RoutingPolicyRow[]> {
+    return this.d.prepare('SELECT * FROM routing_policies ORDER BY name ASC').all() as RoutingPolicyRow[];
+  }
+
+  async updateRoutingPolicy(id: string, fields: Partial<Omit<RoutingPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE routing_policies SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteRoutingPolicy(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM routing_policies WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Workflow definitions ───────────────────────────
+
+  async createWorkflowDef(w: Omit<WorkflowDefRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO workflow_defs (id, name, description, version, steps, entry_step_id, metadata, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(w.id, w.name, w.description ?? null, w.version, w.steps, w.entry_step_id, w.metadata ?? null, w.enabled);
+  }
+
+  async getWorkflowDef(id: string): Promise<WorkflowDefRow | null> {
+    return (this.d.prepare('SELECT * FROM workflow_defs WHERE id = ?').get(id) as WorkflowDefRow) ?? null;
+  }
+
+  async listWorkflowDefs(): Promise<WorkflowDefRow[]> {
+    return this.d.prepare('SELECT * FROM workflow_defs ORDER BY name ASC').all() as WorkflowDefRow[];
+  }
+
+  async updateWorkflowDef(id: string, fields: Partial<Omit<WorkflowDefRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE workflow_defs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteWorkflowDef(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM workflow_defs WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Tool configs ───────────────────────────────────
+
+  async createToolConfig(t: Omit<ToolConfigRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tool_configs (id, name, description, category, risk_level, requires_approval, max_execution_ms, rate_limit_per_min, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(t.id, t.name, t.description ?? null, t.category ?? null, t.risk_level, t.requires_approval, t.max_execution_ms ?? null, t.rate_limit_per_min ?? null, t.enabled);
+  }
+
+  async getToolConfig(id: string): Promise<ToolConfigRow | null> {
+    return (this.d.prepare('SELECT * FROM tool_configs WHERE id = ?').get(id) as ToolConfigRow) ?? null;
+  }
+
+  async listToolConfigs(): Promise<ToolConfigRow[]> {
+    return this.d.prepare('SELECT * FROM tool_configs ORDER BY category ASC, name ASC').all() as ToolConfigRow[];
+  }
+
+  async updateToolConfig(id: string, fields: Partial<Omit<ToolConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE tool_configs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteToolConfig(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM tool_configs WHERE id = ?').run(id);
+  }
+
+  // ─── Workflow Runs ─────────────────────────────────────────
+
+  async createWorkflowRun(r: Omit<WorkflowRunRow, 'completed_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO workflow_runs (id, workflow_id, status, state, input, error, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(r.id, r.workflow_id, r.status, r.state, r.input, r.error, r.started_at);
+  }
+
+  async getWorkflowRun(id: string): Promise<WorkflowRunRow | null> {
+    return (this.d.prepare('SELECT * FROM workflow_runs WHERE id = ?').get(id) as WorkflowRunRow | undefined) ?? null;
+  }
+
+  async listWorkflowRuns(workflowId?: string): Promise<WorkflowRunRow[]> {
+    if (workflowId) {
+      return this.d.prepare('SELECT * FROM workflow_runs WHERE workflow_id = ? ORDER BY started_at DESC').all(workflowId) as WorkflowRunRow[];
+    }
+    return this.d.prepare('SELECT * FROM workflow_runs ORDER BY started_at DESC').all() as WorkflowRunRow[];
+  }
+
+  async updateWorkflowRun(id: string, fields: Partial<Omit<WorkflowRunRow, 'id' | 'started_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    vals.push(id);
+    this.d.prepare(`UPDATE workflow_runs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  // ─── Guardrail Evaluations ─────────────────────────────────
+
+  async createGuardrailEval(e: Omit<GuardrailEvalRow, 'created_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO guardrail_evals (id, chat_id, message_id, stage, input_preview, results, overall_decision) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(e.id, e.chat_id, e.message_id, e.stage, e.input_preview, e.results, e.overall_decision);
+  }
+
+  async listGuardrailEvals(chatId?: string, limit = 50): Promise<GuardrailEvalRow[]> {
+    if (chatId) {
+      return this.d.prepare('SELECT * FROM guardrail_evals WHERE chat_id = ? ORDER BY created_at DESC LIMIT ?').all(chatId, limit) as GuardrailEvalRow[];
+    }
+    return this.d.prepare('SELECT * FROM guardrail_evals ORDER BY created_at DESC LIMIT ?').all(limit) as GuardrailEvalRow[];
+  }
+
+  // ─── Admin: Human Task Policies ────────────────────────────
+
+  async createHumanTaskPolicy(p: Omit<HumanTaskPolicyRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO human_task_policies (id, name, description, trigger, task_type, default_priority, sla_hours, auto_escalate_after_hours, assignment_strategy, assign_to, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.name, p.description ?? null, p.trigger, p.task_type, p.default_priority, p.sla_hours ?? null, p.auto_escalate_after_hours ?? null, p.assignment_strategy, p.assign_to ?? null, p.enabled);
+  }
+
+  async getHumanTaskPolicy(id: string): Promise<HumanTaskPolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM human_task_policies WHERE id = ?').get(id) as HumanTaskPolicyRow) ?? null;
+  }
+
+  async listHumanTaskPolicies(): Promise<HumanTaskPolicyRow[]> {
+    return this.d.prepare('SELECT * FROM human_task_policies ORDER BY name ASC').all() as HumanTaskPolicyRow[];
+  }
+
+  async updateHumanTaskPolicy(id: string, fields: Partial<Omit<HumanTaskPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE human_task_policies SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteHumanTaskPolicy(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM human_task_policies WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Task Contracts ─────────────────────────────────
+
+  async createTaskContract(c: Omit<TaskContractRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO task_contracts (id, name, description, input_schema, output_schema, acceptance_criteria, max_attempts, timeout_ms, evidence_required, min_confidence, require_human_review, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(c.id, c.name, c.description ?? null, c.input_schema ?? null, c.output_schema ?? null, c.acceptance_criteria, c.max_attempts ?? null, c.timeout_ms ?? null, c.evidence_required ?? null, c.min_confidence ?? null, c.require_human_review, c.enabled);
+  }
+
+  async getTaskContract(id: string): Promise<TaskContractRow | null> {
+    return (this.d.prepare('SELECT * FROM task_contracts WHERE id = ?').get(id) as TaskContractRow) ?? null;
+  }
+
+  async listTaskContracts(): Promise<TaskContractRow[]> {
+    return this.d.prepare('SELECT * FROM task_contracts ORDER BY name ASC').all() as TaskContractRow[];
+  }
+
+  async updateTaskContract(id: string, fields: Partial<Omit<TaskContractRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE task_contracts SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteTaskContract(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM task_contracts WHERE id = ?').run(id);
+  }
+
+  // ─── Seed default data ─────────────────────────────────────
+
+  async seedDefaultData(): Promise<void> {
+    const existing = this.d.prepare('SELECT COUNT(*) as cnt FROM prompts').get() as { cnt: number };
+    if (existing.cnt > 0) return; // Already seeded
+
+    // Prompts
+    const prompts: Omit<PromptRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'prompt-general-assistant', name: 'General Assistant', description: 'Default conversational assistant prompt',
+        category: 'general', template: 'You are a helpful, accurate, and concise AI assistant. Answer the user\'s questions clearly and provide relevant details when asked.',
+        variables: null, version: '1.0', is_default: 1, enabled: 1,
+      },
+      {
+        id: 'prompt-code-reviewer', name: 'Code Review Expert', description: 'Technical code review prompt with best practices',
+        category: 'engineering', template: 'You are an expert code reviewer. Analyze code for bugs, security issues, performance problems, and style. Provide actionable suggestions with explanations. Focus on: {{focus_areas}}',
+        variables: JSON.stringify(['focus_areas']), version: '1.0', is_default: 0, enabled: 1,
+      },
+      {
+        id: 'prompt-summarizer', name: 'Document Summarizer', description: 'Summarize long documents into key points',
+        category: 'content', template: 'Summarize the following content into {{format}}. Preserve key facts, numbers, and conclusions. Be concise but thorough.\n\nContent:\n{{content}}',
+        variables: JSON.stringify(['format', 'content']), version: '1.0', is_default: 0, enabled: 1,
+      },
+      {
+        id: 'prompt-sql-expert', name: 'SQL Query Builder', description: 'Generate SQL queries from natural language',
+        category: 'engineering', template: 'You are an expert SQL developer. Convert the following natural language request into a correct, optimized SQL query. Target database: {{db_type}}. Available tables: {{schema}}',
+        variables: JSON.stringify(['db_type', 'schema']), version: '1.0', is_default: 0, enabled: 1,
+      },
+    ];
+    for (const p of prompts) await this.createPrompt(p);
+
+    // Guardrails
+    const guardrails: Omit<GuardrailRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'guard-pii-redact', name: 'PII Redaction', description: 'Redact personal identifiable information before sending to LLM',
+        type: 'redaction', stage: 'pre', config: JSON.stringify({ patterns: ['email', 'phone', 'ssn', 'credit_card'] }), priority: 100, enabled: 1,
+      },
+      {
+        id: 'guard-toxicity', name: 'Toxicity Filter', description: 'Block toxic or harmful content in responses',
+        type: 'content_filter', stage: 'post', config: JSON.stringify({ threshold: 0.7, categories: ['hate', 'violence', 'self_harm'] }), priority: 90, enabled: 1,
+      },
+      {
+        id: 'guard-token-limit', name: 'Token Budget', description: 'Enforce maximum token usage per request',
+        type: 'budget', stage: 'pre', config: JSON.stringify({ max_input_tokens: 8000, max_output_tokens: 4000 }), priority: 80, enabled: 1,
+      },
+      {
+        id: 'guard-hallucination', name: 'Hallucination Check', description: 'Flag responses that may contain fabricated information',
+        type: 'factuality', stage: 'post', config: JSON.stringify({ confidence_threshold: 0.6, require_citations: false }), priority: 70, enabled: 0,
+      },
+    ];
+    for (const g of guardrails) await this.createGuardrail(g);
+
+    // Routing policies
+    const policies: Omit<RoutingPolicyRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'route-cost-optimized', name: 'Cost Optimized', description: 'Route to the cheapest model that meets quality thresholds',
+        strategy: 'cost', constraints: JSON.stringify({ min_quality_score: 0.7 }), weights: JSON.stringify({ cost: 0.7, quality: 0.2, latency: 0.1 }),
+        fallback_model: 'gpt-4o-mini', fallback_provider: 'openai', enabled: 1,
+      },
+      {
+        id: 'route-quality-first', name: 'Quality First', description: 'Always route to the highest quality model available',
+        strategy: 'quality', constraints: null, weights: JSON.stringify({ cost: 0.1, quality: 0.8, latency: 0.1 }),
+        fallback_model: 'claude-sonnet-4-20250514', fallback_provider: 'anthropic', enabled: 1,
+      },
+      {
+        id: 'route-balanced', name: 'Balanced', description: 'Balance between cost, quality and speed',
+        strategy: 'balanced', constraints: null, weights: JSON.stringify({ cost: 0.33, quality: 0.34, latency: 0.33 }),
+        fallback_model: 'gpt-4o', fallback_provider: 'openai', enabled: 1,
+      },
+    ];
+    for (const r of policies) await this.createRoutingPolicy(r);
+
+    // Workflow definitions
+    const workflows: Omit<WorkflowDefRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'wf-code-review', name: 'Code Review Pipeline', description: 'Automated code review with human approval gate',
+        version: '1.0', entry_step_id: 'analyze',
+        steps: JSON.stringify([
+          { id: 'analyze', type: 'agent', name: 'Static Analysis', next: 'review' },
+          { id: 'review', type: 'agent', name: 'AI Code Review', next: 'approve' },
+          { id: 'approve', type: 'human', name: 'Human Approval', next: 'report' },
+          { id: 'report', type: 'agent', name: 'Generate Report', next: null },
+        ]),
+        metadata: JSON.stringify({ category: 'engineering' }), enabled: 1,
+      },
+      {
+        id: 'wf-content-pipeline', name: 'Content Generation', description: 'Draft, review, and publish content workflow',
+        version: '1.0', entry_step_id: 'draft',
+        steps: JSON.stringify([
+          { id: 'draft', type: 'agent', name: 'Generate Draft', next: 'edit' },
+          { id: 'edit', type: 'agent', name: 'Edit & Polish', next: 'approve' },
+          { id: 'approve', type: 'human', name: 'Editorial Approval', next: null },
+        ]),
+        metadata: JSON.stringify({ category: 'content' }), enabled: 1,
+      },
+    ];
+    for (const w of workflows) await this.createWorkflowDef(w);
+
+    // Tool configs
+    const tools: Omit<ToolConfigRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'tool-web-search', name: 'Web Search', description: 'Search the web for current information',
+        category: 'retrieval', risk_level: 'low', requires_approval: 0, max_execution_ms: 10000, rate_limit_per_min: 30, enabled: 1,
+      },
+      {
+        id: 'tool-code-exec', name: 'Code Execution', description: 'Execute code in a sandboxed environment',
+        category: 'compute', risk_level: 'high', requires_approval: 1, max_execution_ms: 30000, rate_limit_per_min: 10, enabled: 1,
+      },
+      {
+        id: 'tool-file-read', name: 'File Reader', description: 'Read files from allowed directories',
+        category: 'filesystem', risk_level: 'medium', requires_approval: 0, max_execution_ms: 5000, rate_limit_per_min: 60, enabled: 1,
+      },
+      {
+        id: 'tool-db-query', name: 'Database Query', description: 'Run read-only SQL queries against configured databases',
+        category: 'data', risk_level: 'medium', requires_approval: 0, max_execution_ms: 15000, rate_limit_per_min: 20, enabled: 1,
+      },
+      {
+        id: 'tool-api-call', name: 'API Caller', description: 'Make HTTP requests to whitelisted endpoints',
+        category: 'integration', risk_level: 'medium', requires_approval: 0, max_execution_ms: 20000, rate_limit_per_min: 15, enabled: 1,
+      },
+    ];
+    for (const t of tools) await this.createToolConfig(t);
+
+    // Workflow runs (sample completed and in-progress runs)
+    const runs: Omit<WorkflowRunRow, 'completed_at'>[] = [
+      {
+        id: 'run-001', workflow_id: 'wf-code-review', status: 'completed',
+        state: JSON.stringify({ currentStepId: 'report', variables: { repository: 'acme/api' }, history: [
+          { stepId: 'analyze', status: 'completed', output: '3 issues found', startedAt: '2025-01-15T10:00:00Z', completedAt: '2025-01-15T10:00:05Z' },
+          { stepId: 'review', status: 'completed', output: 'LGTM with minor notes', startedAt: '2025-01-15T10:00:05Z', completedAt: '2025-01-15T10:00:12Z' },
+        ] }),
+        input: JSON.stringify({ repository: 'acme/api', branch: 'feature/auth' }),
+        error: null, started_at: '2025-01-15T10:00:00Z',
+      },
+      {
+        id: 'run-002', workflow_id: 'wf-content-pipeline', status: 'paused',
+        state: JSON.stringify({ currentStepId: 'approve', variables: { topic: 'AI Safety' }, history: [
+          { stepId: 'draft', status: 'completed', output: 'Draft generated (1200 words)', startedAt: '2025-01-16T09:00:00Z', completedAt: '2025-01-16T09:00:30Z' },
+          { stepId: 'edit', status: 'completed', output: 'Edited and polished', startedAt: '2025-01-16T09:00:30Z', completedAt: '2025-01-16T09:01:00Z' },
+        ] }),
+        input: JSON.stringify({ topic: 'AI Safety', audience: 'technical' }),
+        error: null, started_at: '2025-01-16T09:00:00Z',
+      },
+    ];
+    for (const r of runs) await this.createWorkflowRun(r);
+
+    // Guardrail evaluations (sample evaluations)
+    const evals: Omit<GuardrailEvalRow, 'created_at'>[] = [
+      {
+        id: 'geval-001', chat_id: null, message_id: null, stage: 'pre-execution',
+        input_preview: 'Tell me about machine learning...',
+        results: JSON.stringify([
+          { decision: 'allow', guardrailId: 'guard-pii-redact', explanation: 'No PII detected' },
+          { decision: 'allow', guardrailId: 'guard-token-limit', explanation: 'Within token limit' },
+        ]),
+        overall_decision: 'allow',
+      },
+      {
+        id: 'geval-002', chat_id: null, message_id: null, stage: 'pre-execution',
+        input_preview: 'My SSN is 123-45-6789...',
+        results: JSON.stringify([
+          { decision: 'deny', guardrailId: 'guard-pii-redact', explanation: 'SSN pattern detected' },
+        ]),
+        overall_decision: 'deny',
+      },
+    ];
+    for (const e of evals) await this.createGuardrailEval(e);
+
+    // Human Task Policies
+    const taskPolicies: Omit<HumanTaskPolicyRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'htp-high-risk-tool', name: 'High-Risk Tool Approval', description: 'Require human approval before executing high-risk tools (code execution, DB writes)',
+        trigger: 'tool:high-risk', task_type: 'approval', default_priority: 'high', sla_hours: 1, auto_escalate_after_hours: 2,
+        assignment_strategy: 'round-robin', assign_to: null, enabled: 1,
+      },
+      {
+        id: 'htp-sensitive-data', name: 'Sensitive Data Review', description: 'Human review when agent accesses sensitive or PII data',
+        trigger: 'data:sensitive', task_type: 'review', default_priority: 'urgent', sla_hours: 0.5, auto_escalate_after_hours: 1,
+        assignment_strategy: 'role-based', assign_to: 'security-team', enabled: 1,
+      },
+      {
+        id: 'htp-cost-threshold', name: 'Cost Threshold Approval', description: 'Require approval when estimated cost exceeds threshold',
+        trigger: 'cost:threshold', task_type: 'approval', default_priority: 'normal', sla_hours: 4, auto_escalate_after_hours: 8,
+        assignment_strategy: 'specific-user', assign_to: 'admin', enabled: 1,
+      },
+      {
+        id: 'htp-workflow-gate', name: 'Workflow Gate Review', description: 'Human review gate at critical workflow checkpoints',
+        trigger: 'workflow:gate', task_type: 'review', default_priority: 'normal', sla_hours: 24, auto_escalate_after_hours: 48,
+        assignment_strategy: 'least-busy', assign_to: null, enabled: 1,
+      },
+    ];
+    for (const tp of taskPolicies) await this.createHumanTaskPolicy(tp);
+
+    // Task Contracts
+    const contracts: Omit<TaskContractRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'tc-code-review', name: 'Code Review Contract', description: 'Contract for AI-assisted code review tasks',
+        input_schema: JSON.stringify({ type: 'object', required: ['code', 'language'], properties: { code: { type: 'string' }, language: { type: 'string' }, context: { type: 'string' } } }),
+        output_schema: JSON.stringify({ type: 'object', required: ['summary', 'issues'], properties: { summary: { type: 'string' }, issues: { type: 'array' }, score: { type: 'number' } } }),
+        acceptance_criteria: JSON.stringify([
+          { id: 'cr-has-summary', description: 'Output must include a summary', type: 'assertion', config: { field: 'summary', operator: 'exists' }, required: true, weight: 1 },
+          { id: 'cr-has-issues', description: 'Output must include issues array', type: 'assertion', config: { field: 'issues', operator: 'exists' }, required: true, weight: 1 },
+          { id: 'cr-score-range', description: 'Score must be between 0 and 10', type: 'assertion', config: { field: 'score', operator: 'gte', expected: 0 }, required: false, weight: 0.5 },
+        ]),
+        max_attempts: 3, timeout_ms: 60000,
+        evidence_required: JSON.stringify(['text', 'metric']), min_confidence: 0.7, require_human_review: 0, enabled: 1,
+      },
+      {
+        id: 'tc-content-gen', name: 'Content Generation Contract', description: 'Contract for AI content generation tasks',
+        input_schema: JSON.stringify({ type: 'object', required: ['topic'], properties: { topic: { type: 'string' }, audience: { type: 'string' }, maxWords: { type: 'number' } } }),
+        output_schema: JSON.stringify({ type: 'object', required: ['content', 'wordCount'], properties: { content: { type: 'string' }, wordCount: { type: 'number' }, readabilityScore: { type: 'number' } } }),
+        acceptance_criteria: JSON.stringify([
+          { id: 'cg-has-content', description: 'Output must include content', type: 'assertion', config: { field: 'content', operator: 'exists' }, required: true, weight: 1 },
+          { id: 'cg-word-count', description: 'Must include word count', type: 'assertion', config: { field: 'wordCount', operator: 'gt', expected: 0 }, required: true, weight: 0.5 },
+        ]),
+        max_attempts: 2, timeout_ms: 120000,
+        evidence_required: JSON.stringify(['text']), min_confidence: 0.8, require_human_review: 1, enabled: 1,
+      },
+      {
+        id: 'tc-data-analysis', name: 'Data Analysis Contract', description: 'Contract for data analysis and reporting tasks',
+        input_schema: JSON.stringify({ type: 'object', required: ['query'], properties: { query: { type: 'string' }, dataset: { type: 'string' } } }),
+        output_schema: JSON.stringify({ type: 'object', required: ['analysis', 'confidence'], properties: { analysis: { type: 'string' }, confidence: { type: 'number' }, charts: { type: 'array' } } }),
+        acceptance_criteria: JSON.stringify([
+          { id: 'da-has-analysis', description: 'Output must include analysis text', type: 'assertion', config: { field: 'analysis', operator: 'exists' }, required: true, weight: 1 },
+          { id: 'da-confidence', description: 'Confidence must be at least 0.5', type: 'assertion', config: { field: 'confidence', operator: 'gte', expected: 0.5 }, required: true, weight: 1 },
+        ]),
+        max_attempts: 3, timeout_ms: 180000,
+        evidence_required: JSON.stringify(['text', 'metric', 'trace']), min_confidence: 0.6, require_human_review: 0, enabled: 1,
+      },
+    ];
+    for (const c of contracts) await this.createTaskContract(c);
   }
 }
 

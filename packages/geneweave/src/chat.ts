@@ -15,14 +15,17 @@ import type { ServerResponse } from 'node:http';
 import type {
   Model, ModelRequest, ModelResponse, StreamChunk, ExecutionContext, Message,
   ToolRegistry, AgentStepEvent, AgentStep, AgentResult,
+  Guardrail, GuardrailResult, GuardrailStage,
 } from '@weaveintel/core';
 import { weaveContext, weaveEventBus } from '@weaveintel/core';
 import { weaveAgent, weaveSupervisor } from '@weaveintel/agents';
 import { weaveInMemoryTracer, weaveUsageTracker } from '@weaveintel/observability';
 import { weaveRedactor } from '@weaveintel/redaction';
 import { weaveEvalRunner } from '@weaveintel/evals';
-import type { DatabaseAdapter, MessageRow, ChatSettingsRow } from './db.js';
+import { createGuardrailPipeline, hasDeny, hasWarning, getDenyReason } from '@weaveintel/guardrails';
+import type { DatabaseAdapter, MessageRow, ChatSettingsRow, GuardrailRow, HumanTaskPolicyRow } from './db.js';
 import { createToolRegistry } from './tools.js';
+import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
 
 // ─── Model pricing (per 1 M tokens) ─────────────────────────
 
@@ -151,11 +154,25 @@ export class ChatEngine {
     eval?: { passed: number; failed: number; total: number; score: number };
     steps?: AgentStep[];
     traceId?: string;
+    guardrail?: { decision: 'allow' | 'deny' | 'warn'; reason?: string };
+    policyChecks?: Array<{ tool: string; policy: string; taskType: string; priority: string }>;
   }> {
-    const provider = opts?.provider ?? this.config.defaultProvider;
-    const modelId = opts?.model ?? this.config.defaultModel;
-    const providerCfg = this.config.providers[provider];
-    if (!providerCfg) throw new Error(`Provider "${provider}" not configured`);
+    let provider = opts?.provider ?? this.config.defaultProvider;
+    let modelId = opts?.model ?? this.config.defaultModel;
+    let providerCfg = this.config.providers[provider];
+    if (!providerCfg) {
+      // Fall back to default provider when stored provider isn't configured
+      provider = this.config.defaultProvider;
+      modelId = this.config.defaultModel;
+      providerCfg = this.config.providers[provider];
+    }
+    if (!providerCfg) {
+      // Fall back to first available provider
+      const first = Object.entries(this.config.providers)[0];
+      if (!first) throw new Error(`No providers configured`);
+      [provider, providerCfg] = first;
+      modelId = this.config.defaultModel;
+    }
 
     const model = await getOrCreateModel(provider, modelId, providerCfg.apiKey);
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
@@ -177,6 +194,15 @@ export class ChatEngine {
     // Save user message
     const userMsgId = randomUUID();
     await this.db.addMessage({ id: userMsgId, chatId, role: 'user', content, metadata: redactionInfo ? JSON.stringify({ redaction: redactionInfo }) : undefined });
+
+    // Pre-execution guardrails
+    const preGuardrail = await this.evaluateGuardrails(chatId, userMsgId, processedContent, 'pre-execution');
+    if (preGuardrail.decision === 'deny') {
+      const denyContent = preGuardrail.reason || 'Your message was blocked by a guardrail policy.';
+      const assistMsgId = randomUUID();
+      await this.db.addMessage({ id: assistMsgId, chatId, role: 'assistant', content: denyContent, metadata: JSON.stringify({ guardrail: { decision: 'deny', reason: preGuardrail.reason } }) });
+      return { assistantContent: denyContent, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, cost: 0, latencyMs: Date.now() - startMs, redaction: redactionInfo, guardrail: { decision: 'deny', reason: preGuardrail.reason } };
+    }
 
     // Build conversation
     const history = await this.db.getMessages(chatId);
@@ -213,9 +239,20 @@ export class ChatEngine {
     const latencyMs = Date.now() - startMs;
     const cost = calculateCost(modelId, usage.promptTokens, usage.completionTokens);
 
+    // Human-task policy checks on tool calls
+    const policyChecks = steps ? await this.evaluateTaskPolicies(steps) : undefined;
+
     // Eval
     let evalInfo: { passed: number; failed: number; total: number; score: number } | undefined;
     evalInfo = await this.runPostEval(ctx, userId, chatId, processedContent, assistantContent, latencyMs, cost);
+
+    // Post-execution guardrails
+    const postGuardrail = await this.evaluateGuardrails(chatId, null, assistantContent, 'post-execution');
+    const guardrailInfo = preGuardrail.decision !== 'allow'
+      ? { decision: preGuardrail.decision as 'allow' | 'deny' | 'warn', reason: preGuardrail.reason }
+      : postGuardrail.decision !== 'allow'
+      ? { decision: postGuardrail.decision as 'allow' | 'deny' | 'warn', reason: postGuardrail.reason }
+      : undefined;
 
     // Save assistant message
     const assistMsgId = randomUUID();
@@ -227,8 +264,13 @@ export class ChatEngine {
       metadata: JSON.stringify({
         model: modelId, provider,
         mode: settings.mode,
+        agentName: settings.mode === 'supervisor' ? 'geneweave-supervisor' : settings.mode === 'agent' ? 'geneweave-agent' : undefined,
+        systemPrompt: settings.systemPrompt || undefined,
+        enabledTools: settings.enabledTools.length ? settings.enabledTools : undefined,
+        redactionEnabled: settings.redactionEnabled || undefined,
         steps: steps ? steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })) : undefined,
         eval: evalInfo,
+        policyChecks: policyChecks?.length ? policyChecks : undefined,
         traceId,
       }),
       tokensUsed: usage.totalTokens,
@@ -246,7 +288,7 @@ export class ChatEngine {
     // Record traces
     await this.recordTraceSpans(userId, chatId, assistMsgId, traceId, settings.mode, startMs, latencyMs, steps);
 
-    return { assistantContent, usage, cost, latencyMs, redaction: redactionInfo, eval: evalInfo, steps, traceId };
+    return { assistantContent, usage, cost, latencyMs, redaction: redactionInfo, eval: evalInfo, steps, traceId, guardrail: guardrailInfo, policyChecks };
   }
 
   // ── Stream mode ─────────────────────────────────────────────
@@ -258,10 +300,22 @@ export class ChatEngine {
     content: string,
     opts?: { provider?: string; model?: string; maxTokens?: number; temperature?: number },
   ): Promise<void> {
-    const provider = opts?.provider ?? this.config.defaultProvider;
-    const modelId = opts?.model ?? this.config.defaultModel;
-    const providerCfg = this.config.providers[provider];
-    if (!providerCfg) throw new Error(`Provider "${provider}" not configured`);
+    let provider = opts?.provider ?? this.config.defaultProvider;
+    let modelId = opts?.model ?? this.config.defaultModel;
+    let providerCfg = this.config.providers[provider];
+    if (!providerCfg) {
+      // Fall back to default provider when stored provider isn't configured
+      provider = this.config.defaultProvider;
+      modelId = this.config.defaultModel;
+      providerCfg = this.config.providers[provider];
+    }
+    if (!providerCfg) {
+      // Fall back to first available provider
+      const first = Object.entries(this.config.providers)[0];
+      if (!first) throw new Error(`No providers configured`);
+      [provider, providerCfg] = first;
+      modelId = this.config.defaultModel;
+    }
 
     const model = await getOrCreateModel(provider, modelId, providerCfg.apiKey);
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
@@ -280,7 +334,21 @@ export class ChatEngine {
     }
 
     // Save user message
-    await this.db.addMessage({ id: randomUUID(), chatId, role: 'user', content, metadata: redactionInfo ? JSON.stringify({ redaction: redactionInfo }) : undefined });
+    const userMsgId = randomUUID();
+    await this.db.addMessage({ id: userMsgId, chatId, role: 'user', content, metadata: redactionInfo ? JSON.stringify({ redaction: redactionInfo }) : undefined });
+
+    // Pre-execution guardrails
+    const preGuardrail = await this.evaluateGuardrails(chatId, userMsgId, processedContent, 'pre-execution');
+    if (preGuardrail.decision === 'deny') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+      const denyContent = preGuardrail.reason || 'Your message was blocked by a guardrail policy.';
+      res.write(`data: ${JSON.stringify({ type: 'text', text: denyContent })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'guardrail', decision: 'deny', reason: preGuardrail.reason })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done', usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, cost: 0, latencyMs: 0 })}\n\n`);
+      res.end();
+      await this.db.addMessage({ id: randomUUID(), chatId, role: 'assistant', content: denyContent, metadata: JSON.stringify({ guardrail: { decision: 'deny', reason: preGuardrail.reason } }) });
+      return;
+    }
 
     // Build conversation
     const history = await this.db.getMessages(chatId);
@@ -351,10 +419,22 @@ export class ChatEngine {
     const latencyMs = Date.now() - startMs;
     const cost = calculateCost(modelId, finalUsage.promptTokens, finalUsage.completionTokens);
 
+    // Human-task policy checks on tool calls
+    const policyChecks = steps.length ? await this.evaluateTaskPolicies(steps) : undefined;
+    if (policyChecks?.length) {
+      res.write(`data: ${JSON.stringify({ type: 'policy_checks', checks: policyChecks })}\n\n`);
+    }
+
     // Eval
     const evalInfo = await this.runPostEval(ctx, userId, chatId, processedContent, fullText, latencyMs, cost);
     if (evalInfo) {
       res.write(`data: ${JSON.stringify({ type: 'eval', ...evalInfo })}\n\n`);
+    }
+
+    // Post-execution guardrails
+    const postGuardrail = await this.evaluateGuardrails(chatId, null, fullText, 'post-execution');
+    if (postGuardrail.decision !== 'allow') {
+      res.write(`data: ${JSON.stringify({ type: 'guardrail', decision: postGuardrail.decision, reason: postGuardrail.reason })}\n\n`);
     }
 
     // Done event
@@ -377,8 +457,12 @@ export class ChatEngine {
       id: assistMsgId, chatId, role: 'assistant', content: fullText,
       metadata: JSON.stringify({
         model: modelId, provider, streamed: true, mode: settings.mode,
+        agentName: settings.mode === 'supervisor' ? 'geneweave-supervisor' : settings.mode === 'agent' ? 'geneweave-agent' : undefined,
+        systemPrompt: settings.systemPrompt || undefined,
+        enabledTools: settings.enabledTools.length ? settings.enabledTools : undefined,
+        redactionEnabled: settings.redactionEnabled || undefined,
         steps: steps.length ? steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })) : undefined,
-        eval: evalInfo, traceId,
+        eval: evalInfo, policyChecks: policyChecks?.length ? policyChecks : undefined, traceId,
       }),
       tokensUsed: finalUsage.totalTokens, cost, latencyMs,
     });
@@ -403,14 +487,16 @@ export class ChatEngine {
   ): Promise<AgentResult> {
     const tools = settings.enabledTools.length ? createToolRegistry(settings.enabledTools) : undefined;
 
-    if (settings.mode === 'supervisor' && settings.workers.length > 0) {
-      const workers = settings.workers.map((w) => ({
-        name: w.name,
-        description: w.description,
-        model,
-        tools: w.tools.length ? createToolRegistry(w.tools) : undefined,
-      }));
-      const supervisor = weaveSupervisor({ model, workers, maxSteps: 20, name: 'geneweave-supervisor' });
+    if (settings.mode === 'supervisor') {
+      const workerDefs = settings.workers.length > 0
+        ? settings.workers.map((w) => ({
+            name: w.name,
+            description: w.description,
+            model,
+            tools: w.tools.length ? createToolRegistry(w.tools) : undefined,
+          }))
+        : defaultWorkers(model);
+      const supervisor = weaveSupervisor({ model, workers: workerDefs, maxSteps: 20, name: 'geneweave-supervisor' });
       return supervisor.run(ctx, { messages, goal: userContent });
     }
 
@@ -437,14 +523,16 @@ export class ChatEngine {
     const tools = settings.enabledTools.length ? createToolRegistry(settings.enabledTools) : undefined;
 
     let agent;
-    if (settings.mode === 'supervisor' && settings.workers.length > 0) {
-      const workers = settings.workers.map((w) => ({
-        name: w.name,
-        description: w.description,
-        model,
-        tools: w.tools.length ? createToolRegistry(w.tools) : undefined,
-      }));
-      agent = weaveSupervisor({ model, workers, maxSteps: 20, name: 'geneweave-supervisor' });
+    if (settings.mode === 'supervisor') {
+      const workerDefs = settings.workers.length > 0
+        ? settings.workers.map((w) => ({
+            name: w.name,
+            description: w.description,
+            model,
+            tools: w.tools.length ? createToolRegistry(w.tools) : undefined,
+          }))
+        : defaultWorkers(model);
+      agent = weaveSupervisor({ model, workers: workerDefs, maxSteps: 20, name: 'geneweave-supervisor' });
     } else {
       agent = weaveAgent({
         model,
@@ -676,9 +764,127 @@ export class ChatEngine {
     }
     return models;
   }
+
+  // ── Guardrail evaluation ────────────────────────────────────
+
+  private async evaluateGuardrails(
+    chatId: string,
+    messageId: string | null,
+    input: string,
+    stage: GuardrailStage,
+  ): Promise<{ decision: 'allow' | 'deny' | 'warn'; reason?: string; results: GuardrailResult[] }> {
+    try {
+      const rows = await this.db.listGuardrails();
+      const enabledRows = rows.filter(r => r.enabled);
+      if (enabledRows.length === 0) return { decision: 'allow', results: [] };
+
+      const guardrails: Guardrail[] = enabledRows.map(r => ({
+        id: r.id,
+        name: r.name,
+        description: r.description ?? undefined,
+        type: (r.type === 'content_filter' ? 'blocklist' : r.type === 'budget' ? 'custom' : r.type === 'redaction' ? 'regex' : r.type === 'factuality' ? 'custom' : r.type) as Guardrail['type'],
+        stage: (r.stage === 'pre' ? 'pre-execution' : r.stage === 'post' ? 'post-execution' : r.stage === 'both' ? stage : r.stage) as GuardrailStage,
+        enabled: !!r.enabled,
+        config: r.config ? JSON.parse(r.config) : {},
+        priority: r.priority,
+      }));
+
+      const pipeline = createGuardrailPipeline(guardrails, { shortCircuitOnDeny: true });
+      const results = await pipeline.evaluate(input, stage);
+
+      const decision = hasDeny(results) ? 'deny' as const : hasWarning(results) ? 'warn' as const : 'allow' as const;
+      const reason = getDenyReason(results);
+
+      // Persist evaluation
+      await this.db.createGuardrailEval({
+        id: randomUUID(),
+        chat_id: chatId,
+        message_id: messageId,
+        stage,
+        input_preview: input.slice(0, 100),
+        results: JSON.stringify(results),
+        overall_decision: decision,
+      });
+
+      return { decision, reason, results };
+    } catch {
+      return { decision: 'allow', results: [] };
+    }
+  }
+
+  // ── Human-task policy evaluation ────────────────────────────
+
+  private async evaluateTaskPolicies(
+    steps: AgentStep[],
+  ): Promise<Array<{ tool: string; policy: string; taskType: string; priority: string }>> {
+    try {
+      const rows = await this.db.listHumanTaskPolicies();
+      const enabledRows = rows.filter(r => r.enabled);
+      if (enabledRows.length === 0) return [];
+
+      const evaluator = new PolicyEvaluator();
+      for (const row of enabledRows) {
+        evaluator.addPolicy(createPolicy({
+          name: row.name,
+          description: row.description ?? undefined,
+          trigger: row.trigger,
+          taskType: row.task_type as any,
+          defaultPriority: row.default_priority as any,
+          slaHours: row.sla_hours ?? undefined,
+          autoEscalateAfterHours: row.auto_escalate_after_hours ?? undefined,
+          assignmentStrategy: row.assignment_strategy as any,
+          assignTo: row.assign_to ?? undefined,
+          enabled: true,
+        }));
+      }
+
+      const checks: Array<{ tool: string; policy: string; taskType: string; priority: string }> = [];
+      for (const step of steps) {
+        if (step.toolCall) {
+          const result = evaluator.check({ trigger: step.toolCall.name });
+          if (result.required && result.policy) {
+            checks.push({
+              tool: step.toolCall.name,
+              policy: result.policy.name,
+              taskType: result.policy.taskType,
+              priority: result.policy.defaultPriority,
+            });
+          }
+        }
+      }
+
+      return checks;
+    } catch {
+      return [];
+    }
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
+
+/** Default workers for supervisor mode when none are explicitly configured */
+function defaultWorkers(model: Model): Array<{ name: string; description: string; model: Model; tools?: ToolRegistry }> {
+  return [
+    {
+      name: 'researcher',
+      description: 'Researches topics, searches the web, and gathers information. Good for fact-finding and exploration tasks.',
+      model,
+      tools: createToolRegistry(['web_search', 'text_analysis']),
+    },
+    {
+      name: 'analyst',
+      description: 'Analyzes data, performs calculations, formats JSON, and provides structured insights. Good for math, data processing, and formatting.',
+      model,
+      tools: createToolRegistry(['calculator', 'json_format', 'text_analysis']),
+    },
+    {
+      name: 'writer',
+      description: 'Writes, edits, and refines text. Good for drafting content, summarizing, and creative writing tasks.',
+      model,
+      tools: createToolRegistry(['text_analysis', 'datetime']),
+    },
+  ];
+}
 
 function historyToMessages(rows: MessageRow[]): Message[] {
   return rows.map((r) => ({

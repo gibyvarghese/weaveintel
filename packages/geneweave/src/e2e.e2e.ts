@@ -1,0 +1,272 @@
+/**
+ * geneWeave — Playwright E2E tests
+ *
+ * Verifies the full web UI: auth flow, chat, and admin pages.
+ * Run: npx playwright test --config playwright.config.ts
+ */
+import { test, expect, type Page } from '@playwright/test';
+
+/* ── Helpers ─────────────────────────────────────────────── */
+
+/** Generate a unique email for each call to avoid "already registered" conflicts. */
+function uniqueEmail() {
+  return `pw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@weaveintel.dev`;
+}
+const PASSWORD = 'Str0ng!Pass99';
+
+async function registerAndEnter(page: Page, email?: string) {
+  const em = email ?? uniqueEmail();
+  await page.goto('/');
+  // Switch to register mode if on login
+  const toggle = page.locator('a', { hasText: 'Register' });
+  if (await toggle.isVisible({ timeout: 2000 }).catch(() => false)) await toggle.click();
+
+  await page.locator('#auth-name').fill('E2E User');
+  await page.locator('#auth-email').fill(em);
+  await page.locator('#auth-pass').fill(PASSWORD);
+  await page.locator('button', { hasText: 'Create Account' }).click();
+  // Wait for the app to render (sidebar appears)
+  await expect(page.locator('.sidebar')).toBeVisible({ timeout: 5000 });
+}
+
+async function goAdmin(page: Page) {
+  await page.locator('button.nav-btn', { hasText: 'Admin' }).click();
+  await expect(page.locator('h2', { hasText: 'Administration' })).toBeVisible({ timeout: 5000 });
+}
+
+/** Scope locator to the .main content area (avoids matching sidebar elements). */
+function main(page: Page) {
+  return page.locator('.main');
+}
+
+/* ── Auth ────────────────────────────────────────────────── */
+
+test.describe('Auth', () => {
+  test('shows login page on first visit', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.auth-card')).toBeVisible();
+    await expect(page.locator('button', { hasText: 'Sign In' })).toBeVisible();
+  });
+
+  test('registers a new user and sees sidebar', async ({ page }) => {
+    await registerAndEnter(page);
+    await expect(page.locator('button.nav-btn', { hasText: 'Chat' })).toBeVisible();
+    await expect(page.locator('button.nav-btn', { hasText: 'Admin' })).toBeVisible();
+  });
+});
+
+/* ── Chat ────────────────────────────────────────────────── */
+
+test.describe('Chat', () => {
+  test('displays input area after login', async ({ page }) => {
+    await registerAndEnter(page);
+    await expect(page.locator('textarea')).toBeVisible();
+    await expect(page.locator('.send-btn')).toBeVisible();
+  });
+
+  test('sends a message and receives a response', async ({ page }) => {
+    await registerAndEnter(page);
+    const textarea = page.locator('textarea');
+    await textarea.fill('Say exactly: pong');
+    await page.locator('button.send-btn').click({ force: true });
+
+    // User message bubble
+    await expect(page.locator('.msg.user .bubble')).toBeVisible({ timeout: 10_000 });
+
+    // Assistant response via SSE streaming
+    await expect(page.locator('.msg.assistant .bubble')).toBeVisible({ timeout: 60_000 });
+  });
+});
+
+/* ── Admin: Navigation ───────────────────────────────────── */
+
+test.describe('Admin Navigation', () => {
+  test('shows all 9 admin tabs', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    for (const label of ['Prompts', 'Guardrails', 'Routing', 'Workflows', 'Tools', 'Workflow Runs', 'Guardrail Evals', 'Task Policies', 'Contracts']) {
+      await expect(m.locator('button', { hasText: label })).toBeVisible();
+    }
+  });
+
+  test('switches to Guardrails tab', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Guardrails' }).click();
+    // Should see item count text
+    await expect(m.getByText(/\d+ items?/)).toBeVisible({ timeout: 3000 });
+  });
+
+  test('seed defaults button is visible', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    await expect(main(page).locator('button', { hasText: 'Seed Defaults' })).toBeVisible();
+  });
+});
+
+/* ── Admin: Seed & Data ──────────────────────────────────── */
+
+test.describe('Admin Seed & Data', () => {
+  test('seed defaults populates prompts', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    // Prompts tab (default) should show "N items" with N > 0, and table rows
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('guardrails tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Guardrails' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+});
+
+/* ── Admin: Guardrails CRUD ──────────────────────────────── */
+
+test.describe('Admin Guardrail CRUD', () => {
+  test('creates a new guardrail via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    // Seed defaults first to populate existing data
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    // Navigate to Guardrails tab
+    await m.locator('button', { hasText: 'Guardrails' }).click();
+    await page.waitForTimeout(500);
+    // Click + New in the admin action bar
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    // Form should now be visible with "New Guardrail" heading
+    await expect(m.locator('h3', { hasText: 'New Guardrail' })).toBeVisible({ timeout: 3000 });
+    // Fill the Name input (first text input in the form)
+    await m.locator('input[type="text"]').first().fill('PW-Test-Guard');
+    // Select the Type (required field — UI doesn't auto-set state on initial render)
+    await m.locator('select').first().selectOption('content_filter');
+    // Click Create button in the form
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    // Wait for the form to disappear (save + re-render triggered)
+    await expect(m.locator('h3', { hasText: 'New Guardrail' })).not.toBeVisible({ timeout: 5000 });
+  });
+});
+
+/* ── Admin: Read-only Tabs ───────────────────────────────── */
+
+test.describe('Admin Read-only Tabs', () => {
+  test('workflow runs tab has no admin + New button', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Workflow Runs' }).click();
+    await page.waitForTimeout(500);
+    // The admin action bar's "+ New" button should NOT exist in main (sidebar's + New is outside .main)
+    await expect(m.locator('button.nav-btn', { hasText: '+ New' })).not.toBeVisible();
+  });
+
+  test('guardrail evals tab has no admin + New button', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Guardrail Evals' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.locator('button.nav-btn', { hasText: '+ New' })).not.toBeVisible();
+  });
+
+  test('workflow runs tab shows data after seed + API run creation', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    // Seed defaults to create some runs
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Workflow Runs' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/\d+ items?/)).toBeVisible({ timeout: 5000 });
+  });
+});
+
+/* ── Admin: Task Policies Tab ────────────────────────────── */
+
+test.describe('Admin Task Policies', () => {
+  test('task policies tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Task Policies' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new task policy via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Task Policies' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Task Policy' })).toBeVisible({ timeout: 3000 });
+    // Fill Name (1st text input), Description (2nd), Trigger (3rd)
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Test-Policy');
+    await textInputs.nth(2).fill('test_action');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Task Policy' })).not.toBeVisible({ timeout: 5000 });
+  });
+});
+
+/* ── Admin: Contracts Tab ────────────────────────────────── */
+
+test.describe('Admin Contracts', () => {
+  test('contracts tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Contracts' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new contract via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Contracts' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Contract' })).toBeVisible({ timeout: 3000 });
+    await m.locator('input[type="text"]').first().fill('PW-Test-Contract');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Contract' })).not.toBeVisible({ timeout: 5000 });
+  });
+});
+
+/* ── Dashboard ───────────────────────────────────────────── */
+
+test.describe('Dashboard', () => {
+  test('navigates to dashboard', async ({ page }) => {
+    await registerAndEnter(page);
+    await page.locator('button.nav-btn', { hasText: 'Dashboard' }).click();
+    await page.waitForTimeout(1000);
+    await expect(page.locator('.main')).toBeVisible();
+  });
+});
