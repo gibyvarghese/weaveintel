@@ -13,6 +13,7 @@
     { "path": "packages/a2a" },
     { "path": "packages/evals" },
     { "path": "packages/testing" },
-    { "path": "packages/provider-openai" }
+    { "path": "packages/provider-openai" },
+    { "path": "packages/provider-anthropic" }
   ]
 }
