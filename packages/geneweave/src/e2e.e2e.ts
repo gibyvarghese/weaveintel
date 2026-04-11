@@ -1060,3 +1060,195 @@ test.describe('Admin Reliability Policies', () => {
     }
   });
 });
+
+// ─── Admin Collaboration Sessions ───────────────────────────
+
+test.describe('Admin Collaboration Sessions', () => {
+  test('shows seeded collaboration sessions', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Collaboration' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new collaboration session via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Collaboration' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Collaboration Session' })).toBeVisible({ timeout: 3000 });
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Collab');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Collaboration Session' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded collaboration session', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Collaboration' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+// ─── Admin Compliance Rules ─────────────────────────────────
+
+test.describe('Admin Compliance Rules', () => {
+  test('shows seeded compliance rules', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Compliance' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new compliance rule via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Compliance' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Compliance Rule' })).toBeVisible({ timeout: 3000 });
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Compliance');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Compliance Rule' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded compliance rule', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Compliance' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+// ─── Admin Graph Configs ────────────────────────────────────
+
+test.describe('Admin Graph Configs', () => {
+  test('shows seeded graph configs', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Graph' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new graph config via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Graph' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Graph Config' })).toBeVisible({ timeout: 3000 });
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Graph');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Graph Config' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded graph config', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Graph' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+// ─── Admin Plugin Configs ───────────────────────────────────
+
+test.describe('Admin Plugin Configs', () => {
+  test('shows seeded plugin configs', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Plugins' }).click();
+    await page.waitForTimeout(500);
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new plugin config via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Plugins' }).click();
+    await page.waitForTimeout(500);
+    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Plugin Config' })).toBeVisible({ timeout: 3000 });
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Plugin');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Plugin Config' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded plugin config', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await page.waitForTimeout(1500);
+    await m.locator('button', { hasText: 'Plugins' }).click();
+    await page.waitForTimeout(500);
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+    }
+  });
+});

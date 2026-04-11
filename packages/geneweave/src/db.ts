@@ -441,6 +441,67 @@ export interface ReliabilityPolicyRow {
   updated_at: string;
 }
 
+export interface CollaborationSessionRow {
+  id: string;
+  name: string;
+  description: string | null;
+  session_type: string;              // 'pair' | 'team' | 'broadcast'
+  max_participants: number;
+  presence_ttl_ms: number;
+  auto_close_idle_ms: number | null;
+  handoff_enabled: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ComplianceRuleRow {
+  id: string;
+  name: string;
+  description: string | null;
+  rule_type: string;                 // 'retention' | 'deletion' | 'legal-hold' | 'residency' | 'consent'
+  target_resource: string;
+  retention_days: number | null;
+  region: string | null;
+  consent_purpose: string | null;
+  action: string;                    // 'delete' | 'archive' | 'anonymize' | 'block' | 'notify'
+  config: string | null;             // JSON
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GraphConfigRow {
+  id: string;
+  name: string;
+  description: string | null;
+  graph_type: string;                // 'entity' | 'timeline' | 'knowledge'
+  max_depth: number;
+  entity_types: string | null;       // JSON array
+  relationship_types: string | null; // JSON array
+  auto_link: number;
+  scoring_weights: string | null;    // JSON object
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PluginConfigRow {
+  id: string;
+  name: string;
+  description: string | null;
+  plugin_type: string;               // 'official' | 'verified' | 'community' | 'private'
+  package_name: string;
+  version: string;
+  capabilities: string | null;       // JSON array
+  trust_level: string;               // 'official' | 'verified' | 'community' | 'private'
+  auto_update: number;
+  config: string | null;             // JSON
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MetricsSummary {
   total_tokens: number;
   total_cost: number;
@@ -739,6 +800,34 @@ export interface DatabaseAdapter {
   listReliabilityPolicies(): Promise<ReliabilityPolicyRow[]>;
   updateReliabilityPolicy(id: string, fields: Partial<Omit<ReliabilityPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteReliabilityPolicy(id: string): Promise<void>;
+
+  // ─── Admin: Collaboration Sessions ───────────────────────────
+  createCollaborationSession(s: Omit<CollaborationSessionRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getCollaborationSession(id: string): Promise<CollaborationSessionRow | null>;
+  listCollaborationSessions(): Promise<CollaborationSessionRow[]>;
+  updateCollaborationSession(id: string, fields: Partial<Omit<CollaborationSessionRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteCollaborationSession(id: string): Promise<void>;
+
+  // ─── Admin: Compliance Rules ─────────────────────────────────
+  createComplianceRule(r: Omit<ComplianceRuleRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getComplianceRule(id: string): Promise<ComplianceRuleRow | null>;
+  listComplianceRules(): Promise<ComplianceRuleRow[]>;
+  updateComplianceRule(id: string, fields: Partial<Omit<ComplianceRuleRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteComplianceRule(id: string): Promise<void>;
+
+  // ─── Admin: Graph Configs ────────────────────────────────────
+  createGraphConfig(g: Omit<GraphConfigRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getGraphConfig(id: string): Promise<GraphConfigRow | null>;
+  listGraphConfigs(): Promise<GraphConfigRow[]>;
+  updateGraphConfig(id: string, fields: Partial<Omit<GraphConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteGraphConfig(id: string): Promise<void>;
+
+  // ─── Admin: Plugin Configs ───────────────────────────────────
+  createPluginConfig(p: Omit<PluginConfigRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getPluginConfig(id: string): Promise<PluginConfigRow | null>;
+  listPluginConfigs(): Promise<PluginConfigRow[]>;
+  updatePluginConfig(id: string, fields: Partial<Omit<PluginConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deletePluginConfig(id: string): Promise<void>;
 
   // ─── Admin: Seed data ──────────────────────────────────────
   seedDefaultData(): Promise<void>;
@@ -1193,6 +1282,67 @@ CREATE TABLE IF NOT EXISTS reliability_policies (
   queue_size INTEGER,
   strategy TEXT,
   ttl_ms INTEGER,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS collaboration_sessions (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  session_type TEXT NOT NULL DEFAULT 'team',
+  max_participants INTEGER NOT NULL DEFAULT 10,
+  presence_ttl_ms INTEGER NOT NULL DEFAULT 30000,
+  auto_close_idle_ms INTEGER,
+  handoff_enabled INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS compliance_rules (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  rule_type TEXT NOT NULL DEFAULT 'retention',
+  target_resource TEXT NOT NULL DEFAULT '*',
+  retention_days INTEGER,
+  region TEXT,
+  consent_purpose TEXT,
+  action TEXT NOT NULL DEFAULT 'notify',
+  config TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS graph_configs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  graph_type TEXT NOT NULL DEFAULT 'entity',
+  max_depth INTEGER NOT NULL DEFAULT 3,
+  entity_types TEXT,
+  relationship_types TEXT,
+  auto_link INTEGER NOT NULL DEFAULT 1,
+  scoring_weights TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS plugin_configs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT,
+  plugin_type TEXT NOT NULL DEFAULT 'community',
+  package_name TEXT NOT NULL,
+  version TEXT NOT NULL DEFAULT '1.0.0',
+  capabilities TEXT,
+  trust_level TEXT NOT NULL DEFAULT 'community',
+  auto_update INTEGER NOT NULL DEFAULT 0,
+  config TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -2212,6 +2362,138 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM reliability_policies WHERE id = ?').run(id);
   }
 
+  // ── Collaboration Sessions ─────────────────────────────────
+
+  async createCollaborationSession(s: Omit<CollaborationSessionRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO collaboration_sessions (id, name, description, session_type, max_participants, presence_ttl_ms, auto_close_idle_ms, handoff_enabled, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(s.id, s.name, s.description ?? null, s.session_type, s.max_participants, s.presence_ttl_ms, s.auto_close_idle_ms ?? null, s.handoff_enabled, s.enabled);
+  }
+
+  async getCollaborationSession(id: string): Promise<CollaborationSessionRow | null> {
+    return (this.d.prepare('SELECT * FROM collaboration_sessions WHERE id = ?').get(id) as CollaborationSessionRow) ?? null;
+  }
+
+  async listCollaborationSessions(): Promise<CollaborationSessionRow[]> {
+    return this.d.prepare('SELECT * FROM collaboration_sessions ORDER BY name ASC').all() as CollaborationSessionRow[];
+  }
+
+  async updateCollaborationSession(id: string, fields: Partial<Omit<CollaborationSessionRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE collaboration_sessions SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteCollaborationSession(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM collaboration_sessions WHERE id = ?').run(id);
+  }
+
+  // ── Compliance Rules ───────────────────────────────────────
+
+  async createComplianceRule(r: Omit<ComplianceRuleRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO compliance_rules (id, name, description, rule_type, target_resource, retention_days, region, consent_purpose, action, config, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(r.id, r.name, r.description ?? null, r.rule_type, r.target_resource, r.retention_days ?? null, r.region ?? null, r.consent_purpose ?? null, r.action, r.config ?? null, r.enabled);
+  }
+
+  async getComplianceRule(id: string): Promise<ComplianceRuleRow | null> {
+    return (this.d.prepare('SELECT * FROM compliance_rules WHERE id = ?').get(id) as ComplianceRuleRow) ?? null;
+  }
+
+  async listComplianceRules(): Promise<ComplianceRuleRow[]> {
+    return this.d.prepare('SELECT * FROM compliance_rules ORDER BY name ASC').all() as ComplianceRuleRow[];
+  }
+
+  async updateComplianceRule(id: string, fields: Partial<Omit<ComplianceRuleRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE compliance_rules SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteComplianceRule(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM compliance_rules WHERE id = ?').run(id);
+  }
+
+  // ── Graph Configs ──────────────────────────────────────────
+
+  async createGraphConfig(g: Omit<GraphConfigRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO graph_configs (id, name, description, graph_type, max_depth, entity_types, relationship_types, auto_link, scoring_weights, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(g.id, g.name, g.description ?? null, g.graph_type, g.max_depth, g.entity_types ?? null, g.relationship_types ?? null, g.auto_link, g.scoring_weights ?? null, g.enabled);
+  }
+
+  async getGraphConfig(id: string): Promise<GraphConfigRow | null> {
+    return (this.d.prepare('SELECT * FROM graph_configs WHERE id = ?').get(id) as GraphConfigRow) ?? null;
+  }
+
+  async listGraphConfigs(): Promise<GraphConfigRow[]> {
+    return this.d.prepare('SELECT * FROM graph_configs ORDER BY name ASC').all() as GraphConfigRow[];
+  }
+
+  async updateGraphConfig(id: string, fields: Partial<Omit<GraphConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE graph_configs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteGraphConfig(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM graph_configs WHERE id = ?').run(id);
+  }
+
+  // ── Plugin Configs ─────────────────────────────────────────
+
+  async createPluginConfig(p: Omit<PluginConfigRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO plugin_configs (id, name, description, plugin_type, package_name, version, capabilities, trust_level, auto_update, config, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.name, p.description ?? null, p.plugin_type, p.package_name, p.version, p.capabilities ?? null, p.trust_level, p.auto_update, p.config ?? null, p.enabled);
+  }
+
+  async getPluginConfig(id: string): Promise<PluginConfigRow | null> {
+    return (this.d.prepare('SELECT * FROM plugin_configs WHERE id = ?').get(id) as PluginConfigRow) ?? null;
+  }
+
+  async listPluginConfigs(): Promise<PluginConfigRow[]> {
+    return this.d.prepare('SELECT * FROM plugin_configs ORDER BY name ASC').all() as PluginConfigRow[];
+  }
+
+  async updatePluginConfig(id: string, fields: Partial<Omit<PluginConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE plugin_configs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deletePluginConfig(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM plugin_configs WHERE id = ?').run(id);
+  }
+
   // ─── Seed default data ─────────────────────────────────────
 
   async seedDefaultData(): Promise<void> {
@@ -2936,6 +3218,122 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const p of reliabilityPolicies) await this.createReliabilityPolicy(p);
+    }
+
+    // Collaboration Sessions
+    if (cnt('collaboration_sessions') === 0) {
+    const collabSessions: Omit<CollaborationSessionRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'collab-pair', name: 'Pair Programming', description: 'Two-participant session for pair programming with real-time code sharing',
+        session_type: 'pair', max_participants: 2, presence_ttl_ms: 30000, auto_close_idle_ms: 600000,
+        handoff_enabled: 1, enabled: 1,
+      },
+      {
+        id: 'collab-team', name: 'Team Collaboration', description: 'Multi-participant session for team brainstorming and collaborative problem solving',
+        session_type: 'team', max_participants: 10, presence_ttl_ms: 60000, auto_close_idle_ms: 1800000,
+        handoff_enabled: 1, enabled: 1,
+      },
+      {
+        id: 'collab-broadcast', name: 'Broadcast Session', description: 'One-to-many session for presentations and demos with view-only participants',
+        session_type: 'broadcast', max_participants: 50, presence_ttl_ms: 120000, auto_close_idle_ms: null,
+        handoff_enabled: 0, enabled: 1,
+      },
+    ];
+    for (const s of collabSessions) await this.createCollaborationSession(s);
+    }
+
+    // Compliance Rules
+    if (cnt('compliance_rules') === 0) {
+    const complianceRules: Omit<ComplianceRuleRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'comp-retention-90d', name: '90-Day Data Retention', description: 'Delete chat logs and metrics older than 90 days',
+        rule_type: 'retention', target_resource: 'messages', retention_days: 90,
+        region: null, consent_purpose: null, action: 'delete',
+        config: JSON.stringify({ include_metadata: true }), enabled: 1,
+      },
+      {
+        id: 'comp-gdpr-deletion', name: 'GDPR Right to Delete', description: 'Honor user deletion requests within 30 days per GDPR Article 17',
+        rule_type: 'deletion', target_resource: '*', retention_days: null,
+        region: 'EU', consent_purpose: null, action: 'delete',
+        config: JSON.stringify({ cascade: true, notify_processors: true }), enabled: 1,
+      },
+      {
+        id: 'comp-eu-residency', name: 'EU Data Residency', description: 'Ensure EU user data stays within EU regions only',
+        rule_type: 'residency', target_resource: '*', retention_days: null,
+        region: 'EU', consent_purpose: null, action: 'block',
+        config: JSON.stringify({ allowed_regions: ['eu-west-1', 'eu-central-1', 'eu-north-1'] }), enabled: 1,
+      },
+      {
+        id: 'comp-analytics-consent', name: 'Analytics Consent', description: 'Require explicit consent for analytics data collection',
+        rule_type: 'consent', target_resource: 'metrics', retention_days: null,
+        region: null, consent_purpose: 'analytics', action: 'notify',
+        config: JSON.stringify({ consent_ttl_days: 365, re_consent_required: true }), enabled: 1,
+      },
+    ];
+    for (const r of complianceRules) await this.createComplianceRule(r);
+    }
+
+    // Graph Configs
+    if (cnt('graph_configs') === 0) {
+    const graphConfigs: Omit<GraphConfigRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'graph-entity', name: 'Entity Knowledge Graph', description: 'General-purpose entity extraction and relationship mapping',
+        graph_type: 'entity', max_depth: 3,
+        entity_types: JSON.stringify(['person', 'organization', 'location', 'product', 'concept']),
+        relationship_types: JSON.stringify(['works_at', 'located_in', 'related_to', 'depends_on', 'part_of']),
+        auto_link: 1, scoring_weights: JSON.stringify({ relevance: 0.4, recency: 0.3, frequency: 0.3 }), enabled: 1,
+      },
+      {
+        id: 'graph-timeline', name: 'Timeline Graph', description: 'Chronological event tracking with causal links between events',
+        graph_type: 'timeline', max_depth: 5,
+        entity_types: JSON.stringify(['event', 'milestone', 'decision']),
+        relationship_types: JSON.stringify(['caused_by', 'preceded_by', 'concurrent_with']),
+        auto_link: 1, scoring_weights: JSON.stringify({ temporal_proximity: 0.5, causal_strength: 0.5 }), enabled: 1,
+      },
+      {
+        id: 'graph-knowledge', name: 'Knowledge Base', description: 'Long-term knowledge graph for RAG-augmented memory and retrieval',
+        graph_type: 'knowledge', max_depth: 4,
+        entity_types: JSON.stringify(['concept', 'definition', 'example', 'reference']),
+        relationship_types: JSON.stringify(['defines', 'exemplifies', 'references', 'contradicts', 'supports']),
+        auto_link: 0, scoring_weights: JSON.stringify({ semantic_similarity: 0.6, authority: 0.2, recency: 0.2 }), enabled: 1,
+      },
+    ];
+    for (const g of graphConfigs) await this.createGraphConfig(g);
+    }
+
+    // Plugin Configs
+    if (cnt('plugin_configs') === 0) {
+    const pluginConfigs: Omit<PluginConfigRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'plug-code-exec', name: 'Code Execution Plugin', description: 'Sandboxed code execution for JavaScript and Python',
+        plugin_type: 'official', package_name: '@weaveintel/sandbox', version: '1.0.0',
+        capabilities: JSON.stringify(['code-execution', 'sandboxing']),
+        trust_level: 'official', auto_update: 1,
+        config: JSON.stringify({ defaultPolicy: 'sbx-moderate' }), enabled: 1,
+      },
+      {
+        id: 'plug-web-search', name: 'Web Search Plugin', description: 'Integrate external search providers for web search capabilities',
+        plugin_type: 'official', package_name: '@weaveintel/tools-search', version: '1.0.0',
+        capabilities: JSON.stringify(['web-search', 'news-search']),
+        trust_level: 'official', auto_update: 1,
+        config: JSON.stringify({ defaultProvider: 'sp-brave' }), enabled: 1,
+      },
+      {
+        id: 'plug-community-viz', name: 'Data Visualization', description: 'Community plugin for generating charts and data visualizations',
+        plugin_type: 'community', package_name: 'weaveintel-plugin-viz', version: '0.3.2',
+        capabilities: JSON.stringify(['visualization', 'chart-generation']),
+        trust_level: 'community', auto_update: 0,
+        config: null, enabled: 1,
+      },
+      {
+        id: 'plug-enterprise-sso', name: 'Enterprise SSO', description: 'SAML/OIDC single sign-on integration for enterprise deployments',
+        plugin_type: 'verified', package_name: 'weaveintel-plugin-sso', version: '2.1.0',
+        capabilities: JSON.stringify(['authentication', 'sso', 'saml', 'oidc']),
+        trust_level: 'verified', auto_update: 1,
+        config: JSON.stringify({ provider: 'okta', domain: 'example.okta.com' }), enabled: 0,
+      },
+    ];
+    for (const p of pluginConfigs) await this.createPluginConfig(p);
     }
   }
 }

@@ -1372,3 +1372,208 @@ describe('Admin Reliability Policies', () => {
     expect(data['ok']).toBe(true);
   });
 });
+
+// ─── Admin Collaboration Sessions ───────────────────────────
+
+describe('Admin Collaboration Sessions', () => {
+  let itemId: string;
+
+  it('lists collaboration sessions', async () => {
+    const { status, data } = await api('GET', '/api/admin/collaboration-sessions');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['collaboration-sessions'])).toBe(true);
+  });
+
+  it('creates a collaboration session', async () => {
+    const { status, data } = await api('POST', '/api/admin/collaboration-sessions', {
+      name: 'Test Pair Session',
+      description: 'Integration test collaboration session',
+      session_type: 'pair',
+      max_participants: 2,
+      presence_ttl_ms: 30000,
+      auto_close_idle_ms: 300000,
+      handoff_enabled: true,
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['collaboration-session'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a collaboration session by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/collaboration-sessions/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['collaboration-session'] as Record<string, unknown>)?.['name']).toBe('Test Pair Session');
+  });
+
+  it('updates a collaboration session', async () => {
+    const { status, data } = await api('PUT', `/api/admin/collaboration-sessions/${itemId}`, {
+      name: 'Updated Pair Session',
+      max_participants: 4,
+    });
+    expect(status).toBe(200);
+    expect((data['collaboration-session'] as Record<string, unknown>)?.['name']).toBe('Updated Pair Session');
+  });
+
+  it('deletes a collaboration session', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/collaboration-sessions/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin Compliance Rules ─────────────────────────────────
+
+describe('Admin Compliance Rules', () => {
+  let itemId: string;
+
+  it('lists compliance rules', async () => {
+    const { status, data } = await api('GET', '/api/admin/compliance-rules');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['compliance-rules'])).toBe(true);
+  });
+
+  it('creates a compliance rule', async () => {
+    const { status, data } = await api('POST', '/api/admin/compliance-rules', {
+      name: 'Test Retention Rule',
+      description: 'Integration test compliance rule',
+      rule_type: 'retention',
+      target_resource: 'chat-logs',
+      retention_days: 90,
+      region: 'us-east-1',
+      consent_purpose: '',
+      action: 'archive',
+      config: '{}',
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['compliance-rule'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a compliance rule by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/compliance-rules/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['compliance-rule'] as Record<string, unknown>)?.['name']).toBe('Test Retention Rule');
+  });
+
+  it('updates a compliance rule', async () => {
+    const { status, data } = await api('PUT', `/api/admin/compliance-rules/${itemId}`, {
+      name: 'Updated Retention Rule',
+      retention_days: 180,
+    });
+    expect(status).toBe(200);
+    expect((data['compliance-rule'] as Record<string, unknown>)?.['name']).toBe('Updated Retention Rule');
+  });
+
+  it('deletes a compliance rule', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/compliance-rules/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin Graph Configs ────────────────────────────────────
+
+describe('Admin Graph Configs', () => {
+  let itemId: string;
+
+  it('lists graph configs', async () => {
+    const { status, data } = await api('GET', '/api/admin/graph-configs');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['graph-configs'])).toBe(true);
+  });
+
+  it('creates a graph config', async () => {
+    const { status, data } = await api('POST', '/api/admin/graph-configs', {
+      name: 'Test Entity Graph',
+      description: 'Integration test graph config',
+      graph_type: 'entity',
+      max_depth: 3,
+      entity_types: '["person","org"]',
+      relationship_types: '["works_for","manages"]',
+      auto_link: true,
+      scoring_weights: '{"relevance":0.7,"recency":0.3}',
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['graph-config'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a graph config by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/graph-configs/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['graph-config'] as Record<string, unknown>)?.['name']).toBe('Test Entity Graph');
+  });
+
+  it('updates a graph config', async () => {
+    const { status, data } = await api('PUT', `/api/admin/graph-configs/${itemId}`, {
+      name: 'Updated Entity Graph',
+      max_depth: 5,
+    });
+    expect(status).toBe(200);
+    expect((data['graph-config'] as Record<string, unknown>)?.['name']).toBe('Updated Entity Graph');
+  });
+
+  it('deletes a graph config', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/graph-configs/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});
+
+// ─── Admin Plugin Configs ───────────────────────────────────
+
+describe('Admin Plugin Configs', () => {
+  let itemId: string;
+
+  it('lists plugin configs', async () => {
+    const { status, data } = await api('GET', '/api/admin/plugin-configs');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['plugin-configs'])).toBe(true);
+  });
+
+  it('creates a plugin config', async () => {
+    const { status, data } = await api('POST', '/api/admin/plugin-configs', {
+      name: 'Test Plugin',
+      description: 'Integration test plugin config',
+      plugin_type: 'community',
+      package_name: '@test/plugin-hello',
+      version: '1.0.0',
+      capabilities: '["chat","tools"]',
+      trust_level: 'sandboxed',
+      auto_update: false,
+      config: '{"timeout":5000}',
+      enabled: true,
+    });
+    expect(status).toBe(201);
+    const item = data['plugin-config'] as Record<string, unknown>;
+    expect(item?.['id']).toBeDefined();
+    itemId = item['id'] as string;
+  });
+
+  it('gets a plugin config by id', async () => {
+    const { status, data } = await api('GET', `/api/admin/plugin-configs/${itemId}`);
+    expect(status).toBe(200);
+    expect((data['plugin-config'] as Record<string, unknown>)?.['name']).toBe('Test Plugin');
+  });
+
+  it('updates a plugin config', async () => {
+    const { status, data } = await api('PUT', `/api/admin/plugin-configs/${itemId}`, {
+      name: 'Updated Plugin',
+      version: '2.0.0',
+    });
+    expect(status).toBe(200);
+    expect((data['plugin-config'] as Record<string, unknown>)?.['name']).toBe('Updated Plugin');
+  });
+
+  it('deletes a plugin config', async () => {
+    const { status, data } = await api('DELETE', `/api/admin/plugin-configs/${itemId}`);
+    expect(status).toBe(200);
+    expect(data['ok']).toBe(true);
+  });
+});

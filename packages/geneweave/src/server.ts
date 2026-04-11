@@ -1890,6 +1890,264 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
+  // ── Admin: Collaboration Sessions ──────────────────────────
+
+  router.get('/api/admin/collaboration-sessions', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listCollaborationSessions();
+    json(res, 200, { 'collaboration-sessions': items });
+  });
+
+  router.get('/api/admin/collaboration-sessions/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getCollaborationSession(params['id']!);
+    if (!c) { json(res, 404, { error: 'Collaboration session not found' }); return; }
+    json(res, 200, { 'collaboration-session': c });
+  });
+
+  router.post('/api/admin/collaboration-sessions', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'collab-' + randomUUID().slice(0, 8);
+    await db.createCollaborationSession({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      session_type: (body['session_type'] as string) ?? 'team',
+      max_participants: (body['max_participants'] as number) ?? 10,
+      presence_ttl_ms: (body['presence_ttl_ms'] as number) ?? 30000,
+      auto_close_idle_ms: (body['auto_close_idle_ms'] as number) ?? null,
+      handoff_enabled: body['handoff_enabled'] !== false ? 1 : 0,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getCollaborationSession(id);
+    json(res, 201, { 'collaboration-session': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/collaboration-sessions/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getCollaborationSession(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Collaboration session not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['session_type'] !== undefined) fields['session_type'] = body['session_type'];
+    if (body['max_participants'] !== undefined) fields['max_participants'] = body['max_participants'];
+    if (body['presence_ttl_ms'] !== undefined) fields['presence_ttl_ms'] = body['presence_ttl_ms'];
+    if (body['auto_close_idle_ms'] !== undefined) fields['auto_close_idle_ms'] = body['auto_close_idle_ms'];
+    if (body['handoff_enabled'] !== undefined) fields['handoff_enabled'] = body['handoff_enabled'] ? 1 : 0;
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateCollaborationSession(params['id']!, fields as any);
+    const item = await db.getCollaborationSession(params['id']!);
+    json(res, 200, { 'collaboration-session': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/collaboration-sessions/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteCollaborationSession(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Compliance Rules ────────────────────────────────
+
+  router.get('/api/admin/compliance-rules', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listComplianceRules();
+    json(res, 200, { 'compliance-rules': items });
+  });
+
+  router.get('/api/admin/compliance-rules/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getComplianceRule(params['id']!);
+    if (!c) { json(res, 404, { error: 'Compliance rule not found' }); return; }
+    json(res, 200, { 'compliance-rule': c });
+  });
+
+  router.post('/api/admin/compliance-rules', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'comp-' + randomUUID().slice(0, 8);
+    await db.createComplianceRule({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      rule_type: (body['rule_type'] as string) ?? 'retention',
+      target_resource: (body['target_resource'] as string) ?? '*',
+      retention_days: (body['retention_days'] as number) ?? null,
+      region: (body['region'] as string) ?? null,
+      consent_purpose: (body['consent_purpose'] as string) ?? null,
+      action: (body['action'] as string) ?? 'notify',
+      config: body['config'] != null ? (typeof body['config'] === 'string' ? body['config'] as string : JSON.stringify(body['config'])) : null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getComplianceRule(id);
+    json(res, 201, { 'compliance-rule': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/compliance-rules/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getComplianceRule(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Compliance rule not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['rule_type'] !== undefined) fields['rule_type'] = body['rule_type'];
+    if (body['target_resource'] !== undefined) fields['target_resource'] = body['target_resource'];
+    if (body['retention_days'] !== undefined) fields['retention_days'] = body['retention_days'];
+    if (body['region'] !== undefined) fields['region'] = body['region'];
+    if (body['consent_purpose'] !== undefined) fields['consent_purpose'] = body['consent_purpose'];
+    if (body['action'] !== undefined) fields['action'] = body['action'];
+    if (body['config'] !== undefined) fields['config'] = body['config'] != null ? (typeof body['config'] === 'string' ? body['config'] : JSON.stringify(body['config'])) : null;
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateComplianceRule(params['id']!, fields as any);
+    const item = await db.getComplianceRule(params['id']!);
+    json(res, 200, { 'compliance-rule': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/compliance-rules/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteComplianceRule(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Graph Configs ───────────────────────────────────
+
+  router.get('/api/admin/graph-configs', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listGraphConfigs();
+    json(res, 200, { 'graph-configs': items });
+  });
+
+  router.get('/api/admin/graph-configs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getGraphConfig(params['id']!);
+    if (!c) { json(res, 404, { error: 'Graph config not found' }); return; }
+    json(res, 200, { 'graph-config': c });
+  });
+
+  router.post('/api/admin/graph-configs', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'graph-' + randomUUID().slice(0, 8);
+    await db.createGraphConfig({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      graph_type: (body['graph_type'] as string) ?? 'entity',
+      max_depth: (body['max_depth'] as number) ?? 3,
+      entity_types: body['entity_types'] != null ? (typeof body['entity_types'] === 'string' ? body['entity_types'] as string : JSON.stringify(body['entity_types'])) : null,
+      relationship_types: body['relationship_types'] != null ? (typeof body['relationship_types'] === 'string' ? body['relationship_types'] as string : JSON.stringify(body['relationship_types'])) : null,
+      auto_link: body['auto_link'] !== false ? 1 : 0,
+      scoring_weights: body['scoring_weights'] != null ? (typeof body['scoring_weights'] === 'string' ? body['scoring_weights'] as string : JSON.stringify(body['scoring_weights'])) : null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getGraphConfig(id);
+    json(res, 201, { 'graph-config': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/graph-configs/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getGraphConfig(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Graph config not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['graph_type'] !== undefined) fields['graph_type'] = body['graph_type'];
+    if (body['max_depth'] !== undefined) fields['max_depth'] = body['max_depth'];
+    if (body['entity_types'] !== undefined) fields['entity_types'] = body['entity_types'] != null ? (typeof body['entity_types'] === 'string' ? body['entity_types'] : JSON.stringify(body['entity_types'])) : null;
+    if (body['relationship_types'] !== undefined) fields['relationship_types'] = body['relationship_types'] != null ? (typeof body['relationship_types'] === 'string' ? body['relationship_types'] : JSON.stringify(body['relationship_types'])) : null;
+    if (body['auto_link'] !== undefined) fields['auto_link'] = body['auto_link'] ? 1 : 0;
+    if (body['scoring_weights'] !== undefined) fields['scoring_weights'] = body['scoring_weights'] != null ? (typeof body['scoring_weights'] === 'string' ? body['scoring_weights'] : JSON.stringify(body['scoring_weights'])) : null;
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateGraphConfig(params['id']!, fields as any);
+    const item = await db.getGraphConfig(params['id']!);
+    json(res, 200, { 'graph-config': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/graph-configs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteGraphConfig(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Plugin Configs ──────────────────────────────────
+
+  router.get('/api/admin/plugin-configs', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const items = await db.listPluginConfigs();
+    json(res, 200, { 'plugin-configs': items });
+  });
+
+  router.get('/api/admin/plugin-configs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getPluginConfig(params['id']!);
+    if (!c) { json(res, 404, { error: 'Plugin config not found' }); return; }
+    json(res, 200, { 'plugin-config': c });
+  });
+
+  router.post('/api/admin/plugin-configs', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const id = 'plug-' + randomUUID().slice(0, 8);
+    await db.createPluginConfig({
+      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      plugin_type: (body['plugin_type'] as string) ?? 'community',
+      package_name: (body['package_name'] as string) ?? 'unknown',
+      version: (body['version'] as string) ?? '1.0.0',
+      capabilities: body['capabilities'] != null ? (typeof body['capabilities'] === 'string' ? body['capabilities'] as string : JSON.stringify(body['capabilities'])) : null,
+      trust_level: (body['trust_level'] as string) ?? 'community',
+      auto_update: body['auto_update'] ? 1 : 0,
+      config: body['config'] != null ? (typeof body['config'] === 'string' ? body['config'] as string : JSON.stringify(body['config'])) : null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getPluginConfig(id);
+    json(res, 201, { 'plugin-config': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/plugin-configs/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getPluginConfig(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Plugin config not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['plugin_type'] !== undefined) fields['plugin_type'] = body['plugin_type'];
+    if (body['package_name'] !== undefined) fields['package_name'] = body['package_name'];
+    if (body['version'] !== undefined) fields['version'] = body['version'];
+    if (body['capabilities'] !== undefined) fields['capabilities'] = body['capabilities'] != null ? (typeof body['capabilities'] === 'string' ? body['capabilities'] : JSON.stringify(body['capabilities'])) : null;
+    if (body['trust_level'] !== undefined) fields['trust_level'] = body['trust_level'];
+    if (body['auto_update'] !== undefined) fields['auto_update'] = body['auto_update'] ? 1 : 0;
+    if (body['config'] !== undefined) fields['config'] = body['config'] != null ? (typeof body['config'] === 'string' ? body['config'] : JSON.stringify(body['config'])) : null;
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updatePluginConfig(params['id']!, fields as any);
+    const item = await db.getPluginConfig(params['id']!);
+    json(res, 200, { 'plugin-config': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/plugin-configs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deletePluginConfig(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
   // ── Admin: Seed data ───────────────────────────────────────
 
   router.post('/api/admin/seed', async (_req, res, _params, auth) => {

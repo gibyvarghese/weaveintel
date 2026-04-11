@@ -36,6 +36,10 @@
     { "path": "packages/extraction" },
     { "path": "packages/artifacts" },
     { "path": "packages/reliability" },
+    { "path": "packages/collaboration" },
+    { "path": "packages/compliance" },
+    { "path": "packages/graph" },
+    { "path": "packages/plugins" },
     { "path": "packages/geneweave" }
   ]
 }

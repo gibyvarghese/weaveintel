@@ -876,7 +876,7 @@ function renderApp(){
 
 async function loadAdmin(){
   try{
-    const [p,g,r,w,t,wr,ge,tp,ct,cp,ir,mg,sp,he,sa,ec,tr,rs,td,tc,sbp,exp,arp,rlp] = await Promise.all([
+    const [p,g,r,w,t,wr,ge,tp,ct,cp,ir,mg,sp,he,sa,ec,tr,rs,td,tc,sbp,exp,arp,rlp,coll,cmpl,grc,plc] = await Promise.all([
       api.get('/admin/prompts').then(r=>r.json()),
       api.get('/admin/guardrails').then(r=>r.json()),
       api.get('/admin/routing').then(r=>r.json()),
@@ -901,6 +901,10 @@ async function loadAdmin(){
       api.get('/admin/extraction-pipelines').then(r=>r.json()).catch(()=>({'extraction-pipelines':[]})),
       api.get('/admin/artifact-policies').then(r=>r.json()).catch(()=>({'artifact-policies':[]})),
       api.get('/admin/reliability-policies').then(r=>r.json()).catch(()=>({'reliability-policies':[]})),
+      api.get('/admin/collaboration-sessions').then(r=>r.json()).catch(()=>({'collaboration-sessions':[]})),
+      api.get('/admin/compliance-rules').then(r=>r.json()).catch(()=>({'compliance-rules':[]})),
+      api.get('/admin/graph-configs').then(r=>r.json()).catch(()=>({'graph-configs':[]})),
+      api.get('/admin/plugin-configs').then(r=>r.json()).catch(()=>({'plugin-configs':[]})),
     ]);
     state.adminData = {
       prompts:p.prompts||[], guardrails:g.guardrails||[],
@@ -918,7 +922,11 @@ async function loadAdmin(){
       'sandbox-policies':sbp['sandbox-policies']||[],
       'extraction-pipelines':exp['extraction-pipelines']||[],
       'artifact-policies':arp['artifact-policies']||[],
-      'reliability-policies':rlp['reliability-policies']||[]
+      'reliability-policies':rlp['reliability-policies']||[],
+      'collaboration-sessions':coll['collaboration-sessions']||[],
+      'compliance-rules':cmpl['compliance-rules']||[],
+      'graph-configs':grc['graph-configs']||[],
+      'plugin-configs':plc['plugin-configs']||[]
     };
   }catch(e){ console.error('Failed to load admin data',e); }
   render();
@@ -1035,6 +1043,24 @@ async function adminSave(tab){
     } else if(tab==='reliability-policies'){
       const payload = {name:f.name,description:f.description,policy_type:f.policy_type||'retry',max_retries:f.max_retries?parseInt(f.max_retries):null,initial_delay_ms:f.initial_delay_ms?parseInt(f.initial_delay_ms):null,max_delay_ms:f.max_delay_ms?parseInt(f.max_delay_ms):null,backoff_multiplier:f.backoff_multiplier?parseFloat(f.backoff_multiplier):null,max_concurrent:f.max_concurrent?parseInt(f.max_concurrent):null,queue_size:f.queue_size?parseInt(f.queue_size):null,strategy:f.strategy||null,ttl_ms:f.ttl_ms?parseInt(f.ttl_ms):null,enabled:f.enabled!==false};
       resp = isEdit ? await api.put('/admin/reliability-policies/'+state.adminEditing,payload) : await api.post('/admin/reliability-policies',payload);
+    } else if(tab==='collaboration-sessions'){
+      const payload = {name:f.name,description:f.description,session_type:f.session_type||'team',max_participants:f.max_participants?parseInt(f.max_participants):10,presence_ttl_ms:f.presence_ttl_ms?parseInt(f.presence_ttl_ms):30000,auto_close_idle_ms:f.auto_close_idle_ms?parseInt(f.auto_close_idle_ms):null,handoff_enabled:f.handoff_enabled!==false,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/collaboration-sessions/'+state.adminEditing,payload) : await api.post('/admin/collaboration-sessions',payload);
+    } else if(tab==='compliance-rules'){
+      let cfg = null; try{cfg=f.config?JSON.parse(f.config):null;}catch{}
+      const payload = {name:f.name,description:f.description,rule_type:f.rule_type||'retention',target_resource:f.target_resource||'*',retention_days:f.retention_days?parseInt(f.retention_days):null,region:f.region||null,consent_purpose:f.consent_purpose||null,action:f.action||'notify',config:cfg?JSON.stringify(cfg):null,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/compliance-rules/'+state.adminEditing,payload) : await api.post('/admin/compliance-rules',payload);
+    } else if(tab==='graph-configs'){
+      let eTypes = null; try{eTypes=f.entity_types?JSON.parse(f.entity_types):null;}catch{}
+      let rTypes = null; try{rTypes=f.relationship_types?JSON.parse(f.relationship_types):null;}catch{}
+      let sWeights = null; try{sWeights=f.scoring_weights?JSON.parse(f.scoring_weights):null;}catch{}
+      const payload = {name:f.name,description:f.description,graph_type:f.graph_type||'entity',max_depth:f.max_depth?parseInt(f.max_depth):3,entity_types:eTypes?JSON.stringify(eTypes):null,relationship_types:rTypes?JSON.stringify(rTypes):null,auto_link:f.auto_link!==false,scoring_weights:sWeights?JSON.stringify(sWeights):null,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/graph-configs/'+state.adminEditing,payload) : await api.post('/admin/graph-configs',payload);
+    } else if(tab==='plugin-configs'){
+      let caps = null; try{caps=f.capabilities?JSON.parse(f.capabilities):null;}catch{}
+      let pcfg = null; try{pcfg=f.config?JSON.parse(f.config):null;}catch{}
+      const payload = {name:f.name,description:f.description,plugin_type:f.plugin_type||'community',package_name:f.package_name||'unknown',version:f.version||'1.0.0',capabilities:caps?JSON.stringify(caps):null,trust_level:f.trust_level||'community',auto_update:!!f.auto_update,config:pcfg?JSON.stringify(pcfg):null,enabled:f.enabled!==false};
+      resp = isEdit ? await api.put('/admin/plugin-configs/'+state.adminEditing,payload) : await api.post('/admin/plugin-configs',payload);
     }
     if(resp && resp.ok){
       state.adminEditing=null; state.adminForm={};
@@ -1048,7 +1074,7 @@ async function adminSave(tab){
 
 async function adminDelete(tab,id){
   if(!confirm('Delete this item?')) return;
-  const paths = {prompts:'prompts',guardrails:'guardrails',routing:'routing',workflows:'workflows',tools:'tools','task-policies':'task-policies',contracts:'contracts','cache-policies':'cache-policies','identity-rules':'identity-rules','memory-governance':'memory-governance','search-providers':'search-providers','http-endpoints':'http-endpoints','social-accounts':'social-accounts','enterprise-connectors':'enterprise-connectors','tool-registry':'tool-registry','replay-scenarios':'replay-scenarios','trigger-definitions':'trigger-definitions','tenant-configs':'tenant-configs','sandbox-policies':'sandbox-policies','extraction-pipelines':'extraction-pipelines','artifact-policies':'artifact-policies','reliability-policies':'reliability-policies'};
+  const paths = {prompts:'prompts',guardrails:'guardrails',routing:'routing',workflows:'workflows',tools:'tools','task-policies':'task-policies',contracts:'contracts','cache-policies':'cache-policies','identity-rules':'identity-rules','memory-governance':'memory-governance','search-providers':'search-providers','http-endpoints':'http-endpoints','social-accounts':'social-accounts','enterprise-connectors':'enterprise-connectors','tool-registry':'tool-registry','replay-scenarios':'replay-scenarios','trigger-definitions':'trigger-definitions','tenant-configs':'tenant-configs','sandbox-policies':'sandbox-policies','extraction-pipelines':'extraction-pipelines','artifact-policies':'artifact-policies','reliability-policies':'reliability-policies','collaboration-sessions':'collaboration-sessions','compliance-rules':'compliance-rules','graph-configs':'graph-configs','plugin-configs':'plugin-configs'};
   try{
     await api.del('/admin/'+paths[tab]+'/'+id);
     await loadAdmin();
@@ -1079,6 +1105,10 @@ function adminEdit(tab,item){
   if(tab==='extraction-pipelines'){ if(f.stages){try{f.stages=typeof f.stages==='string'?f.stages:JSON.stringify(f.stages,null,2);}catch{}} if(f.input_mime_types){try{f.input_mime_types=typeof f.input_mime_types==='string'?f.input_mime_types:JSON.stringify(f.input_mime_types,null,2);}catch{}} }
   if(tab==='artifact-policies'){ if(f.allowed_types){try{f.allowed_types=typeof f.allowed_types==='string'?f.allowed_types:JSON.stringify(f.allowed_types,null,2);}catch{}} }
   if(tab==='reliability-policies'){} // No JSON fields to stringify for editing
+  if(tab==='collaboration-sessions'){} // No JSON fields to stringify for editing
+  if(tab==='compliance-rules'){ if(f.config){try{f.config=typeof f.config==='string'?f.config:JSON.stringify(f.config,null,2);}catch{}} }
+  if(tab==='graph-configs'){ if(f.entity_types){try{f.entity_types=typeof f.entity_types==='string'?f.entity_types:JSON.stringify(f.entity_types,null,2);}catch{}} if(f.relationship_types){try{f.relationship_types=typeof f.relationship_types==='string'?f.relationship_types:JSON.stringify(f.relationship_types,null,2);}catch{}} if(f.scoring_weights){try{f.scoring_weights=typeof f.scoring_weights==='string'?f.scoring_weights:JSON.stringify(f.scoring_weights,null,2);}catch{}} }
+  if(tab==='plugin-configs'){ if(f.capabilities){try{f.capabilities=typeof f.capabilities==='string'?f.capabilities:JSON.stringify(f.capabilities,null,2);}catch{}} if(f.config){try{f.config=typeof f.config==='string'?f.config:JSON.stringify(f.config,null,2);}catch{}} }
   state.adminForm = f;
   render();
 }
@@ -1133,7 +1163,7 @@ function inp(label,key,opts){
 function renderAdminForm(tab){
   const form = h('div',{style:'background:#fff;border:1px solid #E5E7EB;border-radius:10px;padding:20px;margin-bottom:16px'});
   const title = state.adminEditing?'Edit':'New';
-  var singulars={'prompts':'Prompt','guardrails':'Guardrail','routing':'Routing Policy','workflows':'Workflow','tools':'Tool','task-policies':'Task Policy','contracts':'Contract','cache-policies':'Cache Policy','identity-rules':'Identity Rule','memory-governance':'Memory Governance','search-providers':'Search Provider','http-endpoints':'HTTP Endpoint','social-accounts':'Social Account','enterprise-connectors':'Enterprise Connector','tool-registry':'Tool Registry','replay-scenarios':'Replay Scenario','trigger-definitions':'Trigger Definition','tenant-configs':'Tenant Config','sandbox-policies':'Sandbox Policy','extraction-pipelines':'Extraction Pipeline','artifact-policies':'Artifact Policy','reliability-policies':'Reliability Policy'};
+  var singulars={'prompts':'Prompt','guardrails':'Guardrail','routing':'Routing Policy','workflows':'Workflow','tools':'Tool','task-policies':'Task Policy','contracts':'Contract','cache-policies':'Cache Policy','identity-rules':'Identity Rule','memory-governance':'Memory Governance','search-providers':'Search Provider','http-endpoints':'HTTP Endpoint','social-accounts':'Social Account','enterprise-connectors':'Enterprise Connector','tool-registry':'Tool Registry','replay-scenarios':'Replay Scenario','trigger-definitions':'Trigger Definition','tenant-configs':'Tenant Config','sandbox-policies':'Sandbox Policy','extraction-pipelines':'Extraction Pipeline','artifact-policies':'Artifact Policy','reliability-policies':'Reliability Policy','collaboration-sessions':'Collaboration Session','compliance-rules':'Compliance Rule','graph-configs':'Graph Config','plugin-configs':'Plugin Config'};
   var tabLabel = singulars[tab]||(tab.slice(0,1).toUpperCase()+tab.slice(1).replace(/s$/,''));
   form.appendChild(h('h3',{style:'margin:0 0 14px;font-size:15px;color:#1E293B'},title+' '+tabLabel));
 
@@ -1359,6 +1389,47 @@ function renderAdminForm(tab){
     form.appendChild(inp('Strategy','strategy',{options:['queue','reject','shed-oldest','']}));
     form.appendChild(inp('TTL (ms)','ttl_ms',{type:'number'}));
     form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='collaboration-sessions'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Session Type','session_type',{options:['pair','team','broadcast']}));
+    form.appendChild(inp('Max Participants','max_participants',{type:'number'}));
+    form.appendChild(inp('Presence TTL (ms)','presence_ttl_ms',{type:'number'}));
+    form.appendChild(inp('Auto-close Idle (ms)','auto_close_idle_ms',{type:'number'}));
+    form.appendChild(inp('Handoff Enabled','handoff_enabled',{type:'checkbox'}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='compliance-rules'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Rule Type','rule_type',{options:['retention','deletion','legal-hold','residency','consent']}));
+    form.appendChild(inp('Target Resource','target_resource'));
+    form.appendChild(inp('Retention Days','retention_days',{type:'number'}));
+    form.appendChild(inp('Region','region'));
+    form.appendChild(inp('Consent Purpose','consent_purpose',{options:['analytics','marketing','personalization','training','functional','third-party','']}));
+    form.appendChild(inp('Action','action',{options:['delete','archive','anonymize','block','notify']}));
+    form.appendChild(inp('Config (JSON)','config',{textarea:true,rows:3}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='graph-configs'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Graph Type','graph_type',{options:['entity','timeline','knowledge']}));
+    form.appendChild(inp('Max Depth','max_depth',{type:'number'}));
+    form.appendChild(inp('Entity Types (JSON array)','entity_types',{textarea:true,rows:2}));
+    form.appendChild(inp('Relationship Types (JSON array)','relationship_types',{textarea:true,rows:2}));
+    form.appendChild(inp('Auto Link','auto_link',{type:'checkbox'}));
+    form.appendChild(inp('Scoring Weights (JSON)','scoring_weights',{textarea:true,rows:2}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
+  } else if(tab==='plugin-configs'){
+    form.appendChild(inp('Name','name'));
+    form.appendChild(inp('Description','description'));
+    form.appendChild(inp('Plugin Type','plugin_type',{options:['official','verified','community','private']}));
+    form.appendChild(inp('Package Name','package_name'));
+    form.appendChild(inp('Version','version'));
+    form.appendChild(inp('Capabilities (JSON array)','capabilities',{textarea:true,rows:2}));
+    form.appendChild(inp('Trust Level','trust_level',{options:['official','verified','community','private']}));
+    form.appendChild(inp('Auto Update','auto_update',{type:'checkbox'}));
+    form.appendChild(inp('Config (JSON)','config',{textarea:true,rows:3}));
+    form.appendChild(inp('Enabled','enabled',{type:'checkbox'}));
   }
 
   const btns = h('div',{style:'display:flex;gap:8px;margin-top:14px'});
@@ -1445,6 +1516,10 @@ function getAdminCols(tab){
   if(tab==='extraction-pipelines') return [{key:'name',label:'Name',w:'1.2fr'},{key:'description',label:'Description',w:'1.5fr'},{key:'max_input_size_bytes',label:'Max Size',w:'0.7fr'},{key:'enabled',label:'On',w:'0.4fr'}];
   if(tab==='artifact-policies') return [{key:'name',label:'Name',w:'1.2fr'},{key:'max_size_bytes',label:'Max Size',w:'0.8fr'},{key:'retention_days',label:'Retention',w:'0.6fr'},{key:'require_versioning',label:'Versioning',w:'0.6fr'},{key:'enabled',label:'On',w:'0.4fr'}];
   if(tab==='reliability-policies') return [{key:'name',label:'Name',w:'1.2fr'},{key:'policy_type',label:'Type',w:'0.7fr'},{key:'max_retries',label:'Retries',w:'0.5fr'},{key:'max_concurrent',label:'Concurrent',w:'0.6fr'},{key:'strategy',label:'Strategy',w:'0.6fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='collaboration-sessions') return [{key:'name',label:'Name',w:'1.2fr'},{key:'session_type',label:'Type',w:'0.7fr'},{key:'max_participants',label:'Max Users',w:'0.6fr'},{key:'presence_ttl_ms',label:'Presence TTL',w:'0.7fr'},{key:'handoff_enabled',label:'Handoff',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='compliance-rules') return [{key:'name',label:'Name',w:'1.2fr'},{key:'rule_type',label:'Type',w:'0.7fr'},{key:'target_resource',label:'Resource',w:'0.7fr'},{key:'action',label:'Action',w:'0.6fr'},{key:'region',label:'Region',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='graph-configs') return [{key:'name',label:'Name',w:'1.2fr'},{key:'graph_type',label:'Type',w:'0.7fr'},{key:'max_depth',label:'Depth',w:'0.5fr'},{key:'auto_link',label:'Auto Link',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
+  if(tab==='plugin-configs') return [{key:'name',label:'Name',w:'1.2fr'},{key:'package_name',label:'Package',w:'1fr'},{key:'version',label:'Ver',w:'0.5fr'},{key:'trust_level',label:'Trust',w:'0.6fr'},{key:'auto_update',label:'Update',w:'0.5fr'},{key:'enabled',label:'On',w:'0.4fr'}];
   return [];
 }
 
@@ -1485,7 +1560,11 @@ function renderAdmin(){
     {key:'sandbox-policies',label:'Sandbox',icon:'\\uD83D\\uDD12'},
     {key:'extraction-pipelines',label:'Extraction',icon:'\\uD83D\\uDCC4'},
     {key:'artifact-policies',label:'Artifacts',icon:'\\uD83D\\uDCE6'},
-    {key:'reliability-policies',label:'Reliability',icon:'\\uD83D\\uDEE1'}
+    {key:'reliability-policies',label:'Reliability',icon:'\\uD83D\\uDEE1'},
+    {key:'collaboration-sessions',label:'Collaboration',icon:'\\uD83D\\uDC65'},
+    {key:'compliance-rules',label:'Compliance',icon:'\\u2696'},
+    {key:'graph-configs',label:'Graph',icon:'\\uD83D\\uDD17'},
+    {key:'plugin-configs',label:'Plugins',icon:'\\uD83E\\uDDE9'}
   ];
   tabDefs.forEach(function(t){
     const active = state.adminTab===t.key;
