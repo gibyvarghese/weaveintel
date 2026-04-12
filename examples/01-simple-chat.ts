@@ -27,9 +27,8 @@ async function main() {
   // interface (chat / stream / generate / countTokens). Under the hood it
   // calls the OpenAI REST API. You can swap this for weaveAnthropicModel()
   // or any other provider without changing downstream code.
-  const model = weaveOpenAIModel({
+  const model = weaveOpenAIModel('gpt-4o-mini', {
     apiKey: process.env['OPENAI_API_KEY']!,
-    model: 'gpt-4o-mini',
   });
 
   // --- Basic completion ---
@@ -38,15 +37,12 @@ async function main() {
   // and optional .toolCalls. The second argument is the ExecutionContext that
   // carries tracing / user info through the call stack.
   console.log('=== Basic Completion ===');
-  const response = await model.chat(
-    {
-      messages: [
-        { role: 'system', content: 'You are a helpful assistant.' },
-        { role: 'user', content: 'What is the capital of France?' },
-      ],
-    },
-    ctx,
-  );
+  const response = await model.generate(ctx, {
+    messages: [
+      { role: 'system', content: 'You are a helpful assistant.' },
+      { role: 'user', content: 'What is the capital of France?' },
+    ],
+  });
   console.log('Response:', response.content);
   // .usage includes prompt_tokens, completion_tokens, and total_tokens — useful
   // for cost tracking via @weaveintel/observability's weaveUsageTracker.
@@ -58,20 +54,17 @@ async function main() {
   // for incremental tool-call JSON, and 'done' when the stream ends.
   // Streaming lets you display tokens to the user in real time.
   console.log('\n=== Streaming ===');
-  const stream = await model.stream(
-    {
-      messages: [
-        { role: 'user', content: 'Count from 1 to 5, one per line.' },
-      ],
-    },
-    ctx,
-  );
+  const stream = model.stream!(ctx, {
+    messages: [
+      { role: 'user', content: 'Count from 1 to 5, one per line.' },
+    ],
+  });
 
   process.stdout.write('Streamed: ');
   for await (const chunk of stream) {
     // Only print text deltas; ignore tool_call / done chunks here.
-    if (chunk.type === 'content') {
-      process.stdout.write(chunk.content);
+    if (chunk.type === 'text' && chunk.text) {
+      process.stdout.write(chunk.text);
     }
   }
   console.log('\n');
@@ -83,24 +76,21 @@ async function main() {
   // response_format.json_schema). The result is always a valid JSON string
   // in response.content that you can safely JSON.parse.
   console.log('=== Structured Output ===');
-  const structured = await model.chat(
-    {
-      messages: [
-        { role: 'user', content: 'List 3 European capitals as JSON: { "capitals": ["..."] }' },
-      ],
-      responseFormat: {
-        type: 'json_schema',
-        schema: {
-          type: 'object',
-          properties: {
-            capitals: { type: 'array', items: { type: 'string' } },
-          },
-          required: ['capitals'],
+  const structured = await model.generate(ctx, {
+    messages: [
+      { role: 'user', content: 'List 3 European capitals as JSON: { "capitals": ["..."] }' },
+    ],
+    responseFormat: {
+      type: 'json_schema',
+      schema: {
+        type: 'object',
+        properties: {
+          capitals: { type: 'array', items: { type: 'string' } },
         },
+        required: ['capitals'],
       },
     },
-    ctx,
-  );
+  });
   console.log('Structured:', JSON.parse(structured.content));
 }
 

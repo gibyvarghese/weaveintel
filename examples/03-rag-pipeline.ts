@@ -66,7 +66,7 @@ async function main() {
   // The "fixed_size" strategy splits on character count; other strategies include
   // 'sentence', 'paragraph', and 'recursive' for smarter boundaries.
   const pipeline = weaveEmbeddingPipeline({
-    chunkerConfig: { strategy: 'fixed_size', chunkSize: 200, overlap: 50 },
+    chunkerConfig: { strategy: 'fixed_size', chunkSize: 200, chunkOverlap: 50 },
     embeddingModel,
     vectorStore,
   });

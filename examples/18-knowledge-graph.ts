@@ -245,7 +245,7 @@ header('6. Graph Statistics');
 
 console.log(`  Total nodes: ${store.nodeCount()}`);
 console.log(`  Total edges: ${store.edgeCount()}`);
-console.log(`  Node types: ${[...new Set(store.findNodes('person').concat(store.findNodes('project'), store.findNodes('team'), store.findNodes('technology')).map(n => n.type))].join(', ')}`);
+console.log(`  Node types: ${Array.from(new Set(store.findNodes('person').concat(store.findNodes('project'), store.findNodes('team'), store.findNodes('technology')).map(n => n.type))).join(', ')}`);
 
 // Remove a node and check cascade
 store.removeNode('project-y');

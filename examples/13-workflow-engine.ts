@@ -91,7 +91,9 @@ const bus = weaveEventBus();
 
 // Track events
 const events: string[] = [];
-bus.onAll((e) => events.push(`[${e.type}]`));
+bus.onAll((e) => {
+  events.push(`[${e.type}]`);
+});
 
 // createWorkflowEngine() creates the execution runtime. It:
 //   1. Accepts a checkpoint store (for durability) and an event bus (for observability)
@@ -148,8 +150,8 @@ const testState = { currentStepId: 'publish', variables: { topic: 'AI' }, histor
 await checkpointStore.save(manualCpRunId, 'publish', testState);
 console.log(`Checkpoint saved for run: ${manualCpRunId}`);
 
-const loaded = await checkpointStore.load(manualCpRunId, 'publish');
-console.log(`Checkpoint loaded: step=publish, variables: ${JSON.stringify(loaded?.variables || {})}`);
+const loaded = await checkpointStore.latest(manualCpRunId);
+console.log(`Checkpoint loaded: step=publish, variables: ${JSON.stringify(loaded?.state.variables || {})}`);
 
 /* ── 4. Compensation (Rollback) ───────────────────────── */
 
@@ -162,14 +164,14 @@ header('4. Compensation — Rollback on Failure');
 const compensations = new DefaultCompensationRegistry();
 
 compensations.register(
-  { stepId: 'publish', handlerName: 'publishContent', description: 'Unpublish content' },
+  { stepId: 'publish', handler: 'publishContent', description: 'Unpublish content' },
   async (stepId, _result, variables) => {
     console.log(`  Rollback: Unpublishing content from step ${stepId}`);
   },
 );
 
 compensations.register(
-  { stepId: 'notify', handlerName: 'sendNotifications', description: 'Retract notifications' },
+  { stepId: 'notify', handler: 'sendNotifications', description: 'Retract notifications' },
   async (stepId, _result, variables) => {
     console.log(`  Rollback: Retracting notifications from step ${stepId}`);
   },
@@ -177,8 +179,8 @@ compensations.register(
 
 // Simulate running compensations for completed steps
 const completedSteps = [
-  { stepId: 'publish', status: 'completed' as const, output: { publishedId: 'pub-123' }, startedAt: Date.now(), completedAt: Date.now() },
-  { stepId: 'notify', status: 'completed' as const, output: { notified: true }, startedAt: Date.now(), completedAt: Date.now() },
+  { stepId: 'publish', status: 'completed' as const, output: { publishedId: 'pub-123' }, startedAt: new Date().toISOString(), completedAt: new Date().toISOString() },
+  { stepId: 'notify', status: 'completed' as const, output: { notified: true }, startedAt: new Date().toISOString(), completedAt: new Date().toISOString() },
 ];
 const compResult = await runCompensations(compensations, completedSteps, { topic: 'AI' });
 console.log(`Compensated ${compResult.compensated.length} steps, errors: ${compResult.errors.length}`);

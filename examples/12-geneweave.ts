@@ -30,6 +30,8 @@
 import { createGeneWeave } from '@weaveintel/geneweave';
 
 async function main() {
+  const port = Number(process.env['PORT'] ?? '3500');
+
   // createGeneWeave() accepts a config object and returns a GeneWeaveApp handle.
   // The config wires together:
   //   • port/host     — HTTP server binding
@@ -39,7 +41,7 @@ async function main() {
   //                      imports @weaveintel/provider-openai or provider-anthropic
   //   • defaultModel  — The model used when the user hasn't picked one yet
   const app = await createGeneWeave({
-    port: 3500,
+    port,
     // In production, use a strong secret (e.g. from env: process.env.JWT_SECRET)
     jwtSecret: 'change-me-in-production-' + Math.random().toString(36).slice(2),
     // SQLite database file — stores users, sessions, chats, messages, metrics,
@@ -58,6 +60,7 @@ async function main() {
   // app.chatEngine.getAvailableModels() queries each registered provider
   // for its model catalog and returns a combined list.
   console.log(`  Models available: ${(await app.chatEngine.getAvailableModels()).map(m => m.provider + '/' + m.id).join(', ')}`);
+  console.log(`  URL: http://localhost:${port}`);
   console.log('  Press Ctrl+C to stop\n');
 
   // Graceful shutdown: app.stop() closes the HTTP server and the SQLite database

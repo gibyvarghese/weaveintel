@@ -56,7 +56,7 @@ import {
   type AnthropicRequestOptions,
 } from '@weaveintel/provider-anthropic';
 
-import { weaveContext } from '@weaveintel/core';
+import { weaveContext, Capabilities } from '@weaveintel/core';
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -91,7 +91,7 @@ async function section(name: string, fn: () => Promise<void>) {
 // ─── Main ────────────────────────────────────────────────────
 
 async function main() {
-  const ctx = weaveContext({ timeout: 60_000 });
+  const ctx = weaveContext({ deadline: Date.now() + 60_000 });
   const model = weaveAnthropicModel('claude-sonnet-4-20250514');
 
   // ─── 1. Basic Chat ───────────────────────────────────────
@@ -440,13 +440,12 @@ async function main() {
     assert('Provider is anthropic', m.info.provider === 'anthropic');
 
     // Model capabilities
-    const caps = [...m.capabilities];
-    assert('Has Chat capability', caps.includes('model.chat'));
-    assert('Has Streaming capability', caps.includes('model.streaming'));
-    assert('Has ToolCalling capability', caps.includes('model.tool_calling'));
-    assert('Has Vision capability', caps.includes('model.vision'));
-    assert('Has Multimodal capability', caps.includes('model.multimodal'));
-    assert('Has Reasoning capability', caps.includes('model.reasoning'));
+    assert('Has Chat capability', m.hasCapability(Capabilities.Chat));
+    assert('Has Streaming capability', m.hasCapability(Capabilities.Streaming));
+    assert('Has ToolCalling capability', m.hasCapability(Capabilities.ToolCalling));
+    assert('Has Vision capability', m.hasCapability(Capabilities.Vision));
+    assert('Has Multimodal capability', m.hasCapability(Capabilities.Multimodal));
+    assert('Has Reasoning capability', m.hasCapability(Capabilities.Reasoning));
 
     // Info metadata
     assert('Has maxContextTokens', (m.info.maxContextTokens ?? 0) > 0, String(m.info.maxContextTokens));

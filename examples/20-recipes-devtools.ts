@@ -80,6 +80,7 @@ import {
   timelineWidget,
   createProgressTracker,
 } from '@weaveintel/ui-primitives';
+import { weaveContext } from '@weaveintel/core';
 
 /* ── Helpers ──────────────────────────────────────────── */
 
@@ -109,7 +110,7 @@ const governed = createGovernedAssistant({
   governanceRules: ['No PII in responses', 'Cite sources for claims', 'Maximum 500 tokens per response'],
   systemPrompt: 'You are a compliance-aware assistant.',
 });
-console.log(`  Governed assistant: "${governed.name}"`);
+console.log('  Governed assistant created');
 
 // createEventDrivenAgent() creates an agent that subscribes to EventBus
 // events (listenTo[]) and processes them through the model. Useful for
@@ -121,7 +122,7 @@ const eventAgent = createEventDrivenAgent({
   listenTo: ['user:message', 'tool:result', 'error:*'],
   systemPrompt: 'Process incoming events and produce summaries.',
 });
-console.log(`  Event-driven agent: "${eventAgent.name}"`);
+console.log('  Event-driven agent created');
 
 // createSafeExecutionAgent() wraps a model with tool deny-lists and
 // execution timeouts, preventing dangerous operations (rm, sudo, etc.).
@@ -132,7 +133,7 @@ const safeAgent = createSafeExecutionAgent({
   maxToolExecutionMs: 5000,
   systemPrompt: 'Execute tasks safely.',
 });
-console.log(`  Safe execution agent: "${safeAgent.name}"`);
+console.log('  Safe execution agent created');
 
 /* ── 2. Project Scaffolding ───────────────────────────── */
 
@@ -201,11 +202,11 @@ const runtime = createMockRuntime({
   ],
 });
 
-console.log(`  Mock model: ${runtime.model.name}`);
+console.log(`  Mock model: ${runtime.model.info.modelId}`);
 console.log(`  Mock bus events so far: ${runtime.bus.events.length}`);
 
 // Call the mock model
-const modelResult = await runtime.model.generate({ messages: [{ role: 'user', content: 'Analyze data' }] });
+const modelResult = await runtime.model.generate(weaveContext({ userId: 'tester' }), { messages: [{ role: 'user', content: 'Analyze data' }] });
 console.log(`  Model response: "${typeof modelResult.content === 'string' ? modelResult.content : JSON.stringify(modelResult.content)}"`);
 console.log(`  Model call count: ${runtime.model.calls.length}`);
 

@@ -72,7 +72,7 @@ const review = createReviewTask({
   contentType: 'text/plain',
   criteria: ['accuracy', 'completeness', 'tone', 'no-hallucinations'],
   originalInput: 'Summarize the Q3 financial report',
-  priority: 'medium',
+  priority: 'normal',
 });
 console.log(`  Review: "${review.title}" (${review.type}, criteria: ${(review.data as any)?.criteria?.length ?? 0})`);
 
@@ -84,7 +84,7 @@ const escalation = createEscalationTask({
   reason: 'Max iterations (50) exceeded without satisfying exit condition',
   agentId: 'research-agent-v2',
   failureDetails: 'Loop detected between search and summarize steps',
-  priority: 'critical',
+  priority: 'urgent',
 });
 console.log(`  Escalation: "${escalation.title}" (${escalation.type}, priority: ${escalation.priority})`);
 
@@ -92,7 +92,7 @@ const genericTask = createHumanTask({
   type: 'input',
   title: 'Provide Missing Context',
   description: 'Agent needs additional context to proceed',
-  priority: 'medium',
+  priority: 'normal',
   data: { question: 'What is the target audience for this document?', options: ['technical', 'business', 'general'] },
 });
 console.log(`  Generic: "${genericTask.title}" (${genericTask.type})`);
@@ -178,7 +178,7 @@ await queue.complete(queued1.id, approvalDecision);
 await queue.complete(queued2.id, reviewDecision);
 await queue.complete(queued3.id, escalationDecision);
 
-const remainingTasks = await queue.list({ status: 'pending' });
+const remainingTasks = await queue.list({ status: ['pending'] });
 console.log(`\n  Remaining pending tasks: ${remainingTasks.length}`);
 
 /* ── 4. Decision Log ──────────────────────────────────── */
@@ -228,7 +228,7 @@ evaluator.addPolicy(createPolicy({
   description: 'Require review when confidence is below threshold',
   trigger: 'low-confidence',
   taskType: 'review',
-  defaultPriority: 'medium',
+  defaultPriority: 'normal',
   slaHours: 24,
 }));
 
@@ -237,7 +237,7 @@ evaluator.addPolicy(createPolicy({
   description: 'All financial operations need explicit approval',
   trigger: 'financial',
   taskType: 'approval',
-  defaultPriority: 'critical',
+  defaultPriority: 'urgent',
   slaHours: 1,
   autoEscalateAfterHours: 2,
 }));

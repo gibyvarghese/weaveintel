@@ -66,7 +66,7 @@ async function main() {
   // .restore() reverses the redaction: replaces tokens with original values.
   // Only available when the redactor was created with "reversible: true".
   console.log('\n=== Restore ===');
-  const restored = await redactor.restore!(ctx, redacted.redacted, redacted.detections);
+  const restored = await redactor.restore!(ctx, redacted.redacted, [...redacted.detections]);
   console.log('Restored:\n', restored);
 
   // Allowlists let you exempt known-safe values from redaction.

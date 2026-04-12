@@ -144,7 +144,7 @@ const calcTool = weaveTool({
 registry.registerWithDescriptor(searchTool, searchDescriptor);
 registry.register(calcTool);
 
-console.log(`  Registered tools: ${registry.list().map(t => t.name).join(', ')}`);
+console.log(`  Registered tools: ${registry.list().map(t => t.schema.name).join(', ')}`);
 
 const descriptors = registry.listDescriptors();
 for (const d of descriptors) {
@@ -152,7 +152,7 @@ for (const d of descriptors) {
 }
 
 const destructiveTools = registry.listByRisk('destructive');
-console.log(`\n  Destructive tools: ${destructiveTools.length > 0 ? destructiveTools.map(t => t.name).join(', ') : '(none in registry)'}`);
+console.log(`\n  Destructive tools: ${destructiveTools.length > 0 ? destructiveTools.map(t => t.schema.name).join(', ') : '(none in registry)'}`);
 
 /* ── 4. Tool Testing ──────────────────────────────────── */
 

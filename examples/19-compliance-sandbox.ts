@@ -246,7 +246,7 @@ const exportReq = audits.create(
 console.log(`  Export created: ${exportReq.id} (status: ${exportReq.status})`);
 
 const ready = audits.markReady(exportReq.id, 1500, 2048000);
-console.log(`  Marked ready: ${ready?.records} records, ${(ready?.sizeBytes ?? 0) / 1024}KB`);
+console.log(`  Marked ready: ${ready?.recordCount} records, ${(ready?.sizeBytes ?? 0) / 1024}KB`);
 
 /* ── 7. Code Sandbox ──────────────────────────────────── */
 

@@ -4,6 +4,13 @@
 
 weaveIntel is a modular monorepo that provides composable building blocks for building production-grade AI applications — from simple chat completions to multi-agent orchestration with tool calling, RAG, memory, observability, and inter-agent communication.
 
+## Latest Development (April 2026)
+
+- geneWeave app moved from packages to apps: [apps/geneweave](apps/geneweave)
+- New example 21 added: [examples/21-guardrails-date-evidence.ts](examples/21-guardrails-date-evidence.ts)
+- Guardrail grounding improvements for tool-backed responses and date/day evidence checks
+- Temporal tool state persistence coverage in geneWeave test suite
+
 ## Why weaveIntel?
 
 - **Protocol-first** — Core defines contracts (interfaces), not implementations. Swap providers without changing application code.
@@ -675,8 +682,9 @@ weaveintel/
 │   ├── triggers/           # Cron, webhooks, queue triggers
 │   ├── collaboration/      # Session management & handoff
 │   ├── testing/            # Fakes & test harnesses
+├── apps/
 │   └── geneweave/          # Full-stack demo app
-├── examples/               # 20 runnable examples
+├── examples/               # 21 runnable examples
 ├── turbo.json              # Turborepo config
 ├── tsconfig.base.json      # Shared TypeScript config
 └── package.json            # Workspace root
@@ -724,6 +732,7 @@ npx tsx examples/17-prompt-management.ts
 npx tsx examples/18-knowledge-graph.ts
 npx tsx examples/19-compliance-sandbox.ts
 npx tsx examples/20-recipes-devtools.ts
+npx tsx examples/21-guardrails-date-evidence.ts
 
 # Requires OPENAI_API_KEY
 OPENAI_API_KEY=sk-... npx tsx examples/01-simple-chat.ts
@@ -731,8 +740,8 @@ OPENAI_API_KEY=sk-... npx tsx examples/01-simple-chat.ts
 # Requires ANTHROPIC_API_KEY
 ANTHROPIC_API_KEY=sk-ant-... npx tsx examples/11-anthropic-provider.ts
 
-# Full-stack demo (requires .env with database config)
-npx tsx examples/12-geneweave.ts
+# Full-stack demo (requires provider key, defaults to port 3500)
+PORT=3501 npx tsx examples/12-geneweave.ts
 ```
 
 ### Adding a New Provider
@@ -751,7 +760,7 @@ npx tsx examples/12-geneweave.ts
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 20 runnable demonstrations:
+The [examples](examples) directory contains 21 runnable demonstrations:
 
 | # | File | What It Shows | Packages Used | API Key |
 |---|---|---|---|---|
@@ -775,6 +784,7 @@ The [`examples/`](examples/) directory contains 20 runnable demonstrations:
 | 18 | [Knowledge Graph](examples/18-knowledge-graph.ts) | Entity nodes, relationships, entity linking, timeline, graph retrieval, extraction pipeline | graph, extraction, agents, testing | None |
 | 19 | [Compliance & Sandbox](examples/19-compliance-sandbox.ts) | Data retention, legal holds, consent, audit export, sandboxed execution, idempotency, retries, DLQ, health checking | compliance, sandbox, reliability | None |
 | 20 | [Recipes & DevTools](examples/20-recipes-devtools.ts) | Pre-built agents, scaffolding, inspection, validation, mock runtime, streaming events, widgets, artifacts, citations, progress | recipes, devtools, ui-primitives | None |
+| 21 | [Guardrails Date Evidence](examples/21-guardrails-date-evidence.ts) | Tool-grounded vs memory-based responses, post-execution grounding behavior, date/day evidence handling | guardrails, agents, tools-time, testing | None |
 
 ## Deployment
 

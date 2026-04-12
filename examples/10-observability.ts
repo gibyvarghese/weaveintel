@@ -91,23 +91,23 @@ async function main() {
   console.log('\n=== Event Bus ===');
   const events: string[] = [];
 
-  bus.on(EventTypes.MODEL_REQUEST_START, (event) => {
+  bus.on(EventTypes.ModelRequestStart, (event) => {
     events.push(`model-start: ${JSON.stringify(event.data)}`);
   });
 
-  bus.on(EventTypes.MODEL_REQUEST_END, (event) => {
+  bus.on(EventTypes.ModelRequestEnd, (event) => {
     events.push(`model-end: ${JSON.stringify(event.data)}`);
   });
 
-  bus.on(EventTypes.TOOL_CALL_START, (event) => {
+  bus.on(EventTypes.ToolCallStart, (event) => {
     events.push(`tool-start: ${JSON.stringify(event.data)}`);
   });
 
-  bus.on(EventTypes.TOOL_CALL_END, (event) => {
+  bus.on(EventTypes.ToolCallEnd, (event) => {
     events.push(`tool-end: ${JSON.stringify(event.data)}`);
   });
 
-  bus.on(EventTypes.AGENT_STEP, (event) => {
+  bus.on(EventTypes.AgentStepEnd, (event) => {
     events.push(`agent-step: ${JSON.stringify(event.data)}`);
   });
 
