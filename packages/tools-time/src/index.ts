@@ -6,7 +6,7 @@ import type { ExecutionContext, Tool } from '@weaveintel/core';
 import { weaveTool } from '@weaveintel/core';
 
 export interface TimeFormatOptions {
-  format?: 'iso' | 'unix' | 'human' | 'date' | 'time';
+  format?: 'iso' | 'unix' | 'human' | 'date' | 'time' | 'weekday';
   timezone?: string;
   locale?: string;
   now?: Date;
@@ -184,9 +184,11 @@ export function formatCurrentTime(opts: TimeFormatOptions = {}): string {
     case 'human':
       return now.toLocaleString(locale, { timeZone: timezone });
     case 'date':
-      return now.toLocaleDateString(locale, { timeZone: timezone });
+      return now.toLocaleDateString(locale, { timeZone: timezone, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     case 'time':
       return now.toLocaleTimeString(locale, { timeZone: timezone });
+    case 'weekday':
+      return now.toLocaleDateString(locale, { timeZone: timezone, weekday: 'long' });
     default:
       return now.toISOString();
   }
@@ -210,16 +212,16 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
   return [
     weaveTool({
       name: 'datetime',
-      description: 'Get the current date/time in different formats.',
+      description: 'Get the current date/time in different formats. Use format="weekday" to get the current day of the week (e.g. Sunday). Use format="date" to get the full date including day of week.',
       parameters: {
         type: 'object',
         properties: {
-          format: { type: 'string', description: 'iso|unix|human|date|time' },
+          format: { type: 'string', description: 'iso|unix|human|date|time|weekday — use weekday to get the current day of the week' },
           timezone: { type: 'string', description: 'IANA timezone override' },
           locale: { type: 'string', description: 'Locale (default en-US)' },
         },
       },
-      execute: async (args: { format?: 'iso' | 'unix' | 'human' | 'date' | 'time'; timezone?: string; locale?: string }) => {
+      execute: async (args: { format?: 'iso' | 'unix' | 'human' | 'date' | 'time' | 'weekday'; timezone?: string; locale?: string }) => {
         const timezone = resolveTimezone(args.timezone, options.defaultTimezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'));
         return formatCurrentTime({ format: args.format, timezone, locale: args.locale ?? locale });
       },
