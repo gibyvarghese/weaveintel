@@ -1459,8 +1459,8 @@ function defaultWorkers(
 ): Array<{ name: string; description: string; systemPrompt?: string; model: Model; tools?: ToolRegistry }> {
   const writerTools = ['text_analysis', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
   
-  // Analyst should also have datetime tools for temporal questions
-  const analystTools = ['calculator', 'json_format', 'text_analysis', 'datetime', 'timezone_info'];
+  // Analyst should have temporal tools AND timer management for handling time-based tasks
+  const analystTools = ['calculator', 'json_format', 'text_analysis', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
 
   return [
     {
@@ -1471,7 +1471,7 @@ function defaultWorkers(
     },
     {
       name: 'analyst',
-      description: 'Analyzes data, performs calculations, formats JSON, provides structured insights, and handles temporal queries. Good for math, data processing, formatting, and date/time questions.',
+      description: 'Analyzes data, performs calculations, formats JSON, provides structured insights, and handles temporal/timer queries. Good for math, data processing, formatting, date/time questions, and time management.',
       systemPrompt: buildPrompt?.(undefined, analystTools),
       model,
       tools: createToolRegistry(analystTools, undefined, toolOptions),
