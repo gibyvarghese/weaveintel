@@ -18,3 +18,18 @@ export { recordCorrection, getCorrections, applyCorrection } from './correction.
 export type { Correction } from './correction.js';
 
 export { isExpired, filterExpired, enforceRetention, forgetUser, forgetSession } from './expiry.js';
+
+export {
+  runHybridMemoryExtraction,
+  evaluateSelfDisclosureByRules,
+  extractEntitiesByRegexRules,
+  mergeExtractedEntities,
+} from './extraction.js';
+export type {
+  MemoryExtractionRule,
+  ExtractedEntity,
+  ExtractionEvent,
+  MemoryExtractionInput,
+  MemoryExtractionResult,
+  LlmEntityExtractor,
+} from './extraction.js';

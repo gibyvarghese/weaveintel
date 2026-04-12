@@ -492,6 +492,24 @@ export function registerAdminRoutes(
     json(res, 200, { evals });
   });
 
+  // ── Memory Extraction Events ───────────────────────────────
+
+  router.get('/api/memory-extraction-events', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const chatId = url.searchParams.get('chat_id') ?? undefined;
+    const limit = parseInt(url.searchParams.get('limit') ?? '100', 10);
+    const events = await db.listMemoryExtractionEvents(chatId, limit);
+    json(res, 200, { events });
+  });
+
+  router.get('/api/memory-extraction-events/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const event = await db.getMemoryExtractionEvent(params['id']!);
+    if (!event) { json(res, 404, { error: 'Memory extraction event not found' }); return; }
+    json(res, 200, { event });
+  });
+
   // ── Admin: Human Task Policies ─────────────────────────────
 
   router.get('/api/admin/task-policies', async (_req, res, _params, auth) => {
@@ -811,6 +829,81 @@ export function registerAdminRoutes(
   router.del('/api/admin/memory-governance/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     await db.deleteMemoryGovernance(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Memory Extraction Rules ────────────────────────
+
+  router.get('/api/admin/memory-extraction-rules', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const url = new URL(req.url ?? '', 'http://localhost');
+    const ruleType = url.searchParams.get('rule_type') ?? undefined;
+    const items = await db.listMemoryExtractionRules(ruleType);
+    json(res, 200, { 'memory-extraction-rules': items });
+  });
+
+  router.get('/api/admin/memory-extraction-rules/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const rule = await db.getMemoryExtractionRule(params['id']!);
+    if (!rule) { json(res, 404, { error: 'Memory extraction rule not found' }); return; }
+    json(res, 200, { 'memory-extraction-rule': rule });
+  });
+
+  router.post('/api/admin/memory-extraction-rules', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name'] || !body['rule_type'] || !body['pattern']) {
+      json(res, 400, { error: 'name, rule_type and pattern required' });
+      return;
+    }
+    const id = 'mer-' + randomUUID().slice(0, 8);
+    await db.createMemoryExtractionRule({
+      id,
+      name: body['name'] as string,
+      description: (body['description'] as string) ?? null,
+      rule_type: body['rule_type'] as string,
+      entity_type: ((body['entity_type'] as string) || '').trim() || null,
+      pattern: body['pattern'] as string,
+      flags: (body['flags'] as string) ?? null,
+      facts_template: body['facts_template']
+        ? (typeof body['facts_template'] === 'string' ? body['facts_template'] as string : JSON.stringify(body['facts_template']))
+        : null,
+      priority: (body['priority'] as number) ?? 0,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const item = await db.getMemoryExtractionRule(id);
+    json(res, 201, { 'memory-extraction-rule': item });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/memory-extraction-rules/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getMemoryExtractionRule(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Memory extraction rule not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['rule_type'] !== undefined) fields['rule_type'] = body['rule_type'];
+    if (body['entity_type'] !== undefined) fields['entity_type'] = ((body['entity_type'] as string) || '').trim() || null;
+    if (body['pattern'] !== undefined) fields['pattern'] = body['pattern'];
+    if (body['flags'] !== undefined) fields['flags'] = body['flags'];
+    if (body['facts_template'] !== undefined) {
+      fields['facts_template'] = typeof body['facts_template'] === 'string' ? body['facts_template'] : JSON.stringify(body['facts_template']);
+    }
+    if (body['priority'] !== undefined) fields['priority'] = body['priority'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateMemoryExtractionRule(params['id']!, fields as any);
+    const item = await db.getMemoryExtractionRule(params['id']!);
+    json(res, 200, { 'memory-extraction-rule': item });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/memory-extraction-rules/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteMemoryExtractionRule(params['id']!);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 

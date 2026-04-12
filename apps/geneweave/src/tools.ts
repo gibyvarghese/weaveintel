@@ -208,6 +208,11 @@ export const BUILTIN_TOOLS: Record<string, Tool> = {
 export interface ToolRegistryOptions {
   defaultTimezone?: string;
   temporalStore?: TemporalStore;
+  currentUserId?: string;
+  memoryRecall?: (args: { userId: string; query: string; limit?: number }) => Promise<{
+    semantic: Array<{ content: string; source: string }>;
+    entities: Array<{ entityType: string; entityName: string; facts: Record<string, unknown> }>;
+  }>;
 }
 
 /**
@@ -216,9 +221,45 @@ export interface ToolRegistryOptions {
  */
 export function createToolRegistry(toolNames: string[], customTools?: Tool[], opts?: ToolRegistryOptions): ToolRegistry {
   const registry = weaveToolRegistry();
+  const memoryRecallTool = weaveTool({
+    name: 'memory_recall',
+    description: 'Retrieve relevant long-term memory for the current user from semantic and entity memory stores.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What to recall from memory for this user' },
+        limit: { type: 'number', description: 'Max semantic memories to return (default: 5, max: 20)' },
+      },
+      required: ['query'],
+    },
+    execute: async (args: { query: string; limit?: number }) => {
+      if (!opts?.memoryRecall || !opts.currentUserId) {
+        return {
+          content: 'Memory recall is unavailable in this execution context.',
+          isError: true,
+        };
+      }
+      const limit = Math.max(1, Math.min(20, Number(args.limit ?? 5)));
+      const recalled = await opts.memoryRecall({
+        userId: opts.currentUserId,
+        query: args.query,
+        limit,
+      });
+      return JSON.stringify({
+        query: args.query,
+        semanticCount: recalled.semantic.length,
+        entityCount: recalled.entities.length,
+        semantic: recalled.semantic,
+        entities: recalled.entities,
+      }, null, 2);
+    },
+    tags: ['memory', 'personalization'],
+  });
+
   const scopedTools: Record<string, Tool> = {
     ...BUILTIN_TOOLS,
     ...createTimeToolMap(opts?.defaultTimezone, opts?.temporalStore ?? defaultTemporalStore),
+    memory_recall: memoryRecallTool,
   };
   for (const name of toolNames) {
     const tool = scopedTools[name];
@@ -234,9 +275,17 @@ export function createToolRegistry(toolNames: string[], customTools?: Tool[], op
 
 /** Info about all available built-in tools */
 export function getAvailableTools(): Array<{ name: string; description: string; tags: string[] }> {
-  return Object.values(BUILTIN_TOOLS).map((t) => ({
+  const base = Object.values(BUILTIN_TOOLS).map((t) => ({
     name: t.schema.name,
     description: t.schema.description,
     tags: [...(t.schema.tags ?? [])],
   }));
+  return [
+    ...base,
+    {
+      name: 'memory_recall',
+      description: 'Retrieve relevant long-term memory for the current user from semantic and entity memory stores.',
+      tags: ['memory', 'personalization'],
+    },
+  ];
 }

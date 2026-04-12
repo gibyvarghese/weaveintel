@@ -14,11 +14,14 @@ import type {
   PromptRow, GuardrailRow, RoutingPolicyRow, WorkflowDefRow,
   ToolConfigRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
   IdentityRuleRow, MemoryGovernanceRow, SearchProviderRow, HttpEndpointRow,
+  MemoryExtractionRuleRow,
   SocialAccountRow, EnterpriseConnectorRow, ToolRegistryRow, ReplayScenarioRow,
   TriggerDefinitionRow, TenantConfigRow, SandboxPolicyRow, ExtractionPipelineRow,
   ArtifactPolicyRow, ReliabilityPolicyRow,
   CollaborationSessionRow, ComplianceRuleRow, GraphConfigRow, PluginConfigRow,
   ScaffoldTemplateRow, RecipeConfigRow, WidgetConfigRow, ValidationRuleRow,
+  SemanticMemoryRow, EntityMemoryRow,
+  MemoryExtractionEventRow,
   MetricsSummary, WorkflowRunRow, GuardrailEvalRow, ModelPricingRow,
 } from './db-types.js';
 
@@ -38,6 +41,56 @@ export class SQLiteAdapter implements DatabaseAdapter {
     } catch {
       // Ignore when the column already exists.
     }
+    // Migrations for semantic and entity memory tables (added later, safe to run on new or old DBs)
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS semantic_memory (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL,
+        tenant_id TEXT,
+        content TEXT NOT NULL,
+        memory_type TEXT NOT NULL DEFAULT 'semantic',
+        source TEXT NOT NULL DEFAULT 'assistant',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    } catch { /* ignore */ }
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS entity_memory (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL,
+        tenant_id TEXT,
+        entity_name TEXT NOT NULL,
+        entity_type TEXT NOT NULL DEFAULT 'general',
+        facts TEXT NOT NULL DEFAULT '{}',
+        confidence REAL NOT NULL DEFAULT 0.5,
+        source TEXT NOT NULL DEFAULT 'regex',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(user_id, entity_name)
+      )`);
+    } catch { /* ignore */ }
+    try {
+      this.db.exec('ALTER TABLE entity_memory ADD COLUMN confidence REAL NOT NULL DEFAULT 0.5');
+    } catch { /* ignore */ }
+    try {
+      this.db.exec("ALTER TABLE entity_memory ADD COLUMN source TEXT NOT NULL DEFAULT 'regex'");
+    } catch { /* ignore */ }
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS memory_extraction_events (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL,
+        tenant_id TEXT,
+        self_disclosure INTEGER NOT NULL DEFAULT 0,
+        regex_entities_count INTEGER NOT NULL DEFAULT 0,
+        llm_entities_count INTEGER NOT NULL DEFAULT 0,
+        merged_entities_count INTEGER NOT NULL DEFAULT 0,
+        events TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    } catch { /* ignore */ }
   }
 
   async close(): Promise<void> {
@@ -855,6 +908,54 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM memory_governance WHERE id = ?').run(id);
   }
 
+  // ─── Admin: Memory Extraction Rules ───────────────────────
+
+  async createMemoryExtractionRule(r: Omit<MemoryExtractionRuleRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO memory_extraction_rules (id, name, description, rule_type, entity_type, pattern, flags, facts_template, priority, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      r.id,
+      r.name,
+      r.description ?? null,
+      r.rule_type,
+      r.entity_type ?? null,
+      r.pattern,
+      r.flags ?? null,
+      r.facts_template ?? null,
+      r.priority,
+      r.enabled,
+    );
+  }
+
+  async getMemoryExtractionRule(id: string): Promise<MemoryExtractionRuleRow | null> {
+    return (this.d.prepare('SELECT * FROM memory_extraction_rules WHERE id = ?').get(id) as MemoryExtractionRuleRow | undefined) ?? null;
+  }
+
+  async listMemoryExtractionRules(ruleType?: string): Promise<MemoryExtractionRuleRow[]> {
+    if (ruleType) {
+      return this.d.prepare('SELECT * FROM memory_extraction_rules WHERE rule_type = ? ORDER BY priority DESC, name ASC').all(ruleType) as MemoryExtractionRuleRow[];
+    }
+    return this.d.prepare('SELECT * FROM memory_extraction_rules ORDER BY rule_type ASC, priority DESC, name ASC').all() as MemoryExtractionRuleRow[];
+  }
+
+  async updateMemoryExtractionRule(id: string, fields: Partial<Omit<MemoryExtractionRuleRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE memory_extraction_rules SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteMemoryExtractionRule(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM memory_extraction_rules WHERE id = ?').run(id);
+  }
+
   // ─── Admin: Search Providers ───────────────────────────────
 
   async createSearchProvider(p: Omit<SearchProviderRow, 'created_at' | 'updated_at'>): Promise<void> {
@@ -1503,6 +1604,175 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM validation_rules WHERE id = ?').run(id);
   }
 
+  // ─── Semantic Memory ───────────────────────────────────────
+
+  async saveSemanticMemory(m: {
+    id: string;
+    userId: string;
+    chatId?: string;
+    tenantId?: string;
+    content: string;
+    memoryType?: string;
+    source?: string;
+  }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO semantic_memory (id, user_id, chat_id, tenant_id, content, memory_type, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      m.id, m.userId, m.chatId ?? null, m.tenantId ?? null,
+      m.content, m.memoryType ?? 'semantic', m.source ?? 'assistant',
+    );
+  }
+
+  async searchSemanticMemory(opts: {
+    userId: string;
+    query: string;
+    limit?: number;
+  }): Promise<SemanticMemoryRow[]> {
+    // Keyword-based search: rank entries containing the most query words first
+    const words = opts.query.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
+    if (words.length === 0) {
+      return this.d.prepare(
+        'SELECT * FROM semantic_memory WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
+      ).all(opts.userId, opts.limit ?? 5) as SemanticMemoryRow[];
+    }
+    // Build CASE score: one point per word match, then order by score DESC, recency DESC
+    const scoreParts = words.map(() => `CASE WHEN LOWER(content) LIKE ? THEN 1 ELSE 0 END`).join(' + ');
+    const likeParams = words.map(w => `%${w}%`);
+    const sql = `
+      SELECT *, (${scoreParts}) AS _score
+      FROM semantic_memory
+      WHERE user_id = ? AND (${words.map(() => 'LOWER(content) LIKE ?').join(' OR ')})
+      ORDER BY _score DESC, created_at DESC
+      LIMIT ?
+    `;
+    return this.d.prepare(sql).all(
+      ...likeParams, opts.userId, ...likeParams, opts.limit ?? 5,
+    ) as SemanticMemoryRow[];
+  }
+
+  async listSemanticMemory(userId: string, limit = 20): Promise<SemanticMemoryRow[]> {
+    return this.d.prepare(
+      'SELECT * FROM semantic_memory WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
+    ).all(userId, limit) as SemanticMemoryRow[];
+  }
+
+  async deleteSemanticMemory(id: string, userId: string): Promise<void> {
+    this.d.prepare('DELETE FROM semantic_memory WHERE id = ? AND user_id = ?').run(id, userId);
+  }
+
+  async clearUserSemanticMemory(userId: string): Promise<void> {
+    this.d.prepare('DELETE FROM semantic_memory WHERE user_id = ?').run(userId);
+  }
+
+  // ─── Entity Memory ─────────────────────────────────────────
+
+  async upsertEntity(e: {
+    userId: string;
+    entityName: string;
+    entityType?: string;
+    facts: Record<string, unknown>;
+    confidence?: number;
+    source?: string;
+    chatId?: string;
+    tenantId?: string;
+  }): Promise<void> {
+    // Merge facts: read existing JSON and merge with new facts
+    const existing = this.d.prepare(
+      'SELECT facts, confidence, source FROM entity_memory WHERE user_id = ? AND entity_name = ?',
+    ).get(e.userId, e.entityName) as { facts: string; confidence: number; source: string } | undefined;
+    const merged = existing ? { ...JSON.parse(existing.facts), ...e.facts } : e.facts;
+    const incomingConfidence = Math.max(0, Math.min(1, e.confidence ?? 0.6));
+    const existingConfidence = existing?.confidence ?? 0;
+    const chosenConfidence = Math.max(existingConfidence, incomingConfidence);
+    const chosenSource = incomingConfidence >= existingConfidence ? (e.source ?? 'regex') : (existing?.source ?? 'regex');
+    this.d.prepare(
+      `INSERT INTO entity_memory (id, user_id, chat_id, tenant_id, entity_name, entity_type, facts, confidence, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, entity_name) DO UPDATE SET
+         entity_type = excluded.entity_type,
+         facts = ?,
+         confidence = ?,
+         source = ?,
+         chat_id = COALESCE(excluded.chat_id, chat_id),
+         updated_at = datetime('now')`,
+    ).run(
+      randomUUID(), e.userId, e.chatId ?? null, e.tenantId ?? null,
+      e.entityName, e.entityType ?? 'general', JSON.stringify(merged), chosenConfidence, chosenSource,
+      JSON.stringify(merged),
+      chosenConfidence,
+      chosenSource,
+    );
+  }
+
+  async getEntity(userId: string, entityName: string): Promise<EntityMemoryRow | null> {
+    return (this.d.prepare(
+      'SELECT * FROM entity_memory WHERE user_id = ? AND entity_name = ? COLLATE NOCASE',
+    ).get(userId, entityName) as EntityMemoryRow | undefined) ?? null;
+  }
+
+  async searchEntities(userId: string, query: string): Promise<EntityMemoryRow[]> {
+    const q = `%${query}%`;
+    return this.d.prepare(
+      `SELECT * FROM entity_memory WHERE user_id = ?
+       AND (LOWER(entity_name) LIKE LOWER(?) OR LOWER(facts) LIKE LOWER(?))
+       ORDER BY updated_at DESC LIMIT 10`,
+    ).all(userId, q, q) as EntityMemoryRow[];
+  }
+
+  async listEntities(userId: string): Promise<EntityMemoryRow[]> {
+    return this.d.prepare(
+      'SELECT * FROM entity_memory WHERE user_id = ? ORDER BY entity_type ASC, entity_name ASC',
+    ).all(userId) as EntityMemoryRow[];
+  }
+
+  async deleteEntity(userId: string, entityName: string): Promise<void> {
+    this.d.prepare('DELETE FROM entity_memory WHERE user_id = ? AND entity_name = ?').run(userId, entityName);
+  }
+
+  async clearUserEntityMemory(userId: string): Promise<void> {
+    this.d.prepare('DELETE FROM entity_memory WHERE user_id = ?').run(userId);
+  }
+
+  async recordMemoryExtractionEvent(e: {
+    id: string;
+    userId: string;
+    chatId?: string;
+    tenantId?: string;
+    selfDisclosure: boolean;
+    regexEntitiesCount: number;
+    llmEntitiesCount: number;
+    mergedEntitiesCount: number;
+    events?: string;
+  }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO memory_extraction_events
+       (id, user_id, chat_id, tenant_id, self_disclosure, regex_entities_count, llm_entities_count, merged_entities_count, events)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      e.id,
+      e.userId,
+      e.chatId ?? null,
+      e.tenantId ?? null,
+      e.selfDisclosure ? 1 : 0,
+      e.regexEntitiesCount,
+      e.llmEntitiesCount,
+      e.mergedEntitiesCount,
+      e.events ?? null,
+    );
+  }
+
+  async getMemoryExtractionEvent(id: string): Promise<MemoryExtractionEventRow | null> {
+    return (this.d.prepare('SELECT * FROM memory_extraction_events WHERE id = ?').get(id) as MemoryExtractionEventRow | undefined) ?? null;
+  }
+
+  async listMemoryExtractionEvents(chatId?: string, limit = 100): Promise<MemoryExtractionEventRow[]> {
+    if (chatId) {
+      return this.d.prepare('SELECT * FROM memory_extraction_events WHERE chat_id = ? ORDER BY created_at DESC LIMIT ?').all(chatId, limit) as MemoryExtractionEventRow[];
+    }
+    return this.d.prepare('SELECT * FROM memory_extraction_events ORDER BY created_at DESC LIMIT ?').all(limit) as MemoryExtractionEventRow[];
+  }
+
   // ─── Seed default data ─────────────────────────────────────
 
   async seedDefaultData(): Promise<void> {
@@ -1893,6 +2163,97 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const g of memGov) await this.createMemoryGovernance(g);
+    }
+
+    // Memory extraction rules
+    if (cnt('memory_extraction_rules') === 0) {
+    const extractionRules: Omit<MemoryExtractionRuleRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'mer-self-name',
+        name: 'Self disclosure: name',
+        description: 'Detect when user discloses their name',
+        rule_type: 'self_disclosure',
+        entity_type: null,
+        pattern: "\\b(?:my name is|i\\'?m called|call me)\\s+([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)?)",
+        flags: 'i',
+        facts_template: null,
+        priority: 100,
+        enabled: 1,
+      },
+      {
+        id: 'mer-self-location',
+        name: 'Self disclosure: location',
+        description: 'Detect where user lives or is from',
+        rule_type: 'self_disclosure',
+        entity_type: null,
+        pattern: "\\b(?:i live in|i\\'?m from|i am from|i reside in)\\s+([A-Z][a-zA-Z\\s]{2,25}?)(?:[,\\.!]|$)",
+        flags: 'i',
+        facts_template: null,
+        priority: 95,
+        enabled: 1,
+      },
+      {
+        id: 'mer-self-work',
+        name: 'Self disclosure: work',
+        description: 'Detect organization where user works',
+        rule_type: 'self_disclosure',
+        entity_type: null,
+        pattern: "\\b(?:i work (?:at|for)|i\\'?m employed (?:at|by)|i\\'?m at)\\s+([A-Z][a-zA-Z\\s]{2,25}?)(?:[,\\.!]|$)",
+        flags: 'i',
+        facts_template: null,
+        priority: 90,
+        enabled: 1,
+      },
+      {
+        id: 'mer-entity-name',
+        name: 'Entity extraction: person name',
+        description: 'Extract a person entity from self name disclosure',
+        rule_type: 'entity_extraction',
+        entity_type: 'person',
+        pattern: "\\b(?:my name is|i\\'?m called|call me)\\s+([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)?)",
+        flags: 'i',
+        facts_template: '{"relationship":"self"}',
+        priority: 100,
+        enabled: 1,
+      },
+      {
+        id: 'mer-entity-location',
+        name: 'Entity extraction: location',
+        description: 'Extract location entity from residence disclosure',
+        rule_type: 'entity_extraction',
+        entity_type: 'location',
+        pattern: "\\b(?:i live in|i\\'?m from|i am from|i reside in)\\s+([A-Z][a-zA-Z\\s]{2,25}?)(?:[,\\.!]|$)",
+        flags: 'i',
+        facts_template: '{"relationship":"residence"}',
+        priority: 95,
+        enabled: 1,
+      },
+      {
+        id: 'mer-entity-work',
+        name: 'Entity extraction: organization',
+        description: 'Extract organization entity from employer disclosure',
+        rule_type: 'entity_extraction',
+        entity_type: 'organization',
+        pattern: "\\b(?:i work (?:at|for)|i\\'?m employed (?:at|by)|i\\'?m at)\\s+([A-Z][a-zA-Z\\s]{2,25}?)(?:[,\\.!]|$)",
+        flags: 'i',
+        facts_template: '{"relationship":"employer"}',
+        priority: 90,
+        enabled: 1,
+      },
+      {
+        id: 'mer-entity-pref',
+        name: 'Entity extraction: preference',
+        description: 'Extract preference topic from likes/loves/enjoys statements',
+        rule_type: 'entity_extraction',
+        entity_type: 'preference',
+        pattern: '\\bi (?:like|love|enjoy|prefer)\\s+([a-zA-Z][a-zA-Z\\s]{2,25}?)(?:[,\\.!]|$)',
+        flags: 'gi',
+        facts_template: '{"sentiment":"positive"}',
+        priority: 80,
+        enabled: 1,
+      },
+    ];
+    for (const r of extractionRules) await this.createMemoryExtractionRule(r);
     }
 
     // Search Providers

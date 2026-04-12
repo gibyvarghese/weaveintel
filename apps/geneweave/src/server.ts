@@ -295,7 +295,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       // For now, we replicate the policy here; ideally this would be imported
       const DEFAULT_TOOLS: Record<string, string[]> = {
         direct: [],
-        agent: ['datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'web_search'],
+        agent: ['datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'memory_recall', 'web_search'],
         supervisor: ['datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis'],
       };
       return DEFAULT_TOOLS[mode] ?? [];

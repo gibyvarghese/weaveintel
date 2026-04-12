@@ -9,7 +9,8 @@
     "url": "https://github.com/gibyvarghese/weaveintel"
   },
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
     "build": "turbo build",
@@ -17,8 +18,8 @@
     "lint": "turbo lint",
     "clean": "turbo clean",
     "typecheck": "turbo typecheck",
-    "format": "prettier --write \"packages/*/src/**/*.ts\"",
-    "format:check": "prettier --check \"packages/*/src/**/*.ts\"",
+    "format": "prettier --write \"{packages,apps}/*/src/**/*.ts\"",
+    "format:check": "prettier --check \"{packages,apps}/*/src/**/*.ts\"",
     "release:bump": "node scripts/bump-version.mjs",
     "release:tag": "node scripts/tag-release.mjs"
   },

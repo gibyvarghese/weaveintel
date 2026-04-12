@@ -46,6 +46,7 @@ import { weaveInMemoryCacheStore } from '@weaveintel/cache';
 import { weaveCacheKeyBuilder } from '@weaveintel/cache';
 import { shouldBypass, resolvePolicy } from '@weaveintel/cache';
 import type { CachePolicy } from '@weaveintel/core';
+import { runHybridMemoryExtraction, type ExtractedEntity, type MemoryExtractionRule } from '@weaveintel/memory';
 
 const TEMPORAL_TOOL_POLICY = [
   'Temporal Tool Usage Policy:',
@@ -114,7 +115,7 @@ const TOOL_POLICIES: Record<'direct' | 'agent' | 'supervisor', string[]> = {
     'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',
     'reminder_create', 'reminder_list', 'reminder_cancel',
     // Utility tools
-    'calculator', 'json_format', 'text_analysis',
+    'calculator', 'json_format', 'text_analysis', 'memory_recall',
     'web_search',
   ],
   
@@ -403,6 +404,15 @@ export class ChatEngine {
     const history = await this.db.getMessages(chatId);
     const messages = historyToMessages(history);
 
+    // ── Memory recall ──
+    const memoryContext = await this.buildMemoryContext(ctx, model, userId, processedContent);
+    const augmentedPrompt = memoryContext
+      ? (resolvedPrompt ? `${resolvedPrompt}\n\n---\n${memoryContext}` : memoryContext)
+      : resolvedPrompt;
+    const memorySettings = memoryContext
+      ? { ...settings, systemPrompt: settings.systemPrompt ? `${settings.systemPrompt}\n\n---\n${memoryContext}` : memoryContext }
+      : settings;
+
     let assistantContent: string = '';
     let usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
     let steps: AgentStep[] | undefined;
@@ -423,7 +433,7 @@ export class ChatEngine {
     if (!cacheHit) {
     if (settings.mode === 'agent' || settings.mode === 'supervisor') {
       // ── Agent / Supervisor mode ──
-      const result = await this.runAgent(ctx, model, messages, processedContent, settings);
+      const result = await this.runAgent(ctx, model, userId, messages, processedContent, memorySettings);
       assistantContent = result.output;
       usage = {
         promptTokens: result.usage.totalTokens,  // agent tracks totalTokens only
@@ -434,8 +444,8 @@ export class ChatEngine {
     } else {
       // ── Direct mode ──
       const request: ModelRequest = {
-        messages: resolvedPrompt
-          ? [{ role: 'system', content: resolvedPrompt }, ...messages]
+        messages: augmentedPrompt
+          ? [{ role: 'system', content: augmentedPrompt }, ...messages]
           : messages,
         maxTokens: opts?.maxTokens ?? 4096,
         temperature: opts?.temperature,
@@ -515,6 +525,13 @@ export class ChatEngine {
       cost,
       latencyMs,
     });
+
+    // Persist memory before returning so cross-chat recall is immediately available.
+    try {
+      await this.saveToMemory(ctx, model, userId, chatId, processedContent, assistantContent);
+    } catch {
+      // Keep chat success path resilient when memory persistence fails.
+    }
 
     // Record metric
     await this.db.recordMetric({
@@ -624,6 +641,15 @@ export class ChatEngine {
     const history = await this.db.getMessages(chatId);
     const messages = historyToMessages(history);
 
+    // ── Memory recall ──
+    const streamMemoryContext = await this.buildMemoryContext(ctx, model, userId, processedContent);
+    const streamAugmentedPrompt = streamMemoryContext
+      ? (resolvedPrompt ? `${resolvedPrompt}\n\n---\n${streamMemoryContext}` : streamMemoryContext)
+      : resolvedPrompt;
+    const streamMemorySettings = streamMemoryContext
+      ? { ...settings, systemPrompt: settings.systemPrompt ? `${settings.systemPrompt}\n\n---\n${streamMemoryContext}` : streamMemoryContext }
+      : settings;
+
     // SSE headers
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -645,15 +671,15 @@ export class ChatEngine {
     try {
       if (settings.mode === 'agent' || settings.mode === 'supervisor') {
         // ── Agent / Supervisor streaming ──
-        const agentResult = await this.streamAgent(res, ctx, model, messages, processedContent, settings);
+        const agentResult = await this.streamAgent(res, ctx, model, userId, messages, processedContent, streamMemorySettings);
         fullText = agentResult.output;
         finalUsage = { promptTokens: agentResult.usage.totalTokens, completionTokens: 0, totalTokens: agentResult.usage.totalTokens };
         steps = [...agentResult.steps];
       } else {
         // ── Direct streaming ──
         const request: ModelRequest = {
-          messages: resolvedPrompt
-            ? [{ role: 'system', content: resolvedPrompt }, ...messages]
+          messages: streamAugmentedPrompt
+            ? [{ role: 'system', content: streamAugmentedPrompt }, ...messages]
             : messages,
           maxTokens: opts?.maxTokens ?? 4096,
           temperature: opts?.temperature,
@@ -744,9 +770,8 @@ export class ChatEngine {
       cognitive: postGuardrail.cognitive,
       traceId,
     })}\n\n`);
-    res.end();
 
-    // Persist (fire-and-forget)
+    // Persist before closing the stream so immediate follow-up chats can recall memory.
     const assistMsgId = randomUUID();
     await this.db.addMessage({
       id: assistMsgId, chatId, role: 'assistant', content: fullText,
@@ -766,6 +791,13 @@ export class ChatEngine {
       tokensUsed: finalUsage.totalTokens, cost, latencyMs,
     });
 
+    // Persist memory before completing request lifecycle to reduce write/read races across chats.
+    try {
+      await this.saveToMemory(ctx, model, userId, chatId, processedContent, fullText);
+    } catch {
+      // Keep chat success path resilient when memory persistence fails.
+    }
+
     await this.db.recordMetric({
       id: randomUUID(), userId, chatId, type: 'generation', provider, model: modelId,
       promptTokens: finalUsage.promptTokens, completionTokens: finalUsage.completionTokens,
@@ -773,6 +805,7 @@ export class ChatEngine {
     });
 
     await this.recordTraceSpans(userId, chatId, assistMsgId, traceId, settings.mode, startMs, latencyMs, steps);
+    res.end();
   }
 
   // ── Agent execution (non-streaming) ─────────────────────────
@@ -780,6 +813,7 @@ export class ChatEngine {
   private async runAgent(
     ctx: ExecutionContext,
     model: Model,
+    userId: string,
     messages: Message[],
     userContent: string,
     settings: ChatSettings,
@@ -787,6 +821,22 @@ export class ChatEngine {
     const toolOptions: ToolRegistryOptions = {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
+      currentUserId: userId,
+      memoryRecall: async ({ userId: recallUserId, query, limit }) => {
+        const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
+        const [semantic, entityRows] = await Promise.all([
+          this.db.searchSemanticMemory({ userId: recallUserId, query, limit: boundedLimit }),
+          this.db.searchEntities(recallUserId, query),
+        ]);
+        return {
+          semantic: semantic.map((m) => ({ content: m.content, source: m.source })),
+          entities: entityRows.map((e) => ({
+            entityType: e.entity_type,
+            entityName: e.entity_name,
+            facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
+          })),
+        };
+      },
     };
     const tools = settings.enabledTools.length
       ? createToolRegistry(settings.enabledTools, undefined, toolOptions)
@@ -829,6 +879,7 @@ export class ChatEngine {
     res: ServerResponse,
     ctx: ExecutionContext,
     model: Model,
+    userId: string,
     messages: Message[],
     userContent: string,
     settings: ChatSettings,
@@ -836,6 +887,22 @@ export class ChatEngine {
     const toolOptions: ToolRegistryOptions = {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
+      currentUserId: userId,
+      memoryRecall: async ({ userId: recallUserId, query, limit }) => {
+        const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
+        const [semantic, entityRows] = await Promise.all([
+          this.db.searchSemanticMemory({ userId: recallUserId, query, limit: boundedLimit }),
+          this.db.searchEntities(recallUserId, query),
+        ]);
+        return {
+          semantic: semantic.map((m) => ({ content: m.content, source: m.source })),
+          entities: entityRows.map((e) => ({
+            entityType: e.entity_type,
+            entityName: e.entity_name,
+            facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
+          })),
+        };
+      },
     };
     const tools = settings.enabledTools.length
       ? createToolRegistry(settings.enabledTools, undefined, toolOptions)
@@ -1469,6 +1536,228 @@ export class ChatEngine {
     }
   }
 
+  // ── Memory helpers ─────────────────────────────────────────────────────────
+
+  private async loadExtractionRules(): Promise<MemoryExtractionRule[]> {
+    const rows = await this.db.listMemoryExtractionRules();
+    return rows.map((r) => {
+      let factsTemplate: Record<string, unknown> | null = null;
+      try {
+        factsTemplate = r.facts_template ? JSON.parse(r.facts_template) as Record<string, unknown> : null;
+      } catch {
+        factsTemplate = null;
+      }
+      return {
+        id: r.id,
+        ruleType: r.rule_type as MemoryExtractionRule['ruleType'],
+        entityType: r.entity_type,
+        pattern: r.pattern,
+        flags: r.flags,
+        factsTemplate,
+        priority: r.priority,
+        enabled: !!r.enabled,
+      };
+    });
+  }
+
+  private safeParseJson(text: string): unknown {
+    const trimmed = text.trim();
+    const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+    const raw = fenced?.[1] ?? trimmed;
+    return JSON.parse(raw);
+  }
+
+  private sanitizeExtractedEntities(raw: unknown): Array<{ name: string; type: string; facts: Record<string, unknown> }> {
+    if (!Array.isArray(raw)) return [];
+    const allowedTypes = new Set(['person', 'location', 'organization', 'preference', 'topic', 'general']);
+    const out: Array<{ name: string; type: string; facts: Record<string, unknown> }> = [];
+    for (const item of raw.slice(0, 8)) {
+      if (!item || typeof item !== 'object') continue;
+      const row = item as { name?: unknown; type?: unknown; facts?: unknown };
+      const name = typeof row.name === 'string' ? row.name.trim() : '';
+      if (!name || name.length > 120) continue;
+      const typeRaw = typeof row.type === 'string' ? row.type.toLowerCase().trim() : 'general';
+      const type = allowedTypes.has(typeRaw) ? typeRaw : 'general';
+      const facts = (row.facts && typeof row.facts === 'object' && !Array.isArray(row.facts))
+        ? (row.facts as Record<string, unknown>)
+        : {};
+      out.push({ name, type, facts });
+    }
+    return out;
+  }
+
+  private async extractEntitiesWithModel(
+    ctx: ExecutionContext,
+    model: Model,
+    userContent: string,
+    assistantContent: string,
+  ): Promise<ExtractedEntity[]> {
+    const request: ModelRequest = {
+      messages: [
+        {
+          role: 'system',
+          content: [
+            'You extract durable user profile entities from a conversation turn.',
+            'Think carefully about stable facts, but output JSON only.',
+            'Return a JSON array, each item as: {"name": string, "type": "person|location|organization|preference|topic|general", "facts": object}.',
+            'Only include entities that are explicitly stated or strongly implied by the user.',
+            'Do not include temporary tasks or speculative details.',
+            'If nothing durable is present, return [].',
+          ].join('\n'),
+        },
+        {
+          role: 'user',
+          content: [
+            `User message: ${userContent}`,
+            `Assistant response: ${assistantContent.slice(0, 600)}`,
+            'Return JSON array only.',
+          ].join('\n\n'),
+        },
+      ],
+      maxTokens: 500,
+      temperature: 0,
+    };
+    const res = await model.generate(ctx, request);
+    const parsed = this.safeParseJson(res.content);
+    return this.sanitizeExtractedEntities(parsed).map((e) => ({
+      ...e,
+      confidence: 0.78,
+      source: 'llm' as const,
+    }));
+  }
+
+  private async classifyIdentityRecallIntent(ctx: ExecutionContext, model: Model, query: string): Promise<boolean> {
+    const regexSignal = /\b(name|who\s+am\s+i|who\s+i\s+am|what\s+am\s+i\s+called|what'?s\s+my\s+name|remember\s+my\s+name|do\s+you\s+know\s+who\s+i\s+am)\b/i.test(query);
+    if (regexSignal) return true;
+
+    // Avoid model classification for long prompts where identity intent is unlikely.
+    if (query.length > 180) return false;
+
+    try {
+      const request: ModelRequest = {
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'Classify whether the user is asking the assistant to recall who the user is based on prior memory.',
+              'Return ONLY one token: YES or NO.',
+              'Use YES for questions about identity, name, personal profile, or remembered user details from prior chats.',
+            ].join('\n'),
+          },
+          {
+            role: 'user',
+            content: query,
+          },
+        ],
+        maxTokens: 3,
+        temperature: 0,
+      };
+      const res = await model.generate(ctx, request);
+      return /^\s*yes\b/i.test(res.content);
+    } catch {
+      return false;
+    }
+  }
+
+  private async buildMemoryContext(ctx: ExecutionContext, model: Model, userId: string, query: string): Promise<string | null> {
+    try {
+      const identityQuery = await this.classifyIdentityRecallIntent(ctx, model, query);
+      const entityPromise = identityQuery
+        ? this.db.listEntities(userId).then((rows) => rows.slice(0, 10))
+        : this.db.searchEntities(userId, query);
+      const [semanticMatches, entityMatches] = await Promise.all([
+        this.db.searchSemanticMemory({ userId, query, limit: 5 }),
+        entityPromise,
+      ]);
+      if (semanticMatches.length === 0 && entityMatches.length === 0) return null;
+      const parts: string[] = ['[Long-term memory from past conversations]'];
+      if (entityMatches.length > 0) {
+        parts.push('Known facts about this user:');
+        for (const e of entityMatches) {
+          const factsObj = JSON.parse(e.facts) as Record<string, unknown>;
+          const factsStr = Object.entries(factsObj)
+            .filter(([k]) => !k.startsWith('noted_'))
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ');
+          parts.push(`  • ${e.entity_type} "${e.entity_name}"${factsStr ? ' — ' + factsStr : ''}`);
+        }
+      }
+      if (semanticMatches.length > 0) {
+        parts.push('Relevant memories:');
+        for (const m of semanticMatches) {
+          const label = m.source === 'user' ? 'User stated' : 'Previously discussed';
+          parts.push(`  • [${label}] ${m.content.slice(0, 200)}`);
+        }
+      }
+      return parts.join('\n');
+    } catch {
+      return null;
+    }
+  }
+
+  private async saveToMemory(
+    ctx: ExecutionContext,
+    model: Model,
+    userId: string,
+    chatId: string,
+    userContent: string,
+    assistantContent: string,
+  ): Promise<void> {
+    const rules = await this.loadExtractionRules();
+    const extraction = await runHybridMemoryExtraction({
+      ctx,
+      input: { userContent, assistantContent },
+      rules,
+      llmExtractor: async (innerCtx, input) => this.extractEntitiesWithModel(innerCtx, model, input.userContent, input.assistantContent ?? ''),
+    });
+
+    if (extraction.selfDisclosure && userContent.length > 5) {
+      await this.db.saveSemanticMemory({
+        id: randomUUID(),
+        userId,
+        chatId,
+        content: userContent.slice(0, 600),
+        memoryType: 'user_fact',
+        source: 'user',
+      });
+    }
+    if (assistantContent.length > 100) {
+      await this.db.saveSemanticMemory({
+        id: randomUUID(),
+        userId,
+        chatId,
+        content: assistantContent.slice(0, 600),
+        memoryType: 'summary',
+        source: 'assistant',
+      });
+    }
+
+    for (const e of extraction.entities) {
+      await this.db.upsertEntity({
+        userId,
+        entityName: e.name,
+        entityType: e.type,
+        facts: e.facts,
+        confidence: e.confidence,
+        source: e.source,
+        chatId,
+      });
+    }
+
+    const regexEntitiesCount = extraction.entities.filter((e) => e.source === 'regex').length;
+    const llmEntitiesCount = extraction.entities.filter((e) => e.source === 'llm').length;
+    await this.db.recordMemoryExtractionEvent({
+      id: randomUUID(),
+      userId,
+      chatId,
+      selfDisclosure: extraction.selfDisclosure,
+      regexEntitiesCount,
+      llmEntitiesCount,
+      mergedEntitiesCount: extraction.entities.length,
+      events: JSON.stringify(extraction.events),
+    });
+  }
+
   /**
    * Resolve the best-matching cache policy from admin-configured policies.
    */
@@ -1509,10 +1798,10 @@ function defaultWorkers(
   toolOptions?: ToolRegistryOptions,
   buildPrompt?: (basePrompt: string | undefined, toolNames: string[]) => string | undefined,
 ): Array<{ name: string; description: string; systemPrompt?: string; model: Model; tools?: ToolRegistry }> {
-  const writerTools = ['text_analysis', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
+  const writerTools = ['text_analysis', 'memory_recall', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
   
   // Analyst should have temporal tools AND timer management for handling time-based tasks
-  const analystTools = ['calculator', 'json_format', 'text_analysis', 'datetime', 'datetime_add', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
+  const analystTools = ['calculator', 'json_format', 'text_analysis', 'memory_recall', 'datetime', 'datetime_add', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
 
   return [
     {

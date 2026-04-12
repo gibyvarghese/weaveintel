@@ -59,6 +59,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'contracts', label: 'Contracts' },
     { key: 'identity-rules', label: 'Identity Rules' },
     { key: 'memory-governance', label: 'Memory Gov' },
+    { key: 'memory-extraction-rules', label: 'Memory Rules' },
     { key: 'compliance-rules', label: 'Compliance' },
   ]},
   { label: 'Integrations', icon: '\uD83D\uDD0C', tabs: [
@@ -94,6 +95,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
   { label: 'Monitoring', icon: '\uD83D\uDCCA', tabs: [
     { key: 'workflow-runs', label: 'Workflow Runs' },
     { key: 'guardrail-evals', label: 'Guardrail Evals' },
+    { key: 'memory-extraction-events', label: 'Memory Extraction' },
   ]},
   { label: 'System', icon: '\u2139\uFE0F', tabs: [
     { key: 'about', label: 'About' },
@@ -247,6 +249,21 @@ export const ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'redact_patterns', label: 'Redact Patterns (JSON)', textarea: true, save: 'json' },
       { key: 'max_age', label: 'Max Age' },
       { key: 'max_entries', label: 'Max Entries', type: 'number', save: 'int' },
+      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
+    ],
+  },
+  'memory-extraction-rules': {
+    singular: 'Memory Extraction Rule', apiPath: 'admin/memory-extraction-rules', listKey: 'memory-extraction-rules',
+    cols: ['name', 'rule_type', 'entity_type', 'priority', 'enabled'],
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'description', label: 'Description' },
+      { key: 'rule_type', label: 'Rule Type', options: ['self_disclosure', 'entity_extraction'], default: 'entity_extraction' },
+      { key: 'entity_type', label: 'Entity Type', options: ['', 'person', 'location', 'organization', 'preference', 'topic', 'general'] },
+      { key: 'pattern', label: 'Regex Pattern', textarea: true, rows: 3 },
+      { key: 'flags', label: 'Regex Flags', default: 'i' },
+      { key: 'facts_template', label: 'Facts Template (JSON)', textarea: true, save: 'json' },
+      { key: 'priority', label: 'Priority', type: 'number', save: 'int', default: 0 },
       { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
     ],
   },
@@ -593,6 +610,12 @@ export const ADMIN_TABS: Record<string, AdminTabDef> = {
   'guardrail-evals': {
     singular: 'Guardrail Eval', apiPath: 'guardrail-evals', listKey: 'evals',
     cols: ['id', 'stage', 'overall_decision', 'created_at'],
+    fields: [],
+    readOnly: true,
+  },
+  'memory-extraction-events': {
+    singular: 'Memory Extraction Event', apiPath: 'memory-extraction-events', listKey: 'events',
+    cols: ['id', 'self_disclosure', 'regex_entities_count', 'llm_entities_count', 'merged_entities_count', 'created_at'],
     fields: [],
     readOnly: true,
   },

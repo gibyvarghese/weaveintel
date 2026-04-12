@@ -120,7 +120,7 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 | [`@weaveintel/ui-primitives`](packages/ui-primitives) | UI streaming events, widgets (table, chart, form, code, timeline), artifacts, citations, progress |
 | [`@weaveintel/triggers`](packages/triggers) | Trigger system — cron schedules, webhooks, queue-based triggers with filtering |
 | [`@weaveintel/collaboration`](packages/collaboration) | Session management — multi-user handoff, shared context, agent collaboration |
-| [`@weaveintel/geneweave`](packages/geneweave) | Full-stack demo app — chat UI, admin dashboard, tools, auth, SQLite backend |
+| [`@weaveintel/geneweave`](apps/geneweave) | Full-stack demo app — chat UI, admin dashboard, tools, auth, SQLite backend |
 
 ## Quick Start
 

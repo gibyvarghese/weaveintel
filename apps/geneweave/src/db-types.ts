@@ -312,6 +312,21 @@ export interface MemoryGovernanceRow {
   updated_at: string;
 }
 
+export interface MemoryExtractionRuleRow {
+  id: string;
+  name: string;
+  description: string | null;
+  rule_type: string;              // 'self_disclosure' | 'entity_extraction'
+  entity_type: string | null;     // used for entity_extraction rules
+  pattern: string;
+  flags: string | null;           // regex flags e.g. 'i', 'gi'
+  facts_template: string | null;  // JSON object for additional facts
+  priority: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SearchProviderRow {
   id: string;
   name: string;
@@ -624,6 +639,45 @@ export interface ValidationRuleRow {
   updated_at: string;
 }
 
+export interface SemanticMemoryRow {
+  id: string;
+  user_id: string;
+  chat_id: string | null;
+  tenant_id: string | null;
+  content: string;
+  memory_type: string;   // 'semantic' | 'user_fact' | 'preference' | 'summary'
+  source: string;        // 'user' | 'assistant'
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EntityMemoryRow {
+  id: string;
+  user_id: string;
+  chat_id: string | null;
+  tenant_id: string | null;
+  entity_name: string;
+  entity_type: string;   // 'person' | 'location' | 'organization' | 'preference' | 'topic' | 'general'
+  facts: string;         // JSON object of key→value facts
+  confidence: number;
+  source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MemoryExtractionEventRow {
+  id: string;
+  user_id: string;
+  chat_id: string | null;
+  tenant_id: string | null;
+  self_disclosure: number;
+  regex_entities_count: number;
+  llm_entities_count: number;
+  merged_entities_count: number;
+  events: string | null;
+  created_at: string;
+}
+
 export interface MetricsSummary {
   total_tokens: number;
   total_cost: number;
@@ -898,6 +952,13 @@ export interface DatabaseAdapter {
   updateMemoryGovernance(id: string, fields: Partial<Omit<MemoryGovernanceRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteMemoryGovernance(id: string): Promise<void>;
 
+  // ─── Admin: Memory Extraction Rules ────────────────────────
+  createMemoryExtractionRule(r: Omit<MemoryExtractionRuleRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getMemoryExtractionRule(id: string): Promise<MemoryExtractionRuleRow | null>;
+  listMemoryExtractionRules(ruleType?: string): Promise<MemoryExtractionRuleRow[]>;
+  updateMemoryExtractionRule(id: string, fields: Partial<Omit<MemoryExtractionRuleRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteMemoryExtractionRule(id: string): Promise<void>;
+
   // ─── Admin: Search Providers ─────────────────────────────────
   createSearchProvider(p: Omit<SearchProviderRow, 'created_at' | 'updated_at'>): Promise<void>;
   getSearchProvider(id: string): Promise<SearchProviderRow | null>;
@@ -1037,6 +1098,56 @@ export interface DatabaseAdapter {
   listValidationRules(): Promise<ValidationRuleRow[]>;
   updateValidationRule(id: string, fields: Partial<Omit<ValidationRuleRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteValidationRule(id: string): Promise<void>;
+
+  // ─── Semantic Memory ──────────────────────────────────────────
+  saveSemanticMemory(m: {
+    id: string;
+    userId: string;
+    chatId?: string;
+    tenantId?: string;
+    content: string;
+    memoryType?: string;
+    source?: string;
+  }): Promise<void>;
+  searchSemanticMemory(opts: {
+    userId: string;
+    query: string;
+    limit?: number;
+  }): Promise<SemanticMemoryRow[]>;
+  listSemanticMemory(userId: string, limit?: number): Promise<SemanticMemoryRow[]>;
+  deleteSemanticMemory(id: string, userId: string): Promise<void>;
+  clearUserSemanticMemory(userId: string): Promise<void>;
+
+  // ─── Entity Memory ────────────────────────────────────────────
+  upsertEntity(e: {
+    userId: string;
+    entityName: string;
+    entityType?: string;
+    facts: Record<string, unknown>;
+    confidence?: number;
+    source?: string;
+    chatId?: string;
+    tenantId?: string;
+  }): Promise<void>;
+  getEntity(userId: string, entityName: string): Promise<EntityMemoryRow | null>;
+  searchEntities(userId: string, query: string): Promise<EntityMemoryRow[]>;
+  listEntities(userId: string): Promise<EntityMemoryRow[]>;
+  deleteEntity(userId: string, entityName: string): Promise<void>;
+  clearUserEntityMemory(userId: string): Promise<void>;
+
+  recordMemoryExtractionEvent(e: {
+    id: string;
+    userId: string;
+    chatId?: string;
+    tenantId?: string;
+    selfDisclosure: boolean;
+    regexEntitiesCount: number;
+    llmEntitiesCount: number;
+    mergedEntitiesCount: number;
+    events?: string;
+  }): Promise<void>;
+  getMemoryExtractionEvent(id: string): Promise<MemoryExtractionEventRow | null>;
+  listMemoryExtractionEvents(chatId?: string, limit?: number): Promise<MemoryExtractionEventRow[]>;
 
   // ─── Admin: Seed data ──────────────────────────────────────
   seedDefaultData(): Promise<void>;
