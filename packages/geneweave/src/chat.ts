@@ -71,6 +71,43 @@ const SUPERVISOR_TEMPORAL_POLICY = [
   '  • Any question about current timestamp, current date, current time, or today',
 ].join('\n');
 
+// ─── Tool Policies (auto-select tools by mode) ─────────────────
+
+/**
+ * Default tool suite for each mode. Tools are auto-selected based on the
+ * chat mode to ensure agents have access to necessary capabilities without
+ * requiring manual configuration.
+ */
+const TOOL_POLICIES: Record<'direct' | 'agent' | 'supervisor', string[]> = {
+  // Direct mode: model has no tools (direct inference)
+  direct: [],
+  
+  // Agent mode: full toolkit for general-purpose reasoning
+  agent: [
+    // Temporal tools
+    'datetime', 'timezone_info',
+    'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
+    'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',
+    'reminder_create', 'reminder_list', 'reminder_cancel',
+    // Utility tools
+    'calculator', 'json_format', 'text_analysis',
+    'web_search',
+  ],
+  
+  // Supervisor mode: reserved for worker delegation; supervisor itself has minimal direct tools
+  supervisor: [
+    'datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis',
+  ],
+};
+
+/**
+ * Get the default enabled tools for a given chat mode.
+ * Tools are auto-selected to ensure proper functionality without manual setup.
+ */
+export function getDefaultToolsByMode(mode: 'direct' | 'agent' | 'supervisor'): string[] {
+  return TOOL_POLICIES[mode] ?? [];
+}
+
 // ─── Model pricing (per 1 M tokens) ─────────────────────────
 
 interface ModelPricing { input: number; output: number }
@@ -162,7 +199,7 @@ type CognitiveCheckSummary = GuardrailCategorySummary;
 
 const DEFAULT_SETTINGS: ChatSettings = {
   mode: 'direct',
-  enabledTools: [],
+  enabledTools: getDefaultToolsByMode('direct'),
   redactionEnabled: false,
   redactionPatterns: ['email', 'phone', 'ssn', 'credit_card'],
   workers: [],
@@ -170,11 +207,19 @@ const DEFAULT_SETTINGS: ChatSettings = {
 
 export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
   if (!row) return { ...DEFAULT_SETTINGS };
+  
+  const mode = (row.mode as ChatSettings['mode']) || 'direct';
+  
+  // Apply tool policy based on mode: if no tools are explicitly set, use defaults for the mode
+  const enabledTools = row.enabled_tools 
+    ? JSON.parse(row.enabled_tools) 
+    : getDefaultToolsByMode(mode);
+  
   return {
-    mode: (row.mode as ChatSettings['mode']) || 'direct',
+    mode,
     systemPrompt: row.system_prompt ?? undefined,
     timezone: row.timezone ?? undefined,
-    enabledTools: row.enabled_tools ? JSON.parse(row.enabled_tools) : [],
+    enabledTools,
     redactionEnabled: !!row.redaction_enabled,
     redactionPatterns: row.redaction_patterns ? JSON.parse(row.redaction_patterns) : DEFAULT_SETTINGS.redactionPatterns,
     workers: row.workers ? JSON.parse(row.workers) : [],

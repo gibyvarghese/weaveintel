@@ -1979,21 +1979,7 @@ function renderSettingsDropdown(){
     )
   ];
 
-  /* Tools section (only for agent/supervisor) */
-  if(s.mode==='agent'||s.mode==='supervisor'){
-    const toolChips = (state.availableTools||[]).map(t=>{
-      const active = s.enabledTools.includes(t.name);
-      return h('span',{className:'tool-chip'+(active?' active':''),onClick:()=>{
-        if(active) s.enabledTools=s.enabledTools.filter(n=>n!==t.name);
-        else s.enabledTools.push(t.name);
-        saveChatSettings(); render();
-      }},t.name);
-    });
-    sections.push(h('div',{className:'settings-section'},
-      h('div',{className:'sec-label'},'Tools'),
-      h('div',{className:'tool-toggle'},...toolChips)
-    ));
-  }
+  /* Tools are now auto-selected based on the mode via tool policies (no manual selection needed) */
 
   /* Redaction toggle */
   const redactToggle = h('div',{className:'toggle-switch'+(s.redactionEnabled?' on':''),onClick:()=>{

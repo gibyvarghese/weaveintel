@@ -284,12 +284,29 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       json(res, 400, { error: 'mode must be "direct", "agent", or "supervisor"' }); return;
     }
 
+    // Apply tool policy: if enabledTools not provided, apply defaults for the mode
+    // This allows tools to be auto-selected based on the mode
+    const toolPolicy = (() => {
+      if (body['enabledTools'] !== undefined && body['enabledTools'] !== null) {
+        // User explicitly provided tools
+        return body['enabledTools'];
+      }
+      // Auto-select based on mode - get from chat engine's tool policy
+      // For now, we replicate the policy here; ideally this would be imported
+      const DEFAULT_TOOLS: Record<string, string[]> = {
+        direct: [],
+        agent: ['datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'web_search'],
+        supervisor: ['datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis'],
+      };
+      return DEFAULT_TOOLS[mode] ?? [];
+    })();
+
     await db.saveChatSettings({
       chatId: chat.id,
       mode,
       systemPrompt: (body['systemPrompt'] as string) ?? undefined,
       timezone: (body['timezone'] as string) ?? undefined,
-      enabledTools: body['enabledTools'] ? JSON.stringify(body['enabledTools']) : undefined,
+      enabledTools: JSON.stringify(toolPolicy),
       redactionEnabled: !!body['redactionEnabled'],
       redactionPatterns: body['redactionPatterns'] ? JSON.stringify(body['redactionPatterns']) : undefined,
       workers: body['workers'] ? JSON.stringify(body['workers']) : undefined,
