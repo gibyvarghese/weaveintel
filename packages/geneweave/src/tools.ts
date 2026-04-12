@@ -7,6 +7,47 @@
 
 import type { Tool, ToolRegistry } from '@weaveintel/core';
 import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import { createSearchRouter, type SearchProviderConfig } from '@weaveintel/tools-search';
+import { createInMemoryTemporalStore, createTimeTools, type TemporalStore } from '@weaveintel/tools-time';
+
+function envFlag(name: string, defaultValue: boolean): boolean {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
+}
+
+function buildSearchProviderConfigs(): Record<string, SearchProviderConfig> {
+  const tavilyApiKey = process.env['TAVILY_API_KEY'];
+  const braveApiKey = process.env['BRAVE_SEARCH_API_KEY'];
+
+  return {
+    // Default free provider with no API key requirement.
+    duckduckgo: {
+      name: 'duckduckgo',
+      enabled: envFlag('SEARCH_DUCKDUCKGO_ENABLED', true),
+      priority: Number(process.env['SEARCH_DUCKDUCKGO_PRIORITY'] ?? 50),
+      options: {
+        safesearch: process.env['SEARCH_DUCKDUCKGO_SAFESEARCH'] ?? 'moderate',
+        region: process.env['SEARCH_DUCKDUCKGO_REGION'] ?? 'wt-wt',
+      },
+    },
+    tavily: {
+      name: 'tavily',
+      enabled: envFlag('SEARCH_TAVILY_ENABLED', Boolean(tavilyApiKey)),
+      apiKey: tavilyApiKey,
+      priority: Number(process.env['SEARCH_TAVILY_PRIORITY'] ?? 30),
+      options: {
+        depth: process.env['SEARCH_TAVILY_DEPTH'] ?? 'basic',
+      },
+    },
+    brave: {
+      name: 'brave',
+      enabled: envFlag('SEARCH_BRAVE_ENABLED', Boolean(braveApiKey)),
+      apiKey: braveApiKey,
+      priority: Number(process.env['SEARCH_BRAVE_PRIORITY'] ?? 40),
+    },
+  };
+}
 
 // ─── Built-in tools ─────────────────────────────────────────
 
@@ -38,41 +79,71 @@ const calculatorTool = weaveTool({
   tags: ['math', 'utility'],
 });
 
-const datetimeTool = weaveTool({
-  name: 'datetime',
-  description: 'Get the current date and time in various formats.',
-  parameters: {
-    type: 'object',
-    properties: {
-      format: { type: 'string', description: 'Output format: "iso", "unix", "human", "date", "time"' },
-      timezone: { type: 'string', description: 'IANA timezone (e.g., "America/New_York")' },
-    },
-  },
-  execute: async (args: { format?: string; timezone?: string }) => {
-    const now = new Date();
-    switch (args.format || 'iso') {
-      case 'unix': return String(Math.floor(now.getTime() / 1000));
-      case 'human': return now.toLocaleString('en-US', { timeZone: args.timezone });
-      case 'date': return now.toLocaleDateString('en-US', { timeZone: args.timezone });
-      case 'time': return now.toLocaleTimeString('en-US', { timeZone: args.timezone });
-      default: return now.toISOString();
-    }
-  },
-  tags: ['utility', 'datetime'],
-});
+const defaultTemporalStore = createInMemoryTemporalStore();
+
+function createTimeToolMap(defaultTimezone?: string, temporalStore: TemporalStore = defaultTemporalStore): Record<string, Tool> {
+  const timeTools = createTimeTools({ defaultTimezone, store: temporalStore });
+  return Object.fromEntries(timeTools.map((tool) => [tool.schema.name, tool]));
+}
 
 const webSearchTool = weaveTool({
   name: 'web_search',
-  description: 'Search the web for information (placeholder — replace with real search API in production).',
+  description: 'Search the web using configured providers (DuckDuckGo, Tavily, Brave).',
   parameters: {
     type: 'object',
     properties: {
       query: { type: 'string', description: 'The search query' },
+      limit: { type: 'number', description: 'Maximum number of results (default: 5, max: 10)' },
+      provider: { type: 'string', description: 'Optional provider override (duckduckgo|tavily|brave)' },
+      language: { type: 'string', description: 'Optional language hint (e.g. en)' },
+      safeSearch: { type: 'boolean', description: 'Optional safesearch preference' },
     },
     required: ['query'],
   },
-  execute: async (args: { query: string }) => {
-    return `[Web search for "${args.query}" — integrate a real search API for production use]`;
+  execute: async (args: { query: string; limit?: number; provider?: string; language?: string; safeSearch?: boolean }) => {
+    const configs = buildSearchProviderConfigs();
+    const hasEnabledProvider = Object.values(configs).some((cfg) => cfg.enabled);
+    if (!hasEnabledProvider) {
+      return JSON.stringify({
+        query: args.query,
+        provider: 'none',
+        error: 'No search providers are enabled. Enable at least one provider via environment variables.',
+        results: [],
+      }, null, 2);
+    }
+
+    const router = createSearchRouter({ configs, fallback: true });
+    const limit = Math.max(1, Math.min(10, Number(args.limit ?? 5)));
+
+    const routed = args.provider
+      ? await router.searchWith(args.provider, {
+          query: args.query,
+          limit,
+          language: args.language,
+          safeSearch: args.safeSearch,
+        })
+      : await router.search({
+          query: args.query,
+          limit,
+          language: args.language,
+          safeSearch: args.safeSearch,
+        });
+
+    return JSON.stringify({
+      query: args.query,
+      provider: routed.provider,
+      latencyMs: routed.latencyMs,
+      error: routed.error,
+      resultCount: routed.results.length,
+      results: routed.results.map((result) => ({
+        title: result.title,
+        url: result.url,
+        snippet: result.snippet,
+        source: result.source,
+        publishedAt: result.publishedAt,
+        score: result.score,
+      })),
+    }, null, 2);
   },
   tags: ['search', 'external'],
 });
@@ -128,20 +199,29 @@ const textAnalysisTool = weaveTool({
 
 export const BUILTIN_TOOLS: Record<string, Tool> = {
   calculator: calculatorTool,
-  datetime: datetimeTool,
+  ...createTimeToolMap(),
   web_search: webSearchTool,
   json_format: jsonFormatterTool,
   text_analysis: textAnalysisTool,
 };
 
+export interface ToolRegistryOptions {
+  defaultTimezone?: string;
+  temporalStore?: TemporalStore;
+}
+
 /**
  * Create a ToolRegistry pre-loaded with the selected built-in tools
  * plus any custom tools provided.
  */
-export function createToolRegistry(toolNames: string[], customTools?: Tool[]): ToolRegistry {
+export function createToolRegistry(toolNames: string[], customTools?: Tool[], opts?: ToolRegistryOptions): ToolRegistry {
   const registry = weaveToolRegistry();
+  const scopedTools: Record<string, Tool> = {
+    ...BUILTIN_TOOLS,
+    ...createTimeToolMap(opts?.defaultTimezone, opts?.temporalStore ?? defaultTemporalStore),
+  };
   for (const name of toolNames) {
-    const tool = BUILTIN_TOOLS[name];
+    const tool = scopedTools[name];
     if (tool) registry.register(tool);
   }
   if (customTools) {

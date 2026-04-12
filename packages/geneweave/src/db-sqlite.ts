@@ -10,6 +10,7 @@ import type {
   DatabaseAdapter, DatabaseConfig,
   UserRow, SessionRow, ChatRow, MessageRow,
   MetricRow, EvalRow, ChatSettingsRow, TraceRow, UserPreferencesRow,
+  TemporalTimerRow, TemporalStopwatchRow, TemporalReminderRow,
   PromptRow, GuardrailRow, RoutingPolicyRow, WorkflowDefRow,
   ToolConfigRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
   IdentityRuleRow, MemoryGovernanceRow, SearchProviderRow, HttpEndpointRow,
@@ -31,6 +32,12 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.exec(SCHEMA_SQL);
+    // Lightweight migration for existing databases created before timezone support.
+    try {
+      this.db.exec('ALTER TABLE chat_settings ADD COLUMN timezone TEXT');
+    } catch {
+      // Ignore when the column already exists.
+    }
   }
 
   async close(): Promise<void> {
@@ -218,19 +225,21 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async saveChatSettings(s: {
     chatId: string; mode: string; systemPrompt?: string;
+    timezone?: string;
     enabledTools?: string; redactionEnabled?: boolean;
     redactionPatterns?: string; workers?: string;
   }): Promise<void> {
     this.d.prepare(
-      `INSERT INTO chat_settings (chat_id, mode, system_prompt, enabled_tools, redaction_enabled, redaction_patterns, workers)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO chat_settings (chat_id, mode, system_prompt, timezone, enabled_tools, redaction_enabled, redaction_patterns, workers)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(chat_id) DO UPDATE SET
-         mode=excluded.mode, system_prompt=excluded.system_prompt,
+         mode=excluded.mode, system_prompt=excluded.system_prompt, timezone=excluded.timezone,
          enabled_tools=excluded.enabled_tools, redaction_enabled=excluded.redaction_enabled,
          redaction_patterns=excluded.redaction_patterns, workers=excluded.workers,
          updated_at=datetime('now')`,
     ).run(
       s.chatId, s.mode, s.systemPrompt ?? null,
+      s.timezone ?? null,
       s.enabledTools ?? null, s.redactionEnabled ? 1 : 0,
       s.redactionPatterns ?? null, s.workers ?? null,
     );
@@ -262,6 +271,152 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async getUserTraces(userId: string, limit?: number): Promise<TraceRow[]> {
     const sql = 'SELECT * FROM traces WHERE user_id = ? ORDER BY start_time DESC LIMIT ?';
     return this.d.prepare(sql).all(userId, limit ?? 100) as TraceRow[];
+  }
+
+  // ── Temporal tools persistence ────────────────────────────
+
+  async upsertTemporalTimer(row: {
+    id: string;
+    scopeId: string;
+    label?: string | null;
+    durationMs?: number | null;
+    state: string;
+    createdAt: string;
+    startedAt?: string | null;
+    pausedAt?: string | null;
+    resumedAt?: string | null;
+    stoppedAt?: string | null;
+    elapsedMs: number;
+  }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO temporal_timers
+       (id, scope_id, label, duration_ms, state, created_at, started_at, paused_at, resumed_at, stopped_at, elapsed_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(scope_id, id) DO UPDATE SET
+         label=excluded.label,
+         duration_ms=excluded.duration_ms,
+         state=excluded.state,
+         created_at=excluded.created_at,
+         started_at=excluded.started_at,
+         paused_at=excluded.paused_at,
+         resumed_at=excluded.resumed_at,
+         stopped_at=excluded.stopped_at,
+         elapsed_ms=excluded.elapsed_ms,
+         updated_at=datetime('now')`,
+    ).run(
+      row.id,
+      row.scopeId,
+      row.label ?? null,
+      row.durationMs ?? null,
+      row.state,
+      row.createdAt,
+      row.startedAt ?? null,
+      row.pausedAt ?? null,
+      row.resumedAt ?? null,
+      row.stoppedAt ?? null,
+      row.elapsedMs,
+    );
+  }
+
+  async getTemporalTimer(scopeId: string, id: string): Promise<TemporalTimerRow | null> {
+    return (this.d.prepare('SELECT * FROM temporal_timers WHERE scope_id = ? AND id = ?').get(scopeId, id) as TemporalTimerRow | undefined) ?? null;
+  }
+
+  async listTemporalTimers(scopeId: string): Promise<TemporalTimerRow[]> {
+    return this.d.prepare('SELECT * FROM temporal_timers WHERE scope_id = ? ORDER BY created_at DESC').all(scopeId) as TemporalTimerRow[];
+  }
+
+  async upsertTemporalStopwatch(row: {
+    id: string;
+    scopeId: string;
+    label?: string | null;
+    state: string;
+    createdAt: string;
+    startedAt?: string | null;
+    pausedAt?: string | null;
+    resumedAt?: string | null;
+    stoppedAt?: string | null;
+    elapsedMs: number;
+    lapsJson: string;
+  }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO temporal_stopwatches
+       (id, scope_id, label, state, created_at, started_at, paused_at, resumed_at, stopped_at, elapsed_ms, laps_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(scope_id, id) DO UPDATE SET
+         label=excluded.label,
+         state=excluded.state,
+         created_at=excluded.created_at,
+         started_at=excluded.started_at,
+         paused_at=excluded.paused_at,
+         resumed_at=excluded.resumed_at,
+         stopped_at=excluded.stopped_at,
+         elapsed_ms=excluded.elapsed_ms,
+         laps_json=excluded.laps_json,
+         updated_at=datetime('now')`,
+    ).run(
+      row.id,
+      row.scopeId,
+      row.label ?? null,
+      row.state,
+      row.createdAt,
+      row.startedAt ?? null,
+      row.pausedAt ?? null,
+      row.resumedAt ?? null,
+      row.stoppedAt ?? null,
+      row.elapsedMs,
+      row.lapsJson,
+    );
+  }
+
+  async getTemporalStopwatch(scopeId: string, id: string): Promise<TemporalStopwatchRow | null> {
+    return (this.d.prepare('SELECT * FROM temporal_stopwatches WHERE scope_id = ? AND id = ?').get(scopeId, id) as TemporalStopwatchRow | undefined) ?? null;
+  }
+
+  async listTemporalStopwatches(scopeId: string): Promise<TemporalStopwatchRow[]> {
+    return this.d.prepare('SELECT * FROM temporal_stopwatches WHERE scope_id = ? ORDER BY created_at DESC').all(scopeId) as TemporalStopwatchRow[];
+  }
+
+  async upsertTemporalReminder(row: {
+    id: string;
+    scopeId: string;
+    text: string;
+    dueAt: string;
+    timezone: string;
+    status: string;
+    createdAt: string;
+    cancelledAt?: string | null;
+  }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO temporal_reminders
+       (id, scope_id, text, due_at, timezone, status, created_at, cancelled_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(scope_id, id) DO UPDATE SET
+         text=excluded.text,
+         due_at=excluded.due_at,
+         timezone=excluded.timezone,
+         status=excluded.status,
+         created_at=excluded.created_at,
+         cancelled_at=excluded.cancelled_at,
+         updated_at=datetime('now')`,
+    ).run(
+      row.id,
+      row.scopeId,
+      row.text,
+      row.dueAt,
+      row.timezone,
+      row.status,
+      row.createdAt,
+      row.cancelledAt ?? null,
+    );
+  }
+
+  async getTemporalReminder(scopeId: string, id: string): Promise<TemporalReminderRow | null> {
+    return (this.d.prepare('SELECT * FROM temporal_reminders WHERE scope_id = ? AND id = ?').get(scopeId, id) as TemporalReminderRow | undefined) ?? null;
+  }
+
+  async listTemporalReminders(scopeId: string): Promise<TemporalReminderRow[]> {
+    return this.d.prepare('SELECT * FROM temporal_reminders WHERE scope_id = ? ORDER BY due_at ASC').all(scopeId) as TemporalReminderRow[];
   }
 
   async getAgentActivity(userId: string, limit?: number): Promise<Array<MessageRow & { chat_title: string; chat_model: string; chat_provider: string }>> {

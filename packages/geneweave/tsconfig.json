@@ -20,6 +20,7 @@
     { "path": "../cache" },
     { "path": "../identity" },
     { "path": "../memory" },
+    { "path": "../tools-time" },
     { "path": "../ui-primitives" },
     { "path": "../devtools" },
     { "path": "../recipes" }

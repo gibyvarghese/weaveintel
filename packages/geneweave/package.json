@@ -38,6 +38,8 @@
     "@weaveintel/cache": "*",
     "@weaveintel/identity": "*",
     "@weaveintel/memory": "*",
+    "@weaveintel/tools-search": "*",
+    "@weaveintel/tools-time": "*",
     "@weaveintel/ui-primitives": "*",
     "@weaveintel/devtools": "*",
     "@weaveintel/recipes": "*",

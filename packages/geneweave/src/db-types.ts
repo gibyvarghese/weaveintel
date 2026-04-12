@@ -83,6 +83,7 @@ export interface ChatSettingsRow {
   chat_id: string;
   mode: string;
   system_prompt: string | null;
+  timezone: string | null;
   enabled_tools: string | null;
   redaction_enabled: number;
   redaction_patterns: string | null;
@@ -105,6 +106,48 @@ export interface TraceRow {
   attributes: string | null;
   events: string | null;
   created_at: string;
+}
+
+export interface TemporalTimerRow {
+  id: string;
+  scope_id: string;
+  label: string | null;
+  duration_ms: number | null;
+  state: string;
+  created_at: string;
+  started_at: string | null;
+  paused_at: string | null;
+  resumed_at: string | null;
+  stopped_at: string | null;
+  elapsed_ms: number;
+  updated_at: string;
+}
+
+export interface TemporalStopwatchRow {
+  id: string;
+  scope_id: string;
+  label: string | null;
+  state: string;
+  created_at: string;
+  started_at: string | null;
+  paused_at: string | null;
+  resumed_at: string | null;
+  stopped_at: string | null;
+  elapsed_ms: number;
+  laps_json: string;
+  updated_at: string;
+}
+
+export interface TemporalReminderRow {
+  id: string;
+  scope_id: string;
+  text: string;
+  due_at: string;
+  timezone: string;
+  status: string;
+  created_at: string;
+  cancelled_at: string | null;
+  updated_at: string;
 }
 
 // ─── Admin config row types ──────────────────────────────────
@@ -692,6 +735,7 @@ export interface DatabaseAdapter {
     chatId: string;
     mode: string;
     systemPrompt?: string;
+    timezone?: string;
     enabledTools?: string;
     redactionEnabled?: boolean;
     redactionPatterns?: string;
@@ -716,6 +760,52 @@ export interface DatabaseAdapter {
   }): Promise<void>;
   getChatTraces(chatId: string): Promise<TraceRow[]>;
   getUserTraces(userId: string, limit?: number): Promise<TraceRow[]>;
+
+  // Temporal tools persistence (timers, stopwatches, reminders)
+  upsertTemporalTimer(row: {
+    id: string;
+    scopeId: string;
+    label?: string | null;
+    durationMs?: number | null;
+    state: string;
+    createdAt: string;
+    startedAt?: string | null;
+    pausedAt?: string | null;
+    resumedAt?: string | null;
+    stoppedAt?: string | null;
+    elapsedMs: number;
+  }): Promise<void>;
+  getTemporalTimer(scopeId: string, id: string): Promise<TemporalTimerRow | null>;
+  listTemporalTimers(scopeId: string): Promise<TemporalTimerRow[]>;
+
+  upsertTemporalStopwatch(row: {
+    id: string;
+    scopeId: string;
+    label?: string | null;
+    state: string;
+    createdAt: string;
+    startedAt?: string | null;
+    pausedAt?: string | null;
+    resumedAt?: string | null;
+    stoppedAt?: string | null;
+    elapsedMs: number;
+    lapsJson: string;
+  }): Promise<void>;
+  getTemporalStopwatch(scopeId: string, id: string): Promise<TemporalStopwatchRow | null>;
+  listTemporalStopwatches(scopeId: string): Promise<TemporalStopwatchRow[]>;
+
+  upsertTemporalReminder(row: {
+    id: string;
+    scopeId: string;
+    text: string;
+    dueAt: string;
+    timezone: string;
+    status: string;
+    createdAt: string;
+    cancelledAt?: string | null;
+  }): Promise<void>;
+  getTemporalReminder(scopeId: string, id: string): Promise<TemporalReminderRow | null>;
+  listTemporalReminders(scopeId: string): Promise<TemporalReminderRow[]>;
 
   // Agent activity: assistant messages with parsed metadata
   getAgentActivity(userId: string, limit?: number): Promise<Array<MessageRow & { chat_title: string; chat_model: string; chat_provider: string }>>;

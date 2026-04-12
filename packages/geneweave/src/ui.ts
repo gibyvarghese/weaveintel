@@ -788,6 +788,7 @@ async function loadChatSettings(chatId){
       state.chatSettings = {
         mode: d.mode||'direct',
         systemPrompt: d.system_prompt||'',
+        timezone: d.timezone || '',
         enabledTools: d.enabled_tools ? JSON.parse(d.enabled_tools) : [],
         redactionEnabled: !!d.redaction_enabled,
         redactionPatterns: d.redaction_patterns ? JSON.parse(d.redaction_patterns) : ['email','phone','ssn','credit_card'],
@@ -795,11 +796,11 @@ async function loadChatSettings(chatId){
       };
     } else {
       console.warn('loadChatSettings: non-ok response', r.status);
-      state.chatSettings = { mode:state.defaultMode||'direct', systemPrompt:'', enabledTools:[], redactionEnabled:false, redactionPatterns:['email','phone','ssn','credit_card'], workers:[] };
+      state.chatSettings = { mode:state.defaultMode||'direct', systemPrompt:'', timezone:'', enabledTools:[], redactionEnabled:false, redactionPatterns:['email','phone','ssn','credit_card'], workers:[] };
     }
   }catch(e){
     console.warn('loadChatSettings error', e);
-    state.chatSettings = { mode:state.defaultMode||'direct', systemPrompt:'', enabledTools:[], redactionEnabled:false, redactionPatterns:['email','phone','ssn','credit_card'], workers:[] };
+    state.chatSettings = { mode:state.defaultMode||'direct', systemPrompt:'', timezone:'', enabledTools:[], redactionEnabled:false, redactionPatterns:['email','phone','ssn','credit_card'], workers:[] };
   }
 }
 async function saveChatSettings(){
@@ -2010,6 +2011,12 @@ function renderSettingsDropdown(){
   sections.push(h('div',{className:'settings-section'},
     h('div',{className:'sec-label'},'System Prompt'),
     sysInput
+  ));
+
+  const tzInput = h('input',{type:'text',value:s.timezone||'',placeholder:'User timezone (e.g. Pacific/Auckland)...',style:'width:100%;padding:8px 10px;border-radius:var(--radius);border:1px solid var(--bg4);background:var(--bg3);color:var(--fg);font-size:13px',onChange:function(){s.timezone=this.value;saveChatSettings();}});
+  sections.push(h('div',{className:'settings-section'},
+    h('div',{className:'sec-label'},'User Timezone'),
+    tzInput
   ));
 
   const dd = h('div',{className:'dropdown settings-dd',onClick:e=>e.stopPropagation()},

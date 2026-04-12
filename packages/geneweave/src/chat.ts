@@ -36,7 +36,8 @@ import { weaveRedactor } from '@weaveintel/redaction';
 import { weaveEvalRunner } from '@weaveintel/evals';
 import { createGuardrailPipeline, hasDeny, hasWarning, getDenyReason, summarizeGuardrailResults, type GuardrailCategorySummary } from '@weaveintel/guardrails';
 import type { DatabaseAdapter, MessageRow, ChatSettingsRow, GuardrailRow, HumanTaskPolicyRow, PromptRow, RoutingPolicyRow } from './db.js';
-import { createToolRegistry } from './tools.js';
+import { createToolRegistry, type ToolRegistryOptions } from './tools.js';
+import { createTemporalStore } from './temporal-store.js';
 import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
 import { createTemplate } from '@weaveintel/prompts';
 import { SmartModelRouter, ModelHealthTracker } from '@weaveintel/routing';
@@ -120,6 +121,7 @@ export async function getOrCreateModel(
 export interface ChatSettings {
   mode: 'direct' | 'agent' | 'supervisor';
   systemPrompt?: string;
+  timezone?: string;
   enabledTools: string[];
   redactionEnabled: boolean;
   redactionPatterns: string[];
@@ -147,6 +149,7 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
   return {
     mode: (row.mode as ChatSettings['mode']) || 'direct',
     systemPrompt: row.system_prompt ?? undefined,
+    timezone: row.timezone ?? undefined,
     enabledTools: row.enabled_tools ? JSON.parse(row.enabled_tools) : [],
     redactionEnabled: !!row.redaction_enabled,
     redactionPatterns: row.redaction_patterns ? JSON.parse(row.redaction_patterns) : DEFAULT_SETTINGS.redactionPatterns,
@@ -160,11 +163,14 @@ export class ChatEngine {
   private readonly cacheKeyBuilder = weaveCacheKeyBuilder({ namespace: 'gw-chat' });
   private pricingCache: Map<string, ModelPricing> | null = null;
   private pricingCacheTs = 0;
+  private readonly toolOptions: ToolRegistryOptions;
 
   constructor(
     private readonly config: ChatEngineConfig,
     private readonly db: DatabaseAdapter,
-  ) {}
+  ) {
+    this.toolOptions = { temporalStore: createTemporalStore(db) };
+  }
 
   /** Load pricing from DB, cache for 60 s */
   private async loadPricing(): Promise<Map<string, ModelPricing>> {
@@ -640,7 +646,13 @@ export class ChatEngine {
     userContent: string,
     settings: ChatSettings,
   ): Promise<AgentResult> {
-    const tools = settings.enabledTools.length ? createToolRegistry(settings.enabledTools) : undefined;
+    const toolOptions: ToolRegistryOptions = {
+      ...this.toolOptions,
+      defaultTimezone: settings.timezone,
+    };
+    const tools = settings.enabledTools.length
+      ? createToolRegistry(settings.enabledTools, undefined, toolOptions)
+      : undefined;
 
     if (settings.mode === 'supervisor') {
       const workerDefs = settings.workers.length > 0
@@ -648,9 +660,9 @@ export class ChatEngine {
             name: w.name,
             description: w.description,
             model,
-            tools: w.tools.length ? createToolRegistry(w.tools) : undefined,
+            tools: w.tools.length ? createToolRegistry(w.tools, undefined, toolOptions) : undefined,
           }))
-        : defaultWorkers(model);
+        : defaultWorkers(model, toolOptions);
       const supervisor = weaveSupervisor({ model, workers: workerDefs, maxSteps: 20, name: 'geneweave-supervisor' });
       return supervisor.run(ctx, { messages, goal: userContent });
     }
@@ -675,7 +687,13 @@ export class ChatEngine {
     userContent: string,
     settings: ChatSettings,
   ): Promise<AgentResult> {
-    const tools = settings.enabledTools.length ? createToolRegistry(settings.enabledTools) : undefined;
+    const toolOptions: ToolRegistryOptions = {
+      ...this.toolOptions,
+      defaultTimezone: settings.timezone,
+    };
+    const tools = settings.enabledTools.length
+      ? createToolRegistry(settings.enabledTools, undefined, toolOptions)
+      : undefined;
 
     let agent;
     if (settings.mode === 'supervisor') {
@@ -684,9 +702,9 @@ export class ChatEngine {
             name: w.name,
             description: w.description,
             model,
-            tools: w.tools.length ? createToolRegistry(w.tools) : undefined,
+            tools: w.tools.length ? createToolRegistry(w.tools, undefined, toolOptions) : undefined,
           }))
-        : defaultWorkers(model);
+        : defaultWorkers(model, toolOptions);
       agent = weaveSupervisor({ model, workers: workerDefs, maxSteps: 20, name: 'geneweave-supervisor' });
     } else {
       agent = weaveAgent({
@@ -1331,25 +1349,25 @@ export class ChatEngine {
 // ─── Helpers ─────────────────────────────────────────────────
 
 /** Default workers for supervisor mode when none are explicitly configured */
-function defaultWorkers(model: Model): Array<{ name: string; description: string; model: Model; tools?: ToolRegistry }> {
+function defaultWorkers(model: Model, toolOptions?: ToolRegistryOptions): Array<{ name: string; description: string; model: Model; tools?: ToolRegistry }> {
   return [
     {
       name: 'researcher',
       description: 'Researches topics, searches the web, and gathers information. Good for fact-finding and exploration tasks.',
       model,
-      tools: createToolRegistry(['web_search', 'text_analysis']),
+      tools: createToolRegistry(['web_search', 'text_analysis'], undefined, toolOptions),
     },
     {
       name: 'analyst',
       description: 'Analyzes data, performs calculations, formats JSON, and provides structured insights. Good for math, data processing, and formatting.',
       model,
-      tools: createToolRegistry(['calculator', 'json_format', 'text_analysis']),
+      tools: createToolRegistry(['calculator', 'json_format', 'text_analysis'], undefined, toolOptions),
     },
     {
       name: 'writer',
       description: 'Writes, edits, and refines text. Good for drafting content, summarizing, and creative writing tasks.',
       model,
-      tools: createToolRegistry(['text_analysis', 'datetime']),
+      tools: createToolRegistry(['text_analysis', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'], undefined, toolOptions),
     },
   ];
 }

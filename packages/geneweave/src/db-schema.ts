@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS chat_settings (
   chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
   mode TEXT NOT NULL DEFAULT 'direct',
   system_prompt TEXT,
+  timezone TEXT,
   enabled_tools TEXT,
   redaction_enabled INTEGER NOT NULL DEFAULT 0,
   redaction_patterns TEXT,
@@ -106,6 +107,51 @@ CREATE TABLE IF NOT EXISTS traces (
   attributes TEXT,
   events TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS temporal_timers (
+  id TEXT NOT NULL,
+  scope_id TEXT NOT NULL,
+  label TEXT,
+  duration_ms INTEGER,
+  state TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  paused_at TEXT,
+  resumed_at TEXT,
+  stopped_at TEXT,
+  elapsed_ms INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (scope_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS temporal_stopwatches (
+  id TEXT NOT NULL,
+  scope_id TEXT NOT NULL,
+  label TEXT,
+  state TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  started_at TEXT,
+  paused_at TEXT,
+  resumed_at TEXT,
+  stopped_at TEXT,
+  elapsed_ms INTEGER NOT NULL DEFAULT 0,
+  laps_json TEXT NOT NULL DEFAULT '[]',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (scope_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS temporal_reminders (
+  id TEXT NOT NULL,
+  scope_id TEXT NOT NULL,
+  text TEXT NOT NULL,
+  due_at TEXT NOT NULL,
+  timezone TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'scheduled',
+  created_at TEXT NOT NULL,
+  cancelled_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (scope_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS prompts (

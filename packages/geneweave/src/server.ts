@@ -266,7 +266,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     if (!chat) { json(res, 404, { error: 'Chat not found' }); return; }
     const settings = await db.getChatSettings(chat.id);
     json(res, 200, {
-      settings: settings ?? { chat_id: chat.id, mode: 'direct', system_prompt: null, enabled_tools: null, redaction_enabled: 0, redaction_patterns: null, workers: null },
+      settings: settings ?? { chat_id: chat.id, mode: 'direct', system_prompt: null, timezone: null, enabled_tools: null, redaction_enabled: 0, redaction_patterns: null, workers: null },
     });
   });
 
@@ -288,6 +288,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       chatId: chat.id,
       mode,
       systemPrompt: (body['systemPrompt'] as string) ?? undefined,
+      timezone: (body['timezone'] as string) ?? undefined,
       enabledTools: body['enabledTools'] ? JSON.stringify(body['enabledTools']) : undefined,
       redactionEnabled: !!body['redactionEnabled'],
       redactionPatterns: body['redactionPatterns'] ? JSON.stringify(body['redactionPatterns']) : undefined,
