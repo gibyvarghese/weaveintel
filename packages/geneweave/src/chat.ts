@@ -46,6 +46,7 @@ import { weaveInMemoryCacheStore } from '@weaveintel/cache';
 import { weaveCacheKeyBuilder } from '@weaveintel/cache';
 import { shouldBypass, resolvePolicy } from '@weaveintel/cache';
 import type { CachePolicy } from '@weaveintel/core';
+import { resolveTimezone } from '@weaveintel/tools-time';
 
 // ─── Model pricing (per 1 M tokens) ─────────────────────────
 
@@ -164,6 +165,34 @@ export class ChatEngine {
   private pricingCache: Map<string, ModelPricing> | null = null;
   private pricingCacheTs = 0;
   private readonly toolOptions: ToolRegistryOptions;
+
+  private tryDirectTemporalAnswer(input: string, timezone?: string): string | null {
+    const text = input.toLowerCase();
+    const asksDay = /(what\s+day\s+is\s+it|day\s+is\s+it\s+today|today\s*\?)/i.test(text);
+    const asksDate = /(what\s+date\s+is\s+it|today'?s\s+date|current\s+date)/i.test(text);
+    const asksTime = /(what\s+time\s+is\s+it|current\s+time|time\s+now)/i.test(text);
+    if (!asksDay && !asksDate && !asksTime) return null;
+
+    const tz = resolveTimezone(timezone, process.env['DEFAULT_TIMEZONE'] ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'));
+    const now = new Date();
+
+    if (asksDay && !asksDate && !asksTime) {
+      const day = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: tz });
+      return `Today is ${day} (${tz}).`;
+    }
+    if (asksDate && !asksTime) {
+      const date = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz });
+      return `Today is ${date} (${tz}).`;
+    }
+    if (asksTime && !asksDate && !asksDay) {
+      const time = now.toLocaleTimeString('en-US', { timeZone: tz });
+      return `The current time is ${time} (${tz}).`;
+    }
+
+    const date = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz });
+    const time = now.toLocaleTimeString('en-US', { timeZone: tz });
+    return `It is ${date}, ${time} (${tz}).`;
+  }
 
   constructor(
     private readonly config: ChatEngineConfig,
@@ -321,6 +350,12 @@ export class ChatEngine {
       steps = [...result.steps];
     } else {
       // ── Direct mode ──
+      const deterministicTime = this.tryDirectTemporalAnswer(processedContent, settings.timezone);
+      if (deterministicTime) {
+        assistantContent = deterministicTime;
+        usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+        // Skip model call for deterministic time/date/day responses.
+      } else {
       const request: ModelRequest = {
         messages: resolvedPrompt
           ? [{ role: 'system', content: resolvedPrompt }, ...messages]
@@ -331,6 +366,7 @@ export class ChatEngine {
       const response = await model.generate(ctx, request);
       assistantContent = response.content;
       usage = { ...response.usage };
+      }
     }
     } // end if (!cacheHit)
 
@@ -526,6 +562,12 @@ export class ChatEngine {
         steps = [...agentResult.steps];
       } else {
         // ── Direct streaming ──
+        const deterministicTime = this.tryDirectTemporalAnswer(processedContent, settings.timezone);
+        if (deterministicTime) {
+          fullText = deterministicTime;
+          finalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+          res.write(`data: ${JSON.stringify({ type: 'text', text: deterministicTime })}\n\n`);
+        } else {
         const request: ModelRequest = {
           messages: resolvedPrompt
             ? [{ role: 'system', content: resolvedPrompt }, ...messages]
@@ -554,6 +596,7 @@ export class ChatEngine {
           fullText = response.content;
           finalUsage = { ...response.usage };
           res.write(`data: ${JSON.stringify({ type: 'text', text: response.content })}\n\n`);
+        }
         }
       }
     } catch (err: unknown) {

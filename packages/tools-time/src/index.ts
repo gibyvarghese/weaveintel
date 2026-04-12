@@ -168,11 +168,13 @@ export function isValidTimezone(timezone: string): boolean {
 export function resolveTimezone(preferred?: string, fallback = 'UTC'): string {
   if (preferred && isValidTimezone(preferred)) return preferred;
   if (isValidTimezone(fallback)) return fallback;
+  const localTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  if (localTz && isValidTimezone(localTz)) return localTz;
   return 'UTC';
 }
 
 export function formatCurrentTime(opts: TimeFormatOptions = {}): string {
-  const timezone = resolveTimezone(opts.timezone, 'UTC');
+  const timezone = resolveTimezone(opts.timezone, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const locale = opts.locale ?? 'en-US';
   const now = opts.now ?? new Date();
 
@@ -191,7 +193,7 @@ export function formatCurrentTime(opts: TimeFormatOptions = {}): string {
 }
 
 export function getTimezoneSnapshot(timezone?: string, locale = 'en-US', now = new Date()): TimezoneSnapshot {
-  const tz = resolveTimezone(timezone, 'UTC');
+  const tz = resolveTimezone(timezone, Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   return {
     timezone: tz,
     nowIso: now.toISOString(),
@@ -218,7 +220,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
         },
       },
       execute: async (args: { format?: 'iso' | 'unix' | 'human' | 'date' | 'time'; timezone?: string; locale?: string }) => {
-        const timezone = resolveTimezone(args.timezone, options.defaultTimezone ?? 'UTC');
+        const timezone = resolveTimezone(args.timezone, options.defaultTimezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'));
         return formatCurrentTime({ format: args.format, timezone, locale: args.locale ?? locale });
       },
       tags: ['utility', 'datetime'],
@@ -526,7 +528,7 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
           return { content: `Invalid dueAt timestamp: ${args.dueAt}`, isError: true };
         }
         const scope = getScope(ctx);
-        const timezone = resolveTimezone(args.timezone, options.defaultTimezone ?? 'UTC');
+        const timezone = resolveTimezone(args.timezone, options.defaultTimezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'));
         const reminder: ReminderRecord = {
           id: makeId('reminder'),
           text: args.text,
