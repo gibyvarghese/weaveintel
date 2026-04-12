@@ -55,6 +55,22 @@ const TEMPORAL_TOOL_POLICY = [
   '- If timezone is missing, use available context and state assumptions explicitly.',
 ].join('\n');
 
+const SUPERVISOR_TEMPORAL_POLICY = [
+  'TEMPORAL QUESTION HANDLING (CRITICAL):',
+  '- If the user asks about current day/date/time/timestamp or anything time-dependent:',
+  '  • ALWAYS delegate to a worker that has datetime/timezone tools',
+  '  • Do NOT answer from your training data or memory',
+  '  • Always use `think` tool first to reason about what worker you need',
+  '  • Always use `plan` tool to decompose the request',
+  '  • After the worker responds, use `think` with reasoning_phase="reasoning" to verify the answer',
+  '  • Then formulate your response based on the worker\'s actual tool outputs',
+  '- Examples of temporal questions that MUST be delegated:',
+  '  • "What day is today?" / "What date is it?" / "What is today\'s date?"',
+  '  • "What time is it?" / "What is the current time?"',
+  '  • "What timezone am I in?" / "What is the timezone?"',
+  '  • Any question about current timestamp, current date, current time, or today',
+].join('\n');
+
 // ─── Model pricing (per 1 M tokens) ─────────────────────────
 
 interface ModelPricing { input: number; output: number }
@@ -176,8 +192,19 @@ export class ChatEngine {
   private withTemporalToolPolicy(basePrompt: string | undefined, toolNames: string[]): string | undefined {
     const hasTemporalTools = toolNames.includes('datetime') || toolNames.includes('timezone_info');
     if (!hasTemporalTools) return basePrompt;
+    
+    const enhancedPolicy = [
+      TEMPORAL_TOOL_POLICY,
+      '',
+      'REASONING REQUIREMENT:',
+      '- Always use the `think` tool before acting',
+      '- After calling datetime/timezone_info tools, use `think` with reasoning_phase="reasoning"',
+      '- Explicitly connect tool outputs to your answer',
+      '- Do not guess or hallucinate dates/times',
+    ].join('\n');
+    
     const base = basePrompt?.trim();
-    return base ? `${base}\n\n${TEMPORAL_TOOL_POLICY}` : TEMPORAL_TOOL_POLICY;
+    return base ? `${base}\n\n${enhancedPolicy}` : enhancedPolicy;
   }
 
   constructor(
@@ -679,7 +706,13 @@ export class ChatEngine {
             tools: w.tools.length ? createToolRegistry(w.tools, undefined, toolOptions) : undefined,
           }))
         : defaultWorkers(model, toolOptions, this.withTemporalToolPolicy.bind(this));
-      const supervisor = weaveSupervisor({ model, workers: workerDefs, maxSteps: 20, name: 'geneweave-supervisor' });
+      const supervisor = weaveSupervisor({
+        model,
+        workers: workerDefs,
+        maxSteps: 20,
+        name: 'geneweave-supervisor',
+        instructions: SUPERVISOR_TEMPORAL_POLICY,
+      });
       return supervisor.run(ctx, { messages, goal: userContent });
     }
 
@@ -723,7 +756,13 @@ export class ChatEngine {
             tools: w.tools.length ? createToolRegistry(w.tools, undefined, toolOptions) : undefined,
           }))
         : defaultWorkers(model, toolOptions, this.withTemporalToolPolicy.bind(this));
-      agent = weaveSupervisor({ model, workers: workerDefs, maxSteps: 20, name: 'geneweave-supervisor' });
+      agent = weaveSupervisor({
+        model,
+        workers: workerDefs,
+        maxSteps: 20,
+        name: 'geneweave-supervisor',
+        instructions: SUPERVISOR_TEMPORAL_POLICY,
+      });
     } else {
       const policyPrompt = this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools);
       agent = weaveAgent({
@@ -1374,6 +1413,9 @@ function defaultWorkers(
   buildPrompt?: (basePrompt: string | undefined, toolNames: string[]) => string | undefined,
 ): Array<{ name: string; description: string; systemPrompt?: string; model: Model; tools?: ToolRegistry }> {
   const writerTools = ['text_analysis', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
+  
+  // Analyst should also have datetime tools for temporal questions
+  const analystTools = ['calculator', 'json_format', 'text_analysis', 'datetime', 'timezone_info'];
 
   return [
     {
@@ -1384,9 +1426,10 @@ function defaultWorkers(
     },
     {
       name: 'analyst',
-      description: 'Analyzes data, performs calculations, formats JSON, and provides structured insights. Good for math, data processing, and formatting.',
+      description: 'Analyzes data, performs calculations, formats JSON, provides structured insights, and handles temporal queries. Good for math, data processing, formatting, and date/time questions.',
+      systemPrompt: buildPrompt?.(undefined, analystTools),
       model,
-      tools: createToolRegistry(['calculator', 'json_format', 'text_analysis'], undefined, toolOptions),
+      tools: createToolRegistry(analystTools, undefined, toolOptions),
     },
     {
       name: 'writer',
