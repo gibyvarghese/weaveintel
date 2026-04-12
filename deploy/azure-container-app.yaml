@@ -1,0 +1,61 @@
+# Azure Container Apps deployment
+#
+# Prerequisites:
+#   az login
+#   az extension add --name containerapp
+#
+# Deploy:
+#   az containerapp up \
+#     --name geneweave \
+#     --resource-group <rg> \
+#     --location westus2 \
+#     --source . \
+#     --env-vars \
+#       JWT_SECRET=secretref:jwt-secret \
+#       ANTHROPIC_API_KEY=secretref:anthropic-key \
+#       OPENAI_API_KEY=secretref:openai-key
+
+properties:
+  managedEnvironmentId: /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.App/managedEnvironments/<env>
+  configuration:
+    ingress:
+      external: true
+      targetPort: 3500
+      transport: auto
+    secrets:
+      - name: jwt-secret
+        value: "<your-jwt-secret>"
+      - name: anthropic-key
+        value: "<your-anthropic-api-key>"
+      - name: openai-key
+        value: "<your-openai-api-key>"
+  template:
+    containers:
+      - name: geneweave
+        image: ghcr.io/gibyvarghese/weaveintel:latest
+        resources:
+          cpu: 0.5
+          memory: 1Gi
+        env:
+          - name: NODE_ENV
+            value: production
+          - name: PORT
+            value: "3500"
+          - name: DATABASE_PATH
+            value: /app/data/geneweave.db
+          - name: JWT_SECRET
+            secretRef: jwt-secret
+          - name: ANTHROPIC_API_KEY
+            secretRef: anthropic-key
+          - name: OPENAI_API_KEY
+            secretRef: openai-key
+        volumeMounts:
+          - volumeName: data
+            mountPath: /app/data
+    scale:
+      minReplicas: 0
+      maxReplicas: 3
+    volumes:
+      - name: data
+        storageType: AzureFile
+        storageName: geneweave-data

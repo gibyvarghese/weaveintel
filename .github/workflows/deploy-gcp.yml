@@ -1,0 +1,56 @@
+name: Deploy to Google Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: 'GCP Project ID'
+        required: true
+      region:
+        description: 'GCP Region'
+        required: true
+        default: 'us-central1'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker
+
+      - name: Build and push to GCR
+        run: |
+          docker build -t gcr.io/${{ github.event.inputs.project_id }}/geneweave:${{ github.sha }} .
+          docker push gcr.io/${{ github.event.inputs.project_id }}/geneweave:${{ github.sha }}
+
+      - name: Deploy to Cloud Run
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: geneweave
+          image: gcr.io/${{ github.event.inputs.project_id }}/geneweave:${{ github.sha }}
+          region: ${{ github.event.inputs.region }}
+          flags: --allow-unauthenticated --port=3500 --memory=512Mi --cpu=1
+          env_vars: |
+            NODE_ENV=production
+            PORT=3500
+            DATABASE_PATH=/app/data/geneweave.db
+          secrets: |
+            JWT_SECRET=jwt-secret:latest
+            ANTHROPIC_API_KEY=anthropic-key:latest
+            OPENAI_API_KEY=openai-key:latest

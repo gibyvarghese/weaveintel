@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Extract version info
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+
+          # Fabric codename lookup
+          FABRICS=(Aertex Batiste Calico Damask Etamine Flannel Gauze Habutai Intarsia Jersey Knit Linen Muslin Nankeen Organza Percale Rinzu Satin Taffeta Ultrasuede Velvet Wadmal Zephyr)
+          IDX=$((MAJOR - 1))
+          if [ $IDX -ge 0 ] && [ $IDX -lt ${#FABRICS[@]} ]; then
+            CODENAME="${FABRICS[$IDX]}"
+          else
+            CODENAME="v${MAJOR}"
+          fi
+
+          MINOR=$(echo "$VERSION" | cut -d. -f2)
+          if [ "$MINOR" = "0" ] && [ "$(echo "$VERSION" | cut -d. -f3)" = "0" ]; then
+            PRERELEASE=false
+            RELEASE_TYPE="major"
+          else
+            PRERELEASE=false
+            RELEASE_TYPE="minor"
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "codename=$CODENAME" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "release_type=$RELEASE_TYPE" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Extract the section for this version from CHANGELOG.md
+          NOTES=$(awk "/^## \[${VERSION}\]/{found=1;next} /^## \[/{if(found)exit} found{print}" CHANGELOG.md)
+          if [ -z "$NOTES" ]; then
+            NOTES="Release ${VERSION} — ${{ steps.version.outputs.codename }}"
+          fi
+          # Use delimiter for multiline output
+          echo "notes<<CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+          echo "$NOTES" >> "$GITHUB_OUTPUT"
+          echo "CHANGELOG_EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          npm ci
+          npm run build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "${{ steps.version.outputs.tag }} — ${{ steps.version.outputs.codename }}"
+          body: |
+            # ${{ steps.version.outputs.tag }} — ${{ steps.version.outputs.codename }}
+
+            ${{ steps.changelog.outputs.notes }}
+
+            ---
+            *Fabric Versioning: Major releases are named after fabrics A→Z. See [VERSIONING.md](https://github.com/gibyvarghese/weaveintel/blob/main/VERSIONING.md) for details.*
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          generate_release_notes: false

@@ -25,7 +25,7 @@ async function main() {
     defaultModel: process.env['ANTHROPIC_API_KEY'] ? 'claude-sonnet-4-20250514' : 'gpt-4o-mini',
   });
 
-  console.log(`  Models available: ${app.chatEngine.getAvailableModels().map(m => m.provider + '/' + m.id).join(', ')}`);
+  console.log(`  Models available: ${(await app.chatEngine.getAvailableModels()).map(m => m.provider + '/' + m.id).join(', ')}`);
   console.log('  Press Ctrl+C to stop\n');
 
   process.on('SIGINT', async () => {

@@ -1,0 +1,35 @@
+# DigitalOcean App Platform spec for geneWeave
+#
+# Deploy:
+#   doctl apps create --spec deploy/digitalocean-app.yaml
+
+name: geneweave
+services:
+  - name: geneweave
+    github:
+      repo: gibyvarghese/weaveintel
+      branch: main
+      deploy_on_push: true
+    build_command: npm ci && npx turbo build
+    run_command: npx tsx deploy/server.ts
+    environment_slug: node-js
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    http_port: 3500
+    health_check:
+      http_path: /api/auth/me
+      initial_delay_seconds: 10
+      period_seconds: 30
+    envs:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3500"
+      - key: DATABASE_PATH
+        value: /app/data/geneweave.db
+      - key: JWT_SECRET
+        type: SECRET
+      - key: ANTHROPIC_API_KEY
+        type: SECRET
+      - key: OPENAI_API_KEY
+        type: SECRET

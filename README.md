@@ -776,6 +776,232 @@ The [`examples/`](examples/) directory contains 20 runnable demonstrations:
 | 19 | [Compliance & Sandbox](examples/19-compliance-sandbox.ts) | Data retention, legal holds, consent, audit export, sandboxed execution, idempotency, retries, DLQ, health checking | compliance, sandbox, reliability | None |
 | 20 | [Recipes & DevTools](examples/20-recipes-devtools.ts) | Pre-built agents, scaffolding, inspection, validation, mock runtime, streaming events, widgets, artifacts, citations, progress | recipes, devtools, ui-primitives | None |
 
+## Deployment
+
+geneWeave can be deployed to any platform that runs Node.js 20+ or Docker containers.
+All deployment configs live in the repo — pick your platform and follow the steps below.
+
+### Environment Variables
+
+Every deployment requires these environment variables:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `JWT_SECRET` | **Yes** | Secret for signing auth tokens |
+| `ANTHROPIC_API_KEY` | One of these | Anthropic API key |
+| `OPENAI_API_KEY` | One of these | OpenAI API key |
+| `PORT` | No | HTTP port (default: `3500`) |
+| `DATABASE_PATH` | No | SQLite path (default: `./data/geneweave.db`) |
+| `DEFAULT_PROVIDER` | No | `anthropic` or `openai` (auto-detected) |
+| `DEFAULT_MODEL` | No | Model ID (auto-detected) |
+| `CORS_ORIGIN` | No | Allowed CORS origin |
+
+### Docker
+
+```bash
+# Build
+docker build -t geneweave .
+
+# Run
+docker run -d --name geneweave \
+  -p 3500:3500 \
+  -e JWT_SECRET=your-secret \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -e OPENAI_API_KEY=sk-... \
+  -v geneweave-data:/app/data \
+  geneweave
+```
+
+### Docker Compose
+
+```bash
+# Copy .env.example to .env and fill in your keys, then:
+docker compose up -d
+```
+
+### Fly.io
+
+```bash
+fly launch                  # First time — creates app from fly.toml
+fly secrets set \
+  JWT_SECRET=your-secret \
+  ANTHROPIC_API_KEY=sk-ant-... \
+  OPENAI_API_KEY=sk-...
+fly deploy                  # Subsequent deploys
+```
+
+### Railway
+
+1. Connect your GitHub repo at [railway.app](https://railway.app)
+2. Set environment variables in the dashboard
+3. Railway auto-detects `railway.toml` and deploys
+
+### Render
+
+1. Go to [render.com](https://render.com) → New → Blueprint
+2. Point to this repo — Render reads `render.yaml`
+3. Fill in `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` in the dashboard
+4. `JWT_SECRET` is auto-generated
+
+### Heroku
+
+```bash
+heroku create geneweave
+heroku config:set \
+  JWT_SECRET=your-secret \
+  ANTHROPIC_API_KEY=sk-ant-... \
+  OPENAI_API_KEY=sk-...
+git push heroku main
+```
+
+Or click **Deploy to Heroku** — the `app.json` file configures everything.
+
+### Vercel
+
+```bash
+vercel --prod
+# Set environment variables in the Vercel dashboard
+```
+
+> **Note:** Vercel serverless functions have execution time limits. For long-running
+> streaming conversations, a container-based platform (Docker, Fly, Railway) is recommended.
+
+### Azure Container Apps
+
+```bash
+az login
+az containerapp up \
+  --name geneweave \
+  --resource-group your-rg \
+  --location westus2 \
+  --source .
+# Set secrets via the Azure portal or CLI
+```
+
+Or use the GitHub Actions workflow: go to **Actions → Deploy to Azure Container Apps → Run workflow**.
+See [`deploy/azure-container-app.yaml`](deploy/azure-container-app.yaml) for the full manifest.
+
+### Google Cloud Run
+
+```bash
+gcloud run deploy geneweave \
+  --source . \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --set-secrets=JWT_SECRET=jwt-secret:latest,ANTHROPIC_API_KEY=anthropic-key:latest,OPENAI_API_KEY=openai-key:latest
+```
+
+Or use the GitHub Actions workflow: **Actions → Deploy to Google Cloud Run → Run workflow**.
+See [`deploy/gcp-cloudrun.yaml`](deploy/gcp-cloudrun.yaml) for the Cloud Run service spec.
+
+### AWS (ECS Fargate)
+
+1. Push the Docker image to ECR (or use the GHCR image)
+2. Register the task definition: `aws ecs register-task-definition --cli-input-json file://deploy/aws-ecs-task.json`
+3. Create a service pointing to the task definition
+4. Store secrets in AWS Systems Manager Parameter Store
+
+Or use the GitHub Actions workflow: **Actions → Deploy to AWS (ECS Fargate) → Run workflow**.
+
+### AWS App Runner
+
+```bash
+# Connect GitHub repo in the App Runner console
+# Or use the CLI with deploy/aws-apprunner.yaml
+```
+
+### DigitalOcean App Platform
+
+```bash
+doctl apps create --spec deploy/digitalocean-app.yaml
+# Set secrets in the DigitalOcean dashboard
+```
+
+### Kubernetes
+
+```bash
+# Create secrets
+kubectl create secret generic geneweave-secrets \
+  --from-literal=JWT_SECRET=your-secret \
+  --from-literal=ANTHROPIC_API_KEY=sk-ant-... \
+  --from-literal=OPENAI_API_KEY=sk-...
+
+# Deploy
+kubectl apply -f deploy/kubernetes.yaml
+```
+
+The manifest includes a Deployment, Service, PVC for data persistence, and an Ingress.
+Edit the host in the Ingress to match your domain.
+
+### Deployment Files Reference
+
+| File | Platform |
+|------|----------|
+| [`Dockerfile`](Dockerfile) | Any Docker host |
+| [`docker-compose.yml`](docker-compose.yml) | Docker Compose |
+| [`fly.toml`](fly.toml) | Fly.io |
+| [`railway.toml`](railway.toml) | Railway |
+| [`render.yaml`](render.yaml) | Render |
+| [`Procfile`](Procfile) + [`app.json`](app.json) | Heroku |
+| [`vercel.json`](vercel.json) | Vercel |
+| [`deploy/azure-container-app.yaml`](deploy/azure-container-app.yaml) | Azure Container Apps |
+| [`deploy/aws-apprunner.yaml`](deploy/aws-apprunner.yaml) | AWS App Runner |
+| [`deploy/aws-ecs-task.json`](deploy/aws-ecs-task.json) | AWS ECS Fargate |
+| [`deploy/gcp-cloudrun.yaml`](deploy/gcp-cloudrun.yaml) | Google Cloud Run |
+| [`deploy/digitalocean-app.yaml`](deploy/digitalocean-app.yaml) | DigitalOcean App Platform |
+| [`deploy/kubernetes.yaml`](deploy/kubernetes.yaml) | Kubernetes |
+| [`deploy/server.ts`](deploy/server.ts) | Production entrypoint (all platforms) |
+
+### CI/CD Workflows
+
+| Workflow | Trigger | Description |
+|----------|---------|-------------|
+| [`docker.yml`](.github/workflows/docker.yml) | Push to `main` / tags | Builds & pushes Docker image to GHCR (+ Docker Hub) |
+| [`deploy-azure.yml`](.github/workflows/deploy-azure.yml) | Manual | Deploys to Azure Container Apps |
+| [`deploy-fly.yml`](.github/workflows/deploy-fly.yml) | Push to `main` | Auto-deploys to Fly.io |
+| [`deploy-gcp.yml`](.github/workflows/deploy-gcp.yml) | Manual | Deploys to Google Cloud Run |
+| [`deploy-aws.yml`](.github/workflows/deploy-aws.yml) | Manual | Deploys to AWS ECS Fargate |
+
+## Versioning — Fabric Releases
+
+weaveIntel uses **Fabric Versioning**: each major release is named after a fabric,
+assigned alphabetically from A to Z.
+
+```
+<major>.<minor>.<patch>  —  "<Fabric Name>"
+```
+
+| Major | Codename | Description |
+|------:|----------|-------------|
+| 1 | **Aertex** | First stable release |
+| 2 | **Batiste** | |
+| 3 | **Calico** | |
+| 4 | **Damask** | |
+| 5 | **Etamine** | |
+| 6 | **Flannel** | |
+| 7 | **Gauze** | |
+| 8 | **Habutai** | |
+| 9 | **Intarsia** | |
+| 10 | **Jersey** | |
+| 11 | **Knit** | |
+| 12 | **Linen** | |
+| 13 | **Muslin** | |
+| 14 | **Nankeen** | |
+| 15 | **Organza** | |
+| 16 | **Percale** | |
+| 17 | **Rinzu** | |
+| 18 | **Satin** | |
+| 19 | **Taffeta** | |
+| 20 | **Ultrasuede** | |
+| 21 | **Velvet** | |
+| 22 | **Wadmal** | |
+| 23 | **Zephyr** | |
+
+> Minor releases (e.g., 1.1.0, 1.2.0) add features under the same fabric.
+> Patch releases (e.g., 1.1.1) fix bugs. See [VERSIONING.md](VERSIONING.md) for full details.
+
+**Current Release: v1.0.0 — Aertex**
+
 ## Tech Stack
 
 - **TypeScript 5.7+** — strict mode, ESM-first (`"module": "Node16"`)
@@ -783,7 +1009,7 @@ The [`examples/`](examples/) directory contains 20 runnable demonstrations:
 - **Turborepo** — parallel builds with dependency-aware caching
 - **Vitest** — test runner (configured, ready for test files)
 - **Prettier** — code formatting
-- **Changesets** — versioning and changelog generation
+- **Fabric Versioning** — major releases named after fabrics A→Z ([details](VERSIONING.md))
 
 ## License
 

@@ -1,0 +1,14 @@
+# Railway configuration for geneWeave
+#
+# Deploy: Connect your GitHub repo at https://railway.app
+# Set environment variables in the Railway dashboard.
+
+[build]
+  builder = "nixpacks"
+
+[deploy]
+  startCommand = "npx tsx deploy/server.ts"
+  healthcheckPath = "/api/auth/me"
+  healthcheckTimeout = 10
+  restartPolicyType = "on_failure"
+  restartPolicyMaxRetries = 5

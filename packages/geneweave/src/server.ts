@@ -125,10 +125,11 @@ export interface ServerConfig {
   chatEngine: ChatEngine;
   jwtSecret: string;
   corsOrigin?: string;
+  providers?: Record<string, { apiKey: string }>;
 }
 
 export function createGeneWeaveServer(config: ServerConfig): Server {
-  const { db, chatEngine, jwtSecret, corsOrigin } = config;
+  const { db, chatEngine, jwtSecret, corsOrigin, providers } = config;
   const dashboard = new DashboardService(db);
   const router = new Router();
   const uiHtml = getHTML();
@@ -202,7 +203,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
   router.get('/api/models', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const models = chatEngine.getAvailableModels();
+    const models = await chatEngine.getAvailableModels();
     json(res, 200, {
       models,
       defaultModel: (chatEngine as any).config.defaultProvider + ':' + (chatEngine as any).config.defaultModel,
@@ -429,7 +430,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
 
   // ── Admin routes (extracted to server-admin.ts) ─────────
-  registerAdminRoutes(router, db, json, readBody);
+  registerAdminRoutes(router, db, json, readBody, providers);
 
   // ── Health ─────────────────────────────────────────────────
 

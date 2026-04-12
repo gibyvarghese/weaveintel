@@ -1,0 +1,131 @@
+# Kubernetes Deployment for geneWeave
+#
+# Apply:
+#   kubectl create secret generic geneweave-secrets \
+#     --from-literal=JWT_SECRET=<secret> \
+#     --from-literal=ANTHROPIC_API_KEY=<key> \
+#     --from-literal=OPENAI_API_KEY=<key>
+#
+#   kubectl apply -f deploy/kubernetes.yaml
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: geneweave-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: geneweave
+  labels:
+    app: geneweave
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: geneweave
+  template:
+    metadata:
+      labels:
+        app: geneweave
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: geneweave
+          image: ghcr.io/gibyvarghese/weaveintel:latest
+          ports:
+            - containerPort: 3500
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3500"
+            - name: DATABASE_PATH
+              value: /app/data/geneweave.db
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: geneweave-secrets
+                  key: JWT_SECRET
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: geneweave-secrets
+                  key: ANTHROPIC_API_KEY
+                  optional: true
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: geneweave-secrets
+                  key: OPENAI_API_KEY
+                  optional: true
+          volumeMounts:
+            - name: data
+              mountPath: /app/data
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /api/auth/me
+              port: 3500
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/auth/me
+              port: 3500
+            initialDelaySeconds: 10
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: geneweave-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: geneweave
+spec:
+  type: ClusterIP
+  selector:
+    app: geneweave
+  ports:
+    - port: 80
+      targetPort: 3500
+      protocol: TCP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: geneweave
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  rules:
+    - host: geneweave.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: geneweave
+                port:
+                  number: 80

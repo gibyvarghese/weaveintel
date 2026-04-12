@@ -1,0 +1,46 @@
+name: Deploy to Azure Container Apps
+
+on:
+  workflow_dispatch:
+    inputs:
+      resource_group:
+        description: 'Azure resource group'
+        required: true
+        default: 'geneweave-rg'
+      location:
+        description: 'Azure region'
+        required: true
+        default: 'westus2'
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to Container Apps
+        uses: azure/container-apps-deploy-action@v1
+        with:
+          resourceGroup: ${{ github.event.inputs.resource_group }}
+          containerAppName: geneweave
+          containerAppEnvironment: geneweave-env
+          location: ${{ github.event.inputs.location }}
+          imageToDeploy: ghcr.io/${{ github.repository }}:main
+          targetPort: 3500
+          environmentVariables: >-
+            NODE_ENV=production
+            PORT=3500
+            DATABASE_PATH=/app/data/geneweave.db
+            JWT_SECRET=secretref:jwt-secret
+            ANTHROPIC_API_KEY=secretref:anthropic-key
+            OPENAI_API_KEY=secretref:openai-key

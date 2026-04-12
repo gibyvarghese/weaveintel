@@ -1,6 +1,6 @@
 {
   "name": "@weaveintel/geneweave",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "geneWeave — AI chatbot application with streaming, auth, observability dashboard, built on weaveIntel",
   "type": "module",
   "main": "./dist/index.js",

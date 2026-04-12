@@ -1,0 +1,17 @@
+node_modules
+dist
+.git
+.github
+.turbo
+.env
+.env.local
+*.tsbuildinfo
+coverage
+geneweave.db
+geneweave.db-shm
+geneweave.db-wal
+.DS_Store
+README.md
+CHANGELOG.md
+VERSIONING.md
+LICENSE

@@ -27,6 +27,9 @@ import type { Server } from 'node:http';
 import { createDatabaseAdapter, type DatabaseAdapter, type DatabaseConfig } from './db.js';
 import { ChatEngine, type ProviderConfig } from './chat.js';
 import { createGeneWeaveServer } from './server.js';
+import { syncModelPricing, type PricingSyncReport } from './pricing-sync.js';
+
+export type { PricingSyncReport };
 
 // ─── Config ──────────────────────────────────────────────────
 
@@ -60,6 +63,8 @@ export interface GeneWeaveApp {
   db: DatabaseAdapter;
   /** Chat engine (for programmatic use) */
   chatEngine: ChatEngine;
+  /** Sync model pricing from provider APIs into the database */
+  syncPricing(): Promise<PricingSyncReport>;
   /** Gracefully stop the server and close the database */
   stop(): Promise<void>;
 }
@@ -92,6 +97,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     chatEngine,
     jwtSecret: config.jwtSecret,
     corsOrigin: config.corsOrigin,
+    providers: config.providers,
   });
 
   // 5. Listen
@@ -107,6 +113,9 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     server,
     db,
     chatEngine,
+    async syncPricing() {
+      return syncModelPricing(db, config.providers);
+    },
     async stop() {
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));

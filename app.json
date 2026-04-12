@@ -1,0 +1,45 @@
+{
+  "name": "geneweave",
+  "description": "geneWeave — AI chatbot with streaming, multi-model support, and observability dashboard",
+  "repository": "https://github.com/gibyvarghese/weaveintel",
+  "logo": "",
+  "keywords": ["ai", "chatbot", "typescript", "llm"],
+  "stack": "heroku-22",
+  "buildpacks": [
+    { "url": "heroku/nodejs" }
+  ],
+  "env": {
+    "JWT_SECRET": {
+      "description": "Secret key for signing authentication tokens",
+      "generator": "secret"
+    },
+    "ANTHROPIC_API_KEY": {
+      "description": "Anthropic API key (optional if OpenAI key is set)",
+      "required": false
+    },
+    "OPENAI_API_KEY": {
+      "description": "OpenAI API key (optional if Anthropic key is set)",
+      "required": false
+    },
+    "DEFAULT_PROVIDER": {
+      "description": "Default LLM provider: anthropic or openai",
+      "required": false
+    },
+    "DEFAULT_MODEL": {
+      "description": "Default model ID (e.g. claude-sonnet-4-20250514, gpt-4o-mini)",
+      "required": false
+    },
+    "NODE_ENV": {
+      "value": "production"
+    }
+  },
+  "scripts": {
+    "postdeploy": "echo 'geneWeave deployed successfully'"
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  }
+}

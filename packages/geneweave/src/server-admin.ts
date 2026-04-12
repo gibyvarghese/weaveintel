@@ -7,6 +7,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseAdapter } from './db.js';
+import { syncModelPricing } from './pricing-sync.js';
 
 type Handler = (
   req: IncomingMessage,
@@ -27,6 +28,7 @@ export function registerAdminRoutes(
   db: DatabaseAdapter,
   json: (res: ServerResponse, status: number, data: unknown) => void,
   readBody: (req: IncomingMessage) => Promise<string>,
+  providers?: Record<string, { apiKey: string }>,
 ): void {
   // ── Admin: Prompts ──────────────────────────────────────────
 
@@ -205,6 +207,83 @@ export function registerAdminRoutes(
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     await db.deleteRoutingPolicy(params['id']!);
     json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Model Pricing ───────────────────────────────────
+
+  router.get('/api/admin/model-pricing', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const pricing = await db.listModelPricing();
+    json(res, 200, { pricing });
+  });
+
+  router.get('/api/admin/model-pricing/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const p = await db.getModelPricing(params['id']!);
+    if (!p) { json(res, 404, { error: 'Pricing entry not found' }); return; }
+    json(res, 200, { pricing: p });
+  });
+
+  router.post('/api/admin/model-pricing', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['model_id'] || !body['provider']) { json(res, 400, { error: 'model_id and provider required' }); return; }
+    const id = 'mp-' + randomUUID().slice(0, 8);
+    await db.createModelPricing({
+      id, model_id: body['model_id'] as string, provider: body['provider'] as string,
+      display_name: (body['display_name'] as string) ?? null,
+      input_cost_per_1m: (body['input_cost_per_1m'] as number) ?? 0,
+      output_cost_per_1m: (body['output_cost_per_1m'] as number) ?? 0,
+      quality_score: (body['quality_score'] as number) ?? 0.7,
+      source: 'manual', last_synced_at: null, enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const pricing = await db.getModelPricing(id);
+    json(res, 201, { pricing });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/model-pricing/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getModelPricing(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Pricing entry not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['model_id'] !== undefined) fields['model_id'] = body['model_id'];
+    if (body['provider'] !== undefined) fields['provider'] = body['provider'];
+    if (body['display_name'] !== undefined) fields['display_name'] = body['display_name'];
+    if (body['input_cost_per_1m'] !== undefined) fields['input_cost_per_1m'] = body['input_cost_per_1m'];
+    if (body['output_cost_per_1m'] !== undefined) fields['output_cost_per_1m'] = body['output_cost_per_1m'];
+    if (body['quality_score'] !== undefined) fields['quality_score'] = body['quality_score'];
+    if (body['source'] !== undefined) fields['source'] = body['source'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updateModelPricing(params['id']!, fields as any);
+    const pricing = await db.getModelPricing(params['id']!);
+    json(res, 200, { pricing });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/model-pricing/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteModelPricing(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Model Pricing: Sync from providers ─────────────────────
+
+  router.post('/api/admin/model-pricing/sync', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    if (!providers || Object.keys(providers).length === 0) {
+      json(res, 400, { error: 'No providers configured — cannot sync pricing' });
+      return;
+    }
+    try {
+      const report = await syncModelPricing(db, providers);
+      json(res, 200, report);
+    } catch (err: unknown) {
+      json(res, 500, { error: err instanceof Error ? err.message : 'Sync failed' });
+    }
   }, { auth: true, csrf: true });
 
   // ── Prompt resolution ──────────────────────────────────────
@@ -2033,6 +2112,77 @@ export function registerAdminRoutes(
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     await db.seedDefaultData();
     json(res, 200, { ok: true, message: 'Default data seeded' });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Version / About ────────────────────────────────
+
+  const FABRIC_CODENAMES = [
+    'Aertex','Batiste','Calico','Damask','Etamine','Flannel','Gauze',
+    'Habutai','Intarsia','Jersey','Knit','Linen','Muslin','Nankeen',
+    'Organza','Percale','Rinzu','Satin','Taffeta','Ultrasuede',
+    'Velvet','Wadmal','Zephyr',
+  ];
+
+  function fabricForMajor(major: number): string {
+    return FABRIC_CODENAMES[major - 1] ?? `v${major}`;
+  }
+
+  const CURRENT_VERSION = '1.0.0';
+
+  router.get('/api/admin/version', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+
+    const currentMajor = parseInt(CURRENT_VERSION.split('.')[0]!, 10);
+    const result: Record<string, unknown> = {
+      currentVersion: CURRENT_VERSION,
+      codename: fabricForMajor(currentMajor),
+      repoUrl: 'https://github.com/gibyvarghese/weaveintel',
+    };
+
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 8000);
+      const resp = await fetch(
+        'https://api.github.com/repos/gibyvarghese/weaveintel/releases/latest',
+        {
+          headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'geneweave' },
+          signal: ctrl.signal,
+        },
+      );
+      clearTimeout(timer);
+      if (resp.ok) {
+        const data = (await resp.json()) as { tag_name?: string; html_url?: string };
+        const tag = (data.tag_name ?? '').replace(/^v/, '');
+        if (tag) {
+          const latestMajor = parseInt(tag.split('.')[0]!, 10);
+          result['latestVersion'] = tag;
+          result['latestCodename'] = fabricForMajor(latestMajor);
+          result['updateAvailable'] = tag !== CURRENT_VERSION;
+          result['releaseUrl'] = data.html_url ?? null;
+        }
+      }
+    } catch {
+      /* GitHub unreachable — just return current info */
+    }
+
+    json(res, 200, result);
+  });
+
+  router.post('/api/admin/upgrade', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+
+    const { execSync } = await import('node:child_process');
+    const cwd = process.cwd();
+
+    try {
+      execSync('git pull origin main', { cwd, timeout: 60_000, stdio: 'pipe' });
+      execSync('npm install', { cwd, timeout: 120_000, stdio: 'pipe' });
+      execSync('npx turbo build', { cwd, timeout: 180_000, stdio: 'pipe' });
+      json(res, 200, { ok: true, message: 'Upgrade complete. Restart the server to apply changes.' });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      json(res, 500, { error: 'Upgrade failed', details: msg });
+    }
   }, { auth: true, csrf: true });
 
 }

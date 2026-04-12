@@ -1,0 +1,50 @@
+# Google Cloud Run service configuration
+#
+# Deploy:
+#   gcloud run deploy geneweave \
+#     --source . \
+#     --region us-central1 \
+#     --allow-unauthenticated \
+#     --set-secrets=JWT_SECRET=jwt-secret:latest,ANTHROPIC_API_KEY=anthropic-key:latest,OPENAI_API_KEY=openai-key:latest
+#
+# Or deploy from a pre-built image:
+#   gcloud run deploy geneweave \
+#     --image ghcr.io/gibyvarghese/weaveintel:latest \
+#     --region us-central1
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: geneweave
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "3"
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 100
+      timeoutSeconds: 300
+      containers:
+        - image: ghcr.io/gibyvarghese/weaveintel:latest
+          ports:
+            - containerPort: 3500
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3500"
+            - name: DATABASE_PATH
+              value: /app/data/geneweave.db
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /api/auth/me
+              port: 3500
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3

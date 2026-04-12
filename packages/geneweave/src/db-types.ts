@@ -150,6 +150,21 @@ export interface RoutingPolicyRow {
   updated_at: string;
 }
 
+export interface ModelPricingRow {
+  id: string;
+  model_id: string;
+  provider: string;
+  display_name: string | null;
+  input_cost_per_1m: number;
+  output_cost_per_1m: number;
+  quality_score: number;
+  source: string;                 // 'manual' | 'sync' | 'seed'
+  last_synced_at: string | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WorkflowDefRow {
   id: string;
   name: string;
@@ -704,6 +719,14 @@ export interface DatabaseAdapter {
 
   // Agent activity: assistant messages with parsed metadata
   getAgentActivity(userId: string, limit?: number): Promise<Array<MessageRow & { chat_title: string; chat_model: string; chat_provider: string }>>;
+
+  // ─── Admin: Model Pricing ────────────────────────────────────
+  createModelPricing(p: Omit<ModelPricingRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getModelPricing(id: string): Promise<ModelPricingRow | null>;
+  listModelPricing(): Promise<ModelPricingRow[]>;
+  updateModelPricing(id: string, fields: Partial<Omit<ModelPricingRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteModelPricing(id: string): Promise<void>;
+  upsertModelPricing(p: Omit<ModelPricingRow, 'created_at' | 'updated_at'>): Promise<void>;
 
   // ─── Admin: Prompts ────────────────────────────────────────
   createPrompt(p: Omit<PromptRow, 'created_at' | 'updated_at'>): Promise<void>;

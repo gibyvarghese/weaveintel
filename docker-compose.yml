@@ -1,0 +1,26 @@
+version: "3.8"
+
+services:
+  geneweave:
+    build: .
+    ports:
+      - "${PORT:-3500}:3500"
+    environment:
+      - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET in .env}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DEFAULT_PROVIDER=${DEFAULT_PROVIDER:-}
+      - DEFAULT_MODEL=${DEFAULT_MODEL:-}
+      - DATABASE_PATH=/app/data/geneweave.db
+    volumes:
+      - geneweave-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3500/api/auth/me"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  geneweave-data:

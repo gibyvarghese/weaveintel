@@ -38,7 +38,8 @@ import type { CachePolicy } from '@weaveintel/core';
 
 interface ModelPricing { input: number; output: number }
 
-const PRICING: Record<string, ModelPricing> = {
+// Fallback pricing used when DB lookup yields nothing (keeps system functional during cold start)
+const FALLBACK_PRICING: Record<string, ModelPricing> = {
   'claude-sonnet-4-20250514':       { input: 3.00, output: 15.00 },
   'claude-opus-4-20250514':         { input: 15.00, output: 75.00 },
   'claude-haiku-4-20250414':        { input: 1.00, output: 5.00 },
@@ -51,8 +52,8 @@ const PRICING: Record<string, ModelPricing> = {
   'o4-mini':                        { input: 1.10, output: 4.40 },
 };
 
-export function calculateCost(modelId: string, promptTokens: number, completionTokens: number): number {
-  const pricing = PRICING[modelId];
+export function calculateCost(modelId: string, promptTokens: number, completionTokens: number, pricingOverride?: ModelPricing): number {
+  const pricing = pricingOverride ?? FALLBACK_PRICING[modelId];
   if (!pricing) return 0;
   return (promptTokens / 1_000_000) * pricing.input + (completionTokens / 1_000_000) * pricing.output;
 }
@@ -143,11 +144,31 @@ export class ChatEngine {
   private readonly healthTracker = new ModelHealthTracker();
   private readonly responseCache = weaveInMemoryCacheStore();
   private readonly cacheKeyBuilder = weaveCacheKeyBuilder({ namespace: 'gw-chat' });
+  private pricingCache: Map<string, ModelPricing> | null = null;
+  private pricingCacheTs = 0;
 
   constructor(
     private readonly config: ChatEngineConfig,
     private readonly db: DatabaseAdapter,
   ) {}
+
+  /** Load pricing from DB, cache for 60 s */
+  private async loadPricing(): Promise<Map<string, ModelPricing>> {
+    const now = Date.now();
+    if (this.pricingCache && now - this.pricingCacheTs < 60_000) return this.pricingCache;
+    try {
+      const rows = await this.db.listModelPricing();
+      const map = new Map<string, ModelPricing>();
+      for (const r of rows) {
+        if (r.enabled) map.set(r.model_id, { input: r.input_cost_per_1m, output: r.output_cost_per_1m });
+      }
+      this.pricingCache = map;
+      this.pricingCacheTs = now;
+      return map;
+    } catch {
+      return new Map();
+    }
+  }
 
   // ── Direct mode: send ───────────────────────────────────────
 
@@ -281,7 +302,8 @@ export class ChatEngine {
     }
 
     const latencyMs = Date.now() - startMs;
-    const cost = calculateCost(modelId, usage.promptTokens, usage.completionTokens);
+    const dbPricing = await this.loadPricing();
+    const cost = calculateCost(modelId, usage.promptTokens, usage.completionTokens, dbPricing.get(modelId));
 
     // Record health outcome
     this.recordModelOutcome(modelId, provider, latencyMs, true);
@@ -474,7 +496,8 @@ export class ChatEngine {
     }
 
     const latencyMs = Date.now() - startMs;
-    const cost = calculateCost(modelId, finalUsage.promptTokens, finalUsage.completionTokens);
+    const streamDbPricing = await this.loadPricing();
+    const cost = calculateCost(modelId, finalUsage.promptTokens, finalUsage.completionTokens, streamDbPricing.get(modelId));
 
     // Record health outcome
     this.recordModelOutcome(modelId, provider, latencyMs, true);
@@ -800,26 +823,43 @@ export class ChatEngine {
     }
   }
 
-  /** Available models based on configured providers */
-  getAvailableModels(): Array<{ id: string; provider: string }> {
+  /** Available models based on configured providers + DB pricing table */
+  async getAvailableModels(): Promise<Array<{ id: string; provider: string }>> {
+    const seen = new Set<string>();
     const models: Array<{ id: string; provider: string }> = [];
-    for (const provider of Object.keys(this.config.providers)) {
-      if (provider === 'anthropic') {
-        models.push(
-          { id: 'claude-sonnet-4-20250514', provider },
-          { id: 'claude-opus-4-20250514', provider },
-          { id: 'claude-haiku-4-20250414', provider },
-        );
-      } else if (provider === 'openai') {
-        models.push(
-          { id: 'gpt-4o', provider },
-          { id: 'gpt-4o-mini', provider },
-          { id: 'gpt-4.1', provider },
-          { id: 'gpt-4.1-mini', provider },
-          { id: 'gpt-4.1-nano', provider },
-          { id: 'o3', provider },
-          { id: 'o4-mini', provider },
-        );
+    const configuredProviders = new Set(Object.keys(this.config.providers));
+
+    // First, pull enabled models from the DB pricing table
+    try {
+      const rows = await this.db.listModelPricing();
+      for (const row of rows) {
+        if (row.enabled && configuredProviders.has(row.provider)) {
+          const key = `${row.provider}:${row.model_id}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            models.push({ id: row.model_id, provider: row.provider });
+          }
+        }
+      }
+    } catch {
+      // DB lookup is best-effort; fall through to hardcoded fallback
+    }
+
+    // Merge hardcoded fallback models (for providers with no DB rows yet)
+    const FALLBACK_MODELS: Record<string, string[]> = {
+      anthropic: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-20250414'],
+      openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'o4-mini'],
+    };
+    for (const provider of configuredProviders) {
+      const fallback = FALLBACK_MODELS[provider];
+      if (fallback) {
+        for (const id of fallback) {
+          const key = `${provider}:${id}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            models.push({ id, provider });
+          }
+        }
       }
     }
     return models;
@@ -966,36 +1006,38 @@ export class ChatEngine {
       if (!active) return null;
 
       // Build candidate list from configured providers
-      const candidates = this.getAvailableModels().map(m => ({
+      const candidates = (await this.getAvailableModels()).map(m => ({
         modelId: m.id,
         providerId: m.provider,
       }));
 
       if (candidates.length === 0) return null;
 
-      // Cost data from PRICING table
+      // Load pricing & quality from DB (falls back to hardcoded if DB is empty)
+      const pricingRows = await this.db.listModelPricing();
+      const pricingMap = new Map(pricingRows.filter(r => r.enabled).map(r => [`${r.provider}:${r.model_id}`, r]));
+
+      // Cost data from DB model_pricing table
       const costs: ModelCostInfo[] = candidates.map(c => {
-        const p = PRICING[c.modelId];
+        const row = pricingMap.get(`${c.providerId}:${c.modelId}`);
+        const fb = FALLBACK_PRICING[c.modelId];
         return {
           modelId: c.modelId,
           providerId: c.providerId,
-          inputCostPer1M: p ? p.input : 10,
-          outputCostPer1M: p ? p.output : 30,
+          inputCostPer1M: row ? row.input_cost_per_1m : fb ? fb.input : 10,
+          outputCostPer1M: row ? row.output_cost_per_1m : fb ? fb.output : 30,
         };
       });
 
-      // Quality estimates (static for now — higher-tier models get higher scores)
-      const qualityMap: Record<string, number> = {
-        'claude-opus-4-20250514': 0.95, 'gpt-4o': 0.9, 'gpt-4.1': 0.9,
-        'claude-sonnet-4-20250514': 0.85, 'o3': 0.85,
-        'gpt-4o-mini': 0.75, 'gpt-4.1-mini': 0.75, 'o4-mini': 0.75,
-        'claude-haiku-4-20250414': 0.7, 'gpt-4.1-nano': 0.6,
-      };
-      const qualities: ModelQualityInfo[] = candidates.map(c => ({
-        modelId: c.modelId,
-        providerId: c.providerId,
-        qualityScore: qualityMap[c.modelId] ?? 0.7,
-      }));
+      // Quality scores from DB model_pricing table
+      const qualities: ModelQualityInfo[] = candidates.map(c => {
+        const row = pricingMap.get(`${c.providerId}:${c.modelId}`);
+        return {
+          modelId: c.modelId,
+          providerId: c.providerId,
+          qualityScore: row ? row.quality_score : 0.7,
+        };
+      });
 
       const router = new SmartModelRouter({ candidates, costs, qualities });
 

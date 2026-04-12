@@ -18,7 +18,7 @@ import type {
   ArtifactPolicyRow, ReliabilityPolicyRow,
   CollaborationSessionRow, ComplianceRuleRow, GraphConfigRow, PluginConfigRow,
   ScaffoldTemplateRow, RecipeConfigRow, WidgetConfigRow, ValidationRuleRow,
-  MetricsSummary, WorkflowRunRow, GuardrailEvalRow,
+  MetricsSummary, WorkflowRunRow, GuardrailEvalRow, ModelPricingRow,
 } from './db-types.js';
 
 export class SQLiteAdapter implements DatabaseAdapter {
@@ -340,6 +340,54 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteGuardrail(id: string): Promise<void> {
     this.d.prepare('DELETE FROM guardrails WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Model Pricing ──────────────────────────────────
+
+  async createModelPricing(p: Omit<ModelPricingRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO model_pricing (id, model_id, provider, display_name, input_cost_per_1m, output_cost_per_1m, quality_score, source, last_synced_at, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.model_id, p.provider, p.display_name ?? null, p.input_cost_per_1m, p.output_cost_per_1m, p.quality_score, p.source, p.last_synced_at ?? null, p.enabled);
+  }
+
+  async getModelPricing(id: string): Promise<ModelPricingRow | null> {
+    return (this.d.prepare('SELECT * FROM model_pricing WHERE id = ?').get(id) as ModelPricingRow) ?? null;
+  }
+
+  async listModelPricing(): Promise<ModelPricingRow[]> {
+    return this.d.prepare('SELECT * FROM model_pricing ORDER BY provider ASC, model_id ASC').all() as ModelPricingRow[];
+  }
+
+  async updateModelPricing(id: string, fields: Partial<Omit<ModelPricingRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE model_pricing SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteModelPricing(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM model_pricing WHERE id = ?').run(id);
+  }
+
+  async upsertModelPricing(p: Omit<ModelPricingRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO model_pricing (id, model_id, provider, display_name, input_cost_per_1m, output_cost_per_1m, quality_score, source, last_synced_at, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(model_id, provider) DO UPDATE SET
+         display_name = excluded.display_name,
+         input_cost_per_1m = excluded.input_cost_per_1m,
+         output_cost_per_1m = excluded.output_cost_per_1m,
+         quality_score = excluded.quality_score,
+         source = excluded.source,
+         last_synced_at = excluded.last_synced_at,
+         updated_at = datetime('now')`,
+    ).run(p.id, p.model_id, p.provider, p.display_name ?? null, p.input_cost_per_1m, p.output_cost_per_1m, p.quality_score, p.source, p.last_synced_at ?? null, p.enabled);
   }
 
   // ─── Admin: Routing policies ───────────────────────────────
@@ -1375,6 +1423,23 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const r of policies) await this.createRoutingPolicy(r);
+    }
+
+    // Model pricing
+    if (cnt('model_pricing') === 0) {
+    const pricing: Omit<ModelPricingRow, 'created_at' | 'updated_at'>[] = [
+      { id: 'mp-claude-sonnet-4',    model_id: 'claude-sonnet-4-20250514',    provider: 'anthropic', display_name: 'Claude Sonnet 4',    input_cost_per_1m: 3.00,  output_cost_per_1m: 15.00, quality_score: 0.85, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'mp-claude-opus-4',      model_id: 'claude-opus-4-20250514',      provider: 'anthropic', display_name: 'Claude Opus 4',      input_cost_per_1m: 15.00, output_cost_per_1m: 75.00, quality_score: 0.95, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'mp-claude-haiku-4',     model_id: 'claude-haiku-4-20250414',     provider: 'anthropic', display_name: 'Claude Haiku 4',     input_cost_per_1m: 1.00,  output_cost_per_1m: 5.00,  quality_score: 0.70, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'mp-gpt-4o',             model_id: 'gpt-4o',                      provider: 'openai',    display_name: 'GPT-4o',             input_cost_per_1m: 2.50,  output_cost_per_1m: 10.00, quality_score: 0.90, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'mp-gpt-4o-mini',        model_id: 'gpt-4o-mini',                 provider: 'openai',    display_name: 'GPT-4o Mini',        input_cost_per_1m: 0.15,  output_cost_per_1m: 0.60,  quality_score: 0.75, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'mp-gpt-4.1',            model_id: 'gpt-4.1',                     provider: 'openai',    display_name: 'GPT-4.1',            input_cost_per_1m: 2.00,  output_cost_per_1m: 8.00,  quality_score: 0.90, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'mp-gpt-4.1-mini',       model_id: 'gpt-4.1-mini',                provider: 'openai',    display_name: 'GPT-4.1 Mini',       input_cost_per_1m: 0.40,  output_cost_per_1m: 1.60,  quality_score: 0.75, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'mp-gpt-4.1-nano',       model_id: 'gpt-4.1-nano',                provider: 'openai',    display_name: 'GPT-4.1 Nano',       input_cost_per_1m: 0.10,  output_cost_per_1m: 0.40,  quality_score: 0.60, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'mp-o3',                 model_id: 'o3',                           provider: 'openai',    display_name: 'o3',                 input_cost_per_1m: 2.00,  output_cost_per_1m: 8.00,  quality_score: 0.85, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'mp-o4-mini',            model_id: 'o4-mini',                      provider: 'openai',    display_name: 'o4 Mini',            input_cost_per_1m: 1.10,  output_cost_per_1m: 4.40,  quality_score: 0.75, source: 'seed', last_synced_at: null, enabled: 1 },
+    ];
+    for (const p of pricing) await this.createModelPricing(p);
     }
 
     // Workflow definitions

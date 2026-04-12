@@ -1,0 +1,30 @@
+# Render.com Blueprint
+#
+# Deploy: Connect your GitHub repo at https://render.com
+# Or click "New > Blueprint" and point to this repo.
+
+services:
+  - type: web
+    name: geneweave
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npx turbo build
+    startCommand: npx tsx deploy/server.ts
+    healthCheckPath: /api/auth/me
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3500"
+      - key: DATABASE_PATH
+        value: /app/data/geneweave.db
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+    disk:
+      name: geneweave-data
+      mountPath: /app/data
+      sizeGB: 1

@@ -50,6 +50,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'prompts', label: 'Prompts' },
     { key: 'guardrails', label: 'Guardrails' },
     { key: 'routing', label: 'Routing' },
+    { key: 'model-pricing', label: 'Model Pricing' },
     { key: 'workflows', label: 'Workflows' },
     { key: 'tools', label: 'Tools' },
   ]},
@@ -93,6 +94,9 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
   { label: 'Monitoring', icon: '\uD83D\uDCCA', tabs: [
     { key: 'workflow-runs', label: 'Workflow Runs' },
     { key: 'guardrail-evals', label: 'Guardrail Evals' },
+  ]},
+  { label: 'System', icon: '\u2139\uFE0F', tabs: [
+    { key: 'about', label: 'About' },
   ]},
 ];
 
@@ -138,6 +142,19 @@ export const ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'weights', label: 'Weights (JSON)', textarea: true, save: 'json' },
       { key: 'fallback_model', label: 'Fallback Model' },
       { key: 'fallback_provider', label: 'Fallback Provider' },
+      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
+    ],
+  },
+  'model-pricing': {
+    singular: 'Model Pricing', apiPath: 'admin/model-pricing', listKey: 'pricing',
+    cols: ['model_id', 'provider', 'display_name', 'input_cost_per_1m', 'output_cost_per_1m', 'quality_score', 'source', 'enabled'],
+    fields: [
+      { key: 'model_id', label: 'Model ID' },
+      { key: 'provider', label: 'Provider', options: ['openai', 'anthropic'] },
+      { key: 'display_name', label: 'Display Name' },
+      { key: 'input_cost_per_1m', label: 'Input Cost / 1M tokens', type: 'number', save: 'float' },
+      { key: 'output_cost_per_1m', label: 'Output Cost / 1M tokens', type: 'number', save: 'float' },
+      { key: 'quality_score', label: 'Quality Score (0-1)', type: 'number', save: 'float', default: 0.5 },
       { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
     ],
   },

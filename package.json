@@ -1,6 +1,6 @@
 {
   "name": "weaveintel",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "description": "Protocol-first, capability-driven AI framework for TypeScript",
   "license": "MIT",
@@ -18,7 +18,9 @@
     "clean": "turbo clean",
     "typecheck": "turbo typecheck",
     "format": "prettier --write \"packages/*/src/**/*.ts\"",
-    "format:check": "prettier --check \"packages/*/src/**/*.ts\""
+    "format:check": "prettier --check \"packages/*/src/**/*.ts\"",
+    "release:bump": "node scripts/bump-version.mjs",
+    "release:tag": "node scripts/tag-release.mjs"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.0",

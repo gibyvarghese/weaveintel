@@ -149,6 +149,22 @@ CREATE TABLE IF NOT EXISTS routing_policies (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS model_pricing (
+  id TEXT PRIMARY KEY,
+  model_id TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  display_name TEXT,
+  input_cost_per_1m REAL NOT NULL DEFAULT 0,
+  output_cost_per_1m REAL NOT NULL DEFAULT 0,
+  quality_score REAL NOT NULL DEFAULT 0.7,
+  source TEXT NOT NULL DEFAULT 'manual',
+  last_synced_at TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(model_id, provider)
+);
+
 CREATE TABLE IF NOT EXISTS workflow_defs (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

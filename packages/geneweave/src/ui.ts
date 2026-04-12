@@ -424,7 +424,9 @@ let state = {
   // Admin state
   adminTab:'prompts',
   adminData:{},
-  adminEditing:null, adminForm:{}
+  adminEditing:null, adminForm:{},
+  // About state
+  _aboutInfo:null, _upgradeStatus:null, _upgradeMsg:null
 };
 
 /* ── API ────────────────────────────────────── */
@@ -972,6 +974,25 @@ async function seedData(){
   }catch(e){ console.error('Seed failed',e); }
 }
 
+async function syncPricing(){
+  try{
+    var resp = await api.post('/admin/model-pricing/sync',{});
+    if(resp && resp.ok){
+      var report = await resp.json();
+      var parts = [];
+      Object.keys(report.providers||{}).forEach(function(p){
+        var s = report.providers[p];
+        parts.push(p+': '+s.discovered+' discovered, '+s.matched+' matched, '+s.upserted+' upserted'+(s.errors&&s.errors.length?' ('+s.errors.length+' errors)':''));
+      });
+      alert('Pricing synced!\\n\\n'+parts.join('\\n'));
+      await loadAdmin();
+    } else {
+      var err = resp ? await resp.json() : {};
+      alert('Sync failed: '+(err.error||'Unknown error'));
+    }
+  }catch(e){ alert('Sync error: '+e.message); }
+}
+
 async function adminSave(tab){
   var schema = ADMIN_SCHEMA[tab];
   if(!schema) return;
@@ -1165,6 +1186,106 @@ function getAdminCols(tab){
   });
 }
 
+/* ── About panel ─────────────────────────────────────────── */
+function renderAboutPanel(){
+  var wrap = h('div',{style:'max-width:560px'});
+
+  /* Logo / title */
+  wrap.appendChild(h('div',{style:'display:flex;align-items:center;gap:14px;margin-bottom:24px'},
+    h('div',{style:'width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#6366F1,#8B5CF6);display:flex;align-items:center;justify-content:center;font-size:28px;color:#fff'},'\uD83E\uDDF6'),
+    h('div',{},
+      h('div',{style:'font-size:22px;font-weight:800;color:#1E293B'},'geneWeave'),
+      h('div',{style:'font-size:13px;color:#64748B;margin-top:2px'},'Built on weaveIntel')
+    )
+  ));
+
+  /* Version card */
+  var card = h('div',{style:'background:var(--bg2);border:1px solid #E5E7EB;border-radius:12px;padding:20px;margin-bottom:20px'});
+  card.appendChild(h('div',{style:'font-size:11px;font-weight:700;color:var(--fg3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px'},'Installed Version'));
+
+  if(!state._aboutInfo){
+    card.appendChild(h('div',{style:'color:var(--fg3);font-size:13px'},'Loading version info\u2026'));
+    /* Fetch version info */
+    fetch('/api/admin/version',{credentials:'include'}).then(function(r){return r.json();}).then(function(d){
+      state._aboutInfo=d; render();
+    }).catch(function(){
+      state._aboutInfo={currentVersion:'unknown',codename:'',error:true}; render();
+    });
+  } else {
+    var info = state._aboutInfo;
+    card.appendChild(h('div',{style:'display:flex;align-items:baseline;gap:10px;margin-bottom:6px'},
+      h('span',{style:'font-size:28px;font-weight:800;color:#1E293B'},'v'+info.currentVersion),
+      h('span',{style:'font-size:15px;font-weight:600;color:#6366F1'},'\u201C'+info.codename+'\u201D')
+    ));
+
+    if(info.latestVersion && !info.updateAvailable){
+      card.appendChild(h('div',{style:'display:flex;align-items:center;gap:6px;margin-top:10px;color:#16A34A;font-size:13px;font-weight:600'},
+        '\u2705 You are on the latest version'
+      ));
+    }
+
+    if(info.updateAvailable){
+      var updateBox = h('div',{style:'margin-top:14px;padding:14px;background:#FEF3C7;border:1px solid #F59E0B;border-radius:8px'});
+      updateBox.appendChild(h('div',{style:'font-weight:700;color:#92400E;font-size:14px;margin-bottom:4px'},
+        '\u26A0\uFE0F Update Available'));
+      updateBox.appendChild(h('div',{style:'font-size:13px;color:#78350F'},
+        'Version v'+info.latestVersion+' \u201C'+info.latestCodename+'\u201D is available.'
+      ));
+
+      var upgradeBtn = h('button',{
+        className:'nav-btn active',
+        style:'margin-top:10px;font-size:13px',
+        onClick:function(){
+          if(!confirm('This will pull the latest code from GitHub, install dependencies, and rebuild. Proceed?')) return;
+          state._upgradeStatus='running'; render();
+          fetch('/api/admin/upgrade',{method:'POST',credentials:'include'}).then(function(r){return r.json();}).then(function(d){
+            state._upgradeStatus=d.ok?'done':'error';
+            state._upgradeMsg=d.message||d.error||''; render();
+          }).catch(function(e){
+            state._upgradeStatus='error';
+            state._upgradeMsg=e.message||'Network error'; render();
+          });
+        }
+      },'\u2B06\uFE0F Upgrade to v'+info.latestVersion);
+
+      if(state._upgradeStatus==='running'){
+        updateBox.appendChild(h('div',{style:'margin-top:10px;font-size:13px;color:#78350F'},'\u23F3 Upgrading\u2026 this may take a few minutes.'));
+      } else if(state._upgradeStatus==='done'){
+        updateBox.appendChild(h('div',{style:'margin-top:10px;font-size:13px;color:#16A34A;font-weight:600'},'\u2705 '+state._upgradeMsg));
+      } else if(state._upgradeStatus==='error'){
+        updateBox.appendChild(h('div',{style:'margin-top:10px;font-size:13px;color:#DC2626;font-weight:600'},'\u274C '+state._upgradeMsg));
+      } else {
+        updateBox.appendChild(upgradeBtn);
+      }
+      card.appendChild(updateBox);
+    }
+
+    if(info.error){
+      card.appendChild(h('div',{style:'color:#DC2626;font-size:13px;margin-top:8px'},'Could not fetch version information.'));
+    }
+  }
+  wrap.appendChild(card);
+
+  /* Links */
+  var links = h('div',{style:'display:flex;gap:12px;flex-wrap:wrap'});
+  links.appendChild(h('a',{href:'https://github.com/gibyvarghese/weaveintel',target:'_blank',
+    style:'font-size:13px;color:var(--accent);text-decoration:none;font-weight:600'},'\uD83D\uDD17 GitHub Repository'));
+  links.appendChild(h('a',{href:'https://github.com/gibyvarghese/weaveintel/releases',target:'_blank',
+    style:'font-size:13px;color:var(--accent);text-decoration:none;font-weight:600'},'\uD83D\uDCE6 Releases'));
+  links.appendChild(h('a',{href:'https://github.com/gibyvarghese/weaveintel/blob/main/VERSIONING.md',target:'_blank',
+    style:'font-size:13px;color:var(--accent);text-decoration:none;font-weight:600'},'\uD83E\uDDF5 Versioning Guide'));
+  wrap.appendChild(links);
+
+  /* Refresh button */
+  wrap.appendChild(h('div',{style:'margin-top:20px'},
+    h('button',{className:'nav-btn',style:'font-size:12px',onClick:function(){
+      state._aboutInfo=null; state._upgradeStatus=null; state._upgradeMsg=null; render();
+    }},'\uD83D\uDD04 Refresh')
+  ));
+
+  return wrap;
+}
+
 function renderAdmin(){
   var view = h('div',{style:'display:flex;flex-direction:column;flex:1;overflow:hidden'});
 
@@ -1199,6 +1320,14 @@ function renderAdmin(){
   var schema = ADMIN_SCHEMA[tab];
   var isReadOnlyTab = schema && schema.readOnly;
 
+  /* ── About panel (custom) ── */
+  if(tab==='about'){
+    content.appendChild(renderAboutPanel());
+    layout.appendChild(content);
+    view.appendChild(layout);
+    return view;
+  }
+
   /* Form (if editing or creating) */
   if(!isReadOnlyTab && (state.adminEditing!==null||Object.keys(state.adminForm).length>0)){
     content.appendChild(renderAdminForm(tab));
@@ -1209,7 +1338,12 @@ function renderAdmin(){
   var count = (state.adminData[tab]||[]).length;
   actions.appendChild(h('span',{style:'font-size:13px;color:#64748B'},count+' item'+(count!==1?'s':'')));
   if(!isReadOnlyTab && !state.adminEditing && Object.keys(state.adminForm).length===0){
-    actions.appendChild(h('button',{className:'nav-btn active',style:'font-size:12px',onClick:adminNew},'+ New'));
+    var actionBtns = h('div',{style:'display:flex;gap:8px'});
+    if(tab==='model-pricing'){
+      actionBtns.appendChild(h('button',{className:'nav-btn',style:'font-size:12px',onClick:syncPricing},'\uD83D\uDD04 Sync Pricing'));
+    }
+    actionBtns.appendChild(h('button',{className:'nav-btn active',style:'font-size:12px',onClick:adminNew},'+ New'));
+    actions.appendChild(actionBtns);
   }
   content.appendChild(actions);
 

@@ -1,0 +1,49 @@
+# AWS ECS Task Definition for geneWeave (Fargate)
+#
+# Register:
+#   aws ecs register-task-definition --cli-input-json file://deploy/aws-ecs-task.json
+#
+# Then create a service pointing to this task definition.
+
+{
+  "family": "geneweave",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::<account>:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "geneweave",
+      "image": "ghcr.io/gibyvarghese/weaveintel:latest",
+      "portMappings": [
+        { "containerPort": 3500, "protocol": "tcp" }
+      ],
+      "environment": [
+        { "name": "NODE_ENV", "value": "production" },
+        { "name": "PORT", "value": "3500" },
+        { "name": "DATABASE_PATH", "value": "/app/data/geneweave.db" }
+      ],
+      "secrets": [
+        { "name": "JWT_SECRET", "valueFrom": "arn:aws:ssm:<region>:<account>:parameter/geneweave/jwt-secret" },
+        { "name": "ANTHROPIC_API_KEY", "valueFrom": "arn:aws:ssm:<region>:<account>:parameter/geneweave/anthropic-key" },
+        { "name": "OPENAI_API_KEY", "valueFrom": "arn:aws:ssm:<region>:<account>:parameter/geneweave/openai-key" }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -qO- http://localhost:3500/api/auth/me || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 10
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/geneweave",
+          "awslogs-region": "<region>",
+          "awslogs-stream-prefix": "geneweave"
+        }
+      }
+    }
+  ]
+}

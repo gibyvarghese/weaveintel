@@ -1,0 +1,48 @@
+# Fly.io configuration for geneWeave
+#
+# Deploy:
+#   fly launch          (first time)
+#   fly deploy          (subsequent)
+#   fly secrets set JWT_SECRET=... ANTHROPIC_API_KEY=... OPENAI_API_KEY=...
+
+app = "geneweave"
+primary_region = "iad"
+kill_signal = "SIGTERM"
+kill_timeout = "5s"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3500"
+  NODE_ENV = "production"
+  DATABASE_PATH = "/app/data/geneweave.db"
+
+[http_service]
+  internal_port = 3500
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 250
+    soft_limit = 200
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[mounts]
+  source = "geneweave_data"
+  destination = "/app/data"
+
+[[checks]]
+  port = 3500
+  type = "http"
+  interval = "30s"
+  timeout = "5s"
+  grace_period = "10s"
+  method = "GET"
+  path = "/api/auth/me"

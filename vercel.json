@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "deploy/server.ts",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "deploy/server.ts" }
+  ],
+  "env": {
+    "NODE_ENV": "production"
+  }
+}
