@@ -53,6 +53,16 @@ const TEMPORAL_TOOL_POLICY = [
   '- You MUST call datetime and/or timezone_info before answering.',
   '- Use tool outputs as the source of truth for temporal answers.',
   '- If timezone is missing, use available context and state assumptions explicitly.',
+  '',
+  'Timer and Stopwatch Tool Usage Policy:',
+  '- When asked to "start a timer", "start a stopwatch", "begin timing", or anything that requires tracking elapsed time:',
+  '  • ALWAYS call `stopwatch_start` (not just `datetime`). Return the full JSON including the stopwatch `id`.',
+  '  • The caller needs the stopwatch ID to later stop it and check elapsed time.',
+  '- When asked to "stop the timer", "check elapsed time", or "how long did it take":',
+  '  • First call `timer_list` and check for active timers. If none, check for active stopwatches.',
+  '  • Call `stopwatch_stop` (or `timer_stop`) with the appropriate ID.',
+  '  • Always report `elapsedMs` converted to human-readable format (minutes and seconds).',
+  '- NEVER calculate elapsed time from raw timestamps or message content — use the stopwatch/timer tools.',
 ].join('\n');
 
 const SUPERVISOR_TEMPORAL_POLICY = [
@@ -69,6 +79,20 @@ const SUPERVISOR_TEMPORAL_POLICY = [
   '  • "What time is it?" / "What is the current time?"',
   '  • "What timezone am I in?" / "What is the timezone?"',
   '  • Any question about current timestamp, current date, current time, or today',
+  '',
+  'TIMER AND STOPWATCH MANAGEMENT (CRITICAL):',
+  '- When the user asks to START a timer or stopwatch (e.g. "start a timer", "start timing", "begin stopwatch"):',
+  '  • Delegate to analyst with EXPLICIT goal: "Use the `stopwatch_start` tool to start a stopwatch labeled \'[context label]\'. Return the full JSON response including the stopwatch ID."',
+  '  • Do NOT ask the analyst to just "capture the current timestamp" — it MUST call `stopwatch_start`',
+  '  • After analyst returns, extract the stopwatch ID from the JSON',
+  '  • Tell the user the timer has started AND include the stopwatch ID in your response (e.g. "Timer started (ID: watch-abc123). I\'ll track this until you return.")',
+  '  • The stopwatch ID MUST appear in your reply so it is recorded in conversation history for later retrieval',
+  '',
+  '- When the user RETURNS after a timer was started (e.g. "I am back", "I\'m back", "stop the timer"):',
+  '  • Look in the conversation history for the stopwatch ID from when the timer was started',
+  '  • Delegate to analyst with EXPLICIT goal: "Use `stopwatch_stop` with stopwatchId=\'[ID from history]\' to stop the stopwatch and report the total elapsed time in minutes and seconds."',
+  '  • If no stopwatch ID is found in history, delegate to analyst: "Use `timer_list` and `stopwatch_status` to find any active timers or stopwatches. If found, stop them and report the elapsed time."',
+  '  • Do NOT try to calculate elapsed time using raw timestamps or message metadata — always use the stopwatch tools',
 ].join('\n');
 
 // ─── Tool Policies (auto-select tools by mode) ─────────────────
@@ -235,7 +259,8 @@ export class ChatEngine {
   private readonly toolOptions: ToolRegistryOptions;
 
   private withTemporalToolPolicy(basePrompt: string | undefined, toolNames: string[]): string | undefined {
-    const hasTemporalTools = toolNames.includes('datetime') || toolNames.includes('timezone_info');
+    const hasTemporalTools = toolNames.includes('datetime') || toolNames.includes('timezone_info')
+      || toolNames.includes('stopwatch_start') || toolNames.includes('timer_start');
     if (!hasTemporalTools) return basePrompt;
     
     const enhancedPolicy = [
