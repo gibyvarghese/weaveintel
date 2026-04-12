@@ -7,6 +7,9 @@
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { readFile as fsReadFile } from 'node:fs/promises';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { DatabaseAdapter } from './db.js';
 import type { ChatEngine } from './chat.js';
 import { DashboardService } from './dashboard.js';
@@ -469,6 +472,18 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { status: 'ok', service: 'geneweave', timestamp: new Date().toISOString() });
   });
 
+  // ── Avatar static files ────────────────────────────────────
+
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const avatarDirs = [
+    join(__dirname, '..', 'avatar'),
+    join(__dirname, '..', 'avatars'),
+    join(process.cwd(), 'packages', 'geneweave', 'avatar'),
+    join(process.cwd(), 'packages', 'geneweave', 'avatars'),
+    join(process.cwd(), 'avatar'),
+    join(process.cwd(), 'avatars'),
+  ];
+
   // ── HTTP server ────────────────────────────────────────────
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -509,6 +524,32 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
         const msg = err instanceof Error ? err.message : 'Internal server error';
         console.error(`[geneWeave] Error handling ${method} ${pathname}:`, err);
         if (!res.headersSent) json(res, 500, { error: msg });
+      }
+      return;
+    }
+
+    // Serve avatar images
+    const avatarMatch = pathname.match(/^\/avatar\/(avatar-\d+\.webp)$/);
+    if (method === 'GET' && avatarMatch) {
+      const filename = avatarMatch[1]!;
+      let data: Buffer | null = null;
+      for (const dir of avatarDirs) {
+        try {
+          data = await fsReadFile(join(dir, filename));
+          break;
+        } catch {
+          // Try next candidate directory.
+        }
+      }
+      if (data) {
+        res.writeHead(200, {
+          'Content-Type': 'image/webp',
+          'Content-Length': data.length,
+          'Cache-Control': 'public, max-age=31536000, immutable',
+        });
+        res.end(data);
+      } else {
+        json(res, 404, { error: 'Avatar not found' });
       }
       return;
     }

@@ -85,7 +85,8 @@ input{font-family:inherit;outline:none}
 .messages{flex:1;overflow-y:auto;padding:32px;display:flex;flex-direction:column;gap:20px}
 .msg{max-width:720px;width:100%;margin:0 auto;display:flex;gap:12px;align-items:flex-start}
 .msg.user{flex-direction:row-reverse}
-.msg .avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0}
+.msg .avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;overflow:hidden}
+.msg .avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%}
 .msg.user .avatar{background:var(--fg);color:#FFFFFF}
 .msg.assistant .avatar{background:var(--bg3);color:var(--fg2);border:1px solid var(--bg4)}
 .msg .bubble{padding:14px 18px;border-radius:var(--radius-lg);font-size:14px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
@@ -144,6 +145,7 @@ input{font-family:inherit;outline:none}
 .step-card.tool .step-hdr{color:var(--warn)}
 .step-card.delegation{border-color:rgba(124,58,237,.2)}
 .step-card.delegation .step-hdr{color:#7c3aed}
+.step-card.delegation .step-hdr img.delegation-avatar{width:20px;height:20px;border-radius:50%;object-fit:cover;margin-right:4px;vertical-align:middle}
 .step-card.thinking{border-color:var(--bg4)}
 .step-card.thinking .step-hdr{color:var(--fg3)}
 .redaction-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(220,38,38,.06);color:var(--danger);font-size:11px;padding:3px 10px;border-radius:999px;margin-bottom:4px;border:1px solid rgba(220,38,38,.15)}
@@ -151,6 +153,8 @@ input{font-family:inherit;outline:none}
 .eval-badge.pass{background:rgba(22,163,74,.06);color:var(--success);border:1px solid rgba(22,163,74,.15)}
 .eval-badge.fail{background:rgba(220,38,38,.06);color:var(--danger);border:1px solid rgba(220,38,38,.15)}
 .mode-badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:3px 10px;border-radius:999px;background:var(--accent-dim);color:var(--accent);text-transform:uppercase;letter-spacing:.5px;font-weight:600;border:1px solid rgba(37,99,235,.15)}
+.worker-chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 10px;border-radius:999px;background:var(--bg3);color:var(--fg2);border:1px solid var(--bg4);margin-right:6px;margin-bottom:6px}
+.worker-chip img{width:16px;height:16px;border-radius:50%;object-fit:cover}
 
 /* ── Chat header bar ─────────────────────── */
 .chat-header{display:flex;align-items:center;justify-content:space-between;padding:12px 24px;border-bottom:1px solid var(--bg4);background:var(--bg2);flex-shrink:0;min-height:56px}
@@ -159,7 +163,8 @@ input{font-family:inherit;outline:none}
 .hdr-icon-btn{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--fg2);background:var(--bg3);border:1px solid var(--bg4);transition:all .18s ease}
 .hdr-icon-btn:hover{background:var(--bg);border-color:var(--fg3);color:var(--fg)}
 .hdr-icon-btn.active{background:var(--accent-dim);color:var(--accent);border-color:var(--accent)}
-.profile-avatar{width:38px;height:38px;border-radius:50%;background:var(--fg);color:#FFFFFF;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;cursor:pointer;border:2px solid transparent;transition:all .18s ease}
+.profile-avatar{width:38px;height:38px;border-radius:50%;background:var(--fg);color:#FFFFFF;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;cursor:pointer;border:2px solid transparent;transition:all .18s ease;overflow:hidden}
+.profile-avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%}
 .profile-avatar:hover{border-color:var(--fg3)}
 .model-sel{padding:8px 12px;border-radius:var(--radius);border:1px solid var(--bg4);background:var(--bg2);color:var(--fg2);font-size:13px;font-weight:500}
 
@@ -429,6 +434,40 @@ let state = {
   _aboutInfo:null, _upgradeStatus:null, _upgradeMsg:null
 };
 
+/* ── Avatar helpers ─────────────────────────── */
+const AVATAR_COUNT = 26;
+// Deterministic avatar index from a string (user id, email, or agent name)
+function avatarIndex(seed){
+  if(!seed) return 1;
+  var hash = 0;
+  for(var i=0;i<seed.length;i++){ hash = ((hash<<5)-hash)+seed.charCodeAt(i); hash |= 0; }
+  return (Math.abs(hash) % AVATAR_COUNT) + 1;
+}
+function avatarUrl(index){ return '/avatar/avatar-'+index+'.webp'; }
+function getUserAvatarUrl(){ return avatarUrl(avatarIndex(state.user?.id||state.user?.email||'user')); }
+function getAgentAvatarUrl(agentName){ return avatarUrl(avatarIndex(agentName||'geneweave-agent')); }
+
+function normalizeLoadedMessage(row){
+  var msg = Object.assign({}, row);
+  if(msg.role !== 'assistant') return msg;
+  var md = null;
+  if(typeof msg.metadata === 'string' && msg.metadata){
+    try { md = JSON.parse(msg.metadata); } catch { md = null; }
+  }
+  if(!md) return msg;
+  msg.steps = Array.isArray(md.steps) ? md.steps : [];
+  msg.mode = md.mode || 'direct';
+  msg.evalResult = md.eval || null;
+  msg.redaction = md.redaction || null;
+  msg.guardrail = md.guardrail || null;
+  msg.usage = {
+    totalTokens: msg.tokens_used || 0,
+  };
+  msg.cost = msg.cost || 0;
+  msg.latency_ms = msg.latency_ms || 0;
+  return msg;
+}
+
 /* ── API ────────────────────────────────────── */
 const api = {
   async post(path,body){
@@ -540,7 +579,10 @@ async function createChat(){
 async function selectChat(id){
   state.currentChatId=id;
   const r = await api.get('/chats/'+id+'/messages');
-  if(r.ok) state.messages = (await r.json()).messages ?? [];
+  if(r.ok){
+    const rows = (await r.json()).messages ?? [];
+    state.messages = rows.map(normalizeLoadedMessage);
+  }
   await loadChatSettings(id);
   state.showSettings=false;
   render();
@@ -731,17 +773,31 @@ function renderMessages(){
       extras.push(h('span',{style:'display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 10px;border-radius:999px;margin-bottom:4px;'+gc},(gd==='deny'?'\\u{1F6AB}':gd==='warn'?'\\u26A0':'\\u2705')+' Guardrail: '+gd+(m.guardrail.reason?' \\u2014 '+m.guardrail.reason:'')));
     }
     if(!isUser && m.steps && m.steps.length){
+      var delegatedWorkers = [];
       m.steps.forEach(s=>{
         let cls = 'step-card';
         let label = 'Step';
         let body = '';
+        const isDelegationToolCall = (s.type==='tool_call' && s.toolCall && s.toolCall.name==='delegate_to_worker');
         if(s.kind==='tool_start'||s.type==='tool_call'){
-          cls += ' tool';
-          label = '\\u{1F527} Tool: '+(s.name||s.toolName||'');
-          body = s.input ? (typeof s.input==='string'? s.input : JSON.stringify(s.input,null,2)) : '';
-          if(s.result) body += '\\n\\u2192 '+(typeof s.result==='string'? s.result : JSON.stringify(s.result));
+          if(isDelegationToolCall){
+            cls += ' delegation';
+            const workerName = s.toolCall.arguments?.worker || '';
+            if(workerName && !delegatedWorkers.includes(workerName)) delegatedWorkers.push(workerName);
+            label = '\\u{1F91D} Delegated to: '+workerName;
+            body = s.toolCall.arguments?.goal || '';
+            if(s.toolCall.result) body += '\\n\\u2192 '+(typeof s.toolCall.result==='string'? s.toolCall.result : JSON.stringify(s.toolCall.result));
+          } else {
+            cls += ' tool';
+            label = '\\u{1F527} Tool: '+(s.name||s.toolName||s.toolCall?.name||'');
+            const toolInput = s.input ?? s.toolCall?.arguments;
+            body = toolInput ? (typeof toolInput==='string'? toolInput : JSON.stringify(toolInput,null,2)) : '';
+            const toolResult = s.result ?? s.toolCall?.result;
+            if(toolResult) body += '\\n\\u2192 '+(typeof toolResult==='string'? toolResult : JSON.stringify(toolResult));
+          }
         } else if(s.type==='delegation'){
           cls += ' delegation';
+          if((s.worker||s.name) && !delegatedWorkers.includes(s.worker||s.name)) delegatedWorkers.push(s.worker||s.name);
           label = '\\u{1F91D} Delegated to: '+(s.worker||s.name||'');
           body = s.input||s.message||'';
         } else if(s.type==='thinking'){
@@ -752,11 +808,32 @@ function renderMessages(){
           label = s.type||'Step';
           body = s.text||s.content||JSON.stringify(s);
         }
+        // Build step header — add avatar for delegations
+        var stepHdrChildren = [];
+        if(s.type==='delegation' || isDelegationToolCall){
+          var worker = s.type==='delegation' ? (s.worker||s.name||'') : (s.toolCall?.arguments?.worker||'');
+          var dImg = document.createElement('img');
+          dImg.className = 'delegation-avatar';
+          dImg.src = getAgentAvatarUrl(worker);
+          dImg.alt = worker||'Agent';
+          stepHdrChildren.push(dImg);
+        }
+        var labelNode = document.createTextNode(label);
+        stepHdrChildren.push(labelNode);
         extras.push(h('div',{className:cls},
-          h('div',{className:'step-hdr'},label),
+          h('div',{className:'step-hdr'},...stepHdrChildren),
           body ? h('div',{className:'step-body'},body) : null
         ));
       });
+      if(delegatedWorkers.length){
+        const workerChips = delegatedWorkers.map(function(name){
+          var wImg = document.createElement('img');
+          wImg.src = getAgentAvatarUrl(name);
+          wImg.alt = name;
+          return h('span',{className:'worker-chip'},wImg,name);
+        });
+        extras.unshift(h('div',null,...workerChips));
+      }
     }
     if(!isUser && m.evalResult){
       const ev = m.evalResult;
@@ -804,8 +881,34 @@ function renderMessages(){
       return bar;
     })() : null;
 
+    // Determine avatar image for this message
+    var avatarEl;
+    if(isUser){
+      var img = document.createElement('img');
+      img.src = getUserAvatarUrl();
+      img.alt = 'User';
+      avatarEl = h('div',{className:'avatar'},img);
+    } else {
+      // For assistant: check if a specific agent name is in the steps
+      var agentName = '';
+      if(m.steps){
+        for(var si=0;si<m.steps.length;si++){
+          var st=m.steps[si];
+          if(st.type==='delegation'&&(st.worker||st.name)){ agentName=st.worker||st.name; break; }
+          if(st.type==='tool_call'&&st.toolCall?.name==='delegate_to_worker'&&st.toolCall?.arguments?.worker){
+            agentName=st.toolCall.arguments.worker;
+            break;
+          }
+        }
+      }
+      var aImg = document.createElement('img');
+      aImg.src = getAgentAvatarUrl(agentName);
+      aImg.alt = agentName||'Agent';
+      avatarEl = h('div',{className:'avatar'},aImg);
+    }
+
     const msgEl = h('div',{className:'msg '+(isUser?'user':'assistant')},
-      h('div',{className:'avatar'},isUser?'U':'G'),
+      avatarEl,
       h('div',null,
         ...extras,
         bubbleEl,
@@ -894,11 +997,13 @@ function renderTopBar(){
 
   /* Profile button + dropdown */
   const profileAnchor = h('div',{className:'dropdown-anchor'});
-  const initials = state.user?.name ? state.user.name.charAt(0).toUpperCase() : (state.user?.email ? state.user.email.charAt(0).toUpperCase() : 'U');
+  const profileImg = document.createElement('img');
+  profileImg.src = getUserAvatarUrl();
+  profileImg.alt = state.user?.name||'Profile';
   const profileBtn = h('div',{className:'profile-avatar',title:state.user?.email||'Profile',onClick:(e)=>{
     e.stopPropagation();
     state.showProfile=!state.showProfile; state.showSettings=false; render();
-  }},initials);
+  }},profileImg);
   profileAnchor.appendChild(profileBtn);
   if(state.showProfile){
     const dd = renderProfileDropdown();
@@ -1444,7 +1549,12 @@ function renderSettingsDropdown(){
 
 function renderProfileDropdown(){
   const u = state.user||{};
+  const pfAvatar = document.createElement('img');
+  pfAvatar.src = getUserAvatarUrl();
+  pfAvatar.alt = u.name||'User';
+  pfAvatar.style.cssText = 'width:48px;height:48px;border-radius:50%;object-fit:cover;margin-bottom:10px';
   const dd = h('div',{className:'dropdown profile-dd',onClick:e=>e.stopPropagation()},
+    pfAvatar,
     h('div',{className:'pf-name'},u.name||'User'),
     h('div',{className:'pf-email'},u.email||''),
     h('div',{className:'pf-divider'}),
