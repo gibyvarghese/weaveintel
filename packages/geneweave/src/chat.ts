@@ -46,7 +46,14 @@ import { weaveInMemoryCacheStore } from '@weaveintel/cache';
 import { weaveCacheKeyBuilder } from '@weaveintel/cache';
 import { shouldBypass, resolvePolicy } from '@weaveintel/cache';
 import type { CachePolicy } from '@weaveintel/core';
-import { resolveTimezone } from '@weaveintel/tools-time';
+
+const TEMPORAL_TOOL_POLICY = [
+  'Temporal Tool Usage Policy:',
+  '- When asked about current day/date/time, current timestamp, or timezone-dependent time, do not guess.',
+  '- You MUST call datetime and/or timezone_info before answering.',
+  '- Use tool outputs as the source of truth for temporal answers.',
+  '- If timezone is missing, use available context and state assumptions explicitly.',
+].join('\n');
 
 // ─── Model pricing (per 1 M tokens) ─────────────────────────
 
@@ -166,37 +173,11 @@ export class ChatEngine {
   private pricingCacheTs = 0;
   private readonly toolOptions: ToolRegistryOptions;
 
-  private tryDirectTemporalAnswer(input: string, timezone?: string): string | null {
-    const text = input.toLowerCase();
-    const asksDay = /(what\s+day\s+is\s+it|day\s+is\s+it\s+today|today\s*\?)/i.test(text);
-    const asksDate = /(what\s+date\s+is\s+it|what\s+date\s+is\s+today|what'?s\s+the\s+date|today'?s\s+date|current\s+date|date\s+today)/i.test(text);
-    const asksTime = /(what\s+time\s+is\s+it|current\s+time|time\s+now)/i.test(text);
-    if (!asksDay && !asksDate && !asksTime) return null;
-
-    const tz = resolveTimezone(timezone, process.env['DEFAULT_TIMEZONE'] ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'));
-    const now = new Date();
-
-    if (asksDay && !asksDate && !asksTime) {
-      const day = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: tz });
-      return `Today is ${day} (${tz}).`;
-    }
-    if (asksDate && !asksTime) {
-      const date = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz });
-      return `Today is ${date} (${tz}).`;
-    }
-    if (asksTime && !asksDate && !asksDay) {
-      const time = now.toLocaleTimeString('en-US', { timeZone: tz });
-      return `The current time is ${time} (${tz}).`;
-    }
-
-    const date = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: tz });
-    const time = now.toLocaleTimeString('en-US', { timeZone: tz });
-    return `It is ${date}, ${time} (${tz}).`;
-  }
-
-  private shouldUseDeterministicTemporal(settings: ChatSettings): boolean {
-    // If user intentionally set a custom system prompt, respect that behavior.
-    return !(settings.systemPrompt && settings.systemPrompt.trim().length > 0);
+  private withTemporalToolPolicy(basePrompt: string | undefined, toolNames: string[]): string | undefined {
+    const hasTemporalTools = toolNames.includes('datetime') || toolNames.includes('timezone_info');
+    if (!hasTemporalTools) return basePrompt;
+    const base = basePrompt?.trim();
+    return base ? `${base}\n\n${TEMPORAL_TOOL_POLICY}` : TEMPORAL_TOOL_POLICY;
   }
 
   constructor(
@@ -343,14 +324,7 @@ export class ChatEngine {
     }
 
     if (!cacheHit) {
-    const deterministicTime = this.shouldUseDeterministicTemporal(settings)
-      ? this.tryDirectTemporalAnswer(processedContent, settings.timezone)
-      : null;
-
-    if (deterministicTime) {
-      assistantContent = deterministicTime;
-      usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-    } else if (settings.mode === 'agent' || settings.mode === 'supervisor') {
+    if (settings.mode === 'agent' || settings.mode === 'supervisor') {
       // ── Agent / Supervisor mode ──
       const result = await this.runAgent(ctx, model, messages, processedContent, settings);
       assistantContent = result.output;
@@ -559,15 +533,7 @@ export class ChatEngine {
     let steps: AgentStep[] = [];
 
     try {
-      const deterministicTime = this.shouldUseDeterministicTemporal(settings)
-        ? this.tryDirectTemporalAnswer(processedContent, settings.timezone)
-        : null;
-
-      if (deterministicTime) {
-        fullText = deterministicTime;
-        finalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
-        res.write(`data: ${JSON.stringify({ type: 'text', text: deterministicTime })}\n\n`);
-      } else if (settings.mode === 'agent' || settings.mode === 'supervisor') {
+      if (settings.mode === 'agent' || settings.mode === 'supervisor') {
         // ── Agent / Supervisor streaming ──
         const agentResult = await this.streamAgent(res, ctx, model, messages, processedContent, settings);
         fullText = agentResult.output;
@@ -708,18 +674,20 @@ export class ChatEngine {
         ? settings.workers.map((w) => ({
             name: w.name,
             description: w.description,
+            systemPrompt: this.withTemporalToolPolicy(undefined, w.tools),
             model,
             tools: w.tools.length ? createToolRegistry(w.tools, undefined, toolOptions) : undefined,
           }))
-        : defaultWorkers(model, toolOptions);
+        : defaultWorkers(model, toolOptions, this.withTemporalToolPolicy.bind(this));
       const supervisor = weaveSupervisor({ model, workers: workerDefs, maxSteps: 20, name: 'geneweave-supervisor' });
       return supervisor.run(ctx, { messages, goal: userContent });
     }
 
+    const policyPrompt = this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools);
     const agent = weaveAgent({
       model,
       tools,
-      systemPrompt: settings.systemPrompt,
+      systemPrompt: policyPrompt,
       maxSteps: 15,
       name: 'geneweave-agent',
     });
@@ -750,16 +718,18 @@ export class ChatEngine {
         ? settings.workers.map((w) => ({
             name: w.name,
             description: w.description,
+            systemPrompt: this.withTemporalToolPolicy(undefined, w.tools),
             model,
             tools: w.tools.length ? createToolRegistry(w.tools, undefined, toolOptions) : undefined,
           }))
-        : defaultWorkers(model, toolOptions);
+        : defaultWorkers(model, toolOptions, this.withTemporalToolPolicy.bind(this));
       agent = weaveSupervisor({ model, workers: workerDefs, maxSteps: 20, name: 'geneweave-supervisor' });
     } else {
+      const policyPrompt = this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools);
       agent = weaveAgent({
         model,
         tools,
-        systemPrompt: settings.systemPrompt,
+        systemPrompt: policyPrompt,
         maxSteps: 15,
         name: 'geneweave-agent',
       });
@@ -1398,7 +1368,13 @@ export class ChatEngine {
 // ─── Helpers ─────────────────────────────────────────────────
 
 /** Default workers for supervisor mode when none are explicitly configured */
-function defaultWorkers(model: Model, toolOptions?: ToolRegistryOptions): Array<{ name: string; description: string; model: Model; tools?: ToolRegistry }> {
+function defaultWorkers(
+  model: Model,
+  toolOptions?: ToolRegistryOptions,
+  buildPrompt?: (basePrompt: string | undefined, toolNames: string[]) => string | undefined,
+): Array<{ name: string; description: string; systemPrompt?: string; model: Model; tools?: ToolRegistry }> {
+  const writerTools = ['text_analysis', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
+
   return [
     {
       name: 'researcher',
@@ -1415,8 +1391,9 @@ function defaultWorkers(model: Model, toolOptions?: ToolRegistryOptions): Array<
     {
       name: 'writer',
       description: 'Writes, edits, and refines text. Good for drafting content, summarizing, and creative writing tasks.',
+      systemPrompt: buildPrompt?.(undefined, writerTools),
       model,
-      tools: createToolRegistry(['text_analysis', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'], undefined, toolOptions),
+      tools: createToolRegistry(writerTools, undefined, toolOptions),
     },
   ];
 }

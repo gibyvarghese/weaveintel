@@ -41,6 +41,7 @@ import { weaveAgent } from './agent.js';
 export interface WorkerDefinition {
   name: string;
   description: string;
+  systemPrompt?: string;
   model: Model;
   tools?: ToolRegistry;
 }
@@ -82,6 +83,7 @@ export function weaveSupervisor(opts: SupervisorOptions): Agent {
     workers.set(w.name, weaveAgent({
       name: w.name,
       model: w.model,
+      systemPrompt: w.systemPrompt,
       tools: w.tools,
       bus: eventBus,
     }));
