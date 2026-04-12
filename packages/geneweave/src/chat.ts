@@ -462,9 +462,14 @@ export class ChatEngine {
     const policyChecks = steps ? await this.evaluateTaskPolicies(steps) : undefined;
 
     // Post-execution guardrails (must run before eval so the decision feeds into the eval score)
+    const toolEvidence = steps
+      ?.filter(s => (s.type === 'tool_call' && s.toolCall?.result) || (s.type === 'delegation' && s.delegation?.result))
+      .map(s => s.toolCall?.result ?? s.delegation?.result ?? '')
+      .join(' ') || undefined;
     const postGuardrail = await this.evaluateGuardrails(chatId, null, assistantContent, 'post-execution', {
       userInput: processedContent,
       assistantOutput: assistantContent,
+      toolEvidence,
     });
     const guardrailInfo = preGuardrail.decision !== 'allow'
       ? { decision: preGuardrail.decision as 'allow' | 'deny' | 'warn', reason: preGuardrail.reason }
@@ -687,9 +692,14 @@ export class ChatEngine {
     }
 
     // Post-execution guardrails (must run before eval so the decision feeds into the eval score)
+    const streamToolEvidence = steps
+      ?.filter(s => (s.type === 'tool_call' && s.toolCall?.result) || (s.type === 'delegation' && s.delegation?.result))
+      .map(s => s.toolCall?.result ?? s.delegation?.result ?? '')
+      .join(' ') || undefined;
     const postGuardrail = await this.evaluateGuardrails(chatId, null, fullText, 'post-execution', {
       userInput: processedContent,
       assistantOutput: fullText,
+      toolEvidence: streamToolEvidence,
     });
     if (postGuardrail.cognitive) {
       res.write(`data: ${JSON.stringify({ type: 'cognitive', ...postGuardrail.cognitive })}\n\n`);
@@ -1248,7 +1258,7 @@ export class ChatEngine {
     messageId: string | null,
     input: string,
     stage: GuardrailStage,
-    refs?: { userInput?: string; assistantOutput?: string },
+    refs?: { userInput?: string; assistantOutput?: string; toolEvidence?: string },
   ): Promise<{ decision: 'allow' | 'deny' | 'warn'; reason?: string; results: GuardrailResult[]; cognitive?: CognitiveCheckSummary }> {
     try {
       const rows = await this.db.listGuardrails();
@@ -1260,6 +1270,7 @@ export class ChatEngine {
         ? await pipeline.evaluate(input, stage, {
             userInput: refs?.userInput ?? input,
             assistantOutput: refs?.assistantOutput,
+            toolEvidence: refs?.toolEvidence,
             action: refs?.userInput ?? input,
           })
         : [];

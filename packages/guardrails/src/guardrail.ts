@@ -184,7 +184,14 @@ function evaluateRiskConfidenceGate(g: Guardrail, context?: GuardrailEvaluationC
 }
 
 function evaluateGroundingOverlap(g: Guardrail, context?: GuardrailEvaluationContext): GuardrailResult {
-  const overlap = lexicalOverlap(String(context?.userInput ?? ''), String(context?.assistantOutput ?? ''));
+  // When the response was backed by tool calls or delegations, use that evidence as the
+  // grounding reference. Tool-sourced data is factually grounded regardless of how much
+  // it lexically overlaps with the user's query (e.g. "what day is today" → "Sunday").
+  const toolEvidence = context?.toolEvidence?.trim();
+  const reference = toolEvidence
+    ? `${context?.userInput ?? ''} ${toolEvidence}`
+    : String(context?.userInput ?? '');
+  const overlap = lexicalOverlap(reference, String(context?.assistantOutput ?? ''));
   const minOverlap = getNumber(g.config, 'min_overlap', 0.06);
   const decision: GuardrailDecision = overlap < minOverlap ? 'warn' : 'allow';
   return buildResult(

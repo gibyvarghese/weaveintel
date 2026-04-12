@@ -19,6 +19,10 @@ export interface GuardrailResult {
 export interface GuardrailEvaluationContext {
   userInput?: string;
   assistantOutput?: string;
+  /** Tool call / delegation results that ground the assistant's response. When present,
+   *  the grounding-overlap check uses this as the reference instead of the raw userInput,
+   *  since a tool-backed answer is factually grounded regardless of lexical similarity to the query. */
+  toolEvidence?: string;
   action?: string;
   previousResults?: GuardrailResult[];
   metadata?: Record<string, unknown>;
