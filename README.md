@@ -7,7 +7,9 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 ## Latest Development (April 2026)
 
 - geneWeave app moved from packages to apps: [apps/geneweave](apps/geneweave)
-- New example 21 added: [examples/21-guardrails-date-evidence.ts](examples/21-guardrails-date-evidence.ts)
+- New examples 22 and 23 added:
+  - [examples/22-chat-memory-extraction.ts](examples/22-chat-memory-extraction.ts)
+  - [examples/23-chat-guardrails-pipeline.ts](examples/23-chat-guardrails-pipeline.ts)
 - Guardrail grounding improvements for tool-backed responses and date/day evidence checks
 - Temporal tool state persistence coverage in geneWeave test suite
 
@@ -684,7 +686,7 @@ weaveintel/
 │   ├── testing/            # Fakes & test harnesses
 ├── apps/
 │   └── geneweave/          # Full-stack demo app
-├── examples/               # 21 runnable examples
+├── examples/               # 23 runnable examples
 ├── turbo.json              # Turborepo config
 ├── tsconfig.base.json      # Shared TypeScript config
 └── package.json            # Workspace root
@@ -733,6 +735,8 @@ npx tsx examples/18-knowledge-graph.ts
 npx tsx examples/19-compliance-sandbox.ts
 npx tsx examples/20-recipes-devtools.ts
 npx tsx examples/21-guardrails-date-evidence.ts
+npx tsx examples/22-chat-memory-extraction.ts
+npx tsx examples/23-chat-guardrails-pipeline.ts
 
 # Requires OPENAI_API_KEY
 OPENAI_API_KEY=sk-... npx tsx examples/01-simple-chat.ts
@@ -760,7 +764,7 @@ PORT=3501 npx tsx examples/12-geneweave.ts
 
 ## Examples
 
-The [examples](examples) directory contains 21 runnable demonstrations:
+The [examples](examples) directory contains 23 runnable demonstrations:
 
 | # | File | What It Shows | Packages Used | API Key |
 |---|---|---|---|---|
@@ -785,6 +789,8 @@ The [examples](examples) directory contains 21 runnable demonstrations:
 | 19 | [Compliance & Sandbox](examples/19-compliance-sandbox.ts) | Data retention, legal holds, consent, audit export, sandboxed execution, idempotency, retries, DLQ, health checking | compliance, sandbox, reliability | None |
 | 20 | [Recipes & DevTools](examples/20-recipes-devtools.ts) | Pre-built agents, scaffolding, inspection, validation, mock runtime, streaming events, widgets, artifacts, citations, progress | recipes, devtools, ui-primitives | None |
 | 21 | [Guardrails Date Evidence](examples/21-guardrails-date-evidence.ts) | Tool-grounded vs memory-based responses, post-execution grounding behavior, date/day evidence handling | guardrails, agents, tools-time, testing | None |
+| 22 | [Chat Memory Extraction](examples/22-chat-memory-extraction.ts) | Chat-style hybrid memory extraction (regex + LLM) with tool calls (datetime, calculator, duckduckgo search) and in-memory recall context (no DB) | memory, core, tools | None |
+| 23 | [Chat Guardrails Pipeline](examples/23-chat-guardrails-pipeline.ts) | Post-execution guardrail evaluation with executed tool evidence (datetime, calculator, duckduckgo search), memory-only warnings, and deny paths (no DB) | guardrails, core, tools | None |
 
 ## Deployment
 
