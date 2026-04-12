@@ -8,6 +8,18 @@
  *  • Graph-assisted retrieval (search and entity-based)
  *  • Timeline graph for event ordering
  *
+ * WeaveIntel packages used:
+ *   @weaveintel/graph — Knowledge graph primitives for structured memory:
+ *     • createEntityNode()       — Typed graph node (person, project, technology, etc.)
+ *     • createRelationshipEdge() — Weighted directed edge between two nodes
+ *     • createGraphMemoryStore() — In-memory graph with addNode/addEdge, search, neighbors,
+ *                                  traversal (multi-hop), and cascade delete
+ *     • createEntityLinker()     — Extracts named entities from text (persons, dates, emails)
+ *                                  and creates nodes + "mentioned-in" relationships
+ *     • createGraphRetriever()   — Graph-assisted RAG: text search + entity-based retrieval
+ *                                  with scored results and traversal paths
+ *     • createTimelineGraph()    — Temporal graph for ordering events with causal links
+ *
  * No API keys needed — uses in-memory graph primitives.
  *
  * Run: npx tsx examples/18-knowledge-graph.ts
@@ -36,9 +48,17 @@ async function main() {
 
 header('1. Entity Nodes & Relationships');
 
+// createGraphMemoryStore() is an in-memory graph database. It stores
+// typed entity nodes and weighted relationship edges, and supports:
+//   • findNodes(type)       — filter by entity type
+//   • getNeighbors(id, depth)— multi-hop traversal
+//   • searchNodes(query)    — text search across node names
+//   • removeNode() with cascade delete of connected edges
 const store = createGraphMemoryStore();
 
 // Create entity nodes
+// createEntityNode(id, type, name, properties) creates a typed graph node.
+// The type field (person, project, team, technology) enables type-filtered queries.
 const alice = createEntityNode('person-alice', 'person', 'Alice Chen', { role: 'CTO', department: 'Engineering' });
 const bob = createEntityNode('person-bob', 'person', 'Bob Williams', { role: 'Lead Engineer', department: 'Engineering' });
 const carol = createEntityNode('person-carol', 'person', 'Carol Davis', { role: 'Product Manager', department: 'Product' });
@@ -55,6 +75,9 @@ for (const node of [alice, bob, carol, projectX, projectY, teamAlpha, techAI, te
 console.log(`  Added ${store.nodeCount()} nodes`);
 
 // Create relationships
+// createRelationshipEdge(sourceId, targetId, type, weight) creates a
+// directed weighted edge. Weights (0–1) encode relationship strength,
+// which the graph retriever uses for relevance scoring.
 const relationships = [
   createRelationshipEdge('person-alice', 'team-alpha', 'leads', 1.0),
   createRelationshipEdge('person-bob', 'team-alpha', 'member-of', 0.8),
@@ -113,6 +136,10 @@ console.log(`  Search "machine": ${searchResults.map(n => `${n.name} (${n.type})
 
 header('3. Entity Linking — Extracting from Text');
 
+// createEntityLinker() extracts named entities from unstructured text
+// using pattern matching (person names, emails, dates, technologies).
+// It returns entities + "mentioned-in" relationships suitable for
+// directly inserting into the graph store.
 const linker = createEntityLinker();
 
 const doc1 = `
@@ -139,6 +166,10 @@ console.log(`\n  Document "doc-002" — new entities: ${result2.entities.length}
 
 header('4. Graph-Assisted Retrieval');
 
+// createGraphRetriever(store) wraps the graph store with RAG-style
+// retrieval methods: .retrieve(query, k) does text search and returns
+// scored results with connected edges; .retrieveByEntity(nodeId, depth, k)
+// traverses from a node and returns all reachable nodes with paths.
 const retriever = createGraphRetriever(store);
 
 // Text search retrieval
@@ -166,6 +197,10 @@ for (const r of entityResults) {
 
 header('5. Timeline Graph — Event Ordering');
 
+// createTimelineGraph() is a temporal graph optimized for event ordering.
+// addEvent() stamps each event with a timestamp; linkEvents() records
+// causal relationships (led-to, resulted-in, etc.); getEventsBetween()
+// returns events within a date range for timeline visualization.
 const timeline = createTimelineGraph();
 
 // Add events

@@ -8,7 +8,12 @@
 import type { Tool, ToolRegistry } from '@weaveintel/core';
 import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
 
-// ─── Built-in tools ──────────────────────────────────────────
+// ─── Built-in tools ─────────────────────────────────────────
+
+// Each tool below uses weaveTool() from @weaveintel/core to create
+// a schema-validated, tagable tool. The ChatEngine’s agent mode picks
+// tools from the ToolRegistry to inject into the agent’s ReAct loop.
+// In direct mode they are listed in the UI for user reference.─
 
 const calculatorTool = weaveTool({
   name: 'calculator',
@@ -114,7 +119,12 @@ const textAnalysisTool = weaveTool({
   tags: ['utility', 'text'],
 });
 
-// ─── Tool catalog ────────────────────────────────────────────
+// ─── Tool catalog ───────────────────────────────────────────
+
+// BUILTIN_TOOLS is an index of all shipped tools keyed by name.
+// createToolRegistry() uses weaveToolRegistry() from @weaveintel/core,
+// pre-loads selected built-in tools, and optionally adds custom tools.
+// This is how the ChatEngine builds the per-chat tool set.─
 
 export const BUILTIN_TOOLS: Record<string, Tool> = {
   calculator: calculatorTool,

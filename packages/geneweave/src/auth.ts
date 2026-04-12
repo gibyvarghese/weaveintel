@@ -11,6 +11,10 @@ import type { DatabaseAdapter, SessionRow } from './db.js';
 
 // ─── JWT ─────────────────────────────────────────────────────
 
+// Hand-rolled JWT implementation using HMAC-SHA256 via node:crypto.
+// Avoids external dependencies (no jsonwebtoken). The signJWT/verifyJWT
+// pair produces/validates base64url-encoded tokens with iat/exp claims.
+
 export interface JWTPayload {
   userId: string;
   email: string;
@@ -61,6 +65,10 @@ export function verifyJWT(token: string, secret: string): JWTPayload | null {
 
 // ─── Password hashing (scrypt) ───────────────────────────────
 
+// Uses scrypt (memory-hard KDF) with random salt for password storage.
+// hashPassword() returns "salt:hash"; verifyPassword() uses timingSafeEqual
+// to prevent timing attacks during comparison.
+
 export function hashPassword(password: string): string {
   const salt = randomBytes(32).toString('hex');
   const hash = scryptSync(password, salt, 64).toString('hex');
@@ -104,7 +112,12 @@ export function parseCookies(req: IncomingMessage): Record<string, string> {
   return cookies;
 }
 
-// ─── Auth context ────────────────────────────────────────────
+// ─── Auth context ───────────────────────────────────────────
+
+// authenticateRequest() is the auth middleware used by the Router.
+// It reads the gw_token HttpOnly cookie, verifies the JWT signature,
+// checks expiry, and validates the session ID against the database.
+// Returns an AuthContext (userId, email, sessionId, csrfToken) or null.─
 
 export interface AuthContext {
   userId: string;

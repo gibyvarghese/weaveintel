@@ -19,6 +19,16 @@
  * 15. Convenience API + config
  *
  * Requires ANTHROPIC_API_KEY in the environment.
+ *
+ * WeaveIntel packages used:
+ *   @weaveintel/provider-anthropic — Full Anthropic adapter for the weaveIntel Model interface.
+ *     Includes: weaveAnthropicModel (model factory), weaveAnthropic (convenience shorthand),
+ *     thinking helpers (manual/adaptive/disable), token counting, prompt caching,
+ *     computer-use tool builders, batches API, and streaming with thinking chunks.
+ *   @weaveintel/core — ExecutionContext (carries traceId, timeout, metadata through every call)
+ *
+ * This example serves as both a feature showcase and an integration test suite.
+ * Each section creates the model, makes a real API call, and asserts expected behavior.
  */
 
 import {

@@ -8,6 +8,18 @@
  *
  * Integrates redaction (PII scrubbing), observability (trace spans),
  * and eval (response quality assertions) into the message flow.
+ *
+ * WeaveIntel packages integrated here:
+ *   @weaveintel/core         — ExecutionContext, EventBus, Model/ToolRegistry types
+ *   @weaveintel/agents       — weaveAgent (ReAct loop) and weaveSupervisor
+ *   @weaveintel/observability — weaveInMemoryTracer, weaveUsageTracker for spans
+ *   @weaveintel/redaction     — weaveRedactor for PII scrubbing before/after LLM
+ *   @weaveintel/evals         — weaveEvalRunner for response quality assertions
+ *   @weaveintel/guardrails    — createGuardrailPipeline, risk classification
+ *   @weaveintel/human-tasks   — PolicyEvaluator for automatic human-review triggers
+ *   @weaveintel/prompts       — createTemplate for variable-substituted prompts
+ *   @weaveintel/routing       — SmartModelRouter, ModelHealthTracker
+ *   @weaveintel/cache         — weaveInMemoryCacheStore, semantic cache for responses
  */
 
 import { randomUUID } from 'node:crypto';

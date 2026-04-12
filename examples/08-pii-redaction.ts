@@ -3,6 +3,19 @@
  *
  * Demonstrates the redaction pipeline for detecting and masking
  * personally identifiable information before sending to LLMs.
+ *
+ * WeaveIntel packages used:
+ *   @weaveintel/core      — ExecutionContext
+ *   @weaveintel/redaction — Two complementary subsystems:
+ *     • weaveRedactor()     — Pattern-based PII detector + masker. Supports builtin
+ *                            patterns (email, phone, SSN, credit card, IPv4) and custom
+ *                            regex. "reversible: true" means original values can be restored.
+ *     • weavePolicyEngine() — Rule-based policy evaluator. You define rules that check
+ *                            an input and return { allowed, reason }. Rules run in order
+ *                            and a single failure rejects the input.
+ *
+ * Typical flow: redact PII from user input → send to LLM → restore originals in output.
+ * The policy engine adds an extra layer for content-level checks beyond PII.
  */
 import { weaveContext } from '@weaveintel/core';
 import { weaveRedactor, weavePolicyEngine } from '@weaveintel/redaction';
@@ -13,6 +26,10 @@ async function main() {
   // --- Basic PII Redaction ---
   console.log('=== Basic PII Redaction ===');
 
+  // weaveRedactor() creates a PII detection + masking engine.
+  // "patterns" lists which PII types to detect (builtins use curated regex).
+  // "reversible: true" stores a token→original mapping so you can undo the
+  // redaction after the LLM responds (e.g. put real names back in the output).
   const redactor = weaveRedactor({
     patterns: [
       { name: 'email', type: 'builtin', builtinType: 'email' },
@@ -34,6 +51,10 @@ async function main() {
     Notes: Please process this refund to the card above.
   `;
 
+  // .redact() scans the text and replaces each PII match with a token
+  // like <EMAIL_1>, <PHONE_1>, etc. Returns:
+  //   • .redacted   — the masked text safe to send to an LLM
+  //   • .detections — array of { type, original, token } for each match
   const redacted = await redactor.redact(ctx, input);
   console.log('Original:\n', input);
   console.log('Redacted:\n', redacted.redacted);
@@ -42,12 +63,15 @@ async function main() {
     console.log(`  ${det.type}: "${det.original}" → "${det.token}"`);
   }
 
-  // --- Restore original values ---
+  // .restore() reverses the redaction: replaces tokens with original values.
+  // Only available when the redactor was created with "reversible: true".
   console.log('\n=== Restore ===');
   const restored = await redactor.restore!(ctx, redacted.redacted, redacted.detections);
   console.log('Restored:\n', restored);
 
-  // --- Allowlist ---
+  // Allowlists let you exempt known-safe values from redaction.
+  // Here john.doe@example.com will pass through unredacted, but
+  // jane@secret.com will still be masked.
   console.log('\n=== Allowlist ===');
   const redactorWithAllow = weaveRedactor({
     patterns: [
@@ -61,7 +85,11 @@ async function main() {
   console.log('With allowlist:', result.redacted);
   console.log('Detections:', result.detections.length);
 
-  // --- Policy Engine ---
+  // weavePolicyEngine() is a lightweight rule engine. Each rule is an async
+  // function that inspects the input and returns { allowed, reason, policies }.
+  // All rules are evaluated; if any returns allowed=false, the overall result
+  // is rejected. Use this for guardrails beyond PII (length limits, topic
+  // restrictions, compliance rules, etc.).
   console.log('\n=== Policy Engine ===');
 
   const policy = weavePolicyEngine();

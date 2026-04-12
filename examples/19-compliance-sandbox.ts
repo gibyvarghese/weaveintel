@@ -14,6 +14,24 @@
  *  • Health checks for service monitoring
  *  • Idempotency store for deduplication
  *
+ * WeaveIntel packages used:
+ *   @weaveintel/compliance  — Data governance and regulatory compliance:
+ *     • createRetentionEngine()    — Time-based data lifecycle (delete/archive/anonymize)
+ *     • createDeletionManager()    — Right-to-be-forgotten request workflow (create→process→complete)
+ *     • createLegalHoldManager()   — Block data deletion for legal discovery/litigation
+ *     • createConsentManager()     — GDPR-style consent tracking (grant/revoke/isGranted)
+ *     • createResidencyEngine()    — Data residency rules (allowed/denied regions per data type)
+ *     • createAuditExportManager() — Export audit records in specified format for regulators
+ *   @weaveintel/sandbox     — Safe code execution environment:
+ *     • createSandbox()            — Isolated execution environment for untrusted code
+ *     • createSandboxPolicy()      — Defines what the sandbox can access (network, FS, modules)
+ *     • enforceLimits()            — CPU/memory/duration budgets for sandbox runs
+ *   @weaveintel/reliability — Production reliability patterns:
+ *     • createRetryBudget()        — Retry with exponential backoff + max-retries budget
+ *     • createDeadLetterQueue()    — Store and inspect permanently-failed operations
+ *     • createHealthChecker()      — Named health checks for liveness/readiness probes
+ *     • createIdempotencyStore()   — Deduplication via idempotency-key → result cache
+ *
  * No API keys needed — all in-memory.
  *
  * Run: npx tsx examples/19-compliance-sandbox.ts
@@ -59,6 +77,10 @@ async function main() {
 
 header('1. Data Retention Rules');
 
+// createRetentionEngine() manages time-based data lifecycle rules.
+// Each rule maps a dataCategory to (retentionDays, action). evaluate()
+// checks item age against rules and returns the required action
+// (delete | archive | anonymize) or null if still within retention.
 const retention = createRetentionEngine();
 
 retention.addRule({
@@ -95,6 +117,9 @@ for (const s of scenarios) {
 
 header('2. Deletion Requests (Right to be Forgotten)');
 
+// createDeletionManager() implements right-to-be-forgotten workflow.
+// create() → process() → complete() tracks state transitions; each
+// request records subjectId, requester, reason, and affected categories.
 const deletion = createDeletionManager();
 
 const req1 = deletion.create('user-123', 'admin@company.com', 'GDPR erasure request', ['pii', 'logs', 'analytics']);
@@ -116,6 +141,9 @@ console.log(`  All requests: ${deletion.list().length}`);
 
 header('3. Legal Holds');
 
+// createLegalHoldManager() blocks deletion for legal discovery.
+// isHeld(subject, category) returns true if any active hold applies.
+// release() lifts the hold so normal retention/deletion can proceed.
 const holds = createLegalHoldManager();
 
 const hold1 = holds.create({
@@ -147,6 +175,9 @@ console.log(`  After release: ${holds.get('hold-litigation')?.status}`);
 
 header('4. Consent Management (GDPR)');
 
+// createConsentManager() tracks per-user consent for each data purpose.
+// grant() records consent (with optional expiry); revoke() removes it;
+// isGranted() checks current state. Supports GDPR/CCPA compliance flows.
 const consent = createConsentManager();
 
 consent.grant('user-123', 'analytics', 'cookie-banner');
@@ -168,6 +199,9 @@ console.log(`  After revoke — user-123 analytics: ${consent.isGranted('user-12
 
 header('5. Data Residency Constraints');
 
+// createResidencyEngine() enforces data residency constraints.
+// Each constraint maps a dataCategory to allowed/denied cloud regions.
+// isAllowed() and getAllowedRegions() check before data is stored/moved.
 const residency = createResidencyEngine();
 
 residency.addConstraint({
@@ -218,6 +252,9 @@ console.log(`  Marked ready: ${ready?.records} records, ${(ready?.sizeBytes ?? 0
 
 header('7. Code Sandbox — Safe Execution');
 
+// createSandbox() provides an isolated code execution environment.
+// createSandboxPolicy() defines what is allowed (network, FS, modules).
+// .execute(code, policy) runs the code and returns status + output/error.
 const sandbox = createSandbox();
 const policy = createSandboxPolicy({
   name: 'restricted',
@@ -258,6 +295,9 @@ console.log(`\n  Aggregate: ${stats.total} runs, ${stats.succeeded} success, ${s
 
 header('8. Retry Budget — Exponential Backoff');
 
+// createRetryBudget() implements exponential backoff with a finite budget.
+// getDelay(attempt) returns the backoff delay; shouldRetry() checks the
+// budget; execute(fn) wraps a function with automatic retries.
 const retry = createRetryBudget({ maxRetries: 3, baseDelayMs: 100, maxDelayMs: 2000 });
 
 // Show backoff delays
@@ -284,6 +324,9 @@ try {
 
 header('9. Dead-Letter Queue');
 
+// createDeadLetterQueue() stores operations that failed after all retries.
+// Each entry includes the original payload, error, and retry count.
+// retry(id, fn) allows manual re-processing of failed operations.
 const dlq = createDeadLetterQueue();
 
 const dl1 = dlq.enqueue({ type: 'email', payload: { to: 'user@example.com', subject: 'Welcome' }, error: 'SMTP timeout', retryCount: 3 });
@@ -305,6 +348,9 @@ console.log(`  Remaining unresolved: ${dlq.list({ resolved: false }).length}`);
 
 header('10. Health Checks');
 
+// createHealthChecker() provides named health checks for service monitoring.
+// addCheck() registers async probes; run() executes all probes and returns
+// per-check status + overall health. Suitable for K8s liveness/readiness.
 const health = createHealthChecker('example-service');
 
 health.addCheck('database', async () => ({ ok: true, message: 'Connected to primary' }));
@@ -325,6 +371,9 @@ console.log(`  Overall healthy: ${isHealthy}`);
 
 header('11. Idempotency Store');
 
+// createIdempotencyStore() prevents duplicate operations. check() returns
+// isDuplicate (true if key was seen before) + previousResult. record()
+// stores the result keyed by idempotency key, with TTL-based expiry.
 const idempotency = createIdempotencyStore({ ttlMs: 60000 });
 
 // First call — not a duplicate

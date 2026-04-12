@@ -4,6 +4,12 @@
  * Demonstrates document ingestion (chunk → embed → index)
  * and retrieval-augmented generation (query → retrieve → generate).
  * Uses fake models and vector store for deterministic execution.
+ *
+ * WeaveIntel packages used:
+ *   @weaveintel/core      — ExecutionContext and the Document type
+ *   @weaveintel/retrieval — weaveEmbeddingPipeline() for ingest, weaveRetriever() for search
+ *   @weaveintel/testing   — weaveFakeEmbedding / weaveFakeVectorStore / weaveFakeModel
+ *                           for deterministic, no-API execution
  */
 import { weaveContext } from '@weaveintel/core';
 import type { Document } from '@weaveintel/core';
@@ -13,8 +19,14 @@ import { weaveFakeEmbedding, weaveFakeVectorStore, weaveFakeModel } from '@weave
 async function main() {
   const ctx = weaveContext({ userId: 'demo-user' });
 
-  // Setup
+  // weaveFakeEmbedding() returns random fixed-dimension vectors.
+  // In production you'd use weaveOpenAIModel({ model: 'text-embedding-3-small' })
+  // or any provider that implements the EmbeddingModel interface.
   const embeddingModel = weaveFakeEmbedding({ dimensions: 128 });
+
+  // weaveFakeVectorStore() is an in-memory store that implements the VectorStore
+  // interface (upsert / query / delete). For production use weaveIntel supports
+  // Pinecone, Qdrant, Weaviate, ChromaDB, etc. via @weaveintel/core connectors.
   const vectorStore = weaveFakeVectorStore();
 
   // --- Ingest documents ---
@@ -47,6 +59,12 @@ async function main() {
     },
   ];
 
+  // weaveEmbeddingPipeline() creates a three-stage ingest pipeline:
+  //   1. Chunker   — splits large documents into smaller pieces (here: 200 chars, 50 overlap)
+  //   2. Embedder  — converts each chunk into a dense vector using the embedding model
+  //   3. Indexer   — upserts the (vector, metadata) pairs into the vector store
+  // The "fixed_size" strategy splits on character count; other strategies include
+  // 'sentence', 'paragraph', and 'recursive' for smarter boundaries.
   const pipeline = weaveEmbeddingPipeline({
     chunkerConfig: { strategy: 'fixed_size', chunkSize: 200, overlap: 50 },
     embeddingModel,
@@ -61,6 +79,10 @@ async function main() {
   // --- Retrieve ---
   console.log('\n=== Retrieval ===');
 
+  // weaveRetriever() wraps the embedding model + vector store into a simple
+  // .retrieve(ctx, { query }) call. It embeds the user's question, performs
+  // a nearest-neighbor search in the vector store, and returns ranked chunks.
+  // defaultTopK controls how many chunks to return.
   const retriever = weaveRetriever({
     embeddingModel,
     vectorStore,
@@ -88,6 +110,9 @@ async function main() {
     ],
   });
 
+  // The retrieved chunks are concatenated into a context string and injected
+  // into the system prompt, giving the LLM relevant knowledge to answer
+  // the user's question — this is the "augmented generation" step in RAG.
   const context = results.chunks.map((r) => r.content).join('\n\n');
   const answer = await model.generate(
     ctx,

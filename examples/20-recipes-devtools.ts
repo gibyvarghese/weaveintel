@@ -14,6 +14,28 @@
  *  • Progress tracking
  *  • Tool approval payloads
  *
+ * WeaveIntel packages used:
+ *   @weaveintel/recipes       — Pre-built high-level agent patterns:
+ *     • createGovernedAssistant()  — Agent with automatic governance rule enforcement
+ *     • createEventDrivenAgent()   — Agent that reacts to EventBus events (pub/sub-driven)
+ *     • createSafeExecutionAgent() — Agent with tool deny-lists and execution timeouts
+ *   @weaveintel/devtools       — Developer productivity tools:
+ *     • scaffold() / listTemplates()— Generate full project boilerplates from templates
+ *     • createValidator()          — Build rule-based config validators (requiredFields,
+ *                                    maxStepsInRange, etc.)
+ *     • createMockModel/Bus/Runtime— Test doubles for model, event bus, and tool registry
+ *     • inspect() / formatReport() — Introspect agent wiring (tools, events, configuration)
+ *     • planMigration()            — Generate step-by-step upgrade plans between versions
+ *   @weaveintel/ui-primitives  — Typed UI events for streaming agent UIs:
+ *     • textEvent / statusEvent / errorEvent / toolCallEvent / stepUpdateEvent
+ *       — Typed stream events for real-time agent output
+ *     • envelope() / createStreamBuilder() — Sequenced wrapper with session/agent metadata
+ *     • toolApproval()             — Human-in-the-loop approval payload for risky tool calls
+ *     • documentCitation() / webCitation() — Source attribution for RAG responses
+ *     • jsonArtifact() / codeArtifact()    — Structured output attachments
+ *     • tableWidget / chartWidget / timelineWidget — Rich visual widgets
+ *     • createProgressTracker()    — Task progress with increment/complete lifecycle
+ *
  * No API keys needed — uses mock model and in-memory primitives.
  *
  * Run: npx tsx examples/20-recipes-devtools.ts
@@ -73,9 +95,14 @@ async function main() {
 
 header('1. Pre-Built Agent Recipes');
 
+// createMockModel() returns a deterministic model that cycles through
+// pre-configured responses. Used for testing without API keys.
 const mockModel = createMockModel({ responses: ['Hello from governed assistant!', 'Event processed.'] });
 const mockBus = createMockEventBus();
 
+// createGovernedAssistant() wraps a model with governance rules that are
+// injected into the system prompt. Every response is checked against the
+// rules before being returned to the user.
 const governed = createGovernedAssistant({
   model: mockModel,
   name: 'ComplianceBot',
@@ -84,6 +111,9 @@ const governed = createGovernedAssistant({
 });
 console.log(`  Governed assistant: "${governed.name}"`);
 
+// createEventDrivenAgent() creates an agent that subscribes to EventBus
+// events (listenTo[]) and processes them through the model. Useful for
+// building reactive pipelines where agents respond to system events.
 const eventAgent = createEventDrivenAgent({
   model: mockModel,
   bus: mockBus,
@@ -93,6 +123,8 @@ const eventAgent = createEventDrivenAgent({
 });
 console.log(`  Event-driven agent: "${eventAgent.name}"`);
 
+// createSafeExecutionAgent() wraps a model with tool deny-lists and
+// execution timeouts, preventing dangerous operations (rm, sudo, etc.).
 const safeAgent = createSafeExecutionAgent({
   model: mockModel,
   name: 'SafeRunner',
@@ -106,6 +138,8 @@ console.log(`  Safe execution agent: "${safeAgent.name}"`);
 
 header('2. Project Scaffolding');
 
+// scaffold() generates a full project from a template (package.json,
+// src/, tsconfig, Dockerfile, tests). listTemplates() shows available types.
 const templates = listTemplates();
 console.log(`  Available templates (${templates.length}):`);
 for (const t of templates) {
@@ -133,6 +167,9 @@ console.log(`    Dev deps: ${project.devDependencies.join(', ')}`);
 
 header('3. Configuration Validation');
 
+// createValidator() composes validation rules. requiredFields() checks
+// that named properties exist; maxStepsInRange() validates the maxSteps
+// value is within bounds. .validate() returns { valid, issues[] }.
 const validator = createValidator([
   requiredFields('name', 'model', 'maxSteps'),
   maxStepsInRange(1, 100),
@@ -153,6 +190,9 @@ for (const issue of badResult.issues) {
 
 header('4. Mock Runtime for Testing');
 
+// createMockRuntime() bundles a mock model + mock event bus + mock tools
+// into a single test harness. The mock model tracks all .generate() calls
+// in .calls[] for assertions; the bus stores emitted events.
 const runtime = createMockRuntime({
   responses: ['Analysis complete.', 'Summary: all metrics nominal.'],
   tools: [
@@ -173,6 +213,8 @@ console.log(`  Model call count: ${runtime.model.calls.length}`);
 
 header('5. Agent Inspection & Reports');
 
+// inspect() introspects an agent's wiring (tools, bus handlers, config)
+// and returns a structured report. formatReport() renders it as text.
 const report = inspect({
   tools: runtime.tools,
   bus: runtime.bus,
@@ -194,6 +236,8 @@ for (const line of reportLines) console.log(`    ${line}`);
 
 header('6. Migration Planning');
 
+// planMigration() generates a step-by-step upgrade plan between two
+// WeaveIntel versions, identifying breaking changes and migration steps.
 const migration = planMigration('0.1.0', '0.3.0');
 console.log(`  Migration from ${migration.from} → ${migration.to}:`);
 console.log(`    Total steps: ${migration.totalSteps}`);
@@ -207,6 +251,10 @@ for (const line of migrationLines) console.log(`    ${line}`);
 
 header('7. UI Stream Events');
 
+// UI stream events are typed payloads that a streaming agent UI consumes.
+// textEvent() carries LLM output text; statusEvent() signals agent state;
+// errorEvent() reports errors with optional codes; toolCallEvent() logs
+// tool invocations with args+result; stepUpdateEvent() tracks multi-step progress.
 const text = textEvent('Processing your request...');
 console.log(`  Text event: type=${text.type}, data="${(text.data as any)?.text ?? text.data}"`);
 
@@ -223,6 +271,9 @@ const step = stepUpdateEvent('step-3', 'Summarize', 'completed', 'Done in 2.1s')
 console.log(`  Step update: type=${step.type}`);
 
 // Envelope wrapping
+// envelope() wraps any stream event with sequence number, timestamp,
+// sessionId, and agentId for multiplexed streaming. createStreamBuilder()
+// creates a stateful builder that auto-increments the sequence.
 const env = envelope(text, { sessionId: 'sess-001', agentId: 'agent-x' });
 console.log(`  Envelope: seq=${env.sequence}, sessionId=${env.sessionId}`);
 
@@ -245,6 +296,9 @@ console.log(`  Risk: ${approval.riskLevel}, actions: ${approval.actions?.map((a:
 
 header('9. Citations');
 
+// documentCitation() and webCitation() create source-attribution objects
+// for RAG responses. Each includes the cited text, source, optional page/URL,
+// and a confidence score indicating how well the source supports the claim.
 const docCite = documentCitation('Revenue increased 15% YoY', 'Q3-Financial-Report.pdf', 12, 0.95);
 console.log(`  Document: "${docCite.text}" — ${docCite.source} p.${docCite.page} (${(docCite.confidence! * 100).toFixed(0)}%)`);
 
@@ -255,6 +309,9 @@ console.log(`  Web: "${webCite.text}" — ${webCite.source} (${(webCite.confiden
 
 header('10. Artifacts');
 
+// jsonArtifact() and codeArtifact() create typed output attachments.
+// These are sent alongside text in the stream so the UI can render them
+// as collapsible JSON viewers or syntax-highlighted code blocks.
 const jsonArt = jsonArtifact('Analysis Results', {
   accuracy: 0.94,
   precision: 0.91,
@@ -277,6 +334,8 @@ console.log(`  Code: "${codeArt.title}" (type: ${codeArt.type}, mime: ${codeArt.
 
 header('11. Widgets');
 
+// tableWidget(), chartWidget(), and timelineWidget() create rich visual
+// components that the agent UI renders as interactive data displays.
 const table = tableWidget('Model Comparison', 
   ['Model', 'Accuracy', 'Latency', 'Cost'],
   [
@@ -309,6 +368,8 @@ console.log(`  Timeline: "${timeline.title}" (${(timeline.data as any)?.events?.
 
 header('12. Progress Tracking');
 
+// createProgressTracker() creates a task-level progress bar. increment()
+// advances the counter and emits a progress event; complete() finalizes it.
 const progress = createProgressTracker('Document Processing', 100);
 console.log(`  Tracker: "${progress.taskId}" — ${progress.current}/${progress.total}`);
 

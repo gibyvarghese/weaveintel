@@ -3,6 +3,21 @@
  *
  * Demonstrates conversation memory, semantic memory, and entity memory
  * working together to give an agent persistent context.
+ *
+ * WeaveIntel packages used:
+ *   @weaveintel/core    — ExecutionContext (carries userId for per-user memory isolation)
+ *   @weaveintel/memory  — Three memory subsystems that can be composed together:
+ *     • weaveConversationMemory — Rolling chat history (FIFO, max N messages)
+ *     • weaveSemanticMemory     — Embedding-based long-term memory (store / recall by similarity)
+ *     • weaveEntityMemory       — Key-value store of structured facts about named entities
+ *   @weaveintel/testing — weaveFakeEmbedding() for deterministic vector operations
+ *
+ * Why three memory types?
+ *   Conversation memory captures recent dialogue (short-term). Semantic memory
+ *   captures long-term knowledge and recalls it by meaning. Entity memory tracks
+ *   structured facts about people, orgs, or concepts. Combining all three gives
+ *   an agent a rich, multi-layered context that mitigates the LLM's limited
+ *   context window.
  */
 import {
   weaveContext,
@@ -18,6 +33,9 @@ async function main() {
   const ctx = weaveContext({ userId: 'demo-user' });
 
   // --- Conversation Memory ---
+  // weaveConversationMemory keeps a sliding window of chat messages.
+  // maxHistory limits how many messages are stored (oldest are evicted).
+  // This is the simplest memory: it just stores the raw conversation.
   console.log('=== Conversation Memory ===');
   const conversationMemory = weaveConversationMemory({ maxHistory: 50 });
 
@@ -43,6 +61,11 @@ async function main() {
   }
 
   // --- Semantic Memory ---
+  // weaveSemanticMemory uses an embedding model to convert text into vectors,
+  // then stores them in an internal vector index. The .recall() method embeds
+  // a query and returns the top-K most semantically similar stored memories.
+  // This lets the agent recall relevant long-term knowledge even if it wasn't
+  // in the recent conversation window.
   console.log('\n=== Semantic Memory ===');
   const embeddingModel = weaveFakeEmbedding({ dimensions: 64 });
   const semanticMemory = weaveSemanticMemory(embeddingModel);
@@ -61,6 +84,10 @@ async function main() {
   }
 
   // --- Entity Memory ---
+  // weaveEntityMemory stores structured key-value facts about named entities
+  // (people, companies, concepts). Unlike semantic memory (free-text), entity
+  // memory gives you exact lookups by name and typed metadata fields.
+  // Useful for "Alice works at Acme" style facts that need precise retrieval.
   console.log('\n=== Entity Memory ===');
   const entityMemory = weaveEntityMemory();
 
@@ -91,6 +118,9 @@ async function main() {
   }
 
   // --- Combined: Build a rich prompt from all memories ---
+  // In a real agent, you'd concatenate these three context sources into the
+  // system prompt so the LLM has: (1) recent conversation, (2) relevant
+  // long-term knowledge, and (3) precise entity facts — all in one prompt.
   console.log('\n=== Combined Context for Prompt ===');
   const query = 'Help Alice with her current project';
 

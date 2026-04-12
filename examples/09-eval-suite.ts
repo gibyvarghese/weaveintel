@@ -3,6 +3,22 @@
  *
  * Demonstrates running evaluations against model outputs
  * with multiple assertion types, custom evaluators, and reporting.
+ *
+ * WeaveIntel packages used:
+ *   @weaveintel/core    — ExecutionContext, plus the EvalDefinition and EvalCase types
+ *                         that define what to test and how
+ *   @weaveintel/evals   — weaveEvalRunner() provides the test harness that:
+ *                         (a) calls a model/executor for each case,
+ *                         (b) runs all assertions against the output,
+ *                         (c) returns pass/fail results with reasons
+ *   @weaveintel/testing — weaveFakeModel() for deterministic, repeatable outputs
+ *
+ * Assertion types demonstrated:
+ *   • contains          — output must contain a substring
+ *   • regex             — output must match a regular expression
+ *   • schema_valid      — output must parse as JSON matching a JSON Schema
+ *   • safety            — output must NOT contain any blocked phrases
+ *   • latency_threshold — model response must complete within a time budget
  */
 import { weaveContext } from '@weaveintel/core';
 import type { EvalDefinition, EvalCase } from '@weaveintel/core';
@@ -12,8 +28,11 @@ import { weaveFakeModel } from '@weaveintel/testing';
 async function main() {
   const ctx = weaveContext({ userId: 'eval-user' });
 
-  // Each eval suite shares one model with pre-canned responses.
-  // We create a new model per suite so the response index resets.
+  // Each eval suite has:
+  //   • An EvalDefinition — name, type, and an array of assertions (the "rubric")
+  //   • An array of EvalCase objects — each case has an id and input messages
+  //   • A model (or executor function) that generates the output to evaluate
+  // We create a fresh model per suite so the fake response index resets.
   function makeModel(responses: string[]) {
     return weaveFakeModel({
       responses: responses.map((r) => ({ content: r })),
@@ -22,6 +41,8 @@ async function main() {
   }
 
   // ── Suite 1: Contains assertion ────────────────────────────
+  // The 'contains' assertion checks that a substring exists in the output.
+  // The 'latency_threshold' assertion verifies the model responded within maxMs.
 
   const capitalModel = makeModel(['The capital of France is Paris.']);
 

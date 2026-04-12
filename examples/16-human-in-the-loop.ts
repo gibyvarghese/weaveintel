@@ -8,6 +8,15 @@
  *  • Policy evaluator for automatic HITL triggers
  *  • SLA deadline computation
  *
+ * WeaveIntel packages used:
+ *   @weaveintel/human-tasks — Human oversight for AI-driven workflows:
+ *     • createApprovalTask() / createReviewTask() / createEscalationTask()
+ *       — Factory functions for typed task objects (with risk level, priority, assignee)
+ *     • InMemoryTaskQueue    — FIFO queue with enqueue/dequeue/complete lifecycle
+ *     • DecisionLog          — Append-only audit log of all HITL decisions
+ *     • PolicyEvaluator      — Rule engine that decides when a task needs human review
+ *                              vs. auto-approval based on risk, cost, and context
+ *
  * No API keys needed — uses in-memory task primitives.
  *
  * Run: npx tsx examples/16-human-in-the-loop.ts
@@ -39,6 +48,9 @@ async function main() {
 
 header('1. Create Human Tasks');
 
+// createApprovalTask() creates a typed task with riskLevel, estimatedImpact,
+// and assignee fields — designed for high-stakes actions (deployments,
+// financial ops) that need explicit human sign-off before proceeding.
 const approval = createApprovalTask({
   title: 'Deploy to Production',
   description: 'Approve production deployment of v2.3.0',
@@ -51,6 +63,8 @@ const approval = createApprovalTask({
 });
 console.log(`  Approval: "${approval.title}" (${approval.type}, priority: ${approval.priority})`);
 
+// createReviewTask() creates a content-review task with criteria[]
+// that the reviewer uses as a checklist (accuracy, completeness, tone, etc.).
 const review = createReviewTask({
   title: 'Review AI Response Quality',
   description: 'Review the quality of AI-generated summaries',
@@ -62,6 +76,8 @@ const review = createReviewTask({
 });
 console.log(`  Review: "${review.title}" (${review.type}, criteria: ${(review.data as any)?.criteria?.length ?? 0})`);
 
+// createEscalationTask() is for agent failures — captures agentId,
+// failureDetails, and reason to help the on-call engineer diagnose.
 const escalation = createEscalationTask({
   title: 'Agent Stuck in Loop',
   description: 'Agent exceeded max iterations without resolution',
@@ -85,6 +101,9 @@ console.log(`  Generic: "${genericTask.title}" (${genericTask.type})`);
 
 header('2. Task Queue — Enqueue & Process');
 
+// InMemoryTaskQueue is a FIFO queue with assignee-aware dequeue.
+// enqueue() stamps an id + createdAt; dequeue(assignee) returns the
+// highest-priority pending task for that assignee; complete() archives it.
 const queue = new InMemoryTaskQueue();
 
 // Enqueue tasks
@@ -166,6 +185,9 @@ console.log(`\n  Remaining pending tasks: ${remainingTasks.length}`);
 
 header('4. Decision Log — Audit Trail');
 
+// DecisionLog is an append-only audit trail: record() stores the
+// task + decision + timestamp. getAll() and getByDecider() support
+// compliance reporting and post-hoc review of human decisions.
 const log = new DecisionLog();
 
 log.record(queued1, approvalDecision);
@@ -185,6 +207,10 @@ console.log(`\n  Decisions by lead-engineer: ${engineerDecisions.length}`);
 
 header('5. Policy Evaluator — Auto HITL Triggers');
 
+// PolicyEvaluator checks incoming context against registered policies.
+// Each policy specifies a trigger ('high-risk', 'low-confidence', 'financial'),
+// a taskType to create, slaHours for response deadlines, and an optional
+// autoEscalateAfterHours for timeout-based escalation.
 const evaluator = new PolicyEvaluator();
 
 evaluator.addPolicy(createPolicy({

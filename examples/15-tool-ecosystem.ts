@@ -8,6 +8,17 @@
  *  • Running tool test suites
  *  • Converting tools to MCP definitions
  *
+ * WeaveIntel packages used:
+ *   @weaveintel/tools — Extended tool management layer:
+ *     • weaveToolDescriptor()      — Enriches a tool with risk level, rate limits, and timeout
+ *     • weaveHealthTracker()       — Tracks per-tool invocation counts, errors, and latency;
+ *                                    implements a circuit breaker pattern (auto-disables tools
+ *                                    that exceed error thresholds)
+ *     • weaveExtendedToolRegistry()— Registry that integrates descriptors + health tracking
+ *     • weaveRunToolTests()        — Runs test suites (input/expectedOutput pairs) against tools
+ *     • toolsToMCPDefinitions()    — Converts weaveIntel tools to MCP-compliant tool definitions
+ *   @weaveintel/core  — ExecutionContext, weaveTool(), weaveToolRegistry()
+ *
  * No API keys needed — uses deterministic in-memory primitives.
  *
  * Run: npx tsx examples/15-tool-ecosystem.ts
@@ -41,6 +52,11 @@ async function main() {
 
 header('1. Extended Tool Descriptors');
 
+// weaveToolDescriptor() enriches a tool with operational metadata that the
+// extended registry and health tracker use for gating:
+//   • riskLevel ('read-only' | 'destructive' | 'financial') — controls approval requirements
+//   • rateLimit.perMinute — max invocations/min before throttling
+//   • maxExecutionMs      — hard timeout per invocation
 const searchDescriptor = weaveToolDescriptor(
   'web_search',
   'Search the web for information',
@@ -70,6 +86,10 @@ for (const d of [searchDescriptor, deleteDescriptor, payDescriptor]) {
 
 header('2. Tool Health Tracking');
 
+// weaveHealthTracker() monitors per-tool invocation counts, error counts,
+// and average latency within a sliding time window. When errors exceed
+// `errorThreshold`, the circuit breaker trips — isCircuitOpen() returns true
+// and the tool is auto-disabled until the window resets.
 const healthTracker = weaveHealthTracker({ errorThreshold: 3, windowMs: 60_000 });
 
 // Simulate tool invocations
@@ -101,6 +121,10 @@ console.log(`\n  Circuit open for delete_record? ${healthTracker.isCircuitOpen('
 
 header('3. Extended Tool Registry');
 
+// weaveExtendedToolRegistry() extends the base weaveToolRegistry with
+// descriptor metadata. registerWithDescriptor() attaches risk level and
+// rate limit info; listDescriptors() returns tools with their metadata;
+// listByRisk() filters tools by risk classification.
 const registry = weaveExtendedToolRegistry();
 
 const searchTool = weaveTool({
@@ -136,6 +160,9 @@ header('4. Tool Test Suite');
 
 const ctx = weaveContext({ userId: 'tester' });
 
+// weaveRunToolTests() runs a test suite against a tool. Each test case
+// specifies input arguments and expected output (substring match). Returns
+// per-case results with pass/fail, error message, and duration.
 const testResults = await weaveRunToolTests(searchTool, ctx, [
   { name: 'basic search', input: { name: 'web_search', arguments: { query: 'TypeScript' } }, expectedContent: 'Results for: TypeScript' },
   { name: 'empty query', input: { name: 'web_search', arguments: { query: '' } }, expectedContent: 'Results for: ' },
@@ -155,6 +182,10 @@ const basicRegistry = weaveToolRegistry();
 basicRegistry.register(searchTool);
 basicRegistry.register(calcTool);
 
+// toolsToMCPDefinitions() converts a weaveToolRegistry into an array of
+// MCP-compliant tool definitions (name, description, inputSchema). This
+// bridges WeaveIntel’s tool system with the Model Context Protocol so
+// any weaveIntel tool can be exposed via an MCP server.
 const mcpDefs = toolsToMCPDefinitions(basicRegistry);
 for (const def of mcpDefs) {
   console.log(`  MCP Tool: ${def.name}`);

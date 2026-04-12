@@ -3,6 +3,18 @@
  *
  * Demonstrates the internal A2A bus for in-process agent delegation.
  * Two agents (summarizer and translator) communicate via the bus.
+ *
+ * WeaveIntel packages used:
+ *   @weaveintel/core    — ExecutionContext, EventBus, ToolRegistry, and A2A type definitions
+ *                         (AgentCard, A2AServer, A2ATask, A2ATaskResult)
+ *   @weaveintel/a2a     — weaveA2ABus() creates an in-process message bus that implements
+ *                         Google's Agent-to-Agent protocol for agent discovery & delegation
+ *   @weaveintel/agents  — weaveAgent() for creating the underlying ReAct agents
+ *   @weaveintel/testing — weaveFakeModel() for deterministic responses
+ *
+ * A2A (Agent-to-Agent) is an open protocol for agent interoperability.
+ * Each agent publishes an AgentCard describing its capabilities, and other
+ * agents can discover and send tasks to it via the bus.
  */
 import {
   weaveContext,
@@ -26,10 +38,18 @@ async function main() {
   const bus = weaveEventBus();
   const ctx = weaveContext({ userId: 'demo-user' });
 
-  // Create the A2A bus
+  // weaveA2ABus() creates the A2A message bus — a registry + dispatcher.
+  // Agents register as A2AServer instances with an AgentCard (name, description,
+  // capabilities, version). You can then discover agents via listAgents() and
+  // send tasks via send(). The bus handles routing, execution, and result delivery.
   const a2aBus = weaveA2ABus();
 
   // --- Register Agent 1: Summarizer ---
+  // Each A2A agent wraps a weaveAgent with an A2AServer adapter.
+  // The A2AServer interface requires:
+  //   • card       — AgentCard with name, description, capabilities array, and URL
+  //   • handleTask — receives an A2ATask (with input parts) and returns an A2ATaskResult
+  //   • start/stop — lifecycle hooks (no-ops here since we're in-process)
   const summarizerModel = weaveFakeModel({
     responses: [
       {
@@ -69,6 +89,9 @@ async function main() {
     async stop() {},
   };
 
+  // a2aBus.register() adds the agent to the bus under a string key.
+  // Other agents (or the main program) can now discover it via listAgents()
+  // and send tasks to it via send(ctx, 'summarizer', task).
   a2aBus.register('summarizer', summarizerServer);
 
   // --- Register Agent 2: Translator ---
@@ -114,13 +137,18 @@ async function main() {
   a2aBus.register('translator', translatorServer);
 
   // --- Use the bus ---
+  // listAgents() returns all registered AgentCards — useful for agent discovery.
+  // In a distributed setup, agents could be on different machines and discovered
+  // via HTTP; the in-process bus is a lightweight alternative for monolith apps.
   console.log('=== Discover Agents ===');
   const agents = a2aBus.listAgents();
   for (const card of agents) {
     console.log(`  ${card.name}: ${card.description} [${card.capabilities.join(', ')}]`);
   }
 
-  // Send a task to the summarizer
+  // a2aBus.send() dispatches a task to a named agent and awaits its result.
+  // The task input uses A2A's multipart message format (role + parts array),
+  // supporting text, file, and data parts. The result follows the same format.
   console.log('\n=== Summarize ===');
   const summaryResult = await a2aBus.send(ctx, 'summarizer', {
     id: 'task-1',

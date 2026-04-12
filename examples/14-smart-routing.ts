@@ -8,6 +8,14 @@
  *  • Routing policies (cost-optimized, quality-optimized, balanced)
  *  • Decision store for audit trail
  *
+ * WeaveIntel packages used:
+ *   @weaveintel/routing — Intelligent model selection layer:
+ *     • SmartModelRouter       — Picks the best model for a request based on a weighted
+ *                                scoring algorithm (cost, quality, latency, reliability)
+ *     • ModelHealthTracker     — Tracks per-model success/error rates and latency stats
+ *     • ModelScorer            — Computes normalized scores for side-by-side comparison
+ *     • InMemoryDecisionStore  — Logs every routing decision for auditing and learning
+ *
  * No API keys needed — uses in-memory routing simulation.
  *
  * Run: npx tsx examples/14-smart-routing.ts
@@ -65,6 +73,9 @@ for (const c of candidates) {
 
 header('2. Health Tracking');
 
+// ModelHealthTracker accumulates per-model success/failure counts and
+// latency statistics in a sliding window. .listHealth() returns all models
+// with their error rate, average latency, and availability flag.
 const healthTracker = new ModelHealthTracker({ windowSize: 100 });
 
 // Simulate historical health data
@@ -94,8 +105,14 @@ for (const h of allHealth) {
 
 header('3. Smart Routing — Policy Comparison');
 
+// InMemoryDecisionStore logs every routing decision (model chosen, scores,
+// alternatives, reason) for post-hoc analysis and learning.
 const decisionStore = new InMemoryDecisionStore();
 
+// SmartModelRouter combines candidates, cost data, quality scores, and health
+// stats to pick the best model for a given request. Each routing call takes
+// a policy that defines the strategy (cost-optimized, quality-optimized,
+// balanced) and the weight of each scoring dimension.
 const router = new SmartModelRouter({
   candidates,
   costs,

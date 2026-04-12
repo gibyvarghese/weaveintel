@@ -27,6 +27,11 @@ import { registerAdminRoutes } from './server-admin.js';
 
 // ─── Router ──────────────────────────────────────────────────
 
+// Hand-rolled URL router built on RegExp matching. Supports
+// param extraction (:id), auth enforcement, and CSRF validation.
+// POST/PUT/DELETE routes require CSRF by default.
+// This avoids pulling in Express or Fastify as dependencies.
+
 type Handler = (
   req: IncomingMessage,
   res: ServerResponse,
@@ -118,7 +123,14 @@ function html(res: ServerResponse, status: number, body: string): void {
   res.end(body);
 }
 
-// ─── Server factory ──────────────────────────────────────────
+// ─── Server factory ─────────────────────────────────────────
+
+// createGeneWeaveServer() wires together all HTTP routes:
+//   /api/auth/*       — Login/register/logout (JWT cookies, scrypt hashing)
+//   /api/chats/*      — CRUD + streaming chat via ChatEngine (SSE)
+//   /api/dashboard/*  — Analytics from DashboardService
+//   /api/admin/*      — Admin CRUD for guardrails, routing, prompts, etc.
+//   /*                — SPA fallback serving the embedded UI from ui.ts─
 
 export interface ServerConfig {
   db: DatabaseAdapter;
@@ -134,7 +146,12 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   const router = new Router();
   const uiHtml = getHTML();
 
-  // ── Auth routes ────────────────────────────────────────────
+  // ── Auth routes ────────────────────────────────────────
+
+  // Auth routes use signJWT/verifyJWT + hashPassword/verifyPassword from auth.ts.
+  // Sessions are stored in the database; JWT cookie (HttpOnly, SameSite=Strict)
+  // carries the session reference. CSRF tokens are returned to the client and
+  // validated on state-changing requests.────
 
   router.post('/api/auth/register', async (req, res) => {
     const raw = await readBody(req);
@@ -329,7 +346,13 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { activity });
   });
 
-  // ── Chat routes ────────────────────────────────────────────
+  // ── Chat routes ────────────────────────────────────────
+
+  // Chat routes delegate to ChatEngine which orchestrates WeaveIntel:
+  //   • GET /api/chats          — list user’s conversations
+  //   • POST /api/chats         — create a new chat (sets model + provider)
+  //   • POST /api/chats/:id/messages — send a message, returns SSE stream
+  //     ChatEngine.streamMessage() wires: redaction → guardrails → model → eval────
 
   router.get('/api/chats', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
@@ -396,7 +419,14 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
-  // ── Dashboard routes ───────────────────────────────────────
+  // ── Dashboard routes ───────────────────────────────────
+
+  // Dashboard routes use DashboardService which queries the metrics table.
+  // Each endpoint returns aggregated data for the authenticated user:
+  //   • /overview     — total chats, messages, token usage, cost summary
+  //   • /costs        — per-model cost breakdown over time
+  //   • /performance  — latency percentiles and throughput
+  //   • /evals        — eval assertion results (pass/fail/score)────
 
   router.get('/api/dashboard/overview', async (req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
@@ -429,8 +459,9 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   });
 
 
-  // ── Admin routes (extracted to server-admin.ts) ─────────
-  registerAdminRoutes(router, db, json, readBody, providers);
+  // ── Admin routes (extracted to server-admin.ts) ─────────  // Admin CRUD for guardrails, routing policies, prompts, tools,
+  // workflows, HITL policies, and system settings. Each entity
+  // maps to a database table via the DatabaseAdapter.  registerAdminRoutes(router, db, json, readBody, providers);
 
   // ── Health ─────────────────────────────────────────────────
 

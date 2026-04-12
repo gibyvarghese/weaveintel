@@ -8,6 +8,19 @@
  *  • Prompt experiments (A/B testing) with weighted variants
  *  • Prompt resolver with experiment-aware selection
  *
+ * WeaveIntel packages used:
+ *   @weaveintel/prompts — Full prompt lifecycle management:
+ *     • createTemplate()           — Build a renderable template with {{variable}} slots
+ *     • extractVariables()         — Auto-detect variable names from a raw template string
+ *     • InMemoryPromptRegistry     — Versioned prompt store with category/tag filtering
+ *     • InstructionBundleBuilder   — Fluent builder for layered system prompts
+ *                                    (system → task → formatting → guardrails → examples)
+ *     • composeInstructions()      — Serializes a bundle into a single system prompt string
+ *     • InMemoryExperimentStore    — Tracks A/B experiments with weighted variant selection
+ *     • PromptResolver             — Experiment-aware version resolver (picks variant or latest)
+ *   @weaveintel/core   — Type defs: PromptDefinition, PromptVersion, PromptVariable,
+ *                        PromptExperiment
+ *
  * No API keys needed — all in-memory.
  *
  * Run: npx tsx examples/17-prompt-management.ts
@@ -45,6 +58,9 @@ async function main() {
 
 header('1. Template Creation & Rendering');
 
+// createTemplate() builds a renderable prompt template. Variables use
+// {{name}} syntax. Each variable can be required or optional (with a
+// defaultValue). .render() substitutes all slots and returns the final string.
 const summaryTemplate = createTemplate({
   name: 'Document Summarizer',
   template: 'Summarize the following {{documentType}} in {{language}}.\n\nContent: {{content}}\n\nProvide a {{length}} summary.',
@@ -67,6 +83,8 @@ const rendered = summaryTemplate.render({
 console.log(`  Rendered:\n    ${rendered.split('\n').join('\n    ')}`);
 
 // Auto-detect variables from template string
+// extractVariables() scans a raw template string and returns all
+// {{variable}} names without needing a formal template definition.
 const detectedVars = extractVariables('Hello {{name}}, welcome to {{organization}}!');
 console.log(`\n  Auto-detected variables: ${detectedVars.join(', ')}`);
 
@@ -74,6 +92,10 @@ console.log(`\n  Auto-detected variables: ${detectedVars.join(', ')}`);
 
 header('2. Prompt Registry — Versioning & Filtering');
 
+// InMemoryPromptRegistry stores PromptDefinitions with multiple
+// PromptVersions. register() adds/updates; list() supports filtering
+// by category and tags; resolve() renders the latest version with variables;
+// get(id, version) retrieves a specific historical version.
 const registry = new InMemoryPromptRegistry();
 
 // Register prompts with versions
@@ -165,6 +187,10 @@ console.log(`\n  Version 1.0 template: "${oldVersion?.template}"`);
 
 header('3. Instruction Bundles — Layered Prompts');
 
+// createInstructionBundle() + fluent builder creates layered system prompts.
+// Each layer (system, task, formatting, guardrails, examples) is composed
+// into a single string by composeInstructions(). This separates concerns
+// and lets you swap individual layers without rewriting the entire prompt.
 const bundle = createInstructionBundle('assistant-v3', 'Research Assistant')
   .system('You are a highly capable research assistant with expertise in scientific literature.')
   .task('Analyze the provided research papers and produce a structured literature review.')
@@ -196,6 +222,10 @@ console.log(`\n  Simple bundle: "${simpleBundle.name}" — ${composeInstructions
 
 header('4. A/B Testing — Prompt Experiments');
 
+// InMemoryExperimentStore tracks A/B experiments. Each experiment has
+// weighted variants pointing to different prompt versions. pickVariant()
+// selects according to weights; recordImpression() and recordScore()
+// track usage and quality metrics for winner determination.
 const experimentStore = new InMemoryExperimentStore();
 
 const experiment: PromptExperiment = {
@@ -251,6 +281,9 @@ const versionStore = {
   },
 };
 
+// PromptResolver wraps the registry and experiment store together.
+// resolve(promptId, { experimentId? }) either picks a variant from an
+// active experiment or falls back to the latest version from the registry.
 const resolver = new PromptResolver(versionStore, experimentStore);
 
 // Without experiment — returns latest version

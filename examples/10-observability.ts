@@ -3,6 +3,19 @@
  *
  * Demonstrates tracing, event bus, and usage tracking
  * to monitor and debug AI workflows.
+ *
+ * WeaveIntel packages used:
+ *   @weaveintel/core          — ExecutionContext, EventBus, EventTypes constants, ToolRegistry
+ *   @weaveintel/observability — Three observability primitives:
+ *     • weaveConsoleTracer   — Logs span lifecycle (start/event/end) to stdout; great for dev
+ *     • weaveInMemoryTracer  — Stores spans in an array for programmatic inspection / export
+ *     • weaveUsageTracker    — Accumulates token counts and costs per model per execution
+ *   @weaveintel/agents        — weaveAgent() to generate realistic events for the bus
+ *   @weaveintel/testing       — weaveFakeModel() for deterministic agent runs
+ *
+ * Tracing follows the OpenTelemetry span model: each span has a name, optional
+ * parent, events, attributes, start/end timestamps, and status. Spans can nest
+ * to form a tree (e.g. rag-pipeline → embedding → vector-search).
  */
 import {
   weaveContext,
@@ -24,16 +37,25 @@ async function main() {
   const ctx = weaveContext({ userId: 'demo-user' });
 
   // --- Console Tracer ---
+  // weaveConsoleTracer() logs every span start, event, and end to the console.
+  // Useful during development to see the full execution trace in real time.
   console.log('=== Console Tracer ===');
   const consoleTracer = weaveConsoleTracer();
 
+  // startSpan() begins a new trace span. The first argument is the context
+  // (carries traceId/userId), the second is the span name, and the third is
+  // an optional attributes object for structured metadata.
   const span1 = consoleTracer.startSpan(ctx, 'model-call', { model: 'gpt-4o-mini' });
-  // Simulate some work
+  // addEvent() attaches named events to a span — like milestones within one operation.
   span1.addEvent('request-sent', { tokens: 150 });
   span1.addEvent('response-received', { tokens: 85 });
+  // end() closes the span, recording its duration.
   span1.end();
 
   // --- In-Memory Tracer ---
+  // weaveInMemoryTracer() stores all spans in a .spans array that you can
+  // inspect, export to JSON, or send to an external tracing backend.
+  // Spans can be nested via parentSpanId to form a tree.
   console.log('\n=== In-Memory Tracer ===');
   const memTracer = weaveInMemoryTracer();
 
@@ -62,6 +84,10 @@ async function main() {
   }
 
   // --- Event Bus ---
+  // weaveEventBus is weaveIntel's global pub/sub system. Every subsystem
+  // emits typed events (MODEL_REQUEST_START, TOOL_CALL_END, AGENT_STEP, etc.)
+  // that you can subscribe to for logging, metrics, or custom side effects.
+  // EventTypes is a const enum of all standard event names.
   console.log('\n=== Event Bus ===');
   const events: string[] = [];
 
@@ -128,6 +154,9 @@ async function main() {
   }
 
   // --- Usage Tracker ---
+  // weaveUsageTracker() accumulates token counts and dollar costs per model
+  // per executionId. Call .record() after each LLM call, then .getTotal()
+  // to aggregate. Useful for budgeting, cost alerts, and billing dashboards.
   console.log('\n=== Usage Tracker ===');
   const tracker = weaveUsageTracker();
 

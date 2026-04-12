@@ -71,6 +71,18 @@ export interface GeneWeaveApp {
 
 // ─── Factory ─────────────────────────────────────────────────
 
+/**
+ * createGeneWeave() is the single entry-point for the entire application.
+ * It wires together all WeaveIntel subsystems in order:
+ *
+ *  1. Database — SQLite adapter for persistence (users, sessions, chats, metrics)
+ *  2. ChatEngine — orchestrates @weaveintel/models, @weaveintel/agents,
+ *     @weaveintel/observability, @weaveintel/redaction, @weaveintel/evals,
+ *     @weaveintel/guardrails, @weaveintel/routing, and @weaveintel/cache
+ *  3. seedDefaultData — creates admin user and default settings on first run
+ *  4. HTTP Server — zero-dependency router with auth, CORS, SSE streaming
+ *  5. Returns a GeneWeaveApp handle with stop() for graceful shutdown
+ */
 export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeaveApp> {
   const port = config.port ?? 3500;
   const host = config.host ?? '0.0.0.0';

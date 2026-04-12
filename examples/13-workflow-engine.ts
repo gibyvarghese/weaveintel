@@ -9,6 +9,20 @@
  *  • Guardrail pipeline with risk classification and cost guards
  *  • Governance context with runtime policy evaluation
  *
+ * WeaveIntel packages used:
+ *   @weaveintel/workflows  — Declarative workflow definition & execution:
+ *     • defineWorkflow()             — Fluent builder API to define steps, conditions, and transitions
+ *     • createWorkflowEngine()       — Engine that executes steps, calls handlers, and manages state
+ *     • InMemoryCheckpointStore      — Persists workflow state for crash recovery / resume
+ *     • DefaultCompensationRegistry  — Registers rollback functions for each step
+ *     • runCompensations()           — Executes rollbacks in reverse order on failure
+ *   @weaveintel/guardrails — Safety and governance layer:
+ *     • createRiskClassifier()       — Pattern-based risk level assignment (low/medium/critical)
+ *     • createCostGuard()            — Enforces token/cost/rate budgets before each request
+ *     • createGovernanceContext()    — Tenant/user-scoped policy rules (deny/warn/allow)
+ *     • evaluateRuntimePolicies()    — Checks cost/token/rate policies against current usage
+ *   @weaveintel/core       — ExecutionContext and EventBus
+ *
  * No API keys needed — uses deterministic in-memory primitives.
  *
  * Run: npx tsx examples/13-workflow-engine.ts
@@ -49,6 +63,10 @@ async function main() {
 
 header('1. Define Workflow — Content Publication Pipeline');
 
+// defineWorkflow() returns a fluent WorkflowBuilder.
+// .deterministic() adds a step that always runs its handler and goes to `next`.
+// .condition() adds a branching step (trueBranch / falseBranch based on handler return).
+// .build() finalizes the definition into an immutable WorkflowDefinition object.
 const definition = defineWorkflow('Content Publication Pipeline')
   .deterministic('draft', 'Create Draft', { handler: 'createDraft', next: 'review' })
   .deterministic('review', 'Editorial Review', { handler: 'editorialReview', next: 'gate' })
@@ -75,6 +93,10 @@ const bus = weaveEventBus();
 const events: string[] = [];
 bus.onAll((e) => events.push(`[${e.type}]`));
 
+// createWorkflowEngine() creates the execution runtime. It:
+//   1. Accepts a checkpoint store (for durability) and an event bus (for observability)
+//   2. Lets you register handler functions by name (matching step handler IDs)
+//   3. Runs workflows step-by-step, checkpointing after each step completes
 const checkpointStore = new InMemoryCheckpointStore();
 const engine = createWorkflowEngine({ checkpointStore, bus });
 
@@ -133,6 +155,10 @@ console.log(`Checkpoint loaded: step=publish, variables: ${JSON.stringify(loaded
 
 header('4. Compensation — Rollback on Failure');
 
+// DefaultCompensationRegistry stores rollback functions keyed by stepId.
+// When a workflow fails, runCompensations() walks the completed steps in
+// reverse order and calls each registered compensation handler — similar
+// to the Saga pattern in distributed systems.
 const compensations = new DefaultCompensationRegistry();
 
 compensations.register(
@@ -161,6 +187,9 @@ console.log(`Compensated ${compResult.compensated.length} steps, errors: ${compR
 
 header('5. Guardrail Pipeline — Risk Classification');
 
+// createRiskClassifier() builds a pattern-matching engine that scans text
+// for keywords and assigns a risk level (low/medium/critical). Used to
+// gate dangerous actions before they reach the LLM or workflow engine.
 const riskClassifier = createRiskClassifier([
   { pattern: 'delete|drop|truncate', level: 'critical', explanation: 'Destructive operation detected' },
   { pattern: 'publish|deploy', level: 'medium', explanation: 'Publication action' },
@@ -184,6 +213,11 @@ for (const action of testActions) {
 
 header('6. Cost Guard — Budget Enforcement');
 
+// createCostGuard() enforces three budget dimensions:
+//   • maxTokensTotal        — hard cap on cumulative token usage
+//   • maxCostUsd            — hard cap on cumulative dollar spend
+//   • maxRequestsPerMinute  — rate limit within a sliding window
+// .check() returns an array of guardrail results; .record() tracks usage.
 const costGuard = createCostGuard({
   maxTokensTotal: 30_000,
   maxCostUsd: 1.00,
@@ -210,6 +244,9 @@ for (const req of requests) {
 
 header('7. Governance — Runtime Policy Evaluation');
 
+// createGovernanceContext() creates a tenant/user/agent-scoped policy engine.
+// Each rule has: id, name, condition (human-readable), action (deny/warn/allow),
+// and priority. .evaluate() runs all enabled rules and returns results.
 const governance = createGovernanceContext({
   tenantId: 'tenant-1',
   userId: 'user-1',

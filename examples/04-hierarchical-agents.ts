@@ -3,6 +3,17 @@
  *
  * Demonstrates a supervisor agent that delegates tasks to specialized workers.
  * The supervisor decides which worker to route each sub-task to.
+ *
+ * WeaveIntel packages used:
+ *   @weaveintel/core    — ExecutionContext, EventBus, ToolRegistry, weaveTool()
+ *   @weaveintel/agents  — weaveSupervisor() builds a multi-agent hierarchy where one
+ *                         "boss" model delegates sub-tasks to named worker agents
+ *   @weaveintel/testing — weaveFakeModel() provides deterministic model responses
+ *
+ * Architecture:
+ *   Supervisor (with delegate_to_worker tool)
+ *     ├─ researcher  — has search_web tool
+ *     └─ writer      — has write_document tool
  */
 import {
   weaveContext,
@@ -17,7 +28,9 @@ async function main() {
   const bus = weaveEventBus();
   const ctx = weaveContext({ userId: 'demo-user' });
 
-  // Worker tools
+  // Each worker has its own ToolRegistry with domain-specific tools.
+  // The supervisor doesn't see these tools directly — it delegates to a worker
+  // by name, and the worker's own agent loop handles tool execution internally.
   const researchTools = weaveToolRegistry();
   researchTools.register(
     weaveTool({
@@ -48,7 +61,12 @@ async function main() {
     }),
   );
 
-  // Supervisor model: first delegates to researcher, then to writer, then summarizes
+  // The supervisor's model is configured with a sequence of fake responses:
+  //   1. Delegates to 'researcher' via the built-in 'delegate_to_worker' tool
+  //   2. Delegates to 'writer' with the research results
+  //   3. Produces a final summary (no tool calls → loop ends)
+  // In production the supervisor model would be a real LLM that decides
+  // which worker to call based on the conversation and task decomposition.
   const supervisorModel = weaveFakeModel({
     responses: [
       // Step 1: supervisor delegates to researcher
@@ -128,6 +146,13 @@ async function main() {
     ],
   });
 
+  // weaveSupervisor() creates a hierarchical agent system:
+  //   • It auto-injects a 'delegate_to_worker' tool into the supervisor's tool set
+  //   • When the supervisor calls that tool, its loop pauses, spins up the named
+  //     worker agent, runs it to completion, and returns the worker's output
+  //     as the tool result to the supervisor.
+  //   • Each worker is a full weaveAgent with its own model + tools + maxSteps.
+  //   • maxSteps on the supervisor limits the total number of delegation rounds.
   const supervisor = weaveSupervisor({
     model: supervisorModel,
     bus,
@@ -145,7 +170,7 @@ async function main() {
         tools: writerTools,
       },
     ],
-    maxSteps: 10,
+    maxSteps: 10, // Max delegation rounds for the supervisor
   });
 
   const result = await supervisor.run(
