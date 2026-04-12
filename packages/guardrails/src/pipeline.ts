@@ -2,7 +2,7 @@
  * @weaveintel/guardrails — pipeline.ts
  * GuardrailPipeline — ordered evaluation chain with short-circuit
  */
-import type { Guardrail, GuardrailPipeline as IPipeline, GuardrailResult, GuardrailStage } from '@weaveintel/core';
+import type { Guardrail, GuardrailEvaluationContext, GuardrailPipeline as IPipeline, GuardrailResult, GuardrailStage } from '@weaveintel/core';
 import { evaluateGuardrail } from './guardrail.js';
 
 export interface PipelineOptions {
@@ -24,12 +24,12 @@ export class DefaultGuardrailPipeline implements IPipeline {
     this.shortCircuitOnDeny = opts?.shortCircuitOnDeny ?? true;
   }
 
-  async evaluate(input: unknown, stage: GuardrailStage): Promise<GuardrailResult[]> {
+  async evaluate(input: unknown, stage: GuardrailStage, context?: GuardrailEvaluationContext): Promise<GuardrailResult[]> {
     const applicableGuardrails = this.guardrails.filter(g => g.stage === stage && g.enabled);
     const results: GuardrailResult[] = [];
 
     for (const guardrail of applicableGuardrails) {
-      const result = evaluateGuardrail(guardrail, input, stage);
+      const result = evaluateGuardrail(guardrail, input, stage, { ...context, previousResults: results });
       results.push(result);
 
       if (this.shortCircuitOnDeny && result.decision === 'deny') {

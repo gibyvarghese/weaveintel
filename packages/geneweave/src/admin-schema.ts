@@ -124,7 +124,7 @@ export const ADMIN_TABS: Record<string, AdminTabDef> = {
     fields: [
       { key: 'name', label: 'Name' },
       { key: 'description', label: 'Description' },
-      { key: 'type', label: 'Type', options: ['content_filter', 'pii_detection', 'topic_guard', 'toxicity', 'custom'] },
+      { key: 'type', label: 'Type', options: ['content_filter', 'redaction', 'pii_detection', 'budget', 'factuality', 'cognitive_check', 'topic_guard', 'toxicity', 'custom'] },
       { key: 'stage', label: 'Stage', options: ['pre', 'post', 'both'], default: 'pre' },
       { key: 'config', label: 'Config (JSON)', textarea: true, save: 'json' },
       { key: 'priority', label: 'Priority', type: 'number', save: 'int', default: 0 },

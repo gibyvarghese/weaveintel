@@ -34,7 +34,7 @@ import { weaveAgent, weaveSupervisor } from '@weaveintel/agents';
 import { weaveInMemoryTracer, weaveUsageTracker } from '@weaveintel/observability';
 import { weaveRedactor } from '@weaveintel/redaction';
 import { weaveEvalRunner } from '@weaveintel/evals';
-import { createGuardrailPipeline, hasDeny, hasWarning, getDenyReason, createConfidenceGate, createRiskClassifier } from '@weaveintel/guardrails';
+import { createGuardrailPipeline, hasDeny, hasWarning, getDenyReason, summarizeGuardrailResults, type GuardrailCategorySummary } from '@weaveintel/guardrails';
 import type { DatabaseAdapter, MessageRow, ChatSettingsRow, GuardrailRow, HumanTaskPolicyRow, PromptRow, RoutingPolicyRow } from './db.js';
 import { createToolRegistry } from './tools.js';
 import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
@@ -132,39 +132,7 @@ export interface WorkerDef {
   tools: string[];
 }
 
-type CognitiveCheckSummary = {
-  confidence: number;
-  decision: 'allow' | 'deny' | 'warn';
-  checks: GuardrailResult[];
-  riskLevel: 'low' | 'medium' | 'high' | 'critical';
-};
-
-type CognitiveCheckKey =
-  | 'pre_sycophancy'
-  | 'pre_confidence'
-  | 'post_grounding'
-  | 'post_sycophancy'
-  | 'post_devils_advocate'
-  | 'post_confidence';
-
-type CognitiveCheckConfig = {
-  check?: CognitiveCheckKey | string;
-  threshold?: number;
-  min_overlap?: number;
-  base_confidence?: number;
-  confidence?: number;
-  low_risk_confidence?: number;
-  medium_risk_confidence?: number;
-  high_risk_confidence?: number;
-  critical_risk_confidence?: number;
-  gate_threshold?: number;
-  gate_on_fail?: 'warn' | 'block' | 'escalate' | 'log';
-  pattern?: string;
-  needs_pattern?: string;
-  has_pattern?: string;
-  warn_confidence?: number;
-  allow_confidence?: number;
-};
+type CognitiveCheckSummary = GuardrailCategorySummary;
 
 const DEFAULT_SETTINGS: ChatSettings = {
   mode: 'direct',
@@ -375,11 +343,7 @@ export class ChatEngine {
     // Human-task policy checks on tool calls
     const policyChecks = steps ? await this.evaluateTaskPolicies(steps) : undefined;
 
-    // Eval
-    let evalInfo: { passed: number; failed: number; total: number; score: number } | undefined;
-    evalInfo = await this.runPostEval(ctx, userId, chatId, processedContent, assistantContent, latencyMs, cost);
-
-    // Post-execution guardrails
+    // Post-execution guardrails (must run before eval so the decision feeds into the eval score)
     const postGuardrail = await this.evaluateGuardrails(chatId, null, assistantContent, 'post-execution', {
       userInput: processedContent,
       assistantOutput: assistantContent,
@@ -389,6 +353,11 @@ export class ChatEngine {
       : postGuardrail.decision !== 'allow'
       ? { decision: postGuardrail.decision as 'allow' | 'deny' | 'warn', reason: postGuardrail.reason }
       : undefined;
+
+    // Eval — pass the overall guardrail decision so the score reflects grounding/sycophancy warnings
+    const overallGuardrailDecision = guardrailInfo?.decision ?? 'allow';
+    let evalInfo: { passed: number; failed: number; total: number; score: number } | undefined;
+    evalInfo = await this.runPostEval(ctx, userId, chatId, processedContent, assistantContent, latencyMs, cost, overallGuardrailDecision);
 
     // Save assistant message
     const assistMsgId = randomUUID();
@@ -599,13 +568,7 @@ export class ChatEngine {
       res.write(`data: ${JSON.stringify({ type: 'policy_checks', checks: policyChecks })}\n\n`);
     }
 
-    // Eval
-    const evalInfo = await this.runPostEval(ctx, userId, chatId, processedContent, fullText, latencyMs, cost);
-    if (evalInfo) {
-      res.write(`data: ${JSON.stringify({ type: 'eval', ...evalInfo })}\n\n`);
-    }
-
-    // Post-execution guardrails
+    // Post-execution guardrails (must run before eval so the decision feeds into the eval score)
     const postGuardrail = await this.evaluateGuardrails(chatId, null, fullText, 'post-execution', {
       userInput: processedContent,
       assistantOutput: fullText,
@@ -615,6 +578,13 @@ export class ChatEngine {
     }
     if (postGuardrail.decision !== 'allow') {
       res.write(`data: ${JSON.stringify({ type: 'guardrail', decision: postGuardrail.decision, reason: postGuardrail.reason })}\n\n`);
+    }
+
+    // Eval — pass guardrail decision so the score reflects grounding/sycophancy warnings
+    const streamGuardrailDecision = postGuardrail.decision as 'allow' | 'warn' | 'deny';
+    const evalInfo = await this.runPostEval(ctx, userId, chatId, processedContent, fullText, latencyMs, cost, streamGuardrailDecision);
+    if (evalInfo) {
+      res.write(`data: ${JSON.stringify({ type: 'eval', ...evalInfo })}\n\n`);
     }
 
     // Done event
@@ -834,10 +804,14 @@ export class ChatEngine {
     output: string,
     latencyMs: number,
     cost: number,
+    guardrailDecision?: 'allow' | 'warn' | 'deny',
   ): Promise<{ passed: number; failed: number; total: number; score: number } | undefined> {
     try {
       const runner = weaveEvalRunner({
-        executor: async (_ctx, inp) => ({ output: inp['output'] as string }),
+        executor: async (_ctx, inp) => ({
+          output: inp['output'] as string,
+          guardrailDecision: inp['guardrailDecision'] as string,
+        }),
       });
 
       const result = await runner.run(ctx, {
@@ -849,9 +823,10 @@ export class ChatEngine {
           { name: 'latency_ok', type: 'latency_threshold', config: { maxMs: 30_000 } },
           { name: 'cost_ok', type: 'cost_threshold', config: { maxCostUsd: 1.0 } },
           { name: 'safety', type: 'safety', config: { blockedPhrases: [] } },
+          { name: 'guardrail_ok', type: 'guardrail_decision', config: { warnPenalty: 0.25, denyPenalty: 1.0 } },
         ],
       }, [
-        { id: 'msg', input: { output, latencyMs, costUsd: cost }, expected: {} },
+        { id: 'msg', input: { output, latencyMs, costUsd: cost, guardrailDecision: guardrailDecision ?? 'allow' }, expected: {} },
       ]);
 
       const info = {
@@ -875,19 +850,6 @@ export class ChatEngine {
     }
   }
 
-  // ── Cognitive pre/post checks ─────────────────────────────
-
-  private lexicalOverlap(a: string, b: string): number {
-    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
-    const aa = new Set(norm(a));
-    const bb = new Set(norm(b));
-    if (!aa.size || !bb.size) return 0;
-    let inter = 0;
-    aa.forEach((t) => { if (bb.has(t)) inter += 1; });
-    const union = aa.size + bb.size - inter;
-    return union > 0 ? inter / union : 0;
-  }
-
   private parseGuardrailConfig(raw: string | null): Record<string, unknown> {
     if (!raw) return {};
     try {
@@ -905,214 +867,140 @@ export class ChatEngine {
     return rowStage === stage;
   }
 
-  private inferCognitiveCheckKey(row: GuardrailRow, cfg: CognitiveCheckConfig): CognitiveCheckKey | null {
-    const explicit = typeof cfg.check === 'string' ? cfg.check.trim().toLowerCase() : '';
-    const id = `${row.id} ${row.name}`.toLowerCase();
-    const source = explicit || id;
-    if (source.includes('pre') && source.includes('sycoph')) return 'pre_sycophancy';
-    if (source.includes('pre') && source.includes('confidence')) return 'pre_confidence';
-    if (source.includes('post') && source.includes('ground')) return 'post_grounding';
-    if (source.includes('post') && source.includes('sycoph')) return 'post_sycophancy';
-    if (source.includes('post') && (source.includes('devil') || source.includes('counterpoint'))) return 'post_devils_advocate';
-    if (source.includes('post') && source.includes('confidence')) return 'post_confidence';
-    return null;
+  private normalizeGuardrailStage(rowStage: string, stage: GuardrailStage): GuardrailStage {
+    if (rowStage === 'pre') return 'pre-execution';
+    if (rowStage === 'post') return 'post-execution';
+    if (rowStage === 'both') return stage;
+    return rowStage as GuardrailStage;
   }
 
-  private getNum(cfg: CognitiveCheckConfig, key: keyof CognitiveCheckConfig, fallback: number): number {
-    const v = cfg[key];
-    return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+  private inferRuleName(row: GuardrailRow, config: Record<string, unknown>): string | undefined {
+    const explicit = typeof config['check'] === 'string' ? config['check'].trim().toLowerCase() : '';
+    const source = explicit || `${row.id} ${row.name}`.toLowerCase();
+    if (source.includes('pre') && source.includes('sycoph')) return 'input-pattern';
+    if (source.includes('pre') && source.includes('confidence')) return 'risk-confidence-gate';
+    if (source.includes('post') && source.includes('ground')) return 'grounding-overlap';
+    if (source.includes('post') && source.includes('sycoph')) return 'output-pattern';
+    if (source.includes('post') && (source.includes('devil') || source.includes('counterpoint'))) return 'decision-balance';
+    if (source.includes('post') && source.includes('confidence')) return 'aggregate-confidence-gate';
+    return undefined;
   }
 
-  private getStr(cfg: CognitiveCheckConfig, key: keyof CognitiveCheckConfig, fallback: string): string {
-    const v = cfg[key];
-    return typeof v === 'string' && v.trim() ? v : fallback;
+  private patternConfigFromNames(patterns: unknown): Record<string, unknown> {
+    if (!Array.isArray(patterns)) return {};
+    const library: Record<string, string> = {
+      email: '[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}',
+      phone: '\\+?\\d[\\d(). -]{7,}\\d',
+      ssn: '\\b\\d{3}-\\d{2}-\\d{4}\\b',
+      credit_card: '\\b(?:\\d[ -]*?){13,16}\\b',
+    };
+    const parts = patterns
+      .map((value) => typeof value === 'string' ? library[value] : undefined)
+      .filter((value): value is string => !!value);
+    return parts.length ? { pattern: `(${parts.join('|')})`, action: 'warn' } : {};
   }
 
-  private getDecision(cfg: CognitiveCheckConfig, key: keyof CognitiveCheckConfig, fallback: 'allow' | 'warn' | 'deny'): 'allow' | 'warn' | 'deny' {
-    const v = cfg[key];
-    return v === 'allow' || v === 'warn' || v === 'deny' ? v : fallback;
-  }
+  private normalizeGuardrail(row: GuardrailRow, stage: GuardrailStage): Guardrail {
+    const config = this.parseGuardrailConfig(row.config);
+    const normalizedStage = this.normalizeGuardrailStage(row.stage, stage);
 
-  private getGateAction(cfg: CognitiveCheckConfig, fallback: 'warn' | 'block' | 'escalate' | 'log'): 'warn' | 'block' | 'escalate' | 'log' {
-    const v = cfg.gate_on_fail;
-    return v === 'warn' || v === 'block' || v === 'escalate' || v === 'log' ? v : fallback;
-  }
-
-  private compileRegex(pattern: string, fallback: RegExp): RegExp {
-    try {
-      return new RegExp(pattern, 'i');
-    } catch {
-      return fallback;
-    }
-  }
-
-  private async evaluateCognitiveChecks(
-    stage: GuardrailStage,
-    userInput: string,
-    assistantOutput?: string,
-    rows?: GuardrailRow[],
-  ): Promise<CognitiveCheckSummary> {
-    const checks: GuardrailResult[] = [];
-    const riskClassifier = createRiskClassifier();
-    const risk = await riskClassifier.classify(userInput);
-
-    const cognitiveRows = (rows ?? []).filter(r =>
-      (r.type === 'cognitive' || r.type === 'cognitive_check') &&
-      this.stageMatches(r.stage, stage),
-    );
-
-    const defs = cognitiveRows.map((row) => {
-      const cfg = this.parseGuardrailConfig(row.config) as CognitiveCheckConfig;
-      const key = this.inferCognitiveCheckKey(row, cfg);
-      return key ? { row, key, cfg } : null;
-    }).filter((x): x is { row: GuardrailRow; key: CognitiveCheckKey; cfg: CognitiveCheckConfig } => !!x);
-
-    const hasDbCognitiveConfig = defs.length > 0;
-
-    // Pre-check: detect prompts that push for agreement over truth.
-    if (stage === 'pre-execution') {
-      const preSycCfg = defs.find(d => d.key === 'pre_sycophancy')?.cfg;
-      const preSycPattern = this.compileRegex(
-        this.getStr(preSycCfg ?? {}, 'pattern', "\\b(agree with me|just agree|say yes|validate me|don't challenge|no criticism)\\b"),
-        /\b(agree with me|just agree|say yes|validate me|don't challenge|no criticism)\b/i,
-      );
-      const sycophancyPrompt = preSycPattern.test(userInput);
-      const preSycWarnConf = this.getNum(preSycCfg ?? {}, 'warn_confidence', 0.62);
-      const preSycAllowConf = this.getNum(preSycCfg ?? {}, 'allow_confidence', 0.86);
-      checks.push({
-        decision: sycophancyPrompt ? 'warn' : 'allow',
-        guardrailId: defs.find(d => d.key === 'pre_sycophancy')?.row.id ?? 'cognitive-pre-sycophancy',
-        explanation: sycophancyPrompt
-          ? 'Prompt indicates possible sycophancy pressure; response should prioritize truth over agreement.'
-          : 'No strong sycophancy pressure detected in prompt.',
-        confidence: sycophancyPrompt ? preSycWarnConf : preSycAllowConf,
-      });
-
-      const preConfCfg = defs.find(d => d.key === 'pre_confidence')?.cfg;
-      const confidence = risk.level === 'critical'
-        ? this.getNum(preConfCfg ?? {}, 'critical_risk_confidence', 0.5)
-        : risk.level === 'high'
-        ? this.getNum(preConfCfg ?? {}, 'high_risk_confidence', 0.6)
-        : risk.level === 'medium'
-        ? this.getNum(preConfCfg ?? {}, 'medium_risk_confidence', 0.72)
-        : this.getNum(preConfCfg ?? {}, 'low_risk_confidence', 0.82);
-      const gate = createConfidenceGate(
-        this.getNum(preConfCfg ?? {}, 'gate_threshold', 0.65),
-        this.getGateAction(preConfCfg ?? {}, 'warn'),
-      );
-      const decision = gate.evaluate(confidence) as 'allow' | 'deny' | 'warn';
-      checks.push({
-        decision,
-        guardrailId: defs.find(d => d.key === 'pre_confidence')?.row.id ?? 'cognitive-pre-confidence',
-        explanation: `Pre-check confidence gate scored ${Math.round(confidence * 100)}% with risk=${risk.level}.`,
-        confidence,
-        metadata: { riskLevel: risk.level, riskExplanation: risk.explanation },
-      });
-
-      if (hasDbCognitiveConfig) {
-        // Keep only checks that were explicitly configured for this stage in DB.
-        const allowIds = new Set(defs.map(d => d.row.id));
-        const fallbackIds = new Set(['cognitive-pre-sycophancy', 'cognitive-pre-confidence']);
-        for (let i = checks.length - 1; i >= 0; i--) {
-          const id = checks[i]?.guardrailId;
-          if (id && fallbackIds.has(id) && !allowIds.has(id)) checks.splice(i, 1);
-        }
-      }
-
-      const worst = checks.some(c => c.decision === 'deny') ? 'deny' : checks.some(c => c.decision === 'warn') ? 'warn' : 'allow';
-      const avg = checks.reduce((s, c) => s + (c.confidence ?? 0.75), 0) / checks.length;
-      return { confidence: Number(avg.toFixed(3)), decision: worst, checks, riskLevel: risk.level };
+    if (row.type === 'cognitive' || row.type === 'cognitive_check') {
+      return {
+        id: row.id,
+        name: row.name,
+        description: row.description ?? undefined,
+        type: 'custom',
+        stage: normalizedStage,
+        enabled: !!row.enabled,
+        priority: row.priority,
+        config: {
+          ...config,
+          category: 'cognitive',
+          rule: this.inferRuleName(row, config),
+          pattern_target: typeof config['check'] === 'string' && String(config['check']).includes('post_') ? 'output' : 'input',
+        },
+      };
     }
 
-    // Post-check: grounding, sycophancy, devil's-advocate balance.
-    const output = assistantOutput ?? '';
-    const postGroundCfg = defs.find(d => d.key === 'post_grounding')?.cfg;
-    const grounding = this.lexicalOverlap(userInput, output);
-    const groundingDecision: 'allow' | 'warn' = grounding < this.getNum(postGroundCfg ?? {}, 'min_overlap', 0.06) ? 'warn' : 'allow';
-    checks.push({
-      decision: groundingDecision,
-      guardrailId: defs.find(d => d.key === 'post_grounding')?.row.id ?? 'cognitive-post-grounding',
-      explanation: groundingDecision === 'warn'
-        ? 'Low grounding overlap with user query. Consider adding references, assumptions, or explicit uncertainty.'
-        : 'Grounding overlap looks acceptable.',
-      confidence: Math.max(0.1, Math.min(1, grounding)),
-      metadata: { overlap: grounding },
-    });
-
-    const postSycCfg = defs.find(d => d.key === 'post_sycophancy')?.cfg;
-    const sycophancyPattern = this.compileRegex(
-      this.getStr(postSycCfg ?? {}, 'pattern', '\\b(you are absolutely right|exactly right|totally correct|you are 100% right)\\b'),
-      /\b(you are absolutely right|exactly right|totally correct|you are 100% right)\b/i,
-    );
-    const sycophancyHit = sycophancyPattern.test(output);
-    checks.push({
-      decision: sycophancyHit ? 'warn' : 'allow',
-      guardrailId: defs.find(d => d.key === 'post_sycophancy')?.row.id ?? 'cognitive-post-sycophancy',
-      explanation: sycophancyHit
-        ? 'Potential sycophantic phrasing detected; ensure evidence-based reasoning.'
-        : 'No strong sycophancy phrasing detected.',
-      confidence: sycophancyHit
-        ? this.getNum(postSycCfg ?? {}, 'warn_confidence', 0.58)
-        : this.getNum(postSycCfg ?? {}, 'allow_confidence', 0.86),
-    });
-
-    const postDevilCfg = defs.find(d => d.key === 'post_devils_advocate')?.cfg;
-    const needsPattern = this.compileRegex(
-      this.getStr(postDevilCfg ?? {}, 'needs_pattern', '\\b(should i|is it good|best|recommend|decision|choose|strategy|plan)\\b'),
-      /\b(should i|is it good|best|recommend|decision|choose|strategy|plan)\b/i,
-    );
-    const hasPattern = this.compileRegex(
-      this.getStr(postDevilCfg ?? {}, 'has_pattern', '\\b(however|on the other hand|trade-?off|counterpoint|risk|alternative)\\b'),
-      /\b(however|on the other hand|trade-?off|counterpoint|risk|alternative)\b/i,
-    );
-    const needsCounterpoint = needsPattern.test(userInput);
-    const hasCounterpoint = hasPattern.test(output);
-    const devilDecision: 'allow' | 'warn' = needsCounterpoint && !hasCounterpoint ? 'warn' : 'allow';
-    checks.push({
-      decision: devilDecision,
-      guardrailId: defs.find(d => d.key === 'post_devils_advocate')?.row.id ?? 'cognitive-post-devils-advocate',
-      explanation: devilDecision === 'warn'
-        ? 'Response may be missing devil\'s-advocate perspective for a decision-style query.'
-        : 'Counterpoint coverage looks sufficient for the query type.',
-      confidence: devilDecision === 'warn'
-        ? this.getNum(postDevilCfg ?? {}, 'warn_confidence', 0.6)
-        : this.getNum(postDevilCfg ?? {}, 'allow_confidence', 0.84),
-    });
-
-    const baseConfidence = (checks.reduce((s, c) => s + (c.confidence ?? 0.75), 0) / checks.length);
-    const riskPenalty = risk.level === 'critical' ? 0.18 : risk.level === 'high' ? 0.12 : risk.level === 'medium' ? 0.06 : 0;
-    const postConfCfg = defs.find(d => d.key === 'post_confidence')?.cfg;
-    const confidence = Math.max(0.05, Math.min(0.99, baseConfidence - riskPenalty));
-    const gate = createConfidenceGate(
-      this.getNum(postConfCfg ?? {}, 'gate_threshold', 0.67),
-      this.getGateAction(postConfCfg ?? {}, 'warn'),
-    );
-    const gateDecision = gate.evaluate(confidence) as 'allow' | 'deny' | 'warn';
-    checks.push({
-      decision: gateDecision,
-      guardrailId: defs.find(d => d.key === 'post_confidence')?.row.id ?? 'cognitive-post-confidence',
-      explanation: `Post-check confidence ${Math.round(confidence * 100)}% (risk=${risk.level}).`,
-      confidence,
-      metadata: { riskLevel: risk.level, riskExplanation: risk.explanation },
-    });
-
-    if (hasDbCognitiveConfig) {
-      // Keep only checks explicitly configured in DB when cognitive rows exist for this stage.
-      const allowIds = new Set(defs.map(d => d.row.id));
-      const fallbackIds = new Set([
-        'cognitive-post-grounding',
-        'cognitive-post-sycophancy',
-        'cognitive-post-devils-advocate',
-        'cognitive-post-confidence',
-      ]);
-      for (let i = checks.length - 1; i >= 0; i--) {
-        const id = checks[i]?.guardrailId;
-        if (id && fallbackIds.has(id) && !allowIds.has(id)) checks.splice(i, 1);
-      }
+    if (row.type === 'factuality') {
+      return {
+        id: row.id,
+        name: row.name,
+        description: row.description ?? undefined,
+        type: 'custom',
+        stage: normalizedStage,
+        enabled: !!row.enabled,
+        priority: row.priority,
+        config: {
+          ...config,
+          category: 'verification',
+          rule: 'grounding-overlap',
+          min_overlap: typeof config['confidence_threshold'] === 'number' ? Number(config['confidence_threshold']) / 10 : config['min_overlap'],
+        },
+      };
     }
 
-    const worst = checks.some(c => c.decision === 'deny') ? 'deny' : checks.some(c => c.decision === 'warn') ? 'warn' : 'allow';
-    return { confidence: Number(confidence.toFixed(3)), decision: worst, checks, riskLevel: risk.level };
+    if (row.type === 'budget') {
+      const maxInputTokens = typeof config['max_input_tokens'] === 'number' ? Number(config['max_input_tokens']) : undefined;
+      return {
+        id: row.id,
+        name: row.name,
+        description: row.description ?? undefined,
+        type: 'length',
+        stage: normalizedStage,
+        enabled: !!row.enabled,
+        priority: row.priority,
+        config: {
+          ...config,
+          maxLength: typeof config['maxLength'] === 'number' ? config['maxLength'] : maxInputTokens ? maxInputTokens * 4 : undefined,
+          action: config['action'] === 'deny' || config['action'] === 'warn' ? config['action'] : 'warn',
+        },
+      };
+    }
+
+    if (row.type === 'redaction' || row.type === 'pii_detection') {
+      return {
+        id: row.id,
+        name: row.name,
+        description: row.description ?? undefined,
+        type: 'regex',
+        stage: normalizedStage,
+        enabled: !!row.enabled,
+        priority: row.priority,
+        config: {
+          ...this.patternConfigFromNames(config['patterns']),
+          ...config,
+        },
+      };
+    }
+
+    if (row.type === 'content_filter') {
+      return {
+        id: row.id,
+        name: row.name,
+        description: row.description ?? undefined,
+        type: 'blocklist',
+        stage: normalizedStage,
+        enabled: !!row.enabled,
+        priority: row.priority,
+        config: {
+          ...config,
+          words: Array.isArray(config['words']) ? config['words'] : Array.isArray(config['categories']) ? config['categories'] : [],
+          action: config['action'] === 'deny' || config['action'] === 'warn' ? config['action'] : 'warn',
+        },
+      };
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description ?? undefined,
+      type: row.type as Guardrail['type'],
+      stage: normalizedStage,
+      enabled: !!row.enabled,
+      config,
+      priority: row.priority,
+    };
   }
 
   // ── Trace persistence ───────────────────────────────────────
@@ -1218,25 +1106,18 @@ export class ChatEngine {
   ): Promise<{ decision: 'allow' | 'deny' | 'warn'; reason?: string; results: GuardrailResult[]; cognitive?: CognitiveCheckSummary }> {
     try {
       const rows = await this.db.listGuardrails();
-      const enabledRows = rows.filter(r => r.enabled);
-      const cognitiveRows = enabledRows.filter(r => r.type === 'cognitive' || r.type === 'cognitive_check');
-      const cognitive = await this.evaluateCognitiveChecks(stage, refs?.userInput ?? input, refs?.assistantOutput, cognitiveRows);
-
-      const pipelineRows = enabledRows.filter(r => r.type !== 'cognitive' && r.type !== 'cognitive_check');
-      const guardrails: Guardrail[] = pipelineRows.map(r => ({
-        id: r.id,
-        name: r.name,
-        description: r.description ?? undefined,
-        type: (r.type === 'content_filter' ? 'blocklist' : r.type === 'budget' ? 'custom' : r.type === 'redaction' ? 'regex' : r.type === 'factuality' ? 'custom' : r.type) as Guardrail['type'],
-        stage: (r.stage === 'pre' ? 'pre-execution' : r.stage === 'post' ? 'post-execution' : r.stage === 'both' ? stage : r.stage) as GuardrailStage,
-        enabled: !!r.enabled,
-        config: this.parseGuardrailConfig(r.config),
-        priority: r.priority,
-      }));
+      const enabledRows = rows.filter(r => r.enabled && this.stageMatches(r.stage, stage));
+      const guardrails: Guardrail[] = enabledRows.map(r => this.normalizeGuardrail(r, stage));
 
       const pipeline = createGuardrailPipeline(guardrails, { shortCircuitOnDeny: true });
-      const pipelineResults = pipelineRows.length > 0 ? await pipeline.evaluate(input, stage) : [];
-      const results = [...pipelineResults, ...cognitive.checks];
+      const results = guardrails.length > 0
+        ? await pipeline.evaluate(input, stage, {
+            userInput: refs?.userInput ?? input,
+            assistantOutput: refs?.assistantOutput,
+            action: refs?.userInput ?? input,
+          })
+        : [];
+      const cognitive = summarizeGuardrailResults(results, 'cognitive') ?? undefined;
 
       const decision = hasDeny(results) ? 'deny' as const : hasWarning(results) ? 'warn' as const : 'allow' as const;
       const reason = getDenyReason(results);

@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import type { Guardrail, GuardrailResult } from '@weaveintel/core';
 import {
   evaluateGuardrail,
+  summarizeGuardrailResults,
   createGuardrailPipeline,
   hasDeny,
   hasWarning,
@@ -81,6 +82,58 @@ describe('evaluateGuardrail', () => {
     const result = evaluateGuardrail(g, 'Short text', 'pre-execution');
     expect(result.decision).toBe('allow');
   });
+
+  it('evaluates context-aware custom grounding rules', () => {
+    const g: Guardrail = {
+      id: 'g8', name: 'Grounding', type: 'custom', stage: 'post-execution',
+      enabled: true, config: { rule: 'grounding-overlap', category: 'cognitive', min_overlap: 0.2 },
+    };
+    const result = evaluateGuardrail(g, 'BANANA', 'post-execution', {
+      userInput: 'What is the capital of France?',
+      assistantOutput: 'BANANA',
+    });
+    expect(result.decision).toBe('warn');
+    expect(result.metadata?.['category']).toBe('cognitive');
+  });
+
+  it('warns when day-of-week answer lacks evidence context', () => {
+    const g: Guardrail = {
+      id: 'g10',
+      name: 'Date Evidence Check',
+      type: 'custom',
+      stage: 'post-execution',
+      enabled: true,
+      config: {
+        rule: 'grounding-overlap',
+        category: 'verification',
+        min_overlap: 0.35,
+      },
+    };
+
+    const result = evaluateGuardrail(g, 'It is Monday.', 'post-execution', {
+      userInput: 'What day is it today?',
+      assistantOutput: 'It is Monday.',
+      metadata: { hasDateTimeTool: false },
+    });
+
+    expect(result.decision).toBe('warn');
+    expect(result.explanation).toContain('grounding overlap');
+  });
+
+  it('evaluates aggregate confidence rules using previous results', () => {
+    const g: Guardrail = {
+      id: 'g9', name: 'Aggregate Confidence', type: 'custom', stage: 'post-execution',
+      enabled: true, config: { rule: 'aggregate-confidence-gate', category: 'cognitive', gate_threshold: 0.8, gate_on_fail: 'warn' },
+    };
+    const result = evaluateGuardrail(g, 'ignored', 'post-execution', {
+      previousResults: [
+        { decision: 'warn', guardrailId: 'a', confidence: 0.2, metadata: { category: 'cognitive', riskLevel: 'medium' } },
+        { decision: 'allow', guardrailId: 'b', confidence: 0.4, metadata: { category: 'cognitive' } },
+      ],
+    });
+    expect(result.decision).toBe('warn');
+    expect(result.confidence).toBeLessThan(0.8);
+  });
 });
 
 // ─── Pipeline ───────────────────────────────────────────────
@@ -131,6 +184,22 @@ describe('createGuardrailPipeline', () => {
     const results = await pipeline.evaluate('test text', 'pre-execution');
     expect(results).toHaveLength(0);
   });
+
+  it('passes runtime context through the pipeline', async () => {
+    const guardrails: Guardrail[] = [
+      { id: 'g1', name: 'Grounding', type: 'custom', stage: 'post-execution', enabled: true, config: { rule: 'grounding-overlap', category: 'cognitive', min_overlap: 0.2 }, priority: 1 },
+      { id: 'g2', name: 'Confidence', type: 'custom', stage: 'post-execution', enabled: true, config: { rule: 'aggregate-confidence-gate', category: 'cognitive', gate_threshold: 0.8, gate_on_fail: 'warn' }, priority: 2 },
+    ];
+
+    const pipeline = createGuardrailPipeline(guardrails);
+    const results = await pipeline.evaluate('BANANA', 'post-execution', {
+      userInput: 'What is the capital of France?',
+      assistantOutput: 'BANANA',
+    });
+    expect(results).toHaveLength(2);
+    expect(results[0]!.decision).toBe('warn');
+    expect(results[1]!.decision).toBe('warn');
+  });
 });
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -155,6 +224,17 @@ describe('result helpers', () => {
   it('getDenyReason returns first deny explanation', () => {
     expect(getDenyReason(results)).toBe('Blocked: SSN detected');
     expect(getDenyReason([{ decision: 'allow', guardrailId: 'g1' }])).toBeUndefined();
+  });
+
+  it('summarizes a category of results', () => {
+    const summary = summarizeGuardrailResults([
+      { decision: 'warn', guardrailId: 'g1', confidence: 0.4, metadata: { category: 'cognitive', riskLevel: 'medium' } },
+      { decision: 'allow', guardrailId: 'g2', confidence: 0.8, metadata: { category: 'cognitive' } },
+      { decision: 'deny', guardrailId: 'g3', confidence: 0.1, metadata: { category: 'other' } },
+    ], 'cognitive');
+    expect(summary?.decision).toBe('warn');
+    expect(summary?.riskLevel).toBe('medium');
+    expect(summary?.checks).toHaveLength(2);
   });
 });
 

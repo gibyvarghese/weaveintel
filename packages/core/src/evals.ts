@@ -45,6 +45,7 @@ export type AssertionType =
   | 'factuality'
   | 'citation_present'
   | 'safety'
+  | 'guardrail_decision'
   | 'custom';
 
 export interface EvalCase {

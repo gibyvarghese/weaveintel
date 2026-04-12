@@ -13,7 +13,11 @@ export {
 } from './pipeline.js';
 
 // Built-in guardrails
-export { evaluateGuardrail } from './guardrail.js';
+export {
+  evaluateGuardrail,
+  summarizeGuardrailResults,
+  type GuardrailCategorySummary,
+} from './guardrail.js';
 
 // Risk classification
 export {

@@ -16,6 +16,14 @@ export interface GuardrailResult {
   metadata?: Record<string, unknown>;
 }
 
+export interface GuardrailEvaluationContext {
+  userInput?: string;
+  assistantOutput?: string;
+  action?: string;
+  previousResults?: GuardrailResult[];
+  metadata?: Record<string, unknown>;
+}
+
 export interface Guardrail {
   id: string;
   name: string;
@@ -36,7 +44,7 @@ export interface GuardrailPipeline {
   name: string;
   guardrails: Guardrail[];
   shortCircuitOnDeny: boolean;
-  evaluate(input: unknown, stage: GuardrailStage): Promise<GuardrailResult[]>;
+  evaluate(input: unknown, stage: GuardrailStage, context?: GuardrailEvaluationContext): Promise<GuardrailResult[]>;
 }
 
 // ─── Risk & Confidence ───────────────────────────────────────

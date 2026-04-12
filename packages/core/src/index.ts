@@ -353,6 +353,7 @@ export {
   type GuardrailStage,
   type GuardrailType,
   type GuardrailResult,
+  type GuardrailEvaluationContext,
   type Guardrail,
   type GuardrailPipeline,
   type RiskLevel,
