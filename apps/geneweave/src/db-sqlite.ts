@@ -1848,8 +1848,64 @@ export class SQLiteAdapter implements DatabaseAdapter {
         id: 'guard-cog-post-confidence', name: 'Cognitive Post: Confidence Gate', description: 'Apply post-response confidence gate for outcome signaling',
         type: 'cognitive_check', stage: 'post', config: JSON.stringify({ check: 'post_confidence', gate_threshold: 0.67, gate_on_fail: 'warn' }), priority: 60, enabled: 1,
       },
+      {
+        id: 'guard-injection-directive-override', name: 'Prompt Injection: Directive Override', description: 'Block attempts to override system or developer instructions',
+        type: 'content_filter', stage: 'pre', config: JSON.stringify({
+          words: [
+            'ignore previous instructions',
+            'disregard previous instructions',
+            'forget all prior instructions',
+            'override system prompt',
+            'ignore system prompt',
+            'ignore developer instructions',
+            'jailbreak',
+            'do anything now',
+          ],
+          action: 'deny',
+        }), priority: 95, enabled: 1,
+      },
+      {
+        id: 'guard-injection-prompt-exfil', name: 'Prompt Injection: Prompt Exfiltration', description: 'Block attempts to extract hidden prompts or policies',
+        type: 'regex', stage: 'pre', config: JSON.stringify({
+          pattern: '(?:show|reveal|print|dump|output).{0,80}(?:system prompt|developer message|hidden instructions|internal policy)',
+          flags: 'i',
+          action: 'deny',
+        }), priority: 94, enabled: 1,
+      },
     ];
     for (const g of guardrails) await this.createGuardrail(g);
+    }
+
+    // Ensure prompt-injection guardrails exist for existing databases
+    const injectionGuardrails: Omit<GuardrailRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'guard-injection-directive-override', name: 'Prompt Injection: Directive Override', description: 'Block attempts to override system or developer instructions',
+        type: 'content_filter', stage: 'pre', config: JSON.stringify({
+          words: [
+            'ignore previous instructions',
+            'disregard previous instructions',
+            'forget all prior instructions',
+            'override system prompt',
+            'ignore system prompt',
+            'ignore developer instructions',
+            'jailbreak',
+            'do anything now',
+          ],
+          action: 'deny',
+        }), priority: 95, enabled: 1,
+      },
+      {
+        id: 'guard-injection-prompt-exfil', name: 'Prompt Injection: Prompt Exfiltration', description: 'Block attempts to extract hidden prompts or policies',
+        type: 'regex', stage: 'pre', config: JSON.stringify({
+          pattern: '(?:show|reveal|print|dump|output).{0,80}(?:system prompt|developer message|hidden instructions|internal policy)',
+          flags: 'i',
+          action: 'deny',
+        }), priority: 94, enabled: 1,
+      },
+    ];
+    for (const g of injectionGuardrails) {
+      const existing = await this.getGuardrail(g.id);
+      if (!existing) await this.createGuardrail(g);
     }
 
     // Routing policies

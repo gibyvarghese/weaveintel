@@ -400,6 +400,41 @@ export class ChatEngine {
       };
     }
 
+    const identityRecall = await this.resolveIdentityRecallFromMemory(userId, processedContent);
+    if (identityRecall) {
+      const latencyMs = Date.now() - startMs;
+      const assistMsgId = randomUUID();
+      await this.db.addMessage({
+        id: assistMsgId,
+        chatId,
+        role: 'assistant',
+        content: identityRecall,
+        metadata: JSON.stringify({
+          model: 'memory-recall',
+          provider: 'local',
+          mode: settings.mode,
+          memoryRecall: { deterministic: true, identity: true },
+          traceId,
+        }),
+        tokensUsed: 0,
+        cost: 0,
+        latencyMs,
+      });
+
+      await this.db.recordMetric({
+        id: randomUUID(), userId, chatId, type: 'generation', provider: 'local', model: 'memory-recall',
+        promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0, latencyMs,
+      });
+
+      return {
+        assistantContent: identityRecall,
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        cost: 0,
+        latencyMs,
+        redaction: redactionInfo,
+      };
+    }
+
     // Build conversation
     const history = await this.db.getMessages(chatId);
     const messages = historyToMessages(history);
@@ -634,6 +669,56 @@ export class ChatEngine {
         content: denyContent,
         metadata: JSON.stringify({ guardrail: { decision: 'deny', reason: preGuardrail.reason }, cognitive: preGuardrail.cognitive }),
       });
+      return;
+    }
+
+    const identityRecall = await this.resolveIdentityRecallFromMemory(userId, processedContent);
+    if (identityRecall) {
+      const latencyMs = 0;
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      if (redactionInfo) {
+        res.write(`data: ${JSON.stringify({ type: 'redaction', ...redactionInfo })}\n\n`);
+      }
+      res.write(`data: ${JSON.stringify({ type: 'text', text: identityRecall })}\n\n`);
+      res.write(`data: ${JSON.stringify({
+        type: 'done',
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        cost: 0,
+        latencyMs,
+        model: 'memory-recall',
+        provider: 'local',
+        mode: settings.mode,
+      })}\n\n`);
+
+      await this.db.addMessage({
+        id: randomUUID(),
+        chatId,
+        role: 'assistant',
+        content: identityRecall,
+        metadata: JSON.stringify({
+          model: 'memory-recall',
+          provider: 'local',
+          streamed: true,
+          mode: settings.mode,
+          memoryRecall: { deterministic: true, identity: true },
+          traceId,
+        }),
+        tokensUsed: 0,
+        cost: 0,
+        latencyMs,
+      });
+
+      await this.db.recordMetric({
+        id: randomUUID(), userId, chatId, type: 'generation', provider: 'local', model: 'memory-recall',
+        promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0, latencyMs,
+      });
+
+      res.end();
       return;
     }
 
@@ -1659,6 +1744,58 @@ export class ChatEngine {
     }
   }
 
+  private isIdentityRecallQuery(query: string): boolean {
+    return /\b(do\s+you\s+know\s+who\s+i\s+am|who\s+am\s+i|who\s+i\s+am|do\s+you\s+remember\s+me|do\s+you\s+know\s+my\s+name|what(?:'|\s+)?s\s+my\s+name|remember\s+my\s+name)\b/i.test(query);
+  }
+
+  private async resolveIdentityRecallFromMemory(userId: string, query: string): Promise<string | null> {
+    if (!this.isIdentityRecallQuery(query)) return null;
+
+    const [entities, semanticRows] = await Promise.all([
+      this.db.listEntities(userId),
+      this.db.listSemanticMemory(userId, 24),
+    ]);
+
+    let name: string | null = null;
+    let location: string | null = null;
+
+    const personEntity = entities.find((e) => e.entity_type.toLowerCase() === 'person');
+    if (personEntity?.entity_name) {
+      name = personEntity.entity_name.trim();
+    }
+    const locationEntity = entities.find((e) => e.entity_type.toLowerCase() === 'location');
+    if (locationEntity?.entity_name) {
+      location = locationEntity.entity_name.trim();
+    }
+
+    const semanticPriority = semanticRows
+      .filter((m) => m.memory_type === 'user_fact' || m.source === 'user')
+      .concat(semanticRows.filter((m) => !(m.memory_type === 'user_fact' || m.source === 'user')));
+
+    for (const m of semanticPriority) {
+      if (!name) {
+        const nm = m.content.match(/\b(?:my\s+name\s+is|i\s+am|i'?m\s+called|call\s+me)\s+([A-Za-z][A-Za-z\-']{1,39})\b/i);
+        if (nm?.[1]) name = nm[1].trim();
+      }
+      if (!location) {
+        const lm = m.content.match(/\b(?:i\s+live\s+in|i'?m\s+from|i\s+am\s+from|i\s+reside\s+in)\s+([A-Za-z][A-Za-z\s\-']{1,50}?)(?=\s+(?:and|but)\b|[,.!?]|$)/i);
+        if (lm?.[1]) location = lm[1].trim();
+      }
+      if (name && location) break;
+    }
+
+    if (name && location) {
+      return `From our previous chats, you are ${name} and you live in ${location}.`;
+    }
+    if (name) {
+      return `From our previous chats, you are ${name}.`;
+    }
+    if (location) {
+      return `From our previous chats, I remember that you live in ${location}.`;
+    }
+    return null;
+  }
+
   private async buildMemoryContext(ctx: ExecutionContext, model: Model, userId: string, query: string): Promise<string | null> {
     try {
       const identityQuery = await this.classifyIdentityRecallIntent(ctx, model, query);
@@ -1679,8 +1816,29 @@ export class ChatEngine {
 
       if (semanticForContext.length === 0 && entityMatches.length === 0) return null;
       const parts: string[] = ['[Long-term memory from past conversations]'];
+
+      let inferredIdentityName: string | null = null;
+      if (identityQuery) {
+        const person = entityMatches.find((e) => e.entity_type.toLowerCase() === 'person');
+        if (person?.entity_name) {
+          inferredIdentityName = person.entity_name;
+        } else {
+          for (const m of semanticForContext) {
+            const nameMatch = m.content.match(/\bmy\s+name\s+is\s+([A-Za-z][A-Za-z\-']{1,39})\b/i);
+            if (nameMatch?.[1]) {
+              inferredIdentityName = nameMatch[1];
+              break;
+            }
+          }
+        }
+      }
+
       if (identityQuery) {
         parts.push('Identity recall request detected. Use these memories to identify the user when possible.');
+        parts.push('If a name or identity fact is present below, answer directly from memory and do not claim you lack memory.');
+        if (inferredIdentityName) {
+          parts.push(`Most likely user name from memory: "${inferredIdentityName}".`);
+        }
       }
       if (entityMatches.length > 0) {
         parts.push('Known facts about this user:');
