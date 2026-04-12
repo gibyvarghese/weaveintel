@@ -390,6 +390,23 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { messages });
   });
 
+  router.put('/api/chats/:chatId', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const chat = await db.getChat(params['chatId']!, auth.userId);
+    if (!chat) { json(res, 404, { error: 'Chat not found' }); return; }
+
+    const raw = await readBody(req);
+    let body: { title?: string };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const title = String(body.title ?? '').trim();
+    if (!title) { json(res, 400, { error: 'title required' }); return; }
+
+    await db.updateChatTitle(chat.id, auth.userId, title.slice(0, 200));
+    const updated = await db.getChat(chat.id, auth.userId);
+    json(res, 200, { chat: updated });
+  }, { auth: true, csrf: true });
+
   router.post('/api/chats/:chatId/messages', async (req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const chat = await db.getChat(params['chatId']!, auth.userId);
@@ -462,9 +479,11 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   });
 
 
-  // ── Admin routes (extracted to server-admin.ts) ─────────  // Admin CRUD for guardrails, routing policies, prompts, tools,
+  // ── Admin routes (extracted to server-admin.ts) ─────────
+  // Admin CRUD for guardrails, routing policies, prompts, tools,
   // workflows, HITL policies, and system settings. Each entity
-  // maps to a database table via the DatabaseAdapter.  registerAdminRoutes(router, db, json, readBody, providers);
+  // maps to a database table via the DatabaseAdapter.
+  registerAdminRoutes(router, db, json, readBody, providers);
 
   // ── Health ─────────────────────────────────────────────────
 

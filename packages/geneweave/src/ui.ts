@@ -19,7 +19,7 @@ export function getHTML(): string {
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>geneWeave — AI Chat &amp; Observability</title>
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
   --bg:#F4F4F2;--bg2:#FFFFFF;--bg3:#F8F8F6;--bg4:#E7E7E4;
@@ -27,7 +27,8 @@ export function getHTML(): string {
   --accent:#2563EB;--accent2:#1d4ed8;--accent-dim:rgba(37,99,235,.08);
   --danger:#dc2626;--success:#16a34a;--warn:#d97706;
   --radius:12px;--radius-lg:16px;
-  --font:'Inter',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --font:'Manrope',system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --font-display:'Space Grotesk','Manrope',sans-serif;
   --mono:'SF Mono',SFMono-Regular,Menlo,Consolas,monospace;
   --shadow-soft:0 1px 2px rgba(17,17,17,.04),0 8px 24px rgba(17,17,17,.04);
   --shadow-hover:0 2px 6px rgba(17,17,17,.06),0 12px 30px rgba(17,17,17,.08);
@@ -80,10 +81,106 @@ input{font-family:inherit;outline:none}
 /* ── Main content area ──────────────────────── */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
 
+/* ── Workspace shell (new UI) ───────────────── */
+.workspace-nav{width:248px;background:var(--bg2);border-right:1px solid var(--bg4);padding:20px 14px;display:flex;flex-direction:column;gap:18px}
+.brand{display:flex;align-items:center;gap:8px;font-family:var(--font-display);font-weight:700;font-size:20px;color:var(--fg);padding:4px 10px}
+.workspace-menu{display:flex;flex-direction:column;gap:6px}
+.workspace-menu button,.workspace-menu a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;color:var(--fg2);font-size:14px;font-weight:600;border:1px solid transparent;transition:all .18s ease}
+.workspace-menu button:hover,.workspace-menu a:hover{background:var(--bg3);color:var(--fg)}
+.workspace-menu .active{background:var(--accent-dim);color:var(--accent);border-color:rgba(37,99,235,.15)}
+.workspace-spacer{flex:1}
+.workspace-home{flex:1;display:flex;flex-direction:column;padding:18px 22px;gap:14px;overflow:hidden;min-height:0}
+.workspace-top-card{background:var(--bg2);border:1px solid var(--bg4);border-radius:18px;padding:14px 16px;display:grid;grid-template-columns:auto auto 1fr auto;gap:14px;align-items:center;box-shadow:var(--shadow-soft)}
+.user-chip{display:flex;align-items:center;gap:10px;min-width:220px}
+.user-chip img{width:36px;height:36px;border-radius:50%;object-fit:cover}
+.user-chip .name{font-weight:700;font-size:13px;color:var(--fg)}
+.user-chip .role{font-size:11px;color:var(--fg3)}
+.today-badge{display:inline-flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--bg4);padding:8px 12px;border-radius:10px;font-size:12px;color:var(--fg2);font-weight:700}
+.semantic-search{position:relative}
+.semantic-search input{width:100%;padding:10px 14px;border-radius:999px;border:1px solid var(--bg4);background:var(--bg3);font-size:13px;color:var(--fg)}
+.semantic-search input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
+.search-dd{position:absolute;left:0;right:0;top:46px;z-index:60;background:var(--bg2);border:1px solid var(--bg4);border-radius:12px;box-shadow:var(--shadow-hover);max-height:280px;overflow-y:auto}
+.search-item{padding:10px 12px;border-bottom:1px solid var(--bg4);cursor:pointer}
+.search-item:last-child{border-bottom:none}
+.search-item:hover{background:var(--bg3)}
+.search-item .ttl{font-size:13px;font-weight:700;color:var(--fg)}
+.search-item .sub{font-size:11px;color:var(--fg3);margin-top:2px}
+.top-actions{display:flex;align-items:center;gap:8px}
+.icon-circle{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--bg3);border:1px solid var(--bg4);color:var(--fg2);font-size:14px;position:relative}
+.ui-icon{display:inline-flex;align-items:center;justify-content:center;width:14px;color:var(--fg3);opacity:.85;font-size:13px;line-height:1}
+.notif-dot{position:absolute;top:7px;right:9px;width:8px;height:8px;border-radius:50%;background:var(--danger)}
+.workspace-body{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:14px;flex:1;overflow:hidden;align-items:stretch;min-height:0}
+.center-card{background:var(--bg2);border:1px solid var(--bg4);border-radius:20px;display:flex;flex-direction:column;min-height:0;overflow:hidden;box-shadow:var(--shadow-soft);height:100%;align-self:stretch}
+.center-card-hdr{padding:14px 16px;border-bottom:1px solid var(--bg4);display:flex;align-items:center;justify-content:space-between;gap:12px}
+.agent-strip{display:flex;align-items:center;gap:8px}
+.agent-strip .lead{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--fg)}
+.agent-strip .lead img{width:34px;height:34px;border-radius:50%;object-fit:cover;border:1px solid var(--bg4)}
+.worker-avatars{display:flex;align-items:center}
+.worker-avatars img{width:24px;height:24px;border-radius:50%;object-fit:cover;border:2px solid var(--bg2);margin-left:-6px;background:var(--bg3)}
+.center-card-hdr .title{font-size:13px;color:var(--fg2);font-weight:600}
+.right-rail{display:flex;flex-direction:column;gap:10px;min-height:0;height:100%;align-self:stretch}
+.side-card{background:var(--bg2);border:1px solid var(--bg4);border-radius:18px;padding:14px;box-shadow:var(--shadow-soft)}
+.side-card h3{font-size:14px;font-weight:800;font-family:var(--font-display);margin-bottom:8px}
+.schedule-card{padding:0;overflow:hidden;display:flex;flex-direction:column;flex:1;min-height:0}
+.schedule-head{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px;padding:8px 8px 7px;border-bottom:1px solid var(--bg4)}
+.schedule-head .ttl{font-size:15px;font-family:var(--font-display);font-weight:700;display:flex;align-items:center;gap:6px}
+.see-all{font-size:9.5px;font-weight:700;color:var(--fg2);background:var(--bg3);border:1px solid var(--bg4);padding:5px 7px;border-radius:9px;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;min-width:max-content}
+.month-nav{display:flex;align-items:center;justify-content:center;gap:4px;min-width:0}
+.month-pill{flex:1;text-align:center;font-size:11px;font-weight:800;color:var(--fg);background:var(--bg3);border:1px solid var(--bg4);border-radius:8px;padding:5px 0;min-width:70px}
+.icon-btn-sm{width:20px;height:20px;border-radius:7px;background:var(--bg3);border:1px solid var(--bg4);display:flex;align-items:center;justify-content:center;color:var(--fg2);font-size:11px}
+.day-strip{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;padding:8px 12px 8px}
+.day-chip{border:1px solid var(--bg4);background:var(--bg2);border-radius:10px;padding:5px 3px;text-align:center;cursor:pointer;transition:all .15s ease}
+.day-chip:hover{border-color:var(--fg3)}
+.day-chip .dw{font-size:9px;color:var(--fg3);font-weight:700}
+.day-chip .dn{font-size:12px;line-height:1.1;font-weight:800;color:var(--fg);margin-top:2px}
+.day-chip.active{background:#6B4CE6;border-color:#6B4CE6}
+.day-chip.active .dw,.day-chip.active .dn{color:#fff}
+.month-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;padding:8px 10px}
+.month-grid .mh{font-size:10px;color:var(--fg3);text-align:center;font-weight:700;padding:2px 0}
+.month-grid .md{border:1px solid var(--bg4);background:var(--bg2);border-radius:8px;min-height:24px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--fg2);cursor:pointer;transition:all .15s ease}
+.month-grid .md:hover{border-color:var(--fg3)}
+.month-grid .md.empty{visibility:hidden}
+.month-grid .md.active{background:#6B4CE6;color:#fff;border-color:#6B4CE6}
+.month-grid .md.has{background:var(--accent-dim);color:var(--accent);border-color:rgba(37,99,235,.2)}
+.month-grid .md.has.active{background:#6B4CE6;color:#fff;border-color:#6B4CE6}
+.schedule-search{padding:0 12px 8px}
+.schedule-search .search-row{display:flex;align-items:center;gap:8px;border:1px solid var(--bg4);background:var(--bg3);border-radius:11px;padding:8px 10px;font-size:12px;color:var(--fg3)}
+.schedule-tabs{display:grid;grid-template-columns:repeat(3,1fr);border-top:1px solid var(--bg4);border-bottom:1px solid var(--bg4)}
+.schedule-tab{padding:9px 8px;text-align:center;font-size:11px;color:var(--fg2);font-weight:700;position:relative;cursor:pointer}
+.schedule-tab.active{color:#6B4CE6}
+.schedule-tab.active::after{content:'';position:absolute;left:14px;right:14px;bottom:0;height:2px;background:#6B4CE6;border-radius:2px}
+.schedule-meetings{padding:9px 12px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;min-height:120px}
+.meet-card{border-radius:14px;padding:12px 12px 10px;border:1px solid transparent}
+.meet-card.peach{background:#F6E2D2;border-color:#ECC8AA}
+.meet-card.blue{background:#DDE6FB;border-color:#C5D6FA}
+.meet-title{font-size:13px;font-weight:800;color:#3f2b1c}
+.meet-card.blue .meet-title{color:#1f3463}
+.meet-time{font-size:12px;color:rgba(39,39,39,.62);margin-top:4px}
+.meet-row{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+.mini-avatars{display:flex;align-items:center}
+.mini-avatars img{width:18px;height:18px;border-radius:50%;object-fit:cover;border:1.5px solid rgba(255,255,255,.85);margin-left:-6px}
+.mini-avatars img:first-child{margin-left:0}
+.mini-more{font-size:11px;color:rgba(39,39,39,.62);margin-left:6px;font-weight:700}
+.tag{font-size:10px;font-weight:800;letter-spacing:.2px;color:#A35B1E;border:1px solid #C97E3F;background:rgba(255,255,255,.55);padding:2px 8px;border-radius:999px}
+.action-list{display:flex;flex-direction:column;gap:8px;max-height:240px;overflow-y:auto}
+.actions-card{margin-top:auto;display:flex;flex-direction:column;min-height:180px;max-height:200px}
+.actions-card h3{margin-bottom:10px}
+.action-item{padding:9px 10px;border-radius:10px;border:1px solid var(--bg4);background:var(--bg3)}
+.action-item.selectable{cursor:pointer;transition:all .18s ease}
+.action-item.selectable:hover{background:var(--bg2);border-color:var(--fg3)}
+.action-item.active{border-color:rgba(37,99,235,.3);background:var(--accent-dim)}
+.action-item .at{font-size:12px;font-weight:700;color:var(--fg)}
+.action-item .as{font-size:11px;color:var(--fg3);margin-top:2px}
+.notif-list{max-height:280px;overflow-y:auto}
+.notif-item{padding:10px 0;border-bottom:1px solid var(--bg4)}
+.notif-item:last-child{border-bottom:none}
+.notif-item .nt{font-size:13px;color:var(--fg);font-weight:700}
+.notif-item .ns{font-size:11px;color:var(--fg3);margin-top:2px}
+
 /* ── Chat view ──────────────────────────────── */
 .chat-view{flex:1;display:flex;flex-direction:column;overflow:hidden}
-.messages{flex:1;overflow-y:auto;padding:32px;display:flex;flex-direction:column;gap:20px}
-.msg{max-width:720px;width:100%;margin:0 auto;display:flex;gap:12px;align-items:flex-start}
+.messages{flex:1;overflow-y:auto;padding:18px 20px;display:flex;flex-direction:column;gap:20px}
+.msg{max-width:620px;width:100%;margin:0 auto;display:flex;gap:12px;align-items:flex-start}
 .msg.user{flex-direction:row-reverse}
 .msg .avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;overflow:hidden}
 .msg .avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%}
@@ -94,6 +191,12 @@ input{font-family:inherit;outline:none}
 .msg.assistant .bubble{background:var(--bg2);color:var(--fg);border:1px solid var(--bg4);border-bottom-left-radius:4px;box-shadow:var(--shadow-soft);white-space:normal}
 .msg .meta{font-size:11px;color:var(--fg3);margin-top:6px}
 .msg .meta span{margin-right:10px}
+.msg-body{position:relative}
+.resp-corner{position:absolute;top:-8px;right:-8px;display:flex;gap:6px;z-index:3}
+.resp-ind{width:22px;height:22px;border-radius:999px;border:1px solid var(--bg4);background:var(--bg2);color:var(--fg3);display:flex;align-items:center;justify-content:center;font-size:11px;box-shadow:var(--shadow-soft);cursor:help}
+.resp-ind.ok{color:var(--success);border-color:rgba(22,163,74,.25)}
+.resp-ind.warn{color:var(--warn);border-color:rgba(217,119,6,.3)}
+.resp-ind.deny{color:var(--danger);border-color:rgba(220,38,38,.28)}
 
 /* ── Rich text (assistant bubble) ───────── */
 .msg.assistant .bubble h1,.msg.assistant .bubble h2,.msg.assistant .bubble h3,.msg.assistant .bubble h4{margin:16px 0 8px;font-weight:700;color:var(--fg);line-height:1.3}
@@ -303,8 +406,9 @@ input{font-family:inherit;outline:none}
 ::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:3px}
 ::-webkit-scrollbar-thumb:hover{background:var(--fg3)}
 
-@media(max-width:900px){.charts{grid-template-columns:1fr}.sidebar{width:220px}}
-@media(max-width:640px){.sidebar{display:none}.app{flex-direction:column}}
+@media(max-width:1100px){.workspace-body{grid-template-columns:1fr}.right-rail{display:none}}
+@media(max-width:900px){.charts{grid-template-columns:1fr}.workspace-nav{width:78px}.workspace-menu button span,.workspace-menu a span,.brand .word{display:none}.workspace-top-card{grid-template-columns:1fr;gap:10px}}
+@media(max-width:640px){.workspace-nav{display:none}.app{flex-direction:column}.workspace-home{padding:10px}}
 </style>
 </head>
 <body>
@@ -425,6 +529,16 @@ let state = {
   // New: settings, tools, traces
   chatSettings:null, availableTools:[], showSettings:false, defaultMode:'direct',
   showProfile:false,
+  showNotifications:false,
+  chatSearchQuery:'',
+  chatSearchResults:[],
+  chatSearchLoading:false,
+  chatSearchIndex:[],
+  chatSearchReady:false,
+  _chatSearchTimer:null,
+  calendarFocusDate:null,
+  calendarShowAll:false,
+  calendarTab:'meetings',
   traces:[],
   // Admin state
   adminTab:'prompts',
@@ -447,6 +561,138 @@ function avatarUrl(index){ return '/avatar/avatar-'+index+'.webp'; }
 function getUserAvatarUrl(){ return avatarUrl(avatarIndex(state.user?.id||state.user?.email||'user')); }
 function getAgentAvatarUrl(agentName){ return avatarUrl(avatarIndex(agentName||'geneweave-agent')); }
 
+function getTodayLabel(){
+  return new Date().toLocaleDateString(undefined,{weekday:'short', day:'2-digit', month:'short'});
+}
+
+function toYMD(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return y+'-'+m+'-'+day;
+}
+
+function fromYMD(ymd){
+  const p = String(ymd||'').split('-').map(Number);
+  if(p.length!==3 || !p[0] || !p[1] || !p[2]) return new Date();
+  return new Date(p[0], p[1]-1, p[2]);
+}
+
+function getCalendarFocusDate(){
+  if(!state.calendarFocusDate) state.calendarFocusDate = toYMD(new Date());
+  return fromYMD(state.calendarFocusDate);
+}
+
+function setCalendarFocusDate(d){
+  state.calendarFocusDate = toYMD(d);
+}
+
+function shiftCalendarMonth(delta){
+  const d = getCalendarFocusDate();
+  const shifted = new Date(d.getFullYear(), d.getMonth()+delta, d.getDate());
+  setCalendarFocusDate(shifted);
+  render();
+}
+
+function normalizeText(s){
+  return String(s||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+}
+
+function tokenSet(s){
+  const txt = normalizeText(s);
+  if(!txt) return new Set();
+  return new Set(txt.split(' ').filter(Boolean));
+}
+
+function trigramSet(s){
+  const txt = normalizeText(s).replace(/\s+/g,' ');
+  const out = new Set();
+  if(txt.length<3){ if(txt) out.add(txt); return out; }
+  for(let i=0;i<=txt.length-3;i++) out.add(txt.slice(i,i+3));
+  return out;
+}
+
+function semanticScore(query,text){
+  const q = normalizeText(query);
+  const t = normalizeText(text);
+  if(!q||!t) return 0;
+  let score = 0;
+  if(t.includes(q)) score += 0.55;
+
+  const qTokens = tokenSet(q);
+  const tTokens = tokenSet(t);
+  let overlap = 0;
+  qTokens.forEach(tok=>{ if(tTokens.has(tok)) overlap++; });
+  score += (qTokens.size ? (overlap / qTokens.size) : 0) * 0.3;
+
+  const qTri = trigramSet(q);
+  const tTri = trigramSet(t);
+  let triOverlap = 0;
+  qTri.forEach(g=>{ if(tTri.has(g)) triOverlap++; });
+  const triUnion = qTri.size + tTri.size - triOverlap;
+  score += (triUnion ? triOverlap / triUnion : 0) * 0.15;
+
+  return score;
+}
+
+async function ensureChatSearchIndex(){
+  if(state.chatSearchReady) return;
+  const topChats = state.chats.slice(0,30);
+  const rows = await Promise.all(topChats.map(async (c)=>{
+    try{
+      const r = await api.get('/chats/'+c.id+'/messages');
+      const payload = r.ok ? await r.json() : {messages:[]};
+      const msgs = payload.messages || [];
+      const merged = msgs.slice(-6).map(m=>m.content||'').join(' ');
+      return {id:c.id,title:c.title||'New Chat',updated_at:c.updated_at||c.created_at||'',text:(c.title||'')+' '+merged};
+    }catch{
+      return {id:c.id,title:c.title||'New Chat',updated_at:c.updated_at||c.created_at||'',text:c.title||''};
+    }
+  }));
+  state.chatSearchIndex = rows;
+  state.chatSearchReady = true;
+}
+
+async function runSemanticChatSearch(query){
+  const q = String(query||'').trim();
+  state.chatSearchQuery = query;
+  if(!q){
+    state.chatSearchResults = [];
+    state.chatSearchLoading = false;
+    render();
+    return;
+  }
+  state.chatSearchLoading = true;
+  render();
+  await ensureChatSearchIndex();
+  const ranked = state.chatSearchIndex
+    .map(item=>({item, score: semanticScore(q, item.text)}))
+    .filter(x=>x.score>0.12)
+    .sort((a,b)=>b.score-a.score)
+    .slice(0,8)
+    .map(x=>x.item);
+  state.chatSearchResults = ranked;
+  state.chatSearchLoading = false;
+  render();
+}
+
+function getDelegatedWorkers(messages){
+  const names = [];
+  (messages||[]).forEach(m=>{
+    (m.steps||[]).forEach(s=>{
+      if(s.type==='delegation'){
+        const n = s.worker||s.name;
+        if(n && !names.includes(n)) names.push(n);
+      }
+      if(s.type==='tool_call' && s.toolCall?.name==='delegate_to_worker'){
+        const n = s.toolCall?.arguments?.worker;
+        if(n && !names.includes(n)) names.push(n);
+      }
+    });
+  });
+  return names;
+}
+
 function normalizeLoadedMessage(row){
   var msg = Object.assign({}, row);
   if(msg.role !== 'assistant') return msg;
@@ -458,6 +704,7 @@ function normalizeLoadedMessage(row){
   msg.steps = Array.isArray(md.steps) ? md.steps : [];
   msg.mode = md.mode || 'direct';
   msg.evalResult = md.eval || null;
+  msg.cognitive = md.cognitive || null;
   msg.redaction = md.redaction || null;
   msg.guardrail = md.guardrail || null;
   msg.usage = {
@@ -515,7 +762,10 @@ async function doLogout(){
 /* ── Chats ──────────────────────────────────── */
 async function loadChats(){
   const r = await api.get('/chats');
-  if(r.ok) state.chats = (await r.json()).chats ?? [];
+  if(r.ok){
+    state.chats = (await r.json()).chats ?? [];
+    state.chatSearchReady = false;
+  }
 }
 async function loadModels(){
   const r = await api.get('/models');
@@ -574,7 +824,7 @@ async function loadChatTraces(chatId){
 async function createChat(){
   const mParts = state.selectedModel.split(':');
   const r = await api.post('/chats',{model:mParts[1]||state.selectedModel,provider:mParts[0]||''});
-  if(r.ok){ const d=await r.json(); state.chats.unshift(d.chat); state.currentChatId=d.chat.id; state.messages=[]; await loadChatSettings(d.chat.id); if(state.chatSettings && state.defaultMode){ state.chatSettings.mode=state.defaultMode; saveChatSettings(); } render(); }
+  if(r.ok){ const d=await r.json(); state.chats.unshift(d.chat); state.currentChatId=d.chat.id; state.messages=[]; state.chatSearchReady=false; await loadChatSettings(d.chat.id); if(state.chatSettings && state.defaultMode){ state.chatSettings.mode=state.defaultMode; saveChatSettings(); } render(); }
 }
 async function selectChat(id){
   state.currentChatId=id;
@@ -583,6 +833,8 @@ async function selectChat(id){
     const rows = (await r.json()).messages ?? [];
     state.messages = rows.map(normalizeLoadedMessage);
   }
+  state.chatSearchQuery='';
+  state.chatSearchResults=[];
   await loadChatSettings(id);
   state.showSettings=false;
   render();
@@ -590,6 +842,7 @@ async function selectChat(id){
 async function deleteChat(id){
   await api.del('/chats/'+id);
   state.chats = state.chats.filter(c=>c.id!==id);
+  state.chatSearchReady=false;
   if(state.currentChatId===id){ state.currentChatId=null; state.messages=[]; }
   render();
 }
@@ -633,8 +886,9 @@ async function sendMessage(content){
           else if(d.type==='tool_end'){ const last=assistantMsg.steps[assistantMsg.steps.length-1]; if(last&&last.kind==='tool_start') last.result=d.result; }
           else if(d.type==='redaction') assistantMsg.redaction=d;
           else if(d.type==='eval') assistantMsg.evalResult=d;
+          else if(d.type==='cognitive') assistantMsg.cognitive=d;
           else if(d.type==='guardrail') assistantMsg.guardrail=d;
-          else if(d.type==='done'){ assistantMsg.usage=d.usage; assistantMsg.cost=d.cost; assistantMsg.latency_ms=d.latencyMs; if(d.steps) assistantMsg.steps=d.steps; if(d.eval) assistantMsg.evalResult=d.eval; }
+          else if(d.type==='done'){ assistantMsg.usage=d.usage; assistantMsg.cost=d.cost; assistantMsg.latency_ms=d.latencyMs; if(d.steps) assistantMsg.steps=d.steps; if(d.eval) assistantMsg.evalResult=d.eval; if(d.cognitive) assistantMsg.cognitive=d.cognitive; }
           else if(d.type==='error') assistantMsg.content += '\\n[Error: '+d.error+']';
         } catch{}
       }
@@ -647,7 +901,9 @@ async function sendMessage(content){
   // Update chat title from first message
   const chat = state.chats.find(c=>c.id===chatId);
   if(chat && chat.title==='New Chat' && content.length>0){
-    chat.title = content.slice(0,40) + (content.length>40?'…':'');
+    const newTitle = content.slice(0,40) + (content.length>40?'…':'');
+    chat.title = newTitle;
+    api.put('/chats/'+chatId,{title:newTitle}).catch((e)=>console.warn('Failed to persist chat title', e));
   }
   render();
 }
@@ -767,11 +1023,6 @@ function renderMessages(){
     if(!isUser && m.redaction){
       extras.push(h('span',{className:'redaction-badge'},'\\u{1F6E1} Redacted: '+(m.redaction.count||m.redaction.detections?.length||'')+ ' items'));
     }
-    if(!isUser && m.guardrail){
-      const gd = m.guardrail.decision;
-      const gc = gd==='deny'?'background:rgba(220,38,38,.08);color:#DC2626;border:1px solid rgba(220,38,38,.2)':gd==='warn'?'background:rgba(217,119,6,.08);color:#D97706;border:1px solid rgba(217,119,6,.2)':'background:rgba(22,163,74,.08);color:#16A34A;border:1px solid rgba(22,163,74,.2)';
-      extras.push(h('span',{style:'display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 10px;border-radius:999px;margin-bottom:4px;'+gc},(gd==='deny'?'\\u{1F6AB}':gd==='warn'?'\\u26A0':'\\u2705')+' Guardrail: '+gd+(m.guardrail.reason?' \\u2014 '+m.guardrail.reason:'')));
-    }
     if(!isUser && m.steps && m.steps.length){
       var delegatedWorkers = [];
       m.steps.forEach(s=>{
@@ -835,12 +1086,34 @@ function renderMessages(){
         extras.unshift(h('div',null,...workerChips));
       }
     }
-    if(!isUser && m.evalResult){
-      const ev = m.evalResult;
-      const passed = ev.passed ?? ev.score >= 1;
-      extras.push(h('span',{className:'eval-badge '+(passed?'pass':'fail')},
-        (passed?'\\u2713':'\\u2717')+' Eval: '+(ev.score != null ? (ev.score*100).toFixed(0)+'%' : (passed?'pass':'fail'))
-      ));
+    let corner = null;
+    if(!isUser){
+      const indicators = [];
+      if(m.evalResult){
+        const score = m.evalResult.score != null ? (m.evalResult.score*100).toFixed(0) : null;
+        const passed = m.evalResult.passed ?? m.evalResult.score >= 1;
+        indicators.push(h('div',{
+          className:'resp-ind '+(passed?'ok':'warn'),
+          title:'Eval score: '+(score?score+'%':'n/a')+' | Passed: '+(m.evalResult.passed??'n/a')+' Failed: '+(m.evalResult.failed??'n/a'),
+        },passed?'\\u2713':'!'));
+      }
+      if(m.cognitive){
+        const c = Math.round((m.cognitive.confidence||0) * 100);
+        const decision = m.cognitive.decision || 'allow';
+        const firstWarn = m.cognitive.checks?.find(x=>x.decision!=='allow');
+        indicators.push(h('div',{
+          className:'resp-ind '+(decision==='deny'?'deny':decision==='warn'?'warn':'ok'),
+          title:'Confidence: '+c+'% | Cognitive decision: '+decision+(firstWarn?.explanation?' | '+firstWarn.explanation:''),
+        },'\\u25C9'));
+      }
+      if(m.guardrail){
+        const gd = m.guardrail.decision;
+        indicators.push(h('div',{
+          className:'resp-ind '+(gd==='deny'?'deny':gd==='warn'?'warn':'ok'),
+          title:'Guardrail: '+gd+(m.guardrail.reason?' | '+m.guardrail.reason:''),
+        },gd==='deny'?'\\u2715':gd==='warn'?'\\u26A0':'\\u2713'));
+      }
+      if(indicators.length) corner = h('div',{className:'resp-corner'},...indicators);
     }
 
     // Build bubble element
@@ -909,7 +1182,8 @@ function renderMessages(){
 
     const msgEl = h('div',{className:'msg '+(isUser?'user':'assistant')},
       avatarEl,
-      h('div',null,
+      h('div',{className:'msg-body'},
+        corner,
         ...extras,
         bubbleEl,
         toolbar,
@@ -950,107 +1224,289 @@ function renderAuth(){
   return card;
 }
 
-function renderTopBar(){
-  const headerLeft = h('div',{className:'chat-header-left'});
-  if(state.view==='chat'){
-    const modelSel = h('select',{className:'model-sel',onChange:function(){state.selectedModel=this.value;}});
-    state.models.forEach(m=>{
-      const val=m.provider+':'+m.id;
-      const opt=h('option',{value:val},m.provider+'/'+m.id);
-      if(val===state.selectedModel) opt.selected=true;
-      modelSel.appendChild(opt);
-    });
-    headerLeft.appendChild(modelSel);
-  } else {
-    const backBtn = h('button',{className:'hdr-icon-btn',title:'Back to Chat',onClick:()=>{state.view='chat';render();}},'\\u2190');
-    headerLeft.appendChild(backBtn);
-    headerLeft.appendChild(h('span',{style:'font-weight:600;font-size:15px;margin-left:8px'},state.view==='admin'?'Administration':'Dashboard'));
-  }
+function getUserRoleLabel(){
+  if(state.user?.email && state.user.email.toLowerCase().includes('admin')) return 'Administrator';
+  return 'Project manager';
+}
 
-  const headerRight = h('div',{className:'chat-header-right'});
+function uiIcon(sym){
+  return h('span',{className:'ui-icon'},sym);
+}
 
-  /* Settings button + dropdown (chat only) */
-  if(state.view==='chat'){
-    const settingsAnchor = h('div',{className:'dropdown-anchor'});
-    const settingsBtn = h('button',{className:'hdr-icon-btn'+(state.showSettings?' active':''),title:'AI Settings',onClick:async(e)=>{
-      e.stopPropagation();
-      if(!state.chatSettings && state.currentChatId){
-        await loadChatSettings(state.currentChatId);
-      }
-      if(!state.chatSettings){
-        state.chatSettings = { mode:state.defaultMode||'direct', systemPrompt:'', enabledTools:[], redactionEnabled:false, redactionPatterns:['email','phone','ssn','credit_card'], workers:[] };
-      }
-      state.showSettings=!state.showSettings; state.showProfile=false; render();
-    }},'\\u2699');
-    settingsAnchor.appendChild(settingsBtn);
-    if(state.showSettings && state.chatSettings){
-      const dd = renderSettingsDropdown();
-      document.body.appendChild(dd);
-      requestAnimationFrame(()=>{
-        const r = settingsBtn.getBoundingClientRect();
-        dd.style.top = (r.bottom + 8) + 'px';
-        dd.style.right = (window.innerWidth - r.right) + 'px';
-      });
-    }
-    headerRight.appendChild(settingsAnchor);
-  }
+function buildNotifications(){
+  const items = [];
+  const workers = getDelegatedWorkers(state.messages);
+  workers.slice(0,3).forEach(w=>items.push({title:'Approval or review from '+w, subtitle:'Delegated work completed in this chat'}));
+  state.chats.slice(0,4).forEach(c=>items.push({title:'Task update: '+(c.title||'New Chat'), subtitle:'Last activity '+new Date(c.updated_at||c.created_at||Date.now()).toLocaleString()}));
+  return items.slice(0,7);
+}
 
-  /* Profile button + dropdown */
-  const profileAnchor = h('div',{className:'dropdown-anchor'});
-  const profileImg = document.createElement('img');
-  profileImg.src = getUserAvatarUrl();
-  profileImg.alt = state.user?.name||'Profile';
-  const profileBtn = h('div',{className:'profile-avatar',title:state.user?.email||'Profile',onClick:(e)=>{
+function renderNotificationsDropdown(){
+  const items = buildNotifications();
+  return h('div',{className:'dropdown profile-dd',onClick:e=>e.stopPropagation()},
+    h('div',{className:'pf-name'},'Notifications'),
+    h('div',{className:'pf-email'},'Approvals and tasks linked to your account'),
+    h('div',{className:'pf-divider'}),
+    h('div',{className:'notif-list'},
+      ...items.map(n=>h('div',{className:'notif-item'},h('div',{className:'nt'},n.title),h('div',{className:'ns'},n.subtitle))),
+      !items.length ? h('div',{className:'notif-item'},h('div',{className:'ns'},'No pending approvals right now.')) : null
+    )
+  );
+}
+
+function renderWorkspaceNav(){
+  const nav = h('aside',{className:'workspace-nav'},
+    h('div',{className:'brand'},uiIcon('✦'),h('span',{className:'word'},'geneWeave')),
+    h('div',{className:'workspace-menu'},
+      h('button',{className:state.view==='chat'?'active':'',onClick:()=>{state.view='chat';render();}},uiIcon('⌂'),h('span',null,'Home')),
+      h('button',{className:state.view==='admin'?'active':'',onClick:()=>{state.view='admin';loadAdmin();}},uiIcon('⚙'),h('span',null,'Admin')),
+      h('button',{className:state.view==='dashboard'?'active':'',onClick:()=>{state.view='dashboard';loadDashboard();}},uiIcon('▦'),h('span',null,'Dashboard')),
+      h('a',{href:'https://github.com/gibyvarghese/weaveintel',target:'_blank',rel:'noopener'},uiIcon('ⓘ'),h('span',null,'Help & Information'))
+    ),
+    h('div',{className:'workspace-spacer'}),
+    h('div',{className:'workspace-menu'},
+      h('button',{onClick:()=>doLogout()},uiIcon('⎋'),h('span',null,'Log Out'))
+    )
+  );
+  return nav;
+}
+
+function renderWorkspaceTopCard(){
+  const userImg = document.createElement('img');
+  userImg.src = getUserAvatarUrl();
+  userImg.alt = state.user?.name||'User';
+
+  const notifAnchor = h('div',{className:'dropdown-anchor'});
+  const notifBtn = h('button',{className:'icon-circle',title:'Notifications',onClick:(e)=>{
     e.stopPropagation();
-    state.showProfile=!state.showProfile; state.showSettings=false; render();
-  }},profileImg);
-  profileAnchor.appendChild(profileBtn);
-  if(state.showProfile){
-    const dd = renderProfileDropdown();
+    state.showNotifications = !state.showNotifications;
+    render();
+  }},'\\u{1F514}');
+  if(buildNotifications().length) notifBtn.appendChild(h('span',{className:'notif-dot'}));
+  notifAnchor.appendChild(notifBtn);
+  if(state.showNotifications){
+    const dd = renderNotificationsDropdown();
     document.body.appendChild(dd);
     requestAnimationFrame(()=>{
-      const r = profileBtn.getBoundingClientRect();
+      const r = notifBtn.getBoundingClientRect();
       dd.style.top = (r.bottom + 8) + 'px';
       dd.style.right = (window.innerWidth - r.right) + 'px';
     });
   }
-  headerRight.appendChild(profileAnchor);
 
-  return h('div',{className:'chat-header'},headerLeft,headerRight);
+  const searchWrap = h('div',{className:'semantic-search'});
+  const input = h('input',{type:'text',placeholder:'Search chats semantically (intent, topic, context)...',value:state.chatSearchQuery||'',onInput:function(){
+    state.chatSearchQuery = this.value;
+    if(state._chatSearchTimer) clearTimeout(state._chatSearchTimer);
+    state._chatSearchTimer = setTimeout(()=>runSemanticChatSearch(this.value),240);
+  }});
+  searchWrap.appendChild(input);
+  if(state.chatSearchLoading || state.chatSearchResults.length){
+    const rows = state.chatSearchLoading
+      ? [h('div',{className:'search-item'},h('div',{className:'sub'},'Searching chats semantically...'))]
+      : state.chatSearchResults.map(r=>h('div',{className:'search-item',onClick:()=>{state.chatSearchQuery='';state.chatSearchResults=[];selectChat(r.id);}},h('div',{className:'ttl'},r.title),h('div',{className:'sub'},new Date(r.updated_at||Date.now()).toLocaleString())));
+    searchWrap.appendChild(h('div',{className:'search-dd'},...rows));
+  }
+
+  return h('div',{className:'workspace-top-card'},
+    h('div',{className:'user-chip'},
+      userImg,
+      h('div',null,
+        h('div',{className:'name'},state.user?.name||'User'),
+        h('div',{className:'role'},getUserRoleLabel())
+      )
+    ),
+    h('div',{className:'today-badge'},uiIcon('◷'),' ',getTodayLabel()),
+    searchWrap,
+    h('div',{className:'top-actions'},
+      h('button',{className:'nav-btn',onClick:createChat},'+ New Chat'),
+      notifAnchor
+    )
+  );
+}
+
+function renderRightRail(){
+  const focus = getCalendarFocusDate();
+  const year = focus.getFullYear();
+  const month = focus.getMonth();
+  const selectedYMD = toYMD(focus);
+  const counts = {};
+  state.chats.forEach(c=>{
+    const d = new Date(c.updated_at||c.created_at||Date.now());
+    if(d.getFullYear()===year && d.getMonth()===month){
+      const k = d.getDate();
+      counts[k] = (counts[k]||0)+1;
+    }
+  });
+  const focusDays = [];
+  for(let i=-1;i<=3;i++){
+    const d = new Date(year, month, focus.getDate()+i);
+    focusDays.push(d);
+  }
+
+  const monthFirst = new Date(year, month, 1);
+  const monthLast = new Date(year, month+1, 0);
+  const monthCells = [];
+  for(let i=0;i<monthFirst.getDay();i++) monthCells.push(h('div',{className:'md empty'},''));
+  for(let day=1;day<=monthLast.getDate();day++){
+    const d = new Date(year, month, day);
+    const dYMD = toYMD(d);
+    monthCells.push(h('div',{
+      className:'md'+(counts[day]?' has':'')+(dYMD===selectedYMD?' active':''),
+      onClick:()=>{ setCalendarFocusDate(d); render(); }
+    },String(day)));
+  }
+
+  const actions = state.chats.slice(0,8).map(c=>h('div',{
+    className:'action-item selectable'+(state.currentChatId===c.id?' active':''),
+    onClick:()=>{
+      if(state.currentChatId!==c.id) selectChat(c.id);
+    }
+  },
+    h('div',{className:'at'},c.title||'New Chat'),
+    h('div',{className:'as'},'Updated '+new Date(c.updated_at||c.created_at||Date.now()).toLocaleString())
+  ));
+
+  const meetingsBody = [
+    h('div',{className:'meet-card peach'},
+      h('div',{className:'meet-title'},'Agent Review and Approval'),
+      h('div',{className:'meet-time'},focus.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'2-digit'})+' • 08:00 - 08:45 (UTC)'),
+      h('div',{className:'meet-row'},
+        h('div',{className:'mini-avatars'},
+          ...getDelegatedWorkers(state.messages).slice(0,3).map(w=>{const img=document.createElement('img');img.src=getAgentAvatarUrl(w);img.alt=w;img.title=w;return img;}),
+          getDelegatedWorkers(state.messages).length>3 ? h('span',{className:'mini-more'},'+'+(getDelegatedWorkers(state.messages).length-3)) : null
+        ),
+        h('span',{className:'tag'},'APPROVAL')
+      )
+    ),
+    h('div',{className:'meet-card blue'},
+      h('div',{className:'meet-title'},'Chat Follow-up Actions'),
+      h('div',{className:'meet-time'},focus.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'2-digit'})+' • 09:00 - 09:45 (UTC)'),
+      h('div',{className:'meet-row'},
+        h('div',{className:'mini-avatars'},
+          ...state.chats.slice(0,3).map((c,i)=>{const img=document.createElement('img');img.src=getAgentAvatarUrl((c.title||'chat')+i);img.alt='chat';return img;})
+        ),
+        h('span',{className:'tag'},'TASK')
+      )
+    )
+  ];
+
+  const eventsBody = state.chats.slice(0,2).map(c=>h('div',{className:'meet-card blue'},
+    h('div',{className:'meet-title'},c.title||'Chat Event'),
+    h('div',{className:'meet-time'},new Date(c.updated_at||c.created_at||Date.now()).toLocaleDateString()+' • Model activity')
+  ));
+
+  const holidayBody = [
+    h('div',{className:'meet-card peach'},
+      h('div',{className:'meet-title'},'No scheduled holidays'),
+      h('div',{className:'meet-time'},'Use this tab for OOO and downtime events')
+    )
+  ];
+
+  const tabContent = state.calendarTab==='events' ? eventsBody : state.calendarTab==='holiday' ? holidayBody : meetingsBody;
+
+  return h('aside',{className:'right-rail'},
+    h('div',{className:'side-card schedule-card'},
+      h('div',{className:'schedule-head'},
+        h('div',{className:'ttl'},uiIcon('◷'),' Schedule'),
+        h('div',{className:'month-nav'},
+          h('button',{className:'icon-btn-sm',title:'Previous month',onClick:()=>shiftCalendarMonth(-1)},'\u2039'),
+          h('div',{className:'month-pill'},focus.toLocaleDateString(undefined,{month:'short', year:'numeric'})),
+          h('button',{className:'icon-btn-sm',title:'Next month',onClick:()=>shiftCalendarMonth(1)},'\u203A')
+        ),
+        h('button',{className:'see-all',title:'Toggle full month',onClick:()=>{state.calendarShowAll=!state.calendarShowAll;render();}},
+          uiIcon('▤'),
+          h('span',null,state.calendarShowAll?'Hide':'See All')
+        )
+      ),
+      !state.calendarShowAll ? h('div',{className:'day-strip'},
+        ...focusDays.map((d)=>h('div',{className:'day-chip'+(toYMD(d)===selectedYMD?' active':''),title:(counts[d.getDate()]||0)+' actions',onClick:()=>{setCalendarFocusDate(d);render();}},
+          h('div',{className:'dw'},d.toLocaleDateString(undefined,{weekday:'short'})),
+          h('div',{className:'dn'},String(d.getDate()).padStart(2,'0'))
+        ))
+      ) : h('div',{className:'month-grid'},
+        ...['S','M','T','W','T','F','S'].map(x=>h('div',{className:'mh'},x)),
+        ...monthCells
+      ),
+      h('div',{className:'schedule-search'},
+        h('div',{className:'search-row'},'\u{1F50D}',' Search... ',h('span',{style:'margin-left:auto'},'\u2630'))
+      ),
+      h('div',{className:'schedule-tabs'},
+        h('div',{className:'schedule-tab'+(state.calendarTab==='meetings'?' active':''),onClick:()=>{state.calendarTab='meetings';render();}},'Meetings'),
+        h('div',{className:'schedule-tab'+(state.calendarTab==='events'?' active':''),onClick:()=>{state.calendarTab='events';render();}},'Events'),
+        h('div',{className:'schedule-tab'+(state.calendarTab==='holiday'?' active':''),onClick:()=>{state.calendarTab='holiday';render();}},'Holiday')
+      ),
+      h('div',{className:'schedule-meetings'},...tabContent)
+    ),
+    h('div',{className:'side-card actions-card'},
+      h('h3',null,'My Actions'),
+      h('div',{className:'action-list'},...actions, !actions.length ? h('div',{className:'action-item'},h('div',{className:'as'},'No actions yet')):null)
+    )
+  );
+}
+
+function renderHomeWorkspace(){
+  const workers = getDelegatedWorkers(state.messages);
+  const leadImg = document.createElement('img');
+  leadImg.src = getAgentAvatarUrl('geneweave-supervisor');
+  leadImg.alt = 'Lead agent';
+
+  const settingsAnchor = h('div',{className:'dropdown-anchor'});
+  const settingsBtn = h('button',{className:'hdr-icon-btn'+(state.showSettings?' active':''),title:'AI Settings',onClick:async(e)=>{
+    e.stopPropagation();
+    if(!state.chatSettings && state.currentChatId) await loadChatSettings(state.currentChatId);
+    if(!state.chatSettings) state.chatSettings = { mode:state.defaultMode||'direct', systemPrompt:'', enabledTools:[], redactionEnabled:false, redactionPatterns:['email','phone','ssn','credit_card'], workers:[] };
+    state.showSettings=!state.showSettings;
+    render();
+  }},'\\u2699');
+  settingsAnchor.appendChild(settingsBtn);
+  if(state.showSettings && state.chatSettings){
+    const dd = renderSettingsDropdown();
+    document.body.appendChild(dd);
+    requestAnimationFrame(()=>{
+      const r = settingsBtn.getBoundingClientRect();
+      dd.style.top = (r.bottom + 8) + 'px';
+      dd.style.right = (window.innerWidth - r.right) + 'px';
+    });
+  }
+
+  const modelSel = h('select',{className:'model-sel',onChange:function(){state.selectedModel=this.value;}});
+  state.models.forEach(m=>{
+    const val=m.provider+':'+m.id;
+    const opt=h('option',{value:val},m.provider+'/'+m.id);
+    if(val===state.selectedModel) opt.selected=true;
+    modelSel.appendChild(opt);
+  });
+
+  const center = h('section',{className:'center-card'},
+    h('div',{className:'center-card-hdr'},
+      h('div',{className:'agent-strip'},
+        h('div',{className:'lead'},leadImg,h('span',null,'geneWeave Agent')),
+        h('div',{className:'worker-avatars'},...workers.slice(0,6).map(w=>{const img=document.createElement('img');img.src=getAgentAvatarUrl(w);img.alt=w;img.title=w;return img;}))
+      ),
+      h('div',{style:'display:flex;align-items:center;gap:8px'},
+        h('div',{className:'title'},(state.chats.find(c=>c.id===state.currentChatId)?.title)||'Conversation'),
+        modelSel,
+        settingsAnchor
+      )
+    ),
+    renderChatView()
+  );
+
+  return h('div',{className:'workspace-home'},
+    renderWorkspaceTopCard(),
+    h('div',{className:'workspace-body'},center,renderRightRail())
+  );
 }
 
 function renderApp(){
   const wrap = h('div',{className:'app'});
+  wrap.appendChild(renderWorkspaceNav());
 
-  /* Sidebar (chat view only) */
-  if(state.view==='chat'){
-    const sidebar = h('div',{className:'sidebar'},
-      h('div',{className:'sidebar-hdr'},
-        h('h2',null,Object.assign(document.createElement('span'),{innerHTML:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8A8A8A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:4px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/></svg>'}),' ',h('span',null,'gene'),'Weave'),
-        h('button',{className:'new-chat-btn',onClick:createChat},'+ New')
-      ),
-      h('div',{className:'chat-list'},
-        ...state.chats.map(c=>
-          h('div',{className:'chat-item'+(state.currentChatId===c.id?' active':''),onClick:()=>selectChat(c.id)},
-            h('span',null,c.title||'New Chat'),
-            h('span',{className:'del',onClick:e=>{e.stopPropagation();deleteChat(c.id);}},'\\u00D7')
-          )
-        )
-      )
-    );
-    wrap.appendChild(sidebar);
-  }
-
-  /* Main */
   const main = h('div',{className:'main'});
-  main.appendChild(renderTopBar());
-  if(state.view==='dashboard'){
-    main.appendChild(renderDashboard());
-  } else if(state.view==='admin'){
-    main.appendChild(renderAdmin());
-  } else {
-    main.appendChild(renderChatView());
-  }
+  if(state.view==='dashboard') main.appendChild(renderDashboard());
+  else if(state.view==='admin') main.appendChild(renderAdmin());
+  else main.appendChild(renderHomeWorkspace());
   wrap.appendChild(main);
   return wrap;
 }
@@ -1059,10 +1515,15 @@ function renderApp(){
 
 async function loadAdmin(){
   try{
+    function adminPath(p){
+      var path = String(p||'').replace(/^\\/+/, '');
+      if(path.startsWith('api/')) path = path.slice(4);
+      return '/'+path;
+    }
     var keys = Object.keys(ADMIN_SCHEMA);
     var promises = keys.map(function(k){
       var s = ADMIN_SCHEMA[k];
-      return api.get('/'+s.apiPath).then(function(r){return r.json();}).catch(function(){var d={};d[s.listKey]=[];return d;});
+      return api.get(adminPath(s.apiPath)).then(function(r){return r.json();}).catch(function(){var d={};d[s.listKey]=[];return d;});
     });
     var results = await Promise.all(promises);
     var data = {};
@@ -1101,6 +1562,11 @@ async function syncPricing(){
 async function adminSave(tab){
   var schema = ADMIN_SCHEMA[tab];
   if(!schema) return;
+  function adminPath(p){
+    var path = String(p||'').replace(/^\\/+/, '');
+    if(path.startsWith('api/')) path = path.slice(4);
+    return '/'+path;
+  }
   var f = state.adminForm;
   var isEdit = !!state.adminEditing;
   var payload = {};
@@ -1117,7 +1583,8 @@ async function adminSave(tab){
     payload[fd.key] = val;
   });
   try{
-    var resp = isEdit ? await api.put('/'+schema.apiPath+'/'+state.adminEditing,payload) : await api.post('/'+schema.apiPath,payload);
+    var base = adminPath(schema.apiPath);
+    var resp = isEdit ? await api.put(base+'/'+state.adminEditing,payload) : await api.post(base,payload);
     if(resp && resp.ok){
       state.adminEditing=null; state.adminForm={};
       await loadAdmin();
@@ -1132,8 +1599,13 @@ async function adminDelete(tab,id){
   if(!confirm('Delete this item?')) return;
   var schema = ADMIN_SCHEMA[tab];
   if(!schema) return;
+  function adminPath(p){
+    var path = String(p||'').replace(/^\\/+/, '');
+    if(path.startsWith('api/')) path = path.slice(4);
+    return '/'+path;
+  }
   try{
-    await api.del('/'+schema.apiPath+'/'+id);
+    await api.del(adminPath(schema.apiPath)+'/'+id);
     await loadAdmin();
   }catch(e){ alert('Delete failed: '+e.message); }
 }
@@ -1801,7 +2273,9 @@ function renderDashboard(){
 
 /* ── Init: check if already authenticated ──── */
 document.addEventListener('click',()=>{
-  if(state.showSettings||state.showProfile){state.showSettings=false;state.showProfile=false;render();}
+  if(state.showSettings||state.showProfile||state.showNotifications){
+    state.showSettings=false;state.showProfile=false;state.showNotifications=false;render();
+  }
 });
 (async()=>{
   const r = await api.get('/auth/me');
