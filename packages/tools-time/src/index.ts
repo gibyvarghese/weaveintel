@@ -246,6 +246,41 @@ export function createTimeTools(options: TimeToolOptions = {}): Tool[] {
     }),
 
     weaveTool({
+      name: 'datetime_add',
+      description: 'Calculate a future or past date by adding/subtracting days, weeks, months, or years from now. Use positive numbers to go forward in time, negative to go backward. Returns the resulting date in the chosen format.',
+      parameters: {
+        type: 'object',
+        properties: {
+          days: { type: 'number', description: 'Number of days to add (negative to subtract)' },
+          weeks: { type: 'number', description: 'Number of weeks to add (negative to subtract)' },
+          months: { type: 'number', description: 'Number of months to add (negative to subtract)' },
+          years: { type: 'number', description: 'Number of years to add (negative to subtract)' },
+          format: { type: 'string', description: 'iso|human|date|weekday — output format (default: date)' },
+          timezone: { type: 'string', description: 'IANA timezone override' },
+          locale: { type: 'string', description: 'Locale (default en-US)' },
+        },
+      },
+      execute: async (args: { days?: number; weeks?: number; months?: number; years?: number; format?: 'iso' | 'human' | 'date' | 'weekday'; timezone?: string; locale?: string }) => {
+        const tz = resolveTimezone(args.timezone, options.defaultTimezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'));
+        const loc = args.locale ?? locale;
+        const result = new Date();
+        // Apply years and months first (relative to month boundaries), then days/weeks
+        if (args.years) result.setFullYear(result.getFullYear() + args.years);
+        if (args.months) result.setMonth(result.getMonth() + args.months);
+        const totalDays = (args.days ?? 0) + (args.weeks ?? 0) * 7;
+        if (totalDays) result.setDate(result.getDate() + totalDays);
+        const fmt = args.format ?? 'date';
+        switch (fmt) {
+          case 'iso': return result.toISOString();
+          case 'human': return result.toLocaleString(loc, { timeZone: tz });
+          case 'weekday': return result.toLocaleDateString(loc, { timeZone: tz, weekday: 'long' });
+          default: return result.toLocaleDateString(loc, { timeZone: tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+        }
+      },
+      tags: ['utility', 'datetime', 'arithmetic'],
+    }),
+
+    weaveTool({
       name: 'timer_start',
       description: 'Start a timer, optionally with duration in milliseconds.',
       parameters: {

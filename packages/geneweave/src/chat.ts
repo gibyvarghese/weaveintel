@@ -462,9 +462,17 @@ export class ChatEngine {
     const policyChecks = steps ? await this.evaluateTaskPolicies(steps) : undefined;
 
     // Post-execution guardrails (must run before eval so the decision feeds into the eval score)
+    const SUPERVISOR_INTERNAL_TOOLS = new Set(['think', 'plan', 'synthesize', 'reflect', 'log']);
     const toolEvidence = steps
-      ?.filter(s => (s.type === 'tool_call' && s.toolCall?.result) || (s.type === 'delegation' && s.delegation?.result))
-      .map(s => s.toolCall?.result ?? s.delegation?.result ?? '')
+      ?.filter(s => {
+        if (s.type !== 'tool_call' && s.type !== 'delegation') return false;
+        const result = (s.toolCall?.result ?? s.delegation?.result ?? '') as string;
+        if (!result || result === '(Worker returned no output)') return false;
+        if (/^\[(PLANNING|REASONING|SYNTHESIS|REFLECTION)\]/.test(result)) return false;
+        if (s.type === 'tool_call' && SUPERVISOR_INTERNAL_TOOLS.has(s.toolCall?.name ?? '')) return false;
+        return true;
+      })
+      .map(s => (s.toolCall?.result ?? s.delegation?.result ?? '') as string)
       .join(' ') || undefined;
     const postGuardrail = await this.evaluateGuardrails(chatId, null, assistantContent, 'post-execution', {
       userInput: processedContent,
@@ -692,9 +700,17 @@ export class ChatEngine {
     }
 
     // Post-execution guardrails (must run before eval so the decision feeds into the eval score)
+    const STREAM_SUPERVISOR_INTERNAL_TOOLS = new Set(['think', 'plan', 'synthesize', 'reflect', 'log']);
     const streamToolEvidence = steps
-      ?.filter(s => (s.type === 'tool_call' && s.toolCall?.result) || (s.type === 'delegation' && s.delegation?.result))
-      .map(s => s.toolCall?.result ?? s.delegation?.result ?? '')
+      ?.filter(s => {
+        if (s.type !== 'tool_call' && s.type !== 'delegation') return false;
+        const result = (s.toolCall?.result ?? s.delegation?.result ?? '') as string;
+        if (!result || result === '(Worker returned no output)') return false;
+        if (/^\[(PLANNING|REASONING|SYNTHESIS|REFLECTION)\]/.test(result)) return false;
+        if (s.type === 'tool_call' && STREAM_SUPERVISOR_INTERNAL_TOOLS.has(s.toolCall?.name ?? '')) return false;
+        return true;
+      })
+      .map(s => (s.toolCall?.result ?? s.delegation?.result ?? '') as string)
       .join(' ') || undefined;
     const postGuardrail = await this.evaluateGuardrails(chatId, null, fullText, 'post-execution', {
       userInput: processedContent,
@@ -1496,7 +1512,7 @@ function defaultWorkers(
   const writerTools = ['text_analysis', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
   
   // Analyst should have temporal tools AND timer management for handling time-based tasks
-  const analystTools = ['calculator', 'json_format', 'text_analysis', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
+  const analystTools = ['calculator', 'json_format', 'text_analysis', 'datetime', 'datetime_add', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
 
   return [
     {
