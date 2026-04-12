@@ -1665,12 +1665,23 @@ export class ChatEngine {
       const entityPromise = identityQuery
         ? this.db.listEntities(userId).then((rows) => rows.slice(0, 10))
         : this.db.searchEntities(userId, query);
-      const [semanticMatches, entityMatches] = await Promise.all([
+      const [semanticMatches, entityMatches, recentSemantic] = await Promise.all([
         this.db.searchSemanticMemory({ userId, query, limit: 5 }),
         entityPromise,
+        identityQuery ? this.db.listSemanticMemory(userId, 12) : Promise.resolve([]),
       ]);
-      if (semanticMatches.length === 0 && entityMatches.length === 0) return null;
+
+      const semanticForContext = semanticMatches.length > 0
+        ? semanticMatches
+        : (identityQuery
+          ? recentSemantic.filter((m) => m.memory_type === 'user_fact' || m.source === 'user').slice(0, 5)
+          : []);
+
+      if (semanticForContext.length === 0 && entityMatches.length === 0) return null;
       const parts: string[] = ['[Long-term memory from past conversations]'];
+      if (identityQuery) {
+        parts.push('Identity recall request detected. Use these memories to identify the user when possible.');
+      }
       if (entityMatches.length > 0) {
         parts.push('Known facts about this user:');
         for (const e of entityMatches) {
@@ -1682,9 +1693,9 @@ export class ChatEngine {
           parts.push(`  • ${e.entity_type} "${e.entity_name}"${factsStr ? ' — ' + factsStr : ''}`);
         }
       }
-      if (semanticMatches.length > 0) {
+      if (semanticForContext.length > 0) {
         parts.push('Relevant memories:');
-        for (const m of semanticMatches) {
+        for (const m of semanticForContext) {
           const label = m.source === 'user' ? 'User stated' : 'Previously discussed';
           parts.push(`  • [${label}] ${m.content.slice(0, 200)}`);
         }
