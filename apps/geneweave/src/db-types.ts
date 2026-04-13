@@ -363,9 +363,14 @@ export interface SocialAccountRow {
   id: string;
   name: string;
   description: string | null;
-  platform: string;               // slack, discord, github
+  platform: string;               // facebook, instagram, slack, discord
   api_key: string | null;
   api_secret: string | null;
+  access_token: string | null;
+  refresh_token: string | null;
+  token_expires_at: string | null;
+  oauth_state: string | null;
+  status: string;                 // disconnected, connected, error
   base_url: string | null;
   options: string | null;         // JSON object
   enabled: number;
@@ -377,10 +382,15 @@ export interface EnterpriseConnectorRow {
   id: string;
   name: string;
   description: string | null;
-  connector_type: string;         // jira, confluence, salesforce, notion
+  connector_type: string;         // jira, servicenow, canva, confluence, salesforce
   base_url: string | null;
   auth_type: string | null;       // bearer, oauth2, api_key, basic, service_account
   auth_config: string | null;     // JSON object
+  access_token: string | null;
+  refresh_token: string | null;
+  token_expires_at: string | null;
+  oauth_state: string | null;
+  status: string;                 // disconnected, connected, error
   options: string | null;         // JSON object
   enabled: number;
   created_at: string;

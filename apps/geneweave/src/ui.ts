@@ -523,7 +523,7 @@ function openInWord(htmlContent, plainText){
 let state = {
   user:null, csrfToken:null,
   chats:[], currentChatId:null, messages:[],
-  view:'chat', // 'chat' | 'dashboard' | 'admin'
+  view:'chat', // 'chat' | 'dashboard' | 'admin' | 'connectors'
   streaming:false, models:[], selectedModel:'',
   dashboard:null, authMode:'login', authError:'',
   // New: settings, tools, traces
@@ -545,7 +545,10 @@ let state = {
   adminData:{},
   adminEditing:null, adminForm:{},
   // About state
-  _aboutInfo:null, _upgradeStatus:null, _upgradeMsg:null
+  _aboutInfo:null, _upgradeStatus:null, _upgradeMsg:null,
+  // Connectors state
+  connectors:{ enterprise:[], social:[] },
+  connectorsLoading:false,
 };
 
 /* ── Avatar helpers ─────────────────────────── */
@@ -1260,6 +1263,7 @@ function renderWorkspaceNav(){
     h('div',{className:'brand'},uiIcon('✦'),h('span',{className:'word'},'geneWeave')),
     h('div',{className:'workspace-menu'},
       h('button',{className:state.view==='chat'?'active':'',onClick:()=>{state.view='chat';render();}},uiIcon('⌂'),h('span',null,'Home')),
+      h('button',{className:state.view==='connectors'?'active':'',onClick:()=>{state.view='connectors';loadConnectors();}},uiIcon('⚡'),h('span',null,'Connectors')),
       h('button',{className:state.view==='admin'?'active':'',onClick:()=>{state.view='admin';loadAdmin();}},uiIcon('⚙'),h('span',null,'Admin')),
       h('button',{className:state.view==='dashboard'?'active':'',onClick:()=>{state.view='dashboard';loadDashboard();}},uiIcon('▦'),h('span',null,'Dashboard')),
       h('a',{href:'https://github.com/gibyvarghese/weaveintel',target:'_blank',rel:'noopener'},uiIcon('ⓘ'),h('span',null,'Help & Information'))
@@ -1507,6 +1511,7 @@ function renderApp(){
   const main = h('div',{className:'main'});
   if(state.view==='dashboard') main.appendChild(renderDashboard());
   else if(state.view==='admin') main.appendChild(renderAdmin());
+  else if(state.view==='connectors') main.appendChild(renderConnectors());
   else main.appendChild(renderHomeWorkspace());
   wrap.appendChild(main);
   return wrap;
@@ -1862,6 +1867,206 @@ function renderAboutPanel(){
   ));
 
   return wrap;
+}
+
+/* ── Connectors ─────────────────────────────── */
+
+const CONNECTOR_DEFS = [
+  { id:'jira',        label:'Jira',        category:'enterprise', icon:'🔧', desc:'Project tracking & issue management', color:'#0052CC', authMethod:'oauth' },
+  { id:'servicenow',  label:'ServiceNow',  category:'enterprise', icon:'🏢', desc:'IT service management & workflows', color:'#62D84E', authMethod:'oauth', needsDomain:true },
+  { id:'facebook',    label:'Facebook',    category:'social',     icon:'📘', desc:'Pages, posts & audience engagement', color:'#1877F2', authMethod:'oauth' },
+  { id:'instagram',   label:'Instagram',   category:'social',     icon:'📷', desc:'Business content & media publishing', color:'#E4405F', authMethod:'oauth' },
+  { id:'canva',       label:'Canva',       category:'enterprise', icon:'🎨', desc:'Design assets & creative workflows', color:'#00C4CC', authMethod:'oauth' },
+];
+
+async function loadConnectors(){
+  state.view='connectors';
+  state.connectorsLoading=true;
+  render();
+  try{
+    var r = await api.get('/api/connectors');
+    var data = await r.json();
+    state.connectors = { enterprise: data.enterprise||[], social: data.social||[] };
+  }catch(e){
+    state.connectors = { enterprise:[], social:[] };
+  }
+  state.connectorsLoading=false;
+  render();
+}
+
+function getConnectorStatus(def){
+  var list = def.category==='social' ? state.connectors.social : state.connectors.enterprise;
+  var key = def.category==='social' ? 'platform' : 'connector_type';
+  return list.find(function(c){ return c[key]===def.id; });
+}
+
+function connectorOAuthConnect(def){
+  var existing = getConnectorStatus(def);
+  var connectorId = existing ? existing.id : null;
+
+  // If no record exists yet, create one first
+  if(!connectorId){
+    var table = def.category==='social' ? 'social-accounts' : 'enterprise-connectors';
+    var body = def.category==='social'
+      ? { name:def.label, platform:def.id, description:def.desc }
+      : { name:def.label, connector_type:def.id, description:def.desc, auth_type:'oauth2' };
+    api.post('/api/admin/'+table, body).then(function(r){ return r.json(); }).then(function(data){
+      var item = data['social-account'] || data['enterprise-connector'];
+      if(item) connectorId = item.id;
+      startOAuthFlow(def, connectorId);
+    }).catch(function(){ alert('Failed to create connector record'); });
+  } else {
+    startOAuthFlow(def, connectorId);
+  }
+}
+
+function startOAuthFlow(def, connectorId){
+  var qs = 'connector_id=' + encodeURIComponent(connectorId||'');
+  api.get('/api/connectors/'+def.id+'/authorize?'+qs).then(function(r){ return r.json(); }).then(function(data){
+    if(!data.url){ alert('Could not get authorization URL'); return; }
+    var popup = window.open(data.url, 'oauth-'+def.id, 'width=600,height=700,scrollbars=yes');
+    // Listen for postMessage from the popup callback page
+    function onMsg(e){
+      if(e.data && (e.data.type==='oauth-success' || e.data.type==='oauth-error')){
+        window.removeEventListener('message', onMsg);
+        if(e.data.type==='oauth-success'){
+          loadConnectors();
+        } else {
+          alert('OAuth error: '+(e.data.error||'Unknown error'));
+          loadConnectors();
+        }
+      }
+    }
+    window.addEventListener('message', onMsg);
+  }).catch(function(err){
+    alert('Failed to start OAuth: '+err.message);
+  });
+}
+
+function connectorDisconnect(def){
+  var existing = getConnectorStatus(def);
+  if(!existing) return;
+  var table = def.category==='social' ? 'social' : 'enterprise';
+  api.post('/api/connectors/'+existing.id+'/disconnect', { table:table }).then(function(){
+    loadConnectors();
+  }).catch(function(err){
+    alert('Failed to disconnect: '+err.message);
+  });
+}
+
+function connectorTest(def){
+  var existing = getConnectorStatus(def);
+  if(!existing) return;
+  var table = def.category==='social' ? 'social' : 'enterprise';
+  api.post('/api/connectors/'+existing.id+'/test', { table:table }).then(function(r){ return r.json(); }).then(function(data){
+    if(data.ok) alert('\\u2705 '+data.message);
+    else alert('\\u274C '+data.message);
+  }).catch(function(err){
+    alert('Test failed: '+err.message);
+  });
+}
+
+function renderConnectorCard(def){
+  var existing = getConnectorStatus(def);
+  var connected = existing && existing.status==='connected';
+  var statusText = connected ? 'Connected' : 'Not connected';
+  var statusColor = connected ? '#16A34A' : '#94A3B8';
+  var statusDot = connected ? '#16A34A' : '#CBD5E1';
+
+  var card = h('div',{style:'background:var(--bg2);border:1px solid '+(connected?'#BBF7D0':'#E5E7EB')+';border-radius:12px;padding:20px;display:flex;flex-direction:column;gap:12px;transition:all 0.2s;position:relative'});
+
+  /* Status indicator */
+  card.appendChild(h('div',{style:'position:absolute;top:12px;right:12px;display:flex;align-items:center;gap:6px'},
+    h('span',{style:'width:8px;height:8px;border-radius:50%;background:'+statusDot+';display:inline-block'}),
+    h('span',{style:'font-size:11px;color:'+statusColor+';font-weight:500'},statusText)
+  ));
+
+  /* Icon and name */
+  card.appendChild(h('div',{style:'display:flex;align-items:center;gap:12px'},
+    h('div',{style:'width:44px;height:44px;border-radius:10px;background:'+def.color+'18;display:flex;align-items:center;justify-content:center;font-size:22px'},def.icon),
+    h('div',null,
+      h('div',{style:'font-weight:700;font-size:15px;color:var(--fg)'},def.label),
+      h('div',{style:'font-size:12px;color:var(--fg3);margin-top:2px'},def.desc)
+    )
+  ));
+
+  /* Token info if connected */
+  if(connected && existing.token_expires_at){
+    var expires = new Date(existing.token_expires_at);
+    var now = new Date();
+    var expiresIn = Math.round((expires - now) / 60000);
+    var expiryText = expiresIn > 0 ? 'Token expires in '+expiresIn+' min' : 'Token expired';
+    var expiryColor = expiresIn > 60 ? '#64748B' : expiresIn > 0 ? '#D97706' : '#DC2626';
+    card.appendChild(h('div',{style:'font-size:11px;color:'+expiryColor+';padding:4px 8px;background:var(--bg3);border-radius:6px;width:fit-content'},expiryText));
+  }
+
+  /* Actions */
+  var actions = h('div',{style:'display:flex;gap:8px;margin-top:auto;padding-top:4px'});
+  if(connected){
+    actions.appendChild(h('button',{className:'nav-btn',style:'font-size:12px;flex:1',onClick:function(){ connectorTest(def); }},'\\u{1F50D} Test'));
+    actions.appendChild(h('button',{className:'nav-btn',style:'font-size:12px;color:#DC2626;flex:1',onClick:function(){ connectorDisconnect(def); }},'\\u26D4 Disconnect'));
+  } else {
+    actions.appendChild(h('button',{className:'nav-btn active',style:'font-size:12px;flex:1;background:'+def.color+';border-color:'+def.color,onClick:function(){ connectorOAuthConnect(def); }},'\\u{1F517} Connect'));
+  }
+  card.appendChild(actions);
+
+  return card;
+}
+
+function renderConnectors(){
+  var view = h('div',{style:'display:flex;flex-direction:column;flex:1;overflow:hidden'});
+
+  /* Header */
+  var hdr = h('div',{style:'display:flex;justify-content:space-between;align-items:center;padding:16px 24px;border-bottom:1px solid #E5E7EB;background:var(--bg2);flex-shrink:0'});
+  hdr.appendChild(h('div',null,
+    h('h2',{style:'margin:0;font-size:20px;font-weight:700;color:#1E293B'},'\\u26A1 Connectors'),
+    h('p',{style:'margin:4px 0 0;font-size:13px;color:#64748B'},'Connect your external services with OAuth for seamless integration')
+  ));
+  hdr.appendChild(h('button',{className:'nav-btn',style:'font-size:12px',onClick:loadConnectors},'\\uD83D\\uDD04 Refresh'));
+  view.appendChild(hdr);
+
+  /* Content */
+  var content = h('div',{style:'flex:1;overflow-y:auto;padding:24px'});
+
+  if(state.connectorsLoading){
+    content.appendChild(h('div',{style:'text-align:center;padding:48px;color:#64748B'},'Loading connectors…'));
+    view.appendChild(content);
+    return view;
+  }
+
+  /* Enterprise section */
+  var enterpriseDefs = CONNECTOR_DEFS.filter(function(d){ return d.category==='enterprise'; });
+  content.appendChild(h('div',{style:'margin-bottom:24px'},
+    h('h3',{style:'margin:0 0 4px;font-size:14px;font-weight:700;color:#1E293B'},'\\u{1F3E2} Enterprise'),
+    h('p',{style:'margin:0 0 16px;font-size:12px;color:#94A3B8'},'Business tools and service management platforms')
+  ));
+  var grid1 = h('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-bottom:32px'});
+  enterpriseDefs.forEach(function(d){ grid1.appendChild(renderConnectorCard(d)); });
+  content.appendChild(grid1);
+
+  /* Social section */
+  var socialDefs = CONNECTOR_DEFS.filter(function(d){ return d.category==='social'; });
+  content.appendChild(h('div',{style:'margin-bottom:24px'},
+    h('h3',{style:'margin:0 0 4px;font-size:14px;font-weight:700;color:#1E293B'},'\\u{1F4F1} Social Media'),
+    h('p',{style:'margin:0 0 16px;font-size:12px;color:#94A3B8'},'Social platforms for content and audience management')
+  ));
+  var grid2 = h('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-bottom:32px'});
+  socialDefs.forEach(function(d){ grid2.appendChild(renderConnectorCard(d)); });
+  content.appendChild(grid2);
+
+  /* Environment vars info */
+  content.appendChild(h('div',{style:'background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:16px;margin-top:8px'},
+    h('div',{style:'font-weight:600;font-size:13px;color:#92400E;margin-bottom:6px'},'\\u{1F511} OAuth Configuration'),
+    h('div',{style:'font-size:12px;color:#78350F;line-height:1.6'},
+      'Set these environment variables before connecting:',
+      h('div',{style:'margin-top:8px;font-family:monospace;font-size:11px;background:#FEF3C7;padding:8px 12px;border-radius:6px;white-space:pre-wrap'},
+        'JIRA_CLIENT_ID / JIRA_CLIENT_SECRET\\nSERVICENOW_CLIENT_ID / SERVICENOW_CLIENT_SECRET\\nFACEBOOK_CLIENT_ID / FACEBOOK_CLIENT_SECRET\\nINSTAGRAM_CLIENT_ID / INSTAGRAM_CLIENT_SECRET\\nCANVA_CLIENT_ID / CANVA_CLIENT_SECRET'
+      )
+    )
+  ));
+
+  view.appendChild(content);
+  return view;
 }
 
 function renderAdmin(){

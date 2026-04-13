@@ -1026,8 +1026,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createSocialAccount(a: Omit<SocialAccountRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO social_accounts (id, name, description, platform, api_key, api_secret, base_url, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(a.id, a.name, a.description ?? null, a.platform, a.api_key ?? null, a.api_secret ?? null, a.base_url ?? null, a.options ?? null, a.enabled);
+      `INSERT INTO social_accounts (id, name, description, platform, api_key, api_secret, access_token, refresh_token, token_expires_at, oauth_state, status, base_url, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(a.id, a.name, a.description ?? null, a.platform, a.api_key ?? null, a.api_secret ?? null, a.access_token ?? null, a.refresh_token ?? null, a.token_expires_at ?? null, a.oauth_state ?? null, a.status ?? 'disconnected', a.base_url ?? null, a.options ?? null, a.enabled);
   }
 
   async getSocialAccount(id: string): Promise<SocialAccountRow | null> {
@@ -1059,8 +1059,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createEnterpriseConnector(c: Omit<EnterpriseConnectorRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO enterprise_connectors (id, name, description, connector_type, base_url, auth_type, auth_config, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(c.id, c.name, c.description ?? null, c.connector_type, c.base_url ?? null, c.auth_type ?? null, c.auth_config ?? null, c.options ?? null, c.enabled);
+      `INSERT INTO enterprise_connectors (id, name, description, connector_type, base_url, auth_type, auth_config, access_token, refresh_token, token_expires_at, oauth_state, status, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(c.id, c.name, c.description ?? null, c.connector_type, c.base_url ?? null, c.auth_type ?? null, c.auth_config ?? null, c.access_token ?? null, c.refresh_token ?? null, c.token_expires_at ?? null, c.oauth_state ?? null, c.status ?? 'disconnected', c.options ?? null, c.enabled);
   }
 
   async getEnterpriseConnector(id: string): Promise<EnterpriseConnectorRow | null> {
@@ -2374,17 +2374,17 @@ export class SQLiteAdapter implements DatabaseAdapter {
     const socialAccounts: Omit<SocialAccountRow, 'created_at' | 'updated_at'>[] = [
       {
         id: 'sa-slack-default', name: 'Slack Workspace', description: 'Default Slack workspace integration for team messaging',
-        platform: 'slack', api_key: '', api_secret: null, base_url: null,
+        platform: 'slack', api_key: '', api_secret: null, access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected', base_url: null,
         options: JSON.stringify({ default_channel: '#general' }), enabled: 0,
       },
       {
         id: 'sa-discord-default', name: 'Discord Server', description: 'Discord server bot integration',
-        platform: 'discord', api_key: '', api_secret: null, base_url: null,
+        platform: 'discord', api_key: '', api_secret: null, access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected', base_url: null,
         options: JSON.stringify({ guild_id: '' }), enabled: 0,
       },
       {
         id: 'sa-github-default', name: 'GitHub', description: 'GitHub integration for repository and issue management',
-        platform: 'github', api_key: '', api_secret: null, base_url: null,
+        platform: 'github', api_key: '', api_secret: null, access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected', base_url: null,
         options: JSON.stringify({ default_owner: '', default_repo: '' }), enabled: 0,
       },
     ];
@@ -2398,24 +2398,28 @@ export class SQLiteAdapter implements DatabaseAdapter {
         id: 'ec-jira', name: 'Jira', description: 'Atlassian Jira for issue tracking and project management',
         connector_type: 'jira', base_url: '', auth_type: 'basic',
         auth_config: JSON.stringify({ username: '', token: '' }),
+        access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected',
         options: JSON.stringify({ default_project: '' }), enabled: 0,
       },
       {
         id: 'ec-confluence', name: 'Confluence', description: 'Atlassian Confluence for team documentation and knowledge base',
         connector_type: 'confluence', base_url: '', auth_type: 'basic',
         auth_config: JSON.stringify({ username: '', token: '' }),
+        access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected',
         options: JSON.stringify({ default_space: '' }), enabled: 0,
       },
       {
         id: 'ec-salesforce', name: 'Salesforce', description: 'Salesforce CRM integration for customer data and opportunities',
         connector_type: 'salesforce', base_url: '', auth_type: 'oauth2',
         auth_config: JSON.stringify({ client_id: '', client_secret: '', token_url: '' }),
+        access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected',
         options: null, enabled: 0,
       },
       {
         id: 'ec-notion', name: 'Notion', description: 'Notion workspace integration for docs and databases',
         connector_type: 'notion', base_url: null, auth_type: 'bearer',
         auth_config: JSON.stringify({ token: '' }),
+        access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected',
         options: null, enabled: 0,
       },
     ];

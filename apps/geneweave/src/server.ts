@@ -501,7 +501,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   // Admin CRUD for guardrails, routing policies, prompts, tools,
   // workflows, HITL policies, and system settings. Each entity
   // maps to a database table via the DatabaseAdapter.
-  registerAdminRoutes(router, db, json, readBody, providers);
+  registerAdminRoutes(router, db, json, readBody, providers, html);
 
   // ── Health ─────────────────────────────────────────────────
 
