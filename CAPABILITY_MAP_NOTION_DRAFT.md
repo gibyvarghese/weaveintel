@@ -7,6 +7,8 @@ Core strengths:
 - Provider-agnostic model runtime with OpenAI and Anthropic integrations
 - Multi-mode execution: direct inference, tool-calling agents, and supervisor-worker orchestration
 - Built-in tool ecosystem (time, search, utility, memory recall) with policy controls
+- Enterprise tool ecosystem: 335+ MCP tools across Jira, ServiceNow, Canva, Confluence, Salesforce, Notion
+- ServiceNow full API coverage: 283 tools spanning ITSM, CMDB, Service Catalog, Change/Problem/SLA, Security Ops, Analytics, DevOps, NLU, Admin, and ServiceNow Development/Configuration
 - Persistent memory layers (conversation, semantic, entity) with hybrid extraction
 - Governance stack: guardrails, redaction, routing policy, evals, compliance, identity, tenancy
 - Production-grade operations: tracing, metrics/cost tracking, caching, workflows, replay/testing
@@ -31,7 +33,7 @@ Core strengths:
 | @weaveintel/tools-search | Multi-provider web search tool routing |
 | @weaveintel/tools-http | HTTP integration tools |
 | @weaveintel/tools-browser | Browser automation tools |
-| @weaveintel/tools-enterprise | Enterprise integrations |
+| @weaveintel/tools-enterprise | Enterprise integrations — Jira (31 tools), ServiceNow (283 tools), Canva (21 tools), Confluence, Salesforce, Notion |
 | @weaveintel/tools-social | Social platform tools |
 | @weaveintel/mcp-server | MCP server implementation |
 | @weaveintel/mcp-client | MCP client integration |

@@ -93,7 +93,7 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 | [`@weaveintel/tools-search`](packages/tools-search) | Web search tools — DuckDuckGo, Brave, with structured result parsing |
 | [`@weaveintel/tools-browser`](packages/tools-browser) | Browser tools — URL fetching, content extraction, page rendering |
 | [`@weaveintel/tools-http`](packages/tools-http) | HTTP endpoint tools — REST client with auth, rate limiting, schema validation |
-| [`@weaveintel/tools-enterprise`](packages/tools-enterprise) | Enterprise connectors — Jira, Slack, GitHub, database query tools |
+| [`@weaveintel/tools-enterprise`](packages/tools-enterprise) | Enterprise connectors — Jira (31 tools), ServiceNow (283 tools), Canva (21 tools), Confluence, Salesforce, Notion |
 | [`@weaveintel/tools-social`](packages/tools-social) | Social media tools — Twitter/X, LinkedIn, with content formatting |
 | [`@weaveintel/mcp-client`](packages/mcp-client) | MCP protocol client — discover and invoke remote tools, resources, prompts |
 | [`@weaveintel/mcp-server`](packages/mcp-server) | MCP protocol server — expose tools, resources, and prompts |
@@ -662,7 +662,7 @@ weaveintel/
 │   ├── tools-search/       # Web search (DuckDuckGo, Brave)
 │   ├── tools-browser/      # URL fetch & content extraction
 │   ├── tools-http/         # REST client tools
-│   ├── tools-enterprise/   # Jira, Slack, GitHub connectors
+│   ├── tools-enterprise/   # Jira, ServiceNow (283 tools), Canva connectors
 │   ├── tools-social/       # Social media tools
 │   ├── mcp-client/         # MCP protocol client
 │   ├── mcp-server/         # MCP protocol server
