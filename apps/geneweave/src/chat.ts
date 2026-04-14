@@ -47,7 +47,7 @@ import { weaveCacheKeyBuilder } from '@weaveintel/cache';
 import { shouldBypass, resolvePolicy } from '@weaveintel/cache';
 import type { CachePolicy } from '@weaveintel/core';
 import { runHybridMemoryExtraction, type ExtractedEntity, type MemoryExtractionRule } from '@weaveintel/memory';
-import { createEnterpriseTools, createEnterpriseToolGroups, type EnterpriseConnectorConfig, type EnterpriseToolGroup } from '@weaveintel/tools-enterprise';
+import { createEnterpriseTools, createEnterpriseToolGroups, ServiceNowProvider, type EnterpriseConnectorConfig, type EnterpriseToolGroup } from '@weaveintel/tools-enterprise';
 
 const TEMPORAL_TOOL_POLICY = [
   'Temporal Tool Usage Policy:',
@@ -898,11 +898,51 @@ export class ChatEngine {
 
   // ── Enterprise tools loader ─────────────────────────────────
 
+  /**
+   * Auto-refresh OAuth2 token if it expires within 60 seconds.
+   * Mutates the row's access_token in-place and persists to DB.
+   */
+  private async refreshTokenIfNeeded(row: import('./db-types.js').EnterpriseConnectorRow): Promise<void> {
+    if (row.auth_type !== 'oauth2' || !row.refresh_token || !row.token_expires_at) return;
+    const expiresAt = new Date(row.token_expires_at).getTime();
+    const now = Date.now();
+    // Refresh if token expires within 60 seconds
+    if (expiresAt - now > 60_000) return;
+
+    const authConfig = row.auth_config ? (JSON.parse(row.auth_config) as Record<string, string>) : {};
+    const clientId = authConfig['clientId'] ?? authConfig['client_id'];
+    const clientSecret = authConfig['clientSecret'] ?? authConfig['client_secret'];
+    if (!clientId || !clientSecret || !row.base_url) return;
+
+    console.log(`[chat] OAuth token for ${row.connector_type}/${row.name} expires soon — refreshing...`);
+    const provider = new ServiceNowProvider();
+    const result = await provider.refreshOAuthToken(row.base_url, clientId, clientSecret, row.refresh_token);
+    if (!result) {
+      console.error(`[chat] Token refresh failed for connector ${row.id}`);
+      return;
+    }
+
+    const newExpiresAt = new Date(now + result.expiresIn * 1000).toISOString();
+    await this.db.updateEnterpriseConnector(row.id, {
+      access_token: result.accessToken,
+      refresh_token: result.refreshToken,
+      token_expires_at: newExpiresAt,
+    });
+    // Mutate the row so callers pick up the fresh token
+    row.access_token = result.accessToken;
+    row.refresh_token = result.refreshToken;
+    row.token_expires_at = newExpiresAt;
+    console.log(`[chat] Token refreshed for ${row.connector_type}/${row.name}, expires ${newExpiresAt}`);
+  }
+
   private async loadEnterpriseTools(): Promise<import('@weaveintel/core').Tool[]> {
     try {
       const rows = await this.db.listEnterpriseConnectors();
       const enabled = rows.filter((r) => r.enabled === 1 && r.status === 'connected');
       if (enabled.length === 0) return [];
+
+      // Auto-refresh expired OAuth tokens before building configs
+      await Promise.all(enabled.map((r) => this.refreshTokenIfNeeded(r)));
 
       const configs: EnterpriseConnectorConfig[] = enabled.map((row) => {
         const authConfig: Record<string, string> = row.auth_config
@@ -935,6 +975,9 @@ export class ChatEngine {
       const rows = await this.db.listEnterpriseConnectors();
       const enabled = rows.filter((r) => r.enabled === 1 && r.status === 'connected');
       if (enabled.length === 0) return [];
+
+      // Auto-refresh expired OAuth tokens before building configs
+      await Promise.all(enabled.map((r) => this.refreshTokenIfNeeded(r)));
 
       const configs: EnterpriseConnectorConfig[] = enabled.map((row) => {
         const authConfig: Record<string, string> = row.auth_config

@@ -48,6 +48,48 @@ function toRecord(type: string, data: Record<string, unknown>, id?: string): Ent
 export class ServiceNowProvider extends BaseEnterpriseProvider {
   readonly type = 'servicenow';
 
+  /**
+   * Refresh the OAuth2 access token using the refresh_token grant.
+   * Returns the new token data or null if refresh is not possible/fails.
+   */
+  async refreshOAuthToken(
+    baseUrl: string,
+    clientId: string,
+    clientSecret: string,
+    refreshToken: string,
+  ): Promise<{ accessToken: string; refreshToken: string; expiresIn: number } | null> {
+    const base = validateBaseUrl(baseUrl);
+    const body = new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+    });
+    try {
+      const resp = await fetch(`${base}/oauth_token.do`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+      if (!resp.ok) {
+        console.error(`[servicenow] Token refresh failed: HTTP ${resp.status}`);
+        return null;
+      }
+      const data = (await resp.json()) as Record<string, unknown>;
+      const newToken = data['access_token'] as string | undefined;
+      const newRefresh = (data['refresh_token'] as string | undefined) ?? refreshToken;
+      const expiresIn = Number(data['expires_in'] ?? 1799);
+      if (!newToken) {
+        console.error('[servicenow] Token refresh returned no access_token');
+        return null;
+      }
+      return { accessToken: newToken, refreshToken: newRefresh, expiresIn };
+    } catch (err) {
+      console.error('[servicenow] Token refresh error:', err);
+      return null;
+    }
+  }
+
   /* ================================================================
    *  PHASE 0 — Generic Table API (EXISTING)
    * ================================================================ */
