@@ -1309,7 +1309,10 @@ function renderAuth(){
       h('div',{className:'divider'},h('div',{className:'line'}),h('span',null,'or'),h('div',{className:'line'})),
       h('div',{className:'oauth-btns'},
         h('button',{className:'oauth-btn',onClick:()=>initiateOAuthFlow('google'),title:'Sign in with Google'},h('span',null,'🔷'),'Google'),
-        h('button',{className:'oauth-btn',onClick:()=>initiateOAuthFlow('github'),title:'Sign in with GitHub'},h('span',null,'⬛'),'GitHub')
+        h('button',{className:'oauth-btn',onClick:()=>initiateOAuthFlow('github'),title:'Sign in with GitHub'},h('span',null,'⬛'),'GitHub'),
+        h('button',{className:'oauth-btn',onClick:()=>initiateOAuthFlow('microsoft'),title:'Sign in with Microsoft'},h('span',null,'🟦'),'Microsoft'),
+        h('button',{className:'oauth-btn',onClick:()=>initiateOAuthFlow('apple'),title:'Sign in with Apple'},h('span',null,'🍎'),'Apple'),
+        h('button',{className:'oauth-btn',onClick:()=>initiateOAuthFlow('facebook'),title:'Sign in with Facebook'},h('span',null,'📘'),'Facebook')
       ),
       h('div',{className:'err'},state.authError),
       h('div',{className:'toggle'},

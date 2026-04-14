@@ -35,6 +35,7 @@
     "@weaveintel/contracts": "*",
     "@weaveintel/prompts": "*",
     "@weaveintel/routing": "*",
+    "@weaveintel/oauth": "*",
     "@weaveintel/cache": "*",
     "@weaveintel/identity": "*",
     "@weaveintel/memory": "*",

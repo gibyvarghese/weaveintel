@@ -6,6 +6,7 @@
     { "path": "packages/agents" },
     { "path": "packages/memory" },
     { "path": "packages/retrieval" },
+    { "path": "packages/oauth" },
     { "path": "packages/observability" },
     { "path": "packages/redaction" },
     { "path": "packages/mcp-client" },

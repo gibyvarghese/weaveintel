@@ -8,6 +8,8 @@
  * App-level integration handles session creation and account linking.
  */
 
+import { createHash, randomFillSync } from 'node:crypto';
+
 /* ================================================================== */
 /*  OAuth Provider Types                                              */
 /* ================================================================== */
@@ -115,11 +117,7 @@ export function generateCodeVerifier(): string {
     globalThis.crypto.getRandomValues(bytes);
   } else if (typeof global !== 'undefined' && global.crypto?.getRandomValues) {
     global.crypto.getRandomValues(bytes);
-  } else {
-    // Fallback for Node.js
-    const crypto = require('crypto');
-    crypto.randomFillSync(bytes);
-  }
+  } else randomFillSync(bytes);
   return Array.from(bytes)
     .map(b => String.fromCharCode(b))
     .join('')
@@ -144,12 +142,7 @@ export async function generateCodeChallenge(verifier: string): Promise<string> {
     const data = encoder.encode(verifier);
     const hash = await global.crypto.subtle.digest('SHA-256', data);
     return Buffer.from(hash).toString('base64url');
-  } else {
-    // Node.js
-    const crypto = require('crypto');
-    const hash = crypto.createHash('sha256').update(verifier).digest();
-    return Buffer.from(hash).toString('base64url');
-  }
+  } else return Buffer.from(createHash('sha256').update(verifier).digest()).toString('base64url');
 }
 
 /* ================================================================== */
@@ -196,7 +189,7 @@ export function createOAuthProvider(
       endpoints: {
         authorization: 'https://appleid.apple.com/auth/authorize',
         token: 'https://appleid.apple.com/auth/token',
-        userinfo: 'https://appleid.apple.com/auth/token',  // returned in id_token
+        userinfo: '', // Apple profile comes from id_token JWT claims
       },
     },
     facebook: {
@@ -204,8 +197,8 @@ export function createOAuthProvider(
       scopes: ['email', 'public_profile'],
       endpoints: {
         authorization: 'https://www.facebook.com/v18.0/dialog/oauth',
-        token: 'https://graph.instagram.com/v18.0/oauth/access_token',
-        userinfo: 'https://graph.instagram.com/me?fields=id,name,email,picture',
+        token: 'https://graph.facebook.com/v18.0/oauth/access_token',
+        userinfo: 'https://graph.facebook.com/me?fields=id,name,email,picture',
       },
     },
   };
@@ -254,10 +247,8 @@ export class OAuthClient {
       code_challenge_method: 'S256', // PKCE
     });
 
-    // Provider-specific parameters
-    if (provider.name === 'apple') {
-      params.set('response_mode', 'form_post');
-    }
+    // Keep callback GET-compatible for all providers.
+    if (provider.name === 'apple') params.set('response_mode', 'query');
 
     const authUrl = `${provider.endpoints.authorization}?${params.toString()}`;
     return { authUrl, codeVerifier };
@@ -300,14 +291,21 @@ export class OAuthClient {
       throw new Error(`OAuth token exchange failed: ${response.status} ${error}`);
     }
 
-    const token: OAuthTokenResponse = await response.json();
+    const token = await response.json() as OAuthTokenResponse;
     return { token, codeVerifier };
   }
 
   /**
    * Fetch user profile from OAuth provider
    */
-  async getUserProfile(provider: OAuthProvider, accessToken: string): Promise<OAuthUserProfile> {
+  async getUserProfile(provider: OAuthProvider, accessToken: string, tokenResponse?: OAuthTokenResponse): Promise<OAuthUserProfile> {
+    if (provider.name === 'apple') {
+      const idToken = tokenResponse?.id_token;
+      if (!idToken) throw new Error('Apple id_token missing from token response');
+      const payload = this.parseJwtPayload(idToken);
+      return this.extractUserProfile('apple', payload);
+    }
+
     const response = await fetch(provider.endpoints.userinfo, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -319,8 +317,15 @@ export class OAuthClient {
       throw new Error(`Failed to fetch user profile: ${response.status}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as Record<string, unknown>;
     return this.extractUserProfile(provider.name, data);
+  }
+
+  private parseJwtPayload(jwt: string): Record<string, unknown> {
+    const parts = jwt.split('.');
+    if (parts.length < 2 || !parts[1]) throw new Error('Invalid JWT payload');
+    const payload = Buffer.from(parts[1], 'base64url').toString('utf8');
+    return JSON.parse(payload) as Record<string, unknown>;
   }
 
   /**
@@ -356,31 +361,35 @@ export class OAuthClient {
           raw: data,
         };
       case 'apple':
+        {
+          const fullName = String(data['name'] ?? '').trim();
+          const given = String(data['given_name'] ?? '').trim();
+          const family = String(data['family_name'] ?? '').trim();
+          const resolvedName = fullName || [given, family].filter(Boolean).join(' ');
         return {
           id: String(data['sub']),
           email: String(data['email'] ?? ''),
-          name: String(data['name']?.['firstName'] ? `${data['name']['firstName']} ${data['name']['lastName']}` : ''),
+          name: resolvedName,
           picture: '',
           provider,
           raw: data,
         };
+        }
       case 'facebook':
+        {
+          const picture = data['picture'] as Record<string, unknown> | undefined;
+          const pictureData = picture?.['data'] as Record<string, unknown> | undefined;
         return {
           id: String(data['id']),
           email: String(data['email'] ?? ''),
           name: String(data['name'] ?? ''),
-          picture: String(data['picture']?.['data']?.['url'] ?? ''),
+          picture: String(pictureData?.['url'] ?? ''),
           provider,
           raw: data,
         };
+        }
       default:
         throw new Error(`Unknown provider: ${provider}`);
     }
   }
 }
-
-/* ================================================================== */
-/*  Exports                                                            */
-/* ================================================================== */
-
-export { OAuthProvider, OAuthAuthorizationRequest, OAuthCallbackData, OAuthTokenResponse, OAuthUserProfile, OAuthLinkedAccount, OAuthProviderName };

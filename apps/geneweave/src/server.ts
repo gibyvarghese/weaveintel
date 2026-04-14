@@ -29,6 +29,7 @@ import { getHTML } from './ui.js';
 import { registerAdminRoutes } from './server-admin.js';
 import { encryptCredential, decryptCredential } from './vault.js';
 import { setBrowserAuthProvider, type SSOPassThroughAuth } from '@weaveintel/tools-browser';
+import { OAuthClient, createOAuthProvider, type OAuthProviderName } from '@weaveintel/oauth';
 import { getAllProviders, getProvider, checkAllProviders, type ExternalCredential } from './password-providers.js';
 
 // ─── Router ──────────────────────────────────────────────────
@@ -129,197 +130,44 @@ function html(res: ServerResponse, status: number, body: string): void {
   res.end(body);
 }
 
-// ─── OAuth State Store (in-memory, production should use Redis) ──────────
+// ─── OAuth Flow State (in-memory, production should use Redis) ──────────
 
-class InMemoryStateStore {
-  private store = new Map<string, { userId: string; provider: string; expiresAt: number }>();
+const oauthClient = new OAuthClient();
+const oauthStateStore = new Map<string, { userId: string; provider: OAuthProviderName; expiresAt: number }>();
 
-  set(key: string, value: { userId: string; provider: string; expiresAt: number }): void {
-    this.store.set(key, value);
-  }
-
-  get(key: string): { userId: string; provider: string; expiresAt: number } | undefined {
-    return this.store.get(key);
-  }
-
-  delete(key: string): void {
-    this.store.delete(key);
-  }
-
-  // Cleanup expired entries (call periodically)
-  cleanup(): void {
-    const now = Date.now();
-    for (const [key, value] of this.store.entries()) {
-      if (now > value.expiresAt) this.store.delete(key);
-    }
-  }
+function setOAuthState(state: string, value: { userId: string; provider: OAuthProviderName; expiresAt: number }): void {
+  oauthStateStore.set(state, value);
 }
 
-const SessionStore = new InMemoryStateStore();
-
-// Periodically clean up expired state entries
-setInterval(() => SessionStore.cleanup(), 60_000); // Every minute
-
-// ─── OAuth Token Exchange ────────────────────────────────────
-
-interface OAuthProfile {
-  id: string;
-  email: string;
-  name: string | null;
-  picture: string | null;
+function getOAuthState(state: string): { userId: string; provider: OAuthProviderName; expiresAt: number } | null {
+  const found = oauthStateStore.get(state);
+  if (!found) return null;
+  if (Date.now() > found.expiresAt) {
+    oauthStateStore.delete(state);
+    return null;
+  }
+  return found;
 }
 
-async function exchangeCodeForToken(provider: string, code: string, req: IncomingMessage): Promise<OAuthProfile> {
+function deleteOAuthState(state: string): void {
+  oauthStateStore.delete(state);
+}
+
+function buildOAuthProviderFromRequest(provider: OAuthProviderName, req: IncomingMessage) {
   const baseUrl = (req.headers['x-forwarded-proto'] || 'http') + '://' + (req.headers['x-forwarded-host'] || req.headers['host']);
   const redirectUri = `${baseUrl}/api/oauth/callback`;
   const clientId = process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_ID`];
   const clientSecret = process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_SECRET`];
-
   if (!clientId || !clientSecret) throw new Error(`${provider} credentials not configured`);
-
-  let tokenUrl = '';
-  let userInfoUrl = '';
-  let body = '';
-  let accessTokenField = 'access_token';
-
-  switch (provider) {
-    case 'google':
-      tokenUrl = 'https://oauth2.googleapis.com/token';
-      userInfoUrl = 'https://openidconnect.googleapis.com/v1/userinfo';
-      body = new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: redirectUri,
-      }).toString();
-      break;
-    case 'github':
-      tokenUrl = 'https://github.com/login/oauth/access_token';
-      userInfoUrl = 'https://api.github.com/user';
-      body = new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: redirectUri,
-      }).toString();
-      break;
-    case 'microsoft':
-      tokenUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
-      userInfoUrl = 'https://graph.microsoft.com/v1.0/me';
-      body = new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: redirectUri,
-        scope: 'openid email profile',
-      }).toString();
-      break;
-    case 'apple':
-      tokenUrl = 'https://appleid.apple.com/auth/token';
-      userInfoUrl = '';
-      body = new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: redirectUri,
-      }).toString();
-      break;
-    case 'facebook':
-      tokenUrl = 'https://graph.instagram.com/v18.0/oauth/access_token';
-      userInfoUrl = 'https://graph.instagram.com/me?fields=id,email,name';
-      body = new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        grant_type: 'authorization_code',
-        redirect_uri: redirectUri,
-        code,
-      }).toString();
-      break;
-    default:
-      throw new Error(`Unsupported provider: ${provider}`);
-  }
-
-  // Exchange code for token
-  const tokenResponse = await fetch(tokenUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
-    body,
-  });
-
-  if (!tokenResponse.ok) throw new Error(`Token exchange failed: ${tokenResponse.statusText}`);
-  const tokenData = (await tokenResponse.json()) as Record<string, unknown>;
-  const accessToken = tokenData[accessTokenField] as string;
-  if (!accessToken) throw new Error('No access token in response');
-
-  // Get user profile from provider
-  let profile: OAuthProfile;
-
-  if (provider === 'apple') {
-    // Apple doesn't have a separate userinfo endpoint, user data is in the id_token
-    const idToken = tokenData['id_token'] as string;
-    if (!idToken) throw new Error('No id_token in Apple response');
-    const parts = idToken.split('.');
-    if (parts.length !== 3) throw new Error('Invalid id_token format');
-    const payloadPart = parts[1];
-    if (!payloadPart) throw new Error('Invalid id_token format');
-    const decoded = JSON.parse(Buffer.from(payloadPart, 'base64').toString()) as Record<string, unknown>;
-    profile = {
-      id: decoded['sub'] as string,
-      email: decoded['email'] as string,
-      name: null,
-      picture: null,
-    };
-  } else {
-    const userResponse = await fetch(userInfoUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    if (!userResponse.ok) throw new Error(`User info fetch failed: ${userResponse.statusText}`);
-    const userData = (await userResponse.json()) as Record<string, unknown>;
-
-    // Normalize provider responses to OAuthProfile
-    if (provider === 'google') {
-      profile = {
-        id: userData['sub'] as string,
-        email: userData['email'] as string,
-        name: (userData['name'] as string) || null,
-        picture: (userData['picture'] as string) || null,
-      };
-    } else if (provider === 'github') {
-      profile = {
-        id: String(userData['id']),
-        email: userData['email'] as string,
-        name: (userData['name'] as string) || null,
-        picture: (userData['avatar_url'] as string) || null,
-      };
-    } else if (provider === 'microsoft') {
-      profile = {
-        id: userData['id'] as string,
-        email: userData['userPrincipalName'] as string,
-        name: (userData['displayName'] as string) || null,
-        picture: null,
-      };
-    } else if (provider === 'facebook') {
-      const pictureData = userData['picture'] as Record<string, unknown>;
-      const dataObj = pictureData?.['data'] as Record<string, unknown>;
-      const pictureUrl = (dataObj?.['url'] as string) || null;
-      profile = {
-        id: userData['id'] as string,
-        email: userData['email'] as string,
-        name: (userData['name'] as string) || null,
-        picture: pictureUrl,
-      };
-    } else {
-      throw new Error(`Unsupported provider: ${provider}`);
-    }
-  }
-
-  return profile;
+  return createOAuthProvider(provider, clientId, clientSecret, redirectUri);
 }
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of oauthStateStore.entries()) {
+    if (now > value.expiresAt) oauthStateStore.delete(key);
+  }
+}, 60_000);
 
 // ─── Server factory ─────────────────────────────────────────
 
@@ -452,118 +300,79 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     let body: { provider?: string };
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
 
-    const provider = body.provider?.toLowerCase();
+    const provider = body.provider?.toLowerCase() as OAuthProviderName | undefined;
     if (!provider) { json(res, 400, { error: 'provider required' }); return; }
     if (!['google', 'github', 'microsoft', 'apple', 'facebook'].includes(provider)) {
       json(res, 400, { error: 'Invalid provider' }); return;
     }
 
-    // Generate OAuth flow state (stored in session for CSRF protection)
-    const state = randomUUID();
-    SessionStore.set(state, { userId: auth.userId, provider, expiresAt: Date.now() + 600_000 }); // 10 min
-
-    // Build authorization URL based on provider
-    const baseUrl = (req.headers['x-forwarded-proto'] || 'http') + '://' + (req.headers['x-forwarded-host'] || req.headers['host']);
-    const redirectUri = `${baseUrl}/api/oauth/callback`;
-    
-    let authUrl = '';
-    const clientId = process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_ID`];
-    if (!clientId) { json(res, 500, { error: `${provider} not configured` }); return; }
-
-    switch (provider) {
-      case 'google':
-        authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
-          `client_id=${encodeURIComponent(clientId)}&` +
-          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-          `response_type=code&` +
-          `scope=${encodeURIComponent('openid email profile')}&` +
-          `state=${state}`;
-        break;
-      case 'github':
-        authUrl = `https://github.com/login/oauth/authorize?` +
-          `client_id=${encodeURIComponent(clientId)}&` +
-          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-          `scope=${encodeURIComponent('user:email')}&` +
-          `state=${state}`;
-        break;
-      case 'microsoft':
-        authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?` +
-          `client_id=${encodeURIComponent(clientId)}&` +
-          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-          `response_type=code&` +
-          `scope=${encodeURIComponent('openid email profile')}&` +
-          `state=${state}`;
-        break;
-      case 'apple':
-        authUrl = `https://appleid.apple.com/auth/authorize?` +
-          `client_id=${encodeURIComponent(clientId)}&` +
-          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-          `response_type=code&` +
-          `response_mode=form_post&` +
-          `scope=${encodeURIComponent('email name')}&` +
-          `state=${state}`;
-        break;
-      case 'facebook':
-        authUrl = `https://www.facebook.com/v18.0/dialog/oauth?` +
-          `client_id=${encodeURIComponent(clientId)}&` +
-          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
-          `scope=${encodeURIComponent('email public_profile')}&` +
-          `state=${state}`;
-        break;
+    try {
+      const state = randomUUID();
+      const oauthProvider = buildOAuthProviderFromRequest(provider, req);
+      const { authUrl } = await oauthClient.generateAuthorizationUrl(oauthProvider, state);
+      setOAuthState(state, { userId: auth.userId, provider, expiresAt: Date.now() + 600_000 });
+      json(res, 200, { authUrl });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      json(res, 500, { error: msg });
     }
-
-    json(res, 200, { authUrl });
   }, { auth: true, csrf: false });
 
   // OAuth callback handler (handles redirect from providers)
-  router.get('/api/oauth/callback', async (req, res) => {
-    const url = req.url ?? '';
-    const queryStr = url.split('?')[1] ?? '';
-    const params: Record<string, string> = {};
-    queryStr.split('&').forEach(pair => {
-      const [key, val] = pair.split('=');
-      if (key && val) {
-        params[decodeURIComponent(key)] = decodeURIComponent(val);
-      }
-    });
-
-    const { code, state, error } = params;
+  const handleOAuthCallback = async (req: IncomingMessage, res: ServerResponse, callbackParams: Record<string, string>) => {
+    const { code, state, error } = callbackParams;
 
     if (error) { json(res, 400, { error: `OAuth error: ${error}` }); return; }
     if (!code || !state) { json(res, 400, { error: 'Missing code or state' }); return; }
 
-    // Retrieve state from session store
-    const stateData = SessionStore.get(state);
+    const stateData = getOAuthState(state);
     if (!stateData) { json(res, 400, { error: 'Invalid or expired state' }); return; }
     if (Date.now() > stateData.expiresAt) { json(res, 400, { error: 'State expired' }); return; }
 
     const { userId, provider } = stateData;
 
     try {
-      // Exchange code for tokens and get user info from provider
-      const oauthProfile = await exchangeCodeForToken(provider, code, req);
+      const oauthProvider = buildOAuthProviderFromRequest(provider, req);
+      const { token } = await oauthClient.exchangeCodeForToken(oauthProvider, code, state);
+      const oauthProfile = await oauthClient.getUserProfile(oauthProvider, token.access_token, token);
 
-      // Upsert OAuth linked account
-      const accountId = randomUUID();
       await db.createOAuthLinkedAccount({
-        id: accountId,
+        id: randomUUID(),
         user_id: userId,
         provider,
         provider_user_id: oauthProfile.id,
         email: oauthProfile.email,
-        name: oauthProfile.name ?? 'User',
-        picture_url: oauthProfile.picture ?? null,
+        name: oauthProfile.name || 'User',
+        picture_url: oauthProfile.picture || null,
         last_used_at: new Date().toISOString(),
       });
 
-      // Redirect to success page or return JSON
       html(res, 200, '<html><body><script>window.close();</script>Account linked successfully!</body></html>');
     } catch (err) {
       json(res, 500, { error: `Failed to link account: ${(err as Error).message}` });
+    } finally {
+      deleteOAuthState(state);
     }
+  };
 
-    SessionStore.delete(state);
+  router.get('/api/oauth/callback', async (req, res) => {
+    const url = req.url ?? '';
+    const queryStr = url.split('?')[1] ?? '';
+    const params: Record<string, string> = {};
+    queryStr.split('&').forEach(pair => {
+      const [key, val] = pair.split('=');
+      if (key && val) params[decodeURIComponent(key)] = decodeURIComponent(val);
+    });
+    await handleOAuthCallback(req, res, params);
   }, { auth: false });
+
+  router.post('/api/oauth/callback', async (req, res) => {
+    const raw = await readBody(req);
+    const body = new URLSearchParams(raw);
+    const params: Record<string, string> = {};
+    for (const [key, value] of body.entries()) params[key] = value;
+    await handleOAuthCallback(req, res, params);
+  }, { auth: false, csrf: false });
 
   // ── Model routes ───────────────────────────────────────────
 
