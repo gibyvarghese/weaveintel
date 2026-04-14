@@ -9,6 +9,7 @@ import type { Tool, ToolRegistry } from '@weaveintel/core';
 import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
 import { createSearchRouter, type SearchProviderConfig } from '@weaveintel/tools-search';
 import { createInMemoryTemporalStore, createTimeTools, type TemporalStore } from '@weaveintel/tools-time';
+import { createBrowserTools, createAutomationTools } from '@weaveintel/tools-browser';
 
 function envFlag(name: string, defaultValue: boolean): boolean {
   const raw = process.env[name];
@@ -197,12 +198,20 @@ const textAnalysisTool = weaveTool({
 // pre-loads selected built-in tools, and optionally adds custom tools.
 // This is how the ChatEngine builds the per-chat tool set.─
 
+function browserToolMap(): Record<string, Tool> {
+  return Object.fromEntries([
+    ...createBrowserTools(),
+    ...createAutomationTools(),
+  ].map(t => [t.schema.name, t]));
+}
+
 export const BUILTIN_TOOLS: Record<string, Tool> = {
   calculator: calculatorTool,
   ...createTimeToolMap(),
   web_search: webSearchTool,
   json_format: jsonFormatterTool,
   text_analysis: textAnalysisTool,
+  ...browserToolMap(),
 };
 
 export interface ToolRegistryOptions {

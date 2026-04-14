@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@weaveintel/core": "*",
-    "@weaveintel/tools": "*"
+    "@weaveintel/tools": "*",
+    "playwright-core": "^1.52.0"
   },
   "devDependencies": {
     "vitest": "^3.0.0"
