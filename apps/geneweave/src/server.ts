@@ -133,13 +133,13 @@ function html(res: ServerResponse, status: number, body: string): void {
 // ─── OAuth Flow State (in-memory, production should use Redis) ──────────
 
 const oauthClient = new OAuthClient();
-const oauthStateStore = new Map<string, { userId: string; provider: OAuthProviderName; expiresAt: number }>();
+const oauthStateStore = new Map<string, { userId: string | null; provider: OAuthProviderName; expiresAt: number }>();
 
-function setOAuthState(state: string, value: { userId: string; provider: OAuthProviderName; expiresAt: number }): void {
+function setOAuthState(state: string, value: { userId: string | null; provider: OAuthProviderName; expiresAt: number }): void {
   oauthStateStore.set(state, value);
 }
 
-function getOAuthState(state: string): { userId: string; provider: OAuthProviderName; expiresAt: number } | null {
+function getOAuthState(state: string): { userId: string | null; provider: OAuthProviderName; expiresAt: number } | null {
   const found = oauthStateStore.get(state);
   if (!found) return null;
   if (Date.now() > found.expiresAt) {
@@ -294,8 +294,6 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   // Generate OAuth authorization URL for a provider
   // Expected body: { provider: 'google' | 'github' | 'microsoft' | 'apple' | 'facebook' }
   router.post('/api/oauth/authorize-url', async (req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-
     const raw = await readBody(req);
     let body: { provider?: string };
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
@@ -310,13 +308,13 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       const state = randomUUID();
       const oauthProvider = buildOAuthProviderFromRequest(provider, req);
       const { authUrl } = await oauthClient.generateAuthorizationUrl(oauthProvider, state);
-      setOAuthState(state, { userId: auth.userId, provider, expiresAt: Date.now() + 600_000 });
+      setOAuthState(state, { userId: auth?.userId ?? null, provider, expiresAt: Date.now() + 600_000 });
       json(res, 200, { authUrl });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       json(res, 500, { error: msg });
     }
-  }, { auth: true, csrf: false });
+  }, { auth: false, csrf: false });
 
   // OAuth callback handler (handles redirect from providers)
   const handleOAuthCallback = async (req: IncomingMessage, res: ServerResponse, callbackParams: Record<string, string>) => {
@@ -329,23 +327,63 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     if (!stateData) { json(res, 400, { error: 'Invalid or expired state' }); return; }
     if (Date.now() > stateData.expiresAt) { json(res, 400, { error: 'State expired' }); return; }
 
-    const { userId, provider } = stateData;
+    const { userId: stateUserId, provider } = stateData;
 
     try {
       const oauthProvider = buildOAuthProviderFromRequest(provider, req);
       const { token } = await oauthClient.exchangeCodeForToken(oauthProvider, code, state);
       const oauthProfile = await oauthClient.getUserProfile(oauthProvider, token.access_token, token);
 
+      const existingLinked = await db.getOAuthLinkedAccountByProviderUserId(provider, oauthProfile.id);
+
+      // Prevent linking a provider identity already bound to a different account.
+      if (stateUserId && existingLinked && existingLinked.user_id !== stateUserId) {
+        json(res, 409, { error: 'This OAuth account is already linked to another user' });
+        return;
+      }
+
+      let resolvedUserId = stateUserId;
+
+      if (!resolvedUserId && existingLinked) {
+        resolvedUserId = existingLinked.user_id;
+      }
+
+      if (!resolvedUserId) {
+        resolvedUserId = randomUUID();
+        const fallbackEmail = (oauthProfile.email && oauthProfile.email.includes('@'))
+          ? oauthProfile.email
+          : `${provider}-${oauthProfile.id}@oauth.local`;
+        const fallbackName = oauthProfile.name || `${provider} user`;
+        await db.createUser({
+          id: resolvedUserId,
+          email: fallbackEmail,
+          name: fallbackName,
+          passwordHash: hashPassword(randomUUID()),
+        });
+      }
+
       await db.createOAuthLinkedAccount({
         id: randomUUID(),
-        user_id: userId,
+        user_id: resolvedUserId,
         provider,
         provider_user_id: oauthProfile.id,
-        email: oauthProfile.email,
+        email: oauthProfile.email || `${provider}-${oauthProfile.id}@oauth.local`,
         name: oauthProfile.name || 'User',
         picture_url: oauthProfile.picture || null,
         last_used_at: new Date().toISOString(),
       });
+
+      // For OAuth sign-in from logged-out state, establish a session cookie.
+      if (!stateUserId) {
+        const user = await db.getUserById(resolvedUserId);
+        if (!user) throw new Error('User not found after OAuth sign-in');
+        const sessionId = randomUUID();
+        const csrfToken = generateCSRFToken();
+        const expiresAt = new Date(Date.now() + 86400_000).toISOString();
+        await db.createSession({ id: sessionId, userId: resolvedUserId, csrfToken, expiresAt });
+        const jwt = signJWT({ userId: resolvedUserId, email: user.email, sessionId }, jwtSecret);
+        setAuthCookie(res, jwt);
+      }
 
       html(res, 200, '<html><body><script>window.close();</script>Account linked successfully!</body></html>');
     } catch (err) {
