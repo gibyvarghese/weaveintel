@@ -295,7 +295,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       // For now, we replicate the policy here; ideally this would be imported
       const DEFAULT_TOOLS: Record<string, string[]> = {
         direct: [],
-        agent: ['datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'memory_recall', 'web_search', 'browser.open', 'browser.close', 'browser.navigate', 'browser.back', 'browser.forward', 'browser.snapshot', 'browser.screenshot', 'browser.click', 'browser.fill', 'browser.select', 'browser.type', 'browser.hover', 'browser.press', 'browser.scroll', 'browser.wait'],
+        agent: ['datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'memory_recall', 'web_search', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait'],
         supervisor: ['datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis'],
       };
       return DEFAULT_TOOLS[mode] ?? [];

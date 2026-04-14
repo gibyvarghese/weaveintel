@@ -59,7 +59,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.open',
+        name: 'browser_open',
         description: 'Launch a headless browser and navigate to a URL. Returns a session ID and a text snapshot of the page showing all interactive elements with ref numbers. Use the ref numbers in subsequent actions. Always start here before interacting with any website.',
         parameters: {
           type: 'object',
@@ -79,7 +79,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.close',
+        name: 'browser_close',
         description: 'Close a browser session and free resources. Always close sessions when done.',
         parameters: {
           type: 'object',
@@ -97,7 +97,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.navigate',
+        name: 'browser_navigate',
         description: 'Navigate to a new URL within an existing browser session. Returns updated page snapshot.',
         parameters: {
           type: 'object',
@@ -121,7 +121,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.back',
+        name: 'browser_back',
         description: 'Go back in browser history. Returns updated page snapshot.',
         parameters: {
           type: 'object',
@@ -142,7 +142,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.forward',
+        name: 'browser_forward',
         description: 'Go forward in browser history. Returns updated page snapshot.',
         parameters: {
           type: 'object',
@@ -165,7 +165,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.snapshot',
+        name: 'browser_snapshot',
         description: 'Get a text representation of the current page. Shows headings, landmarks, and interactive elements with ref numbers. Interactive elements display as: [ref] role "name" value="..." Use ref numbers to target elements in click, fill, select, etc.',
         parameters: {
           type: 'object',
@@ -184,7 +184,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.screenshot',
+        name: 'browser_screenshot',
         description: 'Take a screenshot of the current page (base64 PNG). Use this when you need to visually inspect the page — for example to read images, charts, CAPTCHAs, or complex layouts that the text snapshot cannot capture.',
         parameters: {
           type: 'object',
@@ -205,7 +205,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.click',
+        name: 'browser_click',
         description: 'Click an element on the page. Target by ref number (from snapshot), CSS selector, or visible text. Returns the updated page snapshot after clicking.',
         parameters: {
           type: 'object',
@@ -227,7 +227,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.fill',
+        name: 'browser_fill',
         description: 'Clear a text input and type a new value. Target the input by ref, selector, or label text. Returns updated snapshot.',
         parameters: {
           type: 'object',
@@ -252,7 +252,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.select',
+        name: 'browser_select',
         description: 'Select an option from a <select> dropdown. Target the select element by ref, selector, or label. Provide the option value or visible text. Returns updated snapshot.',
         parameters: {
           type: 'object',
@@ -280,7 +280,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.type',
+        name: 'browser_type',
         description: 'Type text character-by-character into the focused or targeted element. Useful for search boxes, autocomplete fields, and inputs that react to each keystroke. Slower than fill but triggers input/keydown events.',
         parameters: {
           type: 'object',
@@ -306,7 +306,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.hover',
+        name: 'browser_hover',
         description: 'Hover over an element (useful for menus, tooltips, dropdowns that appear on hover). Returns updated snapshot.',
         parameters: {
           type: 'object',
@@ -328,7 +328,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.press',
+        name: 'browser_press',
         description: 'Press a keyboard key or key combination. Useful for Enter (submit forms), Tab (focus next), Escape (close modals), shortcuts (Control+a). Returns updated snapshot.',
         parameters: {
           type: 'object',
@@ -352,7 +352,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.scroll',
+        name: 'browser_scroll',
         description: 'Scroll the page up or down to reveal more content. Use direction "down" to scroll towards the bottom (load more, see below-fold content) or "up" to go back to the top. Returns updated snapshot.',
         parameters: {
           type: 'object',
@@ -379,7 +379,7 @@ export function createAutomationTools(): Tool[] {
 
     {
       schema: {
-        name: 'browser.wait',
+        name: 'browser_wait',
         description: 'Wait for a condition before continuing: an element to appear, a URL change, or a fixed timeout. Returns updated snapshot once the condition is met.',
         parameters: {
           type: 'object',

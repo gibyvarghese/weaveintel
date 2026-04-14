@@ -2120,9 +2120,9 @@ function defaultWorkers(
   return [
     {
       name: 'researcher',
-      description: 'Researches topics, searches the web, and gathers information. Good for fact-finding and exploration tasks.',
+      description: 'Researches topics, searches the web, browses websites, and gathers information. Can open a headless browser to navigate dynamic sites, read page content, click links, fill forms, and interact with web applications. Good for fact-finding, exploration, and accessing sites that require browser interaction.',
       model,
-      tools: createToolRegistry(['web_search', 'text_analysis'], undefined, toolOptions),
+      tools: createToolRegistry(['web_search', 'text_analysis', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait'], undefined, toolOptions),
     },
     {
       name: 'analyst',

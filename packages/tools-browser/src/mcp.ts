@@ -20,7 +20,7 @@ export function createBrowserTools(): Tool[] {
   return [
     {
       schema: {
-        name: 'browser.fetch',
+        name: 'browser_fetch',
         description: 'Fetch a web page and return its raw HTML',
         parameters: URL_PARAMS,
       },
@@ -32,7 +32,7 @@ export function createBrowserTools(): Tool[] {
     },
     {
       schema: {
-        name: 'browser.extract',
+        name: 'browser_extract',
         description: 'Fetch a page and extract structured content (title, text, links, images, metadata)',
         parameters: URL_PARAMS,
       },
@@ -45,7 +45,7 @@ export function createBrowserTools(): Tool[] {
     },
     {
       schema: {
-        name: 'browser.read',
+        name: 'browser_read',
         description: 'Fetch a page and extract the main article text (readability mode)',
         parameters: URL_PARAMS,
       },
@@ -58,7 +58,7 @@ export function createBrowserTools(): Tool[] {
     },
     {
       schema: {
-        name: 'browser.scrape',
+        name: 'browser_scrape',
         description: 'Scrape structured data from a page using CSS selectors',
         parameters: {
           type: 'object',
@@ -79,7 +79,7 @@ export function createBrowserTools(): Tool[] {
     },
     {
       schema: {
-        name: 'browser.sitemap',
+        name: 'browser_sitemap',
         description: 'Parse a sitemap XML and return all URLs',
         parameters: URL_PARAMS,
       },
