@@ -258,3 +258,87 @@ export async function captureSnapshot(page: Page): Promise<PageSnapshot> {
     elements: raw.elements,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/*  Login / auth detection                                             */
+/* ------------------------------------------------------------------ */
+
+export interface LoginFormDetection {
+  detected: boolean;
+  type: 'login' | 'captcha' | '2fa' | 'oauth_prompt' | 'unknown';
+  usernameRef?: number;
+  passwordRef?: number;
+  submitRef?: number;
+  captchaPresent: boolean;
+  twoFactorPresent: boolean;
+  oauthButtons: string[];
+}
+
+/**
+ * Heuristic analysis of a page snapshot to detect login forms, CAPTCHAs, 2FA prompts.
+ */
+export function detectLoginForm(snapshot: PageSnapshot): LoginFormDetection {
+  const els = snapshot.elements;
+  const text = snapshot.text.toLowerCase();
+
+  // Find password and username fields
+  const passwordEl = els.find(e => e.type === 'password' || e.name?.toLowerCase().includes('password'));
+  const usernameEl = els.find(e =>
+    (e.tag === 'input' && (e.type === 'text' || e.type === 'email')) &&
+    (e.name?.toLowerCase().includes('user') || e.name?.toLowerCase().includes('email') ||
+     e.name?.toLowerCase().includes('login') || e.placeholder?.toLowerCase().includes('email') ||
+     e.placeholder?.toLowerCase().includes('username')),
+  );
+
+  // Find submit button
+  const submitEl = els.find(e =>
+    (e.role === 'button' || e.tag === 'button' || (e.tag === 'input' && e.type === 'submit')) &&
+    (e.name?.toLowerCase().includes('sign in') || e.name?.toLowerCase().includes('log in') ||
+     e.name?.toLowerCase().includes('login') || e.name?.toLowerCase().includes('submit') ||
+     e.name?.toLowerCase().includes('continue')),
+  );
+
+  // CAPTCHA detection
+  const captchaPresent = text.includes('captcha') || text.includes('recaptcha') ||
+    text.includes('hcaptcha') || text.includes('i\'m not a robot') ||
+    text.includes('verify you are human') || text.includes('cloudflare');
+
+  // 2FA detection
+  const twoFactorPresent = text.includes('two-factor') || text.includes('2fa') ||
+    text.includes('verification code') || text.includes('authenticator') ||
+    text.includes('one-time') || text.includes('otp') ||
+    els.some(e => e.name?.toLowerCase().includes('otp') || e.name?.toLowerCase().includes('verification'));
+
+  // OAuth button detection
+  const oauthKeywords = ['google', 'github', 'microsoft', 'facebook', 'apple', 'twitter', 'sso', 'saml'];
+  const oauthButtons = els
+    .filter(e => (e.role === 'button' || e.role === 'link') &&
+      oauthKeywords.some(k => e.name?.toLowerCase().includes(k) &&
+        (e.name?.toLowerCase().includes('sign') || e.name?.toLowerCase().includes('log') || e.name?.toLowerCase().includes('continue'))))
+    .map(e => e.name);
+
+  // Determine page type
+  if (captchaPresent) {
+    return { detected: true, type: 'captcha', captchaPresent, twoFactorPresent, oauthButtons };
+  }
+  if (twoFactorPresent && !passwordEl) {
+    return { detected: true, type: '2fa', captchaPresent, twoFactorPresent, oauthButtons };
+  }
+  if (oauthButtons.length > 0 && !passwordEl) {
+    return { detected: true, type: 'oauth_prompt', oauthButtons, captchaPresent, twoFactorPresent };
+  }
+  if (passwordEl) {
+    return {
+      detected: true,
+      type: 'login',
+      usernameRef: usernameEl?.ref,
+      passwordRef: passwordEl.ref,
+      submitRef: submitEl?.ref,
+      captchaPresent,
+      twoFactorPresent,
+      oauthButtons,
+    };
+  }
+
+  return { detected: false, type: 'unknown', captchaPresent, twoFactorPresent, oauthButtons };
+}

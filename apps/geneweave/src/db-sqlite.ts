@@ -23,6 +23,7 @@ import type {
   SemanticMemoryRow, EntityMemoryRow,
   MemoryExtractionEventRow,
   MetricsSummary, WorkflowRunRow, GuardrailEvalRow, ModelPricingRow,
+  WebsiteCredentialRow,
 } from './db-types.js';
 
 export class SQLiteAdapter implements DatabaseAdapter {
@@ -91,6 +92,52 @@ export class SQLiteAdapter implements DatabaseAdapter {
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`);
     } catch { /* ignore */ }
+    // Migration: website_credentials table for browser auth vault
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS website_credentials (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        site_name TEXT NOT NULL,
+        site_url_pattern TEXT NOT NULL,
+        auth_method TEXT NOT NULL DEFAULT 'form_fill',
+        credentials_encrypted TEXT NOT NULL,
+        encryption_iv TEXT NOT NULL,
+        last_used_at TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    } catch { /* ignore */ }
+    // Migration: sso_linked_accounts table for SSO pass-through sessions
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS sso_linked_accounts (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        identity_provider TEXT NOT NULL,
+        email TEXT,
+        session_encrypted TEXT NOT NULL,
+        encryption_iv TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        linked_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(user_id, identity_provider)
+      )`);
+    } catch { /* ignore */ }
+    // Migration: oauth_linked_accounts table for OAuth provider identity linking
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS oauth_linked_accounts (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL,
+        provider_user_id TEXT NOT NULL,
+        email TEXT NOT NULL,
+        name TEXT NOT NULL,
+        picture_url TEXT,
+        linked_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_used_at TEXT,
+        UNIQUE(user_id, provider)
+      )`);
+    } catch { /* ignore */ }
   }
 
   async close(): Promise<void> {
@@ -133,6 +180,35 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteExpiredSessions(): Promise<void> {
     this.d.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
+  }
+
+  // ── OAuth Linked Accounts ──────────────────────────────────
+
+  async createOAuthLinkedAccount(account: Omit<import('./db-types.js').OAuthLinkedAccountRow, 'linked_at'>): Promise<void> {
+    this.d.prepare(`
+      INSERT OR REPLACE INTO oauth_linked_accounts (id, user_id, provider, provider_user_id, email, name, picture_url, last_used_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(account.id, account.user_id, account.provider, account.provider_user_id, account.email, account.name, account.picture_url ?? null, account.last_used_at ?? null);
+  }
+
+  async getOAuthLinkedAccount(userId: string, provider: string): Promise<import('./db-types.js').OAuthLinkedAccountRow | null> {
+    return (this.d.prepare('SELECT * FROM oauth_linked_accounts WHERE user_id = ? AND provider = ?').get(userId, provider) as import('./db-types.js').OAuthLinkedAccountRow | undefined) ?? null;
+  }
+
+  async getOAuthLinkedAccountByProviderUserId(provider: string, providerUserId: string): Promise<import('./db-types.js').OAuthLinkedAccountRow | null> {
+    return (this.d.prepare('SELECT * FROM oauth_linked_accounts WHERE provider = ? AND provider_user_id = ?').get(provider, providerUserId) as import('./db-types.js').OAuthLinkedAccountRow | undefined) ?? null;
+  }
+
+  async listOAuthLinkedAccounts(userId: string): Promise<import('./db-types.js').OAuthLinkedAccountRow[]> {
+    return this.d.prepare('SELECT * FROM oauth_linked_accounts WHERE user_id = ? ORDER BY linked_at DESC').all(userId) as import('./db-types.js').OAuthLinkedAccountRow[];
+  }
+
+  async updateOAuthAccountLastUsed(userId: string, provider: string): Promise<void> {
+    this.d.prepare("UPDATE oauth_linked_accounts SET last_used_at = datetime('now') WHERE user_id = ? AND provider = ?").run(userId, provider);
+  }
+
+  async deleteOAuthLinkedAccount(userId: string, provider: string): Promise<void> {
+    this.d.prepare('DELETE FROM oauth_linked_accounts WHERE user_id = ? AND provider = ?').run(userId, provider);
   }
 
   // ── Chats ──────────────────────────────────────────────────
@@ -1771,6 +1847,90 @@ export class SQLiteAdapter implements DatabaseAdapter {
       return this.d.prepare('SELECT * FROM memory_extraction_events WHERE chat_id = ? ORDER BY created_at DESC LIMIT ?').all(chatId, limit) as MemoryExtractionEventRow[];
     }
     return this.d.prepare('SELECT * FROM memory_extraction_events ORDER BY created_at DESC LIMIT ?').all(limit) as MemoryExtractionEventRow[];
+  }
+
+  // ─── Website Credentials (Browser Auth Vault) ──────────────
+
+  async createWebsiteCredential(c: Omit<WebsiteCredentialRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO website_credentials (id, user_id, site_name, site_url_pattern, auth_method, credentials_encrypted, encryption_iv, last_used_at, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(c.id, c.user_id, c.site_name, c.site_url_pattern, c.auth_method, c.credentials_encrypted, c.encryption_iv, c.last_used_at ?? null, c.status);
+  }
+
+  async getWebsiteCredential(id: string, userId: string): Promise<WebsiteCredentialRow | null> {
+    return (this.d.prepare('SELECT * FROM website_credentials WHERE id = ? AND user_id = ?').get(id, userId) as WebsiteCredentialRow | undefined) ?? null;
+  }
+
+  async listWebsiteCredentials(userId: string): Promise<WebsiteCredentialRow[]> {
+    return this.d.prepare('SELECT * FROM website_credentials WHERE user_id = ? ORDER BY updated_at DESC').all(userId) as WebsiteCredentialRow[];
+  }
+
+  async listAllActiveWebsiteCredentials(): Promise<WebsiteCredentialRow[]> {
+    return this.d.prepare("SELECT * FROM website_credentials WHERE status = 'active' ORDER BY updated_at DESC").all() as WebsiteCredentialRow[];
+  }
+
+  async findWebsiteCredential(userId: string, url: string): Promise<WebsiteCredentialRow | null> {
+    // Find credentials where the URL matches the site_url_pattern using glob-style matching
+    const rows = this.d.prepare(
+      `SELECT * FROM website_credentials WHERE user_id = ? AND status = 'active' ORDER BY last_used_at DESC`,
+    ).all(userId) as WebsiteCredentialRow[];
+    for (const row of rows) {
+      const pattern = row.site_url_pattern;
+      // Convert simple glob to regex: *.example.com/* → .*\.example\.com\/.*
+      const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+      if (new RegExp(`^${escaped}$`, 'i').test(url)) return row;
+    }
+    return null;
+  }
+
+  async updateWebsiteCredential(id: string, userId: string, fields: Partial<Omit<WebsiteCredentialRow, 'id' | 'user_id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id, userId);
+    this.d.prepare(`UPDATE website_credentials SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).run(...vals);
+  }
+
+  async deleteWebsiteCredential(id: string, userId: string): Promise<void> {
+    this.d.prepare('DELETE FROM website_credentials WHERE id = ? AND user_id = ?').run(id, userId);
+  }
+
+  // ─── SSO Linked Accounts (for SSO pass-through) ─────────────
+
+  async createSSOLinkedAccount(acct: { id: string; user_id: string; identity_provider: string; email?: string; session_encrypted: string; encryption_iv: string }): Promise<void> {
+    this.d.prepare(`
+      INSERT OR REPLACE INTO sso_linked_accounts (id, user_id, identity_provider, email, session_encrypted, encryption_iv)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(acct.id, acct.user_id, acct.identity_provider, acct.email ?? null, acct.session_encrypted, acct.encryption_iv);
+  }
+
+  async getSSOLinkedAccount(userId: string, identityProvider: string): Promise<import('./db-types.js').SSOLinkedAccountRow | null> {
+    return (this.d.prepare(`
+      SELECT * FROM sso_linked_accounts
+      WHERE user_id = ? AND identity_provider = ? AND status = 'active'
+    `).get(userId, identityProvider) as import('./db-types.js').SSOLinkedAccountRow | undefined) ?? null;
+  }
+
+  async listSSOLinkedAccounts(userId: string): Promise<Array<Omit<import('./db-types.js').SSOLinkedAccountRow, 'session_encrypted' | 'encryption_iv'>>> {
+    return this.d.prepare(`
+      SELECT id, user_id, identity_provider, email, status, linked_at, updated_at
+      FROM sso_linked_accounts
+      WHERE user_id = ? AND status = 'active'
+      ORDER BY linked_at DESC
+    `).all(userId) as Array<any>;
+  }
+
+  async deleteSSOLinkedAccount(userId: string, identityProvider: string): Promise<void> {
+    this.d.prepare(`
+      DELETE FROM sso_linked_accounts
+      WHERE user_id = ? AND identity_provider = ?
+    `).run(userId, identityProvider);
   }
 
   // ─── Seed default data ─────────────────────────────────────

@@ -50,6 +50,11 @@ input{font-family:inherit;outline:none}
 .auth-card input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(37,99,235,.1)}
 .auth-card .btn{width:100%;padding:12px;border-radius:999px;background:var(--fg);color:#FFFFFF;font-weight:600;font-size:14px;margin-top:8px;transition:background .18s ease}
 .auth-card .btn:hover{background:#1D1D1D}
+.auth-card .divider{margin:16px 0;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg3)}
+.auth-card .divider .line{flex:1;height:1px;background:var(--bg4)}
+.auth-card .oauth-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.auth-card .oauth-btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:10px 12px;border:1px solid var(--bg4);border-radius:var(--radius);background:var(--bg3);color:var(--fg2);font-weight:600;font-size:12px;transition:all .18s ease;cursor:pointer}
+.auth-card .oauth-btn:hover{background:var(--bg4);border-color:var(--fg3);color:var(--fg)}
 .auth-card .toggle{text-align:center;margin-top:16px;font-size:13px;color:var(--fg3)}
 .auth-card .toggle a{cursor:pointer;color:var(--accent);font-weight:500}
 .auth-card .err{color:var(--danger);font-size:13px;margin-top:8px;min-height:18px}
@@ -549,6 +554,20 @@ let state = {
   // Connectors state
   connectors:{ enterprise:[], social:[] },
   connectorsLoading:false,
+  // Website Credentials state
+  credentials:[],
+  credentialForm:null,
+  credentialEditing:null,
+  ssoProviders:null,  // Linked SSO providers
+  // Import state
+  importProviders:null,
+  importShow:false,
+  importProvider:null,
+  importConfig:{},
+  importLoading:false,
+  importResult:null,
+  // Handoff state
+  handoffRequest:null,
 };
 
 /* ── Avatar helpers ─────────────────────────── */
@@ -762,6 +781,57 @@ async function doLogout(){
   render();
 }
 
+async function initiateOAuthFlow(provider){
+  try {
+    // Get the authorization URL from the backend
+    const r = await api.post('/oauth/authorize-url', { provider });
+    const d = await r.json();
+    if (!r.ok) {
+      state.authError = d.error || provider + ' sign-in failed';
+      render();
+      return;
+    }
+
+    // Open the OAuth authorization URL in a popup
+    const width = 500, height = 600;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    const popup = window.open(d.authUrl, provider + '-auth', 'width=' + width + ',height=' + height + ',left=' + left + ',top=' + top);
+    
+    if (!popup) {
+      state.authError = 'Popup blocked. Please allow popups for this site.';
+      render();
+      return;
+    }
+
+    // Poll for the popup to close (indicating OAuth flow completion)
+    const checkPopup = setInterval(() => {
+      if (popup.closed) {
+        clearInterval(checkPopup);
+        // OAuth flow completed, try to get user info
+        setTimeout(() => {
+          api.get('/auth/me').then(meR => {
+            if (meR.ok) {
+              return meR.json().then(meD => {
+                state.user = meD.user;
+                state.csrfToken = meD.csrfToken;
+                state.authError = '';
+                return Promise.all([loadChats(), loadModels(), loadTools(), loadUserPreferences()]).then(() => render());
+              });
+            }
+          }).catch(err => {
+            state.authError = 'OAuth error: ' + (err.message || err);
+            render();
+          });
+        }, 500);
+      }
+    }, 500);
+  } catch (err) {
+    state.authError = 'OAuth error: ' + (err.message || err);
+    render();
+  }
+}
+
 /* ── Chats ──────────────────────────────────── */
 async function loadChats(){
   const r = await api.get('/chats');
@@ -892,6 +962,8 @@ async function sendMessage(content){
           else if(d.type==='eval') assistantMsg.evalResult=d;
           else if(d.type==='cognitive') assistantMsg.cognitive=d;
           else if(d.type==='guardrail') assistantMsg.guardrail=d;
+          else if(d.type==='screenshot'){ if(!assistantMsg.screenshots) assistantMsg.screenshots=[]; assistantMsg.screenshots.push({base64:d.base64,format:d.format||'png'}); }
+          else if(d.type==='handoff'){ state.handoffRequest=d; render(); }
           else if(d.type==='done'){ assistantMsg.usage=d.usage; assistantMsg.cost=d.cost; assistantMsg.latency_ms=d.latencyMs; if(d.steps) assistantMsg.steps=d.steps; if(d.eval) assistantMsg.evalResult=d.eval; if(d.cognitive) assistantMsg.cognitive=d.cognitive; }
           else if(d.type==='error') assistantMsg.content += '\\n[Error: '+d.error+']';
         } catch{}
@@ -1184,12 +1256,28 @@ function renderMessages(){
       avatarEl = h('div',{className:'avatar'},aImg);
     }
 
+    // Render screenshots if any
+    let screenshotsEl = null;
+    if(!isUser && m.screenshots && m.screenshots.length){
+      const imgs = m.screenshots.map(function(s){
+        const img = document.createElement('img');
+        img.src = 'data:image/'+(s.format||'png')+';base64,'+s.base64;
+        img.className = 'screenshot-img';
+        img.style.cssText = 'max-width:100%;border-radius:8px;margin-top:8px;border:1px solid var(--border);cursor:pointer;';
+        img.onclick = function(){ window.open(img.src, '_blank'); };
+        img.title = 'Click to open full size';
+        return img;
+      });
+      screenshotsEl = h('div',{className:'screenshots'},...imgs);
+    }
+
     const msgEl = h('div',{className:'msg '+(isUser?'user':'assistant')},
       avatarEl,
       h('div',{className:'msg-body'},
         corner,
         ...extras,
         bubbleEl,
+        screenshotsEl,
         toolbar,
         !isUser && m.usage ? h('div',{className:'meta'},
           h('span',null,'\\u{1F4CA} '+m.usage.totalTokens+' tok'),
@@ -1218,6 +1306,11 @@ function renderAuth(){
         if(isLogin) doLogin(email,pass);
         else doRegister($('#auth-name').value,email,pass);
       }},isLogin?'Sign In':'Create Account'),
+      h('div',{className:'divider'},h('div',{className:'line'}),h('span',null,'or'),h('div',{className:'line'})),
+      h('div',{className:'oauth-btns'},
+        h('button',{className:'oauth-btn',onClick:()=>initiateOAuthFlow('google'),title:'Sign in with Google'},h('span',null,'🔷'),'Google'),
+        h('button',{className:'oauth-btn',onClick:()=>initiateOAuthFlow('github'),title:'Sign in with GitHub'},h('span',null,'⬛'),'GitHub')
+      ),
       h('div',{className:'err'},state.authError),
       h('div',{className:'toggle'},
         isLogin?'No account? ':'Already have an account? ',
@@ -1892,6 +1985,9 @@ async function loadConnectors(){
   }
   state.connectorsLoading=false;
   render();
+  loadCredentials();
+  loadSSOProviders();
+  loadOAuthAccounts();
 }
 
 function getConnectorStatus(def){
@@ -2013,6 +2109,473 @@ function renderConnectorCard(def){
   return card;
 }
 
+/* ── Website Credentials ────────────────────── */
+
+async function loadCredentials(){
+  try{
+    var r = await api.get('/credentials');
+    var data = await r.json();
+    state.credentials = data.credentials || [];
+  }catch(e){ state.credentials = []; }
+  render();
+}
+
+async function saveCredential(){
+  var f = state.credentialForm;
+  if(!f) return;
+  if(!f.siteName||!f.siteUrlPattern||!f.authMethod){
+    alert('Site Name, URL Pattern, and Auth Method are required.');
+    return;
+  }
+  var config = {method:f.authMethod};
+  if(f.authMethod==='form_fill'){
+    config.username = f.username||'';
+    config.password = f.password||'';
+    if(f.usernameSelector||f.passwordSelector||f.submitSelector){
+      config.selectors = {};
+      if(f.usernameSelector) config.selectors.username = f.usernameSelector;
+      if(f.passwordSelector) config.selectors.password = f.passwordSelector;
+      if(f.submitSelector) config.selectors.submit = f.submitSelector;
+    }
+  } else if(f.authMethod==='header'){
+    config.headerValue = f.headerValue||'';
+  } else if(f.authMethod==='cookie'){
+    try{ config.cookies = JSON.parse(f.cookiesJson||'[]'); }catch(e){ alert('Invalid cookies JSON'); return; }
+  }
+
+  try{
+    if(state.credentialEditing){
+      await api.put('/credentials/'+state.credentialEditing, {
+        siteName:f.siteName,
+        siteUrlPattern:f.siteUrlPattern,
+        authMethod:f.authMethod,
+        config:config,
+      });
+    } else {
+      await api.post('/credentials', {
+        siteName:f.siteName,
+        siteUrlPattern:f.siteUrlPattern,
+        authMethod:f.authMethod,
+        config:config,
+      });
+    }
+    state.credentialForm = null;
+    state.credentialEditing = null;
+    await loadCredentials();
+  }catch(e){ alert('Failed to save: '+(e.message||e)); }
+}
+
+async function deleteCredential(id){
+  if(!confirm('Delete this credential? This cannot be undone.')) return;
+  try{
+    await api.del('/credentials/'+id);  // api helper prepends /api
+    await loadCredentials();
+  }catch(e){ alert('Failed to delete: '+(e.message||e)); }
+}
+
+/* ── External Password Manager Import ────────── */
+
+async function loadPasswordProviders(){
+  try{
+    var r = await api.get('/password-providers');
+    state.importProviders = await r.json();
+  }catch(e){ state.importProviders = []; }
+  render();
+}
+
+async function runPasswordImport(){
+  if(!state.importProvider) return;
+  state.importLoading = true;
+  state.importResult = null;
+  render();
+  try{
+    var body = { provider: state.importProvider, config: state.importConfig || {}, search:'' };
+    var r = await api.post('/password-providers/import', body);
+    var data = await r.json();
+    if(!r.ok){ state.importResult = { error: data.error || 'Import failed' }; }
+    else { state.importResult = data; }
+    await loadCredentials();
+  }catch(e){
+    state.importResult = { error: e.message || String(e) };
+  }
+  state.importLoading = false;
+  render();
+}
+
+function renderImportPanel(){
+  var panel = h('div',{style:'background:linear-gradient(135deg,#EEF2FF,#F0FDFA);border:1px solid #C7D2FE;border-radius:12px;padding:20px;margin-bottom:20px'});
+  panel.appendChild(h('div',{style:'display:flex;justify-content:space-between;align-items:center;margin-bottom:16px'},
+    h('div',{style:'font-weight:700;font-size:15px;color:#1E293B'},'\u{1F4E5} Import from Password Manager'),
+    h('button',{style:'background:none;border:none;cursor:pointer;font-size:18px;color:#64748B',onClick:function(){
+      state.importShow=false; state.importProvider=null; state.importConfig={}; state.importResult=null;
+      render();
+    }},'\u2715')
+  ));
+
+  // Provider selection cards
+  if(!state.importProviders){
+    panel.appendChild(h('div',{style:'color:#64748B;font-size:13px'},'Loading providers…'));
+    loadPasswordProviders();
+    return panel;
+  }
+
+  if(!state.importProvider){
+    var grid = h('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px'});
+    var icons = {'1password':'\u{1F511}','bitwarden':'\u{1F6E1}\uFE0F','apple_keychain':'\u{1F34E}','chrome':'\u{1F310}','csv':'\u{1F4C4}'};
+    var labels = {'1password':'1Password','bitwarden':'Bitwarden','apple_keychain':'Apple Keychain','chrome':'Chrome Passwords','csv':'CSV Import'};
+    (state.importProviders||[]).forEach(function(p){
+      var isAvail = p.available;
+      var card = h('div',{style:'background:'+(isAvail?'#fff':'#F8FAFC')+';border:1px solid '+(isAvail?'#D1D5DB':'#E5E7EB')+';border-radius:10px;padding:14px;text-align:center;cursor:'+(isAvail?'pointer':'not-allowed')+';opacity:'+(isAvail?'1':'0.6')+';transition:all .15s',
+        onClick:isAvail?function(){ state.importProvider=p.provider; state.importConfig={}; render(); }:null},
+        h('div',{style:'font-size:28px;margin-bottom:6px'},icons[p.provider]||'\u{1F511}'),
+        h('div',{style:'font-size:13px;font-weight:600;color:#1E293B'},labels[p.provider]||p.provider),
+        h('div',{style:'font-size:10px;color:'+(isAvail?'#16A34A':'#DC2626')+';margin-top:4px'},isAvail?(p.version||'Available'):'Not available')
+      );
+      if(isAvail){
+        card.addEventListener('mouseenter',function(){this.style.borderColor='#6366F1';this.style.boxShadow='0 0 0 2px rgba(99,102,241,.15)';});
+        card.addEventListener('mouseleave',function(){this.style.borderColor='#D1D5DB';this.style.boxShadow='none';});
+      }
+      if(!isAvail && p.reason){
+        card.setAttribute('title',p.reason);
+      }
+      grid.appendChild(card);
+    });
+    panel.appendChild(grid);
+    return panel;
+  }
+
+  // Provider-specific config form
+  var selected = state.importProvider;
+  panel.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:14px'},
+    h('button',{style:'background:none;border:none;cursor:pointer;font-size:14px;color:#6366F1',onClick:function(){ state.importProvider=null; state.importResult=null; render(); }},'\u2190 Back'),
+    h('span',{style:'font-weight:600;font-size:14px;color:#1E293B'},(labels||{})[selected]||selected)
+  ));
+
+  var configArea = h('div',{style:'display:grid;gap:10px;margin-bottom:14px'});
+
+  if(selected==='1password'){
+    configArea.appendChild(renderImportField('Service Account Token','serviceAccountToken','Paste your OP_SERVICE_ACCOUNT_TOKEN',true));
+  } else if(selected==='bitwarden'){
+    configArea.appendChild(renderImportField('Master Password','password','Your Bitwarden master password',true));
+    configArea.appendChild(renderImportField('Client ID (optional)','clientId','BW_CLIENTID'));
+    configArea.appendChild(renderImportField('Client Secret (optional)','clientSecret','BW_CLIENTSECRET'));
+  } else if(selected==='csv'){
+    var ta = h('textarea',{style:'width:100%;height:120px;padding:10px;border:1px solid #D1D5DB;border-radius:8px;font-size:12px;font-family:monospace;box-sizing:border-box;resize:vertical',
+      placeholder:'Paste your CSV export here…\\n\\nSupported formats: Chrome, Firefox, Bitwarden, 1Password, LastPass CSV exports.',
+      onInput:function(){ state.importConfig.csvContent = this.value; }
+    });
+    if(state.importConfig.csvContent) ta.value = state.importConfig.csvContent;
+    configArea.appendChild(h('div',null,
+      h('label',{style:'display:block;font-size:12px;font-weight:600;color:#64748B;margin-bottom:4px'},'CSV Content'),
+      ta
+    ));
+  }
+  // apple_keychain and chrome need no config
+
+  panel.appendChild(configArea);
+
+  // Import button + result
+  var btnRow = h('div',{style:'display:flex;align-items:center;gap:12px'});
+  var importBtn = h('button',{className:'nav-btn active',style:'font-size:13px;padding:8px 20px',disabled:state.importLoading,
+    onClick:function(){ runPasswordImport(); }
+  },state.importLoading?'Importing…':'\u{1F4E5} Import Credentials');
+  btnRow.appendChild(importBtn);
+
+  if(state.importResult){
+    if(state.importResult.error){
+      btnRow.appendChild(h('span',{style:'font-size:12px;color:#DC2626'},'\u274C '+state.importResult.error));
+    } else {
+      btnRow.appendChild(h('span',{style:'font-size:12px;color:#16A34A'},'\u2705 Imported '+state.importResult.imported+' of '+state.importResult.total+' credentials'));
+    }
+  }
+  panel.appendChild(btnRow);
+
+  return panel;
+}
+
+function renderImportField(label,key,placeholder,isSecret){
+  return h('div',null,
+    h('label',{style:'display:block;font-size:12px;font-weight:600;color:#64748B;margin-bottom:4px'},label),
+    h('input',{type:isSecret?'password':'text',value:state.importConfig[key]||'',placeholder:placeholder||'',
+      style:'width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:13px;box-sizing:border-box',
+      onInput:function(){ state.importConfig[key]=this.value; }
+    })
+  );
+}
+
+/* ── SSO Pass-Through (Identity Provider Sessions) ────────── */
+
+async function loadSSOProviders(){
+  try{
+    var r = await api.get('/sso/providers');
+    var data = await r.json();
+    state.ssoProviders = data.providers || [];
+  }catch(e){ state.ssoProviders = []; }
+  render();
+}
+
+async function unlinkSSOProvider(provider){
+  if(!confirm('Unlink '+provider+' from SSO? Future OAuth logins to sites using '+provider+' will require manual authentication.')) return;
+  try{
+    await api.del('/sso/providers/'+provider);
+    await loadSSOProviders();
+  }catch(e){ alert('Failed to unlink: '+(e.message||e)); }
+}
+
+function renderSSOProviders(){
+  var section = h('div',{style:'background:#F0F9FF;border:1px solid #BAE6FD;border-radius:12px;padding:16px;margin-bottom:20px'});
+  section.appendChild(h('div',{style:'font-weight:700;font-size:14px;margin-bottom:12px;color:#0369A1'},'\u{1F517} Linked SSO Providers'));
+  
+  if(!state.ssoProviders){
+    section.appendChild(h('div', { style: 'font-size:12px;color:#64748B' }, 'Loading…'));
+    loadSSOProviders();
+    return section;
+  }
+
+  if(state.ssoProviders.length === 0){
+    section.appendChild(h('div',{style:'font-size:12px;color:#64748B'},'No linked identity providers yet. Use browser_capture_sso or click "Link Provider" to add one.'));
+    return section;
+  }
+
+  var grid = h('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px'});
+  var icons = {google:'\u{1F518}',github:'\u{26A1}',microsoft:'\u{1F309}',apple:'\u{1F34E}',facebook:'\u{1F4C4}'};
+  state.ssoProviders.forEach(function(p){
+    var card = h('div',{style:'background:#fff;border:1px solid #BAE6FD;border-radius:10px;padding:12px;display:flex;align-items:center;justify-content:space-between'});
+    card.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px'},
+      h('span',{style:'font-size:24px'},icons[p.identity_provider]||'\u{1F4D1}'),
+      h('div',null,
+        h('div',{style:'font-weight:600;font-size:13px;color:#1E293B;text-transform:capitalize'},p.identity_provider),
+        h('div', {style: 'font-size:11px;color:#64748B'}, p.email ? ('Signed in as ' + p.email) : 'Captured ' + (p.linked_at ? new Date(p.linked_at).toLocaleDateString() : 'recently'))
+      )
+    ));
+    card.appendChild(h('button',{style:'background:#EF4444;color:white;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600',
+      onClick:function(){ unlinkSSOProvider(p.identity_provider); }
+    },'\u274C Unlink'));
+    grid.appendChild(card);
+  });
+  section.appendChild(grid);
+  return section;
+}
+
+async function loadOAuthAccounts(){
+  try{
+    var r = await api.get('/oauth/accounts');
+    var data = await r.json();
+    state.oauthAccounts = data.accounts || [];
+  }catch(e){ state.oauthAccounts = []; }
+  render();
+}
+
+async function unlinkOAuthAccount(provider){
+  if(!confirm('Unlink '+provider+' account? You won\\\'t be able to sign in with '+provider+' in the future.')) return;
+  try{
+    const r = await api.post('/oauth/accounts/'+provider+'/unlink', {});
+    if(r.ok) await loadOAuthAccounts();
+    else alert('Failed to unlink account');
+  }catch(e){ alert('Failed to unlink: '+(e.message||e)); }
+}
+
+function renderOAuthAccounts(){
+  var section = h('div',{style:'background:#FEF3C7;border:1px solid #FCD34D;border-radius:12px;padding:16px;margin-bottom:20px'});
+  section.appendChild(h('div',{style:'font-weight:700;font-size:14px;margin-bottom:12px;color:#92400E'},'\u{1F512} Linked OAuth Accounts'));
+  
+  if(!state.oauthAccounts){
+    section.appendChild(h('div', { style: 'font-size:12px;color:#64748B' }, 'Loading…'));
+    loadOAuthAccounts();
+    return section;
+  }
+
+  if(state.oauthAccounts.length === 0){
+    section.appendChild(h('div',{style:'font-size:12px;color:#64748B'},'No linked OAuth accounts. You can link social accounts for quick sign-in.'));
+    return section;
+  }
+
+  var grid = h('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px'});
+  var icons = {google:'\u{1F518}',github:'\u{26A1}',microsoft:'\u{1F309}',apple:'\u{1F34E}',facebook:'\u{1F4C4}'};
+  state.oauthAccounts.forEach(function(acc){
+    var card = h('div',{style:'background:#fff;border:1px solid #FCD34D;border-radius:10px;padding:12px;display:flex;align-items:center;justify-content:space-between'});
+    card.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;flex:1;min-width:0'},
+      acc.picture_url ? h('img',{src:acc.picture_url,style:'width:32px;height:32px;border-radius:50%;object-fit:cover'}) : h('span',{style:'font-size:24px'},icons[acc.provider]||'\u{1F4D1}'),
+      h('div',{style:'min-width:0'},
+        h('div',{style:'font-weight:600;font-size:13px;color:#1E293B;text-transform:capitalize;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'},acc.name||acc.email),
+        h('div', {style: 'font-size:11px;color:#64748B;text-transform:capitalize;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'}, acc.provider + ' • ' + (acc.last_used_at ? 'Last used ' + new Date(acc.last_used_at).toLocaleDateString() : 'Never used'))
+      )
+    ));
+    card.appendChild(h('button',{style:'background:#EF4444;color:white;border:none;border-radius:6px;padding:6px 10px;cursor:pointer;font-size:11px;font-weight:600;flex-shrink:0',
+      onClick:function(){ unlinkOAuthAccount(acc.provider); }
+    },'\u274C Unlink'));
+    grid.appendChild(card);
+  });
+  section.appendChild(grid);
+  return section;
+}
+
+function renderCredentialForm(){
+  var f = state.credentialForm || {};
+  var isEdit = !!state.credentialEditing;
+
+  var form = h('div',{style:'background:var(--bg2);border:1px solid #E5E7EB;border-radius:12px;padding:20px;margin-bottom:20px'});
+  form.appendChild(h('div',{style:'font-weight:700;font-size:15px;margin-bottom:16px;color:#1E293B'}, isEdit ? '\\u270F\\uFE0F Edit Credential' : '\\u2795 New Website Credential'));
+
+  var grid = h('div',{style:'display:grid;grid-template-columns:1fr 1fr;gap:12px'});
+
+  // Site Name
+  grid.appendChild(h('div',null,
+    h('label',{style:'display:block;font-size:12px;font-weight:600;color:#64748B;margin-bottom:4px'},'Site Name'),
+    h('input',{type:'text',value:f.siteName||'',placeholder:'e.g. GitHub',style:'width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:13px;box-sizing:border-box',onInput:function(){ f.siteName=this.value; }})
+  ));
+
+  // URL Pattern
+  grid.appendChild(h('div',null,
+    h('label',{style:'display:block;font-size:12px;font-weight:600;color:#64748B;margin-bottom:4px'},'URL Pattern'),
+    h('input',{type:'text',value:f.siteUrlPattern||'',placeholder:'e.g. *.github.com/*',style:'width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:13px;box-sizing:border-box',onInput:function(){ f.siteUrlPattern=this.value; }})
+  ));
+
+  // Auth Method
+  var sel = h('select',{style:'width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:13px;box-sizing:border-box;background:white',onChange:function(){ f.authMethod=this.value; state.credentialForm=f; render(); }});
+  [['form_fill','Form Fill (Username/Password)'],['cookie','Cookie Injection'],['header','Authorization Header']].forEach(function(opt){
+    var o = h('option',{value:opt[0]},opt[1]);
+    if(f.authMethod===opt[0]) o.selected = true;
+    sel.appendChild(o);
+  });
+  grid.appendChild(h('div',{style:'grid-column:1/-1'},
+    h('label',{style:'display:block;font-size:12px;font-weight:600;color:#64748B;margin-bottom:4px'},'Auth Method'),
+    sel
+  ));
+
+  // Method-specific fields
+  if(f.authMethod==='form_fill'){
+    grid.appendChild(h('div',null,
+      h('label',{style:'display:block;font-size:12px;font-weight:600;color:#64748B;margin-bottom:4px'},'Username'),
+      h('input',{type:'text',value:f.username||'',placeholder:'username or email',style:'width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:13px;box-sizing:border-box',onInput:function(){ f.username=this.value; },autocomplete:'off'})
+    ));
+    grid.appendChild(h('div',null,
+      h('label',{style:'display:block;font-size:12px;font-weight:600;color:#64748B;margin-bottom:4px'},'Password'),
+      h('input',{type:'password',value:f.password||'',placeholder:'\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022\\u2022',style:'width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:13px;box-sizing:border-box',onInput:function(){ f.password=this.value; },autocomplete:'new-password'})
+    ));
+    grid.appendChild(h('div',{style:'grid-column:1/-1'},
+      h('label',{style:'display:block;font-size:12px;font-weight:600;color:#64748B;margin-bottom:4px'},'CSS Selectors (optional)'),
+      h('div',{style:'display:flex;gap:8px'},
+        h('input',{type:'text',value:f.usernameSelector||'',placeholder:'Username selector',style:'flex:1;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px;box-sizing:border-box',onInput:function(){ f.usernameSelector=this.value; }}),
+        h('input',{type:'text',value:f.passwordSelector||'',placeholder:'Password selector',style:'flex:1;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px;box-sizing:border-box',onInput:function(){ f.passwordSelector=this.value; }}),
+        h('input',{type:'text',value:f.submitSelector||'',placeholder:'Submit selector',style:'flex:1;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px;box-sizing:border-box',onInput:function(){ f.submitSelector=this.value; }})
+      )
+    ));
+  } else if(f.authMethod==='header'){
+    grid.appendChild(h('div',{style:'grid-column:1/-1'},
+      h('label',{style:'display:block;font-size:12px;font-weight:600;color:#64748B;margin-bottom:4px'},'Authorization Header Value'),
+      h('input',{type:'password',value:f.headerValue||'',placeholder:'Bearer eyJ...',style:'width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:13px;box-sizing:border-box',onInput:function(){ f.headerValue=this.value; },autocomplete:'off'})
+    ));
+  } else if(f.authMethod==='cookie'){
+    grid.appendChild(h('div',{style:'grid-column:1/-1'},
+      h('label',{style:'display:block;font-size:12px;font-weight:600;color:#64748B;margin-bottom:4px'},'Cookies JSON'),
+      h('textarea',{value:f.cookiesJson||'[{"name":"session","value":"...","domain":".example.com"}]',placeholder:'[{"name":"session","value":"...","domain":".example.com"}]',style:'width:100%;padding:8px 10px;border:1px solid #D1D5DB;border-radius:6px;font-size:12px;font-family:monospace;height:80px;resize:vertical;box-sizing:border-box',onInput:function(){ f.cookiesJson=this.value; }})
+    ));
+  }
+
+  form.appendChild(grid);
+
+  // Buttons
+  var btns = h('div',{style:'display:flex;gap:8px;margin-top:16px;justify-content:flex-end'});
+  btns.appendChild(h('button',{className:'nav-btn',style:'font-size:12px',onClick:function(){ state.credentialForm=null; state.credentialEditing=null; render(); }},'Cancel'));
+  btns.appendChild(h('button',{className:'nav-btn active',style:'font-size:12px',onClick:saveCredential}, isEdit ? 'Update' : 'Save'));
+  form.appendChild(btns);
+
+  return form;
+}
+
+function renderCredentialCard(cred){
+  var methodIcons = {form_fill:'\\u{1F4DD}', cookie:'\\u{1F36A}', header:'\\u{1F511}', oauth_flow:'\\u{1F310}'};
+  var methodLabels = {form_fill:'Form Fill', cookie:'Cookie', header:'Header Auth', oauth_flow:'OAuth Flow'};
+  var icon = methodIcons[cred.authMethod] || '\\u{1F512}';
+  var label = methodLabels[cred.authMethod] || cred.authMethod;
+  var active = cred.status==='active';
+
+  var card = h('div',{style:'background:var(--bg2);border:1px solid '+(active?'#BBF7D0':'#FED7AA')+';border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:10px;position:relative'});
+
+  card.appendChild(h('div',{style:'position:absolute;top:10px;right:10px;display:flex;align-items:center;gap:5px'},
+    h('span',{style:'width:7px;height:7px;border-radius:50%;background:'+(active?'#16A34A':'#F59E0B')+';display:inline-block'}),
+    h('span',{style:'font-size:10px;color:'+(active?'#16A34A':'#F59E0B')+';font-weight:500'},active?'Active':'Inactive')
+  ));
+
+  card.appendChild(h('div',{style:'display:flex;align-items:center;gap:10px'},
+    h('div',{style:'width:38px;height:38px;border-radius:8px;background:#E0F2FE;display:flex;align-items:center;justify-content:center;font-size:18px'},icon),
+    h('div',null,
+      h('div',{style:'font-weight:700;font-size:14px;color:var(--fg)'},cred.siteName),
+      h('div',{style:'font-size:11px;color:var(--fg3);margin-top:1px;font-family:monospace'},cred.siteUrlPattern)
+    )
+  ));
+
+  card.appendChild(h('div',{style:'display:flex;gap:8px;flex-wrap:wrap'},
+    h('span',{style:'font-size:10px;padding:3px 8px;background:#F1F5F9;border-radius:4px;color:#475569;font-weight:500'},label),
+    cred.lastUsedAt ? h('span',{style:'font-size:10px;padding:3px 8px;background:#F0FDF4;border-radius:4px;color:#166534'},'Last used: '+new Date(cred.lastUsedAt).toLocaleDateString()) : null
+  ));
+
+  var actions = h('div',{style:'display:flex;gap:6px;margin-top:auto;padding-top:4px'});
+  actions.appendChild(h('button',{className:'nav-btn',style:'font-size:11px;flex:1',onClick:function(){
+    state.credentialEditing = cred.id;
+    state.credentialForm = {
+      siteName:cred.siteName, siteUrlPattern:cred.siteUrlPattern,
+      authMethod:cred.authMethod, username:'', password:''
+    };
+    render();
+  }},'\\u270F\\uFE0F Edit'));
+  actions.appendChild(h('button',{className:'nav-btn',style:'font-size:11px;color:#DC2626;flex:1',onClick:function(){ deleteCredential(cred.id); }},'\\u{1F5D1} Delete'));
+  card.appendChild(actions);
+
+  return card;
+}
+
+function renderCredentialsSection(){
+  var section = h('div',{style:'margin-bottom:32px'});
+
+  section.appendChild(h('div',{style:'display:flex;justify-content:space-between;align-items:center;margin-bottom:16px'},
+    h('div',null,
+      h('h3',{style:'margin:0 0 4px;font-size:14px;font-weight:700;color:#1E293B'},'\\u{1F512} Website Credentials'),
+      h('p',{style:'margin:0;font-size:12px;color:#94A3B8'},'Stored credentials for browser auto-login. Encrypted at rest — passwords are never exposed.')
+    ),
+    h('div',{style:'display:flex;gap:8px'},
+      h('button',{className:'nav-btn',style:'font-size:12px',onClick:function(){
+        state.importShow=!state.importShow; state.importProvider=null; state.importConfig={}; state.importResult=null;
+        render();
+      }},'\u{1F4E5} Import'),
+      h('button',{className:'nav-btn active',style:'font-size:12px',onClick:function(){
+        state.credentialForm = { siteName:'', siteUrlPattern:'', authMethod:'form_fill', username:'', password:'' };
+        state.credentialEditing = null;
+        render();
+      }},'+ Add Credential')
+    )
+  ));
+
+  if(state.importShow){
+    section.appendChild(renderImportPanel());
+  }
+
+  if(state.credentialForm){
+    section.appendChild(renderCredentialForm());
+  }
+
+  if(state.credentials.length){
+    var grid = h('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px'});
+    state.credentials.forEach(function(c){ grid.appendChild(renderCredentialCard(c)); });
+    section.appendChild(grid);
+  } else if(!state.credentialForm){
+    section.appendChild(h('div',{style:'text-align:center;padding:32px;color:#94A3B8;background:var(--bg2);border-radius:12px;border:1px dashed #E5E7EB'},
+      h('div',{style:'font-size:24px;margin-bottom:8px'},'\\u{1F512}'),
+      h('div',{style:'font-size:13px'},'No website credentials stored yet.'),
+      h('div',{style:'font-size:11px;margin-top:4px'},'Add credentials so the browser agent can auto-login to sites.')
+    ));
+  }
+
+  // SSO Linked Providers section
+  section.appendChild(renderSSOProviders());
+
+  // OAuth Linked Accounts section
+  section.appendChild(renderOAuthAccounts());
+
+  return section;
+}
+
 function renderConnectors(){
   var view = h('div',{style:'display:flex;flex-direction:column;flex:1;overflow:hidden'});
 
@@ -2053,6 +2616,9 @@ function renderConnectors(){
   var grid2 = h('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-bottom:32px'});
   socialDefs.forEach(function(d){ grid2.appendChild(renderConnectorCard(d)); });
   content.appendChild(grid2);
+
+  /* Website Credentials section */
+  content.appendChild(renderCredentialsSection());
 
   /* Environment vars info */
   content.appendChild(h('div',{style:'background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:16px;margin-top:8px'},
@@ -2142,6 +2708,39 @@ function renderAdmin(){
 
 function renderChatView(){
   const view = h('div',{className:'chat-view'});
+
+  /* ── Handoff notification banner ─── */
+  if(state.handoffRequest){
+    var ho = state.handoffRequest;
+    var banner = h('div',{style:'background:#FEF3C7;border:1px solid #FCD34D;border-radius:10px;margin:12px 16px 0;padding:14px 18px;display:flex;flex-direction:column;gap:10px;flex-shrink:0'});
+    banner.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px'},
+      h('span',{style:'font-size:20px'},'\\u{1F6A8}'),
+      h('div',{style:'flex:1'},
+        h('div',{style:'font-weight:700;font-size:14px;color:#92400E'},'Browser Handoff Requested'),
+        h('div',{style:'font-size:12px;color:#78350F;margin-top:2px'},ho.reason||'The agent needs you to complete an action in the browser.')
+      )
+    ));
+    if(ho.url){
+      banner.appendChild(h('div',{style:'font-size:11px;color:#78350F;font-family:monospace;background:#FDE68A;padding:4px 8px;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'},'\\u{1F517} '+ho.url));
+    }
+    if(ho.screenshot){
+      var img = h('img',{src:'data:image/png;base64,'+ho.screenshot,style:'max-width:100%;max-height:200px;border-radius:6px;border:1px solid #FCD34D'});
+      banner.appendChild(img);
+    }
+    var hoBtns = h('div',{style:'display:flex;gap:8px'});
+    hoBtns.appendChild(h('button',{className:'nav-btn active',style:'font-size:12px;background:#059669;border-color:#059669;color:white',onClick:function(){
+      var msg = 'Resume the browser session' + (ho.sessionId ? ' (session: '+ho.sessionId+')' : '') + (ho.taskId ? ' (task: '+ho.taskId+')' : '');
+      state.handoffRequest = null;
+      render();
+      sendMessage(msg);
+    }},'\\u2705 I\\'m Done — Resume Agent'));
+    hoBtns.appendChild(h('button',{className:'nav-btn',style:'font-size:12px',onClick:function(){
+      state.handoffRequest = null;
+      render();
+    }},'Dismiss'));
+    banner.appendChild(hoBtns);
+    view.appendChild(banner);
+  }
 
   /* ── Messages ─── */
   const msgContainer = h('div',{className:'messages'});

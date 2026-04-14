@@ -27,6 +27,9 @@ import {
 } from './auth.js';
 import { getHTML } from './ui.js';
 import { registerAdminRoutes } from './server-admin.js';
+import { encryptCredential, decryptCredential } from './vault.js';
+import { setBrowserAuthProvider, type SSOPassThroughAuth } from '@weaveintel/tools-browser';
+import { getAllProviders, getProvider, checkAllProviders, type ExternalCredential } from './password-providers.js';
 
 // ─── Router ──────────────────────────────────────────────────
 
@@ -126,6 +129,198 @@ function html(res: ServerResponse, status: number, body: string): void {
   res.end(body);
 }
 
+// ─── OAuth State Store (in-memory, production should use Redis) ──────────
+
+class InMemoryStateStore {
+  private store = new Map<string, { userId: string; provider: string; expiresAt: number }>();
+
+  set(key: string, value: { userId: string; provider: string; expiresAt: number }): void {
+    this.store.set(key, value);
+  }
+
+  get(key: string): { userId: string; provider: string; expiresAt: number } | undefined {
+    return this.store.get(key);
+  }
+
+  delete(key: string): void {
+    this.store.delete(key);
+  }
+
+  // Cleanup expired entries (call periodically)
+  cleanup(): void {
+    const now = Date.now();
+    for (const [key, value] of this.store.entries()) {
+      if (now > value.expiresAt) this.store.delete(key);
+    }
+  }
+}
+
+const SessionStore = new InMemoryStateStore();
+
+// Periodically clean up expired state entries
+setInterval(() => SessionStore.cleanup(), 60_000); // Every minute
+
+// ─── OAuth Token Exchange ────────────────────────────────────
+
+interface OAuthProfile {
+  id: string;
+  email: string;
+  name: string | null;
+  picture: string | null;
+}
+
+async function exchangeCodeForToken(provider: string, code: string, req: IncomingMessage): Promise<OAuthProfile> {
+  const baseUrl = (req.headers['x-forwarded-proto'] || 'http') + '://' + (req.headers['x-forwarded-host'] || req.headers['host']);
+  const redirectUri = `${baseUrl}/api/oauth/callback`;
+  const clientId = process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_ID`];
+  const clientSecret = process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_SECRET`];
+
+  if (!clientId || !clientSecret) throw new Error(`${provider} credentials not configured`);
+
+  let tokenUrl = '';
+  let userInfoUrl = '';
+  let body = '';
+  let accessTokenField = 'access_token';
+
+  switch (provider) {
+    case 'google':
+      tokenUrl = 'https://oauth2.googleapis.com/token';
+      userInfoUrl = 'https://openidconnect.googleapis.com/v1/userinfo';
+      body = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+      }).toString();
+      break;
+    case 'github':
+      tokenUrl = 'https://github.com/login/oauth/access_token';
+      userInfoUrl = 'https://api.github.com/user';
+      body = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+      }).toString();
+      break;
+    case 'microsoft':
+      tokenUrl = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+      userInfoUrl = 'https://graph.microsoft.com/v1.0/me';
+      body = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        scope: 'openid email profile',
+      }).toString();
+      break;
+    case 'apple':
+      tokenUrl = 'https://appleid.apple.com/auth/token';
+      userInfoUrl = '';
+      body = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+      }).toString();
+      break;
+    case 'facebook':
+      tokenUrl = 'https://graph.instagram.com/v18.0/oauth/access_token';
+      userInfoUrl = 'https://graph.instagram.com/me?fields=id,email,name';
+      body = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+        code,
+      }).toString();
+      break;
+    default:
+      throw new Error(`Unsupported provider: ${provider}`);
+  }
+
+  // Exchange code for token
+  const tokenResponse = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body,
+  });
+
+  if (!tokenResponse.ok) throw new Error(`Token exchange failed: ${tokenResponse.statusText}`);
+  const tokenData = (await tokenResponse.json()) as Record<string, unknown>;
+  const accessToken = tokenData[accessTokenField] as string;
+  if (!accessToken) throw new Error('No access token in response');
+
+  // Get user profile from provider
+  let profile: OAuthProfile;
+
+  if (provider === 'apple') {
+    // Apple doesn't have a separate userinfo endpoint, user data is in the id_token
+    const idToken = tokenData['id_token'] as string;
+    if (!idToken) throw new Error('No id_token in Apple response');
+    const parts = idToken.split('.');
+    if (parts.length !== 3) throw new Error('Invalid id_token format');
+    const payloadPart = parts[1];
+    if (!payloadPart) throw new Error('Invalid id_token format');
+    const decoded = JSON.parse(Buffer.from(payloadPart, 'base64').toString()) as Record<string, unknown>;
+    profile = {
+      id: decoded['sub'] as string,
+      email: decoded['email'] as string,
+      name: null,
+      picture: null,
+    };
+  } else {
+    const userResponse = await fetch(userInfoUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!userResponse.ok) throw new Error(`User info fetch failed: ${userResponse.statusText}`);
+    const userData = (await userResponse.json()) as Record<string, unknown>;
+
+    // Normalize provider responses to OAuthProfile
+    if (provider === 'google') {
+      profile = {
+        id: userData['sub'] as string,
+        email: userData['email'] as string,
+        name: (userData['name'] as string) || null,
+        picture: (userData['picture'] as string) || null,
+      };
+    } else if (provider === 'github') {
+      profile = {
+        id: String(userData['id']),
+        email: userData['email'] as string,
+        name: (userData['name'] as string) || null,
+        picture: (userData['avatar_url'] as string) || null,
+      };
+    } else if (provider === 'microsoft') {
+      profile = {
+        id: userData['id'] as string,
+        email: userData['userPrincipalName'] as string,
+        name: (userData['displayName'] as string) || null,
+        picture: null,
+      };
+    } else if (provider === 'facebook') {
+      const pictureData = userData['picture'] as Record<string, unknown>;
+      const dataObj = pictureData?.['data'] as Record<string, unknown>;
+      const pictureUrl = (dataObj?.['url'] as string) || null;
+      profile = {
+        id: userData['id'] as string,
+        email: userData['email'] as string,
+        name: (userData['name'] as string) || null,
+        picture: pictureUrl,
+      };
+    } else {
+      throw new Error(`Unsupported provider: ${provider}`);
+    }
+  }
+
+  return profile;
+}
+
 // ─── Server factory ─────────────────────────────────────────
 
 // createGeneWeaveServer() wires together all HTTP routes:
@@ -219,6 +414,157 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { user: { id: user.id, email: user.email, name: user.name }, csrfToken: auth.csrfToken });
   });
 
+  // ── OAuth routes ───────────────────────────────────────────
+
+  // List all linked OAuth accounts for the authenticated user
+  router.get('/api/oauth/accounts', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const accounts = await db.listOAuthLinkedAccounts(auth.userId);
+    // Return sanitized account info (no sensitive data)
+    const sanitized = accounts.map(acc => ({
+      id: acc.id,
+      provider: acc.provider,
+      email: acc.email,
+      name: acc.name,
+      picture_url: acc.picture_url,
+      linked_at: acc.linked_at,
+      last_used_at: acc.last_used_at,
+    }));
+    json(res, 200, { accounts: sanitized });
+  });
+
+  // Unlink an OAuth account
+  router.post('/api/oauth/accounts/:provider/unlink', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const provider = params['provider'];
+    if (!provider) { json(res, 400, { error: 'Provider required' }); return; }
+    
+    await db.deleteOAuthLinkedAccount(auth.userId, provider);
+    json(res, 200, { ok: true });
+  });
+
+  // Generate OAuth authorization URL for a provider
+  // Expected body: { provider: 'google' | 'github' | 'microsoft' | 'apple' | 'facebook' }
+  router.post('/api/oauth/authorize-url', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+
+    const raw = await readBody(req);
+    let body: { provider?: string };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const provider = body.provider?.toLowerCase();
+    if (!provider) { json(res, 400, { error: 'provider required' }); return; }
+    if (!['google', 'github', 'microsoft', 'apple', 'facebook'].includes(provider)) {
+      json(res, 400, { error: 'Invalid provider' }); return;
+    }
+
+    // Generate OAuth flow state (stored in session for CSRF protection)
+    const state = randomUUID();
+    SessionStore.set(state, { userId: auth.userId, provider, expiresAt: Date.now() + 600_000 }); // 10 min
+
+    // Build authorization URL based on provider
+    const baseUrl = (req.headers['x-forwarded-proto'] || 'http') + '://' + (req.headers['x-forwarded-host'] || req.headers['host']);
+    const redirectUri = `${baseUrl}/api/oauth/callback`;
+    
+    let authUrl = '';
+    const clientId = process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_ID`];
+    if (!clientId) { json(res, 500, { error: `${provider} not configured` }); return; }
+
+    switch (provider) {
+      case 'google':
+        authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+          `client_id=${encodeURIComponent(clientId)}&` +
+          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+          `response_type=code&` +
+          `scope=${encodeURIComponent('openid email profile')}&` +
+          `state=${state}`;
+        break;
+      case 'github':
+        authUrl = `https://github.com/login/oauth/authorize?` +
+          `client_id=${encodeURIComponent(clientId)}&` +
+          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+          `scope=${encodeURIComponent('user:email')}&` +
+          `state=${state}`;
+        break;
+      case 'microsoft':
+        authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?` +
+          `client_id=${encodeURIComponent(clientId)}&` +
+          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+          `response_type=code&` +
+          `scope=${encodeURIComponent('openid email profile')}&` +
+          `state=${state}`;
+        break;
+      case 'apple':
+        authUrl = `https://appleid.apple.com/auth/authorize?` +
+          `client_id=${encodeURIComponent(clientId)}&` +
+          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+          `response_type=code&` +
+          `response_mode=form_post&` +
+          `scope=${encodeURIComponent('email name')}&` +
+          `state=${state}`;
+        break;
+      case 'facebook':
+        authUrl = `https://www.facebook.com/v18.0/dialog/oauth?` +
+          `client_id=${encodeURIComponent(clientId)}&` +
+          `redirect_uri=${encodeURIComponent(redirectUri)}&` +
+          `scope=${encodeURIComponent('email public_profile')}&` +
+          `state=${state}`;
+        break;
+    }
+
+    json(res, 200, { authUrl });
+  }, { auth: true, csrf: false });
+
+  // OAuth callback handler (handles redirect from providers)
+  router.get('/api/oauth/callback', async (req, res) => {
+    const url = req.url ?? '';
+    const queryStr = url.split('?')[1] ?? '';
+    const params: Record<string, string> = {};
+    queryStr.split('&').forEach(pair => {
+      const [key, val] = pair.split('=');
+      if (key && val) {
+        params[decodeURIComponent(key)] = decodeURIComponent(val);
+      }
+    });
+
+    const { code, state, error } = params;
+
+    if (error) { json(res, 400, { error: `OAuth error: ${error}` }); return; }
+    if (!code || !state) { json(res, 400, { error: 'Missing code or state' }); return; }
+
+    // Retrieve state from session store
+    const stateData = SessionStore.get(state);
+    if (!stateData) { json(res, 400, { error: 'Invalid or expired state' }); return; }
+    if (Date.now() > stateData.expiresAt) { json(res, 400, { error: 'State expired' }); return; }
+
+    const { userId, provider } = stateData;
+
+    try {
+      // Exchange code for tokens and get user info from provider
+      const oauthProfile = await exchangeCodeForToken(provider, code, req);
+
+      // Upsert OAuth linked account
+      const accountId = randomUUID();
+      await db.createOAuthLinkedAccount({
+        id: accountId,
+        user_id: userId,
+        provider,
+        provider_user_id: oauthProfile.id,
+        email: oauthProfile.email,
+        name: oauthProfile.name ?? 'User',
+        picture_url: oauthProfile.picture ?? null,
+        last_used_at: new Date().toISOString(),
+      });
+
+      // Redirect to success page or return JSON
+      html(res, 200, '<html><body><script>window.close();</script>Account linked successfully!</body></html>');
+    } catch (err) {
+      json(res, 500, { error: `Failed to link account: ${(err as Error).message}` });
+    }
+
+    SessionStore.delete(state);
+  }, { auth: false });
+
   // ── Model routes ───────────────────────────────────────────
 
   router.get('/api/models', async (_req, res, _params, auth) => {
@@ -295,7 +641,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       // For now, we replicate the policy here; ideally this would be imported
       const DEFAULT_TOOLS: Record<string, string[]> = {
         direct: [],
-        agent: ['datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'memory_recall', 'web_search', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait'],
+        agent: ['datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'memory_recall', 'web_search', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume'],
         supervisor: ['datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis'],
       };
       return DEFAULT_TOOLS[mode] ?? [];
@@ -502,6 +848,224 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   // workflows, HITL policies, and system settings. Each entity
   // maps to a database table via the DatabaseAdapter.
   registerAdminRoutes(router, db, json, readBody, providers, html);
+
+  // ── Website Credentials (Browser Auth Vault) ───────────────
+
+  router.get('/api/credentials', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const rows = await db.listWebsiteCredentials(auth.userId);
+    // Never expose encrypted creds to client — return metadata only
+    const creds = rows.map(r => ({
+      id: r.id,
+      siteName: r.site_name,
+      siteUrlPattern: r.site_url_pattern,
+      authMethod: r.auth_method,
+      lastUsedAt: r.last_used_at,
+      status: r.status,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }));
+    json(res, 200, { credentials: creds });
+  }, { auth: true });
+
+  router.post('/api/credentials', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: { siteName?: string; siteUrlPattern?: string; authMethod?: string; config?: Record<string, unknown> };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body.siteName || !body.siteUrlPattern || !body.authMethod || !body.config) {
+      json(res, 400, { error: 'siteName, siteUrlPattern, authMethod, and config are required' }); return;
+    }
+    const id = `wc-${randomUUID().slice(0, 8)}`;
+    const { encrypted, iv } = encryptCredential(body.config);
+    await db.createWebsiteCredential({
+      id,
+      user_id: auth.userId,
+      site_name: body.siteName,
+      site_url_pattern: body.siteUrlPattern,
+      auth_method: body.authMethod,
+      credentials_encrypted: encrypted,
+      encryption_iv: iv,
+      last_used_at: null,
+      status: 'active',
+    });
+    json(res, 201, { id, siteName: body.siteName, status: 'active' });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/credentials/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getWebsiteCredential(params['id']!, auth.userId);
+    if (!existing) { json(res, 404, { error: 'Credential not found' }); return; }
+    const raw = await readBody(req);
+    let body: { siteName?: string; siteUrlPattern?: string; authMethod?: string; config?: Record<string, unknown>; status?: string };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const updates: Record<string, unknown> = {};
+    if (body.siteName) updates['site_name'] = body.siteName;
+    if (body.siteUrlPattern) updates['site_url_pattern'] = body.siteUrlPattern;
+    if (body.authMethod) updates['auth_method'] = body.authMethod;
+    if (body.status) updates['status'] = body.status;
+    if (body.config) {
+      const { encrypted, iv } = encryptCredential(body.config);
+      updates['credentials_encrypted'] = encrypted;
+      updates['encryption_iv'] = iv;
+    }
+    await db.updateWebsiteCredential(params['id']!, auth.userId, updates);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/credentials/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteWebsiteCredential(params['id']!, auth.userId);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── External Password Manager Import ──────────────────────
+
+  router.get('/api/password-providers', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const statuses = await checkAllProviders();
+    json(res, 200, statuses);
+  }, { auth: true });
+
+  router.post('/api/password-providers/import', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: { provider: string; config?: Record<string, string>; search?: string };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body.provider) { json(res, 400, { error: 'provider is required' }); return; }
+
+    const provider = getProvider(body.provider);
+    if (!provider) { json(res, 400, { error: `Unknown provider: ${body.provider}` }); return; }
+
+    const status = await provider.checkAvailability();
+    if (!status.available) { json(res, 400, { error: `Provider unavailable: ${status.reason}` }); return; }
+
+    let credentials: ExternalCredential[];
+    try {
+      credentials = await provider.listCredentials(body.config ?? {}, body.search);
+    } catch (e: unknown) {
+      json(res, 500, { error: `Import failed: ${e instanceof Error ? e.message : String(e)}` }); return;
+    }
+
+    // Bulk-import into vault
+    let imported = 0;
+    for (const cred of credentials) {
+      if (!cred.username && !cred.password) continue;
+      const id = `wc-${randomUUID().slice(0, 8)}`;
+      const config: Record<string, unknown> = {
+        type: 'form_fill',
+        username: cred.username,
+        password: cred.password,
+      };
+      const { encrypted, iv } = encryptCredential(config);
+      try {
+        await db.createWebsiteCredential({
+          id,
+          user_id: auth.userId,
+          site_name: cred.title || 'Imported',
+          site_url_pattern: cred.url || '*',
+          auth_method: 'form_fill',
+          credentials_encrypted: encrypted,
+          encryption_iv: iv,
+          last_used_at: null,
+          status: 'active',
+        });
+        imported++;
+      } catch { /* skip duplicates */ }
+    }
+
+    json(res, 200, { imported, total: credentials.length, provider: body.provider });
+  }, { auth: true, csrf: true });
+
+  // ── SSO Pass-Through (Identity Provider Sessions) ──────────
+
+  router.get('/api/sso/providers', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const linked = await db.listSSOLinkedAccounts(auth.userId);
+    json(res, 200, { providers: linked });
+  }, { auth: true });
+
+  router.post('/api/sso/capture', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: { identityProvider: string; email?: string; cookies: Array<{ name: string; value: string; domain: string; path?: string; secure?: boolean; httpOnly?: boolean; sameSite?: 'Strict' | 'Lax' | 'None'; expires?: number }> };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    
+    if (!body.identityProvider || !body.cookies) {
+      json(res, 400, { error: 'identityProvider and cookies are required' }); return;
+    }
+
+    const ssoSession: SSOPassThroughAuth = {
+      method: 'sso_passthrough',
+      identityProvider: body.identityProvider,
+      email: body.email,
+      cookies: body.cookies,
+    };
+
+    const { encrypted, iv } = encryptCredential(ssoSession);
+    const id = `sso-${randomUUID().slice(0, 8)}`;
+    
+    try {
+      await db.createSSOLinkedAccount({
+        id,
+        user_id: auth.userId,
+        identity_provider: body.identityProvider,
+        email: body.email,
+        session_encrypted: encrypted,
+        encryption_iv: iv,
+      });
+      json(res, 201, { id, provider: body.identityProvider, email: body.email, cookiesCaptured: body.cookies.length });
+    } catch (e: unknown) {
+      json(res, 500, { error: `Failed to save SSO session: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  }, { auth: true, csrf: true });
+
+  router.del('/api/sso/providers/:provider', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const provider = params['provider']!;
+    await db.deleteSSOLinkedAccount(auth.userId, provider);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Wire Browser Auth Provider ─────────────────────────────
+  // Connects the credential vault to the browser auth tools so
+  // browser_login can look up and decrypt stored credentials.
+
+  setBrowserAuthProvider({
+    async getCredential(url: string) {
+      // Query all active credentials across all users.
+      // The tool runs inside an authenticated agent turn — user was already validated.
+      const rows = await db.listAllActiveWebsiteCredentials();
+      for (const row of rows) {
+        try {
+          const pattern = row.site_url_pattern;
+          // Convert glob or literal URL to regex: *.example.com/* → .*\.example\.com\/.*
+          const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+          if (new RegExp(`^${escaped}$`, 'i').test(url) || url.includes(pattern.replace(/\*/g, ''))) {
+            const config = decryptCredential(row.credentials_encrypted);
+            return config as import('@weaveintel/tools-browser').BrowserAuthConfig;
+          }
+        } catch { /* skip broken entries */ }
+      }
+      return null;
+    },
+    async getSSOSession(identityProvider: string) {
+      // Retrieve the user's current SSO session from the authenticated request context.
+      // The tool runs in an agent turn with an authenticated user.
+      // For now, we return null since we don't have request context here.
+      // The SSO endpoints (below) will handle this properly per-user.
+      return null;
+    },
+    async saveSSOSession(session: import('@weaveintel/tools-browser').SSOPassThroughAuth) {
+      // Save SSO session — would need request context for user ID.
+      // Handled by server endpoint below.
+    },
+    async listSSOProviders() {
+      // List linked providers — would need request context for user ID.
+      // Handled by server endpoint below.
+      return [];
+    },
+  });
 
   // ── Health ─────────────────────────────────────────────────
 

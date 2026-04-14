@@ -398,7 +398,7 @@ async function executeToolCall(
     }
   }
 
-  eventBus?.emit(weaveEvent(EventTypes.ToolCallEnd, { tool: tc.name, agent: agentName }, ctx));
+  eventBus?.emit(weaveEvent(EventTypes.ToolCallEnd, { tool: tc.name, agent: agentName, result: resultContent }, ctx));
 
   return {
     index: 0,

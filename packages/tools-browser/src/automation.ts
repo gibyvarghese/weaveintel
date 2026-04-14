@@ -6,6 +6,7 @@
  */
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import { captureSnapshot, type PageSnapshot } from './snapshot.js';
+import type { BrowserAuthConfig, HandoffState, CookieAuth, HeaderAuth } from './auth-types.js';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -38,6 +39,7 @@ export class BrowserSession {
   page: Page;
   readonly createdAt: number;
   lastActivityAt: number;
+  handoffState: HandoffState = 'none';
 
   constructor(id: string, browser: Browser, context: BrowserContext, page: Page) {
     this.id = id;
@@ -111,6 +113,15 @@ export class BrowserPool {
 
   /** Launch a new browser, navigate to URL, return session + initial snapshot */
   async open(url: string): Promise<{ session: BrowserSession; snapshot: PageSnapshot }> {
+    return this._open(url);
+  }
+
+  /** Launch a browser with authentication pre-configured (cookies or headers injected before navigation) */
+  async openWithAuth(url: string, auth: BrowserAuthConfig): Promise<{ session: BrowserSession; snapshot: PageSnapshot }> {
+    return this._open(url, auth);
+  }
+
+  private async _open(url: string, auth?: BrowserAuthConfig): Promise<{ session: BrowserSession; snapshot: PageSnapshot }> {
     // evict oldest if at capacity
     if (this.sessions.size >= this.opts.maxSessions) {
       const oldest = [...this.sessions.values()].sort((a, b) => a.lastActivityAt - b.lastActivityAt)[0];
@@ -122,7 +133,26 @@ export class BrowserPool {
     const context = await browser.newContext({
       viewport: this.opts.viewport,
       userAgent: 'WeaveIntel-Browser/1.0',
+      ...(auth?.method === 'header' ? {
+        extraHTTPHeaders: { 'Authorization': (auth as HeaderAuth).authorization },
+      } : {}),
     });
+
+    // Inject cookies before navigation if cookie auth
+    if (auth?.method === 'cookie') {
+      const cookieAuth = auth as CookieAuth;
+      await context.addCookies(cookieAuth.cookies.map(c => ({
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        path: c.path ?? '/',
+        secure: c.secure ?? false,
+        httpOnly: c.httpOnly ?? false,
+        sameSite: c.sameSite ?? 'Lax',
+        expires: c.expires ?? -1,
+      })));
+    }
+
     const page = await context.newPage();
     page.setDefaultTimeout(30_000);
     page.setDefaultNavigationTimeout(30_000);
@@ -170,6 +200,8 @@ export class BrowserPool {
   private async cleanup(): Promise<void> {
     const now = Date.now();
     for (const [id, s] of this.sessions) {
+      // Don't expire sessions during handoff — the human may be working
+      if (s.handoffState !== 'none') continue;
       if (now - s.lastActivityAt > this.opts.sessionTimeoutMs) {
         await this.close(id);
       }

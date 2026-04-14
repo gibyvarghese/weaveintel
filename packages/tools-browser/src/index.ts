@@ -11,11 +11,15 @@ export { scrape } from './scraper.js';
 export { parseSitemap } from './sitemap.js';
 export { createBrowserTools } from './mcp.js';
 export { createAutomationTools } from './mcp-automation.js';
+export { createBrowserAuthTools, setBrowserAuthProvider, getPendingHandoff, resolvePendingHandoff, listPendingHandoffs } from './mcp-auth.js';
+export type { BrowserAuthProvider } from './mcp-auth.js';
+export type { BrowserAuthConfig, FormFillAuth, CookieAuth, HeaderAuth, OAuthFlowAuth, SSOPassThroughAuth, WebsiteCredential, HandoffState, HandoffRequest, LoginFormDetection } from './auth-types.js';
 export { BrowserPool, BrowserSession } from './automation.js';
-export { captureSnapshot } from './snapshot.js';
+export { captureSnapshot, detectLoginForm } from './snapshot.js';
 
 // Convenience aliases
 export { fetchPage as weaveFetchPage } from './fetcher.js';
 export { readability as weaveReadability } from './readability.js';
 export { createBrowserTools as weaveBrowserTools } from './mcp.js';
 export { createAutomationTools as weaveAutomationTools } from './mcp-automation.js';
+export { createBrowserAuthTools as weaveBrowserAuthTools } from './mcp-auth.js';

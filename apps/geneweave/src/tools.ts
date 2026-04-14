@@ -9,7 +9,7 @@ import type { Tool, ToolRegistry } from '@weaveintel/core';
 import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
 import { createSearchRouter, type SearchProviderConfig } from '@weaveintel/tools-search';
 import { createInMemoryTemporalStore, createTimeTools, type TemporalStore } from '@weaveintel/tools-time';
-import { createBrowserTools, createAutomationTools } from '@weaveintel/tools-browser';
+import { createBrowserTools, createAutomationTools, createBrowserAuthTools } from '@weaveintel/tools-browser';
 
 function envFlag(name: string, defaultValue: boolean): boolean {
   const raw = process.env[name];
@@ -202,6 +202,7 @@ function browserToolMap(): Record<string, Tool> {
   return Object.fromEntries([
     ...createBrowserTools(),
     ...createAutomationTools(),
+    ...createBrowserAuthTools(),
   ].map(t => [t.schema.name, t]));
 }
 

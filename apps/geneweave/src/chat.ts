@@ -29,7 +29,7 @@ import type {
   ToolRegistry, AgentStepEvent, AgentStep, AgentResult,
   Guardrail, GuardrailResult, GuardrailStage,
 } from '@weaveintel/core';
-import { weaveContext, weaveEventBus } from '@weaveintel/core';
+import { weaveContext, weaveEventBus, EventTypes } from '@weaveintel/core';
 import { weaveAgent, weaveSupervisor } from '@weaveintel/agents';
 import { weaveInMemoryTracer, weaveUsageTracker } from '@weaveintel/observability';
 import { weaveRedactor } from '@weaveintel/redaction';
@@ -91,6 +91,15 @@ const SUPERVISOR_TEMPORAL_POLICY = [
   '  • The stopwatch ID MUST appear in your reply so it is recorded in conversation history for later retrieval',
   '',
   '- When the user RETURNS after a timer was started (e.g. "I am back", "I\'m back", "stop the timer"):',
+  '',
+  'BROWSER LOGIN & AUTHENTICATION (CRITICAL):',
+  '- When the user asks to log in, sign in, authenticate, or access a site that requires login:',
+  '  • ALWAYS delegate to the researcher worker — it has browser_detect_auth, browser_login, browser_save_cookies, browser_handoff_request, and browser_handoff_resume tools',
+  '  • The researcher can detect login forms, auto-fill credentials from the vault, and log in automatically',
+  '  • If the site needs 2FA, CAPTCHA, or manual steps, the researcher will trigger a handoff to the user',
+  '  • NEVER refuse login requests — the credential vault securely stores and encrypts website credentials',
+  '  • Example goal for researcher: "Navigate to [url], detect the login form, then use browser_login to authenticate using stored credentials. If 2FA or CAPTCHA appears, use browser_handoff_request."',
+  '',
   '  • Look in the conversation history for the stopwatch ID from when the timer was started',
   '  • Delegate to analyst with EXPLICIT goal: "Use `stopwatch_stop` with stopwatchId=\'[ID from history]\' to stop the stopwatch and report the total elapsed time in minutes and seconds."',
   '  • If no stopwatch ID is found in history, delegate to analyst: "Use `timer_list` and `stopwatch_status` to find any active timers or stopwatches. If found, stop them and report the elapsed time."',
@@ -1127,6 +1136,22 @@ export class ChatEngine {
       ? createToolRegistry(settings.enabledTools, customTools, toolOptions)
       : customTools?.length ? createToolRegistry([], customTools, toolOptions) : undefined;
 
+    // Create event bus to capture sub-agent events (e.g. screenshots from workers)
+    const agentBus = weaveEventBus();
+    let screenshotUnsub: (() => void) | undefined;
+
+    // Listen for browser_screenshot tool results from any worker and forward via SSE
+    screenshotUnsub = agentBus.on(EventTypes.ToolCallEnd, (event) => {
+      if (event.data['tool'] === 'browser_screenshot' && typeof event.data['result'] === 'string') {
+        try {
+          const parsed = JSON.parse(event.data['result'] as string);
+          if (parsed.base64) {
+            res.write(`data: ${JSON.stringify({ type: 'screenshot', base64: parsed.base64, format: parsed.format || 'png' })}\n\n`);
+          }
+        } catch { /* not JSON or no base64 — ignore */ }
+      }
+    });
+
     let agent;
     if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
       const baseWorkers = settings.workers.length > 0
@@ -1155,6 +1180,7 @@ export class ChatEngine {
         maxSteps: 20,
         name: 'geneweave-supervisor',
         instructions: SUPERVISOR_TEMPORAL_POLICY,
+        bus: agentBus,
       });
     } else {
       const policyPrompt = this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools);
@@ -1164,6 +1190,7 @@ export class ChatEngine {
         systemPrompt: policyPrompt,
         maxSteps: 15,
         name: 'geneweave-agent',
+        bus: agentBus,
       });
     }
 
@@ -1221,7 +1248,7 @@ export class ChatEngine {
         }
       }
 
-      if (finalResult) return finalResult;
+      if (finalResult) { screenshotUnsub?.(); return finalResult; }
     }
 
     // Fallback: non-streaming agent run, send result as single text event
@@ -1237,6 +1264,7 @@ export class ChatEngine {
       })}\n\n`);
     }
 
+    screenshotUnsub?.();
     return result;
   }
 
@@ -2120,9 +2148,9 @@ function defaultWorkers(
   return [
     {
       name: 'researcher',
-      description: 'Researches topics, searches the web, browses websites, and gathers information. Can open a headless browser to navigate dynamic sites, read page content, click links, fill forms, and interact with web applications. Good for fact-finding, exploration, and accessing sites that require browser interaction.',
+      description: 'Researches topics, searches the web, browses websites, and gathers information. Can open a headless browser to navigate dynamic sites, read page content, click links, fill forms, and interact with web applications. Has full browser authentication capabilities: can detect login forms, auto-login using stored website credentials from the credential vault, save session cookies, and hand off the browser to the user for manual steps like 2FA or CAPTCHA. Always delegate login/auth tasks to this worker — it has the browser_detect_auth, browser_login, browser_save_cookies, browser_handoff_request, and browser_handoff_resume tools.',
       model,
-      tools: createToolRegistry(['web_search', 'text_analysis', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait'], undefined, toolOptions),
+      tools: createToolRegistry(['web_search', 'text_analysis', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume'], undefined, toolOptions),
     },
     {
       name: 'analyst',

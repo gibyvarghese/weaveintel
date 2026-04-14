@@ -22,6 +22,18 @@ export interface SessionRow {
   created_at: string;
 }
 
+export interface OAuthLinkedAccountRow {
+  id: string;
+  user_id: string;
+  provider: string;              // google | github | microsoft | apple | facebook
+  provider_user_id: string;      // ID from OAuth provider
+  email: string;
+  name: string;
+  picture_url: string | null;
+  linked_at: string;
+  last_used_at: string | null;
+}
+
 export interface ChatRow {
   id: string;
   user_id: string;
@@ -688,6 +700,32 @@ export interface MemoryExtractionEventRow {
   created_at: string;
 }
 
+export interface WebsiteCredentialRow {
+  id: string;
+  user_id: string;
+  site_name: string;
+  site_url_pattern: string;
+  auth_method: string;           // form_fill | cookie | header | oauth
+  credentials_encrypted: string; // AES-256-GCM encrypted JSON blob
+  encryption_iv: string;
+  last_used_at: string | null;
+  status: string;                // active | expired | needs_reauth
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SSOLinkedAccountRow {
+  id: string;
+  user_id: string;
+  identity_provider: string;     // google | github | microsoft | apple | facebook
+  email: string | null;
+  session_encrypted: string;     // AES-256-GCM encrypted SSOPassThroughAuth JSON
+  encryption_iv: string;
+  status: string;                // active | expired | needs_reauth
+  linked_at: string;
+  updated_at: string;
+}
+
 export interface MetricsSummary {
   total_tokens: number;
   total_cost: number;
@@ -736,6 +774,14 @@ export interface DatabaseAdapter {
   getSession(id: string): Promise<SessionRow | null>;
   deleteSession(id: string): Promise<void>;
   deleteExpiredSessions(): Promise<void>;
+
+  // OAuth Linked Accounts
+  createOAuthLinkedAccount(account: Omit<OAuthLinkedAccountRow, 'linked_at'>): Promise<void>;
+  getOAuthLinkedAccount(userId: string, provider: string): Promise<OAuthLinkedAccountRow | null>;
+  getOAuthLinkedAccountByProviderUserId(provider: string, providerUserId: string): Promise<OAuthLinkedAccountRow | null>;
+  listOAuthLinkedAccounts(userId: string): Promise<OAuthLinkedAccountRow[]>;
+  updateOAuthAccountLastUsed(userId: string, provider: string): Promise<void>;
+  deleteOAuthLinkedAccount(userId: string, provider: string): Promise<void>;
 
   // Chats
   createChat(chat: { id: string; userId: string; title: string; model: string; provider: string }): Promise<void>;
@@ -1108,6 +1154,21 @@ export interface DatabaseAdapter {
   listValidationRules(): Promise<ValidationRuleRow[]>;
   updateValidationRule(id: string, fields: Partial<Omit<ValidationRuleRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteValidationRule(id: string): Promise<void>;
+
+  // ─── Website Credentials (Browser Auth Vault) ─────────────────
+  createWebsiteCredential(c: Omit<WebsiteCredentialRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getWebsiteCredential(id: string, userId: string): Promise<WebsiteCredentialRow | null>;
+  listWebsiteCredentials(userId: string): Promise<WebsiteCredentialRow[]>;
+  listAllActiveWebsiteCredentials(): Promise<WebsiteCredentialRow[]>;
+  findWebsiteCredential(userId: string, url: string): Promise<WebsiteCredentialRow | null>;
+  updateWebsiteCredential(id: string, userId: string, fields: Partial<Omit<WebsiteCredentialRow, 'id' | 'user_id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteWebsiteCredential(id: string, userId: string): Promise<void>;
+
+  // ─── SSO Linked Accounts (SSO Pass-Through) ──────────────────
+  createSSOLinkedAccount(acct: { id: string; user_id: string; identity_provider: string; email?: string; session_encrypted: string; encryption_iv: string }): Promise<void>;
+  getSSOLinkedAccount(userId: string, identityProvider: string): Promise<SSOLinkedAccountRow | null>;
+  listSSOLinkedAccounts(userId: string): Promise<Array<Omit<SSOLinkedAccountRow, 'session_encrypted' | 'encryption_iv'>>>;
+  deleteSSOLinkedAccount(userId: string, identityProvider: string): Promise<void>;
 
   // ─── Semantic Memory ──────────────────────────────────────────
   saveSemanticMemory(m: {

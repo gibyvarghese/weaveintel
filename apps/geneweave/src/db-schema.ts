@@ -713,5 +713,19 @@ CREATE TABLE IF NOT EXISTS memory_extraction_events (
   events TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS website_credentials (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  site_name TEXT NOT NULL,
+  site_url_pattern TEXT NOT NULL,
+  auth_method TEXT NOT NULL DEFAULT 'form_fill',
+  credentials_encrypted TEXT NOT NULL,
+  encryption_iv TEXT NOT NULL,
+  last_used_at TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
