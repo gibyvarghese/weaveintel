@@ -13,7 +13,7 @@ import { SalesforceProvider } from './connectors/salesforce.js';
 import { NotionProvider } from './connectors/notion.js';
 import { ServiceNowProvider } from './connectors/servicenow.js';
 import { CanvaProvider } from './connectors/canva.js';
-import { serviceNowExtendedTools } from './servicenow-tools.js';
+import { serviceNowExtendedTools, serviceNowToolGroups, type ServiceNowToolGroup } from './servicenow-tools.js';
 
 const BUILT_IN: EnterpriseProvider[] = [new JiraProvider(), new ConfluenceProvider(), new SalesforceProvider(), new NotionProvider()];
 
@@ -51,7 +51,8 @@ const ID_FIELD_PARAMS = {
 /* ---------- tool builder helper ---------- */
 type ToolDef = { name: string; desc: string; params: Record<string, unknown>; fn: (ctx: ExecutionContext, input: ToolInput) => Promise<ToolOutput> };
 function buildTool(d: ToolDef): Tool {
-  return { schema: { name: d.name, description: d.desc, parameters: d.params }, invoke: d.fn };
+  const safeName = d.name.replace(/\./g, '_');
+  return { schema: { name: safeName, description: d.desc, parameters: d.params }, invoke: d.fn };
 }
 function ok(data: unknown): ToolOutput { return { content: JSON.stringify(data) }; }
 
@@ -138,7 +139,7 @@ function jiraExtendedTools(prefix: string, config: EnterpriseConnectorConfig): T
 }
 
 /* ---------- ServiceNow extended tools ---------- */
-function serviceNowTools(prefix: string, config: EnterpriseConnectorConfig): Tool[] {
+function serviceNowTools(prefix: string, config: EnterpriseConnectorConfig, includeExtended = true): Tool[] {
   const p = SERVICENOW;
   return [
     buildTool({ name: `${prefix}.query`, desc: 'Query any ServiceNow table using encoded query syntax (e.g. "active=true^priority=1"). Defaults to incident table. Returns an array of matching records with all fields. Use standard ServiceNow sysparm_query operators: =, !=, LIKE, STARTSWITH, ENDSWITH, IN, ORDERBY, ^NQ (new query/OR).',
@@ -192,7 +193,7 @@ function serviceNowTools(prefix: string, config: EnterpriseConnectorConfig): Too
     buildTool({ name: `${prefix}.aggregate`, desc: 'Run an aggregate/statistics query on a ServiceNow table. Returns grouped counts (like SQL GROUP BY with COUNT). Useful for dashboards, reports, and summary statistics — e.g. count incidents by priority, count changes by state.',
       params: { type: 'object', properties: { table: { type: 'string', description: 'Table to aggregate, e.g. incident, change_request, problem, sc_req_item' }, query: { type: 'string', description: 'Encoded query to filter records before aggregation, e.g. "active=true", "sys_created_on>=javascript:gs.beginningOfLastMonth()"' }, groupBy: { type: 'string', description: 'Field to group results by, e.g. priority, state, category, assignment_group' } }, required: ['table', 'query', 'groupBy'] },
       fn: async (_c, inp) => ok(await p.aggregate(String(inp.arguments['table']), String(inp.arguments['query']), String(inp.arguments['groupBy']), config)) }),
-    ...serviceNowExtendedTools(prefix, config, p),
+    ...(includeExtended ? serviceNowExtendedTools(prefix, config, p) : []),
   ];
 }
 
@@ -267,9 +268,15 @@ function canvaTools(prefix: string, config: EnterpriseConnectorConfig): Tool[] {
 
 /* ---------- main factory ---------- */
 
+export interface EnterpriseToolsOptions {
+  /** Include extended/full-coverage tools (e.g. 250+ ServiceNow tools). Default: true */
+  includeExtended?: boolean;
+}
+
 export function createEnterpriseTools(
   configs: EnterpriseConnectorConfig[],
   extraProviders?: EnterpriseProvider[],
+  options?: EnterpriseToolsOptions,
 ): Tool[] {
   const providerMap = new Map<string, EnterpriseProvider>();
   for (const p of [...BUILT_IN, ...(extraProviders ?? [])]) providerMap.set(p.type, p);
@@ -277,7 +284,7 @@ export function createEnterpriseTools(
   const tools: Tool[] = [];
 
   for (const config of configs.filter(c => c.enabled)) {
-    const prefix = `enterprise.${config.name}`;
+    const prefix = `enterprise_${config.name.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
 
     /* --- extended connectors with full API coverage --- */
     if (config.type === 'jira') {
@@ -297,7 +304,7 @@ export function createEnterpriseTools(
     }
 
     if (config.type === 'servicenow') {
-      tools.push(...serviceNowTools(prefix, config));
+      tools.push(...serviceNowTools(prefix, config, options?.includeExtended ?? true));
       continue;
     }
 
@@ -312,7 +319,7 @@ export function createEnterpriseTools(
 
     tools.push({
       schema: {
-        name: `${prefix}.query`,
+        name: `${prefix}_query`,
         description: `Search or query records from the ${config.type} connector "${config.name}". Pass a search string and optional limit. Returns matching records.`,
         parameters: QUERY_PARAMS,
       },
@@ -328,7 +335,7 @@ export function createEnterpriseTools(
 
     tools.push({
       schema: {
-        name: `${prefix}.get`,
+        name: `${prefix}_get`,
         description: `Get a single record by ID from the ${config.type} connector "${config.name}". Returns full record details.`,
         parameters: GET_PARAMS,
       },
@@ -340,7 +347,7 @@ export function createEnterpriseTools(
 
     tools.push({
       schema: {
-        name: `${prefix}.create`,
+        name: `${prefix}_create`,
         description: `Create a new record in the ${config.type} connector "${config.name}". Pass a data object with the record fields.`,
         parameters: { type: 'object', properties: { data: { type: 'object', description: 'Record data' } }, required: ['data'] },
       },
@@ -353,4 +360,88 @@ export function createEnterpriseTools(
   }
 
   return tools;
+}
+
+/* ---------- grouped tool factory (for multi-agent / supervisor) ---------- */
+
+export interface EnterpriseToolGroup {
+  /** Short identifier like "itsm-operations" or "cmdb-infrastructure" */
+  name: string;
+  /** Natural language description used by the supervisor to route */
+  description: string;
+  /** Tools assigned to this group's worker agent */
+  tools: Tool[];
+}
+
+/**
+ * Creates enterprise tools partitioned into domain-specific groups.
+ * Each group becomes a supervisor worker agent with focused tools.
+ * The base CRUD tools (query, get, create, update, patch, delete, etc.)
+ * are included in EVERY group so each worker can do basic lookups.
+ */
+export function createEnterpriseToolGroups(
+  configs: EnterpriseConnectorConfig[],
+  extraProviders?: EnterpriseProvider[],
+): EnterpriseToolGroup[] {
+  const providerMap = new Map<string, EnterpriseProvider>();
+  for (const p of [...BUILT_IN, ...(extraProviders ?? [])]) providerMap.set(p.type, p);
+
+  const groups: EnterpriseToolGroup[] = [];
+
+  for (const config of configs.filter(c => c.enabled)) {
+    const prefix = `enterprise_${config.name.replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+
+    if (config.type === 'servicenow') {
+      // Base tools shared across all workers
+      const baseTools = serviceNowTools(prefix, config, false);
+      // Domain-specific groups from extended tools
+      const snGroups = serviceNowToolGroups(prefix, config, SERVICENOW);
+      for (const g of snGroups) {
+        groups.push({
+          name: `servicenow-${g.name}`,
+          description: `[ServiceNow] ${g.description}`,
+          tools: [...baseTools, ...g.tools],
+        });
+      }
+      continue;
+    }
+
+    // Non-ServiceNow connectors: single group per connector
+    if (config.type === 'jira') {
+      const jp = JIRA_FULL;
+      const baseJira = [
+        buildTool({ name: `${prefix}.query`, desc: 'Search Jira issues using JQL.', params: QUERY_PARAMS,
+          fn: async (_c, inp) => ok(await jp.query({ query: String(inp.arguments['query']), limit: inp.arguments['limit'] ? Number(inp.arguments['limit']) : undefined }, config)) }),
+        buildTool({ name: `${prefix}.get`, desc: 'Get a Jira issue by key or ID.', params: GET_PARAMS,
+          fn: async (_c, inp) => ok(await jp.get(String(inp.arguments['id']), config)) }),
+        buildTool({ name: `${prefix}.create`, desc: 'Create a Jira issue.',
+          params: { type: 'object', properties: { data: { type: 'object', description: 'Issue fields' } }, required: ['data'] },
+          fn: async (_c, inp) => ok(await jp.create(inp.arguments['data'] as Record<string, unknown>, config)) }),
+        ...jiraExtendedTools(prefix, config),
+      ];
+      groups.push({ name: `jira-${config.name}`, description: `[Jira] Issue tracking, sprints, boards, comments, worklogs for "${config.name}".`, tools: baseJira });
+      continue;
+    }
+
+    if (config.type === 'canva') {
+      groups.push({ name: `canva-${config.name}`, description: `[Canva] Design management, export, assets, folders, comments for "${config.name}".`, tools: canvaTools(prefix, config) });
+      continue;
+    }
+
+    // Legacy connectors
+    const provider = providerMap.get(config.type);
+    if (!provider) continue;
+    const legacyTools: Tool[] = [
+      { schema: { name: `${prefix}_query`, description: `Search records from ${config.type} "${config.name}".`, parameters: QUERY_PARAMS },
+        async invoke(_ctx, input) { return { content: JSON.stringify(await provider.query({ query: String(input.arguments['query']), limit: input.arguments['limit'] ? Number(input.arguments['limit']) : undefined }, config)) }; } },
+      { schema: { name: `${prefix}_get`, description: `Get a record by ID from ${config.type} "${config.name}".`, parameters: GET_PARAMS },
+        async invoke(_ctx, input) { return { content: JSON.stringify(await provider.get(String(input.arguments['id']), config)) }; } },
+      { schema: { name: `${prefix}_create`, description: `Create a record in ${config.type} "${config.name}".`,
+        parameters: { type: 'object', properties: { data: { type: 'object', description: 'Record data' } }, required: ['data'] } },
+        async invoke(_ctx, input) { return { content: JSON.stringify(await provider.create(input.arguments['data'] as Record<string, unknown>, config)) }; } },
+    ];
+    groups.push({ name: `${config.type}-${config.name}`, description: `[${config.type}] Records from "${config.name}".`, tools: legacyTools });
+  }
+
+  return groups;
 }

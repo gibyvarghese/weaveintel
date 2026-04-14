@@ -28,7 +28,7 @@ export {
 } from './auth/profiles.js';
 
 // MCP tool factory
-export { createEnterpriseTools } from './mcp.js';
+export { createEnterpriseTools, createEnterpriseToolGroups, type EnterpriseToolsOptions, type EnterpriseToolGroup } from './mcp.js';
 
 // Convenience aliases
 export { createEnterpriseTools as weaveEnterpriseTools } from './mcp.js';

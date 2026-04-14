@@ -47,6 +47,7 @@ import { weaveCacheKeyBuilder } from '@weaveintel/cache';
 import { shouldBypass, resolvePolicy } from '@weaveintel/cache';
 import type { CachePolicy } from '@weaveintel/core';
 import { runHybridMemoryExtraction, type ExtractedEntity, type MemoryExtractionRule } from '@weaveintel/memory';
+import { createEnterpriseTools, createEnterpriseToolGroups, type EnterpriseConnectorConfig, type EnterpriseToolGroup } from '@weaveintel/tools-enterprise';
 
 const TEMPORAL_TOOL_POLICY = [
   'Temporal Tool Usage Policy:',
@@ -178,7 +179,9 @@ export async function getOrCreateModel(
   modelId: string,
   apiKey: string,
 ): Promise<Model> {
-  const cacheKey = `${provider}:${modelId}`;
+  // Strip provider prefix (e.g. "anthropic/claude-sonnet-4-20250514" → "claude-sonnet-4-20250514")
+  const bareModel = modelId.includes('/') ? modelId.split('/').slice(1).join('/') : modelId;
+  const cacheKey = `${provider}:${bareModel}`;
   const cached = modelCache.get(cacheKey);
   if (cached) return cached;
 
@@ -186,12 +189,12 @@ export async function getOrCreateModel(
   switch (provider) {
     case 'anthropic': {
       const mod = await import('@weaveintel/provider-anthropic');
-      model = (mod as any).weaveAnthropicModel(modelId, { apiKey });
+      model = (mod as any).weaveAnthropicModel(bareModel, { apiKey });
       break;
     }
     case 'openai': {
       const mod = await import('@weaveintel/provider-openai');
-      model = (mod as any).weaveOpenAIModel(modelId, { apiKey });
+      model = (mod as any).weaveOpenAIModel(bareModel, { apiKey });
       break;
     }
     default:
@@ -457,9 +460,9 @@ export class ChatEngine {
     const cachePolicy = await this.resolveActiveCache(settings.mode);
     const cacheKey = this.cacheKeyBuilder.build({ model: modelId, prompt: processedContent });
     if (cachePolicy && !shouldBypass(cachePolicy, processedContent)) {
-      const cached = this.responseCache.get(cacheKey);
+      const cached = await this.responseCache.get(cacheKey);
       if (cached) {
-        assistantContent = (cached as any).content;
+        assistantContent = (cached as any).content ?? '';
         usage = (cached as any).usage ?? usage;
         cacheHit = true;
       }
@@ -469,7 +472,7 @@ export class ChatEngine {
     if (settings.mode === 'agent' || settings.mode === 'supervisor') {
       // ── Agent / Supervisor mode ──
       const result = await this.runAgent(ctx, model, userId, messages, processedContent, memorySettings);
-      assistantContent = result.output;
+      assistantContent = result.output ?? '';
       usage = {
         promptTokens: result.usage.totalTokens,  // agent tracks totalTokens only
         completionTokens: 0,
@@ -486,14 +489,14 @@ export class ChatEngine {
         temperature: opts?.temperature,
       };
       const response = await model.generate(ctx, request);
-      assistantContent = response.content;
+      assistantContent = response.content ?? '';
       usage = { ...response.usage };
     }
     } // end if (!cacheHit)
 
     // ── Cache store ──
     if (!cacheHit && cachePolicy) {
-      this.responseCache.set(cacheKey, { content: assistantContent!, usage }, cachePolicy.ttlMs);
+      await this.responseCache.set(cacheKey, { content: assistantContent!, usage }, cachePolicy.ttlMs);
     }
 
     const latencyMs = Date.now() - startMs;
@@ -541,7 +544,7 @@ export class ChatEngine {
       id: assistMsgId,
       chatId,
       role: 'assistant',
-      content: assistantContent,
+      content: assistantContent ?? '',
       metadata: JSON.stringify({
         model: modelId, provider,
         mode: settings.mode,
@@ -757,7 +760,7 @@ export class ChatEngine {
       if (settings.mode === 'agent' || settings.mode === 'supervisor') {
         // ── Agent / Supervisor streaming ──
         const agentResult = await this.streamAgent(res, ctx, model, userId, messages, processedContent, streamMemorySettings);
-        fullText = agentResult.output;
+        fullText = agentResult.output ?? '';
         finalUsage = { promptTokens: agentResult.usage.totalTokens, completionTokens: 0, totalTokens: agentResult.usage.totalTokens };
         steps = [...agentResult.steps];
       } else {
@@ -893,6 +896,71 @@ export class ChatEngine {
     res.end();
   }
 
+  // ── Enterprise tools loader ─────────────────────────────────
+
+  private async loadEnterpriseTools(): Promise<import('@weaveintel/core').Tool[]> {
+    try {
+      const rows = await this.db.listEnterpriseConnectors();
+      const enabled = rows.filter((r) => r.enabled === 1 && r.status === 'connected');
+      if (enabled.length === 0) return [];
+
+      const configs: EnterpriseConnectorConfig[] = enabled.map((row) => {
+        const authConfig: Record<string, string> = row.auth_config
+          ? (JSON.parse(row.auth_config) as Record<string, string>)
+          : {};
+        // Inject access_token from the DB column into authConfig for oauth2/bearer
+        if (row.access_token && !authConfig['accessToken']) {
+          authConfig['accessToken'] = row.access_token;
+        }
+        return {
+          name: row.name,
+          type: row.connector_type,
+          enabled: true,
+          baseUrl: row.base_url ?? '',
+          authType: (row.auth_type ?? 'bearer') as EnterpriseConnectorConfig['authType'],
+          authConfig,
+          options: row.options ? (JSON.parse(row.options) as Record<string, string>) : undefined,
+        };
+      });
+
+      return createEnterpriseTools(configs, undefined, { includeExtended: false });
+    } catch (err) {
+      console.error('[chat] Failed to load enterprise tools:', err);
+      return [];
+    }
+  }
+
+  private async loadEnterpriseToolGroups(): Promise<EnterpriseToolGroup[]> {
+    try {
+      const rows = await this.db.listEnterpriseConnectors();
+      const enabled = rows.filter((r) => r.enabled === 1 && r.status === 'connected');
+      if (enabled.length === 0) return [];
+
+      const configs: EnterpriseConnectorConfig[] = enabled.map((row) => {
+        const authConfig: Record<string, string> = row.auth_config
+          ? (JSON.parse(row.auth_config) as Record<string, string>)
+          : {};
+        if (row.access_token && !authConfig['accessToken']) {
+          authConfig['accessToken'] = row.access_token;
+        }
+        return {
+          name: row.name,
+          type: row.connector_type,
+          enabled: true,
+          baseUrl: row.base_url ?? '',
+          authType: (row.auth_type ?? 'bearer') as EnterpriseConnectorConfig['authType'],
+          authConfig,
+          options: row.options ? (JSON.parse(row.options) as Record<string, string>) : undefined,
+        };
+      });
+
+      return createEnterpriseToolGroups(configs);
+    } catch (err) {
+      console.error('[chat] Failed to load enterprise tool groups:', err);
+      return [];
+    }
+  }
+
   // ── Agent execution (non-streaming) ─────────────────────────
 
   private async runAgent(
@@ -903,6 +971,10 @@ export class ChatEngine {
     userContent: string,
     settings: ChatSettings,
   ): Promise<AgentResult> {
+    const enterpriseToolGroups = await this.loadEnterpriseToolGroups();
+    const hasEnterprise = enterpriseToolGroups.length > 0;
+    // Flat enterprise tools for backward compat (base tools only, no extended)
+    const enterpriseTools = hasEnterprise ? await this.loadEnterpriseTools() : [];
     const toolOptions: ToolRegistryOptions = {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
@@ -923,23 +995,38 @@ export class ChatEngine {
         };
       },
     };
+    const customTools = enterpriseTools.length > 0 ? enterpriseTools : undefined;
     const tools = settings.enabledTools.length
-      ? createToolRegistry(settings.enabledTools, undefined, toolOptions)
-      : undefined;
+      ? createToolRegistry(settings.enabledTools, customTools, toolOptions)
+      : customTools?.length ? createToolRegistry([], customTools, toolOptions) : undefined;
 
-    if (settings.mode === 'supervisor') {
-      const workerDefs = settings.workers.length > 0
+    // Auto-upgrade to supervisor when enterprise tools are available
+    if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
+      const baseWorkers = settings.workers.length > 0
         ? settings.workers.map((w) => ({
             name: w.name,
             description: w.description,
             systemPrompt: this.withTemporalToolPolicy(undefined, w.tools),
             model,
-            tools: w.tools.length ? createToolRegistry(w.tools, undefined, toolOptions) : undefined,
+            tools: w.tools.length ? createToolRegistry(w.tools, customTools, toolOptions) : customTools?.length ? createToolRegistry([], customTools, toolOptions) : undefined,
           }))
         : defaultWorkers(model, toolOptions, this.withTemporalToolPolicy.bind(this));
+      // Build enterprise domain workers from tool groups
+      const enterpriseWorkers = enterpriseToolGroups.map((g) => {
+        const registry = createToolRegistry([], g.tools, toolOptions);
+        return {
+          name: g.name,
+          description: g.description,
+          systemPrompt: `You are a specialized ServiceNow agent for: ${g.description}\nUse the available tools to fulfill the user's request. Always use the most specific tool available rather than generic query/get when possible.`,
+          model,
+          tools: registry,
+        };
+      });
+      const allWorkers = [...baseWorkers, ...enterpriseWorkers];
+      console.log(`[chat] Supervisor with ${allWorkers.length} workers (${baseWorkers.length} base + ${enterpriseWorkers.length} enterprise)`);
       const supervisor = weaveSupervisor({
         model,
-        workers: workerDefs,
+        workers: allWorkers,
         maxSteps: 20,
         name: 'geneweave-supervisor',
         instructions: SUPERVISOR_TEMPORAL_POLICY,
@@ -969,6 +1056,9 @@ export class ChatEngine {
     userContent: string,
     settings: ChatSettings,
   ): Promise<AgentResult> {
+    const enterpriseToolGroups = await this.loadEnterpriseToolGroups();
+    const hasEnterprise = enterpriseToolGroups.length > 0;
+    const enterpriseTools = hasEnterprise ? await this.loadEnterpriseTools() : [];
     const toolOptions: ToolRegistryOptions = {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
@@ -989,24 +1079,36 @@ export class ChatEngine {
         };
       },
     };
+    const customTools = enterpriseTools.length > 0 ? enterpriseTools : undefined;
     const tools = settings.enabledTools.length
-      ? createToolRegistry(settings.enabledTools, undefined, toolOptions)
-      : undefined;
+      ? createToolRegistry(settings.enabledTools, customTools, toolOptions)
+      : customTools?.length ? createToolRegistry([], customTools, toolOptions) : undefined;
 
     let agent;
-    if (settings.mode === 'supervisor') {
-      const workerDefs = settings.workers.length > 0
+    if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
+      const baseWorkers = settings.workers.length > 0
         ? settings.workers.map((w) => ({
             name: w.name,
             description: w.description,
             systemPrompt: this.withTemporalToolPolicy(undefined, w.tools),
             model,
-            tools: w.tools.length ? createToolRegistry(w.tools, undefined, toolOptions) : undefined,
+            tools: w.tools.length ? createToolRegistry(w.tools, customTools, toolOptions) : customTools?.length ? createToolRegistry([], customTools, toolOptions) : undefined,
           }))
         : defaultWorkers(model, toolOptions, this.withTemporalToolPolicy.bind(this));
+      const enterpriseWorkers = enterpriseToolGroups.map((g) => {
+        const registry = createToolRegistry([], g.tools, toolOptions);
+        return {
+          name: g.name,
+          description: g.description,
+          systemPrompt: `You are a specialized ServiceNow agent for: ${g.description}\nUse the available tools to fulfill the user's request. Always use the most specific tool available rather than generic query/get when possible.`,
+          model,
+          tools: registry,
+        };
+      });
+      const allWorkers = [...baseWorkers, ...enterpriseWorkers];
       agent = weaveSupervisor({
         model,
-        workers: workerDefs,
+        workers: allWorkers,
         maxSteps: 20,
         name: 'geneweave-supervisor',
         instructions: SUPERVISOR_TEMPORAL_POLICY,

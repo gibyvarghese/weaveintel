@@ -1159,6 +1159,10 @@ export function registerAdminRoutes(
     if (body['auth_config'] !== undefined) fields['auth_config'] = typeof body['auth_config'] === 'string' ? body['auth_config'] : JSON.stringify(body['auth_config']);
     if (body['options'] !== undefined) fields['options'] = typeof body['options'] === 'string' ? body['options'] : JSON.stringify(body['options']);
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    if (body['access_token'] !== undefined) fields['access_token'] = body['access_token'];
+    if (body['refresh_token'] !== undefined) fields['refresh_token'] = body['refresh_token'];
+    if (body['token_expires_at'] !== undefined) fields['token_expires_at'] = body['token_expires_at'];
+    if (body['status'] !== undefined) fields['status'] = body['status'];
     await db.updateEnterpriseConnector(params['id']!, fields as any);
     const item = await db.getEnterpriseConnector(params['id']!);
     json(res, 200, { 'enterprise-connector': item });
