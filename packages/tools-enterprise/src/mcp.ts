@@ -50,9 +50,37 @@ const ID_FIELD_PARAMS = {
 
 /* ---------- tool builder helper ---------- */
 type ToolDef = { name: string; desc: string; params: Record<string, unknown>; fn: (ctx: ExecutionContext, input: ToolInput) => Promise<ToolOutput> };
+
+/**
+ * Normalize tool arguments so handlers always see the expected nested structure.
+ * LLMs sometimes send flat args ({short_description:"…", urgency:"1"}) instead of
+ * nesting them ({data: {short_description:"…", urgency:"1"}}).  This helper inspects
+ * the tool parameter schema: if there is exactly one 'object'-typed param whose key
+ * is missing from the args, all extra (non-scalar-param) keys are wrapped under it.
+ */
+function normalizeArgs(params: Record<string, unknown>, args: Record<string, unknown>): Record<string, unknown> {
+  const props = (params as { properties?: Record<string, { type?: string }> }).properties;
+  if (!props) return args;
+  const objectKeys = Object.keys(props).filter(k => props[k]?.type === 'object');
+  if (objectKeys.length !== 1) return args;
+  const objKey = objectKeys[0]!;
+  const existing = args[objKey];
+  if (existing != null && typeof existing === 'object' && !Array.isArray(existing)) return args;
+  const scalarKeys = new Set(Object.keys(props).filter(k => k !== objKey));
+  const dataObj: Record<string, unknown> = {};
+  const newArgs: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (scalarKeys.has(k)) newArgs[k] = v;
+    else if (k !== objKey) dataObj[k] = v;
+  }
+  if (Object.keys(dataObj).length > 0) newArgs[objKey] = dataObj;
+  return newArgs;
+}
+
 function buildTool(d: ToolDef): Tool {
   const safeName = d.name.replace(/\./g, '_');
-  return { schema: { name: safeName, description: d.desc, parameters: d.params }, invoke: d.fn };
+  return { schema: { name: safeName, description: d.desc, parameters: d.params },
+    invoke: (ctx, inp) => d.fn(ctx, { ...inp, arguments: normalizeArgs(d.params, inp.arguments) }) };
 }
 function ok(data: unknown): ToolOutput { return { content: JSON.stringify(data) }; }
 
@@ -352,7 +380,9 @@ export function createEnterpriseTools(
         parameters: { type: 'object', properties: { data: { type: 'object', description: 'Record data' } }, required: ['data'] },
       },
       async invoke(_ctx: ExecutionContext, input: ToolInput): Promise<ToolOutput> {
-        const data = input.arguments['data'] as Record<string, unknown>;
+        const params = { type: 'object', properties: { data: { type: 'object' } }, required: ['data'] };
+        const norm = normalizeArgs(params, input.arguments);
+        const data = norm['data'] as Record<string, unknown>;
         const result = await provider.create(data, config);
         return { content: JSON.stringify(result) };
       },
@@ -438,7 +468,7 @@ export function createEnterpriseToolGroups(
         async invoke(_ctx, input) { return { content: JSON.stringify(await provider.get(String(input.arguments['id']), config)) }; } },
       { schema: { name: `${prefix}_create`, description: `Create a record in ${config.type} "${config.name}".`,
         parameters: { type: 'object', properties: { data: { type: 'object', description: 'Record data' } }, required: ['data'] } },
-        async invoke(_ctx, input) { return { content: JSON.stringify(await provider.create(input.arguments['data'] as Record<string, unknown>, config)) }; } },
+        async invoke(_ctx, input) { const norm = normalizeArgs({ type: 'object', properties: { data: { type: 'object' } } }, input.arguments); return { content: JSON.stringify(await provider.create(norm['data'] as Record<string, unknown>, config)) }; } },
     ];
     groups.push({ name: `${config.type}-${config.name}`, description: `[${config.type}] Records from "${config.name}".`, tools: legacyTools });
   }
