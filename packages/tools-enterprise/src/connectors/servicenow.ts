@@ -28,13 +28,17 @@
  */
 import { BaseEnterpriseProvider } from '../base.js';
 import type { EnterpriseConnectorConfig, EnterpriseRecord, EnterpriseQueryOptions } from '../types.js';
+import { validateTableName, validateSysId, validateApiPath, validateHttpMethod, validateBaseUrl, MAX_ATTACHMENT_BYTES } from '../validation.js';
 
 function table(config: EnterpriseConnectorConfig, tableName: string, path = ''): string {
-  return `${config.baseUrl}/api/now/table/${tableName}${path}`;
+  const base = validateBaseUrl(config.baseUrl);
+  const safe = validateTableName(tableName);
+  return `${base}/api/now/table/${safe}${path}`;
 }
 
 function apiUrl(config: EnterpriseConnectorConfig, path: string): string {
-  return `${config.baseUrl}${path}`;
+  const base = validateBaseUrl(config.baseUrl);
+  return `${base}${path}`;
 }
 
 function toRecord(type: string, data: Record<string, unknown>, id?: string): EnterpriseRecord {
@@ -60,11 +64,15 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   }
 
   async get(id: string, config: EnterpriseConnectorConfig, tableName = 'incident'): Promise<EnterpriseRecord | null> {
+    const safeId = validateSysId(id);
     try {
       const d = await this.fetchJSON<{ result: Record<string, unknown> }>(
-        table(config, tableName, `/${id}`), this.authHeaders(config));
-      return toRecord(tableName, d.result, id);
-    } catch { return null; }
+        table(config, tableName, `/${safeId}`), this.authHeaders(config));
+      return toRecord(tableName, d.result, safeId);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('404')) return null;
+      throw err;
+    }
   }
 
   async create(data: Record<string, unknown>, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
@@ -77,17 +85,20 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   }
 
   async updateRecord(id: string, tableName: string, fields: Record<string, unknown>, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
-    const d = await this.fetchWithBody('PUT', table(config, tableName, `/${id}`), this.authHeaders(config), JSON.stringify(fields));
-    return toRecord(tableName, d.result, id);
+    const safeId = validateSysId(id);
+    const d = await this.fetchWithBody('PUT', table(config, tableName, `/${safeId}`), this.authHeaders(config), JSON.stringify(fields));
+    return toRecord(tableName, d.result, safeId);
   }
 
   async patchRecord(id: string, tableName: string, fields: Record<string, unknown>, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
-    const d = await this.fetchWithBody('PATCH', table(config, tableName, `/${id}`), this.authHeaders(config), JSON.stringify(fields));
-    return toRecord(tableName, d.result, id);
+    const safeId = validateSysId(id);
+    const d = await this.fetchWithBody('PATCH', table(config, tableName, `/${safeId}`), this.authHeaders(config), JSON.stringify(fields));
+    return toRecord(tableName, d.result, safeId);
   }
 
   async deleteRecord(id: string, tableName: string, config: EnterpriseConnectorConfig): Promise<void> {
-    await this.fetchRaw('DELETE', table(config, tableName, `/${id}`), this.authHeaders(config));
+    const safeId = validateSysId(id);
+    await this.fetchRaw('DELETE', table(config, tableName, `/${safeId}`), this.authHeaders(config));
   }
 
   /* ===== Incidents ===== */
@@ -159,11 +170,15 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   }
 
   async getCatalogItem(id: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord | null> {
+    const safeId = validateSysId(id);
     try {
       const d = await this.fetchJSON<{ result: Record<string, unknown> }>(
-        apiUrl(config, `/api/sn_sc/servicecatalog/items/${id}`), this.authHeaders(config));
-      return toRecord('catalog_item', d.result, id);
-    } catch { return null; }
+        apiUrl(config, `/api/sn_sc/servicecatalog/items/${safeId}`), this.authHeaders(config));
+      return toRecord('catalog_item', d.result, safeId);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('404')) return null;
+      throw err;
+    }
   }
 
   async orderCatalogItem(id: string, variables: Record<string, unknown>, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
@@ -208,22 +223,30 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   }
 
   async getAttachment(id: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord | null> {
+    const safeId = validateSysId(id);
     try {
       const d = await this.fetchJSON<{ result: Record<string, unknown> }>(
-        apiUrl(config, `/api/now/attachment/${id}`), this.authHeaders(config));
-      return toRecord('attachment', d.result, id);
-    } catch { return null; }
+        apiUrl(config, `/api/now/attachment/${safeId}`), this.authHeaders(config));
+      return toRecord('attachment', d.result, safeId);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('404')) return null;
+      throw err;
+    }
   }
 
   async downloadAttachment(id: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
-    const resp = await fetch(apiUrl(config, `/api/now/attachment/${id}/file`), {
+    const safeId = validateSysId(id);
+    const resp = await fetch(apiUrl(config, `/api/now/attachment/${safeId}/file`), {
       headers: { ...this.authHeaders(config) },
     });
     if (!resp.ok) throw new Error(`servicenow: GET attachment file ${resp.status}`);
     const contentType = resp.headers.get('content-type') ?? 'application/octet-stream';
     const buffer = await resp.arrayBuffer();
+    if (buffer.byteLength > MAX_ATTACHMENT_BYTES) {
+      throw new Error(`Attachment exceeds ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB size limit.`);
+    }
     const b64 = Buffer.from(buffer).toString('base64');
-    return toRecord('attachment_file', { content_type: contentType, base64: b64, size: buffer.byteLength }, id);
+    return toRecord('attachment_file', { content_type: contentType, base64: b64, size: buffer.byteLength }, safeId);
   }
 
   async uploadAttachment(tableName: string, sysId: string, fileName: string, contentType: string, content: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
@@ -239,15 +262,22 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   }
 
   async deleteAttachment(id: string, config: EnterpriseConnectorConfig): Promise<void> {
-    await this.fetchRaw('DELETE', apiUrl(config, `/api/now/attachment/${id}`), this.authHeaders(config));
+    const safeId = validateSysId(id);
+    await this.fetchRaw('DELETE', apiUrl(config, `/api/now/attachment/${safeId}`), this.authHeaders(config));
   }
 
   /* ----- 1B: Batch API ----- */
 
   async batchRequest(requests: Array<{ id: string; method: string; url: string; body?: unknown; headers?: Record<string, string> }>, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord[]> {
+    const sanitised = requests.map(r => {
+      validateHttpMethod(r.method);
+      if (!r.url.startsWith('/api/')) throw new Error(`Batch sub-request URL must start with /api/. Got: "${r.url}".`);
+      const { headers: _stripped, ...rest } = r;          // drop user-supplied headers to prevent auth override
+      return rest;
+    });
     const d = await this.fetchJSON<{ serviced_requests: Array<Record<string, unknown>> }>(
       apiUrl(config, '/api/now/batch'), this.authHeaders(config),
-      JSON.stringify({ batch_request_payload: { use_parallel: true, rest_requests: requests } }));
+      JSON.stringify({ batch_request_payload: { use_parallel: true, rest_requests: sanitised } }));
     return (d.serviced_requests ?? []).map((r, i) => toRecord('batch_response', r, String(i)));
   }
 
@@ -278,7 +308,10 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
       const d = await this.fetchJSON<Record<string, unknown>>(
         apiUrl(config, `/api/now/scim/Users/${id}`), this.authHeaders(config));
       return toRecord('scim_user', d, id);
-    } catch { return null; }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('404')) return null;
+      throw err;
+    }
   }
 
   async scimCreateUser(data: Record<string, unknown>, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
@@ -308,7 +341,10 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
       const d = await this.fetchJSON<Record<string, unknown>>(
         apiUrl(config, `/api/now/scim/Groups/${id}`), this.authHeaders(config));
       return toRecord('scim_group', d, id);
-    } catch { return null; }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('404')) return null;
+      throw err;
+    }
   }
 
   async scimCreateGroup(data: Record<string, unknown>, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
@@ -353,31 +389,42 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
    * ================================================================ */
 
   async cmdbGetCI(id: string, className: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord | null> {
+    const safeId = validateSysId(id);
+    const safeCls = validateTableName(className);
     try {
       const d = await this.fetchJSON<{ result: Record<string, unknown> }>(
-        apiUrl(config, `/api/now/cmdb/instance/${className}/${id}`), this.authHeaders(config));
-      return toRecord(className, d.result, id);
-    } catch { return null; }
+        apiUrl(config, `/api/now/cmdb/instance/${safeCls}/${safeId}`), this.authHeaders(config));
+      return toRecord(safeCls, d.result, safeId);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('404')) return null;
+      throw err;
+    }
   }
 
   async cmdbCreateCI(className: string, data: Record<string, unknown>, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
+    const safeCls = validateTableName(className);
     const d = await this.fetchJSON<{ result: Record<string, unknown> }>(
-      apiUrl(config, `/api/now/cmdb/instance/${className}`), this.authHeaders(config), JSON.stringify(data));
-    return toRecord(className, d.result, d.result['sys_id'] as string);
+      apiUrl(config, `/api/now/cmdb/instance/${safeCls}`), this.authHeaders(config), JSON.stringify(data));
+    return toRecord(safeCls, d.result, d.result['sys_id'] as string);
   }
 
   async cmdbUpdateCI(id: string, className: string, data: Record<string, unknown>, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
-    const d = await this.fetchWithBody('PATCH', apiUrl(config, `/api/now/cmdb/instance/${className}/${id}`), this.authHeaders(config), JSON.stringify(data));
-    return toRecord(className, d.result, id);
+    const safeId = validateSysId(id);
+    const safeCls = validateTableName(className);
+    const d = await this.fetchWithBody('PATCH', apiUrl(config, `/api/now/cmdb/instance/${safeCls}/${safeId}`), this.authHeaders(config), JSON.stringify(data));
+    return toRecord(safeCls, d.result, safeId);
   }
 
   async cmdbDeleteCI(id: string, className: string, config: EnterpriseConnectorConfig): Promise<void> {
-    await this.fetchRaw('DELETE', apiUrl(config, `/api/now/cmdb/instance/${className}/${id}`), this.authHeaders(config));
+    const safeId = validateSysId(id);
+    const safeCls = validateTableName(className);
+    await this.fetchRaw('DELETE', apiUrl(config, `/api/now/cmdb/instance/${safeCls}/${safeId}`), this.authHeaders(config));
   }
 
   async cmdbGetRelationships(id: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord[]> {
+    const safeId = validateSysId(id);
     const d = await this.fetchJSON<{ result: Array<Record<string, unknown>> }>(
-      apiUrl(config, `/api/now/cmdb/instance/cmdb_rel_ci?sysparm_query=parent=${id}^ORchild=${id}`), this.authHeaders(config));
+      apiUrl(config, `/api/now/cmdb/instance/cmdb_rel_ci?sysparm_query=parent=${safeId}^ORchild=${safeId}`), this.authHeaders(config));
     return (d.result ?? []).map(r => toRecord('cmdb_rel', r, r['sys_id'] as string));
   }
 
@@ -483,11 +530,15 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   }
 
   async getCatalog(id: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord | null> {
+    const safeId = validateSysId(id);
     try {
       const d = await this.fetchJSON<{ result: Record<string, unknown> }>(
-        apiUrl(config, `/api/sn_sc/servicecatalog/catalogs/${id}`), this.authHeaders(config));
-      return toRecord('catalog', d.result, id);
-    } catch { return null; }
+        apiUrl(config, `/api/sn_sc/servicecatalog/catalogs/${safeId}`), this.authHeaders(config));
+      return toRecord('catalog', d.result, safeId);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('404')) return null;
+      throw err;
+    }
   }
 
   async listCategories(catalogId: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord[]> {
@@ -497,11 +548,15 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   }
 
   async getCategory(id: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord | null> {
+    const safeId = validateSysId(id);
     try {
       const d = await this.fetchJSON<{ result: Record<string, unknown> }>(
-        apiUrl(config, `/api/sn_sc/servicecatalog/categories/${id}`), this.authHeaders(config));
-      return toRecord('category', d.result, id);
-    } catch { return null; }
+        apiUrl(config, `/api/sn_sc/servicecatalog/categories/${safeId}`), this.authHeaders(config));
+      return toRecord('category', d.result, safeId);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('404')) return null;
+      throw err;
+    }
   }
 
   async getCatalogItemVariables(itemId: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord[]> {
@@ -677,9 +732,11 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   }
 
   async callScriptedREST(method: string, path: string, config: EnterpriseConnectorConfig, body?: Record<string, unknown>): Promise<EnterpriseRecord> {
-    const url = apiUrl(config, path);
-    if (body && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-      const d = await this.fetchWithBody(method, url, this.authHeaders(config), JSON.stringify(body));
+    const safeMethod = validateHttpMethod(method);
+    const safePath = validateApiPath(path);
+    const url = apiUrl(config, safePath);
+    if (body && (safeMethod === 'POST' || safeMethod === 'PUT' || safeMethod === 'PATCH')) {
+      const d = await this.fetchWithBody(safeMethod, url, this.authHeaders(config), JSON.stringify(body));
       return toRecord('scripted_rest', d.result, 'response');
     }
     const d = await this.fetchJSON<{ result: Record<string, unknown> }>(url, this.authHeaders(config));
@@ -761,7 +818,10 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
       const d = await this.fetchJSON<{ result: Record<string, unknown> }>(
         apiUrl(config, `/api/sn_flow/flow/execution/${executionId}`), this.authHeaders(config));
       return toRecord('flow_execution', d.result, executionId);
-    } catch { return null; }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('404')) return null;
+      throw err;
+    }
   }
 
   async listFlowExecutions(config: EnterpriseConnectorConfig, query = '', limit = 50): Promise<EnterpriseRecord[]> {
@@ -783,7 +843,10 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
       const d = await this.fetchJSON<{ result: Record<string, unknown> }>(
         apiUrl(config, `/api/sn_flow/action/execution/${executionId}`), this.authHeaders(config));
       return toRecord('action_execution', d.result, executionId);
-    } catch { return null; }
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes('404')) return null;
+      throw err;
+    }
   }
 
   async listMidServers(config: EnterpriseConnectorConfig): Promise<EnterpriseRecord[]> {
@@ -926,21 +989,25 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   }
 
   async retrieveUpdateSet(url: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
+    // Validate the remote URL is a service-now.com instance to prevent SSRF
+    validateBaseUrl(url);
     const d = await this.fetchJSON<{ result: Record<string, unknown> }>(
       apiUrl(config, `/api/sn_cicd/updateset/retrieve?update_set_url=${encodeURIComponent(url)}`), this.authHeaders(config), JSON.stringify({}));
     return toRecord('retrieved_update_set', d.result, d.result['sys_id'] as string);
   }
 
   async previewUpdateSet(id: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
+    const safeId = validateSysId(id);
     const d = await this.fetchJSON<{ result: Record<string, unknown> }>(
-      apiUrl(config, `/api/sn_cicd/updateset/preview?update_set_sys_id=${id}`), this.authHeaders(config), JSON.stringify({}));
-    return toRecord('preview_result', d.result, id);
+      apiUrl(config, `/api/sn_cicd/updateset/preview?update_set_sys_id=${safeId}`), this.authHeaders(config), JSON.stringify({}));
+    return toRecord('preview_result', d.result, safeId);
   }
 
   async applyUpdateSet(id: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
+    const safeId = validateSysId(id);
     const d = await this.fetchJSON<{ result: Record<string, unknown> }>(
-      apiUrl(config, `/api/sn_cicd/updateset/apply?update_set_sys_id=${id}`), this.authHeaders(config), JSON.stringify({}));
-    return toRecord('apply_result', d.result, id);
+      apiUrl(config, `/api/sn_cicd/updateset/apply?update_set_sys_id=${safeId}`), this.authHeaders(config), JSON.stringify({}));
+    return toRecord('apply_result', d.result, safeId);
   }
 
   /* ================================================================
@@ -1551,7 +1618,7 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers },
       body,
     });
-    if (!resp.ok) throw new Error(`servicenow: ${method} ${resp.status} ${resp.statusText}`);
+    if (!resp.ok) throw new Error(`servicenow: ${method} HTTP ${resp.status}`);
     return resp.json() as Promise<{ result: Record<string, unknown> }>;
   }
 
@@ -1561,7 +1628,7 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
       headers: { Accept: 'application/json', ...headers },
     });
     if (!resp.ok && resp.status !== 204) {
-      throw new Error(`servicenow: ${method} ${resp.status} ${resp.statusText}`);
+      throw new Error(`servicenow: ${method} HTTP ${resp.status}`);
     }
   }
 }

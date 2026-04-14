@@ -2,12 +2,18 @@
  * Base enterprise connector
  */
 import type { EnterpriseConnectorConfig, EnterpriseRecord, EnterpriseQueryOptions, EnterpriseProvider } from './types.js';
+import { validateBaseUrl } from './validation.js';
 
 export abstract class BaseEnterpriseProvider implements EnterpriseProvider {
   abstract readonly type: string;
   abstract query(options: EnterpriseQueryOptions, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord[]>;
   abstract get(id: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord | null>;
   abstract create(data: Record<string, unknown>, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord>;
+
+  /** Validate and cache the baseUrl on first use. */
+  protected safeBaseUrl(config: EnterpriseConnectorConfig): string {
+    return validateBaseUrl(config.baseUrl);
+  }
 
   protected authHeaders(config: EnterpriseConnectorConfig): Record<string, string> {
     switch (config.authType) {
@@ -32,7 +38,7 @@ export abstract class BaseEnterpriseProvider implements EnterpriseProvider {
       headers: { 'Content-Type': 'application/json', ...headers },
       body,
     });
-    if (!resp.ok) throw new Error(`${this.type}: ${resp.status} ${resp.statusText}`);
+    if (!resp.ok) throw new Error(`${this.type}: HTTP ${resp.status}`);
     return resp.json() as Promise<T>;
   }
 }
