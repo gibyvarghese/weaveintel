@@ -5,26 +5,80 @@
  *   ANTHROPIC_API_KEY=sk-… npx tsx examples/12-geneweave.ts
  *
  * Then open http://localhost:3000 in your browser.
- *  - Register an account
+ *  - Register an account (or sign in with Google via OAuth)
  *  - Start chatting (supports streaming + multiple models)
+ *  - Switch between Direct / Agent / Supervisor chat modes
  *  - Switch to the Dashboard tab to see token usage, costs, and latency
+ *  - Click your profile icon (top-right) → Preferences to change the theme
+ *  - Open the Traces tab to see per-tool-call observability spans
  *
  * WeaveIntel packages used:
  *   @weaveintel/geneweave — The full-stack reference application that wires together:
  *     • @weaveintel/provider-openai & provider-anthropic — LLM adapters (auto-discovered)
  *     • @weaveintel/core       — ExecutionContext, EventBus, ToolRegistry, Model interface
  *     • @weaveintel/agents     — ReAct agent loop (used in Agent Mode chat)
+ *     • @weaveintel/agents     — weaveSupervisor() (used in Supervisor Mode — routes to
+ *                                researcher/analyst/writer workers)
  *     • @weaveintel/memory     — Conversation history per chat session
  *     • @weaveintel/redaction  — PII masking (if enabled in settings)
  *     • @weaveintel/evals      — Post-response quality evaluation
  *     • @weaveintel/observability — Trace recording for the Traces admin tab
+ *     • @weaveintel/tools-search  — Web search via DuckDuckGo HTML fallback, Brave, Tavily
+ *     • @weaveintel/oauth         — Google OAuth 2.0 SSO sign-in
  *
  *   createGeneWeave() is the single entry point. It:
- *     1. Initializes a SQLite database (users, sessions, chats, metrics, settings, etc.)
+ *     1. Initializes a SQLite database (users, sessions, chats, messages, metrics,
+ *        traces, settings, user_preferences, and model pricing data)
  *     2. Creates a ChatEngine that dynamically imports provider packages
  *     3. Seeds default admin data (default admin user, default settings)
  *     4. Spins up an HTTP server with auth, chat, dashboard, and admin API routes
- *     5. Serves a single-page app (SPA) with chat UI, dashboard charts, and admin panel
+ *     5. Serves a single-page app (SPA) with:
+ *          - Chat UI with streaming, multi-model selection, and mode switching
+ *          - Dashboard charts (token usage, cost, latency)
+ *          - Traces tab — per-span tool-call observability (tool_call.web_search, etc.)
+ *          - Admin panel
+ *          - Preferences screen for theme switching (light / dark)
+ *
+ * NEW FEATURES (recent additions):
+ *
+ *   1. Theme system (light / dark)
+ *      The SPA ships a full CSS token theme system. Users can switch between
+ *      "light" and "dark" via Preferences (profile icon → Preferences).
+ *      The selected theme is persisted to the user_preferences table via
+ *      PATCH /api/users/preferences and restored on next login.
+ *      CSS token families: --bg, --bg2, --surface, --border, --text, --text2,
+ *        --accent, --accent-hover, --solid, --solid-hover, --solid-contrast.
+ *
+ *   2. Tool-call observability (SQLite traces)
+ *      The ChatEngine now subscribes to the event bus (tool.call.start/end/error)
+ *      during every chat turn. Each completed tool invocation is persisted as a
+ *      separate row in the traces table with name = "tool_call.<toolName>" and the
+ *      full payload (agent, provider, result snippet, latency) in attributes JSON.
+ *      This provides per-tool visibility in the Traces tab, separate from the
+ *      coarser "step.*" spans. Covers any tool that runs through the agent pipeline
+ *      — including web_search, delegate_to_worker, plan, think, calculator, etc.
+ *
+ *   3. Web search with DuckDuckGo HTML fallback
+ *      The built-in web_search tool uses @weaveintel/tools-search with the
+ *      DuckDuckGoProvider. Previously, the Instant Answer API was used — it often
+ *      returns zero results for real-world queries (e.g. event tickets, tour dates).
+ *      Now the provider automatically falls back to parsing DuckDuckGo's public HTML
+ *      SERP when the Instant Answer API returns no results. This makes web_search
+ *      reliable for arbitrary queries with no API key required.
+ *      Additional providers (Brave, Tavily, Bing, SearXNG, Jina, Exa, Serper) can
+ *      be enabled via environment variables.
+ *
+ *   4. Google OAuth 2.0 SSO
+ *      Set OAUTH_GOOGLE_CLIENT_ID and OAUTH_GOOGLE_CLIENT_SECRET to enable
+ *      "Sign in with Google" on the login screen. The /api/oauth/google flow
+ *      exchanges the authorization code, creates or retrieves the user account,
+ *      and issues a JWT session cookie identical to email/password auth.
+ *
+ *   5. Supervisor multi-agent mode
+ *      In Supervisor chat mode the ChatEngine creates a weaveSupervisor() with
+ *      researcher / analyst / writer worker agents. Each worker has its own tool
+ *      set (web_search for researcher, etc.). Delegation is traced as
+ *      tool_call.delegate_to_worker spans.
  */
 
 import { createGeneWeave } from '@weaveintel/geneweave';
@@ -43,9 +97,9 @@ async function main() {
   const app = await createGeneWeave({
     port,
     // In production, use a strong secret (e.g. from env: process.env.JWT_SECRET)
-    jwtSecret: 'change-me-in-production-' + Math.random().toString(36).slice(2),
+    jwtSecret: process.env['JWT_SECRET'] ?? 'change-me-in-production-' + Math.random().toString(36).slice(2),
     // SQLite database file — stores users, sessions, chats, messages, metrics,
-    // evals, traces, settings, and model pricing data
+    // evals, traces, user_preferences, settings, and model pricing data
     database: { type: 'sqlite', path: './geneweave.db' },
     // provider keys — only providers with valid API keys are registered;
     // ChatEngine.getAvailableModels() returns models from all active providers
@@ -55,6 +109,28 @@ async function main() {
     },
     defaultProvider: process.env['ANTHROPIC_API_KEY'] ? 'anthropic' : 'openai',
     defaultModel: process.env['ANTHROPIC_API_KEY'] ? 'claude-sonnet-4-20250514' : 'gpt-4o-mini',
+
+    // Google OAuth 2.0 — optional: enables "Sign in with Google" on the login screen.
+    // The callback URL must be registered in your Google Cloud Console:
+    //   http://localhost:<port>/api/oauth/google/callback
+    ...(process.env['OAUTH_GOOGLE_CLIENT_ID'] ? {
+      oauth: {
+        google: {
+          clientId: process.env['OAUTH_GOOGLE_CLIENT_ID']!,
+          clientSecret: process.env['OAUTH_GOOGLE_CLIENT_SECRET']!,
+          redirectUri: `http://localhost:${port}/api/oauth/google/callback`,
+        },
+      },
+    } : {}),
+
+    // Search providers — configure any combination; the built-in web_search tool
+    // will use DuckDuckGo (no key needed) with HTML SERP fallback by default.
+    // Add Brave/Tavily/Bing for higher-quality results with an API key.
+    search: {
+      defaultProvider: 'duckduckgo',
+      ...(process.env['BRAVE_API_KEY'] ? { brave: { apiKey: process.env['BRAVE_API_KEY'] } } : {}),
+      ...(process.env['TAVILY_API_KEY'] ? { tavily: { apiKey: process.env['TAVILY_API_KEY'] } } : {}),
+    },
   });
 
   // app.chatEngine.getAvailableModels() queries each registered provider
