@@ -51,15 +51,29 @@ export function listPendingHandoffs(): HandoffRequest[] {
 
 export interface BrowserAuthProvider {
   /** Look up stored credentials for a URL and return decrypted config */
-  getCredential(url: string): Promise<BrowserAuthConfig | null>;
+  getCredential(url: string, userId?: string): Promise<BrowserAuthConfig | null>;
   /** Called when a handoff is requested — the app layer emits SSE events etc. */
   onHandoffRequest?(request: HandoffRequest): void;
   /** Look up a linked SSO identity provider session (cookies from IdP domain) */
-  getSSOSession?(identityProvider: string): Promise<SSOPassThroughAuth | null>;
+  getSSOSession?(identityProvider: string, userId?: string): Promise<SSOPassThroughAuth | null>;
   /** Save a captured SSO session for reuse across sites */
-  saveSSOSession?(session: SSOPassThroughAuth): Promise<void>;
+  saveSSOSession?(session: SSOPassThroughAuth, userId?: string): Promise<void>;
   /** List all linked SSO identity providers */
-  listSSOProviders?(): Promise<Array<{ provider: string; email?: string; linkedAt: string }>>;
+  listSSOProviders?(userId?: string): Promise<Array<{ provider: string; email?: string; linkedAt: string }>>;
+}
+
+function inferProviderFromUrl(url: string): string | null {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host === 'github.com' || host.endsWith('.github.com')) return 'github';
+    if (host === 'google.com' || host.endsWith('.google.com')) return 'google';
+    if (host.endsWith('.microsoft.com') || host.endsWith('.live.com') || host === 'login.microsoftonline.com') return 'microsoft';
+    if (host.endsWith('.apple.com') || host.endsWith('.icloud.com')) return 'apple';
+    if (host === 'facebook.com' || host.endsWith('.facebook.com')) return 'facebook';
+  } catch {
+    // Ignore malformed URLs.
+  }
+  return null;
 }
 
 let _authProvider: BrowserAuthProvider | null = null;
@@ -115,14 +129,43 @@ export function createBrowserAuthTools(): Tool[] {
           required: ['sessionId'],
         },
       },
-      async invoke(_ctx: ExecutionContext, inp: ToolInput): Promise<ToolOutput> {
+      async invoke(ctx: ExecutionContext, inp: ToolInput): Promise<ToolOutput> {
         try {
           if (!_authProvider) return err('No credential provider configured. Store credentials first via the admin UI.');
           const session = pool().require(str(inp, 'sessionId'));
           const pageUrl = session.page.url();
 
-          const authConfig = await _authProvider.getCredential(pageUrl);
-          if (!authConfig) return err(`No stored credentials found for ${pageUrl}. Add credentials in Settings → Website Credentials.`);
+          const authConfig = await _authProvider.getCredential(pageUrl, ctx.userId);
+          if (!authConfig) {
+            // If no website credential exists, try SSO pass-through by URL provider.
+            const inferredProvider = inferProviderFromUrl(pageUrl);
+            if (inferredProvider && _authProvider.getSSOSession) {
+              const ssoSession = await _authProvider.getSSOSession(inferredProvider, ctx.userId);
+              if (ssoSession && ssoSession.cookies.length > 0) {
+                await session.context.addCookies(ssoSession.cookies.map(c => ({
+                  name: c.name,
+                  value: c.value,
+                  domain: c.domain,
+                  path: c.path ?? '/',
+                  secure: c.secure ?? false,
+                  httpOnly: c.httpOnly ?? false,
+                  sameSite: (c.sameSite ?? 'Lax') as 'Strict' | 'Lax' | 'None',
+                  expires: c.expires ?? -1,
+                })));
+                await session.page.reload({ waitUntil: 'domcontentloaded' });
+                await session.settle();
+                const newSnapshot = await session.snapshot();
+                return ok({
+                  success: true,
+                  postLoginUrl: session.page.url(),
+                  authMethod: 'sso_passthrough',
+                  provider: inferredProvider,
+                  snapshot: newSnapshot.text,
+                });
+              }
+            }
+            return err(`No stored credentials found for ${pageUrl}. Add credentials in Settings → Website Credentials, or capture an SSO session for pass-through.`);
+          }
 
           if (authConfig.method === 'form_fill') {
             const formAuth = authConfig as FormFillAuth;
@@ -352,7 +395,7 @@ export function createBrowserAuthTools(): Tool[] {
           required: ['sessionId'],
         },
       },
-      async invoke(_ctx: ExecutionContext, inp: ToolInput): Promise<ToolOutput> {
+      async invoke(ctx: ExecutionContext, inp: ToolInput): Promise<ToolOutput> {
         try {
           if (!_authProvider?.getSSOSession) return err('SSO pass-through not configured. Link an identity provider session first via the admin UI or browser_capture_sso.');
           const session = pool().require(str(inp, 'sessionId'));
@@ -373,7 +416,7 @@ export function createBrowserAuthTools(): Tool[] {
           }
 
           // Look up the linked SSO session
-          const ssoSession = await _authProvider.getSSOSession(provider);
+          const ssoSession = await _authProvider.getSSOSession(provider, ctx.userId);
           if (!ssoSession) {
             return err(`No linked ${provider} session found. Use browser_capture_sso after completing a manual ${provider} login to capture the session for future SSO pass-through.`);
           }
@@ -451,12 +494,13 @@ export function createBrowserAuthTools(): Tool[] {
           required: ['sessionId', 'provider'],
         },
       },
-      async invoke(_ctx: ExecutionContext, inp: ToolInput): Promise<ToolOutput> {
+      async invoke(ctx: ExecutionContext, inp: ToolInput): Promise<ToolOutput> {
         try {
           if (!_authProvider?.saveSSOSession) return err('SSO session storage not configured.');
           const session = pool().require(str(inp, 'sessionId'));
           const provider = str(inp, 'provider').toLowerCase();
           const email = str(inp, 'email') || undefined;
+          if (!ctx.userId) return err('No authenticated user context available to save SSO session.');
 
           // Map provider to known IdP domains
           const idpDomains: Record<string, string[]> = {
@@ -498,7 +542,7 @@ export function createBrowserAuthTools(): Tool[] {
             })),
           };
 
-          await _authProvider.saveSSOSession(ssoAuth);
+          await _authProvider.saveSSOSession(ssoAuth, ctx.userId);
 
           return ok({
             success: true,

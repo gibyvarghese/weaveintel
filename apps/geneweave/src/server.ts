@@ -385,7 +385,11 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
         setAuthCookie(res, jwt);
       }
 
-      html(res, 200, '<html><body><script>window.close();</script>Account linked successfully!</body></html>');
+      html(
+        res,
+        200,
+        '<html><body><script>if(window.opener){window.opener.postMessage({type:"oauth-success"}, window.location.origin);}window.close();</script>Account linked successfully! You can close this window.</body></html>',
+      );
     } catch (err) {
       json(res, 500, { error: `Failed to link account: ${(err as Error).message}` });
     } finally {
@@ -879,10 +883,11 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   // browser_login can look up and decrypt stored credentials.
 
   setBrowserAuthProvider({
-    async getCredential(url: string) {
-      // Query all active credentials across all users.
-      // The tool runs inside an authenticated agent turn — user was already validated.
-      const rows = await db.listAllActiveWebsiteCredentials();
+    async getCredential(url: string, userId?: string) {
+      // Prefer credentials scoped to the current authenticated user.
+      const rows = userId
+        ? (await db.listWebsiteCredentials(userId)).filter(r => r.status === 'active')
+        : await db.listAllActiveWebsiteCredentials();
       for (const row of rows) {
         try {
           const pattern = row.site_url_pattern;
@@ -896,21 +901,37 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       }
       return null;
     },
-    async getSSOSession(identityProvider: string) {
-      // Retrieve the user's current SSO session from the authenticated request context.
-      // The tool runs in an agent turn with an authenticated user.
-      // For now, we return null since we don't have request context here.
-      // The SSO endpoints (below) will handle this properly per-user.
-      return null;
+    async getSSOSession(identityProvider: string, userId?: string) {
+      if (!userId) return null;
+      const row = await db.getSSOLinkedAccount(userId, identityProvider);
+      if (!row) return null;
+      try {
+        const session = decryptCredential<SSOPassThroughAuth>(row.session_encrypted);
+        return session;
+      } catch {
+        return null;
+      }
     },
-    async saveSSOSession(session: import('@weaveintel/tools-browser').SSOPassThroughAuth) {
-      // Save SSO session — would need request context for user ID.
-      // Handled by server endpoint below.
+    async saveSSOSession(session: import('@weaveintel/tools-browser').SSOPassThroughAuth, userId?: string) {
+      if (!userId) return;
+      const { encrypted, iv } = encryptCredential(session);
+      await db.createSSOLinkedAccount({
+        id: `sso-${randomUUID().slice(0, 8)}`,
+        user_id: userId,
+        identity_provider: session.identityProvider,
+        email: session.email,
+        session_encrypted: encrypted,
+        encryption_iv: iv,
+      });
     },
-    async listSSOProviders() {
-      // List linked providers — would need request context for user ID.
-      // Handled by server endpoint below.
-      return [];
+    async listSSOProviders(userId?: string) {
+      if (!userId) return [];
+      const linked = await db.listSSOLinkedAccounts(userId);
+      return linked.map(p => ({
+        provider: p.identity_provider,
+        email: p.email ?? undefined,
+        linkedAt: p.linked_at,
+      }));
     },
   });
 

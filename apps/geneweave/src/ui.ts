@@ -804,28 +804,52 @@ async function initiateOAuthFlow(provider){
       return;
     }
 
-    // Poll for the popup to close (indicating OAuth flow completion)
-    const checkPopup = setInterval(() => {
-      if (popup.closed) {
-        clearInterval(checkPopup);
-        // OAuth flow completed, try to get user info
-        setTimeout(() => {
-          api.get('/auth/me').then(meR => {
-            if (meR.ok) {
-              return meR.json().then(meD => {
-                state.user = meD.user;
-                state.csrfToken = meD.csrfToken;
-                state.authError = '';
-                return Promise.all([loadChats(), loadModels(), loadTools(), loadUserPreferences()]).then(() => render());
-              });
-            }
-          }).catch(err => {
-            state.authError = 'OAuth error: ' + (err.message || err);
-            render();
-          });
-        }, 500);
-      }
-    }, 500);
+    let completed = false;
+    let pollTimer = null;
+    let timeoutTimer = null;
+
+    const cleanup = () => {
+      window.removeEventListener('message', onMessage);
+      if (pollTimer) clearInterval(pollTimer);
+      if (timeoutTimer) clearTimeout(timeoutTimer);
+    };
+
+    const finalizeAuth = () => {
+      if (completed) return;
+      api.get('/auth/me').then(meR => {
+        if (!meR.ok) return;
+        return meR.json().then(meD => {
+          completed = true;
+          cleanup();
+          state.user = meD.user;
+          state.csrfToken = meD.csrfToken;
+          state.authError = '';
+          try { popup.close(); } catch (_) { /* ignore */ }
+          return Promise.all([loadChats(), loadModels(), loadTools(), loadUserPreferences()]).then(() => render());
+        });
+      }).catch(err => {
+        state.authError = 'OAuth error: ' + (err.message || err);
+        render();
+      });
+    };
+
+    const onMessage = (event) => {
+      if (event.origin !== window.location.origin) return;
+      if (!event.data || event.data.type !== 'oauth-success') return;
+      finalizeAuth();
+    };
+
+    window.addEventListener('message', onMessage);
+
+    // Primary completion path: callback posts oauth-success to opener.
+    // Fallback: periodically check auth state without reading popup.closed (COOP-safe).
+    pollTimer = setInterval(finalizeAuth, 1500);
+    timeoutTimer = setTimeout(() => {
+      if (completed) return;
+      cleanup();
+      state.authError = 'OAuth timed out. Please try again.';
+      render();
+    }, 120000);
   } catch (err) {
     state.authError = 'OAuth error: ' + (err.message || err);
     render();
