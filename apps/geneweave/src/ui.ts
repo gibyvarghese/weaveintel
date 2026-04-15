@@ -2349,9 +2349,49 @@ async function unlinkSSOProvider(provider){
   }catch(e){ alert('Failed to unlink: '+(e.message||e)); }
 }
 
+function openGuidedSSOConnect(target){
+  var urls = {
+    github_google: 'https://github.com/login',
+    google: 'https://accounts.google.com/',
+    github: 'https://github.com/login',
+    microsoft: 'https://login.microsoftonline.com/',
+    apple: 'https://appleid.apple.com/',
+    facebook: 'https://www.facebook.com/login/',
+  };
+  var url = urls[target] || urls['github_google'];
+  window.open(url, '_blank', 'noopener');
+}
+
+function copyGuidedSSOPrompt(provider){
+  var email = state.user?.email || 'your-email@example.com';
+  var lines = [
+    'Use browser_open for https://github.com/login',
+    'Select Sign in with Google and complete login manually (including CAPTCHA/2FA if prompted).',
+    'Run browser_capture_sso with provider='+provider+' and email='+email,
+    'Then run browser_sso_login with provider='+provider,
+  ];
+  var txt = lines.join('\\n');
+  var done = function(){ alert('Guided SSO prompt copied. Paste it in chat and run step-by-step.'); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done).catch(function(){ window.prompt('Copy this guided prompt:', txt); });
+  } else {
+    window.prompt('Copy this guided prompt:', txt);
+  }
+}
+
 function renderSSOProviders(){
   var section = h('div',{style:'background:#F0F9FF;border:1px solid #BAE6FD;border-radius:12px;padding:16px;margin-bottom:20px'});
   section.appendChild(h('div',{style:'font-weight:700;font-size:14px;margin-bottom:12px;color:#0369A1'},'\u{1F517} Linked SSO Providers'));
+
+  var guide = h('div',{style:'background:#FFFFFF;border:1px solid #BFDBFE;border-radius:10px;padding:12px;margin-bottom:12px'},
+    h('div',{style:'font-size:12px;font-weight:700;color:#1E40AF;margin-bottom:6px'},'\u{1F6A9} Guided Connect (recommended)'),
+    h('div',{style:'font-size:12px;color:#475569;line-height:1.5;margin-bottom:8px'},'For GitHub with Google social login: open GitHub login, complete Google sign-in manually once, then capture SSO for pass-through.'),
+    h('div',{style:'display:flex;gap:8px;flex-wrap:wrap'},
+      h('button',{className:'nav-btn active',style:'font-size:11px',onClick:function(){ openGuidedSSOConnect('github_google'); }},'\u{1F517} Open GitHub Login'),
+      h('button',{className:'nav-btn',style:'font-size:11px',onClick:function(){ copyGuidedSSOPrompt('google'); }},'\u{1F4CB} Copy Guided Prompt')
+    )
+  );
+  section.appendChild(guide);
   
   if(!state.ssoProviders){
     section.appendChild(h('div', { style: 'font-size:12px;color:#64748B' }, 'Loading…'));

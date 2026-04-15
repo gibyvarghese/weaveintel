@@ -1,10 +1,11 @@
 /**
- * Browser session pool — manages headless Chromium instances for agent automation.
+ * Browser session pool — manages browser instances for agent automation.
  *
  * Sessions are identified by UUID and expire after a configurable idle timeout.
  * A single global pool is shared across all tool invocations.
  */
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
+import { existsSync } from 'node:fs';
 import { captureSnapshot, type PageSnapshot } from './snapshot.js';
 import type { BrowserAuthConfig, HandoffState, CookieAuth, HeaderAuth } from './auth-types.js';
 
@@ -17,6 +18,7 @@ export interface BrowserPoolOptions {
   /** Idle timeout in ms (default: 5 min) */
   sessionTimeoutMs?: number;
   headless?: boolean;
+  executablePath?: string;
   viewport?: { width: number; height: number };
 }
 
@@ -26,6 +28,14 @@ export interface SessionInfo {
   title: string;
   createdAt: number;
   lastActivityAt: number;
+}
+
+interface ResolvedBrowserPoolOptions {
+  maxSessions: number;
+  sessionTimeoutMs: number;
+  headless: boolean;
+  executablePath?: string;
+  viewport: { width: number; height: number };
 }
 
 /* ------------------------------------------------------------------ */
@@ -91,16 +101,42 @@ export class BrowserSession {
 
 let _pool: BrowserPool | null = null;
 
+function readHeadlessDefault(): boolean {
+  const raw = (process.env['PLAYWRIGHT_HEADLESS'] ?? '').trim().toLowerCase();
+  if (!raw) return true;
+  return !(raw === 'false' || raw === '0' || raw === 'no' || raw === 'off');
+}
+
+function readBrowserExecutablePath(): string | undefined {
+  const configuredPath = (process.env['PLAYWRIGHT_BROWSER_PATH'] ?? '').trim();
+  if (configuredPath) return configuredPath;
+
+  const preferredBrowser = (process.env['PLAYWRIGHT_BROWSER'] ?? '').trim().toLowerCase();
+  if (preferredBrowser !== 'chrome') return undefined;
+
+  const candidates = [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    `${process.env['HOME'] ?? ''}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`,
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+
+  return undefined;
+}
+
 export class BrowserPool {
   private sessions = new Map<string, BrowserSession>();
-  private opts: Required<BrowserPoolOptions>;
+  private opts: ResolvedBrowserPoolOptions;
   private timer: ReturnType<typeof setInterval> | null;
 
   constructor(options: BrowserPoolOptions = {}) {
     this.opts = {
       maxSessions: options.maxSessions ?? 3,
       sessionTimeoutMs: options.sessionTimeoutMs ?? 5 * 60 * 1000,
-      headless: options.headless ?? true,
+      headless: options.headless ?? readHeadlessDefault(),
+      executablePath: options.executablePath ?? readBrowserExecutablePath(),
       viewport: options.viewport ?? { width: 1280, height: 720 },
     };
     this.timer = setInterval(() => void this.cleanup(), 30_000);
@@ -129,7 +165,10 @@ export class BrowserPool {
     }
 
     const id = crypto.randomUUID();
-    const browser = await chromium.launch({ headless: this.opts.headless });
+    const browser = await chromium.launch({
+      headless: this.opts.headless,
+      ...(this.opts.executablePath ? { executablePath: this.opts.executablePath } : {}),
+    });
     const context = await browser.newContext({
       viewport: this.opts.viewport,
       userAgent: 'WeaveIntel-Browser/1.0',

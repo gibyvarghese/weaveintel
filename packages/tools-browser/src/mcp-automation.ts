@@ -60,7 +60,7 @@ export function createAutomationTools(): Tool[] {
     {
       schema: {
         name: 'browser_open',
-        description: 'Launch a headless browser and navigate to a URL. Returns a session ID and a text snapshot of the page showing all interactive elements with ref numbers. Use the ref numbers in subsequent actions. Always start here before interacting with any website.',
+        description: 'Launch a browser and navigate to a URL. Returns a session ID and a text snapshot of the page showing all interactive elements with ref numbers. Use the ref numbers in subsequent actions. By default the browser is headless; set PLAYWRIGHT_HEADLESS=false to show a visible browser window for manual handoff. Set PLAYWRIGHT_BROWSER=chrome to use the installed system Chrome binary, or PLAYWRIGHT_BROWSER_PATH to target a specific browser executable.',
         parameters: {
           type: 'object',
           properties: {
