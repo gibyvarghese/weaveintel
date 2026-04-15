@@ -13,6 +13,7 @@
  */
 
 import { createGeneWeave } from '@weaveintel/geneweave';
+import 'dotenv/config';
 
 async function main() {
   const port = parseInt(process.env['PORT'] ?? '3500', 10);
