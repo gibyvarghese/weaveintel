@@ -88,6 +88,7 @@ export interface EvalRow {
 export interface UserPreferencesRow {
   user_id: string;
   default_mode: string;
+  theme: string;
   updated_at: string;
 }
 
@@ -837,7 +838,7 @@ export interface DatabaseAdapter {
 
   // User preferences
   getUserPreferences(userId: string): Promise<UserPreferencesRow | null>;
-  saveUserPreferences(userId: string, defaultMode: string): Promise<void>;
+  saveUserPreferences(userId: string, defaultMode: string, theme: string): Promise<void>;
 
   // Chat settings (agent mode, tools, redaction)
   getChatSettings(chatId: string): Promise<ChatSettingsRow | null>;

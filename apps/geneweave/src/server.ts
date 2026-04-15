@@ -439,7 +439,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   router.get('/api/user/preferences', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const prefs = await db.getUserPreferences(auth.userId);
-    json(res, 200, { preferences: prefs ?? { default_mode: 'direct' } });
+    json(res, 200, { preferences: prefs ?? { default_mode: 'direct', theme: 'light' } });
   });
 
   router.post('/api/user/preferences', async (req, res, _params, auth) => {
@@ -448,10 +448,14 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     const mode = (body['default_mode'] as string) || 'direct';
+    const theme = (body['theme'] as string) || 'light';
     if (!['direct', 'agent', 'supervisor'].includes(mode)) {
       json(res, 400, { error: 'default_mode must be "direct", "agent", or "supervisor"' }); return;
     }
-    await db.saveUserPreferences(auth.userId, mode);
+    if (!['light', 'dark'].includes(theme)) {
+      json(res, 400, { error: 'theme must be "light" or "dark"' }); return;
+    }
+    await db.saveUserPreferences(auth.userId, mode, theme);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 

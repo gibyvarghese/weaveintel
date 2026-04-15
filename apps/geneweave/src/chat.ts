@@ -26,7 +26,7 @@ import { randomUUID } from 'node:crypto';
 import type { ServerResponse } from 'node:http';
 import type {
   Model, ModelRequest, ModelResponse, StreamChunk, ExecutionContext, Message,
-  ToolRegistry, AgentStepEvent, AgentStep, AgentResult,
+  ToolRegistry, AgentStepEvent, AgentStep, AgentResult, EventBus,
   Guardrail, GuardrailResult, GuardrailStage,
 } from '@weaveintel/core';
 import { weaveContext, weaveEventBus, EventTypes } from '@weaveintel/core';
@@ -230,6 +230,19 @@ export interface WorkerDef {
   name: string;
   description: string;
   tools: string[];
+}
+
+interface ToolCallObservableEvent {
+  phase: 'start' | 'end' | 'error';
+  timestamp: number;
+  executionId?: string;
+  spanId?: string;
+  data: Record<string, unknown>;
+}
+
+interface AgentRunTelemetry {
+  result: AgentResult;
+  toolCallEvents: ToolCallObservableEvent[];
 }
 
 type CognitiveCheckSummary = GuardrailCategorySummary;
@@ -463,6 +476,7 @@ export class ChatEngine {
     let assistantContent: string = '';
     let usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
     let steps: AgentStep[] | undefined;
+    let toolCallEvents: ToolCallObservableEvent[] | undefined;
     let cacheHit = false;
 
     // ── Cache lookup ──
@@ -480,14 +494,15 @@ export class ChatEngine {
     if (!cacheHit) {
     if (settings.mode === 'agent' || settings.mode === 'supervisor') {
       // ── Agent / Supervisor mode ──
-      const result = await this.runAgent(ctx, model, userId, messages, processedContent, memorySettings);
-      assistantContent = result.output ?? '';
+      const telemetry = await this.runAgent(ctx, model, userId, messages, processedContent, memorySettings);
+      assistantContent = telemetry.result.output ?? '';
       usage = {
-        promptTokens: result.usage.totalTokens,  // agent tracks totalTokens only
+        promptTokens: telemetry.result.usage.totalTokens,  // agent tracks totalTokens only
         completionTokens: 0,
-        totalTokens: result.usage.totalTokens,
+        totalTokens: telemetry.result.usage.totalTokens,
       };
-      steps = [...result.steps];
+      steps = [...telemetry.result.steps];
+      toolCallEvents = telemetry.toolCallEvents;
     } else {
       // ── Direct mode ──
       const request: ModelRequest = {
@@ -588,7 +603,7 @@ export class ChatEngine {
     });
 
     // Record traces
-    await this.recordTraceSpans(userId, chatId, assistMsgId, traceId, settings.mode, startMs, latencyMs, steps);
+    await this.recordTraceSpans(userId, chatId, assistMsgId, traceId, settings.mode, startMs, latencyMs, steps, toolCallEvents);
 
     return {
       assistantContent,
@@ -764,14 +779,16 @@ export class ChatEngine {
     let fullText = '';
     let finalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
     let steps: AgentStep[] = [];
+    let toolCallEvents: ToolCallObservableEvent[] = [];
 
     try {
       if (settings.mode === 'agent' || settings.mode === 'supervisor') {
         // ── Agent / Supervisor streaming ──
-        const agentResult = await this.streamAgent(res, ctx, model, userId, messages, processedContent, streamMemorySettings);
-        fullText = agentResult.output ?? '';
-        finalUsage = { promptTokens: agentResult.usage.totalTokens, completionTokens: 0, totalTokens: agentResult.usage.totalTokens };
-        steps = [...agentResult.steps];
+        const telemetry = await this.streamAgent(res, ctx, model, userId, messages, processedContent, streamMemorySettings);
+        fullText = telemetry.result.output ?? '';
+        finalUsage = { promptTokens: telemetry.result.usage.totalTokens, completionTokens: 0, totalTokens: telemetry.result.usage.totalTokens };
+        steps = [...telemetry.result.steps];
+        toolCallEvents = telemetry.toolCallEvents;
       } else {
         // ── Direct streaming ──
         const request: ModelRequest = {
@@ -901,7 +918,7 @@ export class ChatEngine {
       totalTokens: finalUsage.totalTokens, cost, latencyMs,
     });
 
-    await this.recordTraceSpans(userId, chatId, assistMsgId, traceId, settings.mode, startMs, latencyMs, steps);
+    await this.recordTraceSpans(userId, chatId, assistMsgId, traceId, settings.mode, startMs, latencyMs, steps, toolCallEvents);
     res.end();
   }
 
@@ -1022,7 +1039,7 @@ export class ChatEngine {
     messages: Message[],
     userContent: string,
     settings: ChatSettings,
-  ): Promise<AgentResult> {
+  ): Promise<AgentRunTelemetry> {
     const enterpriseToolGroups = await this.loadEnterpriseToolGroups();
     const hasEnterprise = enterpriseToolGroups.length > 0;
     // Flat enterprise tools for backward compat (base tools only, no extended)
@@ -1052,49 +1069,61 @@ export class ChatEngine {
       ? createToolRegistry(settings.enabledTools, customTools, toolOptions)
       : customTools?.length ? createToolRegistry([], customTools, toolOptions) : undefined;
 
-    // Auto-upgrade to supervisor when enterprise tools are available
-    if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
-      const baseWorkers = settings.workers.length > 0
-        ? settings.workers.map((w) => ({
-            name: w.name,
-            description: w.description,
-            systemPrompt: this.withTemporalToolPolicy(undefined, w.tools),
-            model,
-            tools: w.tools.length ? createToolRegistry(w.tools, customTools, toolOptions) : customTools?.length ? createToolRegistry([], customTools, toolOptions) : undefined,
-          }))
-        : defaultWorkers(model, toolOptions, this.withTemporalToolPolicy.bind(this));
-      // Build enterprise domain workers from tool groups
-      const enterpriseWorkers = enterpriseToolGroups.map((g) => {
-        const registry = createToolRegistry([], g.tools, toolOptions);
-        return {
-          name: g.name,
-          description: g.description,
-          systemPrompt: `You are a specialized ServiceNow agent for: ${g.description}\nUse the available tools to fulfill the user's request. Always use the most specific tool available rather than generic query/get when possible.`,
-          model,
-          tools: registry,
-        };
-      });
-      const allWorkers = [...baseWorkers, ...enterpriseWorkers];
-      console.log(`[chat] Supervisor with ${allWorkers.length} workers (${baseWorkers.length} base + ${enterpriseWorkers.length} enterprise)`);
-      const supervisor = weaveSupervisor({
-        model,
-        workers: allWorkers,
-        maxSteps: 20,
-        name: 'geneweave-supervisor',
-        instructions: SUPERVISOR_TEMPORAL_POLICY,
-      });
-      return supervisor.run(ctx, { messages, goal: userContent });
-    }
+    const agentBus = weaveEventBus();
+    const toolCallObserver = this.observeToolCallEvents(agentBus);
 
-    const policyPrompt = this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools);
-    const agent = weaveAgent({
-      model,
-      tools,
-      systemPrompt: policyPrompt,
-      maxSteps: 15,
-      name: 'geneweave-agent',
-    });
-    return agent.run(ctx, { messages, goal: userContent });
+    try {
+      let agent;
+
+      // Auto-upgrade to supervisor when enterprise tools are available
+      if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
+        const baseWorkers = settings.workers.length > 0
+          ? settings.workers.map((w) => ({
+              name: w.name,
+              description: w.description,
+              systemPrompt: this.withTemporalToolPolicy(undefined, w.tools),
+              model,
+              tools: w.tools.length ? createToolRegistry(w.tools, customTools, toolOptions) : customTools?.length ? createToolRegistry([], customTools, toolOptions) : undefined,
+            }))
+          : defaultWorkers(model, toolOptions, this.withTemporalToolPolicy.bind(this));
+        // Build enterprise domain workers from tool groups
+        const enterpriseWorkers = enterpriseToolGroups.map((g) => {
+          const registry = createToolRegistry([], g.tools, toolOptions);
+          return {
+            name: g.name,
+            description: g.description,
+            systemPrompt: `You are a specialized ServiceNow agent for: ${g.description}\nUse the available tools to fulfill the user's request. Always use the most specific tool available rather than generic query/get when possible.`,
+            model,
+            tools: registry,
+          };
+        });
+        const allWorkers = [...baseWorkers, ...enterpriseWorkers];
+        console.log(`[chat] Supervisor with ${allWorkers.length} workers (${baseWorkers.length} base + ${enterpriseWorkers.length} enterprise)`);
+        agent = weaveSupervisor({
+          model,
+          workers: allWorkers,
+          maxSteps: 20,
+          name: 'geneweave-supervisor',
+          instructions: SUPERVISOR_TEMPORAL_POLICY,
+          bus: agentBus,
+        });
+      } else {
+        const policyPrompt = this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools);
+        agent = weaveAgent({
+          model,
+          tools,
+          systemPrompt: policyPrompt,
+          maxSteps: 15,
+          name: 'geneweave-agent',
+          bus: agentBus,
+        });
+      }
+
+      const result = await agent.run(ctx, { messages, goal: userContent });
+      return { result, toolCallEvents: toolCallObserver.events };
+    } finally {
+      toolCallObserver.dispose();
+    }
   }
 
   // ── Agent streaming ─────────────────────────────────────────
@@ -1107,7 +1136,7 @@ export class ChatEngine {
     messages: Message[],
     userContent: string,
     settings: ChatSettings,
-  ): Promise<AgentResult> {
+  ): Promise<AgentRunTelemetry> {
     const enterpriseToolGroups = await this.loadEnterpriseToolGroups();
     const hasEnterprise = enterpriseToolGroups.length > 0;
     const enterpriseTools = hasEnterprise ? await this.loadEnterpriseTools() : [];
@@ -1138,6 +1167,7 @@ export class ChatEngine {
 
     // Create event bus to capture sub-agent events (e.g. screenshots from workers)
     const agentBus = weaveEventBus();
+    const toolCallObserver = this.observeToolCallEvents(agentBus);
     let screenshotUnsub: (() => void) | undefined;
 
     // Listen for browser_screenshot tool results from any worker and forward via SSE
@@ -1152,6 +1182,7 @@ export class ChatEngine {
       }
     });
 
+    try {
     let agent;
     if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
       const baseWorkers = settings.workers.length > 0
@@ -1248,7 +1279,7 @@ export class ChatEngine {
         }
       }
 
-      if (finalResult) { screenshotUnsub?.(); return finalResult; }
+      if (finalResult) return { result: finalResult, toolCallEvents: toolCallObserver.events };
     }
 
     // Fallback: non-streaming agent run, send result as single text event
@@ -1264,8 +1295,11 @@ export class ChatEngine {
       })}\n\n`);
     }
 
-    screenshotUnsub?.();
-    return result;
+    return { result, toolCallEvents: toolCallObserver.events };
+    } finally {
+      screenshotUnsub?.();
+      toolCallObserver.dispose();
+    }
   }
 
   // ── Redaction ───────────────────────────────────────────────
@@ -1502,6 +1536,48 @@ export class ChatEngine {
 
   // ── Trace persistence ───────────────────────────────────────
 
+  private observeToolCallEvents(eventBus: EventBus): { events: ToolCallObservableEvent[]; dispose: () => void } {
+    const events: ToolCallObservableEvent[] = [];
+    const unsubscribers: Array<() => void> = [];
+
+    unsubscribers.push(eventBus.on(EventTypes.ToolCallStart, (event) => {
+      events.push({
+        phase: 'start',
+        timestamp: event.timestamp,
+        executionId: event.executionId,
+        spanId: event.spanId,
+        data: event.data,
+      });
+    }));
+
+    unsubscribers.push(eventBus.on(EventTypes.ToolCallEnd, (event) => {
+      events.push({
+        phase: 'end',
+        timestamp: event.timestamp,
+        executionId: event.executionId,
+        spanId: event.spanId,
+        data: event.data,
+      });
+    }));
+
+    unsubscribers.push(eventBus.on(EventTypes.ToolCallError, (event) => {
+      events.push({
+        phase: 'error',
+        timestamp: event.timestamp,
+        executionId: event.executionId,
+        spanId: event.spanId,
+        data: event.data,
+      });
+    }));
+
+    return {
+      events,
+      dispose: () => {
+        for (const unsubscribe of unsubscribers) unsubscribe();
+      },
+    };
+  }
+
   private async recordTraceSpans(
     userId: string,
     chatId: string,
@@ -1511,6 +1587,7 @@ export class ChatEngine {
     startMs: number,
     latencyMs: number,
     steps?: AgentStep[],
+    toolCallEvents?: ToolCallObservableEvent[],
   ): Promise<void> {
     try {
       // Root span
@@ -1543,6 +1620,75 @@ export class ChatEngine {
             }),
           });
           offset += step.durationMs;
+        }
+      }
+
+      if (toolCallEvents?.length) {
+        const starts = new Map<string, ToolCallObservableEvent[]>();
+        const pending: ToolCallObservableEvent[] = [];
+
+        const keyFor = (event: ToolCallObservableEvent, toolName: string): string =>
+          `${event.executionId ?? ''}|${event.spanId ?? ''}|${toolName}`;
+
+        const toolNameFor = (event: ToolCallObservableEvent): string => {
+          const fromData = event.data['tool'];
+          if (typeof fromData === 'string' && fromData.trim()) return fromData;
+          const fromName = event.data['name'];
+          if (typeof fromName === 'string' && fromName.trim()) return fromName;
+          return 'unknown';
+        };
+
+        for (const event of toolCallEvents) {
+          const toolName = toolNameFor(event);
+          const key = keyFor(event, toolName);
+          if (event.phase === 'start') {
+            const arr = starts.get(key) ?? [];
+            arr.push(event);
+            starts.set(key, arr);
+            continue;
+          }
+
+          const arr = starts.get(key);
+          const start = arr?.shift();
+          if (arr && arr.length === 0) starts.delete(key);
+
+          const spanStart = start?.timestamp ?? event.timestamp;
+          const spanEnd = Math.max(event.timestamp, spanStart + 1);
+          pending.push({
+            ...event,
+            timestamp: spanEnd,
+            data: {
+              ...event.data,
+              _toolName: toolName,
+              _startTime: spanStart,
+            },
+          });
+        }
+
+        for (const event of pending) {
+          const toolName = (typeof event.data['_toolName'] === 'string' && event.data['_toolName']) ? event.data['_toolName'] as string : 'unknown';
+          const spanStart = typeof event.data['_startTime'] === 'number' ? event.data['_startTime'] as number : event.timestamp;
+          const status = event.phase === 'error' ? 'error' : 'ok';
+          const attributes = { ...event.data };
+          delete (attributes as Record<string, unknown>)['_toolName'];
+          delete (attributes as Record<string, unknown>)['_startTime'];
+
+          await this.db.saveTrace({
+            id: randomUUID(), userId, chatId, messageId,
+            traceId,
+            spanId: event.spanId ?? randomUUID(),
+            parentSpanId: rootSpanId,
+            name: `tool_call.${toolName}`,
+            startTime: spanStart,
+            endTime: event.timestamp,
+            status,
+            attributes: JSON.stringify({
+              phase: event.phase,
+              executionId: event.executionId,
+              tool: toolName,
+              data: attributes,
+            }),
+          });
         }
       }
     } catch {

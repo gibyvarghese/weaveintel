@@ -42,6 +42,11 @@ export class SQLiteAdapter implements DatabaseAdapter {
     } catch {
       // Ignore when the column already exists.
     }
+    try {
+      this.db.exec("ALTER TABLE user_preferences ADD COLUMN theme TEXT NOT NULL DEFAULT 'light'");
+    } catch {
+      // Ignore when the column already exists.
+    }
     // Migrations for semantic and entity memory tables (added later, safe to run on new or old DBs)
     try {
       this.db.exec(`CREATE TABLE IF NOT EXISTS semantic_memory (
@@ -338,12 +343,15 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return (this.d.prepare('SELECT * FROM user_preferences WHERE user_id = ?').get(userId) as UserPreferencesRow | undefined) ?? null;
   }
 
-  async saveUserPreferences(userId: string, defaultMode: string): Promise<void> {
+  async saveUserPreferences(userId: string, defaultMode: string, theme: string): Promise<void> {
     this.d.prepare(
-      `INSERT INTO user_preferences (user_id, default_mode)
-       VALUES (?, ?)
-       ON CONFLICT(user_id) DO UPDATE SET default_mode=excluded.default_mode, updated_at=datetime('now')`,
-    ).run(userId, defaultMode);
+      `INSERT INTO user_preferences (user_id, default_mode, theme)
+       VALUES (?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         default_mode=excluded.default_mode,
+         theme=excluded.theme,
+         updated_at=datetime('now')`,
+    ).run(userId, defaultMode, theme);
   }
 
   // ── Chat Settings ──────────────────────────────────────────
