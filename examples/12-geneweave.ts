@@ -82,6 +82,8 @@
  */
 
 import { createGeneWeave } from '@weaveintel/geneweave';
+import { createGeneWeave } from '@weaveintel/geneweave';
+import { shutdownCSE } from '../apps/geneweave/src/cse.js';
 
 async function main() {
   const port = Number(process.env['PORT'] ?? '3500');
@@ -139,11 +141,14 @@ async function main() {
   console.log(`  URL: http://localhost:${port}`);
   console.log('  Press Ctrl+C to stop\n');
 
-  // Graceful shutdown: app.stop() closes the HTTP server and the SQLite database
-  process.on('SIGINT', async () => {
-    await app.stop();
+  // Graceful shutdown: close HTTP server, SQLite, and terminate all CSE Docker containers.
+  const gracefulShutdown = async (signal: string) => {
+    console.log(`\n[geneweave] ${signal} received — shutting down…`);
+    await Promise.allSettled([app.stop(), shutdownCSE()]);
     process.exit(0);
-  });
+  };
+  process.on('SIGINT',  () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 }
 
 main().catch(console.error);

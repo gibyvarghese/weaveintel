@@ -128,6 +128,24 @@ export class LocalDockerProvider implements ContainerProvider {
   async initialize(_config: CSEConfig): Promise<void> {
     const { exitCode } = await run('docker', ['info', '--format', '{{.ServerVersion}}']);
     if (exitCode !== 0) throw new Error('Docker daemon is not available. Start Docker Desktop or Docker Engine.');
+    // Orphan cleanup: remove any cse_session containers left over from a previous
+    // crashed/killed server instance. These containers are identified by the
+    // 'cse.managed=true' label we attach at creation time.
+    await this.cleanupOrphanContainers();
+  }
+
+  /** Remove all cse.managed containers left over from a previous server instance. */
+  private async cleanupOrphanContainers(): Promise<void> {
+    const { stdout, exitCode } = await run('docker', [
+      'ps', '-a',
+      '--filter', 'label=cse.managed=true',
+      '--format', '{{.Names}}',
+    ]);
+    if (exitCode !== 0 || !stdout.trim()) return;
+    const names = stdout.trim().split('\n').map(n => n.trim()).filter(Boolean);
+    if (names.length === 0) return;
+    // Best-effort: ignore errors for individual containers
+    await run('docker', ['rm', '-f', ...names]).catch(() => {});
   }
 
   async execute(request: ExecutionRequest, config: CSEConfig): Promise<ExecutionResult> {
@@ -235,8 +253,14 @@ export class LocalDockerProvider implements ContainerProvider {
       '--security-opt', 'no-new-privileges',
       '--tmpfs', '/tmp:size=100m,noexec,nosuid',
       '--tmpfs', '/workspace:size=200m',
+      '--label', `cse.created=${Date.now()}`,
+      '--label', 'cse.managed=true',
       image,
-      'sleep', 'infinity',
+      // Use a finite max lifetime instead of sleep infinity.
+      // Even if the server crashes and forgets about this container,
+      // it will self-destruct after maxLifetimeSec seconds.
+      // Configurable via CSE_SESSION_MAX_LIFETIME_S (default 3600 = 1 hour).
+      'sleep', String(Number(process.env['CSE_SESSION_MAX_LIFETIME_S'] ?? 3600)),
     ];
 
     const { exitCode, stderr } = await run('docker', dockerArgs);
