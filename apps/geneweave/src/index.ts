@@ -50,6 +50,8 @@ export interface GeneWeaveConfig {
   defaultModel: string;
   /** CORS origin — set to your frontend URL in production */
   corsOrigin?: string;
+  /** Absolute public origin used for OAuth callbacks when behind a proxy */
+  publicBaseUrl?: string;
 }
 
 // ─── App handle ──────────────────────────────────────────────
@@ -84,6 +86,16 @@ export interface GeneWeaveApp {
  *  5. Returns a GeneWeaveApp handle with stop() for graceful shutdown
  */
 export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeaveApp> {
+  const activeProviders = Object.fromEntries(
+    Object.entries(config.providers).filter(([, provider]) => Boolean(provider?.apiKey?.trim())),
+  );
+  if (Object.keys(activeProviders).length === 0) {
+    throw new Error('At least one provider with a non-empty apiKey is required.');
+  }
+  if (!activeProviders[config.defaultProvider]) {
+    throw new Error(`Default provider "${config.defaultProvider}" is not configured with an apiKey.`);
+  }
+
   const port = config.port ?? 3500;
   const host = config.host ?? '0.0.0.0';
 
@@ -93,7 +105,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // 2. Chat engine
   const chatEngine = new ChatEngine(
     {
-      providers: config.providers,
+      providers: activeProviders,
       defaultProvider: config.defaultProvider,
       defaultModel: config.defaultModel,
     },
@@ -109,7 +121,8 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     chatEngine,
     jwtSecret: config.jwtSecret,
     corsOrigin: config.corsOrigin,
-    providers: config.providers,
+    providers: activeProviders,
+    publicBaseUrl: config.publicBaseUrl,
   });
 
   // 5. Listen
@@ -126,7 +139,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     db,
     chatEngine,
     async syncPricing() {
-      return syncModelPricing(db, config.providers);
+      return syncModelPricing(db, activeProviders);
     },
     async stop() {
       await new Promise<void>((resolve, reject) => {

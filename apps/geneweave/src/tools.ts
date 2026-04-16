@@ -10,6 +10,7 @@ import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
 import { createSearchRouter, type SearchProviderConfig } from '@weaveintel/tools-search';
 import { createInMemoryTemporalStore, createTimeTools, type TemporalStore } from '@weaveintel/tools-time';
 import { createBrowserTools, createAutomationTools, createBrowserAuthTools } from '@weaveintel/tools-browser';
+import { canUseTool, normalizePersona } from './rbac.js';
 
 function envFlag(name: string, defaultValue: boolean): boolean {
   const raw = process.env[name];
@@ -17,9 +18,103 @@ function envFlag(name: string, defaultValue: boolean): boolean {
   return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
 }
 
+function isBrowserAutomationEnabledByEnv(): boolean {
+  return envFlag('GENEWEAVE_ENABLE_BROWSER_AUTOMATION', true)
+    && (Boolean(process.env['PLAYWRIGHT_BROWSER_PATH']) || envFlag('PLAYWRIGHT_AUTOMATION_ENABLED', false));
+}
+
+function tokenizeExpression(expression: string): string[] {
+  const sanitized = expression.replace(/\^/g, '**').replace(/\s+/g, '');
+  if (!sanitized || sanitized.length > 200) throw new Error('Invalid expression');
+  if (/[^0-9+\-*/.%()]/.test(sanitized)) throw new Error('Expression contains unsupported characters');
+
+  const tokens = sanitized.match(/\*\*|\d+(?:\.\d+)?|[()+\-*/%]/g);
+  if (!tokens || tokens.join('') !== sanitized) throw new Error('Expression could not be parsed');
+  return tokens;
+}
+
+function evaluateExpression(expression: string): number {
+  const tokens = tokenizeExpression(expression);
+  const values: number[] = [];
+  const operators: string[] = [];
+  const precedence = { '+': 1, '-': 1, '*': 2, '/': 2, '%': 2, '**': 3 } as const;
+  const rightAssociative = new Set(['**']);
+  const isOperator = (value: string): value is keyof typeof precedence => Object.prototype.hasOwnProperty.call(precedence, value);
+
+  const applyOperator = () => {
+    const op = operators.pop();
+    if (!op) throw new Error('Malformed expression');
+    if (op === '(') throw new Error('Mismatched parentheses');
+    const right = values.pop();
+    const left = values.pop();
+    if (right == null || left == null) throw new Error('Malformed expression');
+    switch (op) {
+      case '+': values.push(left + right); break;
+      case '-': values.push(left - right); break;
+      case '*': values.push(left * right); break;
+      case '/':
+        if (right === 0) throw new Error('Division by zero');
+        values.push(left / right);
+        break;
+      case '%':
+        if (right === 0) throw new Error('Division by zero');
+        values.push(left % right);
+        break;
+      case '**': values.push(left ** right); break;
+      default: throw new Error('Unsupported operator');
+    }
+  };
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    const previous = index > 0 ? tokens[index - 1] : undefined;
+    const previousIsOperator = previous != null && isOperator(previous);
+    const unary = token === '-' && (index === 0 || previous === '(' || previousIsOperator);
+
+    if (unary) {
+      const next = tokens[index + 1];
+      if (next == null || !/^\d/.test(next)) throw new Error('Unary minus must precede a number');
+      values.push(-Number(next));
+      index += 1;
+      continue;
+    }
+
+    if (/^\d/.test(token)) {
+      values.push(Number(token));
+      continue;
+    }
+    if (token === '(') {
+      operators.push(token);
+      continue;
+    }
+    if (token === ')') {
+      while (operators.length > 0 && operators[operators.length - 1] !== '(') applyOperator();
+      if (operators.pop() !== '(') throw new Error('Mismatched parentheses');
+      continue;
+    }
+    if (!isOperator(token)) throw new Error('Unsupported operator');
+
+    while (operators.length > 0) {
+      const top = operators[operators.length - 1]!;
+      if (top === '(') break;
+      if (!isOperator(top)) throw new Error('Unsupported operator');
+      const shouldApply = rightAssociative.has(token)
+        ? precedence[top] > precedence[token]
+        : precedence[top] >= precedence[token];
+      if (!shouldApply) break;
+      applyOperator();
+    }
+    operators.push(token);
+  }
+
+  while (operators.length > 0) applyOperator();
+  if (values.length !== 1 || !Number.isFinite(values[0]!)) throw new Error('Malformed expression');
+  return values[0]!;
+}
+
 function buildSearchProviderConfigs(): Record<string, SearchProviderConfig> {
   const tavilyApiKey = process.env['TAVILY_API_KEY'];
-  const braveApiKey = process.env['BRAVE_SEARCH_API_KEY'];
+  const braveApiKey = process.env['BRAVE_SEARCH_API_KEY'] ?? process.env['BRAVE_API_KEY'];
 
   return {
     // Default free provider with no API key requirement.
@@ -69,9 +164,7 @@ const calculatorTool = weaveTool({
   },
   execute: async (args: { expression: string }) => {
     try {
-      const sanitized = args.expression.replace(/[^0-9+\-*/.()%\s^]/g, '');
-      if (!sanitized.trim() || sanitized.length > 200) return { content: 'Invalid expression', isError: true };
-      const result = new Function(`"use strict"; return (${sanitized.replace(/\^/g, '**')})`)();
+      const result = evaluateExpression(args.expression);
       return String(result);
     } catch (e) {
       return { content: `Error: ${(e as Error).message}`, isError: true };
@@ -199,11 +292,11 @@ const textAnalysisTool = weaveTool({
 // This is how the ChatEngine builds the per-chat tool set.─
 
 function browserToolMap(): Record<string, Tool> {
-  return Object.fromEntries([
-    ...createBrowserTools(),
-    ...createAutomationTools(),
-    ...createBrowserAuthTools(),
-  ].map(t => [t.schema.name, t]));
+  const browserTools = [...createBrowserTools()];
+  if (isBrowserAutomationEnabledByEnv()) {
+    browserTools.push(...createAutomationTools(), ...createBrowserAuthTools());
+  }
+  return Object.fromEntries(browserTools.map(t => [t.schema.name, t]));
 }
 
 export const BUILTIN_TOOLS: Record<string, Tool> = {
@@ -219,10 +312,15 @@ export interface ToolRegistryOptions {
   defaultTimezone?: string;
   temporalStore?: TemporalStore;
   currentUserId?: string;
+  actorPersona?: string;
   memoryRecall?: (args: { userId: string; query: string; limit?: number }) => Promise<{
     semantic: Array<{ content: string; source: string }>;
     entities: Array<{ entityType: string; entityName: string; facts: Record<string, unknown> }>;
   }>;
+}
+
+export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
+  return toolNames.filter((toolName) => canUseTool(persona, toolName));
 }
 
 /**
@@ -231,6 +329,7 @@ export interface ToolRegistryOptions {
  */
 export function createToolRegistry(toolNames: string[], customTools?: Tool[], opts?: ToolRegistryOptions): ToolRegistry {
   const registry = weaveToolRegistry();
+  const actorPersona = opts?.actorPersona;
   const memoryRecallTool = weaveTool({
     name: 'memory_recall',
     description: 'Retrieve relevant long-term memory for the current user from semantic and entity memory stores.',
@@ -271,20 +370,23 @@ export function createToolRegistry(toolNames: string[], customTools?: Tool[], op
     ...createTimeToolMap(opts?.defaultTimezone, opts?.temporalStore ?? defaultTemporalStore),
     memory_recall: memoryRecallTool,
   };
-  for (const name of toolNames) {
+  for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {
     const tool = scopedTools[name];
     if (tool) registry.register(tool);
   }
   if (customTools) {
     for (const tool of customTools) {
-      registry.register(tool);
+      if (canUseTool(actorPersona, tool.schema.name)) {
+        registry.register(tool);
+      }
     }
   }
   return registry;
 }
 
 /** Info about all available built-in tools */
-export function getAvailableTools(): Array<{ name: string; description: string; tags: string[] }> {
+export function getAvailableTools(persona?: string | null): Array<{ name: string; description: string; tags: string[] }> {
+  const effectivePersona = persona;
   const base = Object.values(BUILTIN_TOOLS).map((t) => ({
     name: t.schema.name,
     description: t.schema.description,
@@ -297,5 +399,5 @@ export function getAvailableTools(): Array<{ name: string; description: string; 
       description: 'Retrieve relevant long-term memory for the current user from semantic and entity memory stores.',
       tags: ['memory', 'personalization'],
     },
-  ];
+  ].filter((tool) => canUseTool(effectivePersona, tool.name));
 }

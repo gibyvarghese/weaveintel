@@ -14,6 +14,10 @@ import {
   validateDelegationChain,
   evaluateAccess,
   evaluateAccessBatch,
+  DEFAULT_RBAC_POLICY,
+  hasPersonaPermission,
+  resolvePersonaPermissions,
+  extendIdentityWithPersona,
   weaveInMemoryTokenResolver,
 } from '../src/index.js';
 import type { AccessRule } from '../src/access.js';
@@ -260,5 +264,45 @@ describe('weaveInMemoryTokenResolver', () => {
   it('revokes without error', async () => {
     const resolver = weaveInMemoryTokenResolver();
     await expect(resolver.revoke(scope, user)).resolves.toBeUndefined();
+  });
+});
+
+// ─── Persona RBAC ───────────────────────────────────────────
+
+describe('persona RBAC', () => {
+  it('allows platform admin platform and admin privileges', () => {
+    expect(hasPersonaPermission(DEFAULT_RBAC_POLICY, 'platform_admin', 'admin:platform:write')).toBe(true);
+    expect(hasPersonaPermission(DEFAULT_RBAC_POLICY, 'platform_admin', 'tools:browser:use')).toBe(true);
+  });
+
+  it('allows tenant admin tenant admin actions but denies platform admin actions', () => {
+    expect(hasPersonaPermission(DEFAULT_RBAC_POLICY, 'tenant_admin', 'admin:tenant:write')).toBe(true);
+    expect(hasPersonaPermission(DEFAULT_RBAC_POLICY, 'tenant_admin', 'admin:platform:write')).toBe(false);
+  });
+
+  it('allows tenant user basic tools but denies browser and admin actions', () => {
+    expect(hasPersonaPermission(DEFAULT_RBAC_POLICY, 'tenant_user', 'tools:search')).toBe(true);
+    expect(hasPersonaPermission(DEFAULT_RBAC_POLICY, 'tenant_user', 'tools:browser:use')).toBe(false);
+    expect(hasPersonaPermission(DEFAULT_RBAC_POLICY, 'tenant_user', 'admin:tenant:write')).toBe(false);
+  });
+
+  it('allows agent researcher browser permissions', () => {
+    expect(hasPersonaPermission(DEFAULT_RBAC_POLICY, 'agent_researcher', 'tools:browser:use')).toBe(true);
+  });
+
+  it('defaults to deny for unknown persona', () => {
+    expect(resolvePersonaPermissions(DEFAULT_RBAC_POLICY, 'unknown_persona')).toEqual([]);
+    expect(hasPersonaPermission(DEFAULT_RBAC_POLICY, 'unknown_persona', 'chat:read')).toBe(false);
+    expect(hasPersonaPermission(DEFAULT_RBAC_POLICY, 'unknown_persona', 'tools:browser:use')).toBe(false);
+  });
+
+  it('extends identity with persona roles and permissions', () => {
+    const base = createIdentity({ id: 'u-rbac', type: 'user', roles: ['custom-role'], scopes: ['custom:scope'] });
+    const extended = extendIdentityWithPersona(base, DEFAULT_RBAC_POLICY, 'tenant_admin');
+    expect(extended.persona).toBe('tenant_admin');
+    expect(extended.roles).toContain('tenant_admin');
+    expect(extended.roles).toContain('custom-role');
+    expect(extended.scopes).toContain('admin:tenant:*');
+    expect(extended.scopes).toContain('custom:scope');
   });
 });

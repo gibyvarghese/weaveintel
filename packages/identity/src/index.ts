@@ -23,4 +23,16 @@ export {
 } from './access.js';
 export type { AccessRule } from './access.js';
 
+export {
+  DEFAULT_RBAC_POLICY,
+  resolvePersonaPermissions,
+  hasPersonaPermission,
+  extendIdentityWithPersona,
+} from './rbac.js';
+export type {
+  RbacRoleDefinition,
+  RbacPersonaDefinition,
+  RbacPolicy,
+} from './rbac.js';
+
 export { weaveInMemoryTokenResolver } from './secrets.js';

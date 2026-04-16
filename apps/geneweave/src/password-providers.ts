@@ -1,3 +1,4 @@
+import { execFileSync, execSync } from 'node:child_process';
 /**
  * @weaveintel/geneweave — External password manager providers
  *
@@ -14,7 +15,6 @@
  *   • CSV Import     — universal fallback (Chrome, Firefox, LastPass CSV exports)
  */
 
-import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, copyFileSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -318,10 +318,22 @@ export class ChromeProvider implements PasswordManagerProvider {
     try {
       // Read URLs and usernames (passwords are encrypted — we extract raw entries)
       let query = "SELECT origin_url, username_value, date_created FROM logins WHERE blacklisted_by_user = 0";
-      if (search) query += ` AND (origin_url LIKE '%${search.replace(/'/g, "''")}%' OR username_value LIKE '%${search.replace(/'/g, "''")}%')`;
+      if (search) {
+        const escapedSearch = search.replace(/'/g, "''").slice(0, 128);
+        query += ` AND (origin_url LIKE '%${escapedSearch}%' OR username_value LIKE '%${escapedSearch}%')`;
+      }
       query += ' ORDER BY date_last_used DESC LIMIT 200';
 
-      const rows = exec(`sqlite3 -json "${tmpPath}" "${query}"`);
+      let rows = '';
+      try {
+        rows = execFileSync('sqlite3', ['-json', tmpPath, query], {
+          encoding: 'utf8',
+          timeout: 30_000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+      } catch {
+        rows = '';
+      }
       if (!rows) return [];
 
       let entries: Array<{ origin_url: string; username_value: string }>;

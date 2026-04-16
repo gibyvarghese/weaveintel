@@ -109,7 +109,7 @@ function readHeadlessDefault(): boolean {
 
 function readBrowserExecutablePath(): string | undefined {
   const configuredPath = (process.env['PLAYWRIGHT_BROWSER_PATH'] ?? '').trim();
-  if (configuredPath) return configuredPath;
+  if (configuredPath) return existsSync(configuredPath) ? configuredPath : undefined;
 
   const preferredBrowser = (process.env['PLAYWRIGHT_BROWSER'] ?? '').trim().toLowerCase();
   if (preferredBrowser !== 'chrome') return undefined;
@@ -126,6 +126,18 @@ function readBrowserExecutablePath(): string | undefined {
   return undefined;
 }
 
+export function isBrowserAutomationAvailable(): boolean {
+  const configuredExecutable = readBrowserExecutablePath();
+  if (configuredExecutable) return true;
+
+  try {
+    const bundledExecutable = chromium.executablePath();
+    return Boolean(bundledExecutable) && existsSync(bundledExecutable);
+  } catch {
+    return false;
+  }
+}
+
 export class BrowserPool {
   private sessions = new Map<string, BrowserSession>();
   private opts: ResolvedBrowserPoolOptions;
@@ -140,6 +152,7 @@ export class BrowserPool {
       viewport: options.viewport ?? { width: 1280, height: 720 },
     };
     this.timer = setInterval(() => void this.cleanup(), 30_000);
+    this.timer.unref?.();
   }
 
   static instance(options?: BrowserPoolOptions): BrowserPool {
@@ -158,6 +171,10 @@ export class BrowserPool {
   }
 
   private async _open(url: string, auth?: BrowserAuthConfig): Promise<{ session: BrowserSession; snapshot: PageSnapshot }> {
+    if (!isBrowserAutomationAvailable()) {
+      throw new Error('Browser automation is unavailable. Install a Playwright-compatible browser or set PLAYWRIGHT_BROWSER_PATH.');
+    }
+
     // evict oldest if at capacity
     if (this.sessions.size >= this.opts.maxSessions) {
       const oldest = [...this.sessions.values()].sort((a, b) => a.lastActivityAt - b.lastActivityAt)[0];

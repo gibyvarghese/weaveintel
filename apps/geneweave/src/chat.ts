@@ -48,6 +48,7 @@ import { shouldBypass, resolvePolicy } from '@weaveintel/cache';
 import type { CachePolicy } from '@weaveintel/core';
 import { runHybridMemoryExtraction, type ExtractedEntity, type MemoryExtractionRule } from '@weaveintel/memory';
 import { createEnterpriseTools, createEnterpriseToolGroups, ServiceNowProvider, type EnterpriseConnectorConfig, type EnterpriseToolGroup } from '@weaveintel/tools-enterprise';
+import { normalizePersona } from './rbac.js';
 
 const TEMPORAL_TOOL_POLICY = [
   'Temporal Tool Usage Policy:',
@@ -230,6 +231,7 @@ export interface WorkerDef {
   name: string;
   description: string;
   tools: string[];
+  persona?: string;
 }
 
 interface ToolCallObservableEvent {
@@ -272,7 +274,12 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
     enabledTools,
     redactionEnabled: !!row.redaction_enabled,
     redactionPatterns: row.redaction_patterns ? JSON.parse(row.redaction_patterns) : DEFAULT_SETTINGS.redactionPatterns,
-    workers: row.workers ? JSON.parse(row.workers) : [],
+    workers: row.workers
+      ? (JSON.parse(row.workers) as WorkerDef[]).map((worker) => ({
+          ...worker,
+          persona: normalizePersona(worker.persona, 'agent'),
+        }))
+      : [],
   };
 }
 
@@ -378,6 +385,8 @@ export class ChatEngine {
     }
 
     const model = await getOrCreateModel(provider, modelId, providerCfg.apiKey);
+    const actor = await this.db.getUserById(userId);
+    const userPersona = normalizePersona(actor?.persona, 'user');
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
     const resolvedPrompt = await this.resolveSystemPrompt(settings);
     const traceId = randomUUID();
@@ -494,7 +503,7 @@ export class ChatEngine {
     if (!cacheHit) {
     if (settings.mode === 'agent' || settings.mode === 'supervisor') {
       // ── Agent / Supervisor mode ──
-      const telemetry = await this.runAgent(ctx, model, userId, messages, processedContent, memorySettings);
+      const telemetry = await this.runAgent(ctx, model, userId, userPersona, messages, processedContent, memorySettings);
       assistantContent = telemetry.result.output ?? '';
       usage = {
         promptTokens: telemetry.result.usage.totalTokens,  // agent tracks totalTokens only
@@ -657,6 +666,8 @@ export class ChatEngine {
     }
 
     const model = await getOrCreateModel(provider, modelId, providerCfg.apiKey);
+    const actor = await this.db.getUserById(userId);
+    const userPersona = normalizePersona(actor?.persona, 'user');
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
     const resolvedPrompt = await this.resolveSystemPrompt(settings);
     const traceId = randomUUID();
@@ -784,7 +795,7 @@ export class ChatEngine {
     try {
       if (settings.mode === 'agent' || settings.mode === 'supervisor') {
         // ── Agent / Supervisor streaming ──
-        const telemetry = await this.streamAgent(res, ctx, model, userId, messages, processedContent, streamMemorySettings);
+        const telemetry = await this.streamAgent(res, ctx, model, userId, userPersona, messages, processedContent, streamMemorySettings);
         fullText = telemetry.result.output ?? '';
         finalUsage = { promptTokens: telemetry.result.usage.totalTokens, completionTokens: 0, totalTokens: telemetry.result.usage.totalTokens };
         steps = [...telemetry.result.steps];
@@ -1036,6 +1047,7 @@ export class ChatEngine {
     ctx: ExecutionContext,
     model: Model,
     userId: string,
+    userPersona: string,
     messages: Message[],
     userContent: string,
     settings: ChatSettings,
@@ -1048,6 +1060,7 @@ export class ChatEngine {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
       currentUserId: userId,
+      actorPersona: userPersona,
       memoryRecall: async ({ userId: recallUserId, query, limit }) => {
         const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
         const [semantic, entityRows] = await Promise.all([
@@ -1083,12 +1096,16 @@ export class ChatEngine {
               description: w.description,
               systemPrompt: this.withTemporalToolPolicy(undefined, w.tools),
               model,
-              tools: w.tools.length ? createToolRegistry(w.tools, customTools, toolOptions) : customTools?.length ? createToolRegistry([], customTools, toolOptions) : undefined,
+              tools: w.tools.length
+                ? createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
+                : customTools?.length
+                  ? createToolRegistry([], customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
+                  : undefined,
             }))
           : defaultWorkers(model, toolOptions, this.withTemporalToolPolicy.bind(this));
         // Build enterprise domain workers from tool groups
         const enterpriseWorkers = enterpriseToolGroups.map((g) => {
-          const registry = createToolRegistry([], g.tools, toolOptions);
+          const registry = createToolRegistry([], g.tools, { ...toolOptions, actorPersona: 'agent_researcher' });
           return {
             name: g.name,
             description: g.description,
@@ -1133,6 +1150,7 @@ export class ChatEngine {
     ctx: ExecutionContext,
     model: Model,
     userId: string,
+    userPersona: string,
     messages: Message[],
     userContent: string,
     settings: ChatSettings,
@@ -1144,6 +1162,7 @@ export class ChatEngine {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
       currentUserId: userId,
+      actorPersona: userPersona,
       memoryRecall: async ({ userId: recallUserId, query, limit }) => {
         const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
         const [semantic, entityRows] = await Promise.all([
@@ -1191,11 +1210,15 @@ export class ChatEngine {
             description: w.description,
             systemPrompt: this.withTemporalToolPolicy(undefined, w.tools),
             model,
-            tools: w.tools.length ? createToolRegistry(w.tools, customTools, toolOptions) : customTools?.length ? createToolRegistry([], customTools, toolOptions) : undefined,
+            tools: w.tools.length
+              ? createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
+              : customTools?.length
+                ? createToolRegistry([], customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
+                : undefined,
           }))
         : defaultWorkers(model, toolOptions, this.withTemporalToolPolicy.bind(this));
       const enterpriseWorkers = enterpriseToolGroups.map((g) => {
-        const registry = createToolRegistry([], g.tools, toolOptions);
+        const registry = createToolRegistry([], g.tools, { ...toolOptions, actorPersona: 'agent_researcher' });
         return {
           name: g.name,
           description: g.description,
@@ -2296,21 +2319,25 @@ function defaultWorkers(
       name: 'researcher',
       description: 'Researches topics, searches the web, browses websites, and gathers information. Can open a headless browser to navigate dynamic sites, read page content, click links, fill forms, and interact with web applications. Has full browser authentication capabilities: can detect login forms, auto-login using stored website credentials from the credential vault, save session cookies, and hand off the browser to the user for manual steps like 2FA or CAPTCHA. Always delegate login/auth tasks to this worker — it has the browser_detect_auth, browser_login, browser_save_cookies, browser_handoff_request, and browser_handoff_resume tools.',
       model,
-      tools: createToolRegistry(['web_search', 'text_analysis', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume'], undefined, toolOptions),
+      tools: createToolRegistry(
+        ['web_search', 'text_analysis', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume'],
+        undefined,
+        { ...toolOptions, actorPersona: 'agent_researcher' },
+      ),
     },
     {
       name: 'analyst',
       description: 'Analyzes data, performs calculations, formats JSON, provides structured insights, and handles temporal/timer queries. Good for math, data processing, formatting, date/time questions, and time management.',
       systemPrompt: buildPrompt?.(undefined, analystTools),
       model,
-      tools: createToolRegistry(analystTools, undefined, toolOptions),
+      tools: createToolRegistry(analystTools, undefined, { ...toolOptions, actorPersona: 'agent_worker' }),
     },
     {
       name: 'writer',
       description: 'Writes, edits, and refines text. Good for drafting content, summarizing, and creative writing tasks.',
       systemPrompt: buildPrompt?.(undefined, writerTools),
       model,
-      tools: createToolRegistry(writerTools, undefined, toolOptions),
+      tools: createToolRegistry(writerTools, undefined, { ...toolOptions, actorPersona: 'agent_worker' }),
     },
   ];
 }

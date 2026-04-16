@@ -14,6 +14,7 @@ import type { DatabaseAdapter } from './db.js';
 import type { ChatEngine } from './chat.js';
 import { DashboardService } from './dashboard.js';
 import { getAvailableTools } from './tools.js';
+import { canPersonaAccess, isValidPersona, normalizePersona, personaPermissions } from './rbac.js';
 import {
   authenticateRequest,
   verifyCSRF,
@@ -130,6 +131,29 @@ function html(res: ServerResponse, status: number, body: string): void {
   res.end(body);
 }
 
+function permissionForAdminRoute(path: string): string {
+  if (path === '/api/admin/upgrade' || path.startsWith('/api/admin/tenants')) {
+    return 'admin:platform:write';
+  }
+  if (path.startsWith('/api/admin/rbac')) {
+    return 'admin:platform:write';
+  }
+  return 'admin:tenant:write';
+}
+
+function ensurePermission(
+  auth: AuthContext | null,
+  permission: string,
+): { ok: true } | { ok: false; status: number; error: string } {
+  if (!auth) {
+    return { ok: false, status: 401, error: 'Not authenticated' };
+  }
+  if (!canPersonaAccess(auth.persona, permission)) {
+    return { ok: false, status: 403, error: `Missing permission: ${permission}` };
+  }
+  return { ok: true };
+}
+
 // ─── OAuth Flow State (in-memory, production should use Redis) ──────────
 
 const oauthClient = new OAuthClient();
@@ -153,8 +177,21 @@ function deleteOAuthState(state: string): void {
   oauthStateStore.delete(state);
 }
 
-function buildOAuthProviderFromRequest(provider: OAuthProviderName, req: IncomingMessage) {
-  const baseUrl = (req.headers['x-forwarded-proto'] || 'http') + '://' + (req.headers['x-forwarded-host'] || req.headers['host']);
+function normalizePublicOrigin(value: string): string {
+  const parsed = new URL(value);
+  return parsed.origin;
+}
+
+function resolveRequestOrigin(req: IncomingMessage): string {
+  const hostHeader = req.headers['host'];
+  const host = Array.isArray(hostHeader) ? hostHeader[0] : hostHeader;
+  if (!host) throw new Error('Missing Host header');
+  const protocol = host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
+  return normalizePublicOrigin(`${protocol}://${host}`);
+}
+
+function buildOAuthProviderFromRequest(provider: OAuthProviderName, req: IncomingMessage, publicBaseUrl?: string) {
+  const baseUrl = publicBaseUrl ? normalizePublicOrigin(publicBaseUrl) : resolveRequestOrigin(req);
   const redirectUri = `${baseUrl}/api/oauth/callback`;
   const clientId = process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_ID`];
   const clientSecret = process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_SECRET`];
@@ -162,12 +199,13 @@ function buildOAuthProviderFromRequest(provider: OAuthProviderName, req: Incomin
   return createOAuthProvider(provider, clientId, clientSecret, redirectUri);
 }
 
-setInterval(() => {
+const oauthStateCleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [key, value] of oauthStateStore.entries()) {
     if (now > value.expiresAt) oauthStateStore.delete(key);
   }
 }, 60_000);
+oauthStateCleanupTimer.unref?.();
 
 // ─── Server factory ─────────────────────────────────────────
 
@@ -184,10 +222,11 @@ export interface ServerConfig {
   jwtSecret: string;
   corsOrigin?: string;
   providers?: Record<string, { apiKey: string }>;
+  publicBaseUrl?: string;
 }
 
 export function createGeneWeaveServer(config: ServerConfig): Server {
-  const { db, chatEngine, jwtSecret, corsOrigin, providers } = config;
+  const { db, chatEngine, jwtSecret, corsOrigin, providers, publicBaseUrl } = config;
   const dashboard = new DashboardService(db);
   const router = new Router();
   const uiHtml = getHTML();
@@ -213,7 +252,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
     const userId = randomUUID();
     const passwordHash = hashPassword(password);
-    await db.createUser({ id: userId, email, name, passwordHash });
+    await db.createUser({ id: userId, email, name, passwordHash, persona: 'tenant_user' });
 
     const sessionId = randomUUID();
     const csrfToken = generateCSRFToken();
@@ -222,7 +261,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
     const token = signJWT({ userId, email, sessionId }, jwtSecret);
     setAuthCookie(res, token);
-    json(res, 201, { user: { id: userId, email, name }, csrfToken });
+    json(res, 201, { user: { id: userId, email, name, persona: 'tenant_user' }, csrfToken });
   }, { csrf: false });
 
   router.post('/api/auth/login', async (req, res) => {
@@ -246,7 +285,11 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
     const token = signJWT({ userId: user.id, email: user.email, sessionId }, jwtSecret);
     setAuthCookie(res, token);
-    json(res, 200, { user: { id: user.id, email: user.email, name: user.name }, csrfToken });
+    json(res, 200, {
+      user: { id: user.id, email: user.email, name: user.name, persona: user.persona, tenantId: user.tenant_id },
+      csrfToken,
+      permissions: personaPermissions(user.persona),
+    });
   }, { csrf: false });
 
   router.post('/api/auth/logout', async (_req, _res, _params, auth) => {
@@ -259,8 +302,21 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const user = await db.getUserById(auth.userId);
     if (!user) { json(res, 401, { error: 'User not found' }); return; }
-    json(res, 200, { user: { id: user.id, email: user.email, name: user.name }, csrfToken: auth.csrfToken });
+    json(res, 200, {
+      user: { id: user.id, email: user.email, name: user.name, persona: user.persona, tenantId: user.tenant_id },
+      csrfToken: auth.csrfToken,
+      permissions: personaPermissions(user.persona),
+    });
   });
+
+  router.get('/api/auth/permissions', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    json(res, 200, {
+      persona: auth.persona,
+      effectivePersona: isValidPersona(auth.persona) ? auth.persona : null,
+      permissions: personaPermissions(auth.persona),
+    });
+  }, { auth: true });
 
   // ── OAuth routes ───────────────────────────────────────────
 
@@ -431,7 +487,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
   router.get('/api/tools', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    json(res, 200, { tools: getAvailableTools() });
+    json(res, 200, { tools: getAvailableTools(auth.persona), persona: normalizePersona(auth.persona) });
   });
 
   // ── User preferences routes ────────────────────────────────
@@ -702,7 +758,89 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   // Admin CRUD for guardrails, routing policies, prompts, tools,
   // workflows, HITL policies, and system settings. Each entity
   // maps to a database table via the DatabaseAdapter.
-  registerAdminRoutes(router, db, json, readBody, providers, html);
+  const adminRouter = {
+    get: (path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }) => {
+      router.get(path, async (req, res, params, auth) => {
+        const gate = ensurePermission(auth, permissionForAdminRoute(path));
+        if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
+        await handler(req, res, params, auth);
+      }, opts);
+    },
+    post: (path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }) => {
+      router.post(path, async (req, res, params, auth) => {
+        const gate = ensurePermission(auth, permissionForAdminRoute(path));
+        if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
+        await handler(req, res, params, auth);
+      }, opts);
+    },
+    put: (path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }) => {
+      router.put(path, async (req, res, params, auth) => {
+        const gate = ensurePermission(auth, permissionForAdminRoute(path));
+        if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
+        await handler(req, res, params, auth);
+      }, opts);
+    },
+    del: (path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }) => {
+      router.del(path, async (req, res, params, auth) => {
+        const gate = ensurePermission(auth, permissionForAdminRoute(path));
+        if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
+        await handler(req, res, params, auth);
+      }, opts);
+    },
+  };
+
+  registerAdminRoutes(adminRouter, db, json, readBody, providers, html);
+
+  router.get('/api/admin/rbac/personas', async (_req, res, _params, auth) => {
+    const gate = ensurePermission(auth, 'admin:platform:write');
+    if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
+    json(res, 200, {
+      personas: ['platform_admin', 'tenant_admin', 'tenant_user', 'agent_worker', 'agent_researcher', 'agent_supervisor'],
+    });
+  }, { auth: true });
+
+  router.get('/api/admin/rbac/users', async (_req, res, _params, auth) => {
+    const gate = ensurePermission(auth, 'admin:platform:write');
+    if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
+    const users = await db.listUsers();
+    json(res, 200, {
+      users: users.map((user) => ({
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        persona: normalizePersona(user.persona),
+        tenantId: user.tenant_id,
+        createdAt: user.created_at,
+      })),
+    });
+  }, { auth: true });
+
+  router.post('/api/admin/rbac/users/:id/persona', async (req, res, params, auth) => {
+    const gate = ensurePermission(auth, 'admin:platform:write');
+    if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
+    const targetUser = await db.getUserById(params['id']!);
+    if (!targetUser) { json(res, 404, { error: 'User not found' }); return; }
+
+    const raw = await readBody(req);
+    let body: { persona?: string };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!isValidPersona(body.persona)) {
+      json(res, 400, { error: 'Invalid persona value' });
+      return;
+    }
+    const nextPersona = body.persona.trim().toLowerCase();
+
+    await db.updateUserPersona(targetUser.id, nextPersona);
+    json(res, 200, {
+      user: {
+        id: targetUser.id,
+        email: targetUser.email,
+        name: targetUser.name,
+        persona: nextPersona,
+        tenantId: targetUser.tenant_id,
+      },
+    });
+  }, { auth: true, csrf: true });
 
   // ── Website Credentials (Browser Auth Vault) ───────────────
 

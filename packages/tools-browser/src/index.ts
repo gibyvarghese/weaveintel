@@ -4,6 +4,7 @@
 export type { FetchOptions, FetchResult, ExtractedContent, SitemapEntry, ReadabilityResult, ScraperConfig, ScrapedData } from './types.js';
 export type { PageSnapshot, SnapshotElement } from './snapshot.js';
 export type { BrowserPoolOptions, SessionInfo } from './automation.js';
+export { isBrowserAutomationAvailable } from './automation.js';
 export { fetchPage } from './fetcher.js';
 export { extractContent } from './extractor.js';
 export { readability } from './readability.js';

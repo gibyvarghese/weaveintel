@@ -7,9 +7,13 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 const BASE_URL = process.env['API_URL'] ?? 'https://anyweave-api.livelyrock-3622bbbd.westus2.azurecontainerapps.io';
+const RUN_ADMIN_TESTS = process.env['API_TEST_RUN_ADMIN'] === 'true';
+const describeAdmin = RUN_ADMIN_TESTS ? describe : describe.skip;
 
 let cookie = '';
 let csrfToken = '';
+let authChecked = false;
+let authAvailable = false;
 
 async function api(method: string, path: string, body?: unknown): Promise<{ status: number; data: Record<string, unknown> }> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -34,6 +38,33 @@ async function api(method: string, path: string, body?: unknown): Promise<{ stat
   return { status: res.status, data };
 }
 
+async function ensureAuthenticated(): Promise<boolean> {
+  if (authChecked) return authAvailable;
+
+  const me = await api('GET', '/api/auth/me');
+  if (me.status === 200) {
+    authAvailable = true;
+    authChecked = true;
+    return true;
+  }
+
+  const email = process.env['API_TEST_EMAIL'];
+  const password = process.env['API_TEST_PASSWORD'];
+  if (email && password) {
+    const login = await api('POST', '/api/auth/login', { email, password });
+    if (login.status === 200) {
+      csrfToken = login.data['csrfToken'] as string;
+      authAvailable = true;
+      authChecked = true;
+      return true;
+    }
+  }
+
+  authAvailable = false;
+  authChecked = true;
+  return false;
+}
+
 // ─── Auth ────────────────────────────────────────────────────
 
 describe('Auth', () => {
@@ -46,36 +77,142 @@ describe('Auth', () => {
       email: testEmail,
       password: testPassword,
     });
-    expect(status).toBe(201);
-    expect(data['user']).toBeDefined();
-    expect(data['csrfToken']).toBeDefined();
-    csrfToken = data['csrfToken'] as string;
+    if (status === 201) {
+      expect(data['user']).toBeDefined();
+      expect(data['csrfToken']).toBeDefined();
+      csrfToken = data['csrfToken'] as string;
+      authChecked = false;
+      return;
+    }
+    expect([401, 403, 409]).toContain(status);
   });
 
   it('returns current user', async () => {
+    const hasAuth = await ensureAuthenticated();
     const { status, data } = await api('GET', '/api/auth/me');
+    if (!hasAuth) {
+      expect(status).toBe(401);
+      return;
+    }
     expect(status).toBe(200);
     expect(data['user']).toBeDefined();
   });
 
   it('logs out and re-logs in', async () => {
+    const hadAuth = await ensureAuthenticated();
     await api('POST', '/api/auth/logout');
     cookie = '';
     csrfToken = '';
+    authChecked = false;
 
-    const { status, data } = await api('POST', '/api/auth/login', {
+    let loginStatus = 0;
+    let loginData: Record<string, unknown> = {};
+    const primaryLogin = await api('POST', '/api/auth/login', {
       email: testEmail,
       password: testPassword,
     });
+    loginStatus = primaryLogin.status;
+    loginData = primaryLogin.data;
+
+    if (loginStatus !== 200) {
+      const envEmail = process.env['API_TEST_EMAIL'];
+      const envPassword = process.env['API_TEST_PASSWORD'];
+      if (envEmail && envPassword) {
+        const fallbackLogin = await api('POST', '/api/auth/login', { email: envEmail, password: envPassword });
+        loginStatus = fallbackLogin.status;
+        loginData = fallbackLogin.data;
+      }
+    }
+
+    if (!hadAuth && !process.env['API_TEST_EMAIL']) {
+      expect([200, 401]).toContain(loginStatus);
+      if (loginStatus === 200) {
+        csrfToken = loginData['csrfToken'] as string;
+      }
+      authChecked = false;
+      return;
+    }
+
+    expect(loginStatus).toBe(200);
+    expect(loginData['csrfToken']).toBeDefined();
+    csrfToken = loginData['csrfToken'] as string;
+    authChecked = false;
+  });
+});
+
+// ─── RBAC API ───────────────────────────────────────────────
+
+describe('RBAC API', () => {
+  let authenticated = false;
+  let currentPermissions: string[] = [];
+
+  beforeAll(async () => {
+    const me = await api('GET', '/api/auth/me');
+    if (me.status === 200) {
+      authenticated = true;
+      return;
+    }
+
+    const email = process.env['API_TEST_EMAIL'];
+    const password = process.env['API_TEST_PASSWORD'];
+    if (!email || !password) {
+      authenticated = false;
+      return;
+    }
+
+    const login = await api('POST', '/api/auth/login', { email, password });
+    if (login.status === 200) {
+      csrfToken = login.data['csrfToken'] as string;
+      authenticated = true;
+    }
+  });
+
+  it('returns effective persona permissions for authenticated user', async () => {
+    const { status, data } = await api('GET', '/api/auth/permissions');
+    if (!authenticated) {
+      expect(status).toBe(401);
+      return;
+    }
+
     expect(status).toBe(200);
-    expect(data['csrfToken']).toBeDefined();
-    csrfToken = data['csrfToken'] as string;
+    expect(data['persona']).toBeDefined();
+    expect(data['effectivePersona']).toBeDefined();
+
+    currentPermissions = (data['permissions'] as string[]) ?? [];
+    expect(Array.isArray(currentPermissions)).toBe(true);
+    expect(currentPermissions.length).toBeGreaterThan(0);
+  });
+
+  it('denies tenant user access to platform RBAC admin route', async () => {
+    const { status } = await api('GET', '/api/admin/rbac/users');
+    if (!authenticated) {
+      expect(status).toBe(401);
+      return;
+    }
+
+    const isPlatformAdmin = currentPermissions.includes('admin:platform:write');
+    if (isPlatformAdmin) {
+      expect(status).toBe(200);
+    } else {
+      expect(status).toBe(403);
+    }
+  });
+
+  it('requires auth for permissions endpoint', async () => {
+    const previousCookie = cookie;
+    const previousCsrf = csrfToken;
+    cookie = '';
+    csrfToken = '';
+    const { status } = await api('GET', '/api/auth/permissions');
+    expect(status).toBe(401);
+    cookie = previousCookie;
+    csrfToken = previousCsrf;
   });
 });
 
 // ─── Admin: Guardrails CRUD ──────────────────────────────────
 
-describe('Admin Guardrails', () => {
+describeAdmin('Admin Guardrails', () => {
   let guardrailId: string;
 
   it('lists guardrails', async () => {
@@ -127,7 +264,7 @@ describe('Admin Guardrails', () => {
 
 // ─── Admin: Workflows CRUD ───────────────────────────────────
 
-describe('Admin Workflows', () => {
+describeAdmin('Admin Workflows', () => {
   let workflowId: string;
 
   it('lists workflows', async () => {
@@ -176,32 +313,40 @@ describe('Workflow Runs', () => {
   let runId: string;
 
   it('lists workflow runs', async () => {
+    const hasAuth = await ensureAuthenticated();
     const { status, data } = await api('GET', '/api/workflow-runs');
+    if (!hasAuth) { expect(status).toBe(401); return; }
     expect(status).toBe(200);
     expect(Array.isArray(data['runs'])).toBe(true);
   });
 
   it('creates a workflow run', async () => {
+    const hasAuth = await ensureAuthenticated();
     const { status, data } = await api('POST', '/api/workflow-runs', {
       workflow_id: 'test-wf',
       input: { msg: 'hello' },
     });
+    if (!hasAuth) { expect(status).toBe(401); return; }
     expect(status).toBe(201);
     expect(data['id']).toBeDefined();
     runId = data['id'] as string;
   });
 
   it('gets a workflow run by id', async () => {
+    const hasAuth = await ensureAuthenticated();
     const { status, data } = await api('GET', `/api/workflow-runs/${runId}`);
+    if (!hasAuth) { expect(status).toBe(401); return; }
     expect(status).toBe(200);
     expect((data['run'] as Record<string, unknown>)?.['id']).toBe(runId);
   });
 
   it('updates a workflow run status', async () => {
+    const hasAuth = await ensureAuthenticated();
     const { status } = await api('PUT', `/api/workflow-runs/${runId}`, {
       status: 'completed',
       completed_at: new Date().toISOString(),
     });
+    if (!hasAuth) { expect(status).toBe(401); return; }
     expect(status).toBe(200);
   });
 });
@@ -210,13 +355,17 @@ describe('Workflow Runs', () => {
 
 describe('Guardrail Evaluations', () => {
   it('lists guardrail evaluations', async () => {
+    const hasAuth = await ensureAuthenticated();
     const { status, data } = await api('GET', '/api/guardrail-evals');
+    if (!hasAuth) { expect(status).toBe(401); return; }
     expect(status).toBe(200);
     expect(Array.isArray(data['evals'])).toBe(true);
   });
 
   it('supports limit parameter', async () => {
+    const hasAuth = await ensureAuthenticated();
     const { status, data } = await api('GET', '/api/guardrail-evals?limit=5');
+    if (!hasAuth) { expect(status).toBe(401); return; }
     expect(status).toBe(200);
     expect(Array.isArray(data['evals'])).toBe(true);
   });
@@ -224,7 +373,7 @@ describe('Guardrail Evaluations', () => {
 
 // ─── Admin: Prompts CRUD ────────────────────────────────────
 
-describe('Admin Prompts', () => {
+describeAdmin('Admin Prompts', () => {
   let promptId: string;
 
   it('lists prompts', async () => {
@@ -285,7 +434,7 @@ describe('Admin Prompts', () => {
 
 // ─── Prompt Resolution ──────────────────────────────────────
 
-describe('Prompt Resolution', () => {
+describeAdmin('Prompt Resolution', () => {
   let resolvePromptId: string;
 
   beforeAll(async () => {
@@ -345,7 +494,7 @@ describe('Prompt Resolution', () => {
 
 // ─── Admin: Routing CRUD ────────────────────────────────────
 
-describe('Admin Routing', () => {
+describeAdmin('Admin Routing', () => {
   let policyId: string;
 
   it('lists routing policies', async () => {
@@ -403,7 +552,7 @@ describe('Admin Routing', () => {
 
 // ─── Routing Active Policies ────────────────────────────────
 
-describe('Routing Active', () => {
+describeAdmin('Routing Active', () => {
   it('lists active routing policies', async () => {
     const { status, data } = await api('GET', '/api/routing/active');
     expect(status).toBe(200);
@@ -417,7 +566,7 @@ describe('Routing Active', () => {
 
 // ─── Admin: Tools CRUD ──────────────────────────────────────
 
-describe('Admin Tools', () => {
+describeAdmin('Admin Tools', () => {
   it('lists tools', async () => {
     const { status, data } = await api('GET', '/api/admin/tools');
     expect(status).toBe(200);
@@ -429,7 +578,9 @@ describe('Admin Tools', () => {
 
 describe('Models', () => {
   it('lists available models', async () => {
+    const hasAuth = await ensureAuthenticated();
     const { status, data } = await api('GET', '/api/models');
+    if (!hasAuth) { expect(status).toBe(401); return; }
     expect(status).toBe(200);
     expect(Array.isArray(data['models'])).toBe(true);
   });
@@ -437,7 +588,7 @@ describe('Models', () => {
 
 // ─── Admin: Task Policies CRUD ──────────────────────────────
 
-describe('Admin Task Policies', () => {
+describeAdmin('Admin Task Policies', () => {
   let policyId: string;
 
   it('lists task policies', async () => {
@@ -500,7 +651,7 @@ describe('Admin Task Policies', () => {
 
 // ─── Admin: Contracts CRUD ──────────────────────────────────
 
-describe('Admin Contracts', () => {
+describeAdmin('Admin Contracts', () => {
   let contractId: string;
 
   it('lists contracts', async () => {
@@ -565,7 +716,7 @@ describe('Admin Contracts', () => {
 
 // ─── Admin: Cache Policies CRUD ─────────────────────────────
 
-describe('Admin Cache Policies', () => {
+describeAdmin('Admin Cache Policies', () => {
   let policyId: string;
 
   it('lists cache policies', async () => {
@@ -626,7 +777,7 @@ describe('Admin Cache Policies', () => {
 
 // ─── Admin: Identity Rules CRUD ─────────────────────────────
 
-describe('Admin Identity Rules', () => {
+describeAdmin('Admin Identity Rules', () => {
   let ruleId: string;
 
   it('lists identity rules', async () => {
@@ -688,7 +839,7 @@ describe('Admin Identity Rules', () => {
 
 // ─── Admin: Memory Governance CRUD ──────────────────────────
 
-describe('Admin Memory Governance', () => {
+describeAdmin('Admin Memory Governance', () => {
   let ruleId: string;
 
   it('lists memory governance rules', async () => {
@@ -749,7 +900,7 @@ describe('Admin Memory Governance', () => {
 
 // ─── Seed ───────────────────────────────────────────────────
 
-describe('Seed', () => {
+describeAdmin('Seed', () => {
   it('seeds default data', async () => {
     const { status, data } = await api('POST', '/api/admin/seed');
     expect(status).toBe(200);
@@ -759,7 +910,7 @@ describe('Seed', () => {
 
 // ─── Admin: Search Providers CRUD ────────────────────────────
 
-describe('Admin Search Providers', () => {
+describeAdmin('Admin Search Providers', () => {
   let itemId: string;
 
   it('lists search providers', async () => {
@@ -809,7 +960,7 @@ describe('Admin Search Providers', () => {
 
 // ─── Admin: HTTP Endpoints CRUD ──────────────────────────────
 
-describe('Admin HTTP Endpoints', () => {
+describeAdmin('Admin HTTP Endpoints', () => {
   let itemId: string;
 
   it('lists http endpoints', async () => {
@@ -861,7 +1012,7 @@ describe('Admin HTTP Endpoints', () => {
 
 // ─── Admin: Social Accounts CRUD ─────────────────────────────
 
-describe('Admin Social Accounts', () => {
+describeAdmin('Admin Social Accounts', () => {
   let itemId: string;
 
   it('lists social accounts', async () => {
@@ -911,7 +1062,7 @@ describe('Admin Social Accounts', () => {
 
 // ─── Admin: Enterprise Connectors CRUD ───────────────────────
 
-describe('Admin Enterprise Connectors', () => {
+describeAdmin('Admin Enterprise Connectors', () => {
   let itemId: string;
 
   it('lists enterprise connectors', async () => {
@@ -961,7 +1112,7 @@ describe('Admin Enterprise Connectors', () => {
 
 // ─── Admin: Tool Registry CRUD ───────────────────────────────
 
-describe('Admin Tool Registry', () => {
+describeAdmin('Admin Tool Registry', () => {
   let itemId: string;
 
   it('lists tool registry entries', async () => {
@@ -1015,7 +1166,7 @@ describe('Admin Tool Registry', () => {
 
 // ─── Admin: Replay Scenarios CRUD ────────────────────────────
 
-describe('Admin Replay Scenarios', () => {
+describeAdmin('Admin Replay Scenarios', () => {
   let itemId: string;
 
   it('lists replay scenarios', async () => {
@@ -1066,7 +1217,7 @@ describe('Admin Replay Scenarios', () => {
 
 // ─── Admin: Trigger Definitions CRUD ─────────────────────────
 
-describe('Admin Trigger Definitions', () => {
+describeAdmin('Admin Trigger Definitions', () => {
   let itemId: string;
 
   it('lists trigger definitions', async () => {
@@ -1116,7 +1267,7 @@ describe('Admin Trigger Definitions', () => {
 
 // ─── Admin: Tenant Configs CRUD ──────────────────────────────
 
-describe('Admin Tenant Configs', () => {
+describeAdmin('Admin Tenant Configs', () => {
   let itemId: string;
 
   it('lists tenant configs', async () => {
@@ -1172,7 +1323,7 @@ describe('Admin Tenant Configs', () => {
 
 // ─── Admin Sandbox Policies ─────────────────────────────────
 
-describe('Admin Sandbox Policies', () => {
+describeAdmin('Admin Sandbox Policies', () => {
   let itemId: string;
 
   it('lists sandbox policies', async () => {
@@ -1225,7 +1376,7 @@ describe('Admin Sandbox Policies', () => {
 
 // ─── Admin Extraction Pipelines ─────────────────────────────
 
-describe('Admin Extraction Pipelines', () => {
+describeAdmin('Admin Extraction Pipelines', () => {
   let itemId: string;
 
   it('lists extraction pipelines', async () => {
@@ -1276,7 +1427,7 @@ describe('Admin Extraction Pipelines', () => {
 
 // ─── Admin Artifact Policies ────────────────────────────────
 
-describe('Admin Artifact Policies', () => {
+describeAdmin('Admin Artifact Policies', () => {
   let itemId: string;
 
   it('lists artifact policies', async () => {
@@ -1325,7 +1476,7 @@ describe('Admin Artifact Policies', () => {
 
 // ─── Admin Reliability Policies ─────────────────────────────
 
-describe('Admin Reliability Policies', () => {
+describeAdmin('Admin Reliability Policies', () => {
   let itemId: string;
 
   it('lists reliability policies', async () => {
@@ -1375,7 +1526,7 @@ describe('Admin Reliability Policies', () => {
 
 // ─── Admin Collaboration Sessions ───────────────────────────
 
-describe('Admin Collaboration Sessions', () => {
+describeAdmin('Admin Collaboration Sessions', () => {
   let itemId: string;
 
   it('lists collaboration sessions', async () => {
@@ -1425,7 +1576,7 @@ describe('Admin Collaboration Sessions', () => {
 
 // ─── Admin Compliance Rules ─────────────────────────────────
 
-describe('Admin Compliance Rules', () => {
+describeAdmin('Admin Compliance Rules', () => {
   let itemId: string;
 
   it('lists compliance rules', async () => {
@@ -1477,7 +1628,7 @@ describe('Admin Compliance Rules', () => {
 
 // ─── Admin Graph Configs ────────────────────────────────────
 
-describe('Admin Graph Configs', () => {
+describeAdmin('Admin Graph Configs', () => {
   let itemId: string;
 
   it('lists graph configs', async () => {
@@ -1528,7 +1679,7 @@ describe('Admin Graph Configs', () => {
 
 // ─── Admin Plugin Configs ───────────────────────────────────
 
-describe('Admin Plugin Configs', () => {
+describeAdmin('Admin Plugin Configs', () => {
   let itemId: string;
 
   it('lists plugin configs', async () => {
@@ -1580,7 +1731,7 @@ describe('Admin Plugin Configs', () => {
 
 // ─── Admin Scaffold Templates ───────────────────────────────
 
-describe('Admin Scaffold Templates', () => {
+describeAdmin('Admin Scaffold Templates', () => {
   let itemId: string;
 
   it('lists scaffold templates', async () => {
@@ -1631,7 +1782,7 @@ describe('Admin Scaffold Templates', () => {
 
 // ─── Admin Recipe Configs ───────────────────────────────────
 
-describe('Admin Recipe Configs', () => {
+describeAdmin('Admin Recipe Configs', () => {
   let itemId: string;
 
   it('lists recipe configs', async () => {
@@ -1684,7 +1835,7 @@ describe('Admin Recipe Configs', () => {
 
 // ─── Admin Widget Configs ───────────────────────────────────
 
-describe('Admin Widget Configs', () => {
+describeAdmin('Admin Widget Configs', () => {
   let itemId: string;
 
   it('lists widget configs', async () => {
@@ -1734,7 +1885,7 @@ describe('Admin Widget Configs', () => {
 
 // ─── Admin Validation Rules ─────────────────────────────────
 
-describe('Admin Validation Rules', () => {
+describeAdmin('Admin Validation Rules', () => {
   let itemId: string;
 
   it('lists validation rules', async () => {

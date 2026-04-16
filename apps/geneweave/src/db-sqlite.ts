@@ -47,6 +47,16 @@ export class SQLiteAdapter implements DatabaseAdapter {
     } catch {
       // Ignore when the column already exists.
     }
+    try {
+      this.db.exec("ALTER TABLE users ADD COLUMN persona TEXT NOT NULL DEFAULT 'tenant_user'");
+    } catch {
+      // Ignore when the column already exists.
+    }
+    try {
+      this.db.exec('ALTER TABLE users ADD COLUMN tenant_id TEXT');
+    } catch {
+      // Ignore when the column already exists.
+    }
     // Migrations for semantic and entity memory tables (added later, safe to run on new or old DBs)
     try {
       this.db.exec(`CREATE TABLE IF NOT EXISTS semantic_memory (
@@ -157,8 +167,15 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   // ── Users ──────────────────────────────────────────────────
 
-  async createUser(u: { id: string; email: string; name: string; passwordHash: string }): Promise<void> {
-    this.d.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').run(u.id, u.email, u.name, u.passwordHash);
+  async createUser(u: { id: string; email: string; name: string; passwordHash: string; persona?: string; tenantId?: string | null }): Promise<void> {
+    this.d.prepare('INSERT INTO users (id, email, name, persona, tenant_id, password_hash) VALUES (?, ?, ?, ?, ?, ?)').run(
+      u.id,
+      u.email,
+      u.name,
+      u.persona ?? 'tenant_user',
+      u.tenantId ?? null,
+      u.passwordHash,
+    );
   }
 
   async getUserByEmail(email: string): Promise<UserRow | null> {
@@ -167,6 +184,14 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async getUserById(id: string): Promise<UserRow | null> {
     return (this.d.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined) ?? null;
+  }
+
+  async listUsers(): Promise<UserRow[]> {
+    return this.d.prepare('SELECT * FROM users ORDER BY created_at ASC').all() as UserRow[];
+  }
+
+  async updateUserPersona(userId: string, persona: string): Promise<void> {
+    this.d.prepare("UPDATE users SET persona = ? WHERE id = ?").run(persona, userId);
   }
 
   // ── Sessions ───────────────────────────────────────────────

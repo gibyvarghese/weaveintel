@@ -52,7 +52,8 @@ export function verifyJWT(token: string, secret: string): JWTPayload | null {
     .update(`${headerB64}.${payloadB64}`)
     .digest('base64url');
 
-  if (signatureB64 !== expectedSig) return null;
+  if (signatureB64.length !== expectedSig.length) return null;
+  if (!timingSafeEqual(Buffer.from(signatureB64), Buffer.from(expectedSig))) return null;
 
   try {
     const payload = JSON.parse(Buffer.from(payloadB64, 'base64url').toString()) as JWTPayload;
@@ -124,6 +125,8 @@ export interface AuthContext {
   email: string;
   sessionId: string;
   csrfToken: string;
+  persona: string;
+  tenantId: string | null;
 }
 
 export interface AuthenticatedRequest extends IncomingMessage {
@@ -149,12 +152,16 @@ export async function authenticateRequest(
 
   const session = await db.getSession(payload.sessionId);
   if (!session) return null;
+  const user = await db.getUserById(payload.userId);
+  if (!user) return null;
 
   return {
     userId: payload.userId,
     email: payload.email,
     sessionId: payload.sessionId,
     csrfToken: session.csrf_token,
+    persona: user.persona,
+    tenantId: user.tenant_id,
   };
 }
 

@@ -8,6 +8,7 @@ export interface RuntimeIdentity {
   type: 'user' | 'agent' | 'service' | 'system';
   id: string;
   name?: string;
+  persona?: string;
   tenantId?: string;
   roles?: string[];
   scopes?: string[];

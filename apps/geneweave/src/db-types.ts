@@ -10,6 +10,8 @@ export interface UserRow {
   id: string;
   email: string;
   name: string;
+  persona: string;
+  tenant_id: string | null;
   password_hash: string;
   created_at: string;
 }
@@ -766,9 +768,11 @@ export interface DatabaseAdapter {
   close(): Promise<void>;
 
   // Users
-  createUser(user: { id: string; email: string; name: string; passwordHash: string }): Promise<void>;
+  createUser(user: { id: string; email: string; name: string; passwordHash: string; persona?: string; tenantId?: string | null }): Promise<void>;
   getUserByEmail(email: string): Promise<UserRow | null>;
   getUserById(id: string): Promise<UserRow | null>;
+  listUsers(): Promise<UserRow[]>;
+  updateUserPersona(userId: string, persona: string): Promise<void>;
 
   // Sessions
   createSession(session: { id: string; userId: string; csrfToken: string; expiresAt: string }): Promise<void>;

@@ -12,6 +12,7 @@ export interface IdentityOptions {
   type: RuntimeIdentity['type'];
   id: string;
   name?: string;
+  persona?: string;
   tenantId?: string;
   roles?: string[];
   scopes?: string[];
@@ -24,6 +25,7 @@ export function createIdentity(opts: IdentityOptions): RuntimeIdentity {
     type: opts.type,
     id: opts.id,
     name: opts.name,
+    persona: opts.persona,
     tenantId: opts.tenantId,
     roles: opts.roles ?? [],
     scopes: opts.scopes ?? [],

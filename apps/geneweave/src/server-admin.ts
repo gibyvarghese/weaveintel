@@ -8,12 +8,13 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseAdapter } from './db.js';
 import { syncModelPricing } from './pricing-sync.js';
+import type { AuthContext } from './auth.js';
 
 type Handler = (
   req: IncomingMessage,
   res: ServerResponse,
   params: Record<string, string>,
-  auth: { userId: string; email: string } | null,
+  auth: AuthContext | null,
 ) => Promise<void>;
 
 interface RouterLike {
@@ -2275,6 +2276,10 @@ export function registerAdminRoutes(
 
   router.post('/api/admin/upgrade', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    if ((process.env['GENEWEAVE_ALLOW_ADMIN_UPGRADE'] ?? '').toLowerCase() !== 'true') {
+      json(res, 403, { error: 'Admin upgrade endpoint is disabled. Set GENEWEAVE_ALLOW_ADMIN_UPGRADE=true to enable.' });
+      return;
+    }
 
     const { execSync } = await import('node:child_process');
     const cwd = process.cwd();
@@ -2385,19 +2390,19 @@ export function registerAdminRoutes(
     const error = url.searchParams.get('error');
 
     if (error) {
-      htmlResp(res, 200, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'${error.replace(/'/g, "\\'")}'},'*');window.close();</script></body></html>`);
+      htmlResp(res, 200, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'${error.replace(/'/g, "\\'")}'}, window.location.origin);window.close();</script></body></html>`);
       return;
     }
 
     if (!code || !stateParam) {
-      htmlResp(res, 400, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'Missing code or state'},'*');window.close();</script></body></html>`);
+      htmlResp(res, 400, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'Missing code or state'}, window.location.origin);window.close();</script></body></html>`);
       return;
     }
 
     // Parse state: "type:connectorId:oauthState"
     const parts = stateParam.split(':');
     if (parts.length < 3) {
-      htmlResp(res, 400, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'Invalid state'},'*');window.close();</script></body></html>`);
+      htmlResp(res, 400, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'Invalid state'}, window.location.origin);window.close();</script></body></html>`);
       return;
     }
     const connectorType = parts[0]!;
@@ -2406,7 +2411,7 @@ export function registerAdminRoutes(
 
     const oauthCfg = OAUTH_CONFIGS[connectorType];
     if (!oauthCfg) {
-      htmlResp(res, 400, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'Unknown connector type'},'*');window.close();</script></body></html>`);
+      htmlResp(res, 400, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'Unknown connector type'}, window.location.origin);window.close();</script></body></html>`);
       return;
     }
 
@@ -2417,7 +2422,7 @@ export function registerAdminRoutes(
         ? await db.getSocialAccount(connectorId)
         : await db.getEnterpriseConnector(connectorId);
       if (!stored || stored.oauth_state !== oauthState) {
-        htmlResp(res, 400, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'State mismatch — possible CSRF'},'*');window.close();</script></body></html>`);
+        htmlResp(res, 400, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'State mismatch — possible CSRF'}, window.location.origin);window.close();</script></body></html>`);
         return;
       }
     }
@@ -2445,7 +2450,7 @@ export function registerAdminRoutes(
 
       if (!tokenResp.ok) {
         const errText = await tokenResp.text();
-        htmlResp(res, 200, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'Token exchange failed: ${tokenResp.status}'},'*');window.close();</script></body></html>`);
+        htmlResp(res, 200, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'Token exchange failed: ${tokenResp.status}'}, window.location.origin);window.close();</script></body></html>`);
         return;
       }
 
@@ -2477,10 +2482,10 @@ export function registerAdminRoutes(
         }
       }
 
-      htmlResp(res, 200, `<html><body><script>window.opener.postMessage({type:'oauth-success',connectorType:'${connectorType}',connectorId:'${connectorId}'},'*');window.close();</script></body></html>`);
+      htmlResp(res, 200, `<html><body><script>window.opener.postMessage({type:'oauth-success',connectorType:'${connectorType}',connectorId:'${connectorId}'}, window.location.origin);window.close();</script></body></html>`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      htmlResp(res, 200, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'${msg.replace(/'/g, "\\'")}'},'*');window.close();</script></body></html>`);
+      htmlResp(res, 200, `<html><body><script>window.opener.postMessage({type:'oauth-error',error:'${msg.replace(/'/g, "\\'")}'}, window.location.origin);window.close();</script></body></html>`);
     }
   }, { auth: false, csrf: false });
 
