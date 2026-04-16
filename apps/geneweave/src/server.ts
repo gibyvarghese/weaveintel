@@ -171,6 +171,25 @@ function ensurePermission(
   return { ok: true };
 }
 
+async function ensureAtLeastOneTenantAdmin(db: DatabaseAdapter, preferredUserId?: string): Promise<void> {
+  const users = await db.listUsers();
+  if (users.length === 0) return;
+
+  const hasAdmin = users.some((u) => {
+    const persona = normalizePersona(u.persona, 'user');
+    return persona === 'tenant_admin' || persona === 'platform_admin';
+  });
+  if (hasAdmin) return;
+
+  const preferred = preferredUserId ? users.find((u) => u.id === preferredUserId) : undefined;
+  const fallback = preferred ?? users
+    .slice()
+    .sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))[0];
+  if (!fallback) return;
+
+  await db.updateUserPersona(fallback.id, 'tenant_admin');
+}
+
 // ─── OAuth Flow State (in-memory, production should use Redis) ──────────
 
 const oauthClient = new OAuthClient();
@@ -267,9 +286,13 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     const existing = await db.getUserByEmail(email);
     if (existing) { json(res, 409, { error: 'Email already registered' }); return; }
 
+    const users = await db.listUsers();
+    const assignedPersona = users.length === 0 ? 'tenant_admin' : 'tenant_user';
+
     const userId = randomUUID();
     const passwordHash = hashPassword(password);
-    await db.createUser({ id: userId, email, name, passwordHash, persona: 'tenant_user' });
+    await db.createUser({ id: userId, email, name, passwordHash, persona: assignedPersona });
+    await ensureAtLeastOneTenantAdmin(db, userId);
 
     const sessionId = randomUUID();
     const csrfToken = generateCSRFToken();
@@ -278,7 +301,8 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
     const token = signJWT({ userId, email, sessionId }, jwtSecret);
     setAuthCookie(res, token);
-    json(res, 201, { user: { id: userId, email, name, persona: 'tenant_user' }, csrfToken });
+    const created = await db.getUserById(userId);
+    json(res, 201, { user: { id: userId, email, name, persona: created?.persona ?? assignedPersona }, csrfToken });
   }, { csrf: false });
 
   router.post('/api/auth/login', async (req, res) => {
@@ -295,17 +319,20 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       return;
     }
 
+    await ensureAtLeastOneTenantAdmin(db, user.id);
+    const effectiveUser = (await db.getUserById(user.id)) ?? user;
+
     const sessionId = randomUUID();
     const csrfToken = generateCSRFToken();
     const expiresAt = new Date(Date.now() + 86400_000).toISOString();
-    await db.createSession({ id: sessionId, userId: user.id, csrfToken, expiresAt });
+    await db.createSession({ id: sessionId, userId: effectiveUser.id, csrfToken, expiresAt });
 
-    const token = signJWT({ userId: user.id, email: user.email, sessionId }, jwtSecret);
+    const token = signJWT({ userId: effectiveUser.id, email: effectiveUser.email, sessionId }, jwtSecret);
     setAuthCookie(res, token);
     json(res, 200, {
-      user: { id: user.id, email: user.email, name: user.name, persona: user.persona, tenantId: user.tenant_id },
+      user: { id: effectiveUser.id, email: effectiveUser.email, name: effectiveUser.name, persona: effectiveUser.persona, tenantId: effectiveUser.tenant_id },
       csrfToken,
-      permissions: personaPermissions(user.persona),
+      permissions: personaPermissions(effectiveUser.persona),
     });
   }, { csrf: false });
 
@@ -317,6 +344,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
   router.get('/api/auth/me', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await ensureAtLeastOneTenantAdmin(db, auth.userId);
     const user = await db.getUserById(auth.userId);
     if (!user) { json(res, 401, { error: 'User not found' }); return; }
     json(res, 200, {
