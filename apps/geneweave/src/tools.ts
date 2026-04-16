@@ -7,12 +7,21 @@
 
 import type { Tool, ToolRegistry } from '@weaveintel/core';
 import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import { Buffer } from 'node:buffer';
 import { createSearchRouter, type SearchProviderConfig } from '@weaveintel/tools-search';
 import { createInMemoryTemporalStore, createTimeTools, type TemporalStore } from '@weaveintel/tools-time';
 import { createBrowserTools, createAutomationTools, createBrowserAuthTools } from '@weaveintel/tools-browser';
 import { canUseTool, normalizePersona } from './rbac.js';
 import type { ExecutionLanguage } from '@weaveintel/sandbox';
 import { getCSE } from './cse.js';
+
+interface RuntimeAttachment {
+  name: string;
+  mimeType: string;
+  size: number;
+  dataBase64?: string;
+  transcript?: string;
+}
 
 function envFlag(name: string, defaultValue: boolean): boolean {
   const raw = process.env[name];
@@ -320,11 +329,51 @@ function cseToolMap(opts?: ToolRegistryOptions): Record<string, Tool> {
       const cse = await getCSE();
       if (!cse) return { content: 'CSE is not configured in this environment.', isError: true };
       const chatId = args.chatId ?? opts?.currentChatId;
+      const files = (opts?.currentAttachments ?? []).flatMap((attachment) => {
+        const safeName = attachment.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 180) || `attachment-${Date.now()}`;
+        const lowerMime = attachment.mimeType.toLowerCase();
+        const isText =
+          lowerMime.startsWith('text/') ||
+          lowerMime === 'application/json' ||
+          lowerMime === 'application/xml' ||
+          lowerMime === 'application/javascript' ||
+          lowerMime === 'application/x-javascript' ||
+          lowerMime === 'application/csv' ||
+          lowerMime.includes('markdown');
+
+        const built: Array<{ name: string; content: string; binary?: boolean }> = [];
+        if (attachment.dataBase64) {
+          if (isText) {
+            try {
+              built.push({
+                name: safeName,
+                content: Buffer.from(attachment.dataBase64, 'base64').toString('utf8'),
+                binary: false,
+              });
+            } catch {
+              // Skip malformed base64 payloads.
+            }
+          } else {
+            built.push({ name: safeName, content: attachment.dataBase64, binary: true });
+          }
+        }
+
+        if (attachment.transcript) {
+          built.push({
+            name: `${safeName}.transcript.txt`,
+            content: attachment.transcript,
+            binary: false,
+          });
+        }
+
+        return built;
+      });
       const result = await cse.run({
         code: args.code,
         language: args.language,
         userId: opts?.currentUserId,
         chatId,
+        files: files.length > 0 ? files : undefined,
         timeoutMs: args.timeoutMs,
         networkAccess: args.networkAccess,
       });
@@ -405,6 +454,7 @@ export interface ToolRegistryOptions {
   temporalStore?: TemporalStore;
   currentUserId?: string;
   currentChatId?: string;
+  currentAttachments?: RuntimeAttachment[];
   actorPersona?: string;
   memoryRecall?: (args: { userId: string; query: string; limit?: number }) => Promise<{
     semantic: Array<{ content: string; source: string }>;

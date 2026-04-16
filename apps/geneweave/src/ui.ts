@@ -254,6 +254,21 @@ input{font-family:inherit;outline:none}
 .input-bar .send-btn:hover{background:var(--solid-hover)}
 .input-bar .send-btn:disabled{opacity:.4;cursor:not-allowed}
 .input-bar .model-sel{padding:10px 12px;border-radius:var(--radius);border:1px solid var(--bg4);background:var(--bg2);color:var(--fg2);font-size:13px;height:48px}
+.input-tools{display:flex;align-items:center;gap:8px}
+.tool-btn{width:42px;height:42px;border-radius:12px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg2);font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .18s ease}
+.tool-btn:hover{background:var(--bg2);border-color:var(--fg3);color:var(--fg)}
+.tool-btn.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+.composer-wrap{flex:1;display:flex;flex-direction:column;gap:8px}
+.attach-strip{display:flex;flex-wrap:wrap;gap:8px}
+.attach-chip{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg3);border:1px solid var(--bg4);border-radius:999px;font-size:12px;color:var(--fg2);max-width:340px}
+.attach-chip .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.attach-chip .remove{width:18px;height:18px;border-radius:999px;background:var(--bg2);border:1px solid var(--bg4);display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--fg3)}
+.attach-chip .remove:hover{color:var(--danger);border-color:var(--danger)}
+.msg-attachments{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+.msg-attachment{border:1px solid var(--bg4);background:var(--bg3);border-radius:10px;padding:8px 10px;font-size:12px;color:var(--fg2)}
+.msg-attachment .title{font-weight:700;color:var(--fg);margin-bottom:2px}
+.msg-attachment audio{width:100%;margin-top:6px}
+.msg-attachment pre{max-height:180px;overflow:auto;margin-top:6px;background:var(--bg2);border:1px solid var(--bg4);border-radius:8px;padding:8px}
 
 /* ── Agent steps & tool calls ───────────── */
 .step-card{background:var(--bg3);border:1px solid var(--bg4);border-radius:var(--radius);padding:12px 16px;margin:8px 0;font-size:13px}
@@ -556,6 +571,12 @@ let state = {
   calendarShowAll:false,
   calendarTab:'meetings',
   traces:[],
+  pendingAttachments:[],
+  audioRecording:false,
+  audioRecorder:null,
+  audioStream:null,
+  audioRecognition:null,
+  audioTranscript:'',
   // Admin state
   adminTab:'prompts',
   adminData:{},
@@ -752,12 +773,12 @@ function getDelegatedWorkers(messages){
 
 function normalizeLoadedMessage(row){
   var msg = Object.assign({}, row);
-  if(msg.role !== 'assistant') return msg;
   var md = null;
   if(typeof msg.metadata === 'string' && msg.metadata){
     try { md = JSON.parse(msg.metadata); } catch { md = null; }
   }
-  if(!md) return msg;
+  if(md && Array.isArray(md.attachments)) msg.attachments = md.attachments;
+  if(msg.role !== 'assistant' || !md) return msg;
   msg.steps = Array.isArray(md.steps) ? md.steps : [];
   msg.mode = md.mode || 'direct';
   msg.evalResult = md.eval || null;
@@ -770,6 +791,125 @@ function normalizeLoadedMessage(row){
   msg.cost = msg.cost || 0;
   msg.latency_ms = msg.latency_ms || 0;
   return msg;
+}
+
+function toBase64(blob){
+  return new Promise(function(resolve,reject){
+    var reader = new FileReader();
+    reader.onload = function(){
+      var s = String(reader.result || '');
+      var idx = s.indexOf(',');
+      resolve(idx >= 0 ? s.slice(idx+1) : s);
+    };
+    reader.onerror = function(){ reject(reader.error || new Error('Failed to read file')); };
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function queueFiles(files){
+  if(!files || !files.length) return;
+  var accepted = [];
+  for(var i=0;i<files.length && accepted.length<8;i++){
+    var f = files[i];
+    if(!f) continue;
+    if(f.size <= 0 || f.size > 4 * 1024 * 1024) continue;
+    var b64 = await toBase64(f);
+    accepted.push({
+      name: f.name || ('file-'+Date.now()),
+      mimeType: f.type || 'application/octet-stream',
+      size: f.size,
+      dataBase64: b64,
+    });
+  }
+  state.pendingAttachments = state.pendingAttachments.concat(accepted).slice(0,8);
+  render();
+}
+
+function removePendingAttachment(index){
+  state.pendingAttachments = state.pendingAttachments.filter(function(_,i){ return i !== index; });
+  render();
+}
+
+function stopAudioRecognition(){
+  if(state.audioRecognition){
+    try { state.audioRecognition.onresult = null; state.audioRecognition.onerror = null; state.audioRecognition.onend = null; state.audioRecognition.stop(); } catch {}
+    state.audioRecognition = null;
+  }
+}
+
+async function toggleAudioRecording(){
+  if(state.audioRecording){
+    if(state.audioRecorder){
+      try { state.audioRecorder.stop(); } catch {}
+    }
+    return;
+  }
+
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    alert('Audio capture is not supported in this browser.');
+    return;
+  }
+
+  var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  var chunks = [];
+  var mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm')
+    ? 'audio/webm'
+    : '';
+  var recorder = mimeType ? new MediaRecorder(stream, { mimeType: mimeType }) : new MediaRecorder(stream);
+
+  state.audioRecording = true;
+  state.audioRecorder = recorder;
+  state.audioStream = stream;
+  state.audioTranscript = '';
+
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(SR){
+    try {
+      var recognition = new SR();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+      recognition.onresult = function(event){
+        var transcript = '';
+        for(var i=0;i<event.results.length;i++){
+          transcript += event.results[i][0].transcript || '';
+        }
+        state.audioTranscript = transcript.trim();
+      };
+      recognition.onerror = function(){ /* ignore */ };
+      recognition.start();
+      state.audioRecognition = recognition;
+    } catch { /* ignore */ }
+  }
+
+  recorder.ondataavailable = function(event){
+    if(event.data && event.data.size > 0) chunks.push(event.data);
+  };
+  recorder.onstop = async function(){
+    stopAudioRecognition();
+    var blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
+    if(blob.size > 0 && blob.size <= 4 * 1024 * 1024){
+      var b64 = await toBase64(blob);
+      state.pendingAttachments = state.pendingAttachments.concat([{
+        name: 'voice-note-'+new Date().toISOString().replace(/[:.]/g,'-')+'.webm',
+        mimeType: blob.type || 'audio/webm',
+        size: blob.size,
+        dataBase64: b64,
+        transcript: state.audioTranscript || undefined,
+      }]).slice(0,8);
+    }
+    if(state.audioStream){
+      state.audioStream.getTracks().forEach(function(t){ t.stop(); });
+    }
+    state.audioRecording = false;
+    state.audioRecorder = null;
+    state.audioStream = null;
+    state.audioTranscript = '';
+    render();
+  };
+
+  recorder.start();
+  render();
 }
 
 /* ── API ────────────────────────────────────── */
@@ -1004,23 +1144,41 @@ async function deleteChat(id){
 
 /* ── Send message with streaming ────────────── */
 async function sendMessage(content){
-  if(!content.trim()||state.streaming) return;
+  var text = String(content||'').trim();
+  var attachments = (state.pendingAttachments || []).slice();
+  if((!text && !attachments.length) || state.streaming) return;
   if(!state.currentChatId) await createChat();
   const chatId = state.currentChatId;
-  state.messages.push({role:'user',content,created_at:new Date().toISOString()});
+  state.messages.push({
+    role:'user',
+    content:text,
+    created_at:new Date().toISOString(),
+    attachments: attachments,
+    metadata: attachments.length ? JSON.stringify({ attachments: attachments }) : null,
+  });
+  state.pendingAttachments = [];
   state.streaming=true; render();
   scrollMessages();
 
   const mParts = state.selectedModel.split(':');
-  const body = {content,stream:true,model:mParts[1]||undefined,provider:mParts[0]||undefined};
+  const body = {
+    content:text,
+    stream:true,
+    model:mParts[1]||undefined,
+    provider:mParts[0]||undefined,
+    attachments: attachments.length ? attachments : undefined,
+  };
   const headers = {'Content-Type':'application/json'};
   if(state.csrfToken) headers['X-CSRF-Token'] = state.csrfToken;
+  const startedAtMs = Date.now();
+  let assistantMsg = null;
 
   try {
     const resp = await fetch('/api/chats/'+chatId+'/messages',{method:'POST',headers,body:JSON.stringify(body),credentials:'same-origin'});
+    if(!resp.ok || !resp.body) throw new Error('Streaming request failed ('+resp.status+')');
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
-    let assistantMsg = {role:'assistant',content:'',usage:null,cost:0,latency_ms:0,created_at:new Date().toISOString(),steps:[],evalResult:null,redaction:null,mode:state.chatSettings?.mode||'direct'};
+    assistantMsg = {role:'assistant',content:'',usage:null,cost:0,latency_ms:0,created_at:new Date().toISOString(),steps:[],evalResult:null,redaction:null,mode:state.chatSettings?.mode||'direct'};
     state.messages.push(assistantMsg);
     render(); scrollMessages();
 
@@ -1052,13 +1210,72 @@ async function sendMessage(content){
       renderMessages(); scrollMessages();
     }
   } catch(e){
-    state.messages.push({role:'assistant',content:'[Connection error: '+(e.message||e)+']',created_at:new Date().toISOString()});
+    // Fallback path: retry once without streaming. This avoids losing the final answer
+    // when SSE transport drops but the backend can still complete the request.
+    try {
+      const nonStreamBody = Object.assign({}, body, { stream: false });
+      const nonStreamResp = await fetch('/api/chats/'+chatId+'/messages', {
+        method:'POST',
+        headers,
+        body:JSON.stringify(nonStreamBody),
+        credentials:'same-origin'
+      });
+      if(nonStreamResp.ok){
+        const payload = await nonStreamResp.json();
+        const recoveredMsg = {
+          role:'assistant',
+          content:String(payload.assistantContent || ''),
+          usage:payload.usage || null,
+          cost:payload.cost || 0,
+          latency_ms:payload.latencyMs || 0,
+          created_at:new Date().toISOString(),
+          steps:Array.isArray(payload.steps) ? payload.steps : [],
+          evalResult:payload.eval || null,
+          redaction:payload.redaction || null,
+          mode:state.chatSettings?.mode||'direct'
+        };
+        if(assistantMsg){
+          Object.assign(assistantMsg, recoveredMsg);
+        } else {
+          state.messages.push(recoveredMsg);
+        }
+        state.streaming=false;
+        render();
+        return;
+      }
+    } catch {}
+
+    let recovered = false;
+    try {
+      const hist = await api.get('/chats/'+chatId+'/messages');
+      if(hist.ok){
+        const rows = (await hist.json()).messages ?? [];
+        const candidates = rows.filter(function(m){
+          if(!m || m.role !== 'assistant' || !m.content) return false;
+          const ts = Date.parse(m.created_at || '');
+          return Number.isFinite(ts) && ts >= (startedAtMs - 15000);
+        });
+        if(candidates.length){
+          const latest = candidates[candidates.length - 1];
+          if(assistantMsg){
+            assistantMsg.content = String(latest.content || '');
+          } else {
+            state.messages.push(normalizeLoadedMessage(latest));
+          }
+          recovered = true;
+        }
+      }
+    } catch {}
+
+    if(!recovered){
+      state.messages.push({role:'assistant',content:'[Connection error: '+(e.message||e)+']',created_at:new Date().toISOString()});
+    }
   }
   state.streaming=false;
   // Update chat title from first message
   const chat = state.chats.find(c=>c.id===chatId);
-  if(chat && chat.title==='New Chat' && content.length>0){
-    const newTitle = content.slice(0,40) + (content.length>40?'…':'');
+  if(chat && chat.title==='New Chat' && text.length>0){
+    const newTitle = text.slice(0,40) + (text.length>40?'…':'');
     chat.title = newTitle;
     api.put('/chats/'+chatId,{title:newTitle}).catch((e)=>console.warn('Failed to persist chat title', e));
   }
@@ -1173,6 +1390,7 @@ function renderMessages(){
   state.messages.forEach(m=>{
     const isUser = m.role==='user';
     const extras = [];
+    const attachments = Array.isArray(m.attachments) ? m.attachments : [];
 
     if(!isUser && m.mode && m.mode!=='direct'){
       extras.push(h('span',{className:'mode-badge'},m.mode));
@@ -1352,12 +1570,44 @@ function renderMessages(){
       screenshotsEl = h('div',{className:'screenshots'},...imgs);
     }
 
+    let attachmentsEl = null;
+    if(attachments.length){
+      const nodes = attachments.map(function(att){
+        const mime = String(att.mimeType || 'application/octet-stream');
+        const title = String(att.name || 'attachment');
+        const base64 = typeof att.dataBase64 === 'string' ? att.dataBase64 : '';
+        const dataUrl = base64 ? ('data:'+mime+';base64,'+base64) : null;
+        const transcript = typeof att.transcript === 'string' ? att.transcript : '';
+
+        const body = [
+          h('div',{className:'title'},title),
+          h('div',null,mime+' • '+((att.size||0)+' bytes')),
+        ];
+        if(transcript){
+          body.push(h('pre',null,transcript));
+        }
+        if(dataUrl && mime.startsWith('audio/')){
+          body.push(h('audio',{controls:true,src:dataUrl}));
+        }
+        if(dataUrl && mime.startsWith('image/')){
+          const img = h('img',{src:dataUrl,style:'max-width:100%;border-radius:8px;margin-top:6px'});
+          body.push(img);
+        }
+        if(dataUrl && !mime.startsWith('audio/') && !mime.startsWith('image/')){
+          body.push(h('a',{href:dataUrl,download:title,target:'_blank',rel:'noopener'},'Download attachment'));
+        }
+        return h('div',{className:'msg-attachment'},...body);
+      });
+      attachmentsEl = h('div',{className:'msg-attachments'},...nodes);
+    }
+
     const msgEl = h('div',{className:'msg '+(isUser?'user':'assistant')},
       avatarEl,
       h('div',{className:'msg-body'},
         corner,
         ...extras,
         bubbleEl,
+        attachmentsEl,
         screenshotsEl,
         toolbar,
         !isUser && m.usage ? h('div',{className:'meta'},
@@ -2900,8 +3150,38 @@ function renderChatView(){
   ta.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(ta.value);ta.value='';ta.style.height='auto';}});
   ta.addEventListener('input',()=>{ta.style.height='auto';ta.style.height=Math.min(ta.scrollHeight,160)+'px';});
 
+  const fileInput = h('input',{type:'file',multiple:true,accept:'image/*,audio/*,text/*,application/json,.md,.csv',style:'display:none'});
+  fileInput.addEventListener('change',async()=>{
+    var files = Array.from(fileInput.files || []);
+    await queueFiles(files);
+    fileInput.value = '';
+  });
+
+  const attachmentStrip = state.pendingAttachments.length
+    ? h('div',{className:'attach-strip'},
+        ...state.pendingAttachments.map(function(att, idx){
+          return h('div',{className:'attach-chip'},
+            h('span',{className:'name'},(att.name||'attachment')+' ('+(att.size||0)+'b)'),
+            h('button',{className:'remove',onClick:()=>removePendingAttachment(idx)},'×')
+          );
+        })
+      )
+    : null;
+
+  const tools = h('div',{className:'input-tools'},
+    h('button',{className:'tool-btn',title:'Attach files',onClick:()=>fileInput.click()},'📎'),
+    h('button',{className:'tool-btn'+(state.audioRecording?' active':''),title:state.audioRecording?'Stop recording':'Record audio',onClick:()=>toggleAudioRecording()},state.audioRecording?'⏹':'🎤')
+  );
+
+  const composer = h('div',{className:'composer-wrap'},
+    attachmentStrip,
+    ta
+  );
+
   view.appendChild(h('div',{className:'input-bar'},
-    ta,
+    fileInput,
+    tools,
+    composer,
     h('button',{className:'send-btn',onClick:()=>{sendMessage(ta.value);ta.value='';ta.style.height='auto';},disabled:state.streaming?'true':null},'Send')
   ));
 

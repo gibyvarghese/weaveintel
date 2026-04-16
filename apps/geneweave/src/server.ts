@@ -12,6 +12,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseAdapter } from './db.js';
 import type { ChatEngine } from './chat.js';
+import type { ChatAttachment } from './chat.js';
 import { DashboardService } from './dashboard.js';
 import { getAvailableTools } from './tools.js';
 import { canPersonaAccess, isValidPersona, normalizePersona, personaPermissions } from './rbac.js';
@@ -109,13 +110,29 @@ async function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    const MAX = 1_048_576; // 1 MB
+    const maxFromEnv = Number.parseInt(process.env['GENEWEAVE_MAX_REQUEST_BODY_BYTES'] ?? '', 10);
+    const MAX = Number.isFinite(maxFromEnv) && maxFromEnv > 0
+      ? maxFromEnv
+      : 50 * 1024 * 1024; // 50 MB default to support attachment payloads.
+    let tooLarge = false;
+
     req.on('data', (chunk: Buffer) => {
+      if (tooLarge) return;
       size += chunk.length;
-      if (size > MAX) { req.destroy(); reject(new Error('Request body too large')); return; }
+      if (size > MAX) {
+        tooLarge = true;
+        return;
+      }
       chunks.push(chunk);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString()));
+
+    req.on('end', () => {
+      if (tooLarge) {
+        reject(new Error('Request body too large'));
+        return;
+      }
+      resolve(Buffer.concat(chunks).toString());
+    });
     req.on('error', reject);
   });
 }
@@ -688,16 +705,41 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     if (!chat) { json(res, 404, { error: 'Chat not found' }); return; }
 
     const raw = await readBody(req);
-    let body: { content?: string; stream?: boolean; model?: string; provider?: string; maxTokens?: number; temperature?: number };
+    let body: {
+      content?: string;
+      stream?: boolean;
+      model?: string;
+      provider?: string;
+      maxTokens?: number;
+      temperature?: number;
+      attachments?: ChatAttachment[];
+    };
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
 
     if (!body.content) { json(res, 400, { error: 'content required' }); return; }
+
+    const normalizedAttachments = Array.isArray(body.attachments)
+      ? body.attachments
+          .slice(0, 8)
+          .filter((a): a is ChatAttachment => {
+            return !!a
+              && typeof a.name === 'string'
+              && a.name.trim().length > 0
+              && typeof a.mimeType === 'string'
+              && a.mimeType.trim().length > 0
+              && typeof a.size === 'number'
+              && Number.isFinite(a.size)
+              && a.size > 0
+              && a.size <= 4 * 1024 * 1024;
+          })
+      : undefined;
 
     const opts = {
       model: body.model ?? chat.model,
       provider: body.provider ?? chat.provider,
       maxTokens: body.maxTokens,
       temperature: body.temperature,
+      attachments: normalizedAttachments,
     };
 
     if (body.stream) {
@@ -1226,7 +1268,13 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Internal server error';
         console.error(`[geneWeave] Error handling ${method} ${pathname}:`, err);
-        if (!res.headersSent) json(res, 500, { error: msg });
+        if (!res.headersSent) {
+          if (msg === 'Request body too large') {
+            json(res, 413, { error: 'Request body too large' });
+          } else {
+            json(res, 500, { error: msg });
+          }
+        }
       }
       return;
     }

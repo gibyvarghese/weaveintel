@@ -10,17 +10,13 @@ import { ComputeSandboxEngine, buildCSEConfig } from '@weaveintel/sandbox';
 let engine: ComputeSandboxEngine | null = null;
 let initPromise: Promise<ComputeSandboxEngine> | null = null;
 
-/** Returns true when at least one CSE env var is set. */
+/** Returns true when CSE is available (local Docker is always available as fallback). */
 export function isCSEEnabled(): boolean {
   const env = process.env;
-  return !!(
-    env['CSE_PROVIDER'] ||
-    env['AKS_CLUSTER_NAME'] ||
-    env['GKE_CLUSTER'] ||
-    env['ACI_RESOURCE_GROUP'] ||
-    env['CLOUDRUN_PROJECT_ID'] ||
-    env['GOOGLE_APPLICATION_CREDENTIALS']
-  );
+  // If explicitly disabled, respect that.
+  if (env['CSE_ENABLED'] === 'false') return false;
+  // Local Docker is always the fallback — no env vars required.
+  return true;
 }
 
 /**

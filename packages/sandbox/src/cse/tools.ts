@@ -22,9 +22,10 @@ export const CSE_TOOL_DEFINITIONS = [
   {
     name: 'cse_run_code',
     description:
-      'Execute code (Python, JavaScript, bash) in a secure isolated container. ' +
-      'The container has no internet access by default. Output, errors and file artifacts are returned. ' +
-      'If a chatId is provided the same container session is reused across turns for stateful computation.',
+      'ACTUALLY EXECUTES code in a real isolated Docker container and returns the real stdout/stderr. ' +
+      'Use this whenever the user wants to run, execute, or test a script — this is NOT a simulation. ' +
+      'Supports Python, JavaScript, TypeScript, Bash. Pass the complete code as a string. ' +
+      'The container has no internet access by default. Artifacts are returned alongside output.',
     parameters: {
       type: 'object' as const,
       required: ['code'],

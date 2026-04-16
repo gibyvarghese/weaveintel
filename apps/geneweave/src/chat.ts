@@ -50,6 +50,14 @@ import { runHybridMemoryExtraction, type ExtractedEntity, type MemoryExtractionR
 import { createEnterpriseTools, createEnterpriseToolGroups, ServiceNowProvider, type EnterpriseConnectorConfig, type EnterpriseToolGroup } from '@weaveintel/tools-enterprise';
 import { normalizePersona } from './rbac.js';
 
+export interface ChatAttachment {
+  name: string;
+  mimeType: string;
+  size: number;
+  dataBase64?: string;
+  transcript?: string;
+}
+
 const TEMPORAL_TOOL_POLICY = [
   'Temporal Tool Usage Policy:',
   '- When asked about current day/date/time, current timestamp, or timezone-dependent time, do not guess.',
@@ -66,6 +74,30 @@ const TEMPORAL_TOOL_POLICY = [
   '  • Call `stopwatch_stop` (or `timer_stop`) with the appropriate ID.',
   '  • Always report `elapsedMs` converted to human-readable format (minutes and seconds).',
   '- NEVER calculate elapsed time from raw timestamps or message content — use the stopwatch/timer tools.',
+].join('\n');
+
+const SUPERVISOR_CODE_EXECUTION_POLICY = [
+  'You have direct access to `cse_run_code` — a tool that executes code in a real isolated Docker container.',
+  'Execution strategy by task type:',
+  '- Simple code-run requests (no attached dataset): call `cse_run_code` directly from supervisor.',
+  '- Dataset/file analysis requests (attachments, CSV/JSON/XLSX, or "analyze this file"): delegate to `code_executor` first, then to `analyst` for result verification.',
+  '',
+  'Attachment handling policy:',
+  '- Attached files are injected into container workspace and should be opened by filename.',
+  '- For CSV analysis, prefer Python standard library (`csv`) first.',
+  '- Do not assume `pandas` is installed unless you install it in the same run and verify installation succeeded.',
+  '',
+  'Verification and retry policy (MANDATORY):',
+  '- Verify tool outputs before final response.',
+  '- If tool execution fails (import/file/path/runtime errors), send it back to code_executor with the exact stderr and a corrected plan.',
+  '- Continue iterate->run->verify until success or clear environmental blocker is proven.',
+  '- For successful analyses, final response must include computed metrics and concise insights grounded in execution stdout.',
+  '',
+  'Example: "write a Python script to add 15 numbers and run it"',
+  '  → Write the script, then call: cse_run_code(code="...", language="python")',
+  '  → Include the actual stdout in your final response.',
+  '',
+  'Supported languages: python, javascript, typescript, bash.',
 ].join('\n');
 
 const SUPERVISOR_TEMPORAL_POLICY = [
@@ -319,6 +351,103 @@ export class ChatEngine {
     this.toolOptions = { temporalStore: createTemporalStore(db) };
   }
 
+  private shouldForceWorkerDataAnalysis(userContent: string, attachments?: ChatAttachment[]): boolean {
+    if (!attachments || attachments.length === 0) return false;
+    const lower = userContent.toLowerCase();
+    const analysisIntent = /\b(analy[sz]e|analysis|insight|dataset|csv|table|trend|summary|summarize|statistics|statistical)\b/.test(lower);
+    return analysisIntent;
+  }
+
+  private hasSuccessfulCseExecution(result: AgentResult): boolean {
+    return this.scanForSuccessfulCseExecution(result, new WeakSet<object>());
+  }
+
+  private scanForSuccessfulCseExecution(value: unknown, seen: WeakSet<object>): boolean {
+    if (value == null) return false;
+
+    if (typeof value === 'string') {
+      const workerTrace = this.extractWorkerToolTrace(value);
+      if (workerTrace && this.scanForSuccessfulCseExecution(workerTrace, seen)) {
+        return true;
+      }
+      return false;
+    }
+
+    if (Array.isArray(value)) {
+      return value.some((entry) => this.scanForSuccessfulCseExecution(entry, seen));
+    }
+
+    if (typeof value !== 'object') {
+      return false;
+    }
+
+    if (seen.has(value)) {
+      return false;
+    }
+    seen.add(value);
+
+    const record = value as Record<string, unknown>;
+    const toolCall = this.asRecord(record['toolCall']);
+    if (toolCall && toolCall['name'] === 'cse_run_code' && this.isSuccessfulCseToolResult(toolCall['result'])) {
+      return true;
+    }
+
+    if (record['name'] === 'cse_run_code' && this.isSuccessfulCseToolResult(record['result'])) {
+      return true;
+    }
+
+    for (const nested of Object.values(record)) {
+      if (this.scanForSuccessfulCseExecution(nested, seen)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private extractWorkerToolTrace(value: string): unknown[] | null {
+    const traceIdx = value.indexOf('[WorkerToolTrace]');
+    if (traceIdx < 0) {
+      return null;
+    }
+
+    const traceJson = value.slice(traceIdx + '[WorkerToolTrace]\n'.length).trim();
+    const parsed = this.safeParseJson(traceJson);
+    return Array.isArray(parsed) ? parsed : null;
+  }
+
+  private isSuccessfulCseToolResult(value: unknown): boolean {
+    const parsed = typeof value === 'string' ? this.safeParseJson(value) : value;
+    const record = this.asRecord(parsed);
+    return record?.['status'] === 'success';
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+  }
+
+  private async runWithCseSuccessGuard(
+    agent: { run: (ctx: ExecutionContext, input: { messages: Message[]; goal: string }) => Promise<AgentResult> },
+    ctx: ExecutionContext,
+    messages: Message[],
+    goal: string,
+    enforce: boolean,
+  ): Promise<AgentResult> {
+    const first = await agent.run(ctx, { messages, goal });
+    if (!enforce || this.hasSuccessfulCseExecution(first)) return first;
+
+    const retryGoal = `${goal}\n\nHARD EXECUTION GUARD: The answer is invalid unless a successful cse_run_code execution is present in tool results. Delegate to code_executor, run code successfully, verify output, then respond.`;
+    const second = await agent.run(ctx, { messages, goal: retryGoal });
+    if (this.hasSuccessfulCseExecution(second)) return second;
+
+    return {
+      ...second,
+      output: '[Execution guard failure] No successful cse_run_code result was found in tool traces for this attachment analysis request. The analysis result is not trusted. Please retry.',
+    };
+  }
+
   /** Load pricing from DB, cache for 60 s */
   private async loadPricing(): Promise<Map<string, ModelPricing>> {
     const now = Date.now();
@@ -343,7 +472,7 @@ export class ChatEngine {
     userId: string,
     chatId: string,
     content: string,
-    opts?: { provider?: string; model?: string; maxTokens?: number; temperature?: number },
+    opts?: { provider?: string; model?: string; maxTokens?: number; temperature?: number; attachments?: ChatAttachment[] },
   ): Promise<{
     assistantContent: string;
     usage: { promptTokens: number; completionTokens: number; totalTokens: number };
@@ -395,11 +524,14 @@ export class ChatEngine {
     const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
     const startMs = Date.now();
 
+    const attachments = this.normalizeAttachments(opts?.attachments);
+    const contentWithAttachments = this.composeUserInput(content, attachments);
+
     // Redaction
-    let processedContent = content;
+    let processedContent = contentWithAttachments;
     let redactionInfo: { count: number; types: string[] } | undefined;
     if (settings.redactionEnabled) {
-      const rd = await this.applyRedaction(ctx, content, settings.redactionPatterns);
+      const rd = await this.applyRedaction(ctx, contentWithAttachments, settings.redactionPatterns);
       processedContent = rd.redacted;
       if (rd.wasModified) {
         redactionInfo = { count: rd.detections.length, types: [...new Set(rd.detections.map((d: any) => d.type))] };
@@ -408,7 +540,13 @@ export class ChatEngine {
 
     // Save user message
     const userMsgId = randomUUID();
-    await this.db.addMessage({ id: userMsgId, chatId, role: 'user', content, metadata: redactionInfo ? JSON.stringify({ redaction: redactionInfo }) : undefined });
+    const userMetadata = redactionInfo || attachments.length > 0
+      ? JSON.stringify({
+          redaction: redactionInfo,
+          attachments: attachments.length > 0 ? attachments : undefined,
+        })
+      : undefined;
+    await this.db.addMessage({ id: userMsgId, chatId, role: 'user', content, metadata: userMetadata });
 
     // Pre-execution guardrails
     const preGuardrail = await this.evaluateGuardrails(chatId, userMsgId, processedContent, 'pre-execution');
@@ -474,6 +612,7 @@ export class ChatEngine {
     // Build conversation
     const history = await this.db.getMessages(chatId);
     const messages = historyToMessages(history);
+    this.patchLatestUserMessage(messages, processedContent);
 
     // ── Memory recall ──
     const memoryContext = await this.buildMemoryContext(ctx, model, userId, processedContent);
@@ -491,7 +630,8 @@ export class ChatEngine {
     let cacheHit = false;
 
     // ── Cache lookup ──
-    const cachePolicy = await this.resolveActiveCache(settings.mode);
+    const allowResponseCache = attachments.length === 0;
+    const cachePolicy = allowResponseCache ? await this.resolveActiveCache(settings.mode) : null;
     const cacheKey = this.cacheKeyBuilder.build({ model: modelId, prompt: processedContent });
     if (cachePolicy && !shouldBypass(cachePolicy, processedContent)) {
       const cached = await this.responseCache.get(cacheKey);
@@ -505,7 +645,7 @@ export class ChatEngine {
     if (!cacheHit) {
     if (settings.mode === 'agent' || settings.mode === 'supervisor') {
       // ── Agent / Supervisor mode ──
-      const telemetry = await this.runAgent(ctx, model, userId, chatId, userPersona, messages, processedContent, memorySettings);
+      const telemetry = await this.runAgent(ctx, model, userId, chatId, userPersona, messages, processedContent, memorySettings, attachments);
       assistantContent = telemetry.result.output ?? '';
       usage = {
         promptTokens: telemetry.result.usage.totalTokens,  // agent tracks totalTokens only
@@ -530,9 +670,10 @@ export class ChatEngine {
     } // end if (!cacheHit)
 
     // ── Cache store ──
-    if (!cacheHit && cachePolicy) {
+    if (!cacheHit && cachePolicy && !assistantContent.includes('[Execution guard failure]')) {
       await this.responseCache.set(cacheKey, { content: assistantContent!, usage }, cachePolicy.ttlMs);
     }
+
 
     const latencyMs = Date.now() - startMs;
     const dbPricing = await this.loadPricing();
@@ -639,7 +780,7 @@ export class ChatEngine {
     userId: string,
     chatId: string,
     content: string,
-    opts?: { provider?: string; model?: string; maxTokens?: number; temperature?: number },
+    opts?: { provider?: string; model?: string; maxTokens?: number; temperature?: number; attachments?: ChatAttachment[] },
   ): Promise<void> {
     let provider = opts?.provider ?? this.config.defaultProvider;
     let modelId = opts?.model ?? this.config.defaultModel;
@@ -675,11 +816,14 @@ export class ChatEngine {
     const traceId = randomUUID();
     const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
 
+    const attachments = this.normalizeAttachments(opts?.attachments);
+    const contentWithAttachments = this.composeUserInput(content, attachments);
+
     // Redaction
-    let processedContent = content;
+    let processedContent = contentWithAttachments;
     let redactionInfo: { count: number; types: string[] } | undefined;
     if (settings.redactionEnabled) {
-      const rd = await this.applyRedaction(ctx, content, settings.redactionPatterns);
+      const rd = await this.applyRedaction(ctx, contentWithAttachments, settings.redactionPatterns);
       processedContent = rd.redacted;
       if (rd.wasModified) {
         redactionInfo = { count: rd.detections.length, types: [...new Set(rd.detections.map((d: any) => d.type))] };
@@ -688,7 +832,13 @@ export class ChatEngine {
 
     // Save user message
     const userMsgId = randomUUID();
-    await this.db.addMessage({ id: userMsgId, chatId, role: 'user', content, metadata: redactionInfo ? JSON.stringify({ redaction: redactionInfo }) : undefined });
+    const userMetadata = redactionInfo || attachments.length > 0
+      ? JSON.stringify({
+          redaction: redactionInfo,
+          attachments: attachments.length > 0 ? attachments : undefined,
+        })
+      : undefined;
+    await this.db.addMessage({ id: userMsgId, chatId, role: 'user', content, metadata: userMetadata });
 
     // Pre-execution guardrails
     const preGuardrail = await this.evaluateGuardrails(chatId, userMsgId, processedContent, 'pre-execution');
@@ -765,6 +915,7 @@ export class ChatEngine {
     // Build conversation
     const history = await this.db.getMessages(chatId);
     const messages = historyToMessages(history);
+    this.patchLatestUserMessage(messages, processedContent);
 
     // ── Memory recall ──
     const streamMemoryContext = await this.buildMemoryContext(ctx, model, userId, processedContent);
@@ -797,7 +948,7 @@ export class ChatEngine {
     try {
       if (settings.mode === 'agent' || settings.mode === 'supervisor') {
         // ── Agent / Supervisor streaming ──
-        const telemetry = await this.streamAgent(res, ctx, model, userId, chatId, userPersona, messages, processedContent, streamMemorySettings);
+        const telemetry = await this.streamAgent(res, ctx, model, userId, chatId, userPersona, messages, processedContent, streamMemorySettings, attachments);
         fullText = telemetry.result.output ?? '';
         finalUsage = { promptTokens: telemetry.result.usage.totalTokens, completionTokens: 0, totalTokens: telemetry.result.usage.totalTokens };
         steps = [...telemetry.result.steps];
@@ -1054,6 +1205,7 @@ export class ChatEngine {
     messages: Message[],
     userContent: string,
     settings: ChatSettings,
+    attachments?: ChatAttachment[],
   ): Promise<AgentRunTelemetry> {
     const enterpriseToolGroups = await this.loadEnterpriseToolGroups();
     const hasEnterprise = enterpriseToolGroups.length > 0;
@@ -1064,6 +1216,7 @@ export class ChatEngine {
       defaultTimezone: settings.timezone,
       currentUserId: userId,
       currentChatId: chatId,
+      currentAttachments: attachments,
       actorPersona: userPersona,
       memoryRecall: async ({ userId: recallUserId, query, limit }) => {
         const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
@@ -1091,6 +1244,10 @@ export class ChatEngine {
 
     try {
       let agent;
+      const forceWorkerDataAnalysis = this.shouldForceWorkerDataAnalysis(userContent, attachments);
+      const effectiveGoal = forceWorkerDataAnalysis
+        ? `${userContent}\n\nWORKFLOW REQUIREMENT: Delegate to code_executor to generate and run Python in container against attached files. If execution fails, retry with corrected code. After successful execution, delegate to analyst to verify computed outputs and produce at least 3 concrete insights.`
+        : userContent;
 
       // Auto-upgrade to supervisor when enterprise tools are available
       if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
@@ -1120,12 +1277,33 @@ export class ChatEngine {
         });
         const allWorkers = [...baseWorkers, ...enterpriseWorkers];
         console.log(`[chat] Supervisor with ${allWorkers.length} workers (${baseWorkers.length} base + ${enterpriseWorkers.length} enterprise)`);
+        const supervisorCseTools = forceWorkerDataAnalysis
+          ? undefined
+          : createToolRegistry(
+              ['cse_run_code', 'cse_session_status', 'cse_end_session'],
+              undefined,
+              { ...toolOptions, actorPersona: 'agent_worker' },
+            );
+
+        const supervisorInstructions = forceWorkerDataAnalysis
+          ? [
+              SUPERVISOR_CODE_EXECUTION_POLICY,
+              '',
+              'For attachment-based data analysis requests, do NOT execute code directly in supervisor.',
+              'Delegate first to code_executor for script generation + execution, then to analyst for verification and insight synthesis.',
+              'Require at least 3 concrete, computed insights from tool output.',
+              '',
+              SUPERVISOR_TEMPORAL_POLICY,
+            ].join('\n')
+          : [SUPERVISOR_CODE_EXECUTION_POLICY, '', SUPERVISOR_TEMPORAL_POLICY].join('\n');
+
         agent = weaveSupervisor({
           model,
           workers: allWorkers,
           maxSteps: 20,
           name: 'geneweave-supervisor',
-          instructions: SUPERVISOR_TEMPORAL_POLICY,
+          instructions: supervisorInstructions,
+          additionalTools: supervisorCseTools,
           bus: agentBus,
         });
       } else {
@@ -1140,7 +1318,13 @@ export class ChatEngine {
         });
       }
 
-      const result = await agent.run(ctx, { messages, goal: userContent });
+      const result = await this.runWithCseSuccessGuard(
+        agent,
+        ctx,
+        messages,
+        effectiveGoal,
+        forceWorkerDataAnalysis,
+      );
       return { result, toolCallEvents: toolCallObserver.events };
     } finally {
       toolCallObserver.dispose();
@@ -1159,6 +1343,7 @@ export class ChatEngine {
     messages: Message[],
     userContent: string,
     settings: ChatSettings,
+    attachments?: ChatAttachment[],
   ): Promise<AgentRunTelemetry> {
     const enterpriseToolGroups = await this.loadEnterpriseToolGroups();
     const hasEnterprise = enterpriseToolGroups.length > 0;
@@ -1168,6 +1353,7 @@ export class ChatEngine {
       defaultTimezone: settings.timezone,
       currentUserId: userId,
       currentChatId: chatId,
+      currentAttachments: attachments,
       actorPersona: userPersona,
       memoryRecall: async ({ userId: recallUserId, query, limit }) => {
         const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
@@ -1208,6 +1394,10 @@ export class ChatEngine {
     });
 
     try {
+    const forceWorkerDataAnalysis = this.shouldForceWorkerDataAnalysis(userContent, attachments);
+    const effectiveGoal = forceWorkerDataAnalysis
+      ? `${userContent}\n\nWORKFLOW REQUIREMENT: Delegate to code_executor to generate and run Python in container against attached files. If execution fails, retry with corrected code. After successful execution, delegate to analyst to verify computed outputs and produce at least 3 concrete insights.`
+      : userContent;
     let agent;
     if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
       const baseWorkers = settings.workers.length > 0
@@ -1234,12 +1424,32 @@ export class ChatEngine {
         };
       });
       const allWorkers = [...baseWorkers, ...enterpriseWorkers];
+      const supervisorCseToolsStream = forceWorkerDataAnalysis
+        ? undefined
+        : createToolRegistry(
+            ['cse_run_code', 'cse_session_status', 'cse_end_session'],
+            undefined,
+            { ...toolOptions, actorPersona: 'agent_worker' },
+          );
+
+      const supervisorInstructions = forceWorkerDataAnalysis
+        ? [
+            SUPERVISOR_CODE_EXECUTION_POLICY,
+            '',
+            'For attachment-based data analysis requests, do NOT execute code directly in supervisor.',
+            'Delegate first to code_executor for script generation + execution, then to analyst for verification and insight synthesis.',
+            'Require at least 3 concrete, computed insights from tool output.',
+            '',
+            SUPERVISOR_TEMPORAL_POLICY,
+          ].join('\n')
+        : [SUPERVISOR_CODE_EXECUTION_POLICY, '', SUPERVISOR_TEMPORAL_POLICY].join('\n');
       agent = weaveSupervisor({
         model,
         workers: allWorkers,
         maxSteps: 20,
         name: 'geneweave-supervisor',
-        instructions: SUPERVISOR_TEMPORAL_POLICY,
+        instructions: supervisorInstructions,
+        additionalTools: supervisorCseToolsStream,
         bus: agentBus,
       });
     } else {
@@ -1254,9 +1464,22 @@ export class ChatEngine {
       });
     }
 
+    if (forceWorkerDataAnalysis) {
+      const guarded = await this.runWithCseSuccessGuard(agent, ctx, messages, effectiveGoal, true);
+      res.write(`data: ${JSON.stringify({ type: 'text', text: guarded.output })}\n\n`);
+      for (const step of guarded.steps) {
+        res.write(`data: ${JSON.stringify({
+          type: 'step',
+          step: { index: step.index, type: step.type, content: step.content, toolCall: step.toolCall, delegation: step.delegation, durationMs: step.durationMs },
+          phase: 'step_end',
+        })}\n\n`);
+      }
+      return { result: guarded, toolCallEvents: toolCallObserver.events };
+    }
+
     // Try streaming mode first
     if (agent.runStream) {
-      const stream = agent.runStream(ctx, { messages, goal: userContent });
+      const stream = agent.runStream(ctx, { messages, goal: effectiveGoal });
       let finalResult: AgentResult | undefined;
 
       for await (const event of stream) {
@@ -1312,7 +1535,7 @@ export class ChatEngine {
     }
 
     // Fallback: non-streaming agent run, send result as single text event
-    const result = await agent.run(ctx, { messages, goal: userContent });
+    const result = await agent.run(ctx, { messages, goal: effectiveGoal });
     res.write(`data: ${JSON.stringify({ type: 'text', text: result.output })}\n\n`);
 
     // Send step summaries
@@ -1417,6 +1640,99 @@ export class ChatEngine {
       return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
     } catch {
       return {};
+    }
+  }
+
+  private normalizeAttachments(input: ChatAttachment[] | undefined): ChatAttachment[] {
+    if (!Array.isArray(input) || input.length === 0) return [];
+
+    const maxCount = 8;
+    const maxBytes = 4 * 1024 * 1024;
+    const sanitized: ChatAttachment[] = [];
+
+    for (const item of input.slice(0, maxCount)) {
+      if (!item || typeof item !== 'object') continue;
+      const rawName = typeof item.name === 'string' ? item.name.trim() : '';
+      const rawMime = typeof item.mimeType === 'string' ? item.mimeType.trim() : '';
+      if (!rawName || !rawMime) continue;
+
+      const normalizedBase64 = typeof item.dataBase64 === 'string'
+        ? item.dataBase64.replace(/\s+/g, '')
+        : undefined;
+      if (normalizedBase64 && !/^[A-Za-z0-9+/=]+$/.test(normalizedBase64)) continue;
+
+      const approximateSize = normalizedBase64
+        ? Math.floor((normalizedBase64.length * 3) / 4)
+        : (typeof item.size === 'number' && Number.isFinite(item.size) ? item.size : 0);
+      if (approximateSize <= 0 || approximateSize > maxBytes) continue;
+
+      const transcript = typeof item.transcript === 'string' && item.transcript.trim()
+        ? item.transcript.trim().slice(0, 12_000)
+        : undefined;
+
+      sanitized.push({
+        name: rawName.slice(0, 180),
+        mimeType: rawMime.slice(0, 120),
+        size: approximateSize,
+        dataBase64: normalizedBase64,
+        transcript,
+      });
+    }
+
+    return sanitized;
+  }
+
+  private composeUserInput(content: string, attachments: ChatAttachment[]): string {
+    if (attachments.length === 0) return content;
+    const attachmentContext = this.buildAttachmentContext(attachments);
+    if (!attachmentContext) return content;
+    return `${content}\n\n[User attachments]\n${attachmentContext}`;
+  }
+
+  private buildAttachmentContext(attachments: ChatAttachment[]): string {
+    const lines: string[] = [];
+    const maxInlineChars = 12_000;
+
+    for (const attachment of attachments) {
+      lines.push(`- ${attachment.name} (${attachment.mimeType}, ${attachment.size} bytes)`);
+      if (attachment.transcript) {
+        lines.push(`  transcript: ${attachment.transcript.slice(0, maxInlineChars)}`);
+        continue;
+      }
+
+      const lowerMime = attachment.mimeType.toLowerCase();
+      const maybeText =
+        lowerMime.startsWith('text/') ||
+        lowerMime === 'application/json' ||
+        lowerMime === 'application/xml' ||
+        lowerMime === 'application/javascript' ||
+        lowerMime === 'application/x-javascript' ||
+        lowerMime === 'application/csv' ||
+        lowerMime.includes('markdown');
+
+      if (maybeText && attachment.dataBase64) {
+        try {
+          const decoded = Buffer.from(attachment.dataBase64, 'base64').toString('utf8');
+          const compact = decoded.replace(/\r\n/g, '\n').trim();
+          if (compact) {
+            lines.push(`  content:\n${compact.slice(0, maxInlineChars)}`);
+          }
+        } catch {
+          lines.push('  content: [unable to decode text attachment]');
+        }
+      }
+    }
+
+    return lines.join('\n');
+  }
+
+  private patchLatestUserMessage(messages: Message[], content: string): void {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg?.role === 'user') {
+        messages[i] = { ...msg, content };
+        return;
+      }
     }
   }
 
@@ -2320,7 +2636,46 @@ function defaultWorkers(
   // Analyst should have temporal tools AND timer management for handling time-based tasks
   const analystTools = ['calculator', 'json_format', 'text_analysis', 'memory_recall', 'datetime', 'datetime_add', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
 
+  const codeExecutorTools = ['cse_run_code', 'cse_session_status', 'cse_end_session', 'calculator', 'text_analysis'];
+
   return [
+    {
+      name: 'code_executor',
+      description: '[USE FIRST FOR ANY CODE/SCRIPT/RUN REQUEST] Writes AND executes code in real isolated Docker containers via CSE. Returns actual stdout. Use for: "run", "execute", "run it", "run in a container", "write and run", "test", "script that runs". NOT a simulation — real execution.',
+      systemPrompt: [
+        'You are a code writing + execution + verification agent.',
+        'Your mission is not just to write code, but to make it run successfully and produce validated results.',
+        '',
+        'Execution workflow (MANDATORY):',
+        '1. Understand objective and available attached files from context.',
+        '2. Generate a runnable script.',
+        '3. Execute with `cse_run_code`.',
+        '4. Verify stdout/stderr and correctness against requested output.',
+        '5. If errors or weak output, revise code and run again (iterate).',
+        '6. Stop only when output is successful and materially answers the request, or when a clear environment blocker is proven.',
+        '',
+        'For file/data analysis tasks:',
+        '- Treat attached filenames as real files in container workspace.',
+        '- Prefer robust Python stdlib (`csv`, `json`, `statistics`) first for portability.',
+        '- If using third-party libraries (pandas/numpy/etc.), install and verify explicitly before relying on them.',
+        '- If import fails, immediately fallback to stdlib approach and rerun.',
+        '- If file path fails, probe workspace via code (e.g., os.listdir("."), os.listdir("/workspace")) and retry with corrected path.',
+        '',
+        'Quality bar before returning:',
+        '- Code executed successfully (status success).',
+        '- Output includes concrete computed values (not generic commentary).',
+        '- At least 3 clear insights when the user asks for analysis/insights.',
+        '- Include assumptions and any residual limitations.',
+        '',
+        'Response format back to supervisor:',
+        '- Final code used',
+        '- Execution stdout',
+        '- Verification notes (why output is correct)',
+        '- If blocked: exact blocker + next best fallback',
+      ].join('\n'),
+      model,
+      tools: createToolRegistry(codeExecutorTools, undefined, { ...toolOptions, actorPersona: 'agent_worker' }),
+    },
     {
       name: 'researcher',
       description: 'Researches topics, searches the web, browses websites, and gathers information. Can open a headless browser to navigate dynamic sites, read page content, click links, fill forms, and interact with web applications. Has full browser authentication capabilities: can detect login forms, auto-login using stored website credentials from the credential vault, save session cookies, and hand off the browser to the user for manual steps like 2FA or CAPTCHA. Always delegate login/auth tasks to this worker — it has the browser_detect_auth, browser_login, browser_save_cookies, browser_handoff_request, and browser_handoff_resume tools.',
@@ -2333,7 +2688,7 @@ function defaultWorkers(
     },
     {
       name: 'analyst',
-      description: 'Analyzes data, performs calculations, formats JSON, provides structured insights, and handles temporal/timer queries. Good for math, data processing, formatting, date/time questions, and time management.',
+      description: 'Analyzes data, performs calculations, validates computed outputs, formats JSON, provides structured insights, and handles temporal/timer queries. Good for math, data processing, output verification, formatting, date/time questions, and time management.',
       systemPrompt: buildPrompt?.(undefined, analystTools),
       model,
       tools: createToolRegistry(analystTools, undefined, { ...toolOptions, actorPersona: 'agent_worker' }),

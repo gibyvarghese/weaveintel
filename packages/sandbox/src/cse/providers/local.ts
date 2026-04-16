@@ -39,7 +39,7 @@ const DEFAULT_BROWSER_IMAGE = 'mcr.microsoft.com/playwright:v1.44.0-jammy';
 function run(
   cmd: string,
   args: string[],
-  opts: { timeoutMs?: number; stdin?: string } = {},
+  opts: { timeoutMs?: number; stdin?: string | Buffer } = {},
 ): Promise<{ stdout: string; stderr: string; exitCode: number; durationMs: number }> {
   return new Promise((resolve) => {
     const start = Date.now();
@@ -106,6 +106,16 @@ function guessMime(name: string): string {
   if (name.endsWith('.html')) return 'text/html';
   if (name.endsWith('.pdf')) return 'application/pdf';
   return 'application/octet-stream';
+}
+
+function sanitizeWorkspaceFileName(name: string): string {
+  const normalized = name.replace(/\\/g, '/').replace(/^\/+/, '');
+  const cleaned = normalized
+    .split('/')
+    .filter((segment) => segment && segment !== '.' && segment !== '..')
+    .map((segment) => segment.replace(/[^a-zA-Z0-9._-]/g, '_'))
+    .join('/');
+  return cleaned || `file_${randomUUID().slice(0, 8)}`;
 }
 
 // ─── Provider ────────────────────────────────────────────────
@@ -276,12 +286,40 @@ export class LocalDockerProvider implements ContainerProvider {
       };
     }
 
+    // Write injected files into the running session container under /workspace.
+    if (request.files) {
+      for (const file of request.files) {
+        const fileName = sanitizeWorkspaceFileName(file.name);
+        const remotePath = `/workspace/${fileName}`;
+        const writeFileResult = await run('docker', [
+          'exec', '-i', session.handle,
+          'sh', '-c', `cat > ${remotePath}`,
+        ], {
+          stdin: file.binary ? Buffer.from(file.content, 'base64') : file.content,
+        });
+
+        if (writeFileResult.exitCode !== 0) {
+          return {
+            executionId,
+            sessionId: session.sessionId,
+            status: 'error',
+            stdout: '',
+            stderr: writeFileResult.stderr,
+            error: `Failed to write injected file to session container: ${fileName}`,
+            artifacts: [],
+            durationMs: writeFileResult.durationMs,
+            providerInfo: { provider: 'local', containerId: session.handle },
+          };
+        }
+      }
+    }
+
     // Build exec command
     const runCmd = buildRunCommand(lang).map((p) => (p.includes('code.py') || p.includes('code.js') || p.includes('code.sh') || p.includes('code.ts') ? remoteCode : p));
 
     const start = Date.now();
     const execResult = await run('docker', [
-      'exec', session.handle,
+      'exec', '-w', '/workspace', session.handle,
       ...runCmd,
     ], { timeoutMs });
 
