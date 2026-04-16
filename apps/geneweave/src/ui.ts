@@ -572,6 +572,7 @@ let state = {
   calendarTab:'meetings',
   traces:[],
   pendingAttachments:[],
+  pendingDraft:'',
   audioRecording:false,
   audioRecorder:null,
   audioStream:null,
@@ -887,17 +888,12 @@ async function toggleAudioRecording(){
   };
   recorder.onstop = async function(){
     stopAudioRecognition();
-    var blob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
-    if(blob.size > 0 && blob.size <= 4 * 1024 * 1024){
-      var b64 = await toBase64(blob);
-      state.pendingAttachments = state.pendingAttachments.concat([{
-        name: 'voice-note-'+new Date().toISOString().replace(/[:.]/g,'-')+'.webm',
-        mimeType: blob.type || 'audio/webm',
-        size: blob.size,
-        dataBase64: b64,
-        transcript: state.audioTranscript || undefined,
-      }]).slice(0,8);
+    var capturedTranscript = (state.audioTranscript || '').trim();
+    if(capturedTranscript){
+      // Transcript captured — send as plain text, never upload the raw audio file
+      state.pendingDraft = capturedTranscript;
     }
+    // If no transcript, nothing is sent (raw audio is not processable by the LLM)
     if(state.audioStream){
       state.audioStream.getTracks().forEach(function(t){ t.stop(); });
     }
@@ -3147,6 +3143,11 @@ function renderChatView(){
 
   /* ── Input bar ─── */
   const ta = h('textarea',{placeholder:'Type a message...',rows:'1'});
+  if(state.pendingDraft){
+    ta.value = state.pendingDraft;
+    state.pendingDraft = '';
+    requestAnimationFrame(()=>{ ta.style.height='auto'; ta.style.height=Math.min(ta.scrollHeight,160)+'px'; ta.focus(); });
+  }
   ta.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage(ta.value);ta.value='';ta.style.height='auto';}});
   ta.addEventListener('input',()=>{ta.style.height='auto';ta.style.height=Math.min(ta.scrollHeight,160)+'px';});
 

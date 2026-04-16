@@ -1670,11 +1670,14 @@ export class ChatEngine {
         ? item.transcript.trim().slice(0, 12_000)
         : undefined;
 
+      // Strip raw audio bytes — the LLM cannot process audio directly.
+      // Only the transcript (if present) is forwarded to the model context.
+      const isAudio = rawMime.toLowerCase().startsWith('audio/');
       sanitized.push({
         name: rawName.slice(0, 180),
         mimeType: rawMime.slice(0, 120),
         size: approximateSize,
-        dataBase64: normalizedBase64,
+        dataBase64: isAudio ? undefined : normalizedBase64,
         transcript,
       });
     }
