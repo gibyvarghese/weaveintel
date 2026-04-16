@@ -11,6 +11,8 @@ import { createSearchRouter, type SearchProviderConfig } from '@weaveintel/tools
 import { createInMemoryTemporalStore, createTimeTools, type TemporalStore } from '@weaveintel/tools-time';
 import { createBrowserTools, createAutomationTools, createBrowserAuthTools } from '@weaveintel/tools-browser';
 import { canUseTool, normalizePersona } from './rbac.js';
+import type { ExecutionLanguage } from '@weaveintel/sandbox';
+import { getCSE } from './cse.js';
 
 function envFlag(name: string, defaultValue: boolean): boolean {
   const raw = process.env[name];
@@ -299,6 +301,95 @@ function browserToolMap(): Record<string, Tool> {
   return Object.fromEntries(browserTools.map(t => [t.schema.name, t]));
 }
 
+function cseToolMap(opts?: ToolRegistryOptions): Record<string, Tool> {
+  const runCode = weaveTool({
+    name: 'cse_run_code',
+    description: 'Run Python/JavaScript/bash code in the Compute Sandbox Engine. Starts or reuses a container session scoped to the current user and chat.',
+    parameters: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Code to execute in the sandbox.' },
+        language: { type: 'string', enum: ['python', 'javascript', 'typescript', 'bash', 'shell'], description: 'Execution language. Default: python.' },
+        chatId: { type: 'string', description: 'Optional chat ID. Defaults to current chat context.' },
+        timeoutMs: { type: 'number', description: 'Optional execution timeout in milliseconds.' },
+        networkAccess: { type: 'boolean', description: 'Allow outbound network access for this run.' },
+      },
+      required: ['code'],
+    },
+    execute: async (args: { code: string; language?: ExecutionLanguage; chatId?: string; timeoutMs?: number; networkAccess?: boolean }) => {
+      const cse = await getCSE();
+      if (!cse) return { content: 'CSE is not configured in this environment.', isError: true };
+      const chatId = args.chatId ?? opts?.currentChatId;
+      const result = await cse.run({
+        code: args.code,
+        language: args.language,
+        userId: opts?.currentUserId,
+        chatId,
+        timeoutMs: args.timeoutMs,
+        networkAccess: args.networkAccess,
+      });
+      return JSON.stringify({
+        status: result.status,
+        userId: opts?.currentUserId,
+        chatId,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        error: result.error,
+        sessionId: result.sessionId,
+        provider: result.providerInfo.provider,
+      }, null, 2);
+    },
+    tags: ['sandbox', 'compute', 'code'],
+  });
+
+  const sessionStatus = weaveTool({
+    name: 'cse_session_status',
+    description: 'Get sandbox session status for the current user and chat.',
+    parameters: {
+      type: 'object',
+      properties: {
+        chatId: { type: 'string', description: 'Optional chat ID. Defaults to current chat context.' },
+      },
+      required: [],
+    },
+    execute: async (args: { chatId?: string }) => {
+      const cse = await getCSE();
+      if (!cse) return { content: 'CSE is not configured in this environment.', isError: true };
+      const chatId = args.chatId ?? opts?.currentChatId;
+      const session = cse.listSessions().find((s) => s.chatId === chatId && s.userId === opts?.currentUserId);
+      return JSON.stringify({ active: Boolean(session), session: session ?? null }, null, 2);
+    },
+    tags: ['sandbox', 'session'],
+  });
+
+  const endSession = weaveTool({
+    name: 'cse_end_session',
+    description: 'Terminate sandbox session for the current user and chat.',
+    parameters: {
+      type: 'object',
+      properties: {
+        chatId: { type: 'string', description: 'Optional chat ID. Defaults to current chat context.' },
+      },
+      required: [],
+    },
+    execute: async (args: { chatId?: string }) => {
+      const cse = await getCSE();
+      if (!cse) return { content: 'CSE is not configured in this environment.', isError: true };
+      const chatId = args.chatId ?? opts?.currentChatId;
+      if (!chatId) return { content: 'No chatId available to terminate a session.', isError: true };
+      await cse.terminateChatSession(chatId, opts?.currentUserId);
+      return JSON.stringify({ terminated: true, chatId }, null, 2);
+    },
+    tags: ['sandbox', 'session'],
+  });
+
+  return {
+    cse_run_code: runCode,
+    cse_session_status: sessionStatus,
+    cse_end_session: endSession,
+  };
+}
+
 export const BUILTIN_TOOLS: Record<string, Tool> = {
   calculator: calculatorTool,
   ...createTimeToolMap(),
@@ -306,12 +397,14 @@ export const BUILTIN_TOOLS: Record<string, Tool> = {
   json_format: jsonFormatterTool,
   text_analysis: textAnalysisTool,
   ...browserToolMap(),
+  ...cseToolMap(),
 };
 
 export interface ToolRegistryOptions {
   defaultTimezone?: string;
   temporalStore?: TemporalStore;
   currentUserId?: string;
+  currentChatId?: string;
   actorPersona?: string;
   memoryRecall?: (args: { userId: string; query: string; limit?: number }) => Promise<{
     semantic: Array<{ content: string; source: string }>;
@@ -368,6 +461,7 @@ export function createToolRegistry(toolNames: string[], customTools?: Tool[], op
   const scopedTools: Record<string, Tool> = {
     ...BUILTIN_TOOLS,
     ...createTimeToolMap(opts?.defaultTimezone, opts?.temporalStore ?? defaultTemporalStore),
+    ...cseToolMap(opts),
     memory_recall: memoryRecallTool,
   };
   for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {

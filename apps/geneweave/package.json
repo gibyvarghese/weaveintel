@@ -45,6 +45,7 @@
     "@weaveintel/tools-time": "*",
     "@weaveintel/ui-primitives": "*",
     "@weaveintel/devtools": "*",
+    "@weaveintel/sandbox": "*",
     "@weaveintel/recipes": "*",
     "better-sqlite3": "^11.9.1"
   },

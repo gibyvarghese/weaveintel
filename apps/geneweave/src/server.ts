@@ -552,7 +552,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       // For now, we replicate the policy here; ideally this would be imported
       const DEFAULT_TOOLS: Record<string, string[]> = {
         direct: [],
-        agent: ['datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'memory_recall', 'web_search', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume'],
+        agent: ['datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'memory_recall', 'web_search', 'cse_run_code', 'cse_session_status', 'cse_end_session', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume'],
         supervisor: ['datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis'],
       };
       return DEFAULT_TOOLS[mode] ?? [];
@@ -1078,6 +1078,98 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   });
 
   // ── Health ─────────────────────────────────────────────────
+
+  // ── Compute Sandbox Engine (CSE) ───────────────────────────
+
+  router.get('/api/sandbox/status', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    const { getCSE, isCSEEnabled } = await import('./cse.js');
+    if (!isCSEEnabled()) {
+      json(res, 200, { enabled: false, message: 'CSE is not configured. Set CSE_PROVIDER or cloud credentials.' });
+      return;
+    }
+    const cse = await getCSE();
+    if (!cse) { json(res, 503, { error: 'CSE unavailable' }); return; }
+    const health = await cse.healthCheck();
+    json(res, health.healthy ? 200 : 503, { enabled: true, ...health });
+  });
+
+  router.post('/api/sandbox/execute', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    const { getCSE, isCSEEnabled } = await import('./cse.js');
+    if (!isCSEEnabled()) { json(res, 503, { error: 'CSE is not configured' }); return; }
+
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try {
+      body = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      json(res, 400, { error: 'Invalid JSON' });
+      return;
+    }
+
+    const { code, language, chatId, sessionId, files, env: envVars, timeoutMs, networkAccess, withBrowser } = body;
+
+    if (!code || typeof code !== 'string' || code.trim() === '') {
+      json(res, 400, { error: 'code is required' });
+      return;
+    }
+
+    // Restrict env vars to safe keys only (no overriding system vars)
+    const safeEnv: Record<string, string> = {};
+    if (envVars && typeof envVars === 'object') {
+      for (const [k, v] of Object.entries(envVars as Record<string, unknown>)) {
+        if (/^[A-Z_][A-Z0-9_]*$/i.test(k) && typeof v === 'string') safeEnv[k] = v;
+      }
+    }
+
+    const cse = await getCSE();
+    if (!cse) { json(res, 503, { error: 'CSE unavailable' }); return; }
+
+    const languageValue =
+      language === 'python' ||
+      language === 'javascript' ||
+      language === 'typescript' ||
+      language === 'bash' ||
+      language === 'shell'
+        ? language
+        : undefined;
+
+    const result = await cse.run({
+      code,
+      language: languageValue,
+      userId: auth.userId,
+      chatId: typeof chatId === 'string' ? chatId : undefined,
+      sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+      files: Array.isArray(files) ? files as Array<{ name: string; content: string; binary?: boolean }> : undefined,
+      env: safeEnv,
+      timeoutMs: typeof timeoutMs === 'number' ? timeoutMs : undefined,
+      networkAccess: typeof networkAccess === 'boolean' ? networkAccess : undefined,
+      withBrowser: typeof withBrowser === 'boolean' ? withBrowser : false,
+    });
+
+    json(res, result.status === 'success' ? 200 : 422, result);
+  }, { auth: true, csrf: true });
+
+  router.get('/api/sandbox/sessions', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    const { getCSE, isCSEEnabled } = await import('./cse.js');
+    if (!isCSEEnabled()) { json(res, 200, { sessions: [] }); return; }
+    const cse = await getCSE();
+    if (!cse) { json(res, 200, { sessions: [] }); return; }
+    json(res, 200, { sessions: cse.listSessions() });
+  });
+
+  router.del('/api/sandbox/sessions/:sessionId', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    const { getCSE } = await import('./cse.js');
+    const cse = await getCSE();
+    if (!cse) { json(res, 404, { error: 'No active CSE' }); return; }
+    const sessionId = params['sessionId'];
+    if (!sessionId) { json(res, 400, { error: 'sessionId required' }); return; }
+    await cse.terminateSession(sessionId);
+    json(res, 200, { terminated: true, sessionId });
+  }, { auth: true, csrf: true });
 
   router.get('/health', async (_req, res) => {
     json(res, 200, { status: 'ok', service: 'geneweave', timestamp: new Date().toISOString() });

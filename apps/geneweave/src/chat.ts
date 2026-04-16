@@ -128,6 +128,8 @@ const TOOL_POLICIES: Record<'direct' | 'agent' | 'supervisor', string[]> = {
     // Utility tools
     'calculator', 'json_format', 'text_analysis', 'memory_recall',
     'web_search',
+    // Compute Sandbox Engine
+    'cse_run_code', 'cse_session_status', 'cse_end_session',
   ],
   
   // Supervisor mode: reserved for worker delegation; supervisor itself has minimal direct tools
@@ -503,7 +505,7 @@ export class ChatEngine {
     if (!cacheHit) {
     if (settings.mode === 'agent' || settings.mode === 'supervisor') {
       // ── Agent / Supervisor mode ──
-      const telemetry = await this.runAgent(ctx, model, userId, userPersona, messages, processedContent, memorySettings);
+      const telemetry = await this.runAgent(ctx, model, userId, chatId, userPersona, messages, processedContent, memorySettings);
       assistantContent = telemetry.result.output ?? '';
       usage = {
         promptTokens: telemetry.result.usage.totalTokens,  // agent tracks totalTokens only
@@ -795,7 +797,7 @@ export class ChatEngine {
     try {
       if (settings.mode === 'agent' || settings.mode === 'supervisor') {
         // ── Agent / Supervisor streaming ──
-        const telemetry = await this.streamAgent(res, ctx, model, userId, userPersona, messages, processedContent, streamMemorySettings);
+        const telemetry = await this.streamAgent(res, ctx, model, userId, chatId, userPersona, messages, processedContent, streamMemorySettings);
         fullText = telemetry.result.output ?? '';
         finalUsage = { promptTokens: telemetry.result.usage.totalTokens, completionTokens: 0, totalTokens: telemetry.result.usage.totalTokens };
         steps = [...telemetry.result.steps];
@@ -1047,6 +1049,7 @@ export class ChatEngine {
     ctx: ExecutionContext,
     model: Model,
     userId: string,
+    chatId: string,
     userPersona: string,
     messages: Message[],
     userContent: string,
@@ -1060,6 +1063,7 @@ export class ChatEngine {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
       currentUserId: userId,
+      currentChatId: chatId,
       actorPersona: userPersona,
       memoryRecall: async ({ userId: recallUserId, query, limit }) => {
         const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
@@ -1150,6 +1154,7 @@ export class ChatEngine {
     ctx: ExecutionContext,
     model: Model,
     userId: string,
+    chatId: string,
     userPersona: string,
     messages: Message[],
     userContent: string,
@@ -1162,6 +1167,7 @@ export class ChatEngine {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
       currentUserId: userId,
+      currentChatId: chatId,
       actorPersona: userPersona,
       memoryRecall: async ({ userId: recallUserId, query, limit }) => {
         const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
