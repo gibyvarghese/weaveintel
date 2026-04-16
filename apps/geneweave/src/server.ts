@@ -716,7 +716,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     };
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
 
-    if (!body.content) { json(res, 400, { error: 'content required' }); return; }
+    const normalizedContent = typeof body.content === 'string' ? body.content.trim() : '';
 
     const normalizedAttachments = Array.isArray(body.attachments)
       ? body.attachments
@@ -734,6 +734,11 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
           })
       : undefined;
 
+    if (!normalizedContent && (!normalizedAttachments || normalizedAttachments.length === 0)) {
+      json(res, 400, { error: 'content or attachments required' });
+      return;
+    }
+
     const opts = {
       model: body.model ?? chat.model,
       provider: body.provider ?? chat.provider,
@@ -743,9 +748,9 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     };
 
     if (body.stream) {
-      await chatEngine.streamMessage(res, auth.userId, chat.id, body.content, opts);
+      await chatEngine.streamMessage(res, auth.userId, chat.id, normalizedContent, opts);
     } else {
-      const result = await chatEngine.sendMessage(auth.userId, chat.id, body.content, opts);
+      const result = await chatEngine.sendMessage(auth.userId, chat.id, normalizedContent, opts);
       json(res, 200, result);
     }
   }, { auth: true, csrf: true });
