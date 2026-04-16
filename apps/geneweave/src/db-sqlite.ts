@@ -6,13 +6,14 @@
 
 import { randomUUID } from 'node:crypto';
 import { SCHEMA_SQL } from './db-schema.js';
+import { BUILT_IN_SKILLS } from '@weaveintel/skills';
 import type {
   DatabaseAdapter, DatabaseConfig,
   UserRow, SessionRow, ChatRow, MessageRow,
   MetricRow, EvalRow, ChatSettingsRow, TraceRow, UserPreferencesRow,
   TemporalTimerRow, TemporalStopwatchRow, TemporalReminderRow,
   PromptRow, GuardrailRow, RoutingPolicyRow, WorkflowDefRow,
-  ToolConfigRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
+  ToolConfigRow, SkillRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
   IdentityRuleRow, MemoryGovernanceRow, SearchProviderRow, HttpEndpointRow,
   MemoryExtractionRuleRow,
   SocialAccountRow, EnterpriseConnectorRow, ToolRegistryRow, ReplayScenarioRow,
@@ -804,6 +805,56 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteToolConfig(id: string): Promise<void> {
     this.d.prepare('DELETE FROM tool_configs WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Skills ─────────────────────────────────────────
+
+  async createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO skills (id, name, description, category, trigger_patterns, instructions, tool_names, examples, tags, priority, version, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      s.id,
+      s.name,
+      s.description,
+      s.category,
+      s.trigger_patterns,
+      s.instructions,
+      s.tool_names ?? null,
+      s.examples ?? null,
+      s.tags ?? null,
+      s.priority,
+      s.version,
+      s.enabled,
+    );
+  }
+
+  async getSkill(id: string): Promise<SkillRow | null> {
+    return (this.d.prepare('SELECT * FROM skills WHERE id = ?').get(id) as SkillRow | undefined) ?? null;
+  }
+
+  async listSkills(): Promise<SkillRow[]> {
+    return this.d.prepare('SELECT * FROM skills ORDER BY priority DESC, name ASC').all() as SkillRow[];
+  }
+
+  async listEnabledSkills(): Promise<SkillRow[]> {
+    return this.d.prepare('SELECT * FROM skills WHERE enabled = 1 ORDER BY priority DESC, name ASC').all() as SkillRow[];
+  }
+
+  async updateSkill(id: string, fields: Partial<Omit<SkillRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE skills SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteSkill(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM skills WHERE id = ?').run(id);
   }
 
   // ─── Workflow Runs ─────────────────────────────────────────
@@ -2193,6 +2244,26 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const t of tools) await this.createToolConfig(t);
+    }
+
+    // Skills
+    if (cnt('skills') === 0) {
+      for (const s of BUILT_IN_SKILLS) {
+        await this.createSkill({
+          id: s.id,
+          name: s.name,
+          description: s.description,
+          category: s.category,
+          trigger_patterns: JSON.stringify(s.triggerPatterns),
+          instructions: s.instructions,
+          tool_names: s.toolNames ? JSON.stringify(s.toolNames) : null,
+          examples: s.examples ? JSON.stringify(s.examples) : null,
+          tags: s.tags ? JSON.stringify(s.tags) : null,
+          priority: s.priority ?? 0,
+          version: s.version ?? '1.0',
+          enabled: s.enabled === false ? 0 : 1,
+        });
+      }
     }
 
     // Workflow runs (sample completed and in-progress runs)

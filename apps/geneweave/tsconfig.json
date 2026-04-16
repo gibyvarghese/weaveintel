@@ -17,6 +17,7 @@
     { "path": "../../packages/human-tasks" },
     { "path": "../../packages/contracts" },
     { "path": "../../packages/prompts" },
+    { "path": "../../packages/skills" },
     { "path": "../../packages/routing" },
     { "path": "../../packages/cache" },
     { "path": "../../packages/identity" },

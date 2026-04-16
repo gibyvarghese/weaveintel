@@ -48,6 +48,7 @@ export interface AdminTabGroup {
 export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
   { label: 'Core AI', icon: '\uD83E\uDD16', tabs: [
     { key: 'prompts', label: 'Prompts' },
+    { key: 'skills', label: 'Skills' },
     { key: 'guardrails', label: 'Guardrails' },
     { key: 'routing', label: 'Routing' },
     { key: 'model-pricing', label: 'Model Pricing' },
@@ -184,6 +185,23 @@ export const ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'requires_approval', label: 'Requires Approval', type: 'checkbox', save: 'bool' },
       { key: 'max_execution_ms', label: 'Max Execution (ms)', type: 'number', save: 'int' },
       { key: 'rate_limit_per_min', label: 'Rate Limit/min', type: 'number', save: 'int' },
+      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
+    ],
+  },
+  'skills': {
+    singular: 'Skill', apiPath: 'admin/skills', listKey: 'skills',
+    cols: ['name', 'category', 'priority', 'version', 'enabled'],
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'description', label: 'Description' },
+      { key: 'category', label: 'Category', options: ['retrieval', 'computation', 'communication', 'data-processing', 'planning', 'analysis', 'code', 'web', 'general'], default: 'general' },
+      { key: 'trigger_patterns', label: 'Trigger Patterns (JSON array)', textarea: true, rows: 3, save: 'json' },
+      { key: 'instructions', label: 'Instructions', textarea: true, rows: 6 },
+      { key: 'tool_names', label: 'Tool Names (JSON array)', textarea: true, rows: 3, save: 'json' },
+      { key: 'examples', label: 'Examples (JSON array)', textarea: true, rows: 4, save: 'json' },
+      { key: 'tags', label: 'Tags (JSON array)', textarea: true, rows: 2, save: 'json' },
+      { key: 'priority', label: 'Priority', type: 'number', save: 'int', default: 0 },
+      { key: 'version', label: 'Version', default: '1.0' },
       { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
     ],
   },

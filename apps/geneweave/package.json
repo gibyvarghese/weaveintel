@@ -34,6 +34,7 @@
     "@weaveintel/human-tasks": "*",
     "@weaveintel/contracts": "*",
     "@weaveintel/prompts": "*",
+    "@weaveintel/skills": "*",
     "@weaveintel/routing": "*",
     "@weaveintel/oauth": "*",
     "@weaveintel/cache": "*",

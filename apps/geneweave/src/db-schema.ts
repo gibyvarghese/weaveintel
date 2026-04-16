@@ -730,5 +730,29 @@ CREATE TABLE IF NOT EXISTS website_credentials (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ── Skills: reusable agent capability bundles ──────────────
+
+CREATE TABLE IF NOT EXISTS skills (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  category TEXT NOT NULL DEFAULT 'general',
+  -- JSON string[] — phrases that trigger this skill via pattern matching
+  trigger_patterns TEXT NOT NULL DEFAULT '[]',
+  -- System-prompt snippet injected when this skill is active
+  instructions TEXT NOT NULL DEFAULT '',
+  -- JSON string[] — tool names to make available when skill is active
+  tool_names TEXT,
+  -- JSON array of {input,output} examples (few-shot demonstrations)
+  examples TEXT,
+  -- JSON string[] — searchable tags
+  tags TEXT,
+  priority INTEGER NOT NULL DEFAULT 0,
+  version TEXT NOT NULL DEFAULT '1.0',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 

@@ -40,6 +40,13 @@ import { createToolRegistry, type ToolRegistryOptions } from './tools.js';
 import { createTemporalStore } from './temporal-store.js';
 import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
 import { createTemplate } from '@weaveintel/prompts';
+import {
+  applySkillsToPrompt,
+  collectSkillTools,
+  createSkillRegistry,
+  skillFromRow,
+  type SkillMatch,
+} from '@weaveintel/skills';
 import { SmartModelRouter, ModelHealthTracker } from '@weaveintel/routing';
 import type { ModelCostInfo, ModelQualityInfo } from '@weaveintel/routing';
 import { weaveInMemoryCacheStore } from '@weaveintel/cache';
@@ -358,6 +365,24 @@ export class ChatEngine {
     return analysisIntent;
   }
 
+  private async discoverSkillsForInput(userContent: string): Promise<{ matches: SkillMatch[]; toolNames: string[] }> {
+    try {
+      const rows = await this.db.listEnabledSkills();
+      if (!rows.length) return { matches: [], toolNames: [] };
+
+      const registry = createSkillRegistry();
+      for (const row of rows) {
+        registry.register(skillFromRow(row));
+      }
+
+      const matches = registry.discover(userContent, { maxSkills: 3, minScore: 0.1 });
+      const toolNames = collectSkillTools(matches);
+      return { matches, toolNames };
+    } catch {
+      return { matches: [], toolNames: [] };
+    }
+  }
+
   private hasSuccessfulCseExecution(result: AgentResult): boolean {
     return this.scanForSuccessfulCseExecution(result, new WeakSet<object>());
   }
@@ -538,6 +563,11 @@ export class ChatEngine {
       }
     }
 
+    // Discover skills from the user request and auto-enable their associated tools.
+    const skillContext = await this.discoverSkillsForInput(processedContent);
+    const skillPrompt = applySkillsToPrompt(resolvedPrompt, skillContext.matches);
+    const enabledTools = Array.from(new Set([...settings.enabledTools, ...skillContext.toolNames]));
+
     // Save user message
     const userMsgId = randomUUID();
     const userMetadata = redactionInfo || attachments.length > 0
@@ -617,11 +647,13 @@ export class ChatEngine {
     // ── Memory recall ──
     const memoryContext = await this.buildMemoryContext(ctx, model, userId, processedContent);
     const augmentedPrompt = memoryContext
-      ? (resolvedPrompt ? `${resolvedPrompt}\n\n---\n${memoryContext}` : memoryContext)
-      : resolvedPrompt;
-    const memorySettings = memoryContext
-      ? { ...settings, systemPrompt: settings.systemPrompt ? `${settings.systemPrompt}\n\n---\n${memoryContext}` : memoryContext }
-      : settings;
+      ? (skillPrompt ? `${skillPrompt}\n\n---\n${memoryContext}` : memoryContext)
+      : skillPrompt;
+    const memorySettings = {
+      ...settings,
+      enabledTools,
+      systemPrompt: augmentedPrompt,
+    };
 
     let assistantContent: string = '';
     let usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
@@ -725,8 +757,11 @@ export class ChatEngine {
         model: modelId, provider,
         mode: settings.mode,
         agentName: settings.mode === 'supervisor' ? 'geneweave-supervisor' : settings.mode === 'agent' ? 'geneweave-agent' : undefined,
-        systemPrompt: settings.systemPrompt || undefined,
-        enabledTools: settings.enabledTools.length ? settings.enabledTools : undefined,
+        systemPrompt: memorySettings.systemPrompt || undefined,
+        enabledTools: memorySettings.enabledTools.length ? memorySettings.enabledTools : undefined,
+        activeSkills: skillContext.matches.length
+          ? skillContext.matches.map((m) => ({ id: m.skill.id, name: m.skill.name, score: Number(m.score.toFixed(3)) }))
+          : undefined,
         redactionEnabled: settings.redactionEnabled || undefined,
         steps: steps ? steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })) : undefined,
         eval: evalInfo,
@@ -830,6 +865,11 @@ export class ChatEngine {
       }
     }
 
+    // Discover skills from the user request and auto-enable their associated tools.
+    const streamSkillContext = await this.discoverSkillsForInput(processedContent);
+    const streamSkillPrompt = applySkillsToPrompt(resolvedPrompt, streamSkillContext.matches);
+    const streamEnabledTools = Array.from(new Set([...settings.enabledTools, ...streamSkillContext.toolNames]));
+
     // Save user message
     const userMsgId = randomUUID();
     const userMetadata = redactionInfo || attachments.length > 0
@@ -920,11 +960,13 @@ export class ChatEngine {
     // ── Memory recall ──
     const streamMemoryContext = await this.buildMemoryContext(ctx, model, userId, processedContent);
     const streamAugmentedPrompt = streamMemoryContext
-      ? (resolvedPrompt ? `${resolvedPrompt}\n\n---\n${streamMemoryContext}` : streamMemoryContext)
-      : resolvedPrompt;
-    const streamMemorySettings = streamMemoryContext
-      ? { ...settings, systemPrompt: settings.systemPrompt ? `${settings.systemPrompt}\n\n---\n${streamMemoryContext}` : streamMemoryContext }
-      : settings;
+      ? (streamSkillPrompt ? `${streamSkillPrompt}\n\n---\n${streamMemoryContext}` : streamMemoryContext)
+      : streamSkillPrompt;
+    const streamMemorySettings = {
+      ...settings,
+      enabledTools: streamEnabledTools,
+      systemPrompt: streamAugmentedPrompt,
+    };
 
     // SSE headers
     res.writeHead(200, {
@@ -1056,8 +1098,11 @@ export class ChatEngine {
       metadata: JSON.stringify({
         model: modelId, provider, streamed: true, mode: settings.mode,
         agentName: settings.mode === 'supervisor' ? 'geneweave-supervisor' : settings.mode === 'agent' ? 'geneweave-agent' : undefined,
-        systemPrompt: settings.systemPrompt || undefined,
-        enabledTools: settings.enabledTools.length ? settings.enabledTools : undefined,
+        systemPrompt: streamMemorySettings.systemPrompt || undefined,
+        enabledTools: streamMemorySettings.enabledTools.length ? streamMemorySettings.enabledTools : undefined,
+        activeSkills: streamSkillContext.matches.length
+          ? streamSkillContext.matches.map((m) => ({ id: m.skill.id, name: m.skill.name, score: Number(m.score.toFixed(3)) }))
+          : undefined,
         redactionEnabled: settings.redactionEnabled || undefined,
         steps: steps.length ? steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })) : undefined,
         eval: evalInfo,

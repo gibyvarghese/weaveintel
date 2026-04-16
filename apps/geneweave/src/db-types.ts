@@ -250,6 +250,23 @@ export interface ToolConfigRow {
   updated_at: string;
 }
 
+export interface SkillRow {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  trigger_patterns: string;      // JSON string[]
+  instructions: string;
+  tool_names: string | null;     // JSON string[]
+  examples: string | null;       // JSON array
+  tags: string | null;           // JSON string[]
+  priority: number;
+  version: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface HumanTaskPolicyRow {
   id: string;
   name: string;
@@ -967,6 +984,14 @@ export interface DatabaseAdapter {
   listToolConfigs(): Promise<ToolConfigRow[]>;
   updateToolConfig(id: string, fields: Partial<Omit<ToolConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteToolConfig(id: string): Promise<void>;
+
+  // ─── Admin: Skills ─────────────────────────────────────────
+  createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getSkill(id: string): Promise<SkillRow | null>;
+  listSkills(): Promise<SkillRow[]>;
+  listEnabledSkills(): Promise<SkillRow[]>;
+  updateSkill(id: string, fields: Partial<Omit<SkillRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteSkill(id: string): Promise<void>;
 
   // ─── Workflow Runs ─────────────────────────────────────────
   createWorkflowRun(r: Omit<WorkflowRunRow, 'completed_at'>): Promise<void>;

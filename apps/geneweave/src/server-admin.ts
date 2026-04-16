@@ -445,6 +445,83 @@ export function registerAdminRoutes(
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
+  // ── Admin: Skills ──────────────────────────────────────────
+
+  router.get('/api/admin/skills', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const skills = await db.listSkills();
+    json(res, 200, { skills });
+  });
+
+  router.get('/api/admin/skills/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const skill = await db.getSkill(params['id']!);
+    if (!skill) { json(res, 404, { error: 'Skill not found' }); return; }
+    json(res, 200, { skill });
+  });
+
+  router.post('/api/admin/skills', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name'] || !body['instructions']) {
+      json(res, 400, { error: 'name and instructions required' });
+      return;
+    }
+
+    const id = 'skill-' + randomUUID().slice(0, 8);
+    await db.createSkill({
+      id,
+      name: body['name'] as string,
+      description: (body['description'] as string) ?? '',
+      category: (body['category'] as string) ?? 'general',
+      trigger_patterns: JSON.stringify(Array.isArray(body['trigger_patterns']) ? body['trigger_patterns'] : []),
+      instructions: body['instructions'] as string,
+      tool_names: body['tool_names'] ? JSON.stringify(body['tool_names']) : null,
+      examples: body['examples'] ? JSON.stringify(body['examples']) : null,
+      tags: body['tags'] ? JSON.stringify(body['tags']) : null,
+      priority: Number(body['priority'] ?? 0),
+      version: (body['version'] as string) ?? '1.0',
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const skill = await db.getSkill(id);
+    json(res, 201, { skill });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/skills/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getSkill(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Skill not found' }); return; }
+
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['category'] !== undefined) fields['category'] = body['category'];
+    if (body['trigger_patterns'] !== undefined) fields['trigger_patterns'] = JSON.stringify(Array.isArray(body['trigger_patterns']) ? body['trigger_patterns'] : []);
+    if (body['instructions'] !== undefined) fields['instructions'] = body['instructions'];
+    if (body['tool_names'] !== undefined) fields['tool_names'] = body['tool_names'] ? JSON.stringify(body['tool_names']) : null;
+    if (body['examples'] !== undefined) fields['examples'] = body['examples'] ? JSON.stringify(body['examples']) : null;
+    if (body['tags'] !== undefined) fields['tags'] = body['tags'] ? JSON.stringify(body['tags']) : null;
+    if (body['priority'] !== undefined) fields['priority'] = Number(body['priority']);
+    if (body['version'] !== undefined) fields['version'] = body['version'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+
+    await db.updateSkill(params['id']!, fields as any);
+    const skill = await db.getSkill(params['id']!);
+    json(res, 200, { skill });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/skills/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteSkill(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
   // ── Workflow Runs ──────────────────────────────────────────
 
   router.get('/api/workflow-runs', async (_req, res, _params, auth) => {
