@@ -7,11 +7,17 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 ## Latest Development (April 2026)
 
 - geneWeave app moved from packages to apps: [apps/geneweave](apps/geneweave)
-- New examples 22 and 23 added:
-  - [examples/22-chat-memory-extraction.ts](examples/22-chat-memory-extraction.ts)
-  - [examples/23-chat-guardrails-pipeline.ts](examples/23-chat-guardrails-pipeline.ts)
+- New examples 24-29 added:
+  - [examples/24-web-search-providers.ts](examples/24-web-search-providers.ts)
+  - [examples/25-semantic-cache.ts](examples/25-semantic-cache.ts)
+  - [examples/26-advanced-retrieval.ts](examples/26-advanced-retrieval.ts)
+  - [examples/27-browser-automation.ts](examples/27-browser-automation.ts)
+  - [examples/28-package-auth-rbac.ts](examples/28-package-auth-rbac.ts)
+  - [examples/29-authenticated-agent-tools.ts](examples/29-authenticated-agent-tools.ts)
 - Guardrail grounding improvements for tool-backed responses and date/day evidence checks
 - Temporal tool state persistence coverage in geneWeave test suite
+- Persona-based RBAC in geneWeave (platform admin, tenant admin, tenant user, agent worker, agent researcher, agent supervisor)
+- Package-level identity RBAC primitives in `@weaveintel/identity` with deny-by-default for unknown personas
 
 ## Why weaveIntel?
 
@@ -37,7 +43,8 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 ├─────────────────────────────────────────────────────────────────────────┤
 │                        Tool Layer                                        │
 │   tools · tools-search · tools-browser · tools-http · tools-enterprise   │
-│   tools-social · mcp-client · mcp-server · a2a · plugins                 │
+│   tools-social · tools-time · oauth · mcp-client · mcp-server · a2a      │
+│   plugins                                                                 │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                        Safety & Governance                               │
 │   guardrails · redaction · compliance · sandbox · identity · tenancy     │
@@ -51,7 +58,7 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Packages (42)
+## Packages (44)
 
 ### Core & Models
 
@@ -95,6 +102,8 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 | [`@weaveintel/tools-http`](packages/tools-http) | HTTP endpoint tools — REST client with auth, rate limiting, schema validation |
 | [`@weaveintel/tools-enterprise`](packages/tools-enterprise) | Enterprise connectors — Jira (31 tools), ServiceNow (283 tools), Canva (21 tools), Confluence, Salesforce, Notion |
 | [`@weaveintel/tools-social`](packages/tools-social) | Social media tools — Twitter/X, LinkedIn, with content formatting |
+| [`@weaveintel/tools-time`](packages/tools-time) | Temporal tools — datetime, timezone, timers, stopwatches, reminders with pluggable state stores |
+| [`@weaveintel/oauth`](packages/oauth) | OAuth client/provider toolkit for authorization URL generation, code exchange, and provider profile retrieval |
 | [`@weaveintel/mcp-client`](packages/mcp-client) | MCP protocol client — discover and invoke remote tools, resources, prompts |
 | [`@weaveintel/mcp-server`](packages/mcp-server) | MCP protocol server — expose tools, resources, and prompts |
 | [`@weaveintel/a2a`](packages/a2a) | Agent-to-agent protocol — remote HTTP + in-process bus for multi-agent systems |
@@ -130,6 +139,42 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 | [`@weaveintel/triggers`](packages/triggers) | Trigger system — cron schedules, webhooks, queue-based triggers with filtering |
 | [`@weaveintel/collaboration`](packages/collaboration) | Session management — multi-user handoff, shared context, agent collaboration |
 | [`@weaveintel/geneweave`](apps/geneweave) | Full-stack demo app — chat UI, admin dashboard, tools, auth, SQLite backend |
+
+## geneWeave Feature Set
+
+The geneWeave app in [apps/geneweave](apps/geneweave) is the reference full-stack implementation built on WeaveIntel packages.
+
+- Authentication and account management:
+  - email/password auth with JWT + CSRF protection
+  - OAuth sign-in and linked account management
+  - encrypted website credential vault for browser-login flows
+- Persona RBAC:
+  - user + agent personas (platform/tenant/admin/worker/researcher/supervisor)
+  - deny-by-default behavior for missing/invalid personas
+  - admin RBAC endpoints for persona introspection and persona assignment
+  - persona-aware tool filtering and route authorization
+- Chat runtime:
+  - direct mode, agent mode, and supervisor-worker mode
+  - streaming responses, persisted chats/messages/settings
+  - per-chat tool policies and worker definitions
+- Tool ecosystem integration:
+  - time tools, search tools, browser automation/auth handoff tools
+  - enterprise connectors and social APIs via tool packages
+  - dynamic tool availability by persona
+- Safety and governance:
+  - pre/post execution guardrails
+  - PII redaction
+  - human task policy integration
+- Memory and retrieval:
+  - semantic and entity memory recall
+  - hybrid extraction hooks for long-term memory
+- Observability and quality:
+  - trace capture with per-tool-call spans
+  - dashboard metrics (tokens, costs, latency)
+  - evaluation and replay data surfaces
+- Operations:
+  - SQLite-backed persistence and migrations
+  - deploy manifests for Docker, Kubernetes, Fly, Railway, Render, Azure, AWS, and GCP
 
 ## Quick Start
 
@@ -664,6 +709,8 @@ weaveintel/
 │   ├── tools-http/         # REST client tools
 │   ├── tools-enterprise/   # Jira, ServiceNow (283 tools), Canva connectors
 │   ├── tools-social/       # Social media tools
+│   ├── tools-time/         # Datetime, timezone, timer, stopwatch, reminders
+│   ├── oauth/              # OAuth provider/client toolkit
 │   ├── mcp-client/         # MCP protocol client
 │   ├── mcp-server/         # MCP protocol server
 │   ├── a2a/                # Agent-to-agent communication
@@ -686,7 +733,7 @@ weaveintel/
 │   ├── testing/            # Fakes & test harnesses
 ├── apps/
 │   └── geneweave/          # Full-stack demo app
-├── examples/               # 23 runnable examples
+├── examples/               # 29 runnable examples
 ├── turbo.json              # Turborepo config
 ├── tsconfig.base.json      # Shared TypeScript config
 └── package.json            # Workspace root
@@ -734,9 +781,16 @@ npx tsx examples/17-prompt-management.ts
 npx tsx examples/18-knowledge-graph.ts
 npx tsx examples/19-compliance-sandbox.ts
 npx tsx examples/20-recipes-devtools.ts
+npx tsx examples/21-full-api-tools.ts
 npx tsx examples/21-guardrails-date-evidence.ts
 npx tsx examples/22-chat-memory-extraction.ts
 npx tsx examples/23-chat-guardrails-pipeline.ts
+npx tsx examples/24-web-search-providers.ts
+npx tsx examples/25-semantic-cache.ts
+npx tsx examples/26-advanced-retrieval.ts
+npx tsx examples/27-browser-automation.ts
+npx tsx examples/28-package-auth-rbac.ts
+npx tsx examples/29-authenticated-agent-tools.ts
 
 # Requires OPENAI_API_KEY
 OPENAI_API_KEY=sk-... npx tsx examples/01-simple-chat.ts
@@ -764,7 +818,7 @@ PORT=3501 npx tsx examples/12-geneweave.ts
 
 ## Examples
 
-The [examples](examples) directory contains 23 runnable demonstrations:
+The [examples](examples) directory contains 29 runnable demonstrations:
 
 | # | File | What It Shows | Packages Used | API Key |
 |---|---|---|---|---|
@@ -779,7 +833,7 @@ The [examples](examples) directory contains 23 runnable demonstrations:
 | 09 | [Eval Suite](examples/09-eval-suite.ts) | Assertions, scoring, aggregate results | evals, testing | None |
 | 10 | [Observability](examples/10-observability.ts) | Tracing, spans, event bus, usage tracking | observability | None |
 | 11 | [Anthropic Provider](examples/11-anthropic-provider.ts) | Chat, streaming, tools, thinking, vision, caching, batches, computer use (77 tests) | provider-anthropic, core | Anthropic |
-| 12 | [GeneWeave App](examples/12-geneweave.ts) | Full-stack chat app with admin, recipes, devtools | geneweave | OpenAI |
+| 12 | [GeneWeave App](examples/12-geneweave.ts) | Full-stack chat app with auth, persona RBAC, admin dashboard, streaming chat, traces, recipes, devtools | geneweave | OpenAI or Anthropic |
 | 13 | [Workflow Engine](examples/13-workflow-engine.ts) | Multi-step workflows, conditional branching, checkpoints, compensation, guardrails | workflows, guardrails, core | None |
 | 14 | [Smart Routing](examples/14-smart-routing.ts) | Model routing, health tracking, weighted scoring, capability filtering, explainable decisions | routing | None |
 | 15 | [Tool Ecosystem](examples/15-tool-ecosystem.ts) | Extended tool registry, web search, browser, HTTP tools, agent with multi-tool research | tools, tools-search, tools-browser, tools-http, agents, testing | None |
@@ -788,9 +842,16 @@ The [examples](examples) directory contains 23 runnable demonstrations:
 | 18 | [Knowledge Graph](examples/18-knowledge-graph.ts) | Entity nodes, relationships, entity linking, timeline, graph retrieval, extraction pipeline | graph, extraction, agents, testing | None |
 | 19 | [Compliance & Sandbox](examples/19-compliance-sandbox.ts) | Data retention, legal holds, consent, audit export, sandboxed execution, idempotency, retries, DLQ, health checking | compliance, sandbox, reliability | None |
 | 20 | [Recipes & DevTools](examples/20-recipes-devtools.ts) | Pre-built agents, scaffolding, inspection, validation, mock runtime, streaming events, widgets, artifacts, citations, progress | recipes, devtools, ui-primitives | None |
-| 21 | [Guardrails Date Evidence](examples/21-guardrails-date-evidence.ts) | Tool-grounded vs memory-based responses, post-execution grounding behavior, date/day evidence handling | guardrails, agents, tools-time, testing | None |
+| 21 | [Full API Tool Ecosystem](examples/21-full-api-tools.ts) | Universal auth profiles, token lifecycle, enterprise/social API tool generation and MCP exposure | tools-enterprise, tools-social, core | None |
+| 21b | [Guardrails Date Evidence](examples/21-guardrails-date-evidence.ts) | Tool-grounded vs memory-based responses, post-execution grounding behavior, date/day evidence handling | guardrails, agents, tools-time, testing | None |
 | 22 | [Chat Memory Extraction](examples/22-chat-memory-extraction.ts) | Chat-style hybrid memory extraction (regex + LLM) with tool calls (datetime, calculator, duckduckgo search) and in-memory recall context (no DB) | memory, core, tools | None |
 | 23 | [Chat Guardrails Pipeline](examples/23-chat-guardrails-pipeline.ts) | Post-execution guardrail evaluation with executed tool evidence (datetime, calculator, duckduckgo search), memory-only warnings, and deny paths (no DB) | guardrails, core, tools | None |
+| 24 | [Web Search Providers](examples/24-web-search-providers.ts) | Multi-provider search router, HTML fallback, fan-out search, MCP tool exposure, agent integration | tools-search, agents, core, testing | None |
+| 25 | [Semantic Cache](examples/25-semantic-cache.ts) | Cache store, semantic similarity cache, key builder, policy resolution, invalidation rules | cache, testing | None |
+| 26 | [Advanced Retrieval](examples/26-advanced-retrieval.ts) | Hybrid retriever, query rewrites, citation extraction, retrieval diagnostics | retrieval, testing, core | None |
+| 27 | [Browser Automation](examples/27-browser-automation.ts) | Browser fetch/extract/readability/scrape/sitemap, browser pool sessions, auth handoff tools, agent browser delegation | tools-browser, agents, core, testing | None |
+| 28 | [Package Auth RBAC](examples/28-package-auth-rbac.ts) | Identity creation, persona extension, permission checks, evaluateAccess, deny-by-default | identity, core | None |
+| 29 | [Authenticated Agent + Tools](examples/29-authenticated-agent-tools.ts) | End-to-end agent/tool invocation with identity context and permission-gated tool execution | identity, agents, core, testing | None |
 
 ## Deployment
 
