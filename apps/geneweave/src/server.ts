@@ -354,6 +354,29 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     });
   });
 
+  // Auth check endpoint for UI bootstrap.
+  // Always returns 200 to avoid noisy console "Failed to load resource: 401" on logged-out startup.
+  router.get('/api/auth/check', async (_req, res, _params, auth) => {
+    if (!auth) {
+      json(res, 200, { authenticated: false });
+      return;
+    }
+
+    await ensureAtLeastOneTenantAdmin(db, auth.userId);
+    const user = await db.getUserById(auth.userId);
+    if (!user) {
+      json(res, 200, { authenticated: false });
+      return;
+    }
+
+    json(res, 200, {
+      authenticated: true,
+      user: { id: user.id, email: user.email, name: user.name, persona: user.persona, tenantId: user.tenant_id },
+      csrfToken: auth.csrfToken,
+      permissions: personaPermissions(user.persona),
+    });
+  });
+
   router.get('/api/auth/permissions', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     json(res, 200, {
@@ -1261,7 +1284,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     join(process.cwd(), 'avatar'),
     join(process.cwd(), 'avatars'),
   ];
-
+  const distDir = join(__dirname, '..', 'dist');
   // ── HTTP server ────────────────────────────────────────────
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -1278,13 +1301,32 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     const pathname = url.pathname;
     const method = req.method ?? 'GET';
 
+    // Serve UI module files
+    if (method === 'GET' && pathname.match(/^\/(?:ui(?:\/|\.)|admin-schema\.js)/)) {
+      const filename = pathname.slice(1);
+      const filepath = join(distDir, filename);
+      try {
+        const data = await fsReadFile(filepath);
+        const contentType = filename.endsWith('.js') ? 'application/javascript' : 'application/json';
+        res.writeHead(200, {
+          'Content-Type': contentType + '; charset=utf-8',
+          'Content-Length': data.length,
+          'Cache-Control': 'public, max-age=3600',
+        });
+        res.end(data);
+        return;
+      } catch {
+        json(res, 404, { error: 'Not found' });
+        return;
+      }
+    }
+
     // API routing
     const matched = router.match(method, pathname);
     if (matched) {
       try {
         // Authenticate
         const auth = await authenticateRequest(req, db, jwtSecret);
-
         // Check auth requirement
         if (matched.route.requireAuth && !auth) {
           json(res, 401, { error: 'Authentication required' });
