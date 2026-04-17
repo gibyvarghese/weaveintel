@@ -454,6 +454,7 @@ export abstract class K8sContainerProvider implements ContainerProvider {
       handle: podName,
       status: 'ready',
       hasBrowser: withBrowser,
+      networkAccess: config.networkAccess ?? false,
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
       executionCount: 0,

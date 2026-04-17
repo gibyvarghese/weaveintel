@@ -176,6 +176,8 @@ export interface CSESession {
   status: SessionStatus;
   /** Whether this session has Playwright available. */
   hasBrowser: boolean;
+  /** Whether outbound network is enabled for this session container. */
+  networkAccess?: boolean;
   createdAt: number;
   lastUsedAt: number;
   executionCount: number;

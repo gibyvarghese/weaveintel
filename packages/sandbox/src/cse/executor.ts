@@ -54,19 +54,24 @@ export class ComputeSandboxEngine {
 
   /** Execute code. Uses a session if chatId is provided and provider supports it. */
   async run(request: ExecutionRequest): Promise<ExecutionResult> {
+    const effectiveConfig: CSEConfig = {
+      ...this.config,
+      networkAccess: request.networkAccess ?? this.config.networkAccess,
+    };
+
     // Session path: chatId provided + provider supports sessions
     if (request.chatId && this.provider.supportsSession) {
       const session = await this.sessions.getOrCreateSession(
         request.userId,
         request.chatId,
         this.provider,
-        this.config,
+        effectiveConfig,
         request.withBrowser ?? false,
       );
 
       this.sessions.markBusy(session.sessionId);
       try {
-        const result = await this.provider.executeInSession(session, request, this.config);
+        const result = await this.provider.executeInSession(session, request, effectiveConfig);
         this.sessions.markReady(session.sessionId);
         return { ...result, sessionId: session.sessionId };
       } catch (err) {
@@ -84,7 +89,7 @@ export class ComputeSandboxEngine {
       }
       this.sessions.markBusy(session.sessionId);
       try {
-        const result = await this.provider.executeInSession(session, request, this.config);
+        const result = await this.provider.executeInSession(session, request, effectiveConfig);
         this.sessions.markReady(session.sessionId);
         return result;
       } catch (err) {
@@ -94,7 +99,7 @@ export class ComputeSandboxEngine {
     }
 
     // Ephemeral execution
-    return this.provider.execute(request, this.config);
+    return this.provider.execute(request, effectiveConfig);
   }
 
   /** Create a named session (without immediately executing anything). */

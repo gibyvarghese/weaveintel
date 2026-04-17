@@ -233,6 +233,30 @@ input{font-family:inherit;outline:none}
 .msg.assistant .bubble a{color:var(--accent);text-decoration:underline}
 .msg.assistant .bubble strong{font-weight:600}
 .msg.assistant .bubble em{font-style:italic}
+.msg.assistant .bubble .response-rich{display:flex;flex-direction:column;gap:12px}
+.msg.assistant .bubble .response-rich-embedded{margin-top:12px}
+.msg.assistant .bubble .response-note{margin:0;font-size:13px;line-height:1.6;color:var(--fg2)}
+.msg.assistant .bubble .response-table-wrap{overflow:auto;border:1px solid var(--bg4);border-radius:10px;background:var(--bg2)}
+.msg.assistant .bubble .response-table{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+.msg.assistant .bubble .response-table th,.msg.assistant .bubble .response-table td{padding:8px 10px;border-right:1px solid var(--bg4);border-bottom:1px solid var(--bg4);text-align:left;vertical-align:top}
+.msg.assistant .bubble .response-table th:last-child,.msg.assistant .bubble .response-table td:last-child{border-right:0}
+.msg.assistant .bubble .response-table tr:last-child td{border-bottom:0}
+.msg.assistant .bubble .response-table th{background:var(--bg3);font-weight:700;color:var(--fg);position:sticky;top:0;z-index:1}
+.msg.assistant .bubble .response-table td{font-family:var(--mono);font-size:11.5px;color:var(--fg2);white-space:pre-wrap;word-break:break-word;max-width:340px}
+.msg.assistant .bubble .response-chart{border:1px solid var(--bg4);border-radius:10px;background:var(--bg2);padding:10px}
+.msg.assistant .bubble .response-chart-title{font-size:12px;font-weight:700;color:var(--fg);margin-bottom:8px}
+.msg.assistant .bubble .response-bars{display:flex;flex-direction:column;gap:6px}
+.msg.assistant .bubble .response-bar-row{display:grid;grid-template-columns:minmax(80px,140px) 1fr minmax(56px,90px);align-items:center;gap:8px}
+.msg.assistant .bubble .response-bar-label{font-size:11px;color:var(--fg2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.msg.assistant .bubble .response-bar-track{height:8px;border-radius:999px;background:var(--bg3);overflow:hidden}
+.msg.assistant .bubble .response-bar-fill{height:100%;background:linear-gradient(90deg,var(--accent),#2AB090)}
+.msg.assistant .bubble .response-bar-value{font-size:11px;color:var(--fg3);text-align:right;font-family:var(--mono)}
+.msg.assistant .bubble .response-line svg{width:100%;height:180px;display:block}
+.msg.assistant .bubble .response-line-axis{stroke:var(--bg4);stroke-width:1}
+.msg.assistant .bubble .response-line-path{fill:none;stroke:var(--accent);stroke-width:2}
+.msg.assistant .bubble .response-line-dot{fill:var(--accent)}
+.msg.assistant .bubble .response-line-labels{display:flex;justify-content:space-between;gap:6px;margin-top:6px}
+.msg.assistant .bubble .response-line-labels span{font-size:10px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80px}
 
 /* ── Response toolbar ───────────────────── */
 .response-toolbar{display:flex;gap:4px;margin-top:8px;opacity:0;transition:opacity .18s ease}
@@ -281,6 +305,100 @@ input{font-family:inherit;outline:none}
 .step-card.delegation .step-hdr img.delegation-avatar{width:20px;height:20px;border-radius:50%;object-fit:cover;margin-right:4px;vertical-align:middle}
 .step-card.thinking{border-color:var(--bg4)}
 .step-card.thinking .step-hdr{color:var(--fg3)}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.process-card{background:var(--bg3);border:1px solid var(--bg4);border-radius:var(--radius);margin:8px 0;overflow:hidden}
+.process-card.running{border-color:rgba(42,176,144,.22)}
+.process-card.completed{border-color:var(--bg4)}
+.process-card.error{border-color:rgba(220,38,38,.32)}
+.process-card .process-hdr{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;background:rgba(0,0,0,.02)}
+.process-card .process-hdr-main{min-width:0;flex:1}
+.process-card .process-title{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;color:var(--fg);text-transform:uppercase;letter-spacing:.3px}
+.process-card .process-stage{display:inline-flex;align-items:center;gap:6px;font-size:10px;padding:2px 8px;border-radius:999px;background:var(--accent-dim);color:var(--accent2);border:1px solid rgba(42,176,144,.2)}
+.process-card .process-stage.ok{background:rgba(22,163,74,.08);border-color:rgba(22,163,74,.18);color:var(--success)}
+.process-card .process-stage.warn{background:rgba(217,119,6,.08);border-color:rgba(217,119,6,.18);color:var(--warn)}
+.process-card .process-stage.deny{background:rgba(220,38,38,.08);border-color:rgba(220,38,38,.18);color:var(--danger)}
+.process-card .process-stage-icon{font-size:11px;line-height:1}
+.process-card .process-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.process-card .summary-chip{display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 8px;border-radius:999px;background:var(--bg2);border:1px solid var(--bg4);color:var(--fg2);font-family:var(--mono)}
+.process-card .summary-chip.ok{background:rgba(22,163,74,.08);border-color:rgba(22,163,74,.18);color:var(--success)}
+.process-card .summary-chip.warn{background:rgba(217,119,6,.08);border-color:rgba(217,119,6,.18);color:var(--warn)}
+.process-card .summary-chip.deny{background:rgba(220,38,38,.08);border-color:rgba(220,38,38,.18);color:var(--danger)}
+.process-card .process-toggle{font-size:11px;color:var(--fg2);border:1px solid var(--bg4);background:var(--bg2);padding:4px 10px;border-radius:999px}
+.process-card .process-toggle:hover{color:var(--fg);border-color:var(--fg3)}
+.process-card .process-toggle:focus-visible,.process-card .detail-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.process-card .process-summary{font-size:11px;color:var(--fg3);padding:9px 14px}
+.process-card .process-body-wrap{display:grid;grid-template-rows:1fr;transition:grid-template-rows .22s ease,opacity .18s ease}
+.process-card .process-body-wrap.collapsed{grid-template-rows:0fr;opacity:.72}
+.process-card .process-body-clip{min-height:0;overflow:hidden}
+.process-card .process-body{padding:10px 14px 12px;display:flex;flex-direction:column;gap:10px;transform-origin:top center;transition:transform .18s ease,opacity .18s ease}
+.process-card .process-body-wrap.collapsed .process-body{opacity:0;transform:translateY(-6px)}
+.process-card .process-section{border:1px solid var(--bg4);background:var(--bg2);border-radius:10px;padding:10px}
+.process-card .process-section-title{font-size:10px;color:var(--fg3);text-transform:uppercase;letter-spacing:.3px;margin-bottom:8px}
+.process-card .live-thought{border:1px solid var(--bg4);background:var(--bg2);border-radius:10px;padding:8px 10px}
+.process-card .live-thought .lbl{font-size:10px;color:var(--fg3);text-transform:uppercase;letter-spacing:.3px;margin-bottom:4px}
+.process-card .live-thought .txt{font-size:12px;color:var(--fg2);line-height:1.45;white-space:pre-wrap;word-break:break-word;transition:opacity .18s ease,transform .18s ease}
+.process-card .timeline{display:flex;flex-direction:column;gap:6px}
+.process-card .timeline-item{border:1px solid var(--bg4);background:var(--bg2);border-radius:10px;padding:8px 10px}
+.process-card .timeline-item .t-h{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;font-weight:600;color:var(--fg)}
+.process-card .timeline-item .t-summary{margin-top:4px;font-size:11px;color:var(--fg2);line-height:1.45;white-space:pre-wrap;word-break:break-word}
+.process-card .timeline-item .t-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.process-card .detail-toggle{font-size:10px;color:var(--fg2);border:1px solid var(--bg4);background:var(--bg3);padding:3px 8px;border-radius:999px}
+.process-card .detail-toggle:hover{color:var(--fg);border-color:var(--fg3)}
+.process-card .timeline-item .t-raw{margin-top:8px;background:var(--bg3);border:1px solid var(--bg4);border-radius:8px;padding:8px}
+.process-card .timeline-item .t-raw-label{font-size:10px;color:var(--fg3);text-transform:uppercase;letter-spacing:.3px;margin-bottom:5px}
+.process-card .timeline-item .t-b{font-size:11px;color:var(--fg2);white-space:pre-wrap;word-break:break-word;font-family:var(--mono);max-height:160px;overflow:auto}
+.process-card .detail-block{border:1px solid var(--bg4);border-radius:8px;background:var(--bg2);overflow:hidden}
+.process-card .detail-block-hdr{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid var(--bg4);background:var(--bg3)}
+.process-card .detail-lang{font-size:10px;font-weight:700;letter-spacing:.3px;color:var(--fg3);text-transform:uppercase}
+.process-card .detail-kind{font-size:10px;color:var(--fg3)}
+.process-card .detail-block-actions{display:flex;align-items:center;gap:6px}
+.process-card .detail-copy-btn{font-size:10px;line-height:1;border:1px solid var(--bg4);background:var(--bg2);color:var(--fg2);border-radius:999px;padding:4px 8px;cursor:pointer}
+.process-card .detail-copy-btn:hover{border-color:var(--fg3);color:var(--fg)}
+.process-card .detail-copy-btn.copied{border-color:rgba(22,163,74,.25);background:rgba(22,163,74,.1);color:var(--success)}
+.process-card .detail-code{margin:0;padding:8px 10px;font-size:11px;line-height:1.45;color:var(--fg2);font-family:var(--mono);white-space:pre;overflow:auto;max-height:260px}
+.process-card .detail-table-wrap{overflow:auto;max-height:280px;border:1px solid var(--bg4);border-radius:8px;background:var(--bg2)}
+.process-card .detail-table{width:100%;border-collapse:separate;border-spacing:0;font-size:11px}
+.process-card .detail-table th,.process-card .detail-table td{padding:6px 8px;border-bottom:1px solid var(--bg4);border-right:1px solid var(--bg4);text-align:left;vertical-align:top}
+.process-card .detail-table th:last-child,.process-card .detail-table td:last-child{border-right:0}
+.process-card .detail-table th{position:sticky;top:0;background:var(--bg3);color:var(--fg);font-weight:700;z-index:1}
+.process-card .detail-table td{color:var(--fg2);font-family:var(--mono);white-space:pre-wrap;word-break:break-word;max-width:360px}
+.process-card .timeline-item.thought{border-color:rgba(42,176,144,.25)}
+.process-card .timeline-item.tool{border-color:rgba(217,119,6,.25)}
+.process-card .timeline-item.delegation{border-color:rgba(124,58,237,.25)}
+.process-card .timeline-item.response{border-color:rgba(59,130,246,.2)}
+.process-card.running .process-stage{animation:processPulse 1.8s ease-in-out infinite}
+.process-card.running .live-thought .txt{animation:thoughtReplace .18s ease both}
+.process-card .timeline-item,.process-card .skill-item,.process-card .validation-item,.process-card .process-section{animation:processReveal .16s ease both}
+.step-card.skill{border-color:rgba(42,176,144,.32);background:linear-gradient(180deg,rgba(42,176,144,.08),rgba(42,176,144,.03))}
+.step-card.skill .step-hdr{color:var(--accent2)}
+.skill-list{display:flex;flex-direction:column;gap:8px}
+.skill-item{border:1px solid rgba(42,176,144,.25);background:var(--bg2);border-radius:10px;padding:8px 10px}
+.skill-item-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:3px}
+.skill-name{font-size:12px;font-weight:700;color:var(--fg)}
+.skill-score{font-size:10px;font-family:var(--mono);color:var(--accent2);background:var(--accent-dim);border:1px solid rgba(42,176,144,.2);border-radius:999px;padding:2px 8px}
+.skill-category{font-size:10px;color:var(--fg3);text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px}
+.skill-tags{display:flex;flex-wrap:wrap;gap:4px}
+.skill-tag{font-size:10px;padding:2px 8px;border-radius:999px;background:var(--bg3);border:1px solid var(--bg4);color:var(--fg2);font-family:var(--mono)}
+.skill-summary{display:flex;flex-wrap:wrap;gap:4px;margin-top:8px}
+.skill-summary .skill-tag{background:var(--accent-dim);border-color:rgba(42,176,144,.22);color:var(--accent2)}
+.validation-list{display:flex;flex-direction:column;gap:8px}
+.validation-item{border:1px solid var(--bg4);background:var(--bg3);border-radius:10px;padding:8px 10px}
+.validation-item.ok{border-color:rgba(22,163,74,.2)}
+.validation-item.warn{border-color:rgba(217,119,6,.22)}
+.validation-item.deny{border-color:rgba(220,38,38,.24)}
+.validation-item-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px}
+.validation-name{font-size:12px;font-weight:700;color:var(--fg)}
+.validation-status{font-size:10px;padding:2px 8px;border-radius:999px;border:1px solid var(--bg4);text-transform:uppercase;letter-spacing:.3px}
+.validation-status.ok{background:rgba(22,163,74,.08);border-color:rgba(22,163,74,.18);color:var(--success)}
+.validation-status.warn{background:rgba(217,119,6,.08);border-color:rgba(217,119,6,.18);color:var(--warn)}
+.validation-status.deny{background:rgba(220,38,38,.08);border-color:rgba(220,38,38,.18);color:var(--danger)}
+.validation-body{font-size:11px;color:var(--fg2);line-height:1.45;white-space:pre-wrap;word-break:break-word}
+@keyframes processReveal{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes thoughtReplace{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+@keyframes processPulse{0%,100%{box-shadow:0 0 0 0 rgba(42,176,144,0)}50%{box-shadow:0 0 0 4px rgba(42,176,144,.08)}}
+@media (prefers-reduced-motion: reduce){
+  .process-card .process-body-wrap,.process-card .process-body,.process-card .live-thought .txt,.process-card .timeline-item,.process-card .skill-item,.process-card .validation-item,.process-card .process-section,.process-card.running .process-stage{transition:none!important;animation:none!important}
+}
 .redaction-badge{display:inline-flex;align-items:center;gap:4px;background:rgba(220,38,38,.06);color:var(--danger);font-size:11px;padding:3px 10px;border-radius:999px;margin-bottom:4px;border:1px solid rgba(220,38,38,.15)}
 .eval-badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:3px 10px;border-radius:999px;margin-left:8px}
 .eval-badge.pass{background:rgba(22,163,74,.06);color:var(--success);border:1px solid rgba(22,163,74,.15)}
@@ -524,6 +642,27 @@ function copyResponse(text, btn){
   });
 }
 
+function copyTextWithFeedback(text, btn, idleLabel, copiedLabel){
+  if(!btn) return;
+  const idle = idleLabel || 'Copy';
+  const done = copiedLabel || 'Copied';
+  const finish = function(){
+    btn.classList.add('copied');
+    btn.textContent = done;
+    setTimeout(function(){
+      btn.classList.remove('copied');
+      btn.textContent = idle;
+    }, 1200);
+  };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(String(text || '')).then(finish).catch(function(){
+      window.prompt('Copy text:', String(text || ''));
+    });
+  }else{
+    window.prompt('Copy text:', String(text || ''));
+  }
+}
+
 function emailResponse(text, subject){
   const body = encodeURIComponent(text);
   const subj = encodeURIComponent(subject || 'geneWeave Response');
@@ -674,7 +813,7 @@ function shiftCalendarMonth(delta){
 }
 
 function normalizeText(s){
-  return String(s||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
+  return String(s||'').toLowerCase().replace(/[^a-z0-9\\s]/g,' ').replace(/\\s+/g,' ').trim();
 }
 
 function tokenSet(s){
@@ -684,7 +823,7 @@ function tokenSet(s){
 }
 
 function trigramSet(s){
-  const txt = normalizeText(s).replace(/\s+/g,' ');
+  const txt = normalizeText(s).replace(/\\s+/g,' ');
   const out = new Set();
   if(txt.length<3){ if(txt) out.add(txt); return out; }
   for(let i=0;i<=txt.length-3;i++) out.add(txt.slice(i,i+3));
@@ -786,6 +925,13 @@ function normalizeLoadedMessage(row){
   msg.cognitive = md.cognitive || null;
   msg.redaction = md.redaction || null;
   msg.guardrail = md.guardrail || null;
+  msg.activeSkills = Array.isArray(md.activeSkills) ? md.activeSkills : [];
+  msg.enabledTools = Array.isArray(md.enabledTools) ? md.enabledTools : [];
+  msg.skillTools = Array.isArray(md.skillTools) ? md.skillTools : [];
+  msg.skillPromptApplied = !!md.skillPromptApplied;
+  msg.processState = 'completed';
+  msg.processExpanded = false;
+  msg.processUi = { detailExpanded: Object.create(null) };
   msg.usage = {
     totalTokens: msg.tokens_used || 0,
   };
@@ -1174,7 +1320,21 @@ async function sendMessage(content){
     if(!resp.ok || !resp.body) throw new Error('Streaming request failed ('+resp.status+')');
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
-    assistantMsg = {role:'assistant',content:'',usage:null,cost:0,latency_ms:0,created_at:new Date().toISOString(),steps:[],evalResult:null,redaction:null,mode:state.chatSettings?.mode||'direct'};
+    assistantMsg = {
+      role:'assistant',
+      content:'',
+      usage:null,
+      cost:0,
+      latency_ms:0,
+      created_at:new Date().toISOString(),
+      steps:[],
+      evalResult:null,
+      redaction:null,
+      mode:state.chatSettings?.mode||'direct',
+      processState:'running',
+      processExpanded:true,
+      processUi:{detailExpanded:Object.create(null)},
+    };
     state.messages.push(assistantMsg);
     render(); scrollMessages();
 
@@ -1190,6 +1350,7 @@ async function sendMessage(content){
         try {
           const d = JSON.parse(line.slice(6));
           if(d.type==='text') assistantMsg.content += d.text;
+          else if(d.type==='reasoning' && d.text) assistantMsg.steps.push({type:'thinking',text:d.text});
           else if(d.type==='step') assistantMsg.steps.push(d.step||d);
           else if(d.type==='tool_start') assistantMsg.steps.push({kind:'tool_start',name:d.name,input:d.input});
           else if(d.type==='tool_end'){ const last=assistantMsg.steps[assistantMsg.steps.length-1]; if(last&&last.kind==='tool_start') last.result=d.result; }
@@ -1199,8 +1360,25 @@ async function sendMessage(content){
           else if(d.type==='guardrail') assistantMsg.guardrail=d;
           else if(d.type==='screenshot'){ if(!assistantMsg.screenshots) assistantMsg.screenshots=[]; assistantMsg.screenshots.push({base64:d.base64,format:d.format||'png'}); }
           else if(d.type==='handoff'){ state.handoffRequest=d; render(); }
-          else if(d.type==='done'){ assistantMsg.usage=d.usage; assistantMsg.cost=d.cost; assistantMsg.latency_ms=d.latencyMs; if(d.steps) assistantMsg.steps=d.steps; if(d.eval) assistantMsg.evalResult=d.eval; if(d.cognitive) assistantMsg.cognitive=d.cognitive; }
-          else if(d.type==='error') assistantMsg.content += '\\n[Error: '+d.error+']';
+          else if(d.type==='done'){
+            assistantMsg.usage=d.usage;
+            assistantMsg.cost=d.cost;
+            assistantMsg.latency_ms=d.latencyMs;
+            if(d.steps) assistantMsg.steps=d.steps;
+            if(d.eval) assistantMsg.evalResult=d.eval;
+            if(d.cognitive) assistantMsg.cognitive=d.cognitive;
+            assistantMsg.activeSkills = Array.isArray(d.activeSkills) ? d.activeSkills : [];
+            assistantMsg.enabledTools = Array.isArray(d.enabledTools) ? d.enabledTools : [];
+            assistantMsg.skillTools = Array.isArray(d.skillTools) ? d.skillTools : [];
+            assistantMsg.skillPromptApplied = !!d.skillPromptApplied;
+            assistantMsg.processState = 'completed';
+            assistantMsg.processExpanded = false;
+          }
+          else if(d.type==='error'){
+            assistantMsg.content += '\\n[Error: '+d.error+']';
+            assistantMsg.processState = 'error';
+            assistantMsg.processExpanded = true;
+          }
         } catch{}
       }
       renderMessages(); scrollMessages();
@@ -1228,7 +1406,14 @@ async function sendMessage(content){
           steps:Array.isArray(payload.steps) ? payload.steps : [],
           evalResult:payload.eval || null,
           redaction:payload.redaction || null,
-          mode:state.chatSettings?.mode||'direct'
+          mode:state.chatSettings?.mode||'direct',
+          activeSkills:Array.isArray(payload.activeSkills) ? payload.activeSkills : [],
+          enabledTools:Array.isArray(payload.enabledTools) ? payload.enabledTools : [],
+          skillTools:Array.isArray(payload.skillTools) ? payload.skillTools : [],
+          skillPromptApplied:!!payload.skillPromptApplied,
+          processState:'completed',
+          processExpanded:false,
+          processUi:{detailExpanded:Object.create(null)},
         };
         if(assistantMsg){
           Object.assign(assistantMsg, recoveredMsg);
@@ -1370,6 +1555,850 @@ function render(){
   if(!state.user){ app.appendChild(renderAuth()); return; }
   app.appendChild(renderApp());
 }
+
+function shortText(value, maxLen){
+  if(value == null) return '';
+  const raw = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  if(raw.length <= (maxLen || 280)) return raw;
+  return raw.slice(0, maxLen || 280) + '...';
+}
+
+function detailText(value){
+  if(value == null) return '';
+  return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+}
+
+function summarizeForDisplay(value, maxLen){
+  const raw = detailText(value);
+  if(!raw) return '';
+  const compact = raw.replace(/\\s+/g, ' ').trim();
+  if(compact.length <= (maxLen || 180)) return compact;
+  return compact.slice(0, maxLen || 180) + '...';
+}
+
+function parseJsonMaybe(text){
+  if(typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  if(!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) return null;
+  try { return JSON.parse(trimmed); } catch(_e){ return null; }
+}
+
+function parseDelimitedLine(line, delimiter){
+  const cells = [];
+  let cell = '';
+  let inQuotes = false;
+  for(let i=0;i<line.length;i++){
+    const ch = line[i];
+    if(ch === '"'){
+      if(inQuotes && line[i+1] === '"'){
+        cell += '"';
+        i++;
+      }else{
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if(ch === delimiter && !inQuotes){
+      cells.push(cell.trim());
+      cell = '';
+      continue;
+    }
+    cell += ch;
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function parseDelimitedTable(text){
+  if(typeof text !== 'string') return null;
+  const lines = text.split(/\\r?\\n/).map(function(line){ return line.trim(); }).filter(Boolean);
+  if(lines.length < 2) return null;
+  const delimiters = [',', '\\t', '|'];
+  for(const delimiter of delimiters){
+    const parsed = lines.slice(0, Math.min(lines.length, 40)).map(function(line){ return parseDelimitedLine(line, delimiter); });
+    const width = parsed[0]?.length || 0;
+    if(width < 2) continue;
+    if(!parsed.every(function(row){ return row.length === width; })) continue;
+    const headers = parsed[0].map(function(h, idx){ return h || ('col_' + (idx + 1)); });
+    const rows = parsed.slice(1);
+    if(rows.length < 1) continue;
+    return { headers: headers, rows: rows };
+  }
+  return null;
+}
+
+function formatXml(xmlText){
+  if(typeof xmlText !== 'string') return null;
+  const trimmed = xmlText.trim();
+  if(!/^<([A-Za-z_][\\w:.-]*)(\\s|>)/.test(trimmed)) return null;
+  try{
+    const parser = new DOMParser();
+    const parsed = parser.parseFromString(trimmed, 'application/xml');
+    if(parsed.getElementsByTagName('parsererror').length) return null;
+    const raw = new XMLSerializer().serializeToString(parsed).replace(/>(\\s*)</g, '><');
+    const lines = raw.replace(/(>)(<)(\\/?)/g, '$1\\n$2$3').split('\\n');
+    let pad = 0;
+    return lines.map(function(line){
+      const trimmedLine = line.trim();
+      if(!trimmedLine) return '';
+      if(/^<\\//.test(trimmedLine)) pad = Math.max(0, pad - 1);
+      const out = '  '.repeat(pad) + trimmedLine;
+      if(/^<[^!?/][^>]*[^/]?>$/.test(trimmedLine)) pad++;
+      return out;
+    }).filter(Boolean).join('\\n');
+  }catch(_e){
+    return null;
+  }
+}
+
+function detectCodeLanguage(text){
+  const t = String(text || '');
+  if(/(^|\\n)\\s*(SELECT|INSERT|UPDATE|DELETE)\\s+/i.test(t)) return 'sql';
+  if(/(^|\\n)\\s*(function|const|let|class|import|export)\\b/.test(t) || /=>/.test(t)) return 'javascript';
+  if(/(^|\\n)\\s*(def |class |import |from |if __name__ ==)/.test(t)) return 'python';
+  if(/(^|\\n)\\s*(<\\/?[A-Za-z_][\\w:.-]*|<\\?xml)/.test(t)) return 'xml';
+  return 'text';
+}
+
+function normalizeCodeLanguage(language){
+  const lang = String(language || '').trim().toLowerCase();
+  if(!lang) return '';
+  if(lang === 'py') return 'python';
+  if(lang === 'js') return 'javascript';
+  if(lang === 'ts') return 'typescript';
+  if(lang === 'yml') return 'yaml';
+  return lang;
+}
+
+function friendlyLanguageName(language){
+  const lang = normalizeCodeLanguage(language) || 'text';
+  if(lang === 'python') return 'Python';
+  if(lang === 'javascript') return 'JavaScript';
+  if(lang === 'typescript') return 'TypeScript';
+  if(lang === 'sql') return 'SQL';
+  if(lang === 'json') return 'JSON';
+  if(lang === 'xml') return 'XML';
+  if(lang === 'yaml') return 'YAML';
+  if(lang === 'bash' || lang === 'shell') return 'Shell';
+  return lang.toUpperCase();
+}
+
+function looksLikeCode(text){
+  if(typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if(trimmed.split(/\\r?\\n/).length < 2) return false;
+  let score = 0;
+  if(/[{};]/.test(trimmed)) score++;
+  if(/(^|\\n)\\s*(function|const|let|class|import|export|def|return|if|for|while)\\b/.test(trimmed)) score++;
+  if(/=>|<\\/?[A-Za-z]/.test(trimmed)) score++;
+  return score >= 2;
+}
+
+function tableFromJson(value){
+  if(!Array.isArray(value) || !value.length) return null;
+  if(!value.every(function(row){ return row && typeof row === 'object' && !Array.isArray(row); })) return null;
+  const headers = [];
+  value.forEach(function(row){ Object.keys(row).forEach(function(key){ if(!headers.includes(key)) headers.push(key); }); });
+  if(headers.length < 2) return null;
+  const rows = value.map(function(row){
+    return headers.map(function(key){
+      const v = row[key];
+      if(v == null) return '';
+      return typeof v === 'string' ? v : JSON.stringify(v);
+    });
+  });
+  return { headers: headers, rows: rows };
+}
+
+function extractCodePayloadFromJson(value){
+  if(!value || Array.isArray(value) || typeof value !== 'object') return null;
+  const language = normalizeCodeLanguage(value.language || value.lang || value.syntax || value.format);
+  const candidates = ['code','source','script','program','content','text','body','query'];
+  for(const key of candidates){
+    const candidate = value[key];
+    if(typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if(!trimmed) continue;
+    if(language || looksLikeCode(trimmed) || detectCodeLanguage(trimmed) !== 'text'){
+      return {
+        code: candidate,
+        language: language || detectCodeLanguage(trimmed),
+      };
+    }
+  }
+  return null;
+}
+
+function renderDetailTable(headers, rows){
+  return h('div',{className:'detail-table-wrap'},
+    h('table',{className:'detail-table'},
+      h('thead',null,
+        h('tr',null,
+          ...headers.map(function(col){ return h('th',null,col); })
+        )
+      ),
+      h('tbody',null,
+        ...rows.map(function(row){
+          return h('tr',null,
+            ...row.map(function(cell){ return h('td',null,cell == null ? '' : String(cell)); })
+          );
+        })
+      )
+    )
+  );
+}
+
+function renderDetailCode(text, language, kind){
+  const codeText = text || '';
+  const lang = normalizeCodeLanguage(language) || detectCodeLanguage(codeText);
+  const badge = friendlyLanguageName(lang);
+  const copyBtn = h('button',{
+    className:'detail-copy-btn',
+    type:'button',
+    title:'Copy code',
+    onClick:function(){ copyTextWithFeedback(codeText, copyBtn, 'Copy', 'Copied'); }
+  },'Copy');
+  return h('div',{className:'detail-block'},
+    h('div',{className:'detail-block-hdr'},
+      h('span',{className:'detail-lang'},badge),
+      h('div',{className:'detail-block-actions'},
+        h('span',{className:'detail-kind'},kind || 'formatted'),
+        copyBtn
+      )
+    ),
+    h('pre',{className:'detail-code'},codeText)
+  );
+}
+
+function renderProcessDetailView(value){
+  const text = detailText(value);
+  if(!text) return h('div',{className:'t-b'},'No detail data');
+  const trimmed = text.trim();
+
+  const bt = String.fromCharCode(96);
+  const triple = bt + bt + bt;
+  if(trimmed.startsWith(triple)){
+    const fenceLines = trimmed.split(/\\r?\\n/);
+    if(fenceLines.length >= 2 && fenceLines[fenceLines.length - 1] === triple){
+      const lang = fenceLines[0].slice(3).trim();
+      const body = fenceLines.slice(1, -1).join('\\n');
+      return renderDetailCode(body, lang || detectCodeLanguage(body), 'code');
+    }
+  }
+
+  const json = parseJsonMaybe(trimmed);
+  if(json != null){
+    const codePayload = extractCodePayloadFromJson(json);
+    if(codePayload) return renderDetailCode(codePayload.code, codePayload.language, 'code');
+    const table = tableFromJson(json);
+    if(table) return renderDetailTable(table.headers, table.rows);
+    return renderDetailCode(JSON.stringify(json, null, 2), 'json', 'json');
+  }
+
+  const xml = formatXml(trimmed);
+  if(xml) return renderDetailCode(xml, 'xml', 'xml');
+
+  const delimited = parseDelimitedTable(trimmed);
+  if(delimited) return renderDetailTable(delimited.headers, delimited.rows);
+
+  if(looksLikeCode(trimmed)) return renderDetailCode(trimmed, detectCodeLanguage(trimmed), 'code');
+
+  return h('div',{className:'t-b'},text);
+}
+
+function numericValue(v){
+  if(typeof v === 'number' && Number.isFinite(v)) return v;
+  if(typeof v === 'string'){
+    const cleaned = v.replace(/[$,%\s,]/g, '');
+    if(!cleaned) return null;
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function normalizeTableData(headers, rows){
+  if(!Array.isArray(headers) || !Array.isArray(rows) || !headers.length || !rows.length) return null;
+  const normalizedHeaders = headers.map(function(hd, idx){ return String(hd || ('col_' + (idx + 1))); });
+  const normalizedRows = rows.map(function(row){
+    if(Array.isArray(row)) return row.map(function(cell){ return cell == null ? '' : String(cell); });
+    if(row && typeof row === 'object') return normalizedHeaders.map(function(hd){ return row[hd] == null ? '' : String(row[hd]); });
+    return [String(row)];
+  }).filter(function(row){ return row.length; });
+  if(!normalizedRows.length) return null;
+  return { headers: normalizedHeaders, rows: normalizedRows };
+}
+
+function extractResponseTableData(value){
+  if(value == null) return null;
+  if(Array.isArray(value)){
+    if(!value.length) return null;
+    if(value.every(function(row){ return row && typeof row === 'object' && !Array.isArray(row); })){
+      const headers = [];
+      value.forEach(function(row){ Object.keys(row).forEach(function(key){ if(!headers.includes(key)) headers.push(key); }); });
+      const rows = value.map(function(row){
+        return headers.map(function(hd){
+          const cell = row[hd];
+          return cell == null ? '' : (typeof cell === 'string' ? cell : JSON.stringify(cell));
+        });
+      });
+      return normalizeTableData(headers, rows);
+    }
+    if(value.every(function(row){ return Array.isArray(row); })){
+      return normalizeTableData(value[0].map(function(_, idx){ return 'col_' + (idx + 1); }), value);
+    }
+    return null;
+  }
+  if(typeof value === 'object'){
+    if(value.table && typeof value.table === 'object'){
+      const fromTable = extractResponseTableData(value.table);
+      if(fromTable) return fromTable;
+    }
+    if(Array.isArray(value.data)){
+      const fromData = extractResponseTableData(value.data);
+      if(fromData) return fromData;
+    }
+    const headers = value.headers || value.columns;
+    const rows = value.rows;
+    if(Array.isArray(headers) && Array.isArray(rows)) return normalizeTableData(headers, rows);
+  }
+  return null;
+}
+
+function chartSpecFromChartObject(chartObj){
+  if(!chartObj || typeof chartObj !== 'object') return null;
+  const type = String(chartObj.type || 'bar').toLowerCase();
+  let labels = Array.isArray(chartObj.labels) ? chartObj.labels.map(function(x){ return String(x); }) : [];
+  let values = Array.isArray(chartObj.values) ? chartObj.values.map(numericValue).filter(function(x){ return x != null; }) : [];
+  if((!labels.length || !values.length) && Array.isArray(chartObj.datasets) && chartObj.datasets.length){
+    const ds = chartObj.datasets[0] || {};
+    labels = labels.length ? labels : (Array.isArray(chartObj.labels) ? chartObj.labels.map(function(x){ return String(x); }) : (Array.isArray(ds.data) ? ds.data.map(function(_, idx){ return 'item_' + (idx + 1); }) : []));
+    values = Array.isArray(ds.data) ? ds.data.map(numericValue).filter(function(x){ return x != null; }) : [];
+  }
+  if(!labels.length || !values.length) return null;
+  const len = Math.min(labels.length, values.length, 20);
+  return {
+    type: type === 'line' ? 'line' : 'bar',
+    title: chartObj.title || chartObj.name || 'Chart',
+    labels: labels.slice(0, len),
+    values: values.slice(0, len),
+    unit: chartObj.unit || '',
+  };
+}
+
+function deriveChartSpecFromTable(tableData, hintTitle, hintType){
+  if(!tableData) return null;
+  const headers = Array.isArray(tableData.headers) ? tableData.headers : [];
+  const rows = Array.isArray(tableData.rows) ? tableData.rows : [];
+  if(headers.length < 2 || rows.length < 2) return null;
+
+  const title = String(hintTitle || '').trim();
+  const lower = title.toLowerCase();
+  const preferred = [];
+  if(lower.includes('margin')) preferred.push('margin', '%');
+  if(lower.includes('profit')) preferred.push('profit');
+  if(lower.includes('revenue') || lower.includes('sales')) preferred.push('revenue', 'sales');
+  if(lower.includes('cost') || lower.includes('expense')) preferred.push('cost', 'expense');
+
+  let valueCol = -1;
+  const isMostlyNumeric = function(colIdx){
+    const numericCount = rows.reduce(function(acc, row){ return acc + (numericValue(row[colIdx]) != null ? 1 : 0); }, 0);
+    return numericCount >= Math.max(2, Math.floor(rows.length * 0.6));
+  };
+
+  for(const key of preferred){
+    const idx = headers.findIndex(function(hd){ return String(hd || '').toLowerCase().includes(key); });
+    if(idx > 0 && isMostlyNumeric(idx)){ valueCol = idx; break; }
+  }
+
+  if(valueCol < 0){
+    for(let c=1;c<headers.length;c++){
+      if(isMostlyNumeric(c)){ valueCol = c; break; }
+    }
+  }
+  if(valueCol < 0) return null;
+
+  const points = rows.map(function(row){
+    return { label: String(row[0] || ''), value: numericValue(row[valueCol]) };
+  }).filter(function(point){ return point.label && point.value != null; }).slice(0, 20);
+  if(points.length < 2) return null;
+
+  return {
+    type: String(hintType || '').toLowerCase() === 'line' ? 'line' : 'bar',
+    title: title || (headers[valueCol] + ' by ' + headers[0]),
+    labels: points.map(function(p){ return p.label; }),
+    values: points.map(function(p){ return p.value; }),
+    unit: '',
+  };
+}
+
+function extractResponseChartSpecs(value, tableData){
+  const specs = [];
+  if(value && typeof value === 'object' && value.chart){
+    const chartEntries = Array.isArray(value.chart) ? value.chart : [value.chart];
+    chartEntries.forEach(function(entry){
+      const explicit = chartSpecFromChartObject(entry);
+      if(explicit){
+        specs.push(explicit);
+        return;
+      }
+      const fallback = deriveChartSpecFromTable(tableData, entry?.title || entry?.name || '', entry?.type || 'bar');
+      if(fallback) specs.push(fallback);
+    });
+  }
+
+  if(!specs.length){
+    const single = extractResponseChartSpec(value, tableData);
+    if(single) specs.push(single);
+  }
+  return specs;
+}
+
+function extractResponseChartSpec(value, tableData){
+  if(value && typeof value === 'object' && value.chart){
+    const explicit = chartSpecFromChartObject(value.chart);
+    if(explicit) return explicit;
+  }
+
+  return deriveChartSpecFromTable(tableData, '', 'bar');
+}
+
+function renderResponseTable(headers, rows){
+  return h('div',{className:'response-table-wrap'},
+    h('table',{className:'response-table'},
+      h('thead',null,
+        h('tr',null,
+          ...headers.map(function(col){ return h('th',null,col); })
+        )
+      ),
+      h('tbody',null,
+        ...rows.map(function(row){
+          return h('tr',null,
+            ...row.map(function(cell){ return h('td',null,cell == null ? '' : String(cell)); })
+          );
+        })
+      )
+    )
+  );
+}
+
+function renderResponseChart(spec){
+  const labels = Array.isArray(spec?.labels) ? spec.labels : [];
+  const values = Array.isArray(spec?.values) ? spec.values : [];
+  if(!labels.length || !values.length) return null;
+  const max = Math.max.apply(null, values.concat([0.0001]));
+  const unit = spec.unit ? String(spec.unit) : '';
+  const title = spec.title || 'Chart';
+  if(spec.type === 'line'){
+    const width = 560;
+    const height = 180;
+    const pad = 20;
+    const xSpan = Math.max(1, labels.length - 1);
+    const points = values.map(function(v, idx){
+      const x = pad + ((width - pad * 2) * idx / xSpan);
+      const y = pad + ((height - pad * 2) * (1 - (v / max)));
+      return { x:x, y:y };
+    });
+    const path = points.map(function(p, idx){ return (idx === 0 ? 'M' : 'L') + p.x + ' ' + p.y; }).join(' ');
+    return h('div',{className:'response-chart response-line'},
+      h('div',{className:'response-chart-title'},title),
+      h('svg',{viewBox:'0 0 ' + width + ' ' + height, preserveAspectRatio:'none'},
+        h('line',{className:'response-line-axis',x1:String(pad),y1:String(height - pad),x2:String(width - pad),y2:String(height - pad)}),
+        h('path',{className:'response-line-path',d:path}),
+        ...points.map(function(p){ return h('circle',{className:'response-line-dot',cx:String(p.x),cy:String(p.y),r:'2.5'}); })
+      ),
+      h('div',{className:'response-line-labels'},
+        ...labels.map(function(label){ return h('span',null,label); })
+      )
+    );
+  }
+  return h('div',{className:'response-chart'},
+    h('div',{className:'response-chart-title'},title),
+    h('div',{className:'response-bars'},
+      ...labels.map(function(label, idx){
+        const value = values[idx];
+        const widthPct = Math.max(2, Math.round((value / max) * 100));
+        return h('div',{className:'response-bar-row'},
+          h('div',{className:'response-bar-label',title:label},label),
+          h('div',{className:'response-bar-track'},
+            h('div',{className:'response-bar-fill',style:'width:' + widthPct + '%'})
+          ),
+          h('div',{className:'response-bar-value'},String(value) + unit)
+        );
+      })
+    )
+  );
+}
+
+function renderAssistantStructuredContent(content){
+  const text = String(content || '');
+  const trimmed = text.trim();
+  if(!trimmed) return null;
+
+  const json = parseJsonMaybe(trimmed);
+  if(json != null){
+    const codePayload = extractCodePayloadFromJson(json);
+    if(codePayload){
+      return h('div',{className:'response-rich'},
+        renderDetailCode(codePayload.code, codePayload.language, 'code')
+      );
+    }
+    const table = extractResponseTableData(json);
+    const charts = extractResponseChartSpecs(json, table);
+    const note = typeof json.summary === 'string' ? json.summary : typeof json.message === 'string' ? json.message : typeof json.description === 'string' ? json.description : '';
+    if(charts.length || table){
+      return h('div',{className:'response-rich'},
+        note ? h('p',{className:'response-note'},note) : null,
+        ...charts.map(function(spec){ return renderResponseChart(spec); }),
+        table ? renderResponseTable(table.headers, table.rows) : null
+      );
+    }
+  }
+
+  const delimited = parseDelimitedTable(trimmed);
+  if(delimited){
+    return h('div',{className:'response-rich'},
+      renderResponseTable(delimited.headers, delimited.rows)
+    );
+  }
+  return null;
+}
+
+function extractJsonCodeBlocks(text){
+  const bt = String.fromCharCode(96);
+  const triple = bt + bt + bt;
+  if(typeof text !== 'string' || !text.includes(triple)) return { blocks: [], stripped: text || '' };
+  const fenceRe = new RegExp(triple + '([^\\n' + bt + ']*)\\n([\\s\\S]*?)' + triple, 'g');
+  const blocks = [];
+  let stripped = '';
+  let lastIndex = 0;
+  let match;
+  while((match = fenceRe.exec(text))){
+    const language = String(match[1] || '').trim().toLowerCase();
+    const body = String(match[2] || '').trim();
+    const parsed = parseJsonMaybe(body);
+    if(parsed == null) continue;
+    if(language && language !== 'json' && language !== 'application/json' && language !== 'chart' && language !== 'table') continue;
+    blocks.push(parsed);
+    stripped += text.slice(lastIndex, match.index);
+    lastIndex = fenceRe.lastIndex;
+  }
+  if(!blocks.length) return { blocks: [], stripped: text };
+  stripped += text.slice(lastIndex);
+  return { blocks: blocks, stripped: stripped };
+}
+
+function renderAssistantEmbeddedStructuredContent(content){
+  const extracted = extractJsonCodeBlocks(content);
+  if(!extracted.blocks.length) return null;
+  const sections = [];
+  extracted.blocks.forEach(function(block){
+    const table = extractResponseTableData(block);
+    const chart = extractResponseChartSpec(block, table);
+    const note = typeof block?.summary === 'string' ? block.summary : typeof block?.message === 'string' ? block.message : typeof block?.description === 'string' ? block.description : '';
+    if(!chart && !table) return;
+    sections.push(
+      h('div',{className:'response-rich'},
+        note ? h('p',{className:'response-note'},note) : null,
+        chart ? renderResponseChart(chart) : null,
+        table ? renderResponseTable(table.headers, table.rows) : null
+      )
+    );
+  });
+  if(!sections.length) return null;
+  return {
+    markdown: String(extracted.stripped || '').trim(),
+    node: h('div',{className:'response-rich response-rich-embedded'},sections),
+  };
+}
+
+function parseMarkdownListValues(text){
+  if(typeof text !== 'string') return [];
+  return text.split(',').map(function(part){ return part.trim(); }).filter(Boolean);
+}
+
+function parseMarkdownChartSpecs(text){
+  if(typeof text !== 'string' || !text.trim()) return [];
+  const lines = text.split(/\\r?\\n/);
+  const charts = [];
+  for(let i=0;i<lines.length;i++){
+    const typeMatch = lines[i].trim().match(/^(?:[-*]\\s*)?Type:\\s*(bar|line)\\b/i);
+    if(!typeMatch) continue;
+    const type = String(typeMatch[1] || 'bar').toLowerCase();
+    let labels = [];
+    let values = [];
+    for(let j=i+1;j<Math.min(lines.length, i+7);j++){
+      const line = lines[j].trim();
+      const labelsMatch = line.match(/^(?:[-*]\\s*)?Labels:\\s*(.+)$/i);
+      if(labelsMatch) labels = parseMarkdownListValues(labelsMatch[1]);
+      const valuesMatch = line.match(/^(?:[-*]\\s*)?Values:\\s*(.+)$/i);
+      if(valuesMatch) values = parseMarkdownListValues(valuesMatch[1]).map(numericValue).filter(function(v){ return v != null; });
+    }
+    if(labels.length < 2 || values.length < 2) continue;
+    const len = Math.min(labels.length, values.length, 20);
+
+    let title = 'Chart';
+    for(let p=i-1;p>=Math.max(0, i-4);p--){
+      const candidate = lines[p].trim();
+      if(!candidate) continue;
+      if(/^(charts?|summary table)$/i.test(candidate.replace(/:$/, ''))) continue;
+      if(/^(?:[-*]\\s*)?(type|labels|values):/i.test(candidate)) continue;
+      title = candidate
+        .replace(/^\\d+\\.\\s*/, '')
+        .replace(/^[-*]\\s*/, '')
+        .replace(/^[#>]+\\s*/, '')
+        .trim();
+      if(title) break;
+    }
+
+    charts.push({
+      type: type === 'line' ? 'line' : 'bar',
+      title: title || 'Chart',
+      labels: labels.slice(0, len),
+      values: values.slice(0, len),
+      unit: '',
+    });
+  }
+  return charts;
+}
+
+function renderAssistantMarkdownCharts(content){
+  const charts = parseMarkdownChartSpecs(content);
+  if(!charts.length) return null;
+  return h('div',{className:'response-rich response-rich-embedded'},
+    charts.map(function(spec){ return renderResponseChart(spec); })
+  );
+}
+
+function renderAssistantBubble(content){
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  const structured = renderAssistantStructuredContent(content);
+  if(structured){
+    bubble.appendChild(structured);
+  }else{
+    const embedded = renderAssistantEmbeddedStructuredContent(content || '');
+    if(embedded){
+      const markdown = mdToHtml(embedded.markdown || '');
+      if(markdown) bubble.innerHTML = markdown;
+      bubble.appendChild(embedded.node);
+    }else{
+      bubble.innerHTML = mdToHtml(content || '');
+      const markdownCharts = renderAssistantMarkdownCharts(content || '');
+      if(markdownCharts) bubble.appendChild(markdownCharts);
+    }
+  }
+  return {
+    element: bubble,
+    exportHtml: bubble.innerHTML,
+  };
+}
+
+function processStageMeta(stage){
+  if(stage === 'error') return { label:'Error', icon:'!', tone:'deny' };
+  if(stage === 'completed') return { label:'Completed', icon:'✓', tone:'ok' };
+  if(stage === 'validating') return { label:'Validating', icon:'◉', tone:'warn' };
+  if(stage === 'tools') return { label:'Using Tools', icon:'⚙', tone:'ok' };
+  if(stage === 'finalizing') return { label:'Finalizing', icon:'↗', tone:'ok' };
+  return { label:'Thinking', icon:'…', tone:'ok' };
+}
+
+function ensureProcessUiState(msg){
+  if(!msg.processUi || typeof msg.processUi !== 'object'){
+    msg.processUi = { detailExpanded: Object.create(null) };
+  }
+  if(!msg.processUi.detailExpanded || typeof msg.processUi.detailExpanded !== 'object'){
+    msg.processUi.detailExpanded = Object.create(null);
+  }
+  return msg.processUi;
+}
+
+function toggleProcessDetail(msg, key){
+  const ui = ensureProcessUiState(msg);
+  ui.detailExpanded[key] = !ui.detailExpanded[key];
+}
+
+function processStatusTone(status){
+  if(status === 'deny' || status === 'fail' || status === 'error') return 'deny';
+  if(status === 'warn' || status === 'redacted') return 'warn';
+  return 'ok';
+}
+
+function extractThoughtText(step){
+  if(!step) return '';
+  if(step.type === 'thinking') return String(step.text || step.content || '').trim();
+  const toolName = step?.toolCall?.name || step?.name || step?.toolName || '';
+  if(toolName !== 'think') return '';
+  const args = step?.toolCall?.arguments ?? step?.input;
+  const result = step?.toolCall?.result ?? step?.result;
+  if(typeof result === 'string' && result.trim()){
+    return result.replace(/^\[(PLANNING|REASONING|SYNTHESIS|REFLECTION)\]\\s*/,'').trim();
+  }
+  if(typeof args === 'string' && args.trim()) return args.trim();
+  if(args && typeof args === 'object'){
+    const candidate = args.reasoning || args.thought || args.content || args.summary || args.prompt || args.goal;
+    if(typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return '';
+}
+
+function buildProcessViewModel(msg, isStreamingCurrent){
+  const steps = Array.isArray(msg.steps) ? msg.steps : [];
+  const thoughtHistory = [];
+  const timeline = [];
+  const skills = Array.isArray(msg.activeSkills) ? msg.activeSkills : [];
+  const skillEffects = [];
+  const validations = [];
+
+  steps.forEach(function(s, idx){
+    const stepType = s?.type || s?.kind || 'step';
+    const thoughtText = extractThoughtText(s);
+    if(thoughtText){
+      thoughtHistory.push({ text: thoughtText, idx: idx + 1 });
+      timeline.push({
+        kind: 'thought',
+        title: 'Thought update',
+        summary: summarizeForDisplay(thoughtText, 220),
+        raw: detailText(thoughtText),
+        detailLabel: 'thought',
+        durationMs: s?.durationMs,
+        key: 'thought-' + idx,
+      });
+      if(stepType === 'thinking' || (s?.toolCall?.name || s?.name || s?.toolName) === 'think') return;
+    }
+
+    if(stepType === 'thinking'){
+      return;
+    }
+
+    if(s?.kind === 'tool_start' || stepType === 'tool_call'){
+      const toolName = s?.name || s?.toolName || s?.toolCall?.name || 'tool';
+      const input = s?.input ?? s?.toolCall?.arguments;
+      const result = s?.result ?? s?.toolCall?.result;
+      timeline.push({
+        kind: 'tool',
+        title: 'Tool: ' + toolName,
+        summary: result != null
+          ? 'Input: ' + summarizeForDisplay(input, 120) + '\\nOutput: ' + summarizeForDisplay(result, 160)
+          : 'Input: ' + summarizeForDisplay(input, 180),
+        inputRaw: detailText(input),
+        outputRaw: detailText(result),
+        durationMs: s?.durationMs,
+        key: 'tool-' + idx,
+      });
+      return;
+    }
+
+    if(stepType === 'delegation'){
+      timeline.push({
+        kind: 'delegation',
+        title: 'Delegated to: ' + (s?.worker || s?.name || 'worker'),
+        summary: summarizeForDisplay(s?.input || s?.message || s?.delegation || '', 220),
+        raw: detailText(s?.input || s?.message || s?.delegation || ''),
+        detailLabel: 'delegation',
+        durationMs: s?.durationMs,
+        key: 'delegation-' + idx,
+      });
+      return;
+    }
+
+    timeline.push({
+      kind: stepType === 'response' ? 'response' : 'step',
+      title: stepType,
+      summary: summarizeForDisplay(s?.text || s?.content || s, 220),
+      raw: detailText(s?.text || s?.content || s),
+      detailLabel: stepType === 'response' ? 'response' : 'event',
+      durationMs: s?.durationMs,
+      key: stepType + '-' + idx,
+    });
+  });
+
+  const liveThought = thoughtHistory.length ? thoughtHistory[thoughtHistory.length - 1].text : '';
+  if(msg?.skillPromptApplied) skillEffects.push('Prompt guidance injected');
+  if(Array.isArray(msg?.skillTools) && msg.skillTools.length){
+    msg.skillTools.forEach(function(tool){ skillEffects.push('Enabled: ' + tool); });
+  }
+
+  if(msg?.redaction){
+    const redactedCount = msg.redaction.count || msg.redaction.detections?.length || 0;
+    validations.push({
+      kind: 'redaction',
+      label: 'Redaction',
+      status: redactedCount > 0 ? 'warn' : 'ok',
+      summary: redactedCount > 0 ? ('Redacted ' + redactedCount + ' item' + (redactedCount === 1 ? '' : 's')) : 'No sensitive content flagged',
+    });
+  }
+
+  if(msg?.evalResult){
+    const score = msg.evalResult.score != null ? Math.round(Number(msg.evalResult.score) * 100) : null;
+    const passed = msg.evalResult.passed ?? msg.evalResult.score >= 1;
+    validations.push({
+      kind: 'eval',
+      label: 'Evaluation',
+      status: passed ? 'ok' : 'warn',
+      summary: 'Score ' + (score != null ? (score + '%') : 'n/a') + ' • Passed ' + (msg.evalResult.passed ?? 'n/a') + ' • Failed ' + (msg.evalResult.failed ?? 'n/a'),
+    });
+  }
+
+  if(msg?.cognitive){
+    const confidence = Math.round((msg.cognitive.confidence || 0) * 100);
+    const decision = msg.cognitive.decision || 'allow';
+    const firstWarn = msg.cognitive.checks?.find(function(x){ return x.decision !== 'allow'; });
+    validations.push({
+      kind: 'cognitive',
+      label: 'Cognitive Check',
+      status: decision,
+      summary: 'Confidence ' + confidence + '% • ' + decision + (firstWarn?.explanation ? (' • ' + firstWarn.explanation) : ''),
+    });
+  }
+
+  if(msg?.guardrail){
+    const guardrailDecision = msg.guardrail.decision || 'allow';
+    validations.push({
+      kind: 'guardrail',
+      label: 'Guardrail',
+      status: guardrailDecision,
+      summary: guardrailDecision + (msg.guardrail.reason ? (' • ' + msg.guardrail.reason) : ''),
+    });
+  }
+
+  let stage = 'thinking';
+  if(msg?.processState === 'error') stage = 'error';
+  else if(!isStreamingCurrent && (msg?.processState === 'completed' || !!msg?.content)) stage = 'completed';
+  else if(isStreamingCurrent && msg?.content) stage = 'finalizing';
+  else if(validations.length) stage = 'validating';
+  else if(timeline.length) stage = 'tools';
+
+  const toolCount = timeline.filter(function(item){ return item.kind === 'tool' || item.kind === 'delegation'; }).length;
+  const validationTone = validations.length
+    ? validations.some(function(item){ return processStatusTone(item.status) === 'deny'; })
+      ? 'deny'
+      : validations.some(function(item){ return processStatusTone(item.status) === 'warn'; })
+        ? 'warn'
+        : 'ok'
+    : null;
+  const summaryChips = [];
+  if(skills.length) summaryChips.push({ label:'Skills: ' + skills.length, tone:'ok' });
+  if(toolCount) summaryChips.push({ label:'Tools: ' + toolCount, tone:'ok' });
+  if(validations.length) summaryChips.push({ label:'Checks: ' + validationTone, tone:validationTone });
+  if(msg?.latency_ms) summaryChips.push({ label:'Duration: ' + msg.latency_ms + 'ms', tone:'ok' });
+
+  const hasProcess = isStreamingCurrent || thoughtHistory.length > 0 || timeline.length > 0 || skills.length > 0 || validations.length > 0;
+
+  return {
+    hasProcess,
+    stage,
+    liveThought,
+    thoughtCount: thoughtHistory.length,
+    timeline,
+    skills,
+    skillEffects,
+    validations,
+    summaryChips,
+    expanded: typeof msg.processExpanded === 'boolean' ? msg.processExpanded : isStreamingCurrent,
+  };
+}
+
 function renderMessages(){
   const container = $('.messages');
   if(!container) return;
@@ -1383,78 +2412,150 @@ function renderMessages(){
     ));
     return;
   }
-  state.messages.forEach(m=>{
+  state.messages.forEach((m, msgIndex)=>{
     const isUser = m.role==='user';
     const extras = [];
     const attachments = Array.isArray(m.attachments) ? m.attachments : [];
+    const isStreamingCurrent = !isUser && state.streaming && msgIndex === state.messages.length - 1;
 
     if(!isUser && m.mode && m.mode!=='direct'){
       extras.push(h('span',{className:'mode-badge'},m.mode));
     }
-    if(!isUser && m.redaction){
-      extras.push(h('span',{className:'redaction-badge'},'\\u{1F6E1} Redacted: '+(m.redaction.count||m.redaction.detections?.length||'')+ ' items'));
-    }
-    if(!isUser && m.steps && m.steps.length){
-      var delegatedWorkers = [];
-      m.steps.forEach(s=>{
-        let cls = 'step-card';
-        let label = 'Step';
-        let body = '';
-        const isDelegationToolCall = (s.type==='tool_call' && s.toolCall && s.toolCall.name==='delegate_to_worker');
-        if(s.kind==='tool_start'||s.type==='tool_call'){
-          if(isDelegationToolCall){
-            cls += ' delegation';
-            const workerName = s.toolCall.arguments?.worker || '';
-            if(workerName && !delegatedWorkers.includes(workerName)) delegatedWorkers.push(workerName);
-            label = '\\u{1F91D} Delegated to: '+workerName;
-            body = s.toolCall.arguments?.goal || '';
-            if(s.toolCall.result) body += '\\n\\u2192 '+(typeof s.toolCall.result==='string'? s.toolCall.result : JSON.stringify(s.toolCall.result));
-          } else {
-            cls += ' tool';
-            label = '\\u{1F527} Tool: '+(s.name||s.toolName||s.toolCall?.name||'');
-            const toolInput = s.input ?? s.toolCall?.arguments;
-            body = toolInput ? (typeof toolInput==='string'? toolInput : JSON.stringify(toolInput,null,2)) : '';
-            const toolResult = s.result ?? s.toolCall?.result;
-            if(toolResult) body += '\\n\\u2192 '+(typeof toolResult==='string'? toolResult : JSON.stringify(toolResult));
-          }
-        } else if(s.type==='delegation'){
-          cls += ' delegation';
-          if((s.worker||s.name) && !delegatedWorkers.includes(s.worker||s.name)) delegatedWorkers.push(s.worker||s.name);
-          label = '\\u{1F91D} Delegated to: '+(s.worker||s.name||'');
-          body = s.input||s.message||'';
-        } else if(s.type==='thinking'){
-          cls += ' thinking';
-          label = '\\u{1F4AD} Thinking';
-          body = s.text||s.content||'';
-        } else {
-          label = s.type||'Step';
-          body = s.text||s.content||JSON.stringify(s);
-        }
-        // Build step header — add avatar for delegations
-        var stepHdrChildren = [];
-        if(s.type==='delegation' || isDelegationToolCall){
-          var worker = s.type==='delegation' ? (s.worker||s.name||'') : (s.toolCall?.arguments?.worker||'');
-          var dImg = document.createElement('img');
-          dImg.className = 'delegation-avatar';
-          dImg.src = getAgentAvatarUrl(worker);
-          dImg.alt = worker||'Agent';
-          stepHdrChildren.push(dImg);
-        }
-        var labelNode = document.createTextNode(label);
-        stepHdrChildren.push(labelNode);
-        extras.push(h('div',{className:cls},
-          h('div',{className:'step-hdr'},...stepHdrChildren),
-          body ? h('div',{className:'step-body'},body) : null
-        ));
-      });
-      if(delegatedWorkers.length){
-        const workerChips = delegatedWorkers.map(function(name){
-          var wImg = document.createElement('img');
-          wImg.src = getAgentAvatarUrl(name);
-          wImg.alt = name;
-          return h('span',{className:'worker-chip'},wImg,name);
+    if(!isUser){
+      const processUi = ensureProcessUiState(m);
+      const process = buildProcessViewModel(m, isStreamingCurrent);
+      if(process.hasProcess){
+        const stageMeta = processStageMeta(process.stage);
+        const stageLabel = stageMeta.label || 'Running';
+        const summary = process.timeline.length + ' events' + (process.thoughtCount ? ' • ' + process.thoughtCount + ' thought updates' : '');
+        const toggleText = process.expanded ? 'Hide details' : 'Show details';
+
+        const skillCards = process.skills.map(function(skill){
+          const scorePct = Math.max(0, Math.min(100, Math.round(Number(skill.score || 0) * 100)));
+          const skillTools = Array.isArray(skill.tools) ? skill.tools : [];
+          return h('div',{className:'skill-item'},
+            h('div',{className:'skill-item-top'},
+              h('span',{className:'skill-name'},skill.name || skill.id || 'Unnamed skill'),
+              h('span',{className:'skill-score'},scorePct + '% match')
+            ),
+            h('div',{className:'skill-category'},String(skill.category || 'general').replace(/_/g,' ')),
+            skillTools.length ? h('div',{className:'skill-tags'},
+              ...skillTools.map(function(t){ return h('span',{className:'skill-tag'},t); })
+            ) : null
+          );
         });
-        extras.unshift(h('div',null,...workerChips));
+
+        const validationRows = process.validations.map(function(item){
+          const tone = processStatusTone(item.status);
+          const statusIcon = tone === 'deny' ? '✕' : tone === 'warn' ? '!' : '✓';
+          return h('div',{className:'validation-item ' + tone},
+            h('div',{className:'validation-item-top'},
+              h('span',{className:'validation-name'},item.label),
+              h('span',{className:'validation-status ' + tone},statusIcon + ' ' + String(item.status || 'ok'))
+            ),
+            h('div',{className:'validation-body'},item.summary || '')
+          );
+        });
+
+        const processBody = h('div',{className:'process-body'},
+          h('div',{className:'live-thought'},
+            h('div',{className:'lbl'},'Current thought'),
+            h('div',{className:'txt'},process.liveThought || (isStreamingCurrent ? 'Thinking...' : 'No thought trace captured.'))
+          ),
+          process.skills.length ? h('div',{className:'process-section'},
+            h('div',{className:'process-section-title'},'\u2728 Skills Invoked'),
+            h('div',{className:'skill-list'},...skillCards),
+            process.skillEffects.length ? h('div',{className:'skill-summary'},
+              ...process.skillEffects.map(function(effect){ return h('span',{className:'skill-tag'},effect); })
+            ) : null
+          ) : null,
+          process.timeline.length ? h('div',{className:'timeline'},
+            ...process.timeline.map(function(item, idx){
+              const dur = item.durationMs != null ? item.durationMs + 'ms' : '';
+              const keyBase = item.key || ('timeline-' + idx);
+              const showRaw = !!processUi.detailExpanded[keyBase + '-raw'];
+              const showInput = !!processUi.detailExpanded[keyBase + '-input'];
+              const showOutput = !!processUi.detailExpanded[keyBase + '-output'];
+              return h('div',{className:'timeline-item ' + item.kind},
+                h('div',{className:'t-h'},
+                  h('span',null,item.title || ('Event ' + (idx + 1))),
+                  h('span',null,dur)
+                ),
+                item.summary ? h('div',{className:'t-summary'},item.summary) : null,
+                (item.raw || item.inputRaw || item.outputRaw) ? h('div',{className:'t-actions'},
+                  item.raw ? h('button',{
+                    className:'detail-toggle',
+                    type:'button',
+                    'aria-expanded':String(showRaw),
+                    'aria-controls':'process-' + msgIndex + '-' + keyBase + '-raw',
+                    onClick:function(){ toggleProcessDetail(m, keyBase + '-raw'); renderMessages(); }
+                  },showRaw ? 'Hide raw ' + (item.detailLabel || 'details') : 'View raw ' + (item.detailLabel || 'details')) : null,
+                  item.inputRaw ? h('button',{
+                    className:'detail-toggle',
+                    type:'button',
+                    'aria-expanded':String(showInput),
+                    'aria-controls':'process-' + msgIndex + '-' + keyBase + '-input',
+                    onClick:function(){ toggleProcessDetail(m, keyBase + '-input'); renderMessages(); }
+                  },showInput ? 'Hide input' : 'View input') : null,
+                  item.outputRaw ? h('button',{
+                    className:'detail-toggle',
+                    type:'button',
+                    'aria-expanded':String(showOutput),
+                    'aria-controls':'process-' + msgIndex + '-' + keyBase + '-output',
+                    onClick:function(){ toggleProcessDetail(m, keyBase + '-output'); renderMessages(); }
+                  },showOutput ? 'Hide output' : 'View output') : null
+                ) : null,
+                item.raw && showRaw ? h('div',{className:'t-raw',id:'process-' + msgIndex + '-' + keyBase + '-raw'},
+                  h('div',{className:'t-raw-label'},'Raw ' + (item.detailLabel || 'details')),
+                  renderProcessDetailView(item.raw)
+                ) : null,
+                item.inputRaw && showInput ? h('div',{className:'t-raw',id:'process-' + msgIndex + '-' + keyBase + '-input'},
+                  h('div',{className:'t-raw-label'},'Tool input'),
+                  renderProcessDetailView(item.inputRaw)
+                ) : null,
+                item.outputRaw && showOutput ? h('div',{className:'t-raw',id:'process-' + msgIndex + '-' + keyBase + '-output'},
+                  h('div',{className:'t-raw-label'},'Tool output'),
+                  renderProcessDetailView(item.outputRaw)
+                ) : null
+              );
+            })
+          ) : null,
+          process.validations.length ? h('div',{className:'process-section'},
+            h('div',{className:'process-section-title'},'Validation'),
+            h('div',{className:'validation-list'},...validationRows)
+          ) : null
+        );
+
+        extras.push(h('div',{className:'process-card ' + (m.processState || process.stage)},
+          h('div',{className:'process-hdr'},
+            h('div',{className:'process-hdr-main'},
+              h('div',{className:'process-title'},
+                h('span',null,'\u{1F9E0} Process'),
+                h('span',{className:'process-stage ' + stageMeta.tone,role:'status','aria-live':'polite','aria-atomic':'true'},
+                  h('span',{className:'process-stage-icon','aria-hidden':'true'},stageMeta.icon),
+                  h('span',null,stageLabel)
+                )
+              ),
+              !process.expanded && process.summaryChips.length ? h('div',{className:'process-meta'},
+                ...process.summaryChips.map(function(chip){
+                  return h('span',{className:'summary-chip ' + (chip.tone || 'ok')},chip.label);
+                })
+              ) : null
+            ),
+            h('button',{className:'process-toggle',type:'button','aria-expanded':String(process.expanded),'aria-controls':'process-body-' + msgIndex,onClick:function(){ m.processExpanded = !process.expanded; renderMessages(); }},toggleText)
+          ),
+          !process.expanded ? h('div',{className:'process-summary'},
+            h('div',null,summary || 'No process events'),
+            process.summaryChips.length ? h('div',{className:'process-meta'},
+              ...process.summaryChips.map(function(chip){
+                return h('span',{className:'summary-chip ' + (chip.tone || 'ok')},chip.label);
+              })
+            ) : null
+          ) : null,
+          h('div',{className:'process-body-wrap ' + (process.expanded ? 'expanded' : 'collapsed'),id:'process-body-' + msgIndex,'aria-hidden':String(!process.expanded)},
+            h('div',{className:'process-body-clip'},processBody)
+          )
+        ));
       }
     }
     let corner = null;
@@ -1489,11 +2590,11 @@ function renderMessages(){
 
     // Build bubble element
     let bubbleEl;
+    let responseExportHtml = '';
     if(!isUser && m.content){
-      // Rich text for assistant
-      bubbleEl = document.createElement('div');
-      bubbleEl.className = 'bubble';
-      bubbleEl.innerHTML = mdToHtml(m.content);
+      const renderedBubble = renderAssistantBubble(m.content);
+      bubbleEl = renderedBubble.element;
+      responseExportHtml = renderedBubble.exportHtml;
     } else {
       bubbleEl = h('div',{className:'bubble'},m.content||(state.streaming?'':'...'));
     }
@@ -1501,7 +2602,7 @@ function renderMessages(){
     // Action toolbar for assistant messages
     const toolbar = !isUser && m.content ? (()=>{
       const rawText = m.content;
-      const richHtml = mdToHtml(m.content);
+      const richHtml = responseExportHtml || mdToHtml(m.content);
       const bar = document.createElement('div');
       bar.className = 'response-toolbar';
       // Copy

@@ -34,6 +34,30 @@ import type {
 const DEFAULT_EXECUTION_IMAGE = 'python:3.12-slim';
 const DEFAULT_BROWSER_IMAGE = 'mcr.microsoft.com/playwright:v1.44.0-jammy';
 
+function appendContainerEnvArgs(args: string[], env: Record<string, string>): void {
+  for (const [key, value] of Object.entries(env)) {
+    args.push('-e', `${key}=${value}`);
+  }
+}
+
+function pythonContainerEnv(homeDir: string): Record<string, string> {
+  return {
+    HOME: homeDir,
+    TMPDIR: `${homeDir}/.tmp`,
+    PIP_NO_CACHE_DIR: '1',
+    PIP_DISABLE_PIP_VERSION_CHECK: '1',
+    MPLCONFIGDIR: `${homeDir}/.config/matplotlib`,
+  };
+}
+
+function dockerExecEnvArgs(env: Record<string, string>): string[] {
+  const args: string[] = [];
+  for (const [key, value] of Object.entries(env)) {
+    args.push('-e', `${key}=${value}`);
+  }
+  return args;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────
 
 function run(
@@ -193,10 +217,13 @@ export class LocalDockerProvider implements ContainerProvider {
         '--security-opt', 'no-new-privileges',
         '--read-only',
         '--tmpfs', '/tmp:size=100m,noexec,nosuid',
+        '--tmpfs', '/nonexistent:size=200m,nosuid,uid=65534,gid=65534,mode=1777',
         // Mount workspace read-only, output dir read-write
         '-v', `${workDir}:/workspace:ro`,
         '-v', `${outputDir}:/workspace/output:rw`,
       ];
+
+      appendContainerEnvArgs(dockerArgs, pythonContainerEnv('/tmp'));
 
       // Inject env vars
       if (request.env) {
@@ -252,16 +279,25 @@ export class LocalDockerProvider implements ContainerProvider {
       '--cap-drop=ALL',
       '--security-opt', 'no-new-privileges',
       '--tmpfs', '/tmp:size=100m,noexec,nosuid',
-      '--tmpfs', '/workspace:size=200m',
+      '--tmpfs', '/nonexistent:size=200m,nosuid,uid=65534,gid=65534,mode=1777',
+      '--tmpfs', '/workspace:size=1g,exec',
       '--label', `cse.created=${Date.now()}`,
       '--label', 'cse.managed=true',
+    ];
+
+    appendContainerEnvArgs(dockerArgs, {
+      ...pythonContainerEnv('/workspace'),
+      PATH: '/workspace/.pyuser/bin:/usr/local/bin:/usr/bin:/bin',
+    });
+
+    dockerArgs.push(
       image,
       // Use a finite max lifetime instead of sleep infinity.
       // Even if the server crashes and forgets about this container,
       // it will self-destruct after maxLifetimeSec seconds.
       // Configurable via CSE_SESSION_MAX_LIFETIME_S (default 3600 = 1 hour).
       'sleep', String(Number(process.env['CSE_SESSION_MAX_LIFETIME_S'] ?? 3600)),
-    ];
+    );
 
     const { exitCode, stderr } = await run('docker', dockerArgs);
     if (exitCode !== 0) throw new Error(`Failed to create session container: ${stderr}`);
@@ -273,6 +309,7 @@ export class LocalDockerProvider implements ContainerProvider {
       handle: containerName,
       status: 'ready',
       hasBrowser: withBrowser,
+      networkAccess: config.networkAccess ?? false,
       createdAt: Date.now(),
       lastUsedAt: Date.now(),
       executionCount: 0,
@@ -289,10 +326,14 @@ export class LocalDockerProvider implements ContainerProvider {
     const ext = languageExt(lang);
     const remoteCode = `/workspace/code_${executionId}.${ext}`;
     const timeoutMs = request.timeoutMs ?? config.timeoutMs ?? 30_000;
+    const execEnvArgs = dockerExecEnvArgs({
+      ...pythonContainerEnv('/workspace'),
+      PATH: '/workspace/.pyuser/bin:/usr/local/bin:/usr/bin:/bin',
+    });
 
     // Write code file into the running container via stdin pipe
     const writeResult = await run('docker', [
-      'exec', '-i', session.handle,
+      'exec', '-i', ...execEnvArgs, session.handle,
       'sh', '-c', `cat > ${remoteCode}`,
     ], { stdin: request.code });
 
@@ -316,7 +357,7 @@ export class LocalDockerProvider implements ContainerProvider {
         const fileName = sanitizeWorkspaceFileName(file.name);
         const remotePath = `/workspace/${fileName}`;
         const writeFileResult = await run('docker', [
-          'exec', '-i', session.handle,
+          'exec', '-i', ...execEnvArgs, session.handle,
           'sh', '-c', `cat > ${remotePath}`,
         ], {
           stdin: file.binary ? Buffer.from(file.content, 'base64') : file.content,
@@ -343,9 +384,11 @@ export class LocalDockerProvider implements ContainerProvider {
 
     const start = Date.now();
     const execResult = await run('docker', [
-      'exec', '-w', '/workspace', session.handle,
+      'exec', '-w', '/workspace', ...execEnvArgs, session.handle,
       ...runCmd,
     ], { timeoutMs });
+
+    const artifacts = await this.collectArtifactsFromSession(session, execEnvArgs);
 
     // Cleanup code file
     await run('docker', ['exec', session.handle, 'rm', '-f', remoteCode]);
@@ -358,10 +401,64 @@ export class LocalDockerProvider implements ContainerProvider {
       stderr: execResult.stderr.slice(0, 20_000),
       output: execResult.exitCode === 0 ? tryParseOutput(execResult.stdout) : undefined,
       error: execResult.exitCode !== 0 ? execResult.stderr.slice(0, 2_000) || `Exit ${execResult.exitCode}` : undefined,
-      artifacts: [],
+      artifacts,
       durationMs: Date.now() - start,
       providerInfo: { provider: 'local', containerId: session.handle },
     };
+  }
+
+  private async collectArtifactsFromSession(
+    session: CSESession,
+    execEnvArgs: string[],
+  ): Promise<ExecutionResult['artifacts']> {
+    const extractScript = [
+      'import base64, json, os',
+      'root = "/workspace/output"',
+      'artifacts = []',
+      'if os.path.isdir(root):',
+      '  for name in os.listdir(root):',
+      '    path = os.path.join(root, name)',
+      '    if not os.path.isfile(path):',
+      '      continue',
+      '    with open(path, "rb") as f:',
+      '      data = f.read()',
+      '    artifacts.append({',
+      '      "name": name,',
+      '      "data": base64.b64encode(data).decode("ascii"),',
+      '      "sizeBytes": len(data),',
+      '    })',
+      'print(json.dumps(artifacts))',
+    ].join('\n');
+
+    const extractResult = await run('docker', [
+      'exec', ...execEnvArgs, session.handle,
+      'python', '-c', extractScript,
+    ]);
+
+    if (extractResult.exitCode !== 0 || !extractResult.stdout.trim()) {
+      return [];
+    }
+
+    type SessionArtifact = { name: string; data: string; sizeBytes: number };
+    let parsed: SessionArtifact[] = [];
+
+    try {
+      parsed = JSON.parse(extractResult.stdout) as SessionArtifact[];
+    } catch {
+      return [];
+    }
+
+    const artifacts: ExecutionResult['artifacts'] = [];
+    for (const artifact of parsed) {
+      const safeName = sanitizeWorkspaceFileName(artifact.name);
+      artifacts.push({
+        name: safeName,
+        mimeType: guessMime(safeName),
+        data: artifact.data,
+        sizeBytes: Number.isFinite(artifact.sizeBytes) ? artifact.sizeBytes : 0,
+      });
+    }
+    return artifacts;
   }
 
   async terminateSession(session: CSESession, _config: CSEConfig): Promise<void> {

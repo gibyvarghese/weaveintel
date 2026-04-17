@@ -93,6 +93,11 @@ const SUPERVISOR_CODE_EXECUTION_POLICY = [
   '- Attached files are injected into container workspace and should be opened by filename.',
   '- For CSV analysis, prefer Python standard library (`csv`) first.',
   '- Do not assume `pandas` is installed unless you install it in the same run and verify installation succeeded.',
+  '- If you need to install Python packages during execution, call `cse_run_code` with `networkAccess=true`.',
+  '- In CSE, install packages with: `os.makedirs("/workspace/.deps", exist_ok=True); os.makedirs("/workspace/.tmp", exist_ok=True); subprocess.check_call([sys.executable, "-m", "pip", "install", "--target", "/workspace/.deps", "<package>"]); sys.path.insert(0, "/workspace/.deps")`.',
+  '- For matplotlib/pyplot, always call `matplotlib.use("Agg")` before `import matplotlib.pyplot as plt` (headless environment, no display).',
+  '- When saving chart images, create the output directory first: `os.makedirs("/workspace/output", exist_ok=True)` then save to `/workspace/output/<name>.png`.',
+  '- Never use notebook-style `!pip install ...` inside Python scripts.',
   '',
   'Verification and retry policy (MANDATORY):',
   '- Verify tool outputs before final response.',
@@ -105,6 +110,24 @@ const SUPERVISOR_CODE_EXECUTION_POLICY = [
   '  → Include the actual stdout in your final response.',
   '',
   'Supported languages: python, javascript, typescript, bash.',
+].join('\n');
+
+const RESPONSE_CARD_FORMAT_POLICY = [
+  'RESPONSE PRESENTATION POLICY (for rich response cards):',
+  '- Choose output format based on user intent and data shape.',
+  '- If user asks for a chart, graph, visualization, trend, or numeric comparison, prefer structured JSON with chart fields.',
+  '- If user asks for tabular output, dataset rows, or comparisons, prefer structured JSON with table fields.',
+  '- If user asks for both, include both table and chart.',
+  '- For code or scripts, return JSON object: {"code":"...","language":"python|javascript|typescript|sql|bash|json|xml|yaml"}.',
+  '- For normal conversational answers, use concise markdown text and do not force JSON.',
+  '',
+  'Preferred structured schema when visualization or tabular output is requested:',
+  '{',
+  '  "summary": "short narrative",',
+  '  "table": { "headers": ["col1","col2"], "rows": [["r1", 10], ["r2", 12]] },',
+  '  "chart": { "type": "bar|line", "title": "optional", "labels": ["r1","r2"], "values": [10,12], "unit": "optional" }',
+  '}',
+  '- Keep values accurate and grounded in computed or tool-derived outputs.',
 ].join('\n');
 
 const SUPERVISOR_TEMPORAL_POLICY = [
@@ -350,6 +373,11 @@ export class ChatEngine {
     const base = basePrompt?.trim();
     return base ? `${base}\n\n${enhancedPolicy}` : enhancedPolicy;
   }
+  
+  private withResponseCardFormatPolicy(basePrompt: string | undefined): string | undefined {
+    const base = basePrompt?.trim();
+    return base ? `${base}\n\n${RESPONSE_CARD_FORMAT_POLICY}` : RESPONSE_CARD_FORMAT_POLICY;
+  }
 
   constructor(
     private readonly config: ChatEngineConfig,
@@ -511,6 +539,10 @@ export class ChatEngine {
     cognitive?: CognitiveCheckSummary;
     policyChecks?: Array<{ tool: string; policy: string; taskType: string; priority: string }>;
     routingDecision?: { provider: string; model: string; reason: string };
+    activeSkills?: Array<{ id: string; name: string; category: string; score: number; tools: string[] }>;
+    skillTools?: string[];
+    enabledTools?: string[];
+    skillPromptApplied?: boolean;
   }> {
     let provider = opts?.provider ?? this.config.defaultProvider;
     let modelId = opts?.model ?? this.config.defaultModel;
@@ -544,7 +576,7 @@ export class ChatEngine {
     const actor = await this.db.getUserById(userId);
     const userPersona = normalizePersona(actor?.persona, 'user');
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
-    const resolvedPrompt = await this.resolveSystemPrompt(settings);
+    const resolvedPrompt = this.withResponseCardFormatPolicy(await this.resolveSystemPrompt(settings));
     const traceId = randomUUID();
     const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
     const startMs = Date.now();
@@ -567,6 +599,14 @@ export class ChatEngine {
     const skillContext = await this.discoverSkillsForInput(processedContent);
     const skillPrompt = applySkillsToPrompt(resolvedPrompt, skillContext.matches);
     const enabledTools = Array.from(new Set([...settings.enabledTools, ...skillContext.toolNames]));
+    const skillTools = enabledTools.filter((tool) => !settings.enabledTools.includes(tool));
+    const activeSkills = skillContext.matches.map((m) => ({
+      id: m.skill.id,
+      name: m.skill.name,
+      category: m.skill.category,
+      score: Number(m.score.toFixed(3)),
+      tools: [...(m.skill.toolNames ?? [])],
+    }));
 
     // Save user message
     const userMsgId = randomUUID();
@@ -759,9 +799,9 @@ export class ChatEngine {
         agentName: settings.mode === 'supervisor' ? 'geneweave-supervisor' : settings.mode === 'agent' ? 'geneweave-agent' : undefined,
         systemPrompt: memorySettings.systemPrompt || undefined,
         enabledTools: memorySettings.enabledTools.length ? memorySettings.enabledTools : undefined,
-        activeSkills: skillContext.matches.length
-          ? skillContext.matches.map((m) => ({ id: m.skill.id, name: m.skill.name, score: Number(m.score.toFixed(3)) }))
-          : undefined,
+        activeSkills: activeSkills.length ? activeSkills : undefined,
+        skillTools: skillTools.length ? skillTools : undefined,
+        skillPromptApplied: activeSkills.length > 0 ? true : undefined,
         redactionEnabled: settings.redactionEnabled || undefined,
         steps: steps ? steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })) : undefined,
         eval: evalInfo,
@@ -805,6 +845,10 @@ export class ChatEngine {
       cognitive: postGuardrail.cognitive,
       policyChecks,
       routingDecision: routingInfo,
+      activeSkills,
+      skillTools,
+      enabledTools: memorySettings.enabledTools,
+      skillPromptApplied: activeSkills.length > 0,
     };
   }
 
@@ -847,7 +891,7 @@ export class ChatEngine {
     const actor = await this.db.getUserById(userId);
     const userPersona = normalizePersona(actor?.persona, 'user');
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
-    const resolvedPrompt = await this.resolveSystemPrompt(settings);
+    const resolvedPrompt = this.withResponseCardFormatPolicy(await this.resolveSystemPrompt(settings));
     const traceId = randomUUID();
     const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
 
@@ -869,6 +913,14 @@ export class ChatEngine {
     const streamSkillContext = await this.discoverSkillsForInput(processedContent);
     const streamSkillPrompt = applySkillsToPrompt(resolvedPrompt, streamSkillContext.matches);
     const streamEnabledTools = Array.from(new Set([...settings.enabledTools, ...streamSkillContext.toolNames]));
+    const streamSkillTools = streamEnabledTools.filter((tool) => !settings.enabledTools.includes(tool));
+    const streamActiveSkills = streamSkillContext.matches.map((m) => ({
+      id: m.skill.id,
+      name: m.skill.name,
+      category: m.skill.category,
+      score: Number(m.score.toFixed(3)),
+      tools: [...(m.skill.toolNames ?? [])],
+    }));
 
     // Save user message
     const userMsgId = randomUUID();
@@ -1086,6 +1138,10 @@ export class ChatEngine {
       model: modelId,
       provider,
       mode: settings.mode,
+      activeSkills: streamActiveSkills,
+      skillTools: streamSkillTools,
+      enabledTools: streamMemorySettings.enabledTools,
+      skillPromptApplied: streamActiveSkills.length > 0,
       steps: steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })),
       cognitive: postGuardrail.cognitive,
       traceId,
@@ -1100,9 +1156,9 @@ export class ChatEngine {
         agentName: settings.mode === 'supervisor' ? 'geneweave-supervisor' : settings.mode === 'agent' ? 'geneweave-agent' : undefined,
         systemPrompt: streamMemorySettings.systemPrompt || undefined,
         enabledTools: streamMemorySettings.enabledTools.length ? streamMemorySettings.enabledTools : undefined,
-        activeSkills: streamSkillContext.matches.length
-          ? streamSkillContext.matches.map((m) => ({ id: m.skill.id, name: m.skill.name, score: Number(m.score.toFixed(3)) }))
-          : undefined,
+        activeSkills: streamActiveSkills.length ? streamActiveSkills : undefined,
+        skillTools: streamSkillTools.length ? streamSkillTools : undefined,
+        skillPromptApplied: streamActiveSkills.length > 0 ? true : undefined,
         redactionEnabled: settings.redactionEnabled || undefined,
         steps: steps.length ? steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })) : undefined,
         eval: evalInfo,
@@ -1339,8 +1395,10 @@ export class ChatEngine {
               'Require at least 3 concrete, computed insights from tool output.',
               '',
               SUPERVISOR_TEMPORAL_POLICY,
+              '',
+              RESPONSE_CARD_FORMAT_POLICY,
             ].join('\n')
-          : [SUPERVISOR_CODE_EXECUTION_POLICY, '', SUPERVISOR_TEMPORAL_POLICY].join('\n');
+          : [SUPERVISOR_CODE_EXECUTION_POLICY, '', SUPERVISOR_TEMPORAL_POLICY, '', RESPONSE_CARD_FORMAT_POLICY].join('\n');
 
         agent = weaveSupervisor({
           model,
@@ -1352,7 +1410,7 @@ export class ChatEngine {
           bus: agentBus,
         });
       } else {
-        const policyPrompt = this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools);
+        const policyPrompt = this.withResponseCardFormatPolicy(this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools));
         agent = weaveAgent({
           model,
           tools,
@@ -1486,8 +1544,10 @@ export class ChatEngine {
             'Require at least 3 concrete, computed insights from tool output.',
             '',
             SUPERVISOR_TEMPORAL_POLICY,
+            '',
+            RESPONSE_CARD_FORMAT_POLICY,
           ].join('\n')
-        : [SUPERVISOR_CODE_EXECUTION_POLICY, '', SUPERVISOR_TEMPORAL_POLICY].join('\n');
+        : [SUPERVISOR_CODE_EXECUTION_POLICY, '', SUPERVISOR_TEMPORAL_POLICY, '', RESPONSE_CARD_FORMAT_POLICY].join('\n');
       agent = weaveSupervisor({
         model,
         workers: allWorkers,
@@ -1498,14 +1558,13 @@ export class ChatEngine {
         bus: agentBus,
       });
     } else {
-      const policyPrompt = this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools);
+      const policyPrompt = this.withResponseCardFormatPolicy(this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools));
       agent = weaveAgent({
         model,
         tools,
         systemPrompt: policyPrompt,
         maxSteps: 15,
         name: 'geneweave-agent',
-        bus: agentBus,
       });
     }
 

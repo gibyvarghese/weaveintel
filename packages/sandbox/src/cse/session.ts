@@ -44,10 +44,16 @@ export class SessionManager {
   ): Promise<CSESession> {
     const affinityKey = this.affinityKey(userId, chatId);
     const existingId = this.affinityToSession.get(affinityKey);
+    const needsNetwork = config.networkAccess ?? false;
     if (existingId) {
       const session = this.sessions.get(existingId);
       if (session && session.status !== 'terminated' && session.status !== 'error') {
-        return session;
+        const supportsRequestedBrowser = !withBrowser || session.hasBrowser;
+        const supportsRequestedNetwork = !needsNetwork || session.networkAccess === true;
+        if (supportsRequestedBrowser && supportsRequestedNetwork) {
+          return session;
+        }
+        await this.terminateSession(existingId, provider, config);
       }
       // Stale entry — remove and create fresh
       this.sessions.delete(existingId);
