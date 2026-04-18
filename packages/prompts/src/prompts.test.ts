@@ -15,6 +15,7 @@ import {
   createPromptVersionFromRecord,
   renderPromptRecord,
   renderPromptVersion,
+  resolvePromptRecordForExecution,
   stringifyPromptVariables,
 } from '../src/index.js';
 import type { PromptDefinition, PromptExperiment, PromptVersion, TemplatePromptVersion } from '@weaveintel/core';
@@ -284,6 +285,103 @@ describe('InMemoryExperimentStore', () => {
   it('returns null for unknown experiment', async () => {
     const store = new InMemoryExperimentStore();
     expect(await store.pickVariant('unknown')).toBeNull();
+  });
+});
+
+// ─── Phase 5: Safe version resolution ───────────────────────
+
+describe('resolvePromptRecordForExecution', () => {
+  const baseRecord = {
+    id: 'prompt-abc',
+    key: 'support.reply',
+    name: 'Support Reply',
+    template: 'Base template',
+    version: '1.0',
+    status: 'published',
+  };
+
+  it('prefers requested version when present', () => {
+    const resolved = resolvePromptRecordForExecution({
+      prompt: baseRecord,
+      versions: [
+        { id: 'v1', prompt_id: 'prompt-abc', version: '1.0', status: 'published', template: 'v1', enabled: 1 },
+        { id: 'v2', prompt_id: 'prompt-abc', version: '2.0', status: 'published', template: 'v2', enabled: 1 },
+      ],
+      options: { requestedVersion: '2.0' },
+    });
+
+    expect(resolved.record.template).toBe('v2');
+    expect(resolved.meta.selectedBy).toBe('requested_version');
+    expect(resolved.meta.resolvedVersion).toBe('2.0');
+  });
+
+  it('uses active experiment variant deterministically', () => {
+    const resolvedA = resolvePromptRecordForExecution({
+      prompt: baseRecord,
+      versions: [
+        { id: 'v1', prompt_id: 'prompt-abc', version: '1.0', status: 'published', template: 'control', enabled: 1 },
+        { id: 'v2', prompt_id: 'prompt-abc', version: '1.1', status: 'published', template: 'candidate', enabled: 1 },
+      ],
+      experiments: [
+        {
+          id: 'exp-1',
+          prompt_id: 'prompt-abc',
+          status: 'active',
+          enabled: 1,
+          variants_json: JSON.stringify([
+            { version: '1.0', weight: 50, label: 'control' },
+            { version: '1.1', weight: 50, label: 'candidate' },
+          ]),
+        },
+      ],
+      options: { assignmentKey: 'tenant-42' },
+    });
+
+    const resolvedB = resolvePromptRecordForExecution({
+      prompt: baseRecord,
+      versions: [
+        { id: 'v1', prompt_id: 'prompt-abc', version: '1.0', status: 'published', template: 'control', enabled: 1 },
+        { id: 'v2', prompt_id: 'prompt-abc', version: '1.1', status: 'published', template: 'candidate', enabled: 1 },
+      ],
+      experiments: [
+        {
+          id: 'exp-1',
+          prompt_id: 'prompt-abc',
+          status: 'active',
+          enabled: 1,
+          variants_json: JSON.stringify([
+            { version: '1.0', weight: 50, label: 'control' },
+            { version: '1.1', weight: 50, label: 'candidate' },
+          ]),
+        },
+      ],
+      options: { assignmentKey: 'tenant-42' },
+    });
+
+    expect(resolvedA.meta.selectedBy).toBe('experiment');
+    expect(resolvedA.record.template).toBe(resolvedB.record.template);
+  });
+
+  it('falls back to active published version then latest published', () => {
+    const active = resolvePromptRecordForExecution({
+      prompt: baseRecord,
+      versions: [
+        { id: 'v1', prompt_id: 'prompt-abc', version: '1.0', status: 'published', template: 'v1', enabled: 1 },
+        { id: 'v2', prompt_id: 'prompt-abc', version: '2.0', status: 'published', template: 'v2', is_active: 1, enabled: 1 },
+      ],
+    });
+    expect(active.record.template).toBe('v2');
+    expect(active.meta.selectedBy).toBe('active_flag');
+
+    const latest = resolvePromptRecordForExecution({
+      prompt: baseRecord,
+      versions: [
+        { id: 'v1', prompt_id: 'prompt-abc', version: '1.2', status: 'published', template: 'v1.2', enabled: 1 },
+        { id: 'v2', prompt_id: 'prompt-abc', version: '1.10', status: 'published', template: 'v1.10', enabled: 1 },
+      ],
+    });
+    expect(latest.record.template).toBe('v1.10');
+    expect(latest.meta.selectedBy).toBe('latest_published');
   });
 });
 

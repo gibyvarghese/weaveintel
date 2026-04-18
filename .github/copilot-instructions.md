@@ -86,3 +86,24 @@
 - Start with `defaultPromptStrategyRegistry`, then layer DB-defined strategies for app/tenant-specific behavior.
 - GeneWeave DB: `prompt_strategies` table; admin CRUD at `/api/admin/prompt-strategies`.
 
+## Phase 5 Prompt Capabilities (`@weaveintel/prompts` + GeneWeave)
+
+### Prompt Version & Experiment Resolution (Grounding Runtime)
+- Use `resolvePromptRecordForExecution()` as the shared package-level resolver for runtime prompt selection.
+- Resolution order is deterministic and must remain package-owned: requested version override → active experiment weighted variant → active published version → latest published version → base prompt fallback.
+- Keep runtime safe during partial migrations: if version or experiment tables are empty/unavailable, fallback to base prompt behavior without failing request execution.
+- Avoid app-local branching for version picking in GeneWeave; apps should pass DB rows to shared resolver and consume returned `{ record, meta }`.
+
+### DB-Driven Configuration Requirements
+- Keep prompt lifecycle and rollout controls in DB records, not hardcoded conditionals.
+- GeneWeave DB tables for Phase 5: `prompt_versions` and `prompt_experiments`.
+- Admin CRUD must stay aligned with schema and runtime contracts for both entities.
+
+### Observability & Evaluation Expectations
+- Capture prompt resolution metadata (`source`, `resolvedVersion`, `selectedBy`, experiment metadata) in runtime message metadata for audits and evaluation traces.
+- Preserve shared execution metadata from strategy/contract/evaluation hooks so prompt behavior is explainable after the fact.
+
+### LLM-Callable Metadata Quality
+- Prompt version descriptions, experiment descriptions, and variant labels should be explicit and model-facing when they influence runtime behavior.
+- Prefer structured metadata fields over freeform text for fields consumed by routing/selection logic.
+

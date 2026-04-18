@@ -438,6 +438,144 @@ export function registerAdminRoutes(
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
+  // ── Admin: Prompt Versions (Phase 5) ─────────────────────
+
+  router.get('/api/admin/prompt-versions', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const promptId = url.searchParams.get('prompt_id') ?? undefined;
+    const versions = await db.listPromptVersions(promptId);
+    json(res, 200, { versions });
+  });
+
+  router.get('/api/admin/prompt-versions/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const version = await db.getPromptVersion(params['id']!);
+    if (!version) { json(res, 404, { error: 'Prompt version not found' }); return; }
+    json(res, 200, { version });
+  });
+
+  router.post('/api/admin/prompt-versions', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['prompt_id'] || !body['version'] || !body['template']) {
+      json(res, 400, { error: 'prompt_id, version, and template required' }); return;
+    }
+    const id = 'prompt-version-' + randomUUID().slice(0, 8);
+    await db.createPromptVersion({
+      id,
+      prompt_id: body['prompt_id'] as string,
+      version: body['version'] as string,
+      status: (body['status'] as string) ?? 'draft',
+      template: body['template'] as string,
+      variables: normalizePromptVariables(body['variables']),
+      model_compatibility: normalizeJsonField(body['model_compatibility']),
+      execution_defaults: normalizeJsonField(body['execution_defaults']),
+      framework: normalizeJsonField(body['framework']),
+      metadata: normalizeJsonField(body['metadata']),
+      is_active: body['is_active'] ? 1 : 0,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const version = await db.getPromptVersion(id);
+    json(res, 201, { version });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/prompt-versions/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getPromptVersion(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Prompt version not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['version'] !== undefined) fields['version'] = body['version'];
+    if (body['status'] !== undefined) fields['status'] = body['status'];
+    if (body['template'] !== undefined) fields['template'] = body['template'];
+    if (body['variables'] !== undefined) fields['variables'] = normalizePromptVariables(body['variables']);
+    if (body['model_compatibility'] !== undefined) fields['model_compatibility'] = normalizeJsonField(body['model_compatibility']);
+    if (body['execution_defaults'] !== undefined) fields['execution_defaults'] = normalizeJsonField(body['execution_defaults']);
+    if (body['framework'] !== undefined) fields['framework'] = normalizeJsonField(body['framework']);
+    if (body['metadata'] !== undefined) fields['metadata'] = normalizeJsonField(body['metadata']);
+    if (body['is_active'] !== undefined) fields['is_active'] = body['is_active'] ? 1 : 0;
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updatePromptVersion(params['id']!, fields as any);
+    const version = await db.getPromptVersion(params['id']!);
+    json(res, 200, { version });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/prompt-versions/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deletePromptVersion(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Prompt Experiments (Phase 5) ───────────────────
+
+  router.get('/api/admin/prompt-experiments', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const promptId = url.searchParams.get('prompt_id') ?? undefined;
+    const experiments = await db.listPromptExperiments(promptId);
+    json(res, 200, { experiments });
+  });
+
+  router.get('/api/admin/prompt-experiments/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const experiment = await db.getPromptExperiment(params['id']!);
+    if (!experiment) { json(res, 404, { error: 'Prompt experiment not found' }); return; }
+    json(res, 200, { experiment });
+  });
+
+  router.post('/api/admin/prompt-experiments', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['prompt_id'] || !body['name'] || !body['variants_json']) {
+      json(res, 400, { error: 'prompt_id, name, and variants_json required' }); return;
+    }
+    const id = 'prompt-exp-' + randomUUID().slice(0, 8);
+    await db.createPromptExperiment({
+      id,
+      prompt_id: body['prompt_id'] as string,
+      name: body['name'] as string,
+      description: (body['description'] as string) ?? null,
+      status: (body['status'] as string) ?? 'draft',
+      variants_json: typeof body['variants_json'] === 'string' ? body['variants_json'] : JSON.stringify(body['variants_json']),
+      assignment_key_template: (body['assignment_key_template'] as string) ?? null,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const experiment = await db.getPromptExperiment(id);
+    json(res, 201, { experiment });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/prompt-experiments/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getPromptExperiment(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Prompt experiment not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['status'] !== undefined) fields['status'] = body['status'];
+    if (body['variants_json'] !== undefined) fields['variants_json'] = typeof body['variants_json'] === 'string' ? body['variants_json'] : JSON.stringify(body['variants_json']);
+    if (body['assignment_key_template'] !== undefined) fields['assignment_key_template'] = body['assignment_key_template'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updatePromptExperiment(params['id']!, fields as any);
+    const experiment = await db.getPromptExperiment(params['id']!);
+    json(res, 200, { experiment });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/prompt-experiments/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deletePromptExperiment(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
   // ── Admin: Guardrails ──────────────────────────────────────
 
   router.get('/api/admin/guardrails', async (_req, res, _params, auth) => {

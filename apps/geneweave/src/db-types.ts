@@ -260,6 +260,43 @@ export interface PromptStrategyRow {
   updated_at: string;
 }
 
+/**
+ * Prompt version rows for lifecycle-safe resolution. This separates mutable
+ * prompt metadata from concrete version payloads used at runtime.
+ */
+export interface PromptVersionRow {
+  id: string;
+  prompt_id: string;
+  version: string;
+  status: string;                // draft | published | retired
+  template: string;
+  variables: string | null;      // JSON PromptVariable[]
+  model_compatibility: string | null;
+  execution_defaults: string | null;
+  framework: string | null;
+  metadata: string | null;
+  is_active: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Prompt experiment rows used for deterministic variant assignment.
+ */
+export interface PromptExperimentRow {
+  id: string;
+  prompt_id: string;
+  name: string;
+  description: string | null;
+  status: string;                // draft | active | completed
+  variants_json: string;         // JSON: [{ version, weight, label? }]
+  assignment_key_template: string | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface GuardrailRow {
   id: string;
   name: string;
@@ -1048,9 +1085,24 @@ export interface DatabaseAdapter {
   // ─── Admin: Prompts ────────────────────────────────────────
   createPrompt(p: Omit<PromptRow, 'created_at' | 'updated_at'>): Promise<void>;
   getPrompt(id: string): Promise<PromptRow | null>;
+  getPromptByName(name: string): Promise<PromptRow | null>;
   listPrompts(): Promise<PromptRow[]>;
   updatePrompt(id: string, fields: Partial<Omit<PromptRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deletePrompt(id: string): Promise<void>;
+
+  // ─── Admin: Prompt Versions (Phase 5) ─────────────────────
+  createPromptVersion(v: Omit<PromptVersionRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getPromptVersion(id: string): Promise<PromptVersionRow | null>;
+  listPromptVersions(promptId?: string): Promise<PromptVersionRow[]>;
+  updatePromptVersion(id: string, fields: Partial<Omit<PromptVersionRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deletePromptVersion(id: string): Promise<void>;
+
+  // ─── Admin: Prompt Experiments (Phase 5) ──────────────────
+  createPromptExperiment(e: Omit<PromptExperimentRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getPromptExperiment(id: string): Promise<PromptExperimentRow | null>;
+  listPromptExperiments(promptId?: string): Promise<PromptExperimentRow[]>;
+  updatePromptExperiment(id: string, fields: Partial<Omit<PromptExperimentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deletePromptExperiment(id: string): Promise<void>;
 
   // ─── Admin: Prompt Frameworks (Phase 2) ───────────────────
   createPromptFramework(f: Omit<PromptFrameworkRow, 'created_at' | 'updated_at'>): Promise<void>;

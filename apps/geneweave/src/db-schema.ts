@@ -233,6 +233,37 @@ CREATE TABLE IF NOT EXISTS prompt_strategies (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS prompt_versions (
+  id TEXT PRIMARY KEY,
+  prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+  version TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft',
+  template TEXT NOT NULL,
+  variables TEXT,
+  model_compatibility TEXT,
+  execution_defaults TEXT,
+  framework TEXT,
+  metadata TEXT,
+  is_active INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(prompt_id, version)
+);
+
+CREATE TABLE IF NOT EXISTS prompt_experiments (
+  id TEXT PRIMARY KEY,
+  prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  variants_json TEXT NOT NULL DEFAULT '[]',
+  assignment_key_template TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS guardrails (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

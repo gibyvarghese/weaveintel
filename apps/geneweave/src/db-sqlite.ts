@@ -14,6 +14,7 @@ import type {
   MetricRow, EvalRow, ChatSettingsRow, TraceRow, UserPreferencesRow,
   TemporalTimerRow, TemporalStopwatchRow, TemporalReminderRow,
   PromptRow, PromptFrameworkRow, PromptFragmentRow, PromptContractRow, PromptStrategyRow,
+  PromptVersionRow, PromptExperimentRow,
   GuardrailRow, RoutingPolicyRow, WorkflowDefRow,
   ToolConfigRow, SkillRow, WorkerAgentRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
   IdentityRuleRow, MemoryGovernanceRow, SearchProviderRow, HttpEndpointRow,
@@ -96,6 +97,72 @@ export class SQLiteAdapter implements DatabaseAdapter {
         instruction_prefix TEXT,
         instruction_suffix TEXT,
         config TEXT NOT NULL DEFAULT '{}',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    } catch { /* ignore */ }
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS prompt_versions (
+        id TEXT PRIMARY KEY,
+        prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+        version TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft',
+        template TEXT NOT NULL,
+        variables TEXT,
+        model_compatibility TEXT,
+        execution_defaults TEXT,
+        framework TEXT,
+        metadata TEXT,
+        is_active INTEGER NOT NULL DEFAULT 0,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(prompt_id, version)
+      )`);
+    } catch { /* ignore */ }
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS prompt_experiments (
+        id TEXT PRIMARY KEY,
+        prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'draft',
+        variants_json TEXT NOT NULL DEFAULT '[]',
+        assignment_key_template TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    } catch { /* ignore */ }
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS prompt_versions (
+        id TEXT PRIMARY KEY,
+        prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+        version TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'draft',
+        template TEXT NOT NULL,
+        variables TEXT,
+        model_compatibility TEXT,
+        execution_defaults TEXT,
+        framework TEXT,
+        metadata TEXT,
+        is_active INTEGER NOT NULL DEFAULT 0,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE(prompt_id, version)
+      )`);
+    } catch { /* ignore */ }
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS prompt_experiments (
+        id TEXT PRIMARY KEY,
+        prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'draft',
+        variants_json TEXT NOT NULL DEFAULT '[]',
+        assignment_key_template TEXT,
         enabled INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -668,6 +735,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return (this.d.prepare('SELECT * FROM prompts WHERE id = ?').get(id) as PromptRow) ?? null;
   }
 
+  async getPromptByName(name: string): Promise<PromptRow | null> {
+    return (this.d.prepare('SELECT * FROM prompts WHERE name = ?').get(name) as PromptRow) ?? null;
+  }
+
   async listPrompts(): Promise<PromptRow[]> {
     return this.d.prepare('SELECT * FROM prompts ORDER BY name ASC').all() as PromptRow[];
   }
@@ -687,6 +758,110 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deletePrompt(id: string): Promise<void> {
     this.d.prepare('DELETE FROM prompts WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Prompt Versions (Phase 5) ─────────────────────
+
+  async createPromptVersion(v: Omit<PromptVersionRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO prompt_versions (id, prompt_id, version, status, template, variables, model_compatibility, execution_defaults, framework, metadata, is_active, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      v.id,
+      v.prompt_id,
+      v.version,
+      v.status,
+      v.template,
+      v.variables ?? null,
+      v.model_compatibility ?? null,
+      v.execution_defaults ?? null,
+      v.framework ?? null,
+      v.metadata ?? null,
+      v.is_active,
+      v.enabled,
+    );
+    if (v.is_active) {
+      this.d.prepare(`UPDATE prompt_versions SET is_active = 0, updated_at = datetime('now') WHERE prompt_id = ? AND id <> ?`).run(v.prompt_id, v.id);
+    }
+  }
+
+  async getPromptVersion(id: string): Promise<PromptVersionRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_versions WHERE id = ?').get(id) as PromptVersionRow) ?? null;
+  }
+
+  async listPromptVersions(promptId?: string): Promise<PromptVersionRow[]> {
+    if (promptId) {
+      return this.d.prepare('SELECT * FROM prompt_versions WHERE prompt_id = ? ORDER BY created_at DESC').all(promptId) as PromptVersionRow[];
+    }
+    return this.d.prepare('SELECT * FROM prompt_versions ORDER BY created_at DESC').all() as PromptVersionRow[];
+  }
+
+  async updatePromptVersion(id: string, fields: Partial<Omit<PromptVersionRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const existing = await this.getPromptVersion(id);
+    if (!existing) return;
+
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE prompt_versions SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+
+    if (fields['is_active']) {
+      this.d.prepare(`UPDATE prompt_versions SET is_active = 0, updated_at = datetime('now') WHERE prompt_id = ? AND id <> ?`).run(existing.prompt_id, id);
+    }
+  }
+
+  async deletePromptVersion(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM prompt_versions WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Prompt Experiments (Phase 5) ──────────────────
+
+  async createPromptExperiment(e: Omit<PromptExperimentRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO prompt_experiments (id, prompt_id, name, description, status, variants_json, assignment_key_template, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      e.id,
+      e.prompt_id,
+      e.name,
+      e.description ?? null,
+      e.status,
+      e.variants_json,
+      e.assignment_key_template ?? null,
+      e.enabled,
+    );
+  }
+
+  async getPromptExperiment(id: string): Promise<PromptExperimentRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_experiments WHERE id = ?').get(id) as PromptExperimentRow) ?? null;
+  }
+
+  async listPromptExperiments(promptId?: string): Promise<PromptExperimentRow[]> {
+    if (promptId) {
+      return this.d.prepare('SELECT * FROM prompt_experiments WHERE prompt_id = ? ORDER BY created_at DESC').all(promptId) as PromptExperimentRow[];
+    }
+    return this.d.prepare('SELECT * FROM prompt_experiments ORDER BY created_at DESC').all() as PromptExperimentRow[];
+  }
+
+  async updatePromptExperiment(id: string, fields: Partial<Omit<PromptExperimentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE prompt_experiments SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deletePromptExperiment(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM prompt_experiments WHERE id = ?').run(id);
   }
 
   // ─── Admin: Prompt Frameworks (Phase 2) ───────────────────

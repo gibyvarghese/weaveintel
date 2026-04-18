@@ -141,3 +141,14 @@ export {
   type StructuredContract,
   type ContractRegistry,
 } from './contracts.js';
+
+// ─── Phase 5: Persistence-safe resolution ───────────────────
+// Deterministic runtime selection of active versions and experiments.
+export {
+  resolvePromptRecordForExecution,
+  type PromptVersionRecordLike,
+  type PromptExperimentRecordLike,
+  type PromptExperimentVariant,
+  type PromptResolutionOptions,
+  type ResolvedPromptRecord,
+} from './phase5.js';

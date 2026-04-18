@@ -49,6 +49,7 @@ import {
   fragmentFromRecord,
   strategyFromRecord,
   defaultPromptStrategyRegistry,
+  resolvePromptRecordForExecution,
   contractFromRecord,
   validateContract,
   InMemoryContractRegistry,
@@ -291,6 +292,13 @@ interface PromptStrategyInfo {
 interface ResolvedSystemPrompt {
   content?: string;
   strategy?: PromptStrategyInfo;
+  resolution?: {
+    source: 'base_prompt' | 'prompt_version';
+    resolvedVersion: string;
+    selectedBy: 'requested_version' | 'experiment' | 'active_flag' | 'latest_published' | 'base_prompt';
+    experimentId?: string;
+    experimentVariantLabel?: string;
+  };
 }
 
 // Fallback pricing used when DB lookup yields nothing (keeps system functional during cold start)
@@ -957,6 +965,13 @@ export class ChatEngine {
     skillPromptApplied?: boolean;
     contracts?: PromptContractValidationReport;
     promptStrategy?: PromptStrategyInfo;
+    promptResolution?: {
+      source: 'base_prompt' | 'prompt_version';
+      resolvedVersion: string;
+      selectedBy: 'requested_version' | 'experiment' | 'active_flag' | 'latest_published' | 'base_prompt';
+      experimentId?: string;
+      experimentVariantLabel?: string;
+    };
   }> {
     let provider = opts?.provider ?? this.config.defaultProvider;
     let modelId = opts?.model ?? this.config.defaultModel;
@@ -1228,6 +1243,7 @@ export class ChatEngine {
         policyChecks: policyChecks?.length ? policyChecks : undefined,
         promptContracts: contractInfo,
         promptStrategy: resolvedSystemPrompt.strategy,
+        promptResolution: resolvedSystemPrompt.resolution,
         traceId,
       }),
       tokensUsed: usage.totalTokens,
@@ -1271,6 +1287,7 @@ export class ChatEngine {
       skillPromptApplied: activeSkills.length > 0,
       contracts: contractInfo,
       promptStrategy: resolvedSystemPrompt.strategy,
+      promptResolution: resolvedSystemPrompt.resolution,
     };
   }
 
@@ -1575,6 +1592,7 @@ export class ChatEngine {
       cognitive: postGuardrail.cognitive,
       contracts: streamContractInfo,
       promptStrategy: resolvedSystemPrompt.strategy,
+      promptResolution: resolvedSystemPrompt.resolution,
       traceId,
     })}\n\n`);
 
@@ -1598,6 +1616,7 @@ export class ChatEngine {
         policyChecks: policyChecks?.length ? policyChecks : undefined,
         promptContracts: streamContractInfo,
         promptStrategy: resolvedSystemPrompt.strategy,
+        promptResolution: resolvedSystemPrompt.resolution,
         traceId,
       }),
       tokensUsed: finalUsage.totalTokens, cost, latencyMs,
@@ -2802,8 +2821,19 @@ export class ChatEngine {
         r => r.enabled && (r.id === settings.systemPrompt || r.name === settings.systemPrompt),
       );
       if (match) {
+        const versions = await this.db.listPromptVersions(match.id);
+        const experiments = await this.db.listPromptExperiments(match.id);
+        const resolved = resolvePromptRecordForExecution({
+          prompt: match,
+          versions,
+          experiments,
+          options: {
+            assignmentKey: match.id,
+          },
+        });
+
         const vars: Record<string, unknown> = {};
-        const promptVersion = createPromptVersionFromRecord(match);
+        const promptVersion = createPromptVersionFromRecord(resolved.record);
         if ('variables' in promptVersion) {
           for (const variable of promptVersion.variables) {
             vars[variable.name] = variable.defaultValue ?? `[${variable.name}]`;
@@ -2814,7 +2844,7 @@ export class ChatEngine {
         // {{>key}} inclusions in the template before passing to renderPromptRecord.
         // This lets prompt authors compose templates from reusable fragment blocks
         // without requiring any change to the base rendering pipeline.
-        let resolvedMatch = match;
+        let resolvedMatch = resolved.record;
         try {
           const fragmentRows = await this.db.listPromptFragments();
           const enabledFragments = fragmentRows.filter(f => f.enabled);
@@ -2823,10 +2853,11 @@ export class ChatEngine {
             for (const row of enabledFragments) {
               fragmentRegistry.register(fragmentFromRecord(row));
             }
-            const expandedTemplate = resolveFragments(match.template, fragmentRegistry);
-            if (expandedTemplate !== match.template) {
+            const baseTemplate = resolved.record.template ?? '';
+            const expandedTemplate = resolveFragments(baseTemplate, fragmentRegistry);
+            if (expandedTemplate !== baseTemplate) {
               // Create a shallow copy with the expanded template for rendering
-              resolvedMatch = { ...match, template: expandedTemplate };
+              resolvedMatch = { ...resolved.record, template: expandedTemplate };
             }
           }
         } catch {
@@ -2864,6 +2895,7 @@ export class ChatEngine {
         return {
           content: executed.content,
           strategy: this.toPromptStrategyInfo(executed),
+          resolution: resolved.meta,
         };
       }
     } catch {
