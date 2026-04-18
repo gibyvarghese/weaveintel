@@ -1,5 +1,5 @@
 // Authentication related functions
-import { api } from './api.js';
+import { api, loadChats, loadModels, loadTools, loadUserPreferences } from './api.js';
 import { state } from './state.js';
 import { h } from './dom.js';
 
@@ -158,27 +158,12 @@ export async function initiateOAuthFlow(provider: string) {
 
 async function loadChatsAfterAuth() {
   try {
-    const r = await api.get('/chats');
-    const data = await r.json();
-    state.chats = data.chats || [];
     state.view = 'chat';
     state.authMode = 'login';
     state.authError = '';
 
-    if (state.chats.length && !state.currentChatId) {
-      state.currentChatId = state.chats[0].id;
-    }
-
-    // Load other data
-    const modelsR = await api.get('/models');
-    state.models = (await modelsR.json()).models || [];
-
-    const toolsR = await api.get('/tools');
-    state.tools = (await toolsR.json()).tools || [];
-
-    const prefsR = await api.get('/user/preferences');
-    const prefs = await prefsR.json();
-    if (prefs.preferences?.theme) state.theme = prefs.preferences.theme;
+    await loadChats();
+    await Promise.all([loadModels(), loadTools(), loadUserPreferences()]);
   } catch (e) {
     console.error('Failed to load after auth:', e);
   }

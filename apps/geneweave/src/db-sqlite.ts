@@ -6,14 +6,16 @@
 
 import { randomUUID } from 'node:crypto';
 import { SCHEMA_SQL } from './db-schema.js';
+import { stringifyPromptVariables } from '@weaveintel/prompts';
 import { BUILT_IN_SKILLS } from '@weaveintel/skills';
 import type {
   DatabaseAdapter, DatabaseConfig,
   UserRow, SessionRow, ChatRow, MessageRow,
   MetricRow, EvalRow, ChatSettingsRow, TraceRow, UserPreferencesRow,
   TemporalTimerRow, TemporalStopwatchRow, TemporalReminderRow,
-  PromptRow, GuardrailRow, RoutingPolicyRow, WorkflowDefRow,
-  ToolConfigRow, SkillRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
+  PromptRow, PromptFrameworkRow, PromptFragmentRow, PromptContractRow, PromptStrategyRow,
+  GuardrailRow, RoutingPolicyRow, WorkflowDefRow,
+  ToolConfigRow, SkillRow, WorkerAgentRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
   IdentityRuleRow, MemoryGovernanceRow, SearchProviderRow, HttpEndpointRow,
   MemoryExtractionRuleRow,
   SocialAccountRow, EnterpriseConnectorRow, ToolRegistryRow, ReplayScenarioRow,
@@ -58,6 +60,47 @@ export class SQLiteAdapter implements DatabaseAdapter {
     } catch {
       // Ignore when the column already exists.
     }
+    try {
+      this.db.exec('ALTER TABLE prompts ADD COLUMN key TEXT');
+    } catch { /* ignore */ }
+    try {
+      this.db.exec("ALTER TABLE prompts ADD COLUMN prompt_type TEXT NOT NULL DEFAULT 'template'");
+    } catch { /* ignore */ }
+    try {
+      this.db.exec('ALTER TABLE prompts ADD COLUMN owner TEXT');
+    } catch { /* ignore */ }
+    try {
+      this.db.exec("ALTER TABLE prompts ADD COLUMN status TEXT NOT NULL DEFAULT 'published'");
+    } catch { /* ignore */ }
+    try {
+      this.db.exec('ALTER TABLE prompts ADD COLUMN tags TEXT');
+    } catch { /* ignore */ }
+    try {
+      this.db.exec('ALTER TABLE prompts ADD COLUMN model_compatibility TEXT');
+    } catch { /* ignore */ }
+    try {
+      this.db.exec('ALTER TABLE prompts ADD COLUMN execution_defaults TEXT');
+    } catch { /* ignore */ }
+    try {
+      this.db.exec('ALTER TABLE prompts ADD COLUMN framework TEXT');
+    } catch { /* ignore */ }
+    try {
+      this.db.exec('ALTER TABLE prompts ADD COLUMN metadata TEXT');
+    } catch { /* ignore */ }
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS prompt_strategies (
+        id TEXT PRIMARY KEY,
+        key TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        description TEXT,
+        instruction_prefix TEXT,
+        instruction_suffix TEXT,
+        config TEXT NOT NULL DEFAULT '{}',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    } catch { /* ignore */ }
     // Migrations for semantic and entity memory tables (added later, safe to run on new or old DBs)
     try {
       this.db.exec(`CREATE TABLE IF NOT EXISTS semantic_memory (
@@ -598,8 +641,27 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createPrompt(p: Omit<PromptRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO prompts (id, name, description, category, template, variables, version, is_default, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(p.id, p.name, p.description ?? null, p.category ?? null, p.template, p.variables ?? null, p.version, p.is_default, p.enabled);
+      `INSERT INTO prompts (id, key, name, description, category, prompt_type, owner, status, tags, template, variables, version, model_compatibility, execution_defaults, framework, metadata, is_default, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      p.id,
+      p.key ?? null,
+      p.name,
+      p.description ?? null,
+      p.category ?? null,
+      p.prompt_type,
+      p.owner ?? null,
+      p.status,
+      p.tags ?? null,
+      p.template,
+      p.variables ?? null,
+      p.version,
+      p.model_compatibility ?? null,
+      p.execution_defaults ?? null,
+      p.framework ?? null,
+      p.metadata ?? null,
+      p.is_default,
+      p.enabled,
+    );
   }
 
   async getPrompt(id: string): Promise<PromptRow | null> {
@@ -625,6 +687,154 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deletePrompt(id: string): Promise<void> {
     this.d.prepare('DELETE FROM prompts WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Prompt Frameworks (Phase 2) ───────────────────
+
+  async createPromptFramework(f: Omit<PromptFrameworkRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO prompt_frameworks (id, key, name, description, sections, section_separator, enabled) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(f.id, f.key, f.name, f.description ?? null, f.sections, f.section_separator, f.enabled);
+  }
+
+  async getPromptFramework(id: string): Promise<PromptFrameworkRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_frameworks WHERE id = ?').get(id) as PromptFrameworkRow) ?? null;
+  }
+
+  async getPromptFrameworkByKey(key: string): Promise<PromptFrameworkRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_frameworks WHERE key = ?').get(key) as PromptFrameworkRow) ?? null;
+  }
+
+  async listPromptFrameworks(): Promise<PromptFrameworkRow[]> {
+    return this.d.prepare('SELECT * FROM prompt_frameworks ORDER BY name ASC').all() as PromptFrameworkRow[];
+  }
+
+  async updatePromptFramework(id: string, fields: Partial<Omit<PromptFrameworkRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE prompt_frameworks SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deletePromptFramework(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM prompt_frameworks WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Prompt Fragments (Phase 2) ────────────────────
+
+  async createPromptFragment(f: Omit<PromptFragmentRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO prompt_fragments (id, key, name, description, category, content, variables, tags, version, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(f.id, f.key, f.name, f.description ?? null, f.category ?? null, f.content, f.variables ?? null, f.tags ?? null, f.version, f.enabled);
+  }
+
+  async getPromptFragment(id: string): Promise<PromptFragmentRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_fragments WHERE id = ?').get(id) as PromptFragmentRow) ?? null;
+  }
+
+  async getPromptFragmentByKey(key: string): Promise<PromptFragmentRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_fragments WHERE key = ?').get(key) as PromptFragmentRow) ?? null;
+  }
+
+  async listPromptFragments(): Promise<PromptFragmentRow[]> {
+    return this.d.prepare('SELECT * FROM prompt_fragments ORDER BY name ASC').all() as PromptFragmentRow[];
+  }
+
+  async updatePromptFragment(id: string, fields: Partial<Omit<PromptFragmentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE prompt_fragments SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deletePromptFragment(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM prompt_fragments WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Prompt Contracts ───────────────────────────────
+
+  async createPromptContract(c: Omit<PromptContractRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO prompt_contracts (id, key, name, description, contract_type, schema, config, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(c.id, c.key, c.name, c.description ?? null, c.contract_type, c.schema ?? null, c.config, c.enabled);
+  }
+
+  async getPromptContract(id: string): Promise<PromptContractRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_contracts WHERE id = ?').get(id) as PromptContractRow) ?? null;
+  }
+
+  async getPromptContractByKey(key: string): Promise<PromptContractRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_contracts WHERE key = ?').get(key) as PromptContractRow) ?? null;
+  }
+
+  async listPromptContracts(): Promise<PromptContractRow[]> {
+    return this.d.prepare('SELECT * FROM prompt_contracts ORDER BY name ASC').all() as PromptContractRow[];
+  }
+
+  async updatePromptContract(id: string, fields: Partial<Omit<PromptContractRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE prompt_contracts SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deletePromptContract(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM prompt_contracts WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Prompt Strategies (Phase 4) ───────────────────
+
+  async createPromptStrategy(s: Omit<PromptStrategyRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO prompt_strategies (id, key, name, description, instruction_prefix, instruction_suffix, config, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(s.id, s.key, s.name, s.description ?? null, s.instruction_prefix ?? null, s.instruction_suffix ?? null, s.config, s.enabled);
+  }
+
+  async getPromptStrategy(id: string): Promise<PromptStrategyRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_strategies WHERE id = ?').get(id) as PromptStrategyRow) ?? null;
+  }
+
+  async getPromptStrategyByKey(key: string): Promise<PromptStrategyRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_strategies WHERE key = ?').get(key) as PromptStrategyRow) ?? null;
+  }
+
+  async listPromptStrategies(): Promise<PromptStrategyRow[]> {
+    return this.d.prepare('SELECT * FROM prompt_strategies ORDER BY name ASC').all() as PromptStrategyRow[];
+  }
+
+  async updatePromptStrategy(id: string, fields: Partial<Omit<PromptStrategyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE prompt_strategies SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deletePromptStrategy(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM prompt_strategies WHERE id = ?').run(id);
   }
 
   // ─── Admin: Guardrails ─────────────────────────────────────
@@ -855,6 +1065,55 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteSkill(id: string): Promise<void> {
     this.d.prepare('DELETE FROM skills WHERE id = ?').run(id);
+  }
+
+  // ─── Worker Agents ─────────────────────────────────────────
+
+  async createWorkerAgent(w: Omit<WorkerAgentRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO worker_agents (id, name, description, system_prompt, tool_names, persona, trigger_patterns, task_contract_id, max_retries, priority, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      w.id,
+      w.name,
+      w.description,
+      w.system_prompt,
+      w.tool_names,
+      w.persona,
+      w.trigger_patterns ?? null,
+      w.task_contract_id ?? null,
+      w.max_retries,
+      w.priority,
+      w.enabled,
+    );
+  }
+
+  async getWorkerAgent(id: string): Promise<WorkerAgentRow | null> {
+    return (this.d.prepare('SELECT * FROM worker_agents WHERE id = ?').get(id) as WorkerAgentRow | undefined) ?? null;
+  }
+
+  async listWorkerAgents(): Promise<WorkerAgentRow[]> {
+    return this.d.prepare('SELECT * FROM worker_agents ORDER BY priority DESC, name ASC').all() as WorkerAgentRow[];
+  }
+
+  async listEnabledWorkerAgents(): Promise<WorkerAgentRow[]> {
+    return this.d.prepare('SELECT * FROM worker_agents WHERE enabled = 1 ORDER BY priority DESC, name ASC').all() as WorkerAgentRow[];
+  }
+
+  async updateWorkerAgent(id: string, fields: Partial<Omit<WorkerAgentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE worker_agents SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteWorkerAgent(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM worker_agents WHERE id = ?').run(id);
   }
 
   // ─── Workflow Runs ─────────────────────────────────────────
@@ -2023,30 +2282,326 @@ export class SQLiteAdapter implements DatabaseAdapter {
     const cnt = (tbl: string) => (this.d.prepare(`SELECT COUNT(*) as cnt FROM ${tbl}`).get() as { cnt: number }).cnt;
 
     // Prompts
-    if (cnt('prompts') === 0) {
     const prompts: Omit<PromptRow, 'created_at' | 'updated_at'>[] = [
       {
         id: 'prompt-general-assistant', name: 'General Assistant', description: 'Default conversational assistant prompt',
-        category: 'general', template: 'You are a helpful, accurate, and concise AI assistant. Answer the user\'s questions clearly and provide relevant details when asked.',
-        variables: null, version: '1.0', is_default: 1, enabled: 1,
+        key: 'assistant.general', category: 'general', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['assistant', 'general']), template: 'You are a helpful, accurate, and concise AI assistant. Answer the user\'s questions clearly and provide relevant details when asked.',
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', explanationStyle: 'standard' }), framework: null, metadata: null, is_default: 1, enabled: 1,
       },
       {
         id: 'prompt-code-reviewer', name: 'Code Review Expert', description: 'Technical code review prompt with best practices',
-        category: 'engineering', template: 'You are an expert code reviewer. Analyze code for bugs, security issues, performance problems, and style. Provide actionable suggestions with explanations. Focus on: {{focus_areas}}',
-        variables: JSON.stringify(['focus_areas']), version: '1.0', is_default: 0, enabled: 1,
+        key: 'engineering.code-review', category: 'engineering', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['engineering', 'review']), template: 'You are an expert code reviewer. Analyze code for bugs, security issues, performance problems, and style. Provide actionable suggestions with explanations. Focus on: {{focus_areas}}',
+        variables: stringifyPromptVariables([{ name: 'focus_areas', type: 'string', required: true, description: 'Specific review focus areas such as security, performance, or style.' }]), version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', selfReview: true, explanationStyle: 'detailed' }), framework: null, metadata: null, is_default: 0, enabled: 1,
       },
       {
         id: 'prompt-summarizer', name: 'Document Summarizer', description: 'Summarize long documents into key points',
-        category: 'content', template: 'Summarize the following content into {{format}}. Preserve key facts, numbers, and conclusions. Be concise but thorough.\n\nContent:\n{{content}}',
-        variables: JSON.stringify(['format', 'content']), version: '1.0', is_default: 0, enabled: 1,
+        key: 'content.summarizer', category: 'content', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['content', 'summary']), template: 'Summarize the following content into {{format}}. Preserve key facts, numbers, and conclusions. Be concise but thorough.\n\nContent:\n{{content}}',
+        variables: stringifyPromptVariables([
+          { name: 'format', type: 'string', required: true, description: 'Desired response shape, for example bullet list or executive summary.' },
+          { name: 'content', type: 'string', required: true, description: 'Raw content to summarize.' },
+        ]), version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', explanationStyle: 'concise' }), framework: null, metadata: null, is_default: 0, enabled: 1,
       },
       {
         id: 'prompt-sql-expert', name: 'SQL Query Builder', description: 'Generate SQL queries from natural language',
-        category: 'engineering', template: 'You are an expert SQL developer. Convert the following natural language request into a correct, optimized SQL query. Target database: {{db_type}}. Available tables: {{schema}}',
-        variables: JSON.stringify(['db_type', 'schema']), version: '1.0', is_default: 0, enabled: 1,
+        key: 'engineering.sql-builder', category: 'engineering', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['engineering', 'sql']), template: 'You are an expert SQL developer. Convert the following natural language request into a correct, optimized SQL query. Target database: {{db_type}}. Available tables: {{schema}}',
+        variables: stringifyPromptVariables([
+          { name: 'db_type', type: 'string', required: true, description: 'Target relational database type.' },
+          { name: 'schema', type: 'string', required: true, description: 'Available schema or table summary provided to the model.' },
+        ]), version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', selfReview: true, explanationStyle: 'standard' }), framework: null, metadata: null, is_default: 0, enabled: 1,
+      },
+      {
+        id: 'prompt-runtime-supervisor-code-execution', name: 'Runtime: Supervisor Code Execution Policy', description: 'Runtime policy for supervisor code execution and delegated CSE workflows',
+        key: 'runtime.supervisor.code-execution', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'policy', 'supervisor']), template: [
+          'You have direct access to `cse_run_code` — a tool that executes code in a real isolated Docker container.',
+          'Execution strategy by task type:',
+          '- Simple code-run requests (no attached dataset): call `cse_run_code` directly from supervisor.',
+          '- Dataset/file analysis requests (attachments, CSV/JSON/XLSX, or "analyze this file"): delegate to `code_executor` first, then to `analyst` for result verification.',
+          '- Data retrieval + code analysis requests (user asks to fetch data from a specialist AND run code/Python on it): use SEQUENTIAL multi-worker delegation — (1) delegate to the data specialist worker first to retrieve the data, (2) then delegate to `code_executor` with the retrieved data embedded in the task description so it can write and execute the analysis script. Do NOT synthesize the final response until code_executor returns actual stdout.',
+          '',
+          'Attachment handling policy:',
+          '- Attached files are injected into container workspace and should be opened by filename.',
+          '- For CSV analysis, prefer Python standard library (`csv`) first.',
+          '- Do not assume `pandas` is installed unless you install it in the same run and verify installation succeeded.',
+          '- If you need to install Python packages during execution, call `cse_run_code` with `networkAccess=true`.',
+          '- In CSE, install packages with: `os.makedirs("/workspace/.deps", exist_ok=True); os.makedirs("/workspace/.tmp", exist_ok=True); subprocess.check_call([sys.executable, "-m", "pip", "install", "--target", "/workspace/.deps", "<package>"]); sys.path.insert(0, "/workspace/.deps")`.',
+          '- For matplotlib/pyplot, always call `matplotlib.use("Agg")` before `import matplotlib.pyplot as plt` (headless environment, no display).',
+          '- When saving chart images, create the output directory first: `os.makedirs("/workspace/output", exist_ok=True)` then save to `/workspace/output/<name>.png`.',
+          '- Never use notebook-style `!pip install ...` inside Python scripts.',
+          '',
+          'Verification and retry policy (MANDATORY):',
+          '- Verify tool outputs before final response.',
+          '- If tool execution fails (import/file/path/runtime errors), send it back to code_executor with the exact stderr and a corrected plan.',
+          '- Continue iterate->run->verify until success or clear environmental blocker is proven.',
+          '- For successful analyses, final response must include computed metrics and concise insights grounded in execution stdout.',
+          '',
+          'Example: "write a Python script to add 15 numbers and run it"',
+          '  → Write the script, then call: cse_run_code(code="...", language="python")',
+          '  → Include the actual stdout in your final response.',
+          '',
+          'Supported languages: python, javascript, typescript, bash.',
+        ].join('\n'),
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', deliberationPolicy: 'verify' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: 'prompt-runtime-response-card-format', name: 'Runtime: Response Card Format Policy', description: 'Runtime policy for chart/table/code response formatting',
+        key: 'runtime.response-card-format', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'policy', 'formatting']), template: [
+          'RESPONSE PRESENTATION POLICY (for rich response cards):',
+          '- Choose output format based on user intent and data shape.',
+          '- If user asks for a chart, graph, visualization, trend, or numeric comparison, prefer structured JSON with chart fields.',
+          '- If user asks for tabular output, dataset rows, or comparisons, prefer structured JSON with table fields.',
+          '- If user asks for both, include both table and chart.',
+          '- Never reference sandbox-only file paths such as /workspace/output/*.png or return img_path values that point to local container files.',
+          '- If charts are requested, translate computed results into renderable chart labels/values in JSON instead of markdown images pointing to local files.',
+          '- For code or scripts, return JSON object: {"code":"...","language":"python|javascript|typescript|sql|bash|json|xml|yaml"}.',
+          '- For normal conversational answers, use concise markdown text and do not force JSON.',
+          '',
+          'Preferred structured schema when visualization or tabular output is requested:',
+          '{',
+          '  "summary": "short narrative",',
+          '  "table": { "headers": ["col1","col2"], "rows": [["r1", 10], ["r2", 12]] },',
+          '  "chart": { "type": "bar|line", "title": "optional", "labels": ["r1","r2"], "values": [10,12], "unit": "optional" }',
+          '}',
+          '- Keep values accurate and grounded in computed or tool-derived outputs.',
+        ].join('\n'),
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', explanationStyle: 'standard' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: 'prompt-runtime-supervisor-temporal', name: 'Runtime: Supervisor Temporal Policy', description: 'Runtime policy for supervisor temporal and browser-login delegation',
+        key: 'runtime.supervisor.temporal', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'policy', 'temporal']), template: [
+          'TEMPORAL QUESTION HANDLING (CRITICAL):',
+          '- If the user asks about current day/date/time/timestamp or anything time-dependent:',
+          '  • ALWAYS delegate to a worker that has datetime/timezone tools',
+          '  • Do NOT answer from your training data or memory',
+          '  • Always use `think` tool first to reason about what worker you need',
+          '  • Always use `plan` tool to decompose the request',
+          '  • After the worker responds, use `think` with reasoning_phase="reasoning" to verify the answer',
+          '  • Then formulate your response based on the worker\'s actual tool outputs',
+          '- Examples of temporal questions that MUST be delegated:',
+          '  • "What day is today?" / "What date is it?" / "What is today\'s date?"',
+          '  • "What time is it?" / "What is the current time?"',
+          '  • "What timezone am I in?" / "What is the timezone?"',
+          '  • Any question about current timestamp, current date, current time, or today',
+          '',
+          'TIMER AND STOPWATCH MANAGEMENT (CRITICAL):',
+          '- When the user asks to START a timer or stopwatch (e.g. "start a timer", "start timing", "begin stopwatch"):',
+          '  • Delegate to analyst with EXPLICIT goal: "Use the `stopwatch_start` tool to start a stopwatch labeled \'[context label]\'. Return the full JSON response including the stopwatch ID."',
+          '  • Do NOT ask the analyst to just "capture the current timestamp" — it MUST call `stopwatch_start`',
+          '  • After analyst returns, extract the stopwatch ID from the JSON',
+          '  • Tell the user the timer has started AND include the stopwatch ID in your response (e.g. "Timer started (ID: watch-abc123). I\'ll track this until you return.")',
+          '  • The stopwatch ID MUST appear in your reply so it is recorded in conversation history for later retrieval',
+          '',
+          '- When the user RETURNS after a timer was started (e.g. "I am back", "I\'m back", "stop the timer"):',
+          '',
+          'BROWSER LOGIN & AUTHENTICATION (CRITICAL):',
+          '- When the user asks to log in, sign in, authenticate, or access a site that requires login:',
+          '  • ALWAYS delegate to the researcher worker — it has browser_detect_auth, browser_login, browser_save_cookies, browser_handoff_request, and browser_handoff_resume tools',
+          '  • The researcher can detect login forms, auto-fill credentials from the vault, and log in automatically',
+          '  • If the site needs 2FA, CAPTCHA, or manual steps, the researcher will trigger a handoff to the user',
+          '  • NEVER refuse login requests — the credential vault securely stores and encrypts website credentials',
+          '  • Example goal for researcher: "Navigate to [url], detect the login form, then use browser_login to authenticate using stored credentials. If 2FA or CAPTCHA appears, use browser_handoff_request."',
+          '',
+          '  • Look in the conversation history for the stopwatch ID from when the timer was started',
+          '  • Delegate to analyst with EXPLICIT goal: "Use `stopwatch_stop` with stopwatchId=\'[ID from history]\' to stop the stopwatch and report the total elapsed time in minutes and seconds."',
+          '  • If no stopwatch ID is found in history, delegate to analyst: "Use `timer_list` and `stopwatch_status` to find any active timers or stopwatches. If found, stop them and report the elapsed time."',
+          '  • Do NOT try to calculate elapsed time using raw timestamps or message metadata — always use the stopwatch tools.',
+        ].join('\n'),
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', deliberationPolicy: 'verify' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: 'prompt-runtime-multi-worker-pipeline', name: 'Runtime: Multi Worker Sequential Pipeline', description: 'Runtime policy for supervisor sequential multi-worker execution',
+        key: 'runtime.multi-worker.pipeline', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'policy', 'workflow']), template: [
+          'MULTI-WORKER SEQUENTIAL PIPELINE:',
+          'When the user\'s request spans multiple capabilities (e.g., "fetch NZ economic data AND run Python to find insights"), you MUST use sequential worker delegation:',
+          '  Step 1 — Delegate to the data specialist worker (e.g., statsnz_specialist) to retrieve the raw data.',
+          '  Step 2 — Once data is returned, delegate to code_executor with a task that embeds the retrieved data and asks it to write and execute Python (or other code) to produce insights.',
+          '  Step 3 — Use the code_executor stdout in your final response. Never skip code execution when the user explicitly asked for it.',
+          'Do not collapse multi-step pipelines into a single delegation or into a supervisor-only response.',
+        ].join('\n'),
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', deliberationPolicy: 'verify' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: 'prompt-runtime-force-worker-data-analysis', name: 'Runtime: Forced Worker Data Analysis Requirement', description: 'Runtime requirement appended when worker-based execution is mandatory',
+        key: 'runtime.force-worker.analysis', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'policy', 'analysis']), template: 'WORKFLOW REQUIREMENT: This request requires actual code execution. Delegate to code_executor to generate and run Python in container against attached files and/or retrieved tool data. If execution fails, retry with corrected code. After successful execution, delegate to analyst to verify computed outputs and produce at least 3 concrete insights.',
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', deliberationPolicy: 'verify' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: 'prompt-runtime-hard-execution-guard', name: 'Runtime: Hard Execution Guard', description: 'Runtime hard guard for execution retries and renderable output requirements',
+        key: 'runtime.execution.guard', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'policy', 'guard']), template: [
+          'HARD EXECUTION GUARD: The answer is invalid unless you explicitly call delegate_to_worker(worker="code_executor") and produce a successful cse_run_code execution. Do not execute code directly in supervisor for this workflow. Delegate to code_executor, run code successfully, verify output, then respond.',
+          '',
+          'HARD PRESENTATION GUARD: Do not reference sandbox filesystem paths like /workspace/output/*.png or return img_path values that point to container files. If charts are requested, return renderable structured JSON with chart labels/values and optional table data instead of local file paths. If a prior run produced blank or incomplete insights, fix the script and rerun until the computed insights are non-empty.',
+        ].join('\n'),
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', deliberationPolicy: 'verify' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: 'prompt-runtime-enterprise-worker-system', name: 'Runtime: Enterprise ServiceNow Worker System Prompt', description: 'Template used for enterprise ServiceNow worker system prompts',
+        key: 'runtime.enterprise.worker-system', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'worker', 'servicenow']), template: [
+          'You are a specialized ServiceNow agent for: {{description}}',
+          'Use the available tools to fulfill the user\'s request. Always use the most specific tool available rather than generic query/get when possible.',
+        ].join('\n'),
+        variables: stringifyPromptVariables([{ name: 'description', type: 'string', required: true, description: 'Worker capability description passed from the enterprise tool group.' }]), version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', explanationStyle: 'standard' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
       },
     ];
-    for (const p of prompts) await this.createPrompt(p);
+    if (cnt('prompts') === 0) {
+      for (const p of prompts) await this.createPrompt(p);
+    } else {
+      const existingIds = new Set((await this.listPrompts()).map((p) => p.id));
+      for (const p of prompts) {
+        if (!existingIds.has(p.id)) await this.createPrompt(p);
+      }
+
+    }
+
+    // Prompt Frameworks — seed the 4 built-in named structures (Phase 2)
+    const frameworks: Omit<PromptFrameworkRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'framework-rtce', key: 'rtce', name: 'RTCE (Role → Task → Context → Expectations)',
+        description: 'Concise four-section framework: establish the model role, state the task, supply context, then define expectations. Best for focused, single-turn prompts.',
+        sections: JSON.stringify([
+          { key: 'role',         label: 'Role',         renderOrder: 0, required: true,  header: '## Role' },
+          { key: 'task',         label: 'Task',         renderOrder: 1, required: true,  header: '## Task' },
+          { key: 'context',      label: 'Context',      renderOrder: 2, required: false, header: '## Context' },
+          { key: 'expectations', label: 'Expectations', renderOrder: 3, required: false, header: '## Expectations' },
+        ]),
+        section_separator: '\n\n', enabled: 1,
+      },
+      {
+        id: 'framework-full', key: 'full', name: 'Full (Role → Task → Context → Constraints → Examples → Output Contract)',
+        description: 'Six-section framework for complex, high-stakes prompts. Adds constraints, few-shot examples, and a structured output contract on top of RTCE.',
+        sections: JSON.stringify([
+          { key: 'role',            label: 'Role',            renderOrder: 0, required: true,  header: '## Role' },
+          { key: 'task',            label: 'Task',            renderOrder: 1, required: true,  header: '## Task' },
+          { key: 'context',         label: 'Context',         renderOrder: 2, required: false, header: '## Context' },
+          { key: 'constraints',     label: 'Constraints',     renderOrder: 3, required: false, header: '## Constraints' },
+          { key: 'examples',        label: 'Examples',        renderOrder: 4, required: false, header: '## Examples' },
+          { key: 'output_contract', label: 'Output Contract', renderOrder: 5, required: false, header: '## Output Contract' },
+        ]),
+        section_separator: '\n\n', enabled: 1,
+      },
+      {
+        id: 'framework-critique', key: 'critique', name: 'Critique (Role → Task → Context → Review Instructions)',
+        description: 'Four-section framework designed for LLM-as-evaluator prompts. The review_instructions section carries scoring rubrics, pass/fail thresholds, and output format requirements.',
+        sections: JSON.stringify([
+          { key: 'role',               label: 'Role',               renderOrder: 0, required: true,  header: '## Role' },
+          { key: 'task',               label: 'Task',               renderOrder: 1, required: true,  header: '## Task' },
+          { key: 'context',            label: 'Context',            renderOrder: 2, required: false, header: '## Context' },
+          { key: 'review_instructions',label: 'Review Instructions',renderOrder: 3, required: true,  header: '## Review Instructions' },
+        ]),
+        section_separator: '\n\n', enabled: 1,
+      },
+      {
+        id: 'framework-judge', key: 'judge', name: 'Judge (Role → Task → Context → Scoring Rubric → Output Contract)',
+        description: 'Five-section framework for LLM judge prompts that must produce numeric or categorical scores. Adds an explicit scoring rubric and structured output contract.',
+        sections: JSON.stringify([
+          { key: 'role',            label: 'Role',            renderOrder: 0, required: true,  header: '## Role' },
+          { key: 'task',            label: 'Task',            renderOrder: 1, required: true,  header: '## Task' },
+          { key: 'context',         label: 'Context',         renderOrder: 2, required: false, header: '## Context' },
+          { key: 'scoring_rubric',  label: 'Scoring Rubric',  renderOrder: 3, required: true,  header: '## Scoring Rubric' },
+          { key: 'output_contract', label: 'Output Contract', renderOrder: 4, required: true,  header: '## Output Contract' },
+        ]),
+        section_separator: '\n\n', enabled: 1,
+      },
+    ];
+    {
+      const existingFrameworkIds = new Set((await this.listPromptFrameworks()).map(f => f.id));
+      for (const f of frameworks) {
+        if (!existingFrameworkIds.has(f.id)) await this.createPromptFramework(f);
+      }
+    }
+
+    // Prompt Fragments — seed common reusable blocks (Phase 2)
+    const fragments: Omit<PromptFragmentRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'fragment-safety-notice', key: 'safety_notice', name: 'Safety Notice',
+        description: 'Standard safety disclaimer appended to agent prompts to discourage harmful output.',
+        category: 'safety', content: [
+          'SAFETY: Never produce content that is harmful, hateful, sexually explicit, or that facilitates illegal activity.',
+          'Decline politely if the user requests any of the above and explain why.',
+        ].join('\n'),
+        variables: null, tags: JSON.stringify(['safety', 'guardrails']), version: '1.0', enabled: 1,
+      },
+      {
+        id: 'fragment-json-output-contract', key: 'json_output_contract', name: 'JSON Output Contract',
+        description: 'Instructs the model to return only valid JSON. Include in any prompt where structured output is required.',
+        category: 'output', content: [
+          'OUTPUT FORMAT: Respond with valid JSON only. Do not include markdown code fences, prose, or commentary outside the JSON object.',
+          'The response must be parseable by JSON.parse() without any pre-processing.',
+        ].join('\n'),
+        variables: null, tags: JSON.stringify(['json', 'structured-output']), version: '1.0', enabled: 1,
+      },
+      {
+        id: 'fragment-cot-instruction', key: 'cot_instruction', name: 'Chain-of-Thought Instruction',
+        description: 'Asks the model to think step-by-step before giving its final answer. Append to task descriptions.',
+        category: 'reasoning', content: 'Think step-by-step before giving your final answer. Show your reasoning explicitly.',
+        variables: null, tags: JSON.stringify(['reasoning', 'cot']), version: '1.0', enabled: 1,
+      },
+      {
+        id: 'fragment-language-notice', key: 'language_notice', name: 'Language Notice',
+        description: 'Instructs the model to respond in the same language as the user. Useful for multilingual agents.',
+        category: 'i18n', content: 'Always respond in the same language the user writes in. Do not switch languages unless explicitly asked.',
+        variables: null, tags: JSON.stringify(['i18n', 'language']), version: '1.0', enabled: 1,
+      },
+      {
+        id: 'fragment-persona-analyst', key: 'persona_analyst', name: 'Persona: Analyst',
+        description: 'Sets the model persona to a senior data analyst. Use as the role section of an analytics prompt.',
+        category: 'personas', content: [
+          'You are a senior data analyst. You think rigorously, cite evidence, and present findings clearly.',
+          'You prefer structured output (tables, bullet points) over prose when the data supports it.',
+        ].join('\n'),
+        variables: null, tags: JSON.stringify(['persona', 'analytics']), version: '1.0', enabled: 1,
+      },
+      {
+        id: 'fragment-persona-assistant', key: 'persona_assistant', name: 'Persona: Helpful Assistant',
+        description: 'Sets the model persona to a helpful, harmless, and honest AI assistant.',
+        category: 'personas', content: 'You are a helpful, harmless, and honest AI assistant. You answer concisely and accurately, and ask for clarification when the request is ambiguous.',
+        variables: null, tags: JSON.stringify(['persona', 'general']), version: '1.0', enabled: 1,
+      },
+    ];
+    {
+      const existingFragmentIds = new Set((await this.listPromptFragments()).map(f => f.id));
+      for (const f of fragments) {
+        if (!existingFragmentIds.has(f.id)) await this.createPromptFragment(f);
+      }
+    }
+
+    // Prompt Strategies — seed built-in strategy overlays (Phase 4)
+    const promptStrategies: Omit<PromptStrategyRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'strategy-single-pass',
+        key: 'singlePass',
+        name: 'Single Pass',
+        description: 'Render the prompt template once and send directly to the model without additional orchestration text.',
+        instruction_prefix: null,
+        instruction_suffix: null,
+        config: JSON.stringify({ delimiter: '\n\n' }),
+        enabled: 1,
+      },
+      {
+        id: 'strategy-deliberate',
+        key: 'deliberate',
+        name: 'Deliberate',
+        description: 'Adds a brief quality checklist so the model verifies assumptions and constraints before producing the final answer.',
+        instruction_prefix: null,
+        instruction_suffix: 'Before finalizing: verify assumptions, check constraints, and ensure the response format is followed exactly.',
+        config: JSON.stringify({ delimiter: '\n\n' }),
+        enabled: 1,
+      },
+      {
+        id: 'strategy-critique-revise',
+        key: 'critiqueRevise',
+        name: 'Critique then Revise',
+        description: 'Instructs the model to internally draft, critique, revise once, and return only the final revised answer.',
+        instruction_prefix: null,
+        instruction_suffix: 'Process requirement: internally draft, critique against requirements, revise once, then return only the final revised answer.',
+        config: JSON.stringify({ delimiter: '\n\n' }),
+        enabled: 1,
+      },
+    ];
+    {
+      const existingStrategyIds = new Set((await this.listPromptStrategies()).map(s => s.id));
+      for (const s of promptStrategies) {
+        if (!existingStrategyIds.has(s.id)) await this.createPromptStrategy(s);
+      }
     }
 
     // Guardrails
@@ -2215,6 +2770,17 @@ export class SQLiteAdapter implements DatabaseAdapter {
         ]),
         metadata: JSON.stringify({ category: 'content' }), enabled: 1,
       },
+      {
+        id: 'wf-nz-stats-lookup', name: 'NZ Statistics Lookup', description: 'Search, identify, and retrieve official New Zealand statistics from Stats NZ ADE',
+        version: '1.0', entry_step_id: 'search',
+        steps: JSON.stringify([
+          { id: 'search', type: 'agent', name: 'Search Dataflows', next: 'inspect', tools: ['statsnz_search_dataflows', 'statsnz_list_dataflows'] },
+          { id: 'inspect', type: 'agent', name: 'Inspect Dataset Structure', next: 'fetch', tools: ['statsnz_get_dataflow_info', 'statsnz_get_codelist'] },
+          { id: 'fetch', type: 'agent', name: 'Fetch Observations', next: 'present', tools: ['statsnz_get_data'] },
+          { id: 'present', type: 'agent', name: 'Format & Present Results', next: null },
+        ]),
+        metadata: JSON.stringify({ category: 'statistics', country: 'NZ' }), enabled: 1,
+      },
     ];
     for (const w of workflows) await this.createWorkflowDef(w);
     }
@@ -2242,6 +2808,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
         id: 'tool-api-call', name: 'API Caller', description: 'Make HTTP requests to whitelisted endpoints',
         category: 'integration', risk_level: 'medium', requires_approval: 0, max_execution_ms: 20000, rate_limit_per_min: 15, enabled: 1,
       },
+      {
+        id: 'tool-statsnz', name: 'Stats NZ (Aotearoa Data Explorer)', description: 'Query official New Zealand statistics — population, census, GDP, trade, housing, labour, and more via the Stats NZ ADE SDMX API',
+        category: 'data', risk_level: 'low', requires_approval: 0, max_execution_ms: 30000, rate_limit_per_min: 20, enabled: 1,
+      },
     ];
     for (const t of tools) await this.createToolConfig(t);
     }
@@ -2264,6 +2834,161 @@ export class SQLiteAdapter implements DatabaseAdapter {
           enabled: s.enabled === false ? 0 : 1,
         });
       }
+    }
+
+    // Task Contracts (must seed before worker_agents for FK reference tc-nz-statistics)
+    if (cnt('task_contracts') === 0) {
+    const contracts: Omit<TaskContractRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'tc-code-review', name: 'Code Review Contract', description: 'Contract for AI-assisted code review tasks',
+        input_schema: JSON.stringify({ type: 'object', required: ['code', 'language'], properties: { code: { type: 'string' }, language: { type: 'string' }, context: { type: 'string' } } }),
+        output_schema: JSON.stringify({ type: 'object', required: ['summary', 'issues'], properties: { summary: { type: 'string' }, issues: { type: 'array' }, score: { type: 'number' } } }),
+        acceptance_criteria: JSON.stringify([
+          { id: 'cr-has-summary', description: 'Output must include a summary', type: 'assertion', config: { field: 'summary', operator: 'exists' }, required: true, weight: 1 },
+          { id: 'cr-has-issues', description: 'Output must include issues array', type: 'assertion', config: { field: 'issues', operator: 'exists' }, required: true, weight: 1 },
+          { id: 'cr-score-range', description: 'Score must be between 0 and 10', type: 'assertion', config: { field: 'score', operator: 'gte', expected: 0 }, required: false, weight: 0.5 },
+        ]),
+        max_attempts: 3, timeout_ms: 60000,
+        evidence_required: JSON.stringify(['text', 'metric']), min_confidence: 0.7, require_human_review: 0, enabled: 1,
+      },
+      {
+        id: 'tc-content-gen', name: 'Content Generation Contract', description: 'Contract for AI content generation tasks',
+        input_schema: JSON.stringify({ type: 'object', required: ['topic'], properties: { topic: { type: 'string' }, audience: { type: 'string' }, maxWords: { type: 'number' } } }),
+        output_schema: JSON.stringify({ type: 'object', required: ['content', 'wordCount'], properties: { content: { type: 'string' }, wordCount: { type: 'number' }, readabilityScore: { type: 'number' } } }),
+        acceptance_criteria: JSON.stringify([
+          { id: 'cg-has-content', description: 'Output must include content', type: 'assertion', config: { field: 'content', operator: 'exists' }, required: true, weight: 1 },
+          { id: 'cg-word-count', description: 'Must include word count', type: 'assertion', config: { field: 'wordCount', operator: 'gt', expected: 0 }, required: true, weight: 0.5 },
+        ]),
+        max_attempts: 2, timeout_ms: 120000,
+        evidence_required: JSON.stringify(['text']), min_confidence: 0.8, require_human_review: 1, enabled: 1,
+      },
+      {
+        id: 'tc-data-analysis', name: 'Data Analysis Contract', description: 'Contract for data analysis and reporting tasks',
+        input_schema: JSON.stringify({ type: 'object', required: ['query'], properties: { query: { type: 'string' }, dataset: { type: 'string' } } }),
+        output_schema: JSON.stringify({ type: 'object', required: ['analysis', 'confidence'], properties: { analysis: { type: 'string' }, confidence: { type: 'number' }, charts: { type: 'array' } } }),
+        acceptance_criteria: JSON.stringify([
+          { id: 'da-has-analysis', description: 'Output must include analysis text', type: 'assertion', config: { field: 'analysis', operator: 'exists' }, required: true, weight: 1 },
+          { id: 'da-confidence', description: 'Confidence must be at least 0.5', type: 'assertion', config: { field: 'confidence', operator: 'gte', expected: 0.5 }, required: true, weight: 1 },
+        ]),
+        max_attempts: 3, timeout_ms: 180000,
+        evidence_required: JSON.stringify(['text', 'metric', 'trace']), min_confidence: 0.6, require_human_review: 0, enabled: 1,
+      },
+      {
+        id: 'tc-nz-statistics', name: 'NZ Statistics Lookup Contract', description: 'Contract for querying official New Zealand statistics from Stats NZ Aotearoa Data Explorer',
+        input_schema: JSON.stringify({ type: 'object', required: ['query'], properties: { query: { type: 'string', description: 'The statistical question (e.g. "NZ population by region")' }, dataflow_id: { type: 'string', description: 'Optional specific dataflow ID if known' } } }),
+        output_schema: JSON.stringify({ type: 'object', required: ['dataset_id', 'period', 'values'], properties: { dataset_id: { type: 'string', description: 'Stats NZ dataflow ID' }, dataset_name: { type: 'string' }, period: { type: 'string', description: 'Reference period or year' }, values: { type: 'array', description: 'Numeric observations returned' }, unit: { type: 'string' }, source: { type: 'string' } } }),
+        acceptance_criteria: JSON.stringify([
+          { id: 'nz-has-dataset', description: 'Output must include a Stats NZ dataset ID', type: 'assertion', config: { field: 'dataset_id', operator: 'exists' }, required: true, weight: 1 },
+          { id: 'nz-has-period', description: 'Output must include a reference period or year', type: 'assertion', config: { field: 'period', operator: 'exists' }, required: true, weight: 1 },
+          { id: 'nz-has-values', description: 'Output must include at least one numeric value', type: 'assertion', config: { field: 'values', operator: 'exists' }, required: true, weight: 1 },
+        ]),
+        max_attempts: 3, timeout_ms: 120000,
+        evidence_required: JSON.stringify(['text', 'metric', 'trace']), min_confidence: 0.7, require_human_review: 0, enabled: 1,
+      },
+    ];
+    for (const c of contracts) await this.createTaskContract(c);
+    }
+
+    // Worker agents
+    if (cnt('worker_agents') === 0) {
+      const workers: Omit<WorkerAgentRow, 'created_at' | 'updated_at'>[] = [
+        {
+          id: 'wa-code-executor', name: 'code_executor',
+          description: '[USE FIRST FOR ANY CODE/SCRIPT/RUN REQUEST] Writes AND executes code in real isolated Docker containers via CSE. Returns actual stdout. Use for: "run", "execute", "run it", "run in a container", "write and run", "test", "script that runs". NOT a simulation — real execution.',
+          system_prompt: [
+            'You are a code writing + execution + verification agent.',
+            'Your mission is not just to write code, but to make it run successfully and produce validated results.',
+            '',
+            'Execution workflow (MANDATORY):',
+            '1. Understand objective and available attached files from context.',
+            '2. Generate a runnable script.',
+            '3. Execute with `cse_run_code`.',
+            '4. Verify stdout/stderr and correctness against requested output.',
+            '5. If errors or weak output, revise code and run again (iterate).',
+            '6. Stop only when output is successful and materially answers the request, or when a clear environment blocker is proven.',
+            '',
+            'For file/data analysis tasks:',
+            '- Treat attached filenames as real files in container workspace.',
+            '- Prefer robust Python stdlib (`csv`, `json`, `statistics`) first for portability.',
+            '- If using third-party libraries (pandas/numpy/etc.), install and verify explicitly before relying on them.',
+            '- If import fails, immediately fallback to stdlib approach and rerun.',
+            '- If file path fails, probe workspace via code (e.g., os.listdir("."), os.listdir("/workspace")) and retry with corrected path.',
+            '',
+            'Quality bar before returning:',
+            '- Code executed successfully (status success).',
+            '- Output includes concrete computed values (not generic commentary).',
+            '- At least 3 clear insights when the user asks for analysis/insights.',
+            '- Include assumptions and any residual limitations.',
+            '',
+            'Response format back to supervisor:',
+            '- Final code used',
+            '- Execution stdout',
+            '- Verification notes (why output is correct)',
+            '- If blocked: exact blocker + next best fallback',
+          ].join('\n'),
+          tool_names: JSON.stringify(['cse_run_code', 'cse_session_status', 'cse_end_session', 'calculator', 'text_analysis']),
+          persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 50, enabled: 1,
+        },
+        {
+          id: 'wa-statsnz-specialist', name: 'statsnz_specialist',
+          description: 'Specialist for Stats NZ Aotearoa Data Explorer data retrieval. Use this worker for NZ census/population/demographics requests and any task that should be grounded in Stats NZ APIs.',
+          system_prompt: [
+            'You are a Stats NZ specialist worker.',
+            'Use only statsnz_* tools available to you to discover and retrieve data from Stats NZ ADE.',
+            'For census/population requests, identify the best matching dataflow, then retrieve values with explicit period/date and dataflow ID.',
+            'Preferred retrieval sequence:',
+            '1. statsnz_search_dataflows to shortlist candidate dataflows.',
+            '2. statsnz_get_dataflow_info for chosen dataflow metadata.',
+            '3. statsnz_get_data with safe args: format="jsondata", dimension_at_observation="AllDimensions", key="all".',
+            '4. Narrow to requested year using start_period/end_period (avoid complex dot-slot keys unless fully validated with datastructure/codelists).',
+            '5. If `languageTag1` occurs, retry statsnz_get_data with minimal safe args and then refine filters.',
+            'If multiple plausible tables exist, state uncertainty and list top candidates with reasons.',
+            'Do not rely on web search when statsnz_* tools can answer the request.',
+          ].join('\n'),
+          tool_names: JSON.stringify(['statsnz_list_dataflows', 'statsnz_search_dataflows', 'statsnz_get_dataflow_info', 'statsnz_get_codelist', 'statsnz_get_data']),
+          persona: 'agent_worker',
+          trigger_patterns: JSON.stringify([
+            'stats nz', 'stats new zealand', 'statsnz', 'nz census', 'nz population', 'nz demographics',
+            'new zealand census', 'new zealand population', 'new zealand demographics', 'new zealand statistics',
+            'aotearoa data', 'aotearoa census', 'aotearoa population', 'nz gdp', 'nz trade', 'nz housing',
+            'nz labour', 'nz employment', 'nz unemployment',
+            'population of new zealand', 'population of nz', 'population in new zealand', 'population in nz',
+            'new zealand gdp', 'new zealand trade', 'new zealand housing', 'new zealand labour',
+            'new zealand employment', 'new zealand unemployment', 'new zealand economy',
+            'nz economy', 'nz crime', 'new zealand crime', 'nz income', 'new zealand income',
+            'nz data', 'new zealand data', 'nz births', 'nz deaths', 'nz migration',
+            'economy of new zealand', 'economy of nz', 'economy in new zealand', 'economy in nz',
+            'spending in new zealand', 'spending in nz', 'spending of new zealand',
+            'where are people spending', 'consumer spending', 'card spending', 'retail spending',
+            'gdp of new zealand', 'gdp of nz', 'gdp in new zealand',
+            'cost of living new zealand', 'cost of living nz', 'inflation new zealand', 'inflation nz',
+            'new zealand gdp', 'new zealand inflation', 'new zealand cost of living',
+          ]),
+          task_contract_id: 'tc-nz-statistics', max_retries: 2, priority: 40, enabled: 1,
+        },
+        {
+          id: 'wa-researcher', name: 'researcher',
+          description: 'Researches topics, searches the web, browses websites, and gathers information. Can open a headless browser to navigate dynamic sites, read page content, click links, fill forms, and interact with web applications. Has full browser authentication capabilities: can detect login forms, auto-login using stored website credentials from the credential vault, save session cookies, and hand off the browser to the user for manual steps like 2FA or CAPTCHA. Always delegate login/auth tasks to this worker — it has the browser_detect_auth, browser_login, browser_save_cookies, browser_handoff_request, and browser_handoff_resume tools.',
+          system_prompt: '',
+          tool_names: JSON.stringify(['web_search', 'text_analysis', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume']),
+          persona: 'agent_researcher', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 30, enabled: 1,
+        },
+        {
+          id: 'wa-analyst', name: 'analyst',
+          description: 'Analyzes data, performs calculations, validates computed outputs, formats JSON, provides structured insights, and handles temporal/timer queries. Good for math, data processing, output verification, formatting, date/time questions, and time management.',
+          system_prompt: '',
+          tool_names: JSON.stringify(['calculator', 'json_format', 'text_analysis', 'memory_recall', 'datetime', 'datetime_add', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel']),
+          persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 20, enabled: 1,
+        },
+        {
+          id: 'wa-writer', name: 'writer',
+          description: 'Writes, edits, and refines text. Good for drafting content, summarizing, and creative writing tasks.',
+          system_prompt: '',
+          tool_names: JSON.stringify(['text_analysis', 'memory_recall', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel']),
+          persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 10, enabled: 1,
+        },
+      ];
+      for (const w of workers) await this.createWorkerAgent(w);
     }
 
     // Workflow runs (sample completed and in-progress runs)
@@ -2340,47 +3065,6 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const tp of taskPolicies) await this.createHumanTaskPolicy(tp);
-    }
-
-    // Task Contracts
-    if (cnt('task_contracts') === 0) {
-    const contracts: Omit<TaskContractRow, 'created_at' | 'updated_at'>[] = [
-      {
-        id: 'tc-code-review', name: 'Code Review Contract', description: 'Contract for AI-assisted code review tasks',
-        input_schema: JSON.stringify({ type: 'object', required: ['code', 'language'], properties: { code: { type: 'string' }, language: { type: 'string' }, context: { type: 'string' } } }),
-        output_schema: JSON.stringify({ type: 'object', required: ['summary', 'issues'], properties: { summary: { type: 'string' }, issues: { type: 'array' }, score: { type: 'number' } } }),
-        acceptance_criteria: JSON.stringify([
-          { id: 'cr-has-summary', description: 'Output must include a summary', type: 'assertion', config: { field: 'summary', operator: 'exists' }, required: true, weight: 1 },
-          { id: 'cr-has-issues', description: 'Output must include issues array', type: 'assertion', config: { field: 'issues', operator: 'exists' }, required: true, weight: 1 },
-          { id: 'cr-score-range', description: 'Score must be between 0 and 10', type: 'assertion', config: { field: 'score', operator: 'gte', expected: 0 }, required: false, weight: 0.5 },
-        ]),
-        max_attempts: 3, timeout_ms: 60000,
-        evidence_required: JSON.stringify(['text', 'metric']), min_confidence: 0.7, require_human_review: 0, enabled: 1,
-      },
-      {
-        id: 'tc-content-gen', name: 'Content Generation Contract', description: 'Contract for AI content generation tasks',
-        input_schema: JSON.stringify({ type: 'object', required: ['topic'], properties: { topic: { type: 'string' }, audience: { type: 'string' }, maxWords: { type: 'number' } } }),
-        output_schema: JSON.stringify({ type: 'object', required: ['content', 'wordCount'], properties: { content: { type: 'string' }, wordCount: { type: 'number' }, readabilityScore: { type: 'number' } } }),
-        acceptance_criteria: JSON.stringify([
-          { id: 'cg-has-content', description: 'Output must include content', type: 'assertion', config: { field: 'content', operator: 'exists' }, required: true, weight: 1 },
-          { id: 'cg-word-count', description: 'Must include word count', type: 'assertion', config: { field: 'wordCount', operator: 'gt', expected: 0 }, required: true, weight: 0.5 },
-        ]),
-        max_attempts: 2, timeout_ms: 120000,
-        evidence_required: JSON.stringify(['text']), min_confidence: 0.8, require_human_review: 1, enabled: 1,
-      },
-      {
-        id: 'tc-data-analysis', name: 'Data Analysis Contract', description: 'Contract for data analysis and reporting tasks',
-        input_schema: JSON.stringify({ type: 'object', required: ['query'], properties: { query: { type: 'string' }, dataset: { type: 'string' } } }),
-        output_schema: JSON.stringify({ type: 'object', required: ['analysis', 'confidence'], properties: { analysis: { type: 'string' }, confidence: { type: 'number' }, charts: { type: 'array' } } }),
-        acceptance_criteria: JSON.stringify([
-          { id: 'da-has-analysis', description: 'Output must include analysis text', type: 'assertion', config: { field: 'analysis', operator: 'exists' }, required: true, weight: 1 },
-          { id: 'da-confidence', description: 'Confidence must be at least 0.5', type: 'assertion', config: { field: 'confidence', operator: 'gte', expected: 0.5 }, required: true, weight: 1 },
-        ]),
-        max_attempts: 3, timeout_ms: 180000,
-        evidence_required: JSON.stringify(['text', 'metric', 'trace']), min_confidence: 0.6, require_human_review: 0, enabled: 1,
-      },
-    ];
-    for (const c of contracts) await this.createTaskContract(c);
     }
 
     // Cache Policies

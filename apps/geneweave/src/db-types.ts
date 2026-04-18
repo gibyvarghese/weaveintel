@@ -169,13 +169,92 @@ export interface TemporalReminderRow {
 
 export interface PromptRow {
   id: string;
+  key: string | null;
   name: string;
   description: string | null;
   category: string | null;
+  prompt_type: string;
+  owner: string | null;
+  status: string;
+  tags: string | null;            // JSON array
   template: string;
-  variables: string | null;       // JSON array
+  variables: string | null;       // JSON PromptVariable[]
   version: string;
+  model_compatibility: string | null; // JSON object
+  execution_defaults: string | null;  // JSON object
+  framework: string | null;       // JSON object
+  metadata: string | null;        // JSON object
   is_default: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A named, ordered prompt section structure stored in the `prompt_frameworks` table.
+ * Rows are loaded at runtime into an InMemoryFrameworkRegistry via frameworkFromRecord().
+ */
+export interface PromptFrameworkRow {
+  id: string;
+  key: string;                    // Unique short identifier, e.g. 'rtce'
+  name: string;                   // Display name
+  description: string | null;
+  sections: string;               // JSON: PromptFrameworkSectionDef[]
+  section_separator: string;      // Separator between assembled sections (default '\n\n')
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * A reusable text block stored in `prompt_fragments`, includable via `{{>key}}` syntax.
+ * Rows are loaded at runtime into an InMemoryFragmentRegistry via fragmentFromRecord().
+ */
+export interface PromptFragmentRow {
+  id: string;
+  key: string;                    // Unique fragment key, referenced in templates as {{>key}}
+  name: string;                   // Display name
+  description: string | null;
+  category: string | null;        // Organisational grouping (e.g. 'safety', 'personas')
+  content: string;                // The fragment text body (may contain {{variables}})
+  variables: string | null;       // JSON: FragmentVariable[]
+  tags: string | null;            // JSON: string[]
+  version: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Output contract stored in `prompt_contracts`. Contracts validate or enforce constraints
+ * on LLM output: JSON structure, markdown sections, code quality, length, forbidden content, etc.
+ * Rows are loaded at runtime into an InMemoryContractRegistry via contractFromRecord().
+ */
+export interface PromptContractRow {
+  id: string;
+  key: string;                    // Unique contract key
+  name: string;                   // Display name
+  description: string | null;     // Detailed description for model understanding
+  contract_type: string;          // 'json' | 'markdown' | 'code' | 'max_length' | 'forbidden_content' | 'structured'
+  schema: string | null;          // JSON: JSONSchema7 (for json contracts)
+  config: string;                 // JSON: Contract-specific config (severity, repairHook, constraints, etc.)
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Prompt strategy stored in `prompt_strategies`. Strategies are model-facing
+ * execution overlays selected by execution_defaults.strategy.
+ */
+export interface PromptStrategyRow {
+  id: string;
+  key: string;                    // Unique strategy key, e.g. 'singlePass' or 'critiqueRevise'
+  name: string;                   // Display name
+  description: string | null;     // Detailed model-facing description
+  instruction_prefix: string | null;
+  instruction_suffix: string | null;
+  config: string;                 // JSON object for strategy runtime options
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -262,6 +341,22 @@ export interface SkillRow {
   tags: string | null;           // JSON string[]
   priority: number;
   version: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkerAgentRow {
+  id: string;
+  name: string;
+  description: string;
+  system_prompt: string;
+  tool_names: string;            // JSON string[]
+  persona: string;
+  trigger_patterns: string | null; // JSON string[]
+  task_contract_id: string | null;
+  max_retries: number;
+  priority: number;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -957,6 +1052,38 @@ export interface DatabaseAdapter {
   updatePrompt(id: string, fields: Partial<Omit<PromptRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deletePrompt(id: string): Promise<void>;
 
+  // ─── Admin: Prompt Frameworks (Phase 2) ───────────────────
+  createPromptFramework(f: Omit<PromptFrameworkRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getPromptFramework(id: string): Promise<PromptFrameworkRow | null>;
+  getPromptFrameworkByKey(key: string): Promise<PromptFrameworkRow | null>;
+  listPromptFrameworks(): Promise<PromptFrameworkRow[]>;
+  updatePromptFramework(id: string, fields: Partial<Omit<PromptFrameworkRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deletePromptFramework(id: string): Promise<void>;
+
+  // ─── Admin: Prompt Fragments (Phase 2) ────────────────────
+  createPromptFragment(f: Omit<PromptFragmentRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getPromptFragment(id: string): Promise<PromptFragmentRow | null>;
+  getPromptFragmentByKey(key: string): Promise<PromptFragmentRow | null>;
+  listPromptFragments(): Promise<PromptFragmentRow[]>;
+  updatePromptFragment(id: string, fields: Partial<Omit<PromptFragmentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deletePromptFragment(id: string): Promise<void>;
+
+  // ─── Admin: Prompt Contracts (Phase 3) ─────────────────────
+  createPromptContract(c: Omit<PromptContractRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getPromptContract(id: string): Promise<PromptContractRow | null>;
+  getPromptContractByKey(key: string): Promise<PromptContractRow | null>;
+  listPromptContracts(): Promise<PromptContractRow[]>;
+  updatePromptContract(id: string, fields: Partial<Omit<PromptContractRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deletePromptContract(id: string): Promise<void>;
+
+  // ─── Admin: Prompt Strategies (Phase 4) ────────────────────
+  createPromptStrategy(s: Omit<PromptStrategyRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getPromptStrategy(id: string): Promise<PromptStrategyRow | null>;
+  getPromptStrategyByKey(key: string): Promise<PromptStrategyRow | null>;
+  listPromptStrategies(): Promise<PromptStrategyRow[]>;
+  updatePromptStrategy(id: string, fields: Partial<Omit<PromptStrategyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deletePromptStrategy(id: string): Promise<void>;
+
   // ─── Admin: Guardrails ─────────────────────────────────────
   createGuardrail(g: Omit<GuardrailRow, 'created_at' | 'updated_at'>): Promise<void>;
   getGuardrail(id: string): Promise<GuardrailRow | null>;
@@ -992,6 +1119,14 @@ export interface DatabaseAdapter {
   listEnabledSkills(): Promise<SkillRow[]>;
   updateSkill(id: string, fields: Partial<Omit<SkillRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteSkill(id: string): Promise<void>;
+
+  // ─── Worker Agents ─────────────────────────────────────────
+  createWorkerAgent(w: Omit<WorkerAgentRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getWorkerAgent(id: string): Promise<WorkerAgentRow | null>;
+  listWorkerAgents(): Promise<WorkerAgentRow[]>;
+  listEnabledWorkerAgents(): Promise<WorkerAgentRow[]>;
+  updateWorkerAgent(id: string, fields: Partial<Omit<WorkerAgentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteWorkerAgent(id: string): Promise<void>;
 
   // ─── Workflow Runs ─────────────────────────────────────────
   createWorkflowRun(r: Omit<WorkflowRunRow, 'completed_at'>): Promise<void>;

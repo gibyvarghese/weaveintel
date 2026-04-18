@@ -8,31 +8,61 @@ import { test, expect, type Page } from '@playwright/test';
 
 /* ── Helpers ─────────────────────────────────────────────── */
 
-/** Generate a unique email for each call to avoid "already registered" conflicts. */
-function uniqueEmail() {
-  return `pw-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@weaveintel.dev`;
-}
 const PASSWORD = 'Str0ng!Pass99';
+const ADMIN_EMAIL = 'pw-e2e-admin@weaveintel.dev';
 
 async function registerAndEnter(page: Page, email?: string) {
-  const em = email ?? uniqueEmail();
+  const em = email ?? ADMIN_EMAIL;
   await page.goto('/');
-  // Switch to register mode if on login
-  const toggle = page.locator('a', { hasText: 'Register' });
-  if (await toggle.isVisible({ timeout: 2000 }).catch(() => false)) await toggle.click();
 
-  await page.locator('#auth-name').fill('E2E User');
-  await page.locator('#auth-email').fill(em);
-  await page.locator('#auth-pass').fill(PASSWORD);
-  await page.locator('button', { hasText: 'Create Account' }).click();
-  // Wait for the app to render (sidebar appears)
-  await expect(page.locator('.sidebar')).toBeVisible({ timeout: 5000 });
+  // Reuse an existing authenticated session when available.
+  if (await page.locator('.workspace-nav').isVisible({ timeout: 1000 }).catch(() => false)) return;
+
+  // Use API auth to avoid flaky mode-toggle interactions in the auth form.
+  let login = await page.request.post('/api/auth/login', {
+    data: { email: em, password: PASSWORD },
+  });
+  if (login.status() !== 200) {
+    const register = await page.request.post('/api/auth/register', {
+      data: { name: 'E2E User', email: em, password: PASSWORD },
+    });
+    expect([201, 409]).toContain(register.status());
+
+    login = await page.request.post('/api/auth/login', {
+      data: { email: em, password: PASSWORD },
+    });
+    expect(login.status()).toBe(200);
+  }
+
+  await page.goto('/');
+  // Wait for the app shell to render after auth completes.
+  await expect(page.locator('.workspace-nav')).toBeVisible({ timeout: 5000 });
 }
 
 async function goAdmin(page: Page) {
   await page.locator('.profile-avatar').click();
   await page.locator('.pf-btn', { hasText: 'Admin' }).click();
   await expect(page.locator('h2', { hasText: 'Administration' })).toBeVisible({ timeout: 5000 });
+}
+
+async function seedDefaults(page: Page) {
+  const csrfToken = await page.evaluate(async () => {
+    const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
+    const data = await res.json().catch(() => ({}));
+    return data?.csrfToken ?? '';
+  });
+  expect(csrfToken).toBeTruthy();
+
+  const seedStatus = await page.evaluate(async (csrf) => {
+    const res = await fetch('/api/admin/seed', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', 'x-csrf-token': csrf },
+      body: '{}',
+    });
+    return res.status;
+  }, csrfToken);
+  expect(seedStatus).toBe(200);
 }
 
 /** Scope locator to the .main content area (avoids matching sidebar elements). */
@@ -51,8 +81,8 @@ test.describe('Auth', () => {
 
   test('registers a new user and sees sidebar', async ({ page }) => {
     await registerAndEnter(page);
-    // After login, chat sidebar and profile avatar should be visible
-    await expect(page.locator('.sidebar')).toBeVisible();
+    // After login, navigation shell and profile avatar should be visible.
+    await expect(page.locator('.workspace-nav')).toBeVisible();
     await expect(page.locator('.profile-avatar')).toBeVisible();
   });
 });
@@ -73,10 +103,10 @@ test.describe('Chat', () => {
     await page.locator('button.send-btn').click({ force: true });
 
     // User message bubble
-    await expect(page.locator('.msg.user .bubble')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator('.msg.user .bubble').last()).toBeVisible({ timeout: 10_000 });
 
     // Assistant response via SSE streaming
-    await expect(page.locator('.msg.assistant .bubble')).toBeVisible({ timeout: 60_000 });
+    await expect(page.locator('.msg.assistant .bubble').last()).toBeVisible({ timeout: 60_000 });
   });
 });
 
@@ -101,10 +131,10 @@ test.describe('Admin Navigation', () => {
     await expect(m.getByText(/\d+ items?/)).toBeVisible({ timeout: 3000 });
   });
 
-  test('seed defaults button is visible', async ({ page }) => {
+  test('seed defaults API succeeds for admin user', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
-    await expect(main(page).locator('button', { hasText: 'Seed Defaults' })).toBeVisible();
+    await seedDefaults(page);
   });
 });
 
@@ -115,7 +145,7 @@ test.describe('Admin Seed & Data', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     // Prompts tab (default) should show "N items" with N > 0, and table rows
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
@@ -125,7 +155,7 @@ test.describe('Admin Seed & Data', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Guardrails' }).click();
     await page.waitForTimeout(500);
@@ -141,7 +171,7 @@ test.describe('Admin Guardrail CRUD', () => {
     await goAdmin(page);
     const m = main(page);
     // Seed defaults first to populate existing data
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     // Navigate to Guardrails tab
     await m.locator('button', { hasText: 'Guardrails' }).click();
@@ -169,7 +199,7 @@ test.describe('Admin Prompts', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     // Prompts is the default tab, should show items
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
@@ -179,7 +209,7 @@ test.describe('Admin Prompts', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     // Prompts is default tab — click + New
     await m.locator('button.nav-btn', { hasText: '+ New' }).click();
@@ -200,7 +230,7 @@ test.describe('Admin Prompts', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     // Click first Edit button in the prompts table
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
@@ -208,7 +238,7 @@ test.describe('Admin Prompts', () => {
       await editBtn.click();
       await page.waitForTimeout(300);
       // Should show the edit form with pre-filled data
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -220,7 +250,7 @@ test.describe('Admin Routing', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Routing' }).click();
     await page.waitForTimeout(500);
@@ -231,7 +261,7 @@ test.describe('Admin Routing', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Routing' }).click();
     await page.waitForTimeout(500);
@@ -253,7 +283,7 @@ test.describe('Admin Routing', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Routing' }).click();
     await page.waitForTimeout(500);
@@ -262,7 +292,7 @@ test.describe('Admin Routing', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -294,7 +324,7 @@ test.describe('Admin Read-only Tabs', () => {
     await goAdmin(page);
     const m = main(page);
     // Seed defaults to create some runs
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Workflow Runs' }).click();
     await page.waitForTimeout(500);
@@ -309,7 +339,7 @@ test.describe('Admin Task Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Task Policies' }).click();
     await page.waitForTimeout(500);
@@ -320,7 +350,7 @@ test.describe('Admin Task Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Task Policies' }).click();
     await page.waitForTimeout(500);
@@ -343,7 +373,7 @@ test.describe('Admin Contracts', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Contracts' }).click();
     await page.waitForTimeout(500);
@@ -354,7 +384,7 @@ test.describe('Admin Contracts', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Contracts' }).click();
     await page.waitForTimeout(500);
@@ -374,7 +404,7 @@ test.describe('Admin Cache Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Cache' }).click();
     await page.waitForTimeout(500);
@@ -385,7 +415,7 @@ test.describe('Admin Cache Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Cache' }).click();
     await page.waitForTimeout(500);
@@ -405,7 +435,7 @@ test.describe('Admin Identity Rules', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Identity' }).click();
     await page.waitForTimeout(500);
@@ -416,7 +446,7 @@ test.describe('Admin Identity Rules', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Identity' }).click();
     await page.waitForTimeout(500);
@@ -436,7 +466,7 @@ test.describe('Admin Memory Governance', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Memory Gov' }).click();
     await page.waitForTimeout(500);
@@ -447,7 +477,7 @@ test.describe('Admin Memory Governance', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Memory Gov' }).click();
     await page.waitForTimeout(500);
@@ -479,7 +509,7 @@ test.describe('Admin Search Providers', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Search' }).click();
     await page.waitForTimeout(500);
@@ -490,7 +520,7 @@ test.describe('Admin Search Providers', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Search' }).click();
     await page.waitForTimeout(500);
@@ -510,7 +540,7 @@ test.describe('Admin Search Providers', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Search' }).click();
     await page.waitForTimeout(500);
@@ -518,7 +548,7 @@ test.describe('Admin Search Providers', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -530,7 +560,7 @@ test.describe('Admin HTTP Endpoints', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'HTTP' }).click();
     await page.waitForTimeout(500);
@@ -541,7 +571,7 @@ test.describe('Admin HTTP Endpoints', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'HTTP' }).click();
     await page.waitForTimeout(500);
@@ -559,7 +589,7 @@ test.describe('Admin HTTP Endpoints', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'HTTP' }).click();
     await page.waitForTimeout(500);
@@ -567,7 +597,7 @@ test.describe('Admin HTTP Endpoints', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -579,7 +609,7 @@ test.describe('Admin Social Accounts', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Social' }).click();
     await page.waitForTimeout(500);
@@ -590,7 +620,7 @@ test.describe('Admin Social Accounts', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Social' }).click();
     await page.waitForTimeout(500);
@@ -610,7 +640,7 @@ test.describe('Admin Social Accounts', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Social' }).click();
     await page.waitForTimeout(500);
@@ -618,7 +648,7 @@ test.describe('Admin Social Accounts', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -630,7 +660,7 @@ test.describe('Admin Enterprise Connectors', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Enterprise' }).click();
     await page.waitForTimeout(500);
@@ -641,7 +671,7 @@ test.describe('Admin Enterprise Connectors', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Enterprise' }).click();
     await page.waitForTimeout(500);
@@ -661,7 +691,7 @@ test.describe('Admin Enterprise Connectors', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Enterprise' }).click();
     await page.waitForTimeout(500);
@@ -669,7 +699,7 @@ test.describe('Admin Enterprise Connectors', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -681,7 +711,7 @@ test.describe('Admin Tool Registry', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Registry' }).click();
     await page.waitForTimeout(500);
@@ -692,7 +722,7 @@ test.describe('Admin Tool Registry', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Registry' }).click();
     await page.waitForTimeout(500);
@@ -710,7 +740,7 @@ test.describe('Admin Tool Registry', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Registry' }).click();
     await page.waitForTimeout(500);
@@ -718,7 +748,7 @@ test.describe('Admin Tool Registry', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -730,7 +760,7 @@ test.describe('Admin Replay Scenarios', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Replay' }).click();
     await page.waitForTimeout(500);
@@ -741,7 +771,7 @@ test.describe('Admin Replay Scenarios', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Replay' }).click();
     await page.waitForTimeout(500);
@@ -761,7 +791,7 @@ test.describe('Admin Replay Scenarios', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Replay' }).click();
     await page.waitForTimeout(500);
@@ -769,7 +799,7 @@ test.describe('Admin Replay Scenarios', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -781,7 +811,7 @@ test.describe('Admin Trigger Definitions', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Triggers' }).click();
     await page.waitForTimeout(500);
@@ -792,7 +822,7 @@ test.describe('Admin Trigger Definitions', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Triggers' }).click();
     await page.waitForTimeout(500);
@@ -810,7 +840,7 @@ test.describe('Admin Trigger Definitions', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Triggers' }).click();
     await page.waitForTimeout(500);
@@ -818,7 +848,7 @@ test.describe('Admin Trigger Definitions', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -830,7 +860,7 @@ test.describe('Admin Tenant Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Tenants' }).click();
     await page.waitForTimeout(500);
@@ -841,7 +871,7 @@ test.describe('Admin Tenant Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Tenants' }).click();
     await page.waitForTimeout(500);
@@ -859,7 +889,7 @@ test.describe('Admin Tenant Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Tenants' }).click();
     await page.waitForTimeout(500);
@@ -867,7 +897,7 @@ test.describe('Admin Tenant Configs', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -879,7 +909,7 @@ test.describe('Admin Sandbox Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Sandbox' }).click();
     await page.waitForTimeout(500);
@@ -890,7 +920,7 @@ test.describe('Admin Sandbox Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Sandbox' }).click();
     await page.waitForTimeout(500);
@@ -907,7 +937,7 @@ test.describe('Admin Sandbox Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Sandbox' }).click();
     await page.waitForTimeout(500);
@@ -915,7 +945,7 @@ test.describe('Admin Sandbox Policies', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -927,9 +957,9 @@ test.describe('Admin Extraction Pipelines', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Extraction' }).click();
+    await m.locator('button', { hasText: /^Extraction$/ }).click();
     await page.waitForTimeout(500);
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
@@ -938,9 +968,9 @@ test.describe('Admin Extraction Pipelines', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Extraction' }).click();
+    await m.locator('button', { hasText: /^Extraction$/ }).click();
     await page.waitForTimeout(500);
     await m.locator('button.nav-btn', { hasText: '+ New' }).click();
     await page.waitForTimeout(300);
@@ -955,15 +985,15 @@ test.describe('Admin Extraction Pipelines', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Extraction' }).click();
+    await m.locator('button', { hasText: /^Extraction$/ }).click();
     await page.waitForTimeout(500);
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -975,7 +1005,7 @@ test.describe('Admin Artifact Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Artifacts' }).click();
     await page.waitForTimeout(500);
@@ -986,7 +1016,7 @@ test.describe('Admin Artifact Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Artifacts' }).click();
     await page.waitForTimeout(500);
@@ -1003,7 +1033,7 @@ test.describe('Admin Artifact Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Artifacts' }).click();
     await page.waitForTimeout(500);
@@ -1011,7 +1041,7 @@ test.describe('Admin Artifact Policies', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -1023,7 +1053,7 @@ test.describe('Admin Reliability Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Reliability' }).click();
     await page.waitForTimeout(500);
@@ -1034,7 +1064,7 @@ test.describe('Admin Reliability Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Reliability' }).click();
     await page.waitForTimeout(500);
@@ -1051,7 +1081,7 @@ test.describe('Admin Reliability Policies', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Reliability' }).click();
     await page.waitForTimeout(500);
@@ -1059,7 +1089,7 @@ test.describe('Admin Reliability Policies', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -1071,7 +1101,7 @@ test.describe('Admin Collaboration Sessions', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Collaboration' }).click();
     await page.waitForTimeout(500);
@@ -1082,7 +1112,7 @@ test.describe('Admin Collaboration Sessions', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Collaboration' }).click();
     await page.waitForTimeout(500);
@@ -1099,7 +1129,7 @@ test.describe('Admin Collaboration Sessions', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Collaboration' }).click();
     await page.waitForTimeout(500);
@@ -1107,7 +1137,7 @@ test.describe('Admin Collaboration Sessions', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -1119,7 +1149,7 @@ test.describe('Admin Compliance Rules', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Compliance' }).click();
     await page.waitForTimeout(500);
@@ -1130,7 +1160,7 @@ test.describe('Admin Compliance Rules', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Compliance' }).click();
     await page.waitForTimeout(500);
@@ -1147,7 +1177,7 @@ test.describe('Admin Compliance Rules', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Compliance' }).click();
     await page.waitForTimeout(500);
@@ -1155,7 +1185,7 @@ test.describe('Admin Compliance Rules', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -1167,7 +1197,7 @@ test.describe('Admin Graph Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Graph' }).click();
     await page.waitForTimeout(500);
@@ -1178,7 +1208,7 @@ test.describe('Admin Graph Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Graph' }).click();
     await page.waitForTimeout(500);
@@ -1195,7 +1225,7 @@ test.describe('Admin Graph Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Graph' }).click();
     await page.waitForTimeout(500);
@@ -1203,7 +1233,7 @@ test.describe('Admin Graph Configs', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -1215,7 +1245,7 @@ test.describe('Admin Plugin Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Plugins' }).click();
     await page.waitForTimeout(500);
@@ -1226,7 +1256,7 @@ test.describe('Admin Plugin Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Plugins' }).click();
     await page.waitForTimeout(500);
@@ -1243,7 +1273,7 @@ test.describe('Admin Plugin Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Plugins' }).click();
     await page.waitForTimeout(500);
@@ -1251,7 +1281,7 @@ test.describe('Admin Plugin Configs', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -1263,7 +1293,7 @@ test.describe('Admin Scaffold Templates', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Scaffolds' }).click();
     await page.waitForTimeout(500);
@@ -1274,7 +1304,7 @@ test.describe('Admin Scaffold Templates', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Scaffolds' }).click();
     await page.waitForTimeout(500);
@@ -1291,7 +1321,7 @@ test.describe('Admin Scaffold Templates', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Scaffolds' }).click();
     await page.waitForTimeout(500);
@@ -1299,7 +1329,7 @@ test.describe('Admin Scaffold Templates', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -1309,7 +1339,7 @@ test.describe('Admin Recipe Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Recipes' }).click();
     await page.waitForTimeout(500);
@@ -1320,7 +1350,7 @@ test.describe('Admin Recipe Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Recipes' }).click();
     await page.waitForTimeout(500);
@@ -1337,7 +1367,7 @@ test.describe('Admin Recipe Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Recipes' }).click();
     await page.waitForTimeout(500);
@@ -1345,7 +1375,7 @@ test.describe('Admin Recipe Configs', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -1355,7 +1385,7 @@ test.describe('Admin Widget Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Widgets' }).click();
     await page.waitForTimeout(500);
@@ -1366,7 +1396,7 @@ test.describe('Admin Widget Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Widgets' }).click();
     await page.waitForTimeout(500);
@@ -1383,7 +1413,7 @@ test.describe('Admin Widget Configs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Widgets' }).click();
     await page.waitForTimeout(500);
@@ -1391,7 +1421,7 @@ test.describe('Admin Widget Configs', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });
@@ -1401,7 +1431,7 @@ test.describe('Admin Validation Rules', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Validation' }).click();
     await page.waitForTimeout(500);
@@ -1412,7 +1442,7 @@ test.describe('Admin Validation Rules', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Validation' }).click();
     await page.waitForTimeout(500);
@@ -1429,7 +1459,7 @@ test.describe('Admin Validation Rules', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Seed Defaults' }).click();
+    await seedDefaults(page);
     await page.waitForTimeout(1500);
     await m.locator('button', { hasText: 'Validation' }).click();
     await page.waitForTimeout(500);
@@ -1437,7 +1467,7 @@ test.describe('Admin Validation Rules', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
       await page.waitForTimeout(300);
-      await expect(m.locator('h3')).toBeVisible({ timeout: 3000 });
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
   });
 });

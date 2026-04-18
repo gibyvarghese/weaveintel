@@ -82,7 +82,6 @@
  */
 
 import { createGeneWeave } from '@weaveintel/geneweave';
-import { createGeneWeave } from '@weaveintel/geneweave';
 import { shutdownCSE } from '../apps/geneweave/src/cse.js';
 
 async function main() {

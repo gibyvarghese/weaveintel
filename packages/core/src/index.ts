@@ -398,15 +398,47 @@ export {
 // Prompt management contracts
 export {
   type PromptDefinition,
+  type PromptKind,
+  type PromptStatus,
   type PromptVersion,
+  type PromptVersionBase,
   type PromptVariable,
+  type PromptVariableType,
   type PromptTemplate,
   type PromptRegistry,
   type InstructionBundle,
   type PromptVariant,
   type PromptExperiment,
   type PromptResolver,
+  type PromptOwner,
+  type PromptModelCompatibility,
+  type PromptExecutionDefaults,
+  type PromptFrameworkSection,
+  type PromptFrameworkRef,
+  type PromptOutputContractRef,
+  type PromptExample,
+  type PromptRoute,
+  type PromptChainStep,
+  type StructuredPromptMessage,
+  type TemplatePromptVersion,
+  type FewShotPromptVersion,
+  type StructuredPromptVersion,
+  type ChainPromptVersion,
+  type RouterPromptVersion,
+  type JudgePromptVersion,
+  type OptimizerPromptVersion,
+  type ModalityPresetPromptVersion,
 } from './prompts.js';
+
+// LLM-callable component contracts
+export {
+  type CallableKind,
+  type CallableDescriptor,
+  type CallableDescriptionValidationOptions,
+  type CallableDescriptionValidationResult,
+  normalizeCallableDescription,
+  validateCallableDescription,
+} from './callables.js';
 
 // Model routing contracts
 export {

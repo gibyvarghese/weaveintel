@@ -11,8 +11,17 @@ import {
   InstructionBundleBuilder,
   composeInstructions,
   createInstructionBundle,
+  createPromptDefinitionFromRecord,
+  createPromptVersionFromRecord,
+  renderPromptRecord,
+  renderPromptVersion,
+  stringifyPromptVariables,
 } from '../src/index.js';
-import type { PromptDefinition, PromptVersion, PromptExperiment } from '@weaveintel/core';
+import type { PromptDefinition, PromptExperiment, PromptVersion, TemplatePromptVersion } from '@weaveintel/core';
+
+type PromptVersionStoreLike = {
+  getVersion(promptId: string, version?: string): Promise<PromptVersion | null>;
+};
 
 // ─── Template ────────────────────────────────────────────────
 
@@ -74,11 +83,11 @@ describe('extractVariables', () => {
 
 describe('InMemoryPromptRegistry', () => {
   const makeDef = (id: string): PromptDefinition => ({
-    id, name: id, currentVersion: '1.0',
+    id, key: id, name: id, currentVersion: '1.0', kind: 'template', status: 'published',
   });
 
-  const makeVer = (promptId: string, version: string, template: string): PromptVersion => ({
-    id: `${promptId}-${version}`, promptId, version, template, variables: [], createdAt: new Date().toISOString(),
+  const makeVer = (promptId: string, version: string, template: string): TemplatePromptVersion => ({
+    id: `${promptId}-${version}`, promptId, version, kind: 'template', template, variables: [], createdAt: new Date().toISOString(),
   });
 
   it('registers and retrieves a prompt', async () => {
@@ -86,7 +95,7 @@ describe('InMemoryPromptRegistry', () => {
     await reg.register(makeDef('p1'), makeVer('p1', '1.0', 'Hello'));
     const ver = await reg.get('p1');
     expect(ver).not.toBeNull();
-    expect(ver!.template).toBe('Hello');
+    expect(renderPromptVersion(ver!, {})).toBe('Hello');
   });
 
   it('returns null for unknown prompt', async () => {
@@ -124,9 +133,9 @@ describe('InMemoryPromptRegistry', () => {
     await reg.register(makeDef('p1'), makeVer('p1', '1.0', 'V1'));
     await reg.register(makeDef('p1'), makeVer('p1', '2.0', 'V2'));
     const v1 = await reg.get('p1', '1.0');
-    expect(v1!.template).toBe('V1');
+    expect(renderPromptVersion(v1!, {})).toBe('V1');
     const v2 = await reg.get('p1', '2.0');
-    expect(v2!.template).toBe('V2');
+    expect(renderPromptVersion(v2!, {})).toBe('V2');
   });
 
   it('get returns latest when no version specified', async () => {
@@ -134,7 +143,7 @@ describe('InMemoryPromptRegistry', () => {
     await reg.register(makeDef('p1'), makeVer('p1', '1.0', 'Old'));
     await reg.register(makeDef('p1'), makeVer('p1', '2.0', 'New'));
     const latest = await reg.get('p1');
-    expect(latest!.template).toBe('New');
+    expect(renderPromptVersion(latest!, {})).toBe('New');
   });
 });
 
@@ -142,21 +151,21 @@ describe('InMemoryPromptRegistry', () => {
 
 describe('PromptResolver', () => {
   it('resolves default version', async () => {
-    const store = {
+    const store: PromptVersionStoreLike = {
       getVersion: async (_id: string, _v?: string) => ({
-        id: 'v1', promptId: 'p1', version: '1.0', template: 'Default', variables: [], createdAt: '',
+        id: 'v1', promptId: 'p1', version: '1.0', kind: 'template', template: 'Default', variables: [], createdAt: '',
       }),
     };
     const resolver = new PromptResolver(store);
     const ver = await resolver.resolve('p1', {});
-    expect(ver.template).toBe('Default');
+    expect(renderPromptVersion(ver, {})).toBe('Default');
   });
 
   it('resolves from experiment when active', async () => {
-    const store = {
+    const store: PromptVersionStoreLike = {
       getVersion: async (_id: string, ver?: string) => {
-        if (ver === 'exp-v') return { id: 'exp-v', promptId: 'p1', version: 'exp-v', template: 'Experiment', variables: [], createdAt: '' };
-        return { id: 'def', promptId: 'p1', version: '1.0', template: 'Default', variables: [], createdAt: '' };
+        if (ver === 'exp-v') return { id: 'exp-v', promptId: 'p1', version: 'exp-v', kind: 'template', template: 'Experiment', variables: [], createdAt: '' };
+        return { id: 'def', promptId: 'p1', version: '1.0', kind: 'template', template: 'Default', variables: [], createdAt: '' };
       },
     };
     const experiments = new InMemoryExperimentStore();
@@ -166,13 +175,74 @@ describe('PromptResolver', () => {
     });
     const resolver = new PromptResolver(store, experiments);
     const ver = await resolver.resolve('p1', { experimentId: 'exp1' });
-    expect(ver.template).toBe('Experiment');
+    expect(renderPromptVersion(ver, {})).toBe('Experiment');
   });
 
   it('throws when prompt not found', async () => {
     const store = { getVersion: async () => null };
     const resolver = new PromptResolver(store);
     await expect(resolver.resolve('missing', {})).rejects.toThrow('not found');
+  });
+
+  it('builds prompt objects from database-shaped records', () => {
+    const record = {
+      id: 'prompt-1',
+      key: 'support.reply',
+      name: 'Support Reply',
+      description: 'Detailed support reply prompt for handling customer tickets.',
+      category: 'support',
+      template: 'Hello {{name}}',
+      variables: stringifyPromptVariables([{ name: 'name', type: 'string', required: true }]),
+      version: '2.0',
+      status: 'published',
+      prompt_type: 'template',
+      owner: 'support-team',
+      tags: JSON.stringify(['support', 'email']),
+      model_compatibility: JSON.stringify({ providers: ['openai'] }),
+      execution_defaults: JSON.stringify({ strategy: 'singlePass', explanationStyle: 'standard' }),
+      created_at: '2026-04-19T00:00:00Z',
+      updated_at: '2026-04-19T01:00:00Z',
+    };
+
+    const def = createPromptDefinitionFromRecord(record);
+    const ver = createPromptVersionFromRecord(record);
+
+    expect(def.key).toBe('support.reply');
+    expect(def.status).toBe('published');
+    expect(ver.kind).toBe('template');
+    expect(renderPromptVersion(ver, { name: 'Alice' })).toBe('Hello Alice');
+  });
+
+  it('renders prompt records with lifecycle hooks and evaluations', () => {
+    const events: string[] = [];
+    const result = renderPromptRecord({
+      id: 'prompt-2',
+      key: 'ops.summary',
+      name: 'Ops Summary',
+      description: 'Create an operational summary from incident notes for shift handoff.',
+      prompt_type: 'template',
+      template: 'Summary for {{team}}',
+      variables: stringifyPromptVariables([{ name: 'team', type: 'string', required: true }]),
+      version: '1.0',
+      status: 'published',
+    }, { team: 'SRE' }, {
+      hooks: {
+        onStart: () => events.push('start'),
+        onSuccess: () => events.push('success'),
+      },
+      evaluations: [
+        {
+          id: 'non_empty',
+          description: 'Prompt output should be non-empty',
+          evaluate: ({ content }) => ({ passed: content.length > 0, score: 1 }),
+        },
+      ],
+    });
+
+    expect(result.content).toBe('Summary for SRE');
+    expect(result.evaluations).toHaveLength(1);
+    expect(result.evaluations[0]!.passed).toBe(true);
+    expect(events).toEqual(['start', 'success']);
   });
 });
 

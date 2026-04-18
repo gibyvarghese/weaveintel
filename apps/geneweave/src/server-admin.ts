@@ -6,6 +6,8 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { normalizeCallableDescription, validateCallableDescription } from '@weaveintel/core';
+import { renderPromptRecord, stringifyPromptVariables } from '@weaveintel/prompts';
 import type { DatabaseAdapter } from './db.js';
 import { syncModelPricing } from './pricing-sync.js';
 import type { AuthContext } from './auth.js';
@@ -37,6 +39,69 @@ export function registerAdminRoutes(
     res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': Buffer.byteLength(body) });
     res.end(body);
   });
+
+  function normalizePromptVariables(input: unknown): string | null {
+    if (typeof input === 'string') {
+      const trimmed = input.trim();
+      if (!trimmed) return null;
+      try {
+        return stringifyPromptVariables(JSON.parse(trimmed));
+      } catch {
+        const names = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+        return stringifyPromptVariables(names);
+      }
+    }
+
+    return stringifyPromptVariables(input);
+  }
+
+  function normalizeJsonField(input: unknown): string | null {
+    if (input === undefined || input === null || input === '') return null;
+    if (typeof input === 'string') {
+      const trimmed = input.trim();
+      if (!trimmed) return null;
+      try {
+        JSON.parse(trimmed);
+        return trimmed;
+      } catch {
+        return JSON.stringify(trimmed.split(',').map((value) => value.trim()).filter(Boolean));
+      }
+    }
+    return JSON.stringify(input);
+  }
+
+  function requireDetailedDescription(
+    description: unknown,
+    kind: 'prompt' | 'tool' | 'skill' | 'agent',
+    res: ServerResponse,
+  ): string | null {
+    const normalized = normalizeCallableDescription(description);
+    const validation = validateCallableDescription(normalized);
+    if (!validation.valid) {
+      json(res, 400, { error: `${kind} description validation failed: ${validation.reasons.join('; ')}` });
+      return null;
+    }
+    return normalized;
+  }
+
+  async function clearDefaultPromptExcept(promptId: string): Promise<void> {
+    const rows = await db.listPrompts();
+    await Promise.all(
+      rows
+        .filter((r) => r.id !== promptId && r.is_default)
+        .map((r) => db.updatePrompt(r.id, { is_default: 0 })),
+    );
+  }
+
+  function safeParsePromptVariables(raw: string | null): unknown[] {
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
   // ── Admin: Prompts ──────────────────────────────────────────
 
   router.get('/api/admin/prompts', async (_req, res, _params, auth) => {
@@ -58,13 +123,17 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['template']) { json(res, 400, { error: 'name and template required' }); return; }
+    const validatedDescription = requireDetailedDescription(body['description'], 'prompt', res);
+    if (!validatedDescription) return;
     const id = 'prompt-' + randomUUID().slice(0, 8);
+    const isDefault = body['is_default'] ? 1 : 0;
     await db.createPrompt({
-      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
-      category: (body['category'] as string) ?? null, template: body['template'] as string,
-      variables: body['variables'] ? JSON.stringify(body['variables']) : null,
-      version: (body['version'] as string) ?? '1.0', is_default: body['is_default'] ? 1 : 0, enabled: body['enabled'] !== false ? 1 : 0,
+      id, key: (body['key'] as string) ?? id, name: body['name'] as string, description: validatedDescription,
+      category: (body['category'] as string) ?? null, prompt_type: (body['prompt_type'] as string) ?? 'template', owner: (body['owner'] as string) ?? null, status: (body['status'] as string) ?? 'published', tags: normalizeJsonField(body['tags']), template: body['template'] as string,
+      variables: normalizePromptVariables(body['variables']),
+      version: (body['version'] as string) ?? '1.0', model_compatibility: normalizeJsonField(body['model_compatibility']), execution_defaults: normalizeJsonField(body['execution_defaults']), framework: normalizeJsonField(body['framework']), metadata: normalizeJsonField(body['metadata']), is_default: isDefault, enabled: body['enabled'] !== false ? 1 : 0,
     });
+    if (isDefault) await clearDefaultPromptExcept(id);
     const prompt = await db.getPrompt(id);
     json(res, 201, { prompt });
   }, { auth: true, csrf: true });
@@ -77,15 +146,29 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     const fields: Record<string, unknown> = {};
+    if (body['key'] !== undefined) fields['key'] = body['key'];
     if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['description'] !== undefined) {
+      const validatedDescription = requireDetailedDescription(body['description'], 'prompt', res);
+      if (!validatedDescription) return;
+      fields['description'] = validatedDescription;
+    }
     if (body['category'] !== undefined) fields['category'] = body['category'];
+    if (body['prompt_type'] !== undefined) fields['prompt_type'] = body['prompt_type'];
+    if (body['owner'] !== undefined) fields['owner'] = body['owner'];
+    if (body['status'] !== undefined) fields['status'] = body['status'];
+    if (body['tags'] !== undefined) fields['tags'] = normalizeJsonField(body['tags']);
     if (body['template'] !== undefined) fields['template'] = body['template'];
-    if (body['variables'] !== undefined) fields['variables'] = JSON.stringify(body['variables']);
+    if (body['variables'] !== undefined) fields['variables'] = normalizePromptVariables(body['variables']);
     if (body['version'] !== undefined) fields['version'] = body['version'];
+    if (body['model_compatibility'] !== undefined) fields['model_compatibility'] = normalizeJsonField(body['model_compatibility']);
+    if (body['execution_defaults'] !== undefined) fields['execution_defaults'] = normalizeJsonField(body['execution_defaults']);
+    if (body['framework'] !== undefined) fields['framework'] = normalizeJsonField(body['framework']);
+    if (body['metadata'] !== undefined) fields['metadata'] = normalizeJsonField(body['metadata']);
     if (body['is_default'] !== undefined) fields['is_default'] = body['is_default'] ? 1 : 0;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
     await db.updatePrompt(params['id']!, fields as any);
+    if (body['is_default']) await clearDefaultPromptExcept(params['id']!);
     const prompt = await db.getPrompt(params['id']!);
     json(res, 200, { prompt });
   }, { auth: true, csrf: true });
@@ -93,6 +176,265 @@ export function registerAdminRoutes(
   router.del('/api/admin/prompts/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     await db.deletePrompt(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Prompt Frameworks (Phase 2) ────────────────────
+
+  router.get('/api/admin/prompt-frameworks', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const frameworks = await db.listPromptFrameworks();
+    json(res, 200, { frameworks });
+  });
+
+  router.get('/api/admin/prompt-frameworks/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const f = await db.getPromptFramework(params['id']!);
+    if (!f) { json(res, 404, { error: 'Prompt framework not found' }); return; }
+    json(res, 200, { framework: f });
+  });
+
+  router.post('/api/admin/prompt-frameworks', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['key'] || !body['name']) { json(res, 400, { error: 'key and name required' }); return; }
+    const id = 'framework-' + randomUUID().slice(0, 8);
+    await db.createPromptFramework({
+      id, key: body['key'] as string, name: body['name'] as string,
+      description: (body['description'] as string) ?? null,
+      sections: body['sections'] ? JSON.stringify(body['sections']) : '[]',
+      section_separator: (body['section_separator'] as string) ?? '\n\n',
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const framework = await db.getPromptFramework(id);
+    json(res, 201, { framework });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/prompt-frameworks/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getPromptFramework(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Prompt framework not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['key'] !== undefined) fields['key'] = body['key'];
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['sections'] !== undefined) fields['sections'] = typeof body['sections'] === 'string' ? body['sections'] : JSON.stringify(body['sections']);
+    if (body['section_separator'] !== undefined) fields['section_separator'] = body['section_separator'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updatePromptFramework(params['id']!, fields as any);
+    const framework = await db.getPromptFramework(params['id']!);
+    json(res, 200, { framework });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/prompt-frameworks/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deletePromptFramework(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Prompt Fragments (Phase 2) ─────────────────────
+
+  router.get('/api/admin/prompt-fragments', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const fragments = await db.listPromptFragments();
+    json(res, 200, { fragments });
+  });
+
+  router.get('/api/admin/prompt-fragments/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const f = await db.getPromptFragment(params['id']!);
+    if (!f) { json(res, 404, { error: 'Prompt fragment not found' }); return; }
+    json(res, 200, { fragment: f });
+  });
+
+  router.post('/api/admin/prompt-fragments', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['key'] || !body['name'] || !body['content']) {
+      json(res, 400, { error: 'key, name, and content required' }); return;
+    }
+    const id = 'fragment-' + randomUUID().slice(0, 8);
+    await db.createPromptFragment({
+      id, key: body['key'] as string, name: body['name'] as string,
+      description: (body['description'] as string) ?? null,
+      category: (body['category'] as string) ?? null,
+      content: body['content'] as string,
+      variables: body['variables'] ? JSON.stringify(body['variables']) : null,
+      tags: body['tags'] ? JSON.stringify(body['tags']) : null,
+      version: (body['version'] as string) ?? '1.0',
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const fragment = await db.getPromptFragment(id);
+    json(res, 201, { fragment });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/prompt-fragments/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getPromptFragment(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Prompt fragment not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['key'] !== undefined) fields['key'] = body['key'];
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['category'] !== undefined) fields['category'] = body['category'];
+    if (body['content'] !== undefined) fields['content'] = body['content'];
+    if (body['variables'] !== undefined) fields['variables'] = typeof body['variables'] === 'string' ? body['variables'] : JSON.stringify(body['variables']);
+    if (body['tags'] !== undefined) fields['tags'] = typeof body['tags'] === 'string' ? body['tags'] : JSON.stringify(body['tags']);
+    if (body['version'] !== undefined) fields['version'] = body['version'];
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updatePromptFragment(params['id']!, fields as any);
+    const fragment = await db.getPromptFragment(params['id']!);
+    json(res, 200, { fragment });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/prompt-fragments/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deletePromptFragment(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Prompt Contracts ────────────────────────────────
+
+  router.get('/api/admin/prompt-contracts', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const contracts = await db.listPromptContracts();
+    json(res, 200, { contracts });
+  });
+
+  router.get('/api/admin/prompt-contracts/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const c = await db.getPromptContract(params['id']!);
+    if (!c) { json(res, 404, { error: 'Prompt contract not found' }); return; }
+    json(res, 200, { contract: c });
+  });
+
+  router.post('/api/admin/prompt-contracts', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['key'] || !body['name'] || !body['contract_type'] || !body['config']) {
+      json(res, 400, { error: 'key, name, contract_type, and config required' }); return;
+    }
+    const id = 'contract-' + randomUUID().slice(0, 8);
+    await db.createPromptContract({
+      id, key: body['key'] as string, name: body['name'] as string,
+      description: (body['description'] as string) ?? null,
+      contract_type: body['contract_type'] as string,
+      schema: body['schema'] ? (typeof body['schema'] === 'string' ? body['schema'] : JSON.stringify(body['schema'])) : null,
+      config: typeof body['config'] === 'string' ? body['config'] : JSON.stringify(body['config']),
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const contract = await db.getPromptContract(id);
+    json(res, 201, { contract });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/prompt-contracts/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getPromptContract(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Prompt contract not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    if (body['key'] !== undefined) fields['key'] = body['key'];
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['contract_type'] !== undefined) fields['contract_type'] = body['contract_type'];
+    if (body['schema'] !== undefined) fields['schema'] = typeof body['schema'] === 'string' ? body['schema'] : JSON.stringify(body['schema']);
+    if (body['config'] !== undefined) fields['config'] = typeof body['config'] === 'string' ? body['config'] : JSON.stringify(body['config']);
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    await db.updatePromptContract(params['id']!, fields as any);
+    const contract = await db.getPromptContract(params['id']!);
+    json(res, 200, { contract });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/prompt-contracts/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deletePromptContract(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Prompt Strategies (Phase 4) ───────────────────
+
+  router.get('/api/admin/prompt-strategies', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const strategies = await db.listPromptStrategies();
+    json(res, 200, { strategies });
+  });
+
+  router.get('/api/admin/prompt-strategies/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const strategy = await db.getPromptStrategy(params['id']!);
+    if (!strategy) { json(res, 404, { error: 'Prompt strategy not found' }); return; }
+    json(res, 200, { strategy });
+  });
+
+  router.post('/api/admin/prompt-strategies', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['key'] || !body['name']) {
+      json(res, 400, { error: 'key and name required' }); return;
+    }
+    const validatedDescription = requireDetailedDescription(body['description'], 'prompt', res);
+    if (!validatedDescription) return;
+
+    const id = 'strategy-' + randomUUID().slice(0, 8);
+    await db.createPromptStrategy({
+      id,
+      key: body['key'] as string,
+      name: body['name'] as string,
+      description: validatedDescription,
+      instruction_prefix: (body['instruction_prefix'] as string) ?? null,
+      instruction_suffix: (body['instruction_suffix'] as string) ?? null,
+      config: normalizeJsonField(body['config']) ?? '{}',
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const strategy = await db.getPromptStrategy(id);
+    json(res, 201, { strategy });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/prompt-strategies/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getPromptStrategy(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Prompt strategy not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const fields: Record<string, unknown> = {};
+    if (body['key'] !== undefined) fields['key'] = body['key'];
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) {
+      const validatedDescription = requireDetailedDescription(body['description'], 'prompt', res);
+      if (!validatedDescription) return;
+      fields['description'] = validatedDescription;
+    }
+    if (body['instruction_prefix'] !== undefined) fields['instruction_prefix'] = body['instruction_prefix'];
+    if (body['instruction_suffix'] !== undefined) fields['instruction_suffix'] = body['instruction_suffix'];
+    if (body['config'] !== undefined) fields['config'] = normalizeJsonField(body['config']) ?? '{}';
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+
+    await db.updatePromptStrategy(params['id']!, fields as any);
+    const strategy = await db.getPromptStrategy(params['id']!);
+    json(res, 200, { strategy });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/prompt-strategies/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deletePromptStrategy(params['id']!);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
@@ -304,12 +646,22 @@ export function registerAdminRoutes(
     if (!promptId) { json(res, 400, { error: 'promptId required' }); return; }
     const prompt = await db.getPrompt(promptId);
     if (!prompt) { json(res, 404, { error: 'Prompt not found' }); return; }
-    const { createTemplate: ct } = await import('@weaveintel/prompts');
-    const tpl = ct({ id: prompt.id, name: prompt.name, template: prompt.template });
     const variables = (body['variables'] as Record<string, unknown>) ?? {};
     try {
-      const rendered = tpl.render(variables);
-      json(res, 200, { rendered, template: prompt.template, variables: prompt.variables ? JSON.parse(prompt.variables) : [] });
+      const rendered = renderPromptRecord(prompt, variables, {
+        evaluations: [
+          {
+            id: 'prompt_not_empty',
+            description: 'Rendered prompt previews should produce non-empty content for operators.',
+            evaluate: ({ content }) => ({
+              passed: content.trim().length > 0,
+              score: content.trim().length > 0 ? 1 : 0,
+              reason: content.trim().length > 0 ? undefined : 'Rendered prompt preview is empty',
+            }),
+          },
+        ],
+      }).content;
+      json(res, 200, { rendered, template: prompt.template, variables: safeParsePromptVariables(prompt.variables) });
     } catch (e: unknown) {
       json(res, 400, { error: e instanceof Error ? e.message : 'Render error' });
     }
@@ -405,9 +757,11 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
+    const validatedDescription = requireDetailedDescription(body['description'], 'tool', res);
+    if (!validatedDescription) return;
     const id = 'tool-' + randomUUID().slice(0, 8);
     await db.createToolConfig({
-      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
+      id, name: body['name'] as string, description: validatedDescription,
       category: (body['category'] as string) ?? null, risk_level: (body['risk_level'] as string) ?? 'low',
       requires_approval: body['requires_approval'] ? 1 : 0,
       max_execution_ms: (body['max_execution_ms'] as number) ?? null,
@@ -427,7 +781,11 @@ export function registerAdminRoutes(
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     const fields: Record<string, unknown> = {};
     if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['description'] !== undefined) {
+      const validatedDescription = requireDetailedDescription(body['description'], 'tool', res);
+      if (!validatedDescription) return;
+      fields['description'] = validatedDescription;
+    }
     if (body['category'] !== undefined) fields['category'] = body['category'];
     if (body['risk_level'] !== undefined) fields['risk_level'] = body['risk_level'];
     if (body['requires_approval'] !== undefined) fields['requires_approval'] = body['requires_approval'] ? 1 : 0;
@@ -469,12 +827,14 @@ export function registerAdminRoutes(
       json(res, 400, { error: 'name and instructions required' });
       return;
     }
+    const validatedDescription = requireDetailedDescription(body['description'], 'skill', res);
+    if (!validatedDescription) return;
 
     const id = 'skill-' + randomUUID().slice(0, 8);
     await db.createSkill({
       id,
       name: body['name'] as string,
-      description: (body['description'] as string) ?? '',
+      description: validatedDescription,
       category: (body['category'] as string) ?? 'general',
       trigger_patterns: JSON.stringify(Array.isArray(body['trigger_patterns']) ? body['trigger_patterns'] : []),
       instructions: body['instructions'] as string,
@@ -500,7 +860,11 @@ export function registerAdminRoutes(
 
     const fields: Record<string, unknown> = {};
     if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) fields['description'] = body['description'];
+    if (body['description'] !== undefined) {
+      const validatedDescription = requireDetailedDescription(body['description'], 'skill', res);
+      if (!validatedDescription) return;
+      fields['description'] = validatedDescription;
+    }
     if (body['category'] !== undefined) fields['category'] = body['category'];
     if (body['trigger_patterns'] !== undefined) fields['trigger_patterns'] = JSON.stringify(Array.isArray(body['trigger_patterns']) ? body['trigger_patterns'] : []);
     if (body['instructions'] !== undefined) fields['instructions'] = body['instructions'];
@@ -519,6 +883,87 @@ export function registerAdminRoutes(
   router.del('/api/admin/skills/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     await db.deleteSkill(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Worker Agents ──────────────────────────────────
+
+  router.get('/api/admin/worker-agents', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const workerAgents = await db.listWorkerAgents();
+    json(res, 200, { workerAgents });
+  });
+
+  router.get('/api/admin/worker-agents/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const workerAgent = await db.getWorkerAgent(params['id']!);
+    if (!workerAgent) { json(res, 404, { error: 'Worker agent not found' }); return; }
+    json(res, 200, { workerAgent });
+  });
+
+  router.post('/api/admin/worker-agents', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['name'] || !body['description']) {
+      json(res, 400, { error: 'name and description required' });
+      return;
+    }
+    const validatedDescription = requireDetailedDescription(body['description'], 'agent', res);
+    if (!validatedDescription) return;
+
+    const id = 'wa-' + randomUUID().slice(0, 8);
+    await db.createWorkerAgent({
+      id,
+      name: body['name'] as string,
+      description: validatedDescription,
+      system_prompt: (body['system_prompt'] as string) ?? null,
+      tool_names: body['tool_names'] ? JSON.stringify(body['tool_names']) : '[]',
+      persona: (body['persona'] as string) ?? 'agent_worker',
+      trigger_patterns: body['trigger_patterns'] ? JSON.stringify(body['trigger_patterns']) : '[]',
+      task_contract_id: (body['task_contract_id'] as string) ?? null,
+      max_retries: body['max_retries'] !== undefined ? Number(body['max_retries']) : 0,
+      priority: body['priority'] !== undefined ? Number(body['priority']) : 0,
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const workerAgent = await db.getWorkerAgent(id);
+    json(res, 201, { workerAgent });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/worker-agents/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getWorkerAgent(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Worker agent not found' }); return; }
+
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const fields: Record<string, unknown> = {};
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) {
+      const validatedDescription = requireDetailedDescription(body['description'], 'agent', res);
+      if (!validatedDescription) return;
+      fields['description'] = validatedDescription;
+    }
+    if (body['system_prompt'] !== undefined) fields['system_prompt'] = body['system_prompt'];
+    if (body['tool_names'] !== undefined) fields['tool_names'] = body['tool_names'] ? JSON.stringify(body['tool_names']) : '[]';
+    if (body['persona'] !== undefined) fields['persona'] = body['persona'];
+    if (body['trigger_patterns'] !== undefined) fields['trigger_patterns'] = body['trigger_patterns'] ? JSON.stringify(body['trigger_patterns']) : '[]';
+    if (body['task_contract_id'] !== undefined) fields['task_contract_id'] = body['task_contract_id'];
+    if (body['max_retries'] !== undefined) fields['max_retries'] = Number(body['max_retries']);
+    if (body['priority'] !== undefined) fields['priority'] = Number(body['priority']);
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+
+    await db.updateWorkerAgent(params['id']!, fields as any);
+    const workerAgent = await db.getWorkerAgent(params['id']!);
+    json(res, 200, { workerAgent });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/worker-agents/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteWorkerAgent(params['id']!);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 

@@ -616,4 +616,58 @@ Always test edge cases: empty results, NULL values, duplicate rows.`,
 Provide: (a) root cause diagnosis, (b) fix, (c) how to prevent recurrence.`,
     tags: ['debug', 'errors', 'troubleshooting', 'bugs'],
   }),
+
+  defineSkill({
+    id: 'skill-nz-statistics',
+    name: 'New Zealand Statistics (Stats NZ)',
+    description: 'Query official New Zealand statistics from the Stats NZ Aotearoa Data Explorer (ADE) — population, census, GDP, trade, housing, labour, agriculture, and more',
+    category: 'retrieval',
+    priority: 10,
+    triggerPatterns: [
+      'stats nz', 'statsnz', 'new zealand', 'nz statistics', 'nz data',
+      'aotearoa', 'aotearoa data explorer', 'census', 'population',
+      'gdp', 'trade', 'housing', 'labour', 'employment', 'unemployment',
+      'inflation', 'cpi', 'immigration', 'tourism', 'agriculture',
+      'maori', 'pacific', 'ethnicity', 'birth', 'death', 'mortality',
+      'education', 'income', 'household', 'dwelling', 'poverty',
+      'regional', 'auckland', 'wellington', 'canterbury', 'waikato',
+      'dataflow', 'sdmx',
+    ],
+    instructions: `When answering questions about New Zealand statistics, follow this procedure:
+
+1. **Identify the dataset** — use statsnz_search_dataflows to find the relevant dataflow by keyword. If the user is vague, search for 2-3 plausible terms (e.g. "population", "census", "dwelling").
+2. **Get dataset structure** — call statsnz_get_dataflow_info to understand the dataset's dimensions and available breakdowns (e.g. age, sex, region, year).
+3. **Check available values** — if the user requests a specific region or year, call statsnz_get_codelist for the relevant dimension to confirm the code exists.
+4. **Fetch the data** — call statsnz_get_data with the correct key filter. Use dimension codes (not labels) in the key. Use "all" for dimensions you don't need to filter.
+5. **Present results clearly** — include the dataset name, reference period, actual numeric values, and units. If showing a time series, present as a table.
+6. **Cite the source** — always attribute data to "Stats NZ, Aotearoa Data Explorer" with the dataflow ID.
+
+CRITICAL:
+- Always use statsnz_get_dataflow_info BEFORE statsnz_get_data — you need the dimension order to construct the key.
+- Dimension keys are dot-separated positional filters matching DSD order (e.g. "6050.1.2018").
+- Use "all" as the key to retrieve unfiltered data if the dataset is small.
+- If the API returns an error, check that dimension codes are valid via statsnz_get_codelist.
+- Stats NZ data is authoritative government data — treat it as a primary source.`,
+    toolNames: [
+      'statsnz_list_dataflows',
+      'statsnz_search_dataflows',
+      'statsnz_get_dataflow_info',
+      'statsnz_get_datastructure',
+      'statsnz_get_structure',
+      'statsnz_get_actualconstraint',
+      'statsnz_get_codelist',
+      'statsnz_get_data',
+    ],
+    examples: [
+      {
+        input: 'What is the population of New Zealand by region?',
+        output: 'I searched Stats NZ ADE for "population" and found the "Subnational Population Estimates" dataflow. Auckland has 1.7M, Wellington 543K, Canterbury 645K (2023 estimate). Source: Stats NZ, Aotearoa Data Explorer (DPE_POP_001).',
+      },
+      {
+        input: 'Show me NZ GDP growth over the last 5 years',
+        output: 'From the "Gross Domestic Product" dataflow (SNA_GDP_001): 2019: 3.1%, 2020: -1.1%, 2021: 5.4%, 2022: 2.4%, 2023: 0.9%. Source: Stats NZ, Aotearoa Data Explorer.',
+      },
+    ],
+    tags: ['statistics', 'new-zealand', 'government', 'census', 'population', 'economics', 'sdmx'],
+  }),
 ];

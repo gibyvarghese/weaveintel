@@ -8,13 +8,17 @@ export function $$(selector: string): HTMLElement[] {
   return Array.from(document.querySelectorAll(selector)) as HTMLElement[];
 }
 
+const SVG_TAGS = new Set(['svg', 'path', 'line', 'circle', 'rect', 'polygon', 'polyline', 'ellipse', 'g', 'defs', 'use', 'symbol', 'text', 'tspan', 'clipPath', 'mask', 'linearGradient', 'radialGradient', 'stop', 'pattern', 'image', 'foreignObject']);
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 // h() - JSX-like element factory for creating DOM elements
 export function h(
   tag: string,
   attributes: Record<string, any> | null,
-  ...children: (HTMLElement | string | null | undefined)[]
+  ...children: (HTMLElement | SVGElement | string | null | undefined)[]
 ): HTMLElement {
-  const el = document.createElement(tag);
+  const isSvg = SVG_TAGS.has(tag);
+  const el = (isSvg ? document.createElementNS(SVG_NS, tag) : document.createElement(tag)) as HTMLElement;
 
   if (attributes) {
     Object.entries(attributes).forEach(([key, value]) => {
@@ -45,7 +49,7 @@ export function h(
     if (child) {
       if (typeof child === 'string') {
         el.appendChild(document.createTextNode(child));
-      } else if (child instanceof HTMLElement) {
+      } else if (child instanceof Element) {
         el.appendChild(child);
       }
     }

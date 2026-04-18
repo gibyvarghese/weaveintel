@@ -22,6 +22,8 @@
     { "path": "../../packages/cache" },
     { "path": "../../packages/identity" },
     { "path": "../../packages/memory" },
+    { "path": "../../packages/mcp-statsnz" },
+    { "path": "../../packages/tools-http" },
     { "path": "../../packages/tools-time" },
     { "path": "../../packages/ui-primitives" },
     { "path": "../../packages/devtools" },

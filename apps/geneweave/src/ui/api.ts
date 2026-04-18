@@ -62,14 +62,76 @@ export const api = {
   },
 };
 
+function parseMetadata(raw: unknown): Record<string, any> {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw as Record<string, any>;
+  if (typeof raw !== 'string') return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+export function normalizeServerMessage(message: any) {
+  const meta = parseMetadata(message?.metadata);
+  return {
+    ...message,
+    metadata: message?.metadata ?? null,
+    attachments: Array.isArray(message?.attachments)
+      ? message.attachments
+      : Array.isArray(meta['attachments'])
+        ? meta['attachments']
+        : [],
+    steps: Array.isArray(message?.steps)
+      ? message.steps
+      : Array.isArray(meta['steps'])
+        ? meta['steps']
+        : [],
+    evalResult: message?.evalResult ?? meta['eval'] ?? null,
+    cognitive: message?.cognitive ?? meta['cognitive'] ?? null,
+    guardrail: message?.guardrail ?? meta['guardrail'] ?? null,
+    activeSkills: Array.isArray(message?.activeSkills)
+      ? message.activeSkills
+      : Array.isArray(meta['activeSkills'])
+        ? meta['activeSkills']
+        : [],
+    skillTools: Array.isArray(message?.skillTools)
+      ? message.skillTools
+      : Array.isArray(meta['skillTools'])
+        ? meta['skillTools']
+        : [],
+    enabledTools: Array.isArray(message?.enabledTools)
+      ? message.enabledTools
+      : Array.isArray(meta['enabledTools'])
+        ? meta['enabledTools']
+        : [],
+    skillPromptApplied: message?.skillPromptApplied ?? !!meta['skillPromptApplied'],
+    mode: message?.mode ?? meta['mode'] ?? null,
+  };
+}
+
 // Chat operations
 export async function loadChats() {
   try {
     const r = await api.get('/chats');
     const data = await r.json();
     state.chats = data.chats || [];
-    if (state.chats.length && !state.currentChatId) {
-      state.currentChatId = state.chats[0].id;
+    const hasCurrent = state.currentChatId && state.chats.some((chat: any) => chat.id === state.currentChatId);
+    if (!hasCurrent) {
+      state.currentChatId = state.chats[0]?.id || null;
+      state.messages = [];
+    }
+    if (state.currentChatId && state.messages.length === 0) {
+      const [messagesResp] = await Promise.all([
+        api.get(`/chats/${state.currentChatId}/messages`),
+        loadChatSettings(state.currentChatId),
+      ]);
+      const messagesData = await messagesResp.json();
+      state.messages = Array.isArray(messagesData.messages)
+        ? messagesData.messages.map(normalizeServerMessage)
+        : [];
     }
     triggerRender();
   } catch (e) {
@@ -81,9 +143,14 @@ export async function selectChat(id: string) {
   state.currentChatId = id;
   triggerRender();
   try {
-    const r = await api.get(`/chats/${id}/messages`);
-    const data = await r.json();
-    state.messages = data.messages || [];
+    const [messagesResp, _settingsResp] = await Promise.all([
+      api.get(`/chats/${id}/messages`),
+      loadChatSettings(id),
+    ]);
+    const data = await messagesResp.json();
+    state.messages = Array.isArray(data.messages)
+      ? data.messages.map(normalizeServerMessage)
+      : [];
     triggerRender();
   } catch (e) {
     console.error('Failed to load chat', e);
@@ -103,6 +170,11 @@ export async function createChat() {
       state.chats.unshift(chat);
       state.currentChatId = chat.id;
       state.messages = [];
+      await loadChatSettings(chat.id);
+      if (state.chatSettings && state.defaultMode) {
+        state.chatSettings.mode = state.defaultMode;
+        await saveChatSettings();
+      }
       triggerRender();
     }
   } catch (e) {
@@ -166,13 +238,47 @@ export async function loadUserPreferences() {
 
 // Chat-specific settings
 export async function loadChatSettings(chatId: string) {
+  if (!chatId) {
+    state.chatSettings = null;
+    triggerRender();
+    return;
+  }
   try {
     const r = await api.get(`/chats/${chatId}/settings`);
     const data = await r.json();
-    state.chatSettings = data.settings;
+    const settings = data.settings;
+    state.chatSettings = settings
+      ? {
+          mode: settings.mode || 'direct',
+          systemPrompt: settings.system_prompt || '',
+          timezone: settings.timezone || '',
+          enabledTools: settings.enabled_tools ? JSON.parse(settings.enabled_tools) : [],
+          redactionEnabled: !!settings.redaction_enabled,
+          redactionPatterns: settings.redaction_patterns ? JSON.parse(settings.redaction_patterns) : ['email', 'phone', 'ssn', 'credit_card'],
+          workers: settings.workers ? JSON.parse(settings.workers) : [],
+        }
+      : {
+          mode: state.defaultMode || 'direct',
+          systemPrompt: '',
+          timezone: '',
+          enabledTools: [],
+          redactionEnabled: false,
+          redactionPatterns: ['email', 'phone', 'ssn', 'credit_card'],
+          workers: [],
+        };
     triggerRender();
   } catch (e) {
     console.error('Failed to load chat settings', e);
+    state.chatSettings = {
+      mode: state.defaultMode || 'direct',
+      systemPrompt: '',
+      timezone: '',
+      enabledTools: [],
+      redactionEnabled: false,
+      redactionPatterns: ['email', 'phone', 'ssn', 'credit_card'],
+      workers: [],
+    };
+    triggerRender();
   }
 }
 
@@ -180,6 +286,10 @@ export async function saveChatSettings() {
   if (!state.currentChatId || !state.chatSettings) return;
   try {
     await api.post(`/chats/${state.currentChatId}/settings`, state.chatSettings);
+    if (state.chatSettings.mode && state.chatSettings.mode !== state.defaultMode) {
+      state.defaultMode = state.chatSettings.mode;
+      await api.post('/user/preferences', { default_mode: state.chatSettings.mode, theme: state.theme });
+    }
   } catch (e) {
     console.error('Failed to save chat settings', e);
   }

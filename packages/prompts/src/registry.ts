@@ -9,9 +9,8 @@ import type {
   PromptDefinition,
   PromptVersion,
   PromptRegistry,
-  PromptVariable,
 } from '@weaveintel/core';
-import { createTemplate } from './template.js';
+import { renderPromptVersion } from './template.js';
 
 // ─── In-memory registry ──────────────────────────────────────
 
@@ -48,8 +47,7 @@ export class InMemoryPromptRegistry implements PromptRegistry {
   async resolve(promptId: string, variables: Record<string, unknown>, _scope?: string): Promise<string> {
     const ver = await this.get(promptId);
     if (!ver) throw new Error(`Prompt "${promptId}" not found`);
-    const tpl = createTemplate({ id: ver.id, name: promptId, template: ver.template, variables: ver.variables });
-    return tpl.render(variables);
+    return renderPromptVersion(ver, variables);
   }
 
   async delete(promptId: string): Promise<void> {

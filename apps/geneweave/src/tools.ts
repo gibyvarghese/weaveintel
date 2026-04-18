@@ -11,6 +11,7 @@ import { Buffer } from 'node:buffer';
 import { createSearchRouter, type SearchProviderConfig } from '@weaveintel/tools-search';
 import { createInMemoryTemporalStore, createTimeTools, type TemporalStore } from '@weaveintel/tools-time';
 import { createBrowserTools, createAutomationTools, createBrowserAuthTools } from '@weaveintel/tools-browser';
+import { statsNzToolMap } from '@weaveintel/tools-http';
 import { canUseTool, normalizePersona } from './rbac.js';
 import type { ExecutionLanguage } from '@weaveintel/sandbox';
 import { getCSE } from './cse.js';
@@ -447,6 +448,7 @@ export const BUILTIN_TOOLS: Record<string, Tool> = {
   text_analysis: textAnalysisTool,
   ...browserToolMap(),
   ...cseToolMap(),
+  ...statsNzToolMap(),
 };
 
 export interface ToolRegistryOptions {

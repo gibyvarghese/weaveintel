@@ -167,25 +167,36 @@ export function toBase64(str: string): string {
 
 /* File handling */
 export async function queueFiles(files: File[]) {
-  for (const file of files) {
-    try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const base64 = (e.target?.result as string)?.split(',')[1];
-        if (base64) {
-          state.pendingAttachments.push({
-            name: file.name,
-            mimeType: file.type,
-            size: file.size,
-            dataBase64: base64,
-          });
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch (err) {
-      console.error('Failed to process file:', file.name, err);
+  const MAX_FILE_SIZE = 10 * 1024 * 1024;
+  const selected = files.slice(0, 8);
+  const encoded = await Promise.all(selected.map((file) => new Promise<any>((resolve) => {
+    if (file.size > MAX_FILE_SIZE) {
+      console.warn('Skipping large file:', file.name);
+      resolve(null);
+      return;
     }
-  }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const raw = e.target?.result;
+      const base64 = typeof raw === 'string' ? raw.split(',')[1] : null;
+      if (!base64) {
+        resolve(null);
+        return;
+      }
+      resolve({
+        name: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        size: file.size,
+        dataBase64: base64,
+      });
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  })));
+
+  state.pendingAttachments.push(...encoded.filter(Boolean));
+  const rerender = (globalThis as any).render;
+  if (typeof rerender === 'function') rerender();
 }
 
 export function removePendingAttachment(index: number) {
@@ -228,11 +239,18 @@ export async function toggleAudioRecording() {
           dataBase64: base64,
         });
 
+        state.audioRecording = false;
+        mediaRecorder = null;
+        const rerender = (globalThis as any).render;
+        if (typeof rerender === 'function') rerender();
+
         stream.getTracks().forEach((track) => track.stop());
       };
 
       mediaRecorder.start();
       state.audioRecording = true;
+      const rerender = (globalThis as any).render;
+      if (typeof rerender === 'function') rerender();
     } catch (err) {
       console.error('Audio recording failed:', err);
     }
@@ -243,6 +261,8 @@ export function stopAudioRecognition() {
   if (mediaRecorder) {
     mediaRecorder.stop();
     state.audioRecording = false;
+    const rerender = (globalThis as any).render;
+    if (typeof rerender === 'function') rerender();
   }
 }
 

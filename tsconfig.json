@@ -11,6 +11,7 @@
     { "path": "packages/redaction" },
     { "path": "packages/mcp-client" },
     { "path": "packages/mcp-server" },
+    { "path": "packages/mcp-statsnz" },
     { "path": "packages/a2a" },
     { "path": "packages/evals" },
     { "path": "packages/testing" },

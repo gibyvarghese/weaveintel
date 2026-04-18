@@ -1,0 +1,27 @@
+{
+  "name": "@weaveintel/mcp-statsnz",
+  "version": "0.0.1",
+  "description": "Pre-wired Stats NZ MCP server assembly built on @weaveintel/mcp-server",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@weaveintel/core": "*",
+    "@weaveintel/mcp-server": "*",
+    "@weaveintel/tools-http": "*"
+  },
+  "license": "MIT"
+}

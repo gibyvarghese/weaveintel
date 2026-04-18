@@ -17,7 +17,7 @@
  *   @weaveintel/evals         — weaveEvalRunner for response quality assertions
  *   @weaveintel/guardrails    — createGuardrailPipeline, risk classification
  *   @weaveintel/human-tasks   — PolicyEvaluator for automatic human-review triggers
- *   @weaveintel/prompts       — createTemplate for variable-substituted prompts
+ *   @weaveintel/prompts       — shared prompt record parsing + variable-substituted rendering
  *   @weaveintel/routing       — SmartModelRouter, ModelHealthTracker
  *   @weaveintel/cache         — weaveInMemoryCacheStore, semantic cache for responses
  */
@@ -39,7 +39,22 @@ import type { DatabaseAdapter, MessageRow, ChatSettingsRow, GuardrailRow, HumanT
 import { createToolRegistry, type ToolRegistryOptions } from './tools.js';
 import { createTemporalStore } from './temporal-store.js';
 import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
-import { createTemplate } from '@weaveintel/prompts';
+import {
+  createPromptVersionFromRecord,
+  createTemplate,
+  executePromptRecord,
+  resolveFragments,
+  InMemoryFragmentRegistry,
+  InMemoryPromptStrategyRegistry,
+  fragmentFromRecord,
+  strategyFromRecord,
+  defaultPromptStrategyRegistry,
+  contractFromRecord,
+  validateContract,
+  InMemoryContractRegistry,
+  type ContractValidationResult,
+  type PromptRecordExecutionResult,
+} from '@weaveintel/prompts';
 import {
   applySkillsToPrompt,
   collectSkillTools,
@@ -47,6 +62,7 @@ import {
   skillFromRow,
   type SkillMatch,
 } from '@weaveintel/skills';
+import { createContract, DefaultCompletionValidator } from '@weaveintel/contracts';
 import { SmartModelRouter, ModelHealthTracker } from '@weaveintel/routing';
 import type { ModelCostInfo, ModelQualityInfo } from '@weaveintel/routing';
 import { weaveInMemoryCacheStore } from '@weaveintel/cache';
@@ -88,6 +104,7 @@ const SUPERVISOR_CODE_EXECUTION_POLICY = [
   'Execution strategy by task type:',
   '- Simple code-run requests (no attached dataset): call `cse_run_code` directly from supervisor.',
   '- Dataset/file analysis requests (attachments, CSV/JSON/XLSX, or "analyze this file"): delegate to `code_executor` first, then to `analyst` for result verification.',
+  '- Data retrieval + code analysis requests (user asks to fetch data from a specialist AND run code/Python on it): use SEQUENTIAL multi-worker delegation — (1) delegate to the data specialist worker first to retrieve the data, (2) then delegate to `code_executor` with the retrieved data embedded in the task description so it can write and execute the analysis script. Do NOT synthesize the final response until code_executor returns actual stdout.',
   '',
   'Attachment handling policy:',
   '- Attached files are injected into container workspace and should be opened by filename.',
@@ -112,12 +129,35 @@ const SUPERVISOR_CODE_EXECUTION_POLICY = [
   'Supported languages: python, javascript, typescript, bash.',
 ].join('\n');
 
+const POLICY_PROMPT_SUPERVISOR_CODE_EXECUTION = 'Runtime: Supervisor Code Execution Policy';
+const POLICY_PROMPT_SUPERVISOR_TEMPORAL = 'Runtime: Supervisor Temporal Policy';
+const POLICY_PROMPT_RESPONSE_CARD_FORMAT = 'Runtime: Response Card Format Policy';
+const POLICY_PROMPT_MULTI_WORKER_PIPELINE = 'Runtime: Multi Worker Sequential Pipeline';
+const POLICY_PROMPT_ENTERPRISE_WORKER_SYSTEM = 'Runtime: Enterprise ServiceNow Worker System Prompt';
+const POLICY_PROMPT_FORCED_WORKER_REQUIREMENT = 'Runtime: Forced Worker Data Analysis Requirement';
+const POLICY_PROMPT_HARD_EXECUTION_GUARD = 'Runtime: Hard Execution Guard';
+
+const FORCED_WORKER_REQUIREMENT = 'WORKFLOW REQUIREMENT: This request requires actual code execution. Delegate to code_executor to generate and run Python in container against attached files and/or retrieved tool data. If execution fails, retry with corrected code. After successful execution, delegate to analyst to verify computed outputs and produce at least 3 concrete insights.';
+
+const HARD_EXECUTION_GUARD_POLICY = [
+  'HARD EXECUTION GUARD: The answer is invalid unless you explicitly call delegate_to_worker(worker="code_executor") and produce a successful cse_run_code execution. Do not execute code directly in supervisor for this workflow. Delegate to code_executor, run code successfully, verify output, then respond.',
+  '',
+  'HARD PRESENTATION GUARD: Do not reference sandbox filesystem paths like /workspace/output/*.png or return img_path values that point to container files. If charts are requested, return renderable structured JSON with chart labels/values and optional table data instead of local file paths. If a prior run produced blank or incomplete insights, fix the script and rerun until the computed insights are non-empty.',
+].join('\n');
+
+const ENTERPRISE_WORKER_SYSTEM_PROMPT = [
+  'You are a specialized ServiceNow agent for: {{description}}',
+  'Use the available tools to fulfill the user\'s request. Always use the most specific tool available rather than generic query/get when possible.',
+].join('\n');
+
 const RESPONSE_CARD_FORMAT_POLICY = [
   'RESPONSE PRESENTATION POLICY (for rich response cards):',
   '- Choose output format based on user intent and data shape.',
   '- If user asks for a chart, graph, visualization, trend, or numeric comparison, prefer structured JSON with chart fields.',
   '- If user asks for tabular output, dataset rows, or comparisons, prefer structured JSON with table fields.',
   '- If user asks for both, include both table and chart.',
+  '- Never reference sandbox-only file paths such as /workspace/output/*.png or return img_path values that point to local container files.',
+  '- If charts are requested, translate computed results into renderable chart labels/values in JSON instead of markdown images pointing to local files.',
   '- For code or scripts, return JSON object: {"code":"...","language":"python|javascript|typescript|sql|bash|json|xml|yaml"}.',
   '- For normal conversational answers, use concise markdown text and do not force JSON.',
   '',
@@ -169,6 +209,8 @@ const SUPERVISOR_TEMPORAL_POLICY = [
   '  • Do NOT try to calculate elapsed time using raw timestamps or message metadata — always use the stopwatch tools',
 ].join('\n');
 
+// Stats NZ routing and specialist policies are now stored in worker_agents table (DB-driven)
+
 // ─── Tool Policies (auto-select tools by mode) ─────────────────
 
 /**
@@ -211,6 +253,45 @@ export function getDefaultToolsByMode(mode: 'direct' | 'agent' | 'supervisor'): 
 // ─── Model pricing (per 1 M tokens) ─────────────────────────
 
 interface ModelPricing { input: number; output: number }
+
+interface PromptContractCheckResult {
+  key: string;
+  name: string;
+  contractType: string;
+  valid: boolean;
+  severity: ContractValidationResult['severity'];
+  message: string;
+  errorCount: number;
+  repairSuggestion?: string;
+}
+
+interface PromptContractValidationSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  error: number;
+  warning: number;
+  info: number;
+}
+
+interface PromptContractValidationReport {
+  summary: PromptContractValidationSummary;
+  results: PromptContractCheckResult[];
+}
+
+interface PromptStrategyInfo {
+  requestedKey: string;
+  resolvedKey: string;
+  usedFallback: boolean;
+  name: string;
+  description: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface ResolvedSystemPrompt {
+  content?: string;
+  strategy?: PromptStrategyInfo;
+}
 
 // Fallback pricing used when DB lookup yields nothing (keeps system functional during cold start)
 const FALLBACK_PRICING: Record<string, ModelPricing> = {
@@ -353,6 +434,7 @@ export class ChatEngine {
   private readonly cacheKeyBuilder = weaveCacheKeyBuilder({ namespace: 'gw-chat' });
   private pricingCache: Map<string, ModelPricing> | null = null;
   private pricingCacheTs = 0;
+  private policyPromptCache: { ts: number; prompts: Map<string, string> } | null = null;
   private readonly toolOptions: ToolRegistryOptions;
 
   private withTemporalToolPolicy(basePrompt: string | undefined, toolNames: string[]): string | undefined {
@@ -374,9 +456,47 @@ export class ChatEngine {
     return base ? `${base}\n\n${enhancedPolicy}` : enhancedPolicy;
   }
   
-  private withResponseCardFormatPolicy(basePrompt: string | undefined): string | undefined {
+  private async getPolicyPromptTemplates(): Promise<Map<string, string>> {
+    const now = Date.now();
+    if (this.policyPromptCache && now - this.policyPromptCache.ts < 30_000) {
+      return this.policyPromptCache.prompts;
+    }
+    try {
+      const prompts = await this.db.listPrompts();
+      const enabled = new Map<string, string>();
+      for (const prompt of prompts) {
+        if (prompt.enabled) enabled.set(prompt.name, prompt.template);
+      }
+      this.policyPromptCache = { ts: now, prompts: enabled };
+      return enabled;
+    } catch {
+      return new Map<string, string>();
+    }
+  }
+
+  private async getPolicyPromptTemplate(name: string, fallback: string): Promise<string> {
+    const prompts = await this.getPolicyPromptTemplates();
+    return prompts.get(name) ?? fallback;
+  }
+
+  private async renderPolicyPromptTemplate(
+    name: string,
+    fallbackTemplate: string,
+    vars: Record<string, unknown>,
+  ): Promise<string> {
+    const template = await this.getPolicyPromptTemplate(name, fallbackTemplate);
+    try {
+      const tpl = createTemplate({ id: name, name, template });
+      return tpl.render(vars);
+    } catch {
+      return fallbackTemplate;
+    }
+  }
+
+  private async withResponseCardFormatPolicy(basePrompt: string | undefined): Promise<string | undefined> {
+    const policy = await this.getPolicyPromptTemplate(POLICY_PROMPT_RESPONSE_CARD_FORMAT, RESPONSE_CARD_FORMAT_POLICY);
     const base = basePrompt?.trim();
-    return base ? `${base}\n\n${RESPONSE_CARD_FORMAT_POLICY}` : RESPONSE_CARD_FORMAT_POLICY;
+    return base ? `${base}\n\n${policy}` : policy;
   }
 
   constructor(
@@ -387,10 +507,18 @@ export class ChatEngine {
   }
 
   private shouldForceWorkerDataAnalysis(userContent: string, attachments?: ChatAttachment[]): boolean {
-    if (!attachments || attachments.length === 0) return false;
     const lower = userContent.toLowerCase();
     const analysisIntent = /\b(analy[sz]e|analysis|insight|dataset|csv|table|trend|summary|summarize|statistics|statistical)\b/.test(lower);
-    return analysisIntent;
+    const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+
+    // Existing behavior: attached datasets with analysis intent must run through worker execution pipeline.
+    if (hasAttachments && analysisIntent) return true;
+
+    // New behavior: no-attachment requests that explicitly require code execution on retrieved data
+    // should still enforce the multi-worker code execution path.
+    const codeExecutionIntent = /\b(run|execute|execut(e|ing)|python|script|code)\b/.test(lower);
+    const dataRetrievalIntent = /\b(data|extracted|retrieve|retrieval|economy|gdp|spending|region|age|ethnicity|historical|trend|stats|statistics|stats\s*nz|new zealand)\b/.test(lower);
+    return codeExecutionIntent && dataRetrievalIntent;
   }
 
   private async discoverSkillsForInput(userContent: string): Promise<{ matches: SkillMatch[]; toolNames: string[] }> {
@@ -413,6 +541,25 @@ export class ChatEngine {
 
   private hasSuccessfulCseExecution(result: AgentResult): boolean {
     return this.scanForSuccessfulCseExecution(result, new WeakSet<object>());
+  }
+
+  private hasCodeExecutorDelegation(result: AgentResult): boolean {
+    const steps = Array.isArray(result.steps) ? result.steps : [];
+    for (const step of steps) {
+      if (!step || typeof step !== 'object') continue;
+
+      const delegationWorker = String(step.delegation?.worker ?? step.delegation?.workerName ?? '').trim().toLowerCase();
+      if (delegationWorker === 'code_executor') return true;
+
+      const toolName = String(step.toolCall?.name ?? '').trim();
+      if (toolName !== 'delegate_to_worker') continue;
+
+      const argsRec = this.asRecord(step.toolCall?.arguments);
+      const argWorker = String(argsRec?.['worker'] ?? '').trim().toLowerCase();
+      if (argWorker === 'code_executor') return true;
+    }
+
+    return false;
   }
 
   private scanForSuccessfulCseExecution(value: unknown, seen: WeakSet<object>): boolean {
@@ -466,13 +613,266 @@ export class ChatEngine {
 
     const traceJson = value.slice(traceIdx + '[WorkerToolTrace]\n'.length).trim();
     const parsed = this.safeParseJson(traceJson);
-    return Array.isArray(parsed) ? parsed : null;
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+
+    const rec = this.asRecord(parsed);
+    const executions = rec?.['executions'];
+    return Array.isArray(executions) ? executions : null;
   }
 
   private isSuccessfulCseToolResult(value: unknown): boolean {
     const parsed = typeof value === 'string' ? this.safeParseJson(value) : value;
     const record = this.asRecord(parsed);
     return record?.['status'] === 'success';
+  }
+
+  private isSuccessfulToolResult(value: unknown): boolean {
+    if (value == null) return false;
+    if (typeof value === 'string') {
+      const lower = value.toLowerCase();
+      if (
+        lower.includes('tool error')
+        || lower.includes('"status":"error"')
+        || lower.includes('"status": "error"')
+      ) {
+        return false;
+      }
+    }
+    const parsed = typeof value === 'string' ? this.safeParseJson(value) : value;
+    const record = this.asRecord(parsed);
+    if (!record) return true;
+    if (record['isError'] === true) return false;
+    const status = record['status'];
+    if (status === 'error' || status === 'failed') return false;
+    if (record['error']) return false;
+    return true;
+  }
+
+  /**
+   * Build supervisor worker definitions from DB `worker_agents` rows.
+   */
+  private buildWorkersFromDb(
+    workerRows: import('./db-types.js').WorkerAgentRow[],
+    model: Model,
+    toolOptions: ToolRegistryOptions,
+    customTools?: Awaited<ReturnType<ChatEngine['loadEnterpriseTools']>>,
+  ): Array<{ name: string; description: string; systemPrompt?: string; model: Model; tools?: ToolRegistry }> {
+    const sorted = [...workerRows].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+    return sorted.map((row) => {
+      const toolNames = (this.safeParseJson(row.tool_names) as string[]) ?? [];
+      const systemPrompt = this.withTemporalToolPolicy(row.system_prompt ?? undefined, toolNames);
+      const persona = normalizePersona(row.persona ?? undefined, 'agent');
+      const tools = toolNames.length
+        ? createToolRegistry(toolNames, customTools, { ...toolOptions, actorPersona: persona })
+        : customTools?.length
+          ? createToolRegistry([], customTools, { ...toolOptions, actorPersona: persona })
+          : undefined;
+
+      return {
+        name: row.name,
+        description: row.description,
+        systemPrompt,
+        model,
+        tools,
+      };
+    });
+  }
+
+  /**
+   * Generic contract-based execution guard. Delegates to a specific worker and validates
+   * the output against the worker's task contract. Retries up to max_retries times.
+   */
+  private async runWithContractGuard(
+    agent: { run: (ctx: ExecutionContext, input: { messages: Message[]; goal: string }) => Promise<AgentResult> },
+    ctx: ExecutionContext,
+    messages: Message[],
+    goal: string,
+    workerRow: import('./db-types.js').WorkerAgentRow,
+  ): Promise<AgentResult> {
+    const contractId = workerRow.task_contract_id;
+    const maxRetries = workerRow.max_retries ?? 0;
+
+    // Load the task contract from DB
+    let contractRow: import('./db-types.js').TaskContractRow | null = null;
+    if (contractId) {
+      contractRow = await this.db.getTaskContract(contractId);
+    }
+
+    const first = await agent.run(ctx, { messages, goal });
+    if (!contractRow) return first;
+
+    // Validate against contract
+    if (await this.validateAgainstContract(first, contractRow)) return first;
+
+    // Retry loop with progressively stronger instructions
+    let lastResult = first;
+    const workerToolNames: string[] = this.safeParseJson(workerRow.tool_names) as string[] ?? [];
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      const retryGoal = `${goal}\n\nEXECUTION GUARD (attempt ${attempt + 2}): Delegate to ${workerRow.name} and ensure the response satisfies the task contract "${contractRow.name}". The worker has tools: ${workerToolNames.join(', ')}. Required output fields: ${this.extractRequiredFields(contractRow)}.`;
+      lastResult = await agent.run(ctx, { messages, goal: retryGoal });
+      if (await this.validateAgainstContract(lastResult, contractRow)) return lastResult;
+    }
+
+    return lastResult;
+  }
+
+  /**
+   * Validate an agent result against a task contract's acceptance criteria.
+   */
+  private async validateAgainstContract(
+    result: AgentResult,
+    contractRow: import('./db-types.js').TaskContractRow,
+  ): Promise<boolean> {
+    const output = String(result.output ?? '');
+    const criteria: Array<{ id: string; description: string; type: string; config: Record<string, unknown>; required: boolean }> =
+      (this.safeParseJson(contractRow.acceptance_criteria) as Array<{ id: string; description: string; type: string; config: Record<string, unknown>; required: boolean }>) ?? [];
+
+    // Build signal object from output using each criterion's field config
+    const signal: Record<string, unknown> = {};
+    for (const c of criteria) {
+      const field = String(c.config?.['field'] ?? '');
+      const operator = String(c.config?.['operator'] ?? '');
+      if (operator === 'exists') {
+        // Check if the field name appears meaningfully in the output
+        signal[field] = this.outputContainsField(output, field);
+      } else {
+        signal[field] = this.extractFieldValue(output, field);
+      }
+    }
+
+    const validator = new DefaultCompletionValidator();
+    const contract = createContract({
+      name: contractRow.name,
+      acceptanceCriteria: criteria.map((c) => ({
+        id: c.id,
+        description: c.description,
+        type: c.type as 'assertion',
+        required: c.required,
+        config: c.config,
+      })),
+    });
+    const report = await validator.validate(signal, contract);
+    return report.status === 'fulfilled';
+  }
+
+  /**
+   * Check if an output contains evidence of a contract field.
+   */
+  private outputContainsField(output: string, field: string): boolean {
+    switch (field) {
+      case 'dataset_id':
+        return /\b[A-Z]{2,}_[A-Z0-9]+_[0-9]{3}\b/.test(output);
+      case 'period': {
+        // Check for year references that aren't just part of random numbers
+        return /\b(19|20)\d{2}\b/.test(output);
+      }
+      case 'values': {
+        // Check for numeric values that aren't just years
+        const tokens = output.match(/\b\d[\d,]*(?:\.\d+)?\b/g) ?? [];
+        for (const token of tokens) {
+          if (/^(19|20)\d{2}$/.test(token)) continue;
+          const numeric = Number(token.replace(/,/g, ''));
+          if (Number.isFinite(numeric)) return true;
+        }
+        return false;
+      }
+      default:
+        return output.toLowerCase().includes(field.toLowerCase());
+    }
+  }
+
+  private extractFieldValue(output: string, field: string): unknown {
+    // Try to find a JSON-like value for the field in the output
+    const regex = new RegExp(`"${field}"\\s*:\\s*"?([^",}]+)"?`, 'i');
+    const match = output.match(regex);
+    return match ? match[1]?.trim() : undefined;
+  }
+
+  private extractRequiredFields(contractRow: import('./db-types.js').TaskContractRow): string {
+    const criteria: Array<{ config?: { field?: string }; required?: boolean }> =
+      (this.safeParseJson(contractRow.acceptance_criteria) as Array<{ config?: { field?: string }; required?: boolean }>) ?? [];
+    return criteria
+      .filter((c) => c.required !== false)
+      .map((c) => c.config?.field ?? 'unknown')
+      .join(', ');
+  }
+
+  private async buildSupervisorInstructions(
+    basePrompt: string | undefined,
+    forceWorkerDataAnalysis: boolean,
+    workerRows?: import('./db-types.js').WorkerAgentRow[],
+  ): Promise<string> {
+    const prompts = await this.getPolicyPromptTemplates();
+    const workflowBlock = forceWorkerDataAnalysis
+      ? prompts.get(POLICY_PROMPT_FORCED_WORKER_REQUIREMENT) ?? FORCED_WORKER_REQUIREMENT
+      : undefined;
+
+    // Multi-worker sequential pipeline instruction (always present in supervisor mode)
+    const multiWorkerBlock = prompts.get(POLICY_PROMPT_MULTI_WORKER_PIPELINE) ?? [
+      'MULTI-WORKER SEQUENTIAL PIPELINE:',
+      'When the user\'s request spans multiple capabilities (e.g., "fetch NZ economic data AND run Python to find insights"), you MUST use sequential worker delegation:',
+      '  Step 1 — Delegate to the data specialist worker (e.g., statsnz_specialist) to retrieve the raw data.',
+      '  Step 2 — Once data is returned, delegate to code_executor with a task that embeds the retrieved data and asks it to write and execute Python (or other code) to produce insights.',
+      '  Step 3 — Use the code_executor stdout in your final response. Never skip code execution when the user explicitly asked for it.',
+      'Do not collapse multi-step pipelines into a single delegation or into a supervisor-only response.',
+    ].join('\n');
+
+    // Build dynamic routing guidance from DB worker capabilities/descriptions.
+    // Supervisor should choose workers by user intent, not keyword matching.
+    const routingBlocks: string[] = [];
+    if (workerRows) {
+      for (const row of workerRows) {
+        if (!row.description?.trim()) continue;
+        routingBlocks.push(
+          `WORKER CAPABILITY — ${row.name.toUpperCase()}:\n` +
+          `- Delegate to \`${row.name}\` when the user's query intent aligns with this capability.\n` +
+          `- ${row.description}\n` +
+          '- Select workers semantically based on meaning and task requirements, not keyword overlap.',
+        );
+      }
+    }
+
+    const policyBlocks = [
+      prompts.get(POLICY_PROMPT_SUPERVISOR_CODE_EXECUTION) ?? SUPERVISOR_CODE_EXECUTION_POLICY,
+      workflowBlock,
+      multiWorkerBlock,
+      prompts.get(POLICY_PROMPT_SUPERVISOR_TEMPORAL) ?? SUPERVISOR_TEMPORAL_POLICY,
+      ...routingBlocks,
+      prompts.get(POLICY_PROMPT_RESPONSE_CARD_FORMAT) ?? RESPONSE_CARD_FORMAT_POLICY,
+    ].filter((v): v is string => Boolean(v && v.trim()));
+
+    const prefix = basePrompt?.trim();
+    return prefix ? `${prefix}\n\n${policyBlocks.join('\n\n')}` : policyBlocks.join('\n\n');
+  }
+
+  private containsSandboxArtifactPath(text: string): boolean {
+    if (!text) return false;
+    return /\/workspace\/output\/[^\s)"']+\.png/iu.test(text)
+      || /"img_path"\s*:\s*"\/workspace\/output\//iu.test(text);
+  }
+
+  private indicatesIncompleteAttachmentAnalysis(text: string): boolean {
+    if (!text) return false;
+    const lower = text.toLowerCase();
+    return lower.includes('insight summary was blank')
+      || lower.includes('summary was blank')
+      || lower.includes('would you like me to') && lower.includes('re-run the analysis');
+  }
+
+  private hasRenderableAttachmentAnalysisOutput(result: AgentResult, goal: string): boolean {
+    const output = String(result.output || '').trim();
+    if (!output) return false;
+    if (this.containsSandboxArtifactPath(output)) return false;
+    if (this.indicatesIncompleteAttachmentAnalysis(output)) return false;
+
+    const expectsRenderableChart = /\b(chart|charts|graph|graphs|visuali[sz]ation|plot|plots)\b/i.test(goal);
+    if (!expectsRenderableChart) return true;
+
+    return output.includes('"chart"')
+      || output.includes('```json')
+      || !this.containsSandboxArtifactPath(output);
   }
 
   private asRecord(value: unknown): Record<string, unknown> | null {
@@ -489,15 +889,27 @@ export class ChatEngine {
     enforce: boolean,
   ): Promise<AgentResult> {
     const first = await agent.run(ctx, { messages, goal });
-    if (!enforce || this.hasSuccessfulCseExecution(first)) return first;
+    if (
+      !enforce
+      || (
+        this.hasSuccessfulCseExecution(first)
+        && this.hasCodeExecutorDelegation(first)
+        && this.hasRenderableAttachmentAnalysisOutput(first, goal)
+      )
+    ) return first;
 
-    const retryGoal = `${goal}\n\nHARD EXECUTION GUARD: The answer is invalid unless a successful cse_run_code execution is present in tool results. Delegate to code_executor, run code successfully, verify output, then respond.`;
+    const guardPolicy = await this.getPolicyPromptTemplate(POLICY_PROMPT_HARD_EXECUTION_GUARD, HARD_EXECUTION_GUARD_POLICY);
+    const retryGoal = `${goal}\n\n${guardPolicy}`;
     const second = await agent.run(ctx, { messages, goal: retryGoal });
-    if (this.hasSuccessfulCseExecution(second)) return second;
+    if (
+      this.hasSuccessfulCseExecution(second)
+      && this.hasCodeExecutorDelegation(second)
+      && this.hasRenderableAttachmentAnalysisOutput(second, retryGoal)
+    ) return second;
 
     return {
       ...second,
-      output: '[Execution guard failure] No successful cse_run_code result was found in tool traces for this attachment analysis request. The analysis result is not trusted. Please retry.',
+      output: '[Execution guard failure] The workflow did not satisfy required execution constraints. A successful cse_run_code run through delegated worker "code_executor" is required, and the final result must be renderable (no sandbox-local file paths, no incomplete insights). Please retry.',
     };
   }
 
@@ -543,6 +955,8 @@ export class ChatEngine {
     skillTools?: string[];
     enabledTools?: string[];
     skillPromptApplied?: boolean;
+    contracts?: PromptContractValidationReport;
+    promptStrategy?: PromptStrategyInfo;
   }> {
     let provider = opts?.provider ?? this.config.defaultProvider;
     let modelId = opts?.model ?? this.config.defaultModel;
@@ -576,7 +990,8 @@ export class ChatEngine {
     const actor = await this.db.getUserById(userId);
     const userPersona = normalizePersona(actor?.persona, 'user');
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
-    const resolvedPrompt = this.withResponseCardFormatPolicy(await this.resolveSystemPrompt(settings));
+    const resolvedSystemPrompt = await this.resolveSystemPrompt(settings);
+    const resolvedPrompt = await this.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
     const traceId = randomUUID();
     const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
     const startMs = Date.now();
@@ -700,6 +1115,7 @@ export class ChatEngine {
     let steps: AgentStep[] | undefined;
     let toolCallEvents: ToolCallObservableEvent[] | undefined;
     let cacheHit = false;
+    let contractInfo: PromptContractValidationReport | undefined;
 
     // ── Cache lookup ──
     const allowResponseCache = attachments.length === 0;
@@ -745,6 +1161,8 @@ export class ChatEngine {
     if (!cacheHit && cachePolicy && !assistantContent.includes('[Execution guard failure]')) {
       await this.responseCache.set(cacheKey, { content: assistantContent!, usage }, cachePolicy.ttlMs);
     }
+
+    contractInfo = await this.validatePromptContracts(assistantContent);
 
 
     const latencyMs = Date.now() - startMs;
@@ -808,6 +1226,8 @@ export class ChatEngine {
         guardrail: guardrailInfo,
         cognitive: postGuardrail.cognitive,
         policyChecks: policyChecks?.length ? policyChecks : undefined,
+        promptContracts: contractInfo,
+        promptStrategy: resolvedSystemPrompt.strategy,
         traceId,
       }),
       tokensUsed: usage.totalTokens,
@@ -849,6 +1269,8 @@ export class ChatEngine {
       skillTools,
       enabledTools: memorySettings.enabledTools,
       skillPromptApplied: activeSkills.length > 0,
+      contracts: contractInfo,
+      promptStrategy: resolvedSystemPrompt.strategy,
     };
   }
 
@@ -891,7 +1313,8 @@ export class ChatEngine {
     const actor = await this.db.getUserById(userId);
     const userPersona = normalizePersona(actor?.persona, 'user');
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
-    const resolvedPrompt = this.withResponseCardFormatPolicy(await this.resolveSystemPrompt(settings));
+    const resolvedSystemPrompt = await this.resolveSystemPrompt(settings);
+    const resolvedPrompt = await this.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
     const traceId = randomUUID();
     const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
 
@@ -1038,6 +1461,7 @@ export class ChatEngine {
     let finalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
     let steps: AgentStep[] = [];
     let toolCallEvents: ToolCallObservableEvent[] = [];
+    let streamContractInfo: PromptContractValidationReport | undefined;
 
     try {
       if (settings.mode === 'agent' || settings.mode === 'supervisor') {
@@ -1129,6 +1553,11 @@ export class ChatEngine {
       res.write(`data: ${JSON.stringify({ type: 'eval', ...evalInfo })}\n\n`);
     }
 
+    streamContractInfo = await this.validatePromptContracts(fullText);
+    if (streamContractInfo) {
+      res.write(`data: ${JSON.stringify({ type: 'contracts', ...streamContractInfo })}\n\n`);
+    }
+
     // Done event
     res.write(`data: ${JSON.stringify({
       type: 'done',
@@ -1144,6 +1573,8 @@ export class ChatEngine {
       skillPromptApplied: streamActiveSkills.length > 0,
       steps: steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })),
       cognitive: postGuardrail.cognitive,
+      contracts: streamContractInfo,
+      promptStrategy: resolvedSystemPrompt.strategy,
       traceId,
     })}\n\n`);
 
@@ -1165,6 +1596,8 @@ export class ChatEngine {
         guardrail: postGuardrail.decision !== 'allow' ? { decision: postGuardrail.decision, reason: postGuardrail.reason } : undefined,
         cognitive: postGuardrail.cognitive,
         policyChecks: policyChecks?.length ? policyChecks : undefined,
+        promptContracts: streamContractInfo,
+        promptStrategy: resolvedSystemPrompt.strategy,
         traceId,
       }),
       tokensUsed: finalUsage.totalTokens, cost, latencyMs,
@@ -1185,6 +1618,73 @@ export class ChatEngine {
 
     await this.recordTraceSpans(userId, chatId, assistMsgId, traceId, settings.mode, startMs, latencyMs, steps, toolCallEvents);
     res.end();
+  }
+
+  private async validatePromptContracts(output: string): Promise<PromptContractValidationReport | undefined> {
+    if (!output.trim()) return undefined;
+    try {
+      const rows = await this.db.listPromptContracts();
+      const enabledRows = rows.filter((row) => row.enabled);
+      if (enabledRows.length === 0) return undefined;
+
+      const parsed = enabledRows
+        .map((row) => ({
+          row,
+          contract: contractFromRecord({
+            id: row.id,
+            key: row.key,
+            name: row.name,
+            description: row.description ?? '',
+            contract_type: row.contract_type,
+            schema: row.schema ?? undefined,
+            config: row.config,
+            enabled: row.enabled,
+          }),
+        }))
+        .filter((entry): entry is { row: typeof enabledRows[number]; contract: NonNullable<ReturnType<typeof contractFromRecord>> } => !!entry.contract);
+
+      if (parsed.length === 0) return undefined;
+
+      const registry = new InMemoryContractRegistry(parsed.map((entry) => entry.contract));
+      const results: PromptContractCheckResult[] = parsed.map(({ row }) => {
+        const contract = registry.get(row.key);
+        if (!contract) {
+          return {
+            key: row.key,
+            name: row.name,
+            contractType: row.contract_type,
+            valid: false,
+            severity: 'error',
+            message: 'Contract could not be loaded from registry',
+            errorCount: 1,
+          };
+        }
+        const validation = validateContract(output, contract);
+        return {
+          key: row.key,
+          name: row.name,
+          contractType: row.contract_type,
+          valid: validation.valid,
+          severity: validation.severity,
+          message: validation.message,
+          errorCount: validation.errors.length,
+          repairSuggestion: validation.repairSuggestion,
+        };
+      });
+
+      const summary: PromptContractValidationSummary = {
+        total: results.length,
+        passed: results.filter((r) => r.valid).length,
+        failed: results.filter((r) => !r.valid).length,
+        error: results.filter((r) => r.severity === 'error').length,
+        warning: results.filter((r) => r.severity === 'warning').length,
+        info: results.filter((r) => r.severity === 'info').length,
+      };
+
+      return { summary, results };
+    } catch {
+      return undefined;
+    }
   }
 
   // ── Enterprise tools loader ─────────────────────────────────
@@ -1346,9 +1846,20 @@ export class ChatEngine {
     try {
       let agent;
       const forceWorkerDataAnalysis = this.shouldForceWorkerDataAnalysis(userContent, attachments);
+      const forceWorkerRequirement = await this.getPolicyPromptTemplate(
+        POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
+        FORCED_WORKER_REQUIREMENT,
+      );
       const effectiveGoal = forceWorkerDataAnalysis
-        ? `${userContent}\n\nWORKFLOW REQUIREMENT: Delegate to code_executor to generate and run Python in container against attached files. If execution fails, retry with corrected code. After successful execution, delegate to analyst to verify computed outputs and produce at least 3 concrete insights.`
+        ? `${userContent}\n\n${forceWorkerRequirement}`
         : userContent;
+
+      // Load DB-driven worker agents for supervisor mode
+      const dbWorkerRows = (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise))
+        ? await this.db.listEnabledWorkerAgents()
+        : [];
+
+      const routedGoal = effectiveGoal;
 
       // Auto-upgrade to supervisor when enterprise tools are available
       if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
@@ -1364,18 +1875,22 @@ export class ChatEngine {
                   ? createToolRegistry([], customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
                   : undefined,
             }))
-          : defaultWorkers(model, toolOptions, this.withTemporalToolPolicy.bind(this));
+          : this.buildWorkersFromDb(dbWorkerRows, model, toolOptions, customTools);
         // Build enterprise domain workers from tool groups
-        const enterpriseWorkers = enterpriseToolGroups.map((g) => {
+        const enterpriseWorkers = await Promise.all(enterpriseToolGroups.map(async (g) => {
           const registry = createToolRegistry([], g.tools, { ...toolOptions, actorPersona: 'agent_researcher' });
           return {
             name: g.name,
             description: g.description,
-            systemPrompt: `You are a specialized ServiceNow agent for: ${g.description}\nUse the available tools to fulfill the user's request. Always use the most specific tool available rather than generic query/get when possible.`,
+            systemPrompt: await this.renderPolicyPromptTemplate(
+              POLICY_PROMPT_ENTERPRISE_WORKER_SYSTEM,
+              ENTERPRISE_WORKER_SYSTEM_PROMPT,
+              { description: g.description },
+            ),
             model,
             tools: registry,
           };
-        });
+        }));
         const allWorkers = [...baseWorkers, ...enterpriseWorkers];
         console.log(`[chat] Supervisor with ${allWorkers.length} workers (${baseWorkers.length} base + ${enterpriseWorkers.length} enterprise)`);
         const supervisorCseTools = forceWorkerDataAnalysis
@@ -1386,19 +1901,7 @@ export class ChatEngine {
               { ...toolOptions, actorPersona: 'agent_worker' },
             );
 
-        const supervisorInstructions = forceWorkerDataAnalysis
-          ? [
-              SUPERVISOR_CODE_EXECUTION_POLICY,
-              '',
-              'For attachment-based data analysis requests, do NOT execute code directly in supervisor.',
-              'Delegate first to code_executor for script generation + execution, then to analyst for verification and insight synthesis.',
-              'Require at least 3 concrete, computed insights from tool output.',
-              '',
-              SUPERVISOR_TEMPORAL_POLICY,
-              '',
-              RESPONSE_CARD_FORMAT_POLICY,
-            ].join('\n')
-          : [SUPERVISOR_CODE_EXECUTION_POLICY, '', SUPERVISOR_TEMPORAL_POLICY, '', RESPONSE_CARD_FORMAT_POLICY].join('\n');
+        const supervisorInstructions = await this.buildSupervisorInstructions(settings.systemPrompt, forceWorkerDataAnalysis, dbWorkerRows);
 
         agent = weaveSupervisor({
           model,
@@ -1410,7 +1913,7 @@ export class ChatEngine {
           bus: agentBus,
         });
       } else {
-        const policyPrompt = this.withResponseCardFormatPolicy(this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools));
+        const policyPrompt = await this.withResponseCardFormatPolicy(this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools));
         agent = weaveAgent({
           model,
           tools,
@@ -1425,7 +1928,7 @@ export class ChatEngine {
         agent,
         ctx,
         messages,
-        effectiveGoal,
+        routedGoal,
         forceWorkerDataAnalysis,
       );
       return { result, toolCallEvents: toolCallObserver.events };
@@ -1497,79 +2000,79 @@ export class ChatEngine {
     });
 
     try {
-    const forceWorkerDataAnalysis = this.shouldForceWorkerDataAnalysis(userContent, attachments);
-    const effectiveGoal = forceWorkerDataAnalysis
-      ? `${userContent}\n\nWORKFLOW REQUIREMENT: Delegate to code_executor to generate and run Python in container against attached files. If execution fails, retry with corrected code. After successful execution, delegate to analyst to verify computed outputs and produce at least 3 concrete insights.`
-      : userContent;
-    let agent;
-    if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
-      const baseWorkers = settings.workers.length > 0
-        ? settings.workers.map((w) => ({
-            name: w.name,
-            description: w.description,
-            systemPrompt: this.withTemporalToolPolicy(undefined, w.tools),
+      const forceWorkerDataAnalysis = this.shouldForceWorkerDataAnalysis(userContent, attachments);
+      const forceWorkerRequirement = await this.getPolicyPromptTemplate(
+        POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
+        FORCED_WORKER_REQUIREMENT,
+      );
+      const effectiveGoal = forceWorkerDataAnalysis
+        ? `${userContent}\n\n${forceWorkerRequirement}`
+        : userContent;
+      const dbWorkerRows = (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise))
+        ? await this.db.listEnabledWorkerAgents()
+        : [];
+      const routedGoal = effectiveGoal;
+      let agent;
+      if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
+        const baseWorkers = settings.workers.length > 0
+          ? settings.workers.map((w) => ({
+              name: w.name,
+              description: w.description,
+              systemPrompt: this.withTemporalToolPolicy(undefined, w.tools),
+              model,
+              tools: w.tools.length
+                ? createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
+                : customTools?.length
+                  ? createToolRegistry([], customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
+                  : undefined,
+            }))
+          : this.buildWorkersFromDb(dbWorkerRows, model, toolOptions, customTools);
+        const enterpriseWorkers = await Promise.all(enterpriseToolGroups.map(async (g) => {
+          const registry = createToolRegistry([], g.tools, { ...toolOptions, actorPersona: 'agent_researcher' });
+          return {
+            name: g.name,
+            description: g.description,
+            systemPrompt: await this.renderPolicyPromptTemplate(
+              POLICY_PROMPT_ENTERPRISE_WORKER_SYSTEM,
+              ENTERPRISE_WORKER_SYSTEM_PROMPT,
+              { description: g.description },
+            ),
             model,
-            tools: w.tools.length
-              ? createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
-              : customTools?.length
-                ? createToolRegistry([], customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
-                : undefined,
-          }))
-        : defaultWorkers(model, toolOptions, this.withTemporalToolPolicy.bind(this));
-      const enterpriseWorkers = enterpriseToolGroups.map((g) => {
-        const registry = createToolRegistry([], g.tools, { ...toolOptions, actorPersona: 'agent_researcher' });
-        return {
-          name: g.name,
-          description: g.description,
-          systemPrompt: `You are a specialized ServiceNow agent for: ${g.description}\nUse the available tools to fulfill the user's request. Always use the most specific tool available rather than generic query/get when possible.`,
-          model,
-          tools: registry,
-        };
-      });
-      const allWorkers = [...baseWorkers, ...enterpriseWorkers];
-      const supervisorCseToolsStream = forceWorkerDataAnalysis
-        ? undefined
-        : createToolRegistry(
-            ['cse_run_code', 'cse_session_status', 'cse_end_session'],
-            undefined,
-            { ...toolOptions, actorPersona: 'agent_worker' },
-          );
+            tools: registry,
+          };
+        }));
+        const allWorkers = [...baseWorkers, ...enterpriseWorkers];
+        const supervisorCseToolsStream = forceWorkerDataAnalysis
+          ? undefined
+          : createToolRegistry(
+              ['cse_run_code', 'cse_session_status', 'cse_end_session'],
+              undefined,
+              { ...toolOptions, actorPersona: 'agent_worker' },
+            );
 
-      const supervisorInstructions = forceWorkerDataAnalysis
-        ? [
-            SUPERVISOR_CODE_EXECUTION_POLICY,
-            '',
-            'For attachment-based data analysis requests, do NOT execute code directly in supervisor.',
-            'Delegate first to code_executor for script generation + execution, then to analyst for verification and insight synthesis.',
-            'Require at least 3 concrete, computed insights from tool output.',
-            '',
-            SUPERVISOR_TEMPORAL_POLICY,
-            '',
-            RESPONSE_CARD_FORMAT_POLICY,
-          ].join('\n')
-        : [SUPERVISOR_CODE_EXECUTION_POLICY, '', SUPERVISOR_TEMPORAL_POLICY, '', RESPONSE_CARD_FORMAT_POLICY].join('\n');
-      agent = weaveSupervisor({
-        model,
-        workers: allWorkers,
-        maxSteps: 20,
-        name: 'geneweave-supervisor',
-        instructions: supervisorInstructions,
-        additionalTools: supervisorCseToolsStream,
-        bus: agentBus,
-      });
-    } else {
-      const policyPrompt = this.withResponseCardFormatPolicy(this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools));
-      agent = weaveAgent({
-        model,
-        tools,
-        systemPrompt: policyPrompt,
-        maxSteps: 15,
-        name: 'geneweave-agent',
-      });
-    }
+        const supervisorInstructions = await this.buildSupervisorInstructions(settings.systemPrompt, forceWorkerDataAnalysis, dbWorkerRows);
+        agent = weaveSupervisor({
+          model,
+          workers: allWorkers,
+          maxSteps: 20,
+          name: 'geneweave-supervisor',
+          instructions: supervisorInstructions,
+          additionalTools: supervisorCseToolsStream,
+          bus: agentBus,
+        });
+      } else {
+        const policyPrompt = await this.withResponseCardFormatPolicy(this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools));
+        agent = weaveAgent({
+          model,
+          tools,
+          systemPrompt: policyPrompt,
+          maxSteps: 15,
+          name: 'geneweave-agent',
+        });
+      }
 
     if (forceWorkerDataAnalysis) {
-      const guarded = await this.runWithCseSuccessGuard(agent, ctx, messages, effectiveGoal, true);
+      const guarded = await this.runWithCseSuccessGuard(agent, ctx, messages, routedGoal, true);
       res.write(`data: ${JSON.stringify({ type: 'text', text: guarded.output })}\n\n`);
       for (const step of guarded.steps) {
         res.write(`data: ${JSON.stringify({
@@ -1583,7 +2086,7 @@ export class ChatEngine {
 
     // Try streaming mode first
     if (agent.runStream) {
-      const stream = agent.runStream(ctx, { messages, goal: effectiveGoal });
+      const stream = agent.runStream(ctx, { messages, goal: routedGoal });
       let finalResult: AgentResult | undefined;
 
       for await (const event of stream) {
@@ -1639,7 +2142,7 @@ export class ChatEngine {
     }
 
     // Fallback: non-streaming agent run, send result as single text event
-    const result = await agent.run(ctx, { messages, goal: effectiveGoal });
+    const result = await agent.run(ctx, { messages, goal: routedGoal });
     res.write(`data: ${JSON.stringify({ type: 'text', text: result.output })}\n\n`);
 
     // Send step summaries
@@ -2289,8 +2792,8 @@ export class ChatEngine {
    * look it up in the prompts table and render its template. Falls back to
    * the plain system_prompt string.
    */
-  private async resolveSystemPrompt(settings: ChatSettings): Promise<string | undefined> {
-    if (!settings.systemPrompt) return undefined;
+  private async resolveSystemPrompt(settings: ChatSettings): Promise<ResolvedSystemPrompt> {
+    if (!settings.systemPrompt) return { content: undefined };
 
     try {
       // Check if the system prompt references a DB prompt by name
@@ -2299,21 +2802,86 @@ export class ChatEngine {
         r => r.enabled && (r.id === settings.systemPrompt || r.name === settings.systemPrompt),
       );
       if (match) {
-        // Render the template (variables may be empty for simple prompts)
-        const tpl = createTemplate({ id: match.id, name: match.name, template: match.template });
         const vars: Record<string, unknown> = {};
-        // Parse variable names from the prompt; provide empty defaults for optional ones
-        if (match.variables) {
-          const varNames: string[] = JSON.parse(match.variables);
-          for (const v of varNames) vars[v] = `[${v}]`;
+        const promptVersion = createPromptVersionFromRecord(match);
+        if ('variables' in promptVersion) {
+          for (const variable of promptVersion.variables) {
+            vars[variable.name] = variable.defaultValue ?? `[${variable.name}]`;
+          }
         }
-        return tpl.render(vars);
+
+        // Build a fragment registry from enabled DB fragments, then pre-expand
+        // {{>key}} inclusions in the template before passing to renderPromptRecord.
+        // This lets prompt authors compose templates from reusable fragment blocks
+        // without requiring any change to the base rendering pipeline.
+        let resolvedMatch = match;
+        try {
+          const fragmentRows = await this.db.listPromptFragments();
+          const enabledFragments = fragmentRows.filter(f => f.enabled);
+          if (enabledFragments.length > 0) {
+            const fragmentRegistry = new InMemoryFragmentRegistry();
+            for (const row of enabledFragments) {
+              fragmentRegistry.register(fragmentFromRecord(row));
+            }
+            const expandedTemplate = resolveFragments(match.template, fragmentRegistry);
+            if (expandedTemplate !== match.template) {
+              // Create a shallow copy with the expanded template for rendering
+              resolvedMatch = { ...match, template: expandedTemplate };
+            }
+          }
+        } catch {
+          // Fragment expansion failure is non-fatal — fall through to raw template
+        }
+
+        // Build strategy registry from built-in shared strategies plus enabled
+        // DB-defined overlays so behavior stays package-driven and DB-configurable.
+        const strategyRegistry = new InMemoryPromptStrategyRegistry(defaultPromptStrategyRegistry.list());
+        try {
+          const strategyRows = await this.db.listPromptStrategies();
+          for (const row of strategyRows) {
+            if (!row.enabled) continue;
+            strategyRegistry.register(strategyFromRecord(row));
+          }
+        } catch {
+          // Strategy loading failure is non-fatal — fallback to built-ins only.
+        }
+
+        const executed = executePromptRecord(resolvedMatch, vars, {
+          strategyRegistry,
+          evaluations: [
+            {
+              id: 'prompt_not_empty',
+              description: 'Rendered system prompt should not be empty to avoid unbounded model behavior.',
+              evaluate: ({ content }) => ({
+                passed: content.trim().length > 0,
+                score: content.trim().length > 0 ? 1 : 0,
+                reason: content.trim().length > 0 ? undefined : 'Rendered prompt content is empty',
+              }),
+            },
+          ],
+        });
+
+        return {
+          content: executed.content,
+          strategy: this.toPromptStrategyInfo(executed),
+        };
       }
     } catch {
       // Fall through to plain text
     }
 
-    return settings.systemPrompt;
+    return { content: settings.systemPrompt };
+  }
+
+  private toPromptStrategyInfo(result: PromptRecordExecutionResult): PromptStrategyInfo {
+    return {
+      requestedKey: result.strategy.requestedKey,
+      resolvedKey: result.strategy.resolvedKey,
+      usedFallback: result.strategy.usedFallback,
+      name: result.strategy.name,
+      description: result.strategy.description,
+      metadata: result.strategy.metadata,
+    };
   }
 
   // ── Model routing from DB ───────────────────────────────────
@@ -2420,7 +2988,11 @@ export class ChatEngine {
     const trimmed = text.trim();
     const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
     const raw = fenced?.[1] ?? trimmed;
-    return JSON.parse(raw);
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
   }
 
   private sanitizeExtractedEntities(raw: unknown): Array<{ name: string; type: string; facts: Record<string, unknown> }> {
@@ -2731,84 +3303,6 @@ export class ChatEngine {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
-
-/** Default workers for supervisor mode when none are explicitly configured */
-function defaultWorkers(
-  model: Model,
-  toolOptions?: ToolRegistryOptions,
-  buildPrompt?: (basePrompt: string | undefined, toolNames: string[]) => string | undefined,
-): Array<{ name: string; description: string; systemPrompt?: string; model: Model; tools?: ToolRegistry }> {
-  const writerTools = ['text_analysis', 'memory_recall', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
-  
-  // Analyst should have temporal tools AND timer management for handling time-based tasks
-  const analystTools = ['calculator', 'json_format', 'text_analysis', 'memory_recall', 'datetime', 'datetime_add', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel'];
-
-  const codeExecutorTools = ['cse_run_code', 'cse_session_status', 'cse_end_session', 'calculator', 'text_analysis'];
-
-  return [
-    {
-      name: 'code_executor',
-      description: '[USE FIRST FOR ANY CODE/SCRIPT/RUN REQUEST] Writes AND executes code in real isolated Docker containers via CSE. Returns actual stdout. Use for: "run", "execute", "run it", "run in a container", "write and run", "test", "script that runs". NOT a simulation — real execution.',
-      systemPrompt: [
-        'You are a code writing + execution + verification agent.',
-        'Your mission is not just to write code, but to make it run successfully and produce validated results.',
-        '',
-        'Execution workflow (MANDATORY):',
-        '1. Understand objective and available attached files from context.',
-        '2. Generate a runnable script.',
-        '3. Execute with `cse_run_code`.',
-        '4. Verify stdout/stderr and correctness against requested output.',
-        '5. If errors or weak output, revise code and run again (iterate).',
-        '6. Stop only when output is successful and materially answers the request, or when a clear environment blocker is proven.',
-        '',
-        'For file/data analysis tasks:',
-        '- Treat attached filenames as real files in container workspace.',
-        '- Prefer robust Python stdlib (`csv`, `json`, `statistics`) first for portability.',
-        '- If using third-party libraries (pandas/numpy/etc.), install and verify explicitly before relying on them.',
-        '- If import fails, immediately fallback to stdlib approach and rerun.',
-        '- If file path fails, probe workspace via code (e.g., os.listdir("."), os.listdir("/workspace")) and retry with corrected path.',
-        '',
-        'Quality bar before returning:',
-        '- Code executed successfully (status success).',
-        '- Output includes concrete computed values (not generic commentary).',
-        '- At least 3 clear insights when the user asks for analysis/insights.',
-        '- Include assumptions and any residual limitations.',
-        '',
-        'Response format back to supervisor:',
-        '- Final code used',
-        '- Execution stdout',
-        '- Verification notes (why output is correct)',
-        '- If blocked: exact blocker + next best fallback',
-      ].join('\n'),
-      model,
-      tools: createToolRegistry(codeExecutorTools, undefined, { ...toolOptions, actorPersona: 'agent_worker' }),
-    },
-    {
-      name: 'researcher',
-      description: 'Researches topics, searches the web, browses websites, and gathers information. Can open a headless browser to navigate dynamic sites, read page content, click links, fill forms, and interact with web applications. Has full browser authentication capabilities: can detect login forms, auto-login using stored website credentials from the credential vault, save session cookies, and hand off the browser to the user for manual steps like 2FA or CAPTCHA. Always delegate login/auth tasks to this worker — it has the browser_detect_auth, browser_login, browser_save_cookies, browser_handoff_request, and browser_handoff_resume tools.',
-      model,
-      tools: createToolRegistry(
-        ['web_search', 'text_analysis', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume'],
-        undefined,
-        { ...toolOptions, actorPersona: 'agent_researcher' },
-      ),
-    },
-    {
-      name: 'analyst',
-      description: 'Analyzes data, performs calculations, validates computed outputs, formats JSON, provides structured insights, and handles temporal/timer queries. Good for math, data processing, output verification, formatting, date/time questions, and time management.',
-      systemPrompt: buildPrompt?.(undefined, analystTools),
-      model,
-      tools: createToolRegistry(analystTools, undefined, { ...toolOptions, actorPersona: 'agent_worker' }),
-    },
-    {
-      name: 'writer',
-      description: 'Writes, edits, and refines text. Good for drafting content, summarizing, and creative writing tasks.',
-      systemPrompt: buildPrompt?.(undefined, writerTools),
-      model,
-      tools: createToolRegistry(writerTools, undefined, { ...toolOptions, actorPersona: 'agent_worker' }),
-    },
-  ];
-}
 
 function historyToMessages(rows: MessageRow[]): Message[] {
   return rows.map((r) => ({

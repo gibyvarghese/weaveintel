@@ -375,6 +375,8 @@ describe('Guardrail Evaluations', () => {
 
 describeAdmin('Admin Prompts', () => {
   let promptId: string;
+  let defaultAId: string;
+  let defaultBId: string;
 
   it('lists prompts', async () => {
     const { status, data } = await api('GET', '/api/admin/prompts');
@@ -409,6 +411,51 @@ describeAdmin('Admin Prompts', () => {
     const prompt = data['prompt'] as Record<string, unknown>;
     expect(prompt?.['name']).toBe('Test Prompt');
     expect(prompt?.['template']).toContain('{{name}}');
+    const parsedVars = JSON.parse(String(prompt?.['variables'] ?? '[]')) as unknown[];
+    expect(parsedVars).toEqual(['name', 'role']);
+  });
+
+  it('normalizes variables sent as array of names', async () => {
+    const { status } = await api('PUT', `/api/admin/prompts/${promptId}`, {
+      variables: ['first_name', 'role', 'role'],
+    });
+    expect(status).toBe(200);
+
+    const { data } = await api('GET', `/api/admin/prompts/${promptId}`);
+    const prompt = data['prompt'] as Record<string, unknown>;
+    const parsedVars = JSON.parse(String(prompt?.['variables'] ?? '[]')) as unknown[];
+    expect(parsedVars).toEqual(['first_name', 'role']);
+  });
+
+  it('enforces a single default prompt', async () => {
+    const createdA = await api('POST', '/api/admin/prompts', {
+      name: 'Default A',
+      description: 'First default candidate',
+      category: 'test',
+      template: 'A',
+      is_default: true,
+      enabled: true,
+    });
+    expect(createdA.status).toBe(201);
+    defaultAId = ((createdA.data['prompt'] as Record<string, unknown>)?.['id'] as string);
+
+    const createdB = await api('POST', '/api/admin/prompts', {
+      name: 'Default B',
+      description: 'Second default candidate',
+      category: 'test',
+      template: 'B',
+      is_default: true,
+      enabled: true,
+    });
+    expect(createdB.status).toBe(201);
+    defaultBId = ((createdB.data['prompt'] as Record<string, unknown>)?.['id'] as string);
+
+    const { status, data } = await api('GET', '/api/admin/prompts');
+    expect(status).toBe(200);
+    const prompts = (data['prompts'] as Array<Record<string, unknown>>) ?? [];
+    const defaults = prompts.filter((p) => Number(p['is_default']) === 1);
+    expect(defaults).toHaveLength(1);
+    expect(defaults[0]?.['id']).toBe(defaultBId);
   });
 
   it('updates a prompt', async () => {
@@ -429,6 +476,11 @@ describeAdmin('Admin Prompts', () => {
   it('deletes a prompt', async () => {
     const { status } = await api('DELETE', `/api/admin/prompts/${promptId}`);
     expect(status).toBe(200);
+  });
+
+  afterAll(async () => {
+    if (defaultAId) await api('DELETE', `/api/admin/prompts/${defaultAId}`);
+    if (defaultBId) await api('DELETE', `/api/admin/prompts/${defaultBId}`);
   });
 });
 

@@ -16,7 +16,12 @@ import {
   getAgentAvatarUrl,
   scrollMessages,
   toggleAudioRecording,
-  queueFiles
+  queueFiles,
+  removePendingAttachment,
+  mdToHtml,
+  copyResponse,
+  emailResponse,
+  openInWord
 } from './ui/utils.js';
 import { 
   api, 
@@ -24,6 +29,7 @@ import {
   selectChat, 
   createChat, 
   deleteChat,
+  normalizeServerMessage,
   loadModels,
   loadTools,
   loadUserPreferences,
@@ -84,56 +90,1474 @@ window.ADMIN_SCHEMA = ${adminSchemaJson};
 // RENDERING FUNCTIONS
 // ============================================================================
 
+const dashboardFlowFilters: { mode: string; agent: string; toolQuery: string } = {
+  mode: 'all',
+  agent: 'all',
+  toolQuery: '',
+};
+
+function extractWorkerToolTrace(value: unknown): any[] {
+  if (typeof value !== 'string') return [];
+  const marker = '[WorkerToolTrace]';
+  const traceIdx = value.indexOf(marker);
+  if (traceIdx < 0) return [];
+  const raw = value.slice(traceIdx + marker.length).trim();
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseJsonMaybeLoose(value: unknown): any {
+  if (typeof value !== 'string') return value;
+  const trimmed = value.trim();
+  if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) return value;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return value;
+  }
+}
+
+function buildTimelineItem(item: any, idx: number, processUi: any, message: any): HTMLElement {
+  const dur = item.durationMs != null ? item.durationMs + 'ms' : '';
+  const keyBase = item.key || ('timeline-' + idx);
+  const showRaw = !!processUi.detailExpanded[keyBase + '-raw'];
+  const showInput = !!processUi.detailExpanded[keyBase + '-input'];
+  const showOutput = !!processUi.detailExpanded[keyBase + '-output'];
+  const badgeEls = Array.isArray(item.badges) && item.badges.length
+    ? h('div', { className: 'timeline-badges' }, ...item.badges.map((badge: any) => h('span', { className: 'timeline-badge ' + (badge.tone || 'ok') }, badge.label)))
+    : null;
+
+  return h('div', { className: 'timeline-item ' + item.kind + (item.isWorker ? ' worker' : '') },
+    h('div', { className: 't-h' },
+      h('span', null, item.title || ('Event ' + (idx + 1))),
+      h('span', null, dur)
+    ),
+    badgeEls,
+    item.summary ? h('div', { className: 't-summary' }, item.summary) : null,
+    (item.raw || item.inputRaw || item.outputRaw) ? h('div', { className: 't-actions' },
+      item.raw ? h('button', {
+        className: 'detail-toggle',
+        type: 'button',
+        'aria-expanded': String(showRaw),
+        onClick: () => { toggleProcessDetail(message, keyBase + '-raw'); renderMessages(); },
+      }, showRaw ? 'Hide raw ' + (item.detailLabel || 'details') : 'View raw ' + (item.detailLabel || 'details')) : null,
+      item.inputRaw ? h('button', {
+        className: 'detail-toggle',
+        type: 'button',
+        'aria-expanded': String(showInput),
+        onClick: () => { toggleProcessDetail(message, keyBase + '-input'); renderMessages(); },
+      }, showInput ? 'Hide input' : 'View input') : null,
+      item.outputRaw ? h('button', {
+        className: 'detail-toggle',
+        type: 'button',
+        'aria-expanded': String(showOutput),
+        onClick: () => { toggleProcessDetail(message, keyBase + '-output'); renderMessages(); },
+      }, showOutput ? 'Hide output' : 'View output') : null
+    ) : null,
+    item.raw && showRaw ? h('div', { className: 't-raw' },
+      h('div', { className: 't-raw-label' }, 'Raw ' + (item.detailLabel || 'details')),
+      renderProcessDetailView(item.raw)
+    ) : null,
+    item.inputRaw && showInput ? h('div', { className: 't-raw' },
+      h('div', { className: 't-raw-label' }, 'Tool input'),
+      renderProcessDetailView(item.inputRaw)
+    ) : null,
+    item.outputRaw && showOutput ? h('div', { className: 't-raw' },
+      h('div', { className: 't-raw-label' }, 'Tool output'),
+      renderProcessDetailView(item.outputRaw)
+    ) : null
+  );
+}
+
+function touchChat(chatId: string, titleOverride?: string) {
+  const index = state.chats.findIndex((chat: Chat) => chat.id === chatId);
+  if (index < 0) return;
+  const chat = state.chats[index];
+  const updated = {
+    ...chat,
+    title: titleOverride ?? chat.title,
+    updated_at: new Date().toISOString(),
+  };
+  state.chats.splice(index, 1);
+  state.chats.unshift(updated);
+}
+
 async function sendMessage(text: string) {
-  if (!text.trim()) return;
+  const content = String(text || '').trim();
+  const attachments = (state.pendingAttachments || []).slice();
+  if ((!content && !attachments.length) || state.streaming) return;
   if (!state.currentChatId) {
     await createChat();
   }
-  if (!state.currentChatId) return;
+  const chatId = state.currentChatId;
+  if (!chatId) return;
   
   state.messages.push({
     role: 'user',
-    content: text,
+    content,
+    attachments,
+    created_at: new Date().toISOString(),
+    metadata: attachments.length ? JSON.stringify({ attachments }) : null,
   });
+  state.pendingAttachments = [];
   state.streaming = true;
   render();
+  scrollMessages();
+
+  const modelParts = String(state.selectedModel || '').split(':');
+  const body = {
+    content,
+    stream: true,
+    model: modelParts[1] || undefined,
+    provider: modelParts[0] || undefined,
+    attachments: attachments.length ? attachments : undefined,
+  };
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  if (state.csrfToken) headers['X-CSRF-Token'] = state.csrfToken;
+
+  const startedAtMs = Date.now();
+  let assistantMsg: any = null;
   
   try {
-    const r = await api.post(`/chats/${state.currentChatId}/messages`, {
-      content: text,
-      attachments: state.pendingAttachments,
+    const resp = await fetch(`/api/chats/${chatId}/messages`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      credentials: 'same-origin',
     });
-    
-    if (r && typeof r === 'object' && 'ok' in r && (r as Response).ok) {
-      const data = await (r as Response).json() as any;
-      if (typeof data?.assistantContent === 'string' && data.assistantContent.length) {
-        state.messages.push({
-          role: 'assistant',
-          content: data.assistantContent,
-          metadata: JSON.stringify({
-            eval: data?.eval,
-            guardrail: data?.guardrail,
-            cognitive: data?.cognitive,
-            steps: data?.steps,
-          }),
-          tokens_used: data?.usage?.totalTokens ?? 0,
-          cost: data?.cost ?? 0,
-          latency_ms: data?.latencyMs ?? 0,
-        } as any);
-      } else if (Array.isArray(data?.messages)) {
-        state.messages = data.messages;
+    if (!resp.ok || !resp.body) {
+      throw new Error(`Streaming request failed (${resp.status})`);
+    }
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+
+    assistantMsg = {
+      role: 'assistant',
+      content: '',
+      usage: null,
+      cost: 0,
+      latency_ms: 0,
+      created_at: new Date().toISOString(),
+      steps: [],
+      evalResult: null,
+      redaction: null,
+      mode: state.chatSettings?.mode || 'direct',
+      processState: 'running',
+      processExpanded: true,
+      processUi: { detailExpanded: Object.create(null) },
+      activeSkills: [],
+      enabledTools: [],
+      skillTools: [],
+      skillPromptApplied: false,
+    };
+    state.messages.push(assistantMsg);
+    render();
+    scrollMessages();
+
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const d = JSON.parse(line.slice(6));
+          if (d.type === 'text') assistantMsg.content += d.text || '';
+          else if (d.type === 'reasoning' && d.text) assistantMsg.steps.push({ type: 'thinking', text: d.text });
+          else if (d.type === 'step') assistantMsg.steps.push(d.step || d);
+          else if (d.type === 'tool_start') assistantMsg.steps.push({ kind: 'tool_start', name: d.name, input: d.input });
+          else if (d.type === 'tool_end') {
+            const last = assistantMsg.steps[assistantMsg.steps.length - 1];
+            if (last && last.kind === 'tool_start') last.result = d.result;
+          }
+          else if (d.type === 'redaction') assistantMsg.redaction = d;
+          else if (d.type === 'eval') assistantMsg.evalResult = d;
+          else if (d.type === 'cognitive') assistantMsg.cognitive = d;
+          else if (d.type === 'guardrail') assistantMsg.guardrail = d;
+          else if (d.type === 'screenshot') {
+            if (!assistantMsg.screenshots) assistantMsg.screenshots = [];
+            assistantMsg.screenshots.push({ base64: d.base64, format: d.format || 'png' });
+          }
+          else if (d.type === 'handoff') {
+            state.handoffRequest = d;
+            render();
+          }
+          else if (d.type === 'done') {
+            assistantMsg.usage = d.usage;
+            assistantMsg.cost = d.cost;
+            assistantMsg.latency_ms = d.latencyMs;
+            if (d.steps) assistantMsg.steps = d.steps;
+            if (d.eval) assistantMsg.evalResult = d.eval;
+            if (d.cognitive) assistantMsg.cognitive = d.cognitive;
+            assistantMsg.activeSkills = Array.isArray(d.activeSkills) ? d.activeSkills : [];
+            assistantMsg.enabledTools = Array.isArray(d.enabledTools) ? d.enabledTools : [];
+            assistantMsg.skillTools = Array.isArray(d.skillTools) ? d.skillTools : [];
+            assistantMsg.skillPromptApplied = !!d.skillPromptApplied;
+            assistantMsg.processState = 'completed';
+            // Keep completed process expanded so delegation/tool chain-of-thought remains visible.
+            assistantMsg.processExpanded = true;
+          }
+          else if (d.type === 'error') {
+            assistantMsg.content += `\n[Error: ${d.error}]`;
+            assistantMsg.processState = 'error';
+            assistantMsg.processExpanded = true;
+          }
+          else if (d?.type) {
+            assistantMsg.steps.push({ type: d.type, content: d.text || d.message || JSON.stringify(d) });
+          }
+        } catch {
+          // Ignore malformed streaming events.
+        }
       }
-      state.pendingAttachments = [];
-    } else {
-      console.error('Message send failed:', (r as Response)?.status, (r as Response)?.statusText);
+
+      renderMessages();
+      scrollMessages();
     }
   } catch (e) {
-    console.error('Failed to send message:', e);
+    try {
+      const nonStreamResp = await fetch(`/api/chats/${chatId}/messages`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ ...body, stream: false }),
+        credentials: 'same-origin',
+      });
+      if (nonStreamResp.ok) {
+        const payload = await nonStreamResp.json();
+        const recoveredMsg = {
+          role: 'assistant',
+          content: String(payload.assistantContent || ''),
+          usage: payload.usage || null,
+          cost: payload.cost || 0,
+          latency_ms: payload.latencyMs || 0,
+          created_at: new Date().toISOString(),
+          steps: Array.isArray(payload.steps) ? payload.steps : [],
+          evalResult: payload.eval || null,
+          redaction: payload.redaction || null,
+          mode: state.chatSettings?.mode || 'direct',
+          activeSkills: Array.isArray(payload.activeSkills) ? payload.activeSkills : [],
+          enabledTools: Array.isArray(payload.enabledTools) ? payload.enabledTools : [],
+          skillTools: Array.isArray(payload.skillTools) ? payload.skillTools : [],
+          skillPromptApplied: !!payload.skillPromptApplied,
+          processState: 'completed',
+          processExpanded: true,
+          processUi: { detailExpanded: Object.create(null) },
+        };
+        if (assistantMsg) {
+          Object.assign(assistantMsg, recoveredMsg);
+        } else {
+          state.messages.push(recoveredMsg);
+        }
+        state.streaming = false;
+        render();
+        return;
+      }
+    } catch {
+      // ignore fallback failures
+    }
+
+    let recovered = false;
+    try {
+      const hist = await api.get(`/chats/${chatId}/messages`);
+      if (hist.ok) {
+        const rows = (await hist.json()).messages ?? [];
+        const candidates = rows.filter((m: any) => {
+          if (!m || m.role !== 'assistant' || !m.content) return false;
+          const ts = Date.parse(m.created_at || '');
+          return Number.isFinite(ts) && ts >= (startedAtMs - 15000);
+        });
+        if (candidates.length) {
+          const latest = normalizeServerMessage(candidates[candidates.length - 1]);
+          if (assistantMsg) {
+            assistantMsg.content = String(latest.content || '');
+            assistantMsg.steps = Array.isArray(latest.steps) ? latest.steps : assistantMsg.steps;
+            assistantMsg.evalResult = latest.evalResult || assistantMsg.evalResult;
+            assistantMsg.cognitive = latest.cognitive || assistantMsg.cognitive;
+            assistantMsg.guardrail = latest.guardrail || assistantMsg.guardrail;
+            assistantMsg.activeSkills = Array.isArray(latest.activeSkills) ? latest.activeSkills : assistantMsg.activeSkills;
+            assistantMsg.skillTools = Array.isArray(latest.skillTools) ? latest.skillTools : assistantMsg.skillTools;
+            assistantMsg.enabledTools = Array.isArray(latest.enabledTools) ? latest.enabledTools : assistantMsg.enabledTools;
+            assistantMsg.skillPromptApplied = !!latest.skillPromptApplied;
+            assistantMsg.mode = latest.mode || assistantMsg.mode;
+          } else {
+            state.messages.push(latest);
+          }
+          recovered = true;
+        }
+      }
+    } catch {
+      // ignore recovery failures
+    }
+
+    if (!recovered) {
+      state.messages.push({
+        role: 'assistant',
+        content: `[Connection error: ${String((e as any)?.message || e)}]`,
+        created_at: new Date().toISOString(),
+      } as any);
+    }
   }
   
   state.streaming = false;
+  const chat = state.chats.find((c: Chat) => c.id === chatId);
+  if (chat && chat.title === 'New Chat' && content.length > 0) {
+    const newTitle = content.slice(0, 40) + (content.length > 40 ? '…' : '');
+    touchChat(chatId, newTitle);
+    api.put(`/chats/${chatId}`, { title: newTitle }).catch(() => {});
+  } else {
+    touchChat(chatId);
+  }
   render();
   scrollMessages();
+}
+
+function parseMessageMetadata(raw: any): any {
+  if (!raw) return {};
+  if (typeof raw === 'object') return raw;
+  if (typeof raw !== 'string') return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function shortText(value: any, maxLen?: number): string {
+  if (value == null) return '';
+  const raw = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  if (raw.length <= (maxLen || 280)) return raw;
+  return raw.slice(0, maxLen || 280) + '...';
+}
+
+function detailText(value: any): string {
+  if (value == null) return '';
+  return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+}
+
+function summarizeForDisplay(value: any, maxLen?: number): string {
+  const raw = detailText(value);
+  if (!raw) return '';
+  const compact = raw.replace(/\s+/g, ' ').trim();
+  if (compact.length <= (maxLen || 180)) return compact;
+  return compact.slice(0, maxLen || 180) + '...';
+}
+
+function parseJsonMaybe(text: string): any {
+  if (typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  if (!trimmed || (trimmed[0] !== '{' && trimmed[0] !== '[')) return null;
+  try { return JSON.parse(trimmed); } catch (_e) { return null; }
+}
+
+function parseDelimitedLine(line: string, delimiter: string): string[] {
+  const cells: string[] = [];
+  let cell = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === delimiter && !inQuotes) {
+      cells.push(cell.trim());
+      cell = '';
+      continue;
+    }
+    cell += ch;
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
+function parseDelimitedTable(text: string): { headers: string[]; rows: string[][] } | null {
+  if (typeof text !== 'string') return null;
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length < 2) return null;
+  const delimiters = [',', '\t', '|'];
+  for (const delimiter of delimiters) {
+    const parsed = lines.slice(0, Math.min(lines.length, 40)).map((line) => parseDelimitedLine(line, delimiter));
+    const width = parsed[0]?.length || 0;
+    if (width < 2) continue;
+    if (!parsed.every((row) => row.length === width)) continue;
+    const headers = parsed[0]!.map((h, idx) => h || ('col_' + (idx + 1)));
+    const rows = parsed.slice(1);
+    if (rows.length < 1) continue;
+    return { headers, rows };
+  }
+  return null;
+}
+
+function formatXml(xmlText: string): string | null {
+  if (typeof xmlText !== 'string') return null;
+  const trimmed = xmlText.trim();
+  if (!/^<([A-Za-z_][\w:.-]*)(\s|>)/.test(trimmed)) return null;
+  try {
+    const parser = new DOMParser();
+    const parsed = parser.parseFromString(trimmed, 'application/xml');
+    if (parsed.getElementsByTagName('parsererror').length) return null;
+    const raw = new XMLSerializer().serializeToString(parsed).replace(/>(\s*)</g, '><');
+    const lines = raw.replace(/(>)(<)(\/?)/g, '$1\n$2$3').split('\n');
+    let pad = 0;
+    return lines.map((line) => {
+      const trimmedLine = line.trim();
+      if (!trimmedLine) return '';
+      if (/^<\//.test(trimmedLine)) pad = Math.max(0, pad - 1);
+      const out = '  '.repeat(pad) + trimmedLine;
+      if (/^<[^!?/][^>]*[^/]?>$/.test(trimmedLine)) pad++;
+      return out;
+    }).filter(Boolean).join('\n');
+  } catch (_e) {
+    return null;
+  }
+}
+
+function detectCodeLanguage(text: string): string {
+  const t = String(text || '');
+  if (/(^|\n)\s*(SELECT|INSERT|UPDATE|DELETE)\s+/i.test(t)) return 'sql';
+  if (/(^|\n)\s*(function|const|let|class|import|export)\b/.test(t) || /=>/.test(t)) return 'javascript';
+  if (/(^|\n)\s*(def |class |import |from |if __name__ ==)/.test(t)) return 'python';
+  if (/(^|\n)\s*(<\/?[A-Za-z_][\w:.-]*|<\?xml)/.test(t)) return 'xml';
+  return 'text';
+}
+
+function normalizeCodeLanguage(language: string): string {
+  const lang = String(language || '').trim().toLowerCase();
+  if (!lang) return '';
+  if (lang === 'py') return 'python';
+  if (lang === 'js') return 'javascript';
+  if (lang === 'ts') return 'typescript';
+  if (lang === 'yml') return 'yaml';
+  return lang;
+}
+
+function friendlyLanguageName(language: string): string {
+  const lang = normalizeCodeLanguage(language) || 'text';
+  if (lang === 'python') return 'Python';
+  if (lang === 'javascript') return 'JavaScript';
+  if (lang === 'typescript') return 'TypeScript';
+  if (lang === 'sql') return 'SQL';
+  if (lang === 'json') return 'JSON';
+  if (lang === 'xml') return 'XML';
+  if (lang === 'yaml') return 'YAML';
+  if (lang === 'bash' || lang === 'shell') return 'Shell';
+  return lang.toUpperCase();
+}
+
+function looksLikeCode(text: string): boolean {
+  if (typeof text !== 'string') return false;
+  const trimmed = text.trim();
+  if (trimmed.split(/\r?\n/).length < 2) return false;
+  let score = 0;
+  if (/[{};]/.test(trimmed)) score++;
+  if (/(^|\n)\s*(function|const|let|class|import|export|def|return|if|for|while)\b/.test(trimmed)) score++;
+  if (/=>|<\/?[A-Za-z]/.test(trimmed)) score++;
+  return score >= 2;
+}
+
+function tableFromJson(value: any): { headers: string[]; rows: string[][] } | null {
+  if (!Array.isArray(value) || !value.length) return null;
+  if (!value.every((row) => row && typeof row === 'object' && !Array.isArray(row))) return null;
+  const headers: string[] = [];
+  value.forEach((row) => {
+    Object.keys(row).forEach((key) => {
+      if (!headers.includes(key)) headers.push(key);
+    });
+  });
+  if (headers.length < 2) return null;
+  const rows = value.map((row) => headers.map((key) => {
+    const v = row[key];
+    if (v == null) return '';
+    return typeof v === 'string' ? v : JSON.stringify(v);
+  }));
+  return { headers, rows };
+}
+
+function extractCodePayloadFromJson(value: any): { code: string; language: string } | null {
+  if (!value || Array.isArray(value) || typeof value !== 'object') return null;
+  const language = normalizeCodeLanguage(value.language || value.lang || value.syntax || value.format);
+  const candidates = ['code', 'source', 'script', 'program', 'content', 'text', 'body', 'query'];
+  for (const key of candidates) {
+    const candidate = value[key];
+    if (typeof candidate !== 'string') continue;
+    const trimmed = candidate.trim();
+    if (!trimmed) continue;
+    if (language || looksLikeCode(trimmed) || detectCodeLanguage(trimmed) !== 'text') {
+      return {
+        code: candidate,
+        language: language || detectCodeLanguage(trimmed),
+      };
+    }
+  }
+  return null;
+}
+
+function renderDetailTable(headers: string[], rows: string[][]): HTMLElement {
+  return h('div', { className: 'detail-table-wrap' },
+    h('table', { className: 'detail-table' },
+      h('thead', null,
+        h('tr', null,
+          ...headers.map((col) => h('th', null, col))
+        )
+      ),
+      h('tbody', null,
+        ...rows.map((row) => h('tr', null,
+          ...row.map((cell) => h('td', null, formatMaybeCompactValue(cell)))
+        ))
+      )
+    )
+  );
+}
+
+function renderDetailCode(text: string, language: string, kind: string): HTMLElement {
+  const codeText = text || '';
+  const lang = normalizeCodeLanguage(language) || detectCodeLanguage(codeText);
+  const badge = friendlyLanguageName(lang);
+  const copyBtn = h('button', {
+    className: 'detail-copy-btn',
+    type: 'button',
+    title: 'Copy code',
+    onClick: async () => {
+      try {
+        await navigator.clipboard.writeText(codeText);
+      } catch {
+        // no-op
+      }
+      copyBtn.classList.add('copied');
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => {
+        copyBtn.classList.remove('copied');
+        copyBtn.textContent = 'Copy';
+      }, 1200);
+    },
+  }, 'Copy');
+  return h('div', { className: 'detail-block' },
+    h('div', { className: 'detail-block-hdr' },
+      h('span', { className: 'detail-lang' }, badge),
+      h('div', { className: 'detail-block-actions' },
+        h('span', { className: 'detail-kind' }, kind || 'formatted'),
+        copyBtn
+      )
+    ),
+    h('pre', { className: 'detail-code' }, codeText)
+  );
+}
+
+function processStageMeta(stage: string) {
+  if (stage === 'error') return { label: 'Error', icon: '!', tone: 'deny' };
+  if (stage === 'completed') return { label: 'Completed', icon: '✓', tone: 'ok' };
+  if (stage === 'validating') return { label: 'Validating', icon: '◉', tone: 'warn' };
+  if (stage === 'tools') return { label: 'Using Tools', icon: '⚙', tone: 'ok' };
+  if (stage === 'finalizing') return { label: 'Finalizing', icon: '↗', tone: 'ok' };
+  return { label: 'Thinking', icon: '…', tone: 'ok' };
+}
+
+function ensureProcessUiState(msg: any) {
+  if (!msg.processUi || typeof msg.processUi !== 'object') {
+    msg.processUi = { detailExpanded: Object.create(null) };
+  }
+  if (!msg.processUi.detailExpanded || typeof msg.processUi.detailExpanded !== 'object') {
+    msg.processUi.detailExpanded = Object.create(null);
+  }
+  return msg.processUi;
+}
+
+function toggleProcessDetail(msg: any, key: string) {
+  const ui = ensureProcessUiState(msg);
+  ui.detailExpanded[key] = !ui.detailExpanded[key];
+}
+
+function processStatusTone(status: string) {
+  if (status === 'deny' || status === 'fail' || status === 'error') return 'deny';
+  if (status === 'warn' || status === 'redacted') return 'warn';
+  return 'ok';
+}
+
+function extractThoughtText(step: any) {
+  if (!step) return '';
+  if (step.type === 'thinking') return String(step.text || step.content || '').trim();
+  const toolName = step?.toolCall?.name || step?.name || step?.toolName || '';
+  if (toolName !== 'think') return '';
+  const args = step?.toolCall?.arguments ?? step?.input;
+  const result = step?.toolCall?.result ?? step?.result;
+  if (typeof result === 'string' && result.trim()) {
+    return result.replace(/^\[(PLANNING|REASONING|SYNTHESIS|REFLECTION)\]\s*/, '').trim();
+  }
+  if (typeof args === 'string' && args.trim()) return args.trim();
+  if (args && typeof args === 'object') {
+    const candidate = args.reasoning || args.thought || args.content || args.summary || args.prompt || args.goal;
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return '';
+}
+
+function extractDelegatedWorkerName(value: any): string {
+  if (!value) return '';
+  if (typeof value === 'object') {
+    const worker = value.worker || value.workerName || value.agent || value.name;
+    return typeof worker === 'string' ? worker : '';
+  }
+  if (typeof value === 'string') {
+    const parsed = parseJsonMaybe(value);
+    if (parsed && typeof parsed === 'object') {
+      const worker = (parsed as any).worker || (parsed as any).workerName || (parsed as any).agent || (parsed as any).name;
+      return typeof worker === 'string' ? worker : '';
+    }
+  }
+  return '';
+}
+
+function renderProcessDetailView(value: any) {
+  const text = detailText(value);
+  if (!text) return h('div', { className: 't-b' }, 'No detail data');
+  const trimmed = text.trim();
+
+  const bt = String.fromCharCode(96);
+  const triple = bt + bt + bt;
+  if (trimmed.startsWith(triple)) {
+    const fenceLines = trimmed.split(/\r?\n/);
+    if (fenceLines.length >= 2 && fenceLines[fenceLines.length - 1] === triple) {
+      const lang = fenceLines[0]!.slice(3).trim();
+      const body = fenceLines.slice(1, -1).join('\n');
+      return renderDetailCode(body, lang || detectCodeLanguage(body), 'code');
+    }
+  }
+
+  const json = parseJsonMaybe(trimmed);
+  if (json != null) {
+    const codePayload = extractCodePayloadFromJson(json);
+    if (codePayload) return renderDetailCode(codePayload.code, codePayload.language, 'code');
+    const table = tableFromJson(json);
+    if (table) return renderDetailTable(table.headers, table.rows);
+    return renderDetailCode(JSON.stringify(json, null, 2), 'json', 'json');
+  }
+
+  const xml = formatXml(trimmed);
+  if (xml) return renderDetailCode(xml, 'xml', 'xml');
+
+  const delimited = parseDelimitedTable(trimmed);
+  if (delimited) return renderDetailTable(delimited.headers, delimited.rows);
+
+  if (looksLikeCode(trimmed)) return renderDetailCode(trimmed, detectCodeLanguage(trimmed), 'code');
+
+  return h('div', { className: 't-b' }, text);
+}
+
+function numericValue(v: any): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const cleaned = v.replace(/[$,%\s,]/g, '');
+    if (!cleaned) return null;
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function isLikelyYear(value: number): boolean {
+  return Number.isInteger(value) && value >= 1900 && value <= 2100;
+}
+
+function trimTrailingZeros(value: string): string {
+  return value.replace(/\.0+$|(?<=\.\d*[1-9])0+$/g, '');
+}
+
+function formatCompactNumber(value: number): string {
+  if (!Number.isFinite(value)) return String(value);
+  if (isLikelyYear(value)) return String(value);
+  const abs = Math.abs(value);
+  if (abs < 1000) {
+    if (Number.isInteger(value)) return String(value);
+    return trimTrailingZeros(value.toFixed(abs < 10 ? 2 : 1));
+  }
+
+  const units = ['k', 'M', 'B', 'T'];
+  let scaled = abs;
+  let unitIndex = -1;
+  while (scaled >= 1000 && unitIndex < units.length - 1) {
+    scaled /= 1000;
+    unitIndex += 1;
+  }
+  const decimals = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+  const formatted = trimTrailingZeros(scaled.toFixed(decimals));
+  return `${value < 0 ? '-' : ''}${formatted}${units[Math.max(unitIndex, 0)]}`;
+}
+
+function formatMaybeCompactValue(value: any): string {
+  if (value == null) return '';
+  if (typeof value === 'number') return formatCompactNumber(value);
+  if (typeof value !== 'string') return String(value);
+
+  const trimmed = value.trim();
+  const match = trimmed.match(/^([^\d+\-]*)([+\-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?)([^\d]*)$/);
+  if (!match) return value;
+
+  const prefix = match[1] || '';
+  const numericPart = match[2] || '';
+  const suffix = match[3] || '';
+  if (suffix.includes('%')) return value;
+
+  const parsed = numericValue(numericPart);
+  if (parsed == null) return value;
+  if (Math.abs(parsed) < 1000 || isLikelyYear(parsed)) return prefix + numericPart + suffix;
+  return prefix + formatCompactNumber(parsed) + suffix;
+}
+
+function formatCurrencyCompact(value: number, digits: number = 4): string {
+  if (!Number.isFinite(value)) return '$0';
+  if (Math.abs(value) >= 1000) return '$' + formatCompactNumber(value);
+  return '$' + Number(value).toFixed(digits);
+}
+
+function normalizeTableData(headers: any[], rows: any[]): { headers: string[]; rows: string[][] } | null {
+  if (!Array.isArray(headers) || !Array.isArray(rows) || !headers.length || !rows.length) return null;
+  const normalizedHeaders = headers.map((hd, idx) => String(hd || ('col_' + (idx + 1))));
+  const normalizedRows = rows.map((row) => {
+    if (Array.isArray(row)) return row.map((cell) => (cell == null ? '' : String(cell)));
+    if (row && typeof row === 'object') return normalizedHeaders.map((hd) => (row[hd] == null ? '' : String(row[hd])));
+    return [String(row)];
+  }).filter((row) => row.length);
+  if (!normalizedRows.length) return null;
+  return { headers: normalizedHeaders, rows: normalizedRows };
+}
+
+function extractResponseTableData(value: any): { headers: string[]; rows: string[][] } | null {
+  if (value == null) return null;
+  if (Array.isArray(value)) {
+    if (!value.length) return null;
+    if (value.every((row) => row && typeof row === 'object' && !Array.isArray(row))) {
+      const headers: string[] = [];
+      value.forEach((row) => {
+        Object.keys(row).forEach((key) => {
+          if (!headers.includes(key)) headers.push(key);
+        });
+      });
+      const rows = value.map((row) => headers.map((hd) => {
+        const cell = row[hd];
+        return cell == null ? '' : (typeof cell === 'string' ? cell : JSON.stringify(cell));
+      }));
+      return normalizeTableData(headers, rows);
+    }
+    if (value.every((row) => Array.isArray(row))) {
+      return normalizeTableData(value[0]?.map((_, idx) => 'col_' + (idx + 1)) || [], value);
+    }
+    return null;
+  }
+  if (typeof value === 'object') {
+    if (value.table && typeof value.table === 'object') {
+      const fromTable = extractResponseTableData(value.table);
+      if (fromTable) return fromTable;
+    }
+    if (Array.isArray(value.data)) {
+      const fromData = extractResponseTableData(value.data);
+      if (fromData) return fromData;
+    }
+    const headers = value.headers || value.columns;
+    const rows = value.rows;
+    if (Array.isArray(headers) && Array.isArray(rows)) return normalizeTableData(headers, rows);
+  }
+  return null;
+}
+
+function chartSpecFromChartObject(chartObj: any): any {
+  if (!chartObj || typeof chartObj !== 'object') return null;
+  const type = String(chartObj.type || 'bar').toLowerCase();
+  let labels = Array.isArray(chartObj.labels) ? chartObj.labels.map((x: any) => String(x)) : [];
+  let values = Array.isArray(chartObj.values) ? chartObj.values.map(numericValue).filter((x: any) => x != null) : [];
+  if ((!labels.length || !values.length) && Array.isArray(chartObj.datasets) && chartObj.datasets.length) {
+    const ds = chartObj.datasets[0] || {};
+    labels = labels.length
+      ? labels
+      : (Array.isArray(chartObj.labels)
+          ? chartObj.labels.map((x: any) => String(x))
+          : (Array.isArray(ds.data) ? ds.data.map((_: any, idx: number) => 'item_' + (idx + 1)) : []));
+    values = Array.isArray(ds.data) ? ds.data.map(numericValue).filter((x: any) => x != null) : [];
+  }
+  if (!labels.length || !values.length) return null;
+  const len = Math.min(labels.length, values.length, 20);
+  return {
+    type: type === 'line' ? 'line' : 'bar',
+    title: chartObj.title || chartObj.name || 'Chart',
+    labels: labels.slice(0, len),
+    values: values.slice(0, len),
+    unit: chartObj.unit || '',
+  };
+}
+
+function deriveChartSpecFromTable(tableData: any, hintTitle: string, hintType: string): any {
+  if (!tableData) return null;
+  const headers = Array.isArray(tableData.headers) ? tableData.headers : [];
+  const rows = Array.isArray(tableData.rows) ? tableData.rows : [];
+  if (headers.length < 2 || rows.length < 2) return null;
+
+  const title = String(hintTitle || '').trim();
+  const lower = title.toLowerCase();
+  const preferred: string[] = [];
+  if (lower.includes('margin')) preferred.push('margin', '%');
+  if (lower.includes('profit')) preferred.push('profit');
+  if (lower.includes('revenue') || lower.includes('sales')) preferred.push('revenue', 'sales');
+  if (lower.includes('cost') || lower.includes('expense')) preferred.push('cost', 'expense');
+
+  let valueCol = -1;
+  const isMostlyNumeric = (colIdx: number) => {
+    const numericCount = rows.reduce((acc: number, row: any[]) => acc + (numericValue(row[colIdx]) != null ? 1 : 0), 0);
+    return numericCount >= Math.max(2, Math.floor(rows.length * 0.6));
+  };
+
+  for (const key of preferred) {
+    const idx = headers.findIndex((hd: string) => String(hd || '').toLowerCase().includes(key));
+    if (idx > 0 && isMostlyNumeric(idx)) {
+      valueCol = idx;
+      break;
+    }
+  }
+  if (valueCol < 0) {
+    for (let c = 1; c < headers.length; c++) {
+      if (isMostlyNumeric(c)) {
+        valueCol = c;
+        break;
+      }
+    }
+  }
+  if (valueCol < 0) return null;
+
+  const points = rows.map((row: any[]) => ({
+    label: String(row[0] || ''),
+    value: numericValue(row[valueCol]),
+  })).filter((point: any) => point.label && point.value != null).slice(0, 20);
+  if (points.length < 2) return null;
+
+  return {
+    type: String(hintType || '').toLowerCase() === 'line' ? 'line' : 'bar',
+    title: title || (headers[valueCol] + ' by ' + headers[0]),
+    labels: points.map((p: any) => p.label),
+    values: points.map((p: any) => p.value),
+    unit: '',
+  };
+}
+
+function extractResponseChartSpec(value: any, tableData: any): any {
+  if (value && typeof value === 'object' && value.chart) {
+    const explicit = chartSpecFromChartObject(value.chart);
+    if (explicit) return explicit;
+  }
+  return deriveChartSpecFromTable(tableData, '', 'bar');
+}
+
+function extractResponseChartSpecs(value: any, tableData: any): any[] {
+  const specs: any[] = [];
+  if (value && typeof value === 'object' && value.chart) {
+    const chartEntries = Array.isArray(value.chart) ? value.chart : [value.chart];
+    chartEntries.forEach((entry: any) => {
+      const explicit = chartSpecFromChartObject(entry);
+      if (explicit) {
+        specs.push(explicit);
+        return;
+      }
+      const fallback = deriveChartSpecFromTable(tableData, entry?.title || entry?.name || '', entry?.type || 'bar');
+      if (fallback) specs.push(fallback);
+    });
+  }
+  if (!specs.length) {
+    const single = extractResponseChartSpec(value, tableData);
+    if (single) specs.push(single);
+  }
+  return specs;
+}
+
+function renderResponseTable(headers: string[], rows: string[][]): HTMLElement {
+  return h('div', { className: 'response-table-wrap' },
+    h('table', { className: 'response-table' },
+      h('thead', null,
+        h('tr', null,
+          ...headers.map((col) => h('th', null, col))
+        )
+      ),
+      h('tbody', null,
+        ...rows.map((row) => h('tr', null,
+          ...row.map((cell) => h('td', null, formatMaybeCompactValue(cell)))
+        ))
+      )
+    )
+  );
+}
+
+function renderResponseChart(spec: any): HTMLElement | null {
+  const labels = Array.isArray(spec?.labels) ? spec.labels : [];
+  const values = Array.isArray(spec?.values) ? spec.values : [];
+  if (!labels.length || !values.length) return null;
+  const max = Math.max(...values, 0.0001);
+  const unit = spec.unit ? String(spec.unit) : '';
+  const title = spec.title || 'Chart';
+  if (spec.type === 'line') {
+    const width = 560;
+    const height = 180;
+    const pad = 20;
+    const xSpan = Math.max(1, labels.length - 1);
+    const points = values.map((v: number, idx: number) => {
+      const x = pad + ((width - pad * 2) * idx / xSpan);
+      const y = pad + ((height - pad * 2) * (1 - (v / max)));
+      return { x, y };
+    });
+    const path = points.map((p: { x: number; y: number }, idx: number) => (idx === 0 ? 'M' : 'L') + p.x + ' ' + p.y).join(' ');
+    return h('div', { className: 'response-chart response-line' },
+      h('div', { className: 'response-chart-title' }, title),
+      h('svg', { viewBox: '0 0 ' + width + ' ' + height, preserveAspectRatio: 'none' },
+        h('line', { className: 'response-line-axis', x1: String(pad), y1: String(height - pad), x2: String(width - pad), y2: String(height - pad) }),
+        h('path', { className: 'response-line-path', d: path }),
+        ...points.map((p: { x: number; y: number }) => h('circle', { className: 'response-line-dot', cx: String(p.x), cy: String(p.y), r: '2.5' }))
+      ),
+      h('div', { className: 'response-line-labels' },
+        ...labels.map((label: string) => h('span', null, label))
+      )
+    );
+  }
+  return h('div', { className: 'response-chart' },
+    h('div', { className: 'response-chart-title' }, title),
+    h('div', { className: 'response-bars' },
+      ...labels.map((label: string, idx: number) => {
+        const value = values[idx];
+        const widthPct = Math.max(2, Math.round((value / max) * 100));
+        return h('div', { className: 'response-bar-row' },
+          h('div', { className: 'response-bar-label', title: label }, label),
+          h('div', { className: 'response-bar-track' },
+            h('div', { className: 'response-bar-fill', style: 'width:' + widthPct + '%' })
+          ),
+          h('div', { className: 'response-bar-value' }, formatCompactNumber(value) + unit)
+        );
+      })
+    )
+  );
+}
+
+function renderAssistantStructuredContent(content: string): HTMLElement | null {
+  const text = String(content || '');
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  const json = parseJsonMaybe(trimmed);
+  if (json != null) {
+    const codePayload = extractCodePayloadFromJson(json);
+    if (codePayload) {
+      return h('div', { className: 'response-rich' },
+        renderDetailCode(codePayload.code, codePayload.language, 'code')
+      );
+    }
+    const table = extractResponseTableData(json);
+    const charts = extractResponseChartSpecs(json, table);
+    const note = typeof json.summary === 'string'
+      ? json.summary
+      : typeof json.message === 'string'
+        ? json.message
+        : typeof json.description === 'string'
+          ? json.description
+          : '';
+    if (charts.length || table) {
+      return h('div', { className: 'response-rich' },
+        note ? h('p', { className: 'response-note' }, note) : null,
+        ...charts.map((spec) => renderResponseChart(spec)).filter(Boolean) as HTMLElement[],
+        table ? renderResponseTable(table.headers, table.rows) : null
+      );
+    }
+  }
+
+  const delimited = parseDelimitedTable(trimmed);
+  if (delimited) {
+    return h('div', { className: 'response-rich' },
+      renderResponseTable(delimited.headers, delimited.rows)
+    );
+  }
+  return null;
+}
+
+function extractJsonCodeBlocks(text: string): { blocks: any[]; stripped: string } {
+  const bt = String.fromCharCode(96);
+  const triple = bt + bt + bt;
+  if (typeof text !== 'string' || !text.includes(triple)) return { blocks: [], stripped: text || '' };
+  const fenceRe = new RegExp(triple + '([^\\n' + bt + ']*)\\n([\\s\\S]*?)' + triple, 'g');
+  const blocks: any[] = [];
+  let stripped = '';
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = fenceRe.exec(text))) {
+    const language = String(match[1] || '').trim().toLowerCase();
+    const body = String(match[2] || '').trim();
+    const parsed = parseJsonMaybe(body);
+    if (parsed == null) continue;
+    if (language && language !== 'json' && language !== 'application/json' && language !== 'chart' && language !== 'table') continue;
+    blocks.push(parsed);
+    stripped += text.slice(lastIndex, match.index);
+    lastIndex = fenceRe.lastIndex;
+  }
+  if (!blocks.length) return { blocks: [], stripped: text };
+  stripped += text.slice(lastIndex);
+  return { blocks, stripped };
+}
+
+function renderAssistantEmbeddedStructuredContent(content: string): { markdown: string; node: HTMLElement } | null {
+  const extracted = extractJsonCodeBlocks(content);
+  if (!extracted.blocks.length) return null;
+  const sections: HTMLElement[] = [];
+  extracted.blocks.forEach((block) => {
+    const table = extractResponseTableData(block);
+    const chart = extractResponseChartSpec(block, table);
+    const note = typeof block?.summary === 'string'
+      ? block.summary
+      : typeof block?.message === 'string'
+        ? block.message
+        : typeof block?.description === 'string'
+          ? block.description
+          : '';
+    if (!chart && !table) return;
+    const chartEl = chart ? renderResponseChart(chart) : null;
+    sections.push(
+      h('div', { className: 'response-rich' },
+        note ? h('p', { className: 'response-note' }, note) : null,
+        chartEl,
+        table ? renderResponseTable(table.headers, table.rows) : null
+      )
+    );
+  });
+  if (!sections.length) return null;
+  return {
+    markdown: String(extracted.stripped || '').trim(),
+    node: h('div', { className: 'response-rich response-rich-embedded' }, ...sections),
+  };
+}
+
+function parseMarkdownListValues(text: string): string[] {
+  if (typeof text !== 'string') return [];
+  return text.split(',').map((part) => part.trim()).filter(Boolean);
+}
+
+function parseMarkdownChartSpecs(text: string): any[] {
+  if (typeof text !== 'string' || !text.trim()) return [];
+  const lines = text.split(/\r?\n/);
+  const charts: any[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const typeMatch = lines[i]?.trim().match(/^(?:[-*]\s*)?Type:\s*(bar|line)\b/i);
+    if (!typeMatch) continue;
+    const type = String(typeMatch[1] || 'bar').toLowerCase();
+    let labels: string[] = [];
+    let values: number[] = [];
+    for (let j = i + 1; j < Math.min(lines.length, i + 7); j++) {
+      const line = lines[j]?.trim() || '';
+      const labelsMatch = line.match(/^(?:[-*]\s*)?Labels:\s*(.+)$/i);
+      if (labelsMatch) labels = parseMarkdownListValues(labelsMatch[1] || '');
+      const valuesMatch = line.match(/^(?:[-*]\s*)?Values:\s*(.+)$/i);
+      if (valuesMatch) values = parseMarkdownListValues(valuesMatch[1] || '').map((v) => numericValue(v) as number).filter((v): v is number => v != null);
+    }
+    if (labels.length < 2 || values.length < 2) continue;
+    const len = Math.min(labels.length, values.length, 20);
+
+    let title = 'Chart';
+    for (let p = i - 1; p >= Math.max(0, i - 4); p--) {
+      const candidate = lines[p]?.trim() || '';
+      if (!candidate) continue;
+      if (/^(charts?|summary table)$/i.test(candidate.replace(/:$/, ''))) continue;
+      if (/^(?:[-*]\s*)?(type|labels|values):/i.test(candidate)) continue;
+      title = candidate
+        .replace(/^\d+\.\s*/, '')
+        .replace(/^[-*]\s*/, '')
+        .replace(/^[#>]+\s*/, '')
+        .trim();
+      if (title) break;
+    }
+
+    charts.push({
+      type: type === 'line' ? 'line' : 'bar',
+      title: title || 'Chart',
+      labels: labels.slice(0, len),
+      values: values.slice(0, len),
+      unit: '',
+    });
+  }
+  return charts;
+}
+
+function renderAssistantMarkdownCharts(content: string): HTMLElement | null {
+  const charts = parseMarkdownChartSpecs(content);
+  if (!charts.length) return null;
+  return h('div', { className: 'response-rich response-rich-embedded' },
+    ...(charts.map((spec) => renderResponseChart(spec)).filter(Boolean) as HTMLElement[])
+  );
+}
+
+function buildProcessViewModel(msg: any, isStreamingCurrent: boolean) {
+  const steps = Array.isArray(msg.steps) ? msg.steps : [];
+  const thoughtHistory: Array<{ text: string; idx: number }> = [];
+  const timeline: any[] = [];
+  const workerTimeline: any[] = [];
+  const cseBadges: Array<{ label: string; tone: string }> = [];
+  const seenCseBadges = new Set<string>();
+  const cseSessionMap = new Map<string, { sessionId: string; provider: string; runs: number; successes: number; errors: number }>();
+  const skills = Array.isArray(msg.activeSkills) ? msg.activeSkills : [];
+  const skillEffects: string[] = [];
+  const validations: any[] = [];
+
+  steps.forEach((s: any, idx: number) => {
+    const stepType = s?.type || s?.kind || 'step';
+    const thoughtText = extractThoughtText(s);
+    if (thoughtText) {
+      thoughtHistory.push({ text: thoughtText, idx: idx + 1 });
+      timeline.push({
+        kind: 'thought',
+        title: 'Thought update',
+        summary: summarizeForDisplay(thoughtText),
+        raw: detailText(thoughtText),
+        detailLabel: 'thought',
+        durationMs: s?.durationMs,
+        key: 'thought-' + idx,
+      });
+      if (stepType === 'thinking' || (s?.toolCall?.name || s?.name || s?.toolName) === 'think') return;
+    }
+
+    if (stepType === 'thinking') return;
+
+    if (s?.kind === 'tool_start' || stepType === 'tool_call') {
+      const toolName = s?.name || s?.toolName || s?.toolCall?.name || 'tool';
+      const input = s?.input ?? s?.toolCall?.arguments;
+      const result = s?.result ?? s?.toolCall?.result;
+      const delegatedWorker = toolName === 'delegate_to_worker' ? extractDelegatedWorkerName(input) : '';
+      const toolBadges: Array<{ label: string; tone: string }> = [];
+      if (toolName === 'cse_run_code') {
+        toolBadges.push({ label: 'Code execution', tone: 'ok' });
+      }
+      if (delegatedWorker) {
+        toolBadges.push({ label: 'Worker ' + delegatedWorker, tone: 'warn' });
+      }
+      timeline.push({
+        kind: toolName === 'delegate_to_worker' ? 'delegation' : 'tool',
+        title: toolName === 'delegate_to_worker'
+          ? 'Delegated to: ' + (delegatedWorker || 'worker')
+          : 'Tool: ' + toolName,
+        summary: result != null
+          ? 'Input: ' + summarizeForDisplay(input) + '\nOutput: ' + summarizeForDisplay(result)
+          : 'Input: ' + summarizeForDisplay(input),
+        inputRaw: detailText(input),
+        outputRaw: detailText(result),
+        durationMs: s?.durationMs,
+        badges: toolBadges,
+        key: 'tool-' + idx,
+      });
+
+      const workerTrace = extractWorkerToolTrace(result);
+      workerTrace.forEach((entry: any, traceIdx: number) => {
+        const parsedResult = parseJsonMaybeLoose(entry?.result);
+        const resultRecord = parsedResult && typeof parsedResult === 'object' && !Array.isArray(parsedResult)
+          ? parsedResult as Record<string, any>
+          : null;
+        const cseTone = resultRecord?.['status'] === 'error' ? 'deny' : resultRecord?.['status'] === 'success' ? 'ok' : 'warn';
+        const badges: Array<{ label: string; tone: string }> = [];
+        if (entry?.name === 'cse_run_code') {
+          const provider = typeof resultRecord?.['provider'] === 'string' ? resultRecord['provider'] : 'local';
+          const sessionId = typeof resultRecord?.['sessionId'] === 'string' ? resultRecord['sessionId'] : '';
+          const shortSession = sessionId ? sessionId.slice(0, 8) : '';
+          badges.push({ label: 'CSE ' + (resultRecord?.['status'] || 'run'), tone: cseTone });
+          badges.push({ label: 'Provider ' + provider, tone: 'ok' });
+          if (shortSession) badges.push({ label: 'Session ' + shortSession, tone: 'warn' });
+          if (sessionId) {
+            const current = cseSessionMap.get(sessionId) || { sessionId, provider, runs: 0, successes: 0, errors: 0 };
+            current.runs += 1;
+            if (resultRecord?.['status'] === 'success') current.successes += 1;
+            if (resultRecord?.['status'] === 'error') current.errors += 1;
+            cseSessionMap.set(sessionId, current);
+          }
+          badges.forEach((badge) => {
+            const key = badge.label + ':' + badge.tone;
+            if (!seenCseBadges.has(key)) {
+              seenCseBadges.add(key);
+              cseBadges.push(badge);
+            }
+          });
+        }
+
+        workerTimeline.push({
+          kind: 'tool',
+          title: 'Worker Tool: ' + String(entry?.name || 'tool'),
+          summary: entry?.result != null
+            ? 'Input: ' + summarizeForDisplay(entry?.arguments) + '\nOutput: ' + summarizeForDisplay(entry?.result)
+            : 'Input: ' + summarizeForDisplay(entry?.arguments),
+          inputRaw: detailText(entry?.arguments),
+          outputRaw: detailText(entry?.result),
+          durationMs: entry?.durationMs,
+          badges,
+          isWorker: true,
+          key: 'tool-' + idx + '-worker-' + traceIdx,
+        });
+      });
+      return;
+    }
+
+    if (stepType === 'delegation') {
+      timeline.push({
+        kind: 'delegation',
+        title: 'Delegated to: ' + (s?.worker || s?.name || 'worker'),
+        summary: summarizeForDisplay(s?.input || s?.message || s?.delegation || ''),
+        raw: detailText(s?.input || s?.message || s?.delegation || ''),
+        detailLabel: 'delegation',
+        durationMs: s?.durationMs,
+        key: 'delegation-' + idx,
+      });
+      return;
+    }
+
+    timeline.push({
+      kind: stepType === 'response' ? 'response' : 'step',
+      title: stepType,
+      summary: summarizeForDisplay(s?.text || s?.content || s),
+      raw: detailText(s?.text || s?.content || s),
+      detailLabel: stepType === 'response' ? 'response' : 'event',
+      durationMs: s?.durationMs,
+      key: stepType + '-' + idx,
+    });
+  });
+
+  const liveThought = thoughtHistory.length ? thoughtHistory[thoughtHistory.length - 1]!.text : '';
+  if (msg?.skillPromptApplied) skillEffects.push('Prompt guidance injected');
+  if (Array.isArray(msg?.skillTools) && msg.skillTools.length) {
+    msg.skillTools.forEach((tool: string) => skillEffects.push('Enabled: ' + tool));
+  }
+
+  if (msg?.redaction) {
+    const redactedCount = msg.redaction.count || msg.redaction.detections?.length || 0;
+    validations.push({
+      kind: 'redaction',
+      label: 'Redaction',
+      status: redactedCount > 0 ? 'warn' : 'ok',
+      summary: redactedCount > 0 ? `Redacted ${redactedCount} item${redactedCount === 1 ? '' : 's'}` : 'No sensitive content flagged',
+    });
+  }
+
+  if (msg?.evalResult) {
+    const score = msg.evalResult.score != null ? Math.round(Number(msg.evalResult.score) * 100) : null;
+    const passed = msg.evalResult.passed ?? msg.evalResult.score >= 1;
+    validations.push({
+      kind: 'eval',
+      label: 'Evaluation',
+      status: passed ? 'ok' : 'warn',
+      summary: `Score ${score != null ? `${score}%` : 'n/a'} • Passed ${msg.evalResult.passed ?? 'n/a'} • Failed ${msg.evalResult.failed ?? 'n/a'}`,
+    });
+  }
+
+  if (msg?.cognitive) {
+    const confidence = Math.round((msg.cognitive.confidence || 0) * 100);
+    const decision = msg.cognitive.decision || 'allow';
+    const firstWarn = msg.cognitive.checks?.find((x: any) => x.decision !== 'allow');
+    validations.push({
+      kind: 'cognitive',
+      label: 'Cognitive Check',
+      status: decision,
+      summary: `Confidence ${confidence}% • ${decision}${firstWarn?.explanation ? ` • ${firstWarn.explanation}` : ''}`,
+    });
+  }
+
+  if (msg?.guardrail) {
+    const guardrailDecision = msg.guardrail.decision || 'allow';
+    validations.push({
+      kind: 'guardrail',
+      label: 'Guardrail',
+      status: guardrailDecision,
+      summary: `${guardrailDecision}${msg.guardrail.reason ? ` • ${msg.guardrail.reason}` : ''}`,
+    });
+  }
+
+  let stage = 'thinking';
+  if (msg?.processState === 'error') stage = 'error';
+  else if (!isStreamingCurrent && (msg?.processState === 'completed' || !!msg?.content)) stage = 'completed';
+  else if (isStreamingCurrent && msg?.content) stage = 'finalizing';
+  else if (validations.length) stage = 'validating';
+  else if (timeline.length) stage = 'tools';
+
+  const toolCount = [...timeline, ...workerTimeline].filter((item: any) => item.kind === 'tool' || item.kind === 'delegation').length;
+  const validationTone = validations.length
+    ? validations.some((item: any) => processStatusTone(item.status) === 'deny')
+      ? 'deny'
+      : validations.some((item: any) => processStatusTone(item.status) === 'warn')
+        ? 'warn'
+        : 'ok'
+    : null;
+
+  const summaryChips: Array<{ label: string; tone: string | null }> = [];
+  if (skills.length) summaryChips.push({ label: 'Skills: ' + skills.length, tone: 'ok' });
+  if (toolCount) summaryChips.push({ label: 'Tools: ' + toolCount, tone: 'ok' });
+  if (workerTimeline.length) summaryChips.push({ label: 'Worker Trace: ' + workerTimeline.length, tone: 'warn' });
+  if (cseBadges.length) summaryChips.push({ label: 'CSE', tone: 'ok' });
+  if (validations.length) summaryChips.push({ label: 'Checks: ' + validationTone, tone: validationTone });
+  if (msg?.latency_ms) summaryChips.push({ label: 'Duration: ' + msg.latency_ms + 'ms', tone: 'ok' });
+
+  const hasProcess = isStreamingCurrent || thoughtHistory.length > 0 || timeline.length > 0 || workerTimeline.length > 0 || skills.length > 0 || validations.length > 0;
+  const cseSessions = Array.from(cseSessionMap.values()).map((session) => ({
+    ...session,
+    shortSession: session.sessionId.slice(0, 8),
+    reused: session.runs > 1,
+  }));
+
+  return {
+    hasProcess,
+    stage,
+    liveThought,
+    thoughtCount: thoughtHistory.length,
+    timeline,
+    workerTimeline,
+    cseBadges,
+    cseSessions,
+    skills,
+    skillEffects,
+    validations,
+    summaryChips,
+    expanded: typeof msg.processExpanded === 'boolean' ? msg.processExpanded : isStreamingCurrent,
+  };
+}
+
+function renderAssistantProcess(m: any, isStreamingCurrent: boolean): HTMLElement | null {
+  const processUi = ensureProcessUiState(m);
+  const process = buildProcessViewModel(m, isStreamingCurrent);
+  if (!process.hasProcess) return null;
+
+  const stageMeta = processStageMeta(process.stage);
+  const stageLabel = stageMeta.label || 'Running';
+  const summary = (process.timeline.length + process.workerTimeline.length) + ' events' + (process.thoughtCount ? ' • ' + process.thoughtCount + ' thought updates' : '');
+  const toggleText = process.expanded ? 'Hide details' : 'Show details';
+
+  const skillCards = process.skills.map((skill: any) => {
+    const scorePct = Math.max(0, Math.min(100, Math.round(Number(skill.score || 0) * 100)));
+    const skillTools = Array.isArray(skill.tools) ? skill.tools : [];
+    return h('div', { className: 'skill-item' },
+      h('div', { className: 'skill-item-top' },
+        h('span', { className: 'skill-name' }, skill.name || skill.id || 'Unnamed skill'),
+        h('span', { className: 'skill-score' }, scorePct + '% match')
+      ),
+      h('div', { className: 'skill-category' }, String(skill.category || 'general').replace(/_/g, ' ')),
+      skillTools.length ? h('div', { className: 'skill-tags' }, ...skillTools.map((t: string) => h('span', { className: 'skill-tag' }, t))) : null
+    );
+  });
+
+  const validationRows = process.validations.map((item: any) => {
+    const tone = processStatusTone(item.status);
+    const statusIcon = tone === 'deny' ? '✕' : tone === 'warn' ? '!' : '✓';
+    return h('div', { className: 'validation-item ' + tone },
+      h('div', { className: 'validation-item-top' },
+        h('span', { className: 'validation-name' }, item.label),
+        h('span', { className: 'validation-status ' + tone }, statusIcon + ' ' + String(item.status || 'ok'))
+      ),
+      h('div', { className: 'validation-body' }, item.summary || '')
+    );
+  });
+
+  const processBody = h('div', { className: 'process-body' },
+    process.cseBadges.length ? h('div', { className: 'process-badge-row' },
+      ...process.cseBadges.map((badge: any) => h('span', { className: 'summary-chip ' + (badge.tone || 'ok') }, badge.label))
+    ) : null,
+    process.cseSessions.length ? h('div', { className: 'process-section cse-lifecycle-section' },
+      h('div', { className: 'process-section-title' }, 'CSE Lifecycle'),
+      h('div', { className: 'cse-session-list' },
+        ...process.cseSessions.map((session: any) => h('div', { className: 'cse-session-item' },
+          h('div', { className: 'cse-session-top' },
+            h('span', { className: 'cse-session-id' }, 'Session ' + session.shortSession),
+            h('span', { className: 'timeline-badge ' + (session.reused ? 'warn' : 'ok') }, session.reused ? 'Reused' : 'Single run')
+          ),
+          h('div', { className: 'cse-session-meta' }, `${session.provider} • ${session.runs} run${session.runs === 1 ? '' : 's'} • ${session.successes} ok • ${session.errors} error${session.errors === 1 ? '' : 's'}`)
+        ))
+      )
+    ) : null,
+    h('div', { className: 'live-thought' },
+      h('div', { className: 'lbl' }, 'Current thought'),
+      h('div', { className: 'txt' }, process.liveThought || (isStreamingCurrent ? 'Thinking...' : 'No thought trace captured.'))
+    ),
+    process.skills.length ? h('div', { className: 'process-section' },
+      h('div', { className: 'process-section-title' }, '✨ Skills Invoked'),
+      h('div', { className: 'skill-list' }, ...skillCards),
+      process.skillEffects.length ? h('div', { className: 'skill-summary' }, ...process.skillEffects.map((effect: string) => h('span', { className: 'skill-tag' }, effect))) : null
+    ) : null,
+    process.timeline.length ? h('div', { className: 'process-section' },
+      h('div', { className: 'process-section-title' }, 'Timeline'),
+      h('div', { className: 'timeline' }, ...process.timeline.map((item: any, idx: number) => buildTimelineItem(item, idx, processUi, m)))
+    ) : null,
+    process.workerTimeline.length ? h('div', { className: 'process-section worker-trace-section' },
+      h('div', { className: 'process-section-title' }, 'Worker Trace'),
+      h('div', { className: 'worker-trace-summary' }, 'Nested worker execution details, including container code runs.'),
+      h('div', { className: 'timeline worker-trace' }, ...process.workerTimeline.map((item: any, idx: number) => buildTimelineItem(item, idx, processUi, m)))
+    ) : null,
+    process.validations.length ? h('div', { className: 'process-section' },
+      h('div', { className: 'process-section-title' }, 'Validation'),
+      h('div', { className: 'validation-list' }, ...validationRows)
+    ) : null
+  );
+
+  return h('div', { className: 'process-card ' + (m.processState || process.stage) },
+    h('div', { className: 'process-hdr' },
+      h('div', { className: 'process-hdr-main' },
+        h('div', { className: 'process-title' },
+          h('span', null, '🧠 Process'),
+          h('span', { className: 'process-stage ' + stageMeta.tone, role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' },
+            h('span', { className: 'process-stage-icon', 'aria-hidden': 'true' }, stageMeta.icon),
+            h('span', null, stageLabel)
+          )
+        ),
+        !process.expanded && process.summaryChips.length ? h('div', { className: 'process-meta' },
+          ...process.summaryChips.map((chip: any) => h('span', { className: 'summary-chip ' + (chip.tone || 'ok') }, chip.label))
+        ) : null
+      ),
+      h('button', {
+        className: 'process-toggle',
+        type: 'button',
+        'aria-expanded': String(process.expanded),
+        onClick: () => { m.processExpanded = !process.expanded; renderMessages(); },
+      }, toggleText)
+    ),
+    !process.expanded ? h('div', { className: 'process-summary' },
+      h('div', null, summary || 'No process events'),
+      process.summaryChips.length ? h('div', { className: 'process-meta' },
+        ...process.summaryChips.map((chip: any) => h('span', { className: 'summary-chip ' + (chip.tone || 'ok') }, chip.label))
+      ) : null
+    ) : null,
+    h('div', { className: 'process-body-wrap ' + (process.expanded ? 'expanded' : 'collapsed'), 'aria-hidden': String(!process.expanded) },
+      h('div', { className: 'process-body-clip' }, processBody)
+    )
+  );
+}
+
+function renderAssistantBubble(content: string): { element: HTMLElement; exportHtml: string } {
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+
+  const structured = renderAssistantStructuredContent(content);
+  if (structured) {
+    bubble.appendChild(structured);
+  } else {
+    const embedded = renderAssistantEmbeddedStructuredContent(content || '');
+    if (embedded) {
+      const markdown = mdToHtml(embedded.markdown || '');
+      if (markdown) bubble.innerHTML = markdown;
+      bubble.appendChild(embedded.node);
+    } else {
+      bubble.innerHTML = mdToHtml(content || '');
+      const markdownCharts = renderAssistantMarkdownCharts(content || '');
+      if (markdownCharts) bubble.appendChild(markdownCharts);
+    }
+  }
+
+  return {
+    element: bubble,
+    exportHtml: bubble.innerHTML,
+  };
 }
 
 function renderMessages() {
@@ -150,19 +1574,152 @@ function renderMessages() {
     return;
   }
   
-  state.messages.forEach((m: Message) => {
+  state.messages.forEach((m: Message, msgIndex: number) => {
     const isUser = m.role === 'user';
-    const bubble = h('div', {className:'bubble'}, m.content || (state.streaming ? '' : '...'));
-    
-    const avatarEl = h('div', {className:'avatar'});
-    const img = document.createElement('img');
-    img.src = isUser ? getUserAvatarUrl() : getAgentAvatarUrl();
-    img.alt = isUser ? 'User' : 'Agent';
-    avatarEl.appendChild(img);
+    const isStreamingCurrent = !isUser && state.streaming && msgIndex === state.messages.length - 1;
+    const extras: HTMLElement[] = [];
+
+    if (!isUser && (m as any).mode && (m as any).mode !== 'direct') {
+      extras.push(h('span', { className: 'mode-badge' }, String((m as any).mode)));
+    }
+
+    if (!isUser) {
+      const processCard = renderAssistantProcess(m as any, isStreamingCurrent);
+      if (processCard) extras.push(processCard);
+    }
+
+    const meta = parseMessageMetadata((m as any)?.metadata);
+    let corner: HTMLElement | null = null;
+    if (!isUser) {
+      const evalResult = (m as any)?.evalResult || meta?.eval;
+      const cognitive = (m as any)?.cognitive || meta?.cognitive;
+      const guardrail = (m as any)?.guardrail || meta?.guardrail;
+      const indicators: HTMLElement[] = [];
+      if (evalResult) {
+        const passed = evalResult.passed ?? (evalResult.score >= 1);
+        indicators.push(h('div', { className: 'resp-ind ' + (passed ? 'ok' : 'warn'), title: 'Evaluation result' }, passed ? '✓' : '!'));
+      }
+      if (cognitive) {
+        const decision = cognitive.decision || 'allow';
+        indicators.push(h('div', { className: 'resp-ind ' + (decision === 'deny' ? 'deny' : decision === 'warn' ? 'warn' : 'ok'), title: 'Cognitive check' }, '◉'));
+      }
+      if (guardrail) {
+        const decision = guardrail.decision || 'allow';
+        indicators.push(h('div', { className: 'resp-ind ' + (decision === 'deny' ? 'deny' : decision === 'warn' ? 'warn' : 'ok'), title: 'Guardrail status' }, decision === 'deny' ? '✕' : decision === 'warn' ? '⚠' : '✓'));
+      }
+      if (indicators.length) corner = h('div', { className: 'resp-corner' }, ...indicators);
+    }
+
+    let bubbleEl: HTMLElement;
+    let responseExportHtml = '';
+    if (!isUser && m.content) {
+      const rendered = renderAssistantBubble(m.content);
+      bubbleEl = rendered.element;
+      responseExportHtml = rendered.exportHtml;
+    } else {
+      bubbleEl = h('div', { className: 'bubble' }, m.content || (isStreamingCurrent ? '' : '...'));
+    }
+
+    const attachments = Array.isArray((m as any).attachments) ? (m as any).attachments : [];
+    let attachmentsEl: HTMLElement | null = null;
+    if (attachments.length) {
+      attachmentsEl = h('div', { className: 'msg-attachments' },
+        ...attachments.map((a: any) =>
+          h('div', { className: 'msg-attachment' },
+            h('div', { className: 'title' }, a?.name || 'Attachment'),
+            h('div', null, `${a?.mimeType || 'file'} • ${Math.max(1, Math.round((Number(a?.size || 0) / 1024)))} KB`)
+          )
+        )
+      );
+    }
+
+    let screenshotsEl: HTMLElement | null = null;
+    if (!isUser && Array.isArray((m as any).screenshots) && (m as any).screenshots.length) {
+      const imgs = (m as any).screenshots.map((s: any) => {
+        const img = document.createElement('img');
+        img.src = `data:image/${s?.format || 'png'};base64,${s?.base64 || ''}`;
+        img.style.cssText = 'max-width:100%;border-radius:8px;margin-top:8px;border:1px solid var(--bg4);cursor:pointer;';
+        img.onclick = () => window.open(img.src, '_blank');
+        return img;
+      });
+      screenshotsEl = h('div', { className: 'screenshots' }, ...imgs);
+    }
+
+    const toolbar = !isUser && m.content ? (() => {
+      const bar = document.createElement('div');
+      bar.className = 'response-toolbar';
+
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'tb-btn';
+      copyBtn.textContent = 'Copy';
+      copyBtn.onclick = () => { void copyResponse(m.content, copyBtn); };
+
+      const emailBtn = document.createElement('button');
+      emailBtn.className = 'tb-btn';
+      emailBtn.textContent = 'Email';
+      emailBtn.onclick = () => { void emailResponse(m.content, 'geneWeave Response'); };
+
+      const wordBtn = document.createElement('button');
+      wordBtn.className = 'tb-btn';
+      wordBtn.textContent = 'Word';
+      wordBtn.onclick = () => { void openInWord(responseExportHtml || mdToHtml(m.content), m.content); };
+
+      bar.appendChild(copyBtn);
+      bar.appendChild(emailBtn);
+      bar.appendChild(wordBtn);
+      return bar;
+    })() : null;
+
+    const usage = (m as any).usage;
+    const metaBar = !isUser && usage ? h('div', { className: 'meta' },
+      h('span', null, `📊 ${formatCompactNumber(Number(usage.totalTokens || 0))} tok`),
+      h('span', null, `💰 ${formatCurrencyCompact(Number((m as any).cost || 0), 6)}`),
+      h('span', null, `⏱ ${formatMaybeCompactValue((m as any).latency_ms || 0)}ms`)
+    ) : null;
+
+    const thinkingIndicator = !isUser && isStreamingCurrent && !m.content
+      ? h('div', { className: 'meta' }, 'Thinking...')
+      : null;
+
+    const body = h('div', { className: 'msg-body' },
+      corner,
+      ...extras,
+      bubbleEl,
+      attachmentsEl,
+      screenshotsEl,
+      toolbar,
+      metaBar,
+      thinkingIndicator
+    );
+
+    let avatarEl: HTMLElement;
+    if (isUser) {
+      const img = document.createElement('img');
+      img.src = getUserAvatarUrl();
+      img.alt = 'User';
+      avatarEl = h('div', { className: 'avatar' }, img);
+    } else {
+      let agentName = '';
+      const steps = Array.isArray((m as any).steps) ? (m as any).steps : [];
+      for (const st of steps) {
+        if (st?.type === 'delegation' && (st?.worker || st?.name)) {
+          agentName = st.worker || st.name;
+          break;
+        }
+        if (st?.type === 'tool_call' && st?.toolCall?.name === 'delegate_to_worker' && st?.toolCall?.arguments?.worker) {
+          agentName = st.toolCall.arguments.worker;
+          break;
+        }
+      }
+      const aImg = document.createElement('img');
+      aImg.src = getAgentAvatarUrl(agentName);
+      aImg.alt = agentName || 'Agent';
+      avatarEl = h('div', { className: 'avatar' }, aImg);
+    }
     
     const msgEl = h('div', {className:'msg ' + (isUser ? 'user' : 'assistant')},
       avatarEl,
-      h('div', {className:'msg-body'}, bubble)
+      body
     );
     
     container.appendChild(msgEl);
@@ -171,6 +1728,50 @@ function renderMessages() {
 
 function renderChatView() {
   const view = h('div', {className:'chat-view'});
+
+  if (state.handoffRequest) {
+    const ho = state.handoffRequest as any;
+    const banner = h('div', { style: 'background:#FEF3C7;border:1px solid #FCD34D;border-radius:10px;margin:12px 16px 0;padding:14px 18px;display:flex;flex-direction:column;gap:10px;flex-shrink:0' });
+    banner.appendChild(h('div', { style: 'display:flex;align-items:center;gap:8px' },
+      h('span', { style: 'font-size:20px' }, '\u{1F6A8}'),
+      h('div', { style: 'flex:1' },
+        h('div', { style: 'font-weight:700;font-size:14px;color:#92400E' }, 'Browser Handoff Requested'),
+        h('div', { style: 'font-size:12px;color:#78350F;margin-top:2px' }, ho.reason || 'The agent needs you to complete an action in the browser.')
+      )
+    ));
+
+    if (ho.url) {
+      banner.appendChild(h('div', { style: 'font-size:11px;color:#78350F;font-family:monospace;background:#FDE68A;padding:4px 8px;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, '\u{1F517} ' + ho.url));
+    }
+
+    if (ho.screenshot) {
+      banner.appendChild(h('img', { src: 'data:image/png;base64,' + ho.screenshot, style: 'max-width:100%;max-height:200px;border-radius:6px;border:1px solid #FCD34D' }));
+    }
+
+    const actions = h('div', { style: 'display:flex;gap:8px' });
+    actions.appendChild(h('button', {
+      className: 'nav-btn active',
+      style: 'font-size:12px;background:#059669;border-color:#059669;color:white',
+      onClick: () => {
+        const msg = 'Resume the browser session'
+          + (ho.sessionId ? ' (session: ' + ho.sessionId + ')' : '')
+          + (ho.taskId ? ' (task: ' + ho.taskId + ')' : '');
+        state.handoffRequest = null;
+        render();
+        void sendMessage(msg);
+      },
+    }, "\u2705 I'm Done - Resume Agent"));
+    actions.appendChild(h('button', {
+      className: 'nav-btn',
+      style: 'font-size:12px',
+      onClick: () => {
+        state.handoffRequest = null;
+        render();
+      },
+    }, 'Dismiss'));
+    banner.appendChild(actions);
+    view.appendChild(banner);
+  }
   
   const ta = h('textarea', {placeholder:'Type a message...', rows:'1'}) as HTMLTextAreaElement;
   ta.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -202,7 +1803,23 @@ function renderChatView() {
       h('button', {className:'tool-btn', title:'Attach files', onClick:()=>fileInput.click()},'📎'),
       h('button', {className:'tool-btn'+(state.audioRecording?' active':''), title:state.audioRecording?'Stop recording':'Record audio', onClick:()=>toggleAudioRecording()}, state.audioRecording?'⏹':'🎤')
     ),
-    h('div', {className:'composer-wrap'}, ta),
+    h('div', {className:'composer-wrap'},
+      state.pendingAttachments?.length
+        ? h('div', { className: 'attach-strip' },
+            ...state.pendingAttachments.map((a: any, i: number) =>
+              h('div', { className: 'attach-chip' },
+                h('span', { className: 'name' }, a?.name || 'attachment'),
+                h('button', {
+                  className: 'remove',
+                  title: 'Remove attachment',
+                  onClick: () => removePendingAttachment(i),
+                }, '×')
+              )
+            )
+          )
+        : null,
+      ta
+    ),
     h('button', {className:'send-btn', onClick:()=>{sendMessage(ta.value);ta.value='';ta.style.height='auto';}, disabled:state.streaming?'true':null},'Send')
   ));
   
@@ -212,6 +1829,42 @@ function renderChatView() {
   }, 0);
   
   return view;
+}
+
+function renderSettingsDropdown() {
+  const s = state.chatSettings;
+  if (!s) return h('div', null);
+
+  const modes = [
+    { id: 'direct', icon: '💬', title: 'Direct', desc: 'Simple model chat without orchestration' },
+    { id: 'agent', icon: '🤖', title: 'Agent', desc: 'Autonomous tool-calling with reasoning loop' },
+    { id: 'supervisor', icon: '🧠', title: 'Supervisor', desc: 'Multi-agent delegation to specialists' },
+  ];
+
+  const modeCards = modes.map((m) =>
+    h('div', {
+      className: 'mode-card' + (s.mode === m.id ? ' selected' : ''),
+      onClick: () => {
+        s.mode = m.id;
+        void saveChatSettings();
+        render();
+      },
+    },
+      h('div', { className: 'mc-icon' }, m.icon),
+      h('div', null,
+        h('div', { className: 'mc-title' }, m.title),
+        h('div', { style: 'font-size:12px;color:var(--fg3);margin-top:2px;' }, m.desc)
+      )
+    )
+  );
+
+  return h('div', { className: 'dropdown settings-dd', onClick: (e: Event) => e.stopPropagation() },
+    h('h3', null, h('span', null, '⚙'), ' Agentic AI Settings'),
+    h('div', { style: 'display:flex;flex-direction:column;gap:10px;' },
+      h('div', { style: 'font-size:11px;color:var(--fg3);font-weight:700;text-transform:uppercase;letter-spacing:.4px;' }, 'AI Mode'),
+      ...modeCards
+    )
+  );
 }
 
 function renderWorkspaceNav() {
@@ -224,6 +1877,35 @@ function renderWorkspaceNav() {
   menu.appendChild(h('button', {className:state.view==='admin'?'active':'', onClick:()=>{state.view='admin'; void loadAdmin();}}, '⚙', h('span',null,'Admin')));
   menu.appendChild(h('button', {className:state.view==='dashboard'?'active':'', onClick:()=>{state.view='dashboard'; void loadDashboard();}}, '▦', h('span',null,'Dashboard')));
   nav.appendChild(menu);
+
+  const history = h('div', { className: 'workspace-history' },
+    h('div', { className: 'workspace-history-label' }, 'Recent Chats'),
+    ...(state.chats.length
+      ? state.chats.slice(0, 14).map((chat: Chat) =>
+          h('div', {
+              className: 'chat-item' + (state.currentChatId === chat.id ? ' active' : ''),
+              onClick: () => {
+                state.view = 'chat';
+                if (state.currentChatId !== chat.id) void selectChat(chat.id);
+              },
+            },
+            h('div', { className: 'chat-item-copy' },
+              h('div', { className: 'chat-item-title' }, chat.title || 'New Chat'),
+              h('div', { className: 'chat-item-meta' }, new Date(chat.updated_at || chat.created_at || Date.now()).toLocaleString())
+            ),
+            h('button', {
+              className: 'del',
+              title: 'Delete chat',
+              onClick: (e: Event) => {
+                e.stopPropagation();
+                void deleteChat(chat.id);
+              },
+            }, '×')
+          )
+        )
+      : [h('div', { className: 'workspace-history-empty' }, 'No saved chats yet')])
+  );
+  nav.appendChild(history);
   
   const spacer = h('div', {className:'workspace-spacer'});
   nav.appendChild(spacer);
@@ -510,11 +2192,11 @@ function renderDashboardView() {
   const s = d.overview.summary || {};
   view.appendChild(
     h('div', { className: 'cards' },
-      h('div', { className: 'card' }, h('div', { className: 'label' }, 'Total Tokens'), h('div', { className: 'value tokens' }, String((s.total_tokens || 0).toLocaleString()))),
-      h('div', { className: 'card' }, h('div', { className: 'label' }, 'Total Cost'), h('div', { className: 'value cost' }, '$' + Number(s.total_cost || 0).toFixed(4))),
-      h('div', { className: 'card' }, h('div', { className: 'label' }, 'Avg Latency'), h('div', { className: 'value latency' }, String(s.avg_latency_ms || 0) + 'ms')),
-      h('div', { className: 'card' }, h('div', { className: 'label' }, 'Messages'), h('div', { className: 'value' }, String(s.total_messages || 0))),
-      h('div', { className: 'card' }, h('div', { className: 'label' }, 'Chats'), h('div', { className: 'value' }, String(s.total_chats || 0)))
+      h('div', { className: 'card' }, h('div', { className: 'label' }, 'Total Tokens'), h('div', { className: 'value tokens' }, formatCompactNumber(Number(s.total_tokens || 0)))),
+      h('div', { className: 'card' }, h('div', { className: 'label' }, 'Total Cost'), h('div', { className: 'value cost' }, formatCurrencyCompact(Number(s.total_cost || 0), 4))),
+      h('div', { className: 'card' }, h('div', { className: 'label' }, 'Avg Latency'), h('div', { className: 'value latency' }, formatMaybeCompactValue(s.avg_latency_ms || 0) + 'ms')),
+      h('div', { className: 'card' }, h('div', { className: 'label' }, 'Messages'), h('div', { className: 'value' }, formatCompactNumber(Number(s.total_messages || 0)))),
+      h('div', { className: 'card' }, h('div', { className: 'label' }, 'Chats'), h('div', { className: 'value' }, formatCompactNumber(Number(s.total_chats || 0))))
     )
   );
 
@@ -534,6 +2216,142 @@ function renderDashboardView() {
                 h('td', null, String(ev.created_at || '').slice(0, 16))
               )
             )
+          )
+        )
+      )
+    );
+  }
+
+  const activityData = d.agentActivity || [];
+  if (activityData.length) {
+    const modeOptions = Array.from(new Set(activityData.map((a: any) => String(a?.mode || 'direct')))) as string[];
+    const agentOptions = Array.from(new Set(activityData
+      .map((a: any) => String(a?.agentName || '').trim())
+      .filter(Boolean))) as string[];
+
+    const activityRows = activityData
+      .map((a: any) => {
+        const steps = Array.isArray(a?.steps) ? a.steps : [];
+        const toolNames = Array.from(new Set(steps
+          .map((s: any) => s?.toolCall?.name)
+          .filter(Boolean))) as string[];
+        return { a, steps, toolNames };
+      })
+      .filter((row: any) => {
+        const modeMatch = dashboardFlowFilters.mode === 'all' || String(row.a?.mode || 'direct') === dashboardFlowFilters.mode;
+        const agentMatch = dashboardFlowFilters.agent === 'all' || String(row.a?.agentName || '') === dashboardFlowFilters.agent;
+        const toolQuery = dashboardFlowFilters.toolQuery.trim().toLowerCase();
+        const toolMatch = !toolQuery || row.toolNames.some((tool: string) => tool.toLowerCase().includes(toolQuery));
+        return modeMatch && agentMatch && toolMatch;
+      })
+      .slice(0, 40);
+
+    const preview = (value: any, maxLen: number = 220) => {
+      if (value == null) return '';
+      const text = typeof value === 'string' ? value : (() => {
+        try {
+          return JSON.stringify(value);
+        } catch {
+          return String(value);
+        }
+      })();
+      return text.length > maxLen ? text.slice(0, maxLen) + '...' : text;
+    };
+
+    view.appendChild(
+      h('div', { className: 'table-wrap', style: 'margin-top:16px;' },
+        h('h3', null, 'Agent / Tool Flows'),
+        h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 12px' },
+          h('select', {
+            value: dashboardFlowFilters.mode,
+            onChange: (e: Event) => {
+              dashboardFlowFilters.mode = (e.target as HTMLSelectElement).value;
+              render();
+            },
+          },
+            h('option', { value: 'all' }, 'All modes'),
+            ...modeOptions.map((mode) => h('option', { value: mode }, mode))
+          ),
+          h('select', {
+            value: dashboardFlowFilters.agent,
+            onChange: (e: Event) => {
+              dashboardFlowFilters.agent = (e.target as HTMLSelectElement).value;
+              render();
+            },
+          },
+            h('option', { value: 'all' }, 'All agents'),
+            ...agentOptions.map((agent) => h('option', { value: agent }, agent))
+          ),
+          h('input', {
+            type: 'text',
+            value: dashboardFlowFilters.toolQuery,
+            placeholder: 'Tool contains...',
+            style: 'min-width:220px',
+            onInput: (e: Event) => {
+              dashboardFlowFilters.toolQuery = (e.target as HTMLInputElement).value;
+              render();
+            },
+          }),
+          h('button', {
+            className: 'btn',
+            onClick: () => {
+              dashboardFlowFilters.mode = 'all';
+              dashboardFlowFilters.agent = 'all';
+              dashboardFlowFilters.toolQuery = '';
+              render();
+            },
+          }, 'Reset')
+        ),
+        h('table', { className: 'eval-table' },
+          h('thead', null,
+            h('tr', null,
+              h('th', null, 'Chat'),
+              h('th', null, 'Agent'),
+              h('th', null, 'Mode'),
+              h('th', null, 'Tools Called'),
+              h('th', null, 'Steps'),
+              h('th', null, 'When'),
+              h('th', null, 'Flow')
+            )
+          ),
+          h('tbody', null,
+            ...activityRows.map((row: any) => {
+              const a = row.a;
+              const steps = row.steps;
+              const toolNames = row.toolNames;
+              const flowDetails = h(
+                'details',
+                { style: 'max-width:640px' },
+                h('summary', { style: 'cursor:pointer;color:var(--brand);font-weight:600' }, 'View flow'),
+                h('div', { style: 'margin-top:8px;display:flex;flex-direction:column;gap:8px' },
+                  ...steps.length
+                    ? steps.map((s: any, i: number) => {
+                        const toolName = s?.toolCall?.name || s?.type || 'step';
+                        return h('div', { style: 'padding:8px;border:1px solid var(--bg4);border-radius:10px;background:var(--bg2)' },
+                          h('div', { style: 'font-weight:600;margin-bottom:4px' }, `Step ${i + 1}: ${toolName}`),
+                          s?.content ? h('div', { style: 'color:var(--fg2);margin-bottom:4px' }, preview(s.content, 300)) : null,
+                          s?.toolCall?.arguments != null ? h('div', { style: 'font-size:12px;color:var(--fg3)' }, `Input: ${preview(s.toolCall.arguments)}`) : null,
+                          s?.toolCall?.result != null ? h('div', { style: 'font-size:12px;color:var(--fg3)' }, `Output: ${preview(s.toolCall.result)}`) : null,
+                          s?.durationMs != null ? h('div', { style: 'font-size:12px;color:var(--fg3)' }, `Duration: ${s.durationMs}ms`) : null
+                        );
+                      })
+                    : [h('div', { style: 'color:var(--fg3)' }, 'No step details recorded for this run')]
+                )
+              );
+
+              return h('tr', null,
+                h('td', null, a?.chatTitle || a?.chatId || '-'),
+                h('td', null, a?.agentName || '-'),
+                h('td', null, a?.mode || '-'),
+                h('td', null, toolNames.length ? toolNames.join(', ') : '-'),
+                h('td', null, String(steps.length || 0)),
+                h('td', null, a?.createdAt ? new Date(a.createdAt).toLocaleString() : '-'),
+                h('td', null, flowDetails)
+              );
+            }),
+            ...(!activityRows.length
+              ? [h('tr', null, h('td', { colSpan: '7', style: 'color:var(--fg3);text-align:center;' }, 'No rows match the selected filters'))]
+              : [])
           )
         )
       )
@@ -1396,13 +3214,65 @@ function renderPreferencesView() {
 }
 
 function renderHomeWorkspace() {
+  const settingsAnchor = h('div', { className: 'dropdown-anchor' });
+  const settingsBtn = h('button', {
+    className: 'nav-btn' + (state.showSettings ? ' active' : ''),
+    title: 'AI Settings',
+    style: 'font-size:12px;padding:7px 10px;line-height:1;',
+    onClick: async (e: Event) => {
+      e.stopPropagation();
+      if (!state.chatSettings && state.currentChatId) {
+        await loadChatSettings(state.currentChatId);
+      }
+      if (!state.chatSettings) {
+        state.chatSettings = {
+          mode: state.defaultMode || 'direct',
+          systemPrompt: '',
+          timezone: '',
+          enabledTools: [],
+          redactionEnabled: false,
+          redactionPatterns: ['email', 'phone', 'ssn', 'credit_card'],
+          workers: [],
+        };
+      }
+      state.showSettings = !state.showSettings;
+      render();
+    },
+  }, '⚙');
+  settingsAnchor.appendChild(settingsBtn);
+
+  if (state.showSettings && state.chatSettings) {
+    const dd = renderSettingsDropdown();
+    document.body.appendChild(dd);
+    requestAnimationFrame(() => {
+      const r = settingsBtn.getBoundingClientRect();
+      dd.style.top = (r.bottom + 8) + 'px';
+      dd.style.right = (window.innerWidth - r.right) + 'px';
+    });
+  }
+
+  const modelSel = h('select', {
+    className: 'model-sel',
+    onChange: function(this: HTMLSelectElement) {
+      state.selectedModel = this.value;
+    },
+  }) as HTMLSelectElement;
+  (state.models || []).forEach((m: any) => {
+    const val = `${m.provider}:${m.id}`;
+    const opt = h('option', { value: val }, `${m.provider}/${m.id}`) as HTMLOptionElement;
+    if (val === state.selectedModel) opt.selected = true;
+    modelSel.appendChild(opt);
+  });
+
   const center = h('section', {className:'center-card'},
     h('div', {className:'center-card-hdr'},
       h('div', {className:'agent-strip'},
         h('div', {className:'lead'}, h('img', {src:getAgentAvatarUrl('geneweave-supervisor')}), h('span',null,'geneWeave Agent'))
       ),
       h('div', {style:'display:flex;align-items:center;gap:8px'},
-        h('div', {className:'title'}, (state.chats.find((c: Chat) => c.id === state.currentChatId)?.title) || 'Conversation')
+        h('div', {className:'title'}, (state.chats.find((c: Chat) => c.id === state.currentChatId)?.title) || 'Conversation'),
+        modelSel,
+        settingsAnchor
       )
     ),
     renderChatView()

@@ -7,6 +7,10 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 ## Latest Development (April 2026)
 
 - geneWeave app moved from packages to apps: [apps/geneweave](apps/geneweave)
+- New reusable Stats NZ MCP package: [packages/mcp-statsnz](packages/mcp-statsnz)
+  - Generic MCP runtime stays in [packages/mcp-server](packages/mcp-server)
+  - Stats NZ domain wiring is now reusable and centralized
+  - geneWeave Stats NZ MCP entrypoint is a thin launcher: [apps/geneweave/src/statsnz-mcp-server.ts](apps/geneweave/src/statsnz-mcp-server.ts)
 - New examples 24-29 added:
   - [examples/24-web-search-providers.ts](examples/24-web-search-providers.ts)
   - [examples/25-semantic-cache.ts](examples/25-semantic-cache.ts)
@@ -58,7 +62,7 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Packages (44)
+## Packages (45)
 
 ### Core & Models
 
@@ -78,7 +82,7 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 | [`@weaveintel/workflows`](packages/workflows) | Multi-step workflow engine with conditional branching, checkpointing, and compensation |
 | [`@weaveintel/human-tasks`](packages/human-tasks) | Human-in-the-loop — approval tasks, review queues, escalation, decision logging, policy evaluation |
 | [`@weaveintel/contracts`](packages/contracts) | Completion contracts with evidence bundles and completion reports |
-| [`@weaveintel/prompts`](packages/prompts) | Versioned prompt templates, A/B experiments, instruction bundles, scoped resolution |
+| [`@weaveintel/prompts`](packages/prompts) | Versioned prompt templates, frameworks/fragments, linting, output contracts, provider render adapters, DB-backed strategy runtime |
 | [`@weaveintel/routing`](packages/routing) | Smart model routing — health tracking, capability matching, weighted scoring, explainable decisions |
 
 ### Knowledge & Retrieval
@@ -106,6 +110,7 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 | [`@weaveintel/oauth`](packages/oauth) | OAuth client/provider toolkit for authorization URL generation, code exchange, and provider profile retrieval |
 | [`@weaveintel/mcp-client`](packages/mcp-client) | MCP protocol client — discover and invoke remote tools, resources, prompts |
 | [`@weaveintel/mcp-server`](packages/mcp-server) | MCP protocol server — expose tools, resources, and prompts |
+| [`@weaveintel/mcp-statsnz`](packages/mcp-statsnz) | Pre-wired Stats NZ MCP server assembly — registers `statsnz_*` tools and provides stdio startup helpers |
 | [`@weaveintel/a2a`](packages/a2a) | Agent-to-agent protocol — remote HTTP + in-process bus for multi-agent systems |
 | [`@weaveintel/plugins`](packages/plugins) | Plugin lifecycle — register, enable/disable, validate, dependency resolution |
 
@@ -176,6 +181,100 @@ The geneWeave app in [apps/geneweave](apps/geneweave) is the reference full-stac
   - SQLite-backed persistence and migrations
   - deploy manifests for Docker, Kubernetes, Fly, Railway, Render, Azure, AWS, and GCP
 
+## Prompt Capability Platform (What Is New)
+
+The prompt system has moved from basic template storage to a platform capability with explicit runtime behavior, validation, and admin management.
+
+This section explains what the new prompt capabilities mean, what they cover, and what remains in progress.
+
+### Why this change matters
+
+- Prompts are now treated as managed runtime assets, not just free-form text.
+- Runtime execution strategy is explicit and traceable.
+- Prompt structure and quality can be validated before model execution.
+- geneWeave admin now manages prompt-related runtime assets in dedicated tabs.
+
+### Capability coverage (implemented)
+
+| Capability | What it does | Where it lives |
+|---|---|---|
+| Prompt frameworks | Defines named prompt sections and assembly order | [packages/prompts/src/frameworks.ts](packages/prompts/src/frameworks.ts) |
+| Prompt fragments | Reusable partial blocks via `{{>fragment}}` references | [packages/prompts/src/fragments.ts](packages/prompts/src/fragments.ts) |
+| Unified rendering path | Fragment resolution + optional lint + interpolation in one path | [packages/prompts/src/template.ts](packages/prompts/src/template.ts) |
+| Prompt linting | Static checks for missing/undefined variables, unresolved fragments, size, metadata quality | [packages/prompts/src/lint.ts](packages/prompts/src/lint.ts) |
+| Provider adapters | Render output adaptation for OpenAI, Anthropic, text, and system-as-user flows | [packages/prompts/src/providers.ts](packages/prompts/src/providers.ts) |
+| Strategy runtime | Pluggable prompt execution strategies with fallback semantics | [packages/prompts/src/runtime.ts](packages/prompts/src/runtime.ts) |
+| DB strategy integration | Merge built-in strategies with admin-managed DB strategies at runtime | [apps/geneweave/src/chat.ts](apps/geneweave/src/chat.ts) |
+| Prompt strategy telemetry in chat metadata | Records requested/resolved strategy and fallback use | [apps/geneweave/src/chat.ts](apps/geneweave/src/chat.ts) |
+| Admin CRUD for frameworks/fragments/contracts/strategies | API endpoints for prompt capability records | [apps/geneweave/src/server-admin.ts](apps/geneweave/src/server-admin.ts) |
+| Admin UI tabs | Dedicated tabs for Frameworks, Fragments, Output Contracts, and Strategies | [apps/geneweave/src/admin-schema.ts](apps/geneweave/src/admin-schema.ts) |
+
+### What this means at runtime
+
+When geneWeave resolves a DB-backed system prompt:
+
+1. Prompt data is loaded from prompt records (with active version settings).
+2. Fragments are expanded.
+3. Prompt rendering runs through shared `@weaveintel/prompts` helpers.
+4. Strategy is selected using priority order:
+   - explicit override
+   - prompt `executionDefaults.strategy`
+   - built-in fallback strategy
+5. Runtime metadata captures strategy requested vs resolved and fallback status.
+
+This makes prompt behavior reproducible, inspectable, and less dependent on ad hoc code paths.
+
+### Admin UI coverage
+
+The Admin panel now includes prompt capability tabs under Core AI:
+
+- Prompts
+- Frameworks
+- Fragments
+- Output Contracts
+- Strategies
+
+Each tab is backed by authenticated admin CRUD routes in [apps/geneweave/src/server-admin.ts](apps/geneweave/src/server-admin.ts).
+
+### Prompt boundaries (important)
+
+Prompt assets are now documented with stricter boundaries:
+
+- Use prompts for model-facing instruction assets and reusable renderable templates.
+- Use skills for reusable behavior bundles (instructions + tool usage guidance + execution behavior).
+- Use tools/workers for executable capabilities and data access.
+- Use runtime policies for orchestration constraints that must always execute.
+
+This prevents policy logic from being hidden in generic prompt text.
+
+### Current phase status
+
+Implemented now:
+
+- Prompt frameworks and fragments
+- Prompt linting and unified rendering path
+- Provider-aware prompt render adapters
+- Strategy runtime + DB strategy records + chat metadata wiring
+- Admin CRUD and UI tabs for frameworks/fragments/contracts/strategies
+
+In progress (next focus):
+
+- Deeper output-contract validation wiring in runtime response paths
+- Broader observability rollups for prompt contract validation events
+- Additional end-to-end examples and UI hardening for advanced prompt assets
+
+For detailed phased roadmap and boundaries, see [docs/PROMPT_CAPABILITY_IMPLEMENTATION_PLAN.md](docs/PROMPT_CAPABILITY_IMPLEMENTATION_PLAN.md).
+
+### Operational note
+
+geneWeave serves admin UI modules from `apps/geneweave/dist` via static routes.
+
+After changing admin schema/UI TypeScript sources, rebuild before verifying UI changes:
+
+```bash
+npm run build --workspace @weaveintel/geneweave
+```
+
 ## Quick Start
 
 ### Prerequisites
@@ -199,6 +298,7 @@ Set API keys as needed:
 ```bash
 export OPENAI_API_KEY="sk-..."          # For OpenAI provider
 export ANTHROPIC_API_KEY="sk-ant-..."   # For Anthropic provider
+export STATSNZ_API_KEY="..."            # Optional: required for statsnz_* tools and Stats NZ MCP server
 ```
 
 ---
@@ -344,6 +444,45 @@ const result = await client.callTool('greet', { name: 'weaveIntel' });
 ```
 
 > **Run it:** `npx tsx examples/05-mcp-integration.ts`
+
+### 5b. Pre-Wired Stats NZ MCP Server
+
+Use the reusable Stats NZ MCP package when you want a dedicated MCP server that exposes the `statsnz_*` tools.
+
+Design split:
+
+- Generic transport/protocol server: [packages/mcp-server](packages/mcp-server)
+- Stats NZ domain-specific MCP assembly: [packages/mcp-statsnz](packages/mcp-statsnz)
+- App launcher (thin entrypoint): [apps/geneweave/src/statsnz-mcp-server.ts](apps/geneweave/src/statsnz-mcp-server.ts)
+
+Programmatic usage:
+
+```typescript
+import { startStatsNzMCPServerOverStdio } from '@weaveintel/mcp-statsnz';
+
+const { tools, transport } = await startStatsNzMCPServerOverStdio({
+  name: 'statsnz-ade',
+  version: '1.0.0',
+});
+
+console.error(`Stats NZ MCP started with ${Object.keys(tools).length} tools`);
+
+process.stdin.on('end', () => {
+  transport.close().finally(() => process.exit(0));
+});
+```
+
+CLI launcher (from geneWeave dist output):
+
+```bash
+STATSNZ_API_KEY=your-key node apps/geneweave/dist/statsnz-mcp-server.js
+```
+
+Notes:
+
+- Keep MCP framework code generic in `@weaveintel/mcp-server`.
+- Put reusable domain wiring in dedicated MCP packages (like `@weaveintel/mcp-statsnz`).
+- Keep app entrypoints thin and runtime-specific.
 
 ---
 
@@ -713,6 +852,7 @@ weaveintel/
 │   ├── oauth/              # OAuth provider/client toolkit
 │   ├── mcp-client/         # MCP protocol client
 │   ├── mcp-server/         # MCP protocol server
+│   ├── mcp-statsnz/        # Pre-wired Stats NZ MCP server assembly
 │   ├── a2a/                # Agent-to-agent communication
 │   ├── plugins/            # Plugin lifecycle management
 │   ├── guardrails/         # Risk classification & cost guards
@@ -838,7 +978,7 @@ The [examples](examples) directory contains 29 runnable demonstrations:
 | 14 | [Smart Routing](examples/14-smart-routing.ts) | Model routing, health tracking, weighted scoring, capability filtering, explainable decisions | routing | None |
 | 15 | [Tool Ecosystem](examples/15-tool-ecosystem.ts) | Extended tool registry, web search, browser, HTTP tools, agent with multi-tool research | tools, tools-search, tools-browser, tools-http, agents, testing | None |
 | 16 | [Human-in-the-Loop](examples/16-human-in-the-loop.ts) | Approval tasks, review queues, escalation, decision logging, policy evaluation, contracts, evidence bundles | human-tasks, contracts, agents, testing | None |
-| 17 | [Prompt Management](examples/17-prompt-management.ts) | Versioned templates, A/B experiments, instruction bundles, scoped resolution | prompts, agents, testing | None |
+| 17 | [Prompt Management](examples/17-prompt-management.ts) | Versioned templates, A/B experiments, instruction bundles, DB-backed strategy runtime execution, scoped resolution | prompts, agents, testing | None |
 | 18 | [Knowledge Graph](examples/18-knowledge-graph.ts) | Entity nodes, relationships, entity linking, timeline, graph retrieval, extraction pipeline | graph, extraction, agents, testing | None |
 | 19 | [Compliance & Sandbox](examples/19-compliance-sandbox.ts) | Data retention, legal holds, consent, audit export, sandboxed execution, idempotency, retries, DLQ, health checking | compliance, sandbox, reliability | None |
 | 20 | [Recipes & DevTools](examples/20-recipes-devtools.ts) | Pre-built agents, scaffolding, inspection, validation, mock runtime, streaming events, widgets, artifacts, citations, progress | recipes, devtools, ui-primitives | None |
@@ -867,6 +1007,7 @@ Every deployment requires these environment variables:
 | `JWT_SECRET` | **Yes** | Secret for signing auth tokens |
 | `ANTHROPIC_API_KEY` | One of these | Anthropic API key |
 | `OPENAI_API_KEY` | One of these | OpenAI API key |
+| `STATSNZ_API_KEY` | No | Stats NZ ADE subscription key (required for `statsnz_*` tools / Stats NZ MCP server) |
 | `PORT` | No | HTTP port (default: `3500`) |
 | `DATABASE_PATH` | No | SQLite path (default: `./data/geneweave.db`) |
 | `DEFAULT_PROVIDER` | No | `anthropic` or `openai` (auto-detected) |

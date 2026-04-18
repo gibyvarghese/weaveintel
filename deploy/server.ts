@@ -12,7 +12,7 @@
  *   CORS_ORIGIN       – Allowed CORS origin (optional)
  */
 
-import { createGeneWeave } from '@weaveintel/geneweave';
+import { createGeneWeave } from '../apps/geneweave/src/index.ts';
 import 'dotenv/config';
 
 async function main() {

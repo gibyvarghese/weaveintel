@@ -159,13 +159,75 @@ CREATE TABLE IF NOT EXISTS temporal_reminders (
 
 CREATE TABLE IF NOT EXISTS prompts (
   id TEXT PRIMARY KEY,
+  key TEXT,
   name TEXT NOT NULL,
   description TEXT,
   category TEXT,
+  prompt_type TEXT NOT NULL DEFAULT 'template',
+  owner TEXT,
+  status TEXT NOT NULL DEFAULT 'published',
+  tags TEXT,
   template TEXT NOT NULL,
   variables TEXT,
   version TEXT NOT NULL DEFAULT '1.0',
+  model_compatibility TEXT,
+  execution_defaults TEXT,
+  framework TEXT,
+  metadata TEXT,
   is_default INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS prompt_frameworks (
+  id TEXT PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT,
+  sections TEXT NOT NULL DEFAULT '[]',
+  section_separator TEXT NOT NULL DEFAULT '\n\n',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS prompt_fragments (
+  id TEXT PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT,
+  category TEXT,
+  content TEXT NOT NULL,
+  variables TEXT,
+  tags TEXT,
+  version TEXT NOT NULL DEFAULT '1.0',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS prompt_contracts (
+  id TEXT PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT,
+  contract_type TEXT NOT NULL,
+  schema TEXT,
+  config TEXT NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS prompt_strategies (
+  id TEXT PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT,
+  instruction_prefix TEXT,
+  instruction_suffix TEXT,
+  config TEXT NOT NULL DEFAULT '{}',
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -750,6 +812,31 @@ CREATE TABLE IF NOT EXISTS skills (
   tags TEXT,
   priority INTEGER NOT NULL DEFAULT 0,
   version TEXT NOT NULL DEFAULT '1.0',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ── Worker Agents: database-driven supervisor workers ──────
+
+CREATE TABLE IF NOT EXISTS worker_agents (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  -- System prompt / instructions for this worker
+  system_prompt TEXT NOT NULL DEFAULT '',
+  -- JSON string[] — tool names available to this worker
+  tool_names TEXT NOT NULL DEFAULT '[]',
+  -- RBAC persona for tool filtering (e.g. 'agent_worker', 'agent_researcher')
+  persona TEXT NOT NULL DEFAULT 'agent_worker',
+  -- JSON string[] — trigger patterns for auto-routing (supervisor uses these to decide when to delegate)
+  trigger_patterns TEXT,
+  -- Optional task contract ID for completion validation
+  task_contract_id TEXT REFERENCES task_contracts(id),
+  -- Max retry attempts when contract validation fails
+  max_retries INTEGER NOT NULL DEFAULT 0,
+  -- Priority for ordering when building supervisor worker list (higher = listed first)
+  priority INTEGER NOT NULL DEFAULT 0,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
