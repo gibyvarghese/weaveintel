@@ -1279,10 +1279,14 @@ function render() {
       requestAnimationFrame(() => {
         const navScrollEl = root.querySelector('.workspace-nav-scroll') as HTMLElement | null;
         if (!navScrollEl) return;
-        // Prefer scrolling the active sub-tab into view; fall back to saved position
         const activeSubTab = navScrollEl.querySelector('.admin-subtab.active') as HTMLElement | null;
         if (activeSubTab) {
-          activeSubTab.scrollIntoView({ block: 'nearest', behavior: 'instant' } as ScrollIntoViewOptions);
+          // Use getBoundingClientRect to compute offset relative to the scroll container only,
+          // then set scrollTop directly — avoids scrollIntoView touching body/page scroll.
+          const containerRect = navScrollEl.getBoundingClientRect();
+          const elRect = activeSubTab.getBoundingClientRect();
+          const relativeTop = elRect.top - containerRect.top + navScrollEl.scrollTop;
+          navScrollEl.scrollTop = relativeTop - (navScrollEl.clientHeight / 2) + (activeSubTab.offsetHeight / 2);
         } else if (state.sidebarScrollTop) {
           navScrollEl.scrollTop = state.sidebarScrollTop;
         }
