@@ -35,6 +35,11 @@ export function renderWorkspaceNav(options: {
 
   const nav = h('aside', { className: state.sidebarCollapsed ? 'workspace-nav collapsed' : 'workspace-nav' });
   const navScroll = h('div', { className: 'workspace-nav-scroll' });
+  // Restore scroll position preserved across re-renders
+  if (state.sidebarScrollTop) {
+    requestAnimationFrame(() => { navScroll.scrollTop = state.sidebarScrollTop ?? 0; });
+  }
+  navScroll.addEventListener('scroll', () => { state.sidebarScrollTop = navScroll.scrollTop; }, { passive: true });
   const scrollSidebarBy = (delta: number) => {
     navScroll.scrollBy({ top: delta, behavior: 'smooth' });
   };

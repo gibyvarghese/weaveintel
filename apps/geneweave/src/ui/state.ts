@@ -35,6 +35,7 @@ export const state: any = {
   showSettings: false,
   recentChatsExpanded: true,
   sidebarCollapsed: false,
+  sidebarScrollTop: 0,
 
   // Calendar
   calendarTab: 'meetings',
