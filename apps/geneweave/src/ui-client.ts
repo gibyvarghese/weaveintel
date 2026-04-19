@@ -1204,6 +1204,7 @@ function renderApp() {
 }
 
 const UI_STATE_KEY = 'geneweave.uiState.v1';
+let renderVersion = 0;
 
 function restoreUiStateFromStorage() {
   if (typeof window === 'undefined') return;
@@ -1267,6 +1268,14 @@ function render() {
   document.querySelectorAll('body > .dropdown').forEach((el) => el.remove());
   const root = document.getElementById('root');
   if (!root) return;
+  const navBeforeRender = root.querySelector('.workspace-nav-scroll') as HTMLElement | null;
+  const previousSidebarScrollTop = navBeforeRender
+    ? navBeforeRender.scrollTop
+    : Math.max(0, state.sidebarScrollTop || 0);
+  if (navBeforeRender) {
+    state.sidebarScrollTop = navBeforeRender.scrollTop;
+  }
+  const thisRenderVersion = ++renderVersion;
   
   if (!state.user) {
     root.innerHTML = '';
@@ -1277,19 +1286,22 @@ function render() {
     // Double-rAF: first frame inserts DOM, second frame has computed layout
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
+        if (thisRenderVersion !== renderVersion) return;
         const navScrollEl = root.querySelector('.workspace-nav-scroll') as HTMLElement | null;
         if (!navScrollEl) return;
+        navScrollEl.scrollTop = previousSidebarScrollTop;
         const activeSubTab = navScrollEl.querySelector('.admin-subtab.active') as HTMLElement | null;
         if (activeSubTab) {
-          // Use getBoundingClientRect to compute offset relative to the scroll container only,
-          // then set scrollTop directly — avoids scrollIntoView touching body/page scroll.
+          // Keep the active tab visible while preserving current sidebar position as much as possible.
           const containerRect = navScrollEl.getBoundingClientRect();
           const elRect = activeSubTab.getBoundingClientRect();
-          const relativeTop = elRect.top - containerRect.top + navScrollEl.scrollTop;
-          navScrollEl.scrollTop = relativeTop - (navScrollEl.clientHeight / 2) + (activeSubTab.offsetHeight / 2);
-        } else if (state.sidebarScrollTop) {
-          navScrollEl.scrollTop = state.sidebarScrollTop;
+          if (elRect.top < containerRect.top) {
+            navScrollEl.scrollTop += elRect.top - containerRect.top - 12;
+          } else if (elRect.bottom > containerRect.bottom) {
+            navScrollEl.scrollTop += elRect.bottom - containerRect.bottom + 12;
+          }
         }
+        state.sidebarScrollTop = navScrollEl.scrollTop;
       });
     });
   }
