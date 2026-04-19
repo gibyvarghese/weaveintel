@@ -1274,6 +1274,14 @@ function render() {
   } else {
     root.innerHTML = '';
     root.appendChild(renderApp());
+    // Restore sidebar scroll position after the full DOM tree is inserted
+    const savedScroll = state.sidebarScrollTop;
+    if (savedScroll) {
+      requestAnimationFrame(() => {
+        const navScrollEl = root.querySelector('.workspace-nav-scroll') as HTMLElement | null;
+        if (navScrollEl) navScrollEl.scrollTop = savedScroll;
+      });
+    }
   }
 }
 
