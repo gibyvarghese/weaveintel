@@ -27,7 +27,7 @@ import {
   clearAuthCookie,
   type AuthContext,
 } from './auth.js';
-import { getHTML } from './ui.js';
+import { getHTML } from './ui-server.js';
 import { registerAdminRoutes } from './server-admin.js';
 import { encryptCredential, decryptCredential } from './vault.js';
 import { setBrowserAuthProvider, type SSOPassThroughAuth } from '@weaveintel/tools-browser';
@@ -1301,9 +1301,15 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     const pathname = url.pathname;
     const method = req.method ?? 'GET';
 
-    // Serve UI module files
-    if (method === 'GET' && pathname.match(/^\/(?:ui(?:\/|\.)|admin-schema\.js)/)) {
-      const filename = pathname.slice(1);
+    console.log(`[DEBUG] Request: ${method} ${pathname}`);
+
+    // Serve UI module files (but NOT admin-schema.js - it's embedded in HTML)
+    if ((method === 'GET' || method === 'HEAD') && pathname.match(/^\/(?:ui(?:\/|\.))/)) {
+      // Map /ui.js to /ui-client.js (client-side only module)
+      let filename = pathname.slice(1);
+      if (filename === 'ui.js') {
+        filename = 'ui-client.js';
+      }
       const filepath = join(distDir, filename);
       try {
         const data = await fsReadFile(filepath);
@@ -1313,9 +1319,13 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
           'Content-Length': data.length,
           'Cache-Control': 'public, max-age=3600',
         });
-        res.end(data);
+        if (method === 'GET') {
+          res.end(data);
+        } else {
+          res.end(); // HEAD request: don't send body
+        }
         return;
-      } catch {
+      } catch (err) {
         json(res, 404, { error: 'Not found' });
         return;
       }

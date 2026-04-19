@@ -43,48 +43,13 @@ import {
   loadChatSettings,
   saveChatSettings
 } from './ui/api.js';
-import { ADMIN_TAB_GROUPS, ADMIN_TABS } from './admin-schema.js';
+
 import { 
   doLogout,
   renderAuth
 } from './ui/auth.js';
 import type { Message, Chat } from './ui/types.js';
 
-// ============================================================================
-// HTML GENERATION (Server-side)
-// ============================================================================
-
-export function getHTML(): string {
-  // Embed admin schema and styles as inline content
-  const adminGroupsJson = JSON.stringify(ADMIN_TAB_GROUPS);
-  const adminSchemaJson = JSON.stringify(ADMIN_TABS);
-  
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>geneWeave</title>
-  <style>${STYLES}</style>
-</head>
-<body>
-<div id="root"></div>
-<script>
-// Embed admin schema as global variables so client code can access them
-window.ADMIN_GROUPS = ${adminGroupsJson};
-window.ADMIN_SCHEMA = ${adminSchemaJson};
-</script>
-<script type="module">
-  import { initialize } from '/ui.js';
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initialize);
-  } else {
-    initialize();
-  }
-</script>
-</body>
-</html>`;
-}
 
 // ============================================================================
 // RENDERING FUNCTIONS
@@ -2446,8 +2411,959 @@ function normalizeAdminPath(path: string): string {
   return '/' + p;
 }
 
+function slugifyPromptKey(value: string): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+}
+
+function parseWizardObject(input: unknown, fallback: Record<string, unknown>): Record<string, unknown> {
+  if (!input) return fallback;
+  if (typeof input === 'object' && !Array.isArray(input)) return input as Record<string, unknown>;
+  if (typeof input !== 'string') return fallback;
+  const trimmed = input.trim();
+  if (!trimmed) return fallback;
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function stripPossibleJsonQuotes(value: string): string {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+
+function defaultWizardFrameworkSections() {
+  return [
+    { key: 'role', label: 'Role', required: true, header: null },
+    { key: 'task', label: 'Task', required: true, header: '## Task\n' },
+    { key: 'context', label: 'Context', required: false, header: '## Context\n' },
+    { key: 'expectations', label: 'Expectations', required: false, header: '## Expectations\n' },
+  ];
+}
+
+function ensureWizardFrameworkSections(wizard: any) {
+  if (!Array.isArray(wizard.framework.sections) || !wizard.framework.sections.length) {
+    wizard.framework.sections = defaultWizardFrameworkSections();
+  }
+}
+
+function promptWizardRows(tab: string) {
+  return ((state.adminData?.[tab] || []) as any[]).filter(Boolean);
+}
+
+function buildFrameworkSectionsFromWizard(wizard: any) {
+  ensureWizardFrameworkSections(wizard);
+  return wizard.framework.sections.map((section: any, index: number) => ({
+    key: String(section.key || `section_${index + 1}`),
+    label: String(section.label || section.key || `Section ${index + 1}`),
+    renderOrder: (index + 1) * 10,
+    required: !!section.required,
+    header: section.header === null ? null : String(section.header || `## ${section.label || section.key || `Section ${index + 1}`}\n`),
+  }));
+}
+
+function moveWizardFrameworkSection(wizard: any, index: number, dir: -1 | 1) {
+  ensureWizardFrameworkSections(wizard);
+  const next = index + dir;
+  if (next < 0 || next >= wizard.framework.sections.length) return;
+  const copy = [...wizard.framework.sections];
+  const [item] = copy.splice(index, 1);
+  copy.splice(next, 0, item);
+  wizard.framework.sections = copy;
+  render();
+}
+
+function insertFragmentMarkerIntoTemplate(fragmentKey: string) {
+  if (!fragmentKey) return;
+  const wizard = ensurePromptWizardState();
+  const marker = `{{>${fragmentKey}}}`;
+  const current = String(wizard.prompt.template || '');
+  const start = Number.isFinite(wizard.prompt.cursorStart) ? wizard.prompt.cursorStart : current.length;
+  const end = Number.isFinite(wizard.prompt.cursorEnd) ? wizard.prompt.cursorEnd : start;
+  const from = Math.max(0, Math.min(start, current.length));
+  const to = Math.max(from, Math.min(end, current.length));
+  wizard.prompt.template = `${current.slice(0, from)}${marker}${current.slice(to)}`;
+  wizard.prompt.cursorStart = from + marker.length;
+  wizard.prompt.cursorEnd = from + marker.length;
+  wizard.status = `Inserted fragment marker ${marker} into template.`;
+  wizard.error = '';
+  render();
+}
+
+function renderPromptTemplatePreview(wizard: any, fragmentRows: any[]) {
+  const template = String(wizard.prompt.template || '');
+  const fragmentKeys = new Set(fragmentRows.map((row: any) => String(row.key || '')));
+  const preview = h('pre', { className: 'prompt-template-preview' });
+
+  if (!template.trim()) {
+    preview.appendChild(h('span', { className: 'prompt-template-empty' }, 'Template preview will appear here as you type.'));
+    return preview;
+  }
+
+  const tokenRegex = /\{\{>\s*([a-zA-Z0-9._-]+)\s*\}\}|\{\{\s*([a-zA-Z0-9._-]+)\s*\}\}/g;
+  let last = 0;
+  let match: RegExpExecArray | null;
+  while ((match = tokenRegex.exec(template)) !== null) {
+    const idx = match.index;
+    if (idx > last) preview.appendChild(document.createTextNode(template.slice(last, idx)));
+    const fragmentKey = match[1];
+    const variableKey = match[2];
+    if (fragmentKey) {
+      const tone = fragmentKeys.has(fragmentKey) ? 'ok' : 'warn';
+      preview.appendChild(h('span', { className: `prompt-token prompt-token-fragment ${tone}` }, `{{>${fragmentKey}}}`));
+    } else if (variableKey) {
+      preview.appendChild(h('span', { className: 'prompt-token prompt-token-variable' }, `{{${variableKey}}}`));
+    }
+    last = idx + match[0].length;
+  }
+  if (last < template.length) preview.appendChild(document.createTextNode(template.slice(last)));
+  return preview;
+}
+
+function extractTemplateTokens(template: string) {
+  const variableSet = new Set<string>();
+  const fragmentSet = new Set<string>();
+  const tokenRegex = /\{\{>\s*([a-zA-Z0-9._-]+)\s*\}\}|\{\{\s*([a-zA-Z0-9._-]+)\s*\}\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = tokenRegex.exec(template)) !== null) {
+    if (match[1]) fragmentSet.add(match[1]);
+    if (match[2]) variableSet.add(match[2]);
+  }
+  return {
+    variables: [...variableSet],
+    fragments: [...fragmentSet],
+  };
+}
+
+function ensurePromptWizardState() {
+  const existing = state.promptWizard;
+  if (existing && typeof existing === 'object') return existing;
+
+  const next = {
+    prompt: {
+      key: '',
+      name: '',
+      description: '',
+      category: 'analysis',
+      prompt_type: 'template',
+      status: 'published',
+      version: '1.0',
+      variablesCsv: '',
+      tagsCsv: '',
+      template: '',
+      cursorStart: 0,
+      cursorEnd: 0,
+    },
+    framework: {
+      selectedKey: '',
+      createNew: false,
+      key: '',
+      name: '',
+      description: '',
+      sectionSeparator: '\\n\\n',
+      sections: defaultWizardFrameworkSections(),
+      newSectionKey: 'constraints',
+    },
+    strategy: {
+      selectedKey: '',
+      createNew: false,
+      key: '',
+      name: '',
+      description: '',
+      instructionPrefix: '',
+      instructionSuffix: '',
+      wrapTag: '',
+    },
+    contract: {
+      selectedKey: '',
+      createNew: false,
+      key: '',
+      name: '',
+      description: '',
+      contractType: 'json',
+      schema: '{\\n  "type": "object"\\n}',
+      config: '{\\n  "required": []\\n}',
+    },
+    fragments: {
+      selectedKey: '',
+      createNew: false,
+      key: '',
+      name: '',
+      description: '',
+      category: 'context',
+      content: '',
+      tagsCsv: '',
+      queued: [] as any[],
+    },
+    saving: false,
+    status: '',
+    error: '',
+    mode: 'create',
+    editingPromptId: '',
+    selectedPromptId: '',
+  };
+
+  state.promptWizard = next;
+  return next;
+}
+
+function resetPromptWizard(mode: 'create' | 'edit' = 'create') {
+  state.promptWizard = null;
+  const wizard = ensurePromptWizardState();
+  wizard.mode = mode;
+  wizard.editingPromptId = '';
+  wizard.selectedPromptId = '';
+  wizard.status = '';
+  wizard.error = '';
+  return wizard;
+}
+
+function hydrateWizardFromPrompt(promptRow: any) {
+  const wizard = resetPromptWizard('edit');
+  const promptId = String(promptRow?.id || '');
+  const promptName = String(promptRow?.name || '');
+  const promptKey = String(promptRow?.key || promptName);
+  const vars = Array.isArray(promptRow?.variables)
+    ? promptRow.variables
+    : parseJsonMaybeLoose(promptRow?.variables);
+  const tags = Array.isArray(promptRow?.tags)
+    ? promptRow.tags
+    : parseJsonMaybeLoose(promptRow?.tags);
+
+  wizard.mode = 'edit';
+  wizard.editingPromptId = promptId;
+  wizard.selectedPromptId = promptId;
+  wizard.prompt.key = promptKey;
+  wizard.prompt.name = promptName;
+  wizard.prompt.description = String(promptRow?.description || '');
+  wizard.prompt.category = String(promptRow?.category || 'analysis');
+  wizard.prompt.prompt_type = String(promptRow?.prompt_type || 'template');
+  wizard.prompt.status = String(promptRow?.status || 'published');
+  wizard.prompt.version = String(promptRow?.version || '1.0');
+  wizard.prompt.variablesCsv = Array.isArray(vars) ? vars.join(', ') : '';
+  wizard.prompt.tagsCsv = Array.isArray(tags) ? tags.join(', ') : '';
+  wizard.prompt.template = String(promptRow?.template || '');
+
+  const frameworkRaw = parseJsonMaybeLoose(promptRow?.framework);
+  const frameworkKey = typeof frameworkRaw === 'string'
+    ? stripPossibleJsonQuotes(frameworkRaw)
+    : typeof frameworkRaw?.key === 'string'
+      ? String(frameworkRaw.key)
+      : '';
+  wizard.framework.selectedKey = frameworkKey;
+
+  const execDefaults = parseWizardObject(promptRow?.execution_defaults, {});
+  wizard.strategy.selectedKey = typeof execDefaults['strategy'] === 'string' ? String(execDefaults['strategy']) : '';
+  wizard.contract.selectedKey = typeof execDefaults['outputContractId'] === 'string' ? String(execDefaults['outputContractId']) : '';
+
+  const frameworkRows = promptWizardRows('prompt-frameworks');
+  const selectedFramework = frameworkRows.find((row: any) => row.key === frameworkKey);
+  const frameworkSections = Array.isArray(parseJsonMaybeLoose(selectedFramework?.sections))
+    ? parseJsonMaybeLoose(selectedFramework?.sections)
+    : [];
+  wizard.framework.sections = frameworkSections.length
+    ? frameworkSections.map((section: any) => ({
+        key: String(section.key || ''),
+        label: String(section.label || section.key || ''),
+        required: !!section.required,
+        header: section.header === null ? null : String(section.header || `## ${section.label || section.key || ''}\\n`),
+      }))
+    : defaultWizardFrameworkSections();
+
+  wizard.status = `Loaded prompt package ${promptName || promptId} for editing.`;
+  wizard.error = '';
+}
+
+function queuePromptWizardFragment() {
+  const wizard = ensurePromptWizardState();
+  const key = slugifyPromptKey(wizard.fragments.key || wizard.fragments.name);
+  const name = String(wizard.fragments.name || '').trim();
+  const content = String(wizard.fragments.content || '').trim();
+  if (!key || !name || !content) {
+    wizard.error = 'Fragment key, name, and content are required before adding to queue.';
+    wizard.status = '';
+    render();
+    return;
+  }
+
+  wizard.fragments.queued = [
+    ...(wizard.fragments.queued || []).filter((f: any) => f.key !== key),
+    {
+      key,
+      name,
+      description: String(wizard.fragments.description || '').trim(),
+      category: String(wizard.fragments.category || 'context').trim() || 'context',
+      content,
+      tags: String(wizard.fragments.tagsCsv || '').split(',').map((v: string) => v.trim()).filter(Boolean),
+    },
+  ];
+
+  wizard.fragments.key = '';
+  wizard.fragments.name = '';
+  wizard.fragments.description = '';
+  wizard.fragments.content = '';
+  wizard.fragments.tagsCsv = '';
+  wizard.status = `Queued fragment ${key}.`;
+  wizard.error = '';
+  render();
+}
+
+async function savePromptWizardPackage() {
+  const wizard = ensurePromptWizardState();
+  if (wizard.saving) return;
+
+  const promptName = String(wizard.prompt.name || '').trim();
+  const promptKey = slugifyPromptKey(wizard.prompt.key || promptName);
+  const promptDescription = String(wizard.prompt.description || '').trim();
+  const promptTemplate = String(wizard.prompt.template || '').trim();
+  if (!promptKey || !promptName || !promptDescription || !promptTemplate) {
+    wizard.error = 'Prompt key, name, detailed description, and template are required.';
+    wizard.status = '';
+    render();
+    return;
+  }
+
+  wizard.saving = true;
+  wizard.error = '';
+  wizard.status = 'Saving prompt package...';
+  render();
+
+  try {
+    const frameworkRows = promptWizardRows('prompt-frameworks');
+    const strategyRows = promptWizardRows('prompt-strategies');
+    const contractRows = promptWizardRows('prompt-contracts');
+    const fragmentRows = promptWizardRows('prompt-fragments');
+
+    let selectedFrameworkKey = String(wizard.framework.selectedKey || '').trim();
+    if (wizard.framework.createNew) {
+      const key = slugifyPromptKey(wizard.framework.key || wizard.framework.name);
+      if (!key) throw new Error('Framework key or name is required to create a new framework.');
+      const existing = frameworkRows.find((row: any) => row.key === key);
+      if (!existing) {
+        await api.post('/admin/prompt-frameworks', {
+          key,
+          name: String(wizard.framework.name || key).trim(),
+          description: String(wizard.framework.description || 'Framework created by prompt setup wizard.').trim(),
+          sections: buildFrameworkSectionsFromWizard(wizard),
+          section_separator: String(wizard.framework.sectionSeparator || '\\n\\n'),
+          enabled: true,
+        });
+      }
+      selectedFrameworkKey = key;
+    }
+
+    let selectedStrategyKey = String(wizard.strategy.selectedKey || '').trim();
+    if (wizard.strategy.createNew) {
+      const key = slugifyPromptKey(wizard.strategy.key || wizard.strategy.name);
+      if (!key) throw new Error('Strategy key or name is required to create a new strategy.');
+      const existing = strategyRows.find((row: any) => row.key === key);
+      if (!existing) {
+        await api.post('/admin/prompt-strategies', {
+          key,
+          name: String(wizard.strategy.name || key).trim(),
+          description: String(wizard.strategy.description || 'Prompt execution strategy created by prompt setup wizard.').trim(),
+          instruction_prefix: String(wizard.strategy.instructionPrefix || '').trim() || null,
+          instruction_suffix: String(wizard.strategy.instructionSuffix || '').trim() || null,
+          config: wizard.strategy.wrapTag
+            ? JSON.stringify({ wrapTag: String(wizard.strategy.wrapTag).trim() })
+            : JSON.stringify({}),
+          enabled: true,
+        });
+      }
+      selectedStrategyKey = key;
+    }
+
+    let selectedContractKey = String(wizard.contract.selectedKey || '').trim();
+    if (wizard.contract.createNew) {
+      const key = slugifyPromptKey(wizard.contract.key || wizard.contract.name);
+      if (!key) throw new Error('Output contract key or name is required to create a contract.');
+      const existing = contractRows.find((row: any) => row.key === key);
+      if (!existing) {
+        await api.post('/admin/prompt-contracts', {
+          key,
+          name: String(wizard.contract.name || key).trim(),
+          description: String(wizard.contract.description || 'Output contract created by prompt setup wizard.').trim(),
+          contract_type: String(wizard.contract.contractType || 'json'),
+          schema: String(wizard.contract.schema || '').trim() || '{}',
+          config: String(wizard.contract.config || '').trim() || '{}',
+          enabled: true,
+        });
+      }
+      selectedContractKey = key;
+    }
+
+    const queuedFragments = (wizard.fragments.queued || []) as any[];
+    for (const fragment of queuedFragments) {
+      const existing = fragmentRows.find((row: any) => row.key === fragment.key);
+      if (existing) continue;
+      await api.post('/admin/prompt-fragments', {
+        key: fragment.key,
+        name: fragment.name,
+        description: fragment.description || 'Prompt fragment created by prompt setup wizard.',
+        category: fragment.category || 'context',
+        content: fragment.content,
+        variables: [],
+        tags: fragment.tags || [],
+        version: '1.0',
+        enabled: true,
+      });
+    }
+
+    const executionDefaults: Record<string, unknown> = {};
+    if (selectedStrategyKey) executionDefaults['strategy'] = selectedStrategyKey;
+    if (selectedContractKey) executionDefaults['outputContractId'] = selectedContractKey;
+
+    const payload = {
+      key: promptKey,
+      name: promptName,
+      description: promptDescription,
+      category: String(wizard.prompt.category || 'analysis'),
+      prompt_type: String(wizard.prompt.prompt_type || 'template'),
+      owner: 'admin',
+      status: String(wizard.prompt.status || 'published'),
+      tags: String(wizard.prompt.tagsCsv || '').split(',').map((v: string) => v.trim()).filter(Boolean),
+      template: promptTemplate,
+      variables: String(wizard.prompt.variablesCsv || '').split(',').map((v: string) => v.trim()).filter(Boolean),
+      model_compatibility: {},
+      execution_defaults: executionDefaults,
+      framework: selectedFrameworkKey ? JSON.stringify(selectedFrameworkKey) : null,
+      metadata: {
+        createdFrom: 'prompt-setup-wizard',
+        fragmentKeys: queuedFragments.map((f: any) => f.key),
+      },
+      version: String(wizard.prompt.version || '1.0'),
+      is_default: false,
+      enabled: true,
+    };
+
+    if (wizard.mode === 'edit' && wizard.editingPromptId) {
+      await api.put(`/admin/prompts/${wizard.editingPromptId}`, payload);
+      wizard.status = `Prompt package ${promptKey} updated successfully.`;
+    } else {
+      await api.post('/admin/prompts', payload);
+      wizard.status = `Prompt package ${promptKey} created successfully.`;
+    }
+
+    wizard.error = '';
+    wizard.fragments.queued = [];
+    await loadAdmin();
+  } catch (e: any) {
+    wizard.error = e?.message || 'Failed to create prompt package.';
+    wizard.status = '';
+  } finally {
+    wizard.saving = false;
+    render();
+  }
+}
+
+function renderPromptSetupWizard() {
+  const wizard = ensurePromptWizardState();
+  ensureWizardFrameworkSections(wizard);
+  const promptsRows = promptWizardRows('prompts');
+  const frameworkRows = promptWizardRows('prompt-frameworks');
+  const strategyRows = promptWizardRows('prompt-strategies');
+  const contractRows = promptWizardRows('prompt-contracts');
+  const fragmentRows = promptWizardRows('prompt-fragments');
+  const tokenSummary = extractTemplateTokens(String(wizard.prompt.template || ''));
+
+  const box = h('div', { className: 'chart-box prompt-wizard' },
+    h('div', { className: 'prompt-wizard-head' },
+      h('h3', null, 'Prompt Setup Wizard'),
+      h('div', { className: 'prompt-wizard-sub' }, 'Create or edit a full prompt package in one guided flow instead of editing separate tables.'),
+      h('div', { className: 'prompt-wizard-inline prompt-wizard-top-actions' },
+        h('select', {
+          value: wizard.selectedPromptId || '',
+          onChange: (e: Event) => { wizard.selectedPromptId = (e.target as HTMLSelectElement).value; },
+        },
+          h('option', { value: '' }, 'Load an existing prompt package...'),
+          ...promptsRows.map((row: any) => h('option', { value: row.id }, `${row.name || row.id}`))
+        ),
+        h('button', {
+          className: 'row-btn row-btn-edit',
+          onClick: () => {
+            const row = promptsRows.find((item: any) => item.id === wizard.selectedPromptId);
+            if (!row) {
+              wizard.error = 'Select a prompt package to load.';
+              wizard.status = '';
+              render();
+              return;
+            }
+            hydrateWizardFromPrompt(row);
+            render();
+          },
+        }, 'Load for Edit'),
+        h('button', {
+          className: 'row-btn',
+          onClick: () => { resetPromptWizard('create'); render(); },
+        }, 'Start New')
+      ),
+      wizard.mode === 'edit'
+        ? h('div', { className: 'prompt-wizard-mode' }, `Editing prompt package: ${wizard.prompt.name || wizard.editingPromptId}`)
+        : h('div', { className: 'prompt-wizard-mode' }, 'Create mode')
+    )
+  );
+
+  const sectionBasics = h('div', { className: 'prompt-wizard-section' },
+    h('h4', null, '1) Prompt Basics'),
+    h('div', { className: 'prompt-wizard-grid' },
+      h('div', null,
+        h('label', null, 'Prompt Name'),
+        h('input', {
+          type: 'text',
+          value: wizard.prompt.name,
+          placeholder: 'NZ Regional Economy Insights',
+          onInput: (e: Event) => {
+            const value = (e.target as HTMLInputElement).value;
+            wizard.prompt.name = value;
+            if (!wizard.prompt.key) wizard.prompt.key = slugifyPromptKey(value);
+          },
+        })
+      ),
+      h('div', null,
+        h('label', null, 'Prompt Key'),
+        h('div', { className: 'prompt-wizard-inline' },
+          h('input', {
+            type: 'text',
+            value: wizard.prompt.key,
+            placeholder: 'insights.nz.regional.economy',
+            onInput: (e: Event) => { wizard.prompt.key = (e.target as HTMLInputElement).value; },
+          }),
+          h('button', { className: 'row-btn', onClick: () => { wizard.prompt.key = slugifyPromptKey(wizard.prompt.name); render(); } }, 'Generate')
+        )
+      ),
+      h('div', null,
+        h('label', null, 'Category'),
+        h('input', {
+          type: 'text',
+          value: wizard.prompt.category,
+          placeholder: 'analysis',
+          onInput: (e: Event) => { wizard.prompt.category = (e.target as HTMLInputElement).value; },
+        })
+      ),
+      h('div', null,
+        h('label', null, 'Version'),
+        h('input', {
+          type: 'text',
+          value: wizard.prompt.version,
+          placeholder: '1.0',
+          onInput: (e: Event) => { wizard.prompt.version = (e.target as HTMLInputElement).value; },
+        })
+      )
+    ),
+    h('div', null,
+      h('label', null, 'Detailed Description'),
+      h('textarea', {
+        rows: '3',
+        value: wizard.prompt.description,
+        placeholder: 'Describe what the model should do, for whom, and what quality looks like.',
+        onInput: (e: Event) => { wizard.prompt.description = (e.target as HTMLTextAreaElement).value; },
+      })
+    ),
+    h('div', { className: 'prompt-wizard-grid' },
+      h('div', null,
+        h('label', null, 'Variables (comma-separated)'),
+        h('input', {
+          type: 'text',
+          value: wizard.prompt.variablesCsv,
+          placeholder: 'region, year, metric',
+          onInput: (e: Event) => { wizard.prompt.variablesCsv = (e.target as HTMLInputElement).value; },
+        })
+      ),
+      h('div', null,
+        h('label', null, 'Tags (comma-separated)'),
+        h('input', {
+          type: 'text',
+          value: wizard.prompt.tagsCsv,
+          placeholder: 'economy, nz, regional',
+          onInput: (e: Event) => { wizard.prompt.tagsCsv = (e.target as HTMLInputElement).value; },
+        })
+      )
+    )
+  );
+
+  const sectionTemplate = h('div', { className: 'prompt-wizard-section' },
+    h('h4', null, '2) Prompt Template + Fragment Insertion'),
+    h('div', { className: 'prompt-wizard-inline' },
+      h('select', {
+        value: wizard.fragments.selectedKey,
+        onChange: (e: Event) => { wizard.fragments.selectedKey = (e.target as HTMLSelectElement).value; },
+      },
+        h('option', { value: '' }, 'Select an existing fragment...'),
+        ...fragmentRows.map((row: any) => h('option', { value: row.key }, `${row.key} - ${row.name || ''}`))
+      ),
+      h('button', {
+        className: 'row-btn row-btn-edit',
+        onClick: () => insertFragmentMarkerIntoTemplate(String(wizard.fragments.selectedKey || '')),
+      }, 'Insert Marker')
+    ),
+    h('textarea', {
+      rows: '12',
+      value: wizard.prompt.template,
+      placeholder: 'Write your prompt template here. Use {{variable}} and insert fragments like {{>fragment_key}}.',
+      onInput: (e: Event) => {
+        const target = e.target as HTMLTextAreaElement;
+        wizard.prompt.template = target.value;
+        wizard.prompt.cursorStart = target.selectionStart;
+        wizard.prompt.cursorEnd = target.selectionEnd;
+      },
+      onClick: (e: Event) => {
+        const target = e.target as HTMLTextAreaElement;
+        wizard.prompt.cursorStart = target.selectionStart;
+        wizard.prompt.cursorEnd = target.selectionEnd;
+      },
+      onKeyUp: (e: Event) => {
+        const target = e.target as HTMLTextAreaElement;
+        wizard.prompt.cursorStart = target.selectionStart;
+        wizard.prompt.cursorEnd = target.selectionEnd;
+      },
+    }),
+    h('div', { className: 'prompt-wizard-hint' }, 'Tip: choose a fragment above and click Insert Marker. Marker inserts at your cursor position.'),
+    h('div', { className: 'prompt-token-row' },
+      h('strong', null, 'Detected variables:'),
+      ...(tokenSummary.variables.length
+        ? tokenSummary.variables.map((name) => h('span', { className: 'prompt-token prompt-token-variable' }, `{{${name}}}`))
+        : [h('span', { className: 'prompt-token prompt-token-empty' }, 'none')])
+    ),
+    h('div', { className: 'prompt-token-row' },
+      h('strong', null, 'Detected fragments:'),
+      ...(tokenSummary.fragments.length
+        ? tokenSummary.fragments.map((name) => h('span', { className: `prompt-token prompt-token-fragment ${fragmentRows.some((row: any) => row.key === name) ? 'ok' : 'warn'}` }, `{{>${name}}}`))
+        : [h('span', { className: 'prompt-token prompt-token-empty' }, 'none')])
+    ),
+    renderPromptTemplatePreview(wizard, fragmentRows)
+  );
+
+  const sectionFramework = h('div', { className: 'prompt-wizard-section' },
+    h('h4', null, '3) Framework (optional)'),
+    h('div', { className: 'prompt-wizard-grid' },
+      h('div', null,
+        h('label', null, 'Use Existing Framework'),
+        h('select', {
+          value: wizard.framework.selectedKey,
+          onChange: (e: Event) => { wizard.framework.selectedKey = (e.target as HTMLSelectElement).value; },
+        },
+          h('option', { value: '' }, 'None'),
+          ...frameworkRows.map((row: any) => h('option', { value: row.key }, `${row.key} - ${row.name || ''}`))
+        )
+      ),
+      h('div', null,
+        h('label', null, 'Create New Framework'),
+        h('input', {
+          type: 'checkbox',
+          checked: !!wizard.framework.createNew,
+          onChange: (e: Event) => { wizard.framework.createNew = (e.target as HTMLInputElement).checked; render(); },
+        })
+      )
+    )
+  );
+
+  if (wizard.framework.createNew) {
+    sectionFramework.appendChild(
+      h('div', { className: 'prompt-wizard-grid' },
+        h('div', null,
+          h('label', null, 'Framework Name'),
+          h('input', { type: 'text', value: wizard.framework.name, onInput: (e: Event) => { wizard.framework.name = (e.target as HTMLInputElement).value; } })
+        ),
+        h('div', null,
+          h('label', null, 'Framework Key'),
+          h('input', { type: 'text', value: wizard.framework.key, onInput: (e: Event) => { wizard.framework.key = (e.target as HTMLInputElement).value; } })
+        )
+      )
+    );
+    sectionFramework.appendChild(
+      h('div', null,
+        h('label', null, 'Framework Description'),
+        h('textarea', { rows: '2', value: wizard.framework.description, onInput: (e: Event) => { wizard.framework.description = (e.target as HTMLTextAreaElement).value; } })
+      )
+    );
+    sectionFramework.appendChild(
+      h('div', { className: 'prompt-wizard-inline', style: 'margin-top:8px;' },
+        h('select', {
+          value: wizard.framework.newSectionKey,
+          onChange: (e: Event) => { wizard.framework.newSectionKey = (e.target as HTMLSelectElement).value; },
+        },
+          ...['role', 'task', 'context', 'expectations', 'constraints', 'examples', 'output_contract', 'review_instructions', 'custom']
+            .map((key) => h('option', { value: key }, key))
+        ),
+        h('button', {
+          className: 'row-btn',
+          onClick: () => {
+            const key = String(wizard.framework.newSectionKey || 'custom');
+            wizard.framework.sections = [
+              ...(wizard.framework.sections || []),
+              {
+                key,
+                label: key.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()),
+                required: false,
+                header: `## ${key.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}\\n`,
+              },
+            ];
+            render();
+          },
+        }, 'Add Section')
+      )
+    );
+    sectionFramework.appendChild(
+      h('div', { className: 'prompt-wizard-list' },
+        ...(wizard.framework.sections || []).map((section: any, index: number) =>
+          h('div', { className: 'prompt-wizard-list-item prompt-section-item' },
+            h('div', { className: 'prompt-section-main' },
+              h('div', { className: 'prompt-wizard-grid' },
+                h('div', null,
+                  h('label', null, 'Section Key'),
+                  h('input', {
+                    type: 'text',
+                    value: String(section.key || ''),
+                    onInput: (e: Event) => { section.key = (e.target as HTMLInputElement).value; },
+                  })
+                ),
+                h('div', null,
+                  h('label', null, 'Label'),
+                  h('input', {
+                    type: 'text',
+                    value: String(section.label || ''),
+                    onInput: (e: Event) => { section.label = (e.target as HTMLInputElement).value; },
+                  })
+                )
+              ),
+              h('div', null,
+                h('label', null, 'Header (leave blank for auto-header; use null to suppress)'),
+                h('input', {
+                  type: 'text',
+                  value: section.header === null ? 'null' : String(section.header || ''),
+                  onInput: (e: Event) => {
+                    const value = (e.target as HTMLInputElement).value;
+                    section.header = value.trim().toLowerCase() === 'null' ? null : value;
+                  },
+                })
+              ),
+              h('label', { className: 'prompt-wizard-toggle' },
+                h('input', {
+                  type: 'checkbox',
+                  checked: !!section.required,
+                  onChange: (e: Event) => { section.required = (e.target as HTMLInputElement).checked; },
+                }),
+                h('span', null, 'Required')
+              )
+            ),
+            h('div', { className: 'prompt-section-actions' },
+              h('button', { className: 'row-btn', onClick: () => moveWizardFrameworkSection(wizard, index, -1) }, 'Up'),
+              h('button', { className: 'row-btn', onClick: () => moveWizardFrameworkSection(wizard, index, 1) }, 'Down'),
+              h('button', {
+                className: 'row-btn row-btn-del',
+                onClick: () => {
+                  wizard.framework.sections = wizard.framework.sections.filter((_: any, i: number) => i !== index);
+                  render();
+                },
+              }, 'Remove')
+            )
+          )
+        )
+      )
+    );
+  }
+
+  const sectionStrategyContract = h('div', { className: 'prompt-wizard-section' },
+    h('h4', null, '4) Strategy + Output Contract (optional)'),
+    h('div', { className: 'prompt-wizard-grid' },
+      h('div', null,
+        h('label', null, 'Use Existing Strategy'),
+        h('select', {
+          value: wizard.strategy.selectedKey,
+          onChange: (e: Event) => { wizard.strategy.selectedKey = (e.target as HTMLSelectElement).value; },
+        },
+          h('option', { value: '' }, 'None'),
+          ...strategyRows.map((row: any) => h('option', { value: row.key }, `${row.key} - ${row.name || ''}`))
+        ),
+        h('label', { className: 'prompt-wizard-toggle' },
+          h('input', {
+            type: 'checkbox',
+            checked: !!wizard.strategy.createNew,
+            onChange: (e: Event) => { wizard.strategy.createNew = (e.target as HTMLInputElement).checked; render(); },
+          }),
+          h('span', null, 'Create new strategy in this flow')
+        )
+      ),
+      h('div', null,
+        h('label', null, 'Use Existing Output Contract'),
+        h('select', {
+          value: wizard.contract.selectedKey,
+          onChange: (e: Event) => { wizard.contract.selectedKey = (e.target as HTMLSelectElement).value; },
+        },
+          h('option', { value: '' }, 'None'),
+          ...contractRows.map((row: any) => h('option', { value: row.key }, `${row.key} - ${row.name || ''}`))
+        ),
+        h('label', { className: 'prompt-wizard-toggle' },
+          h('input', {
+            type: 'checkbox',
+            checked: !!wizard.contract.createNew,
+            onChange: (e: Event) => { wizard.contract.createNew = (e.target as HTMLInputElement).checked; render(); },
+          }),
+          h('span', null, 'Create new output contract in this flow')
+        )
+      )
+    )
+  );
+
+  if (wizard.strategy.createNew) {
+    sectionStrategyContract.appendChild(
+      h('div', { className: 'prompt-wizard-grid' },
+        h('div', null,
+          h('label', null, 'Strategy Name'),
+          h('input', { type: 'text', value: wizard.strategy.name, onInput: (e: Event) => { wizard.strategy.name = (e.target as HTMLInputElement).value; } })
+        ),
+        h('div', null,
+          h('label', null, 'Strategy Key'),
+          h('input', { type: 'text', value: wizard.strategy.key, onInput: (e: Event) => { wizard.strategy.key = (e.target as HTMLInputElement).value; } })
+        )
+      )
+    );
+    sectionStrategyContract.appendChild(
+      h('div', null,
+        h('label', null, 'Instruction Prefix'),
+        h('textarea', { rows: '2', value: wizard.strategy.instructionPrefix, onInput: (e: Event) => { wizard.strategy.instructionPrefix = (e.target as HTMLTextAreaElement).value; } })
+      )
+    );
+    sectionStrategyContract.appendChild(
+      h('div', null,
+        h('label', null, 'Instruction Suffix'),
+        h('textarea', { rows: '2', value: wizard.strategy.instructionSuffix, onInput: (e: Event) => { wizard.strategy.instructionSuffix = (e.target as HTMLTextAreaElement).value; } })
+      )
+    );
+  }
+
+  if (wizard.contract.createNew) {
+    sectionStrategyContract.appendChild(
+      h('div', { className: 'prompt-wizard-grid' },
+        h('div', null,
+          h('label', null, 'Contract Name'),
+          h('input', { type: 'text', value: wizard.contract.name, onInput: (e: Event) => { wizard.contract.name = (e.target as HTMLInputElement).value; } })
+        ),
+        h('div', null,
+          h('label', null, 'Contract Key'),
+          h('input', { type: 'text', value: wizard.contract.key, onInput: (e: Event) => { wizard.contract.key = (e.target as HTMLInputElement).value; } })
+        )
+      )
+    );
+    sectionStrategyContract.appendChild(
+      h('div', null,
+        h('label', null, 'Contract Type'),
+        h('select', {
+          value: wizard.contract.contractType,
+          onChange: (e: Event) => { wizard.contract.contractType = (e.target as HTMLSelectElement).value; },
+        },
+          ...['json', 'markdown', 'code', 'max_length', 'forbidden_content', 'structured'].map((type) => h('option', { value: type }, type))
+        )
+      )
+    );
+  }
+
+  const sectionFragments = h('div', { className: 'prompt-wizard-section' },
+    h('h4', null, '5) Optional: Create New Fragments in this Flow'),
+    h('label', { className: 'prompt-wizard-toggle' },
+      h('input', {
+        type: 'checkbox',
+        checked: !!wizard.fragments.createNew,
+        onChange: (e: Event) => { wizard.fragments.createNew = (e.target as HTMLInputElement).checked; render(); },
+      }),
+      h('span', null, 'Create new fragments now')
+    )
+  );
+
+  if (wizard.fragments.createNew) {
+    sectionFragments.appendChild(
+      h('div', { className: 'prompt-wizard-grid' },
+        h('div', null,
+          h('label', null, 'Fragment Name'),
+          h('input', { type: 'text', value: wizard.fragments.name, onInput: (e: Event) => { wizard.fragments.name = (e.target as HTMLInputElement).value; } })
+        ),
+        h('div', null,
+          h('label', null, 'Fragment Key'),
+          h('input', { type: 'text', value: wizard.fragments.key, onInput: (e: Event) => { wizard.fragments.key = (e.target as HTMLInputElement).value; } })
+        )
+      )
+    );
+    sectionFragments.appendChild(
+      h('div', null,
+        h('label', null, 'Fragment Content'),
+        h('textarea', { rows: '3', value: wizard.fragments.content, onInput: (e: Event) => { wizard.fragments.content = (e.target as HTMLTextAreaElement).value; } })
+      )
+    );
+    sectionFragments.appendChild(
+      h('div', { className: 'prompt-wizard-inline' },
+        h('button', { className: 'row-btn row-btn-edit', onClick: () => queuePromptWizardFragment() }, 'Add Fragment to Queue'),
+        h('button', {
+          className: 'row-btn',
+          onClick: () => {
+            const key = slugifyPromptKey(wizard.fragments.key || wizard.fragments.name);
+            if (key) insertFragmentMarkerIntoTemplate(key);
+          },
+        }, 'Insert Marker in Template')
+      )
+    );
+    if ((wizard.fragments.queued || []).length) {
+      sectionFragments.appendChild(
+        h('div', { className: 'prompt-wizard-list' },
+          ...wizard.fragments.queued.map((fragment: any, index: number) =>
+            h('div', { className: 'prompt-wizard-list-item' },
+              h('span', null, `${fragment.key} - ${fragment.name}`),
+              h('button', {
+                className: 'row-btn row-btn-del',
+                onClick: () => {
+                  wizard.fragments.queued = wizard.fragments.queued.filter((_: any, i: number) => i !== index);
+                  render();
+                },
+              }, 'Remove')
+            )
+          )
+        )
+      );
+    }
+  }
+
+  box.appendChild(sectionBasics);
+  box.appendChild(sectionTemplate);
+  box.appendChild(sectionFramework);
+  box.appendChild(sectionStrategyContract);
+  box.appendChild(sectionFragments);
+
+  if (wizard.error) box.appendChild(h('div', { className: 'prompt-wizard-error' }, wizard.error));
+  if (wizard.status) box.appendChild(h('div', { className: 'prompt-wizard-status' }, wizard.status));
+
+  box.appendChild(
+    h('div', { className: 'prompt-wizard-actions' },
+      h('button', {
+        className: 'nav-btn active',
+        disabled: !!wizard.saving,
+        onClick: () => { void savePromptWizardPackage(); },
+      }, wizard.saving ? 'Saving...' : wizard.mode === 'edit' ? 'Update Prompt Package' : 'Create Prompt Package'),
+      h('button', {
+        className: 'nav-btn',
+        onClick: () => {
+          resetPromptWizard('create');
+          render();
+        },
+      }, 'Reset Wizard')
+    )
+  );
+
+  return box;
+}
+
 async function adminDeleteRow(tab: string, row: any) {
-  const schema = (ADMIN_TABS as any)[tab];
+  const schema = (((typeof window !== "undefined" && (window as any).ADMIN_SCHEMA) || {}) as any)[tab];
   if (!schema) return;
   const rowId = row?.id ?? row?.[schema.cols?.[0]];
   if (!rowId) return;
@@ -2463,7 +3379,7 @@ async function adminDeleteRow(tab: string, row: any) {
 }
 
 function adminEditRow(tab: string, row: any) {
-  const schema = (ADMIN_TABS as any)[tab];
+  const schema = (((typeof window !== "undefined" && (window as any).ADMIN_SCHEMA) || {}) as any)[tab];
   if (!schema) return;
 
   state.adminEditing = row?.id ?? row?.[schema.cols?.[0]] ?? null;
@@ -2484,7 +3400,7 @@ function adminEditRow(tab: string, row: any) {
 }
 
 function adminNewRow(tab: string) {
-  const schema = (ADMIN_TABS as any)[tab];
+  const schema = (((typeof window !== "undefined" && (window as any).ADMIN_SCHEMA) || {}) as any)[tab];
   if (!schema) return;
   const f: Record<string, unknown> = {};
   (schema.fields || []).forEach((fd: any) => {
@@ -2502,7 +3418,7 @@ function adminCancelEdit() {
 }
 
 async function adminSaveRow(tab: string) {
-  const schema = (ADMIN_TABS as any)[tab];
+  const schema = (((typeof window !== "undefined" && (window as any).ADMIN_SCHEMA) || {}) as any)[tab];
   if (!schema) return;
   const payload: Record<string, unknown> = {};
   const f = (state.adminForm || {}) as Record<string, unknown>;
@@ -2547,7 +3463,7 @@ async function adminSaveRow(tab: string) {
 }
 
 function renderAdminForm(tab: string) {
-  const schema = (ADMIN_TABS as any)[tab];
+  const schema = (((typeof window !== "undefined" && (window as any).ADMIN_SCHEMA) || {}) as any)[tab];
   if (!schema) return h('div', null);
   const isEdit = !!state.adminEditing;
   const form = h('div', { className: 'chart-box', style: 'margin-bottom:16px;' },
@@ -2614,16 +3530,16 @@ function renderAdminForm(tab: string) {
 }
 
 function renderAdminView() {
-  const tabs = Object.keys(ADMIN_TABS);
+  const tabs = Object.keys(((typeof window !== "undefined" && (window as any).ADMIN_SCHEMA) || {}));
   const currentTab = tabs.includes(state.adminTab) ? state.adminTab : tabs[0];
-  const schema = (ADMIN_TABS as any)[currentTab];
+  const schema = (((typeof window !== "undefined" && (window as any).ADMIN_SCHEMA) || {}) as any)[currentTab];
   const rows = (state.adminData?.[currentTab] || []) as any[];
 
   const page = h('div', { className: 'dash-view' }, h('h2', null, 'Administration'));
   const layout = h('div', { style: 'display:grid;grid-template-columns:260px minmax(0,1fr);gap:16px;align-items:start;' });
 
   const left = h('div', { className: 'chart-box', style: 'max-height:74vh;overflow:auto;' });
-  ADMIN_TAB_GROUPS.forEach((group: any) => {
+  (((typeof window !== "undefined" && (window as any).ADMIN_GROUPS) || []) as any).forEach((group: any) => {
     left.appendChild(h('div', { style: 'font-size:11px;color:var(--fg3);text-transform:uppercase;letter-spacing:.4px;margin:8px 0 6px;font-weight:700;' }, `${group.icon} ${group.label}`));
     group.tabs.forEach((tab: any) => {
       if (!tabs.includes(tab.key)) return;
@@ -2636,6 +3552,9 @@ function renderAdminView() {
   });
 
   const right = h('div', { className: 'table-wrap' });
+  if (currentTab === 'prompts') {
+    right.appendChild(renderPromptSetupWizard());
+  }
   right.appendChild(h('h3', null, schema ? `${schema.singular}s` : 'Records'));
   right.appendChild(h('div', { style: 'display:flex;justify-content:space-between;align-items:center;padding:12px 20px 8px;color:var(--fg2);font-size:12px;' },
     h('span', null, `${rows.length} item${rows.length !== 1 ? 's' : ''}`),

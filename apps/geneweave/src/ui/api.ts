@@ -1,6 +1,10 @@
 // API client for backend communication
 import { state } from './state.js';
-import { ADMIN_TABS } from '../admin-schema.js';
+
+// Client gets ADMIN_SCHEMA from window globals (set by server in HTML)
+function getAdminSchema(): any {
+  return (typeof window !== 'undefined' && (window as any).ADMIN_SCHEMA) || {};
+}
 
 function triggerRender() {
   (globalThis as any).render?.();
@@ -338,9 +342,10 @@ export async function loadDashboardData() {
 // Admin
 export async function loadAdmin() {
   try {
-    const keys = Object.keys(ADMIN_TABS);
+    const adminSchema = getAdminSchema();
+    const keys = Object.keys(adminSchema);
     const promises = keys.map((k: string) => {
-      const s = (ADMIN_TABS as any)[k];
+      const s = (adminSchema as any)[k];
       const path = String(s.apiPath || '').replace(/^\/+/, '').replace(/^api\//, '');
       return api
         .get('/' + path)
@@ -354,7 +359,7 @@ export async function loadAdmin() {
     const results = await Promise.all(promises);
     const data: any = {};
     keys.forEach((k: string, i: number) => {
-      const s = (ADMIN_TABS as any)[k];
+      const s = (adminSchema as any)[k];
       data[k] = results[i][s.listKey] || [];
     });
     state.adminData = data;
