@@ -27,7 +27,6 @@ import type { ServerResponse } from 'node:http';
 import type {
   Model, ModelRequest, ModelResponse, StreamChunk, ExecutionContext, Message,
   ToolRegistry, AgentStepEvent, AgentStep, AgentResult, EventBus,
-  CapabilityTelemetrySummary,
 } from '@weaveintel/core';
 import { weaveContext, weaveEventBus, EventTypes } from '@weaveintel/core';
 import { weaveAgent, weaveSupervisor } from '@weaveintel/agents';
@@ -39,20 +38,6 @@ import type { GuardrailCategorySummary } from '@weaveintel/guardrails';
 import type { DatabaseAdapter, MessageRow, ChatSettingsRow, GuardrailRow, HumanTaskPolicyRow, PromptRow, RoutingPolicyRow } from './db.js';
 import { createToolRegistry, type ToolRegistryOptions } from './tools.js';
 import { createTemporalStore } from './temporal-store.js';
-import {
-  createPromptVersionFromRecord,
-  executePromptRecord,
-  resolveFragments,
-  InMemoryFragmentRegistry,
-  InMemoryPromptStrategyRegistry,
-  fragmentFromRecord,
-  strategyFromRecord,
-  defaultPromptStrategyRegistry,
-  resolvePromptRecordForExecution,
-  type ContractValidationResult,
-  type PromptRecordExecutionResult,
-  createPromptCapabilityTelemetry,
-} from '@weaveintel/prompts';
 import {
   applySkillsToPrompt,
   type SkillMatch,
@@ -134,31 +119,15 @@ import { discoverSkillsForInput } from './chat-skills-utils.js';
 import { applyRedaction, runPostEval } from './chat-eval-utils.js';
 import { observeToolCallEvents, recordTraceSpans, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
 import { evaluateGuardrails, evaluateTaskPolicies } from './chat-guardrail-eval-utils.js';
+import {
+  resolveSystemPrompt,
+  buildCapabilityTelemetrySnapshots,
+  type PromptStrategyInfo,
+  type ResolvedSystemPrompt,
+} from './chat-system-prompt-utils.js';
 
 export { calculateCost, getOrCreateModel, settingsFromRow } from './chat-runtime.js';
 export type { ChatAttachment, ProviderConfig, ChatEngineConfig, ChatSettings, WorkerDef } from './chat-runtime.js';
-
-interface PromptStrategyInfo {
-  requestedKey: string;
-  resolvedKey: string;
-  usedFallback: boolean;
-  name: string;
-  description: string;
-  metadata?: Record<string, unknown>;
-}
-
-interface ResolvedSystemPrompt {
-  content?: string;
-  strategy?: PromptStrategyInfo;
-  telemetry?: CapabilityTelemetrySummary;
-  resolution?: {
-    source: 'base_prompt' | 'prompt_version';
-    resolvedVersion: string;
-    selectedBy: 'requested_version' | 'experiment' | 'active_flag' | 'latest_published' | 'base_prompt';
-    experimentId?: string;
-    experimentVariantLabel?: string;
-  };
-}
 
 // ─── Chat engine ─────────────────────────────────────────────
 
@@ -421,7 +390,7 @@ export class ChatEngine {
     const actor = await this.db.getUserById(userId);
     const userPersona = normalizePersona(actor?.persona, 'user');
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
-    const resolvedSystemPrompt = await this.resolveSystemPrompt(settings);
+    const resolvedSystemPrompt = await resolveSystemPrompt(this.db, settings);
     const resolvedPrompt = await this.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
     const traceId = randomUUID();
     const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
@@ -698,7 +667,7 @@ export class ChatEngine {
       latencyMs,
       steps,
       toolCallEvents,
-      this.buildCapabilityTelemetrySnapshots(
+      buildCapabilityTelemetrySnapshots(
         settings.mode,
         resolvedSystemPrompt.telemetry,
         activeSkills,
@@ -768,7 +737,7 @@ export class ChatEngine {
     const actor = await this.db.getUserById(userId);
     const userPersona = normalizePersona(actor?.persona, 'user');
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
-    const resolvedSystemPrompt = await this.resolveSystemPrompt(settings);
+    const resolvedSystemPrompt = await resolveSystemPrompt(this.db, settings);
     const resolvedPrompt = await this.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
     const traceId = randomUUID();
     const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
@@ -1090,7 +1059,7 @@ export class ChatEngine {
       latencyMs,
       steps,
       toolCallEvents,
-      this.buildCapabilityTelemetrySnapshots(
+      buildCapabilityTelemetrySnapshots(
         settings.mode,
         resolvedSystemPrompt.telemetry,
         streamActiveSkills,
@@ -1524,181 +1493,6 @@ export class ChatEngine {
       }
     }
     return models;
-  }
-
-  // ── Prompt resolution from DB ───────────────────────────────
-
-  /**
-   * Resolve system prompt: if the settings reference a prompt by name/id,
-   * look it up in the prompts table and render its template. Falls back to
-   * the plain system_prompt string.
-   */
-  private async resolveSystemPrompt(settings: ChatSettings): Promise<ResolvedSystemPrompt> {
-    if (!settings.systemPrompt) return { content: undefined };
-
-    try {
-      // Check if the system prompt references a DB prompt by name
-      const rows = await this.db.listPrompts();
-      const match = rows.find(
-        r => r.enabled && (r.id === settings.systemPrompt || r.name === settings.systemPrompt),
-      );
-      if (match) {
-        const versions = await this.db.listPromptVersions(match.id);
-        const experiments = await this.db.listPromptExperiments(match.id);
-        const resolved = resolvePromptRecordForExecution({
-          prompt: match,
-          versions,
-          experiments,
-          options: {
-            assignmentKey: match.id,
-          },
-        });
-
-        const vars: Record<string, unknown> = {};
-        const promptVersion = createPromptVersionFromRecord(resolved.record);
-        if ('variables' in promptVersion) {
-          for (const variable of promptVersion.variables) {
-            vars[variable.name] = variable.defaultValue ?? `[${variable.name}]`;
-          }
-        }
-
-        // Build a fragment registry from enabled DB fragments, then pre-expand
-        // {{>key}} inclusions in the template before passing to renderPromptRecord.
-        // This lets prompt authors compose templates from reusable fragment blocks
-        // without requiring any change to the base rendering pipeline.
-        let resolvedMatch = resolved.record;
-        try {
-          const fragmentRows = await this.db.listPromptFragments();
-          const enabledFragments = fragmentRows.filter(f => f.enabled);
-          if (enabledFragments.length > 0) {
-            const fragmentRegistry = new InMemoryFragmentRegistry();
-            for (const row of enabledFragments) {
-              fragmentRegistry.register(fragmentFromRecord(row));
-            }
-            const baseTemplate = resolved.record.template ?? '';
-            const expandedTemplate = resolveFragments(baseTemplate, fragmentRegistry);
-            if (expandedTemplate !== baseTemplate) {
-              // Create a shallow copy with the expanded template for rendering
-              resolvedMatch = { ...resolved.record, template: expandedTemplate };
-            }
-          }
-        } catch {
-          // Fragment expansion failure is non-fatal — fall through to raw template
-        }
-
-        // Build strategy registry from built-in shared strategies plus enabled
-        // DB-defined overlays so behavior stays package-driven and DB-configurable.
-        const strategyRegistry = new InMemoryPromptStrategyRegistry(defaultPromptStrategyRegistry.list());
-        try {
-          const strategyRows = await this.db.listPromptStrategies();
-          for (const row of strategyRows) {
-            if (!row.enabled) continue;
-            strategyRegistry.register(strategyFromRecord(row));
-          }
-        } catch {
-          // Strategy loading failure is non-fatal — fallback to built-ins only.
-        }
-
-        let promptTelemetry: CapabilityTelemetrySummary | undefined;
-        const executed = executePromptRecord(resolvedMatch, vars, {
-          strategyRegistry,
-          evaluations: [
-            {
-              id: 'prompt_not_empty',
-              description: 'Rendered system prompt should not be empty to avoid unbounded model behavior.',
-              evaluate: ({ content }) => ({
-                passed: content.trim().length > 0,
-                score: content.trim().length > 0 ? 1 : 0,
-                reason: content.trim().length > 0 ? undefined : 'Rendered prompt content is empty',
-              }),
-            },
-          ],
-          hooks: {
-            onTelemetry: ({ telemetry }) => {
-              promptTelemetry = telemetry;
-            },
-          },
-        });
-
-        const telemetry = promptTelemetry ?? createPromptCapabilityTelemetry(executed);
-
-        return {
-          content: executed.content,
-          telemetry: {
-            ...telemetry,
-            source: 'db',
-            selectedBy: resolved.meta.selectedBy,
-            metadata: {
-              ...(telemetry.metadata ?? {}),
-              resolution: resolved.meta,
-              expandedFromFragments: resolvedMatch.template !== resolved.record.template,
-            },
-          },
-          strategy: this.toPromptStrategyInfo(executed),
-          resolution: resolved.meta,
-        };
-      }
-    } catch {
-      // Fall through to plain text
-    }
-
-    return { content: settings.systemPrompt };
-  }
-
-  private buildCapabilityTelemetrySnapshots(
-    mode: string,
-    promptTelemetry: CapabilityTelemetrySummary | undefined,
-    activeSkills: Array<{ id: string; name: string; description: string; category: string; score: number; tools: string[] }>,
-    enabledTools: string[],
-  ): CapabilityTelemetrySummary[] {
-    const snapshots: CapabilityTelemetrySummary[] = [];
-
-    snapshots.push({
-      kind: 'agent',
-      key: `geneweave.${mode}`,
-      name: mode === 'supervisor' ? 'GeneWeave Supervisor Agent' : mode === 'agent' ? 'GeneWeave Tool Agent' : 'GeneWeave Direct Runtime',
-      description: mode === 'supervisor'
-        ? 'Coordinates worker delegation, verification, and response synthesis using database-driven prompt, skill, and policy configuration.'
-        : mode === 'agent'
-        ? 'Runs a tool-calling agent loop with database-driven prompt, skill, and policy overlays.'
-        : 'Runs direct model inference with shared prompt, guardrail, and observability integrations.',
-      source: 'runtime',
-      metadata: {
-        mode,
-        enabledToolCount: enabledTools.length,
-        enabledTools,
-      },
-    });
-
-    if (promptTelemetry) snapshots.push(promptTelemetry);
-
-    for (const skill of activeSkills) {
-      snapshots.push({
-        kind: 'skill',
-        key: skill.id,
-        name: skill.name,
-        description: skill.description,
-        source: 'db',
-        tags: [skill.category],
-        metadata: {
-          score: skill.score,
-          tools: skill.tools,
-        },
-      });
-    }
-
-    return snapshots;
-  }
-
-  private toPromptStrategyInfo(result: PromptRecordExecutionResult): PromptStrategyInfo {
-    return {
-      requestedKey: result.strategy.requestedKey,
-      resolvedKey: result.strategy.resolvedKey,
-      usedFallback: result.strategy.usedFallback,
-      name: result.strategy.name,
-      description: result.strategy.description,
-      metadata: result.strategy.metadata,
-    };
   }
 
   // ── Model routing from DB ───────────────────────────────────
