@@ -43,12 +43,10 @@ import {
   type SkillMatch,
 } from '@weaveintel/skills';
 import { createContract, DefaultCompletionValidator } from '@weaveintel/contracts';
-import { SmartModelRouter, ModelHealthTracker } from '@weaveintel/routing';
-import type { ModelCostInfo, ModelQualityInfo } from '@weaveintel/routing';
+import { ModelHealthTracker } from '@weaveintel/routing';
 import { weaveInMemoryCacheStore } from '@weaveintel/cache';
 import { weaveCacheKeyBuilder } from '@weaveintel/cache';
-import { shouldBypass, resolvePolicy } from '@weaveintel/cache';
-import type { CachePolicy } from '@weaveintel/core';
+import { shouldBypass } from '@weaveintel/cache';
 import { loadEnterpriseTools, loadEnterpriseToolGroups, type EnterpriseToolGroup } from './chat-enterprise-tools-utils.js';
 import {
   loadExtractionRules,
@@ -125,6 +123,7 @@ import {
   type PromptStrategyInfo,
   type ResolvedSystemPrompt,
 } from './chat-system-prompt-utils.js';
+import { routeModel, resolveActiveCache } from './chat-routing-utils.js';
 
 export { calculateCost, getOrCreateModel, settingsFromRow } from './chat-runtime.js';
 export type { ChatAttachment, ProviderConfig, ChatEngineConfig, ChatSettings, WorkerDef } from './chat-runtime.js';
@@ -364,7 +363,7 @@ export class ChatEngine {
     let routingInfo: { provider: string; model: string; reason: string } | undefined;
 
     // Try routing from DB policy
-    const routed = await this.routeModel(opts);
+    const routed = await routeModel(this.db, await this.getAvailableModels(), this.healthTracker.listHealth(), opts);
     if (routed && this.config.providers[routed.provider]) {
       provider = routed.provider;
       modelId = routed.modelId;
@@ -524,7 +523,7 @@ export class ChatEngine {
 
     // ── Cache lookup ──
     const allowResponseCache = attachments.length === 0;
-    const cachePolicy = allowResponseCache ? await this.resolveActiveCache(settings.mode) : null;
+    const cachePolicy = allowResponseCache ? await resolveActiveCache(this.db, settings.mode) : null;
     const cacheKey = this.cacheKeyBuilder.build({ model: modelId, prompt: processedContent });
     if (cachePolicy && !shouldBypass(cachePolicy, processedContent)) {
       const cached = await this.responseCache.get(cacheKey);
@@ -712,7 +711,7 @@ export class ChatEngine {
     let providerCfg = this.config.providers[provider];
 
     // Try routing from DB policy
-    const routed = await this.routeModel(opts);
+    const routed = await routeModel(this.db, await this.getAvailableModels(), this.healthTracker.listHealth(), opts);
     if (routed && this.config.providers[routed.provider]) {
       provider = routed.provider;
       modelId = routed.modelId;
@@ -1495,116 +1494,12 @@ export class ChatEngine {
     return models;
   }
 
-  // ── Model routing from DB ───────────────────────────────────
-
-  /**
-   * Select model + provider using the active routing policy from the DB.
-   * Returns null if no enabled policy exists (caller falls back to default).
-   */
-  private async routeModel(opts?: { provider?: string; model?: string }): Promise<{ provider: string; modelId: string } | null> {
-    try {
-      const policies = await this.db.listRoutingPolicies();
-      const active = policies.find(p => p.enabled);
-      if (!active) return null;
-
-      // Build candidate list from configured providers
-      const candidates = (await this.getAvailableModels()).map(m => ({
-        modelId: m.id,
-        providerId: m.provider,
-      }));
-
-      if (candidates.length === 0) return null;
-
-      // Load pricing & quality from DB (falls back to hardcoded if DB is empty)
-      const pricingRows = await this.db.listModelPricing();
-      const pricingMap = new Map(pricingRows.filter(r => r.enabled).map(r => [`${r.provider}:${r.model_id}`, r]));
-
-      // Cost data from DB model_pricing table
-      const costs: ModelCostInfo[] = candidates.map(c => {
-        const row = pricingMap.get(`${c.providerId}:${c.modelId}`);
-        const fb = FALLBACK_PRICING[c.modelId];
-        return {
-          modelId: c.modelId,
-          providerId: c.providerId,
-          inputCostPer1M: row ? row.input_cost_per_1m : fb ? fb.input : 10,
-          outputCostPer1M: row ? row.output_cost_per_1m : fb ? fb.output : 30,
-        };
-      });
-
-      // Quality scores from DB model_pricing table
-      const qualities: ModelQualityInfo[] = candidates.map(c => {
-        const row = pricingMap.get(`${c.providerId}:${c.modelId}`);
-        return {
-          modelId: c.modelId,
-          providerId: c.providerId,
-          qualityScore: row ? row.quality_score : 0.7,
-        };
-      });
-
-      const router = new SmartModelRouter({ candidates, costs, qualities });
-
-      // Copy health data
-      for (const h of this.healthTracker.listHealth()) {
-        router.recordOutcome(
-          { modelId: h.modelId, providerId: h.providerId, reason: '', scores: {}, alternatives: [], timestamp: '' },
-          { latencyMs: h.avgLatencyMs, success: h.errorRate < 0.5 },
-        );
-      }
-
-      const decision = await router.route(
-        { prompt: '' },
-        {
-          id: active.id,
-          name: active.name,
-          strategy: active.strategy as any,
-          constraints: active.constraints ? JSON.parse(active.constraints) : undefined,
-          weights: active.weights ? JSON.parse(active.weights) : undefined,
-          fallbackModelId: active.fallback_model ?? undefined,
-          fallbackProviderId: active.fallback_provider ?? undefined,
-          enabled: true,
-        },
-      );
-
-      return { provider: decision.providerId, modelId: decision.modelId };
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Resolve the best-matching cache policy from admin-configured policies.
-   */
-
   private safeParseJson(text: string): unknown {
     const trimmed = text.trim();
     const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
     const raw = fenced?.[1] ?? trimmed;
     try {
       return JSON.parse(raw);
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Resolve the best-matching cache policy from admin-configured policies.
-   */
-  private async resolveActiveCache(mode: string): Promise<CachePolicy | null> {
-    try {
-      const rows = await this.db.listCachePolicies();
-      const enabled = rows.filter(r => r.enabled);
-      if (!enabled.length) return null;
-      const policies: CachePolicy[] = enabled.map(r => ({
-        id: r.id,
-        name: r.name,
-        scope: (r.scope as CachePolicy['scope']) ?? 'global',
-        ttlMs: r.ttl_ms ?? 300_000,
-        maxEntries: r.max_entries ?? 1000,
-        bypassPatterns: r.bypass_patterns ? JSON.parse(r.bypass_patterns) : [],
-        invalidateOnEvents: r.invalidate_on ? JSON.parse(r.invalidate_on) : [],
-        enabled: true,
-      }));
-      return resolvePolicy(policies, {}) ?? null;
     } catch {
       return null;
     }
