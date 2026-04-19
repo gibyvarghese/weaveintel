@@ -76,7 +76,7 @@ import { weaveCacheKeyBuilder } from '@weaveintel/cache';
 import { shouldBypass, resolvePolicy } from '@weaveintel/cache';
 import type { CachePolicy } from '@weaveintel/core';
 import { runHybridMemoryExtraction, type ExtractedEntity, type MemoryExtractionRule } from '@weaveintel/memory';
-import { createEnterpriseTools, createEnterpriseToolGroups, ServiceNowProvider, type EnterpriseConnectorConfig, type EnterpriseToolGroup } from '@weaveintel/tools-enterprise';
+import { loadEnterpriseTools, loadEnterpriseToolGroups, type EnterpriseToolGroup } from './chat-enterprise-tools-utils.js';
 import { normalizePersona } from './rbac.js';
 import {
   TEMPORAL_TOOL_POLICY,
@@ -353,7 +353,7 @@ export class ChatEngine {
     workerRows: import('./db-types.js').WorkerAgentRow[],
     model: Model,
     toolOptions: ToolRegistryOptions,
-    customTools?: Awaited<ReturnType<ChatEngine['loadEnterpriseTools']>>,
+    customTools?: import('@weaveintel/core').Tool[],
   ): Array<{ name: string; description: string; systemPrompt?: string; model: Model; tools?: ToolRegistry }> {
     const sorted = [...workerRows].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
     return sorted.map((row) => {
@@ -1241,112 +1241,6 @@ export class ChatEngine {
 
   // ── Enterprise tools loader ─────────────────────────────────
 
-  /**
-   * Auto-refresh OAuth2 token if it expires within 60 seconds.
-   * Mutates the row's access_token in-place and persists to DB.
-   */
-  private async refreshTokenIfNeeded(row: import('./db-types.js').EnterpriseConnectorRow): Promise<void> {
-    if (row.auth_type !== 'oauth2' || !row.refresh_token || !row.token_expires_at) return;
-    const expiresAt = new Date(row.token_expires_at).getTime();
-    const now = Date.now();
-    // Refresh if token expires within 60 seconds
-    if (expiresAt - now > 60_000) return;
-
-    const authConfig = row.auth_config ? (JSON.parse(row.auth_config) as Record<string, string>) : {};
-    const clientId = authConfig['clientId'] ?? authConfig['client_id'];
-    const clientSecret = authConfig['clientSecret'] ?? authConfig['client_secret'];
-    if (!clientId || !clientSecret || !row.base_url) return;
-
-    console.log(`[chat] OAuth token for ${row.connector_type}/${row.name} expires soon — refreshing...`);
-    const provider = new ServiceNowProvider();
-    const result = await provider.refreshOAuthToken(row.base_url, clientId, clientSecret, row.refresh_token);
-    if (!result) {
-      console.error(`[chat] Token refresh failed for connector ${row.id}`);
-      return;
-    }
-
-    const newExpiresAt = new Date(now + result.expiresIn * 1000).toISOString();
-    await this.db.updateEnterpriseConnector(row.id, {
-      access_token: result.accessToken,
-      refresh_token: result.refreshToken,
-      token_expires_at: newExpiresAt,
-    });
-    // Mutate the row so callers pick up the fresh token
-    row.access_token = result.accessToken;
-    row.refresh_token = result.refreshToken;
-    row.token_expires_at = newExpiresAt;
-    console.log(`[chat] Token refreshed for ${row.connector_type}/${row.name}, expires ${newExpiresAt}`);
-  }
-
-  private async loadEnterpriseTools(): Promise<import('@weaveintel/core').Tool[]> {
-    try {
-      const rows = await this.db.listEnterpriseConnectors();
-      const enabled = rows.filter((r) => r.enabled === 1 && r.status === 'connected');
-      if (enabled.length === 0) return [];
-
-      // Auto-refresh expired OAuth tokens before building configs
-      await Promise.all(enabled.map((r) => this.refreshTokenIfNeeded(r)));
-
-      const configs: EnterpriseConnectorConfig[] = enabled.map((row) => {
-        const authConfig: Record<string, string> = row.auth_config
-          ? (JSON.parse(row.auth_config) as Record<string, string>)
-          : {};
-        // Inject access_token from the DB column into authConfig for oauth2/bearer
-        if (row.access_token && !authConfig['accessToken']) {
-          authConfig['accessToken'] = row.access_token;
-        }
-        return {
-          name: row.name,
-          type: row.connector_type,
-          enabled: true,
-          baseUrl: row.base_url ?? '',
-          authType: (row.auth_type ?? 'bearer') as EnterpriseConnectorConfig['authType'],
-          authConfig,
-          options: row.options ? (JSON.parse(row.options) as Record<string, string>) : undefined,
-        };
-      });
-
-      return createEnterpriseTools(configs, undefined, { includeExtended: false });
-    } catch (err) {
-      console.error('[chat] Failed to load enterprise tools:', err);
-      return [];
-    }
-  }
-
-  private async loadEnterpriseToolGroups(): Promise<EnterpriseToolGroup[]> {
-    try {
-      const rows = await this.db.listEnterpriseConnectors();
-      const enabled = rows.filter((r) => r.enabled === 1 && r.status === 'connected');
-      if (enabled.length === 0) return [];
-
-      // Auto-refresh expired OAuth tokens before building configs
-      await Promise.all(enabled.map((r) => this.refreshTokenIfNeeded(r)));
-
-      const configs: EnterpriseConnectorConfig[] = enabled.map((row) => {
-        const authConfig: Record<string, string> = row.auth_config
-          ? (JSON.parse(row.auth_config) as Record<string, string>)
-          : {};
-        if (row.access_token && !authConfig['accessToken']) {
-          authConfig['accessToken'] = row.access_token;
-        }
-        return {
-          name: row.name,
-          type: row.connector_type,
-          enabled: true,
-          baseUrl: row.base_url ?? '',
-          authType: (row.auth_type ?? 'bearer') as EnterpriseConnectorConfig['authType'],
-          authConfig,
-          options: row.options ? (JSON.parse(row.options) as Record<string, string>) : undefined,
-        };
-      });
-
-      return createEnterpriseToolGroups(configs);
-    } catch (err) {
-      console.error('[chat] Failed to load enterprise tool groups:', err);
-      return [];
-    }
-  }
-
   // ── Agent execution (non-streaming) ─────────────────────────
 
   private async runAgent(
@@ -1360,10 +1254,10 @@ export class ChatEngine {
     settings: ChatSettings,
     attachments?: ChatAttachment[],
   ): Promise<AgentRunTelemetry> {
-    const enterpriseToolGroups = await this.loadEnterpriseToolGroups();
+    const enterpriseToolGroups = await loadEnterpriseToolGroups(this.db);
     const hasEnterprise = enterpriseToolGroups.length > 0;
     // Flat enterprise tools for backward compat (base tools only, no extended)
-    const enterpriseTools = hasEnterprise ? await this.loadEnterpriseTools() : [];
+    const enterpriseTools = hasEnterprise ? await loadEnterpriseTools(this.db) : [];
     const toolOptions: ToolRegistryOptions = {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
@@ -1511,9 +1405,9 @@ export class ChatEngine {
     settings: ChatSettings,
     attachments?: ChatAttachment[],
   ): Promise<AgentRunTelemetry> {
-    const enterpriseToolGroups = await this.loadEnterpriseToolGroups();
+    const enterpriseToolGroups = await loadEnterpriseToolGroups(this.db);
     const hasEnterprise = enterpriseToolGroups.length > 0;
-    const enterpriseTools = hasEnterprise ? await this.loadEnterpriseTools() : [];
+    const enterpriseTools = hasEnterprise ? await loadEnterpriseTools(this.db) : [];
     const toolOptions: ToolRegistryOptions = {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
