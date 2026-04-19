@@ -27,7 +27,6 @@ import type { ServerResponse } from 'node:http';
 import type {
   Model, ModelRequest, ModelResponse, StreamChunk, ExecutionContext, Message,
   ToolRegistry, AgentStepEvent, AgentStep, AgentResult, EventBus,
-  Guardrail, GuardrailResult, GuardrailStage,
   CapabilityTelemetrySummary,
 } from '@weaveintel/core';
 import { weaveContext, weaveEventBus, EventTypes } from '@weaveintel/core';
@@ -36,11 +35,10 @@ import {
   weaveInMemoryTracer,
   weaveUsageTracker,
 } from '@weaveintel/observability';
-import { createGuardrailPipeline, hasDeny, hasWarning, getDenyReason, summarizeGuardrailResults, type GuardrailCategorySummary } from '@weaveintel/guardrails';
+import type { GuardrailCategorySummary } from '@weaveintel/guardrails';
 import type { DatabaseAdapter, MessageRow, ChatSettingsRow, GuardrailRow, HumanTaskPolicyRow, PromptRow, RoutingPolicyRow } from './db.js';
 import { createToolRegistry, type ToolRegistryOptions } from './tools.js';
 import { createTemporalStore } from './temporal-store.js';
-import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
 import {
   createPromptVersionFromRecord,
   executePromptRecord,
@@ -104,7 +102,6 @@ import {
   type ModelPricing,
   type PricingCache,
 } from './chat-pricing-utils.js';
-import { normalizeGuardrail, stageMatches } from './chat-guardrail-utils.js';
 import {
   buildAttachmentContext,
   composeUserInput,
@@ -136,6 +133,7 @@ import { shouldForceWorkerDataAnalysis } from './chat-intent-utils.js';
 import { discoverSkillsForInput } from './chat-skills-utils.js';
 import { applyRedaction, runPostEval } from './chat-eval-utils.js';
 import { observeToolCallEvents, recordTraceSpans, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
+import { evaluateGuardrails, evaluateTaskPolicies } from './chat-guardrail-eval-utils.js';
 
 export { calculateCost, getOrCreateModel, settingsFromRow } from './chat-runtime.js';
 export type { ChatAttachment, ProviderConfig, ChatEngineConfig, ChatSettings, WorkerDef } from './chat-runtime.js';
@@ -472,7 +470,7 @@ export class ChatEngine {
     await this.db.addMessage({ id: userMsgId, chatId, role: 'user', content, metadata: userMetadata });
 
     // Pre-execution guardrails
-    const preGuardrail = await this.evaluateGuardrails(chatId, userMsgId, processedContent, 'pre-execution');
+    const preGuardrail = await evaluateGuardrails(this.db, chatId, userMsgId, processedContent, 'pre-execution');
     if (preGuardrail.decision === 'deny') {
       const denyContent = preGuardrail.reason || 'Your message was blocked by a guardrail policy.';
       const assistMsgId = randomUUID();
@@ -611,7 +609,7 @@ export class ChatEngine {
     this.recordModelOutcome(modelId, provider, latencyMs, true);
 
     // Human-task policy checks on tool calls
-    const policyChecks = steps ? await this.evaluateTaskPolicies(steps) : undefined;
+    const policyChecks = steps ? await evaluateTaskPolicies(this.db, steps) : undefined;
 
     // Post-execution guardrails (must run before eval so the decision feeds into the eval score)
     const SUPERVISOR_INTERNAL_TOOLS = new Set(['think', 'plan', 'synthesize', 'reflect', 'log']);
@@ -626,7 +624,7 @@ export class ChatEngine {
       })
       .map(s => (s.toolCall?.result ?? s.delegation?.result ?? '') as string)
       .join(' ') || undefined;
-    const postGuardrail = await this.evaluateGuardrails(chatId, null, assistantContent, 'post-execution', {
+    const postGuardrail = await evaluateGuardrails(this.db, chatId, null, assistantContent, 'post-execution', {
       userInput: processedContent,
       assistantOutput: assistantContent,
       toolEvidence,
@@ -818,7 +816,7 @@ export class ChatEngine {
     await this.db.addMessage({ id: userMsgId, chatId, role: 'user', content, metadata: userMetadata });
 
     // Pre-execution guardrails
-    const preGuardrail = await this.evaluateGuardrails(chatId, userMsgId, processedContent, 'pre-execution');
+    const preGuardrail = await evaluateGuardrails(this.db, chatId, userMsgId, processedContent, 'pre-execution');
     if (preGuardrail.decision === 'deny') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
       const denyContent = preGuardrail.reason || 'Your message was blocked by a guardrail policy.';
@@ -978,7 +976,7 @@ export class ChatEngine {
     this.recordModelOutcome(modelId, provider, latencyMs, true);
 
     // Human-task policy checks on tool calls
-    const policyChecks = steps.length ? await this.evaluateTaskPolicies(steps) : undefined;
+    const policyChecks = steps.length ? await evaluateTaskPolicies(this.db, steps) : undefined;
     if (policyChecks?.length) {
       res.write(`data: ${JSON.stringify({ type: 'policy_checks', checks: policyChecks })}\n\n`);
     }
@@ -996,7 +994,7 @@ export class ChatEngine {
       })
       .map(s => (s.toolCall?.result ?? s.delegation?.result ?? '') as string)
       .join(' ') || undefined;
-    const postGuardrail = await this.evaluateGuardrails(chatId, null, fullText, 'post-execution', {
+    const postGuardrail = await evaluateGuardrails(this.db, chatId, null, fullText, 'post-execution', {
       userInput: processedContent,
       assistantOutput: fullText,
       toolEvidence: streamToolEvidence,
@@ -1526,98 +1524,6 @@ export class ChatEngine {
       }
     }
     return models;
-  }
-
-  // ── Guardrail evaluation ────────────────────────────────────
-
-  private async evaluateGuardrails(
-    chatId: string,
-    messageId: string | null,
-    input: string,
-    stage: GuardrailStage,
-    refs?: { userInput?: string; assistantOutput?: string; toolEvidence?: string },
-  ): Promise<{ decision: 'allow' | 'deny' | 'warn'; reason?: string; results: GuardrailResult[]; cognitive?: CognitiveCheckSummary }> {
-    try {
-      const rows = await this.db.listGuardrails();
-      const enabledRows = rows.filter(r => r.enabled && stageMatches(r.stage, stage));
-      const guardrails: Guardrail[] = enabledRows.map(r => normalizeGuardrail(r, stage));
-
-      const pipeline = createGuardrailPipeline(guardrails, { shortCircuitOnDeny: true });
-      const results = guardrails.length > 0
-        ? await pipeline.evaluate(input, stage, {
-            userInput: refs?.userInput ?? input,
-            assistantOutput: refs?.assistantOutput,
-            toolEvidence: refs?.toolEvidence,
-            action: refs?.userInput ?? input,
-          })
-        : [];
-      const cognitive = summarizeGuardrailResults(results, 'cognitive') ?? undefined;
-
-      const decision = hasDeny(results) ? 'deny' as const : hasWarning(results) ? 'warn' as const : 'allow' as const;
-      const reason = getDenyReason(results);
-
-      // Persist evaluation
-      await this.db.createGuardrailEval({
-        id: randomUUID(),
-        chat_id: chatId,
-        message_id: messageId,
-        stage,
-        input_preview: input.slice(0, 100),
-        results: JSON.stringify(results),
-        overall_decision: decision,
-      });
-
-      return { decision, reason, results, cognitive };
-    } catch {
-      return { decision: 'allow', results: [] };
-    }
-  }
-
-  // ── Human-task policy evaluation ────────────────────────────
-
-  private async evaluateTaskPolicies(
-    steps: AgentStep[],
-  ): Promise<Array<{ tool: string; policy: string; taskType: string; priority: string }>> {
-    try {
-      const rows = await this.db.listHumanTaskPolicies();
-      const enabledRows = rows.filter(r => r.enabled);
-      if (enabledRows.length === 0) return [];
-
-      const evaluator = new PolicyEvaluator();
-      for (const row of enabledRows) {
-        evaluator.addPolicy(createPolicy({
-          name: row.name,
-          description: row.description ?? undefined,
-          trigger: row.trigger,
-          taskType: row.task_type as any,
-          defaultPriority: row.default_priority as any,
-          slaHours: row.sla_hours ?? undefined,
-          autoEscalateAfterHours: row.auto_escalate_after_hours ?? undefined,
-          assignmentStrategy: row.assignment_strategy as any,
-          assignTo: row.assign_to ?? undefined,
-          enabled: true,
-        }));
-      }
-
-      const checks: Array<{ tool: string; policy: string; taskType: string; priority: string }> = [];
-      for (const step of steps) {
-        if (step.toolCall) {
-          const result = evaluator.check({ trigger: step.toolCall.name });
-          if (result.required && result.policy) {
-            checks.push({
-              tool: step.toolCall.name,
-              policy: result.policy.name,
-              taskType: result.policy.taskType,
-              priority: result.policy.defaultPriority,
-            });
-          }
-        }
-      }
-
-      return checks;
-    } catch {
-      return [];
-    }
   }
 
   // ── Prompt resolution from DB ───────────────────────────────
