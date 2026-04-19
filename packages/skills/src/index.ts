@@ -164,11 +164,13 @@ export interface SkillActivationOptions {
   maxCandidates?: number;
   maxSelected?: number;
   minScore?: number;
+  categories?: SkillCategory[];
   mode?: SkillInvocationMode;
   context?: Record<string, unknown>;
   overlays?: readonly SkillExtensionOverlay[];
   selector?: SkillReasoningSelector;
   policyEvaluator?: SkillPolicyEvaluator;
+  hooks?: SkillLifecycleHooks;
 }
 
 export interface SkillActivationResult {
@@ -269,16 +271,18 @@ function applyStricterPolicy(base: SkillPolicyControls | undefined, overlay: Ski
   const allowedTools = overlay.allowedTools ?? base.allowedTools;
   const disallowedTools = [...new Set([...(base.disallowedTools ?? []), ...(overlay.disallowedTools ?? [])])];
 
+  const runtimeBudgetMs = Math.min(
+    base.runtimeBudgetMs ?? Number.POSITIVE_INFINITY,
+    overlay.runtimeBudgetMs ?? Number.POSITIVE_INFINITY,
+  );
+
   return {
     allowedTools,
     disallowedTools: disallowedTools.length ? disallowedTools : undefined,
     sideEffectsAllowed: base.sideEffectsAllowed === false || overlay.sideEffectsAllowed === false ? false : (overlay.sideEffectsAllowed ?? base.sideEffectsAllowed),
     requiresApproval: base.requiresApproval || overlay.requiresApproval,
     sensitivityHandling: overlay.sensitivityHandling ?? base.sensitivityHandling,
-    runtimeBudgetMs: Math.min(
-      base.runtimeBudgetMs ?? Number.POSITIVE_INFINITY,
-      overlay.runtimeBudgetMs ?? Number.POSITIVE_INFINITY,
-    ),
+    runtimeBudgetMs: Number.isFinite(runtimeBudgetMs) ? runtimeBudgetMs : undefined,
     tenantBoundary: overlay.tenantBoundary ?? base.tenantBoundary,
   };
 }
@@ -453,8 +457,18 @@ export function buildSkillSystemPrompt(matches: SkillMatch[]): string {
   return buildSkillInvocationPrompt(activation, 'reasoning_support');
 }
 
-export function applySkillsToPrompt(basePrompt: string | undefined, matches: SkillMatch[]): string | undefined {
-  const skillBlock = buildSkillSystemPrompt(matches);
+export function applySkillsToPrompt(
+  basePrompt: string | undefined,
+  matches: SkillMatch[],
+  mode: SkillInvocationMode = 'reasoning_support',
+): string | undefined {
+  const activation: SkillActivationResult = {
+    considered: matches,
+    selected: matches,
+    rejected: [],
+    mode,
+  };
+  const skillBlock = buildSkillInvocationPrompt(activation, mode);
   if (!skillBlock && !basePrompt) return undefined;
   if (!skillBlock) return basePrompt;
   if (!basePrompt) return skillBlock;
@@ -513,7 +527,7 @@ export async function activateSkills(
 
   const considered: SkillMatch[] = overlaid
     .filter((skill) => skill.enabled !== false)
-    .filter((skill) => keepIfCategory(skill, undefined))
+    .filter((skill) => keepIfCategory(skill, opts.categories))
     .map((skill) => ({
       skill,
       score: semanticScore(query, skill),
@@ -532,13 +546,31 @@ export async function activateSkills(
     .slice(0, maxCandidates);
 
   if (!considered.length) {
-    return {
+    const emptyResult: SkillActivationResult = {
       considered: [],
       selected: [],
       rejected: [],
       noSkillReason: 'No semantically relevant skill candidates found.',
       mode,
     };
+    opts.hooks?.onActivation?.({ query, activation: emptyResult });
+    opts.hooks?.onTelemetry?.({
+      stage: 'activation',
+      telemetry: {
+        kind: 'skill',
+        key: 'skills.activation',
+        name: 'Skills Activation',
+        description: 'Activation pipeline found no semantically relevant skills.',
+        selectedBy: opts.selector ? 'semantic+reasoning' : 'semantic',
+        metadata: {
+          mode,
+          consideredCount: 0,
+          selectedCount: 0,
+          rejectedCount: 0,
+        },
+      },
+    });
+    return emptyResult;
   }
 
   const rejected: Array<{ skillId: string; reason: string }> = [];
@@ -554,13 +586,32 @@ export async function activateSkills(
       });
 
       if (decision.useNoSkillPath) {
-        return {
+        const noSkillResult: SkillActivationResult = {
           considered,
           selected: [],
           rejected: considered.map((item) => ({ skillId: item.skill.id, reason: 'Reasoning selector chose no-skill path.' })),
           noSkillReason: decision.rationale ?? 'Reasoning selector rejected all candidates.',
           mode,
         };
+        opts.hooks?.onActivation?.({ query, activation: noSkillResult });
+        opts.hooks?.onTelemetry?.({
+          stage: 'activation',
+          telemetry: {
+            kind: 'skill',
+            key: 'skills.activation',
+            name: 'Skills Activation',
+            description: 'Reasoning selector rejected all semantic candidates.',
+            selectedBy: 'reasoning',
+            metadata: {
+              mode,
+              consideredCount: considered.length,
+              selectedCount: 0,
+              rejectedCount: noSkillResult.rejected.length,
+              noSkillReason: noSkillResult.noSkillReason,
+            },
+          },
+        });
+        return noSkillResult;
       }
 
       const selectedIds = new Set(decision.selectedSkillIds);
@@ -607,44 +658,110 @@ export async function activateSkills(
   }
 
   if (!selected.length) {
-    return {
+    const blockedResult: SkillActivationResult = {
       considered,
       selected: [],
       rejected,
       noSkillReason: 'All candidates were rejected by reasoning or policy.',
       mode,
     };
+    opts.hooks?.onActivation?.({ query, activation: blockedResult });
+    opts.hooks?.onTelemetry?.({
+      stage: 'activation',
+      telemetry: {
+        kind: 'skill',
+        key: 'skills.activation',
+        name: 'Skills Activation',
+        description: 'All skill candidates were filtered out by selector or policy gates.',
+        selectedBy: opts.selector ? 'semantic+reasoning+policy' : 'semantic+policy',
+        metadata: {
+          mode,
+          consideredCount: considered.length,
+          selectedCount: 0,
+          rejectedCount: rejected.length,
+        },
+      },
+    });
+    return blockedResult;
   }
 
-  return {
+  const activationResult: SkillActivationResult = {
     considered,
     selected,
     rejected,
     mode,
   };
+
+  opts.hooks?.onActivation?.({ query, activation: activationResult });
+  opts.hooks?.onTelemetry?.({
+    stage: 'activation',
+    telemetry: {
+      kind: 'skill',
+      key: 'skills.activation',
+      name: 'Skills Activation',
+      description: 'Skill activation completed with selected semantic/reasoned capabilities.',
+      selectedBy: opts.selector ? 'semantic+reasoning+policy' : 'semantic+policy',
+      metadata: {
+        mode,
+        consideredCount: considered.length,
+        selectedCount: selected.length,
+        rejectedCount: rejected.length,
+        selectedSkillIds: selected.map((item) => item.skill.id),
+      },
+    },
+  });
+
+  return activationResult;
 }
 
 export function evaluateSkillCompletion(
   skill: SkillDefinition,
   output: string,
-  opts?: { evidence?: readonly string[]; blockedByPolicy?: boolean; missingContext?: boolean },
+  opts?: {
+    evidence?: readonly string[];
+    blockedByPolicy?: boolean;
+    missingContext?: boolean;
+    hooks?: SkillLifecycleHooks;
+  },
 ): SkillCompletionEvaluation {
+  const hooks = opts?.hooks;
+
   if (opts?.blockedByPolicy) {
-    return {
+    const result: SkillCompletionEvaluation = {
       state: 'blocked_by_policy',
       reasons: ['Execution was blocked by deterministic policy controls.'],
       missingEvidence: [],
       needsHumanReview: false,
     };
+    hooks?.onCompletion?.({ skill, result });
+    hooks?.onTelemetry?.({
+      stage: 'completion',
+      telemetry: createSkillTelemetry({
+        skill,
+        selectedBy: 'completion_eval',
+        metadata: { state: result.state, reasons: result.reasons },
+      }),
+    });
+    return result;
   }
 
   if (opts?.missingContext) {
-    return {
+    const result: SkillCompletionEvaluation = {
       state: 'blocked_by_missing_context',
       reasons: ['Required context was missing for completion.'],
       missingEvidence: [],
       needsHumanReview: false,
     };
+    hooks?.onCompletion?.({ skill, result });
+    hooks?.onTelemetry?.({
+      stage: 'completion',
+      telemetry: createSkillTelemetry({
+        skill,
+        selectedBy: 'completion_eval',
+        metadata: { state: result.state, reasons: result.reasons },
+      }),
+    });
+    return result;
   }
 
   const lower = output.toLowerCase();
@@ -653,41 +770,83 @@ export function evaluateSkillCompletion(
   const containsAmbiguity = /\b(uncertain|ambiguous|not enough|insufficient|unknown)\b/.test(lower);
 
   if (!output.trim()) {
-    return {
+    const result: SkillCompletionEvaluation = {
       state: 'incomplete',
       reasons: ['Output is empty.'],
       missingEvidence: [...evidenceRequired],
       needsHumanReview: false,
     };
+    hooks?.onCompletion?.({ skill, result });
+    hooks?.onTelemetry?.({
+      stage: 'completion',
+      telemetry: createSkillTelemetry({
+        skill,
+        selectedBy: 'completion_eval',
+        metadata: { state: result.state, missingEvidence: result.missingEvidence },
+      }),
+    });
+    return result;
   }
 
   if (containsAmbiguity && missingEvidence.length > 0) {
-    return {
+    const result: SkillCompletionEvaluation = {
       state: 'ambiguous',
       reasons: ['Output identifies ambiguity but does not satisfy all required evidence.'],
       missingEvidence,
       needsHumanReview: Boolean(skill.completionContract?.humanReviewWhen),
     };
+    hooks?.onCompletion?.({ skill, result });
+    hooks?.onTelemetry?.({
+      stage: 'completion',
+      telemetry: createSkillTelemetry({
+        skill,
+        selectedBy: 'completion_eval',
+        metadata: { state: result.state, missingEvidence: result.missingEvidence },
+      }),
+    });
+    return result;
   }
 
   if (missingEvidence.length > 0) {
-    return {
+    const result: SkillCompletionEvaluation = {
       state: 'incomplete',
       reasons: ['Output missed required evidence from completion contract.'],
       missingEvidence,
       needsHumanReview: false,
     };
+    hooks?.onCompletion?.({ skill, result });
+    hooks?.onTelemetry?.({
+      stage: 'completion',
+      telemetry: createSkillTelemetry({
+        skill,
+        selectedBy: 'completion_eval',
+        metadata: { state: result.state, missingEvidence: result.missingEvidence },
+      }),
+    });
+    return result;
   }
 
   const warningWords = ['might', 'possibly', 'likely'];
   const hasWarningTone = warningWords.some((word) => lower.includes(word));
 
-  return {
+  const result: SkillCompletionEvaluation = {
     state: hasWarningTone ? 'complete_with_warnings' : 'complete',
     reasons: hasWarningTone ? ['Output completed with uncertainty language.'] : ['Output satisfies completion expectations.'],
     missingEvidence: [],
     needsHumanReview: Boolean(skill.completionContract?.humanReviewWhen && hasWarningTone),
   };
+
+  hooks?.onCompletion?.({ skill, result });
+  hooks?.onTelemetry?.({
+    stage: 'completion',
+    telemetry: createSkillTelemetry({
+      skill,
+      selectedBy: 'completion_eval',
+      metadata: { state: result.state, reasons: result.reasons },
+    }),
+  });
+
+  return result;
 }
 
 export function createSkillRegistry(): SkillRegistry {

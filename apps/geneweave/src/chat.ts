@@ -1147,7 +1147,11 @@ export class ChatEngine {
 
     // Discover skills from the user request and auto-enable their associated tools.
     const skillContext = await this.discoverSkillsForInput(processedContent, model, ctx, settings.mode);
-    const skillPrompt = applySkillsToPrompt(resolvedPrompt, skillContext.matches);
+    const skillPrompt = applySkillsToPrompt(
+      resolvedPrompt,
+      skillContext.matches,
+      settings.mode === 'direct' ? 'advisory' : 'tool_assisted',
+    );
     const enabledTools = Array.from(new Set([...settings.enabledTools, ...skillContext.toolNames]));
     const skillTools = enabledTools.filter((tool) => !settings.enabledTools.includes(tool));
     const activeSkills = skillContext.matches.map((m) => ({
@@ -1488,7 +1492,11 @@ export class ChatEngine {
 
     // Discover skills from the user request and auto-enable their associated tools.
     const streamSkillContext = await this.discoverSkillsForInput(processedContent, model, ctx, settings.mode);
-    const streamSkillPrompt = applySkillsToPrompt(resolvedPrompt, streamSkillContext.matches);
+    const streamSkillPrompt = applySkillsToPrompt(
+      resolvedPrompt,
+      streamSkillContext.matches,
+      settings.mode === 'direct' ? 'advisory' : 'tool_assisted',
+    );
     const streamEnabledTools = Array.from(new Set([...settings.enabledTools, ...streamSkillContext.toolNames]));
     const streamSkillTools = streamEnabledTools.filter((tool) => !settings.enabledTools.includes(tool));
     const streamActiveSkills = streamSkillContext.matches.map((m) => ({
