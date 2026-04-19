@@ -1274,14 +1274,25 @@ function render() {
   } else {
     root.innerHTML = '';
     root.appendChild(renderApp());
-    // Restore sidebar scroll position after the full DOM tree is inserted
-    const savedScroll = state.sidebarScrollTop;
-    if (savedScroll) {
+    // Double-rAF: first frame inserts DOM, second frame has computed layout
+    requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const navScrollEl = root.querySelector('.workspace-nav-scroll') as HTMLElement | null;
-        if (navScrollEl) navScrollEl.scrollTop = savedScroll;
+        if (!navScrollEl) return;
+        // Scroll the active sub-tab into view within the nav container
+        const activeSubTab = navScrollEl.querySelector('.admin-subtab.active') as HTMLElement | null;
+        if (activeSubTab) {
+          const elTop = activeSubTab.offsetTop;
+          const elBottom = elTop + activeSubTab.offsetHeight;
+          const containerBottom = navScrollEl.scrollTop + navScrollEl.clientHeight;
+          if (elTop < navScrollEl.scrollTop || elBottom > containerBottom) {
+            navScrollEl.scrollTop = elTop - navScrollEl.clientHeight / 2 + activeSubTab.offsetHeight / 2;
+          }
+        } else if (state.sidebarScrollTop) {
+          navScrollEl.scrollTop = state.sidebarScrollTop;
+        }
       });
-    }
+    });
   }
 }
 
