@@ -47,7 +47,6 @@ import { createTemporalStore } from './temporal-store.js';
 import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
 import {
   createPromptVersionFromRecord,
-  createTemplate,
   executePromptRecord,
   resolveFragments,
   InMemoryFragmentRegistry,
@@ -56,9 +55,6 @@ import {
   strategyFromRecord,
   defaultPromptStrategyRegistry,
   resolvePromptRecordForExecution,
-  contractFromRecord,
-  validateContract,
-  InMemoryContractRegistry,
   type ContractValidationResult,
   type PromptRecordExecutionResult,
   createPromptCapabilityTelemetry,
@@ -121,6 +117,15 @@ import {
   outputContainsField,
   runWithContractGuard as runWithContractGuardHelper,
 } from './chat-contract-guard-utils.js';
+import {
+  loadPolicyPromptTemplates,
+  renderNamedPolicyPromptTemplate,
+  type PolicyPromptCache,
+} from './chat-policy-prompt-utils.js';
+import {
+  validatePromptContractsAgainstDb,
+  type PromptContractValidationReport,
+} from './chat-prompt-contract-utils.js';
 import { buildSupervisorInstructionsPrompt } from './chat-supervisor-policy-utils.js';
 import { applyTemporalToolPolicy } from './chat-policy-format-utils.js';
 import { shouldForceWorkerDataAnalysis } from './chat-intent-utils.js';
@@ -131,31 +136,6 @@ export type { ChatAttachment, ProviderConfig, ChatEngineConfig, ChatSettings, Wo
 // ─── Model pricing (per 1 M tokens) ─────────────────────────
 
 interface ModelPricing { input: number; output: number }
-
-interface PromptContractCheckResult {
-  key: string;
-  name: string;
-  contractType: string;
-  valid: boolean;
-  severity: ContractValidationResult['severity'];
-  message: string;
-  errorCount: number;
-  repairSuggestion?: string;
-}
-
-interface PromptContractValidationSummary {
-  total: number;
-  passed: number;
-  failed: number;
-  error: number;
-  warning: number;
-  info: number;
-}
-
-interface PromptContractValidationReport {
-  summary: PromptContractValidationSummary;
-  results: PromptContractCheckResult[];
-}
 
 interface PromptStrategyInfo {
   requestedKey: string;
@@ -202,25 +182,13 @@ export class ChatEngine {
   private readonly cacheKeyBuilder = weaveCacheKeyBuilder({ namespace: 'gw-chat' });
   private pricingCache: Map<string, ModelPricing> | null = null;
   private pricingCacheTs = 0;
-  private policyPromptCache: { ts: number; prompts: Map<string, string> } | null = null;
+  private policyPromptCache: PolicyPromptCache | null = null;
   private readonly toolOptions: ToolRegistryOptions;
 
   private async getPolicyPromptTemplates(): Promise<Map<string, string>> {
-    const now = Date.now();
-    if (this.policyPromptCache && now - this.policyPromptCache.ts < 30_000) {
-      return this.policyPromptCache.prompts;
-    }
-    try {
-      const prompts = await this.db.listPrompts();
-      const enabled = new Map<string, string>();
-      for (const prompt of prompts) {
-        if (prompt.enabled) enabled.set(prompt.name, prompt.template);
-      }
-      this.policyPromptCache = { ts: now, prompts: enabled };
-      return enabled;
-    } catch {
-      return new Map<string, string>();
-    }
+    const result = await loadPolicyPromptTemplates(this.db, this.policyPromptCache);
+    this.policyPromptCache = result.cache;
+    return result.prompts;
   }
 
   private async getPolicyPromptTemplate(name: string, fallback: string): Promise<string> {
@@ -234,12 +202,7 @@ export class ChatEngine {
     vars: Record<string, unknown>,
   ): Promise<string> {
     const template = await this.getPolicyPromptTemplate(name, fallbackTemplate);
-    try {
-      const tpl = createTemplate({ id: name, name, template });
-      return tpl.render(vars);
-    } catch {
-      return fallbackTemplate;
-    }
+    return renderNamedPolicyPromptTemplate(name, template, fallbackTemplate, vars);
   }
 
   private async withResponseCardFormatPolicy(basePrompt: string | undefined): Promise<string | undefined> {
@@ -787,7 +750,7 @@ export class ChatEngine {
       await this.responseCache.set(cacheKey, { content: assistantContent!, usage }, cachePolicy.ttlMs);
     }
 
-    contractInfo = await this.validatePromptContracts(assistantContent);
+    contractInfo = await validatePromptContractsAgainstDb(assistantContent, this.db);
 
 
     const latencyMs = Date.now() - startMs;
@@ -1201,7 +1164,7 @@ export class ChatEngine {
       res.write(`data: ${JSON.stringify({ type: 'eval', ...evalInfo })}\n\n`);
     }
 
-    streamContractInfo = await this.validatePromptContracts(fullText);
+    streamContractInfo = await validatePromptContractsAgainstDb(fullText, this.db);
     if (streamContractInfo) {
       res.write(`data: ${JSON.stringify({ type: 'contracts', ...streamContractInfo })}\n\n`);
     }
@@ -1285,73 +1248,6 @@ export class ChatEngine {
       ),
     );
     res.end();
-  }
-
-  private async validatePromptContracts(output: string): Promise<PromptContractValidationReport | undefined> {
-    if (!output.trim()) return undefined;
-    try {
-      const rows = await this.db.listPromptContracts();
-      const enabledRows = rows.filter((row) => row.enabled);
-      if (enabledRows.length === 0) return undefined;
-
-      const parsed = enabledRows
-        .map((row) => ({
-          row,
-          contract: contractFromRecord({
-            id: row.id,
-            key: row.key,
-            name: row.name,
-            description: row.description ?? '',
-            contract_type: row.contract_type,
-            schema: row.schema ?? undefined,
-            config: row.config,
-            enabled: row.enabled,
-          }),
-        }))
-        .filter((entry): entry is { row: typeof enabledRows[number]; contract: NonNullable<ReturnType<typeof contractFromRecord>> } => !!entry.contract);
-
-      if (parsed.length === 0) return undefined;
-
-      const registry = new InMemoryContractRegistry(parsed.map((entry) => entry.contract));
-      const results: PromptContractCheckResult[] = parsed.map(({ row }) => {
-        const contract = registry.get(row.key);
-        if (!contract) {
-          return {
-            key: row.key,
-            name: row.name,
-            contractType: row.contract_type,
-            valid: false,
-            severity: 'error',
-            message: 'Contract could not be loaded from registry',
-            errorCount: 1,
-          };
-        }
-        const validation = validateContract(output, contract);
-        return {
-          key: row.key,
-          name: row.name,
-          contractType: row.contract_type,
-          valid: validation.valid,
-          severity: validation.severity,
-          message: validation.message,
-          errorCount: validation.errors.length,
-          repairSuggestion: validation.repairSuggestion,
-        };
-      });
-
-      const summary: PromptContractValidationSummary = {
-        total: results.length,
-        passed: results.filter((r) => r.valid).length,
-        failed: results.filter((r) => !r.valid).length,
-        error: results.filter((r) => r.severity === 'error').length,
-        warning: results.filter((r) => r.severity === 'warning').length,
-        info: results.filter((r) => r.severity === 'info').length,
-      };
-
-      return { summary, results };
-    } catch {
-      return undefined;
-    }
   }
 
   // ── Enterprise tools loader ─────────────────────────────────
