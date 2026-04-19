@@ -33,6 +33,8 @@ export const state: any = {
   showProfile: false,
   showNotifications: false,
   showSettings: false,
+  recentChatsExpanded: true,
+  sidebarCollapsed: false,
 
   // Calendar
   calendarTab: 'meetings',
@@ -44,6 +46,8 @@ export const state: any = {
   adminData: {} as Record<string, any[]>,
   adminForm: {} as Record<string, any>,
   adminEditing: null as string | null,
+  adminMenuExpanded: false,
+  adminGroupExpanded: {} as Record<string, boolean>,
 
   // Connectors
   connectors: { enterprise: [] as any[], social: [] as any[] },

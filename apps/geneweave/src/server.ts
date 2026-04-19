@@ -1317,7 +1317,9 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
         res.writeHead(200, {
           'Content-Type': contentType + '; charset=utf-8',
           'Content-Length': data.length,
-          'Cache-Control': 'public, max-age=3600',
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0',
         });
         if (method === 'GET') {
           res.end(data);

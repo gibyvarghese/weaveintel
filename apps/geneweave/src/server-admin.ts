@@ -6,10 +6,8 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { normalizeCallableDescription, validateCallableDescription } from '@weaveintel/core';
 import {
   renderPromptRecord,
-  stringifyPromptVariables,
   resolvePromptRecordForExecution,
   evaluatePromptDatasetForRecord,
   comparePromptDatasetResults,
@@ -37,6 +35,14 @@ import {
   registerMemoryGovernanceRoutes,
   registerComplianceRuleRoutes,
 } from './admin/api/index.js';
+import {
+  normalizePromptVariables,
+  normalizeJsonField,
+  parseJsonValue,
+  validateDetailedDescription,
+  clearDefaultPromptExcept,
+  safeParsePromptVariables,
+} from './admin/api/admin-route-helpers.js';
 
 type Handler = (
   req: IncomingMessage,
@@ -66,76 +72,17 @@ export function registerAdminRoutes(
     res.end(body);
   });
 
-  function normalizePromptVariables(input: unknown): string | null {
-    if (typeof input === 'string') {
-      const trimmed = input.trim();
-      if (!trimmed) return null;
-      try {
-        return stringifyPromptVariables(JSON.parse(trimmed));
-      } catch {
-        const names = trimmed.split(',').map((s) => s.trim()).filter(Boolean);
-        return stringifyPromptVariables(names);
-      }
-    }
-
-    return stringifyPromptVariables(input);
-  }
-
-  function normalizeJsonField(input: unknown): string | null {
-    if (input === undefined || input === null || input === '') return null;
-    if (typeof input === 'string') {
-      const trimmed = input.trim();
-      if (!trimmed) return null;
-      try {
-        JSON.parse(trimmed);
-        return trimmed;
-      } catch {
-        return JSON.stringify(trimmed.split(',').map((value) => value.trim()).filter(Boolean));
-      }
-    }
-    return JSON.stringify(input);
-  }
-
-  function parseJsonValue<T>(raw: string | null | undefined, fallback: T): T {
-    if (!raw) return fallback;
-    try {
-      return JSON.parse(raw) as T;
-    } catch {
-      return fallback;
-    }
-  }
-
   function requireDetailedDescription(
     description: unknown,
     kind: 'prompt' | 'tool' | 'skill' | 'agent',
     res: ServerResponse,
   ): string | null {
-    const normalized = normalizeCallableDescription(description);
-    const validation = validateCallableDescription(normalized);
+    const validation = validateDetailedDescription(description, kind);
     if (!validation.valid) {
-      json(res, 400, { error: `${kind} description validation failed: ${validation.reasons.join('; ')}` });
+      json(res, 400, { error: validation.error });
       return null;
     }
-    return normalized;
-  }
-
-  async function clearDefaultPromptExcept(promptId: string): Promise<void> {
-    const rows = await db.listPrompts();
-    await Promise.all(
-      rows
-        .filter((r) => r.id !== promptId && r.is_default)
-        .map((r) => db.updatePrompt(r.id, { is_default: 0 })),
-    );
-  }
-
-  function safeParsePromptVariables(raw: string | null): unknown[] {
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
+    return validation.description;
   }
   // ── Admin: Prompts ──────────────────────────────────────────
 
@@ -168,7 +115,7 @@ export function registerAdminRoutes(
       variables: normalizePromptVariables(body['variables']),
       version: (body['version'] as string) ?? '1.0', model_compatibility: normalizeJsonField(body['model_compatibility']), execution_defaults: normalizeJsonField(body['execution_defaults']), framework: normalizeJsonField(body['framework']), metadata: normalizeJsonField(body['metadata']), is_default: isDefault, enabled: body['enabled'] !== false ? 1 : 0,
     });
-    if (isDefault) await clearDefaultPromptExcept(id);
+    if (isDefault) await clearDefaultPromptExcept(db, id);
     const prompt = await db.getPrompt(id);
     json(res, 201, { prompt });
   }, { auth: true, csrf: true });
@@ -203,7 +150,7 @@ export function registerAdminRoutes(
     if (body['is_default'] !== undefined) fields['is_default'] = body['is_default'] ? 1 : 0;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
     await db.updatePrompt(params['id']!, fields as any);
-    if (body['is_default']) await clearDefaultPromptExcept(params['id']!);
+    if (body['is_default']) await clearDefaultPromptExcept(db, params['id']!);
     const prompt = await db.getPrompt(params['id']!);
     json(res, 200, { prompt });
   }, { auth: true, csrf: true });

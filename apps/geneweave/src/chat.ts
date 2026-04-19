@@ -82,183 +82,51 @@ import type { CachePolicy } from '@weaveintel/core';
 import { runHybridMemoryExtraction, type ExtractedEntity, type MemoryExtractionRule } from '@weaveintel/memory';
 import { createEnterpriseTools, createEnterpriseToolGroups, ServiceNowProvider, type EnterpriseConnectorConfig, type EnterpriseToolGroup } from '@weaveintel/tools-enterprise';
 import { normalizePersona } from './rbac.js';
+import {
+  TEMPORAL_TOOL_POLICY,
+  POLICY_PROMPT_RESPONSE_CARD_FORMAT,
+  POLICY_PROMPT_ENTERPRISE_WORKER_SYSTEM,
+  POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
+  POLICY_PROMPT_HARD_EXECUTION_GUARD,
+  FORCED_WORKER_REQUIREMENT,
+  HARD_EXECUTION_GUARD_POLICY,
+  ENTERPRISE_WORKER_SYSTEM_PROMPT,
+  RESPONSE_CARD_FORMAT_POLICY,
+} from './chat-policies.js';
+import {
+  FALLBACK_PRICING,
+  calculateCost,
+  getOrCreateModel,
+  settingsFromRow,
+  type ChatAttachment,
+  type ChatEngineConfig,
+  type ChatSettings,
+  type ProviderConfig,
+  type WorkerDef,
+} from './chat-runtime.js';
+import { normalizeGuardrail, stageMatches } from './chat-guardrail-utils.js';
+import {
+  buildAttachmentContext,
+  composeUserInput,
+  normalizeAttachments,
+  patchLatestUserMessage,
+} from './chat-attachment-utils.js';
+import {
+  hasCodeExecutorDelegation,
+  hasSuccessfulCseExecution,
+} from './chat-cse-utils.js';
+import { hasRenderableAttachmentAnalysisOutput } from './chat-output-guards.js';
+import {
+  extractFieldValue,
+  outputContainsField,
+  runWithContractGuard as runWithContractGuardHelper,
+} from './chat-contract-guard-utils.js';
+import { buildSupervisorInstructionsPrompt } from './chat-supervisor-policy-utils.js';
+import { applyTemporalToolPolicy } from './chat-policy-format-utils.js';
+import { shouldForceWorkerDataAnalysis } from './chat-intent-utils.js';
 
-export interface ChatAttachment {
-  name: string;
-  mimeType: string;
-  size: number;
-  dataBase64?: string;
-  transcript?: string;
-}
-
-const TEMPORAL_TOOL_POLICY = [
-  'Temporal Tool Usage Policy:',
-  '- When asked about current day/date/time, current timestamp, or timezone-dependent time, do not guess.',
-  '- You MUST call datetime and/or timezone_info before answering.',
-  '- Use tool outputs as the source of truth for temporal answers.',
-  '- If timezone is missing, use available context and state assumptions explicitly.',
-  '',
-  'Timer and Stopwatch Tool Usage Policy:',
-  '- When asked to "start a timer", "start a stopwatch", "begin timing", or anything that requires tracking elapsed time:',
-  '  • ALWAYS call `stopwatch_start` (not just `datetime`). Return the full JSON including the stopwatch `id`.',
-  '  • The caller needs the stopwatch ID to later stop it and check elapsed time.',
-  '- When asked to "stop the timer", "check elapsed time", or "how long did it take":',
-  '  • First call `timer_list` and check for active timers. If none, check for active stopwatches.',
-  '  • Call `stopwatch_stop` (or `timer_stop`) with the appropriate ID.',
-  '  • Always report `elapsedMs` converted to human-readable format (minutes and seconds).',
-  '- NEVER calculate elapsed time from raw timestamps or message content — use the stopwatch/timer tools.',
-].join('\n');
-
-const SUPERVISOR_CODE_EXECUTION_POLICY = [
-  'You have direct access to `cse_run_code` — a tool that executes code in a real isolated Docker container.',
-  'Execution strategy by task type:',
-  '- Simple code-run requests (no attached dataset): call `cse_run_code` directly from supervisor.',
-  '- Dataset/file analysis requests (attachments, CSV/JSON/XLSX, or "analyze this file"): delegate to `code_executor` first, then to `analyst` for result verification.',
-  '- Data retrieval + code analysis requests (user asks to fetch data from a specialist AND run code/Python on it): use SEQUENTIAL multi-worker delegation — (1) delegate to the data specialist worker first to retrieve the data, (2) then delegate to `code_executor` with the retrieved data embedded in the task description so it can write and execute the analysis script. Do NOT synthesize the final response until code_executor returns actual stdout.',
-  '',
-  'Attachment handling policy:',
-  '- Attached files are injected into container workspace and should be opened by filename.',
-  '- For CSV analysis, prefer Python standard library (`csv`) first.',
-  '- Do not assume `pandas` is installed unless you install it in the same run and verify installation succeeded.',
-  '- If you need to install Python packages during execution, call `cse_run_code` with `networkAccess=true`.',
-  '- In CSE, install packages with: `os.makedirs("/workspace/.deps", exist_ok=True); os.makedirs("/workspace/.tmp", exist_ok=True); subprocess.check_call([sys.executable, "-m", "pip", "install", "--target", "/workspace/.deps", "<package>"]); sys.path.insert(0, "/workspace/.deps")`.',
-  '- For matplotlib/pyplot, always call `matplotlib.use("Agg")` before `import matplotlib.pyplot as plt` (headless environment, no display).',
-  '- When saving chart images, create the output directory first: `os.makedirs("/workspace/output", exist_ok=True)` then save to `/workspace/output/<name>.png`.',
-  '- Never use notebook-style `!pip install ...` inside Python scripts.',
-  '',
-  'Verification and retry policy (MANDATORY):',
-  '- Verify tool outputs before final response.',
-  '- If tool execution fails (import/file/path/runtime errors), send it back to code_executor with the exact stderr and a corrected plan.',
-  '- Continue iterate->run->verify until success or clear environmental blocker is proven.',
-  '- For successful analyses, final response must include computed metrics and concise insights grounded in execution stdout.',
-  '',
-  'Example: "write a Python script to add 15 numbers and run it"',
-  '  → Write the script, then call: cse_run_code(code="...", language="python")',
-  '  → Include the actual stdout in your final response.',
-  '',
-  'Supported languages: python, javascript, typescript, bash.',
-].join('\n');
-
-const POLICY_PROMPT_SUPERVISOR_CODE_EXECUTION = 'Runtime: Supervisor Code Execution Policy';
-const POLICY_PROMPT_SUPERVISOR_TEMPORAL = 'Runtime: Supervisor Temporal Policy';
-const POLICY_PROMPT_RESPONSE_CARD_FORMAT = 'Runtime: Response Card Format Policy';
-const POLICY_PROMPT_MULTI_WORKER_PIPELINE = 'Runtime: Multi Worker Sequential Pipeline';
-const POLICY_PROMPT_ENTERPRISE_WORKER_SYSTEM = 'Runtime: Enterprise ServiceNow Worker System Prompt';
-const POLICY_PROMPT_FORCED_WORKER_REQUIREMENT = 'Runtime: Forced Worker Data Analysis Requirement';
-const POLICY_PROMPT_HARD_EXECUTION_GUARD = 'Runtime: Hard Execution Guard';
-
-const FORCED_WORKER_REQUIREMENT = 'WORKFLOW REQUIREMENT: This request requires actual code execution. Delegate to code_executor to generate and run Python in container against attached files and/or retrieved tool data. If execution fails, retry with corrected code. After successful execution, delegate to analyst to verify computed outputs and produce at least 3 concrete insights.';
-
-const HARD_EXECUTION_GUARD_POLICY = [
-  'HARD EXECUTION GUARD: The answer is invalid unless you explicitly call delegate_to_worker(worker="code_executor") and produce a successful cse_run_code execution. Do not execute code directly in supervisor for this workflow. Delegate to code_executor, run code successfully, verify output, then respond.',
-  '',
-  'HARD PRESENTATION GUARD: Do not reference sandbox filesystem paths like /workspace/output/*.png or return img_path values that point to container files. If charts are requested, return renderable structured JSON with chart labels/values and optional table data instead of local file paths. If a prior run produced blank or incomplete insights, fix the script and rerun until the computed insights are non-empty.',
-].join('\n');
-
-const ENTERPRISE_WORKER_SYSTEM_PROMPT = [
-  'You are a specialized ServiceNow agent for: {{description}}',
-  'Use the available tools to fulfill the user\'s request. Always use the most specific tool available rather than generic query/get when possible.',
-].join('\n');
-
-const RESPONSE_CARD_FORMAT_POLICY = [
-  'RESPONSE PRESENTATION POLICY (for rich response cards):',
-  '- Choose output format based on user intent and data shape.',
-  '- If user asks for a chart, graph, visualization, trend, or numeric comparison, prefer structured JSON with chart fields.',
-  '- If user asks for tabular output, dataset rows, or comparisons, prefer structured JSON with table fields.',
-  '- If user asks for both, include both table and chart.',
-  '- Never reference sandbox-only file paths such as /workspace/output/*.png or return img_path values that point to local container files.',
-  '- If charts are requested, translate computed results into renderable chart labels/values in JSON instead of markdown images pointing to local files.',
-  '- For code or scripts, return JSON object: {"code":"...","language":"python|javascript|typescript|sql|bash|json|xml|yaml"}.',
-  '- For normal conversational answers, use concise markdown text and do not force JSON.',
-  '',
-  'Preferred structured schema when visualization or tabular output is requested:',
-  '{',
-  '  "summary": "short narrative",',
-  '  "table": { "headers": ["col1","col2"], "rows": [["r1", 10], ["r2", 12]] },',
-  '  "chart": { "type": "bar|line", "title": "optional", "labels": ["r1","r2"], "values": [10,12], "unit": "optional" }',
-  '}',
-  '- Keep values accurate and grounded in computed or tool-derived outputs.',
-].join('\n');
-
-const SUPERVISOR_TEMPORAL_POLICY = [
-  'TEMPORAL QUESTION HANDLING (CRITICAL):',
-  '- If the user asks about current day/date/time/timestamp or anything time-dependent:',
-  '  • ALWAYS delegate to a worker that has datetime/timezone tools',
-  '  • Do NOT answer from your training data or memory',
-  '  • Always use `think` tool first to reason about what worker you need',
-  '  • Always use `plan` tool to decompose the request',
-  '  • After the worker responds, use `think` with reasoning_phase="reasoning" to verify the answer',
-  '  • Then formulate your response based on the worker\'s actual tool outputs',
-  '- Examples of temporal questions that MUST be delegated:',
-  '  • "What day is today?" / "What date is it?" / "What is today\'s date?"',
-  '  • "What time is it?" / "What is the current time?"',
-  '  • "What timezone am I in?" / "What is the timezone?"',
-  '  • Any question about current timestamp, current date, current time, or today',
-  '',
-  'TIMER AND STOPWATCH MANAGEMENT (CRITICAL):',
-  '- When the user asks to START a timer or stopwatch (e.g. "start a timer", "start timing", "begin stopwatch"):',
-  '  • Delegate to analyst with EXPLICIT goal: "Use the `stopwatch_start` tool to start a stopwatch labeled \'[context label]\'. Return the full JSON response including the stopwatch ID."',
-  '  • Do NOT ask the analyst to just "capture the current timestamp" — it MUST call `stopwatch_start`',
-  '  • After analyst returns, extract the stopwatch ID from the JSON',
-  '  • Tell the user the timer has started AND include the stopwatch ID in your response (e.g. "Timer started (ID: watch-abc123). I\'ll track this until you return.")',
-  '  • The stopwatch ID MUST appear in your reply so it is recorded in conversation history for later retrieval',
-  '',
-  '- When the user RETURNS after a timer was started (e.g. "I am back", "I\'m back", "stop the timer"):',
-  '',
-  'BROWSER LOGIN & AUTHENTICATION (CRITICAL):',
-  '- When the user asks to log in, sign in, authenticate, or access a site that requires login:',
-  '  • ALWAYS delegate to the researcher worker — it has browser_detect_auth, browser_login, browser_save_cookies, browser_handoff_request, and browser_handoff_resume tools',
-  '  • The researcher can detect login forms, auto-fill credentials from the vault, and log in automatically',
-  '  • If the site needs 2FA, CAPTCHA, or manual steps, the researcher will trigger a handoff to the user',
-  '  • NEVER refuse login requests — the credential vault securely stores and encrypts website credentials',
-  '  • Example goal for researcher: "Navigate to [url], detect the login form, then use browser_login to authenticate using stored credentials. If 2FA or CAPTCHA appears, use browser_handoff_request."',
-  '',
-  '  • Look in the conversation history for the stopwatch ID from when the timer was started',
-  '  • Delegate to analyst with EXPLICIT goal: "Use `stopwatch_stop` with stopwatchId=\'[ID from history]\' to stop the stopwatch and report the total elapsed time in minutes and seconds."',
-  '  • If no stopwatch ID is found in history, delegate to analyst: "Use `timer_list` and `stopwatch_status` to find any active timers or stopwatches. If found, stop them and report the elapsed time."',
-  '  • Do NOT try to calculate elapsed time using raw timestamps or message metadata — always use the stopwatch tools',
-].join('\n');
-
-// Stats NZ routing and specialist policies are now stored in worker_agents table (DB-driven)
-
-// ─── Tool Policies (auto-select tools by mode) ─────────────────
-
-/**
- * Default tool suite for each mode. Tools are auto-selected based on the
- * chat mode to ensure agents have access to necessary capabilities without
- * requiring manual configuration.
- */
-const TOOL_POLICIES: Record<'direct' | 'agent' | 'supervisor', string[]> = {
-  // Direct mode: model has no tools (direct inference)
-  direct: [],
-  
-  // Agent mode: full toolkit for general-purpose reasoning
-  agent: [
-    // Temporal tools
-    'datetime', 'timezone_info',
-    'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
-    'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',
-    'reminder_create', 'reminder_list', 'reminder_cancel',
-    // Utility tools
-    'calculator', 'json_format', 'text_analysis', 'memory_recall',
-    'web_search',
-    // Compute Sandbox Engine
-    'cse_run_code', 'cse_session_status', 'cse_end_session',
-  ],
-  
-  // Supervisor mode: reserved for worker delegation; supervisor itself has minimal direct tools
-  supervisor: [
-    'datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis',
-  ],
-};
-
-/**
- * Get the default enabled tools for a given chat mode.
- * Tools are auto-selected to ensure proper functionality without manual setup.
- */
-export function getDefaultToolsByMode(mode: 'direct' | 'agent' | 'supervisor'): string[] {
-  return TOOL_POLICIES[mode] ?? [];
-}
+export { calculateCost, getOrCreateModel, settingsFromRow } from './chat-runtime.js';
+export type { ChatAttachment, ProviderConfig, ChatEngineConfig, ChatSettings, WorkerDef } from './chat-runtime.js';
 
 // ─── Model pricing (per 1 M tokens) ─────────────────────────
 
@@ -311,91 +179,7 @@ interface ResolvedSystemPrompt {
   };
 }
 
-// Fallback pricing used when DB lookup yields nothing (keeps system functional during cold start)
-const FALLBACK_PRICING: Record<string, ModelPricing> = {
-  'claude-sonnet-4-20250514':       { input: 3.00, output: 15.00 },
-  'claude-opus-4-20250514':         { input: 15.00, output: 75.00 },
-  'claude-haiku-4-20250414':        { input: 1.00, output: 5.00 },
-  'gpt-4o':                         { input: 2.50, output: 10.00 },
-  'gpt-4o-mini':                    { input: 0.15, output: 0.60 },
-  'gpt-4.1':                        { input: 2.00, output: 8.00 },
-  'gpt-4.1-mini':                   { input: 0.40, output: 1.60 },
-  'gpt-4.1-nano':                   { input: 0.10, output: 0.40 },
-  'o3':                             { input: 2.00, output: 8.00 },
-  'o4-mini':                        { input: 1.10, output: 4.40 },
-};
-
-export function calculateCost(modelId: string, promptTokens: number, completionTokens: number, pricingOverride?: ModelPricing): number {
-  const pricing = pricingOverride ?? FALLBACK_PRICING[modelId];
-  if (!pricing) return 0;
-  return (promptTokens / 1_000_000) * pricing.input + (completionTokens / 1_000_000) * pricing.output;
-}
-
-// ─── Provider config ─────────────────────────────────────────
-
-export interface ProviderConfig {
-  apiKey: string;
-}
-
-export interface ChatEngineConfig {
-  providers: Record<string, ProviderConfig>;
-  defaultProvider: string;
-  defaultModel: string;
-}
-
-// ─── Model factory ───────────────────────────────────────────
-
-const modelCache = new Map<string, Model>();
-
-export async function getOrCreateModel(
-  provider: string,
-  modelId: string,
-  apiKey: string,
-): Promise<Model> {
-  // Strip provider prefix (e.g. "anthropic/claude-sonnet-4-20250514" → "claude-sonnet-4-20250514")
-  const bareModel = modelId.includes('/') ? modelId.split('/').slice(1).join('/') : modelId;
-  const cacheKey = `${provider}:${bareModel}`;
-  const cached = modelCache.get(cacheKey);
-  if (cached) return cached;
-
-  let model: Model;
-  switch (provider) {
-    case 'anthropic': {
-      const mod = await import('@weaveintel/provider-anthropic');
-      model = (mod as any).weaveAnthropicModel(bareModel, { apiKey });
-      break;
-    }
-    case 'openai': {
-      const mod = await import('@weaveintel/provider-openai');
-      model = (mod as any).weaveOpenAIModel(bareModel, { apiKey });
-      break;
-    }
-    default:
-      throw new Error(`Unsupported provider "${provider}". Install @weaveintel/provider-${provider}`);
-  }
-
-  modelCache.set(cacheKey, model);
-  return model;
-}
-
 // ─── Chat engine ─────────────────────────────────────────────
-
-export interface ChatSettings {
-  mode: 'direct' | 'agent' | 'supervisor';
-  systemPrompt?: string;
-  timezone?: string;
-  enabledTools: string[];
-  redactionEnabled: boolean;
-  redactionPatterns: string[];
-  workers: WorkerDef[];
-}
-
-export interface WorkerDef {
-  name: string;
-  description: string;
-  tools: string[];
-  persona?: string;
-}
 
 interface ToolCallObservableEvent {
   phase: 'start' | 'end' | 'error';
@@ -412,40 +196,6 @@ interface AgentRunTelemetry {
 
 type CognitiveCheckSummary = GuardrailCategorySummary;
 
-const DEFAULT_SETTINGS: ChatSettings = {
-  mode: 'direct',
-  enabledTools: getDefaultToolsByMode('direct'),
-  redactionEnabled: false,
-  redactionPatterns: ['email', 'phone', 'ssn', 'credit_card'],
-  workers: [],
-};
-
-export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
-  if (!row) return { ...DEFAULT_SETTINGS };
-  
-  const mode = (row.mode as ChatSettings['mode']) || 'direct';
-  
-  // Apply tool policy based on mode: if no tools are explicitly set, use defaults for the mode
-  const enabledTools = row.enabled_tools 
-    ? JSON.parse(row.enabled_tools) 
-    : getDefaultToolsByMode(mode);
-  
-  return {
-    mode,
-    systemPrompt: row.system_prompt ?? undefined,
-    timezone: row.timezone ?? undefined,
-    enabledTools,
-    redactionEnabled: !!row.redaction_enabled,
-    redactionPatterns: row.redaction_patterns ? JSON.parse(row.redaction_patterns) : DEFAULT_SETTINGS.redactionPatterns,
-    workers: row.workers
-      ? (JSON.parse(row.workers) as WorkerDef[]).map((worker) => ({
-          ...worker,
-          persona: normalizePersona(worker.persona, 'agent'),
-        }))
-      : [],
-  };
-}
-
 export class ChatEngine {
   private readonly healthTracker = new ModelHealthTracker();
   private readonly responseCache = weaveInMemoryCacheStore();
@@ -455,25 +205,6 @@ export class ChatEngine {
   private policyPromptCache: { ts: number; prompts: Map<string, string> } | null = null;
   private readonly toolOptions: ToolRegistryOptions;
 
-  private withTemporalToolPolicy(basePrompt: string | undefined, toolNames: string[]): string | undefined {
-    const hasTemporalTools = toolNames.includes('datetime') || toolNames.includes('timezone_info')
-      || toolNames.includes('stopwatch_start') || toolNames.includes('timer_start');
-    if (!hasTemporalTools) return basePrompt;
-    
-    const enhancedPolicy = [
-      TEMPORAL_TOOL_POLICY,
-      '',
-      'REASONING REQUIREMENT:',
-      '- Always use the `think` tool before acting',
-      '- After calling datetime/timezone_info tools, use `think` with reasoning_phase="reasoning"',
-      '- Explicitly connect tool outputs to your answer',
-      '- Do not guess or hallucinate dates/times',
-    ].join('\n');
-    
-    const base = basePrompt?.trim();
-    return base ? `${base}\n\n${enhancedPolicy}` : enhancedPolicy;
-  }
-  
   private async getPolicyPromptTemplates(): Promise<Map<string, string>> {
     const now = Date.now();
     if (this.policyPromptCache && now - this.policyPromptCache.ts < 30_000) {
@@ -522,21 +253,6 @@ export class ChatEngine {
     private readonly db: DatabaseAdapter,
   ) {
     this.toolOptions = { temporalStore: createTemporalStore(db) };
-  }
-
-  private shouldForceWorkerDataAnalysis(userContent: string, attachments?: ChatAttachment[]): boolean {
-    const lower = userContent.toLowerCase();
-    const analysisIntent = /\b(analy[sz]e|analysis|insight|dataset|csv|table|trend|summary|summarize|statistics|statistical)\b/.test(lower);
-    const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
-
-    // Existing behavior: attached datasets with analysis intent must run through worker execution pipeline.
-    if (hasAttachments && analysisIntent) return true;
-
-    // New behavior: no-attachment requests that explicitly require code execution on retrieved data
-    // should still enforce the multi-worker code execution path.
-    const codeExecutionIntent = /\b(run|execute|execut(e|ing)|python|script|code)\b/.test(lower);
-    const dataRetrievalIntent = /\b(data|extracted|retrieve|retrieval|economy|gdp|spending|region|age|ethnicity|historical|trend|stats|statistics|stats\s*nz|new zealand)\b/.test(lower);
-    return codeExecutionIntent && dataRetrievalIntent;
   }
 
   private async discoverSkillsForInput(
@@ -667,117 +383,6 @@ export class ChatEngine {
     }
   }
 
-  private hasSuccessfulCseExecution(result: AgentResult): boolean {
-    return this.scanForSuccessfulCseExecution(result, new WeakSet<object>());
-  }
-
-  private hasCodeExecutorDelegation(result: AgentResult): boolean {
-    const steps = Array.isArray(result.steps) ? result.steps : [];
-    for (const step of steps) {
-      if (!step || typeof step !== 'object') continue;
-
-      const delegationWorker = String(step.delegation?.worker ?? step.delegation?.workerName ?? '').trim().toLowerCase();
-      if (delegationWorker === 'code_executor') return true;
-
-      const toolName = String(step.toolCall?.name ?? '').trim();
-      if (toolName !== 'delegate_to_worker') continue;
-
-      const argsRec = this.asRecord(step.toolCall?.arguments);
-      const argWorker = String(argsRec?.['worker'] ?? '').trim().toLowerCase();
-      if (argWorker === 'code_executor') return true;
-    }
-
-    return false;
-  }
-
-  private scanForSuccessfulCseExecution(value: unknown, seen: WeakSet<object>): boolean {
-    if (value == null) return false;
-
-    if (typeof value === 'string') {
-      const workerTrace = this.extractWorkerToolTrace(value);
-      if (workerTrace && this.scanForSuccessfulCseExecution(workerTrace, seen)) {
-        return true;
-      }
-      return false;
-    }
-
-    if (Array.isArray(value)) {
-      return value.some((entry) => this.scanForSuccessfulCseExecution(entry, seen));
-    }
-
-    if (typeof value !== 'object') {
-      return false;
-    }
-
-    if (seen.has(value)) {
-      return false;
-    }
-    seen.add(value);
-
-    const record = value as Record<string, unknown>;
-    const toolCall = this.asRecord(record['toolCall']);
-    if (toolCall && toolCall['name'] === 'cse_run_code' && this.isSuccessfulCseToolResult(toolCall['result'])) {
-      return true;
-    }
-
-    if (record['name'] === 'cse_run_code' && this.isSuccessfulCseToolResult(record['result'])) {
-      return true;
-    }
-
-    for (const nested of Object.values(record)) {
-      if (this.scanForSuccessfulCseExecution(nested, seen)) {
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private extractWorkerToolTrace(value: string): unknown[] | null {
-    const traceIdx = value.indexOf('[WorkerToolTrace]');
-    if (traceIdx < 0) {
-      return null;
-    }
-
-    const traceJson = value.slice(traceIdx + '[WorkerToolTrace]\n'.length).trim();
-    const parsed = this.safeParseJson(traceJson);
-    if (Array.isArray(parsed)) {
-      return parsed;
-    }
-
-    const rec = this.asRecord(parsed);
-    const executions = rec?.['executions'];
-    return Array.isArray(executions) ? executions : null;
-  }
-
-  private isSuccessfulCseToolResult(value: unknown): boolean {
-    const parsed = typeof value === 'string' ? this.safeParseJson(value) : value;
-    const record = this.asRecord(parsed);
-    return record?.['status'] === 'success';
-  }
-
-  private isSuccessfulToolResult(value: unknown): boolean {
-    if (value == null) return false;
-    if (typeof value === 'string') {
-      const lower = value.toLowerCase();
-      if (
-        lower.includes('tool error')
-        || lower.includes('"status":"error"')
-        || lower.includes('"status": "error"')
-      ) {
-        return false;
-      }
-    }
-    const parsed = typeof value === 'string' ? this.safeParseJson(value) : value;
-    const record = this.asRecord(parsed);
-    if (!record) return true;
-    if (record['isError'] === true) return false;
-    const status = record['status'];
-    if (status === 'error' || status === 'failed') return false;
-    if (record['error']) return false;
-    return true;
-  }
-
   /**
    * Build supervisor worker definitions from DB `worker_agents` rows.
    */
@@ -790,7 +395,11 @@ export class ChatEngine {
     const sorted = [...workerRows].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
     return sorted.map((row) => {
       const toolNames = (this.safeParseJson(row.tool_names) as string[]) ?? [];
-      const systemPrompt = this.withTemporalToolPolicy(row.system_prompt ?? undefined, toolNames);
+      const systemPrompt = applyTemporalToolPolicy({
+        basePrompt: row.system_prompt ?? undefined,
+        toolNames,
+        temporalToolPolicy: TEMPORAL_TOOL_POLICY,
+      });
       const persona = normalizePersona(row.persona ?? undefined, 'agent');
       const tools = toolNames.length
         ? createToolRegistry(toolNames, customTools, { ...toolOptions, actorPersona: persona })
@@ -819,31 +428,17 @@ export class ChatEngine {
     goal: string,
     workerRow: import('./db-types.js').WorkerAgentRow,
   ): Promise<AgentResult> {
-    const contractId = workerRow.task_contract_id;
-    const maxRetries = workerRow.max_retries ?? 0;
-
-    // Load the task contract from DB
-    let contractRow: import('./db-types.js').TaskContractRow | null = null;
-    if (contractId) {
-      contractRow = await this.db.getTaskContract(contractId);
-    }
-
-    const first = await agent.run(ctx, { messages, goal });
-    if (!contractRow) return first;
-
-    // Validate against contract
-    if (await this.validateAgainstContract(first, contractRow)) return first;
-
-    // Retry loop with progressively stronger instructions
-    let lastResult = first;
-    const workerToolNames: string[] = this.safeParseJson(workerRow.tool_names) as string[] ?? [];
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      const retryGoal = `${goal}\n\nEXECUTION GUARD (attempt ${attempt + 2}): Delegate to ${workerRow.name} and ensure the response satisfies the task contract "${contractRow.name}". The worker has tools: ${workerToolNames.join(', ')}. Required output fields: ${this.extractRequiredFields(contractRow)}.`;
-      lastResult = await agent.run(ctx, { messages, goal: retryGoal });
-      if (await this.validateAgainstContract(lastResult, contractRow)) return lastResult;
-    }
-
-    return lastResult;
+    return runWithContractGuardHelper({
+      agent,
+      ctx,
+      messages,
+      goal,
+      workerRow,
+      getTaskContract: async (id: string) => this.db.getTaskContract(id),
+      parseJson: (text: string) => this.safeParseJson(text),
+      validateAgainstContract: async (result: AgentResult, contractRow: import('./db-types.js').TaskContractRow) =>
+        this.validateAgainstContract(result, contractRow),
+    });
   }
 
   /**
@@ -864,9 +459,9 @@ export class ChatEngine {
       const operator = String(c.config?.['operator'] ?? '');
       if (operator === 'exists') {
         // Check if the field name appears meaningfully in the output
-        signal[field] = this.outputContainsField(output, field);
+        signal[field] = outputContainsField(output, field);
       } else {
-        signal[field] = this.extractFieldValue(output, field);
+        signal[field] = extractFieldValue(output, field);
       }
     }
 
@@ -885,128 +480,18 @@ export class ChatEngine {
     return report.status === 'fulfilled';
   }
 
-  /**
-   * Check if an output contains evidence of a contract field.
-   */
-  private outputContainsField(output: string, field: string): boolean {
-    switch (field) {
-      case 'dataset_id':
-        return /\b[A-Z]{2,}_[A-Z0-9]+_[0-9]{3}\b/.test(output);
-      case 'period': {
-        // Check for year references that aren't just part of random numbers
-        return /\b(19|20)\d{2}\b/.test(output);
-      }
-      case 'values': {
-        // Check for numeric values that aren't just years
-        const tokens = output.match(/\b\d[\d,]*(?:\.\d+)?\b/g) ?? [];
-        for (const token of tokens) {
-          if (/^(19|20)\d{2}$/.test(token)) continue;
-          const numeric = Number(token.replace(/,/g, ''));
-          if (Number.isFinite(numeric)) return true;
-        }
-        return false;
-      }
-      default:
-        return output.toLowerCase().includes(field.toLowerCase());
-    }
-  }
-
-  private extractFieldValue(output: string, field: string): unknown {
-    // Try to find a JSON-like value for the field in the output
-    const regex = new RegExp(`"${field}"\\s*:\\s*"?([^",}]+)"?`, 'i');
-    const match = output.match(regex);
-    return match ? match[1]?.trim() : undefined;
-  }
-
-  private extractRequiredFields(contractRow: import('./db-types.js').TaskContractRow): string {
-    const criteria: Array<{ config?: { field?: string }; required?: boolean }> =
-      (this.safeParseJson(contractRow.acceptance_criteria) as Array<{ config?: { field?: string }; required?: boolean }>) ?? [];
-    return criteria
-      .filter((c) => c.required !== false)
-      .map((c) => c.config?.field ?? 'unknown')
-      .join(', ');
-  }
-
   private async buildSupervisorInstructions(
     basePrompt: string | undefined,
     forceWorkerDataAnalysis: boolean,
     workerRows?: import('./db-types.js').WorkerAgentRow[],
   ): Promise<string> {
     const prompts = await this.getPolicyPromptTemplates();
-    const workflowBlock = forceWorkerDataAnalysis
-      ? prompts.get(POLICY_PROMPT_FORCED_WORKER_REQUIREMENT) ?? FORCED_WORKER_REQUIREMENT
-      : undefined;
-
-    // Multi-worker sequential pipeline instruction (always present in supervisor mode)
-    const multiWorkerBlock = prompts.get(POLICY_PROMPT_MULTI_WORKER_PIPELINE) ?? [
-      'MULTI-WORKER SEQUENTIAL PIPELINE:',
-      'When the user\'s request spans multiple capabilities (e.g., "fetch NZ economic data AND run Python to find insights"), you MUST use sequential worker delegation:',
-      '  Step 1 — Delegate to the data specialist worker (e.g., statsnz_specialist) to retrieve the raw data.',
-      '  Step 2 — Once data is returned, delegate to code_executor with a task that embeds the retrieved data and asks it to write and execute Python (or other code) to produce insights.',
-      '  Step 3 — Use the code_executor stdout in your final response. Never skip code execution when the user explicitly asked for it.',
-      'Do not collapse multi-step pipelines into a single delegation or into a supervisor-only response.',
-    ].join('\n');
-
-    // Build dynamic routing guidance from DB worker capabilities/descriptions.
-    // Supervisor should choose workers by user intent, not keyword matching.
-    const routingBlocks: string[] = [];
-    if (workerRows) {
-      for (const row of workerRows) {
-        if (!row.description?.trim()) continue;
-        routingBlocks.push(
-          `WORKER CAPABILITY — ${row.name.toUpperCase()}:\n` +
-          `- Delegate to \`${row.name}\` when the user's query intent aligns with this capability.\n` +
-          `- ${row.description}\n` +
-          '- Select workers semantically based on meaning and task requirements, not keyword overlap.',
-        );
-      }
-    }
-
-    const policyBlocks = [
-      prompts.get(POLICY_PROMPT_SUPERVISOR_CODE_EXECUTION) ?? SUPERVISOR_CODE_EXECUTION_POLICY,
-      workflowBlock,
-      multiWorkerBlock,
-      prompts.get(POLICY_PROMPT_SUPERVISOR_TEMPORAL) ?? SUPERVISOR_TEMPORAL_POLICY,
-      ...routingBlocks,
-      prompts.get(POLICY_PROMPT_RESPONSE_CARD_FORMAT) ?? RESPONSE_CARD_FORMAT_POLICY,
-    ].filter((v): v is string => Boolean(v && v.trim()));
-
-    const prefix = basePrompt?.trim();
-    return prefix ? `${prefix}\n\n${policyBlocks.join('\n\n')}` : policyBlocks.join('\n\n');
-  }
-
-  private containsSandboxArtifactPath(text: string): boolean {
-    if (!text) return false;
-    return /\/workspace\/output\/[^\s)"']+\.png/iu.test(text)
-      || /"img_path"\s*:\s*"\/workspace\/output\//iu.test(text);
-  }
-
-  private indicatesIncompleteAttachmentAnalysis(text: string): boolean {
-    if (!text) return false;
-    const lower = text.toLowerCase();
-    return lower.includes('insight summary was blank')
-      || lower.includes('summary was blank')
-      || lower.includes('would you like me to') && lower.includes('re-run the analysis');
-  }
-
-  private hasRenderableAttachmentAnalysisOutput(result: AgentResult, goal: string): boolean {
-    const output = String(result.output || '').trim();
-    if (!output) return false;
-    if (this.containsSandboxArtifactPath(output)) return false;
-    if (this.indicatesIncompleteAttachmentAnalysis(output)) return false;
-
-    const expectsRenderableChart = /\b(chart|charts|graph|graphs|visuali[sz]ation|plot|plots)\b/i.test(goal);
-    if (!expectsRenderableChart) return true;
-
-    return output.includes('"chart"')
-      || output.includes('```json')
-      || !this.containsSandboxArtifactPath(output);
-  }
-
-  private asRecord(value: unknown): Record<string, unknown> | null {
-    return value && typeof value === 'object' && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : null;
+    return buildSupervisorInstructionsPrompt({
+      basePrompt,
+      forceWorkerDataAnalysis,
+      workerRows,
+      prompts,
+    });
   }
 
   private async runWithCseSuccessGuard(
@@ -1020,9 +505,9 @@ export class ChatEngine {
     if (
       !enforce
       || (
-        this.hasSuccessfulCseExecution(first)
-        && this.hasCodeExecutorDelegation(first)
-        && this.hasRenderableAttachmentAnalysisOutput(first, goal)
+        hasSuccessfulCseExecution(first)
+        && hasCodeExecutorDelegation(first)
+        && hasRenderableAttachmentAnalysisOutput(first, goal)
       )
     ) return first;
 
@@ -1030,9 +515,9 @@ export class ChatEngine {
     const retryGoal = `${goal}\n\n${guardPolicy}`;
     const second = await agent.run(ctx, { messages, goal: retryGoal });
     if (
-      this.hasSuccessfulCseExecution(second)
-      && this.hasCodeExecutorDelegation(second)
-      && this.hasRenderableAttachmentAnalysisOutput(second, retryGoal)
+      hasSuccessfulCseExecution(second)
+      && hasCodeExecutorDelegation(second)
+      && hasRenderableAttachmentAnalysisOutput(second, retryGoal)
     ) return second;
 
     return {
@@ -1131,8 +616,8 @@ export class ChatEngine {
     const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
     const startMs = Date.now();
 
-    const attachments = this.normalizeAttachments(opts?.attachments);
-    const contentWithAttachments = this.composeUserInput(content, attachments);
+    const attachments = normalizeAttachments(opts?.attachments);
+    const contentWithAttachments = composeUserInput(content, attachments);
 
     // Redaction
     let processedContent = contentWithAttachments;
@@ -1237,7 +722,7 @@ export class ChatEngine {
     // Build conversation
     const history = await this.db.getMessages(chatId);
     const messages = historyToMessages(history);
-    this.patchLatestUserMessage(messages, processedContent);
+    patchLatestUserMessage(messages, processedContent);
 
     // ── Memory recall ──
     const memoryContext = await this.buildMemoryContext(ctx, model, userId, processedContent);
@@ -1476,8 +961,8 @@ export class ChatEngine {
     const traceId = randomUUID();
     const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
 
-    const attachments = this.normalizeAttachments(opts?.attachments);
-    const contentWithAttachments = this.composeUserInput(content, attachments);
+    const attachments = normalizeAttachments(opts?.attachments);
+    const contentWithAttachments = composeUserInput(content, attachments);
 
     // Redaction
     let processedContent = contentWithAttachments;
@@ -1593,7 +1078,7 @@ export class ChatEngine {
     // Build conversation
     const history = await this.db.getMessages(chatId);
     const messages = historyToMessages(history);
-    this.patchLatestUserMessage(messages, processedContent);
+    patchLatestUserMessage(messages, processedContent);
 
     // ── Memory recall ──
     const streamMemoryContext = await this.buildMemoryContext(ctx, model, userId, processedContent);
@@ -2027,7 +1512,7 @@ export class ChatEngine {
 
     try {
       let agent;
-      const forceWorkerDataAnalysis = this.shouldForceWorkerDataAnalysis(userContent, attachments);
+      const forceWorkerDataAnalysis = shouldForceWorkerDataAnalysis(userContent, attachments);
       const forceWorkerRequirement = await this.getPolicyPromptTemplate(
         POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
         FORCED_WORKER_REQUIREMENT,
@@ -2049,7 +1534,11 @@ export class ChatEngine {
           ? settings.workers.map((w) => ({
               name: w.name,
               description: w.description,
-              systemPrompt: this.withTemporalToolPolicy(undefined, w.tools),
+              systemPrompt: applyTemporalToolPolicy({
+                basePrompt: undefined,
+                toolNames: w.tools,
+                temporalToolPolicy: TEMPORAL_TOOL_POLICY,
+              }),
               model,
               tools: w.tools.length
                 ? createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
@@ -2095,7 +1584,11 @@ export class ChatEngine {
           bus: agentBus,
         });
       } else {
-        const policyPrompt = await this.withResponseCardFormatPolicy(this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools));
+        const policyPrompt = await this.withResponseCardFormatPolicy(applyTemporalToolPolicy({
+          basePrompt: settings.systemPrompt,
+          toolNames: settings.enabledTools,
+          temporalToolPolicy: TEMPORAL_TOOL_POLICY,
+        }));
         agent = weaveAgent({
           model,
           tools,
@@ -2182,7 +1675,7 @@ export class ChatEngine {
     });
 
     try {
-      const forceWorkerDataAnalysis = this.shouldForceWorkerDataAnalysis(userContent, attachments);
+      const forceWorkerDataAnalysis = shouldForceWorkerDataAnalysis(userContent, attachments);
       const forceWorkerRequirement = await this.getPolicyPromptTemplate(
         POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
         FORCED_WORKER_REQUIREMENT,
@@ -2200,7 +1693,11 @@ export class ChatEngine {
           ? settings.workers.map((w) => ({
               name: w.name,
               description: w.description,
-              systemPrompt: this.withTemporalToolPolicy(undefined, w.tools),
+              systemPrompt: applyTemporalToolPolicy({
+                basePrompt: undefined,
+                toolNames: w.tools,
+                temporalToolPolicy: TEMPORAL_TOOL_POLICY,
+              }),
               model,
               tools: w.tools.length
                 ? createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
@@ -2243,7 +1740,11 @@ export class ChatEngine {
           bus: agentBus,
         });
       } else {
-        const policyPrompt = await this.withResponseCardFormatPolicy(this.withTemporalToolPolicy(settings.systemPrompt, settings.enabledTools));
+        const policyPrompt = await this.withResponseCardFormatPolicy(applyTemporalToolPolicy({
+          basePrompt: settings.systemPrompt,
+          toolNames: settings.enabledTools,
+          temporalToolPolicy: TEMPORAL_TOOL_POLICY,
+        }));
         agent = weaveAgent({
           model,
           tools,
@@ -2420,255 +1921,6 @@ export class ChatEngine {
     } catch {
       return undefined;
     }
-  }
-
-  private parseGuardrailConfig(raw: string | null): Record<string, unknown> {
-    if (!raw) return {};
-    try {
-      const parsed = JSON.parse(raw);
-      return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
-    } catch {
-      return {};
-    }
-  }
-
-  private normalizeAttachments(input: ChatAttachment[] | undefined): ChatAttachment[] {
-    if (!Array.isArray(input) || input.length === 0) return [];
-
-    const maxCount = 8;
-    const maxBytes = 4 * 1024 * 1024;
-    const sanitized: ChatAttachment[] = [];
-
-    for (const item of input.slice(0, maxCount)) {
-      if (!item || typeof item !== 'object') continue;
-      const rawName = typeof item.name === 'string' ? item.name.trim() : '';
-      const rawMime = typeof item.mimeType === 'string' ? item.mimeType.trim() : '';
-      if (!rawName || !rawMime) continue;
-
-      const normalizedBase64 = typeof item.dataBase64 === 'string'
-        ? item.dataBase64.replace(/\s+/g, '')
-        : undefined;
-      if (normalizedBase64 && !/^[A-Za-z0-9+/=]+$/.test(normalizedBase64)) continue;
-
-      const approximateSize = normalizedBase64
-        ? Math.floor((normalizedBase64.length * 3) / 4)
-        : (typeof item.size === 'number' && Number.isFinite(item.size) ? item.size : 0);
-      if (approximateSize <= 0 || approximateSize > maxBytes) continue;
-
-      const transcript = typeof item.transcript === 'string' && item.transcript.trim()
-        ? item.transcript.trim().slice(0, 12_000)
-        : undefined;
-
-      // Strip raw audio bytes — the LLM cannot process audio directly.
-      // Only the transcript (if present) is forwarded to the model context.
-      const isAudio = rawMime.toLowerCase().startsWith('audio/');
-      sanitized.push({
-        name: rawName.slice(0, 180),
-        mimeType: rawMime.slice(0, 120),
-        size: approximateSize,
-        dataBase64: isAudio ? undefined : normalizedBase64,
-        transcript,
-      });
-    }
-
-    return sanitized;
-  }
-
-  private composeUserInput(content: string, attachments: ChatAttachment[]): string {
-    if (attachments.length === 0) return content;
-    const attachmentContext = this.buildAttachmentContext(attachments);
-    if (!attachmentContext) return content;
-    return `${content}\n\n[User attachments]\n${attachmentContext}`;
-  }
-
-  private buildAttachmentContext(attachments: ChatAttachment[]): string {
-    const lines: string[] = [];
-    const maxInlineChars = 12_000;
-
-    for (const attachment of attachments) {
-      lines.push(`- ${attachment.name} (${attachment.mimeType}, ${attachment.size} bytes)`);
-      if (attachment.transcript) {
-        lines.push(`  transcript: ${attachment.transcript.slice(0, maxInlineChars)}`);
-        continue;
-      }
-
-      const lowerMime = attachment.mimeType.toLowerCase();
-      const maybeText =
-        lowerMime.startsWith('text/') ||
-        lowerMime === 'application/json' ||
-        lowerMime === 'application/xml' ||
-        lowerMime === 'application/javascript' ||
-        lowerMime === 'application/x-javascript' ||
-        lowerMime === 'application/csv' ||
-        lowerMime.includes('markdown');
-
-      if (maybeText && attachment.dataBase64) {
-        try {
-          const decoded = Buffer.from(attachment.dataBase64, 'base64').toString('utf8');
-          const compact = decoded.replace(/\r\n/g, '\n').trim();
-          if (compact) {
-            lines.push(`  content:\n${compact.slice(0, maxInlineChars)}`);
-          }
-        } catch {
-          lines.push('  content: [unable to decode text attachment]');
-        }
-      }
-    }
-
-    return lines.join('\n');
-  }
-
-  private patchLatestUserMessage(messages: Message[], content: string): void {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg?.role === 'user') {
-        messages[i] = { ...msg, content };
-        return;
-      }
-    }
-  }
-
-  private stageMatches(rowStage: string, stage: GuardrailStage): boolean {
-    if (rowStage === 'both') return true;
-    if (rowStage === 'pre' || rowStage === 'pre-execution') return stage === 'pre-execution';
-    if (rowStage === 'post' || rowStage === 'post-execution') return stage === 'post-execution';
-    return rowStage === stage;
-  }
-
-  private normalizeGuardrailStage(rowStage: string, stage: GuardrailStage): GuardrailStage {
-    if (rowStage === 'pre') return 'pre-execution';
-    if (rowStage === 'post') return 'post-execution';
-    if (rowStage === 'both') return stage;
-    return rowStage as GuardrailStage;
-  }
-
-  private inferRuleName(row: GuardrailRow, config: Record<string, unknown>): string | undefined {
-    const explicit = typeof config['check'] === 'string' ? config['check'].trim().toLowerCase() : '';
-    const source = explicit || `${row.id} ${row.name}`.toLowerCase();
-    if (source.includes('pre') && source.includes('sycoph')) return 'input-pattern';
-    if (source.includes('pre') && source.includes('confidence')) return 'risk-confidence-gate';
-    if (source.includes('post') && source.includes('ground')) return 'grounding-overlap';
-    if (source.includes('post') && source.includes('sycoph')) return 'output-pattern';
-    if (source.includes('post') && (source.includes('devil') || source.includes('counterpoint'))) return 'decision-balance';
-    if (source.includes('post') && source.includes('confidence')) return 'aggregate-confidence-gate';
-    return undefined;
-  }
-
-  private patternConfigFromNames(patterns: unknown): Record<string, unknown> {
-    if (!Array.isArray(patterns)) return {};
-    const library: Record<string, string> = {
-      email: '[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}',
-      phone: '\\+?\\d[\\d(). -]{7,}\\d',
-      ssn: '\\b\\d{3}-\\d{2}-\\d{4}\\b',
-      credit_card: '\\b(?:\\d[ -]*?){13,16}\\b',
-    };
-    const parts = patterns
-      .map((value) => typeof value === 'string' ? library[value] : undefined)
-      .filter((value): value is string => !!value);
-    return parts.length ? { pattern: `(${parts.join('|')})`, action: 'warn' } : {};
-  }
-
-  private normalizeGuardrail(row: GuardrailRow, stage: GuardrailStage): Guardrail {
-    const config = this.parseGuardrailConfig(row.config);
-    const normalizedStage = this.normalizeGuardrailStage(row.stage, stage);
-
-    if (row.type === 'cognitive' || row.type === 'cognitive_check') {
-      return {
-        id: row.id,
-        name: row.name,
-        description: row.description ?? undefined,
-        type: 'custom',
-        stage: normalizedStage,
-        enabled: !!row.enabled,
-        priority: row.priority,
-        config: {
-          ...config,
-          category: 'cognitive',
-          rule: this.inferRuleName(row, config),
-          pattern_target: typeof config['check'] === 'string' && String(config['check']).includes('post_') ? 'output' : 'input',
-        },
-      };
-    }
-
-    if (row.type === 'factuality') {
-      return {
-        id: row.id,
-        name: row.name,
-        description: row.description ?? undefined,
-        type: 'custom',
-        stage: normalizedStage,
-        enabled: !!row.enabled,
-        priority: row.priority,
-        config: {
-          ...config,
-          category: 'verification',
-          rule: 'grounding-overlap',
-          min_overlap: typeof config['confidence_threshold'] === 'number' ? Number(config['confidence_threshold']) / 10 : config['min_overlap'],
-        },
-      };
-    }
-
-    if (row.type === 'budget') {
-      const maxInputTokens = typeof config['max_input_tokens'] === 'number' ? Number(config['max_input_tokens']) : undefined;
-      return {
-        id: row.id,
-        name: row.name,
-        description: row.description ?? undefined,
-        type: 'length',
-        stage: normalizedStage,
-        enabled: !!row.enabled,
-        priority: row.priority,
-        config: {
-          ...config,
-          maxLength: typeof config['maxLength'] === 'number' ? config['maxLength'] : maxInputTokens ? maxInputTokens * 4 : undefined,
-          action: config['action'] === 'deny' || config['action'] === 'warn' ? config['action'] : 'warn',
-        },
-      };
-    }
-
-    if (row.type === 'redaction' || row.type === 'pii_detection') {
-      return {
-        id: row.id,
-        name: row.name,
-        description: row.description ?? undefined,
-        type: 'regex',
-        stage: normalizedStage,
-        enabled: !!row.enabled,
-        priority: row.priority,
-        config: {
-          ...this.patternConfigFromNames(config['patterns']),
-          ...config,
-        },
-      };
-    }
-
-    if (row.type === 'content_filter') {
-      return {
-        id: row.id,
-        name: row.name,
-        description: row.description ?? undefined,
-        type: 'blocklist',
-        stage: normalizedStage,
-        enabled: !!row.enabled,
-        priority: row.priority,
-        config: {
-          ...config,
-          words: Array.isArray(config['words']) ? config['words'] : Array.isArray(config['categories']) ? config['categories'] : [],
-          action: config['action'] === 'deny' || config['action'] === 'warn' ? config['action'] : 'warn',
-        },
-      };
-    }
-
-    return {
-      id: row.id,
-      name: row.name,
-      description: row.description ?? undefined,
-      type: row.type as Guardrail['type'],
-      stage: normalizedStage,
-      enabled: !!row.enabled,
-      config,
-      priority: row.priority,
-    };
   }
 
   // ── Trace persistence ───────────────────────────────────────
@@ -2910,8 +2162,8 @@ export class ChatEngine {
   ): Promise<{ decision: 'allow' | 'deny' | 'warn'; reason?: string; results: GuardrailResult[]; cognitive?: CognitiveCheckSummary }> {
     try {
       const rows = await this.db.listGuardrails();
-      const enabledRows = rows.filter(r => r.enabled && this.stageMatches(r.stage, stage));
-      const guardrails: Guardrail[] = enabledRows.map(r => this.normalizeGuardrail(r, stage));
+      const enabledRows = rows.filter(r => r.enabled && stageMatches(r.stage, stage));
+      const guardrails: Guardrail[] = enabledRows.map(r => normalizeGuardrail(r, stage));
 
       const pipeline = createGuardrailPipeline(guardrails, { shortCircuitOnDeny: true });
       const results = guardrails.length > 0
