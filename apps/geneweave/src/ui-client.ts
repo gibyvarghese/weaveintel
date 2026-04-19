@@ -1279,15 +1279,10 @@ function render() {
       requestAnimationFrame(() => {
         const navScrollEl = root.querySelector('.workspace-nav-scroll') as HTMLElement | null;
         if (!navScrollEl) return;
-        // Scroll the active sub-tab into view within the nav container
+        // Prefer scrolling the active sub-tab into view; fall back to saved position
         const activeSubTab = navScrollEl.querySelector('.admin-subtab.active') as HTMLElement | null;
         if (activeSubTab) {
-          const elTop = activeSubTab.offsetTop;
-          const elBottom = elTop + activeSubTab.offsetHeight;
-          const containerBottom = navScrollEl.scrollTop + navScrollEl.clientHeight;
-          if (elTop < navScrollEl.scrollTop || elBottom > containerBottom) {
-            navScrollEl.scrollTop = elTop - navScrollEl.clientHeight / 2 + activeSubTab.offsetHeight / 2;
-          }
+          activeSubTab.scrollIntoView({ block: 'nearest', behavior: 'instant' } as ScrollIntoViewOptions);
         } else if (state.sidebarScrollTop) {
           navScrollEl.scrollTop = state.sidebarScrollTop;
         }
