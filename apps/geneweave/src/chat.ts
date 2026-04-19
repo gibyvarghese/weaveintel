@@ -138,6 +138,7 @@ import { buildSupervisorInstructionsPrompt } from './chat-supervisor-policy-util
 import { applyTemporalToolPolicy } from './chat-policy-format-utils.js';
 import { shouldForceWorkerDataAnalysis } from './chat-intent-utils.js';
 import { discoverSkillsForInput } from './chat-skills-utils.js';
+import { applyRedaction, runPostEval } from './chat-eval-utils.js';
 
 export { calculateCost, getOrCreateModel, settingsFromRow } from './chat-runtime.js';
 export type { ChatAttachment, ProviderConfig, ChatEngineConfig, ChatSettings, WorkerDef } from './chat-runtime.js';
@@ -451,7 +452,7 @@ export class ChatEngine {
     let processedContent = contentWithAttachments;
     let redactionInfo: { count: number; types: string[] } | undefined;
     if (settings.redactionEnabled) {
-      const rd = await this.applyRedaction(ctx, contentWithAttachments, settings.redactionPatterns);
+      const rd = await applyRedaction(ctx, contentWithAttachments, settings.redactionPatterns);
       processedContent = rd.redacted;
       if (rd.wasModified) {
         redactionInfo = { count: rd.detections.length, types: [...new Set(rd.detections.map((d: any) => d.type))] };
@@ -655,7 +656,7 @@ export class ChatEngine {
     // Eval — pass the overall guardrail decision so the score reflects grounding/sycophancy warnings
     const overallGuardrailDecision = guardrailInfo?.decision ?? 'allow';
     let evalInfo: { passed: number; failed: number; total: number; score: number } | undefined;
-    evalInfo = await this.runPostEval(ctx, userId, chatId, processedContent, assistantContent, latencyMs, cost, overallGuardrailDecision);
+    evalInfo = await runPostEval(this.db, ctx, userId, chatId, processedContent, assistantContent, latencyMs, cost, overallGuardrailDecision);
 
     // Save assistant message
     const assistMsgId = randomUUID();
@@ -796,7 +797,7 @@ export class ChatEngine {
     let processedContent = contentWithAttachments;
     let redactionInfo: { count: number; types: string[] } | undefined;
     if (settings.redactionEnabled) {
-      const rd = await this.applyRedaction(ctx, contentWithAttachments, settings.redactionPatterns);
+      const rd = await applyRedaction(ctx, contentWithAttachments, settings.redactionPatterns);
       processedContent = rd.redacted;
       if (rd.wasModified) {
         redactionInfo = { count: rd.detections.length, types: [...new Set(rd.detections.map((d: any) => d.type))] };
@@ -1024,7 +1025,7 @@ export class ChatEngine {
 
     // Eval — pass guardrail decision so the score reflects grounding/sycophancy warnings
     const streamGuardrailDecision = postGuardrail.decision as 'allow' | 'warn' | 'deny';
-    const evalInfo = await this.runPostEval(ctx, userId, chatId, processedContent, fullText, latencyMs, cost, streamGuardrailDecision);
+    const evalInfo = await runPostEval(this.db, ctx, userId, chatId, processedContent, fullText, latencyMs, cost, streamGuardrailDecision);
     if (evalInfo) {
       res.write(`data: ${JSON.stringify({ type: 'eval', ...evalInfo })}\n\n`);
     }
@@ -1496,85 +1497,6 @@ export class ChatEngine {
     } finally {
       screenshotUnsub?.();
       toolCallObserver.dispose();
-    }
-  }
-
-  // ── Redaction ───────────────────────────────────────────────
-
-  private async applyRedaction(
-    ctx: ExecutionContext,
-    text: string,
-    patterns: string[],
-  ): Promise<{ redacted: string; wasModified: boolean; detections: Array<{ type: string; start: number; end: number }> }> {
-    try {
-      const redactor = weaveRedactor({
-        patterns: patterns.map((p) => ({ name: p, type: 'builtin' as const, builtinType: p })),
-        reversible: true,
-      });
-      const result = await redactor.redact(ctx, text);
-      return {
-        redacted: result.redacted,
-        wasModified: result.wasModified,
-        detections: result.detections.map((d) => ({ type: d.type, start: d.start, end: d.end })),
-      };
-    } catch {
-      return { redacted: text, wasModified: false, detections: [] };
-    }
-  }
-
-  // ── Post-eval ───────────────────────────────────────────────
-
-  private async runPostEval(
-    ctx: ExecutionContext,
-    userId: string,
-    chatId: string,
-    input: string,
-    output: string,
-    latencyMs: number,
-    cost: number,
-    guardrailDecision?: 'allow' | 'warn' | 'deny',
-  ): Promise<{ passed: number; failed: number; total: number; score: number } | undefined> {
-    try {
-      const runner = weaveEvalRunner({
-        executor: async (_ctx, inp) => ({
-          output: inp['output'] as string,
-          guardrailDecision: inp['guardrailDecision'] as string,
-        }),
-      });
-
-      const result = await runner.run(ctx, {
-        name: 'chat_response_quality',
-        description: 'Quick quality check on chat response',
-        type: 'model',
-        assertions: [
-          { name: 'not_empty', type: 'regex', config: { pattern: '.+' } },
-          { name: 'latency_ok', type: 'latency_threshold', config: { maxMs: 30_000 } },
-          { name: 'cost_ok', type: 'cost_threshold', config: { maxCostUsd: 1.0 } },
-          { name: 'safety', type: 'safety', config: { blockedPhrases: [] } },
-          { name: 'guardrail_ok', type: 'guardrail_decision', config: { warnPenalty: 0.25, denyPenalty: 1.0 } },
-        ],
-      }, [
-        { id: 'msg', input: { output, latencyMs, costUsd: cost, guardrailDecision: guardrailDecision ?? 'allow' }, expected: {} },
-      ]);
-
-      const info = {
-        passed: result.passed,
-        failed: result.failed,
-        total: result.totalCases * result.results[0]!.assertions.length,
-        score: result.avgScore ?? (result.passed / (result.passed + result.failed || 1)),
-      };
-
-      // Persist
-      await this.db.recordEval({
-        id: randomUUID(), userId, chatId,
-        evalName: 'chat_response_quality',
-        score: info.score, passed: info.passed, failed: info.failed, total: info.total,
-        details: JSON.stringify(result.results[0]?.assertions),
-      });
-
-      return info;
-    } catch {
-      return undefined;
     }
   }
 
