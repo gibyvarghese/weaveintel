@@ -56,6 +56,11 @@ Core contracts, types, and runtime primitives for the weaveIntel AI framework.
 - `Tracer`, `Span`, `TraceSink`, `SpanRecord`
 - `UsageTracker`, `UsageRecord`, `RunLog`, `StepLog`
 
+### Admin Capability Schema (Phase 9)
+- `AdminFieldDef`, `AdminTabDef`, `AdminTabGroup`, `AdminTabMap` — shared schema contracts for DB-driven admin capability UIs
+- `normalizeAdminTabsForModelDiscovery()` — enforces model-facing description labels for LLM-callable entities (prompts, skills, tools, workers)
+- Used by GeneWeave admin schema composition to reduce app-local duplication and keep metadata quality consistent
+
 ### Protocol Contracts
 - **MCP:** `MCPClient`, `MCPServer`, `MCPToolDefinition`, `MCPResource`, `MCPPrompt`, `MCPTransport`
 - **A2A:** `A2AClient`, `A2AServer`, `A2ATask`, `AgentCard`, `AgentSkill`, `InternalA2ABus`

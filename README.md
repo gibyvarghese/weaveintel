@@ -18,6 +18,10 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
   - [examples/27-browser-automation.ts](examples/27-browser-automation.ts)
   - [examples/28-package-auth-rbac.ts](examples/28-package-auth-rbac.ts)
   - [examples/29-authenticated-agent-tools.ts](examples/29-authenticated-agent-tools.ts)
+- New examples 30-32 added for prompt capability phases:
+  - [examples/30-prompt-version-experiments.ts](examples/30-prompt-version-experiments.ts)
+  - [examples/31-skill-prompt-bindings.ts](examples/31-skill-prompt-bindings.ts)
+  - [examples/32-phase9-admin-capability-e2e.ts](examples/32-phase9-admin-capability-e2e.ts)
 - Guardrail grounding improvements for tool-backed responses and date/day evidence checks
 - Temporal tool state persistence coverage in geneWeave test suite
 - Persona-based RBAC in geneWeave (platform admin, tenant admin, tenant user, agent worker, agent researcher, agent supervisor)
@@ -257,11 +261,19 @@ Implemented now:
 - Strategy runtime + DB strategy records + chat metadata wiring
 - Admin CRUD and UI tabs for frameworks/fragments/contracts/strategies
 
+Implemented now (Phase 9 initial modularization):
+
+- Shared admin capability schema primitives moved to [packages/core/src/admin-capabilities.ts](packages/core/src/admin-capabilities.ts) so multiple apps can consume a consistent tab/field model.
+- GeneWeave admin schema now consumes shared types/helpers from `@weaveintel/core` and applies model-discovery label normalization.
+- Prompt capability admin tabs extracted into [apps/geneweave/src/admin/schema/prompt-capability-tabs.ts](apps/geneweave/src/admin/schema/prompt-capability-tabs.ts) to reduce monolithic schema pressure.
+- Added end-to-end DB-driven Phase 9 example at [examples/32-phase9-admin-capability-e2e.ts](examples/32-phase9-admin-capability-e2e.ts) that creates prompt/strategy/skill records, resolves prompt telemetry, runs chat, and reads dashboard traces.
+
 In progress (next focus):
 
 - Deeper output-contract validation wiring in runtime response paths
 - Broader observability rollups for prompt contract validation events
-- Additional end-to-end examples and UI hardening for advanced prompt assets
+- Further modular extraction for `server-admin.ts`, `server.ts`, and `ui.ts` domain units
+- UI hardening for advanced typed JSON editors and operator guidance per capability tab
 
 For detailed phased roadmap and boundaries, see [docs/PROMPT_CAPABILITY_IMPLEMENTATION_PLAN.md](docs/PROMPT_CAPABILITY_IMPLEMENTATION_PLAN.md).
 

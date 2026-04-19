@@ -378,6 +378,13 @@ describeAdmin('Admin Prompts', () => {
   let defaultAId: string;
   let defaultBId: string;
 
+  const parsePromptVariableNames = (raw: unknown): string[] => {
+    const parsed = JSON.parse(String(raw ?? '[]')) as Array<string | { name?: string }>;
+    return parsed
+      .map((entry) => typeof entry === 'string' ? entry : entry?.name)
+      .filter((name): name is string => Boolean(name));
+  };
+
   it('lists prompts', async () => {
     const { status, data } = await api('GET', '/api/admin/prompts');
     expect(status).toBe(200);
@@ -387,12 +394,12 @@ describeAdmin('Admin Prompts', () => {
   it('creates a prompt', async () => {
     const { status, data } = await api('POST', '/api/admin/prompts', {
       name: 'Test Prompt',
-      description: 'Integration test prompt',
+      description: 'Integration test prompt used to validate prompt CRUD behavior through the admin API.',
       category: 'test',
       template: 'Hello {{name}}, you are a {{role}}.',
       variables: JSON.stringify([
-        { name: 'name', type: 'string', required: true },
-        { name: 'role', type: 'string', required: true },
+        { name: 'name', type: 'string', required: true, description: 'User display name for greeting output.' },
+        { name: 'role', type: 'string', required: true, description: 'Role label included in the rendered prompt.' },
       ]),
       version: '1.0',
       is_default: false,
@@ -411,8 +418,7 @@ describeAdmin('Admin Prompts', () => {
     const prompt = data['prompt'] as Record<string, unknown>;
     expect(prompt?.['name']).toBe('Test Prompt');
     expect(prompt?.['template']).toContain('{{name}}');
-    const parsedVars = JSON.parse(String(prompt?.['variables'] ?? '[]')) as unknown[];
-    expect(parsedVars).toEqual(['name', 'role']);
+    expect(parsePromptVariableNames(prompt?.['variables'])).toEqual(['name', 'role']);
   });
 
   it('normalizes variables sent as array of names', async () => {
@@ -423,14 +429,13 @@ describeAdmin('Admin Prompts', () => {
 
     const { data } = await api('GET', `/api/admin/prompts/${promptId}`);
     const prompt = data['prompt'] as Record<string, unknown>;
-    const parsedVars = JSON.parse(String(prompt?.['variables'] ?? '[]')) as unknown[];
-    expect(parsedVars).toEqual(['first_name', 'role']);
+    expect(parsePromptVariableNames(prompt?.['variables'])).toEqual(['first_name', 'role']);
   });
 
   it('enforces a single default prompt', async () => {
     const createdA = await api('POST', '/api/admin/prompts', {
       name: 'Default A',
-      description: 'First default candidate',
+      description: 'First default prompt candidate used to verify only one default prompt remains enabled.',
       category: 'test',
       template: 'A',
       is_default: true,
@@ -441,7 +446,7 @@ describeAdmin('Admin Prompts', () => {
 
     const createdB = await api('POST', '/api/admin/prompts', {
       name: 'Default B',
-      description: 'Second default candidate',
+      description: 'Second default prompt candidate used to replace the earlier default prompt safely.',
       category: 'test',
       template: 'B',
       is_default: true,
@@ -493,12 +498,12 @@ describeAdmin('Prompt Resolution', () => {
     // Create a prompt to resolve
     const { data } = await api('POST', '/api/admin/prompts', {
       name: 'Resolve Test',
-      description: 'For resolve testing',
+      description: 'Prompt used to validate prompt resolution telemetry and error handling through the admin API.',
       category: 'test',
       template: 'Hello {{user}}, welcome to {{app}}.',
       variables: JSON.stringify([
-        { name: 'user', type: 'string', required: true },
-        { name: 'app', type: 'string', required: true },
+        { name: 'user', type: 'string', required: true, description: 'User name inserted into the greeting.' },
+        { name: 'app', type: 'string', required: true, description: 'Application name inserted into the greeting.' },
       ]),
       version: '1.0',
       is_default: false,
@@ -516,6 +521,10 @@ describeAdmin('Prompt Resolution', () => {
     expect(data['rendered']).toBe('Hello Alice, welcome to WeaveIntel.');
     expect(data['template']).toContain('{{user}}');
     expect(data['variables']).toBeDefined();
+    expect((data['telemetry'] as Record<string, unknown>)?.['kind']).toBe('prompt');
+    expect((data['telemetry'] as Record<string, unknown>)?.['description']).toBe('For resolve testing');
+    expect(Array.isArray(data['evaluations'])).toBe(true);
+    expect(data['traceId']).toBeDefined();
   });
 
   it('returns 400 for missing required variable', async () => {

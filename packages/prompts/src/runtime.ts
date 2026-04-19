@@ -12,6 +12,8 @@ import {
   type PromptRecordLike,
 } from './records.js';
 import { renderPromptVersion } from './template.js';
+import { createPromptCapabilityTelemetry } from './telemetry.js';
+import type { CapabilityTelemetrySummary } from '@weaveintel/core';
 
 export interface PromptRenderEvaluation {
   id: string;
@@ -54,6 +56,11 @@ export interface PromptRenderLifecycleHooks {
     variables: Record<string, unknown>;
     durationMs: number;
     error: Error;
+  }): void;
+  onTelemetry?(args: {
+    telemetry: CapabilityTelemetrySummary;
+    stage: 'success' | 'error';
+    error?: Error;
   }): void;
 }
 
@@ -250,6 +257,7 @@ export function renderPromptRecord(
 ): PromptRecordRenderResult {
   const definition = createPromptDefinitionFromRecord(record);
   const version = createPromptVersionFromRecord(record);
+  const capabilityKey = definition.key ?? definition.id;
   const startedAt = Date.now();
 
   options.hooks?.onStart?.({ definition, version, variables, startedAt });
@@ -269,12 +277,29 @@ export function renderPromptRecord(
     });
 
     options.hooks?.onSuccess?.({ definition, version, content, variables, durationMs, evaluations });
+    options.hooks?.onTelemetry?.({
+      telemetry: createPromptCapabilityTelemetry({ content, definition, version, durationMs, evaluations }),
+      stage: 'success',
+    });
 
     return { content, definition, version, durationMs, evaluations };
   } catch (error) {
     const durationMs = Date.now() - startedAt;
     const err = error instanceof Error ? error : new Error(String(error));
     options.hooks?.onError?.({ definition, version, variables, durationMs, error: err });
+    options.hooks?.onTelemetry?.({
+      telemetry: {
+        kind: 'prompt',
+        key: capabilityKey,
+        name: definition.name,
+        description: definition.description ?? 'Prompt render telemetry emitted from shared runtime hooks.',
+        version: version.version,
+        durationMs,
+        metadata: { errorName: err.name, errorMessage: err.message },
+      },
+      stage: 'error',
+      error: err,
+    });
     throw err;
   }
 }
@@ -293,6 +318,7 @@ export function executePromptRecord(
 ): PromptRecordExecutionResult {
   const definition = createPromptDefinitionFromRecord(record);
   const version = createPromptVersionFromRecord(record);
+  const capabilityKey = definition.key ?? definition.id;
   const startedAt = Date.now();
 
   options.hooks?.onStart?.({ definition, version, variables, startedAt });
@@ -319,6 +345,25 @@ export function executePromptRecord(
     });
 
     options.hooks?.onSuccess?.({ definition, version, content, variables, durationMs, evaluations });
+    options.hooks?.onTelemetry?.({
+      telemetry: createPromptCapabilityTelemetry({
+        content,
+        baseContent,
+        definition,
+        version,
+        durationMs,
+        evaluations,
+        strategy: {
+          requestedKey,
+          resolvedKey: strategy.key,
+          usedFallback: !requestedStrategy,
+          name: strategy.name,
+          description: strategy.description,
+          metadata: strategyResult.metadata,
+        },
+      }),
+      stage: 'success',
+    });
 
     return {
       content,
@@ -340,6 +385,20 @@ export function executePromptRecord(
     const durationMs = Date.now() - startedAt;
     const err = error instanceof Error ? error : new Error(String(error));
     options.hooks?.onError?.({ definition, version, variables, durationMs, error: err });
+    options.hooks?.onTelemetry?.({
+      telemetry: {
+        kind: 'prompt',
+        key: capabilityKey,
+        name: definition.name,
+        description: definition.description ?? 'Prompt execution telemetry emitted from shared runtime hooks.',
+        version: version.version,
+        strategyKey: options.strategyKey ?? version.executionDefaults?.strategy ?? 'singlePass',
+        durationMs,
+        metadata: { errorName: err.name, errorMessage: err.message },
+      },
+      stage: 'error',
+      error: err,
+    });
     throw err;
   }
 }

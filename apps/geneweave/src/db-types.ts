@@ -297,6 +297,82 @@ export interface PromptExperimentRow {
   updated_at: string;
 }
 
+/**
+ * Prompt evaluation datasets for Phase 7. Each dataset is attached to one
+ * prompt and optionally pins a specific prompt version.
+ */
+export interface PromptEvalDatasetRow {
+  id: string;
+  prompt_id: string;
+  name: string;
+  description: string | null;
+  prompt_version: string | null;
+  status: string;                // draft | active | archived
+  pass_threshold: number;
+  cases_json: string;            // JSON: PromptEvalCase[]
+  rubric_json: string | null;    // JSON: PromptEvalRubricCriterion[]
+  metadata: string | null;       // JSON object
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Historical evaluation execution artifacts for prompt versions.
+ */
+export interface PromptEvalRunRow {
+  id: string;
+  dataset_id: string;
+  prompt_id: string;
+  prompt_version: string;
+  status: string;                // completed | failed
+  avg_score: number;
+  passed_cases: number;
+  failed_cases: number;
+  total_cases: number;
+  results_json: string;          // JSON: case-level outputs
+  summary_json: string | null;   // JSON: aggregate summary
+  metadata: string | null;       // JSON object
+  created_at: string;
+  completed_at: string | null;
+}
+
+/**
+ * DB-managed prompt optimizer profiles used by app runtimes to select and
+ * configure optimization engines.
+ */
+export interface PromptOptimizerRow {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  implementation_kind: string;   // rule | llm | hybrid
+  config: string;                // JSON object
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Historical optimization run artifacts for audit and rollback workflows.
+ */
+export interface PromptOptimizationRunRow {
+  id: string;
+  prompt_id: string;
+  source_version: string;
+  candidate_version: string;
+  optimizer_id: string | null;
+  objective: string;
+  source_template: string;
+  candidate_template: string;
+  diff_json: string;             // JSON: normalized diff metadata
+  eval_baseline_json: string | null;
+  eval_candidate_json: string | null;
+  status: string;                // completed | failed
+  metadata: string | null;
+  created_at: string;
+}
+
 export interface GuardrailRow {
   id: string;
   name: string;
@@ -1103,6 +1179,33 @@ export interface DatabaseAdapter {
   listPromptExperiments(promptId?: string): Promise<PromptExperimentRow[]>;
   updatePromptExperiment(id: string, fields: Partial<Omit<PromptExperimentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deletePromptExperiment(id: string): Promise<void>;
+
+  // ─── Admin: Prompt Evaluation Datasets (Phase 7) ─────────
+  createPromptEvalDataset(d: Omit<PromptEvalDatasetRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getPromptEvalDataset(id: string): Promise<PromptEvalDatasetRow | null>;
+  listPromptEvalDatasets(promptId?: string): Promise<PromptEvalDatasetRow[]>;
+  updatePromptEvalDataset(id: string, fields: Partial<Omit<PromptEvalDatasetRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deletePromptEvalDataset(id: string): Promise<void>;
+
+  // ─── Admin: Prompt Evaluation Runs (Phase 7) ─────────────
+  createPromptEvalRun(r: Omit<PromptEvalRunRow, 'created_at'>): Promise<void>;
+  getPromptEvalRun(id: string): Promise<PromptEvalRunRow | null>;
+  listPromptEvalRuns(datasetId?: string): Promise<PromptEvalRunRow[]>;
+  deletePromptEvalRun(id: string): Promise<void>;
+
+  // ─── Admin: Prompt Optimizers (Phase 7) ──────────────────
+  createPromptOptimizer(o: Omit<PromptOptimizerRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getPromptOptimizer(id: string): Promise<PromptOptimizerRow | null>;
+  getPromptOptimizerByKey(key: string): Promise<PromptOptimizerRow | null>;
+  listPromptOptimizers(): Promise<PromptOptimizerRow[]>;
+  updatePromptOptimizer(id: string, fields: Partial<Omit<PromptOptimizerRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deletePromptOptimizer(id: string): Promise<void>;
+
+  // ─── Admin: Prompt Optimization Runs (Phase 7) ───────────
+  createPromptOptimizationRun(r: Omit<PromptOptimizationRunRow, 'created_at'>): Promise<void>;
+  getPromptOptimizationRun(id: string): Promise<PromptOptimizationRunRow | null>;
+  listPromptOptimizationRuns(promptId?: string): Promise<PromptOptimizationRunRow[]>;
+  deletePromptOptimizationRun(id: string): Promise<void>;
 
   // ─── Admin: Prompt Frameworks (Phase 2) ───────────────────
   createPromptFramework(f: Omit<PromptFrameworkRow, 'created_at' | 'updated_at'>): Promise<void>;

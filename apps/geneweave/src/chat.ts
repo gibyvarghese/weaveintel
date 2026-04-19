@@ -28,10 +28,16 @@ import type {
   Model, ModelRequest, ModelResponse, StreamChunk, ExecutionContext, Message,
   ToolRegistry, AgentStepEvent, AgentStep, AgentResult, EventBus,
   Guardrail, GuardrailResult, GuardrailStage,
+  CapabilityTelemetrySummary,
 } from '@weaveintel/core';
 import { weaveContext, weaveEventBus, EventTypes } from '@weaveintel/core';
 import { weaveAgent, weaveSupervisor } from '@weaveintel/agents';
-import { weaveInMemoryTracer, weaveUsageTracker } from '@weaveintel/observability';
+import {
+  weaveInMemoryTracer,
+  weaveUsageTracker,
+  capabilityTelemetryToEvent,
+  capabilityTelemetryToSpanAttributes,
+} from '@weaveintel/observability';
 import { weaveRedactor } from '@weaveintel/redaction';
 import { weaveEvalRunner } from '@weaveintel/evals';
 import { createGuardrailPipeline, hasDeny, hasWarning, getDenyReason, summarizeGuardrailResults, type GuardrailCategorySummary } from '@weaveintel/guardrails';
@@ -55,12 +61,15 @@ import {
   InMemoryContractRegistry,
   type ContractValidationResult,
   type PromptRecordExecutionResult,
+  createPromptCapabilityTelemetry,
 } from '@weaveintel/prompts';
 import {
+  activateSkills,
   applySkillsToPrompt,
   collectSkillTools,
   createSkillRegistry,
   skillFromRow,
+  type SkillDefinition,
   type SkillMatch,
 } from '@weaveintel/skills';
 import { createContract, DefaultCompletionValidator } from '@weaveintel/contracts';
@@ -292,6 +301,7 @@ interface PromptStrategyInfo {
 interface ResolvedSystemPrompt {
   content?: string;
   strategy?: PromptStrategyInfo;
+  telemetry?: CapabilityTelemetrySummary;
   resolution?: {
     source: 'base_prompt' | 'prompt_version';
     resolvedVersion: string;
@@ -529,7 +539,12 @@ export class ChatEngine {
     return codeExecutionIntent && dataRetrievalIntent;
   }
 
-  private async discoverSkillsForInput(userContent: string): Promise<{ matches: SkillMatch[]; toolNames: string[] }> {
+  private async discoverSkillsForInput(
+    userContent: string,
+    model: Model,
+    ctx: ExecutionContext,
+    mode: 'direct' | 'agent' | 'supervisor',
+  ): Promise<{ matches: SkillMatch[]; toolNames: string[] }> {
     try {
       const rows = await this.db.listEnabledSkills();
       if (!rows.length) return { matches: [], toolNames: [] };
@@ -539,11 +554,116 @@ export class ChatEngine {
         registry.register(skillFromRow(row));
       }
 
-      const matches = registry.discover(userContent, { maxSkills: 3, minScore: 0.1 });
+      const allSkills = registry.list();
+      const activation = await activateSkills(userContent, allSkills, {
+        maxCandidates: 6,
+        maxSelected: 3,
+        minScore: 0.12,
+        mode: mode === 'direct' ? 'advisory' : 'tool_assisted',
+        context: { chatMode: mode },
+        selector: async ({ query, mode: invokeMode, candidates }) => {
+          const decision = await this.reasonAboutSkillSelection(model, ctx, query, invokeMode, candidates);
+          if (!decision) {
+            return {
+              selectedSkillIds: candidates.slice(0, 3).map((candidate) => candidate.skill.id),
+              rationale: 'Fallback to semantic ranking because reasoning selector did not return a valid decision.',
+            };
+          }
+          return decision;
+        },
+        policyEvaluator: ({ skill, mode: invokeMode }) => {
+          const disallowed = skill.policy?.sideEffectsAllowed === false && invokeMode === 'side_effect_eligible';
+          if (disallowed) {
+            return { allowed: false, reason: 'Skill blocks side-effect eligible execution in current mode.' };
+          }
+
+          return {
+            allowed: true,
+            enforcedAllowedTools: skill.policy?.allowedTools,
+          };
+        },
+      });
+
+      const matches = [...activation.selected];
       const toolNames = collectSkillTools(matches);
       return { matches, toolNames };
     } catch {
       return { matches: [], toolNames: [] };
+    }
+  }
+
+  private async reasonAboutSkillSelection(
+    model: Model,
+    ctx: ExecutionContext,
+    query: string,
+    mode: string,
+    candidates: readonly SkillMatch[],
+  ): Promise<{ selectedSkillIds: string[]; rationale?: string; useNoSkillPath?: boolean } | null> {
+    if (candidates.length <= 1) {
+      return {
+        selectedSkillIds: candidates.map((candidate) => candidate.skill.id),
+        rationale: 'Only one semantic candidate available.',
+      };
+    }
+
+    const compactCandidates = candidates.map((candidate, index) => ({
+      rank: index + 1,
+      id: candidate.skill.id,
+      name: candidate.skill.name,
+      score: Number(candidate.score.toFixed(3)),
+      summary: candidate.skill.summary,
+      whenToUse: candidate.skill.whenToUse,
+      whenNotToUse: candidate.skill.whenNotToUse,
+      policy: candidate.skill.policy,
+    }));
+
+    const selectionPrompt = [
+      'Select the best skills for this request from the candidate list.',
+      'Prioritize semantic fit, completion quality, and policy-safe execution.',
+      'You may choose 0..3 skills. Choose zero if none fit.',
+      'Respond ONLY as JSON with shape: {"selectedSkillIds": string[], "useNoSkillPath": boolean, "rationale": string }.',
+      '',
+      `Invocation mode: ${mode}`,
+      `User request: ${query}`,
+      `Candidates: ${JSON.stringify(compactCandidates)}`,
+    ].join('\n');
+
+    try {
+      const response = await model.generate(ctx, {
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a skill selector. Return strict JSON and prefer no skill over weak skill fit.',
+          },
+          {
+            role: 'user',
+            content: selectionPrompt,
+          },
+        ],
+        temperature: 0,
+        maxTokens: 350,
+      });
+
+      const parsed = this.safeParseJson(response.content);
+      if (!parsed || typeof parsed !== 'object') return null;
+
+      const rec = parsed as Record<string, unknown>;
+      const selectedRaw = Array.isArray(rec['selectedSkillIds']) ? rec['selectedSkillIds'] : [];
+      const selectedSkillIds = selectedRaw
+        .filter((item): item is string => typeof item === 'string')
+        .filter((id) => candidates.some((candidate) => candidate.skill.id === id))
+        .slice(0, 3);
+
+      const useNoSkillPath = rec['useNoSkillPath'] === true;
+      const rationale = typeof rec['rationale'] === 'string' ? rec['rationale'] : undefined;
+
+      return {
+        selectedSkillIds,
+        useNoSkillPath,
+        rationale,
+      };
+    } catch {
+      return null;
     }
   }
 
@@ -1026,14 +1146,15 @@ export class ChatEngine {
     }
 
     // Discover skills from the user request and auto-enable their associated tools.
-    const skillContext = await this.discoverSkillsForInput(processedContent);
+    const skillContext = await this.discoverSkillsForInput(processedContent, model, ctx, settings.mode);
     const skillPrompt = applySkillsToPrompt(resolvedPrompt, skillContext.matches);
     const enabledTools = Array.from(new Set([...settings.enabledTools, ...skillContext.toolNames]));
     const skillTools = enabledTools.filter((tool) => !settings.enabledTools.includes(tool));
     const activeSkills = skillContext.matches.map((m) => ({
       id: m.skill.id,
       name: m.skill.name,
-      category: m.skill.category,
+      description: m.skill.description ?? m.skill.summary,
+      category: m.skill.category ?? 'general',
       score: Number(m.score.toFixed(3)),
       tools: [...(m.skill.toolNames ?? [])],
     }));
@@ -1266,7 +1387,23 @@ export class ChatEngine {
     });
 
     // Record traces
-    await this.recordTraceSpans(userId, chatId, assistMsgId, traceId, settings.mode, startMs, latencyMs, steps, toolCallEvents);
+    await this.recordTraceSpans(
+      userId,
+      chatId,
+      assistMsgId,
+      traceId,
+      settings.mode,
+      startMs,
+      latencyMs,
+      steps,
+      toolCallEvents,
+      this.buildCapabilityTelemetrySnapshots(
+        settings.mode,
+        resolvedSystemPrompt.telemetry,
+        activeSkills,
+        memorySettings.enabledTools,
+      ),
+    );
 
     return {
       assistantContent,
@@ -1350,14 +1487,15 @@ export class ChatEngine {
     }
 
     // Discover skills from the user request and auto-enable their associated tools.
-    const streamSkillContext = await this.discoverSkillsForInput(processedContent);
+    const streamSkillContext = await this.discoverSkillsForInput(processedContent, model, ctx, settings.mode);
     const streamSkillPrompt = applySkillsToPrompt(resolvedPrompt, streamSkillContext.matches);
     const streamEnabledTools = Array.from(new Set([...settings.enabledTools, ...streamSkillContext.toolNames]));
     const streamSkillTools = streamEnabledTools.filter((tool) => !settings.enabledTools.includes(tool));
     const streamActiveSkills = streamSkillContext.matches.map((m) => ({
       id: m.skill.id,
       name: m.skill.name,
-      category: m.skill.category,
+      description: m.skill.description ?? m.skill.summary,
+      category: m.skill.category ?? 'general',
       score: Number(m.score.toFixed(3)),
       tools: [...(m.skill.toolNames ?? [])],
     }));
@@ -1636,6 +1774,23 @@ export class ChatEngine {
     });
 
     await this.recordTraceSpans(userId, chatId, assistMsgId, traceId, settings.mode, startMs, latencyMs, steps, toolCallEvents);
+    await this.recordTraceSpans(
+      userId,
+      chatId,
+      assistMsgId,
+      traceId,
+      settings.mode,
+      startMs,
+      latencyMs,
+      steps,
+      toolCallEvents,
+      this.buildCapabilityTelemetrySnapshots(
+        settings.mode,
+        resolvedSystemPrompt.telemetry,
+        streamActiveSkills,
+        streamMemorySettings.enabledTools,
+      ),
+    );
     res.end();
   }
 
@@ -2562,6 +2717,7 @@ export class ChatEngine {
     latencyMs: number,
     steps?: AgentStep[],
     toolCallEvents?: ToolCallObservableEvent[],
+    capabilities?: CapabilityTelemetrySummary[],
   ): Promise<void> {
     try {
       // Root span
@@ -2572,7 +2728,11 @@ export class ChatEngine {
         name: `chat.${mode}`,
         startTime: startMs, endTime: startMs + latencyMs,
         status: 'ok',
-        attributes: JSON.stringify({ mode }),
+        attributes: JSON.stringify({
+          mode,
+          capabilityCount: capabilities?.length ?? 0,
+          capabilities: capabilities?.map((entry) => ({ kind: entry.kind, key: entry.key, name: entry.name })),
+        }),
       });
 
       // Child spans for agent steps
@@ -2662,6 +2822,25 @@ export class ChatEngine {
               tool: toolName,
               data: attributes,
             }),
+          });
+        }
+      }
+
+      if (capabilities?.length) {
+        for (const capability of capabilities) {
+          const attributes = capabilityTelemetryToSpanAttributes(capability);
+          const event = capabilityTelemetryToEvent(capability, 'success');
+          await this.db.saveTrace({
+            id: randomUUID(), userId, chatId, messageId,
+            traceId,
+            spanId: randomUUID(),
+            parentSpanId: rootSpanId,
+            name: `capability.${capability.kind}.${capability.key}`,
+            startTime: startMs,
+            endTime: startMs + Math.max(1, capability.durationMs ?? latencyMs),
+            status: 'ok',
+            attributes: JSON.stringify(attributes),
+            events: JSON.stringify([event]),
           });
         }
       }
@@ -2877,6 +3056,7 @@ export class ChatEngine {
           // Strategy loading failure is non-fatal — fallback to built-ins only.
         }
 
+        let promptTelemetry: CapabilityTelemetrySummary | undefined;
         const executed = executePromptRecord(resolvedMatch, vars, {
           strategyRegistry,
           evaluations: [
@@ -2890,10 +3070,27 @@ export class ChatEngine {
               }),
             },
           ],
+          hooks: {
+            onTelemetry: ({ telemetry }) => {
+              promptTelemetry = telemetry;
+            },
+          },
         });
+
+        const telemetry = promptTelemetry ?? createPromptCapabilityTelemetry(executed);
 
         return {
           content: executed.content,
+          telemetry: {
+            ...telemetry,
+            source: 'db',
+            selectedBy: resolved.meta.selectedBy,
+            metadata: {
+              ...(telemetry.metadata ?? {}),
+              resolution: resolved.meta,
+              expandedFromFragments: resolvedMatch.template !== resolved.record.template,
+            },
+          },
           strategy: this.toPromptStrategyInfo(executed),
           resolution: resolved.meta,
         };
@@ -2903,6 +3100,51 @@ export class ChatEngine {
     }
 
     return { content: settings.systemPrompt };
+  }
+
+  private buildCapabilityTelemetrySnapshots(
+    mode: string,
+    promptTelemetry: CapabilityTelemetrySummary | undefined,
+    activeSkills: Array<{ id: string; name: string; description: string; category: string; score: number; tools: string[] }>,
+    enabledTools: string[],
+  ): CapabilityTelemetrySummary[] {
+    const snapshots: CapabilityTelemetrySummary[] = [];
+
+    snapshots.push({
+      kind: 'agent',
+      key: `geneweave.${mode}`,
+      name: mode === 'supervisor' ? 'GeneWeave Supervisor Agent' : mode === 'agent' ? 'GeneWeave Tool Agent' : 'GeneWeave Direct Runtime',
+      description: mode === 'supervisor'
+        ? 'Coordinates worker delegation, verification, and response synthesis using database-driven prompt, skill, and policy configuration.'
+        : mode === 'agent'
+        ? 'Runs a tool-calling agent loop with database-driven prompt, skill, and policy overlays.'
+        : 'Runs direct model inference with shared prompt, guardrail, and observability integrations.',
+      source: 'runtime',
+      metadata: {
+        mode,
+        enabledToolCount: enabledTools.length,
+        enabledTools,
+      },
+    });
+
+    if (promptTelemetry) snapshots.push(promptTelemetry);
+
+    for (const skill of activeSkills) {
+      snapshots.push({
+        kind: 'skill',
+        key: skill.id,
+        name: skill.name,
+        description: skill.description,
+        source: 'db',
+        tags: [skill.category],
+        metadata: {
+          score: skill.score,
+          tools: skill.tools,
+        },
+      });
+    }
+
+    return snapshots;
   }
 
   private toPromptStrategyInfo(result: PromptRecordExecutionResult): PromptStrategyInfo {

@@ -142,7 +142,7 @@ export {
   type ContractRegistry,
 } from './contracts.js';
 
-// ─── Phase 5: Persistence-safe resolution ───────────────────
+// ─── Prompt Version Resolution ───────────────────────────────
 // Deterministic runtime selection of active versions and experiments.
 export {
   resolvePromptRecordForExecution,
@@ -151,4 +151,35 @@ export {
   type PromptExperimentVariant,
   type PromptResolutionOptions,
   type ResolvedPromptRecord,
-} from './phase5.js';
+} from './prompt-version-resolution.js';
+
+// ─── Phase 7: Prompt Evaluation ─────────────────────────────
+// Dataset-bound quality checks and baseline-vs-candidate comparisons.
+export {
+  evaluatePromptDatasetForRecord,
+  comparePromptDatasetResults,
+  type PromptEvalRubricCriterion,
+  type PromptEvalCase,
+  type PromptEvalDataset,
+  type PromptJudgeAdapter,
+  type PromptEvalHooks,
+  type PromptDatasetEvaluationOptions,
+  type PromptEvalCaseResult,
+  type PromptDatasetEvaluationResult,
+} from './prompt-evaluation.js';
+
+// ─── Phase 7: Prompt Optimization ───────────────────────────
+// Pluggable optimizer abstraction with diff metadata for auditability.
+export {
+  runPromptOptimization,
+  createConstraintAppenderOptimizer,
+  type PromptOptimizationEngine,
+  type PromptOptimizationRunResult,
+} from './prompt-optimizer.js';
+
+// ─── Phase 8: Prompt Observability ─────────────────────────
+// Shared prompt-to-observability mapping so apps can emit one standard trace shape.
+export {
+  createPromptCapabilityTelemetry,
+  type PromptTelemetryOptions,
+} from './telemetry.js';

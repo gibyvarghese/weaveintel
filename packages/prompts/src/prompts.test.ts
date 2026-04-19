@@ -13,6 +13,7 @@ import {
   createInstructionBundle,
   createPromptDefinitionFromRecord,
   createPromptVersionFromRecord,
+  createPromptCapabilityTelemetry,
   renderPromptRecord,
   renderPromptVersion,
   resolvePromptRecordForExecution,
@@ -216,6 +217,7 @@ describe('PromptResolver', () => {
 
   it('renders prompt records with lifecycle hooks and evaluations', () => {
     const events: string[] = [];
+    const telemetryKinds: string[] = [];
     const result = renderPromptRecord({
       id: 'prompt-2',
       key: 'ops.summary',
@@ -230,6 +232,7 @@ describe('PromptResolver', () => {
       hooks: {
         onStart: () => events.push('start'),
         onSuccess: () => events.push('success'),
+        onTelemetry: ({ telemetry }) => telemetryKinds.push(telemetry.kind),
       },
       evaluations: [
         {
@@ -244,6 +247,57 @@ describe('PromptResolver', () => {
     expect(result.evaluations).toHaveLength(1);
     expect(result.evaluations[0]!.passed).toBe(true);
     expect(events).toEqual(['start', 'success']);
+    expect(telemetryKinds).toEqual(['prompt']);
+  });
+
+  it('builds prompt capability telemetry from executed prompts', () => {
+    const telemetry = createPromptCapabilityTelemetry({
+      content: 'Hello Alice',
+      baseContent: 'Hello Alice',
+      definition: {
+        id: 'prompt-3',
+        key: 'support.reply',
+        name: 'Support Reply',
+        description: 'Detailed support response prompt for customer-facing replies.',
+        kind: 'template',
+        status: 'published',
+        currentVersion: '1.0',
+      },
+      version: {
+        id: 'prompt-3-v1',
+        promptId: 'prompt-3',
+        version: '1.0',
+        kind: 'template',
+        template: 'Hello {{name}}',
+        variables: [{ name: 'name', type: 'string', required: true }],
+        createdAt: new Date().toISOString(),
+      },
+      durationMs: 12,
+      evaluations: [
+        {
+          id: 'non_empty',
+          description: 'Prompt should not be empty.',
+          passed: true,
+          score: 1,
+        },
+      ],
+      strategy: {
+        requestedKey: 'singlePass',
+        resolvedKey: 'singlePass',
+        usedFallback: false,
+        name: 'Single Pass',
+        description: 'Render once and send directly to the model.',
+      },
+    }, {
+      source: 'db',
+      selectedBy: 'active_flag',
+    });
+
+    expect(telemetry.kind).toBe('prompt');
+    expect(telemetry.key).toBe('support.reply');
+    expect(telemetry.strategyKey).toBe('singlePass');
+    expect(telemetry.renderedCharacters).toBe(11);
+    expect(telemetry.evaluations?.[0]?.passed).toBe(true);
   });
 });
 

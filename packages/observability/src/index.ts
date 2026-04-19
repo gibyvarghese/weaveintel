@@ -3,6 +3,11 @@ export {
   weaveInMemoryTracer,
   weaveUsageTracker,
 } from './tracer.js';
+export {
+  capabilityTelemetryToSpanAttributes,
+  capabilityTelemetryToEvent,
+  annotateSpanWithCapabilityTelemetry,
+} from './capability-telemetry.js';
 
 // Phase 5 extensions
 export { weaveBudgetTracker, type BudgetTracker, type BudgetConfig, type BudgetAlert, type BudgetSnapshot } from './budget-tracker.js';

@@ -14,7 +14,7 @@ import type {
   MetricRow, EvalRow, ChatSettingsRow, TraceRow, UserPreferencesRow,
   TemporalTimerRow, TemporalStopwatchRow, TemporalReminderRow,
   PromptRow, PromptFrameworkRow, PromptFragmentRow, PromptContractRow, PromptStrategyRow,
-  PromptVersionRow, PromptExperimentRow,
+  PromptVersionRow, PromptExperimentRow, PromptEvalDatasetRow, PromptEvalRunRow, PromptOptimizerRow, PromptOptimizationRunRow,
   GuardrailRow, RoutingPolicyRow, WorkflowDefRow,
   ToolConfigRow, SkillRow, WorkerAgentRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
   IdentityRuleRow, MemoryGovernanceRow, SearchProviderRow, HttpEndpointRow,
@@ -40,6 +40,32 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.exec(SCHEMA_SQL);
+    // Recover databases created during schema gaps where these tables were absent.
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS user_preferences (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        default_mode TEXT NOT NULL DEFAULT 'agent',
+        theme TEXT NOT NULL DEFAULT 'light',
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    } catch {
+      // Ignore table creation errors and continue with best-effort migrations.
+    }
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS chat_settings (
+        chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+        mode TEXT NOT NULL DEFAULT 'agent',
+        system_prompt TEXT,
+        timezone TEXT,
+        enabled_tools TEXT,
+        redaction_enabled INTEGER NOT NULL DEFAULT 1,
+        redaction_patterns TEXT,
+        workers TEXT,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    } catch {
+      // Ignore table creation errors and continue with best-effort migrations.
+    }
     // Lightweight migration for existing databases created before timezone support.
     try {
       this.db.exec('ALTER TABLE chat_settings ADD COLUMN timezone TEXT');
@@ -133,6 +159,72 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    } catch { /* ignore */ }
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS prompt_eval_datasets (
+        id TEXT PRIMARY KEY,
+        prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        description TEXT,
+        prompt_version TEXT,
+        status TEXT NOT NULL DEFAULT 'draft',
+        pass_threshold REAL NOT NULL DEFAULT 0.75,
+        cases_json TEXT NOT NULL DEFAULT '[]',
+        rubric_json TEXT,
+        metadata TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    } catch { /* ignore */ }
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS prompt_eval_runs (
+        id TEXT PRIMARY KEY,
+        dataset_id TEXT NOT NULL REFERENCES prompt_eval_datasets(id) ON DELETE CASCADE,
+        prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+        prompt_version TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'completed',
+        avg_score REAL NOT NULL DEFAULT 0,
+        passed_cases INTEGER NOT NULL DEFAULT 0,
+        failed_cases INTEGER NOT NULL DEFAULT 0,
+        total_cases INTEGER NOT NULL DEFAULT 0,
+        results_json TEXT NOT NULL DEFAULT '[]',
+        summary_json TEXT,
+        metadata TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        completed_at TEXT
+      )`);
+    } catch { /* ignore */ }
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS prompt_optimizers (
+        id TEXT PRIMARY KEY,
+        key TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        description TEXT,
+        implementation_kind TEXT NOT NULL DEFAULT 'rule',
+        config TEXT NOT NULL DEFAULT '{}',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`);
+    } catch { /* ignore */ }
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS prompt_optimization_runs (
+        id TEXT PRIMARY KEY,
+        prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+        source_version TEXT NOT NULL,
+        candidate_version TEXT NOT NULL,
+        optimizer_id TEXT REFERENCES prompt_optimizers(id) ON DELETE SET NULL,
+        objective TEXT NOT NULL,
+        source_template TEXT NOT NULL,
+        candidate_template TEXT NOT NULL,
+        diff_json TEXT NOT NULL,
+        eval_baseline_json TEXT,
+        eval_candidate_json TEXT,
+        status TEXT NOT NULL DEFAULT 'completed',
+        metadata TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`);
     } catch { /* ignore */ }
     try {
@@ -264,6 +356,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         UNIQUE(user_id, provider)
       )`);
     } catch { /* ignore */ }
+
   }
 
   async close(): Promise<void> {
@@ -862,6 +955,165 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deletePromptExperiment(id: string): Promise<void> {
     this.d.prepare('DELETE FROM prompt_experiments WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Prompt Evaluation Datasets (Phase 7) ─────────
+
+  async createPromptEvalDataset(d: Omit<PromptEvalDatasetRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO prompt_eval_datasets (id, prompt_id, name, description, prompt_version, status, pass_threshold, cases_json, rubric_json, metadata, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      d.id,
+      d.prompt_id,
+      d.name,
+      d.description ?? null,
+      d.prompt_version ?? null,
+      d.status,
+      d.pass_threshold,
+      d.cases_json,
+      d.rubric_json ?? null,
+      d.metadata ?? null,
+      d.enabled,
+    );
+  }
+
+  async getPromptEvalDataset(id: string): Promise<PromptEvalDatasetRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_eval_datasets WHERE id = ?').get(id) as PromptEvalDatasetRow) ?? null;
+  }
+
+  async listPromptEvalDatasets(promptId?: string): Promise<PromptEvalDatasetRow[]> {
+    if (promptId) {
+      return this.d.prepare('SELECT * FROM prompt_eval_datasets WHERE prompt_id = ? ORDER BY created_at DESC').all(promptId) as PromptEvalDatasetRow[];
+    }
+    return this.d.prepare('SELECT * FROM prompt_eval_datasets ORDER BY created_at DESC').all() as PromptEvalDatasetRow[];
+  }
+
+  async updatePromptEvalDataset(id: string, fields: Partial<Omit<PromptEvalDatasetRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE prompt_eval_datasets SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deletePromptEvalDataset(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM prompt_eval_datasets WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Prompt Evaluation Runs (Phase 7) ─────────────
+
+  async createPromptEvalRun(r: Omit<PromptEvalRunRow, 'created_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO prompt_eval_runs (id, dataset_id, prompt_id, prompt_version, status, avg_score, passed_cases, failed_cases, total_cases, results_json, summary_json, metadata, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      r.id,
+      r.dataset_id,
+      r.prompt_id,
+      r.prompt_version,
+      r.status,
+      r.avg_score,
+      r.passed_cases,
+      r.failed_cases,
+      r.total_cases,
+      r.results_json,
+      r.summary_json ?? null,
+      r.metadata ?? null,
+      r.completed_at ?? null,
+    );
+  }
+
+  async getPromptEvalRun(id: string): Promise<PromptEvalRunRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_eval_runs WHERE id = ?').get(id) as PromptEvalRunRow) ?? null;
+  }
+
+  async listPromptEvalRuns(datasetId?: string): Promise<PromptEvalRunRow[]> {
+    if (datasetId) {
+      return this.d.prepare('SELECT * FROM prompt_eval_runs WHERE dataset_id = ? ORDER BY created_at DESC').all(datasetId) as PromptEvalRunRow[];
+    }
+    return this.d.prepare('SELECT * FROM prompt_eval_runs ORDER BY created_at DESC').all() as PromptEvalRunRow[];
+  }
+
+  async deletePromptEvalRun(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM prompt_eval_runs WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Prompt Optimizers (Phase 7) ──────────────────
+
+  async createPromptOptimizer(o: Omit<PromptOptimizerRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO prompt_optimizers (id, key, name, description, implementation_kind, config, enabled) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(o.id, o.key, o.name, o.description ?? null, o.implementation_kind, o.config, o.enabled);
+  }
+
+  async getPromptOptimizer(id: string): Promise<PromptOptimizerRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_optimizers WHERE id = ?').get(id) as PromptOptimizerRow) ?? null;
+  }
+
+  async getPromptOptimizerByKey(key: string): Promise<PromptOptimizerRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_optimizers WHERE key = ?').get(key) as PromptOptimizerRow) ?? null;
+  }
+
+  async listPromptOptimizers(): Promise<PromptOptimizerRow[]> {
+    return this.d.prepare('SELECT * FROM prompt_optimizers ORDER BY name ASC').all() as PromptOptimizerRow[];
+  }
+
+  async updatePromptOptimizer(id: string, fields: Partial<Omit<PromptOptimizerRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE prompt_optimizers SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deletePromptOptimizer(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM prompt_optimizers WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Prompt Optimization Runs (Phase 7) ───────────
+
+  async createPromptOptimizationRun(r: Omit<PromptOptimizationRunRow, 'created_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO prompt_optimization_runs (id, prompt_id, source_version, candidate_version, optimizer_id, objective, source_template, candidate_template, diff_json, eval_baseline_json, eval_candidate_json, status, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      r.id,
+      r.prompt_id,
+      r.source_version,
+      r.candidate_version,
+      r.optimizer_id ?? null,
+      r.objective,
+      r.source_template,
+      r.candidate_template,
+      r.diff_json,
+      r.eval_baseline_json ?? null,
+      r.eval_candidate_json ?? null,
+      r.status,
+      r.metadata ?? null,
+    );
+  }
+
+  async getPromptOptimizationRun(id: string): Promise<PromptOptimizationRunRow | null> {
+    return (this.d.prepare('SELECT * FROM prompt_optimization_runs WHERE id = ?').get(id) as PromptOptimizationRunRow) ?? null;
+  }
+
+  async listPromptOptimizationRuns(promptId?: string): Promise<PromptOptimizationRunRow[]> {
+    if (promptId) {
+      return this.d.prepare('SELECT * FROM prompt_optimization_runs WHERE prompt_id = ? ORDER BY created_at DESC').all(promptId) as PromptOptimizationRunRow[];
+    }
+    return this.d.prepare('SELECT * FROM prompt_optimization_runs ORDER BY created_at DESC').all() as PromptOptimizationRunRow[];
+  }
+
+  async deletePromptOptimizationRun(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM prompt_optimization_runs WHERE id = ?').run(id);
   }
 
   // ─── Admin: Prompt Frameworks (Phase 2) ───────────────────
@@ -2779,6 +3031,40 @@ export class SQLiteAdapter implements DatabaseAdapter {
       }
     }
 
+    // Prompt Optimizers — seed DB-driven optimizer profiles (Phase 7)
+    const promptOptimizers: Omit<PromptOptimizerRow, 'created_at' | 'updated_at'>[] = [
+      {
+        id: 'optimizer-constraint-appender',
+        key: 'constraintAppender',
+        name: 'Constraint Appender',
+        description: 'Deterministic optimizer that appends explicit constraints and output checks to improve predictable compliance.',
+        implementation_kind: 'rule',
+        config: JSON.stringify({
+          mode: 'append',
+          addConstraintHeader: true,
+        }),
+        enabled: 1,
+      },
+      {
+        id: 'optimizer-llm-judge-refine',
+        key: 'llmJudgeRefine',
+        name: 'LLM Judge Refine',
+        description: 'Model-assisted optimizer profile designed to iteratively refine prompts using rubric-based critique and revision loops.',
+        implementation_kind: 'llm',
+        config: JSON.stringify({
+          maxIterations: 2,
+          requireDiffMetadata: true,
+        }),
+        enabled: 1,
+      },
+    ];
+    {
+      const existingOptimizerIds = new Set((await this.listPromptOptimizers()).map(o => o.id));
+      for (const o of promptOptimizers) {
+        if (!existingOptimizerIds.has(o.id)) await this.createPromptOptimizer(o);
+      }
+    }
+
     // Guardrails
     if (cnt('guardrails') === 0) {
     const guardrails: Omit<GuardrailRow, 'created_at' | 'updated_at'>[] = [
@@ -2997,10 +3283,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
         await this.createSkill({
           id: s.id,
           name: s.name,
-          description: s.description,
-          category: s.category,
+          description: s.description ?? s.summary,
+          category: s.category ?? 'general',
           trigger_patterns: JSON.stringify(s.triggerPatterns),
-          instructions: s.instructions,
+          instructions: s.instructions ?? s.executionGuidance ?? s.summary,
           tool_names: s.toolNames ? JSON.stringify(s.toolNames) : null,
           examples: s.examples ? JSON.stringify(s.examples) : null,
           tags: s.tags ? JSON.stringify(s.tags) : null,

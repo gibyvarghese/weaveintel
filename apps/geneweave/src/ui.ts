@@ -2189,6 +2189,29 @@ function renderDashboardView() {
     return view;
   }
 
+  const safeParseTraceJson = (value: unknown) => {
+    if (!value || typeof value !== 'string') return null;
+    try {
+      return JSON.parse(value) as Record<string, any>;
+    } catch {
+      return null;
+    }
+  };
+
+  const capabilityRows = (d.traces || [])
+    .map((trace: any) => {
+      const attributes = safeParseTraceJson(trace?.attributes);
+      const summary = attributes?.['capability.summary'];
+      if (!summary || typeof summary !== 'object') return null;
+      return {
+        trace,
+        summary,
+        events: safeParseTraceJson(trace?.events),
+      };
+    })
+    .filter(Boolean)
+    .slice(0, 20) as Array<{ trace: any; summary: any; events: any }>;
+
   const s = d.overview.summary || {};
   view.appendChild(
     h('div', { className: 'cards' },
@@ -2216,6 +2239,62 @@ function renderDashboardView() {
                 h('td', null, String(ev.created_at || '').slice(0, 16))
               )
             )
+          )
+        )
+      )
+    );
+  }
+
+  if (capabilityRows.length) {
+    view.appendChild(
+      h('div', { className: 'table-wrap', style: 'margin-top:16px;' },
+        h('h3', null, 'Capability Telemetry'),
+        h('div', { style: 'padding:0 20px 12px;color:var(--fg2);font-size:12px;' }, 'Prompt, skill, and agent runtime telemetry captured from shared observability hooks.'),
+        h('table', { className: 'eval-table' },
+          h('thead', null,
+            h('tr', null,
+              h('th', null, 'Type'),
+              h('th', null, 'Capability'),
+              h('th', null, 'Strategy / Source'),
+              h('th', null, 'Eval / Contracts'),
+              h('th', null, 'Rendered'),
+              h('th', null, 'When')
+            )
+          ),
+          h('tbody', null,
+            ...capabilityRows.map(({ trace, summary }: any) => {
+              const evalsLabel = summary.evaluations?.length
+                ? `${summary.evaluations.filter((entry: any) => !entry.passed).length} failed / ${summary.evaluations.length}`
+                : '-';
+              const contractLabel = summary.contracts
+                ? `${summary.contracts.failed || 0} failed / ${summary.contracts.total || 0}`
+                : '-';
+              const strategyLabel = summary.strategyKey
+                ? `${summary.strategyName || summary.strategyKey}${summary.usedFallbackStrategy ? ' (fallback)' : ''}`
+                : (summary.source || '-');
+              const renderedLabel = summary.renderedCharacters
+                ? `${summary.renderedCharacters} chars / ${summary.renderedLines || 0} lines`
+                : '-';
+
+              return h('tr', null,
+                h('td', null, summary.kind || '-'),
+                h('td', null,
+                  h('div', { style: 'font-weight:600' }, summary.name || summary.key || '-'),
+                  h('div', { style: 'font-size:12px;color:var(--fg3);max-width:320px;' }, summary.description || '-'),
+                  summary.version ? h('div', { style: 'font-size:11px;color:var(--fg3);' }, `Version ${summary.version}`) : null
+                ),
+                h('td', null,
+                  h('div', null, strategyLabel),
+                  summary.selectedBy ? h('div', { style: 'font-size:11px;color:var(--fg3);' }, `Selected by ${summary.selectedBy}`) : null
+                ),
+                h('td', null,
+                  h('div', null, `Evaluations: ${evalsLabel}`),
+                  h('div', { style: 'font-size:11px;color:var(--fg3);' }, `Contracts: ${contractLabel}`)
+                ),
+                h('td', null, renderedLabel),
+                h('td', null, trace?.created_at ? new Date(trace.created_at).toLocaleString() : '-')
+              );
+            })
           )
         )
       )

@@ -217,11 +217,26 @@ export {
   type TraceSink,
   type SpanRecord,
   type SpanEvent,
+  type CapabilityKind,
+  type CapabilityEvaluationTelemetry,
+  type CapabilityContractTelemetry,
+  type CapabilityTelemetrySummary,
+  type CapabilityTelemetryStage,
   type UsageRecord,
   type UsageTracker,
   type RunLog,
   type StepLog,
 } from './observability.js';
+
+// Admin capability schema helpers
+export {
+  type AdminFieldSaveTransform,
+  type AdminFieldDef,
+  type AdminTabDef,
+  type AdminTabGroup,
+  type AdminTabMap,
+  normalizeAdminTabsForModelDiscovery,
+} from './admin-capabilities.js';
 
 // MCP contracts
 export {

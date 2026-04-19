@@ -14,6 +14,7 @@
  *  • Phase 2: renderWithOptions() — unified entry point
  *  • Phase 4: Strategy runtime — executePromptRecord() with DB-backed strategy overlays
  *  • Phase 4: InMemoryPromptStrategyRegistry + strategyFromRecord() integration
+ *  • Phase 8: Shared capability telemetry — prompt execution emits one reusable observability shape
  *
  * WeaveIntel packages used:
  *   @weaveintel/prompts — Full prompt lifecycle management
@@ -53,7 +54,13 @@ import {
   anthropicAdapter,
   textAdapter,
   resolveAdapter,
+  createPromptCapabilityTelemetry,
 } from '@weaveintel/prompts';
+import {
+  weaveInMemoryTracer,
+  annotateSpanWithCapabilityTelemetry,
+} from '@weaveintel/observability';
+import { weaveContext } from '@weaveintel/core';
 
 import type {
   PromptDefinition,
@@ -263,6 +270,26 @@ console.log(`  Strategy requested: ${runtimeRendered.strategy.requestedKey}`);
 console.log(`  Strategy resolved: ${runtimeRendered.strategy.resolvedKey} (fallback=${runtimeRendered.strategy.usedFallback})`);
 console.log(`  DB-backed runtime output: ${runtimeRendered.content}`);
 console.log(`  Runtime evaluations passed: ${runtimeRendered.evaluations.filter((e) => e.passed).length}/${runtimeRendered.evaluations.length}`);
+
+// Phase 8 uses one shared telemetry schema for prompts, skills, agents, and
+// tools. The prompt package builds the prompt-specific summary; the
+// observability package writes it to spans.
+const promptTelemetry = createPromptCapabilityTelemetry(runtimeRendered, {
+  source: 'db',
+  selectedBy: 'execution_defaults',
+  metadata: { example: '17-prompt-management' },
+});
+
+const tracer = weaveInMemoryTracer();
+await tracer.withSpan(
+  weaveContext({ userId: 'example-user', deadline: Date.now() + 5_000 }),
+  'example.prompt.runtime',
+  async (span) => {
+    annotateSpanWithCapabilityTelemetry(span, promptTelemetry);
+  },
+);
+
+console.log(`  Phase 8 telemetry captured: ${tracer.spans[0]?.attributes['capability.kind']} -> ${tracer.spans[0]?.attributes['capability.key']}`);
 
 /* ── 3. Instruction Bundles ───────────────────────────── */
 

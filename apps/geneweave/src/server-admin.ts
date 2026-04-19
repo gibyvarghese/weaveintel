@@ -7,10 +7,36 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { normalizeCallableDescription, validateCallableDescription } from '@weaveintel/core';
-import { renderPromptRecord, stringifyPromptVariables } from '@weaveintel/prompts';
+import {
+  renderPromptRecord,
+  stringifyPromptVariables,
+  resolvePromptRecordForExecution,
+  evaluatePromptDatasetForRecord,
+  comparePromptDatasetResults,
+  createConstraintAppenderOptimizer,
+  runPromptOptimization,
+  createPromptCapabilityTelemetry,
+} from '@weaveintel/prompts';
+import {
+  capabilityTelemetryToEvent,
+  capabilityTelemetryToSpanAttributes,
+} from '@weaveintel/observability';
 import type { DatabaseAdapter } from './db.js';
-import { syncModelPricing } from './pricing-sync.js';
 import type { AuthContext } from './auth.js';
+import {
+  registerToolRoutes,
+  registerSkillRoutes,
+  registerWorkerAgentRoutes,
+  registerGuardrailRoutes,
+  registerRoutingRoutes,
+  registerModelPricingRoutes,
+  registerWorkflowRoutes,
+  registerTaskPolicyRoutes,
+  registerTaskContractRoutes,
+  registerIdentityRuleRoutes,
+  registerMemoryGovernanceRoutes,
+  registerComplianceRuleRoutes,
+} from './admin/api/index.js';
 
 type Handler = (
   req: IncomingMessage,
@@ -68,6 +94,15 @@ export function registerAdminRoutes(
       }
     }
     return JSON.stringify(input);
+  }
+
+  function parseJsonValue<T>(raw: string | null | undefined, fallback: T): T {
+    if (!raw) return fallback;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return fallback;
+    }
   }
 
   function requireDetailedDescription(
@@ -576,201 +611,426 @@ export function registerAdminRoutes(
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
-  // ── Admin: Guardrails ──────────────────────────────────────
+  // ── Admin: Prompt Eval Datasets (Phase 7) ────────────────
 
-  router.get('/api/admin/guardrails', async (_req, res, _params, auth) => {
+  router.get('/api/admin/prompt-eval-datasets', async (req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const guardrails = await db.listGuardrails();
-    json(res, 200, { guardrails });
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const promptId = url.searchParams.get('prompt_id') ?? undefined;
+    const datasets = await db.listPromptEvalDatasets(promptId);
+    json(res, 200, { datasets });
   });
 
-  router.get('/api/admin/guardrails/:id', async (_req, res, params, auth) => {
+  router.get('/api/admin/prompt-eval-datasets/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const g = await db.getGuardrail(params['id']!);
-    if (!g) { json(res, 404, { error: 'Guardrail not found' }); return; }
-    json(res, 200, { guardrail: g });
+    const dataset = await db.getPromptEvalDataset(params['id']!);
+    if (!dataset) { json(res, 404, { error: 'Prompt eval dataset not found' }); return; }
+    json(res, 200, { dataset });
   });
 
-  router.post('/api/admin/guardrails', async (req, res, _params, auth) => {
+  router.post('/api/admin/prompt-eval-datasets', async (req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const raw = await readBody(req);
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    if (!body['name'] || !body['type']) { json(res, 400, { error: 'name and type required' }); return; }
-    const id = 'guard-' + randomUUID().slice(0, 8);
-    await db.createGuardrail({
-      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
-      type: body['type'] as string, stage: (body['stage'] as string) ?? 'pre',
-      config: body['config'] ? JSON.stringify(body['config']) : null,
-      priority: (body['priority'] as number) ?? 0, enabled: body['enabled'] !== false ? 1 : 0,
-    });
-    const guardrail = await db.getGuardrail(id);
-    json(res, 201, { guardrail });
-  }, { auth: true, csrf: true });
-
-  router.put('/api/admin/guardrails/:id', async (req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const existing = await db.getGuardrail(params['id']!);
-    if (!existing) { json(res, 404, { error: 'Guardrail not found' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    const fields: Record<string, unknown> = {};
-    if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) fields['description'] = body['description'];
-    if (body['type'] !== undefined) fields['type'] = body['type'];
-    if (body['stage'] !== undefined) fields['stage'] = body['stage'];
-    if (body['config'] !== undefined) fields['config'] = JSON.stringify(body['config']);
-    if (body['priority'] !== undefined) fields['priority'] = body['priority'];
-    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateGuardrail(params['id']!, fields as any);
-    const guardrail = await db.getGuardrail(params['id']!);
-    json(res, 200, { guardrail });
-  }, { auth: true, csrf: true });
-
-  router.del('/api/admin/guardrails/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    await db.deleteGuardrail(params['id']!);
-    json(res, 200, { ok: true });
-  }, { auth: true, csrf: true });
-
-  // ── Admin: Routing Policies ────────────────────────────────
-
-  router.get('/api/admin/routing', async (_req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const policies = await db.listRoutingPolicies();
-    json(res, 200, { policies });
-  });
-
-  router.get('/api/admin/routing/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const p = await db.getRoutingPolicy(params['id']!);
-    if (!p) { json(res, 404, { error: 'Routing policy not found' }); return; }
-    json(res, 200, { policy: p });
-  });
-
-  router.post('/api/admin/routing', async (req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    if (!body['name'] || !body['strategy']) { json(res, 400, { error: 'name and strategy required' }); return; }
-    const id = 'route-' + randomUUID().slice(0, 8);
-    await db.createRoutingPolicy({
-      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
-      strategy: body['strategy'] as string,
-      constraints: body['constraints'] ? JSON.stringify(body['constraints']) : null,
-      weights: body['weights'] ? JSON.stringify(body['weights']) : null,
-      fallback_model: (body['fallback_model'] as string) ?? null,
-      fallback_provider: (body['fallback_provider'] as string) ?? null,
+    if (!body['prompt_id'] || !body['name'] || !body['cases_json']) {
+      json(res, 400, { error: 'prompt_id, name, and cases_json required' }); return;
+    }
+    const id = 'prompt-eval-ds-' + randomUUID().slice(0, 8);
+    await db.createPromptEvalDataset({
+      id,
+      prompt_id: body['prompt_id'] as string,
+      name: body['name'] as string,
+      description: (body['description'] as string) ?? null,
+      prompt_version: (body['prompt_version'] as string) ?? null,
+      status: (body['status'] as string) ?? 'draft',
+      pass_threshold: typeof body['pass_threshold'] === 'number' ? body['pass_threshold'] as number : 0.75,
+      cases_json: typeof body['cases_json'] === 'string' ? body['cases_json'] : JSON.stringify(body['cases_json']),
+      rubric_json: normalizeJsonField(body['rubric_json']),
+      metadata: normalizeJsonField(body['metadata']),
       enabled: body['enabled'] !== false ? 1 : 0,
     });
-    const policy = await db.getRoutingPolicy(id);
-    json(res, 201, { policy });
+    const dataset = await db.getPromptEvalDataset(id);
+    json(res, 201, { dataset });
   }, { auth: true, csrf: true });
 
-  router.put('/api/admin/routing/:id', async (req, res, params, auth) => {
+  router.put('/api/admin/prompt-eval-datasets/:id', async (req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const existing = await db.getRoutingPolicy(params['id']!);
-    if (!existing) { json(res, 404, { error: 'Routing policy not found' }); return; }
+    const existing = await db.getPromptEvalDataset(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Prompt eval dataset not found' }); return; }
     const raw = await readBody(req);
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
     const fields: Record<string, unknown> = {};
     if (body['name'] !== undefined) fields['name'] = body['name'];
     if (body['description'] !== undefined) fields['description'] = body['description'];
-    if (body['strategy'] !== undefined) fields['strategy'] = body['strategy'];
-    if (body['constraints'] !== undefined) fields['constraints'] = JSON.stringify(body['constraints']);
-    if (body['weights'] !== undefined) fields['weights'] = JSON.stringify(body['weights']);
-    if (body['fallback_model'] !== undefined) fields['fallback_model'] = body['fallback_model'];
-    if (body['fallback_provider'] !== undefined) fields['fallback_provider'] = body['fallback_provider'];
+    if (body['prompt_version'] !== undefined) fields['prompt_version'] = body['prompt_version'];
+    if (body['status'] !== undefined) fields['status'] = body['status'];
+    if (body['pass_threshold'] !== undefined) fields['pass_threshold'] = body['pass_threshold'];
+    if (body['cases_json'] !== undefined) fields['cases_json'] = typeof body['cases_json'] === 'string' ? body['cases_json'] : JSON.stringify(body['cases_json']);
+    if (body['rubric_json'] !== undefined) fields['rubric_json'] = normalizeJsonField(body['rubric_json']);
+    if (body['metadata'] !== undefined) fields['metadata'] = normalizeJsonField(body['metadata']);
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateRoutingPolicy(params['id']!, fields as any);
-    const policy = await db.getRoutingPolicy(params['id']!);
-    json(res, 200, { policy });
+
+    await db.updatePromptEvalDataset(params['id']!, fields as any);
+    const dataset = await db.getPromptEvalDataset(params['id']!);
+    json(res, 200, { dataset });
   }, { auth: true, csrf: true });
 
-  router.del('/api/admin/routing/:id', async (_req, res, params, auth) => {
+  router.del('/api/admin/prompt-eval-datasets/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    await db.deleteRoutingPolicy(params['id']!);
+    await db.deletePromptEvalDataset(params['id']!);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
-  // ── Admin: Model Pricing ───────────────────────────────────
+  // ── Admin: Prompt Eval Runs (Phase 7) ────────────────────
 
-  router.get('/api/admin/model-pricing', async (_req, res, _params, auth) => {
+  router.get('/api/admin/prompt-eval-runs', async (req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const pricing = await db.listModelPricing();
-    json(res, 200, { pricing });
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const datasetId = url.searchParams.get('dataset_id') ?? undefined;
+    const runs = await db.listPromptEvalRuns(datasetId);
+    json(res, 200, { runs });
   });
 
-  router.get('/api/admin/model-pricing/:id', async (_req, res, params, auth) => {
+  router.get('/api/admin/prompt-eval-runs/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const p = await db.getModelPricing(params['id']!);
-    if (!p) { json(res, 404, { error: 'Pricing entry not found' }); return; }
-    json(res, 200, { pricing: p });
+    const run = await db.getPromptEvalRun(params['id']!);
+    if (!run) { json(res, 404, { error: 'Prompt eval run not found' }); return; }
+    json(res, 200, { run });
   });
 
-  router.post('/api/admin/model-pricing', async (req, res, _params, auth) => {
+  router.post('/api/admin/prompt-eval-runs', async (req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const raw = await readBody(req);
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    if (!body['model_id'] || !body['provider']) { json(res, 400, { error: 'model_id and provider required' }); return; }
-    const id = 'mp-' + randomUUID().slice(0, 8);
-    await db.createModelPricing({
-      id, model_id: body['model_id'] as string, provider: body['provider'] as string,
-      display_name: (body['display_name'] as string) ?? null,
-      input_cost_per_1m: (body['input_cost_per_1m'] as number) ?? 0,
-      output_cost_per_1m: (body['output_cost_per_1m'] as number) ?? 0,
-      quality_score: (body['quality_score'] as number) ?? 0.7,
-      source: 'manual', last_synced_at: null, enabled: body['enabled'] !== false ? 1 : 0,
+    if (!body['dataset_id'] || !body['prompt_id'] || !body['prompt_version'] || body['results_json'] === undefined) {
+      json(res, 400, { error: 'dataset_id, prompt_id, prompt_version, and results_json required' }); return;
+    }
+    const id = 'prompt-eval-run-' + randomUUID().slice(0, 8);
+    await db.createPromptEvalRun({
+      id,
+      dataset_id: body['dataset_id'] as string,
+      prompt_id: body['prompt_id'] as string,
+      prompt_version: body['prompt_version'] as string,
+      status: (body['status'] as string) ?? 'completed',
+      avg_score: typeof body['avg_score'] === 'number' ? body['avg_score'] as number : 0,
+      passed_cases: typeof body['passed_cases'] === 'number' ? body['passed_cases'] as number : 0,
+      failed_cases: typeof body['failed_cases'] === 'number' ? body['failed_cases'] as number : 0,
+      total_cases: typeof body['total_cases'] === 'number' ? body['total_cases'] as number : 0,
+      results_json: typeof body['results_json'] === 'string' ? body['results_json'] : JSON.stringify(body['results_json']),
+      summary_json: normalizeJsonField(body['summary_json']),
+      metadata: normalizeJsonField(body['metadata']),
+      completed_at: (body['completed_at'] as string) ?? null,
     });
-    const pricing = await db.getModelPricing(id);
-    json(res, 201, { pricing });
+    const run = await db.getPromptEvalRun(id);
+    json(res, 201, { run });
   }, { auth: true, csrf: true });
 
-  router.put('/api/admin/model-pricing/:id', async (req, res, params, auth) => {
+  router.del('/api/admin/prompt-eval-runs/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const existing = await db.getModelPricing(params['id']!);
-    if (!existing) { json(res, 404, { error: 'Pricing entry not found' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    const fields: Record<string, unknown> = {};
-    if (body['model_id'] !== undefined) fields['model_id'] = body['model_id'];
-    if (body['provider'] !== undefined) fields['provider'] = body['provider'];
-    if (body['display_name'] !== undefined) fields['display_name'] = body['display_name'];
-    if (body['input_cost_per_1m'] !== undefined) fields['input_cost_per_1m'] = body['input_cost_per_1m'];
-    if (body['output_cost_per_1m'] !== undefined) fields['output_cost_per_1m'] = body['output_cost_per_1m'];
-    if (body['quality_score'] !== undefined) fields['quality_score'] = body['quality_score'];
-    if (body['source'] !== undefined) fields['source'] = body['source'];
-    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateModelPricing(params['id']!, fields as any);
-    const pricing = await db.getModelPricing(params['id']!);
-    json(res, 200, { pricing });
-  }, { auth: true, csrf: true });
-
-  router.del('/api/admin/model-pricing/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    await db.deleteModelPricing(params['id']!);
+    await db.deletePromptEvalRun(params['id']!);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
-  // ── Model Pricing: Sync from providers ─────────────────────
+  // ── Admin: Prompt Optimizers (Phase 7) ───────────────────
 
-  router.post('/api/admin/model-pricing/sync', async (_req, res, _params, auth) => {
+  router.get('/api/admin/prompt-optimizers', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    if (!providers || Object.keys(providers).length === 0) {
-      json(res, 400, { error: 'No providers configured — cannot sync pricing' });
-      return;
+    const optimizers = await db.listPromptOptimizers();
+    json(res, 200, { optimizers });
+  });
+
+  router.get('/api/admin/prompt-optimizers/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const optimizer = await db.getPromptOptimizer(params['id']!);
+    if (!optimizer) { json(res, 404, { error: 'Prompt optimizer not found' }); return; }
+    json(res, 200, { optimizer });
+  });
+
+  router.post('/api/admin/prompt-optimizers', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['key'] || !body['name']) {
+      json(res, 400, { error: 'key and name required' }); return;
     }
-    try {
-      const report = await syncModelPricing(db, providers);
-      json(res, 200, report);
-    } catch (err: unknown) {
-      json(res, 500, { error: err instanceof Error ? err.message : 'Sync failed' });
+    const validatedDescription = requireDetailedDescription(body['description'], 'prompt', res);
+    if (!validatedDescription) return;
+
+    const id = 'prompt-opt-' + randomUUID().slice(0, 8);
+    await db.createPromptOptimizer({
+      id,
+      key: body['key'] as string,
+      name: body['name'] as string,
+      description: validatedDescription,
+      implementation_kind: (body['implementation_kind'] as string) ?? 'rule',
+      config: normalizeJsonField(body['config']) ?? '{}',
+      enabled: body['enabled'] !== false ? 1 : 0,
+    });
+    const optimizer = await db.getPromptOptimizer(id);
+    json(res, 201, { optimizer });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/prompt-optimizers/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getPromptOptimizer(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Prompt optimizer not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const fields: Record<string, unknown> = {};
+    if (body['key'] !== undefined) fields['key'] = body['key'];
+    if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['description'] !== undefined) {
+      const validatedDescription = requireDetailedDescription(body['description'], 'prompt', res);
+      if (!validatedDescription) return;
+      fields['description'] = validatedDescription;
     }
+    if (body['implementation_kind'] !== undefined) fields['implementation_kind'] = body['implementation_kind'];
+    if (body['config'] !== undefined) fields['config'] = normalizeJsonField(body['config']) ?? '{}';
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+
+    await db.updatePromptOptimizer(params['id']!, fields as any);
+    const optimizer = await db.getPromptOptimizer(params['id']!);
+    json(res, 200, { optimizer });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/prompt-optimizers/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deletePromptOptimizer(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Prompt Optimization Runs (Phase 7) ────────────
+
+  router.get('/api/admin/prompt-optimization-runs', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const promptId = url.searchParams.get('prompt_id') ?? undefined;
+    const runs = await db.listPromptOptimizationRuns(promptId);
+    json(res, 200, { runs });
+  });
+
+  router.get('/api/admin/prompt-optimization-runs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const run = await db.getPromptOptimizationRun(params['id']!);
+    if (!run) { json(res, 404, { error: 'Prompt optimization run not found' }); return; }
+    json(res, 200, { run });
+  });
+
+  router.post('/api/admin/prompt-optimization-runs', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['prompt_id'] || !body['source_version'] || !body['candidate_version'] || !body['objective'] || !body['source_template'] || !body['candidate_template'] || body['diff_json'] === undefined) {
+      json(res, 400, { error: 'prompt_id, source_version, candidate_version, objective, source_template, candidate_template, and diff_json required' }); return;
+    }
+    const id = 'prompt-opt-run-' + randomUUID().slice(0, 8);
+    await db.createPromptOptimizationRun({
+      id,
+      prompt_id: body['prompt_id'] as string,
+      source_version: body['source_version'] as string,
+      candidate_version: body['candidate_version'] as string,
+      optimizer_id: (body['optimizer_id'] as string) ?? null,
+      objective: body['objective'] as string,
+      source_template: body['source_template'] as string,
+      candidate_template: body['candidate_template'] as string,
+      diff_json: typeof body['diff_json'] === 'string' ? body['diff_json'] : JSON.stringify(body['diff_json']),
+      eval_baseline_json: normalizeJsonField(body['eval_baseline_json']),
+      eval_candidate_json: normalizeJsonField(body['eval_candidate_json']),
+      status: (body['status'] as string) ?? 'completed',
+      metadata: normalizeJsonField(body['metadata']),
+    });
+    const run = await db.getPromptOptimizationRun(id);
+    json(res, 201, { run });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/prompt-optimization-runs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deletePromptOptimizationRun(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── Admin: Phase 7 Runtime Execution Helpers ─────────────
+
+  router.post('/api/admin/prompt-eval-datasets/:id/run', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+
+    const dataset = await db.getPromptEvalDataset(params['id']!);
+    if (!dataset) { json(res, 404, { error: 'Prompt eval dataset not found' }); return; }
+
+    const prompt = await db.getPrompt(dataset.prompt_id);
+    if (!prompt) { json(res, 404, { error: 'Prompt not found for dataset.prompt_id' }); return; }
+
+    const raw = await readBody(req);
+    let body: Record<string, unknown> = {};
+    if (raw.trim()) {
+      try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    }
+
+    const versions = await db.listPromptVersions(prompt.id);
+    const experiments = await db.listPromptExperiments(prompt.id);
+    const requestedVersion = (body['requested_version'] as string) ?? dataset.prompt_version ?? undefined;
+
+    const resolved = resolvePromptRecordForExecution({
+      prompt,
+      versions,
+      experiments,
+      options: {
+        requestedVersion,
+        assignmentKey: (body['assignment_key'] as string) ?? undefined,
+        experimentId: (body['experiment_id'] as string) ?? undefined,
+      },
+    });
+
+    const evalDataset = {
+      id: dataset.id,
+      name: dataset.name,
+      description: dataset.description ?? 'Prompt evaluation dataset',
+      promptId: dataset.prompt_id,
+      promptVersion: dataset.prompt_version ?? undefined,
+      cases: parseJsonValue(dataset.cases_json, [] as Array<Record<string, unknown>>),
+      rubric: dataset.rubric_json ? parseJsonValue(dataset.rubric_json, [] as Array<Record<string, unknown>>) : undefined,
+    };
+
+    const result = await evaluatePromptDatasetForRecord(resolved.record, evalDataset as any, {
+      passThreshold: typeof body['pass_threshold'] === 'number'
+        ? body['pass_threshold'] as number
+        : dataset.pass_threshold,
+    });
+
+    const runId = 'prompt-eval-run-' + randomUUID().slice(0, 8);
+    await db.createPromptEvalRun({
+      id: runId,
+      dataset_id: dataset.id,
+      prompt_id: prompt.id,
+      prompt_version: result.promptVersion,
+      status: 'completed',
+      avg_score: result.averageScore,
+      passed_cases: result.passedCases,
+      failed_cases: result.failedCases,
+      total_cases: result.totalCases,
+      results_json: JSON.stringify(result.results),
+      summary_json: JSON.stringify({
+        datasetName: result.datasetName,
+        passThreshold: result.passThreshold,
+        durationMs: result.durationMs,
+      }),
+      metadata: JSON.stringify({ resolution: resolved.meta }),
+      completed_at: new Date().toISOString(),
+    });
+
+    const run = await db.getPromptEvalRun(runId);
+    json(res, 200, { run, result, resolution: resolved.meta });
+  }, { auth: true, csrf: true });
+
+  router.post('/api/admin/prompts/:id/optimize', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+
+    const prompt = await db.getPrompt(params['id']!);
+    if (!prompt) { json(res, 404, { error: 'Prompt not found' }); return; }
+
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['objective']) { json(res, 400, { error: 'objective required' }); return; }
+
+    const versions = await db.listPromptVersions(prompt.id);
+    const experiments = await db.listPromptExperiments(prompt.id);
+    const resolved = resolvePromptRecordForExecution({
+      prompt,
+      versions,
+      experiments,
+      options: {
+        requestedVersion: (body['source_version'] as string) ?? undefined,
+      },
+    });
+
+    const optimizerKey = (body['optimizer_key'] as string) ?? 'constraintAppender';
+    const optimizerRecord = await db.getPromptOptimizerByKey(optimizerKey);
+    const optimizerConfig = parseJsonValue<Record<string, unknown>>(optimizerRecord?.config ?? '{}', {});
+    const optimizer = createConstraintAppenderOptimizer({
+      key: optimizerKey,
+      name: optimizerRecord?.name ?? 'Constraint Appender',
+      description: optimizerRecord?.description ?? 'Deterministic optimizer profile for prompt constraints and format checks.',
+      suffix: typeof optimizerConfig['suffix'] === 'string'
+        ? optimizerConfig['suffix'] as string
+        : 'Return output that follows the required format exactly and explains key decisions clearly.',
+    });
+
+    const optResult = await runPromptOptimization({
+      prompt: resolved.record,
+      optimizer,
+      objective: body['objective'] as string,
+      constraints: Array.isArray(body['constraints'])
+        ? body['constraints'].filter((item): item is string => typeof item === 'string')
+        : undefined,
+      targetVersion: (body['candidate_version'] as string) ?? undefined,
+    });
+
+    let evalBaselineJson: string | null = null;
+    let evalCandidateJson: string | null = null;
+    if (typeof body['dataset_id'] === 'string') {
+      const dataset = await db.getPromptEvalDataset(body['dataset_id']);
+      if (dataset) {
+        const datasetObj = {
+          id: dataset.id,
+          name: dataset.name,
+          description: dataset.description ?? 'Prompt optimization dataset',
+          promptId: dataset.prompt_id,
+          promptVersion: dataset.prompt_version ?? undefined,
+          cases: parseJsonValue(dataset.cases_json, [] as Array<Record<string, unknown>>),
+          rubric: dataset.rubric_json ? parseJsonValue(dataset.rubric_json, [] as Array<Record<string, unknown>>) : undefined,
+        };
+
+        const candidateRecord = {
+          ...resolved.record,
+          version: optResult.candidate.version,
+          template: optResult.candidate.template,
+          variables: optResult.candidate.variables ?? resolved.record.variables,
+        };
+
+        const comparison = await comparePromptDatasetResults({
+          baselineRecord: resolved.record,
+          candidateRecord,
+          dataset: datasetObj as any,
+          options: { passThreshold: dataset.pass_threshold },
+        });
+        evalBaselineJson = JSON.stringify(comparison.baseline);
+        evalCandidateJson = JSON.stringify(comparison.candidate);
+      }
+    }
+
+    const runId = 'prompt-opt-run-' + randomUUID().slice(0, 8);
+    await db.createPromptOptimizationRun({
+      id: runId,
+      prompt_id: prompt.id,
+      source_version: optResult.source.version,
+      candidate_version: optResult.candidate.version,
+      optimizer_id: optimizerRecord?.id ?? null,
+      objective: optResult.objective,
+      source_template: optResult.source.template,
+      candidate_template: optResult.candidate.template,
+      diff_json: JSON.stringify(optResult.diff),
+      eval_baseline_json: evalBaselineJson,
+      eval_candidate_json: evalCandidateJson,
+      status: 'completed',
+      metadata: JSON.stringify({
+        optimizerKey: optResult.optimizerKey,
+        optimizerName: optResult.optimizerName,
+        reasoning: optResult.reasoning,
+        resolution: resolved.meta,
+      }),
+    });
+
+    const run = await db.getPromptOptimizationRun(runId);
+    json(res, 200, { run, optimization: optResult });
   }, { auth: true, csrf: true });
 
   // ── Prompt resolution ──────────────────────────────────────
@@ -786,7 +1046,8 @@ export function registerAdminRoutes(
     if (!prompt) { json(res, 404, { error: 'Prompt not found' }); return; }
     const variables = (body['variables'] as Record<string, unknown>) ?? {};
     try {
-      const rendered = renderPromptRecord(prompt, variables, {
+      let telemetry = undefined;
+      const renderedResult = renderPromptRecord(prompt, variables, {
         evaluations: [
           {
             id: 'prompt_not_empty',
@@ -798,8 +1059,53 @@ export function registerAdminRoutes(
             }),
           },
         ],
-      }).content;
-      json(res, 200, { rendered, template: prompt.template, variables: safeParsePromptVariables(prompt.variables) });
+        hooks: {
+          onTelemetry: ({ telemetry: emitted }) => {
+            telemetry = emitted;
+          },
+        },
+      });
+
+      const traceId = randomUUID();
+      const rootSpanId = randomUUID();
+      const capability = telemetry ?? createPromptCapabilityTelemetry(renderedResult, { source: 'db' });
+      await db.saveTrace({
+        id: randomUUID(),
+        userId: auth.userId,
+        traceId,
+        spanId: rootSpanId,
+        name: 'admin.prompt.resolve',
+        startTime: Date.now() - renderedResult.durationMs,
+        endTime: Date.now(),
+        status: 'ok',
+        attributes: JSON.stringify({
+          route: '/api/prompts/resolve',
+          promptId,
+          renderedCharacters: renderedResult.content.length,
+        }),
+      });
+      await db.saveTrace({
+        id: randomUUID(),
+        userId: auth.userId,
+        traceId,
+        spanId: randomUUID(),
+        parentSpanId: rootSpanId,
+        name: `capability.prompt.${capability.key}`,
+        startTime: Date.now() - renderedResult.durationMs,
+        endTime: Date.now(),
+        status: 'ok',
+        attributes: JSON.stringify(capabilityTelemetryToSpanAttributes(capability)),
+        events: JSON.stringify([capabilityTelemetryToEvent(capability, 'success')]),
+      });
+
+      json(res, 200, {
+        rendered: renderedResult.content,
+        template: prompt.template,
+        variables: safeParsePromptVariables(prompt.variables),
+        telemetry: capability,
+        evaluations: renderedResult.evaluations,
+        traceId,
+      });
     } catch (e: unknown) {
       json(res, 400, { error: e instanceof Error ? e.message : 'Render error' });
     }
@@ -814,296 +1120,22 @@ export function registerAdminRoutes(
     json(res, 200, { active });
   });
 
-  // ── Admin: Workflows ───────────────────────────────────────
+  // ── Callable Capabilities (Tools, Skills, Worker Agents) ───
 
-  router.get('/api/admin/workflows', async (_req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const workflows = await db.listWorkflowDefs();
-    json(res, 200, { workflows });
-  });
-
-  router.get('/api/admin/workflows/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const w = await db.getWorkflowDef(params['id']!);
-    if (!w) { json(res, 404, { error: 'Workflow not found' }); return; }
-    json(res, 200, { workflow: w });
-  });
-
-  router.post('/api/admin/workflows', async (req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    if (!body['name'] || !body['steps'] || !body['entry_step_id']) { json(res, 400, { error: 'name, steps, and entry_step_id required' }); return; }
-    const id = 'wf-' + randomUUID().slice(0, 8);
-    await db.createWorkflowDef({
-      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
-      version: (body['version'] as string) ?? '1.0',
-      steps: JSON.stringify(body['steps']),
-      entry_step_id: body['entry_step_id'] as string,
-      metadata: body['metadata'] ? JSON.stringify(body['metadata']) : null,
-      enabled: body['enabled'] !== false ? 1 : 0,
-    });
-    const workflow = await db.getWorkflowDef(id);
-    json(res, 201, { workflow });
-  }, { auth: true, csrf: true });
-
-  router.put('/api/admin/workflows/:id', async (req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const existing = await db.getWorkflowDef(params['id']!);
-    if (!existing) { json(res, 404, { error: 'Workflow not found' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    const fields: Record<string, unknown> = {};
-    if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) fields['description'] = body['description'];
-    if (body['version'] !== undefined) fields['version'] = body['version'];
-    if (body['steps'] !== undefined) fields['steps'] = JSON.stringify(body['steps']);
-    if (body['entry_step_id'] !== undefined) fields['entry_step_id'] = body['entry_step_id'];
-    if (body['metadata'] !== undefined) fields['metadata'] = JSON.stringify(body['metadata']);
-    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateWorkflowDef(params['id']!, fields as any);
-    const workflow = await db.getWorkflowDef(params['id']!);
-    json(res, 200, { workflow });
-  }, { auth: true, csrf: true });
-
-  router.del('/api/admin/workflows/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    await db.deleteWorkflowDef(params['id']!);
-    json(res, 200, { ok: true });
-  }, { auth: true, csrf: true });
-
-  // ── Admin: Tool Configs ────────────────────────────────────
-
-  router.get('/api/admin/tools', async (_req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const tools = await db.listToolConfigs();
-    json(res, 200, { tools });
-  });
-
-  router.get('/api/admin/tools/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const t = await db.getToolConfig(params['id']!);
-    if (!t) { json(res, 404, { error: 'Tool config not found' }); return; }
-    json(res, 200, { tool: t });
-  });
-
-  router.post('/api/admin/tools', async (req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const validatedDescription = requireDetailedDescription(body['description'], 'tool', res);
-    if (!validatedDescription) return;
-    const id = 'tool-' + randomUUID().slice(0, 8);
-    await db.createToolConfig({
-      id, name: body['name'] as string, description: validatedDescription,
-      category: (body['category'] as string) ?? null, risk_level: (body['risk_level'] as string) ?? 'low',
-      requires_approval: body['requires_approval'] ? 1 : 0,
-      max_execution_ms: (body['max_execution_ms'] as number) ?? null,
-      rate_limit_per_min: (body['rate_limit_per_min'] as number) ?? null,
-      enabled: body['enabled'] !== false ? 1 : 0,
-    });
-    const tool = await db.getToolConfig(id);
-    json(res, 201, { tool });
-  }, { auth: true, csrf: true });
-
-  router.put('/api/admin/tools/:id', async (req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const existing = await db.getToolConfig(params['id']!);
-    if (!existing) { json(res, 404, { error: 'Tool config not found' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    const fields: Record<string, unknown> = {};
-    if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) {
-      const validatedDescription = requireDetailedDescription(body['description'], 'tool', res);
-      if (!validatedDescription) return;
-      fields['description'] = validatedDescription;
-    }
-    if (body['category'] !== undefined) fields['category'] = body['category'];
-    if (body['risk_level'] !== undefined) fields['risk_level'] = body['risk_level'];
-    if (body['requires_approval'] !== undefined) fields['requires_approval'] = body['requires_approval'] ? 1 : 0;
-    if (body['max_execution_ms'] !== undefined) fields['max_execution_ms'] = body['max_execution_ms'];
-    if (body['rate_limit_per_min'] !== undefined) fields['rate_limit_per_min'] = body['rate_limit_per_min'];
-    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateToolConfig(params['id']!, fields as any);
-    const tool = await db.getToolConfig(params['id']!);
-    json(res, 200, { tool });
-  }, { auth: true, csrf: true });
-
-  router.del('/api/admin/tools/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    await db.deleteToolConfig(params['id']!);
-    json(res, 200, { ok: true });
-  }, { auth: true, csrf: true });
-
-  // ── Admin: Skills ──────────────────────────────────────────
-
-  router.get('/api/admin/skills', async (_req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const skills = await db.listSkills();
-    json(res, 200, { skills });
-  });
-
-  router.get('/api/admin/skills/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const skill = await db.getSkill(params['id']!);
-    if (!skill) { json(res, 404, { error: 'Skill not found' }); return; }
-    json(res, 200, { skill });
-  });
-
-  router.post('/api/admin/skills', async (req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    if (!body['name'] || !body['instructions']) {
-      json(res, 400, { error: 'name and instructions required' });
-      return;
-    }
-    const validatedDescription = requireDetailedDescription(body['description'], 'skill', res);
-    if (!validatedDescription) return;
-
-    const id = 'skill-' + randomUUID().slice(0, 8);
-    await db.createSkill({
-      id,
-      name: body['name'] as string,
-      description: validatedDescription,
-      category: (body['category'] as string) ?? 'general',
-      trigger_patterns: JSON.stringify(Array.isArray(body['trigger_patterns']) ? body['trigger_patterns'] : []),
-      instructions: body['instructions'] as string,
-      tool_names: body['tool_names'] ? JSON.stringify(body['tool_names']) : null,
-      examples: body['examples'] ? JSON.stringify(body['examples']) : null,
-      tags: body['tags'] ? JSON.stringify(body['tags']) : null,
-      priority: Number(body['priority'] ?? 0),
-      version: (body['version'] as string) ?? '1.0',
-      enabled: body['enabled'] !== false ? 1 : 0,
-    });
-    const skill = await db.getSkill(id);
-    json(res, 201, { skill });
-  }, { auth: true, csrf: true });
-
-  router.put('/api/admin/skills/:id', async (req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const existing = await db.getSkill(params['id']!);
-    if (!existing) { json(res, 404, { error: 'Skill not found' }); return; }
-
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-
-    const fields: Record<string, unknown> = {};
-    if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) {
-      const validatedDescription = requireDetailedDescription(body['description'], 'skill', res);
-      if (!validatedDescription) return;
-      fields['description'] = validatedDescription;
-    }
-    if (body['category'] !== undefined) fields['category'] = body['category'];
-    if (body['trigger_patterns'] !== undefined) fields['trigger_patterns'] = JSON.stringify(Array.isArray(body['trigger_patterns']) ? body['trigger_patterns'] : []);
-    if (body['instructions'] !== undefined) fields['instructions'] = body['instructions'];
-    if (body['tool_names'] !== undefined) fields['tool_names'] = body['tool_names'] ? JSON.stringify(body['tool_names']) : null;
-    if (body['examples'] !== undefined) fields['examples'] = body['examples'] ? JSON.stringify(body['examples']) : null;
-    if (body['tags'] !== undefined) fields['tags'] = body['tags'] ? JSON.stringify(body['tags']) : null;
-    if (body['priority'] !== undefined) fields['priority'] = Number(body['priority']);
-    if (body['version'] !== undefined) fields['version'] = body['version'];
-    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-
-    await db.updateSkill(params['id']!, fields as any);
-    const skill = await db.getSkill(params['id']!);
-    json(res, 200, { skill });
-  }, { auth: true, csrf: true });
-
-  router.del('/api/admin/skills/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    await db.deleteSkill(params['id']!);
-    json(res, 200, { ok: true });
-  }, { auth: true, csrf: true });
-
-  // ── Admin: Worker Agents ──────────────────────────────────
-
-  router.get('/api/admin/worker-agents', async (_req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const workerAgents = await db.listWorkerAgents();
-    json(res, 200, { workerAgents });
-  });
-
-  router.get('/api/admin/worker-agents/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const workerAgent = await db.getWorkerAgent(params['id']!);
-    if (!workerAgent) { json(res, 404, { error: 'Worker agent not found' }); return; }
-    json(res, 200, { workerAgent });
-  });
-
-  router.post('/api/admin/worker-agents', async (req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    if (!body['name'] || !body['description']) {
-      json(res, 400, { error: 'name and description required' });
-      return;
-    }
-    const validatedDescription = requireDetailedDescription(body['description'], 'agent', res);
-    if (!validatedDescription) return;
-
-    const id = 'wa-' + randomUUID().slice(0, 8);
-    await db.createWorkerAgent({
-      id,
-      name: body['name'] as string,
-      description: validatedDescription,
-      system_prompt: (body['system_prompt'] as string) ?? null,
-      tool_names: body['tool_names'] ? JSON.stringify(body['tool_names']) : '[]',
-      persona: (body['persona'] as string) ?? 'agent_worker',
-      trigger_patterns: body['trigger_patterns'] ? JSON.stringify(body['trigger_patterns']) : '[]',
-      task_contract_id: (body['task_contract_id'] as string) ?? null,
-      max_retries: body['max_retries'] !== undefined ? Number(body['max_retries']) : 0,
-      priority: body['priority'] !== undefined ? Number(body['priority']) : 0,
-      enabled: body['enabled'] !== false ? 1 : 0,
-    });
-    const workerAgent = await db.getWorkerAgent(id);
-    json(res, 201, { workerAgent });
-  }, { auth: true, csrf: true });
-
-  router.put('/api/admin/worker-agents/:id', async (req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const existing = await db.getWorkerAgent(params['id']!);
-    if (!existing) { json(res, 404, { error: 'Worker agent not found' }); return; }
-
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-
-    const fields: Record<string, unknown> = {};
-    if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) {
-      const validatedDescription = requireDetailedDescription(body['description'], 'agent', res);
-      if (!validatedDescription) return;
-      fields['description'] = validatedDescription;
-    }
-    if (body['system_prompt'] !== undefined) fields['system_prompt'] = body['system_prompt'];
-    if (body['tool_names'] !== undefined) fields['tool_names'] = body['tool_names'] ? JSON.stringify(body['tool_names']) : '[]';
-    if (body['persona'] !== undefined) fields['persona'] = body['persona'];
-    if (body['trigger_patterns'] !== undefined) fields['trigger_patterns'] = body['trigger_patterns'] ? JSON.stringify(body['trigger_patterns']) : '[]';
-    if (body['task_contract_id'] !== undefined) fields['task_contract_id'] = body['task_contract_id'];
-    if (body['max_retries'] !== undefined) fields['max_retries'] = Number(body['max_retries']);
-    if (body['priority'] !== undefined) fields['priority'] = Number(body['priority']);
-    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-
-    await db.updateWorkerAgent(params['id']!, fields as any);
-    const workerAgent = await db.getWorkerAgent(params['id']!);
-    json(res, 200, { workerAgent });
-  }, { auth: true, csrf: true });
-
-  router.del('/api/admin/worker-agents/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    await db.deleteWorkerAgent(params['id']!);
-    json(res, 200, { ok: true });
-  }, { auth: true, csrf: true });
+  const adminHelpers = { json, readBody, requireDetailedDescription };
+  const adminHelpersWithProviders = { ...adminHelpers, providers };
+  registerGuardrailRoutes(router, db, adminHelpers);
+  registerRoutingRoutes(router, db, adminHelpers);
+  registerModelPricingRoutes(router, db, adminHelpersWithProviders);
+  registerWorkflowRoutes(router, db, adminHelpers);
+  registerTaskPolicyRoutes(router, db, adminHelpers);
+  registerTaskContractRoutes(router, db, adminHelpers);
+  registerIdentityRuleRoutes(router, db, adminHelpers);
+  registerMemoryGovernanceRoutes(router, db, adminHelpers);
+  registerComplianceRuleRoutes(router, db, adminHelpers);
+  registerToolRoutes(router, db, adminHelpers);
+  registerSkillRoutes(router, db, adminHelpers);
+  registerWorkerAgentRoutes(router, db, adminHelpers);
 
   // ── Workflow Runs ──────────────────────────────────────────
 
@@ -1177,138 +1209,6 @@ export function registerAdminRoutes(
     json(res, 200, { event });
   });
 
-  // ── Admin: Human Task Policies ─────────────────────────────
-
-  router.get('/api/admin/task-policies', async (_req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const policies = await db.listHumanTaskPolicies();
-    json(res, 200, { taskPolicies: policies });
-  });
-
-  router.get('/api/admin/task-policies/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const p = await db.getHumanTaskPolicy(params['id']!);
-    if (!p) { json(res, 404, { error: 'Task policy not found' }); return; }
-    json(res, 200, { taskPolicy: p });
-  });
-
-  router.post('/api/admin/task-policies', async (req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    if (!body['name'] || !body['trigger']) { json(res, 400, { error: 'name and trigger required' }); return; }
-    const id = 'htp-' + randomUUID().slice(0, 8);
-    await db.createHumanTaskPolicy({
-      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
-      trigger: body['trigger'] as string, task_type: (body['task_type'] as string) ?? 'approval',
-      default_priority: (body['default_priority'] as string) ?? 'normal',
-      sla_hours: (body['sla_hours'] as number) ?? null, auto_escalate_after_hours: (body['auto_escalate_after_hours'] as number) ?? null,
-      assignment_strategy: (body['assignment_strategy'] as string) ?? 'round-robin',
-      assign_to: (body['assign_to'] as string) ?? null,
-      enabled: body['enabled'] !== false ? 1 : 0,
-    });
-    const taskPolicy = await db.getHumanTaskPolicy(id);
-    json(res, 201, { taskPolicy });
-  }, { auth: true, csrf: true });
-
-  router.put('/api/admin/task-policies/:id', async (req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const existing = await db.getHumanTaskPolicy(params['id']!);
-    if (!existing) { json(res, 404, { error: 'Task policy not found' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    const fields: Record<string, unknown> = {};
-    if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) fields['description'] = body['description'];
-    if (body['trigger'] !== undefined) fields['trigger'] = body['trigger'];
-    if (body['task_type'] !== undefined) fields['task_type'] = body['task_type'];
-    if (body['default_priority'] !== undefined) fields['default_priority'] = body['default_priority'];
-    if (body['sla_hours'] !== undefined) fields['sla_hours'] = body['sla_hours'];
-    if (body['auto_escalate_after_hours'] !== undefined) fields['auto_escalate_after_hours'] = body['auto_escalate_after_hours'];
-    if (body['assignment_strategy'] !== undefined) fields['assignment_strategy'] = body['assignment_strategy'];
-    if (body['assign_to'] !== undefined) fields['assign_to'] = body['assign_to'];
-    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateHumanTaskPolicy(params['id']!, fields as any);
-    const taskPolicy = await db.getHumanTaskPolicy(params['id']!);
-    json(res, 200, { taskPolicy });
-  }, { auth: true, csrf: true });
-
-  router.del('/api/admin/task-policies/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    await db.deleteHumanTaskPolicy(params['id']!);
-    json(res, 200, { ok: true });
-  }, { auth: true, csrf: true });
-
-  // ── Admin: Task Contracts ──────────────────────────────────
-
-  router.get('/api/admin/contracts', async (_req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const contracts = await db.listTaskContracts();
-    json(res, 200, { contracts });
-  });
-
-  router.get('/api/admin/contracts/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const c = await db.getTaskContract(params['id']!);
-    if (!c) { json(res, 404, { error: 'Contract not found' }); return; }
-    json(res, 200, { contract: c });
-  });
-
-  router.post('/api/admin/contracts', async (req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = 'tc-' + randomUUID().slice(0, 8);
-    await db.createTaskContract({
-      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
-      input_schema: body['input_schema'] ? (typeof body['input_schema'] === 'string' ? body['input_schema'] as string : JSON.stringify(body['input_schema'])) : null,
-      output_schema: body['output_schema'] ? (typeof body['output_schema'] === 'string' ? body['output_schema'] as string : JSON.stringify(body['output_schema'])) : null,
-      acceptance_criteria: body['acceptance_criteria'] ? (typeof body['acceptance_criteria'] === 'string' ? body['acceptance_criteria'] as string : JSON.stringify(body['acceptance_criteria'])) : '[]',
-      max_attempts: (body['max_attempts'] as number) ?? null,
-      timeout_ms: (body['timeout_ms'] as number) ?? null,
-      evidence_required: body['evidence_required'] ? (typeof body['evidence_required'] === 'string' ? body['evidence_required'] as string : JSON.stringify(body['evidence_required'])) : null,
-      min_confidence: (body['min_confidence'] as number) ?? null,
-      require_human_review: body['require_human_review'] ? 1 : 0,
-      enabled: body['enabled'] !== false ? 1 : 0,
-    });
-    const contract = await db.getTaskContract(id);
-    json(res, 201, { contract });
-  }, { auth: true, csrf: true });
-
-  router.put('/api/admin/contracts/:id', async (req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const existing = await db.getTaskContract(params['id']!);
-    if (!existing) { json(res, 404, { error: 'Contract not found' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    const fields: Record<string, unknown> = {};
-    if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) fields['description'] = body['description'];
-    if (body['input_schema'] !== undefined) fields['input_schema'] = typeof body['input_schema'] === 'string' ? body['input_schema'] : JSON.stringify(body['input_schema']);
-    if (body['output_schema'] !== undefined) fields['output_schema'] = typeof body['output_schema'] === 'string' ? body['output_schema'] : JSON.stringify(body['output_schema']);
-    if (body['acceptance_criteria'] !== undefined) fields['acceptance_criteria'] = typeof body['acceptance_criteria'] === 'string' ? body['acceptance_criteria'] : JSON.stringify(body['acceptance_criteria']);
-    if (body['max_attempts'] !== undefined) fields['max_attempts'] = body['max_attempts'];
-    if (body['timeout_ms'] !== undefined) fields['timeout_ms'] = body['timeout_ms'];
-    if (body['evidence_required'] !== undefined) fields['evidence_required'] = typeof body['evidence_required'] === 'string' ? body['evidence_required'] : JSON.stringify(body['evidence_required']);
-    if (body['min_confidence'] !== undefined) fields['min_confidence'] = body['min_confidence'];
-    if (body['require_human_review'] !== undefined) fields['require_human_review'] = body['require_human_review'] ? 1 : 0;
-    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateTaskContract(params['id']!, fields as any);
-    const contract = await db.getTaskContract(params['id']!);
-    json(res, 200, { contract });
-  }, { auth: true, csrf: true });
-
-  router.del('/api/admin/contracts/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    await db.deleteTaskContract(params['id']!);
-    json(res, 200, { ok: true });
-  }, { auth: true, csrf: true });
-
   // ── Admin: Cache Policies ──────────────────────────────────
 
   router.get('/api/admin/cache-policies', async (_req, res, _params, auth) => {
@@ -1368,134 +1268,6 @@ export function registerAdminRoutes(
   router.del('/api/admin/cache-policies/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     await db.deleteCachePolicy(params['id']!);
-    json(res, 200, { ok: true });
-  }, { auth: true, csrf: true });
-
-  // ── Admin: Identity Rules ──────────────────────────────────
-
-  router.get('/api/admin/identity-rules', async (_req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const items = await db.listIdentityRules();
-    json(res, 200, { 'identity-rules': items });
-  });
-
-  router.get('/api/admin/identity-rules/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const c = await db.getIdentityRule(params['id']!);
-    if (!c) { json(res, 404, { error: 'Identity rule not found' }); return; }
-    json(res, 200, { 'identity-rule': c });
-  });
-
-  router.post('/api/admin/identity-rules', async (req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = 'ident-' + randomUUID().slice(0, 8);
-    await db.createIdentityRule({
-      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
-      resource: (body['resource'] as string) ?? '*',
-      action: (body['action'] as string) ?? '*',
-      roles: body['roles'] ? (typeof body['roles'] === 'string' ? body['roles'] as string : JSON.stringify(body['roles'])) : '["*"]',
-      scopes: body['scopes'] ? (typeof body['scopes'] === 'string' ? body['scopes'] as string : JSON.stringify(body['scopes'])) : '["*"]',
-      result: (body['result'] as string) ?? 'allow',
-      priority: (body['priority'] as number) ?? 100,
-      enabled: body['enabled'] !== false ? 1 : 0,
-    });
-    const item = await db.getIdentityRule(id);
-    json(res, 201, { 'identity-rule': item });
-  }, { auth: true, csrf: true });
-
-  router.put('/api/admin/identity-rules/:id', async (req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const existing = await db.getIdentityRule(params['id']!);
-    if (!existing) { json(res, 404, { error: 'Identity rule not found' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    const fields: Record<string, unknown> = {};
-    if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) fields['description'] = body['description'];
-    if (body['resource'] !== undefined) fields['resource'] = body['resource'];
-    if (body['action'] !== undefined) fields['action'] = body['action'];
-    if (body['roles'] !== undefined) fields['roles'] = typeof body['roles'] === 'string' ? body['roles'] : JSON.stringify(body['roles']);
-    if (body['scopes'] !== undefined) fields['scopes'] = typeof body['scopes'] === 'string' ? body['scopes'] : JSON.stringify(body['scopes']);
-    if (body['result'] !== undefined) fields['result'] = body['result'];
-    if (body['priority'] !== undefined) fields['priority'] = body['priority'];
-    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateIdentityRule(params['id']!, fields as any);
-    const item = await db.getIdentityRule(params['id']!);
-    json(res, 200, { 'identity-rule': item });
-  }, { auth: true, csrf: true });
-
-  router.del('/api/admin/identity-rules/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    await db.deleteIdentityRule(params['id']!);
-    json(res, 200, { ok: true });
-  }, { auth: true, csrf: true });
-
-  // ── Admin: Memory Governance ───────────────────────────────
-
-  router.get('/api/admin/memory-governance', async (_req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const items = await db.listMemoryGovernance();
-    json(res, 200, { 'memory-governance': items });
-  });
-
-  router.get('/api/admin/memory-governance/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const c = await db.getMemoryGovernance(params['id']!);
-    if (!c) { json(res, 404, { error: 'Memory governance rule not found' }); return; }
-    json(res, 200, { 'memory-governance-rule': c });
-  });
-
-  router.post('/api/admin/memory-governance', async (req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = 'mgov-' + randomUUID().slice(0, 8);
-    await db.createMemoryGovernance({
-      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
-      memory_types: body['memory_types'] ? (typeof body['memory_types'] === 'string' ? body['memory_types'] as string : JSON.stringify(body['memory_types'])) : '["*"]',
-      tenant_id: (body['tenant_id'] as string) ?? null,
-      block_patterns: body['block_patterns'] ? (typeof body['block_patterns'] === 'string' ? body['block_patterns'] as string : JSON.stringify(body['block_patterns'])) : '[]',
-      redact_patterns: body['redact_patterns'] ? (typeof body['redact_patterns'] === 'string' ? body['redact_patterns'] as string : JSON.stringify(body['redact_patterns'])) : '[]',
-      max_age: (body['max_age'] as string) ?? null,
-      max_entries: (body['max_entries'] as number) ?? null,
-      enabled: body['enabled'] !== false ? 1 : 0,
-    });
-    const item = await db.getMemoryGovernance(id);
-    json(res, 201, { 'memory-governance-rule': item });
-  }, { auth: true, csrf: true });
-
-  router.put('/api/admin/memory-governance/:id', async (req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const existing = await db.getMemoryGovernance(params['id']!);
-    if (!existing) { json(res, 404, { error: 'Memory governance rule not found' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    const fields: Record<string, unknown> = {};
-    if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) fields['description'] = body['description'];
-    if (body['memory_types'] !== undefined) fields['memory_types'] = typeof body['memory_types'] === 'string' ? body['memory_types'] : JSON.stringify(body['memory_types']);
-    if (body['tenant_id'] !== undefined) fields['tenant_id'] = body['tenant_id'];
-    if (body['block_patterns'] !== undefined) fields['block_patterns'] = typeof body['block_patterns'] === 'string' ? body['block_patterns'] : JSON.stringify(body['block_patterns']);
-    if (body['redact_patterns'] !== undefined) fields['redact_patterns'] = typeof body['redact_patterns'] === 'string' ? body['redact_patterns'] : JSON.stringify(body['redact_patterns']);
-    if (body['max_age'] !== undefined) fields['max_age'] = body['max_age'];
-    if (body['max_entries'] !== undefined) fields['max_entries'] = body['max_entries'];
-    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateMemoryGovernance(params['id']!, fields as any);
-    const item = await db.getMemoryGovernance(params['id']!);
-    json(res, 200, { 'memory-governance-rule': item });
-  }, { auth: true, csrf: true });
-
-  router.del('/api/admin/memory-governance/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    await db.deleteMemoryGovernance(params['id']!);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
@@ -2417,72 +2189,6 @@ export function registerAdminRoutes(
   router.del('/api/admin/collaboration-sessions/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     await db.deleteCollaborationSession(params['id']!);
-    json(res, 200, { ok: true });
-  }, { auth: true, csrf: true });
-
-  // ── Admin: Compliance Rules ────────────────────────────────
-
-  router.get('/api/admin/compliance-rules', async (_req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const items = await db.listComplianceRules();
-    json(res, 200, { 'compliance-rules': items });
-  });
-
-  router.get('/api/admin/compliance-rules/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const c = await db.getComplianceRule(params['id']!);
-    if (!c) { json(res, 404, { error: 'Compliance rule not found' }); return; }
-    json(res, 200, { 'compliance-rule': c });
-  });
-
-  router.post('/api/admin/compliance-rules', async (req, res, _params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = 'comp-' + randomUUID().slice(0, 8);
-    await db.createComplianceRule({
-      id, name: body['name'] as string, description: (body['description'] as string) ?? null,
-      rule_type: (body['rule_type'] as string) ?? 'retention',
-      target_resource: (body['target_resource'] as string) ?? '*',
-      retention_days: (body['retention_days'] as number) ?? null,
-      region: (body['region'] as string) ?? null,
-      consent_purpose: (body['consent_purpose'] as string) ?? null,
-      action: (body['action'] as string) ?? 'notify',
-      config: body['config'] != null ? (typeof body['config'] === 'string' ? body['config'] as string : JSON.stringify(body['config'])) : null,
-      enabled: body['enabled'] !== false ? 1 : 0,
-    });
-    const item = await db.getComplianceRule(id);
-    json(res, 201, { 'compliance-rule': item });
-  }, { auth: true, csrf: true });
-
-  router.put('/api/admin/compliance-rules/:id', async (req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const existing = await db.getComplianceRule(params['id']!);
-    if (!existing) { json(res, 404, { error: 'Compliance rule not found' }); return; }
-    const raw = await readBody(req);
-    let body: Record<string, unknown>;
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
-    const fields: Record<string, unknown> = {};
-    if (body['name'] !== undefined) fields['name'] = body['name'];
-    if (body['description'] !== undefined) fields['description'] = body['description'];
-    if (body['rule_type'] !== undefined) fields['rule_type'] = body['rule_type'];
-    if (body['target_resource'] !== undefined) fields['target_resource'] = body['target_resource'];
-    if (body['retention_days'] !== undefined) fields['retention_days'] = body['retention_days'];
-    if (body['region'] !== undefined) fields['region'] = body['region'];
-    if (body['consent_purpose'] !== undefined) fields['consent_purpose'] = body['consent_purpose'];
-    if (body['action'] !== undefined) fields['action'] = body['action'];
-    if (body['config'] !== undefined) fields['config'] = body['config'] != null ? (typeof body['config'] === 'string' ? body['config'] : JSON.stringify(body['config'])) : null;
-    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateComplianceRule(params['id']!, fields as any);
-    const item = await db.getComplianceRule(params['id']!);
-    json(res, 200, { 'compliance-rule': item });
-  }, { auth: true, csrf: true });
-
-  router.del('/api/admin/compliance-rules/:id', async (_req, res, params, auth) => {
-    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    await db.deleteComplianceRule(params['id']!);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 

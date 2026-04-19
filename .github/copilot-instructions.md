@@ -32,6 +32,20 @@
 - Ensure runtime metadata captures which strategy, contracts, and evaluations were used so observability and audits can explain model behavior after the fact.
 - Prefer app-wide reusable helpers in `@weaveintel/prompts` for prompt execution and strategy overlays; GeneWeave should consume these helpers, not duplicate them.
 
+## Phase 8 Observability and Runtime Adoption
+- Add new observability schemas in shared packages first (`@weaveintel/core` contracts, `@weaveintel/observability` helpers) so prompts, skills, agents, and tools can emit one comparable trace shape.
+- Keep capability telemetry grounded in code, not prompt text: prompt/skill/agent runtime metadata must be emitted from runtime hooks and stored in DB-backed traces.
+- When GeneWeave adopts new shared observability helpers, wire them into existing trace persistence and dashboard views instead of creating app-only telemetry stores.
+- Capability descriptions in traces must remain model-facing and explicit enough to support future routing, audits, and replay review.
+
+## Phase 9 Modularization and Reusability
+- Put reusable admin capability schema primitives in shared packages first (for example, `@weaveintel/core`) and keep GeneWeave as a consumer.
+- For large GeneWeave files, extract by capability domain (prompt tabs, skill tabs, routes, runtime units) and re-compose from index modules rather than appending new blocks.
+- New capability records must stay DB-driven end-to-end: schema + adapter + admin CRUD + runtime resolution in one change set.
+- New prompt/skill/tool/agent-facing admin fields must preserve model-facing descriptions; avoid generic labels for LLM-discovered entities.
+- New features must wire shared observability/eval hooks by default so prompts, skills, agents, and tools emit comparable telemetry without app-only pipelines.
+- When modularizing UI/admin surfaces, preserve operator UX: explicit labels, safe defaults, and JSON hints for advanced fields.
+
 ## LLM-Callable Metadata
 - Enforce detailed model-facing descriptions for prompts, skills, tools, and agents through shared validation helpers in `@weaveintel/core`.
 - Prefer shared prompt runtime helpers in `@weaveintel/prompts` for DB-backed rendering with lifecycle hooks and evaluations.
@@ -106,4 +120,26 @@
 ### LLM-Callable Metadata Quality
 - Prompt version descriptions, experiment descriptions, and variant labels should be explicit and model-facing when they influence runtime behavior.
 - Prefer structured metadata fields over freeform text for fields consumed by routing/selection logic.
+
+## Phase 7 Prompt Evaluation and Optimization (`@weaveintel/prompts` + `@weaveintel/evals` + GeneWeave)
+
+### Shared Package-First Evaluation Runtime
+- Implement prompt evaluation logic in shared packages first (`@weaveintel/prompts`, `@weaveintel/evals`) and keep GeneWeave as a consumer of package APIs.
+- Use dataset-driven prompt evaluation (`PromptEvalDataset`) with explicit case payloads, expected outputs, and rubric criteria; avoid app-local ad-hoc scoring logic.
+- Prefer reusable rubric judge adapters and normalized score helpers from `@weaveintel/evals` so scoring behavior remains comparable across prompts, skills, and agents.
+
+### DB-Driven Prompt Optimization and Governance
+- Keep optimizer selection and configuration DB-managed via optimizer records (key, kind, config, enabled), not hardcoded app conditionals.
+- Persist evaluation runs and optimization runs as first-class records for auditability, rollback decisions, and trend analysis.
+- Require model-facing descriptions for optimizer records and evaluation artifacts that can influence LLM discovery/routing.
+
+### Grounding Reality for Optimization Loops
+- Treat optimization prompts as hypotheses; always verify candidate quality with deterministic evaluation passes before promotion.
+- Runtime promotion decisions (accept/reject candidate versions) must be code-level and data-backed, never instruction-only.
+- Capture baseline-vs-candidate evidence in metadata (`avgScore`, pass/fail counts, diff metadata, selected optimizer key) to support observability and postmortems.
+
+### GeneWeave Admin and UX Expectations
+- Expose Phase 7 entities in admin with explicit labels and JSON hints: eval datasets, eval runs, optimizers, optimization runs.
+- Keep defaults safe for operators (e.g., draft status, conservative thresholds, deterministic starter optimizer).
+- Ensure admin CRUD stays aligned with DB schema and shared runtime contracts when fields evolve.
 

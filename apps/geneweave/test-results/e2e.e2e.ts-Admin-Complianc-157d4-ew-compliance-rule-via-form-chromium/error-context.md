@@ -43,68 +43,83 @@ Received: 403
       - generic [ref=e17]: Recent Chats
       - generic [ref=e18] [cursor=pointer]:
         - generic [ref=e19]:
-          - generic [ref=e20]: Analyze this mini dataset and give me ke…
-          - generic [ref=e21]: 4/18/2026, 10:21:40 PM
+          - generic [ref=e20]: What is the capital of France?
+          - generic [ref=e21]: 4/19/2026, 2:33:20 AM
         - button "×" [ref=e22]
-    - button "⎋ Log Out" [ref=e25] [cursor=pointer]:
+      - generic [ref=e23] [cursor=pointer]:
+        - generic [ref=e24]:
+          - generic [ref=e25]: New Chat
+          - generic [ref=e26]: 4/19/2026, 2:33:14 AM
+        - button "×" [ref=e27]
+    - button "⎋ Log Out" [ref=e30] [cursor=pointer]:
       - text: ⎋
-      - generic [ref=e26]: Log Out
-  - generic [ref=e28]:
-    - heading "Administration" [level=2] [ref=e29]
-    - generic [ref=e30]:
-      - generic [ref=e31]:
-        - generic [ref=e32]: 🤖 Core AI
-        - button "Prompts" [ref=e33] [cursor=pointer]
-        - button "Skills" [ref=e34] [cursor=pointer]
-        - button "Worker Agents" [ref=e35] [cursor=pointer]
-        - button "Guardrails" [ref=e36] [cursor=pointer]
-        - button "Routing" [ref=e37] [cursor=pointer]
-        - button "Model Pricing" [ref=e38] [cursor=pointer]
-        - button "Workflows" [ref=e39] [cursor=pointer]
-        - button "Tools" [ref=e40] [cursor=pointer]
-        - generic [ref=e41]: ⚖️ Governance
-        - button "Task Policies" [ref=e42] [cursor=pointer]
-        - button "Contracts" [ref=e43] [cursor=pointer]
-        - button "Identity Rules" [ref=e44] [cursor=pointer]
-        - button "Memory Gov" [ref=e45] [cursor=pointer]
-        - button "Memory Rules" [ref=e46] [cursor=pointer]
-        - button "Compliance" [ref=e47] [cursor=pointer]
-        - generic [ref=e48]: 🔌 Integrations
-        - button "Search" [ref=e49] [cursor=pointer]
-        - button "HTTP" [ref=e50] [cursor=pointer]
-        - button "Social" [ref=e51] [cursor=pointer]
-        - button "Enterprise" [ref=e52] [cursor=pointer]
-        - button "Registry" [ref=e53] [cursor=pointer]
-        - generic [ref=e54]: ⚡ Automation
-        - button "Triggers" [ref=e55] [cursor=pointer]
-        - button "Replay" [ref=e56] [cursor=pointer]
-        - button "Cache" [ref=e57] [cursor=pointer]
-        - button "Reliability" [ref=e58] [cursor=pointer]
-        - generic [ref=e59]: 🏗️ Infrastructure
-        - button "Sandbox" [ref=e60] [cursor=pointer]
-        - button "Extraction" [ref=e61] [cursor=pointer]
-        - button "Artifacts" [ref=e62] [cursor=pointer]
-        - button "Tenants" [ref=e63] [cursor=pointer]
-        - generic [ref=e64]: 🧩 Advanced
-        - button "Collaboration" [ref=e65] [cursor=pointer]
-        - button "Graph" [ref=e66] [cursor=pointer]
-        - button "Plugins" [ref=e67] [cursor=pointer]
-        - generic [ref=e68]: 🛠️ Developer
-        - button "Scaffolds" [ref=e69] [cursor=pointer]
-        - button "Recipes" [ref=e70] [cursor=pointer]
-        - button "Widgets" [ref=e71] [cursor=pointer]
-        - button "Validation" [ref=e72] [cursor=pointer]
-        - generic [ref=e73]: 📊 Monitoring
-        - button "Workflow Runs" [ref=e74] [cursor=pointer]
-        - button "Guardrail Evals" [ref=e75] [cursor=pointer]
-        - button "Memory Extraction" [ref=e76] [cursor=pointer]
-        - generic [ref=e77]: ℹ️ System
-      - generic [ref=e78]:
-        - heading "Prompts" [level=3] [ref=e79]
-        - generic [ref=e80]:
-          - generic [ref=e81]: 0 items
-          - button "+ New" [ref=e82] [cursor=pointer]
-        - generic [ref=e83]: No records found.
+      - generic [ref=e31]: Log Out
+  - generic [ref=e33]:
+    - heading "Administration" [level=2] [ref=e34]
+    - generic [ref=e35]:
+      - generic [ref=e36]:
+        - generic [ref=e37]: 🤖 Core AI
+        - button "Prompts" [ref=e38] [cursor=pointer]
+        - button "Prompt Versions" [ref=e39] [cursor=pointer]
+        - button "Prompt Experiments" [ref=e40] [cursor=pointer]
+        - button "Prompt Eval Datasets" [ref=e41] [cursor=pointer]
+        - button "Prompt Eval Runs" [ref=e42] [cursor=pointer]
+        - button "Prompt Optimizers" [ref=e43] [cursor=pointer]
+        - button "Prompt Optimization Runs" [ref=e44] [cursor=pointer]
+        - button "Frameworks" [ref=e45] [cursor=pointer]
+        - button "Fragments" [ref=e46] [cursor=pointer]
+        - button "Output Contracts" [ref=e47] [cursor=pointer]
+        - button "Strategies" [ref=e48] [cursor=pointer]
+        - button "Skills" [ref=e49] [cursor=pointer]
+        - button "Worker Agents" [ref=e50] [cursor=pointer]
+        - button "Guardrails" [ref=e51] [cursor=pointer]
+        - button "Routing" [ref=e52] [cursor=pointer]
+        - button "Model Pricing" [ref=e53] [cursor=pointer]
+        - button "Workflows" [ref=e54] [cursor=pointer]
+        - button "Tools" [ref=e55] [cursor=pointer]
+        - generic [ref=e56]: ⚖️ Governance
+        - button "Task Policies" [ref=e57] [cursor=pointer]
+        - button "Contracts" [ref=e58] [cursor=pointer]
+        - button "Identity Rules" [ref=e59] [cursor=pointer]
+        - button "Memory Gov" [ref=e60] [cursor=pointer]
+        - button "Memory Rules" [ref=e61] [cursor=pointer]
+        - button "Compliance" [ref=e62] [cursor=pointer]
+        - generic [ref=e63]: 🔌 Integrations
+        - button "Search" [ref=e64] [cursor=pointer]
+        - button "HTTP" [ref=e65] [cursor=pointer]
+        - button "Social" [ref=e66] [cursor=pointer]
+        - button "Enterprise" [ref=e67] [cursor=pointer]
+        - button "Registry" [ref=e68] [cursor=pointer]
+        - generic [ref=e69]: ⚡ Automation
+        - button "Triggers" [ref=e70] [cursor=pointer]
+        - button "Replay" [ref=e71] [cursor=pointer]
+        - button "Cache" [ref=e72] [cursor=pointer]
+        - button "Reliability" [ref=e73] [cursor=pointer]
+        - generic [ref=e74]: 🏗️ Infrastructure
+        - button "Sandbox" [ref=e75] [cursor=pointer]
+        - button "Extraction" [ref=e76] [cursor=pointer]
+        - button "Artifacts" [ref=e77] [cursor=pointer]
+        - button "Tenants" [ref=e78] [cursor=pointer]
+        - generic [ref=e79]: 🧩 Advanced
+        - button "Collaboration" [ref=e80] [cursor=pointer]
+        - button "Graph" [ref=e81] [cursor=pointer]
+        - button "Plugins" [ref=e82] [cursor=pointer]
+        - generic [ref=e83]: 🛠️ Developer
+        - button "Scaffolds" [ref=e84] [cursor=pointer]
+        - button "Recipes" [ref=e85] [cursor=pointer]
+        - button "Widgets" [ref=e86] [cursor=pointer]
+        - button "Validation" [ref=e87] [cursor=pointer]
+        - generic [ref=e88]: 📊 Monitoring
+        - button "Workflow Runs" [ref=e89] [cursor=pointer]
+        - button "Guardrail Evals" [ref=e90] [cursor=pointer]
+        - button "Memory Extraction" [ref=e91] [cursor=pointer]
+        - generic [ref=e92]: ℹ️ System
+      - generic [ref=e93]:
+        - heading "Prompts" [level=3] [ref=e94]
+        - generic [ref=e95]:
+          - generic [ref=e96]: 0 items
+          - button "+ New" [ref=e97] [cursor=pointer]
+        - generic [ref=e98]: No records found.
 ```
 
 # Test source

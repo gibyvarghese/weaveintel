@@ -1,152 +1,693 @@
 /**
- * @weaveintel/skills — Agent Skills capability
+ * @weaveintel/skills — Text-first Skills runtime
  *
- * Skills are reusable, named units of capability that agents can discover and
- * apply automatically.  Unlike tools (executable functions), a skill bundles:
- *
- *  - Trigger conditions  (when should the agent activate this skill?)
- *  - Step-by-step instructions  (injected as a system-prompt snippet)
- *  - Associated tool names  (tools to make available when the skill is active)
- *  - Examples  (few-shot demonstrations that guide the model)
- *
- * Design goals (informed by Anthropic's "Building Effective Agents" research):
- *  1. Simplicity — no embeddings, no heavy ML; pure pattern matching + priority.
- *  2. Composability — skills stack on top of any base system prompt.
- *  3. Discoverability — agents find skills from user messages automatically.
- *  4. Transparency — injected instructions are human-readable, not opaque.
- *
- * Typical flow:
- *   const registry = createSkillRegistry();
- *   registry.register(mySkill);
- *   const matches = registry.discover(userMessage, { maxSkills: 3 });
- *   const augmented = applySkillsToPrompt(baseSystemPrompt, matches);
- *   // pass augmented to the agent as its systemPrompt
+ * Skills are reusable semantic capability packages, not keyword maps.
+ * A skill describes when/why/how to execute, completion expectations,
+ * governance constraints, and optional tool guidance.
  */
 
-// ─── Types ────────────────────────────────────────────────────
+import type { CapabilityTelemetrySummary } from '@weaveintel/core';
 
 export type SkillCategory =
-  | 'retrieval'
-  | 'computation'
-  | 'communication'
-  | 'data-processing'
-  | 'planning'
+  | 'research'
   | 'analysis'
-  | 'code'
-  | 'web'
-  | 'general';
+  | 'planning'
+  | 'extraction'
+  | 'synthesis'
+  | 'compliance'
+  | 'coding'
+  | 'general'
+  | string;
 
-/**
- * SkillDefinition — the core contract for a skill.
- *
- * Fields map 1-to-1 to the `skills` table in geneWeave so that skills can be
- * stored in the DB, loaded at runtime, and applied to agents automatically.
- */
+export type SkillInvocationMode =
+  | 'advisory'
+  | 'reasoning_support'
+  | 'extraction'
+  | 'structured_output'
+  | 'tool_assisted'
+  | 'side_effect_eligible';
+
+export type SkillCompletionState =
+  | 'complete'
+  | 'complete_with_warnings'
+  | 'incomplete'
+  | 'ambiguous'
+  | 'blocked_by_policy'
+  | 'blocked_by_missing_context';
+
+export interface SkillExample {
+  readonly input: string;
+  readonly output: string;
+  readonly notes?: string;
+}
+
+export interface SkillCompletionContract {
+  readonly narrative: string;
+  readonly requiredEvidence?: readonly string[];
+  readonly confidenceBehavior?: string;
+  readonly ambiguityBehavior?: string;
+  readonly humanReviewWhen?: string;
+}
+
+export interface SkillPolicyControls {
+  readonly allowedTools?: readonly string[];
+  readonly disallowedTools?: readonly string[];
+  readonly sideEffectsAllowed?: boolean;
+  readonly requiresApproval?: boolean;
+  readonly sensitivityHandling?: string;
+  readonly runtimeBudgetMs?: number;
+  readonly tenantBoundary?: 'tenant' | 'global' | 'application';
+}
+
+export interface SkillOutputContract {
+  readonly narrative: string;
+  readonly schemaJson?: string;
+}
+
 export interface SkillDefinition {
-  /** Unique identifier */
   readonly id: string;
-  /** Short human-readable name shown in the admin UI */
   readonly name: string;
-  /**
-   * Description of what this skill does.  Shown in the admin UI and also
-   * used as fallback for pattern matching when triggerPatterns is empty.
-   */
-  readonly description: string;
-  /**
-   * Broad functional category.  Used to filter skills by type and group
-   * them in the admin UI.
-   */
-  readonly category: SkillCategory;
-  /**
-   * Phrases / intent signals that trigger this skill.
-   * The discovery algorithm checks whether the user's message contains any of
-   * these patterns (case-insensitive substring match).
-   *
-   * Good patterns are short, distinctive phrases:
-   *   ["analyze", "chart", "trend", "data set"] — data analysis skill
-   *   ["summarize", "tldr", "brief"] — summarization skill
-   *   ["search the web", "look it up", "browse"] — web-research skill
-   */
-  readonly triggerPatterns: readonly string[];
-  /**
-   * System-prompt snippet injected when this skill is active.
-   * Write it as if speaking to the agent:
-   *   "When asked to analyze data, follow this procedure: ..."
-   *
-   * Best practices (Anthropic ACI guidelines):
-   *   - Include step-by-step instructions
-   *   - List edge cases and what NOT to do
-   *   - Mention which tools to use and in what order
-   *   - Keep under ~400 tokens to avoid drowning the base prompt
-   */
-  readonly instructions: string;
-  /**
-   * Tool names (from the agent's ToolRegistry) to make available when this
-   * skill is active.  If empty/undefined, skill only injects instructions.
-   */
-  readonly toolNames?: readonly string[];
-  /**
-   * Optional few-shot examples.  These are appended to the instructions
-   * block so the model sees concrete demonstrations.
-   */
-  readonly examples?: ReadonlyArray<{ readonly input: string; readonly output: string }>;
-  /** Searchable tags for the admin UI and future semantic discovery. */
-  readonly tags?: readonly string[];
-  /**
-   * Tie-breaking priority when multiple skills score the same.
-   * Higher = preferred. Default 0.
-   */
-  readonly priority?: number;
   readonly version?: string;
-  /** Only enabled skills participate in discovery. */
+  readonly enabled?: boolean;
+  readonly category?: SkillCategory;
+
+  readonly summary: string;
+  readonly purpose?: string;
+  readonly whenToUse?: string;
+  readonly whenNotToUse?: string;
+  readonly requiredContext?: string;
+  readonly helpfulContext?: string;
+  readonly reasoningGuidance?: string;
+  readonly executionGuidance?: string;
+  readonly outputGuidance?: string;
+  readonly completionGuidance?: string;
+  readonly ambiguityGuidance?: string;
+  readonly failureGuidance?: string;
+  readonly notes?: string;
+  readonly extensionNotes?: string;
+
+  readonly examples?: readonly SkillExample[];
+  readonly completionContract?: SkillCompletionContract;
+  readonly policy?: SkillPolicyControls;
+  readonly outputContract?: SkillOutputContract;
+
+  readonly tags?: readonly string[];
+  readonly description?: string;
+  readonly instructions?: string;
+  readonly triggerPatterns?: readonly string[];
+  readonly toolNames?: readonly string[];
+  readonly priority?: number;
+}
+
+export interface SkillExtensionOverlay {
+  readonly skillId: string;
+  readonly source: string;
+  readonly summaryAppend?: string;
+  readonly purposeAppend?: string;
+  readonly whenToUseAppend?: string;
+  readonly whenNotToUseAppend?: string;
+  readonly requiredContextAppend?: string;
+  readonly helpfulContextAppend?: string;
+  readonly reasoningGuidanceAppend?: string;
+  readonly executionGuidanceAppend?: string;
+  readonly outputGuidanceAppend?: string;
+  readonly completionGuidanceAppend?: string;
+  readonly ambiguityGuidanceAppend?: string;
+  readonly failureGuidanceAppend?: string;
+  readonly notesAppend?: string;
+  readonly examplesAppend?: readonly SkillExample[];
+  readonly stricterPolicy?: SkillPolicyControls;
   readonly enabled?: boolean;
 }
 
-// ─── Discovery ────────────────────────────────────────────────
+export interface SkillMatch {
+  readonly skill: SkillDefinition;
+  readonly score: number;
+  readonly matchedPatterns: readonly string[];
+  readonly rationale: string;
+  readonly source: 'semantic' | 'reasoning';
+}
 
 export interface SkillDiscoveryOptions {
-  /** Maximum skills to return.  Default 3. */
   maxSkills?: number;
-  /**
-   * Minimum relevance score [0-1] to include a skill.
-   * Default 0.1 — skills that match at least one pattern always qualify.
-   */
   minScore?: number;
-  /** Restrict discovery to these categories. */
   categories?: SkillCategory[];
 }
 
-/** A skill that was matched for a given user query. */
-export interface SkillMatch {
-  readonly skill: SkillDefinition;
-  /** Normalized relevance score [0-1]. */
-  readonly score: number;
-  /** Which triggerPatterns were found in the query. */
-  readonly matchedPatterns: readonly string[];
+export interface SkillReasoningDecision {
+  readonly selectedSkillIds: readonly string[];
+  readonly rejectedSkillIds?: readonly string[];
+  readonly rationale?: string;
+  readonly confidence?: number;
+  readonly useNoSkillPath?: boolean;
 }
 
-// ─── Registry ─────────────────────────────────────────────────
+export type SkillReasoningSelector = (args: {
+  query: string;
+  mode: SkillInvocationMode;
+  candidates: readonly SkillMatch[];
+  context?: Record<string, unknown>;
+}) => Promise<SkillReasoningDecision>;
+
+export type SkillPolicyEvaluator = (args: {
+  skill: SkillDefinition;
+  mode: SkillInvocationMode;
+  query: string;
+  context?: Record<string, unknown>;
+}) => {
+  allowed: boolean;
+  reason?: string;
+  enforcedAllowedTools?: readonly string[];
+};
+
+export interface SkillActivationOptions {
+  maxCandidates?: number;
+  maxSelected?: number;
+  minScore?: number;
+  mode?: SkillInvocationMode;
+  context?: Record<string, unknown>;
+  overlays?: readonly SkillExtensionOverlay[];
+  selector?: SkillReasoningSelector;
+  policyEvaluator?: SkillPolicyEvaluator;
+}
+
+export interface SkillActivationResult {
+  readonly considered: readonly SkillMatch[];
+  readonly selected: readonly SkillMatch[];
+  readonly rejected: ReadonlyArray<{ skillId: string; reason: string }>;
+  readonly noSkillReason?: string;
+  readonly mode: SkillInvocationMode;
+}
+
+export interface SkillCompletionEvaluation {
+  readonly state: SkillCompletionState;
+  readonly reasons: readonly string[];
+  readonly missingEvidence: readonly string[];
+  readonly needsHumanReview: boolean;
+}
+
+export interface SkillLifecycleHooks {
+  onActivation?(args: {
+    query: string;
+    activation: SkillActivationResult;
+  }): void;
+  onCompletion?(args: {
+    skill: SkillDefinition;
+    result: SkillCompletionEvaluation;
+  }): void;
+  onTelemetry?(args: {
+    stage: 'activation' | 'completion';
+    telemetry: CapabilityTelemetrySummary;
+  }): void;
+}
 
 export interface SkillRegistry {
-  /** Register a skill.  Replaces any existing skill with the same id. */
   register(skill: SkillDefinition): void;
-  /** Remove a skill by id. */
   unregister(skillId: string): void;
-  /** Get a skill by id. */
   get(skillId: string): SkillDefinition | undefined;
-  /** List all registered skills (regardless of enabled flag). */
   list(): SkillDefinition[];
-  /**
-   * Discover skills relevant to a user message.
-   *
-   * Algorithm:
-   *  1. Skip disabled skills.
-   *  2. For each skill, count how many triggerPatterns appear in the query.
-   *  3. score = (matchCount / totalPatterns) * (1 + priority * 0.05)
-   *  4. Sort descending by score, then priority, then name (stable).
-   *  5. Return top-maxSkills results with score >= minScore.
-   */
   discover(query: string, opts?: SkillDiscoveryOptions): SkillMatch[];
+  activate(query: string, opts?: SkillActivationOptions): Promise<SkillActivationResult>;
+}
+
+const STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has', 'have', 'if', 'in', 'into', 'is', 'it',
+  'of', 'on', 'or', 'such', 'that', 'the', 'their', 'then', 'there', 'these', 'this', 'to', 'was', 'will', 'with',
+]);
+
+function normalizeText(raw: string | undefined): string {
+  return (raw ?? '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function tokenize(raw: string | undefined): string[] {
+  const text = normalizeText(raw);
+  if (!text) return [];
+  return text
+    .split(' ')
+    .filter((t) => t.length > 2 && !STOP_WORDS.has(t));
+}
+
+function termFrequency(tokens: readonly string[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const token of tokens) {
+    out.set(token, (out.get(token) ?? 0) + 1);
+  }
+  return out;
+}
+
+function cosineSimilarity(a: Map<string, number>, b: Map<string, number>): number {
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (const val of a.values()) normA += val * val;
+  for (const val of b.values()) normB += val * val;
+
+  if (normA === 0 || normB === 0) return 0;
+
+  for (const [term, aval] of a.entries()) {
+    dot += aval * (b.get(term) ?? 0);
+  }
+
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+function appendSection(base: string | undefined, extra: string | undefined): string | undefined {
+  const left = base?.trim();
+  const right = extra?.trim();
+  if (!left && !right) return undefined;
+  if (!left) return right;
+  if (!right) return left;
+  return `${left}\n\n${right}`;
+}
+
+function applyStricterPolicy(base: SkillPolicyControls | undefined, overlay: SkillPolicyControls | undefined): SkillPolicyControls | undefined {
+  if (!base && !overlay) return undefined;
+  if (!base) return overlay;
+  if (!overlay) return base;
+
+  const allowedTools = overlay.allowedTools ?? base.allowedTools;
+  const disallowedTools = [...new Set([...(base.disallowedTools ?? []), ...(overlay.disallowedTools ?? [])])];
+
+  return {
+    allowedTools,
+    disallowedTools: disallowedTools.length ? disallowedTools : undefined,
+    sideEffectsAllowed: base.sideEffectsAllowed === false || overlay.sideEffectsAllowed === false ? false : (overlay.sideEffectsAllowed ?? base.sideEffectsAllowed),
+    requiresApproval: base.requiresApproval || overlay.requiresApproval,
+    sensitivityHandling: overlay.sensitivityHandling ?? base.sensitivityHandling,
+    runtimeBudgetMs: Math.min(
+      base.runtimeBudgetMs ?? Number.POSITIVE_INFINITY,
+      overlay.runtimeBudgetMs ?? Number.POSITIVE_INFINITY,
+    ),
+    tenantBoundary: overlay.tenantBoundary ?? base.tenantBoundary,
+  };
+}
+
+export function defineSkill(def: SkillDefinition): SkillDefinition {
+  const summary = def.summary?.trim() || def.description?.trim() || '';
+  const executionGuidance = def.executionGuidance ?? def.instructions;
+  return {
+    enabled: true,
+    version: '1.0',
+    category: 'general',
+    priority: 0,
+    triggerPatterns: [],
+    toolNames: [],
+    ...def,
+    summary,
+    executionGuidance,
+  };
+}
+
+export function withSkillOverlay(base: SkillDefinition, overlay: SkillExtensionOverlay): SkillDefinition {
+  if (base.id !== overlay.skillId) return base;
+
+  const mergedPolicy = applyStricterPolicy(base.policy, overlay.stricterPolicy);
+  const mergedExamples = [...(base.examples ?? []), ...(overlay.examplesAppend ?? [])];
+
+  return {
+    ...base,
+    enabled: overlay.enabled ?? base.enabled,
+    summary: appendSection(base.summary, overlay.summaryAppend) ?? base.summary,
+    purpose: appendSection(base.purpose, overlay.purposeAppend),
+    whenToUse: appendSection(base.whenToUse, overlay.whenToUseAppend),
+    whenNotToUse: appendSection(base.whenNotToUse, overlay.whenNotToUseAppend),
+    requiredContext: appendSection(base.requiredContext, overlay.requiredContextAppend),
+    helpfulContext: appendSection(base.helpfulContext, overlay.helpfulContextAppend),
+    reasoningGuidance: appendSection(base.reasoningGuidance, overlay.reasoningGuidanceAppend),
+    executionGuidance: appendSection(base.executionGuidance, overlay.executionGuidanceAppend),
+    outputGuidance: appendSection(base.outputGuidance, overlay.outputGuidanceAppend),
+    completionGuidance: appendSection(base.completionGuidance, overlay.completionGuidanceAppend),
+    ambiguityGuidance: appendSection(base.ambiguityGuidance, overlay.ambiguityGuidanceAppend),
+    failureGuidance: appendSection(base.failureGuidance, overlay.failureGuidanceAppend),
+    notes: appendSection(base.notes, overlay.notesAppend),
+    examples: mergedExamples.length ? mergedExamples : undefined,
+    policy: mergedPolicy,
+    extensionNotes: appendSection(base.extensionNotes, `Overlay source: ${overlay.source}`),
+  };
+}
+
+export function applySkillOverlays(
+  skills: readonly SkillDefinition[],
+  overlays: readonly SkillExtensionOverlay[] = [],
+): SkillDefinition[] {
+  if (!overlays.length) return [...skills];
+  const overlayBySkill = new Map<string, SkillExtensionOverlay[]>();
+  for (const overlay of overlays) {
+    const existing = overlayBySkill.get(overlay.skillId) ?? [];
+    existing.push(overlay);
+    overlayBySkill.set(overlay.skillId, existing);
+  }
+
+  return skills.map((skill) => {
+    const skillOverlays = overlayBySkill.get(skill.id) ?? [];
+    return skillOverlays.reduce((acc, item) => withSkillOverlay(acc, item), skill);
+  });
+}
+
+function skillSemanticDocument(skill: SkillDefinition): string {
+  const parts = [
+    skill.name,
+    skill.summary,
+    skill.purpose,
+    skill.whenToUse,
+    skill.whenNotToUse,
+    skill.requiredContext,
+    skill.helpfulContext,
+    skill.reasoningGuidance,
+    skill.executionGuidance,
+    skill.outputGuidance,
+    skill.completionGuidance,
+    skill.ambiguityGuidance,
+    skill.failureGuidance,
+    skill.notes,
+    skill.description,
+    skill.instructions,
+    (skill.tags ?? []).join(' '),
+  ];
+  return parts.filter(Boolean).join('\n');
+}
+
+function semanticScore(query: string, skill: SkillDefinition): number {
+  const queryTf = termFrequency(tokenize(query));
+  const docTf = termFrequency(tokenize(skillSemanticDocument(skill)));
+  const base = cosineSimilarity(queryTf, docTf);
+  const priorityBoost = Math.min(0.15, (skill.priority ?? 0) * 0.01);
+  return Math.min(1, base + priorityBoost);
+}
+
+function semanticRationale(skill: SkillDefinition, query: string): string {
+  const queryTokens = new Set(tokenize(query));
+  const docTokens = tokenize(skillSemanticDocument(skill));
+  const shared = Array.from(new Set(docTokens.filter((token) => queryTokens.has(token)))).slice(0, 6);
+  if (!shared.length) return 'Semantic similarity across narrative sections.';
+  return `Semantic overlap on: ${shared.join(', ')}`;
+}
+
+function sectionLabel(title: string, value: string | undefined): string | undefined {
+  const text = value?.trim();
+  if (!text) return undefined;
+  return `### ${title}\n${text}`;
+}
+
+export function buildSkillInvocationPrompt(
+  activation: SkillActivationResult,
+  mode: SkillInvocationMode,
+): string {
+  if (!activation.selected.length) return '';
+
+  const parts: string[] = ['## Active Skills'];
+
+  for (const match of activation.selected) {
+    const skill = match.skill;
+    const sections: Array<string | undefined> = [
+      `### ${skill.name}`,
+      sectionLabel('Summary', skill.summary),
+      sectionLabel('Purpose', skill.purpose),
+      sectionLabel('When To Use', skill.whenToUse),
+      sectionLabel('When Not To Use', skill.whenNotToUse),
+    ];
+
+    if (mode === 'advisory' || mode === 'reasoning_support') {
+      sections.push(sectionLabel('Reasoning Guidance', skill.reasoningGuidance));
+      sections.push(sectionLabel('Execution Guidance', skill.executionGuidance));
+    }
+
+    if (mode === 'extraction' || mode === 'structured_output' || mode === 'tool_assisted' || mode === 'side_effect_eligible') {
+      sections.push(sectionLabel('Required Context', skill.requiredContext));
+      sections.push(sectionLabel('Output Guidance', skill.outputGuidance));
+      sections.push(sectionLabel('Completion Guidance', skill.completionGuidance));
+      sections.push(sectionLabel('Ambiguity Guidance', skill.ambiguityGuidance));
+      sections.push(sectionLabel('Failure Guidance', skill.failureGuidance));
+      if (skill.completionContract) {
+        sections.push(sectionLabel('Completion Contract', skill.completionContract.narrative));
+      }
+    }
+
+    if (mode === 'tool_assisted' || mode === 'side_effect_eligible') {
+      const tools = collectSkillTools([{ ...match, source: match.source }]);
+      if (tools.length) {
+        sections.push(`### Tool Guidance\nUse only relevant tools for this step. Candidate tools: ${tools.join(', ')}`);
+      }
+    }
+
+    if (skill.examples?.length) {
+      const ex = skill.examples.slice(0, 2).map((item) => `- Input: ${item.input}\n  Output: ${item.output}`).join('\n');
+      sections.push(`### Examples\n${ex}`);
+    }
+
+    sections.push(sectionLabel('Selection Rationale', match.rationale));
+    parts.push(...sections.filter((item): item is string => Boolean(item)));
+  }
+
+  return `${parts.join('\n\n')}\n`;
+}
+
+export function buildSkillSystemPrompt(matches: SkillMatch[]): string {
+  const activation: SkillActivationResult = {
+    considered: matches,
+    selected: matches,
+    rejected: [],
+    mode: 'reasoning_support',
+  };
+  return buildSkillInvocationPrompt(activation, 'reasoning_support');
+}
+
+export function applySkillsToPrompt(basePrompt: string | undefined, matches: SkillMatch[]): string | undefined {
+  const skillBlock = buildSkillSystemPrompt(matches);
+  if (!skillBlock && !basePrompt) return undefined;
+  if (!skillBlock) return basePrompt;
+  if (!basePrompt) return skillBlock;
+  return `${basePrompt.trim()}\n\n${skillBlock}`;
+}
+
+export function collectSkillTools(matches: readonly SkillMatch[]): string[] {
+  const tools = new Set<string>();
+  for (const match of matches) {
+    const policyAllowed = match.skill.policy?.allowedTools;
+    const toolCandidates = policyAllowed ?? match.skill.toolNames ?? [];
+    for (const tool of toolCandidates) {
+      if ((match.skill.policy?.disallowedTools ?? []).includes(tool)) continue;
+      tools.add(tool);
+    }
+  }
+  return [...tools];
+}
+
+export function createSkillTelemetry(args: {
+  skill: SkillDefinition;
+  durationMs?: number;
+  selectedBy: string;
+  metadata?: Record<string, unknown>;
+}): CapabilityTelemetrySummary {
+  return {
+    kind: 'skill',
+    key: args.skill.id,
+    name: args.skill.name,
+    description: args.skill.summary || args.skill.description || 'Skill capability execution summary.',
+    version: args.skill.version,
+    selectedBy: args.selectedBy,
+    durationMs: args.durationMs,
+    tags: args.skill.tags,
+    metadata: args.metadata,
+  };
+}
+
+function keepIfCategory(skill: SkillDefinition, categories: SkillCategory[] | undefined): boolean {
+  if (!categories?.length) return true;
+  const category = skill.category ?? 'general';
+  return categories.includes(category);
+}
+
+export async function activateSkills(
+  query: string,
+  skills: readonly SkillDefinition[],
+  opts: SkillActivationOptions = {},
+): Promise<SkillActivationResult> {
+  const mode = opts.mode ?? 'reasoning_support';
+  const maxCandidates = opts.maxCandidates ?? 6;
+  const maxSelected = opts.maxSelected ?? 3;
+  const minScore = opts.minScore ?? 0.12;
+
+  const overlaid = applySkillOverlays(skills, opts.overlays);
+
+  const considered: SkillMatch[] = overlaid
+    .filter((skill) => skill.enabled !== false)
+    .filter((skill) => keepIfCategory(skill, undefined))
+    .map((skill) => ({
+      skill,
+      score: semanticScore(query, skill),
+      matchedPatterns: [] as string[],
+      rationale: semanticRationale(skill, query),
+      source: 'semantic' as const,
+    }))
+    .filter((match) => match.score >= minScore)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const pa = a.skill.priority ?? 0;
+      const pb = b.skill.priority ?? 0;
+      if (pb !== pa) return pb - pa;
+      return a.skill.name.localeCompare(b.skill.name);
+    })
+    .slice(0, maxCandidates);
+
+  if (!considered.length) {
+    return {
+      considered: [],
+      selected: [],
+      rejected: [],
+      noSkillReason: 'No semantically relevant skill candidates found.',
+      mode,
+    };
+  }
+
+  const rejected: Array<{ skillId: string; reason: string }> = [];
+  let selected: SkillMatch[] = considered.slice(0, maxSelected);
+
+  if (opts.selector) {
+    try {
+      const decision = await opts.selector({
+        query,
+        mode,
+        candidates: considered,
+        context: opts.context,
+      });
+
+      if (decision.useNoSkillPath) {
+        return {
+          considered,
+          selected: [],
+          rejected: considered.map((item) => ({ skillId: item.skill.id, reason: 'Reasoning selector chose no-skill path.' })),
+          noSkillReason: decision.rationale ?? 'Reasoning selector rejected all candidates.',
+          mode,
+        };
+      }
+
+      const selectedIds = new Set(decision.selectedSkillIds);
+      selected = considered
+        .filter((item) => selectedIds.has(item.skill.id))
+        .map((item) => ({ ...item, source: 'reasoning' as const, rationale: decision.rationale ?? item.rationale }))
+        .slice(0, maxSelected);
+
+      const rejectedIds = new Set(decision.rejectedSkillIds ?? []);
+      for (const id of rejectedIds) {
+        rejected.push({ skillId: id, reason: 'Rejected by reasoning selector.' });
+      }
+    } catch {
+      // Selector is an optional enhancement; fallback keeps runtime available.
+    }
+  }
+
+  if (opts.policyEvaluator) {
+    const policySelected: SkillMatch[] = [];
+    for (const match of selected) {
+      const decision = opts.policyEvaluator({
+        skill: match.skill,
+        mode,
+        query,
+        context: opts.context,
+      });
+      if (!decision.allowed) {
+        rejected.push({ skillId: match.skill.id, reason: decision.reason ?? 'Blocked by policy.' });
+        continue;
+      }
+
+      const enforcedSkill: SkillDefinition = decision.enforcedAllowedTools
+        ? {
+            ...match.skill,
+            policy: {
+              ...match.skill.policy,
+              allowedTools: decision.enforcedAllowedTools,
+            },
+          }
+        : match.skill;
+      policySelected.push({ ...match, skill: enforcedSkill });
+    }
+    selected = policySelected;
+  }
+
+  if (!selected.length) {
+    return {
+      considered,
+      selected: [],
+      rejected,
+      noSkillReason: 'All candidates were rejected by reasoning or policy.',
+      mode,
+    };
+  }
+
+  return {
+    considered,
+    selected,
+    rejected,
+    mode,
+  };
+}
+
+export function evaluateSkillCompletion(
+  skill: SkillDefinition,
+  output: string,
+  opts?: { evidence?: readonly string[]; blockedByPolicy?: boolean; missingContext?: boolean },
+): SkillCompletionEvaluation {
+  if (opts?.blockedByPolicy) {
+    return {
+      state: 'blocked_by_policy',
+      reasons: ['Execution was blocked by deterministic policy controls.'],
+      missingEvidence: [],
+      needsHumanReview: false,
+    };
+  }
+
+  if (opts?.missingContext) {
+    return {
+      state: 'blocked_by_missing_context',
+      reasons: ['Required context was missing for completion.'],
+      missingEvidence: [],
+      needsHumanReview: false,
+    };
+  }
+
+  const lower = output.toLowerCase();
+  const evidenceRequired = skill.completionContract?.requiredEvidence ?? [];
+  const missingEvidence = evidenceRequired.filter((item) => !lower.includes(item.toLowerCase()));
+  const containsAmbiguity = /\b(uncertain|ambiguous|not enough|insufficient|unknown)\b/.test(lower);
+
+  if (!output.trim()) {
+    return {
+      state: 'incomplete',
+      reasons: ['Output is empty.'],
+      missingEvidence: [...evidenceRequired],
+      needsHumanReview: false,
+    };
+  }
+
+  if (containsAmbiguity && missingEvidence.length > 0) {
+    return {
+      state: 'ambiguous',
+      reasons: ['Output identifies ambiguity but does not satisfy all required evidence.'],
+      missingEvidence,
+      needsHumanReview: Boolean(skill.completionContract?.humanReviewWhen),
+    };
+  }
+
+  if (missingEvidence.length > 0) {
+    return {
+      state: 'incomplete',
+      reasons: ['Output missed required evidence from completion contract.'],
+      missingEvidence,
+      needsHumanReview: false,
+    };
+  }
+
+  const warningWords = ['might', 'possibly', 'likely'];
+  const hasWarningTone = warningWords.some((word) => lower.includes(word));
+
+  return {
+    state: hasWarningTone ? 'complete_with_warnings' : 'complete',
+    reasons: hasWarningTone ? ['Output completed with uncertainty language.'] : ['Output satisfies completion expectations.'],
+    missingEvidence: [],
+    needsHumanReview: Boolean(skill.completionContract?.humanReviewWhen && hasWarningTone),
+  };
 }
 
 export function createSkillRegistry(): SkillRegistry {
@@ -154,7 +695,7 @@ export function createSkillRegistry(): SkillRegistry {
 
   return {
     register(skill: SkillDefinition): void {
-      skills.set(skill.id, skill);
+      skills.set(skill.id, defineSkill(skill));
     },
 
     unregister(skillId: string): void {
@@ -166,508 +707,212 @@ export function createSkillRegistry(): SkillRegistry {
     },
 
     list(): SkillDefinition[] {
-      return Array.from(skills.values());
+      return [...skills.values()];
     },
 
-    discover(query: string, opts?: SkillDiscoveryOptions): SkillMatch[] {
-      const maxSkills = opts?.maxSkills ?? 3;
-      const minScore = opts?.minScore ?? 0.1;
-      const categories = opts?.categories;
-      const lower = query.toLowerCase();
+    discover(query: string, opts: SkillDiscoveryOptions = {}): SkillMatch[] {
+      const maxSkills = opts.maxSkills ?? 3;
+      const minScore = opts.minScore ?? 0.12;
+      const categories = opts.categories;
 
-      const matches: SkillMatch[] = [];
+      const matches: SkillMatch[] = [...skills.values()]
+        .filter((skill) => skill.enabled !== false)
+        .filter((skill) => keepIfCategory(skill, categories))
+        .map((skill) => ({
+          skill,
+          score: semanticScore(query, skill),
+          matchedPatterns: [] as string[],
+          rationale: semanticRationale(skill, query),
+          source: 'semantic' as const,
+        }))
+        .filter((match) => match.score >= minScore)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, maxSkills);
 
-      for (const skill of skills.values()) {
-        if (skill.enabled === false) continue;
-        if (categories && categories.length > 0 && !categories.includes(skill.category)) continue;
+      return matches;
+    },
 
-        const patterns = skill.triggerPatterns;
-        const matched: string[] = [];
-
-        // Also check description as a fallback signal
-        const descLower = skill.description.toLowerCase();
-        const isDescriptionMatch = descLower.split(' ').some(word => word.length > 4 && lower.includes(word));
-
-        for (const pattern of patterns) {
-          if (lower.includes(pattern.toLowerCase())) {
-            matched.push(pattern);
-          }
-        }
-
-        if (matched.length === 0 && !isDescriptionMatch) continue;
-
-        // Score: pattern coverage + priority boost + description fallback
-        const patternCoverage = patterns.length > 0 ? matched.length / patterns.length : 0;
-        const descBonus = isDescriptionMatch && matched.length === 0 ? 0.1 : 0;
-        const priorityBoost = (skill.priority ?? 0) * 0.05;
-        const score = Math.min(1, patternCoverage + descBonus + priorityBoost);
-
-        if (score >= minScore) {
-          matches.push({ skill, score, matchedPatterns: matched });
-        }
-      }
-
-      // Sort: score desc, then priority desc, then name asc (stable)
-      matches.sort((a, b) => {
-        if (b.score !== a.score) return b.score - a.score;
-        const pa = a.skill.priority ?? 0;
-        const pb = b.skill.priority ?? 0;
-        if (pb !== pa) return pb - pa;
-        return a.skill.name.localeCompare(b.skill.name);
-      });
-
-      return matches.slice(0, maxSkills);
+    async activate(query: string, opts: SkillActivationOptions = {}): Promise<SkillActivationResult> {
+      return activateSkills(query, [...skills.values()], opts);
     },
   };
 }
-
-// ─── Prompt injection ─────────────────────────────────────────
-
-/**
- * Build a system-prompt block from a set of matched skills.
- * Returns an empty string when matches is empty.
- *
- * Format:
- *   ## Active Skills
- *
- *   ### <skill name>
- *   <instructions>
- *
- *   **Examples:**
- *   - Input: ...
- *     Output: ...
- */
-export function buildSkillSystemPrompt(matches: SkillMatch[]): string {
-  if (matches.length === 0) return '';
-
-  const parts: string[] = ['## Active Skills\n'];
-
-  for (const { skill } of matches) {
-    parts.push(`### ${skill.name}`);
-    parts.push(skill.instructions.trim());
-
-    if (skill.examples && skill.examples.length > 0) {
-      parts.push('\n**Examples:**');
-      for (const ex of skill.examples) {
-        parts.push(`- Input: ${ex.input}\n  Output: ${ex.output}`);
-      }
-    }
-
-    parts.push('');
-  }
-
-  return parts.join('\n');
-}
-
-/**
- * Augment a base system prompt with skill instructions.
- * Returns undefined when there are no skills and no base prompt.
- */
-export function applySkillsToPrompt(
-  basePrompt: string | undefined,
-  matches: SkillMatch[],
-): string | undefined {
-  const skillBlock = buildSkillSystemPrompt(matches);
-  if (!skillBlock && !basePrompt) return undefined;
-  if (!skillBlock) return basePrompt;
-  if (!basePrompt) return skillBlock;
-  return `${basePrompt.trim()}\n\n${skillBlock}`;
-}
-
-/**
- * Return the unique set of tool names requested by matched skills.
- * The caller should make these tools available in the agent's ToolRegistry.
- */
-export function collectSkillTools(matches: SkillMatch[]): string[] {
-  const tools = new Set<string>();
-  for (const { skill } of matches) {
-    if (skill.toolNames) {
-      for (const t of skill.toolNames) {
-        tools.add(t);
-      }
-    }
-  }
-  return Array.from(tools);
-}
-
-// ─── Builder helper ───────────────────────────────────────────
-
-/** Type-safe skill builder with sensible defaults. */
-export function defineSkill(def: SkillDefinition): SkillDefinition {
-  return {
-    priority: 0,
-    version: '1.0',
-    enabled: true,
-    ...def,
-  };
-}
-
-// ─── DB row ↔ SkillDefinition conversion ─────────────────────
 
 export interface SkillRow {
   id: string;
   name: string;
   description: string;
   category: string;
-  trigger_patterns: string;  // JSON string[]
+  trigger_patterns: string;
   instructions: string;
-  tool_names: string | null;  // JSON string[]
-  examples: string | null;    // JSON array
-  tags: string | null;        // JSON string[]
+  tool_names: string | null;
+  examples: string | null;
+  tags: string | null;
   priority: number;
   version: string;
-  enabled: number;            // SQLite boolean (0|1)
+  enabled: number;
   created_at: string;
   updated_at: string;
 }
 
-export function skillFromRow(row: SkillRow): SkillDefinition {
-  return {
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    category: row.category as SkillCategory,
-    triggerPatterns: safeParseArray(row.trigger_patterns),
-    instructions: row.instructions,
-    toolNames: row.tool_names ? safeParseArray(row.tool_names) : undefined,
-    examples: row.examples ? JSON.parse(row.examples) : undefined,
-    tags: row.tags ? safeParseArray(row.tags) : undefined,
-    priority: row.priority,
-    version: row.version,
-    enabled: !!row.enabled,
-  };
-}
-
-function safeParseArray(raw: string): string[] {
+function safeParseStringArray(raw: string | null | undefined): string[] {
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === 'string');
   } catch {
     return [];
   }
 }
 
-// ─── Built-in seed skills ─────────────────────────────────────
+function safeParseExamples(raw: string | null | undefined): SkillExample[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => {
+        const rec = item as Record<string, unknown>;
+        return {
+          input: String(rec['input'] ?? ''),
+          output: String(rec['output'] ?? ''),
+          notes: typeof rec['notes'] === 'string' ? rec['notes'] : undefined,
+        };
+      })
+      .filter((item) => Boolean(item.input && item.output));
+  } catch {
+    return [];
+  }
+}
 
-/**
- * A curated set of built-in skills covering common agent use cases.
- * These can be seeded into the DB via the admin UI "Seed Defaults" button.
- *
- * Based on research from:
- *   - Anthropic "Building Effective Agents" (Dec 2024)
- *   - OpenAI Agents SDK tool patterns
- *   - Common enterprise AI assistant use cases
- */
+export function skillFromRow(row: SkillRow): SkillDefinition {
+  const examples = safeParseExamples(row.examples);
+  const tools = safeParseStringArray(row.tool_names);
+  const triggerPatterns = safeParseStringArray(row.trigger_patterns);
+  const tags = safeParseStringArray(row.tags);
+
+  return defineSkill({
+    id: row.id,
+    name: row.name,
+    version: row.version,
+    enabled: row.enabled !== 0,
+    category: row.category,
+    summary: row.description || row.instructions,
+    purpose: row.description,
+    executionGuidance: row.instructions,
+    whenToUse: triggerPatterns.length
+      ? `Legacy hints from stored trigger patterns: ${triggerPatterns.join(', ')}`
+      : undefined,
+    examples: examples.length ? examples : undefined,
+    tags: tags.length ? tags : undefined,
+    triggerPatterns,
+    toolNames: tools,
+    description: row.description,
+    instructions: row.instructions,
+    priority: row.priority,
+    policy: tools.length ? { allowedTools: tools } : undefined,
+    completionContract: {
+      narrative: 'Provide a complete response with evidence and surface ambiguity explicitly when confidence is low.',
+      requiredEvidence: ['evidence', 'confidence'],
+      ambiguityBehavior: 'Use explicit uncertainty language when context is incomplete.',
+    },
+  });
+}
+
 export const BUILT_IN_SKILLS: SkillDefinition[] = [
   defineSkill({
-    id: 'skill-data-analysis',
-    name: 'Data Analysis',
-    description: 'Analyze structured data, compute statistics, identify trends and anomalies',
+    id: 'skill-investigation-brief',
+    name: 'Investigation Briefing',
+    version: '2.0',
     category: 'analysis',
-    priority: 10,
-    triggerPatterns: [
-      'analyze', 'analysis', 'data', 'dataset', 'csv', 'table',
-      'trend', 'statistics', 'statistical', 'average', 'sum', 'total',
-      'chart', 'graph', 'visualize', 'breakdown',
-    ],
-    instructions: `When asked to analyze data, follow this procedure:
-1. **Understand the data** — identify column types, value ranges, and missing values before computing anything.
-2. **Compute descriptive statistics** — count, mean, median, min, max, standard deviation where relevant.
-3. **Identify trends** — look for patterns over time, groupings, or correlations.
-4. **Highlight anomalies** — flag values that are statistical outliers (> 2 standard deviations from mean).
-5. **Summarize findings** — lead with the most important insight, then supporting details.
-6. **Cite numbers precisely** — always include the actual values, not just relative terms like "high" or "low".
-
-Do NOT:
-- Guess values not present in the data.
-- Present analysis as definitive if the data is incomplete.
-- Skip showing sample calculations that justify your conclusions.`,
-    toolNames: ['calculator'],
+    summary: 'Turn a complex problem into a concise diagnostic brief with hypotheses, evidence, and clear next checks.',
+    purpose: 'Help models reason transparently when debugging incidents, regressions, and architecture tradeoffs.',
+    whenToUse: 'Use for bug triage, architecture reviews, and failure analysis where evidence and uncertainty should both be explicit.',
+    whenNotToUse: 'Avoid for trivial factual requests where no multi-step reasoning is needed.',
+    requiredContext: 'Include observed behavior, expected behavior, constraints, and known signals from logs/tests.',
+    reasoningGuidance: 'Generate plausible hypotheses, rank by likelihood, gather confirming/disconfirming evidence, then converge.',
+    executionGuidance: 'Keep analysis grounded in observed artifacts. Do not claim certainty without concrete evidence.',
+    outputGuidance: 'Return: findings, confidence per finding, gaps, and immediate next actions.',
+    completionGuidance: 'Done means top issues are identified, evidence is cited, and ambiguity is explicitly surfaced.',
+    ambiguityGuidance: 'If evidence conflicts, mark ambiguous and request additional validation.',
+    failureGuidance: 'If blocked, state what data is missing and how to collect it.',
+    toolNames: ['text_analysis', 'json_format'],
+    policy: {
+      allowedTools: ['text_analysis', 'json_format'],
+      sideEffectsAllowed: false,
+      requiresApproval: false,
+      sensitivityHandling: 'Avoid exposing secrets in summaries.',
+    },
+    completionContract: {
+      narrative: 'Identify probable root causes, confidence, and explicit evidence before recommending actions.',
+      requiredEvidence: ['evidence', 'confidence'],
+      humanReviewWhen: 'When the recommendation could change production behavior.',
+    },
+    tags: ['debugging', 'investigation', 'analysis'],
+    triggerPatterns: [],
     examples: [
       {
-        input: 'Analyze this sales CSV: Month,Revenue\nJan,10000\nFeb,12000\nMar,9500',
-        output: 'Revenue ranges from $9,500 (Mar) to $12,000 (Feb), mean $10,500. Feb outperformed by 14.3%. Mar dipped 20.8% below Feb — warrants investigation.',
+        input: 'API suddenly returns 401 in compliance routes after refactor.',
+        output: 'Finding: auth middleware path mismatch likely introduced. Evidence: auth tests pass, compliance suite fails with 401. Confidence: medium. Next check: compare route registration + permission guard wiring.',
       },
     ],
-    tags: ['data', 'statistics', 'csv', 'charts'],
   }),
-
   defineSkill({
-    id: 'skill-web-research',
-    name: 'Web Research',
-    description: 'Search the web, synthesize information from multiple sources, cite references',
-    category: 'web',
-    priority: 8,
-    triggerPatterns: [
-      'search', 'look up', 'find', 'what is', 'who is', 'latest', 'current',
-      'news', 'recent', 'browse', 'research', 'online', 'web',
-    ],
-    instructions: `When performing web research:
-1. **Plan your searches** — break the question into 2-3 targeted search queries before searching.
-2. **Triangulate sources** — verify key facts across at least 2 independent sources.
-3. **Prefer authoritative sources** — official documentation, peer-reviewed papers, reputable news outlets.
-4. **State the date** — always note when information was retrieved.
-5. **Cite inline** — include source URLs or site names next to each fact.
-6. **Flag uncertainty** — if sources conflict, say so explicitly and explain the disagreement.
-7. **Summarize clearly** — lead with the direct answer, then supporting context.
-
-Do NOT:
-- Present a single source as definitive proof.
-- Make up URLs or fabricate citations.
-- Present outdated information without noting the date.`,
-    toolNames: ['web_search', 'web_browse'],
-    examples: [
-      {
-        input: 'What is the current interest rate set by the Federal Reserve?',
-        output: 'Based on Federal Reserve official communications (federalreserve.gov, retrieved today), the federal funds rate target range is currently X%-X%. [cite source]',
-      },
-    ],
-    tags: ['search', 'web', 'research', 'citations'],
+    id: 'skill-structured-extraction',
+    name: 'Structured Evidence Extraction',
+    version: '2.0',
+    category: 'extraction',
+    summary: 'Extract required entities and evidence from noisy text into a deterministic schema while preserving ambiguity.',
+    purpose: 'Support workflows that need machine-consumable outputs and confidence-aware extraction behavior.',
+    whenToUse: 'Use for compliance checks, data normalization, and pipeline handoffs that require explicit fields.',
+    whenNotToUse: 'Avoid when user only needs conversational summaries.',
+    requiredContext: 'Provide schema goals, constraints, and examples of valid outputs.',
+    executionGuidance: 'Prefer faithful extraction over inference; if uncertain, flag ambiguity instead of fabricating data.',
+    outputGuidance: 'Return structured JSON with extracted values, confidence, and evidence spans.',
+    completionGuidance: 'Complete only when required fields are populated or explicitly marked missing with reasons.',
+    ambiguityGuidance: 'Use `ambiguous` state when evidence is conflicting or missing.',
+    failureGuidance: 'Return blocked state and missing context checklist if input is insufficient.',
+    toolNames: ['json_format'],
+    policy: {
+      allowedTools: ['json_format'],
+      sideEffectsAllowed: false,
+    },
+    completionContract: {
+      narrative: 'Populate required fields, include confidence, and cite evidence for each extracted claim.',
+      requiredEvidence: ['confidence', 'evidence'],
+    },
+    triggerPatterns: [],
   }),
-
   defineSkill({
-    id: 'skill-code-review',
-    name: 'Code Review',
-    description: 'Review code for bugs, security issues, performance problems, and style',
-    category: 'code',
-    priority: 9,
-    triggerPatterns: [
-      'review', 'code', 'bug', 'security', 'vulnerability', 'performance',
-      'refactor', 'improve', 'function', 'class', 'optimize', 'fix', 'debug',
-    ],
-    instructions: `When reviewing code, evaluate these dimensions in order:
-
-1. **Correctness** — Does the code do what it claims? Are there off-by-one errors, null pointer risks, or logic gaps?
-2. **Security** — Check for: injection (SQL, command, path traversal), hardcoded secrets, improper auth, insecure deserialization, missing input validation (OWASP Top 10).
-3. **Performance** — Identify O(n²) algorithms, unnecessary DB queries in loops, memory leaks, blocking I/O in async paths.
-4. **Readability** — Flag unclear variable names, missing error handling, functions > 50 lines.
-5. **Tests** — Note missing test coverage for edge cases.
-
-Format your response as:
-- 🔴 **Critical** — must fix before deployment
-- 🟡 **Warning** — should fix soon
-- 🟢 **Suggestion** — nice to have
-
-Always explain WHY each issue matters, not just WHAT is wrong.`,
-    tags: ['code', 'security', 'review', 'bugs'],
-  }),
-
-  defineSkill({
-    id: 'skill-document-summary',
-    name: 'Document Summarization',
-    description: 'Summarize long documents, extract key points, create structured briefs',
-    category: 'analysis',
-    priority: 7,
-    triggerPatterns: [
-      'summarize', 'summary', 'tldr', 'brief', 'key points', 'extract',
-      'main points', 'highlights', 'overview', 'outline',
-    ],
-    instructions: `When summarizing documents:
-1. **Read completely** — do not summarize based on the first paragraph alone.
-2. **Identify the core thesis** — what is the single most important claim or conclusion?
-3. **Extract key supporting points** — typically 3-7 bullet points that substantiate the thesis.
-4. **Note action items** — if the document contains tasks, deadlines, or decisions, list them separately.
-5. **Preserve nuance** — do not strip away important qualifications (e.g., "only applies to X").
-6. **Scale to length** — for documents < 1 page: 3-5 sentences. For > 5 pages: structured sections.
-
-Format:
-**TL;DR:** [1-2 sentence core thesis]
-**Key Points:** [bulleted list]
-**Action Items:** [if any]`,
-    tags: ['summary', 'documents', 'extraction', 'briefs'],
-  }),
-
-  defineSkill({
-    id: 'skill-email-drafting',
-    name: 'Email Drafting',
-    description: 'Draft professional emails with appropriate tone, structure, and clarity',
-    category: 'communication',
-    priority: 6,
-    triggerPatterns: [
-      'email', 'write', 'draft', 'compose', 'message', 'reply', 'respond',
-      'follow up', 'professional', 'formal', 'letter',
-    ],
-    instructions: `When drafting emails:
-1. **Clarify the goal** — what single action do you want the reader to take?
-2. **Choose the right tone** — formal (board, legal, external clients), semi-formal (colleagues), casual (close teammates).
-3. **Structure: Subject → Opening → Body → Call-to-action → Closing**
-   - Subject: specific, < 60 characters, no ALL CAPS
-   - Opening: acknowledge context if it's a reply
-   - Body: one paragraph per topic, no walls of text
-   - Call-to-action: one clear ask, with a deadline if relevant
-   - Closing: appropriate sign-off for the tone
-4. **Be concise** — cut any sentence that doesn't serve the goal.
-5. **Proofread mentally** — check for ambiguity, typos, and unintended tone.
-
-Provide subject line, body, and sign-off separately so the user can mix and match.`,
-    tags: ['email', 'communication', 'writing', 'professional'],
-  }),
-
-  defineSkill({
-    id: 'skill-planning',
-    name: 'Planning & Decomposition',
-    description: 'Break complex tasks into steps, create actionable plans, sequence dependencies',
+    id: 'skill-tool-orchestrated-analysis',
+    name: 'Tool-Orchestrated Analysis',
+    version: '2.0',
     category: 'planning',
-    priority: 7,
-    triggerPatterns: [
-      'plan', 'planning', 'how to', 'steps', 'roadmap', 'strategy',
-      'approach', 'organize', 'schedule', 'prioritize', 'break down',
-    ],
-    instructions: `When creating plans:
-1. **Clarify the end goal** — what does "done" look like? What are the acceptance criteria?
-2. **Identify dependencies** — which steps must happen before others?
-3. **Break into atomic tasks** — each task should be completable in one sitting with a clear deliverable.
-4. **Assign estimates** — add rough time estimates (hours/days) to each task.
-5. **Flag risks** — note blockers, assumptions, and things that could go wrong.
-6. **Sequence properly** — order tasks to deliver value early (parallelizable tasks, critical path).
-
-Format as a numbered list with sub-tasks indented. Include a brief "success criteria" section at the end.`,
-    tags: ['planning', 'tasks', 'roadmap', 'strategy'],
-  }),
-
-  defineSkill({
-    id: 'skill-translation',
-    name: 'Translation',
-    description: 'Translate text between languages with cultural nuance and accuracy',
-    category: 'communication',
-    priority: 5,
-    triggerPatterns: [
-      'translate', 'translation', 'in spanish', 'in french', 'in german',
-      'in chinese', 'in japanese', 'in arabic', 'in portuguese', 'into',
-    ],
-    instructions: `When translating:
-1. **Identify source language** — if not specified, identify it first.
-2. **Translate meaning, not words** — use natural idioms in the target language; avoid literal word-for-word translation.
-3. **Preserve tone** — if the source is formal, the translation must be formal; if casual, casual.
-4. **Flag cultural nuances** — note when a phrase has no direct equivalent or could be misunderstood.
-5. **Offer alternatives** — for ambiguous phrases, provide 2 translation options with brief explanations.
-6. **Validate proper nouns** — do not translate names, brands, or technical terms unless standard translations exist.`,
-    tags: ['translation', 'languages', 'localization'],
-  }),
-
-  defineSkill({
-    id: 'skill-sql-query',
-    name: 'SQL Query Writing',
-    description: 'Write, explain, and optimize SQL queries for relational databases',
-    category: 'data-processing',
-    priority: 8,
-    triggerPatterns: [
-      'sql', 'query', 'database', 'select', 'join', 'table', 'db',
-      'fetch', 'records', 'filter', 'aggregate', 'group by',
-    ],
-    instructions: `When writing SQL queries:
-1. **Understand the schema** — ask for table/column names if not provided.
-2. **Write readable SQL** — use UPPERCASE keywords, consistent indentation, aliases for long table names.
-3. **Optimize for performance**:
-   - Filter early (WHERE before JOIN where possible)
-   - Avoid SELECT * in production queries
-   - Use indexes — note which columns should be indexed
-   - Avoid N+1 patterns; prefer JOINs or CTEs
-4. **Handle NULLs explicitly** — use IS NULL / IS NOT NULL, COALESCE where appropriate.
-5. **Explain the query** — add a brief comment block describing what it does and why.
-6. **Security** — never concatenate user input into queries; use parameterized queries.
-
-Always test edge cases: empty results, NULL values, duplicate rows.`,
-    tags: ['sql', 'database', 'queries', 'optimization'],
-  }),
-
-  defineSkill({
-    id: 'skill-api-design',
-    name: 'API Design',
-    description: 'Design RESTful or GraphQL APIs with proper resource modeling, status codes, and docs',
-    category: 'code',
-    priority: 6,
-    triggerPatterns: [
-      'api', 'endpoint', 'rest', 'graphql', 'route', 'http', 'design',
-      'schema', 'request', 'response', 'json',
-    ],
-    instructions: `When designing APIs:
-1. **Resource modeling** — use nouns for resource paths (/users, /orders), not verbs.
-2. **HTTP methods** — GET (read), POST (create), PUT (replace), PATCH (partial update), DELETE.
-3. **Status codes** — 200 OK, 201 Created, 204 No Content, 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found, 409 Conflict, 422 Unprocessable, 500 Internal Error.
-4. **Consistent response shape** — use a standard envelope: { data, error, meta }.
-5. **Versioning** — prefix routes with /v1/ for public APIs.
-6. **Security** — require auth on all mutating endpoints; validate all inputs; rate-limit public endpoints.
-7. **Pagination** — use cursor-based pagination for large collections.
-8. **Documentation** — provide OpenAPI/Swagger snippet for each endpoint.`,
-    tags: ['api', 'rest', 'design', 'http'],
-  }),
-
-  defineSkill({
-    id: 'skill-debugging',
-    name: 'Debugging',
-    description: 'Systematically debug errors, trace stack traces, identify root causes',
-    category: 'code',
-    priority: 9,
-    triggerPatterns: [
-      'error', 'exception', 'crash', 'failed', 'broken', 'bug', 'debug',
-      'issue', 'problem', 'not working', 'stack trace', 'undefined', 'null',
-    ],
-    instructions: `When debugging:
-1. **Read the full error message** — parse the error type, message, and stack trace before guessing.
-2. **Reproduce first** — identify the minimal input that triggers the bug.
-3. **Form a hypothesis** — state what you think is wrong before looking at code.
-4. **Isolate the failure** — binary-search through the code: which function fails?
-5. **Check the data** — inspect the actual values at the point of failure; assumptions about data types or shape are the most common bug source.
-6. **Fix root cause, not symptoms** — don't mask errors with try/catch without understanding why they occur.
-7. **Verify the fix** — confirm the original error is gone AND that no regression was introduced.
-
-Provide: (a) root cause diagnosis, (b) fix, (c) how to prevent recurrence.`,
-    tags: ['debug', 'errors', 'troubleshooting', 'bugs'],
-  }),
-
-  defineSkill({
-    id: 'skill-nz-statistics',
-    name: 'New Zealand Statistics (Stats NZ)',
-    description: 'Query official New Zealand statistics from the Stats NZ Aotearoa Data Explorer (ADE) — population, census, GDP, trade, housing, labour, agriculture, and more',
-    category: 'retrieval',
-    priority: 10,
-    triggerPatterns: [
-      'stats nz', 'statsnz', 'new zealand', 'nz statistics', 'nz data',
-      'aotearoa', 'aotearoa data explorer', 'census', 'population',
-      'gdp', 'trade', 'housing', 'labour', 'employment', 'unemployment',
-      'inflation', 'cpi', 'immigration', 'tourism', 'agriculture',
-      'maori', 'pacific', 'ethnicity', 'birth', 'death', 'mortality',
-      'education', 'income', 'household', 'dwelling', 'poverty',
-      'regional', 'auckland', 'wellington', 'canterbury', 'waikato',
-      'dataflow', 'sdmx',
-    ],
-    instructions: `When answering questions about New Zealand statistics, follow this procedure:
-
-1. **Identify the dataset** — use statsnz_search_dataflows to find the relevant dataflow by keyword. If the user is vague, search for 2-3 plausible terms (e.g. "population", "census", "dwelling").
-2. **Get dataset structure** — call statsnz_get_dataflow_info to understand the dataset's dimensions and available breakdowns (e.g. age, sex, region, year).
-3. **Check available values** — if the user requests a specific region or year, call statsnz_get_codelist for the relevant dimension to confirm the code exists.
-4. **Fetch the data** — call statsnz_get_data with the correct key filter. Use dimension codes (not labels) in the key. Use "all" for dimensions you don't need to filter.
-5. **Present results clearly** — include the dataset name, reference period, actual numeric values, and units. If showing a time series, present as a table.
-6. **Cite the source** — always attribute data to "Stats NZ, Aotearoa Data Explorer" with the dataflow ID.
-
-CRITICAL:
-- Always use statsnz_get_dataflow_info BEFORE statsnz_get_data — you need the dimension order to construct the key.
-- Dimension keys are dot-separated positional filters matching DSD order (e.g. "6050.1.2018").
-- Use "all" as the key to retrieve unfiltered data if the dataset is small.
-- If the API returns an error, check that dimension codes are valid via statsnz_get_codelist.
-- Stats NZ data is authoritative government data — treat it as a primary source.`,
-    toolNames: [
-      'statsnz_list_dataflows',
-      'statsnz_search_dataflows',
-      'statsnz_get_dataflow_info',
-      'statsnz_get_datastructure',
-      'statsnz_get_structure',
-      'statsnz_get_actualconstraint',
-      'statsnz_get_codelist',
-      'statsnz_get_data',
-    ],
-    examples: [
-      {
-        input: 'What is the population of New Zealand by region?',
-        output: 'I searched Stats NZ ADE for "population" and found the "Subnational Population Estimates" dataflow. Auckland has 1.7M, Wellington 543K, Canterbury 645K (2023 estimate). Source: Stats NZ, Aotearoa Data Explorer (DPE_POP_001).',
-      },
-      {
-        input: 'Show me NZ GDP growth over the last 5 years',
-        output: 'From the "Gross Domestic Product" dataflow (SNA_GDP_001): 2019: 3.1%, 2020: -1.1%, 2021: 5.4%, 2022: 2.4%, 2023: 0.9%. Source: Stats NZ, Aotearoa Data Explorer.',
-      },
-    ],
-    tags: ['statistics', 'new-zealand', 'government', 'census', 'population', 'economics', 'sdmx'],
+    summary: 'Plan and execute multi-step analysis that combines reasoning with governed tool usage.',
+    purpose: 'Guide the model to choose tools deliberately, verify outputs, and report completion states safely.',
+    whenToUse: 'Use when direct model reasoning is insufficient and tool outputs are required as evidence.',
+    whenNotToUse: 'Avoid when policy forbids tool usage for the current context or tenant scope.',
+    requiredContext: 'Provide task objective, tool availability, runtime budgets, and sensitivity constraints.',
+    reasoningGuidance: 'Decide if tools are needed, sequence calls, verify outputs, then synthesize conclusions.',
+    executionGuidance: 'Use the minimum required tool set and retry only with clear corrective intent.',
+    outputGuidance: 'Report tool evidence, latency-sensitive caveats, and completion status.',
+    completionGuidance: 'Done means output includes evidence-backed conclusion and explicit unresolved gaps.',
+    failureGuidance: 'If a required tool is blocked, return blocked_by_policy with exact guard reason.',
+    toolNames: ['web_search', 'calculator', 'json_format'],
+    policy: {
+      allowedTools: ['web_search', 'calculator', 'json_format'],
+      disallowedTools: ['cse_run_code'],
+      sideEffectsAllowed: false,
+      requiresApproval: true,
+      runtimeBudgetMs: 20000,
+    },
+    completionContract: {
+      narrative: 'Evidence-backed answer with declared confidence and unresolved unknowns.',
+      requiredEvidence: ['evidence', 'confidence'],
+      humanReviewWhen: 'Recommendations involve external actions or policy exceptions.',
+    },
+    triggerPatterns: [],
   }),
 ];

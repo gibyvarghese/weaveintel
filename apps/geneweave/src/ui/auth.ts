@@ -138,10 +138,7 @@ export async function initiateOAuthFlow(provider: string) {
 
     window.addEventListener('message', onMessage);
     pollTimer = window.setInterval(() => {
-      if (popup.closed) {
-        cleanup();
-        return;
-      }
+      // COOP can block popup.closed reads in some browsers; rely on auth-check polling instead.
       void finalizeAuth();
     }, 1200);
     timeoutTimer = window.setTimeout(() => {

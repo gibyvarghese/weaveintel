@@ -35,6 +35,25 @@ CREATE TABLE IF NOT EXISTS chats (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS user_preferences (
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  default_mode TEXT NOT NULL DEFAULT 'agent',
+  theme TEXT NOT NULL DEFAULT 'light',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS chat_settings (
+  chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+  mode TEXT NOT NULL DEFAULT 'agent',
+  system_prompt TEXT,
+  timezone TEXT,
+  enabled_tools TEXT,
+  redaction_enabled INTEGER NOT NULL DEFAULT 1,
+  redaction_patterns TEXT,
+  workers TEXT,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
   chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
@@ -72,20 +91,6 @@ CREATE TABLE IF NOT EXISTS eval_results (
   passed INTEGER NOT NULL DEFAULT 0,
   failed INTEGER NOT NULL DEFAULT 0,
   total INTEGER NOT NULL DEFAULT 0,
-  details TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS user_preferences (
-  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-  default_mode TEXT NOT NULL DEFAULT 'direct',
-  theme TEXT NOT NULL DEFAULT 'light',
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS chat_settings (
-  chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
-  mode TEXT NOT NULL DEFAULT 'direct',
   system_prompt TEXT,
   timezone TEXT,
   enabled_tools TEXT,
@@ -262,6 +267,68 @@ CREATE TABLE IF NOT EXISTS prompt_experiments (
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS prompt_eval_datasets (
+  id TEXT PRIMARY KEY,
+  prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  prompt_version TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  pass_threshold REAL NOT NULL DEFAULT 0.75,
+  cases_json TEXT NOT NULL DEFAULT '[]',
+  rubric_json TEXT,
+  metadata TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS prompt_eval_runs (
+  id TEXT PRIMARY KEY,
+  dataset_id TEXT NOT NULL REFERENCES prompt_eval_datasets(id) ON DELETE CASCADE,
+  prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+  prompt_version TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'completed',
+  avg_score REAL NOT NULL DEFAULT 0,
+  passed_cases INTEGER NOT NULL DEFAULT 0,
+  failed_cases INTEGER NOT NULL DEFAULT 0,
+  total_cases INTEGER NOT NULL DEFAULT 0,
+  results_json TEXT NOT NULL DEFAULT '[]',
+  summary_json TEXT,
+  metadata TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS prompt_optimizers (
+  id TEXT PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT,
+  implementation_kind TEXT NOT NULL DEFAULT 'rule',
+  config TEXT NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS prompt_optimization_runs (
+  id TEXT PRIMARY KEY,
+  prompt_id TEXT NOT NULL REFERENCES prompts(id) ON DELETE CASCADE,
+  source_version TEXT NOT NULL,
+  candidate_version TEXT NOT NULL,
+  optimizer_id TEXT REFERENCES prompt_optimizers(id) ON DELETE SET NULL,
+  objective TEXT NOT NULL,
+  source_template TEXT NOT NULL,
+  candidate_template TEXT NOT NULL,
+  diff_json TEXT NOT NULL,
+  eval_baseline_json TEXT,
+  eval_candidate_json TEXT,
+  status TEXT NOT NULL DEFAULT 'completed',
+  metadata TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS guardrails (

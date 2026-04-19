@@ -7,41 +7,13 @@
  * in ui.ts reference this schema instead of per-tab switch/if blocks.
  */
 
-/* ── Field transform types ────────────────────────────────────
- *  json     – parse from JSON string → object for API payload
- *  jsonStr  – parse then re-stringify (text column in DB)
- *  int      – parseInt
- *  float    – parseFloat
- *  csvArr   – split by comma → array
- *  bool     – boolean
- *  intBool  – boolean → 0 | 1
- * ──────────────────────────────────────────────────────────── */
-
-export interface AdminFieldDef {
-  key: string;
-  label: string;
-  textarea?: boolean;
-  rows?: number;
-  options?: string[];
-  type?: 'checkbox' | 'number';
-  save?: 'json' | 'jsonStr' | 'int' | 'float' | 'csvArr' | 'bool' | 'intBool';
-  default?: unknown;
-}
-
-export interface AdminTabDef {
-  singular: string;
-  apiPath: string;
-  listKey: string;
-  cols: string[];
-  fields: AdminFieldDef[];
-  readOnly?: boolean;
-}
-
-export interface AdminTabGroup {
-  label: string;
-  icon: string;
-  tabs: Array<{ key: string; label: string }>;
-}
+import {
+  type AdminTabDef,
+  type AdminTabGroup,
+  normalizeAdminTabsForModelDiscovery,
+} from '@weaveintel/core';
+import { PROMPT_CAPABILITY_ADMIN_TABS } from './admin/schema/prompt-capability-tabs.js';
+import { CALLABLE_CAPABILITY_ADMIN_TABS } from './admin/schema/callable-capability-tabs.js';
 
 // ─── Tab groups (sidebar navigation) ─────────────────────────
 
@@ -50,6 +22,10 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'prompts', label: 'Prompts' },
     { key: 'prompt-versions', label: 'Prompt Versions' },
     { key: 'prompt-experiments', label: 'Prompt Experiments' },
+    { key: 'prompt-eval-datasets', label: 'Prompt Eval Datasets' },
+    { key: 'prompt-eval-runs', label: 'Prompt Eval Runs' },
+    { key: 'prompt-optimizers', label: 'Prompt Optimizers' },
+    { key: 'prompt-optimization-runs', label: 'Prompt Optimization Runs' },
     { key: 'prompt-frameworks', label: 'Frameworks' },
     { key: 'prompt-fragments', label: 'Fragments' },
     { key: 'prompt-contracts', label: 'Output Contracts' },
@@ -112,114 +88,9 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
 
 // ─── Per-tab definitions ─────────────────────────────────────
 
-export const ADMIN_TABS: Record<string, AdminTabDef> = {
+export const ADMIN_TABS: Record<string, AdminTabDef> = normalizeAdminTabsForModelDiscovery({
   /* ── Core AI ──────────────────────────────── */
-  'prompts': {
-    singular: 'Prompt', apiPath: 'admin/prompts', listKey: 'prompts',
-    cols: ['name', 'prompt_type', 'status', 'version', 'enabled'],
-    fields: [
-      { key: 'key', label: 'Key' },
-      { key: 'name', label: 'Name' },
-      { key: 'description', label: 'Detailed Description (model-facing)' },
-      { key: 'category', label: 'Category' },
-      { key: 'prompt_type', label: 'Prompt Type', options: ['template', 'structured', 'fewShot', 'chain', 'router', 'judge', 'optimizer', 'modalityPreset'], default: 'template' },
-      { key: 'owner', label: 'Owner' },
-      { key: 'status', label: 'Status', options: ['draft', 'published', 'retired'], default: 'published' },
-      { key: 'tags', label: 'Tags (JSON array)', textarea: true, rows: 2, save: 'json' },
-      { key: 'template', label: 'Template', textarea: true, rows: 8 },
-      { key: 'variables', label: 'Variables (JSON array or comma-separated)', textarea: true, rows: 4 },
-      { key: 'model_compatibility', label: 'Model Compatibility (JSON)', textarea: true, rows: 3, save: 'json' },
-      { key: 'execution_defaults', label: 'Execution Defaults (JSON)', textarea: true, rows: 3, save: 'json' },
-      { key: 'framework', label: 'Framework (JSON)', textarea: true, rows: 3, save: 'json' },
-      { key: 'metadata', label: 'Metadata (JSON)', textarea: true, rows: 3, save: 'json' },
-      { key: 'version', label: 'Version', default: '1.0' },
-      { key: 'is_default', label: 'Default', type: 'checkbox', save: 'bool' },
-      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
-    ],
-  },
-  'prompt-versions': {
-    singular: 'Prompt Version', apiPath: 'admin/prompt-versions', listKey: 'versions',
-    cols: ['prompt_id', 'version', 'status', 'is_active', 'enabled'],
-    fields: [
-      { key: 'prompt_id', label: 'Prompt ID (from prompts table)' },
-      { key: 'version', label: 'Version (semantic, e.g. 1.0, 1.1)' },
-      { key: 'status', label: 'Status', options: ['draft', 'published', 'retired'], default: 'draft' },
-      { key: 'template', label: 'Template', textarea: true, rows: 8 },
-      { key: 'variables', label: 'Variables (JSON array or comma-separated)', textarea: true, rows: 4 },
-      { key: 'model_compatibility', label: 'Model Compatibility (JSON)', textarea: true, rows: 3, save: 'json' },
-      { key: 'execution_defaults', label: 'Execution Defaults (JSON)', textarea: true, rows: 3, save: 'json' },
-      { key: 'framework', label: 'Framework (JSON)', textarea: true, rows: 3, save: 'json' },
-      { key: 'metadata', label: 'Metadata (JSON)', textarea: true, rows: 3, save: 'json' },
-      { key: 'is_active', label: 'Active Version', type: 'checkbox', save: 'bool', default: false },
-      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
-    ],
-  },
-  'prompt-experiments': {
-    singular: 'Prompt Experiment', apiPath: 'admin/prompt-experiments', listKey: 'experiments',
-    cols: ['prompt_id', 'name', 'status', 'enabled'],
-    fields: [
-      { key: 'prompt_id', label: 'Prompt ID (from prompts table)' },
-      { key: 'name', label: 'Name' },
-      { key: 'description', label: 'Description (operator and model-facing)' },
-      { key: 'status', label: 'Status', options: ['draft', 'active', 'completed'], default: 'draft' },
-      { key: 'variants_json', label: 'Variants (JSON array: [{version,weight,label}])', textarea: true, rows: 6, save: 'jsonStr' },
-      { key: 'assignment_key_template', label: 'Assignment Key Template (optional)' },
-      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
-    ],
-  },
-  'prompt-frameworks': {
-    singular: 'Prompt Framework', apiPath: 'admin/prompt-frameworks', listKey: 'frameworks',
-    cols: ['key', 'name', 'enabled'],
-    fields: [
-      { key: 'key', label: 'Key (unique short identifier, e.g. rtce)' },
-      { key: 'name', label: 'Name' },
-      { key: 'description', label: 'Description (shown to users and agents)' },
-      { key: 'sections', label: 'Sections (JSON array of PromptFrameworkSectionDef)', textarea: true, rows: 8, save: 'json' },
-      { key: 'section_separator', label: 'Section Separator', default: '\n\n' },
-      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
-    ],
-  },
-  'prompt-fragments': {
-    singular: 'Prompt Fragment', apiPath: 'admin/prompt-fragments', listKey: 'fragments',
-    cols: ['key', 'name', 'category', 'version', 'enabled'],
-    fields: [
-      { key: 'key', label: 'Key (referenced in templates as {{>key}})' },
-      { key: 'name', label: 'Name' },
-      { key: 'description', label: 'Description (shown to users and agents)' },
-      { key: 'category', label: 'Category (e.g. safety, personas, output)' },
-      { key: 'content', label: 'Fragment Content', textarea: true, rows: 6 },
-      { key: 'variables', label: 'Variables (JSON array)', textarea: true, rows: 3, save: 'json' },
-      { key: 'tags', label: 'Tags (JSON array)', textarea: true, rows: 2, save: 'json' },
-      { key: 'version', label: 'Version', default: '1.0' },
-      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
-    ],
-  },
-  'prompt-contracts': {
-    singular: 'Prompt Output Contract', apiPath: 'admin/prompt-contracts', listKey: 'contracts',
-    cols: ['key', 'name', 'contract_type', 'enabled'],
-    fields: [
-      { key: 'key', label: 'Key (unique contract identifier)' },
-      { key: 'name', label: 'Name' },
-      { key: 'description', label: 'Detailed Description (model-facing)' },
-      { key: 'contract_type', label: 'Contract Type', options: ['json', 'markdown', 'code', 'max_length', 'forbidden_content', 'structured'] },
-      { key: 'schema', label: 'Schema (JSON)', textarea: true, rows: 6, save: 'jsonStr' },
-      { key: 'config', label: 'Config (JSON)', textarea: true, rows: 6, save: 'jsonStr' },
-      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
-    ],
-  },
-  'prompt-strategies': {
-    singular: 'Prompt Strategy', apiPath: 'admin/prompt-strategies', listKey: 'strategies',
-    cols: ['key', 'name', 'enabled'],
-    fields: [
-      { key: 'key', label: 'Key (execution_defaults.strategy reference)' },
-      { key: 'name', label: 'Name' },
-      { key: 'description', label: 'Detailed Description (model-facing)' },
-      { key: 'instruction_prefix', label: 'Instruction Prefix', textarea: true, rows: 4 },
-      { key: 'instruction_suffix', label: 'Instruction Suffix', textarea: true, rows: 4 },
-      { key: 'config', label: 'Config (JSON)', textarea: true, rows: 4, save: 'jsonStr' },
-      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
-    ],
-  },
+  ...PROMPT_CAPABILITY_ADMIN_TABS,
   'guardrails': {
     singular: 'Guardrail', apiPath: 'admin/guardrails', listKey: 'guardrails',
     cols: ['name', 'type', 'stage', 'enabled'],
@@ -273,53 +144,7 @@ export const ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
     ],
   },
-  'tools': {
-    singular: 'Tool', apiPath: 'admin/tools', listKey: 'tools',
-    cols: ['name', 'category', 'risk_level', 'enabled'],
-    fields: [
-      { key: 'name', label: 'Name' },
-      { key: 'description', label: 'Detailed Description (model-facing)' },
-      { key: 'category', label: 'Category' },
-      { key: 'risk_level', label: 'Risk Level', options: ['low', 'medium', 'high', 'critical'], default: 'low' },
-      { key: 'requires_approval', label: 'Requires Approval', type: 'checkbox', save: 'bool' },
-      { key: 'max_execution_ms', label: 'Max Execution (ms)', type: 'number', save: 'int' },
-      { key: 'rate_limit_per_min', label: 'Rate Limit/min', type: 'number', save: 'int' },
-      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
-    ],
-  },
-  'skills': {
-    singular: 'Skill', apiPath: 'admin/skills', listKey: 'skills',
-    cols: ['name', 'category', 'priority', 'version', 'enabled'],
-    fields: [
-      { key: 'name', label: 'Name' },
-      { key: 'description', label: 'Detailed Description (model-facing)' },
-      { key: 'category', label: 'Category', options: ['retrieval', 'computation', 'communication', 'data-processing', 'planning', 'analysis', 'code', 'web', 'general'], default: 'general' },
-      { key: 'trigger_patterns', label: 'Trigger Patterns (JSON array)', textarea: true, rows: 3, save: 'json' },
-      { key: 'instructions', label: 'Instructions', textarea: true, rows: 6 },
-      { key: 'tool_names', label: 'Tool Names (JSON array)', textarea: true, rows: 3, save: 'json' },
-      { key: 'examples', label: 'Examples (JSON array)', textarea: true, rows: 4, save: 'json' },
-      { key: 'tags', label: 'Tags (JSON array)', textarea: true, rows: 2, save: 'json' },
-      { key: 'priority', label: 'Priority', type: 'number', save: 'int', default: 0 },
-      { key: 'version', label: 'Version', default: '1.0' },
-      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
-    ],
-  },
-  'worker-agents': {
-    singular: 'Worker Agent', apiPath: 'admin/worker-agents', listKey: 'workerAgents',
-    cols: ['name', 'priority', 'task_contract_id', 'max_retries', 'enabled'],
-    fields: [
-      { key: 'name', label: 'Name' },
-      { key: 'description', label: 'Detailed Description (model-facing)' },
-      { key: 'system_prompt', label: 'System Prompt', textarea: true, rows: 6 },
-      { key: 'tool_names', label: 'Tool Names (JSON array)', textarea: true, rows: 3, save: 'json' },
-      { key: 'persona', label: 'Persona', options: ['agent', 'agent_worker', 'agent_researcher', 'agent_analyst', 'agent_writer'], default: 'agent_worker' },
-      { key: 'trigger_patterns', label: 'Trigger Patterns (JSON array)', textarea: true, rows: 3, save: 'json' },
-      { key: 'task_contract_id', label: 'Task Contract ID' },
-      { key: 'max_retries', label: 'Max Retries', type: 'number', save: 'int', default: 0 },
-      { key: 'priority', label: 'Priority', type: 'number', save: 'int', default: 0 },
-      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
-    ],
-  },
+  ...CALLABLE_CAPABILITY_ADMIN_TABS,
 
   /* ── Governance ───────────────────────────── */
   'task-policies': {
@@ -752,4 +577,4 @@ export const ADMIN_TABS: Record<string, AdminTabDef> = {
     fields: [],
     readOnly: true,
   },
-};
+});

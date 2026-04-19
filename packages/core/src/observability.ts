@@ -56,6 +56,63 @@ export interface SpanEvent {
   readonly data?: Record<string, unknown>;
 }
 
+// ─── Capability telemetry ───────────────────────────────────
+
+/**
+ * Shared capability categories used by observability, evals, and runtime
+ * metadata. Keeping the vocabulary in core ensures prompts, skills, tools,
+ * and agents can all emit a comparable shape without app-local adapters.
+ */
+export type CapabilityKind = 'prompt' | 'skill' | 'agent' | 'tool';
+
+export interface CapabilityEvaluationTelemetry {
+  readonly id: string;
+  readonly description: string;
+  readonly passed: boolean;
+  readonly score?: number;
+  readonly reason?: string;
+}
+
+export interface CapabilityContractTelemetry {
+  readonly total: number;
+  readonly passed: number;
+  readonly failed: number;
+  readonly warnings?: number;
+  readonly errors?: number;
+}
+
+/**
+ * Normalized, capability-agnostic execution summary.
+ *
+ * Why: prompts, skills, agents, and tools should all be observable through the
+ * same top-level shape so traces, dashboards, and audits can compare them.
+ */
+export interface CapabilityTelemetrySummary {
+  readonly kind: CapabilityKind;
+  readonly key: string;
+  readonly name: string;
+  readonly description: string;
+  readonly version?: string;
+  readonly source?: 'db' | 'builtin' | 'runtime' | 'user';
+  readonly selectedBy?: string;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly strategyKey?: string;
+  readonly strategyName?: string;
+  readonly strategyDescription?: string;
+  readonly usedFallbackStrategy?: boolean;
+  readonly renderedCharacters?: number;
+  readonly renderedLines?: number;
+  readonly baseCharacters?: number;
+  readonly durationMs?: number;
+  readonly evaluations?: readonly CapabilityEvaluationTelemetry[];
+  readonly contracts?: CapabilityContractTelemetry;
+  readonly tags?: readonly string[];
+  readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export type CapabilityTelemetryStage = 'start' | 'success' | 'error';
+
 // ─── Cost & token tracking ───────────────────────────────────
 
 export interface UsageRecord {
