@@ -100,6 +100,11 @@ import {
   type ProviderConfig,
   type WorkerDef,
 } from './chat-runtime.js';
+import {
+  loadModelPricing,
+  type ModelPricing,
+  type PricingCache,
+} from './chat-pricing-utils.js';
 import { normalizeGuardrail, stageMatches } from './chat-guardrail-utils.js';
 import {
   buildAttachmentContext,
@@ -132,10 +137,6 @@ import { shouldForceWorkerDataAnalysis } from './chat-intent-utils.js';
 
 export { calculateCost, getOrCreateModel, settingsFromRow } from './chat-runtime.js';
 export type { ChatAttachment, ProviderConfig, ChatEngineConfig, ChatSettings, WorkerDef } from './chat-runtime.js';
-
-// ─── Model pricing (per 1 M tokens) ─────────────────────────
-
-interface ModelPricing { input: number; output: number }
 
 interface PromptStrategyInfo {
   requestedKey: string;
@@ -180,8 +181,7 @@ export class ChatEngine {
   private readonly healthTracker = new ModelHealthTracker();
   private readonly responseCache = weaveInMemoryCacheStore();
   private readonly cacheKeyBuilder = weaveCacheKeyBuilder({ namespace: 'gw-chat' });
-  private pricingCache: Map<string, ModelPricing> | null = null;
-  private pricingCacheTs = 0;
+  private pricingCache: PricingCache | null = null;
   private policyPromptCache: PolicyPromptCache | null = null;
   private readonly toolOptions: ToolRegistryOptions;
 
@@ -491,20 +491,9 @@ export class ChatEngine {
 
   /** Load pricing from DB, cache for 60 s */
   private async loadPricing(): Promise<Map<string, ModelPricing>> {
-    const now = Date.now();
-    if (this.pricingCache && now - this.pricingCacheTs < 60_000) return this.pricingCache;
-    try {
-      const rows = await this.db.listModelPricing();
-      const map = new Map<string, ModelPricing>();
-      for (const r of rows) {
-        if (r.enabled) map.set(r.model_id, { input: r.input_cost_per_1m, output: r.output_cost_per_1m });
-      }
-      this.pricingCache = map;
-      this.pricingCacheTs = now;
-      return map;
-    } catch {
-      return new Map();
-    }
+    const result = await loadModelPricing(this.db, this.pricingCache);
+    this.pricingCache = result.cache;
+    return result.pricing;
   }
 
   // ── Direct mode: send ───────────────────────────────────────
