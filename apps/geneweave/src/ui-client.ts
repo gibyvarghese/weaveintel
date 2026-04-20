@@ -1153,12 +1153,6 @@ function renderHomeWorkspace() {
   );
 
   return h('div', {className:'workspace-home'},
-    renderWorkspaceTopCard({
-      render,
-      createChat,
-      selectChat,
-      renderProfileDropdown: () => renderProfileDropdown({ render, doLogout, loadDashboard, loadAdmin }),
-    }),
     h('div', { className: 'workspace-body' }, center, rightRail)
   );
 }
@@ -1176,6 +1170,14 @@ function renderApp() {
   }));
   
   const main = h('div', {className:'main'});
+  main.appendChild(h('div', { className: 'main-header' },
+    renderWorkspaceTopCard({
+      render,
+      createChat,
+      selectChat,
+      renderProfileDropdown: () => renderProfileDropdown({ render, doLogout, loadDashboard, loadAdmin }),
+    })
+  ));
   if (state.view === 'dashboard') {
     main.appendChild(renderDashboardView({
       render,

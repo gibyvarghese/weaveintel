@@ -78,6 +78,7 @@ input{font-family:inherit;outline:none}
 
 /* ── Main content area ──────────────────────── */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+.main-header{padding:18px 22px 0;flex:0 0 auto}
 
 /* ── Workspace shell (new UI) ───────────────── */
 .workspace-nav{width:252px;background:var(--bg2);border-right:1px solid var(--bg4);padding:20px 14px;display:flex;flex-direction:column;gap:18px;transition:width .18s ease,padding .18s ease;height:100vh;min-height:100vh;max-height:100vh;overflow:hidden}
@@ -142,7 +143,7 @@ input{font-family:inherit;outline:none}
 .workspace-nav.collapsed .workspace-menu a{justify-content:center;padding:10px 0}
 .workspace-nav.collapsed .side-icon{width:18px;height:18px;flex:0 0 18px}
 .workspace-nav.collapsed .sidebar-collapse-btn{margin-left:0}
-.workspace-home{flex:1;display:flex;flex-direction:column;padding:18px 22px;gap:14px;overflow:hidden;min-height:0}
+.workspace-home{flex:1;display:flex;flex-direction:column;padding:14px 22px 18px;gap:14px;overflow:hidden;min-height:0}
 .workspace-top-card{background:var(--bg2);border:1px solid var(--bg4);border-radius:18px;padding:14px 16px;display:grid;grid-template-columns:auto auto 1fr auto;gap:14px;align-items:center;box-shadow:var(--shadow-soft)}
 .user-chip{display:flex;align-items:center;gap:10px;min-width:220px}
 .user-chip img{width:36px;height:36px;border-radius:50%;object-fit:cover}
