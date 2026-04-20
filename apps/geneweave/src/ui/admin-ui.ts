@@ -142,13 +142,26 @@ export function renderAdminForm(
   tab: string,
   onSave: (tab: string) => void,
   onCancel: (tab?: string) => void,
+  onDelete?: () => void,
 ): HTMLElement {
   const schema = getAdminSchema(tab);
   if (!schema) return h('div', null);
   const isEdit = !!state.adminEditing;
-  const form = h('div', { className: 'chart-box', style: 'margin-bottom:16px;' },
-    h('h3', null, `${isEdit ? 'Edit' : 'New'} ${schema.singular}`)
+
+  const actionBar = h('div', { className: 'admin-form-action-bar' },
+    h('span', { className: 'admin-form-title' }, `${isEdit ? 'Edit' : 'New'} ${schema.singular}`),
+    h('div', { className: 'admin-form-action-btns' },
+      isEdit && !schema.readOnly && onDelete
+        ? h('button', { className: 'admin-form-btn admin-form-btn-delete', onClick: onDelete }, 'Delete')
+        : null,
+      h('button', { className: 'admin-form-btn', onClick: () => onCancel(tab) }, 'Cancel'),
+      schema.readOnly
+        ? null
+        : h('button', { className: 'admin-form-btn admin-form-btn-save', onClick: () => onSave(tab) }, isEdit ? 'Save' : 'Create'),
+    )
   );
+
+  const form = h('div', { className: 'chart-box', style: 'margin-bottom:16px;' }, actionBar);
 
   (schema.fields || []).forEach((field: any) => {
     const currentVal = (state.adminForm?.[field.key] ?? '') as any;
@@ -200,11 +213,6 @@ export function renderAdminForm(
 
     form.appendChild(row);
   });
-
-  form.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:12px;' },
-    h('button', { className: 'nav-btn active', onClick: () => onSave(tab) }, isEdit ? 'Update' : 'Create'),
-    h('button', { className: 'nav-btn', onClick: () => onCancel(tab) }, 'Cancel')
-  ));
 
   return form;
 }
@@ -276,6 +284,7 @@ export function renderAdminView(options: {
         currentTab,
         (tab) => { void adminSaveRow(tab, options.render, options.loadAdmin); },
         (tab) => adminBackToList(tab, options.render),
+        () => { void adminDeleteRow(currentTab, state.adminForm as any, options.render, options.loadAdmin); },
       )));
     }
     page.appendChild(right);
@@ -463,7 +472,7 @@ export function renderAdminView(options: {
 
     listPanel.appendChild(
       h('table', { className: 'eval-table' },
-        h('thead', null, h('tr', null, ...headerCells, h('th', null, 'Actions'))),
+        h('thead', null, h('tr', null, ...headerCells)),
         tbody
       )
     );
@@ -773,7 +782,15 @@ function buildAdminRow(
   const excludeVal: string = '';
   const excludeCol: string = '';
   // (filtering handled upstream in the main filter pass)
-  return h('tr', null,
+  return h('tr', {
+    className: 'admin-data-row',
+    title: 'Click to edit',
+    onClick: (e: MouseEvent) => {
+      // Don't trigger row edit if the click was on a context menu or came from it
+      if ((e.target as HTMLElement).closest('.col-ctx-menu')) return;
+      adminEditRow(currentTab, row, options.hydrateWizardFromPrompt, options.render);
+    },
+  },
     ...cols.map((col: string) => {
       const raw = row?.[col];
       const str = raw == null ? '—' : String(raw);
@@ -781,16 +798,11 @@ function buildAdminRow(
       const attrs: Record<string, any> = {};
       if (str.length > 60) attrs['title'] = str;
       attrs['onContextmenu'] = (e: MouseEvent) => {
+        e.stopPropagation();
         e.preventDefault();
         showCellContextMenu(col, str === '—' ? '' : str, row, currentTab, schema, e.clientX, e.clientY, options);
       };
       return h('td', attrs, display);
     }),
-    h('td', null,
-      h('div', { className: 'row-actions' },
-        h('button', { className: 'row-btn row-btn-edit', onClick: () => adminEditRow(currentTab, row, options.hydrateWizardFromPrompt, options.render) }, 'Edit'),
-        schema?.readOnly ? null : h('button', { className: 'row-btn row-btn-del', onClick: () => { void adminDeleteRow(currentTab, row, options.render, options.loadAdmin); } }, 'Delete')
-      )
-    )
   );
 }

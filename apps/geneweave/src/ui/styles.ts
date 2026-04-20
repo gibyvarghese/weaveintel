@@ -570,6 +570,17 @@ input{font-family:inherit;outline:none}
 .row-btn:hover{border-color:var(--fg3);background:var(--bg)}
 .row-btn-edit{color:var(--accent2);border-color:var(--accent);background:var(--accent-dim)}
 .row-btn-del{color:#DC2626;border-color:#FCA5A5;background:#FEF2F2}
+.admin-data-row{cursor:pointer;transition:background .1s}
+.admin-data-row:hover td{background:color-mix(in oklab,var(--accent) 7%, transparent)}
+.admin-form-action-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--bg4)}
+.admin-form-title{font-size:15px;font-weight:700;color:var(--fg)}
+.admin-form-action-btns{display:flex;align-items:center;gap:8px}
+.admin-form-btn{padding:6px 16px;font-size:13px;border-radius:8px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg);cursor:pointer;font-weight:500;transition:background .1s,border-color .1s}
+.admin-form-btn:hover{background:var(--bg);border-color:var(--fg3)}
+.admin-form-btn-save{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+.admin-form-btn-save:hover{opacity:.88;background:var(--accent)}
+.admin-form-btn-delete{color:#DC2626;border-color:#FCA5A5;background:#FEF2F2}
+.admin-form-btn-delete:hover{background:#FEE2E2;border-color:#F87171}
 
 /* ── Prompt Setup Wizard ─────────────────── */
 .prompt-wizard{margin:12px 12px 18px;border:1px solid var(--bg4);background:linear-gradient(180deg,var(--bg2),var(--bg3))}
