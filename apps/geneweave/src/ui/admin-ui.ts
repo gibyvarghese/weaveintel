@@ -14,9 +14,31 @@ import { resetPromptWizard } from './prompt-wizard-state.js';
 
 type SearchNode =
   | { kind: 'term'; value: string }
+  | { kind: 'comparison'; column: string; op: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains'; value: string }
   | { kind: 'and'; left: SearchNode; right: SearchNode }
   | { kind: 'or'; left: SearchNode; right: SearchNode }
   | { kind: 'not'; operand: SearchNode };
+
+type ComparisonOp = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains';
+
+function normalizeKey(s: string): string {
+  return String(s || '').toLowerCase().replace(/[_\s-]+/g, '');
+}
+
+function parseLiteralToken(tok: string): string {
+  if (tok && tok.startsWith('"') && tok.endsWith('"')) {
+    try { return String(JSON.parse(tok)); } catch {}
+  }
+  return tok;
+}
+
+function resolveColumnKey(columnExpr: string, cols: string[]): string | null {
+  const normalizedExpr = normalizeKey(columnExpr);
+  const exact = cols.find((c) => c.toLowerCase() === columnExpr.toLowerCase());
+  if (exact) return exact;
+  const normalized = cols.find((c) => normalizeKey(c) === normalizedExpr);
+  return normalized || null;
+}
 
 function tokenize(input: string): string[] {
   const tokens: string[] = [];
@@ -51,6 +73,56 @@ function parseSearchQuery(raw: string): SearchNode | null {
 
   function peek() { return tokens[pos]; }
   function consume() { return tokens[pos++]; }
+  function isLogicalBoundary(t: string | undefined) { return t === undefined || t === ')' || t === 'and' || t === 'or'; }
+
+  function parseComparisonAtCurrentPosition(): SearchNode | null {
+    const end = (() => {
+      let i = pos;
+      while (!isLogicalBoundary(tokens[i])) i++;
+      return i;
+    })();
+    const segment = tokens.slice(pos, end);
+    if (segment.length < 3) return null;
+
+    const patterns: Array<{ parts: string[]; op: ComparisonOp }> = [
+      { parts: ['is', 'not'], op: 'neq' },
+      { parts: ['greater', 'than', 'or', 'equal', 'to'], op: 'gte' },
+      { parts: ['less', 'than', 'or', 'equal', 'to'], op: 'lte' },
+      { parts: ['greater', 'than'], op: 'gt' },
+      { parts: ['less', 'than'], op: 'lt' },
+      { parts: ['contains'], op: 'contains' },
+      { parts: ['is'], op: 'eq' },
+      { parts: ['>='], op: 'gte' },
+      { parts: ['<='], op: 'lte' },
+      { parts: ['>'], op: 'gt' },
+      { parts: ['<'], op: 'lt' },
+      { parts: ['!='], op: 'neq' },
+      { parts: ['='], op: 'eq' },
+    ];
+
+    for (let i = 1; i < segment.length - 1; i++) {
+      for (const p of patterns) {
+        let matched = true;
+        for (let j = 0; j < p.parts.length; j++) {
+          if (segment[i + j] !== p.parts[j]) {
+            matched = false;
+            break;
+          }
+        }
+        if (!matched) continue;
+
+        const valueStart = i + p.parts.length;
+        if (valueStart >= segment.length) continue;
+        const colPart = segment.slice(0, i).join(' ').trim();
+        const valuePart = segment.slice(valueStart).map(parseLiteralToken).join(' ').trim();
+        if (!colPart || !valuePart) continue;
+
+        pos = end;
+        return { kind: 'comparison', column: colPart, op: p.op, value: valuePart };
+      }
+    }
+    return null;
+  }
 
   // or-expression
   function parseOr(): SearchNode {
@@ -91,23 +163,42 @@ function parseSearchQuery(raw: string): SearchNode | null {
       if (peek() === ')') consume();
       return node;
     }
+
+    const comparison = parseComparisonAtCurrentPosition();
+    if (comparison) return comparison;
+
     const tok = consume();
-    // JSON.stringify-encoded literals from quoted phrases
-    if (tok && tok.startsWith('"') && tok.endsWith('"')) {
-      try { return { kind: 'term', value: JSON.parse(tok) }; } catch { /* fall through */ }
-    }
-    return { kind: 'term', value: tok ?? '' };
+    return { kind: 'term', value: parseLiteralToken(tok ?? '') };
   }
 
   return parseOr();
 }
 
-function evalSearchNode(node: SearchNode, haystack: string): boolean {
+function evalSearchNode(node: SearchNode, row: any, cols: string[], haystack: string): boolean {
   switch (node.kind) {
     case 'term':   return haystack.includes(node.value.toLowerCase());
-    case 'not':    return !evalSearchNode(node.operand, haystack);
-    case 'and':    return evalSearchNode(node.left, haystack) && evalSearchNode(node.right, haystack);
-    case 'or':     return evalSearchNode(node.left, haystack) || evalSearchNode(node.right, haystack);
+    case 'comparison': {
+      const key = resolveColumnKey(node.column, cols);
+      if (!key) return false;
+      const raw = row?.[key];
+      const left = String(raw ?? '').toLowerCase().trim();
+      const right = String(node.value ?? '').toLowerCase().trim();
+      if (node.op === 'contains') return left.includes(right);
+      if (node.op === 'eq') return left === right;
+      if (node.op === 'neq') return left !== right;
+
+      const leftNum = Number(raw);
+      const rightNum = Number(node.value);
+      if (!Number.isFinite(leftNum) || !Number.isFinite(rightNum)) return false;
+      if (node.op === 'gt') return leftNum > rightNum;
+      if (node.op === 'gte') return leftNum >= rightNum;
+      if (node.op === 'lt') return leftNum < rightNum;
+      if (node.op === 'lte') return leftNum <= rightNum;
+      return false;
+    }
+    case 'not':    return !evalSearchNode(node.operand, row, cols, haystack);
+    case 'and':    return evalSearchNode(node.left, row, cols, haystack) && evalSearchNode(node.right, row, cols, haystack);
+    case 'or':     return evalSearchNode(node.left, row, cols, haystack) || evalSearchNode(node.right, row, cols, haystack);
   }
 }
 
@@ -116,7 +207,7 @@ function matchesSearch(query: string, row: any, cols: string[]): boolean {
   const node = parseSearchQuery(query);
   if (!node) return true;
   const haystack = cols.map((c: string) => String(row?.[c] ?? '')).join(' ').toLowerCase();
-  return evalSearchNode(node, haystack);
+  return evalSearchNode(node, row, cols, haystack);
 }
 
 function parseNaturalTerms(raw: string): { include: string[]; exclude: string[] } {
@@ -124,8 +215,9 @@ function parseNaturalTerms(raw: string): { include: string[]; exclude: string[] 
   const exclude: string[] = [];
   let negateNext = false;
   const tokens = tokenize(raw.trim());
+  const ignored = new Set(['and', 'or', 'is', 'contains', '>', '<', '>=', '<=', '=', '!=', 'greater', 'less', 'than', 'equal', 'to']);
   for (const tok of tokens) {
-    if (tok === '(' || tok === ')' || tok === 'and' || tok === 'or') continue;
+    if (tok === '(' || tok === ')' || ignored.has(tok)) continue;
     if (tok === 'not') {
       negateNext = true;
       continue;
@@ -516,7 +608,7 @@ export function renderAdminView(options: {
   const searchInput = h('input', {
     type: 'text',
     className: 'admin-list-search',
-    placeholder: `Search ${rows.length} records… (and · or · not · "phrase")`,
+    placeholder: `Search ${rows.length} records… (name is writer, score > 10, status is not draft)`,
     value: state.adminListSearch || '',
     onInput: (e: Event) => {
       state.adminListSearch = (e.target as HTMLInputElement).value;
