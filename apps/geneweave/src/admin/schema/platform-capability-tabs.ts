@@ -214,25 +214,6 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
     ],
   },
-  'tool-registry': {
-    singular: 'Tool Registry Entry', apiPath: 'admin/tool-registry', listKey: 'tool-registry',
-    cols: ['name', 'package_name', 'version', 'risk_level', 'enabled'],
-    fields: [
-      { key: 'name', label: 'Name' },
-      { key: 'description', label: 'Description' },
-      { key: 'package_name', label: 'Package Name' },
-      { key: 'version', label: 'Version', default: '1.0.0' },
-      { key: 'category', label: 'Category', options: ['general', 'search', 'browser', 'social', 'enterprise', 'utility'], default: 'general' },
-      { key: 'risk_level', label: 'Risk Level', options: ['low', 'medium', 'high', 'critical'], default: 'low' },
-      { key: 'tags', label: 'Tags (JSON)', textarea: true, save: 'json' },
-      { key: 'config', label: 'Config (JSON)', textarea: true, save: 'json' },
-      { key: 'requires_approval', label: 'Requires Approval', type: 'checkbox', save: 'bool' },
-      { key: 'max_execution_ms', label: 'Max Execution (ms)', type: 'number', save: 'int' },
-      { key: 'rate_limit_per_min', label: 'Rate Limit/min', type: 'number', save: 'int' },
-      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
-    ],
-  },
-
   'trigger-definitions': {
     singular: 'Trigger Definition', apiPath: 'admin/trigger-definitions', listKey: 'trigger-definitions',
     cols: ['name', 'trigger_type', 'status', 'enabled'],

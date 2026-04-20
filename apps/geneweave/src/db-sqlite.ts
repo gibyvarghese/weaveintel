@@ -17,7 +17,7 @@ import type {
   PromptRow, PromptFrameworkRow, PromptFragmentRow, PromptContractRow, PromptStrategyRow,
   PromptVersionRow, PromptExperimentRow, PromptEvalDatasetRow, PromptEvalRunRow, PromptOptimizerRow, PromptOptimizationRunRow,
   GuardrailRow, RoutingPolicyRow, WorkflowDefRow,
-  ToolConfigRow, ToolCatalogRow, SkillRow, WorkerAgentRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
+  ToolConfigRow, ToolCatalogRow, ToolPolicyRow, SkillRow, WorkerAgentRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
   IdentityRuleRow, MemoryGovernanceRow, SearchProviderRow, HttpEndpointRow,
   MemoryExtractionRuleRow,
   SocialAccountRow, EnterpriseConnectorRow, ToolRegistryRow, ReplayScenarioRow,
@@ -1141,6 +1141,77 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteToolConfig(id: string): Promise<void> {
     this.d.prepare('DELETE FROM tool_catalog WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Tool policies ──────────────────────────────────
+
+  async createToolPolicy(p: Omit<ToolPolicyRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tool_policies (id, key, name, description, applies_to, applies_to_risk_levels, approval_required, allowed_risk_levels, max_execution_ms, rate_limit_per_minute, max_concurrent, require_dry_run, log_input_output, persona_scope, active_hours_utc, expires_at, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      p.id, p.key, p.name, p.description ?? null,
+      p.applies_to ?? null, p.applies_to_risk_levels ?? null,
+      p.approval_required, p.allowed_risk_levels ?? null,
+      p.max_execution_ms ?? null, p.rate_limit_per_minute ?? null, p.max_concurrent ?? null,
+      p.require_dry_run, p.log_input_output,
+      p.persona_scope ?? null, p.active_hours_utc ?? null, p.expires_at ?? null, p.enabled,
+    );
+  }
+
+  async getToolPolicy(id: string): Promise<ToolPolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM tool_policies WHERE id = ?').get(id) as ToolPolicyRow) ?? null;
+  }
+
+  async getToolPolicyByKey(key: string): Promise<ToolPolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM tool_policies WHERE key = ?').get(key) as ToolPolicyRow) ?? null;
+  }
+
+  async listToolPolicies(): Promise<ToolPolicyRow[]> {
+    return this.d.prepare('SELECT * FROM tool_policies ORDER BY name ASC').all() as ToolPolicyRow[];
+  }
+
+  async updateToolPolicy(id: string, fields: Partial<Omit<ToolPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE tool_policies SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteToolPolicy(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM tool_policies WHERE id = ?').run(id);
+  }
+
+  async checkAndIncrementRateLimit(
+    toolName: string,
+    scopeKey: string,
+    windowStartIso: string,
+    limitPerMinute: number,
+  ): Promise<boolean> {
+    const { randomUUID } = await import('node:crypto');
+    // Upsert the bucket for this (toolName, scopeKey, windowStart) combination.
+    this.d.prepare(`
+      INSERT INTO tool_rate_limit_buckets (id, tool_name, scope_key, window_start, count)
+      VALUES (?, ?, ?, ?, 0)
+      ON CONFLICT(tool_name, scope_key, window_start) DO NOTHING
+    `).run(randomUUID(), toolName, scopeKey, windowStartIso);
+
+    const row = this.d.prepare(
+      'SELECT count FROM tool_rate_limit_buckets WHERE tool_name = ? AND scope_key = ? AND window_start = ?',
+    ).get(toolName, scopeKey, windowStartIso) as { count: number } | undefined;
+
+    if (!row || row.count >= limitPerMinute) return false;
+
+    this.d.prepare(
+      'UPDATE tool_rate_limit_buckets SET count = count + 1 WHERE tool_name = ? AND scope_key = ? AND window_start = ?',
+    ).run(toolName, scopeKey, windowStartIso);
+
+    return true;
   }
 
   // ─── Admin: Skills ─────────────────────────────────────────

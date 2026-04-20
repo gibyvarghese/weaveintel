@@ -37,6 +37,7 @@ import {
 import type { GuardrailCategorySummary } from '@weaveintel/guardrails';
 import type { DatabaseAdapter, MessageRow, ChatSettingsRow, GuardrailRow, HumanTaskPolicyRow, PromptRow, RoutingPolicyRow } from './db.js';
 import { BUILTIN_TOOLS, createToolRegistry, type ToolRegistryOptions } from './tools.js';
+import { DbToolPolicyResolver, DbToolRateLimiter, consoleAuditEmitter } from './tool-policy-resolver.js';
 import { createTemporalStore } from './temporal-store.js';
 import {
   applySkillsToPrompt,
@@ -170,7 +171,12 @@ export class ChatEngine {
     private readonly config: ChatEngineConfig,
     private readonly db: DatabaseAdapter,
   ) {
-    this.toolOptions = { temporalStore: createTemporalStore(db) };
+    this.toolOptions = {
+      temporalStore: createTemporalStore(db),
+      policyResolver: new DbToolPolicyResolver(db),
+      rateLimiter: new DbToolRateLimiter(db),
+      auditEmitter: consoleAuditEmitter,
+    };
   }
 
   private async getDisabledBuiltinToolKeys(): Promise<Set<string>> {

@@ -7,6 +7,7 @@
 
 import type { Tool, ToolRegistry } from '@weaveintel/core';
 import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import { createPolicyEnforcedRegistry, type ToolPolicyResolver, type ToolAuditEmitter, type ToolRateLimiter, noopAuditEmitter } from '@weaveintel/tools';
 import { Buffer } from 'node:buffer';
 import { createSearchRouter, type SearchProviderConfig } from '@weaveintel/tools-search';
 import { createInMemoryTemporalStore, createTimeTools, type TemporalStore } from '@weaveintel/tools-time';
@@ -496,6 +497,12 @@ export interface ToolRegistryOptions {
   }>;
   /** Tool keys disabled in the operator-managed catalog. Populated from db.listEnabledToolCatalog(). */
   disabledToolKeys?: ReadonlySet<string>;
+  /** Policy resolver for Phase 2 enforcement (rate limits, approval gates, risk level gates). */
+  policyResolver?: ToolPolicyResolver;
+  /** Audit emitter for recording tool invocation outcomes. */
+  auditEmitter?: ToolAuditEmitter;
+  /** Rate limiter for per-tool, per-scope limiting. */
+  rateLimiter?: ToolRateLimiter;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -563,6 +570,21 @@ export function createToolRegistry(toolNames: string[], customTools?: Tool[], op
       }
     }
   }
+
+  // Phase 2: wrap with policy enforcement when a resolver is provided.
+  if (opts?.policyResolver) {
+    return createPolicyEnforcedRegistry(registry, {
+      resolver: opts.policyResolver,
+      auditEmitter: opts.auditEmitter ?? noopAuditEmitter,
+      rateLimiter: opts.rateLimiter,
+      resolutionContext: {
+        agentPersona: opts.actorPersona,
+        chatId: opts.currentChatId,
+        userId: opts.currentUserId,
+      },
+    });
+  }
+
   return registry;
 }
 

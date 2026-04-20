@@ -13,7 +13,12 @@
  */
 
 import { createGeneWeave } from '../apps/geneweave/src/index.ts';
-import 'dotenv/config';
+import { config as dotenvConfig } from 'dotenv';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+// Resolve root .env explicitly so the server finds it regardless of CWD
+const __serverDir = dirname(fileURLToPath(import.meta.url));
+dotenvConfig({ path: resolve(__serverDir, '../.env') });
 
 async function main() {
   const port = parseInt(process.env['PORT'] ?? '3500', 10);

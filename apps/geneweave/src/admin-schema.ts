@@ -38,6 +38,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'skills', label: 'Skills' },
     { key: 'worker-agents', label: 'Agents' },
     { key: 'tool-catalog', label: 'Tool Catalog' },
+    { key: 'tool-policies', label: 'Tool Policies' },
     { key: 'workflows', label: 'Workflows' },
     { key: 'routing', label: 'Routing' },
     { key: 'task-policies', label: 'Task Policies' },
@@ -57,7 +58,6 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'social-accounts', label: 'Social' },
     { key: 'search-providers', label: 'Search' },
     { key: 'http-endpoints', label: 'HTTP' },
-    { key: 'tool-registry', label: 'Tool Registry' },
   ]},
   { label: 'Knowledge', icon: '\uD83D\uDCC2', tabs: [
     { key: 'extraction-pipelines', label: 'Extraction' },

@@ -503,6 +503,10 @@ export {
   type ToolTestHarness,
   type ToolHealth,
   type ToolExecutionPolicy,
+  type ToolPolicyViolationReason,
+  type EffectiveToolPolicy,
+  type ToolAuditOutcome,
+  type ToolAuditEvent,
 } from './tool-lifecycle.js';
 
 // Replay & evaluation contracts

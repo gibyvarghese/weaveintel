@@ -510,4 +510,81 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   safeExec(db, `UPDATE tool_catalog SET tool_key = 'database_query' WHERE id = '9bbd1c34-35a1-442f-b2bb-d5d6f568f57a' AND tool_key IS NULL`);
   safeExec(db, `UPDATE tool_catalog SET tool_key = 'api_caller' WHERE id = '31755606-4e34-44be-a101-cee78d49f6e1' AND tool_key IS NULL`);
   safeExec(db, `UPDATE tool_catalog SET tool_key = 'statsnz_get_data' WHERE id = '220dd56e-5c1c-4dad-93c8-befa5d7588f5' AND tool_key IS NULL`);
+
+  // Phase 2: Create tool_policies and tool_rate_limit_buckets tables (no-op on fresh installs).
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tool_policies (
+      id TEXT PRIMARY KEY,
+      key TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      description TEXT,
+      applies_to TEXT,
+      applies_to_risk_levels TEXT,
+      approval_required INTEGER NOT NULL DEFAULT 0,
+      allowed_risk_levels TEXT,
+      max_execution_ms INTEGER,
+      rate_limit_per_minute INTEGER,
+      max_concurrent INTEGER,
+      require_dry_run INTEGER NOT NULL DEFAULT 0,
+      log_input_output INTEGER NOT NULL DEFAULT 1,
+      persona_scope TEXT,
+      active_hours_utc TEXT,
+      expires_at TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tool_rate_limit_buckets (
+      id TEXT PRIMARY KEY,
+      tool_name TEXT NOT NULL,
+      scope_key TEXT NOT NULL,
+      window_start TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(tool_name, scope_key, window_start)
+    )
+  `);
+
+  // Phase 2: Seed 4 default tool policies (idempotent via INSERT OR IGNORE).
+  safeExec(db, `
+    INSERT OR IGNORE INTO tool_policies
+      (id, key, name, description, applies_to, applies_to_risk_levels, approval_required, allowed_risk_levels, max_execution_ms, rate_limit_per_minute, max_concurrent, require_dry_run, log_input_output, persona_scope, enabled)
+    VALUES
+      ('e1a2b3c4-d5e6-47f8-a9b0-c1d2e3f4a5b6', 'default', 'Default Policy',
+       'Baseline policy applied to all tools. Logs I/O, 60 req/min, all risk levels allowed. Override with a more specific policy per tool or skill.',
+       NULL, NULL, 0,
+       '["read-only","write","destructive","privileged","financial","external-side-effect"]',
+       NULL, 60, NULL, 0, 1, NULL, 1)
+  `);
+  safeExec(db, `
+    INSERT OR IGNORE INTO tool_policies
+      (id, key, name, description, applies_to, applies_to_risk_levels, approval_required, allowed_risk_levels, max_execution_ms, rate_limit_per_minute, max_concurrent, require_dry_run, log_input_output, persona_scope, enabled)
+    VALUES
+      ('f2b3c4d5-e6f7-48a9-b0c1-d2e3f4a5b6c7', 'strict_external', 'Strict External Policy',
+       'Applied to tools that make outbound web or API calls. Limits to 20 req/min and enforces full I/O logging for compliance and cost visibility.',
+       '["web_search","api_caller","browser_screenshot","browser_navigate"]', NULL, 0,
+       '["read-only","external-side-effect"]',
+       15000, 20, NULL, 0, 1, NULL, 1)
+  `);
+  safeExec(db, `
+    INSERT OR IGNORE INTO tool_policies
+      (id, key, name, description, applies_to, applies_to_risk_levels, approval_required, allowed_risk_levels, max_execution_ms, rate_limit_per_minute, max_concurrent, require_dry_run, log_input_output, persona_scope, enabled)
+    VALUES
+      ('a3c4d5e6-f7a8-49b0-c1d2-e3f4a5b6c7d8', 'destructive_gate', 'Destructive Gate Policy',
+       'Requires human approval before any tool invocation classified as destructive, privileged, or financial risk. Attach to skills or agent personas handling sensitive operations.',
+       NULL, '["destructive","privileged","financial"]', 1,
+       '["destructive","privileged","financial"]',
+       NULL, NULL, 1, 1, 1, NULL, 1)
+  `);
+  safeExec(db, `
+    INSERT OR IGNORE INTO tool_policies
+      (id, key, name, description, applies_to, applies_to_risk_levels, approval_required, allowed_risk_levels, max_execution_ms, rate_limit_per_minute, max_concurrent, require_dry_run, log_input_output, persona_scope, enabled)
+    VALUES
+      ('b4d5e6f7-a8b9-40c1-d2e3-f4a5b6c7d8e9', 'read_only', 'Read-Only Policy',
+       'Restricts tool usage to read-only risk level only. Use with agent personas that must not have side effects — research agents, summarizers, and audit bots.',
+       NULL, NULL, 0,
+       '["read-only"]',
+       10000, 120, NULL, 0, 0, NULL, 1)
+  `);
 }

@@ -407,6 +407,37 @@ CREATE TABLE IF NOT EXISTS tool_catalog (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS tool_policies (
+  id TEXT PRIMARY KEY,
+  key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  description TEXT,
+  applies_to TEXT,              -- JSON array of tool names or wildcards
+  applies_to_risk_levels TEXT,  -- JSON array of ToolRiskLevel values
+  approval_required INTEGER NOT NULL DEFAULT 0,
+  allowed_risk_levels TEXT,     -- JSON array of ToolRiskLevel values
+  max_execution_ms INTEGER,
+  rate_limit_per_minute INTEGER,
+  max_concurrent INTEGER,
+  require_dry_run INTEGER NOT NULL DEFAULT 0,
+  log_input_output INTEGER NOT NULL DEFAULT 1,
+  persona_scope TEXT,           -- JSON array of persona identifiers
+  active_hours_utc TEXT,        -- JSON object { start: "HH:MM", end: "HH:MM" }
+  expires_at TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS tool_rate_limit_buckets (
+  id TEXT PRIMARY KEY,
+  tool_name TEXT NOT NULL,
+  scope_key TEXT NOT NULL,
+  window_start TEXT NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(tool_name, scope_key, window_start)
+);
+
 CREATE TABLE IF NOT EXISTS workflow_runs (
   id TEXT PRIMARY KEY,
   workflow_id TEXT NOT NULL,

@@ -8,5 +8,6 @@ export { registerIdentityRuleRoutes } from './identity-rules.js';
 export { registerMemoryGovernanceRoutes } from './memory-governance.js';
 export { registerComplianceRuleRoutes } from './compliance-rules.js';
 export { registerToolRoutes } from './tools.js';
+export { registerToolPolicyRoutes } from './tool-policies.js';
 export { registerSkillRoutes } from './skills.js';
 export { registerWorkerAgentRoutes } from './worker-agents.js';

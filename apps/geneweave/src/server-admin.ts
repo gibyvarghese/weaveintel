@@ -23,6 +23,7 @@ import type { DatabaseAdapter } from './db.js';
 import type { AuthContext } from './auth.js';
 import {
   registerToolRoutes,
+  registerToolPolicyRoutes,
   registerSkillRoutes,
   registerWorkerAgentRoutes,
   registerGuardrailRoutes,
@@ -1081,6 +1082,7 @@ export function registerAdminRoutes(
   registerMemoryGovernanceRoutes(router, db, adminHelpers);
   registerComplianceRuleRoutes(router, db, adminHelpers);
   registerToolRoutes(router, db, adminHelpers);
+  registerToolPolicyRoutes(router, db, adminHelpers);
   registerSkillRoutes(router, db, adminHelpers);
   registerWorkerAgentRoutes(router, db, adminHelpers);
 

@@ -1,7 +1,11 @@
+import { config as dotenvConfig } from 'dotenv';
 import { defineConfig } from '@playwright/test';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// Load root .env so API keys are available before provider detection below
+dotenvConfig({ path: resolve(fileURLToPath(new URL('.', import.meta.url)), '../../.env') });
 
 const managedPort = Number.parseInt(process.env['PLAYWRIGHT_PORT'] ?? '3510', 10);
 const baseURL = process.env['BASE_URL'] ?? `http://127.0.0.1:${managedPort}`;

@@ -451,6 +451,36 @@ export interface ToolCatalogRow {
 /** @deprecated Use ToolCatalogRow */
 export type ToolConfigRow = ToolCatalogRow;
 
+export interface ToolPolicyRow {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  applies_to: string | null;              // JSON string[]
+  applies_to_risk_levels: string | null;  // JSON string[]
+  approval_required: number;
+  allowed_risk_levels: string | null;     // JSON string[]
+  max_execution_ms: number | null;
+  rate_limit_per_minute: number | null;
+  max_concurrent: number | null;
+  require_dry_run: number;
+  log_input_output: number;
+  persona_scope: string | null;           // JSON string[]
+  active_hours_utc: string | null;        // JSON { start: "HH:MM", end: "HH:MM" }
+  expires_at: string | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ToolRateLimitBucketRow {
+  id: string;
+  tool_name: string;
+  scope_key: string;
+  window_start: string;
+  count: number;
+}
+
 export interface SkillRow {
   id: string;
   name: string;
@@ -1277,6 +1307,16 @@ export interface DatabaseAdapter {
   listEnabledToolCatalog(): Promise<ToolCatalogRow[]>;
   updateToolConfig(id: string, fields: Partial<Omit<ToolCatalogRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteToolConfig(id: string): Promise<void>;
+
+  // ─── Admin: Tool policies ──────────────────────────────────
+  createToolPolicy(p: Omit<ToolPolicyRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getToolPolicy(id: string): Promise<ToolPolicyRow | null>;
+  getToolPolicyByKey(key: string): Promise<ToolPolicyRow | null>;
+  listToolPolicies(): Promise<ToolPolicyRow[]>;
+  updateToolPolicy(id: string, fields: Partial<Omit<ToolPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteToolPolicy(id: string): Promise<void>;
+  /** Rate limiting: check window count and increment if within limit. Returns true if allowed. */
+  checkAndIncrementRateLimit(toolName: string, scopeKey: string, windowStartIso: string, limitPerMinute: number): Promise<boolean>;
 
   // ─── Admin: Skills ─────────────────────────────────────────
   createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void>;

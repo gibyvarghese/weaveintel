@@ -17,6 +17,7 @@ const ADMIN_TAB_LOCATIONS: Record<string, { group: string; key: string }> = {
   Routing: { group: 'Orchestration', key: 'routing' },
   Workflows: { group: 'Orchestration', key: 'workflows' },
   Tools: { group: 'Orchestration', key: 'tool-catalog' },
+  'Tool Policies': { group: 'Orchestration', key: 'tool-policies' },
   'Workflow Runs': { group: 'Monitoring', key: 'workflow-runs' },
   'Guardrail Evals': { group: 'Monitoring', key: 'guardrail-evals' },
   'Task Policies': { group: 'Orchestration', key: 'task-policies' },
@@ -28,7 +29,6 @@ const ADMIN_TAB_LOCATIONS: Record<string, { group: string; key: string }> = {
   HTTP: { group: 'Integrations', key: 'http-endpoints' },
   Social: { group: 'Integrations', key: 'social-accounts' },
   Enterprise: { group: 'Integrations', key: 'enterprise-connectors' },
-  Registry: { group: 'Integrations', key: 'tool-registry' },
   Replay: { group: 'Orchestration', key: 'replay-scenarios' },
   Triggers: { group: 'Orchestration', key: 'trigger-definitions' },
   Tenants: { group: 'Infrastructure', key: 'tenant-configs' },
@@ -191,7 +191,7 @@ test.describe('Admin Navigation', () => {
   test('shows core admin sidebar tabs', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
-    for (const label of ['Prompts', 'Guardrails', 'Routing', 'Workflows', 'Tools', 'Workflow Runs', 'Guardrail Evals', 'Task Policies', 'Contracts', 'Cache', 'Identity', 'Memory Gov', 'Search', 'HTTP', 'Social', 'Enterprise', 'Registry']) {
+    for (const label of ['Prompts', 'Guardrails', 'Routing', 'Workflows', 'Tools', 'Workflow Runs', 'Guardrail Evals', 'Task Policies', 'Contracts', 'Cache', 'Identity', 'Memory Gov', 'Search', 'HTTP', 'Social', 'Enterprise']) {
       const location = ADMIN_TAB_LOCATIONS[label]!;
       const tabButton = page.locator(`[data-admin-tab="${location.key}"]`).first();
       if (!(await tabButton.isVisible({ timeout: 1000 }).catch(() => false))) {
@@ -752,43 +752,135 @@ test.describe('Admin Enterprise Connectors', () => {
   });
 });
 
-/* ── Admin: Tool Registry Tab ────────────────────────────── */
+/* ── Admin: Tool Catalog Tab ─────────────────────────────── */
 
-test.describe('Admin Tool Registry', () => {
-  test('registry tab shows seeded data', async ({ page }) => {
+test.describe('Admin Tool Catalog', () => {
+  test('tool catalog tab shows seeded data', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await openAdminTab(page, 'Registry');
+    await openAdminTab(page, 'Tools');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
-  test('creates a new tool registry entry via form', async ({ page }) => {
+  test('creates a new tool catalog entry via form', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await openAdminTab(page, 'Registry');
+    await openAdminTab(page, 'Tools');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Tool Registry' })).toBeVisible({ timeout: 3000 });
-    const regInputs = m.locator('input[type="text"]');
-    await regInputs.nth(0).fill('PW-Test-Registry');
-    await regInputs.nth(2).fill('@weaveintel/tools-test');
+    await expect(m.locator('h3', { hasText: 'New Tool' })).toBeVisible({ timeout: 3000 });
+    const inputs = m.locator('input[type="text"]');
+    await inputs.nth(0).fill('PW-Test-Tool');
+    await inputs.nth(1).fill('pw-test-tool');
     await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Tool Registry' })).not.toBeVisible({ timeout: 5000 });
+    await expect(m.locator('h3', { hasText: 'New Tool' })).not.toBeVisible({ timeout: 5000 });
   });
 
-  test('edits a seeded tool registry entry', async ({ page }) => {
+  test('edits a seeded tool catalog entry', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await openAdminTab(page, 'Registry');
+    await openAdminTab(page, 'Tools');
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+/* ── Admin: Tool Policies Tab ────────────────────────────── */
+
+test.describe('Admin Tool Policies', () => {
+  test('tool policies tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await seedDefaults(page);
+    await page.waitForTimeout(1500);
+    await openAdminTab(page, 'Tool Policies');
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new tool policy via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await seedDefaults(page);
+    await page.waitForTimeout(1500);
+    await openAdminTab(page, 'Tool Policies');
+    await clickAdminNewButton(m);
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Tool Policy' })).toBeVisible({ timeout: 3000 });
+    const inputs = m.locator('input[type="text"]');
+    await inputs.nth(0).fill('pw-test-policy');
+    await inputs.nth(1).fill('PW Test Policy');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Tool Policy' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded tool policy', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await seedDefaults(page);
+    await page.waitForTimeout(1500);
+    await openAdminTab(page, 'Tool Policies');
+    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
+    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await editBtn.click();
+      await page.waitForTimeout(300);
+      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
+    }
+  });
+});
+
+/* ── Admin: Tool Policies Tab ────────────────────────────── */
+
+test.describe('Admin Tool Policies', () => {
+  test('tool policies tab shows seeded data', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await seedDefaults(page);
+    await page.waitForTimeout(1500);
+    await openAdminTab(page, 'Tool Policies');
+    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new tool policy via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await seedDefaults(page);
+    await page.waitForTimeout(1500);
+    await openAdminTab(page, 'Tool Policies');
+    await clickAdminNewButton(m);
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Tool Policy' })).toBeVisible({ timeout: 3000 });
+    const inputs = m.locator('input[type="text"]');
+    await inputs.nth(0).fill('pw-test-policy');
+    await inputs.nth(1).fill('PW Test Policy');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Tool Policy' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('edits a seeded tool policy', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await seedDefaults(page);
+    await page.waitForTimeout(1500);
+    await openAdminTab(page, 'Tool Policies');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();

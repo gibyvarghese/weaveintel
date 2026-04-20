@@ -29,7 +29,19 @@
 - `ToolCatalogRow` is the canonical type (exported from `@weaveintel/geneweave`). `ToolConfigRow` is a deprecated alias kept for backward compatibility.
 - New tool fields: `tool_key` (unique key matching BUILTIN_TOOLS key), `version`, `side_effects`, `tags`, `source` (`builtin`|`custom`|`mcp`|`plugin`), `credential_id`.
 - Risk level values are: `read-only` | `write` | `destructive` | `privileged` | `financial` | `external-side-effect`. Old values (`low`, `medium`, `high`) are retired.
-- Phase 2 (Tool Policies) is next: named `tool_policies` table, `ToolPolicyResolver`, rate limiting, approval gates, and audit trail. Implement in `@weaveintel/tools` package first.
+- Phase 2 (Tool Policies) is **complete**. See the section below for the full Phase 2 contract.
+
+## Tool Platform (Phase 2 complete — Tool Policies)
+- Named `tool_policies` table in DB; admin CRUD at `/api/admin/tool-policies`. Seeded with 4 built-in policies: `default`, `strict_external`, `destructive_gate`, `read_only`.
+- `ToolPolicyResolver` interface (in `@weaveintel/tools`) is the contract for looking up the effective policy for a tool at runtime. GeneWeave supplies `DbToolPolicyResolver` backed by the `tool_policies` SQLite table.
+- `createPolicyEnforcedRegistry(registry, opts)` (in `@weaveintel/tools`) wraps every tool in the registry with an enforcement sequence: enabled check → circuit breaker → risk level gate → approval gate → rate limit → execute with timeout → audit emit.
+- `createToolRegistry()` in `tools.ts` accepts `policyResolver`, `auditEmitter`, and `rateLimiter` in `ToolRegistryOptions`. When a `policyResolver` is provided the returned registry is policy-enforced automatically.
+- `ChatEngine` constructor wires `DbToolPolicyResolver`, `DbToolRateLimiter`, and `consoleAuditEmitter` into `this.toolOptions` so all tool invocations are policy-gated end-to-end.
+- Rate limiting uses `tool_rate_limit_buckets` with 1-minute tumbling windows. `checkAndIncrementRateLimit()` on `DatabaseAdapter` is atomic (INSERT OR IGNORE + UPDATE within the same window row).
+- `EffectiveToolPolicy.source` values are: `'default'` | `'global_policy'` | `'skill_override'` | `'persona_override'`. Skill-level overrides are passed via `skillPolicyKey` in `PolicyResolutionContext`.
+- Audit events are emitted via `ToolAuditEmitter`. The current emitter is `consoleAuditEmitter` (stderr warnings on non-success). A DB-backed emitter should be wired in Phase 3 when a `tool_audit_events` table is added.
+- `ToolPolicyRow` and `ToolRateLimitBucketRow` are exported from `@weaveintel/geneweave` `db-types.ts`. All `tool_policies` rows use UUID primary keys.
+- Phase 3 (Tool Audit Trail + per-tool DB emitter): named `tool_audit_events` table, `DbToolAuditEmitter`, dashboard in admin Observability group. Implement in `@weaveintel/tools` package first.
 
 ## Cross-Cutting Requirements
 - Reuse shared observability and evaluation hooks for new AI capabilities instead of creating app-only telemetry paths.
