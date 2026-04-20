@@ -346,27 +346,20 @@ export function renderAdminView(options: {
     onInput: (e: Event) => {
       state.adminListSearch = (e.target as HTMLInputElement).value;
       state.adminListPage = 1;
-      options.render();
+      clearTimeout((state as any)._searchDebounce);
+      (state as any)._searchDebounce = setTimeout(() => {
+        options.render();
+        const newInput = document.querySelector('.admin-list-search') as HTMLInputElement | null;
+        if (newInput) {
+          newInput.focus();
+          const len = newInput.value.length;
+          newInput.setSelectionRange(len, len);
+        }
+      }, 180);
     },
   }) as HTMLInputElement;
 
-  const groupBySelect = h('select', {
-    className: 'admin-list-groupby',
-    title: 'Group by column',
-    onChange: (e: Event) => {
-      state.adminListGroupBy = (e.target as HTMLSelectElement).value;
-      state.adminListPage = 1;
-      options.render();
-    },
-  }) as HTMLSelectElement;
-  const noGroupOpt = h('option', { value: '' }, 'Group by…') as HTMLOptionElement;
-  if (!groupBy) noGroupOpt.selected = true;
-  groupBySelect.appendChild(noGroupOpt);
-  cols.forEach((col: string) => {
-    const opt = h('option', { value: col }, col.replace(/_/g, ' ')) as HTMLOptionElement;
-    if (col === groupBy) opt.selected = true;
-    groupBySelect.appendChild(opt);
-  });
+  const activeGroupHint = groupBy ? h('span', { className: 'admin-grouped-hint', title: 'Right-click a column header to change' }, `Grouped by: ${groupBy.replace(/_/g, ' ')}`) : null;
 
   listPanel.appendChild(
     h('div', { className: 'admin-list-toolbar' },
@@ -374,7 +367,7 @@ export function renderAdminView(options: {
         h('span', { className: 'admin-list-search-icon' }, '🔍'),
         searchInput
       ),
-      groupBySelect
+      activeGroupHint
     )
   );
 
@@ -385,12 +378,14 @@ export function renderAdminView(options: {
   } else if (!filtered.length) {
     listPanel.appendChild(h('div', { style: 'padding:20px;color:var(--fg3);text-align:center;' }, `No records match "${state.adminListSearch}".`));
   } else {
-    // Sortable column header cells
+    // Sortable column header cells — left-click sorts, right-click opens context menu
     const headerCells = cols.map((col: string) => {
       const isActive = sortCol === col;
+      const isGrouped = groupBy === col;
       const indicator = isActive ? (sortDir === 'asc' ? '↑' : '↓') : '↕';
-      return h('th', {
-        className: `sortable${isActive ? ' sort-active' : ''}`,
+      const th = h('th', {
+        className: `sortable${isActive ? ' sort-active' : ''}${isGrouped ? ' col-grouped' : ''}`,
+        title: 'Left-click to sort · Right-click for more options',
         onClick: () => {
           if (state.adminListSortCol === col) {
             state.adminListSortDir = state.adminListSortDir === 'asc' ? 'desc' : 'asc';
@@ -401,10 +396,16 @@ export function renderAdminView(options: {
           state.adminListPage = 1;
           options.render();
         },
+        onContextmenu: (e: MouseEvent) => {
+          e.preventDefault();
+          showColumnContextMenu(col, e.clientX, e.clientY, rows, filtered, options);
+        },
       },
         col.replace(/_/g, ' '),
-        h('span', { className: 'sort-indicator' }, ` ${indicator}`)
+        h('span', { className: 'sort-indicator' }, ` ${indicator}`),
+        isGrouped ? h('span', { className: 'col-group-badge' }, '⊞') : null
       );
+      return th;
     });
 
     const tbody = h('tbody', null);
@@ -498,6 +499,147 @@ export function renderAdminView(options: {
   right.appendChild(content);
   page.appendChild(right);
   return page;
+}
+
+function showColumnContextMenu(
+  col: string,
+  x: number,
+  y: number,
+  allRows: any[],
+  filteredRows: any[],
+  options: {
+    hydrateWizardFromPrompt: (promptRow: any) => void;
+    render: () => void;
+    loadAdmin: () => Promise<void>;
+  },
+) {
+  // Dismiss any existing menu
+  document.querySelector('.col-ctx-menu')?.remove();
+
+  const isSortedByThis = state.adminListSortCol === col;
+  const sortedAsc = isSortedByThis && state.adminListSortDir === 'asc';
+  const sortedDesc = isSortedByThis && state.adminListSortDir === 'desc';
+  const isGrouped = state.adminListGroupBy === col;
+  const hasGrouping = !!state.adminListGroupBy;
+
+  // Collect unique values from filtered data for quick-filter
+  const allVals = filteredRows.map((r: any) => String(r?.[col] ?? ''));
+  const uniqueVals = [...new Set(allVals)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(0, 8);
+
+  const dismiss = () => menu.remove();
+
+  type MenuItem =
+    | { kind: 'sep' }
+    | { kind: 'header'; label: string }
+    | { kind: 'item'; label: string; icon?: string; disabled?: boolean; active?: boolean; danger?: boolean; action: () => void };
+
+  const items: MenuItem[] = [
+    { kind: 'header', label: col.replace(/_/g, ' ').toUpperCase() },
+    { kind: 'sep' },
+    {
+      kind: 'item', label: 'Sort A → Z', icon: '↑', active: sortedAsc,
+      action: () => { state.adminListSortCol = col; state.adminListSortDir = 'asc'; state.adminListPage = 1; options.render(); },
+    },
+    {
+      kind: 'item', label: 'Sort Z → A', icon: '↓', active: sortedDesc,
+      action: () => { state.adminListSortCol = col; state.adminListSortDir = 'desc'; state.adminListPage = 1; options.render(); },
+    },
+    {
+      kind: 'item', label: 'Clear Sort', icon: '✕', disabled: !isSortedByThis,
+      action: () => { state.adminListSortCol = null; options.render(); },
+    },
+    { kind: 'sep' },
+    {
+      kind: 'item', label: isGrouped ? 'Ungroup' : 'Group by this column', icon: isGrouped ? '⊟' : '⊞', active: isGrouped,
+      action: () => { state.adminListGroupBy = isGrouped ? '' : col; state.adminListPage = 1; state.adminListGroupCollapsed = {}; options.render(); },
+    },
+    {
+      kind: 'item', label: 'Clear Grouping', icon: '◻', disabled: !hasGrouping,
+      action: () => { state.adminListGroupBy = ''; state.adminListGroupCollapsed = {}; options.render(); },
+    },
+    { kind: 'sep' },
+    {
+      kind: 'item', label: 'Copy All Values', icon: '⎘',
+      action: () => { void navigator.clipboard.writeText(allVals.join('\n')); dismiss(); },
+    },
+    {
+      kind: 'item', label: 'Copy Unique Values', icon: '⎘',
+      action: () => { void navigator.clipboard.writeText(uniqueVals.join('\n')); dismiss(); },
+    },
+    {
+      kind: 'item', label: 'Show Summary', icon: '∑',
+      action: () => {
+        const nums = allVals.map(Number).filter(n => !isNaN(n));
+        let msg = `Column: ${col}\nTotal rows: ${allVals.length}\nUnique values: ${uniqueVals.length}`;
+        if (nums.length === allVals.length && nums.length > 0) {
+          const sum = nums.reduce((a, b) => a + b, 0);
+          msg += `\nMin: ${Math.min(...nums)}\nMax: ${Math.max(...nums)}\nAvg: ${(sum / nums.length).toFixed(2)}\nSum: ${sum}`;
+        }
+        alert(msg);
+        dismiss();
+      },
+    },
+    ...(uniqueVals.length > 0 ? [
+      { kind: 'sep' as const },
+      { kind: 'header' as const, label: 'FILTER BY VALUE' },
+      ...uniqueVals.map(v => ({
+        kind: 'item' as const,
+        label: v || '(empty)',
+        icon: state.adminListSearch === v ? '✓' : '  ',
+        active: state.adminListSearch === v,
+        action: () => {
+          state.adminListSearch = state.adminListSearch === v ? '' : v;
+          state.adminListPage = 1;
+          options.render();
+          dismiss();
+        },
+      })),
+    ] : []),
+  ];
+
+  const menu = document.createElement('div');
+  menu.className = 'col-ctx-menu';
+
+  items.forEach(item => {
+    if (item.kind === 'sep') {
+      menu.appendChild(Object.assign(document.createElement('div'), { className: 'col-ctx-sep' }));
+    } else if (item.kind === 'header') {
+      const el = document.createElement('div');
+      el.className = 'col-ctx-header';
+      el.textContent = item.label;
+      menu.appendChild(el);
+    } else {
+      const el = document.createElement('div');
+      el.className = `col-ctx-item${item.disabled ? ' ctx-disabled' : ''}${item.active ? ' ctx-active' : ''}${item.danger ? ' ctx-danger' : ''}`;
+      el.innerHTML = `<span class="ctx-icon">${item.icon ?? ' '}</span><span>${item.label}</span>`;
+      if (!item.disabled) {
+        el.addEventListener('click', () => { item.action(); dismiss(); });
+      }
+      menu.appendChild(el);
+    }
+  });
+
+  document.body.appendChild(menu);
+
+  // Position: clamp to viewport
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const rect = menu.getBoundingClientRect();
+  const left = x + rect.width > vw ? vw - rect.width - 8 : x;
+  const top = y + rect.height > vh ? vh - rect.height - 8 : y;
+  menu.style.left = `${Math.max(4, left)}px`;
+  menu.style.top = `${Math.max(4, top)}px`;
+
+  // Dismiss on outside click or Escape
+  const onOutside = (e: MouseEvent) => {
+    if (!menu.contains(e.target as Node)) { dismiss(); document.removeEventListener('mousedown', onOutside); }
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') { dismiss(); document.removeEventListener('keydown', onKey); }
+  };
+  setTimeout(() => {
+    document.addEventListener('mousedown', onOutside);
+    document.addEventListener('keydown', onKey);
+  }, 0);
 }
 
 function buildAdminRow(

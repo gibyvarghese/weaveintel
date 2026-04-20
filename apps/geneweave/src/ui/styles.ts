@@ -517,6 +517,22 @@ input{font-family:inherit;outline:none}
 .admin-list-search{width:100%;padding:8px 12px 8px 32px;border-radius:9px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg);font-size:13px;box-sizing:border-box}
 .admin-list-search:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 18%, transparent)}
 .admin-list-groupby{padding:8px 10px;border-radius:9px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg);font-size:12px;cursor:pointer;white-space:nowrap}
+.admin-grouped-hint{font-size:11px;color:var(--accent2);background:var(--accent-dim);border:1px solid var(--accent);border-radius:7px;padding:4px 10px;white-space:nowrap;user-select:none}
+.eval-table th.col-grouped{color:var(--accent2)}
+.col-group-badge{font-size:10px;margin-left:4px;color:var(--accent2);vertical-align:middle}
+.col-ctx-menu{position:fixed;z-index:9999;background:var(--bg2);border:1px solid var(--bg4);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.35),0 2px 8px rgba(0,0,0,.2);padding:6px 0;min-width:200px;max-width:280px;font-size:13px;animation:ctx-pop .12s ease}
+@keyframes ctx-pop{from{opacity:0;transform:scale(.95) translateY(-4px)}to{opacity:1;transform:scale(1) translateY(0)}}
+.col-ctx-header{padding:5px 14px 3px;font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--fg3);user-select:none}
+.col-ctx-sep{height:1px;background:var(--bg4);margin:4px 0}
+.col-ctx-item{display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;color:var(--fg2);border-radius:0;transition:background .1s}
+.col-ctx-item:hover{background:color-mix(in oklab,var(--accent) 10%, var(--bg3));color:var(--fg)}
+.col-ctx-item.ctx-active{color:var(--accent2);font-weight:600}
+.col-ctx-item.ctx-active:hover{background:var(--accent-dim)}
+.col-ctx-item.ctx-disabled{opacity:.38;cursor:default;pointer-events:none}
+.col-ctx-item.ctx-danger{color:#e05252}
+.col-ctx-item.ctx-danger:hover{background:color-mix(in oklab,#e05252 12%, var(--bg3))}
+.ctx-icon{width:16px;text-align:center;font-size:12px;color:var(--fg3);flex-shrink:0}
+.col-ctx-item.ctx-active .ctx-icon{color:var(--accent2)}
 .admin-list-footer{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-top:1px solid var(--bg4);background:var(--bg2);gap:12px;flex-wrap:wrap}
 .admin-list-info{font-size:12px;color:var(--fg3)}
 .admin-list-pagination{display:flex;align-items:center;gap:4px}
