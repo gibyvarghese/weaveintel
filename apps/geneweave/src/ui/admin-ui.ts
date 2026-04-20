@@ -257,6 +257,8 @@ export function renderAdminView(options: {
     state.adminListGroupBy = '';
     state.adminListPage = 1;
     state.adminListGroupCollapsed = {};
+    (state as any)._adminExcludeSearch = '';
+    (state as any)._adminExcludeCol = '';
   }
 
   const page = h('div', { className: 'dash-view' },
@@ -290,7 +292,10 @@ export function renderAdminView(options: {
   const groupCollapsed: Record<string, boolean> = (state.adminListGroupCollapsed as Record<string, boolean>) || {};
 
   // 1. Filter
+  const excludeVal: string = (state as any)._adminExcludeSearch || '';
+  const excludeCol: string = (state as any)._adminExcludeCol || '';
   let filtered: any[] = rows.filter((row: any) => {
+    if (excludeVal && excludeCol && String(row?.[excludeCol] ?? '') === excludeVal) return false;
     if (!searchQuery) return true;
     return cols.some((col: string) => String(row?.[col] ?? '').toLowerCase().includes(searchQuery));
   });
@@ -361,13 +366,29 @@ export function renderAdminView(options: {
 
   const activeGroupHint = groupBy ? h('span', { className: 'admin-grouped-hint', title: 'Right-click a column header to change' }, `Grouped by: ${groupBy.replace(/_/g, ' ')}`) : null;
 
+  const excludeValActive: string = (state as any)._adminExcludeSearch || '';
+  const excludeColActive: string = (state as any)._adminExcludeCol || '';
+  const activeExcludeHint = excludeValActive
+    ? h('span', {
+        className: 'admin-grouped-hint admin-exclude-hint',
+        title: 'Click to clear exclusion filter',
+        onClick: () => {
+          (state as any)._adminExcludeSearch = '';
+          (state as any)._adminExcludeCol = '';
+          state.adminListPage = 1;
+          options.render();
+        },
+      }, `Excluding: ${excludeColActive.replace(/_/g, ' ')} = ${excludeValActive} ✕`)
+    : null;
+
   listPanel.appendChild(
     h('div', { className: 'admin-list-toolbar' },
       h('div', { className: 'admin-list-search-wrap' },
         h('span', { className: 'admin-list-search-icon' }, '🔍'),
         searchInput
       ),
-      activeGroupHint
+      activeGroupHint,
+      activeExcludeHint
     )
   );
 
@@ -526,12 +547,9 @@ function showColumnContextMenu(
   const allVals = filteredRows.map((r: any) => String(r?.[col] ?? ''));
   const uniqueVals = [...new Set(allVals)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(0, 8);
 
-  const dismiss = () => menu.remove();
+  const dismissCol = () => document.querySelectorAll('.col-ctx-menu').forEach(el => el.remove());
 
-  type MenuItem =
-    | { kind: 'sep' }
-    | { kind: 'header'; label: string }
-    | { kind: 'item'; label: string; icon?: string; disabled?: boolean; active?: boolean; danger?: boolean; action: () => void };
+  type MenuItem = CtxMenuItem;
 
   const items: MenuItem[] = [
     { kind: 'header', label: col.replace(/_/g, ' ').toUpperCase() },
@@ -560,11 +578,11 @@ function showColumnContextMenu(
     { kind: 'sep' },
     {
       kind: 'item', label: 'Copy All Values', icon: '⎘',
-      action: () => { void navigator.clipboard.writeText(allVals.join('\n')); dismiss(); },
+      action: () => { void navigator.clipboard.writeText(allVals.join('\n')); dismissCol(); },
     },
     {
       kind: 'item', label: 'Copy Unique Values', icon: '⎘',
-      action: () => { void navigator.clipboard.writeText(uniqueVals.join('\n')); dismiss(); },
+      action: () => { void navigator.clipboard.writeText(uniqueVals.join('\n')); dismissCol(); },
     },
     {
       kind: 'item', label: 'Show Summary', icon: '∑',
@@ -576,29 +594,26 @@ function showColumnContextMenu(
           msg += `\nMin: ${Math.min(...nums)}\nMax: ${Math.max(...nums)}\nAvg: ${(sum / nums.length).toFixed(2)}\nSum: ${sum}`;
         }
         alert(msg);
-        dismiss();
+        dismissCol();
       },
     },
-    ...(uniqueVals.length > 0 ? [
-      { kind: 'sep' as const },
-      { kind: 'header' as const, label: 'FILTER BY VALUE' },
-      ...uniqueVals.map(v => ({
-        kind: 'item' as const,
-        label: v || '(empty)',
-        icon: state.adminListSearch === v ? '✓' : '  ',
-        active: state.adminListSearch === v,
-        action: () => {
-          state.adminListSearch = state.adminListSearch === v ? '' : v;
-          state.adminListPage = 1;
-          options.render();
-          dismiss();
-        },
-      })),
-    ] : []),
   ];
 
+  renderContextMenu(items, x, y, 'col-ctx-menu');
+}
+
+type CtxMenuItem =
+  | { kind: 'sep' }
+  | { kind: 'header'; label: string }
+  | { kind: 'item'; label: string; icon?: string; disabled?: boolean; active?: boolean; danger?: boolean; action: () => void };
+
+function renderContextMenu(items: CtxMenuItem[], x: number, y: number, cls = 'col-ctx-menu') {
+  document.querySelectorAll('.col-ctx-menu').forEach(el => el.remove());
+
   const menu = document.createElement('div');
-  menu.className = 'col-ctx-menu';
+  menu.className = cls;
+
+  const dismiss = () => menu.remove();
 
   items.forEach(item => {
     if (item.kind === 'sep') {
@@ -621,7 +636,6 @@ function showColumnContextMenu(
 
   document.body.appendChild(menu);
 
-  // Position: clamp to viewport
   const vw = window.innerWidth, vh = window.innerHeight;
   const rect = menu.getBoundingClientRect();
   const left = x + rect.width > vw ? vw - rect.width - 8 : x;
@@ -629,7 +643,6 @@ function showColumnContextMenu(
   menu.style.left = `${Math.max(4, left)}px`;
   menu.style.top = `${Math.max(4, top)}px`;
 
-  // Dismiss on outside click or Escape
   const onOutside = (e: MouseEvent) => {
     if (!menu.contains(e.target as Node)) { dismiss(); document.removeEventListener('mousedown', onOutside); }
   };
@@ -640,6 +653,109 @@ function showColumnContextMenu(
     document.addEventListener('mousedown', onOutside);
     document.addEventListener('keydown', onKey);
   }, 0);
+}
+
+function showCellContextMenu(
+  col: string,
+  value: string,
+  row: any,
+  currentTab: string,
+  schema: any,
+  x: number,
+  y: number,
+  options: {
+    hydrateWizardFromPrompt: (promptRow: any) => void;
+    render: () => void;
+    loadAdmin: () => Promise<void>;
+  },
+) {
+  const colLabel = col.replace(/_/g, ' ');
+  const isFiltered = state.adminListSearch === value;
+  const isExcluded = (state as any)._adminExcludeSearch === value && (state as any)._adminExcludeCol === col;
+  const isUrl = /^https?:\/\//.test(value);
+  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  const isNumeric = value !== '' && value !== '—' && !isNaN(Number(value));
+
+  const items: CtxMenuItem[] = [
+    { kind: 'header', label: `${colLabel}: ${value.length > 40 ? value.slice(0, 37) + '…' : value || '(empty)'}` },
+    { kind: 'sep' },
+    {
+      kind: 'item', label: isFiltered ? 'Remove Filter' : 'Filter by This Value', icon: isFiltered ? '✕' : '▼', active: isFiltered,
+      action: () => {
+        state.adminListSearch = isFiltered ? '' : value;
+        (state as any)._adminExcludeSearch = '';
+        state.adminListPage = 1;
+        options.render();
+      },
+    },
+    {
+      kind: 'item', label: isExcluded ? 'Remove Exclusion' : 'Filter Out This Value', icon: isExcluded ? '✕' : '⊘', active: isExcluded,
+      action: () => {
+        if (isExcluded) {
+          (state as any)._adminExcludeSearch = '';
+          (state as any)._adminExcludeCol = '';
+        } else {
+          (state as any)._adminExcludeSearch = value;
+          (state as any)._adminExcludeCol = col;
+        }
+        state.adminListPage = 1;
+        options.render();
+      },
+    },
+    { kind: 'sep' },
+    {
+      kind: 'item', label: 'Copy Value', icon: '⎘',
+      action: () => { void navigator.clipboard.writeText(value); },
+    },
+    {
+      kind: 'item', label: 'Copy Row as JSON', icon: '{ }',
+      action: () => { void navigator.clipboard.writeText(JSON.stringify(row, null, 2)); },
+    },
+    { kind: 'sep' },
+    {
+      kind: 'item', label: 'Edit This Record', icon: '✎',
+      disabled: !!schema?.readOnly,
+      action: () => { adminEditRow(currentTab, row, options.hydrateWizardFromPrompt, options.render); },
+    },
+    {
+      kind: 'item', label: 'Duplicate Record', icon: '⧉',
+      disabled: !!schema?.readOnly,
+      action: () => {
+        // Strip id/pk fields so a new record is created
+        const clone = { ...row };
+        delete clone.id;
+        delete clone.key;
+        state.adminForm = clone;
+        state.adminEditing = null;
+        options.render();
+      },
+    },
+    {
+      kind: 'item', label: 'Delete This Record', icon: '🗑', danger: true,
+      disabled: !!schema?.readOnly,
+      action: () => { void adminDeleteRow(currentTab, row, options.render, options.loadAdmin); },
+    },
+    ...(isUrl ? [
+      { kind: 'sep' as const },
+      { kind: 'item' as const, label: 'Open URL in New Tab', icon: '↗', action: () => { window.open(value, '_blank', 'noopener'); } },
+    ] : []),
+    ...(isEmail ? [
+      { kind: 'sep' as const },
+      { kind: 'item' as const, label: 'Send Email', icon: '✉', action: () => { window.location.href = `mailto:${value}`; } },
+    ] : []),
+    ...(isNumeric ? [
+      { kind: 'sep' as const },
+      { kind: 'item' as const, label: 'Highlight Rows ≥ This', icon: '≥', action: () => {
+        state.adminListSearch = value;
+        state.adminListSortCol = col;
+        state.adminListSortDir = 'asc';
+        state.adminListPage = 1;
+        options.render();
+      }},
+    ] : []),
+  ];
+
+  renderContextMenu(items, x, y, 'col-ctx-menu');
 }
 
 function buildAdminRow(
@@ -653,6 +769,10 @@ function buildAdminRow(
     loadAdmin: () => Promise<void>;
   },
 ): HTMLElement {
+  // Apply cell-level exclusion filter
+  const excludeVal: string = '';
+  const excludeCol: string = '';
+  // (filtering handled upstream in the main filter pass)
   return h('tr', null,
     ...cols.map((col: string) => {
       const raw = row?.[col];
@@ -660,6 +780,10 @@ function buildAdminRow(
       const display = str.length > 60 ? str.slice(0, 57) + '…' : str;
       const attrs: Record<string, any> = {};
       if (str.length > 60) attrs['title'] = str;
+      attrs['onContextmenu'] = (e: MouseEvent) => {
+        e.preventDefault();
+        showCellContextMenu(col, str === '—' ? '' : str, row, currentTab, schema, e.clientX, e.clientY, options);
+      };
       return h('td', attrs, display);
     }),
     h('td', null,

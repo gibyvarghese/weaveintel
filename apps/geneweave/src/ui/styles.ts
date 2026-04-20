@@ -518,6 +518,9 @@ input{font-family:inherit;outline:none}
 .admin-list-search:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 18%, transparent)}
 .admin-list-groupby{padding:8px 10px;border-radius:9px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg);font-size:12px;cursor:pointer;white-space:nowrap}
 .admin-grouped-hint{font-size:11px;color:var(--accent2);background:var(--accent-dim);border:1px solid var(--accent);border-radius:7px;padding:4px 10px;white-space:nowrap;user-select:none}
+.admin-exclude-hint{color:var(--warn,#e88);border-color:var(--warn,#e88);background:color-mix(in oklab,var(--warn,#e88) 12%, var(--bg2));cursor:pointer}
+.admin-exclude-hint:hover{opacity:.8}
+.eval-table td[oncontextmenu]:hover{background:color-mix(in oklab,var(--accent) 7%, transparent);cursor:context-menu}
 .eval-table th.col-grouped{color:var(--accent2)}
 .col-group-badge{font-size:10px;margin-left:4px;color:var(--accent2);vertical-align:middle}
 .col-ctx-menu{position:fixed;z-index:9999;background:var(--bg2);border:1px solid var(--bg4);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.35),0 2px 8px rgba(0,0,0,.2);padding:6px 0;min-width:200px;max-width:280px;font-size:13px;animation:ctx-pop .12s ease}
