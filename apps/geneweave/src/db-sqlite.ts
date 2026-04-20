@@ -2397,17 +2397,17 @@ export class SQLiteAdapter implements DatabaseAdapter {
     // Prompts
     const prompts: Omit<PromptRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'prompt-general-assistant', name: 'General Assistant', description: 'Default conversational assistant prompt',
+        id: 'e92e7672-3009-4040-8b05-a411dc825f90', name: 'General Assistant', description: 'Default conversational assistant prompt',
         key: 'assistant.general', category: 'general', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['assistant', 'general']), template: 'You are a helpful, accurate, and concise AI assistant. Answer the user\'s questions clearly and provide relevant details when asked.',
         variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', explanationStyle: 'standard' }), framework: null, metadata: null, is_default: 1, enabled: 1,
       },
       {
-        id: 'prompt-code-reviewer', name: 'Code Review Expert', description: 'Technical code review prompt with best practices',
+        id: 'e7c21e36-c558-40e0-9b99-2433c0466bc3', name: 'Code Review Expert', description: 'Technical code review prompt with best practices',
         key: 'engineering.code-review', category: 'engineering', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['engineering', 'review']), template: 'You are an expert code reviewer. Analyze code for bugs, security issues, performance problems, and style. Provide actionable suggestions with explanations. Focus on: {{focus_areas}}',
         variables: stringifyPromptVariables([{ name: 'focus_areas', type: 'string', required: true, description: 'Specific review focus areas such as security, performance, or style.' }]), version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', selfReview: true, explanationStyle: 'detailed' }), framework: null, metadata: null, is_default: 0, enabled: 1,
       },
       {
-        id: 'prompt-summarizer', name: 'Document Summarizer', description: 'Summarize long documents into key points',
+        id: '14b189df-1307-4041-ab1b-2a784df9d304', name: 'Document Summarizer', description: 'Summarize long documents into key points',
         key: 'content.summarizer', category: 'content', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['content', 'summary']), template: 'Summarize the following content into {{format}}. Preserve key facts, numbers, and conclusions. Be concise but thorough.\n\nContent:\n{{content}}',
         variables: stringifyPromptVariables([
           { name: 'format', type: 'string', required: true, description: 'Desired response shape, for example bullet list or executive summary.' },
@@ -2415,7 +2415,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         ]), version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', explanationStyle: 'concise' }), framework: null, metadata: null, is_default: 0, enabled: 1,
       },
       {
-        id: 'prompt-sql-expert', name: 'SQL Query Builder', description: 'Generate SQL queries from natural language',
+        id: '906cdfa7-35f4-4d39-a0ea-d099207570dc', name: 'SQL Query Builder', description: 'Generate SQL queries from natural language',
         key: 'engineering.sql-builder', category: 'engineering', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['engineering', 'sql']), template: 'You are an expert SQL developer. Convert the following natural language request into a correct, optimized SQL query. Target database: {{db_type}}. Available tables: {{schema}}',
         variables: stringifyPromptVariables([
           { name: 'db_type', type: 'string', required: true, description: 'Target relational database type.' },
@@ -2423,7 +2423,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         ]), version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', selfReview: true, explanationStyle: 'standard' }), framework: null, metadata: null, is_default: 0, enabled: 1,
       },
       {
-        id: 'prompt-runtime-supervisor-code-execution', name: 'Runtime: Supervisor Code Execution Policy', description: 'Runtime policy for supervisor code execution and delegated CSE workflows',
+        id: 'f68c3785-469c-4d2b-a2c2-366c5bc3b4d2', name: 'Runtime: Supervisor Code Execution Policy', description: 'Runtime policy for supervisor code execution and delegated CSE workflows',
         key: 'runtime.supervisor.code-execution', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'policy', 'supervisor']), template: [
           'You have direct access to `cse_run_code` — a tool that executes code in a real isolated Docker container.',
           'Execution strategy by task type:',
@@ -2456,7 +2456,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', deliberationPolicy: 'verify' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
       },
       {
-        id: 'prompt-runtime-response-card-format', name: 'Runtime: Response Card Format Policy', description: 'Runtime policy for chart/table/code response formatting',
+        id: '4aecf467-a350-42f9-aeca-550fcc4383a2', name: 'Runtime: Response Card Format Policy', description: 'Runtime policy for chart/table/code response formatting',
         key: 'runtime.response-card-format', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'policy', 'formatting']), template: [
           'RESPONSE PRESENTATION POLICY (for rich response cards):',
           '- Choose output format based on user intent and data shape.',
@@ -2479,7 +2479,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', explanationStyle: 'standard' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
       },
       {
-        id: 'prompt-runtime-supervisor-temporal', name: 'Runtime: Supervisor Temporal Policy', description: 'Runtime policy for supervisor temporal and browser-login delegation',
+        id: 'b3722c76-fc46-4392-ab8e-3f39b0fce3dc', name: 'Runtime: Supervisor Temporal Policy', description: 'Runtime policy for supervisor temporal and browser-login delegation',
         key: 'runtime.supervisor.temporal', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'policy', 'temporal']), template: [
           'TEMPORAL QUESTION HANDLING (CRITICAL):',
           '- If the user asks about current day/date/time/timestamp or anything time-dependent:',
@@ -2521,7 +2521,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', deliberationPolicy: 'verify' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
       },
       {
-        id: 'prompt-runtime-multi-worker-pipeline', name: 'Runtime: Multi Worker Sequential Pipeline', description: 'Runtime policy for supervisor sequential multi-worker execution',
+        id: '338ee839-adee-43cb-9dd4-34e53333b997', name: 'Runtime: Multi Worker Sequential Pipeline', description: 'Runtime policy for supervisor sequential multi-worker execution',
         key: 'runtime.multi-worker.pipeline', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'policy', 'workflow']), template: [
           'MULTI-WORKER SEQUENTIAL PIPELINE:',
           'When the user\'s request spans multiple capabilities (e.g., "fetch NZ economic data AND run Python to find insights"), you MUST use sequential worker delegation:',
@@ -2533,12 +2533,12 @@ export class SQLiteAdapter implements DatabaseAdapter {
         variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', deliberationPolicy: 'verify' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
       },
       {
-        id: 'prompt-runtime-force-worker-data-analysis', name: 'Runtime: Forced Worker Data Analysis Requirement', description: 'Runtime requirement appended when worker-based execution is mandatory',
+        id: '044e122c-67cf-4bb3-9ad3-090bd937b6c8', name: 'Runtime: Forced Worker Data Analysis Requirement', description: 'Runtime requirement appended when worker-based execution is mandatory',
         key: 'runtime.force-worker.analysis', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'policy', 'analysis']), template: 'WORKFLOW REQUIREMENT: This request requires actual code execution. Delegate to code_executor to generate and run Python in container against attached files and/or retrieved tool data. If execution fails, retry with corrected code. After successful execution, delegate to analyst to verify computed outputs and produce at least 3 concrete insights.',
         variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', deliberationPolicy: 'verify' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
       },
       {
-        id: 'prompt-runtime-hard-execution-guard', name: 'Runtime: Hard Execution Guard', description: 'Runtime hard guard for execution retries and renderable output requirements',
+        id: '5f58d48f-931f-4b1f-a418-e9b43d545dc8', name: 'Runtime: Hard Execution Guard', description: 'Runtime hard guard for execution retries and renderable output requirements',
         key: 'runtime.execution.guard', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'policy', 'guard']), template: [
           'HARD EXECUTION GUARD: The answer is invalid unless you explicitly call delegate_to_worker(worker="code_executor") and produce a successful cse_run_code execution. Do not execute code directly in supervisor for this workflow. Delegate to code_executor, run code successfully, verify output, then respond.',
           '',
@@ -2547,7 +2547,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass', deliberationPolicy: 'verify' }), framework: null, metadata: JSON.stringify({ classification: 'runtime-policy' }), is_default: 0, enabled: 1,
       },
       {
-        id: 'prompt-runtime-enterprise-worker-system', name: 'Runtime: Enterprise ServiceNow Worker System Prompt', description: 'Template used for enterprise ServiceNow worker system prompts',
+        id: 'dc61ee37-5268-4e8b-af36-22d6124d99b6', name: 'Runtime: Enterprise ServiceNow Worker System Prompt', description: 'Template used for enterprise ServiceNow worker system prompts',
         key: 'runtime.enterprise.worker-system', category: 'runtime-policy', prompt_type: 'template', owner: 'system', status: 'published', tags: JSON.stringify(['runtime', 'worker', 'servicenow']), template: [
           'You are a specialized ServiceNow agent for: {{description}}',
           'Use the available tools to fulfill the user\'s request. Always use the most specific tool available rather than generic query/get when possible.',
@@ -2568,7 +2568,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     // Prompt Frameworks — seed the 4 built-in named structures (Phase 2)
     const frameworks: Omit<PromptFrameworkRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'framework-rtce', key: 'rtce', name: 'RTCE (Role → Task → Context → Expectations)',
+        id: '21f6a792-9267-4444-bdbc-ff7c2d4298f9', key: 'rtce', name: 'RTCE (Role → Task → Context → Expectations)',
         description: 'Concise four-section framework: establish the model role, state the task, supply context, then define expectations. Best for focused, single-turn prompts.',
         sections: JSON.stringify([
           { key: 'role',         label: 'Role',         renderOrder: 0, required: true,  header: '## Role' },
@@ -2579,7 +2579,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         section_separator: '\n\n', enabled: 1,
       },
       {
-        id: 'framework-full', key: 'full', name: 'Full (Role → Task → Context → Constraints → Examples → Output Contract)',
+        id: '7b55952c-4f80-40ca-81ea-461bab97c672', key: 'full', name: 'Full (Role → Task → Context → Constraints → Examples → Output Contract)',
         description: 'Six-section framework for complex, high-stakes prompts. Adds constraints, few-shot examples, and a structured output contract on top of RTCE.',
         sections: JSON.stringify([
           { key: 'role',            label: 'Role',            renderOrder: 0, required: true,  header: '## Role' },
@@ -2592,7 +2592,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         section_separator: '\n\n', enabled: 1,
       },
       {
-        id: 'framework-critique', key: 'critique', name: 'Critique (Role → Task → Context → Review Instructions)',
+        id: 'eadfbd4d-039b-4993-a89e-82e1a9175b70', key: 'critique', name: 'Critique (Role → Task → Context → Review Instructions)',
         description: 'Four-section framework designed for LLM-as-evaluator prompts. The review_instructions section carries scoring rubrics, pass/fail thresholds, and output format requirements.',
         sections: JSON.stringify([
           { key: 'role',               label: 'Role',               renderOrder: 0, required: true,  header: '## Role' },
@@ -2603,7 +2603,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         section_separator: '\n\n', enabled: 1,
       },
       {
-        id: 'framework-judge', key: 'judge', name: 'Judge (Role → Task → Context → Scoring Rubric → Output Contract)',
+        id: 'df2c712c-6fcb-4048-a1ff-aee1026571fa', key: 'judge', name: 'Judge (Role → Task → Context → Scoring Rubric → Output Contract)',
         description: 'Five-section framework for LLM judge prompts that must produce numeric or categorical scores. Adds an explicit scoring rubric and structured output contract.',
         sections: JSON.stringify([
           { key: 'role',            label: 'Role',            renderOrder: 0, required: true,  header: '## Role' },
@@ -2625,7 +2625,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     // Prompt Fragments — seed common reusable blocks (Phase 2)
     const fragments: Omit<PromptFragmentRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'fragment-safety-notice', key: 'safety_notice', name: 'Safety Notice',
+        id: '34959c97-a4a1-48bd-ac09-9ac176a887fb', key: 'safety_notice', name: 'Safety Notice',
         description: 'Standard safety disclaimer appended to agent prompts to discourage harmful output.',
         category: 'safety', content: [
           'SAFETY: Never produce content that is harmful, hateful, sexually explicit, or that facilitates illegal activity.',
@@ -2634,7 +2634,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         variables: null, tags: JSON.stringify(['safety', 'guardrails']), version: '1.0', enabled: 1,
       },
       {
-        id: 'fragment-json-output-contract', key: 'json_output_contract', name: 'JSON Output Contract',
+        id: '6d71697a-1132-4fa6-908b-3afbd7016e9c', key: 'json_output_contract', name: 'JSON Output Contract',
         description: 'Instructs the model to return only valid JSON. Include in any prompt where structured output is required.',
         category: 'output', content: [
           'OUTPUT FORMAT: Respond with valid JSON only. Do not include markdown code fences, prose, or commentary outside the JSON object.',
@@ -2643,19 +2643,19 @@ export class SQLiteAdapter implements DatabaseAdapter {
         variables: null, tags: JSON.stringify(['json', 'structured-output']), version: '1.0', enabled: 1,
       },
       {
-        id: 'fragment-cot-instruction', key: 'cot_instruction', name: 'Chain-of-Thought Instruction',
+        id: '7c0fcd6a-90e6-4ee2-9380-62153157428c', key: 'cot_instruction', name: 'Chain-of-Thought Instruction',
         description: 'Asks the model to think step-by-step before giving its final answer. Append to task descriptions.',
         category: 'reasoning', content: 'Think step-by-step before giving your final answer. Show your reasoning explicitly.',
         variables: null, tags: JSON.stringify(['reasoning', 'cot']), version: '1.0', enabled: 1,
       },
       {
-        id: 'fragment-language-notice', key: 'language_notice', name: 'Language Notice',
+        id: 'a0999e98-3dc6-4c9b-95ea-4e62c1abd53b', key: 'language_notice', name: 'Language Notice',
         description: 'Instructs the model to respond in the same language as the user. Useful for multilingual agents.',
         category: 'i18n', content: 'Always respond in the same language the user writes in. Do not switch languages unless explicitly asked.',
         variables: null, tags: JSON.stringify(['i18n', 'language']), version: '1.0', enabled: 1,
       },
       {
-        id: 'fragment-persona-analyst', key: 'persona_analyst', name: 'Persona: Analyst',
+        id: '6caa8594-41c4-4664-b91d-40ec8513ccc6', key: 'persona_analyst', name: 'Persona: Analyst',
         description: 'Sets the model persona to a senior data analyst. Use as the role section of an analytics prompt.',
         category: 'personas', content: [
           'You are a senior data analyst. You think rigorously, cite evidence, and present findings clearly.',
@@ -2664,7 +2664,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         variables: null, tags: JSON.stringify(['persona', 'analytics']), version: '1.0', enabled: 1,
       },
       {
-        id: 'fragment-persona-assistant', key: 'persona_assistant', name: 'Persona: Helpful Assistant',
+        id: 'de14761d-5c2f-46a5-a837-dc2760b0d90c', key: 'persona_assistant', name: 'Persona: Helpful Assistant',
         description: 'Sets the model persona to a helpful, harmless, and honest AI assistant.',
         category: 'personas', content: 'You are a helpful, harmless, and honest AI assistant. You answer concisely and accurately, and ask for clarification when the request is ambiguous.',
         variables: null, tags: JSON.stringify(['persona', 'general']), version: '1.0', enabled: 1,
@@ -2680,7 +2680,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     // Prompt Strategies — seed built-in strategy overlays (Phase 4)
     const promptStrategies: Omit<PromptStrategyRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'strategy-single-pass',
+        id: '1006723f-a866-4762-ad8b-b572a7e71f4c',
         key: 'singlePass',
         name: 'Single Pass',
         description: 'Render the prompt template once and send directly to the model without additional orchestration text.',
@@ -2690,7 +2690,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: 1,
       },
       {
-        id: 'strategy-deliberate',
+        id: '1ae56ebf-7e13-4459-bee4-c3e2f9e75299',
         key: 'deliberate',
         name: 'Deliberate',
         description: 'Adds a brief quality checklist so the model verifies assumptions and constraints before producing the final answer.',
@@ -2700,7 +2700,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: 1,
       },
       {
-        id: 'strategy-critique-revise',
+        id: 'cc57decf-8262-43f1-acfa-d65bdbaa720d',
         key: 'critiqueRevise',
         name: 'Critique then Revise',
         description: 'Instructs the model to internally draft, critique, revise once, and return only the final revised answer.',
@@ -2720,7 +2720,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     // Prompt Optimizers — seed DB-driven optimizer profiles (Phase 7)
     const promptOptimizers: Omit<PromptOptimizerRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'optimizer-constraint-appender',
+        id: 'a057bba1-7e06-438e-9c31-1e5489810447',
         key: 'constraintAppender',
         name: 'Constraint Appender',
         description: 'Deterministic optimizer that appends explicit constraints and output checks to improve predictable compliance.',
@@ -2732,7 +2732,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: 1,
       },
       {
-        id: 'optimizer-llm-judge-refine',
+        id: '5c0497a0-1165-4947-b678-5f01bd900db7',
         key: 'llmJudgeRefine',
         name: 'LLM Judge Refine',
         description: 'Model-assisted optimizer profile designed to iteratively refine prompts using rubric-based critique and revision loops.',
@@ -2755,47 +2755,47 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('guardrails') === 0) {
     const guardrails: Omit<GuardrailRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'guard-pii-redact', name: 'PII Redaction', description: 'Redact personal identifiable information before sending to LLM',
+        id: '0370fa22-5fc8-49a4-bd4c-3e39863da61d', name: 'PII Redaction', description: 'Redact personal identifiable information before sending to LLM',
         type: 'redaction', stage: 'pre', config: JSON.stringify({ patterns: ['email', 'phone', 'ssn', 'credit_card'] }), priority: 100, enabled: 1,
       },
       {
-        id: 'guard-toxicity', name: 'Toxicity Filter', description: 'Block toxic or harmful content in responses',
+        id: '51586988-83b7-4780-a006-b3b86b76713f', name: 'Toxicity Filter', description: 'Block toxic or harmful content in responses',
         type: 'content_filter', stage: 'post', config: JSON.stringify({ threshold: 0.7, categories: ['hate', 'violence', 'self_harm'] }), priority: 90, enabled: 1,
       },
       {
-        id: 'guard-token-limit', name: 'Token Budget', description: 'Enforce maximum token usage per request',
+        id: '1a6b5225-07c6-41cc-878f-c0d08930c1de', name: 'Token Budget', description: 'Enforce maximum token usage per request',
         type: 'budget', stage: 'pre', config: JSON.stringify({ max_input_tokens: 8000, max_output_tokens: 4000 }), priority: 80, enabled: 1,
       },
       {
-        id: 'guard-hallucination', name: 'Hallucination Check', description: 'Flag responses that may contain fabricated information',
+        id: '8ae24528-463a-4dfa-9348-a2be5214de9f', name: 'Hallucination Check', description: 'Flag responses that may contain fabricated information',
         type: 'factuality', stage: 'post', config: JSON.stringify({ confidence_threshold: 0.6, require_citations: false }), priority: 70, enabled: 0,
       },
       {
-        id: 'guard-cog-pre-sycophancy', name: 'Cognitive Pre: Sycophancy Pressure', description: 'Detect prompts that push for agreement over truth before generation',
+        id: '58897b64-39ca-457c-8e8b-8ce4ffc33aa5', name: 'Cognitive Pre: Sycophancy Pressure', description: 'Detect prompts that push for agreement over truth before generation',
         type: 'cognitive_check', stage: 'pre', config: JSON.stringify({ check: 'pre_sycophancy', pattern: "\\b(agree with me|just agree|say yes|validate me|don't challenge|no criticism)\\b", warn_confidence: 0.62, allow_confidence: 0.86 }), priority: 65, enabled: 1,
       },
       {
-        id: 'guard-cog-pre-confidence', name: 'Cognitive Pre: Confidence Gate', description: 'Apply risk-aware confidence gate before generation',
+        id: '70469180-6265-47d8-82c6-ee3cec180bc6', name: 'Cognitive Pre: Confidence Gate', description: 'Apply risk-aware confidence gate before generation',
         type: 'cognitive_check', stage: 'pre', config: JSON.stringify({ check: 'pre_confidence', gate_threshold: 0.65, gate_on_fail: 'warn', medium_risk_confidence: 0.72, high_risk_confidence: 0.6, critical_risk_confidence: 0.5, low_risk_confidence: 0.82 }), priority: 64, enabled: 1,
       },
       {
-        id: 'guard-cog-post-grounding', name: 'Cognitive Post: Grounding', description: 'Check lexical grounding between prompt and response',
+        id: 'e6f04e4f-29bb-4081-a9e8-ef66dba939bf', name: 'Cognitive Post: Grounding', description: 'Check lexical grounding between prompt and response',
         type: 'cognitive_check', stage: 'post', config: JSON.stringify({ check: 'post_grounding', min_overlap: 0.06 }), priority: 63, enabled: 1,
       },
       {
-        id: 'guard-cog-post-sycophancy', name: 'Cognitive Post: Sycophancy Phrasing', description: 'Detect strong sycophantic phrasing in assistant output',
+        id: 'f9e2ec15-8243-4884-9056-a5cf79af9800', name: 'Cognitive Post: Sycophancy Phrasing', description: 'Detect strong sycophantic phrasing in assistant output',
         type: 'cognitive_check', stage: 'post', config: JSON.stringify({ check: 'post_sycophancy', pattern: "\\b(you are absolutely right|exactly right|totally correct|you are 100% right)\\b", warn_confidence: 0.58, allow_confidence: 0.86 }), priority: 62, enabled: 1,
       },
       {
-        id: 'guard-cog-post-devils-advocate', name: 'Cognitive Post: Devils Advocate', description: 'Ensure decision-style queries include counterpoints and trade-offs',
+        id: 'af3ed9ac-b3ca-4d10-bf80-678e4a750389', name: 'Cognitive Post: Devils Advocate', description: 'Ensure decision-style queries include counterpoints and trade-offs',
         type: 'cognitive_check', stage: 'post', config: JSON.stringify({ check: 'post_devils_advocate', needs_pattern: "\\b(should i|is it good|best|recommend|decision|choose|strategy|plan)\\b", has_pattern: "\\b(however|on the other hand|trade-?off|counterpoint|risk|alternative)\\b", warn_confidence: 0.6, allow_confidence: 0.84 }), priority: 61, enabled: 1,
       },
       {
-        id: 'guard-cog-post-confidence', name: 'Cognitive Post: Confidence Gate', description: 'Apply post-response confidence gate for outcome signaling',
+        id: '4ace09e3-5aa8-4761-8d7c-e56f81ae84dd', name: 'Cognitive Post: Confidence Gate', description: 'Apply post-response confidence gate for outcome signaling',
         type: 'cognitive_check', stage: 'post', config: JSON.stringify({ check: 'post_confidence', gate_threshold: 0.67, gate_on_fail: 'warn' }), priority: 60, enabled: 1,
       },
       {
-        id: 'guard-injection-directive-override', name: 'Prompt Injection: Directive Override', description: 'Block attempts to override system or developer instructions',
+        id: '7c8988ba-b7c9-4e52-8139-732e5c922a25', name: 'Prompt Injection: Directive Override', description: 'Block attempts to override system or developer instructions',
         type: 'content_filter', stage: 'pre', config: JSON.stringify({
           words: [
             'ignore previous instructions',
@@ -2811,7 +2811,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         }), priority: 95, enabled: 1,
       },
       {
-        id: 'guard-injection-prompt-exfil', name: 'Prompt Injection: Prompt Exfiltration', description: 'Block attempts to extract hidden prompts or policies',
+        id: '0eb8ae21-e411-4dae-921f-3f91651619d9', name: 'Prompt Injection: Prompt Exfiltration', description: 'Block attempts to extract hidden prompts or policies',
         type: 'regex', stage: 'pre', config: JSON.stringify({
           pattern: '(?:show|reveal|print|dump|output).{0,80}(?:system prompt|developer message|hidden instructions|internal policy)',
           flags: 'i',
@@ -2825,7 +2825,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     // Ensure prompt-injection guardrails exist for existing databases
     const injectionGuardrails: Omit<GuardrailRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'guard-injection-directive-override', name: 'Prompt Injection: Directive Override', description: 'Block attempts to override system or developer instructions',
+        id: '7c8988ba-b7c9-4e52-8139-732e5c922a25', name: 'Prompt Injection: Directive Override', description: 'Block attempts to override system or developer instructions',
         type: 'content_filter', stage: 'pre', config: JSON.stringify({
           words: [
             'ignore previous instructions',
@@ -2841,7 +2841,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         }), priority: 95, enabled: 1,
       },
       {
-        id: 'guard-injection-prompt-exfil', name: 'Prompt Injection: Prompt Exfiltration', description: 'Block attempts to extract hidden prompts or policies',
+        id: '0eb8ae21-e411-4dae-921f-3f91651619d9', name: 'Prompt Injection: Prompt Exfiltration', description: 'Block attempts to extract hidden prompts or policies',
         type: 'regex', stage: 'pre', config: JSON.stringify({
           pattern: '(?:show|reveal|print|dump|output).{0,80}(?:system prompt|developer message|hidden instructions|internal policy)',
           flags: 'i',
@@ -2858,17 +2858,17 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('routing_policies') === 0) {
     const policies: Omit<RoutingPolicyRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'route-cost-optimized', name: 'Cost Optimized', description: 'Route to the cheapest model that meets quality thresholds',
+        id: 'a2cdb3b9-cd89-48d8-884d-ce617a9ca328', name: 'Cost Optimized', description: 'Route to the cheapest model that meets quality thresholds',
         strategy: 'cost', constraints: JSON.stringify({ min_quality_score: 0.7 }), weights: JSON.stringify({ cost: 0.7, quality: 0.2, latency: 0.1 }),
         fallback_model: 'gpt-4o-mini', fallback_provider: 'openai', enabled: 1,
       },
       {
-        id: 'route-quality-first', name: 'Quality First', description: 'Always route to the highest quality model available',
+        id: 'eea58ad8-5c94-4aba-98ce-850c4a567e31', name: 'Quality First', description: 'Always route to the highest quality model available',
         strategy: 'quality', constraints: null, weights: JSON.stringify({ cost: 0.1, quality: 0.8, latency: 0.1 }),
         fallback_model: 'claude-sonnet-4-20250514', fallback_provider: 'anthropic', enabled: 1,
       },
       {
-        id: 'route-balanced', name: 'Balanced', description: 'Balance between cost, quality and speed',
+        id: 'b6bcb4e8-16e2-4c40-b5a6-50bc15912c23', name: 'Balanced', description: 'Balance between cost, quality and speed',
         strategy: 'balanced', constraints: null, weights: JSON.stringify({ cost: 0.33, quality: 0.34, latency: 0.33 }),
         fallback_model: 'gpt-4o', fallback_provider: 'openai', enabled: 1,
       },
@@ -2879,16 +2879,16 @@ export class SQLiteAdapter implements DatabaseAdapter {
     // Model pricing
     if (cnt('model_pricing') === 0) {
     const pricing: Omit<ModelPricingRow, 'created_at' | 'updated_at'>[] = [
-      { id: 'mp-claude-sonnet-4',    model_id: 'claude-sonnet-4-20250514',    provider: 'anthropic', display_name: 'Claude Sonnet 4',    input_cost_per_1m: 3.00,  output_cost_per_1m: 15.00, quality_score: 0.85, source: 'seed', last_synced_at: null, enabled: 1 },
-      { id: 'mp-claude-opus-4',      model_id: 'claude-opus-4-20250514',      provider: 'anthropic', display_name: 'Claude Opus 4',      input_cost_per_1m: 15.00, output_cost_per_1m: 75.00, quality_score: 0.95, source: 'seed', last_synced_at: null, enabled: 1 },
-      { id: 'mp-claude-haiku-4',     model_id: 'claude-haiku-4-20250414',     provider: 'anthropic', display_name: 'Claude Haiku 4',     input_cost_per_1m: 1.00,  output_cost_per_1m: 5.00,  quality_score: 0.70, source: 'seed', last_synced_at: null, enabled: 1 },
-      { id: 'mp-gpt-4o',             model_id: 'gpt-4o',                      provider: 'openai',    display_name: 'GPT-4o',             input_cost_per_1m: 2.50,  output_cost_per_1m: 10.00, quality_score: 0.90, source: 'seed', last_synced_at: null, enabled: 1 },
-      { id: 'mp-gpt-4o-mini',        model_id: 'gpt-4o-mini',                 provider: 'openai',    display_name: 'GPT-4o Mini',        input_cost_per_1m: 0.15,  output_cost_per_1m: 0.60,  quality_score: 0.75, source: 'seed', last_synced_at: null, enabled: 1 },
-      { id: 'mp-gpt-4.1',            model_id: 'gpt-4.1',                     provider: 'openai',    display_name: 'GPT-4.1',            input_cost_per_1m: 2.00,  output_cost_per_1m: 8.00,  quality_score: 0.90, source: 'seed', last_synced_at: null, enabled: 1 },
-      { id: 'mp-gpt-4.1-mini',       model_id: 'gpt-4.1-mini',                provider: 'openai',    display_name: 'GPT-4.1 Mini',       input_cost_per_1m: 0.40,  output_cost_per_1m: 1.60,  quality_score: 0.75, source: 'seed', last_synced_at: null, enabled: 1 },
-      { id: 'mp-gpt-4.1-nano',       model_id: 'gpt-4.1-nano',                provider: 'openai',    display_name: 'GPT-4.1 Nano',       input_cost_per_1m: 0.10,  output_cost_per_1m: 0.40,  quality_score: 0.60, source: 'seed', last_synced_at: null, enabled: 1 },
-      { id: 'mp-o3',                 model_id: 'o3',                           provider: 'openai',    display_name: 'o3',                 input_cost_per_1m: 2.00,  output_cost_per_1m: 8.00,  quality_score: 0.85, source: 'seed', last_synced_at: null, enabled: 1 },
-      { id: 'mp-o4-mini',            model_id: 'o4-mini',                      provider: 'openai',    display_name: 'o4 Mini',            input_cost_per_1m: 1.10,  output_cost_per_1m: 4.40,  quality_score: 0.75, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: '24c261e4-3cd0-48da-aba5-ad65cdc4ba84',    model_id: 'claude-sonnet-4-20250514',    provider: 'anthropic', display_name: 'Claude Sonnet 4',    input_cost_per_1m: 3.00,  output_cost_per_1m: 15.00, quality_score: 0.85, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: '3a01332c-7062-46f4-ac27-23718d0b7e11',      model_id: 'claude-opus-4-20250514',      provider: 'anthropic', display_name: 'Claude Opus 4',      input_cost_per_1m: 15.00, output_cost_per_1m: 75.00, quality_score: 0.95, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: '7a159bca-cd4a-4008-9adf-537d3f9087a5',     model_id: 'claude-haiku-4-20250414',     provider: 'anthropic', display_name: 'Claude Haiku 4',     input_cost_per_1m: 1.00,  output_cost_per_1m: 5.00,  quality_score: 0.70, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'd544e807-dd8b-45fc-8d7c-4c35b00fe34c',             model_id: 'gpt-4o',                      provider: 'openai',    display_name: 'GPT-4o',             input_cost_per_1m: 2.50,  output_cost_per_1m: 10.00, quality_score: 0.90, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: '453e9a1e-b374-436b-bbed-58ba0a0db737',        model_id: 'gpt-4o-mini',                 provider: 'openai',    display_name: 'GPT-4o Mini',        input_cost_per_1m: 0.15,  output_cost_per_1m: 0.60,  quality_score: 0.75, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: '5a851707-9a6f-434f-9c8f-e6bc02647e90',            model_id: 'gpt-4.1',                     provider: 'openai',    display_name: 'GPT-4.1',            input_cost_per_1m: 2.00,  output_cost_per_1m: 8.00,  quality_score: 0.90, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'b2c6d495-f58e-40f1-aff2-d58050aabedb',       model_id: 'gpt-4.1-mini',                provider: 'openai',    display_name: 'GPT-4.1 Mini',       input_cost_per_1m: 0.40,  output_cost_per_1m: 1.60,  quality_score: 0.75, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'bf5734a5-3552-4068-a80d-457c25f927ab',       model_id: 'gpt-4.1-nano',                provider: 'openai',    display_name: 'GPT-4.1 Nano',       input_cost_per_1m: 0.10,  output_cost_per_1m: 0.40,  quality_score: 0.60, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: '5190bfc2-0601-4153-8563-a6f5811bdcae',                 model_id: 'o3',                           provider: 'openai',    display_name: 'o3',                 input_cost_per_1m: 2.00,  output_cost_per_1m: 8.00,  quality_score: 0.85, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'f7c3f6b4-f3de-4070-a547-f37359aa0ca4',            model_id: 'o4-mini',                      provider: 'openai',    display_name: 'o4 Mini',            input_cost_per_1m: 1.10,  output_cost_per_1m: 4.40,  quality_score: 0.75, source: 'seed', last_synced_at: null, enabled: 1 },
     ];
     for (const p of pricing) await this.createModelPricing(p);
     }
@@ -2897,7 +2897,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('workflow_defs') === 0) {
     const workflows: Omit<WorkflowDefRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'wf-code-review', name: 'Code Review Pipeline', description: 'Automated code review with human approval gate',
+        id: '3aedac32-ef1a-429f-89d7-23d481ccd8ad', name: 'Code Review Pipeline', description: 'Automated code review with human approval gate',
         version: '1.0', entry_step_id: 'analyze',
         steps: JSON.stringify([
           { id: 'analyze', type: 'agent', name: 'Static Analysis', next: 'review' },
@@ -2908,7 +2908,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         metadata: JSON.stringify({ category: 'engineering' }), enabled: 1,
       },
       {
-        id: 'wf-content-pipeline', name: 'Content Generation', description: 'Draft, review, and publish content workflow',
+        id: 'f47a3a38-a090-4956-8998-3e2bf6327304', name: 'Content Generation', description: 'Draft, review, and publish content workflow',
         version: '1.0', entry_step_id: 'draft',
         steps: JSON.stringify([
           { id: 'draft', type: 'agent', name: 'Generate Draft', next: 'edit' },
@@ -2918,7 +2918,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         metadata: JSON.stringify({ category: 'content' }), enabled: 1,
       },
       {
-        id: 'wf-nz-stats-lookup', name: 'NZ Statistics Lookup', description: 'Search, identify, and retrieve official New Zealand statistics from Stats NZ ADE',
+        id: '2cb3d0de-9ce7-4b90-a7cd-7c41f762a988', name: 'NZ Statistics Lookup', description: 'Search, identify, and retrieve official New Zealand statistics from Stats NZ ADE',
         version: '1.0', entry_step_id: 'search',
         steps: JSON.stringify([
           { id: 'search', type: 'agent', name: 'Search Dataflows', next: 'inspect', tools: ['statsnz_search_dataflows', 'statsnz_list_dataflows'] },
@@ -2936,27 +2936,27 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('tool_configs') === 0) {
     const tools: Omit<ToolConfigRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'tool-web-search', name: 'Web Search', description: 'Search the web for current information',
+        id: 'a7bd3e9f-9b1b-4aa6-9520-8f5fb194a5e3', name: 'Web Search', description: 'Search the web for current information',
         category: 'retrieval', risk_level: 'low', requires_approval: 0, max_execution_ms: 10000, rate_limit_per_min: 30, enabled: 1,
       },
       {
-        id: 'tool-code-exec', name: 'Code Execution', description: 'Execute code in a sandboxed environment',
+        id: '8e6c2528-f5a0-4d5a-a719-b60cc660f353', name: 'Code Execution', description: 'Execute code in a sandboxed environment',
         category: 'compute', risk_level: 'high', requires_approval: 1, max_execution_ms: 30000, rate_limit_per_min: 10, enabled: 1,
       },
       {
-        id: 'tool-file-read', name: 'File Reader', description: 'Read files from allowed directories',
+        id: 'bca36e31-bf3b-4761-89ba-0f1edecf22cf', name: 'File Reader', description: 'Read files from allowed directories',
         category: 'filesystem', risk_level: 'medium', requires_approval: 0, max_execution_ms: 5000, rate_limit_per_min: 60, enabled: 1,
       },
       {
-        id: 'tool-db-query', name: 'Database Query', description: 'Run read-only SQL queries against configured databases',
+        id: '9bbd1c34-35a1-442f-b2bb-d5d6f568f57a', name: 'Database Query', description: 'Run read-only SQL queries against configured databases',
         category: 'data', risk_level: 'medium', requires_approval: 0, max_execution_ms: 15000, rate_limit_per_min: 20, enabled: 1,
       },
       {
-        id: 'tool-api-call', name: 'API Caller', description: 'Make HTTP requests to whitelisted endpoints',
+        id: '31755606-4e34-44be-a101-cee78d49f6e1', name: 'API Caller', description: 'Make HTTP requests to whitelisted endpoints',
         category: 'integration', risk_level: 'medium', requires_approval: 0, max_execution_ms: 20000, rate_limit_per_min: 15, enabled: 1,
       },
       {
-        id: 'tool-statsnz', name: 'Stats NZ (Aotearoa Data Explorer)', description: 'Query official New Zealand statistics — population, census, GDP, trade, housing, labour, and more via the Stats NZ ADE SDMX API',
+        id: '220dd56e-5c1c-4dad-93c8-befa5d7588f5', name: 'Stats NZ (Aotearoa Data Explorer)', description: 'Query official New Zealand statistics — population, census, GDP, trade, housing, labour, and more via the Stats NZ ADE SDMX API',
         category: 'data', risk_level: 'low', requires_approval: 0, max_execution_ms: 30000, rate_limit_per_min: 20, enabled: 1,
       },
     ];
@@ -2987,7 +2987,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('task_contracts') === 0) {
     const contracts: Omit<TaskContractRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'tc-code-review', name: 'Code Review Contract', description: 'Contract for AI-assisted code review tasks',
+        id: 'fbb4e3aa-a78b-452f-90b9-30ec0a1da2ea', name: 'Code Review Contract', description: 'Contract for AI-assisted code review tasks',
         input_schema: JSON.stringify({ type: 'object', required: ['code', 'language'], properties: { code: { type: 'string' }, language: { type: 'string' }, context: { type: 'string' } } }),
         output_schema: JSON.stringify({ type: 'object', required: ['summary', 'issues'], properties: { summary: { type: 'string' }, issues: { type: 'array' }, score: { type: 'number' } } }),
         acceptance_criteria: JSON.stringify([
@@ -2999,7 +2999,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         evidence_required: JSON.stringify(['text', 'metric']), min_confidence: 0.7, require_human_review: 0, enabled: 1,
       },
       {
-        id: 'tc-content-gen', name: 'Content Generation Contract', description: 'Contract for AI content generation tasks',
+        id: 'e5f03434-6aba-4e7f-93c5-838344d25d9b', name: 'Content Generation Contract', description: 'Contract for AI content generation tasks',
         input_schema: JSON.stringify({ type: 'object', required: ['topic'], properties: { topic: { type: 'string' }, audience: { type: 'string' }, maxWords: { type: 'number' } } }),
         output_schema: JSON.stringify({ type: 'object', required: ['content', 'wordCount'], properties: { content: { type: 'string' }, wordCount: { type: 'number' }, readabilityScore: { type: 'number' } } }),
         acceptance_criteria: JSON.stringify([
@@ -3010,7 +3010,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         evidence_required: JSON.stringify(['text']), min_confidence: 0.8, require_human_review: 1, enabled: 1,
       },
       {
-        id: 'tc-data-analysis', name: 'Data Analysis Contract', description: 'Contract for data analysis and reporting tasks',
+        id: '2e9ac54f-a9b4-4ecd-88a0-1113d8c32a34', name: 'Data Analysis Contract', description: 'Contract for data analysis and reporting tasks',
         input_schema: JSON.stringify({ type: 'object', required: ['query'], properties: { query: { type: 'string' }, dataset: { type: 'string' } } }),
         output_schema: JSON.stringify({ type: 'object', required: ['analysis', 'confidence'], properties: { analysis: { type: 'string' }, confidence: { type: 'number' }, charts: { type: 'array' } } }),
         acceptance_criteria: JSON.stringify([
@@ -3021,7 +3021,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         evidence_required: JSON.stringify(['text', 'metric', 'trace']), min_confidence: 0.6, require_human_review: 0, enabled: 1,
       },
       {
-        id: 'tc-nz-statistics', name: 'NZ Statistics Lookup Contract', description: 'Contract for querying official New Zealand statistics from Stats NZ Aotearoa Data Explorer',
+        id: 'eb6561e5-46a8-446d-8056-0d1a6fac751e', name: 'NZ Statistics Lookup Contract', description: 'Contract for querying official New Zealand statistics from Stats NZ Aotearoa Data Explorer',
         input_schema: JSON.stringify({ type: 'object', required: ['query'], properties: { query: { type: 'string', description: 'The statistical question (e.g. "NZ population by region")' }, dataflow_id: { type: 'string', description: 'Optional specific dataflow ID if known' } } }),
         output_schema: JSON.stringify({ type: 'object', required: ['dataset_id', 'period', 'values'], properties: { dataset_id: { type: 'string', description: 'Stats NZ dataflow ID' }, dataset_name: { type: 'string' }, period: { type: 'string', description: 'Reference period or year' }, values: { type: 'array', description: 'Numeric observations returned' }, unit: { type: 'string' }, source: { type: 'string' } } }),
         acceptance_criteria: JSON.stringify([
@@ -3040,7 +3040,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('worker_agents') === 0) {
       const workers: Omit<WorkerAgentRow, 'created_at' | 'updated_at'>[] = [
         {
-          id: 'wa-code-executor', name: 'code_executor',
+          id: '8d2598f8-775d-4e67-841d-1cb5fb16713e', name: 'code_executor',
           description: '[USE FIRST FOR ANY CODE/SCRIPT/RUN REQUEST] Writes AND executes code in real isolated Docker containers via CSE. Returns actual stdout. Use for: "run", "execute", "run it", "run in a container", "write and run", "test", "script that runs". NOT a simulation — real execution.',
           system_prompt: [
             'You are a code writing + execution + verification agent.',
@@ -3077,7 +3077,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
           persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 50, enabled: 1,
         },
         {
-          id: 'wa-statsnz-specialist', name: 'statsnz_specialist',
+          id: 'aebc3dc5-cc5b-4ad2-a10c-dedf8a9a5c3e', name: 'statsnz_specialist',
           description: 'Specialist for Stats NZ Aotearoa Data Explorer data retrieval. Use this worker for NZ census/population/demographics requests and any task that should be grounded in Stats NZ APIs.',
           system_prompt: [
             'You are a Stats NZ specialist worker.',
@@ -3111,24 +3111,24 @@ export class SQLiteAdapter implements DatabaseAdapter {
             'cost of living new zealand', 'cost of living nz', 'inflation new zealand', 'inflation nz',
             'new zealand gdp', 'new zealand inflation', 'new zealand cost of living',
           ]),
-          task_contract_id: 'tc-nz-statistics', max_retries: 2, priority: 40, enabled: 1,
+          task_contract_id: 'eb6561e5-46a8-446d-8056-0d1a6fac751e', max_retries: 2, priority: 40, enabled: 1,
         },
         {
-          id: 'wa-researcher', name: 'researcher',
+          id: 'bf3c7feb-5471-4e17-a46c-f2c84efbf613', name: 'researcher',
           description: 'Researches topics, searches the web, browses websites, and gathers information. Can open a headless browser to navigate dynamic sites, read page content, click links, fill forms, and interact with web applications. Has full browser authentication capabilities: can detect login forms, auto-login using stored website credentials from the credential vault, save session cookies, and hand off the browser to the user for manual steps like 2FA or CAPTCHA. Always delegate login/auth tasks to this worker — it has the browser_detect_auth, browser_login, browser_save_cookies, browser_handoff_request, and browser_handoff_resume tools.',
           system_prompt: '',
           tool_names: JSON.stringify(['web_search', 'text_analysis', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume']),
           persona: 'agent_researcher', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 30, enabled: 1,
         },
         {
-          id: 'wa-analyst', name: 'analyst',
+          id: '63566924-9e94-41e5-8e55-6e9ddee168c5', name: 'analyst',
           description: 'Analyzes data, performs calculations, validates computed outputs, formats JSON, provides structured insights, and handles temporal/timer queries. Good for math, data processing, output verification, formatting, date/time questions, and time management.',
           system_prompt: '',
           tool_names: JSON.stringify(['calculator', 'json_format', 'text_analysis', 'memory_recall', 'datetime', 'datetime_add', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel']),
           persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 20, enabled: 1,
         },
         {
-          id: 'wa-writer', name: 'writer',
+          id: '1111d2e3-2828-4570-9bf2-91320b536a2e', name: 'writer',
           description: 'Writes, edits, and refines text. Good for drafting content, summarizing, and creative writing tasks.',
           system_prompt: '',
           tool_names: JSON.stringify(['text_analysis', 'memory_recall', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel']),
@@ -3142,7 +3142,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('workflow_runs') === 0) {
     const runs: Omit<WorkflowRunRow, 'completed_at'>[] = [
       {
-        id: 'run-001', workflow_id: 'wf-code-review', status: 'completed',
+        id: '38e1d25e-75e8-470c-ae80-f8464c666026', workflow_id: '3aedac32-ef1a-429f-89d7-23d481ccd8ad', status: 'completed',
         state: JSON.stringify({ currentStepId: 'report', variables: { repository: 'acme/api' }, history: [
           { stepId: 'analyze', status: 'completed', output: '3 issues found', startedAt: '2025-01-15T10:00:00Z', completedAt: '2025-01-15T10:00:05Z' },
           { stepId: 'review', status: 'completed', output: 'LGTM with minor notes', startedAt: '2025-01-15T10:00:05Z', completedAt: '2025-01-15T10:00:12Z' },
@@ -3151,7 +3151,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         error: null, started_at: '2025-01-15T10:00:00Z',
       },
       {
-        id: 'run-002', workflow_id: 'wf-content-pipeline', status: 'paused',
+        id: 'b718e2c0-6049-4d67-8d87-3706d13ea97c', workflow_id: 'f47a3a38-a090-4956-8998-3e2bf6327304', status: 'paused',
         state: JSON.stringify({ currentStepId: 'approve', variables: { topic: 'AI Safety' }, history: [
           { stepId: 'draft', status: 'completed', output: 'Draft generated (1200 words)', startedAt: '2025-01-16T09:00:00Z', completedAt: '2025-01-16T09:00:30Z' },
           { stepId: 'edit', status: 'completed', output: 'Edited and polished', startedAt: '2025-01-16T09:00:30Z', completedAt: '2025-01-16T09:01:00Z' },
@@ -3167,19 +3167,19 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('guardrail_evals') === 0) {
     const evals: Omit<GuardrailEvalRow, 'created_at'>[] = [
       {
-        id: 'geval-001', chat_id: null, message_id: null, stage: 'pre-execution',
+        id: 'bdb005ec-c192-4404-ab44-bf4e23ab7aee', chat_id: null, message_id: null, stage: 'pre-execution',
         input_preview: 'Tell me about machine learning...',
         results: JSON.stringify([
-          { decision: 'allow', guardrailId: 'guard-pii-redact', explanation: 'No PII detected' },
-          { decision: 'allow', guardrailId: 'guard-token-limit', explanation: 'Within token limit' },
+          { decision: 'allow', guardrailId: '0370fa22-5fc8-49a4-bd4c-3e39863da61d', explanation: 'No PII detected' },
+          { decision: 'allow', guardrailId: '1a6b5225-07c6-41cc-878f-c0d08930c1de', explanation: 'Within token limit' },
         ]),
         overall_decision: 'allow',
       },
       {
-        id: 'geval-002', chat_id: null, message_id: null, stage: 'pre-execution',
+        id: '25f7e39a-5990-467c-8ae2-6114c3511190', chat_id: null, message_id: null, stage: 'pre-execution',
         input_preview: 'My SSN is 123-45-6789...',
         results: JSON.stringify([
-          { decision: 'deny', guardrailId: 'guard-pii-redact', explanation: 'SSN pattern detected' },
+          { decision: 'deny', guardrailId: '0370fa22-5fc8-49a4-bd4c-3e39863da61d', explanation: 'SSN pattern detected' },
         ]),
         overall_decision: 'deny',
       },
@@ -3191,22 +3191,22 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('human_task_policies') === 0) {
     const taskPolicies: Omit<HumanTaskPolicyRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'htp-high-risk-tool', name: 'High-Risk Tool Approval', description: 'Require human approval before executing high-risk tools (code execution, DB writes)',
+        id: 'cc83adb8-bf49-4fb0-83c4-fa27da65dc56', name: 'High-Risk Tool Approval', description: 'Require human approval before executing high-risk tools (code execution, DB writes)',
         trigger: 'tool:high-risk', task_type: 'approval', default_priority: 'high', sla_hours: 1, auto_escalate_after_hours: 2,
         assignment_strategy: 'round-robin', assign_to: null, enabled: 1,
       },
       {
-        id: 'htp-sensitive-data', name: 'Sensitive Data Review', description: 'Human review when agent accesses sensitive or PII data',
+        id: '50cb4891-c1b7-4562-9bbb-75d0e552c07d', name: 'Sensitive Data Review', description: 'Human review when agent accesses sensitive or PII data',
         trigger: 'data:sensitive', task_type: 'review', default_priority: 'urgent', sla_hours: 0.5, auto_escalate_after_hours: 1,
         assignment_strategy: 'role-based', assign_to: 'security-team', enabled: 1,
       },
       {
-        id: 'htp-cost-threshold', name: 'Cost Threshold Approval', description: 'Require approval when estimated cost exceeds threshold',
+        id: '33664f9c-7e81-4bae-b536-6bdf17ea2352', name: 'Cost Threshold Approval', description: 'Require approval when estimated cost exceeds threshold',
         trigger: 'cost:threshold', task_type: 'approval', default_priority: 'normal', sla_hours: 4, auto_escalate_after_hours: 8,
         assignment_strategy: 'specific-user', assign_to: 'admin', enabled: 1,
       },
       {
-        id: 'htp-workflow-gate', name: 'Workflow Gate Review', description: 'Human review gate at critical workflow checkpoints',
+        id: '659ed861-c3da-432d-a954-94393eb628de', name: 'Workflow Gate Review', description: 'Human review gate at critical workflow checkpoints',
         trigger: 'workflow:gate', task_type: 'review', default_priority: 'normal', sla_hours: 24, auto_escalate_after_hours: 48,
         assignment_strategy: 'least-busy', assign_to: null, enabled: 1,
       },
@@ -3218,27 +3218,27 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('cache_policies') === 0) {
     const cachePolicies: Omit<CachePolicyRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'cp-global-default', name: 'Global Default Cache', description: 'Default caching policy for all responses — 5 minute TTL',
+        id: 'a747b721-8eff-46b2-a916-864ec0ac67cf', name: 'Global Default Cache', description: 'Default caching policy for all responses — 5 minute TTL',
         scope: 'global', ttl_ms: 300000, max_entries: 1000,
         bypass_patterns: JSON.stringify(['password', 'secret', 'token', 'key']),
         invalidate_on: JSON.stringify(['model_change', 'prompt_update']),
         enabled: 1,
       },
       {
-        id: 'cp-session-short', name: 'Session Short-Lived', description: 'Short TTL cache scoped to individual sessions',
+        id: '5820734a-3bea-4558-90ad-d382b7b76bb2', name: 'Session Short-Lived', description: 'Short TTL cache scoped to individual sessions',
         scope: 'session', ttl_ms: 60000, max_entries: 100,
         bypass_patterns: null, invalidate_on: JSON.stringify(['session_end']),
         enabled: 1,
       },
       {
-        id: 'cp-semantic-lookup', name: 'Semantic Query Cache', description: 'Cache semantically similar queries to avoid redundant LLM calls',
+        id: 'bd5cbbb5-c407-4016-9c43-5525f2789017', name: 'Semantic Query Cache', description: 'Cache semantically similar queries to avoid redundant LLM calls',
         scope: 'global', ttl_ms: 600000, max_entries: 500,
         bypass_patterns: JSON.stringify(['real-time', 'current date', 'current time']),
         invalidate_on: JSON.stringify(['knowledge_update']),
         enabled: 1,
       },
       {
-        id: 'cp-user-personalised', name: 'User Personalised Cache', description: 'Per-user cache that respects personalisation context',
+        id: '50dd439b-1fec-4293-8ee2-ed24ae07c387', name: 'User Personalised Cache', description: 'Per-user cache that respects personalisation context',
         scope: 'user', ttl_ms: 120000, max_entries: 200,
         bypass_patterns: null, invalidate_on: JSON.stringify(['preference_change']),
         enabled: 0,
@@ -3251,27 +3251,27 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('identity_rules') === 0) {
     const identityRules: Omit<IdentityRuleRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'ident-admin-all', name: 'Admin Full Access', description: 'Admins have unrestricted access to all resources',
+        id: '71d997aa-fb08-446d-8123-1b774f3c7de5', name: 'Admin Full Access', description: 'Admins have unrestricted access to all resources',
         resource: '*', action: '*', roles: JSON.stringify(['admin']), scopes: null,
         result: 'allow', priority: 100, enabled: 1,
       },
       {
-        id: 'ident-user-chat', name: 'User Chat Access', description: 'Regular users can read and write in chat',
+        id: '280a5cfc-548c-4714-aabb-5e6a5dcaaf44', name: 'User Chat Access', description: 'Regular users can read and write in chat',
         resource: 'chat:*', action: '*', roles: JSON.stringify(['user', 'agent']), scopes: JSON.stringify(['chat']),
         result: 'allow', priority: 50, enabled: 1,
       },
       {
-        id: 'ident-agent-tools', name: 'Agent Tool Access', description: 'AI agents can use tools within defined scopes',
+        id: '89eee70b-407a-4a89-a5e8-17b69330da8a', name: 'Agent Tool Access', description: 'AI agents can use tools within defined scopes',
         resource: 'tools:*', action: 'execute', roles: JSON.stringify(['agent']), scopes: JSON.stringify(['tools']),
         result: 'allow', priority: 50, enabled: 1,
       },
       {
-        id: 'ident-deny-admin-panel', name: 'Deny Non-Admin Panel', description: 'Non-admins cannot access admin settings',
+        id: '7ef01416-07ec-496b-be00-67926157a29e', name: 'Deny Non-Admin Panel', description: 'Non-admins cannot access admin settings',
         resource: 'admin:*', action: '*', roles: null, scopes: null,
         result: 'deny', priority: 10, enabled: 1,
       },
       {
-        id: 'ident-sensitive-challenge', name: 'Sensitive Data Challenge', description: 'Challenge access to sensitive data requiring additional verification',
+        id: '29a67ad5-7424-4e81-887b-14b0b9d951bc', name: 'Sensitive Data Challenge', description: 'Challenge access to sensitive data requiring additional verification',
         resource: 'data:sensitive', action: 'read', roles: null, scopes: null,
         result: 'challenge', priority: 60, enabled: 1,
       },
@@ -3283,7 +3283,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('memory_governance') === 0) {
     const memGov: Omit<MemoryGovernanceRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'mgov-pii-block', name: 'Block PII in Memory', description: 'Prevent storage of messages containing PII patterns',
+        id: 'b15e183e-66e3-4bd2-9b63-7dd540ca65ec', name: 'Block PII in Memory', description: 'Prevent storage of messages containing PII patterns',
         memory_types: JSON.stringify(['conversation', 'semantic']),
         tenant_id: null,
         block_patterns: JSON.stringify(['\\b\\d{3}-\\d{2}-\\d{4}\\b', '\\b\\d{16}\\b']),
@@ -3291,21 +3291,21 @@ export class SQLiteAdapter implements DatabaseAdapter {
         max_age: null, max_entries: null, enabled: 1,
       },
       {
-        id: 'mgov-conversation-retention', name: 'Conversation Retention', description: 'Limit conversation memory to 30 days with max 10000 entries',
+        id: '9dbbe38c-a0a4-4f42-a1bc-a688d5b67103', name: 'Conversation Retention', description: 'Limit conversation memory to 30 days with max 10000 entries',
         memory_types: JSON.stringify(['conversation']),
         tenant_id: null,
         block_patterns: null, redact_patterns: null,
         max_age: 'P30D', max_entries: 10000, enabled: 1,
       },
       {
-        id: 'mgov-semantic-retention', name: 'Semantic Memory Retention', description: 'Semantic facts retained for 90 days with a cap of 5000 entries',
+        id: '2a97b95b-6f01-4637-bc69-020d0597c02d', name: 'Semantic Memory Retention', description: 'Semantic facts retained for 90 days with a cap of 5000 entries',
         memory_types: JSON.stringify(['semantic']),
         tenant_id: null,
         block_patterns: null, redact_patterns: null,
         max_age: 'P90D', max_entries: 5000, enabled: 1,
       },
       {
-        id: 'mgov-entity-no-secrets', name: 'No Secrets in Entity Memory', description: 'Block secrets and API keys from being stored as entity facts',
+        id: 'e6488668-f28f-4574-a7b0-49e45fc8aff2', name: 'No Secrets in Entity Memory', description: 'Block secrets and API keys from being stored as entity facts',
         memory_types: JSON.stringify(['entity']),
         tenant_id: null,
         block_patterns: JSON.stringify(['api[_\\s-]?key', 'secret[_\\s-]?key', 'password', 'bearer\\s+\\S+']),
@@ -3320,7 +3320,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('memory_extraction_rules') === 0) {
     const extractionRules: Omit<MemoryExtractionRuleRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'mer-self-name',
+        id: '64e1189c-3e5a-41f3-ad5d-da4b1e962093',
         name: 'Self disclosure: name',
         description: 'Detect when user discloses their name',
         rule_type: 'self_disclosure',
@@ -3332,7 +3332,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: 1,
       },
       {
-        id: 'mer-self-location',
+        id: '729662dd-644c-4a42-8984-24ed5623bd4c',
         name: 'Self disclosure: location',
         description: 'Detect where user lives or is from',
         rule_type: 'self_disclosure',
@@ -3344,7 +3344,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: 1,
       },
       {
-        id: 'mer-self-work',
+        id: '464f8582-2df1-4b39-9749-a43f7eb21438',
         name: 'Self disclosure: work',
         description: 'Detect organization where user works',
         rule_type: 'self_disclosure',
@@ -3356,7 +3356,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: 1,
       },
       {
-        id: 'mer-entity-name',
+        id: '16d483a4-c2b9-4fea-9082-6a9bcb43befb',
         name: 'Entity extraction: person name',
         description: 'Extract a person entity from self name disclosure',
         rule_type: 'entity_extraction',
@@ -3368,7 +3368,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: 1,
       },
       {
-        id: 'mer-entity-location',
+        id: 'e3354de1-15e6-4ecf-ad8e-e4d02127ee26',
         name: 'Entity extraction: location',
         description: 'Extract location entity from residence disclosure',
         rule_type: 'entity_extraction',
@@ -3380,7 +3380,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: 1,
       },
       {
-        id: 'mer-entity-work',
+        id: 'b7f3045d-6428-4f43-bda1-dd3a879f5951',
         name: 'Entity extraction: organization',
         description: 'Extract organization entity from employer disclosure',
         rule_type: 'entity_extraction',
@@ -3392,7 +3392,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: 1,
       },
       {
-        id: 'mer-entity-pref',
+        id: 'dea53647-9c8a-4c29-9e02-5dd297fe9762',
         name: 'Entity extraction: preference',
         description: 'Extract preference topic from likes/loves/enjoys statements',
         rule_type: 'entity_extraction',
@@ -3411,27 +3411,27 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('search_providers') === 0) {
     const searchProviders: Omit<SearchProviderRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'sp-duckduckgo', name: 'DuckDuckGo', description: 'Free web search via DuckDuckGo Instant Answer API — no API key required',
+        id: '6fce6815-171b-4d75-8502-65b720b829d3', name: 'DuckDuckGo', description: 'Free web search via DuckDuckGo Instant Answer API — no API key required',
         provider_type: 'duckduckgo', api_key: null, base_url: null, priority: 10,
         options: JSON.stringify({ safesearch: 'moderate', region: 'wt-wt' }), enabled: 1,
       },
       {
-        id: 'sp-brave', name: 'Brave Search', description: 'Privacy-focused web search with Brave Search API',
+        id: '897b8e52-dc64-4854-ac39-65b92e00ccd8', name: 'Brave Search', description: 'Privacy-focused web search with Brave Search API',
         provider_type: 'brave', api_key: '', base_url: null, priority: 20,
         options: JSON.stringify({ count: 10, freshness: 'none' }), enabled: 0,
       },
       {
-        id: 'sp-tavily', name: 'Tavily AI Search', description: 'AI-optimised search engine designed for LLM applications',
+        id: 'f64e9011-5b20-41b0-bea3-6a86359e4f47', name: 'Tavily AI Search', description: 'AI-optimised search engine designed for LLM applications',
         provider_type: 'tavily', api_key: '', base_url: null, priority: 30,
         options: JSON.stringify({ search_depth: 'basic', include_answer: true }), enabled: 0,
       },
       {
-        id: 'sp-google-pse', name: 'Google Custom Search', description: 'Google Programmable Search Engine for custom search experiences',
+        id: 'e770810c-7033-4fa5-b525-1befa69000dd', name: 'Google Custom Search', description: 'Google Programmable Search Engine for custom search experiences',
         provider_type: 'google', api_key: '', base_url: null, priority: 15,
         options: JSON.stringify({ cx: '', num: 10 }), enabled: 0,
       },
       {
-        id: 'sp-serper', name: 'Serper (Google SERP)', description: 'Fast Google search results via Serper API',
+        id: 'e2f358c3-89c4-48c4-aad2-3fb7153022ad', name: 'Serper (Google SERP)', description: 'Fast Google search results via Serper API',
         provider_type: 'serper', api_key: '', base_url: null, priority: 25,
         options: JSON.stringify({ gl: 'us', hl: 'en', num: 10 }), enabled: 0,
       },
@@ -3443,19 +3443,19 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('http_endpoints') === 0) {
     const httpEndpoints: Omit<HttpEndpointRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'he-jsonplaceholder', name: 'JSONPlaceholder Posts', description: 'Sample REST endpoint for testing — free JSON API',
+        id: '49f5b2f0-cff1-4446-b318-5598a6b2eab5', name: 'JSONPlaceholder Posts', description: 'Sample REST endpoint for testing — free JSON API',
         url: 'https://jsonplaceholder.typicode.com/posts', method: 'GET',
         auth_type: null, auth_config: null, headers: null,
         body_template: null, response_transform: '$[0:5]', retry_count: 2, rate_limit_rpm: 60, enabled: 1,
       },
       {
-        id: 'he-weather', name: 'Open-Meteo Weather', description: 'Free weather API — no key needed. Returns current weather for a location.',
+        id: 'ff913bd9-717d-412a-b67f-7b176faad8f3', name: 'Open-Meteo Weather', description: 'Free weather API — no key needed. Returns current weather for a location.',
         url: 'https://api.open-meteo.com/v1/forecast?latitude={{lat}}&longitude={{lon}}&current_weather=true', method: 'GET',
         auth_type: null, auth_config: null, headers: null,
         body_template: null, response_transform: '$.current_weather', retry_count: 2, rate_limit_rpm: 30, enabled: 1,
       },
       {
-        id: 'he-ip-info', name: 'IP Info', description: 'Get geolocation data from an IP address',
+        id: 'fca3c3cd-d8a0-46ec-b448-3e12fd466d2f', name: 'IP Info', description: 'Get geolocation data from an IP address',
         url: 'https://ipapi.co/{{ip}}/json/', method: 'GET',
         auth_type: null, auth_config: null, headers: null,
         body_template: null, response_transform: null, retry_count: 1, rate_limit_rpm: 30, enabled: 1,
@@ -3468,17 +3468,17 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('social_accounts') === 0) {
     const socialAccounts: Omit<SocialAccountRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'sa-slack-default', name: 'Slack Workspace', description: 'Default Slack workspace integration for team messaging',
+        id: '82e7b3d3-7794-4cab-878f-9dfc73ed94dc', name: 'Slack Workspace', description: 'Default Slack workspace integration for team messaging',
         platform: 'slack', api_key: '', api_secret: null, access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected', base_url: null,
         options: JSON.stringify({ default_channel: '#general' }), enabled: 0,
       },
       {
-        id: 'sa-discord-default', name: 'Discord Server', description: 'Discord server bot integration',
+        id: 'd1f54eaa-fdf8-4039-aacc-1cfb84e0fe8b', name: 'Discord Server', description: 'Discord server bot integration',
         platform: 'discord', api_key: '', api_secret: null, access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected', base_url: null,
         options: JSON.stringify({ guild_id: '' }), enabled: 0,
       },
       {
-        id: 'sa-github-default', name: 'GitHub', description: 'GitHub integration for repository and issue management',
+        id: '81de7d85-e393-475b-aee9-c67363eaeda8', name: 'GitHub', description: 'GitHub integration for repository and issue management',
         platform: 'github', api_key: '', api_secret: null, access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected', base_url: null,
         options: JSON.stringify({ default_owner: '', default_repo: '' }), enabled: 0,
       },
@@ -3490,28 +3490,28 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('enterprise_connectors') === 0) {
     const connectors: Omit<EnterpriseConnectorRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'ec-jira', name: 'Jira', description: 'Atlassian Jira for issue tracking and project management',
+        id: '43c533a0-3f2e-40ec-bacb-9a9f8a3815ba', name: 'Jira', description: 'Atlassian Jira for issue tracking and project management',
         connector_type: 'jira', base_url: '', auth_type: 'basic',
         auth_config: JSON.stringify({ username: '', token: '' }),
         access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected',
         options: JSON.stringify({ default_project: '' }), enabled: 0,
       },
       {
-        id: 'ec-confluence', name: 'Confluence', description: 'Atlassian Confluence for team documentation and knowledge base',
+        id: '1f9f0fcd-f190-4e0e-8b84-4dc4142554f0', name: 'Confluence', description: 'Atlassian Confluence for team documentation and knowledge base',
         connector_type: 'confluence', base_url: '', auth_type: 'basic',
         auth_config: JSON.stringify({ username: '', token: '' }),
         access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected',
         options: JSON.stringify({ default_space: '' }), enabled: 0,
       },
       {
-        id: 'ec-salesforce', name: 'Salesforce', description: 'Salesforce CRM integration for customer data and opportunities',
+        id: '3ed738ad-f493-49e7-835f-a2fb4cf159a8', name: 'Salesforce', description: 'Salesforce CRM integration for customer data and opportunities',
         connector_type: 'salesforce', base_url: '', auth_type: 'oauth2',
         auth_config: JSON.stringify({ client_id: '', client_secret: '', token_url: '' }),
         access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected',
         options: null, enabled: 0,
       },
       {
-        id: 'ec-notion', name: 'Notion', description: 'Notion workspace integration for docs and databases',
+        id: '04833867-7e14-43e5-a64a-188f5b004382', name: 'Notion', description: 'Notion workspace integration for docs and databases',
         connector_type: 'notion', base_url: null, auth_type: 'bearer',
         auth_config: JSON.stringify({ token: '' }),
         access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected',
@@ -3525,35 +3525,35 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('tool_registry') === 0) {
     const toolReg: Omit<ToolRegistryRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'tr-search', name: 'Web Search Tools', description: 'Search provider toolkit with multi-engine routing',
+        id: '66c73c20-622c-47a3-a21d-210bd8a2eb91', name: 'Web Search Tools', description: 'Search provider toolkit with multi-engine routing',
         package_name: '@weaveintel/tools-search', version: '1.0.0', category: 'search', risk_level: 'low',
         tags: JSON.stringify(['search', 'web', 'retrieval']),
         config: JSON.stringify({ defaultProvider: 'duckduckgo', maxResults: 10 }),
         requires_approval: 0, max_execution_ms: 15000, rate_limit_per_min: 30, enabled: 1,
       },
       {
-        id: 'tr-http', name: 'HTTP Endpoint Tools', description: 'Dynamic HTTP request toolkit with auth, retry, and transforms',
+        id: '2891e86c-a4d0-4fbc-8a6c-ede1c717ba89', name: 'HTTP Endpoint Tools', description: 'Dynamic HTTP request toolkit with auth, retry, and transforms',
         package_name: '@weaveintel/tools-http', version: '1.0.0', category: 'integration', risk_level: 'medium',
         tags: JSON.stringify(['http', 'api', 'rest']),
         config: JSON.stringify({ defaultRetries: 2, defaultTimeout: 10000 }),
         requires_approval: 0, max_execution_ms: 20000, rate_limit_per_min: 30, enabled: 1,
       },
       {
-        id: 'tr-browser', name: 'Browser & Scraping Tools', description: 'Web page fetching, content extraction, and readability tools',
+        id: 'f27606f3-534b-4760-aa95-77dc4e52da3e', name: 'Browser & Scraping Tools', description: 'Web page fetching, content extraction, and readability tools',
         package_name: '@weaveintel/tools-browser', version: '1.0.0', category: 'browser', risk_level: 'low',
         tags: JSON.stringify(['browser', 'scrape', 'extract', 'readability']),
         config: JSON.stringify({ defaultTimeout: 10000, maxBodySize: 1048576 }),
         requires_approval: 0, max_execution_ms: 15000, rate_limit_per_min: 20, enabled: 1,
       },
       {
-        id: 'tr-social', name: 'Social Platform Tools', description: 'Slack, Discord, and GitHub integrations',
+        id: '212ad0f7-2ad2-43e1-94d0-49be0a73d2bf', name: 'Social Platform Tools', description: 'Slack, Discord, and GitHub integrations',
         package_name: '@weaveintel/tools-social', version: '1.0.0', category: 'social', risk_level: 'medium',
         tags: JSON.stringify(['slack', 'discord', 'github', 'social']),
         config: null,
         requires_approval: 0, max_execution_ms: 10000, rate_limit_per_min: 20, enabled: 1,
       },
       {
-        id: 'tr-enterprise', name: 'Enterprise Connector Tools', description: 'Jira, Confluence, Salesforce, and Notion integrations',
+        id: '0566e9f3-00c5-4ef2-9ac9-7012c477d5fd', name: 'Enterprise Connector Tools', description: 'Jira, Confluence, Salesforce, and Notion integrations',
         package_name: '@weaveintel/tools-enterprise', version: '1.0.0', category: 'enterprise', risk_level: 'medium',
         tags: JSON.stringify(['jira', 'confluence', 'salesforce', 'notion', 'enterprise']),
         config: null,
@@ -3567,7 +3567,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('replay_scenarios') === 0) {
     const replayScenarios: Omit<ReplayScenarioRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'rs-greeting', name: 'Greeting Test', description: 'Verify the assistant handles basic greetings correctly',
+        id: 'c6c1387d-1cdd-4c7d-8c2a-0964d3481c51', name: 'Greeting Test', description: 'Verify the assistant handles basic greetings correctly',
         golden_prompt: 'Hello! How are you?',
         golden_response: 'Hello! I\'m doing great, thanks for asking. How can I help you today?',
         model: 'gpt-4o-mini', provider: 'openai',
@@ -3576,7 +3576,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: 1,
       },
       {
-        id: 'rs-code-review', name: 'Code Review Scenario', description: 'Test code review accuracy against a golden response',
+        id: '1eef00ae-efa6-49ee-94ee-5c9a9e301e86', name: 'Code Review Scenario', description: 'Test code review accuracy against a golden response',
         golden_prompt: 'Review this JavaScript function for bugs:\\nfunction add(a, b) { return a - b; }',
         golden_response: 'Bug found: The function is named "add" but performs subtraction (a - b). It should be return a + b;',
         model: 'gpt-4o', provider: 'openai',
@@ -3585,7 +3585,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: 1,
       },
       {
-        id: 'rs-summarization', name: 'Summarization Quality', description: 'Test document summarization quality and completeness',
+        id: '6d68edbb-4641-42b3-8de6-26b61faecf17', name: 'Summarization Quality', description: 'Test document summarization quality and completeness',
         golden_prompt: 'Summarize: AI is transforming healthcare through diagnostics, drug discovery, and personalized medicine. Key challenges include data privacy, bias, and regulatory compliance.',
         golden_response: 'AI is revolutionizing healthcare in three areas: diagnostics, drug discovery, and personalized medicine. Main challenges are data privacy, algorithmic bias, and regulatory compliance.',
         model: null, provider: null,
@@ -3601,25 +3601,25 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('trigger_definitions') === 0) {
     const triggerDefs: Omit<TriggerDefinitionRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'trig-daily-eval', name: 'Daily Eval Sweep', description: 'Run evaluation suite every day at 2 AM UTC',
+        id: 'b97f561c-b948-447c-8d52-2d1d681a232e', name: 'Daily Eval Sweep', description: 'Run evaluation suite every day at 2 AM UTC',
         trigger_type: 'cron', expression: '0 2 * * *',
         config: JSON.stringify({ timezone: 'UTC', skipIfRunning: true }),
-        target_workflow: 'wf-code-review', status: 'active', last_fired_at: null, fire_count: 0, enabled: 1,
+        target_workflow: '3aedac32-ef1a-429f-89d7-23d481ccd8ad', status: 'active', last_fired_at: null, fire_count: 0, enabled: 1,
       },
       {
-        id: 'trig-webhook-deploy', name: 'Deploy Webhook', description: 'Trigger workflow on deployment webhook from CI/CD',
+        id: '6e5be73b-49a5-461a-8cfe-4ff5c758955f', name: 'Deploy Webhook', description: 'Trigger workflow on deployment webhook from CI/CD',
         trigger_type: 'webhook', expression: null,
         config: JSON.stringify({ path: '/hooks/deploy', method: 'POST', requiredHeaders: ['X-Deploy-Token'] }),
-        target_workflow: 'wf-code-review', status: 'active', last_fired_at: null, fire_count: 0, enabled: 1,
+        target_workflow: '3aedac32-ef1a-429f-89d7-23d481ccd8ad', status: 'active', last_fired_at: null, fire_count: 0, enabled: 1,
       },
       {
-        id: 'trig-queue-analysis', name: 'Queue Analysis Jobs', description: 'Process queued data analysis requests',
+        id: '43de3406-4ee5-4ea6-b3ef-0ca283afe1a7', name: 'Queue Analysis Jobs', description: 'Process queued data analysis requests',
         trigger_type: 'queue', expression: null,
         config: JSON.stringify({ queueName: 'analysis-jobs', concurrency: 3, pollIntervalMs: 5000 }),
         target_workflow: null, status: 'active', last_fired_at: null, fire_count: 0, enabled: 1,
       },
       {
-        id: 'trig-model-change', name: 'Model Config Change', description: 'Re-run golden tests when model configuration changes',
+        id: '1ca7843f-9aa0-4298-8bb5-752ad4c263c6', name: 'Model Config Change', description: 'Re-run golden tests when model configuration changes',
         trigger_type: 'change', expression: null,
         config: JSON.stringify({ resourceType: 'model-config', changeTypes: ['updated'], debounceMs: 10000 }),
         target_workflow: null, status: 'paused', last_fired_at: null, fire_count: 0, enabled: 0,
@@ -3632,7 +3632,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('tenant_configs') === 0) {
     const tenantConfigs: Omit<TenantConfigRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'tc-default', name: 'Default Tenant', description: 'Default tenant configuration with standard limits',
+        id: '9ce41ecd-202f-49bf-8042-1ff7a296e537', name: 'Default Tenant', description: 'Default tenant configuration with standard limits',
         tenant_id: 'default', scope: 'global',
         allowed_models: JSON.stringify(['gpt-4o', 'gpt-4o-mini', 'claude-sonnet-4-20250514']),
         denied_models: null,
@@ -3643,7 +3643,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         config_overrides: null, enabled: 1,
       },
       {
-        id: 'tc-enterprise', name: 'Enterprise Tenant', description: 'Enterprise tier with expanded limits and all features',
+        id: '0291280f-f15f-44dc-ac95-bc2a61e88cbd', name: 'Enterprise Tenant', description: 'Enterprise tier with expanded limits and all features',
         tenant_id: 'enterprise', scope: 'organization',
         allowed_models: JSON.stringify(['gpt-4o', 'gpt-4o-mini', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514']),
         denied_models: null,
@@ -3654,7 +3654,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         config_overrides: JSON.stringify({ max_concurrent_runs: 10 }), enabled: 1,
       },
       {
-        id: 'tc-trial', name: 'Trial Tenant', description: 'Free trial with limited access',
+        id: 'b061bbe6-2ded-4c77-afad-33473b4cb4fa', name: 'Trial Tenant', description: 'Free trial with limited access',
         tenant_id: 'trial', scope: 'tenant',
         allowed_models: JSON.stringify(['gpt-4o-mini']),
         denied_models: JSON.stringify(['claude-opus-4-20250514']),
@@ -3672,21 +3672,21 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('sandbox_policies') === 0) {
     const sandboxPolicies: Omit<SandboxPolicyRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'sbx-strict', name: 'Strict Sandbox', description: 'Highly restrictive sandbox for untrusted code execution',
+        id: 'f694e2d8-172c-4ed2-bab7-35720a28149f', name: 'Strict Sandbox', description: 'Highly restrictive sandbox for untrusted code execution',
         max_cpu_ms: 5000, max_memory_mb: 64, max_duration_ms: 10000, max_output_bytes: 65536,
         allowed_modules: JSON.stringify(['Math', 'Date', 'JSON']),
         denied_modules: JSON.stringify(['fs', 'net', 'child_process', 'http', 'https', 'crypto']),
         network_access: 0, filesystem_access: 'none', enabled: 1,
       },
       {
-        id: 'sbx-moderate', name: 'Moderate Sandbox', description: 'Balanced sandbox allowing read-only filesystem and select modules',
+        id: '1b9b4d0e-5307-439d-9608-cac2695ac07f', name: 'Moderate Sandbox', description: 'Balanced sandbox allowing read-only filesystem and select modules',
         max_cpu_ms: 30000, max_memory_mb: 256, max_duration_ms: 60000, max_output_bytes: 1048576,
         allowed_modules: JSON.stringify(['Math', 'Date', 'JSON', 'crypto', 'path', 'url']),
         denied_modules: JSON.stringify(['child_process', 'net', 'cluster', 'worker_threads']),
         network_access: 0, filesystem_access: 'read-only', enabled: 1,
       },
       {
-        id: 'sbx-permissive', name: 'Permissive Sandbox', description: 'Relaxed sandbox for trusted internal code with network access',
+        id: 'f7054708-cbbf-48cd-b3db-16271a4adb10', name: 'Permissive Sandbox', description: 'Relaxed sandbox for trusted internal code with network access',
         max_cpu_ms: 120000, max_memory_mb: 512, max_duration_ms: 300000, max_output_bytes: 10485760,
         allowed_modules: null, denied_modules: JSON.stringify(['child_process', 'cluster']),
         network_access: 1, filesystem_access: 'read-write', enabled: 1,
@@ -3699,7 +3699,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('extraction_pipelines') === 0) {
     const extractionPipelines: Omit<ExtractionPipelineRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'ext-full', name: 'Full Extraction', description: 'Runs all extraction stages: metadata, language, entities, tables, code, tasks, timeline',
+        id: 'dd32d2f8-ccd6-4f93-8aa8-e8859ca9456b', name: 'Full Extraction', description: 'Runs all extraction stages: metadata, language, entities, tables, code, tasks, timeline',
         stages: JSON.stringify([
           { type: 'metadata', enabled: true, order: 1 },
           { type: 'language', enabled: true, order: 2 },
@@ -3713,7 +3713,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         max_input_size_bytes: 10485760, enabled: 1,
       },
       {
-        id: 'ext-code-only', name: 'Code Extraction', description: 'Extracts code blocks and related entities from technical documents',
+        id: '28e7b976-5201-4170-9c7a-ee813e9b2ff5', name: 'Code Extraction', description: 'Extracts code blocks and related entities from technical documents',
         stages: JSON.stringify([
           { type: 'metadata', enabled: true, order: 1 },
           { type: 'code', enabled: true, order: 2 },
@@ -3723,7 +3723,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         max_input_size_bytes: 5242880, enabled: 1,
       },
       {
-        id: 'ext-tasks-timeline', name: 'Tasks & Timeline', description: 'Extracts tasks, deadlines, and chronological events',
+        id: 'b3f4b90f-7094-4ae5-bbda-bf3f106b4c7c', name: 'Tasks & Timeline', description: 'Extracts tasks, deadlines, and chronological events',
         stages: JSON.stringify([
           { type: 'metadata', enabled: true, order: 1 },
           { type: 'tasks', enabled: true, order: 2 },
@@ -3741,17 +3741,17 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('artifact_policies') === 0) {
     const artifactPolicies: Omit<ArtifactPolicyRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'artpol-default', name: 'Default Artifact Policy', description: 'Standard artifact policy with 100MB limit and 90-day retention',
+        id: '5cb95d9c-1bfe-4eb3-b1c4-0a2bab12988f', name: 'Default Artifact Policy', description: 'Standard artifact policy with 100MB limit and 90-day retention',
         max_size_bytes: 104857600, allowed_types: JSON.stringify(['text', 'csv', 'json', 'html', 'markdown', 'image', 'code', 'report']),
         retention_days: 90, require_versioning: 1, enabled: 1,
       },
       {
-        id: 'artpol-strict', name: 'Strict Artifact Policy', description: 'Restrictive policy for sensitive environments — small size limit, short retention',
+        id: 'fb9ad62b-b0ec-4a89-af1c-9cea0e4b9c9a', name: 'Strict Artifact Policy', description: 'Restrictive policy for sensitive environments — small size limit, short retention',
         max_size_bytes: 10485760, allowed_types: JSON.stringify(['text', 'json', 'csv']),
         retention_days: 30, require_versioning: 1, enabled: 1,
       },
       {
-        id: 'artpol-large', name: 'Large Artifact Policy', description: 'Policy for large outputs — PDFs, reports, diagrams — with extended retention',
+        id: 'eda3f580-8b10-4d88-b0bc-2f1f5bf1a9a9', name: 'Large Artifact Policy', description: 'Policy for large outputs — PDFs, reports, diagrams — with extended retention',
         max_size_bytes: 1073741824, allowed_types: JSON.stringify(['text', 'csv', 'json', 'html', 'markdown', 'image', 'pdf', 'diagram', 'code', 'report', 'custom']),
         retention_days: 365, require_versioning: 1, enabled: 1,
       },
@@ -3763,22 +3763,22 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('reliability_policies') === 0) {
     const reliabilityPolicies: Omit<ReliabilityPolicyRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'rel-retry-default', name: 'Default Retry', description: 'Standard exponential backoff retry for transient failures',
+        id: '7558015a-aacd-4b89-acf1-6f11e6cb4d74', name: 'Default Retry', description: 'Standard exponential backoff retry for transient failures',
         policy_type: 'retry', max_retries: 3, initial_delay_ms: 1000, max_delay_ms: 30000, backoff_multiplier: 2.0,
         max_concurrent: null, queue_size: null, strategy: null, ttl_ms: null, enabled: 1,
       },
       {
-        id: 'rel-retry-aggressive', name: 'Aggressive Retry', description: 'More retries with shorter delays for critical operations',
+        id: 'fe035101-0621-43ce-a133-ca8a74022859', name: 'Aggressive Retry', description: 'More retries with shorter delays for critical operations',
         policy_type: 'retry', max_retries: 5, initial_delay_ms: 500, max_delay_ms: 15000, backoff_multiplier: 1.5,
         max_concurrent: null, queue_size: null, strategy: null, ttl_ms: null, enabled: 1,
       },
       {
-        id: 'rel-concurrency-std', name: 'Standard Concurrency', description: 'Limit concurrent executions with queuing for overflow',
+        id: 'eb4778d5-c048-4c54-892a-bcfeb245e95b', name: 'Standard Concurrency', description: 'Limit concurrent executions with queuing for overflow',
         policy_type: 'concurrency', max_retries: null, initial_delay_ms: null, max_delay_ms: null, backoff_multiplier: null,
         max_concurrent: 10, queue_size: 50, strategy: 'queue', ttl_ms: 60000, enabled: 1,
       },
       {
-        id: 'rel-idempotency', name: 'Idempotency Guard', description: 'Prevent duplicate processing within a 5-minute window',
+        id: 'fbd7d3d6-4e70-47ff-9e2a-4e1e2bb62ef7', name: 'Idempotency Guard', description: 'Prevent duplicate processing within a 5-minute window',
         policy_type: 'idempotency', max_retries: null, initial_delay_ms: null, max_delay_ms: null, backoff_multiplier: null,
         max_concurrent: null, queue_size: null, strategy: null, ttl_ms: 300000, enabled: 1,
       },
@@ -3790,17 +3790,17 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('collaboration_sessions') === 0) {
     const collabSessions: Omit<CollaborationSessionRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'collab-pair', name: 'Pair Programming', description: 'Two-participant session for pair programming with real-time code sharing',
+        id: '24bfff3d-7f7b-4ca2-9711-5be4488215ea', name: 'Pair Programming', description: 'Two-participant session for pair programming with real-time code sharing',
         session_type: 'pair', max_participants: 2, presence_ttl_ms: 30000, auto_close_idle_ms: 600000,
         handoff_enabled: 1, enabled: 1,
       },
       {
-        id: 'collab-team', name: 'Team Collaboration', description: 'Multi-participant session for team brainstorming and collaborative problem solving',
+        id: '4a79d9c8-5959-4839-a653-7caf09583aae', name: 'Team Collaboration', description: 'Multi-participant session for team brainstorming and collaborative problem solving',
         session_type: 'team', max_participants: 10, presence_ttl_ms: 60000, auto_close_idle_ms: 1800000,
         handoff_enabled: 1, enabled: 1,
       },
       {
-        id: 'collab-broadcast', name: 'Broadcast Session', description: 'One-to-many session for presentations and demos with view-only participants',
+        id: '3893f5a8-d061-43d7-920f-6d82167e54f6', name: 'Broadcast Session', description: 'One-to-many session for presentations and demos with view-only participants',
         session_type: 'broadcast', max_participants: 50, presence_ttl_ms: 120000, auto_close_idle_ms: null,
         handoff_enabled: 0, enabled: 1,
       },
@@ -3812,25 +3812,25 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('compliance_rules') === 0) {
     const complianceRules: Omit<ComplianceRuleRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'comp-retention-90d', name: '90-Day Data Retention', description: 'Delete chat logs and metrics older than 90 days',
+        id: '726c5bfc-cdb2-47f0-9d08-177f656f6821', name: '90-Day Data Retention', description: 'Delete chat logs and metrics older than 90 days',
         rule_type: 'retention', target_resource: 'messages', retention_days: 90,
         region: null, consent_purpose: null, action: 'delete',
         config: JSON.stringify({ include_metadata: true }), enabled: 1,
       },
       {
-        id: 'comp-gdpr-deletion', name: 'GDPR Right to Delete', description: 'Honor user deletion requests within 30 days per GDPR Article 17',
+        id: 'f56c10ea-07b4-4e8e-8824-8a5a50d1ced7', name: 'GDPR Right to Delete', description: 'Honor user deletion requests within 30 days per GDPR Article 17',
         rule_type: 'deletion', target_resource: '*', retention_days: null,
         region: 'EU', consent_purpose: null, action: 'delete',
         config: JSON.stringify({ cascade: true, notify_processors: true }), enabled: 1,
       },
       {
-        id: 'comp-eu-residency', name: 'EU Data Residency', description: 'Ensure EU user data stays within EU regions only',
+        id: 'a8ef9ac5-977a-4a8c-a473-9cae50d0f132', name: 'EU Data Residency', description: 'Ensure EU user data stays within EU regions only',
         rule_type: 'residency', target_resource: '*', retention_days: null,
         region: 'EU', consent_purpose: null, action: 'block',
         config: JSON.stringify({ allowed_regions: ['eu-west-1', 'eu-central-1', 'eu-north-1'] }), enabled: 1,
       },
       {
-        id: 'comp-analytics-consent', name: 'Analytics Consent', description: 'Require explicit consent for analytics data collection',
+        id: '93e3d7d5-80ac-4924-9916-018e44122ad3', name: 'Analytics Consent', description: 'Require explicit consent for analytics data collection',
         rule_type: 'consent', target_resource: 'metrics', retention_days: null,
         region: null, consent_purpose: 'analytics', action: 'notify',
         config: JSON.stringify({ consent_ttl_days: 365, re_consent_required: true }), enabled: 1,
@@ -3843,21 +3843,21 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('graph_configs') === 0) {
     const graphConfigs: Omit<GraphConfigRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'graph-entity', name: 'Entity Knowledge Graph', description: 'General-purpose entity extraction and relationship mapping',
+        id: '19d8bf98-fe69-4bfb-84c7-31181f171f28', name: 'Entity Knowledge Graph', description: 'General-purpose entity extraction and relationship mapping',
         graph_type: 'entity', max_depth: 3,
         entity_types: JSON.stringify(['person', 'organization', 'location', 'product', 'concept']),
         relationship_types: JSON.stringify(['works_at', 'located_in', 'related_to', 'depends_on', 'part_of']),
         auto_link: 1, scoring_weights: JSON.stringify({ relevance: 0.4, recency: 0.3, frequency: 0.3 }), enabled: 1,
       },
       {
-        id: 'graph-timeline', name: 'Timeline Graph', description: 'Chronological event tracking with causal links between events',
+        id: '0abab6b4-93cc-4664-a99d-200bd9378dee', name: 'Timeline Graph', description: 'Chronological event tracking with causal links between events',
         graph_type: 'timeline', max_depth: 5,
         entity_types: JSON.stringify(['event', 'milestone', 'decision']),
         relationship_types: JSON.stringify(['caused_by', 'preceded_by', 'concurrent_with']),
         auto_link: 1, scoring_weights: JSON.stringify({ temporal_proximity: 0.5, causal_strength: 0.5 }), enabled: 1,
       },
       {
-        id: 'graph-knowledge', name: 'Knowledge Base', description: 'Long-term knowledge graph for RAG-augmented memory and retrieval',
+        id: '27efa1f1-bec8-4c09-a7a3-c2e472b1125d', name: 'Knowledge Base', description: 'Long-term knowledge graph for RAG-augmented memory and retrieval',
         graph_type: 'knowledge', max_depth: 4,
         entity_types: JSON.stringify(['concept', 'definition', 'example', 'reference']),
         relationship_types: JSON.stringify(['defines', 'exemplifies', 'references', 'contradicts', 'supports']),
@@ -3871,28 +3871,28 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('plugin_configs') === 0) {
     const pluginConfigs: Omit<PluginConfigRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'plug-code-exec', name: 'Code Execution Plugin', description: 'Sandboxed code execution for JavaScript and Python',
+        id: '1a4cac30-57a8-4853-b2d9-e8048ade5fc5', name: 'Code Execution Plugin', description: 'Sandboxed code execution for JavaScript and Python',
         plugin_type: 'official', package_name: '@weaveintel/sandbox', version: '1.0.0',
         capabilities: JSON.stringify(['code-execution', 'sandboxing']),
         trust_level: 'official', auto_update: 1,
-        config: JSON.stringify({ defaultPolicy: 'sbx-moderate' }), enabled: 1,
+        config: JSON.stringify({ defaultPolicy: '1b9b4d0e-5307-439d-9608-cac2695ac07f' }), enabled: 1,
       },
       {
-        id: 'plug-web-search', name: 'Web Search Plugin', description: 'Integrate external search providers for web search capabilities',
+        id: '0146baef-15d0-40ec-98f0-40c88f34b9b3', name: 'Web Search Plugin', description: 'Integrate external search providers for web search capabilities',
         plugin_type: 'official', package_name: '@weaveintel/tools-search', version: '1.0.0',
         capabilities: JSON.stringify(['web-search', 'news-search']),
         trust_level: 'official', auto_update: 1,
-        config: JSON.stringify({ defaultProvider: 'sp-brave' }), enabled: 1,
+        config: JSON.stringify({ defaultProvider: '897b8e52-dc64-4854-ac39-65b92e00ccd8' }), enabled: 1,
       },
       {
-        id: 'plug-community-viz', name: 'Data Visualization', description: 'Community plugin for generating charts and data visualizations',
+        id: 'ad0e5e5b-4af3-4bd9-84e3-5fc2b84bb465', name: 'Data Visualization', description: 'Community plugin for generating charts and data visualizations',
         plugin_type: 'community', package_name: 'weaveintel-plugin-viz', version: '0.3.2',
         capabilities: JSON.stringify(['visualization', 'chart-generation']),
         trust_level: 'community', auto_update: 0,
         config: null, enabled: 1,
       },
       {
-        id: 'plug-enterprise-sso', name: 'Enterprise SSO', description: 'SAML/OIDC single sign-on integration for enterprise deployments',
+        id: 'b9550588-d6e3-4d8f-961f-93ed1d841671', name: 'Enterprise SSO', description: 'SAML/OIDC single sign-on integration for enterprise deployments',
         plugin_type: 'verified', package_name: 'weaveintel-plugin-sso', version: '2.1.0',
         capabilities: JSON.stringify(['authentication', 'sso', 'saml', 'oidc']),
         trust_level: 'verified', auto_update: 1,
@@ -3906,7 +3906,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('scaffold_templates') === 0) {
     const scaffoldTemplates: Omit<ScaffoldTemplateRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'scaf-basic-agent', name: 'Basic Agent', description: 'Minimal conversational agent with a single model',
+        id: 'd2d4c9c7-4f26-4de8-b8b9-21c1caadf3d1', name: 'Basic Agent', description: 'Minimal conversational agent with a single model',
         template_type: 'basic-agent',
         files: JSON.stringify({ 'src/index.ts': 'import { createAgent } from "@weaveintel/agents";\n\nconst agent = createAgent({ name: "{{name}}", model: "{{model}}" });\n' }),
         dependencies: JSON.stringify({ '@weaveintel/agents': '*', '@weaveintel/core': '*' }),
@@ -3915,7 +3915,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         post_install: null, enabled: 1,
       },
       {
-        id: 'scaf-tool-agent', name: 'Tool-Calling Agent', description: 'Agent with tool registration and execution capabilities',
+        id: '238db0e5-0a97-408a-87ea-411b7bb90556', name: 'Tool-Calling Agent', description: 'Agent with tool registration and execution capabilities',
         template_type: 'tool-calling-agent',
         files: JSON.stringify({ 'src/index.ts': 'import { createAgent } from "@weaveintel/agents";\nimport { defineTool } from "@weaveintel/core";\n' }),
         dependencies: JSON.stringify({ '@weaveintel/agents': '*', '@weaveintel/core': '*' }),
@@ -3924,7 +3924,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         post_install: null, enabled: 1,
       },
       {
-        id: 'scaf-rag-pipeline', name: 'RAG Pipeline', description: 'Retrieval-augmented generation pipeline with vector search',
+        id: '955d8720-fb97-41e2-8e21-f6f5ed8bd944', name: 'RAG Pipeline', description: 'Retrieval-augmented generation pipeline with vector search',
         template_type: 'rag-pipeline',
         files: JSON.stringify({ 'src/index.ts': 'import { createAgent } from "@weaveintel/agents";\nimport { createRetriever } from "@weaveintel/retrieval";\n' }),
         dependencies: JSON.stringify({ '@weaveintel/agents': '*', '@weaveintel/core': '*', '@weaveintel/retrieval': '*' }),
@@ -3933,7 +3933,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         post_install: null, enabled: 1,
       },
       {
-        id: 'scaf-workflow', name: 'Workflow', description: 'Multi-step workflow with agent orchestration',
+        id: 'b65b2a2d-6173-49bf-af09-5fbaf48d1b92', name: 'Workflow', description: 'Multi-step workflow with agent orchestration',
         template_type: 'workflow',
         files: JSON.stringify({ 'src/index.ts': 'import { createWorkflow } from "@weaveintel/workflows";\n' }),
         dependencies: JSON.stringify({ '@weaveintel/agents': '*', '@weaveintel/core': '*', '@weaveintel/workflows': '*' }),
@@ -3942,7 +3942,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         post_install: null, enabled: 1,
       },
       {
-        id: 'scaf-multi-agent', name: 'Multi-Agent', description: 'Supervisor with multiple worker agents',
+        id: 'b1d3f948-420e-4798-8c16-99c8b0cc46a3', name: 'Multi-Agent', description: 'Supervisor with multiple worker agents',
         template_type: 'multi-agent',
         files: JSON.stringify({ 'src/index.ts': 'import { createSupervisor } from "@weaveintel/agents";\n' }),
         dependencies: JSON.stringify({ '@weaveintel/agents': '*', '@weaveintel/core': '*' }),
@@ -3951,7 +3951,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         post_install: null, enabled: 1,
       },
       {
-        id: 'scaf-mcp-server', name: 'MCP Server', description: 'Model Context Protocol server exposing tools over stdio/SSE',
+        id: 'b61ad2bf-cce5-4989-8800-d51e092fc309', name: 'MCP Server', description: 'Model Context Protocol server exposing tools over stdio/SSE',
         template_type: 'mcp-server',
         files: JSON.stringify({ 'src/index.ts': 'import { createMcpServer } from "@weaveintel/mcp-server";\n' }),
         dependencies: JSON.stringify({ '@weaveintel/mcp-server': '*', '@weaveintel/core': '*' }),
@@ -3960,7 +3960,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         post_install: null, enabled: 1,
       },
       {
-        id: 'scaf-full-stack', name: 'Full-Stack App', description: 'Complete application with geneWeave UI, agents, tools, and observability',
+        id: 'e27a18c3-7718-46e0-9f71-425ec51802b0', name: 'Full-Stack App', description: 'Complete application with geneWeave UI, agents, tools, and observability',
         template_type: 'full-stack',
         files: JSON.stringify({ 'src/index.ts': 'import { startGeneWeave } from "@weaveintel/geneweave";\n' }),
         dependencies: JSON.stringify({ '@weaveintel/geneweave': '*', '@weaveintel/agents': '*', '@weaveintel/core': '*', '@weaveintel/observability': '*' }),
@@ -3976,43 +3976,43 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('recipe_configs') === 0) {
     const recipeConfigs: Omit<RecipeConfigRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'rcp-workflow', name: 'Workflow Agent', description: 'Workflow-aware agent with step-by-step execution',
+        id: '762dba63-d819-4f85-a86f-5f6788c42c99', name: 'Workflow Agent', description: 'Workflow-aware agent with step-by-step execution',
         recipe_type: 'workflow', model: 'gpt-4o', provider: 'openai',
         system_prompt: 'You are a workflow executor. Follow the steps precisely.',
         tools: JSON.stringify(['web-search', 'file-reader']),
-        guardrails: JSON.stringify(['guard-token-limit']),
+        guardrails: JSON.stringify(['1a6b5225-07c6-41cc-878f-c0d08930c1de']),
         max_steps: 10, options: null, enabled: 1,
       },
       {
-        id: 'rcp-governed', name: 'Governed Assistant', description: 'Assistant with governance rules enforced in system prompt',
+        id: '5a5b3951-4ca6-49b8-9ab4-b09a679e5275', name: 'Governed Assistant', description: 'Assistant with governance rules enforced in system prompt',
         recipe_type: 'governed', model: 'gpt-4o', provider: 'openai',
         system_prompt: 'You are a governed assistant. Follow all policies strictly.',
         tools: null,
-        guardrails: JSON.stringify(['guard-pii-redact', 'guard-toxicity']),
+        guardrails: JSON.stringify(['0370fa22-5fc8-49a4-bd4c-3e39863da61d', '51586988-83b7-4780-a006-b3b86b76713f']),
         max_steps: 5, options: JSON.stringify({ governanceLevel: 'strict' }), enabled: 1,
       },
       {
-        id: 'rcp-approval', name: 'Approval-Driven Agent', description: 'Agent that requires human approval for high-risk actions',
+        id: 'b046bcff-9950-46bf-b107-ab6baf097240', name: 'Approval-Driven Agent', description: 'Agent that requires human approval for high-risk actions',
         recipe_type: 'approval', model: 'gpt-4o', provider: 'openai',
         system_prompt: null,
         tools: JSON.stringify(['code-exec', 'db-query']),
         guardrails: null,
-        max_steps: 8, options: JSON.stringify({ approvalPolicy: 'htp-high-risk-tool' }), enabled: 1,
+        max_steps: 8, options: JSON.stringify({ approvalPolicy: 'cc83adb8-bf49-4fb0-83c4-fa27da65dc56' }), enabled: 1,
       },
       {
-        id: 'rcp-acl-rag', name: 'ACL-Aware RAG', description: 'Retrieval agent with access-control-scoped collections',
+        id: '58bea5c2-662b-4c41-9f8e-203c59885931', name: 'ACL-Aware RAG', description: 'Retrieval agent with access-control-scoped collections',
         recipe_type: 'acl-rag', model: 'gpt-4o-mini', provider: 'openai',
         system_prompt: 'You answer questions using only the provided context.',
         tools: JSON.stringify(['web-search']),
-        guardrails: JSON.stringify(['guard-hallucination']),
+        guardrails: JSON.stringify(['8ae24528-463a-4dfa-9348-a2be5214de9f']),
         max_steps: 5, options: JSON.stringify({ collection: 'default' }), enabled: 1,
       },
       {
-        id: 'rcp-safe-exec', name: 'Safe Execution Agent', description: 'Agent with denied tools and defensive execution limits',
+        id: 'ddfd4301-7bf5-459c-a458-59785c6d6995', name: 'Safe Execution Agent', description: 'Agent with denied tools and defensive execution limits',
         recipe_type: 'safe-exec', model: 'gpt-4o-mini', provider: 'openai',
         system_prompt: 'You are a safe execution agent. Never execute dangerous operations.',
         tools: JSON.stringify(['file-reader', 'api-caller']),
-        guardrails: JSON.stringify(['guard-pii-redact', 'guard-token-limit']),
+        guardrails: JSON.stringify(['0370fa22-5fc8-49a4-bd4c-3e39863da61d', '1a6b5225-07c6-41cc-878f-c0d08930c1de']),
         max_steps: 5, options: JSON.stringify({ maxExecutionTime: 30000, deniedTools: ['code-exec'] }), enabled: 1,
       },
     ];
@@ -4023,42 +4023,42 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('widget_configs') === 0) {
     const widgetConfigs: Omit<WidgetConfigRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'wgt-table', name: 'Data Table', description: 'Sortable, filterable data table for structured results',
+        id: 'd309940a-bd09-4899-ace5-a0acd53f2325', name: 'Data Table', description: 'Sortable, filterable data table for structured results',
         widget_type: 'table',
         default_options: JSON.stringify({ sortable: true, filterable: true, pageSize: 25 }),
         allowed_contexts: JSON.stringify(['chat', 'dashboard', 'admin']),
         max_data_points: 10000, refresh_interval_ms: null, enabled: 1,
       },
       {
-        id: 'wgt-chart', name: 'Chart', description: 'Line, bar, or pie chart for data visualization',
+        id: '7fe15c63-2ffd-413f-93e8-1681d5dc5c5b', name: 'Chart', description: 'Line, bar, or pie chart for data visualization',
         widget_type: 'chart',
         default_options: JSON.stringify({ chartType: 'line', showLegend: true, responsive: true }),
         allowed_contexts: JSON.stringify(['chat', 'dashboard']),
         max_data_points: 5000, refresh_interval_ms: 30000, enabled: 1,
       },
       {
-        id: 'wgt-form', name: 'Dynamic Form', description: 'Interactive form widget for collecting structured input',
+        id: 'a3b5a4a7-6cd7-45b6-9715-3221ede6e2f0', name: 'Dynamic Form', description: 'Interactive form widget for collecting structured input',
         widget_type: 'form',
         default_options: JSON.stringify({ submitLabel: 'Submit', resetLabel: 'Reset' }),
         allowed_contexts: JSON.stringify(['chat']),
         max_data_points: null, refresh_interval_ms: null, enabled: 1,
       },
       {
-        id: 'wgt-code', name: 'Code Block', description: 'Syntax-highlighted code viewer with copy and download',
+        id: '4d57f558-6068-44ff-9f45-354696fcdb59', name: 'Code Block', description: 'Syntax-highlighted code viewer with copy and download',
         widget_type: 'code',
         default_options: JSON.stringify({ lineNumbers: true, theme: 'dark', wordWrap: false }),
         allowed_contexts: JSON.stringify(['chat', 'dashboard', 'admin']),
         max_data_points: null, refresh_interval_ms: null, enabled: 1,
       },
       {
-        id: 'wgt-timeline', name: 'Timeline', description: 'Chronological event timeline for workflow and trace visualisation',
+        id: '464ec787-112f-413f-a376-ce534a3c505c', name: 'Timeline', description: 'Chronological event timeline for workflow and trace visualisation',
         widget_type: 'timeline',
         default_options: JSON.stringify({ direction: 'vertical', showDuration: true }),
         allowed_contexts: JSON.stringify(['chat', 'dashboard']),
         max_data_points: 500, refresh_interval_ms: 10000, enabled: 1,
       },
       {
-        id: 'wgt-image', name: 'Image', description: 'Image display widget with zoom and lightbox support',
+        id: '337c379d-22df-44af-980c-04c453398169', name: 'Image', description: 'Image display widget with zoom and lightbox support',
         widget_type: 'image',
         default_options: JSON.stringify({ maxWidth: '100%', lightbox: true }),
         allowed_contexts: JSON.stringify(['chat']),
@@ -4072,31 +4072,31 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (cnt('validation_rules') === 0) {
     const validationRules: Omit<ValidationRuleRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'val-agent-name', name: 'Agent Name Required', description: 'Every agent config must have a non-empty name',
+        id: '940eb416-6e60-47bc-9d7d-3fca55c7b98d', name: 'Agent Name Required', description: 'Every agent config must have a non-empty name',
         rule_type: 'required', target: 'agent-config',
         condition: JSON.stringify({ field: 'name', operator: 'exists' }),
         severity: 'error', message: 'Agent name is required', enabled: 1,
       },
       {
-        id: 'val-agent-steps', name: 'Agent Max Steps Range', description: 'Max steps must be between 1 and 100',
+        id: '014b4186-c36f-4f61-b8c3-bf2545023199', name: 'Agent Max Steps Range', description: 'Max steps must be between 1 and 100',
         rule_type: 'range', target: 'agent-config',
         condition: JSON.stringify({ field: 'maxSteps', min: 1, max: 100 }),
         severity: 'error', message: 'Max steps must be between 1 and 100', enabled: 1,
       },
       {
-        id: 'val-workflow-entry', name: 'Workflow Entry Step', description: 'Workflow must define a valid entry step ID',
+        id: 'c5985869-b721-40a2-b4ef-529bb975c84c', name: 'Workflow Entry Step', description: 'Workflow must define a valid entry step ID',
         rule_type: 'required', target: 'workflow-config',
         condition: JSON.stringify({ field: 'entry_step_id', operator: 'exists' }),
         severity: 'error', message: 'Workflow must have an entry step', enabled: 1,
       },
       {
-        id: 'val-tool-risk', name: 'Tool Risk Level', description: 'High-risk tools should require approval',
+        id: 'b6490a1a-2ddf-41ad-9a7b-6d406808cf86', name: 'Tool Risk Level', description: 'High-risk tools should require approval',
         rule_type: 'custom', target: 'tool-config',
         condition: JSON.stringify({ if: { field: 'risk_level', equals: 'high' }, then: { field: 'requires_approval', equals: true } }),
         severity: 'warning', message: 'High-risk tools should require approval', enabled: 1,
       },
       {
-        id: 'val-json-fields', name: 'Valid JSON Fields', description: 'Fields marked as JSON must contain valid JSON or be null',
+        id: '892adcec-808b-4c17-bc2c-c5c45cfe47fb', name: 'Valid JSON Fields', description: 'Fields marked as JSON must contain valid JSON or be null',
         rule_type: 'custom', target: 'agent-config',
         condition: JSON.stringify({ fields: ['tools', 'guardrails', 'metadata'], validate: 'json' }),
         severity: 'error', message: 'JSON fields must contain valid JSON', enabled: 1,
