@@ -92,6 +92,9 @@ import {
   adminBackToList,
   clearAdminEditorState,
   renderAdminView,
+  parseAdminHash,
+  adminEditRow,
+  getAdminSchema,
 } from './ui/admin-ui.js';
 import {
   openConnectorsView,
@@ -1327,6 +1330,15 @@ export function initialize() {
   (async () => {
     try {
       restoreUiStateFromStorage();
+
+      // Apply admin deep-link hash before rendering (e.g. #admin/prompts/42)
+      const adminHashTarget = parseAdminHash();
+      if (adminHashTarget) {
+        state.view = 'admin';
+        state.adminTab = adminHashTarget.tab;
+        state.adminMenuExpanded = true;
+      }
+
       const r = await api.get('/auth/check');
       if (r && typeof r === 'object' && 'ok' in r && (r as Response).ok) {
         const d = await (r as Response).json() as any;
@@ -1342,6 +1354,17 @@ export function initialize() {
           await openConnectorsView(render);
         } else if (state.view === 'admin') {
           await loadAdmin();
+          // If URL had a record deep-link, open that record after data is loaded
+          if (adminHashTarget?.id) {
+            const tabRows = (state.adminData?.[adminHashTarget.tab] || []) as any[];
+            const targetRow = tabRows.find((r: any) =>
+              String(r?.id ?? '') === String(adminHashTarget.id) ||
+              String(r?.[getAdminSchema(adminHashTarget.tab)?.cols?.[0]] ?? '') === String(adminHashTarget.id)
+            );
+            if (targetRow) {
+              adminEditRow(adminHashTarget.tab, targetRow, hydrateWizardFromPrompt, render);
+            }
+          }
         }
         }
       }

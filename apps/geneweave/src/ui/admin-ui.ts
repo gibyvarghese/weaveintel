@@ -4,6 +4,51 @@ import { state } from './state.js';
 import { normalizeAdminPath } from './prompt-wizard-utils.js';
 import { resetPromptWizard } from './prompt-wizard-state.js';
 
+// ── Admin deep-link URL helpers ───────────────────────────────────────────────
+// Hash format:  #admin/{tab}          → opens the tab's list view
+//               #admin/{tab}/{id}     → opens the tab and immediately edits record {id}
+
+export function buildAdminUrl(tab: string, id?: string | number | null): string {
+  const base = `${window.location.origin}${window.location.pathname}`;
+  const hash = id != null && id !== '' ? `#admin/${tab}/${encodeURIComponent(String(id))}` : `#admin/${tab}`;
+  return `${base}${hash}`;
+}
+
+export function pushAdminHash(tab: string, id?: string | number | null): void {
+  const hash = id != null && id !== '' ? `#admin/${tab}/${encodeURIComponent(String(id))}` : `#admin/${tab}`;
+  if (window.location.hash !== hash) {
+    history.replaceState(null, '', hash);
+  }
+}
+
+export function clearAdminHash(): void {
+  if (window.location.hash.startsWith('#admin')) {
+    history.replaceState(null, '', window.location.pathname);
+  }
+}
+
+/** Call once at boot. Returns {tab, id} if a deep-link hash was present. */
+export function parseAdminHash(): { tab: string; id: string | null } | null {
+  const hash = window.location.hash;
+  const m = hash.match(/^#admin\/([^/]+)(?:\/(.+))?$/);
+  if (!m) return null;
+  return { tab: decodeURIComponent(m[1]!), id: m[2] ? decodeURIComponent(m[2]) : null };
+}
+
+/** Show a brief "Copied!" toast anchored near the element that triggered it. */
+function showCopiedToast(anchorEl: HTMLElement): void {
+  const existing = document.getElementById('admin-share-toast');
+  existing?.remove();
+  const toast = document.createElement('div');
+  toast.id = 'admin-share-toast';
+  toast.className = 'admin-share-toast';
+  toast.textContent = 'Link copied!';
+  const rect = anchorEl.getBoundingClientRect();
+  toast.style.cssText = `position:fixed;top:${rect.bottom + 6}px;left:${rect.left}px;z-index:9999;`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 1800);
+}
+
 // ── Natural-language search parser ───────────────────────────────────────────
 // Supports: AND / OR / NOT (case-insensitive keywords), quoted phrases, parens.
 // Plain space-separated terms are implicitly AND-joined for strict matching.
@@ -247,7 +292,7 @@ function matchesNaturalSearch(query: string, row: any, cols: string[]): boolean 
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-function getAdminSchema(tab: string): any {
+export function getAdminSchema(tab: string): any {
   return (((typeof window !== 'undefined' && (window as any).ADMIN_SCHEMA) || {}) as any)[tab];
 }
 
@@ -280,11 +325,13 @@ export function adminEditRow(
     hydrateWizardFromPrompt(row);
     state.adminEditing = row?.id ?? row?.[schema.cols?.[0]] ?? null;
     state.adminForm = { __promptWizard: true };
+    pushAdminHash(tab, state.adminEditing);
     render();
     return;
   }
 
   state.adminEditing = row?.id ?? row?.[schema.cols?.[0]] ?? null;
+  pushAdminHash(tab, state.adminEditing);
   const form = { ...row } as Record<string, unknown>;
   (schema.fields || []).forEach((field: any) => {
     if (field.save === 'csvArr' && form[field.key]) {
@@ -328,6 +375,7 @@ export function adminBackToList(tab: string | undefined, render: () => void) {
   }
   state.adminEditing = null;
   state.adminForm = {};
+  if (tab) pushAdminHash(tab);
   render();
 }
 
@@ -394,6 +442,24 @@ export function renderAdminForm(
   const actionBar = h('div', { className: 'admin-form-action-bar' },
     h('span', { className: 'admin-form-title' }, `${isEdit ? 'Edit' : 'New'} ${schema.singular}`),
     h('div', { className: 'admin-form-action-btns' },
+      isEdit
+        ? h('button', {
+            className: 'admin-form-btn admin-form-btn-share',
+            title: 'Copy link to this record',
+            onClick: (e: MouseEvent) => {
+              const url = buildAdminUrl(tab, state.adminEditing);
+              navigator.clipboard.writeText(url).catch(() => {
+                const ta = document.createElement('textarea');
+                ta.value = url;
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                ta.remove();
+              });
+              showCopiedToast(e.currentTarget as HTMLElement);
+            },
+          }, '🔗 Share')
+        : null,
       isEdit && !schema.readOnly && onDelete
         ? h('button', { className: 'admin-form-btn admin-form-btn-delete', onClick: onDelete }, 'Delete')
         : null,
@@ -690,6 +756,8 @@ export function renderAdminView(options: {
       );
       return th;
     });
+    // Add a non-sortable Share column header
+    const shareHeader = h('th', { className: 'admin-share-col-header', title: 'Share' }, '');
 
     const tbody = h('tbody', null);
 
@@ -704,7 +772,7 @@ export function renderAdminView(options: {
               options.render();
             },
           },
-            h('td', { colSpan: String(cols.length + 1) },
+            h('td', { colSpan: String(cols.length + 2) },
               isCollapsed ? '▶ ' : '▼ ',
               h('strong', null, groupKey),
               h('span', { className: 'admin-group-count' }, `${groupRowList.length} item${groupRowList.length !== 1 ? 's' : ''}`)
@@ -725,7 +793,7 @@ export function renderAdminView(options: {
 
     listPanel.appendChild(
       h('table', { className: 'eval-table' },
-        h('thead', null, h('tr', null, ...headerCells)),
+        h('thead', null, h('tr', null, ...headerCells, shareHeader)),
         tbody
       )
     );
@@ -1035,12 +1103,33 @@ function buildAdminRow(
   const excludeVal: string = '';
   const excludeCol: string = '';
   // (filtering handled upstream in the main filter pass)
+  const rowId = row?.id ?? row?.[schema?.cols?.[0]];
+  const shareBtn = h('td', { className: 'admin-row-share-cell' },
+    h('button', {
+      className: 'admin-row-share-btn',
+      title: 'Copy link to this record',
+      onClick: (e: MouseEvent) => {
+        e.stopPropagation();
+        const url = buildAdminUrl(currentTab, rowId);
+        navigator.clipboard.writeText(url).catch(() => {
+          const ta = document.createElement('textarea');
+          ta.value = url;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        });
+        showCopiedToast(e.currentTarget as HTMLElement);
+      },
+    }, '🔗')
+  );
   return h('tr', {
     className: 'admin-data-row',
     title: 'Click to edit',
     onClick: (e: MouseEvent) => {
       // Don't trigger row edit if the click was on a context menu or came from it
       if ((e.target as HTMLElement).closest('.col-ctx-menu')) return;
+      if ((e.target as HTMLElement).closest('.admin-row-share-btn')) return;
       adminEditRow(currentTab, row, options.hydrateWizardFromPrompt, options.render);
     },
   },
@@ -1057,5 +1146,6 @@ function buildAdminRow(
       };
       return h('td', attrs, display);
     }),
+    shareBtn,
   );
 }

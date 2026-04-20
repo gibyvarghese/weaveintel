@@ -8,6 +8,7 @@ import {
   getTodayLabel,
 } from './state.js';
 import { getUserAvatarUrl } from './utils.js';
+import { pushAdminHash } from './admin-ui.js';
 import type { Chat } from './types.js';
 
 function renderSidebarIcon(kind: 'home' | 'connectors' | 'admin' | 'dashboard') {
@@ -155,6 +156,7 @@ export function renderWorkspaceNav(options: {
                 options.clearAdminEditorState();
                 state.promptWizard = null;
               }
+              pushAdminHash(tab.key);
               options.render();
               void options.loadAdmin();
             },
@@ -178,6 +180,7 @@ export function renderWorkspaceNav(options: {
               options.clearAdminEditorState();
               state.promptWizard = null;
             }
+            pushAdminHash(tabKey);
             options.render();
             void options.loadAdmin();
           },

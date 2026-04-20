@@ -525,6 +525,7 @@ input{font-family:inherit;outline:none}
 .col-group-badge{font-size:10px;margin-left:4px;color:var(--accent2);vertical-align:middle}
 .col-ctx-menu{position:fixed;z-index:9999;background:var(--bg2);border:1px solid var(--bg4);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.35),0 2px 8px rgba(0,0,0,.2);padding:6px 0;min-width:200px;max-width:280px;font-size:13px;animation:ctx-pop .12s ease}
 @keyframes ctx-pop{from{opacity:0;transform:scale(.95) translateY(-4px)}to{opacity:1;transform:scale(1) translateY(0)}}
+@keyframes admin-toast-in{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
 .col-ctx-header{padding:5px 14px 3px;font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--fg3);user-select:none}
 .col-ctx-sep{height:1px;background:var(--bg4);margin:4px 0}
 .col-ctx-item{display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;color:var(--fg2);border-radius:0;transition:background .1s}
@@ -581,6 +582,16 @@ input{font-family:inherit;outline:none}
 .admin-form-btn-save:hover{opacity:.88;background:var(--accent)}
 .admin-form-btn-delete{color:#DC2626;border-color:#FCA5A5;background:#FEF2F2}
 .admin-form-btn-delete:hover{background:#FEE2E2;border-color:#F87171}
+.admin-form-btn-share{color:var(--fg2);border-color:var(--bg4);background:var(--bg2)}
+.admin-form-btn-share:hover{background:var(--bg3);color:var(--fg)}
+/* Share column in list table */
+.admin-share-col-header{width:32px;min-width:32px;max-width:32px;padding:4px 2px;text-align:center}
+.admin-row-share-cell{width:32px;min-width:32px;max-width:32px;padding:2px;text-align:center;opacity:0;transition:opacity .12s}
+.admin-data-row:hover .admin-row-share-cell{opacity:1}
+.admin-row-share-btn{background:none;border:none;cursor:pointer;padding:2px 4px;border-radius:6px;font-size:13px;color:var(--fg3);line-height:1}
+.admin-row-share-btn:hover{background:var(--bg3);color:var(--fg)}
+/* Copied toast */
+.admin-share-toast{background:var(--bg3);color:var(--fg);border:1px solid var(--bg4);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;pointer-events:none;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.18);animation:admin-toast-in .15s ease}
 
 /* ── Prompt Setup Wizard ─────────────────── */
 .prompt-wizard{margin:12px 12px 18px;border:1px solid var(--bg4);background:linear-gradient(180deg,var(--bg2),var(--bg3))}
