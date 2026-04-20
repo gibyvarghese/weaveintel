@@ -4,6 +4,157 @@ import { state } from './state.js';
 import { normalizeAdminPath } from './prompt-wizard-utils.js';
 import { resetPromptWizard } from './prompt-wizard-state.js';
 
+// ── Natural-language search parser ───────────────────────────────────────────
+// Supports: AND / OR / NOT (case-insensitive keywords), quoted phrases, parens.
+// Plain space-separated terms are implicitly AND-joined for strict matching.
+// If strict matching returns no rows, we fallback to natural matching:
+// positive terms are OR-matched, and NOT terms are exclusions.
+// Examples: "active"  |  "foo and bar"  |  "gpt or claude"  |  "not draft"
+//           "active not gpt-4"  |  "(gpt or claude) and active"
+
+type SearchNode =
+  | { kind: 'term'; value: string }
+  | { kind: 'and'; left: SearchNode; right: SearchNode }
+  | { kind: 'or'; left: SearchNode; right: SearchNode }
+  | { kind: 'not'; operand: SearchNode };
+
+function tokenize(input: string): string[] {
+  const tokens: string[] = [];
+  let i = 0;
+  while (i < input.length) {
+    if (input[i] === ' ' || input[i] === '\t') { i++; continue; }
+    if (input[i] === '(') { tokens.push('('); i++; continue; }
+    if (input[i] === ')') { tokens.push(')'); i++; continue; }
+    // Quoted phrase
+    if (input[i] === '"' || input[i] === "'") {
+      const q = input[i++];
+      let word = '';
+      while (i < input.length && input[i] !== q) word += input[i++];
+      i++; // closing quote
+      if (word) tokens.push(JSON.stringify(word)); // stringify to mark as literal
+      continue;
+    }
+    // Plain token
+    let word = '';
+    while (i < input.length && input[i] !== ' ' && input[i] !== '\t' && input[i] !== '(' && input[i] !== ')') {
+      word += input[i++];
+    }
+    if (word) tokens.push(word.toLowerCase());
+  }
+  return tokens;
+}
+
+function parseSearchQuery(raw: string): SearchNode | null {
+  const tokens = tokenize(raw.trim());
+  if (!tokens.length) return null;
+  let pos = 0;
+
+  function peek() { return tokens[pos]; }
+  function consume() { return tokens[pos++]; }
+
+  // or-expression
+  function parseOr(): SearchNode {
+    let left = parseAnd();
+    while (peek() === 'or') {
+      consume();
+      const right = parseAnd();
+      left = { kind: 'or', left, right };
+    }
+    return left;
+  }
+
+  // and-expression (explicit "and" keyword OR implicit adjacency)
+  function parseAnd(): SearchNode {
+    let left = parseNot();
+    while (peek() !== undefined && peek() !== ')' && peek() !== 'or') {
+      if (peek() === 'and') consume(); // consume optional "and"
+      if (peek() === undefined || peek() === ')' || peek() === 'or') break;
+      const right = parseNot();
+      left = { kind: 'and', left, right };
+    }
+    return left;
+  }
+
+  function parseNot(): SearchNode {
+    if (peek() === 'not') {
+      consume();
+      return { kind: 'not', operand: parsePrimary() };
+    }
+    return parsePrimary();
+  }
+
+  function parsePrimary(): SearchNode {
+    const t = peek();
+    if (t === '(') {
+      consume();
+      const node = parseOr();
+      if (peek() === ')') consume();
+      return node;
+    }
+    const tok = consume();
+    // JSON.stringify-encoded literals from quoted phrases
+    if (tok && tok.startsWith('"') && tok.endsWith('"')) {
+      try { return { kind: 'term', value: JSON.parse(tok) }; } catch { /* fall through */ }
+    }
+    return { kind: 'term', value: tok ?? '' };
+  }
+
+  return parseOr();
+}
+
+function evalSearchNode(node: SearchNode, haystack: string): boolean {
+  switch (node.kind) {
+    case 'term':   return haystack.includes(node.value.toLowerCase());
+    case 'not':    return !evalSearchNode(node.operand, haystack);
+    case 'and':    return evalSearchNode(node.left, haystack) && evalSearchNode(node.right, haystack);
+    case 'or':     return evalSearchNode(node.left, haystack) || evalSearchNode(node.right, haystack);
+  }
+}
+
+function matchesSearch(query: string, row: any, cols: string[]): boolean {
+  if (!query.trim()) return true;
+  const node = parseSearchQuery(query);
+  if (!node) return true;
+  const haystack = cols.map((c: string) => String(row?.[c] ?? '')).join(' ').toLowerCase();
+  return evalSearchNode(node, haystack);
+}
+
+function parseNaturalTerms(raw: string): { include: string[]; exclude: string[] } {
+  const include: string[] = [];
+  const exclude: string[] = [];
+  let negateNext = false;
+  const tokens = tokenize(raw.trim());
+  for (const tok of tokens) {
+    if (tok === '(' || tok === ')' || tok === 'and' || tok === 'or') continue;
+    if (tok === 'not') {
+      negateNext = true;
+      continue;
+    }
+    let term = tok;
+    if (term.startsWith('"') && term.endsWith('"')) {
+      try { term = JSON.parse(term); } catch { /* keep as-is */ }
+    }
+    const normalized = String(term || '').toLowerCase().trim();
+    if (!normalized) {
+      negateNext = false;
+      continue;
+    }
+    if (negateNext) exclude.push(normalized);
+    else include.push(normalized);
+    negateNext = false;
+  }
+  return { include, exclude };
+}
+
+function matchesNaturalSearch(query: string, row: any, cols: string[]): boolean {
+  const { include, exclude } = parseNaturalTerms(query);
+  const haystack = cols.map((c: string) => String(row?.[c] ?? '')).join(' ').toLowerCase();
+  if (exclude.some((term) => haystack.includes(term))) return false;
+  if (!include.length) return true;
+  return include.some((term) => haystack.includes(term));
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 function getAdminSchema(tab: string): any {
   return (((typeof window !== 'undefined' && (window as any).ADMIN_SCHEMA) || {}) as any)[tab];
 }
@@ -291,7 +442,8 @@ export function renderAdminView(options: {
     return page;
   }
 
-  const cols = (schema?.cols || []).slice(0, 6) as string[];
+  const searchCols = (schema?.cols || []) as string[];
+  const cols = searchCols.slice(0, 6) as string[];
   const PAGE_SIZE = 25;
   const searchQuery = ((state.adminListSearch as string) || '').toLowerCase().trim();
   const sortCol: string | null = (state.adminListSortCol as string | null) || null;
@@ -303,11 +455,20 @@ export function renderAdminView(options: {
   // 1. Filter
   const excludeVal: string = (state as any)._adminExcludeSearch || '';
   const excludeCol: string = (state as any)._adminExcludeCol || '';
-  let filtered: any[] = rows.filter((row: any) => {
+  const baseFiltered: any[] = rows.filter((row: any) => {
     if (excludeVal && excludeCol && String(row?.[excludeCol] ?? '') === excludeVal) return false;
-    if (!searchQuery) return true;
-    return cols.some((col: string) => String(row?.[col] ?? '').toLowerCase().includes(searchQuery));
+    return true;
   });
+
+  let filtered: any[];
+  if (!searchQuery) {
+    filtered = baseFiltered;
+  } else {
+    const strictFiltered = baseFiltered.filter((row: any) => matchesSearch(searchQuery, row, searchCols));
+    filtered = strictFiltered.length > 0
+      ? strictFiltered
+      : baseFiltered.filter((row: any) => matchesNaturalSearch(searchQuery, row, searchCols));
+  }
 
   // 2. Sort
   if (sortCol) {
@@ -355,7 +516,7 @@ export function renderAdminView(options: {
   const searchInput = h('input', {
     type: 'text',
     className: 'admin-list-search',
-    placeholder: `Search ${rows.length} record${rows.length !== 1 ? 's' : ''}…`,
+    placeholder: `Search ${rows.length} records… (and · or · not · "phrase")`,
     value: state.adminListSearch || '',
     onInput: (e: Event) => {
       state.adminListSearch = (e.target as HTMLInputElement).value;
