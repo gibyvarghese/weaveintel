@@ -5,17 +5,23 @@ import type { AdminTabDef } from '@weaveintel/core';
  * multiple app surfaces can reuse consistent LLM-facing metadata fields.
  */
 export const CALLABLE_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
-  'tools': {
-    singular: 'Tool', apiPath: 'admin/tools', listKey: 'tools',
-    cols: ['name', 'category', 'risk_level', 'enabled'],
+  'tool-catalog': {
+    singular: 'Tool', apiPath: 'admin/tool-catalog', listKey: 'tools',
+    cols: ['name', 'tool_key', 'category', 'risk_level', 'source', 'enabled'],
     fields: [
       { key: 'name', label: 'Name' },
       { key: 'description', label: 'Detailed Description (model-facing)' },
+      { key: 'tool_key', label: 'Tool Key (unique, read-only for builtins)' },
       { key: 'category', label: 'Category' },
-      { key: 'risk_level', label: 'Risk Level', options: ['low', 'medium', 'high', 'critical'], default: 'low' },
+      { key: 'risk_level', label: 'Risk Level', options: ['read-only', 'write', 'destructive', 'privileged', 'financial', 'external-side-effect'], default: 'read-only' },
+      { key: 'side_effects', label: 'Has Side Effects', type: 'checkbox', save: 'bool' },
       { key: 'requires_approval', label: 'Requires Approval', type: 'checkbox', save: 'bool' },
+      { key: 'version', label: 'Version', default: '1.0' },
+      { key: 'source', label: 'Source', options: ['builtin', 'custom', 'mcp', 'plugin'], default: 'custom' },
+      { key: 'tags', label: 'Tags (JSON array, optional)', textarea: true, rows: 2, save: 'json' },
       { key: 'max_execution_ms', label: 'Max Execution (ms)', type: 'number', save: 'int' },
       { key: 'rate_limit_per_min', label: 'Rate Limit/min', type: 'number', save: 'int' },
+      { key: 'credential_id', label: 'Credential ID (optional)' },
       { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
     ],
   },

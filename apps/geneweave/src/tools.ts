@@ -15,6 +15,7 @@ import { statsNzToolMap } from '@weaveintel/tools-http';
 import { canUseTool, normalizePersona } from './rbac.js';
 import type { ExecutionLanguage } from '@weaveintel/sandbox';
 import { getCSE } from './cse.js';
+import type { DatabaseAdapter } from './db.js';
 
 interface RuntimeAttachment {
   name: string;
@@ -451,6 +452,37 @@ export const BUILTIN_TOOLS: Record<string, Tool> = {
   ...statsNzToolMap(),
 };
 
+/**
+ * Sync BUILTIN_TOOLS into the tool_catalog table so operators can manage them
+ * via the admin panel. Called once at startup via startGeneWeave / index.ts.
+ * Uses upsert-by-tool_key so re-runs are safe and idempotent.
+ */
+export async function syncToolCatalog(db: DatabaseAdapter): Promise<void> {
+  const { randomUUID } = await import('node:crypto');
+  for (const [key, tool] of Object.entries(BUILTIN_TOOLS)) {
+    const existing = await db.getToolCatalogByKey(key);
+    if (!existing) {
+      await db.createToolConfig({
+        id: randomUUID(),
+        name: tool.schema.name,
+        description: tool.schema.description,
+        category: (tool.schema.tags?.[0] ?? null) as string | null,
+        risk_level: 'read-only',
+        requires_approval: 0,
+        max_execution_ms: null,
+        rate_limit_per_min: null,
+        enabled: 1,
+        tool_key: key,
+        version: '1.0',
+        side_effects: 0,
+        tags: tool.schema.tags ? JSON.stringify(tool.schema.tags) : null,
+        source: 'builtin',
+        credential_id: null,
+      });
+    }
+  }
+}
+
 export interface ToolRegistryOptions {
   defaultTimezone?: string;
   temporalStore?: TemporalStore;
@@ -462,6 +494,8 @@ export interface ToolRegistryOptions {
     semantic: Array<{ content: string; source: string }>;
     entities: Array<{ entityType: string; entityName: string; facts: Record<string, unknown> }>;
   }>;
+  /** Tool keys disabled in the operator-managed catalog. Populated from db.listEnabledToolCatalog(). */
+  disabledToolKeys?: ReadonlySet<string>;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -517,6 +551,8 @@ export function createToolRegistry(toolNames: string[], customTools?: Tool[], op
     memory_recall: memoryRecallTool,
   };
   for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {
+    // Skip tools disabled in the operator-managed tool catalog
+    if (opts?.disabledToolKeys && opts.disabledToolKeys.has(name)) continue;
     const tool = scopedTools[name];
     if (tool) registry.register(tool);
   }

@@ -28,6 +28,7 @@ import { createDatabaseAdapter, type DatabaseAdapter, type DatabaseConfig } from
 import { ChatEngine, type ProviderConfig } from './chat.js';
 import { createGeneWeaveServer } from './server.js';
 import { syncModelPricing, type PricingSyncReport } from './pricing-sync.js';
+import { syncToolCatalog } from './tools.js';
 
 export type { PricingSyncReport };
 
@@ -115,7 +116,10 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // 3. Seed default admin data (no-op if already seeded)
   await db.seedDefaultData();
 
-  // 4. HTTP server
+  // 4. Sync BUILTIN_TOOLS into tool_catalog so operators can manage them
+  await syncToolCatalog(db);
+
+  // 5. HTTP server
   const server = createGeneWeaveServer({
     db,
     chatEngine,
@@ -153,7 +157,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
 // ─── Re-exports for advanced usage ───────────────────────────
 
-export type { DatabaseAdapter, DatabaseConfig, UserRow, SessionRow, ChatRow, MessageRow, MetricRow, EvalRow, MetricsSummary, ChatSettingsRow, TraceRow, PromptRow, GuardrailRow, RoutingPolicyRow, WorkflowDefRow, ToolConfigRow, WorkflowRunRow, GuardrailEvalRow } from './db.js';
+export type { DatabaseAdapter, DatabaseConfig, UserRow, SessionRow, ChatRow, MessageRow, MetricRow, EvalRow, MetricsSummary, ChatSettingsRow, TraceRow, PromptRow, GuardrailRow, RoutingPolicyRow, WorkflowDefRow, ToolConfigRow, ToolCatalogRow, WorkflowRunRow, GuardrailEvalRow } from './db.js';
 export { SQLiteAdapter, createDatabaseAdapter } from './db.js';
 export type { ProviderConfig, ChatEngineConfig, ChatSettings } from './chat.js';
 export { ChatEngine, calculateCost } from './chat.js';

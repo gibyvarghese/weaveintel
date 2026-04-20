@@ -36,7 +36,7 @@ import {
 } from '@weaveintel/observability';
 import type { GuardrailCategorySummary } from '@weaveintel/guardrails';
 import type { DatabaseAdapter, MessageRow, ChatSettingsRow, GuardrailRow, HumanTaskPolicyRow, PromptRow, RoutingPolicyRow } from './db.js';
-import { createToolRegistry, type ToolRegistryOptions } from './tools.js';
+import { BUILTIN_TOOLS, createToolRegistry, type ToolRegistryOptions } from './tools.js';
 import { createTemporalStore } from './temporal-store.js';
 import {
   applySkillsToPrompt,
@@ -171,6 +171,16 @@ export class ChatEngine {
     private readonly db: DatabaseAdapter,
   ) {
     this.toolOptions = { temporalStore: createTemporalStore(db) };
+  }
+
+  private async getDisabledBuiltinToolKeys(): Promise<Set<string>> {
+    const enabledCatalogRows = await this.db.listEnabledToolCatalog();
+    const enabledKeys = new Set(
+      enabledCatalogRows
+        .map((row) => row.tool_key)
+        .filter((toolKey): toolKey is string => Boolean(toolKey)),
+    );
+    return new Set(Object.keys(BUILTIN_TOOLS).filter((toolKey) => !enabledKeys.has(toolKey)));
   }
 
   /**
@@ -385,7 +395,7 @@ export class ChatEngine {
       modelId = this.config.defaultModel;
     }
 
-    const model = await getOrCreateModel(provider, modelId, providerCfg.apiKey);
+    const model = await getOrCreateModel(provider, modelId, providerCfg);
     const actor = await this.db.getUserById(userId);
     const userPersona = normalizePersona(actor?.persona, 'user');
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
@@ -732,7 +742,7 @@ export class ChatEngine {
       modelId = this.config.defaultModel;
     }
 
-    const model = await getOrCreateModel(provider, modelId, providerCfg.apiKey);
+    const model = await getOrCreateModel(provider, modelId, providerCfg);
     const actor = await this.db.getUserById(userId);
     const userPersona = normalizePersona(actor?.persona, 'user');
     const settings = settingsFromRow(await this.db.getChatSettings(chatId));
@@ -1085,6 +1095,7 @@ export class ChatEngine {
   ): Promise<AgentRunTelemetry> {
     const enterpriseToolGroups = await loadEnterpriseToolGroups(this.db);
     const hasEnterprise = enterpriseToolGroups.length > 0;
+    const disabledToolKeys = await this.getDisabledBuiltinToolKeys();
     // Flat enterprise tools for backward compat (base tools only, no extended)
     const enterpriseTools = hasEnterprise ? await loadEnterpriseTools(this.db) : [];
     const toolOptions: ToolRegistryOptions = {
@@ -1109,6 +1120,7 @@ export class ChatEngine {
           })),
         };
       },
+      disabledToolKeys,
     };
     const customTools = enterpriseTools.length > 0 ? enterpriseTools : undefined;
     const tools = settings.enabledTools.length
@@ -1237,6 +1249,7 @@ export class ChatEngine {
     const enterpriseToolGroups = await loadEnterpriseToolGroups(this.db);
     const hasEnterprise = enterpriseToolGroups.length > 0;
     const enterpriseTools = hasEnterprise ? await loadEnterpriseTools(this.db) : [];
+    const disabledToolKeys = await this.getDisabledBuiltinToolKeys();
     const toolOptions: ToolRegistryOptions = {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
@@ -1259,6 +1272,7 @@ export class ChatEngine {
           })),
         };
       },
+      disabledToolKeys,
     };
     const customTools = enterpriseTools.length > 0 ? enterpriseTools : undefined;
     const tools = settings.enabledTools.length
@@ -1478,6 +1492,7 @@ export class ChatEngine {
     const FALLBACK_MODELS: Record<string, string[]> = {
       anthropic: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-20250414'],
       openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'o4-mini'],
+      mock: ['mock-model'],
     };
     for (const provider of configuredProviders) {
       const fallback = FALLBACK_MODELS[provider];

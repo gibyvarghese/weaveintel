@@ -25,20 +25,30 @@ async function main() {
 
   const hasAnthropic = !!process.env['ANTHROPIC_API_KEY'];
   const hasOpenAI = !!process.env['OPENAI_API_KEY'];
+  const useMockProvider = process.env['PLAYWRIGHT_E2E'] === '1' && !hasAnthropic && !hasOpenAI;
 
-  if (!hasAnthropic && !hasOpenAI) {
+  if (!hasAnthropic && !hasOpenAI && !useMockProvider) {
     console.error('ERROR: At least one of ANTHROPIC_API_KEY or OPENAI_API_KEY is required');
     process.exit(1);
   }
 
-  const providers: Record<string, { apiKey: string }> = {};
+  const providers: Record<string, { apiKey: string; mockResponses?: string[]; latencyMs?: number }> = {};
   if (hasAnthropic) providers['anthropic'] = { apiKey: process.env['ANTHROPIC_API_KEY']! };
   if (hasOpenAI) providers['openai'] = { apiKey: process.env['OPENAI_API_KEY']! };
+  if (useMockProvider) {
+    providers['mock'] = {
+      apiKey: '__mock__',
+      latencyMs: 25,
+      mockResponses: [
+        'Revenue peaks in Apr with the strongest profit margin, Mar is the weakest month, and the Jan to Apr jump is the main anomaly worth investigating.',
+      ],
+    };
+  }
 
   const defaultProvider = process.env['DEFAULT_PROVIDER']
-    ?? (hasAnthropic ? 'anthropic' : 'openai');
+    ?? (useMockProvider ? 'mock' : hasAnthropic ? 'anthropic' : 'openai');
   const defaultModel = process.env['DEFAULT_MODEL']
-    ?? (defaultProvider === 'anthropic' ? 'claude-sonnet-4-20250514' : 'gpt-4o-mini');
+    ?? (defaultProvider === 'anthropic' ? 'claude-sonnet-4-20250514' : defaultProvider === 'mock' ? 'mock-model' : 'gpt-4o-mini');
 
   const app = await createGeneWeave({
     port,

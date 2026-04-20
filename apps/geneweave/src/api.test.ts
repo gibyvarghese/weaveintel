@@ -627,9 +627,9 @@ describeAdmin('Routing Active', () => {
 
 // ─── Admin: Tools CRUD ──────────────────────────────────────
 
-describeAdmin('Admin Tools', () => {
-  it('lists tools', async () => {
-    const { status, data } = await api('GET', '/api/admin/tools');
+describeAdmin('Admin Tool Catalog', () => {
+  it('lists tool catalog', async () => {
+    const { status, data } = await api('GET', '/api/admin/tool-catalog');
     expect(status).toBe(200);
     expect(Array.isArray(data['tools'])).toBe(true);
   });

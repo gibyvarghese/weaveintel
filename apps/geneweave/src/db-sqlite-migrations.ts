@@ -487,4 +487,27 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   safeExec(db, `UPDATE validation_rules SET id = 'c5985869-b721-40a2-b4ef-529bb975c84c' WHERE id = 'val-workflow-entry'`);
   safeExec(db, `UPDATE validation_rules SET id = 'b6490a1a-2ddf-41ad-9a7b-6d406808cf86' WHERE id = 'val-tool-risk'`);
   safeExec(db, `UPDATE validation_rules SET id = '892adcec-808b-4c17-bc2c-c5c45cfe47fb' WHERE id = 'val-json-fields'`);
+
+  // Phase 1: tool_configs → tool_catalog migration
+  // Copy existing tool_configs data into tool_catalog (for existing databases upgrading from pre-Phase-1).
+  // safeExec swallows the error on fresh installs where tool_configs does not exist.
+  safeExec(db, `
+    INSERT OR IGNORE INTO tool_catalog (id, name, description, category, risk_level, requires_approval, max_execution_ms, rate_limit_per_min, enabled, created_at, updated_at)
+    SELECT id, name, description, category, risk_level, requires_approval, max_execution_ms, rate_limit_per_min, enabled, created_at, updated_at
+    FROM tool_configs
+  `);
+  // Add new Phase 1 columns to tool_catalog (no-op if already present).
+  safeExec(db, `ALTER TABLE tool_catalog ADD COLUMN tool_key TEXT`);
+  safeExec(db, `ALTER TABLE tool_catalog ADD COLUMN version TEXT NOT NULL DEFAULT '1.0'`);
+  safeExec(db, `ALTER TABLE tool_catalog ADD COLUMN side_effects INTEGER NOT NULL DEFAULT 0`);
+  safeExec(db, `ALTER TABLE tool_catalog ADD COLUMN tags TEXT`);
+  safeExec(db, `ALTER TABLE tool_catalog ADD COLUMN source TEXT NOT NULL DEFAULT 'builtin'`);
+  safeExec(db, `ALTER TABLE tool_catalog ADD COLUMN credential_id TEXT`);
+  // Backfill tool_key for the 6 builtin seed records.
+  safeExec(db, `UPDATE tool_catalog SET tool_key = 'web_search' WHERE id = 'a7bd3e9f-9b1b-4aa6-9520-8f5fb194a5e3' AND tool_key IS NULL`);
+  safeExec(db, `UPDATE tool_catalog SET tool_key = 'cse_run_code' WHERE id = '8e6c2528-f5a0-4d5a-a719-b60cc660f353' AND tool_key IS NULL`);
+  safeExec(db, `UPDATE tool_catalog SET tool_key = 'file_reader' WHERE id = 'bca36e31-bf3b-4761-89ba-0f1edecf22cf' AND tool_key IS NULL`);
+  safeExec(db, `UPDATE tool_catalog SET tool_key = 'database_query' WHERE id = '9bbd1c34-35a1-442f-b2bb-d5d6f568f57a' AND tool_key IS NULL`);
+  safeExec(db, `UPDATE tool_catalog SET tool_key = 'api_caller' WHERE id = '31755606-4e34-44be-a101-cee78d49f6e1' AND tool_key IS NULL`);
+  safeExec(db, `UPDATE tool_catalog SET tool_key = 'statsnz_get_data' WHERE id = '220dd56e-5c1c-4dad-93c8-befa5d7588f5' AND tool_key IS NULL`);
 }

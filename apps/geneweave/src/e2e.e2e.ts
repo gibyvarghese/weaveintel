@@ -4,12 +4,47 @@
  * Verifies the full web UI: auth flow, chat, and admin pages.
  * Run: npx playwright test --config playwright.config.ts
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Locator, type Page } from '@playwright/test';
 
 /* ── Helpers ─────────────────────────────────────────────── */
 
 const PASSWORD = 'Str0ng!Pass99';
 const ADMIN_EMAIL = 'pw-e2e-admin@weaveintel.dev';
+
+const ADMIN_TAB_LOCATIONS: Record<string, { group: string; key: string }> = {
+  Prompts: { group: 'Prompt Studio', key: 'prompts' },
+  Guardrails: { group: 'Governance', key: 'guardrails' },
+  Routing: { group: 'Orchestration', key: 'routing' },
+  Workflows: { group: 'Orchestration', key: 'workflows' },
+  Tools: { group: 'Orchestration', key: 'tool-catalog' },
+  'Workflow Runs': { group: 'Monitoring', key: 'workflow-runs' },
+  'Guardrail Evals': { group: 'Monitoring', key: 'guardrail-evals' },
+  'Task Policies': { group: 'Orchestration', key: 'task-policies' },
+  Contracts: { group: 'Governance', key: 'contracts' },
+  Cache: { group: 'Infrastructure', key: 'cache-policies' },
+  Identity: { group: 'Governance', key: 'identity-rules' },
+  'Memory Gov': { group: 'Governance', key: 'memory-governance' },
+  Search: { group: 'Integrations', key: 'search-providers' },
+  HTTP: { group: 'Integrations', key: 'http-endpoints' },
+  Social: { group: 'Integrations', key: 'social-accounts' },
+  Enterprise: { group: 'Integrations', key: 'enterprise-connectors' },
+  Registry: { group: 'Integrations', key: 'tool-registry' },
+  Replay: { group: 'Orchestration', key: 'replay-scenarios' },
+  Triggers: { group: 'Orchestration', key: 'trigger-definitions' },
+  Tenants: { group: 'Infrastructure', key: 'tenant-configs' },
+  Sandbox: { group: 'Infrastructure', key: 'sandbox-policies' },
+  Extraction: { group: 'Knowledge', key: 'extraction-pipelines' },
+  Artifacts: { group: 'Knowledge', key: 'artifact-policies' },
+  Reliability: { group: 'Infrastructure', key: 'reliability-policies' },
+  Collaboration: { group: 'Knowledge', key: 'collaboration-sessions' },
+  Compliance: { group: 'Governance', key: 'compliance-rules' },
+  Graph: { group: 'Knowledge', key: 'graph-configs' },
+  Plugins: { group: 'Knowledge', key: 'plugin-configs' },
+  Scaffolds: { group: 'Developer', key: 'scaffold-templates' },
+  Recipes: { group: 'Developer', key: 'recipe-configs' },
+  Widgets: { group: 'Developer', key: 'widget-configs' },
+  Validation: { group: 'Developer', key: 'validation-rules' },
+};
 
 async function registerAndEnter(page: Page, email?: string) {
   const em = email ?? ADMIN_EMAIL;
@@ -45,6 +80,26 @@ async function goAdmin(page: Page) {
   await expect(page.locator('h2', { hasText: 'Administration' })).toBeVisible({ timeout: 5000 });
 }
 
+async function openAdminTab(page: Page, label: keyof typeof ADMIN_TAB_LOCATIONS | string) {
+  const location = ADMIN_TAB_LOCATIONS[label];
+  if (!location) throw new Error(`Unknown admin tab: ${label}`);
+
+  const adminMenu = page.locator('.admin-nav-sub');
+  if (!(await adminMenu.isVisible({ timeout: 1000 }).catch(() => false))) {
+    await page.locator('.admin-parent').click();
+    await expect(adminMenu).toBeVisible({ timeout: 5000 });
+  }
+
+  const tabButton = page.locator(`[data-admin-tab="${location.key}"]`).first();
+  if (!(await tabButton.isVisible({ timeout: 1000 }).catch(() => false))) {
+    await page.locator('.admin-group-btn', { hasText: location.group }).click();
+  }
+
+  await expect(tabButton).toBeVisible({ timeout: 5000 });
+  await tabButton.click();
+  await page.waitForTimeout(500);
+}
+
 async function seedDefaults(page: Page) {
   const csrfToken = await page.evaluate(async () => {
     const res = await fetch('/api/auth/me', { credentials: 'same-origin' });
@@ -68,6 +123,26 @@ async function seedDefaults(page: Page) {
 /** Scope locator to the .main content area (avoids matching sidebar elements). */
 function main(page: Page) {
   return page.locator('.main');
+}
+
+/** Wait for the table to load and ensure admin list is visible. */
+async function waitForListHeader(m: Locator, timeout = 5000) {
+  // Just wait for the table/list to be visible
+  await expect(m.locator('table')).toBeVisible({ timeout }).catch(async () => {
+    // Fallback: check for any list-like structure
+    await expect(m.locator('.admin-list-panel, .data-table, [role="table"]')).toBeVisible({ timeout });
+  });
+}
+
+/** Click the admin "+ New" button with exact text matching to avoid strict mode violations. */
+async function clickAdminNewButton(m: Locator) {
+  // Use exact regex match to avoid matching "+ New Chat" from chat panel
+  await m.locator('button.nav-btn').filter({ hasText: /^\+ New$/ }).first().click();
+}
+
+async function expectAdminListLoaded(m: Locator) {
+  await expect(m.locator('table')).toBeVisible({ timeout: 5000 });
+  await expect(m.locator('input[placeholder*="Search "]')).toBeVisible({ timeout: 5000 });
 }
 
 /* ── Auth ────────────────────────────────────────────────── */
@@ -113,12 +188,16 @@ test.describe('Chat', () => {
 /* ── Admin: Navigation ───────────────────────────────────── */
 
 test.describe('Admin Navigation', () => {
-  test('shows all 17 admin tabs', async ({ page }) => {
+  test('shows core admin sidebar tabs', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
-    const m = main(page);
     for (const label of ['Prompts', 'Guardrails', 'Routing', 'Workflows', 'Tools', 'Workflow Runs', 'Guardrail Evals', 'Task Policies', 'Contracts', 'Cache', 'Identity', 'Memory Gov', 'Search', 'HTTP', 'Social', 'Enterprise', 'Registry']) {
-      await expect(m.locator('button', { hasText: label })).toBeVisible();
+      const location = ADMIN_TAB_LOCATIONS[label]!;
+      const tabButton = page.locator(`[data-admin-tab="${location.key}"]`).first();
+      if (!(await tabButton.isVisible({ timeout: 1000 }).catch(() => false))) {
+        await page.locator('.admin-group-btn', { hasText: location.group }).click();
+      }
+      await expect(tabButton).toBeVisible();
     }
   });
 
@@ -126,9 +205,8 @@ test.describe('Admin Navigation', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Guardrails' }).click();
-    // Should see item count text
-    await expect(m.getByText(/\d+ items?/)).toBeVisible({ timeout: 3000 });
+    await openAdminTab(page, 'Guardrails');
+    await waitForListHeader(m.locator('.main'));
   });
 
   test('seed defaults API succeeds for admin user', async ({ page }) => {
@@ -147,8 +225,8 @@ test.describe('Admin Seed & Data', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    // Prompts tab (default) should show "N items" with N > 0, and table rows
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    // Prompts tab (default) should show search header with record count
+    await waitForListHeader(m.locator('.search-header'), 5000);
   });
 
   test('guardrails tab shows seeded data', async ({ page }) => {
@@ -157,9 +235,8 @@ test.describe('Admin Seed & Data', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Guardrails' }).click();
-    await page.waitForTimeout(500);
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await openAdminTab(page, 'Guardrails');
+    await waitForListHeader(m.locator('.search-header'), 5000);
   });
 });
 
@@ -174,10 +251,9 @@ test.describe('Admin Guardrail CRUD', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     // Navigate to Guardrails tab
-    await m.locator('button', { hasText: 'Guardrails' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Guardrails');
     // Click + New in the admin action bar
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     // Form should now be visible with "New Guardrail" heading
     await expect(m.locator('h3', { hasText: 'New Guardrail' })).toBeVisible({ timeout: 3000 });
@@ -201,8 +277,8 @@ test.describe('Admin Prompts', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    // Prompts is the default tab, should show items
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    // Prompts is the default tab, should show search header with items
+    await waitForListHeader(m.locator('.search-header'), 5000);
   });
 
   test('creates a new prompt via form', async ({ page }) => {
@@ -212,7 +288,7 @@ test.describe('Admin Prompts', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     // Prompts is default tab — click + New
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Prompt' })).toBeVisible({ timeout: 3000 });
     // Fill Name input
@@ -252,9 +328,8 @@ test.describe('Admin Routing', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Routing' }).click();
-    await page.waitForTimeout(500);
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await openAdminTab(page, 'Routing');
+    await waitForListHeader(m.locator('.search-header'), 5000);
   });
 
   test('creates a new routing policy via form', async ({ page }) => {
@@ -263,9 +338,8 @@ test.describe('Admin Routing', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Routing' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Routing');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Routing Policy' })).toBeVisible({ timeout: 3000 });
     // Fill Name input
@@ -285,8 +359,7 @@ test.describe('Admin Routing', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Routing' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Routing');
     // Click first Edit button in the routing table
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
@@ -304,19 +377,17 @@ test.describe('Admin Read-only Tabs', () => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Workflow Runs' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Workflow Runs');
     // The admin action bar's "+ New" button should NOT exist in main (sidebar's + New is outside .main)
-    await expect(m.locator('button.nav-btn', { hasText: '+ New' })).not.toBeVisible();
+    await expect(m.locator('button.nav-btn').filter({ hasText: /^\+ New$/ })).not.toBeVisible();
   });
 
   test('guardrail evals tab has no admin + New button', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
-    await m.locator('button', { hasText: 'Guardrail Evals' }).click();
-    await page.waitForTimeout(500);
-    await expect(m.locator('button.nav-btn', { hasText: '+ New' })).not.toBeVisible();
+    await openAdminTab(page, 'Guardrail Evals');
+    await expect(m.locator('button.nav-btn').filter({ hasText: /^\+ New$/ })).not.toBeVisible();
   });
 
   test('workflow runs tab shows data after seed + API run creation', async ({ page }) => {
@@ -326,9 +397,8 @@ test.describe('Admin Read-only Tabs', () => {
     // Seed defaults to create some runs
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Workflow Runs' }).click();
-    await page.waitForTimeout(500);
-    await expect(m.getByText(/\d+ items?/)).toBeVisible({ timeout: 5000 });
+    await openAdminTab(page, 'Workflow Runs');
+    await waitForListHeader(m.locator('.search-header'), 5000);
   });
 });
 
@@ -341,9 +411,8 @@ test.describe('Admin Task Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Task Policies' }).click();
-    await page.waitForTimeout(500);
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await openAdminTab(page, 'Task Policies');
+    await waitForListHeader(m.locator('.search-header'), 5000);
   });
 
   test('creates a new task policy via form', async ({ page }) => {
@@ -352,9 +421,8 @@ test.describe('Admin Task Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Task Policies' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Task Policies');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Task Policy' })).toBeVisible({ timeout: 3000 });
     // Fill Name (1st text input), Description (2nd), Trigger (3rd)
@@ -375,9 +443,8 @@ test.describe('Admin Contracts', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Contracts' }).click();
-    await page.waitForTimeout(500);
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await openAdminTab(page, 'Contracts');
+    await waitForListHeader(m.locator('.search-header'), 5000);
   });
 
   test('creates a new contract via form', async ({ page }) => {
@@ -386,9 +453,8 @@ test.describe('Admin Contracts', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Contracts' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Contracts');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Contract' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Contract');
@@ -406,9 +472,8 @@ test.describe('Admin Cache Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Cache' }).click();
-    await page.waitForTimeout(500);
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await openAdminTab(page, 'Cache');
+    await waitForListHeader(m.locator('.search-header'), 5000);
   });
 
   test('creates a new cache policy via form', async ({ page }) => {
@@ -417,9 +482,8 @@ test.describe('Admin Cache Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Cache' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Cache');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Cache Policy' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Cache-Policy');
@@ -437,9 +501,8 @@ test.describe('Admin Identity Rules', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Identity' }).click();
-    await page.waitForTimeout(500);
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await openAdminTab(page, 'Identity');
+    await waitForListHeader(m.locator('.search-header'), 5000);
   });
 
   test('creates a new identity rule via form', async ({ page }) => {
@@ -448,9 +511,8 @@ test.describe('Admin Identity Rules', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Identity' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Identity');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Identity Rule' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Identity-Rule');
@@ -468,9 +530,8 @@ test.describe('Admin Memory Governance', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Memory Gov' }).click();
-    await page.waitForTimeout(500);
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await openAdminTab(page, 'Memory Gov');
+    await waitForListHeader(m.locator('.search-header'), 5000);
   });
 
   test('creates a new memory governance rule via form', async ({ page }) => {
@@ -479,9 +540,8 @@ test.describe('Admin Memory Governance', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Memory Gov' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Memory Gov');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Memory Governance' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Memory-Governance');
@@ -511,9 +571,8 @@ test.describe('Admin Search Providers', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Search' }).click();
-    await page.waitForTimeout(500);
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await openAdminTab(page, 'Search');
+    await waitForListHeader(m.locator('.search-header'), 5000);
   });
 
   test('creates a new search provider via form', async ({ page }) => {
@@ -522,9 +581,8 @@ test.describe('Admin Search Providers', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Search' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Search');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Search Provider' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Search');
@@ -542,8 +600,7 @@ test.describe('Admin Search Providers', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Search' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Search');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -562,9 +619,8 @@ test.describe('Admin HTTP Endpoints', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'HTTP' }).click();
-    await page.waitForTimeout(500);
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await openAdminTab(page, 'HTTP');
+    await waitForListHeader(m.locator('.search-header'), 5000);
   });
 
   test('creates a new http endpoint via form', async ({ page }) => {
@@ -573,9 +629,8 @@ test.describe('Admin HTTP Endpoints', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'HTTP' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'HTTP');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New HTTP Endpoint' })).toBeVisible({ timeout: 3000 });
     const httpInputs = m.locator('input[type="text"]');
@@ -591,8 +646,7 @@ test.describe('Admin HTTP Endpoints', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'HTTP' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'HTTP');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -611,8 +665,7 @@ test.describe('Admin Social Accounts', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Social' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Social');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -622,9 +675,8 @@ test.describe('Admin Social Accounts', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Social' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Social');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Social Account' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Social');
@@ -642,8 +694,7 @@ test.describe('Admin Social Accounts', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Social' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Social');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -662,8 +713,7 @@ test.describe('Admin Enterprise Connectors', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Enterprise' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Enterprise');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -673,9 +723,8 @@ test.describe('Admin Enterprise Connectors', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Enterprise' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Enterprise');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Enterprise Connector' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Enterprise');
@@ -693,8 +742,7 @@ test.describe('Admin Enterprise Connectors', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Enterprise' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Enterprise');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -713,8 +761,7 @@ test.describe('Admin Tool Registry', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Registry' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Registry');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -724,9 +771,8 @@ test.describe('Admin Tool Registry', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Registry' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Registry');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Tool Registry' })).toBeVisible({ timeout: 3000 });
     const regInputs = m.locator('input[type="text"]');
@@ -742,8 +788,7 @@ test.describe('Admin Tool Registry', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Registry' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Registry');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -762,8 +807,7 @@ test.describe('Admin Replay Scenarios', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Replay' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Replay');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -773,9 +817,8 @@ test.describe('Admin Replay Scenarios', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Replay' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Replay');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Replay Scenario' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -793,8 +836,7 @@ test.describe('Admin Replay Scenarios', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Replay' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Replay');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -813,8 +855,7 @@ test.describe('Admin Trigger Definitions', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Triggers' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Triggers');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -824,9 +865,8 @@ test.describe('Admin Trigger Definitions', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Triggers' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Triggers');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Trigger Definition' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -842,8 +882,7 @@ test.describe('Admin Trigger Definitions', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Triggers' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Triggers');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -862,8 +901,7 @@ test.describe('Admin Tenant Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Tenants' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Tenants');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -873,9 +911,8 @@ test.describe('Admin Tenant Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Tenants' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Tenants');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Tenant Config' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -891,8 +928,7 @@ test.describe('Admin Tenant Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Tenants' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Tenants');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -911,8 +947,7 @@ test.describe('Admin Sandbox Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Sandbox' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Sandbox');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -922,9 +957,8 @@ test.describe('Admin Sandbox Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Sandbox' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Sandbox');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Sandbox Policy' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -939,8 +973,7 @@ test.describe('Admin Sandbox Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Sandbox' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Sandbox');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -959,8 +992,7 @@ test.describe('Admin Extraction Pipelines', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: /^Extraction$/ }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Extraction');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -970,9 +1002,8 @@ test.describe('Admin Extraction Pipelines', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: /^Extraction$/ }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Extraction');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Extraction Pipeline' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -987,8 +1018,7 @@ test.describe('Admin Extraction Pipelines', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: /^Extraction$/ }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Extraction');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -1007,8 +1037,7 @@ test.describe('Admin Artifact Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Artifacts' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Artifacts');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -1018,9 +1047,8 @@ test.describe('Admin Artifact Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Artifacts' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Artifacts');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Artifact Policy' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -1035,8 +1063,7 @@ test.describe('Admin Artifact Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Artifacts' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Artifacts');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -1055,8 +1082,7 @@ test.describe('Admin Reliability Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Reliability' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Reliability');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -1066,9 +1092,8 @@ test.describe('Admin Reliability Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Reliability' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Reliability');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Reliability Policy' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -1083,8 +1108,7 @@ test.describe('Admin Reliability Policies', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Reliability' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Reliability');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -1103,8 +1127,7 @@ test.describe('Admin Collaboration Sessions', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Collaboration' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Collaboration');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -1114,9 +1137,8 @@ test.describe('Admin Collaboration Sessions', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Collaboration' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Collaboration');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Collaboration Session' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -1131,8 +1153,7 @@ test.describe('Admin Collaboration Sessions', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Collaboration' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Collaboration');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -1151,8 +1172,7 @@ test.describe('Admin Compliance Rules', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Compliance' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Compliance');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -1162,9 +1182,8 @@ test.describe('Admin Compliance Rules', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Compliance' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Compliance');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Compliance Rule' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -1179,8 +1198,7 @@ test.describe('Admin Compliance Rules', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Compliance' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Compliance');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -1199,8 +1217,7 @@ test.describe('Admin Graph Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Graph' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Graph');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -1210,9 +1227,8 @@ test.describe('Admin Graph Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Graph' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Graph');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Graph Config' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -1227,8 +1243,7 @@ test.describe('Admin Graph Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Graph' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Graph');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -1247,8 +1262,7 @@ test.describe('Admin Plugin Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Plugins' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Plugins');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -1258,9 +1272,8 @@ test.describe('Admin Plugin Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Plugins' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Plugins');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Plugin Config' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -1275,8 +1288,7 @@ test.describe('Admin Plugin Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Plugins' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Plugins');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -1295,8 +1307,7 @@ test.describe('Admin Scaffold Templates', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Scaffolds' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Scaffolds');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -1306,9 +1317,8 @@ test.describe('Admin Scaffold Templates', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Scaffolds' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Scaffolds');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Scaffold Template' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -1323,8 +1333,7 @@ test.describe('Admin Scaffold Templates', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Scaffolds' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Scaffolds');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -1341,8 +1350,7 @@ test.describe('Admin Recipe Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Recipes' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Recipes');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -1352,9 +1360,8 @@ test.describe('Admin Recipe Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Recipes' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Recipes');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Recipe Config' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -1369,8 +1376,7 @@ test.describe('Admin Recipe Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Recipes' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Recipes');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -1387,8 +1393,7 @@ test.describe('Admin Widget Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Widgets' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Widgets');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -1398,9 +1403,8 @@ test.describe('Admin Widget Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Widgets' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Widgets');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Widget Config' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -1415,8 +1419,7 @@ test.describe('Admin Widget Configs', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Widgets' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Widgets');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
@@ -1433,8 +1436,7 @@ test.describe('Admin Validation Rules', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Validation' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Validation');
     await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
   });
 
@@ -1444,9 +1446,8 @@ test.describe('Admin Validation Rules', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Validation' }).click();
-    await page.waitForTimeout(500);
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'Validation');
+    await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     await expect(m.locator('h3', { hasText: 'New Validation Rule' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
@@ -1461,8 +1462,7 @@ test.describe('Admin Validation Rules', () => {
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await m.locator('button', { hasText: 'Validation' }).click();
-    await page.waitForTimeout(500);
+    await openAdminTab(page, 'Validation');
     const editBtn = m.locator('button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();

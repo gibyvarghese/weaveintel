@@ -428,7 +428,7 @@ export interface WorkflowDefRow {
   updated_at: string;
 }
 
-export interface ToolConfigRow {
+export interface ToolCatalogRow {
   id: string;
   name: string;
   description: string | null;
@@ -438,9 +438,18 @@ export interface ToolConfigRow {
   max_execution_ms: number | null;
   rate_limit_per_min: number | null;
   enabled: number;
+  tool_key: string | null;
+  version: string;
+  side_effects: number;
+  tags: string | null;           // JSON string[]
+  source: string;                // 'builtin' | 'mcp' | 'a2a' | 'custom'
+  credential_id: string | null;
   created_at: string;
   updated_at: string;
 }
+
+/** @deprecated Use ToolCatalogRow */
+export type ToolConfigRow = ToolCatalogRow;
 
 export interface SkillRow {
   id: string;
@@ -1260,11 +1269,13 @@ export interface DatabaseAdapter {
   updateWorkflowDef(id: string, fields: Partial<Omit<WorkflowDefRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteWorkflowDef(id: string): Promise<void>;
 
-  // ─── Admin: Tool configs ───────────────────────────────────
-  createToolConfig(t: Omit<ToolConfigRow, 'created_at' | 'updated_at'>): Promise<void>;
-  getToolConfig(id: string): Promise<ToolConfigRow | null>;
-  listToolConfigs(): Promise<ToolConfigRow[]>;
-  updateToolConfig(id: string, fields: Partial<Omit<ToolConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  // ─── Admin: Tool catalog ───────────────────────────────────
+  createToolConfig(t: Omit<ToolCatalogRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getToolConfig(id: string): Promise<ToolCatalogRow | null>;
+  getToolCatalogByKey(toolKey: string): Promise<ToolCatalogRow | null>;
+  listToolConfigs(): Promise<ToolCatalogRow[]>;
+  listEnabledToolCatalog(): Promise<ToolCatalogRow[]>;
+  updateToolConfig(id: string, fields: Partial<Omit<ToolCatalogRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteToolConfig(id: string): Promise<void>;
 
   // ─── Admin: Skills ─────────────────────────────────────────

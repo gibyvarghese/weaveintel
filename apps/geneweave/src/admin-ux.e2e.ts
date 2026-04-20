@@ -3,6 +3,12 @@ import { test, expect, type Page } from '@playwright/test';
 const PASSWORD = 'Str0ng!Pass99';
 const ADMIN_EMAIL = 'pw-e2e-admin@weaveintel.dev';
 
+const ADMIN_TAB_GROUPS: Record<string, string> = {
+  prompts: 'Prompt Studio',
+  guardrails: 'Governance',
+  routing: 'Orchestration',
+};
+
 async function registerAndEnter(page: Page, email?: string) {
   const em = email ?? ADMIN_EMAIL;
   await page.goto('/');
@@ -35,20 +41,38 @@ async function goAdmin(page: Page) {
   await expect(page.locator('h2', { hasText: 'Administration' })).toBeVisible({ timeout: 5000 });
 }
 
+async function openAdminTab(page: Page, tabKey: keyof typeof ADMIN_TAB_GROUPS) {
+  const groupLabel = ADMIN_TAB_GROUPS[tabKey];
+  const adminMenu = page.locator('.admin-nav-sub');
+  if (!(await adminMenu.isVisible({ timeout: 1000 }).catch(() => false))) {
+    await page.locator('.admin-parent').click();
+    await expect(adminMenu).toBeVisible({ timeout: 5000 });
+  }
+
+  const tabButton = page.locator(`[data-admin-tab="${tabKey}"]`).first();
+  if (!(await tabButton.isVisible({ timeout: 1000 }).catch(() => false))) {
+    await page.locator('.admin-group-btn', { hasText: groupLabel }).click();
+  }
+
+  await expect(tabButton).toBeVisible({ timeout: 5000 });
+  await tabButton.click();
+}
+
 test.describe('Admin UX Regression', () => {
   test('tab switch closes editor state', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
 
     const m = page.locator('.main');
-    await page.locator('[data-admin-tab="guardrails"]').first().click();
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await openAdminTab(page, 'guardrails');
+    // Use .first() to select admin panel's "+ New" button, not chat "+ New Chat"
+    await m.locator('button.nav-btn', { hasText: '+ New' }).first().click();
 
     await expect(m.locator('.admin-breadcrumbs')).toBeVisible({ timeout: 3000 });
     await expect(m.locator('.admin-list-panel')).toHaveCount(0);
     await expect(m.getByRole('heading', { name: 'New Guardrail' })).toBeVisible({ timeout: 3000 });
 
-    await page.locator('[data-admin-tab="routing"]').first().click();
+    await openAdminTab(page, 'routing');
 
     await expect(m.locator('.admin-breadcrumbs')).toHaveCount(0);
     await expect(m.getByRole('heading', { name: 'New Guardrail' })).toHaveCount(0);
@@ -59,13 +83,14 @@ test.describe('Admin UX Regression', () => {
     await goAdmin(page);
 
     const m = page.locator('.main');
-    await page.locator('[data-admin-tab="guardrails"]').first().click();
+    await openAdminTab(page, 'guardrails');
 
     const editBtn = m.locator('.admin-list-panel button', { hasText: 'Edit' }).first();
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
     } else {
-      await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+      // Use .first() to select admin panel's "+ New" button, not chat "+ New Chat"
+      await m.locator('button.nav-btn', { hasText: '+ New' }).first().click();
     }
 
     await expect(m.locator('.admin-breadcrumbs')).toBeVisible({ timeout: 3000 });
@@ -80,7 +105,7 @@ test.describe('Admin UX Regression', () => {
     await goAdmin(page);
 
     const m = page.locator('.main');
-    await page.locator('[data-admin-tab="prompts"]').first().click();
+    await openAdminTab(page, 'prompts');
 
     await expect(m.locator('.admin-list-panel')).toBeVisible({ timeout: 5000 });
     await expect(m.locator('.prompt-wizard')).toHaveCount(0);
@@ -101,7 +126,7 @@ test.describe('Admin UX Regression', () => {
     await goAdmin(page);
 
     const m = page.locator('.main');
-    await page.locator('[data-admin-tab="prompts"]').first().click();
+    await openAdminTab(page, 'prompts');
     await m.locator('button.nav-btn', { hasText: '+ New' }).click();
     await expect(m.locator('.prompt-wizard')).toBeVisible({ timeout: 5000 });
 

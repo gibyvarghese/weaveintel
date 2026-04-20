@@ -37,6 +37,8 @@ export function calculateCost(modelId: string, promptTokens: number, completionT
 
 export interface ProviderConfig {
   apiKey: string;
+  mockResponses?: string[];
+  latencyMs?: number;
 }
 
 export interface ChatEngineConfig {
@@ -50,7 +52,7 @@ const modelCache = new Map<string, Model>();
 export async function getOrCreateModel(
   provider: string,
   modelId: string,
-  apiKey: string,
+  providerConfig: ProviderConfig,
 ): Promise<Model> {
   const bareModel = modelId.includes('/') ? modelId.split('/').slice(1).join('/') : modelId;
   const cacheKey = `${provider}:${bareModel}`;
@@ -61,12 +63,21 @@ export async function getOrCreateModel(
   switch (provider) {
     case 'anthropic': {
       const mod = await import('@weaveintel/provider-anthropic');
-      model = (mod as any).weaveAnthropicModel(bareModel, { apiKey });
+      model = (mod as any).weaveAnthropicModel(bareModel, { apiKey: providerConfig.apiKey });
       break;
     }
     case 'openai': {
       const mod = await import('@weaveintel/provider-openai');
-      model = (mod as any).weaveOpenAIModel(bareModel, { apiKey });
+      model = (mod as any).weaveOpenAIModel(bareModel, { apiKey: providerConfig.apiKey });
+      break;
+    }
+    case 'mock': {
+      const mod = await import('@weaveintel/devtools');
+      model = (mod as any).createMockModel({
+        name: bareModel || 'mock-model',
+        responses: providerConfig.mockResponses,
+        latencyMs: providerConfig.latencyMs ?? 25,
+      });
       break;
     }
     default:

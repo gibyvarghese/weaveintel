@@ -387,16 +387,22 @@ CREATE TABLE IF NOT EXISTS workflow_defs (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS tool_configs (
+CREATE TABLE IF NOT EXISTS tool_catalog (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT,
   category TEXT,
-  risk_level TEXT NOT NULL DEFAULT 'low',
+  risk_level TEXT NOT NULL DEFAULT 'read-only',
   requires_approval INTEGER NOT NULL DEFAULT 0,
   max_execution_ms INTEGER,
   rate_limit_per_min INTEGER,
   enabled INTEGER NOT NULL DEFAULT 1,
+  tool_key TEXT UNIQUE,
+  version TEXT NOT NULL DEFAULT '1.0',
+  side_effects INTEGER NOT NULL DEFAULT 0,
+  tags TEXT,
+  source TEXT NOT NULL DEFAULT 'builtin',
+  credential_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

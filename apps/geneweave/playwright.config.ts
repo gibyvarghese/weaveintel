@@ -1,4 +1,13 @@
 import { defineConfig } from '@playwright/test';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const managedPort = Number.parseInt(process.env['PLAYWRIGHT_PORT'] ?? '3510', 10);
+const baseURL = process.env['BASE_URL'] ?? `http://127.0.0.1:${managedPort}`;
+const managedDbPath = join(tmpdir(), `geneweave-playwright-${process.pid}.db`);
+const workspaceDir = fileURLToPath(new URL('.', import.meta.url));
+const useManagedServer = !process.env['BASE_URL'];
 
 export default defineConfig({
   testDir: './src',
@@ -6,9 +15,27 @@ export default defineConfig({
   timeout: 30_000,
   retries: 0,
   use: {
-    baseURL: process.env['BASE_URL'] ?? 'http://localhost:3500',
+    baseURL,
     headless: true,
     screenshot: 'only-on-failure',
   },
+  webServer: useManagedServer ? {
+    command: 'npx tsx ../../deploy/server.ts',
+    cwd: workspaceDir,
+    url: baseURL,
+    timeout: 120_000,
+    reuseExistingServer: false,
+    env: {
+      ...process.env,
+      PORT: String(managedPort),
+      DATABASE_PATH: managedDbPath,
+      PLAYWRIGHT_E2E: '1',
+      JWT_SECRET: process.env['JWT_SECRET'] ?? 'playwright-e2e-secret',
+      DEFAULT_PROVIDER: process.env['DEFAULT_PROVIDER']
+        ?? (process.env['ANTHROPIC_API_KEY'] ? 'anthropic' : process.env['OPENAI_API_KEY'] ? 'openai' : 'mock'),
+      DEFAULT_MODEL: process.env['DEFAULT_MODEL']
+        ?? (process.env['ANTHROPIC_API_KEY'] ? 'claude-sonnet-4-20250514' : process.env['OPENAI_API_KEY'] ? 'gpt-4o-mini' : 'mock-model'),
+    },
+  } : undefined,
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
 });

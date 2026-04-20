@@ -17,7 +17,7 @@ import type {
   PromptRow, PromptFrameworkRow, PromptFragmentRow, PromptContractRow, PromptStrategyRow,
   PromptVersionRow, PromptExperimentRow, PromptEvalDatasetRow, PromptEvalRunRow, PromptOptimizerRow, PromptOptimizationRunRow,
   GuardrailRow, RoutingPolicyRow, WorkflowDefRow,
-  ToolConfigRow, SkillRow, WorkerAgentRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
+  ToolConfigRow, ToolCatalogRow, SkillRow, WorkerAgentRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
   IdentityRuleRow, MemoryGovernanceRow, SearchProviderRow, HttpEndpointRow,
   MemoryExtractionRuleRow,
   SocialAccountRow, EnterpriseConnectorRow, ToolRegistryRow, ReplayScenarioRow,
@@ -1097,23 +1097,36 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM workflow_defs WHERE id = ?').run(id);
   }
 
-  // ─── Admin: Tool configs ───────────────────────────────────
+  // ─── Admin: Tool catalog ───────────────────────────────────
 
-  async createToolConfig(t: Omit<ToolConfigRow, 'created_at' | 'updated_at'>): Promise<void> {
+  async createToolConfig(t: Omit<ToolCatalogRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO tool_configs (id, name, description, category, risk_level, requires_approval, max_execution_ms, rate_limit_per_min, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(t.id, t.name, t.description ?? null, t.category ?? null, t.risk_level, t.requires_approval, t.max_execution_ms ?? null, t.rate_limit_per_min ?? null, t.enabled);
+      `INSERT INTO tool_catalog (id, name, description, category, risk_level, requires_approval, max_execution_ms, rate_limit_per_min, enabled, tool_key, version, side_effects, tags, source, credential_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      t.id, t.name, t.description ?? null, t.category ?? null, t.risk_level, t.requires_approval,
+      t.max_execution_ms ?? null, t.rate_limit_per_min ?? null, t.enabled,
+      t.tool_key ?? null, t.version ?? '1.0', t.side_effects ?? 0,
+      t.tags ?? null, t.source ?? 'builtin', t.credential_id ?? null,
+    );
   }
 
-  async getToolConfig(id: string): Promise<ToolConfigRow | null> {
-    return (this.d.prepare('SELECT * FROM tool_configs WHERE id = ?').get(id) as ToolConfigRow) ?? null;
+  async getToolConfig(id: string): Promise<ToolCatalogRow | null> {
+    return (this.d.prepare('SELECT * FROM tool_catalog WHERE id = ?').get(id) as ToolCatalogRow) ?? null;
   }
 
-  async listToolConfigs(): Promise<ToolConfigRow[]> {
-    return this.d.prepare('SELECT * FROM tool_configs ORDER BY category ASC, name ASC').all() as ToolConfigRow[];
+  async getToolCatalogByKey(toolKey: string): Promise<ToolCatalogRow | null> {
+    return (this.d.prepare('SELECT * FROM tool_catalog WHERE tool_key = ?').get(toolKey) as ToolCatalogRow) ?? null;
   }
 
-  async updateToolConfig(id: string, fields: Partial<Omit<ToolConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+  async listToolConfigs(): Promise<ToolCatalogRow[]> {
+    return this.d.prepare('SELECT * FROM tool_catalog ORDER BY category ASC, name ASC').all() as ToolCatalogRow[];
+  }
+
+  async listEnabledToolCatalog(): Promise<ToolCatalogRow[]> {
+    return this.d.prepare('SELECT * FROM tool_catalog WHERE enabled = 1 AND source = \'builtin\' ORDER BY category ASC, name ASC').all() as ToolCatalogRow[];
+  }
+
+  async updateToolConfig(id: string, fields: Partial<Omit<ToolCatalogRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
     const sets: string[] = [];
     const vals: unknown[] = [];
     for (const [k, v] of Object.entries(fields)) {
@@ -1123,11 +1136,11 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (sets.length === 0) return;
     sets.push("updated_at = datetime('now')");
     vals.push(id);
-    this.d.prepare(`UPDATE tool_configs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+    this.d.prepare(`UPDATE tool_catalog SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
   }
 
   async deleteToolConfig(id: string): Promise<void> {
-    this.d.prepare('DELETE FROM tool_configs WHERE id = ?').run(id);
+    this.d.prepare('DELETE FROM tool_catalog WHERE id = ?').run(id);
   }
 
   // ─── Admin: Skills ─────────────────────────────────────────
@@ -2932,32 +2945,56 @@ export class SQLiteAdapter implements DatabaseAdapter {
     for (const w of workflows) await this.createWorkflowDef(w);
     }
 
-    // Tool configs
-    if (cnt('tool_configs') === 0) {
-    const tools: Omit<ToolConfigRow, 'created_at' | 'updated_at'>[] = [
+    // Tool catalog
+    if (cnt('tool_catalog') === 0) {
+    const tools: Omit<ToolCatalogRow, 'created_at' | 'updated_at'>[] = [
       {
-        id: 'a7bd3e9f-9b1b-4aa6-9520-8f5fb194a5e3', name: 'Web Search', description: 'Search the web for current information',
-        category: 'retrieval', risk_level: 'low', requires_approval: 0, max_execution_ms: 10000, rate_limit_per_min: 30, enabled: 1,
+        id: 'a7bd3e9f-9b1b-4aa6-9520-8f5fb194a5e3', name: 'Web Search',
+        description: 'Search the web for current information using the configured search provider.',
+        category: 'retrieval', risk_level: 'read-only', requires_approval: 0,
+        max_execution_ms: 10000, rate_limit_per_min: 30, enabled: 1,
+        tool_key: 'web_search', version: '1.0', side_effects: 0,
+        tags: JSON.stringify(['search', 'retrieval', 'web']), source: 'builtin', credential_id: null,
       },
       {
-        id: '8e6c2528-f5a0-4d5a-a719-b60cc660f353', name: 'Code Execution', description: 'Execute code in a sandboxed environment',
-        category: 'compute', risk_level: 'high', requires_approval: 1, max_execution_ms: 30000, rate_limit_per_min: 10, enabled: 1,
+        id: '8e6c2528-f5a0-4d5a-a719-b60cc660f353', name: 'Code Execution',
+        description: 'Execute code snippets in a sandboxed environment via the Cloud Sandbox Engine.',
+        category: 'compute', risk_level: 'external-side-effect', requires_approval: 1,
+        max_execution_ms: 30000, rate_limit_per_min: 10, enabled: 1,
+        tool_key: 'cse_run_code', version: '1.0', side_effects: 1,
+        tags: JSON.stringify(['code', 'compute', 'sandbox']), source: 'builtin', credential_id: null,
       },
       {
-        id: 'bca36e31-bf3b-4761-89ba-0f1edecf22cf', name: 'File Reader', description: 'Read files from allowed directories',
-        category: 'filesystem', risk_level: 'medium', requires_approval: 0, max_execution_ms: 5000, rate_limit_per_min: 60, enabled: 1,
+        id: 'bca36e31-bf3b-4761-89ba-0f1edecf22cf', name: 'File Reader',
+        description: 'Read files from allowed directories on the server filesystem.',
+        category: 'filesystem', risk_level: 'read-only', requires_approval: 0,
+        max_execution_ms: 5000, rate_limit_per_min: 60, enabled: 1,
+        tool_key: 'file_reader', version: '1.0', side_effects: 0,
+        tags: JSON.stringify(['filesystem', 'read']), source: 'builtin', credential_id: null,
       },
       {
-        id: '9bbd1c34-35a1-442f-b2bb-d5d6f568f57a', name: 'Database Query', description: 'Run read-only SQL queries against configured databases',
-        category: 'data', risk_level: 'medium', requires_approval: 0, max_execution_ms: 15000, rate_limit_per_min: 20, enabled: 1,
+        id: '9bbd1c34-35a1-442f-b2bb-d5d6f568f57a', name: 'Database Query',
+        description: 'Run read-only SQL queries against configured databases.',
+        category: 'data', risk_level: 'read-only', requires_approval: 0,
+        max_execution_ms: 15000, rate_limit_per_min: 20, enabled: 1,
+        tool_key: 'database_query', version: '1.0', side_effects: 0,
+        tags: JSON.stringify(['database', 'sql', 'read']), source: 'builtin', credential_id: null,
       },
       {
-        id: '31755606-4e34-44be-a101-cee78d49f6e1', name: 'API Caller', description: 'Make HTTP requests to whitelisted endpoints',
-        category: 'integration', risk_level: 'medium', requires_approval: 0, max_execution_ms: 20000, rate_limit_per_min: 15, enabled: 1,
+        id: '31755606-4e34-44be-a101-cee78d49f6e1', name: 'API Caller',
+        description: 'Make HTTP requests to allowlisted external endpoints.',
+        category: 'integration', risk_level: 'external-side-effect', requires_approval: 0,
+        max_execution_ms: 20000, rate_limit_per_min: 15, enabled: 1,
+        tool_key: 'api_caller', version: '1.0', side_effects: 1,
+        tags: JSON.stringify(['http', 'api', 'integration']), source: 'builtin', credential_id: null,
       },
       {
-        id: '220dd56e-5c1c-4dad-93c8-befa5d7588f5', name: 'Stats NZ (Aotearoa Data Explorer)', description: 'Query official New Zealand statistics — population, census, GDP, trade, housing, labour, and more via the Stats NZ ADE SDMX API',
-        category: 'data', risk_level: 'low', requires_approval: 0, max_execution_ms: 30000, rate_limit_per_min: 20, enabled: 1,
+        id: '220dd56e-5c1c-4dad-93c8-befa5d7588f5', name: 'Stats NZ (Aotearoa Data Explorer)',
+        description: 'Query official New Zealand statistics — population, census, GDP, trade, housing, labour, and more via the Stats NZ ADE SDMX API.',
+        category: 'data', risk_level: 'read-only', requires_approval: 0,
+        max_execution_ms: 30000, rate_limit_per_min: 20, enabled: 1,
+        tool_key: 'statsnz_get_data', version: '1.0', side_effects: 0,
+        tags: JSON.stringify(['statistics', 'new-zealand', 'data']), source: 'builtin', credential_id: null,
       },
     ];
     for (const t of tools) await this.createToolConfig(t);
