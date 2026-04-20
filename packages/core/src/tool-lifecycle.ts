@@ -139,7 +139,8 @@ export type ToolAuditOutcome =
   | 'denied_rate_limit'
   | 'denied_approval'
   | 'timeout'
-  | 'circuit_open';
+  | 'circuit_open'
+  | 'simulation';
 
 export interface ToolAuditEvent {
   toolName: string;

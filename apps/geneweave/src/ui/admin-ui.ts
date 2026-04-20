@@ -3,6 +3,7 @@ import { h } from './dom.js';
 import { state } from './state.js';
 import { normalizeAdminPath } from './prompt-wizard-utils.js';
 import { resetPromptWizard } from './prompt-wizard-state.js';
+import { renderToolSimulationView } from './tool-simulation-ui.js';
 
 // ── Admin deep-link URL helpers ───────────────────────────────────────────────
 // Hash format:  #admin/{tab}          → opens the tab's list view
@@ -697,6 +698,13 @@ export function renderAdminView(options: {
         () => { void adminDeleteRow(currentTab, state.adminForm as any, options.render, options.loadAdmin); },
       )));
     }
+    page.appendChild(right);
+    return page;
+  }
+
+  // Custom views (e.g. Tool Simulation step-through UI)
+  if (schema?.customView === 'tool-simulation') {
+    right.appendChild(renderToolSimulationView({ render: options.render }));
     page.appendChild(right);
     return page;
   }

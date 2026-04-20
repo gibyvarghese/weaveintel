@@ -139,4 +139,11 @@ export const CALLABLE_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
     ],
   },
+  'tool-simulation': {
+    singular: 'Tool Simulation', apiPath: 'admin/tool-simulation', listKey: 'tools',
+    cols: ['name', 'source', 'description'],
+    fields: [],
+    readOnly: true,
+    customView: 'tool-simulation',
+  },
 };

@@ -35,6 +35,8 @@ export interface AdminTabDef {
   cols: string[];
   fields: AdminFieldDef[];
   readOnly?: boolean;
+  /** When set, the admin UI renders a custom view component instead of standard CRUD. */
+  customView?: string;
 }
 
 export interface AdminTabGroup {

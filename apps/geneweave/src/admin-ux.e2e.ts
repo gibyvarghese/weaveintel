@@ -7,6 +7,7 @@ const ADMIN_TAB_GROUPS: Record<string, string> = {
   prompts: 'Prompt Studio',
   guardrails: 'Governance',
   routing: 'Orchestration',
+  'tool-simulation': 'Orchestration',
 };
 
 async function registerAndEnter(page: Page, email?: string) {
@@ -152,5 +153,54 @@ test.describe('Admin UX Regression', () => {
     expect(updated).toContain(`{{>${fragmentKey!}}}`);
     expect(updated.startsWith('Alpha ')).toBeTruthy();
     expect(updated.endsWith('Beta Gamma')).toBeTruthy();
+  });
+
+  test('tool-simulation tab is accessible and renders custom UI', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+
+    const m = page.locator('.main');
+    await openAdminTab(page, 'tool-simulation');
+
+    // Custom view should be rendered — no standard admin-list-panel
+    await expect(m.locator('.admin-list-panel')).toHaveCount(0);
+
+    // Simulation container heading is visible
+    await expect(m.locator('.sim-container')).toBeVisible({ timeout: 5000 });
+
+    // Tool select dropdown is rendered once tools are loaded
+    await expect(m.locator('select')).toBeVisible({ timeout: 5000 });
+
+    // Dry run and run buttons are present
+    await expect(m.locator('button', { hasText: 'Dry Run' })).toBeVisible({ timeout: 5000 });
+    await expect(m.locator('button', { hasText: 'Run Simulation' })).toBeVisible({ timeout: 5000 });
+  });
+
+  test('tool-simulation dry run shows policy trace', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+
+    const m = page.locator('.main');
+    await openAdminTab(page, 'tool-simulation');
+
+    // Wait for tool select to be populated
+    const toolSelect = m.locator('select').first();
+    await expect(toolSelect).toBeVisible({ timeout: 5000 });
+    await toolSelect.waitFor({ state: 'attached' });
+
+    // Ensure a tool is selected (calculator should be in list)
+    const options = toolSelect.locator('option');
+    const optionCount = await options.count();
+    test.skip(optionCount < 2, 'No tools loaded in simulation tab.');
+
+    await toolSelect.selectOption({ index: 1 });
+
+    // Click Dry Run
+    await m.locator('button', { hasText: 'Dry Run' }).click();
+
+    // Policy trace should appear
+    await expect(m.locator('.sim-policy-trace')).toBeVisible({ timeout: 8000 });
+    const traceEntries = m.locator('.sim-trace-entry');
+    await expect(traceEntries.first()).toBeVisible({ timeout: 3000 });
   });
 });

@@ -1993,3 +1993,112 @@ describeAdmin('Admin Validation Rules', () => {
     expect(data['ok']).toBe(true);
   });
 });
+
+// ─── Tool Simulation API (Phase 5) ─────────────────────────
+
+describeAdmin('Tool Simulation API', () => {
+  it('lists tools available for simulation', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status, data } = await api('GET', '/api/admin/tool-simulation/tools');
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    if (status === 403) { expect(typeof data['error']).toBe('string'); return; }
+    expect(status).toBe(200);
+    const tools = data['tools'] as Array<Record<string, unknown>>;
+    expect(Array.isArray(tools)).toBe(true);
+    // At least calculator should be present as a builtin
+    const hasTool = tools.some(t => t['source'] === 'builtin');
+    expect(hasTool).toBe(true);
+    // Each tool entry has expected fields
+    if (tools.length > 0) {
+      const first = tools[0]!;
+      expect(typeof first['key']).toBe('string');
+      expect(typeof first['name']).toBe('string');
+      expect(typeof first['description']).toBe('string');
+    }
+  });
+
+  it('returns 401 on tool list when unauthenticated', async () => {
+    const res = await fetch(`${BASE_URL}/api/admin/tool-simulation/tools`, { method: 'GET' });
+    expect(res.status).toBe(401);
+  });
+
+  it('runs a dry-run simulation returning policy trace without execution', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status, data } = await api('POST', '/api/admin/tool-simulation', {
+      toolName: 'calculator',
+      inputJson: '{"expression":"1+1"}',
+      dryRun: true,
+    });
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    if (status === 403) { expect(typeof data['error']).toBe('string'); return; }
+    expect(status).toBe(200);
+    expect(data['simulationId']).toBeDefined();
+    expect(data['toolName']).toBe('calculator');
+    expect(data['dryRun']).toBe(true);
+    expect(Array.isArray(data['policyTrace'])).toBe(true);
+    const trace = data['policyTrace'] as Array<Record<string, unknown>>;
+    const steps = trace.map(e => e['step']);
+    expect(steps).toContain('enabled_check');
+    expect(steps).toContain('risk_level_gate');
+    expect(data['result']).toBeUndefined();
+    expect(typeof data['durationMs']).toBe('number');
+  });
+
+  it('runs a full simulation and returns execution result', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status, data } = await api('POST', '/api/admin/tool-simulation', {
+      toolName: 'calculator',
+      inputJson: '{"expression":"2*3"}',
+      dryRun: false,
+    });
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    if (status === 403) { expect(typeof data['error']).toBe('string'); return; }
+    expect(status).toBe(200);
+    expect(data['toolName']).toBe('calculator');
+    expect(data['allowed']).toBe(true);
+    // Result is present for a full run
+    expect(data['result']).toBeDefined();
+    const result = data['result'] as Record<string, unknown>;
+    expect(typeof result['content']).toBe('string');
+  });
+
+  it('returns 400 when toolName is missing', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status } = await api('POST', '/api/admin/tool-simulation', {
+      inputJson: '{}',
+    });
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    if (status === 403) { expect(status).toBe(403); return; }
+    expect(status).toBe(400);
+  });
+
+  it('returns 400 when inputJson is invalid JSON', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status } = await api('POST', '/api/admin/tool-simulation', {
+      toolName: 'calculator',
+      inputJson: 'not-valid-json',
+    });
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    if (status === 403) { expect(status).toBe(403); return; }
+    expect(status).toBe(400);
+  });
+
+  it('policy trace includes all expected steps for enabled tool', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status, data } = await api('POST', '/api/admin/tool-simulation', {
+      toolName: 'calculator',
+      inputJson: '{"expression":"5+5"}',
+      dryRun: true,
+    });
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    if (status === 403) { expect(typeof data['error']).toBe('string'); return; }
+    expect(status).toBe(200);
+    const trace = data['policyTrace'] as Array<Record<string, unknown>>;
+    expect(trace.length).toBeGreaterThanOrEqual(4);
+    const steps = trace.map(e => e['step']);
+    expect(steps).toContain('enabled_check');
+    expect(steps).toContain('risk_level_gate');
+    expect(steps).toContain('approval_gate');
+    expect(steps).toContain('rate_limit');
+  });
+});

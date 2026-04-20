@@ -6,6 +6,8 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 
 ## Latest Development (April 2026)
 
+- **Phase 5 Tool Simulation + Test Harness** — Admin operators can now dry-run or live-simulate any registered tool directly from the geneWeave admin dashboard without starting a chat session. Full policy trace (enabled check → risk gate → approval → rate limit) is returned on every request. See [Tool Platform (Phase 5)](#tool-platform-phase-5) below.
+  - New example: [examples/33-tool-simulation-harness.ts](examples/33-tool-simulation-harness.ts)
 - geneWeave app moved from packages to apps: [apps/geneweave](apps/geneweave)
 - New reusable Stats NZ MCP package: [packages/mcp-statsnz](packages/mcp-statsnz)
   - Generic MCP runtime stays in [packages/mcp-server](packages/mcp-server)

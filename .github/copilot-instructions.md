@@ -145,6 +145,21 @@
 - Start with `defaultPromptStrategyRegistry`, then layer DB-defined strategies for app/tenant-specific behavior.
 - GeneWeave DB: `prompt_strategies` table; admin CRUD at `/api/admin/prompt-strategies`.
 
+## Tool Platform (Phase 5 complete — Tool Simulation + Test Harness)
+- Admin operators can run dry-run or live simulations of any registered tool without starting a real chat session.
+- `GET /api/admin/tool-simulation/tools` — lists BUILTIN_TOOLS + enabled catalog entries for simulation selection.
+- `POST /api/admin/tool-simulation` — accepts `{ toolName, inputJson, dryRun?, chatContext?, agentPersona?, skillPolicyKey? }`. Returns `{ simulationId, auditEventId, toolName, dryRun, policy, policyTrace, allowed, violationReason?, result?, durationMs }`.
+- `policyTrace` is `Array<{ step: string, passed: boolean, detail: string }>` with steps: `enabled_check → risk_level_gate → approval_gate → rate_limit → [execute]`.
+- On dry-run, the full policy trace is returned but execution is skipped and `result` is omitted from response.
+- On live run, execution is attempted (may call real tool) and `result.content` contains the tool output string.
+- All simulation invocations emit an audit event with `outcome: 'simulation'` — best-effort, non-blocking.
+- `ToolAuditOutcome` in `@weaveintel/core` now includes `'simulation'` as a valid value.
+- `AdminTabDef` in `@weaveintel/core` now has `customView?: string` — set `customView: 'tool-simulation'` to bypass standard CRUD list/form and render a custom UI component.
+- Custom view injection pattern in `renderAdminView`: check `schema?.customView === 'tool-simulation'` before the `showEditor` block, then `appendChild(renderToolSimulationView(...))`.
+- `tool-simulation` tab is under Orchestration group in admin sidebar; `readOnly: true, customView: 'tool-simulation'` in tab schema.
+- Source files: `apps/geneweave/src/admin/api/tool-simulation.ts` (API routes), `apps/geneweave/src/ui/tool-simulation-ui.ts` (custom admin UI component).
+- API tests: `describeAdmin('Tool Simulation API', ...)` in `api.test.ts`; E2E: two Playwright tests in `admin-ux.e2e.ts`.
+
 ## Phase 5 Prompt Capabilities (`@weaveintel/prompts` + GeneWeave)
 
 ### Prompt Version & Experiment Resolution (Grounding Runtime)

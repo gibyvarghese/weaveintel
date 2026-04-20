@@ -12,5 +12,6 @@ export { registerToolPolicyRoutes } from './tool-policies.js';
 export { registerToolAuditRoutes } from './tool-audit.js';
 export { registerToolHealthRoutes } from './tool-health.js';
 export { registerToolCredentialRoutes } from './tool-credentials.js';
+export { registerToolSimulationRoutes } from './tool-simulation.js';
 export { registerSkillRoutes } from './skills.js';
 export { registerWorkerAgentRoutes } from './worker-agents.js';
