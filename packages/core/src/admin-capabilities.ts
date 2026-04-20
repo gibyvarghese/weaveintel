@@ -24,6 +24,8 @@ export interface AdminFieldDef {
   type?: 'checkbox' | 'number';
   save?: AdminFieldSaveTransform;
   default?: unknown;
+  /** When true the field is displayed read-only in the admin form (no editable input). */
+  readonly?: boolean;
 }
 
 export interface AdminTabDef {

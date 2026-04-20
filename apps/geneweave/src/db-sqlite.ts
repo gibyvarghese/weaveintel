@@ -1214,6 +1214,115 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return true;
   }
 
+  // ─── Phase 3: Tool Audit Events ──────────────────────────────
+
+  async insertToolAuditEvent(event: Omit<import('./db-types.js').ToolAuditEventRow, 'created_at'>): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO tool_audit_events
+        (id, tool_name, chat_id, user_id, agent_persona, skill_key, policy_id, outcome,
+         violation_reason, duration_ms, input_preview, output_preview, error_message, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      event.id,
+      event.tool_name,
+      event.chat_id ?? null,
+      event.user_id ?? null,
+      event.agent_persona ?? null,
+      event.skill_key ?? null,
+      event.policy_id ?? null,
+      event.outcome,
+      event.violation_reason ?? null,
+      event.duration_ms ?? null,
+      event.input_preview ?? null,
+      event.output_preview ?? null,
+      event.error_message ?? null,
+      event.metadata ?? null,
+    );
+  }
+
+  async listToolAuditEvents(filters?: {
+    toolName?: string;
+    chatId?: string;
+    outcome?: string;
+    afterIso?: string;
+    beforeIso?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<import('./db-types.js').ToolAuditEventRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (filters?.toolName) { where.push('tool_name = ?'); params.push(filters.toolName); }
+    if (filters?.chatId)   { where.push('chat_id = ?');   params.push(filters.chatId); }
+    if (filters?.outcome)  { where.push('outcome = ?');   params.push(filters.outcome); }
+    if (filters?.afterIso) { where.push('created_at >= ?'); params.push(filters.afterIso); }
+    if (filters?.beforeIso){ where.push('created_at <= ?'); params.push(filters.beforeIso); }
+    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const limit  = filters?.limit  ?? 100;
+    const offset = filters?.offset ?? 0;
+    params.push(limit, offset);
+    return this.d.prepare(
+      `SELECT * FROM tool_audit_events ${clause} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    ).all(...params) as import('./db-types.js').ToolAuditEventRow[];
+  }
+
+  async getToolAuditEvent(id: string): Promise<import('./db-types.js').ToolAuditEventRow | null> {
+    return (this.d.prepare('SELECT * FROM tool_audit_events WHERE id = ?').get(id) as
+      import('./db-types.js').ToolAuditEventRow | undefined) ?? null;
+  }
+
+  // ─── Phase 3: Tool Health Snapshots ──────────────────────────
+
+  async insertToolHealthSnapshot(snapshot: Omit<import('./db-types.js').ToolHealthSnapshotRow, 'created_at'>): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO tool_health_snapshots
+        (id, tool_name, snapshot_at, invocation_count, success_count, error_count, denied_count,
+         avg_duration_ms, p95_duration_ms, error_rate, availability)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      snapshot.id,
+      snapshot.tool_name,
+      snapshot.snapshot_at,
+      snapshot.invocation_count,
+      snapshot.success_count,
+      snapshot.error_count,
+      snapshot.denied_count,
+      snapshot.avg_duration_ms ?? null,
+      snapshot.p95_duration_ms ?? null,
+      snapshot.error_rate,
+      snapshot.availability,
+    );
+  }
+
+  async listToolHealthSnapshots(toolName: string, limit = 48): Promise<import('./db-types.js').ToolHealthSnapshotRow[]> {
+    return this.d.prepare(
+      'SELECT * FROM tool_health_snapshots WHERE tool_name = ? ORDER BY snapshot_at DESC LIMIT ?',
+    ).all(toolName, limit) as import('./db-types.js').ToolHealthSnapshotRow[];
+  }
+
+  async getToolHealthSummary(sinceIso?: string): Promise<import('./db-types.js').ToolHealthSummary[]> {
+    const since = sinceIso ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    return this.d.prepare(`
+      SELECT
+        tool_name,
+        COUNT(*)                                                         AS total_invocations,
+        SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END)            AS success_count,
+        SUM(CASE WHEN outcome = 'error' OR outcome = 'timeout' THEN 1 ELSE 0 END) AS error_count,
+        SUM(CASE WHEN outcome LIKE 'denied%' OR outcome = 'circuit_open' THEN 1 ELSE 0 END) AS denied_count,
+        AVG(CASE WHEN duration_ms IS NOT NULL THEN CAST(duration_ms AS REAL) END) AS avg_duration_ms,
+        CAST(
+          SUM(CASE WHEN outcome = 'error' OR outcome = 'timeout' THEN 1 ELSE 0 END) AS REAL
+        ) / MAX(COUNT(*), 1)                                             AS error_rate,
+        CAST(
+          SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS REAL
+        ) / MAX(COUNT(*), 1)                                             AS availability,
+        MAX(created_at)                                                  AS last_invoked_at
+      FROM tool_audit_events
+      WHERE created_at >= ?
+      GROUP BY tool_name
+      ORDER BY total_invocations DESC
+    `).all(since) as import('./db-types.js').ToolHealthSummary[];
+  }
+
   // ─── Admin: Skills ─────────────────────────────────────────
 
   async createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void> {

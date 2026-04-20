@@ -29,6 +29,7 @@ import { ChatEngine, type ProviderConfig } from './chat.js';
 import { createGeneWeaveServer } from './server.js';
 import { syncModelPricing, type PricingSyncReport } from './pricing-sync.js';
 import { syncToolCatalog } from './tools.js';
+import { startToolHealthJob } from './tool-health-job.js';
 
 export type { PricingSyncReport };
 
@@ -118,6 +119,9 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
   // 4. Sync BUILTIN_TOOLS into tool_catalog so operators can manage them
   await syncToolCatalog(db);
+
+  // 5. Start background tool health snapshot job (writes every 15 min)
+  startToolHealthJob(db);
 
   // 5. HTTP server
   const server = createGeneWeaveServer({

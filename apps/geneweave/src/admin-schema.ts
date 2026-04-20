@@ -39,6 +39,8 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'worker-agents', label: 'Agents' },
     { key: 'tool-catalog', label: 'Tool Catalog' },
     { key: 'tool-policies', label: 'Tool Policies' },
+    { key: 'tool-audit', label: 'Tool Audit' },
+    { key: 'tool-health', label: 'Tool Health' },
     { key: 'workflows', label: 'Workflows' },
     { key: 'routing', label: 'Routing' },
     { key: 'task-policies', label: 'Task Policies' },

@@ -36,12 +36,12 @@
 - `ToolPolicyResolver` interface (in `@weaveintel/tools`) is the contract for looking up the effective policy for a tool at runtime. GeneWeave supplies `DbToolPolicyResolver` backed by the `tool_policies` SQLite table.
 - `createPolicyEnforcedRegistry(registry, opts)` (in `@weaveintel/tools`) wraps every tool in the registry with an enforcement sequence: enabled check → circuit breaker → risk level gate → approval gate → rate limit → execute with timeout → audit emit.
 - `createToolRegistry()` in `tools.ts` accepts `policyResolver`, `auditEmitter`, and `rateLimiter` in `ToolRegistryOptions`. When a `policyResolver` is provided the returned registry is policy-enforced automatically.
-- `ChatEngine` constructor wires `DbToolPolicyResolver`, `DbToolRateLimiter`, and `consoleAuditEmitter` into `this.toolOptions` so all tool invocations are policy-gated end-to-end.
+- `ChatEngine` constructor wires `DbToolPolicyResolver`, `DbToolRateLimiter`, and `DbToolAuditEmitter` into `this.toolOptions` so all tool invocations are policy-gated and persistently audited end-to-end.
 - Rate limiting uses `tool_rate_limit_buckets` with 1-minute tumbling windows. `checkAndIncrementRateLimit()` on `DatabaseAdapter` is atomic (INSERT OR IGNORE + UPDATE within the same window row).
 - `EffectiveToolPolicy.source` values are: `'default'` | `'global_policy'` | `'skill_override'` | `'persona_override'`. Skill-level overrides are passed via `skillPolicyKey` in `PolicyResolutionContext`.
-- Audit events are emitted via `ToolAuditEmitter`. The current emitter is `consoleAuditEmitter` (stderr warnings on non-success). A DB-backed emitter should be wired in Phase 3 when a `tool_audit_events` table is added.
+- Audit events are emitted via `ToolAuditEmitter`. GeneWeave uses `DbToolAuditEmitter` (persists every invocation to `tool_audit_events`). The legacy `consoleAuditEmitter` is no longer wired in production.
 - `ToolPolicyRow` and `ToolRateLimitBucketRow` are exported from `@weaveintel/geneweave` `db-types.ts`. All `tool_policies` rows use UUID primary keys.
-- Phase 3 (Tool Audit Trail + per-tool DB emitter): named `tool_audit_events` table, `DbToolAuditEmitter`, dashboard in admin Observability group. Implement in `@weaveintel/tools` package first.
+- Phase 3 (Tool Audit Trail + Health Persistence) is **complete**. See the section below for the full Phase 3 contract.
 
 ## Cross-Cutting Requirements
 - Reuse shared observability and evaluation hooks for new AI capabilities instead of creating app-only telemetry paths.
@@ -112,6 +112,17 @@
 ### chat.ts Fragment Integration
 - GeneWeave `chat.ts` loads enabled DB fragments before rendering a DB-backed system prompt and calls `resolveFragments()` to expand `{{>key}}` markers.
 - Fragment expansion failure is non-fatal — the raw template is used as fallback.
+
+## Tool Platform (Phase 3 complete — Tool Audit Trail + Health Persistence)
+- Every tool invocation is persisted to `tool_audit_events` (UUID PK, all `ToolAuditOutcome` values, duration_ms, chat/user/agent context, input/output previews, error message, policy_id).
+- `DbToolAuditEmitter implements ToolAuditEmitter` (in `apps/geneweave/src/tool-audit-emitter.ts`) wraps `db.insertToolAuditEvent()` — best-effort, never throws, maps camelCase→snake_case, generates UUID via `randomUUID()`.
+- `startToolHealthJob(db)` (in `apps/geneweave/src/tool-health-job.ts`) runs every 15 minutes via `setInterval` (`.unref()` for clean shutdown), queries the last window of audit events, groups by `tool_name`, computes `success_count`, `error_count`, `denied_count`, `avg_duration_ms`, `p95_duration_ms` (in-process percentile), `error_rate`, `availability`, and writes one `tool_health_snapshots` row per tool.
+- `tool_health_snapshots` table stores historical point-in-time snapshots per tool per window for trend analysis.
+- Admin API path for audit log is `/api/admin/tool-audit` (GET list with `tool_name`, `chat_id`, `outcome`, `after`, `before`, `limit`, `offset` filters; GET by ID). Append-only — no mutations exposed.
+- Admin API path for health is `/api/admin/tool-health` (GET live 24h summary via SQL aggregation; GET `/api/admin/tool-health/:toolName/snapshots` for historical snapshots).
+- Both tabs use `readOnly: true` in `AdminTabDef` (no Create/Edit/Delete UI rendered). `AdminFieldDef` now supports `readonly?: boolean` for individual field display.
+- `ToolAuditEventRow` and `ToolHealthSnapshotRow` are exported from `@weaveintel/geneweave` `db-types.ts`. All `tool_audit_events` rows use UUID primary keys.
+- Startup sequence in `index.ts`: `seedDefaultData()` → `syncToolCatalog(db)` → `startToolHealthJob(db)` → HTTP server listen.
 
 ## Phase 4 Prompt Capabilities (`@weaveintel/prompts`)
 

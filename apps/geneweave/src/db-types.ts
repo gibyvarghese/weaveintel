@@ -481,6 +481,53 @@ export interface ToolRateLimitBucketRow {
   count: number;
 }
 
+// ─── Phase 3: Audit + Health ──────────────────────────────────
+
+export interface ToolAuditEventRow {
+  id: string;
+  tool_name: string;
+  chat_id: string | null;
+  user_id: string | null;
+  agent_persona: string | null;
+  skill_key: string | null;
+  policy_id: string | null;
+  outcome: string;             // ToolAuditOutcome
+  violation_reason: string | null;
+  duration_ms: number | null;
+  input_preview: string | null;
+  output_preview: string | null;
+  error_message: string | null;
+  metadata: string | null;     // JSON
+  created_at: string;
+}
+
+export interface ToolHealthSnapshotRow {
+  id: string;
+  tool_name: string;
+  snapshot_at: string;
+  invocation_count: number;
+  success_count: number;
+  error_count: number;
+  denied_count: number;
+  avg_duration_ms: number | null;
+  p95_duration_ms: number | null;
+  error_rate: number;
+  availability: number;
+  created_at: string;
+}
+
+export interface ToolHealthSummary {
+  tool_name: string;
+  total_invocations: number;
+  success_count: number;
+  error_count: number;
+  denied_count: number;
+  avg_duration_ms: number | null;
+  error_rate: number;
+  availability: number;
+  last_invoked_at: string | null;
+}
+
 export interface SkillRow {
   id: string;
   name: string;
@@ -1317,6 +1364,30 @@ export interface DatabaseAdapter {
   deleteToolPolicy(id: string): Promise<void>;
   /** Rate limiting: check window count and increment if within limit. Returns true if allowed. */
   checkAndIncrementRateLimit(toolName: string, scopeKey: string, windowStartIso: string, limitPerMinute: number): Promise<boolean>;
+
+  // ─── Phase 3: Tool Audit Events ─────────────────────────────
+  /** Append-only insert for audit trail. */
+  insertToolAuditEvent(event: Omit<ToolAuditEventRow, 'created_at'>): Promise<void>;
+  /** List audit events with optional filters (all filters are AND-combined). */
+  listToolAuditEvents(filters?: {
+    toolName?: string;
+    chatId?: string;
+    outcome?: string;
+    afterIso?: string;
+    beforeIso?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<ToolAuditEventRow[]>;
+  /** Get a single audit event by ID. */
+  getToolAuditEvent(id: string): Promise<ToolAuditEventRow | null>;
+
+  // ─── Phase 3: Tool Health Snapshots ─────────────────────────
+  /** Insert a point-in-time health snapshot (written by background job). */
+  insertToolHealthSnapshot(snapshot: Omit<ToolHealthSnapshotRow, 'created_at'>): Promise<void>;
+  /** Get snapshots for a tool (up to limit, newest first). */
+  listToolHealthSnapshots(toolName: string, limit?: number): Promise<ToolHealthSnapshotRow[]>;
+  /** Get live health summary per tool aggregated from audit events (last 24 h). */
+  getToolHealthSummary(sinceIso?: string): Promise<ToolHealthSummary[]>;
 
   // ─── Admin: Skills ─────────────────────────────────────────
   createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void>;

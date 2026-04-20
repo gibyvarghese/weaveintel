@@ -587,4 +587,49 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
        '["read-only"]',
        10000, 120, NULL, 0, 0, NULL, 1)
   `);
+
+  // Phase 3: Audit Trail + Health Persistence
+  // Immutable append-only log of every tool invocation.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tool_audit_events (
+      id TEXT PRIMARY KEY,
+      tool_name TEXT NOT NULL,
+      chat_id TEXT,
+      user_id TEXT,
+      agent_persona TEXT,
+      skill_key TEXT,
+      policy_id TEXT,
+      outcome TEXT NOT NULL,
+      violation_reason TEXT,
+      duration_ms INTEGER,
+      input_preview TEXT,
+      output_preview TEXT,
+      error_message TEXT,
+      metadata TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_audit_tool_name ON tool_audit_events(tool_name)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_audit_chat_id ON tool_audit_events(chat_id)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_audit_outcome ON tool_audit_events(outcome)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_audit_created_at ON tool_audit_events(created_at)`);
+
+  // Persisted health aggregates written every 15 minutes by the background health job.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tool_health_snapshots (
+      id TEXT PRIMARY KEY,
+      tool_name TEXT NOT NULL,
+      snapshot_at TEXT NOT NULL,
+      invocation_count INTEGER NOT NULL DEFAULT 0,
+      success_count INTEGER NOT NULL DEFAULT 0,
+      error_count INTEGER NOT NULL DEFAULT 0,
+      denied_count INTEGER NOT NULL DEFAULT 0,
+      avg_duration_ms REAL,
+      p95_duration_ms REAL,
+      error_rate REAL NOT NULL DEFAULT 0,
+      availability REAL NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_health_name_time ON tool_health_snapshots(tool_name, snapshot_at)`);
 }

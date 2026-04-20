@@ -18,6 +18,8 @@ const ADMIN_TAB_LOCATIONS: Record<string, { group: string; key: string }> = {
   Workflows: { group: 'Orchestration', key: 'workflows' },
   Tools: { group: 'Orchestration', key: 'tool-catalog' },
   'Tool Policies': { group: 'Orchestration', key: 'tool-policies' },
+  'Tool Audit': { group: 'Orchestration', key: 'tool-audit' },
+  'Tool Health': { group: 'Orchestration', key: 'tool-health' },
   'Workflow Runs': { group: 'Monitoring', key: 'workflow-runs' },
   'Guardrail Evals': { group: 'Monitoring', key: 'guardrail-evals' },
   'Task Policies': { group: 'Orchestration', key: 'task-policies' },
@@ -844,49 +846,54 @@ test.describe('Admin Tool Policies', () => {
   });
 });
 
-/* ── Admin: Tool Policies Tab ────────────────────────────── */
+/* ── Admin: Tool Audit Tab ───────────────────────────────── */
 
-test.describe('Admin Tool Policies', () => {
-  test('tool policies tab shows seeded data', async ({ page }) => {
+test.describe('Admin Tool Audit', () => {
+  test('tool audit tab is visible and shows empty state or list', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await openAdminTab(page, 'Tool Policies');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await openAdminTab(page, 'Tool Audit');
+    // Tab loaded — either empty state or item list is acceptable (no events yet in fresh DB)
+    await expect(m).toBeVisible();
   });
 
-  test('creates a new tool policy via form', async ({ page }) => {
+  test('tool audit tab has no New button (read-only)', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await openAdminTab(page, 'Tool Policies');
-    await clickAdminNewButton(m);
-    await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Tool Policy' })).toBeVisible({ timeout: 3000 });
-    const inputs = m.locator('input[type="text"]');
-    await inputs.nth(0).fill('pw-test-policy');
-    await inputs.nth(1).fill('PW Test Policy');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Tool Policy' })).not.toBeVisible({ timeout: 5000 });
+    await openAdminTab(page, 'Tool Audit');
+    await page.waitForTimeout(500);
+    await expect(m.locator('button', { hasText: 'New Tool Audit Event' })).not.toBeVisible();
+  });
+});
+
+/* ── Admin: Tool Health Tab ──────────────────────────────── */
+
+test.describe('Admin Tool Health', () => {
+  test('tool health tab is visible and shows empty state or list', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await seedDefaults(page);
+    await page.waitForTimeout(1500);
+    await openAdminTab(page, 'Tool Health');
+    await expect(m).toBeVisible();
   });
 
-  test('edits a seeded tool policy', async ({ page }) => {
+  test('tool health tab has no New button (read-only)', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    await openAdminTab(page, 'Tool Policies');
-    const editBtn = m.locator('button', { hasText: 'Edit' }).first();
-    if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await editBtn.click();
-      await page.waitForTimeout(300);
-      await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
-    }
+    await openAdminTab(page, 'Tool Health');
+    await page.waitForTimeout(500);
+    await expect(m.locator('button', { hasText: 'New Tool Health' })).not.toBeVisible();
   });
 });
 

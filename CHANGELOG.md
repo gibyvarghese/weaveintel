@@ -7,6 +7,24 @@ and this project adheres to [Fabric Versioning](VERSIONING.md).
 
 ---
 
+## [Unreleased]
+
+### GeneWeave — Tool Platform Phase 3: Audit Trail + Health Persistence
+
+- **`tool_audit_events` table** — Persists every tool invocation with UUID PK, outcome (`success` | `error` | `denied` | `timeout` | `circuit_open`), duration_ms, chat/user/agent context, input/output previews, error message, and policy_id.
+- **`DbToolAuditEmitter`** (`apps/geneweave/src/tool-audit-emitter.ts`) — Implements `ToolAuditEmitter`; wraps `db.insertToolAuditEvent()`, best-effort (never throws), generates UUID via `randomUUID()`.
+- **`ChatEngine` wiring** — `DbToolAuditEmitter` is now passed into `ToolRegistryOptions`; all tool invocations are persistently audited end-to-end.
+- **`tool_health_snapshots` table** — Stores point-in-time health snapshots per tool per 15-minute window for trend analysis.
+- **`startToolHealthJob(db)`** (`apps/geneweave/src/tool-health-job.ts`) — Background job that runs every 15 minutes; aggregates `success_count`, `error_count`, `denied_count`, `avg_duration_ms`, `p95_duration_ms`, `error_rate`, `availability` per tool and writes to `tool_health_snapshots`. Uses `.unref()` for clean shutdown.
+- **Admin API `/api/admin/tool-audit`** — Read-only GET list (filters: `tool_name`, `chat_id`, `outcome`, `after`, `before`, `limit`, `offset`) + GET by ID. Append-only; no mutations exposed.
+- **Admin API `/api/admin/tool-health`** — GET live 24h summary via SQL aggregation; GET `/api/admin/tool-health/:toolName/snapshots` for historical snapshots.
+- **Admin UI** — Two new read-only tabs under the Orchestration group: **Tool Audit** and **Tool Health** (no Create/Edit/Delete rendered).
+- **`AdminFieldDef.readonly`** — Added `readonly?: boolean` to the shared `AdminFieldDef` interface in `@weaveintel/core` to support per-field read-only display in admin forms.
+- **Startup sequence** — `seedDefaultData()` → `syncToolCatalog(db)` → `startToolHealthJob(db)` → HTTP server listen.
+- **4 new Playwright E2E tests** — Validate both read-only tabs are visible and have no New button.
+
+---
+
 ## [1.0.0] — Aertex — 2026-04-12
 
 First stable release of weaveIntel.

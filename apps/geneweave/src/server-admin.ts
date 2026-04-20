@@ -24,6 +24,8 @@ import type { AuthContext } from './auth.js';
 import {
   registerToolRoutes,
   registerToolPolicyRoutes,
+  registerToolAuditRoutes,
+  registerToolHealthRoutes,
   registerSkillRoutes,
   registerWorkerAgentRoutes,
   registerGuardrailRoutes,
@@ -1083,6 +1085,8 @@ export function registerAdminRoutes(
   registerComplianceRuleRoutes(router, db, adminHelpers);
   registerToolRoutes(router, db, adminHelpers);
   registerToolPolicyRoutes(router, db, adminHelpers);
+  registerToolAuditRoutes(router, db, adminHelpers);
+  registerToolHealthRoutes(router, db, adminHelpers);
   registerSkillRoutes(router, db, adminHelpers);
   registerWorkerAgentRoutes(router, db, adminHelpers);
 
