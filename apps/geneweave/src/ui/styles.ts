@@ -511,10 +511,10 @@ input{font-family:inherit;outline:none}
 .admin-list-panel{min-width:0}
 .admin-list-header{display:flex;align-items:center;justify-content:space-between;padding:20px 20px 0}
 .admin-list-header h3{margin:0;font-size:14px;color:var(--fg2);font-weight:600}
-.admin-list-toolbar{display:flex;align-items:center;gap:10px;padding:14px 20px 10px;flex-wrap:wrap}
-.admin-list-search-wrap{position:relative;flex:1;min-width:160px}
+.admin-list-toolbar{display:flex;align-items:center;gap:10px;padding:14px 20px 10px;flex-wrap:wrap;justify-content:flex-end}
+.admin-list-search-wrap{position:relative;width:200px;min-width:120px;flex:0 0 auto}
 .admin-list-search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--fg3);font-size:13px;pointer-events:none;line-height:1}
-.admin-list-search{width:100%;padding:8px 12px 8px 32px;border-radius:9px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg);font-size:13px;box-sizing:border-box}
+.admin-list-search{width:100%;padding:6px 10px 6px 28px;border-radius:9px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg);font-size:12px;box-sizing:border-box}
 .admin-list-search:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 18%, transparent)}
 .admin-list-groupby{padding:8px 10px;border-radius:9px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg);font-size:12px;cursor:pointer;white-space:nowrap}
 .admin-grouped-hint{font-size:11px;color:var(--accent2);background:var(--accent-dim);border:1px solid var(--accent);border-radius:7px;padding:4px 10px;white-space:nowrap;user-select:none}
