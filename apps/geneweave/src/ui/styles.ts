@@ -535,8 +535,11 @@ input{font-family:inherit;outline:none}
 .col-ctx-item.ctx-disabled{opacity:.38;cursor:default;pointer-events:none}
 .col-ctx-item.ctx-danger{color:#e05252}
 .col-ctx-item.ctx-danger:hover{background:color-mix(in oklab,#e05252 12%, var(--bg3))}
+.col-ctx-item.ctx-has-submenu{padding-right:10px}
 .ctx-icon{width:16px;text-align:center;font-size:12px;color:var(--fg3);flex-shrink:0}
 .col-ctx-item.ctx-active .ctx-icon{color:var(--accent2)}
+.ctx-caret{margin-left:auto;color:var(--fg3);font-size:12px;line-height:1}
+.col-ctx-submenu{min-width:170px;max-width:240px}
 .admin-list-footer{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-top:1px solid var(--bg4);background:var(--bg2);gap:12px;flex-wrap:wrap}
 .admin-list-info{font-size:12px;color:var(--fg3)}
 .admin-list-pagination{display:flex;align-items:center;gap:4px}
@@ -573,6 +576,24 @@ input{font-family:inherit;outline:none}
 .row-btn-del{color:#DC2626;border-color:#FCA5A5;background:#FEF2F2}
 .admin-data-row{cursor:pointer;transition:background .1s}
 .admin-data-row:hover td{background:color-mix(in oklab,var(--accent) 7%, transparent)}
+.admin-data-row-selected td{background:color-mix(in oklab,var(--accent) 16%, transparent)}
+.admin-data-row-selected:hover td{background:color-mix(in oklab,var(--accent) 20%, transparent)}
+.admin-col-mgr-btn{font-size:11px;padding:3px 10px;gap:5px}
+.admin-col-manager{background:var(--bg2);border:1px solid var(--bg4);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.35),0 2px 8px rgba(0,0,0,.18);padding:8px 0 6px;min-width:220px;max-width:300px;font-size:13px;animation:ctx-pop .12s ease}
+.admin-col-manager-header{display:flex;align-items:center;justify-content:space-between;padding:4px 14px 8px;border-bottom:1px solid var(--bg4);margin-bottom:4px;font-weight:600;color:var(--fg)}
+.admin-col-manager-reset{font-size:11px;padding:2px 8px;border-radius:6px;background:var(--bg3);border:1px solid var(--bg4);color:var(--fg3);cursor:pointer}
+.admin-col-manager-reset:hover{background:var(--bg4);color:var(--fg)}
+.admin-col-manager-section-label{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--fg3);padding:6px 14px 2px}
+.admin-col-manager-section-label-hidden{padding-top:10px;border-top:1px solid var(--bg4);margin-top:4px}
+.admin-col-manager-item{display:flex;align-items:center;gap:4px;padding:4px 10px 4px 14px;transition:background .1s}
+.admin-col-manager-item:hover{background:color-mix(in oklab,var(--accent) 8%, var(--bg3))}
+.admin-col-manager-item-hidden .admin-col-manager-name{color:var(--fg3)}
+.admin-col-manager-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg2)}
+.admin-col-manager-btn{font-size:12px;padding:1px 6px;border-radius:5px;background:var(--bg3);border:1px solid var(--bg4);color:var(--fg3);cursor:pointer;line-height:1.5;min-width:22px;text-align:center}
+.admin-col-manager-btn:hover:not(:disabled){background:var(--accent-dim);border-color:var(--accent);color:var(--accent2)}
+.admin-col-manager-btn:disabled{opacity:.3;cursor:default}
+.admin-col-manager-hide:hover:not(:disabled){background:color-mix(in oklab,#e05252 12%, var(--bg3));border-color:#e05252;color:#e05252}
+.admin-col-manager-add:hover:not(:disabled){background:color-mix(in oklab,var(--accent) 14%, var(--bg3));border-color:var(--accent);color:var(--accent2)}
 .admin-form-action-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--bg4)}
 .admin-form-title{font-size:15px;font-weight:700;color:var(--fg)}
 .admin-form-action-btns{display:flex;align-items:center;gap:8px}
@@ -584,12 +605,6 @@ input{font-family:inherit;outline:none}
 .admin-form-btn-delete:hover{background:#FEE2E2;border-color:#F87171}
 .admin-form-btn-share{color:var(--fg2);border-color:var(--bg4);background:var(--bg2)}
 .admin-form-btn-share:hover{background:var(--bg3);color:var(--fg)}
-/* Share column in list table */
-.admin-share-col-header{width:32px;min-width:32px;max-width:32px;padding:4px 2px;text-align:center}
-.admin-row-share-cell{width:32px;min-width:32px;max-width:32px;padding:2px;text-align:center;opacity:0;transition:opacity .12s}
-.admin-data-row:hover .admin-row-share-cell{opacity:1}
-.admin-row-share-btn{background:none;border:none;cursor:pointer;padding:2px 4px;border-radius:6px;font-size:13px;color:var(--fg3);line-height:1}
-.admin-row-share-btn:hover{background:var(--bg3);color:var(--fg)}
 /* Copied toast */
 .admin-share-toast{background:var(--bg3);color:var(--fg);border:1px solid var(--bg4);border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;pointer-events:none;white-space:nowrap;box-shadow:0 4px 12px rgba(0,0,0,.18);animation:admin-toast-in .15s ease}
 

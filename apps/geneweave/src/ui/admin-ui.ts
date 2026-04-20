@@ -49,6 +49,105 @@ function showCopiedToast(anchorEl: HTMLElement): void {
   setTimeout(() => toast.remove(), 1800);
 }
 
+function getRowSelectionId(row: any, schema: any): string {
+  const rawId = row?.id ?? row?.key ?? row?.[schema?.cols?.[0]];
+  return rawId == null ? '' : String(rawId);
+}
+
+  function getVisibleCols(tab: string, schemaCols: string[]): string[] {
+    const config: Record<string, string[]> = (state as any)._adminColConfig || {};
+    const saved = config[tab];
+    if (saved && saved.length > 0) return saved.filter((c: string) => schemaCols.includes(c));
+    return schemaCols.slice(0, 6);
+  }
+
+  function setVisibleCols(tab: string, newCols: string[], render: () => void): void {
+    const config: Record<string, string[]> = (state as any)._adminColConfig || {};
+    (state as any)._adminColConfig = { ...config, [tab]: newCols };
+    render();
+  }
+
+function getExportColumns(rows: any[], schema: any): string[] {
+  const schemaCols = Array.isArray(schema?.cols) ? schema.cols.map((c: any) => String(c)) : [];
+  if (schemaCols.length) return schemaCols;
+  const keys = new Set<string>();
+  rows.forEach((row) => Object.keys(row || {}).forEach((key) => keys.add(key)));
+  return Array.from(keys);
+}
+
+function getListableCols(schema: any): string[] {
+  const ordered = new Set<string>();
+  const schemaCols = Array.isArray(schema?.cols) ? schema.cols : [];
+  const fieldKeys = Array.isArray(schema?.fields) ? schema.fields.map((f: any) => f?.key) : [];
+
+  schemaCols.forEach((col: any) => {
+    const key = String(col || '').trim();
+    if (key) ordered.add(key);
+  });
+  fieldKeys.forEach((col: any) => {
+    const key = String(col || '').trim();
+    if (key) ordered.add(key);
+  });
+
+  return Array.from(ordered);
+}
+
+function toCsvCell(value: unknown): string {
+  if (value == null) return '';
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  const escaped = text.replace(/"/g, '""');
+  return `"${escaped}"`;
+}
+
+function buildCsv(rows: any[], columns: string[]): string {
+  const header = columns.map((col) => toCsvCell(col)).join(',');
+  const body = rows.map((row) => columns.map((col) => toCsvCell(row?.[col])).join(',')).join('\n');
+  return `${header}\n${body}`;
+}
+
+function buildXlsx(rows: any[], columns: string[], sheetName: string): ArrayBuffer {
+  const XLSX = (globalThis as any).XLSX as any;
+  const aoaData: string[][] = [columns, ...rows.map((row) =>
+    columns.map((col) => {
+      const v = row?.[col];
+      return typeof v === 'string' ? v : JSON.stringify(v ?? '');
+    })
+  )];
+  const ws = XLSX.utils.aoa_to_sheet(aoaData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, sheetName.slice(0, 31));
+  return XLSX.write(wb, { type: 'array', bookType: 'xlsx' }) as ArrayBuffer;
+}
+
+function downloadTextFile(filename: string, mimeType: string, content: string | ArrayBuffer): void {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function exportRows(rows: any[], schema: any, tab: string, format: 'json' | 'csv' | 'excel', scope: 'all' | 'selected' | 'record'): void {
+  const ts = new Date().toISOString().replace(/[:.]/g, '-');
+  const baseName = `${tab}-${scope}-${ts}`;
+  if (format === 'json') {
+    downloadTextFile(`${baseName}.json`, 'application/json', JSON.stringify(rows, null, 2));
+    return;
+  }
+  const columns = getExportColumns(rows, schema);
+  if (format === 'csv') {
+    const csv = buildCsv(rows, columns);
+    downloadTextFile(`${baseName}.csv`, 'text/csv', csv);
+    return;
+  }
+  const xlsx = buildXlsx(rows, columns, tab);
+  downloadTextFile(`${baseName}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xlsx);
+}
+
 // ── Natural-language search parser ───────────────────────────────────────────
 // Supports: AND / OR / NOT (case-insensitive keywords), quoted phrases, parens.
 // Plain space-separated terms are implicitly AND-joined for strict matching.
@@ -458,7 +557,7 @@ export function renderAdminForm(
               });
               showCopiedToast(e.currentTarget as HTMLElement);
             },
-          }, '🔗 Share')
+          }, '⤴ Share')
         : null,
       isEdit && !schema.readOnly && onDelete
         ? h('button', { className: 'admin-form-btn admin-form-btn-delete', onClick: onDelete }, 'Delete')
@@ -576,6 +675,8 @@ export function renderAdminView(options: {
     state.adminListGroupCollapsed = {};
     (state as any)._adminExcludeSearch = '';
     (state as any)._adminExcludeCol = '';
+    (state as any)._adminSelectedRowIds = [];
+    (state as any)._adminSelectionAnchor = null;
   }
 
   const page = h('div', { className: 'dash-view' },
@@ -600,8 +701,8 @@ export function renderAdminView(options: {
     return page;
   }
 
-  const searchCols = (schema?.cols || []) as string[];
-  const cols = searchCols.slice(0, 6) as string[];
+  const searchCols = getListableCols(schema);
+  const cols = getVisibleCols(currentTab, searchCols);
   const PAGE_SIZE = 25;
   const searchQuery = ((state.adminListSearch as string) || '').toLowerCase().trim();
   const sortCol: string | null = (state.adminListSortCol as string | null) || null;
@@ -609,6 +710,7 @@ export function renderAdminView(options: {
   const groupBy: string = (state.adminListGroupBy as string) || '';
   const currentPage: number = (state.adminListPage as number) || 1;
   const groupCollapsed: Record<string, boolean> = (state.adminListGroupCollapsed as Record<string, boolean>) || {};
+  const selectedIdSet = new Set<string>(((state as any)._adminSelectedRowIds || []).map((id: any) => String(id)));
 
   // 1. Filter
   const excludeVal: string = (state as any)._adminExcludeSearch || '';
@@ -656,6 +758,10 @@ export function renderAdminView(options: {
     });
     groupedRows = Array.from(groupMap.entries()).map(([groupKey, groupRows]) => ({ groupKey, rows: groupRows }));
   }
+
+  const visibleRowsForSelection = groupedRows
+    ? groupedRows.flatMap(({ groupKey, rows: groupRows }) => (groupCollapsed[groupKey] ? [] : groupRows))
+    : pagedRows;
 
   const content = h('div', { className: 'admin-content-grid' });
   const listPanel = h('div', { className: 'table-wrap admin-list-panel' });
@@ -720,6 +826,17 @@ export function renderAdminView(options: {
     )
   );
 
+  // Column manager button
+  if (schema) {
+    let colMgrBtn: HTMLElement;
+    colMgrBtn = h('button', {
+      className: 'nav-btn admin-col-mgr-btn',
+      title: 'Show, hide, or reorder table columns',
+      onClick: () => showColumnManager(colMgrBtn, currentTab, searchCols, cols, options.render),
+    }, '⊞ Columns');
+    (listPanel.querySelector('.admin-list-toolbar') as HTMLElement).appendChild(colMgrBtn);
+  }
+
   if (!schema) {
     listPanel.appendChild(h('div', { style: 'padding:16px;color:var(--fg3);' }, 'No schema for selected tab.'));
   } else if (!rows.length) {
@@ -747,7 +864,7 @@ export function renderAdminView(options: {
         },
         onContextmenu: (e: MouseEvent) => {
           e.preventDefault();
-          showColumnContextMenu(col, e.clientX, e.clientY, rows, filtered, options);
+           showColumnContextMenu(col, currentTab, schema, cols, e.clientX, e.clientY, rows, filtered, options);
         },
       },
         col.replace(/_/g, ' '),
@@ -756,10 +873,8 @@ export function renderAdminView(options: {
       );
       return th;
     });
-    // Add a non-sortable Share column header
-    const shareHeader = h('th', { className: 'admin-share-col-header', title: 'Share' }, '');
-
     const tbody = h('tbody', null);
+    let rowRenderIndex = 0;
 
     if (groupedRows) {
       groupedRows.forEach(({ groupKey, rows: groupRowList }) => {
@@ -772,7 +887,7 @@ export function renderAdminView(options: {
               options.render();
             },
           },
-            h('td', { colSpan: String(cols.length + 2) },
+            h('td', { colSpan: String(cols.length) },
               isCollapsed ? '▶ ' : '▼ ',
               h('strong', null, groupKey),
               h('span', { className: 'admin-group-count' }, `${groupRowList.length} item${groupRowList.length !== 1 ? 's' : ''}`)
@@ -781,19 +896,21 @@ export function renderAdminView(options: {
         );
         if (!isCollapsed) {
           groupRowList.forEach((row: any) => {
-            tbody.appendChild(buildAdminRow(row, cols, currentTab, schema, options));
+            tbody.appendChild(buildAdminRow(row, cols, currentTab, schema, visibleRowsForSelection, rowRenderIndex, selectedIdSet, options));
+            rowRenderIndex++;
           });
         }
       });
     } else {
       pagedRows.forEach((row: any) => {
-        tbody.appendChild(buildAdminRow(row, cols, currentTab, schema, options));
+        tbody.appendChild(buildAdminRow(row, cols, currentTab, schema, visibleRowsForSelection, rowRenderIndex, selectedIdSet, options));
+        rowRenderIndex++;
       });
     }
 
     listPanel.appendChild(
       h('table', { className: 'eval-table' },
-        h('thead', null, h('tr', null, ...headerCells, shareHeader)),
+        h('thead', null, h('tr', null, ...headerCells)),
         tbody
       )
     );
@@ -854,6 +971,9 @@ export function renderAdminView(options: {
 
 function showColumnContextMenu(
   col: string,
+  currentTab: string,
+  schema: any,
+    visibleCols: string[],
   x: number,
   y: number,
   allRows: any[],
@@ -874,6 +994,8 @@ function showColumnContextMenu(
   const hasGrouping = !!state.adminListGroupBy;
 
   // Collect unique values from filtered data for quick-filter
+  const colIdx = visibleCols.indexOf(col);
+
   const allVals = filteredRows.map((r: any) => String(r?.[col] ?? ''));
   const uniqueVals = [...new Set(allVals)].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(0, 8);
 
@@ -905,6 +1027,32 @@ function showColumnContextMenu(
       kind: 'item', label: 'Clear Grouping', icon: '◻', disabled: !hasGrouping,
       action: () => { state.adminListGroupBy = ''; state.adminListGroupCollapsed = {}; options.render(); },
     },
+      { kind: 'sep' },
+      {
+        kind: 'item', label: 'Move Left', icon: '←', disabled: colIdx <= 0,
+        action: () => {
+          const nc = [...visibleCols];
+            const tmp = nc[colIdx - 1] as string; nc[colIdx - 1] = nc[colIdx] as string; nc[colIdx] = tmp;
+          setVisibleCols(currentTab, nc, options.render);
+          dismissCol();
+        },
+      },
+      {
+        kind: 'item', label: 'Move Right', icon: '→', disabled: colIdx < 0 || colIdx >= visibleCols.length - 1,
+        action: () => {
+          const nc = [...visibleCols];
+            const tmp = nc[colIdx + 1] as string; nc[colIdx + 1] = nc[colIdx] as string; nc[colIdx] = tmp;
+          setVisibleCols(currentTab, nc, options.render);
+          dismissCol();
+        },
+      },
+      {
+        kind: 'item', label: 'Hide Column', icon: '✕', disabled: visibleCols.length <= 1,
+        action: () => {
+          setVisibleCols(currentTab, visibleCols.filter((c) => c !== col), options.render);
+          dismissCol();
+        },
+      },
     { kind: 'sep' },
     {
       kind: 'item', label: 'Copy All Values', icon: '⎘',
@@ -927,15 +1075,162 @@ function showColumnContextMenu(
         dismissCol();
       },
     },
+    { kind: 'sep' },
+    {
+      kind: 'item', label: 'Export all', icon: '⇪',
+      submenu: [
+        { label: 'JSON', icon: '{ }', action: () => { exportRows(allRows, schema, currentTab, 'json', 'all'); dismissCol(); } },
+        { label: 'CSV', icon: '🧾', action: () => { exportRows(allRows, schema, currentTab, 'csv', 'all'); dismissCol(); } },
+        { label: 'Excel', icon: '📗', action: () => { exportRows(allRows, schema, currentTab, 'excel', 'all'); dismissCol(); } },
+      ],
+    },
   ];
 
   renderContextMenu(items, x, y, 'col-ctx-menu');
 }
 
+function showColumnManager(
+  anchorEl: HTMLElement,
+  currentTab: string,
+  schemaCols: string[],
+  _currentVisible: string[],
+  render: () => void,
+): void {
+  document.querySelector('.admin-col-manager')?.remove();
+
+  const panel = document.createElement('div');
+  panel.className = 'admin-col-manager';
+
+  const rect = anchorEl.getBoundingClientRect();
+  panel.style.cssText = `position:fixed;top:${rect.bottom + 6}px;right:${window.innerWidth - rect.right}px;z-index:9000;`;
+
+  const rebuild = () => {
+    panel.innerHTML = '';
+    const vis = getVisibleCols(currentTab, schemaCols);
+    const hidden = schemaCols.filter((c) => !vis.includes(c));
+
+    const hdrRow = document.createElement('div');
+    hdrRow.className = 'admin-col-manager-header';
+    const hdrTitle = document.createElement('span');
+    hdrTitle.textContent = 'Columns';
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'admin-col-manager-reset';
+    resetBtn.textContent = 'Reset';
+    resetBtn.onclick = () => {
+      const config: Record<string, string[]> = (state as any)._adminColConfig || {};
+      const { [currentTab]: _r, ...rest } = config;
+      (state as any)._adminColConfig = rest;
+      render();
+      rebuild();
+    };
+    hdrRow.appendChild(hdrTitle);
+    hdrRow.appendChild(resetBtn);
+    panel.appendChild(hdrRow);
+
+    const visLabel = document.createElement('div');
+    visLabel.className = 'admin-col-manager-section-label';
+    visLabel.textContent = `Visible (${vis.length})`;
+    panel.appendChild(visLabel);
+
+    vis.forEach((col, i) => {
+      const item = document.createElement('div');
+      item.className = 'admin-col-manager-item';
+
+      const nameSpan = document.createElement('span');
+      nameSpan.className = 'admin-col-manager-name';
+      nameSpan.textContent = col.replace(/_/g, ' ');
+
+      const upBtn = document.createElement('button');
+      upBtn.className = 'admin-col-manager-btn';
+      upBtn.title = 'Move left';
+      upBtn.textContent = '←';
+      upBtn.disabled = i === 0;
+  upBtn.onclick = () => { const nc = [...vis]; const t = nc[i - 1] as string; nc[i - 1] = nc[i] as string; nc[i] = t; setVisibleCols(currentTab, nc, render); rebuild(); };
+
+      const downBtn = document.createElement('button');
+      downBtn.className = 'admin-col-manager-btn';
+      downBtn.title = 'Move right';
+      downBtn.textContent = '→';
+      downBtn.disabled = i === vis.length - 1;
+  downBtn.onclick = () => { const nc = [...vis]; const t = nc[i + 1] as string; nc[i + 1] = nc[i] as string; nc[i] = t; setVisibleCols(currentTab, nc, render); rebuild(); };
+
+      const hideBtn = document.createElement('button');
+      hideBtn.className = 'admin-col-manager-btn admin-col-manager-hide';
+      hideBtn.title = 'Hide column';
+      hideBtn.textContent = '✕';
+      hideBtn.disabled = vis.length <= 1;
+      hideBtn.onclick = () => { setVisibleCols(currentTab, vis.filter((c) => c !== col), render); rebuild(); };
+
+      item.appendChild(nameSpan);
+      item.appendChild(upBtn);
+      item.appendChild(downBtn);
+      item.appendChild(hideBtn);
+      panel.appendChild(item);
+    });
+
+    if (hidden.length > 0) {
+      const hidLabel = document.createElement('div');
+      hidLabel.className = 'admin-col-manager-section-label admin-col-manager-section-label-hidden';
+      hidLabel.textContent = `Hidden (${hidden.length})`;
+      panel.appendChild(hidLabel);
+
+      hidden.forEach((col) => {
+        const item = document.createElement('div');
+        item.className = 'admin-col-manager-item admin-col-manager-item-hidden';
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'admin-col-manager-name';
+        nameSpan.textContent = col.replace(/_/g, ' ');
+
+        const addBtn = document.createElement('button');
+        addBtn.className = 'admin-col-manager-btn admin-col-manager-add';
+        addBtn.title = 'Show column';
+        addBtn.textContent = '+';
+        addBtn.onclick = () => { setVisibleCols(currentTab, [...vis, col], render); rebuild(); };
+
+        item.appendChild(nameSpan);
+        item.appendChild(addBtn);
+        panel.appendChild(item);
+      });
+    }
+  };
+
+  rebuild();
+  document.body.appendChild(panel);
+
+  const outsideClick = (e: MouseEvent) => {
+    if (!panel.contains(e.target as Node) && e.target !== anchorEl && !anchorEl.contains(e.target as Node)) {
+      panel.remove();
+      document.removeEventListener('mousedown', outsideClick);
+      document.removeEventListener('keydown', escClose);
+    }
+  };
+  const escClose = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      panel.remove();
+      document.removeEventListener('mousedown', outsideClick);
+      document.removeEventListener('keydown', escClose);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener('mousedown', outsideClick);
+    document.addEventListener('keydown', escClose);
+  }, 0);
+}
+
 type CtxMenuItem =
   | { kind: 'sep' }
   | { kind: 'header'; label: string }
-  | { kind: 'item'; label: string; icon?: string; disabled?: boolean; active?: boolean; danger?: boolean; action: () => void };
+  | {
+      kind: 'item';
+      label: string;
+      icon?: string;
+      disabled?: boolean;
+      active?: boolean;
+      danger?: boolean;
+      action?: () => void;
+      submenu?: Array<{ label: string; icon?: string; disabled?: boolean; action: () => void }>;
+    };
 
 function renderContextMenu(items: CtxMenuItem[], x: number, y: number, cls = 'col-ctx-menu') {
   document.querySelectorAll('.col-ctx-menu').forEach(el => el.remove());
@@ -943,7 +1238,54 @@ function renderContextMenu(items: CtxMenuItem[], x: number, y: number, cls = 'co
   const menu = document.createElement('div');
   menu.className = cls;
 
-  const dismiss = () => menu.remove();
+  let activeSubmenu: HTMLDivElement | null = null;
+  const closeSubmenu = () => {
+    activeSubmenu?.remove();
+    activeSubmenu = null;
+  };
+
+  const dismiss = () => {
+    closeSubmenu();
+    menu.remove();
+  };
+
+  const openSubmenu = (
+    hostEl: HTMLElement,
+    submenuItems: Array<{ label: string; icon?: string; disabled?: boolean; action: () => void }>,
+  ) => {
+    closeSubmenu();
+    const submenu = document.createElement('div');
+    submenu.className = `${cls} col-ctx-submenu`;
+
+    submenuItems.forEach((sub) => {
+      const subEl = document.createElement('div');
+      subEl.className = `col-ctx-item${sub.disabled ? ' ctx-disabled' : ''}`;
+      subEl.innerHTML = `<span class="ctx-icon">${sub.icon ?? ' '}</span><span>${sub.label}</span>`;
+      if (!sub.disabled) {
+        subEl.addEventListener('click', () => {
+          sub.action();
+          dismiss();
+        });
+      }
+      submenu.appendChild(subEl);
+    });
+
+    document.body.appendChild(submenu);
+    activeSubmenu = submenu;
+
+    const hostRect = hostEl.getBoundingClientRect();
+    const subRect = submenu.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    const preferredLeft = hostRect.right + 4;
+    const fallbackLeft = hostRect.left - subRect.width - 4;
+    const left = preferredLeft + subRect.width <= vw - 4 ? preferredLeft : Math.max(4, fallbackLeft);
+    const top = Math.min(Math.max(4, hostRect.top - 2), Math.max(4, vh - subRect.height - 4));
+
+    submenu.style.left = `${left}px`;
+    submenu.style.top = `${top}px`;
+  };
 
   items.forEach(item => {
     if (item.kind === 'sep') {
@@ -954,12 +1296,24 @@ function renderContextMenu(items: CtxMenuItem[], x: number, y: number, cls = 'co
       el.textContent = item.label;
       menu.appendChild(el);
     } else {
+      const hasSubmenu = Array.isArray(item.submenu) && item.submenu.length > 0;
       const el = document.createElement('div');
-      el.className = `col-ctx-item${item.disabled ? ' ctx-disabled' : ''}${item.active ? ' ctx-active' : ''}${item.danger ? ' ctx-danger' : ''}`;
-      el.innerHTML = `<span class="ctx-icon">${item.icon ?? ' '}</span><span>${item.label}</span>`;
+      el.className = `col-ctx-item${item.disabled ? ' ctx-disabled' : ''}${item.active ? ' ctx-active' : ''}${item.danger ? ' ctx-danger' : ''}${hasSubmenu ? ' ctx-has-submenu' : ''}`;
+      el.innerHTML = `<span class="ctx-icon">${item.icon ?? ' '}</span><span>${item.label}</span>${hasSubmenu ? '<span class="ctx-caret">›</span>' : ''}`;
+
       if (!item.disabled) {
-        el.addEventListener('click', () => { item.action(); dismiss(); });
+        if (hasSubmenu && item.submenu) {
+          el.addEventListener('mouseenter', () => openSubmenu(el, item.submenu!));
+          el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openSubmenu(el, item.submenu!);
+          });
+        } else if (item.action) {
+          el.addEventListener('mouseenter', closeSubmenu);
+          el.addEventListener('click', () => { item.action?.(); dismiss(); });
+        }
       }
+
       menu.appendChild(el);
     }
   });
@@ -974,7 +1328,11 @@ function renderContextMenu(items: CtxMenuItem[], x: number, y: number, cls = 'co
   menu.style.top = `${Math.max(4, top)}px`;
 
   const onOutside = (e: MouseEvent) => {
-    if (!menu.contains(e.target as Node)) { dismiss(); document.removeEventListener('mousedown', onOutside); }
+    const target = e.target as Node;
+    if (!menu.contains(target) && !(activeSubmenu && activeSubmenu.contains(target))) {
+      dismiss();
+      document.removeEventListener('mousedown', onOutside);
+    }
   };
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') { dismiss(); document.removeEventListener('keydown', onKey); }
@@ -991,6 +1349,7 @@ function showCellContextMenu(
   row: any,
   currentTab: string,
   schema: any,
+  visibleRowsForSelection: any[],
   x: number,
   y: number,
   options: {
@@ -1005,6 +1364,15 @@ function showCellContextMenu(
   const isUrl = /^https?:\/\//.test(value);
   const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
   const isNumeric = value !== '' && value !== '—' && !isNaN(Number(value));
+  const selectedIds = new Set<string>(((state as any)._adminSelectedRowIds || []).map((id: any) => String(id)));
+  const rowId = getRowSelectionId(row, schema);
+  const selectedRows = rowId && selectedIds.has(rowId)
+    ? visibleRowsForSelection.filter((r) => selectedIds.has(getRowSelectionId(r, schema)))
+    : [];
+  const hasMultiSelection = selectedRows.length > 1;
+  const exportRowsSet = hasMultiSelection ? selectedRows : [row];
+  const exportScope: 'selected' | 'record' = hasMultiSelection ? 'selected' : 'record';
+  const exportCount = exportRowsSet.length;
 
   const items: CtxMenuItem[] = [
     { kind: 'header', label: `${colLabel}: ${value.length > 40 ? value.slice(0, 37) + '…' : value || '(empty)'}` },
@@ -1040,6 +1408,24 @@ function showCellContextMenu(
     {
       kind: 'item', label: 'Copy Row as JSON', icon: '{ }',
       action: () => { void navigator.clipboard.writeText(JSON.stringify(row, null, 2)); },
+    },
+    {
+      kind: 'item', label: 'Copy Record Link', icon: '⤴',
+      action: () => {
+        const rowId = row?.id ?? row?.[schema?.cols?.[0]];
+        if (rowId == null || rowId === '') return;
+        const url = buildAdminUrl(currentTab, rowId);
+        void navigator.clipboard.writeText(url);
+      },
+    },
+    { kind: 'sep' },
+    {
+      kind: 'item', label: `Export ${exportCount}`, icon: '⇪',
+      submenu: [
+        { label: 'JSON', icon: '{ }', action: () => { exportRows(exportRowsSet, schema, currentTab, 'json', exportScope); } },
+        { label: 'CSV', icon: '🧾', action: () => { exportRows(exportRowsSet, schema, currentTab, 'csv', exportScope); } },
+        { label: 'Excel', icon: '📗', action: () => { exportRows(exportRowsSet, schema, currentTab, 'excel', exportScope); } },
+      ],
     },
     { kind: 'sep' },
     {
@@ -1093,6 +1479,9 @@ function buildAdminRow(
   cols: string[],
   currentTab: string,
   schema: any,
+  visibleRowsForSelection: any[],
+  rowIndex: number,
+  selectedIdSet: Set<string>,
   options: {
     hydrateWizardFromPrompt: (promptRow: any) => void;
     render: () => void;
@@ -1103,33 +1492,38 @@ function buildAdminRow(
   const excludeVal: string = '';
   const excludeCol: string = '';
   // (filtering handled upstream in the main filter pass)
-  const rowId = row?.id ?? row?.[schema?.cols?.[0]];
-  const shareBtn = h('td', { className: 'admin-row-share-cell' },
-    h('button', {
-      className: 'admin-row-share-btn',
-      title: 'Copy link to this record',
-      onClick: (e: MouseEvent) => {
-        e.stopPropagation();
-        const url = buildAdminUrl(currentTab, rowId);
-        navigator.clipboard.writeText(url).catch(() => {
-          const ta = document.createElement('textarea');
-          ta.value = url;
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand('copy');
-          ta.remove();
-        });
-        showCopiedToast(e.currentTarget as HTMLElement);
-      },
-    }, '🔗')
-  );
+  const rowId = getRowSelectionId(row, schema);
+  const isSelected = rowId ? selectedIdSet.has(rowId) : false;
   return h('tr', {
-    className: 'admin-data-row',
+    className: `admin-data-row${isSelected ? ' admin-data-row-selected' : ''}`,
     title: 'Click to edit',
     onClick: (e: MouseEvent) => {
       // Don't trigger row edit if the click was on a context menu or came from it
       if ((e.target as HTMLElement).closest('.col-ctx-menu')) return;
-      if ((e.target as HTMLElement).closest('.admin-row-share-btn')) return;
+      if (e.shiftKey && rowId) {
+        const selected = new Set<string>(((state as any)._adminSelectedRowIds || []).map((id: any) => String(id)));
+        const anchorRaw = (state as any)._adminSelectionAnchor;
+        const anchor = typeof anchorRaw === 'number' ? anchorRaw : rowIndex;
+        const start = Math.min(anchor, rowIndex);
+        const end = Math.max(anchor, rowIndex);
+        for (let i = start; i <= end; i++) {
+          const id = getRowSelectionId(visibleRowsForSelection[i], schema);
+          if (id) selected.add(id);
+        }
+        (state as any)._adminSelectedRowIds = Array.from(selected);
+        (state as any)._adminSelectionAnchor = anchor;
+        options.render();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && rowId) {
+        const selected = new Set<string>(((state as any)._adminSelectedRowIds || []).map((id: any) => String(id)));
+        if (selected.has(rowId)) selected.delete(rowId);
+        else selected.add(rowId);
+        (state as any)._adminSelectedRowIds = Array.from(selected);
+        (state as any)._adminSelectionAnchor = rowIndex;
+        options.render();
+        return;
+      }
       adminEditRow(currentTab, row, options.hydrateWizardFromPrompt, options.render);
     },
   },
@@ -1142,10 +1536,9 @@ function buildAdminRow(
       attrs['onContextmenu'] = (e: MouseEvent) => {
         e.stopPropagation();
         e.preventDefault();
-        showCellContextMenu(col, str === '—' ? '' : str, row, currentTab, schema, e.clientX, e.clientY, options);
+        showCellContextMenu(col, str === '—' ? '' : str, row, currentTab, schema, visibleRowsForSelection, e.clientX, e.clientY, options);
       };
       return h('td', attrs, display);
     }),
-    shareBtn,
   );
 }

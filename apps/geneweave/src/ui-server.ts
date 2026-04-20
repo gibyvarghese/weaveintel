@@ -21,6 +21,7 @@ export function getHTML(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>geneWeave</title>
   <style>${STYLES}</style>
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
