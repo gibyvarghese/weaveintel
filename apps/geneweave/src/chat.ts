@@ -177,6 +177,8 @@ export class ChatEngine {
       policyResolver: new DbToolPolicyResolver(db),
       rateLimiter: new DbToolRateLimiter(db),
       auditEmitter: new DbToolAuditEmitter(db),
+      // Phase 4: credential and catalog injection
+      credentialResolver: (id: string) => db.getToolCredential(id),
     };
   }
 
@@ -193,14 +195,14 @@ export class ChatEngine {
   /**
    * Build supervisor worker definitions from DB `worker_agents` rows.
    */
-  private buildWorkersFromDb(
+  private async buildWorkersFromDb(
     workerRows: import('./db-types.js').WorkerAgentRow[],
     model: Model,
     toolOptions: ToolRegistryOptions,
     customTools?: import('@weaveintel/core').Tool[],
-  ): Array<{ name: string; description: string; systemPrompt?: string; model: Model; tools?: ToolRegistry }> {
+  ): Promise<Array<{ name: string; description: string; systemPrompt?: string; model: Model; tools?: ToolRegistry }>> {
     const sorted = [...workerRows].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
-    return sorted.map((row) => {
+    return Promise.all(sorted.map(async (row) => {
       const toolNames = (this.safeParseJson(row.tool_names) as string[]) ?? [];
       const systemPrompt = applyTemporalToolPolicy({
         basePrompt: row.system_prompt ?? undefined,
@@ -209,9 +211,9 @@ export class ChatEngine {
       });
       const persona = normalizePersona(row.persona ?? undefined, 'agent');
       const tools = toolNames.length
-        ? createToolRegistry(toolNames, customTools, { ...toolOptions, actorPersona: persona })
+        ? await createToolRegistry(toolNames, customTools, { ...toolOptions, actorPersona: persona })
         : customTools?.length
-          ? createToolRegistry([], customTools, { ...toolOptions, actorPersona: persona })
+          ? await createToolRegistry([], customTools, { ...toolOptions, actorPersona: persona })
           : undefined;
 
       return {
@@ -221,7 +223,7 @@ export class ChatEngine {
         model,
         tools,
       };
-    });
+    }));
   }
 
   /**
@@ -1102,7 +1104,10 @@ export class ChatEngine {
   ): Promise<AgentRunTelemetry> {
     const enterpriseToolGroups = await loadEnterpriseToolGroups(this.db);
     const hasEnterprise = enterpriseToolGroups.length > 0;
-    const disabledToolKeys = await this.getDisabledBuiltinToolKeys();
+    const [disabledToolKeys, catalogEntries] = await Promise.all([
+      this.getDisabledBuiltinToolKeys(),
+      this.db.listEnabledToolCatalog(),
+    ]);
     // Flat enterprise tools for backward compat (base tools only, no extended)
     const enterpriseTools = hasEnterprise ? await loadEnterpriseTools(this.db) : [];
     const toolOptions: ToolRegistryOptions = {
@@ -1128,11 +1133,12 @@ export class ChatEngine {
         };
       },
       disabledToolKeys,
+      catalogEntries,
     };
     const customTools = enterpriseTools.length > 0 ? enterpriseTools : undefined;
     const tools = settings.enabledTools.length
-      ? createToolRegistry(settings.enabledTools, customTools, toolOptions)
-      : customTools?.length ? createToolRegistry([], customTools, toolOptions) : undefined;
+      ? await createToolRegistry(settings.enabledTools, customTools, toolOptions)
+      : customTools?.length ? await createToolRegistry([], customTools, toolOptions) : undefined;
 
     const agentBus = weaveEventBus();
     const toolCallObserver = observeToolCallEvents(agentBus);
@@ -1158,7 +1164,7 @@ export class ChatEngine {
       // Auto-upgrade to supervisor when enterprise tools are available
       if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
         const baseWorkers = settings.workers.length > 0
-          ? settings.workers.map((w) => ({
+          ? await Promise.all(settings.workers.map(async (w) => ({
               name: w.name,
               description: w.description,
               systemPrompt: applyTemporalToolPolicy({
@@ -1168,15 +1174,15 @@ export class ChatEngine {
               }),
               model,
               tools: w.tools.length
-                ? createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
+                ? await createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
                 : customTools?.length
-                  ? createToolRegistry([], customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
+                  ? await createToolRegistry([], customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
                   : undefined,
-            }))
-          : this.buildWorkersFromDb(dbWorkerRows, model, toolOptions, customTools);
+            })))
+          : await this.buildWorkersFromDb(dbWorkerRows, model, toolOptions, customTools);
         // Build enterprise domain workers from tool groups
         const enterpriseWorkers = await Promise.all(enterpriseToolGroups.map(async (g) => {
-          const registry = createToolRegistry([], g.tools, { ...toolOptions, actorPersona: 'agent_researcher' });
+          const registry = await createToolRegistry([], g.tools, { ...toolOptions, actorPersona: 'agent_researcher' });
           return {
             name: g.name,
             description: g.description,
@@ -1193,7 +1199,7 @@ export class ChatEngine {
         console.log(`[chat] Supervisor with ${allWorkers.length} workers (${baseWorkers.length} base + ${enterpriseWorkers.length} enterprise)`);
         const supervisorCseTools = forceWorkerDataAnalysis
           ? undefined
-          : createToolRegistry(
+          : await createToolRegistry(
               ['cse_run_code', 'cse_session_status', 'cse_end_session'],
               undefined,
               { ...toolOptions, actorPersona: 'agent_worker' },
@@ -1256,7 +1262,10 @@ export class ChatEngine {
     const enterpriseToolGroups = await loadEnterpriseToolGroups(this.db);
     const hasEnterprise = enterpriseToolGroups.length > 0;
     const enterpriseTools = hasEnterprise ? await loadEnterpriseTools(this.db) : [];
-    const disabledToolKeys = await this.getDisabledBuiltinToolKeys();
+    const [disabledToolKeys, catalogEntries] = await Promise.all([
+      this.getDisabledBuiltinToolKeys(),
+      this.db.listEnabledToolCatalog(),
+    ]);
     const toolOptions: ToolRegistryOptions = {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
@@ -1280,11 +1289,12 @@ export class ChatEngine {
         };
       },
       disabledToolKeys,
+      catalogEntries,
     };
     const customTools = enterpriseTools.length > 0 ? enterpriseTools : undefined;
     const tools = settings.enabledTools.length
-      ? createToolRegistry(settings.enabledTools, customTools, toolOptions)
-      : customTools?.length ? createToolRegistry([], customTools, toolOptions) : undefined;
+      ? await createToolRegistry(settings.enabledTools, customTools, toolOptions)
+      : customTools?.length ? await createToolRegistry([], customTools, toolOptions) : undefined;
 
     // Create event bus to capture sub-agent events (e.g. screenshots from workers)
     const agentBus = weaveEventBus();
@@ -1319,7 +1329,7 @@ export class ChatEngine {
       let agent;
       if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
         const baseWorkers = settings.workers.length > 0
-          ? settings.workers.map((w) => ({
+          ? await Promise.all(settings.workers.map(async (w) => ({
               name: w.name,
               description: w.description,
               systemPrompt: applyTemporalToolPolicy({
@@ -1329,14 +1339,14 @@ export class ChatEngine {
               }),
               model,
               tools: w.tools.length
-                ? createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
+                ? await createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
                 : customTools?.length
-                  ? createToolRegistry([], customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
+                  ? await createToolRegistry([], customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
                   : undefined,
-            }))
-          : this.buildWorkersFromDb(dbWorkerRows, model, toolOptions, customTools);
+            })))
+          : await this.buildWorkersFromDb(dbWorkerRows, model, toolOptions, customTools);
         const enterpriseWorkers = await Promise.all(enterpriseToolGroups.map(async (g) => {
-          const registry = createToolRegistry([], g.tools, { ...toolOptions, actorPersona: 'agent_researcher' });
+          const registry = await createToolRegistry([], g.tools, { ...toolOptions, actorPersona: 'agent_researcher' });
           return {
             name: g.name,
             description: g.description,
@@ -1352,7 +1362,7 @@ export class ChatEngine {
         const allWorkers = [...baseWorkers, ...enterpriseWorkers];
         const supervisorCseToolsStream = forceWorkerDataAnalysis
           ? undefined
-          : createToolRegistry(
+          : await createToolRegistry(
               ['cse_run_code', 'cse_session_status', 'cse_end_session'],
               undefined,
               { ...toolOptions, actorPersona: 'agent_worker' },

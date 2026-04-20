@@ -124,4 +124,19 @@ export const CALLABLE_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
     ],
   },
+  'tool-credentials': {
+    singular: 'Tool Credential', apiPath: 'admin/tool-credentials', listKey: 'credentials',
+    cols: ['name', 'credential_type', 'env_var_name', 'validation_status', 'enabled'],
+    fields: [
+      { key: 'name', label: 'Name' },
+      { key: 'description', label: 'Description' },
+      { key: 'credential_type', label: 'Credential Type', options: ['api_key', 'oauth_token', 'basic_auth', 'jwt', 'custom'], default: 'api_key' },
+      { key: 'tool_names', label: 'Tool Names (JSON array of tool_key strings)', textarea: true, rows: 2, save: 'json' },
+      { key: 'env_var_name', label: 'Env Var Name (holds the secret)' },
+      { key: 'config', label: 'Config (JSON: headerName, prefix, etc.)', textarea: true, rows: 3, save: 'json' },
+      { key: 'rotation_due_at', label: 'Rotation Due At (ISO datetime, optional)' },
+      { key: 'validation_status', label: 'Validation Status', readonly: true },
+      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
+    ],
+  },
 };

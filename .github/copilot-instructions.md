@@ -124,7 +124,18 @@
 - `ToolAuditEventRow` and `ToolHealthSnapshotRow` are exported from `@weaveintel/geneweave` `db-types.ts`. All `tool_audit_events` rows use UUID primary keys.
 - Startup sequence in `index.ts`: `seedDefaultData()` → `syncToolCatalog(db)` → `startToolHealthJob(db)` → HTTP server listen.
 
-## Phase 4 Prompt Capabilities (`@weaveintel/prompts`)
+## Tool Platform (Phase 4 complete — Credentials + External Tool Support)
+- `tool_credentials` table stores operator-managed credentials for external tools. **Secrets are never stored in DB** — only `env_var_name` is stored; the actual secret lives in the process environment.
+- `ToolCredentialRow` exported from `@weaveintel/geneweave` `db-types.ts`. UUID primary keys. Fields: `id, name, description, credential_type, tool_names (JSON), env_var_name, config (JSON), rotation_due_at, validation_status, enabled`.
+- Admin API at `/api/admin/tool-credentials` — full CRUD + `POST /:id/validate` (checks env var, updates `validation_status`, returns `{ status, configured: boolean }` — never exposes secret).
+- `tool_catalog.config` column (`TEXT`, nullable) — stores JSON configuration for MCP (`{ endpoint }`) and A2A (`{ agentUrl }`) tools.
+- **`createToolRegistry()` is now `async`** — all call sites must `await` it. `buildWorkersFromDb()` in `chat.ts` is also async.
+- `ToolRegistryOptions` extended: `credentialResolver?: (id: string) => Promise<ToolCredentialRow | null>` and `catalogEntries?: ToolCatalogRow[]`.
+- MCP tool loading: catalog entries with `source='mcp'` use `createHttpMCPTransport()` which injects `Authorization` headers from `env_var_name`. Non-fatal per entry — broken MCP servers do not block request processing.
+- A2A tool loading: catalog entries with `source='a2a'` use `buildA2ATool()` wrapping `weaveA2AClient().sendTask()` with the correct `A2ATask` shape (`id, input: { role, parts: [{ type: 'text', text }] }`). Non-fatal per entry.
+- `ChatEngine` wires `credentialResolver: (id) => db.getToolCredential(id)` and passes `catalogEntries` from `db.listEnabledToolCatalog()` in both streaming and non-streaming `toolOptions`.
+
+
 
 ### Strategy Runtime (DB + Shared Package)
 - Use `executePromptRecord(record, variables, options?)` as the package-level execution entry point when strategy overlays are needed.

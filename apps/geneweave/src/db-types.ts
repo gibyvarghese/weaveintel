@@ -444,6 +444,7 @@ export interface ToolCatalogRow {
   tags: string | null;           // JSON string[]
   source: string;                // 'builtin' | 'mcp' | 'a2a' | 'custom'
   credential_id: string | null;
+  config?: string | null;        // JSON: e.g. { endpoint } for MCP, { agentUrl } for A2A
   created_at: string;
   updated_at: string;
 }
@@ -526,6 +527,30 @@ export interface ToolHealthSummary {
   error_rate: number;
   availability: number;
   last_invoked_at: string | null;
+}
+
+/** Phase 4: Credential binding for tools that require external API keys.
+ *  The actual secret lives in the env var named by `env_var_name`; no
+ *  plaintext secrets are stored in this row. */
+export interface ToolCredentialRow {
+  id: string;
+  name: string;
+  description: string | null;
+  /** Type of credential: api_key | oauth_token | basic_auth | jwt | custom */
+  credential_type: string;
+  /** JSON array of tool_key strings that use this credential */
+  tool_names: string | null;
+  /** Name of the environment variable that holds the secret value */
+  env_var_name: string | null;
+  /** JSON blob: { headerName?: string; prefix?: string; [key: string]: unknown } */
+  config: string | null;
+  /** ISO datetime when the credential is due for rotation */
+  rotation_due_at: string | null;
+  /** Validation status: valid | invalid | unknown | expired */
+  validation_status: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface SkillRow {
@@ -1388,6 +1413,17 @@ export interface DatabaseAdapter {
   listToolHealthSnapshots(toolName: string, limit?: number): Promise<ToolHealthSnapshotRow[]>;
   /** Get live health summary per tool aggregated from audit events (last 24 h). */
   getToolHealthSummary(sinceIso?: string): Promise<ToolHealthSummary[]>;
+
+  // ─── Phase 4: Tool Credentials ──────────────────────────────
+  createToolCredential(c: Omit<ToolCredentialRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getToolCredential(id: string): Promise<ToolCredentialRow | null>;
+  listToolCredentials(): Promise<ToolCredentialRow[]>;
+  listEnabledToolCredentials(): Promise<ToolCredentialRow[]>;
+  updateToolCredential(id: string, fields: Partial<Omit<ToolCredentialRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteToolCredential(id: string): Promise<void>;
+  /** Resolve a credential by ID and attempt validation by checking env var presence.
+   *  Updates validation_status in DB and returns the resolved secret value or null. */
+  validateToolCredential(id: string): Promise<{ status: 'valid' | 'invalid' | 'unknown'; value: string | null }>;
 
   // ─── Admin: Skills ─────────────────────────────────────────
   createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void>;

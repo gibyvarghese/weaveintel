@@ -161,7 +161,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
 // ─── Re-exports for advanced usage ───────────────────────────
 
-export type { DatabaseAdapter, DatabaseConfig, UserRow, SessionRow, ChatRow, MessageRow, MetricRow, EvalRow, MetricsSummary, ChatSettingsRow, TraceRow, PromptRow, GuardrailRow, RoutingPolicyRow, WorkflowDefRow, ToolConfigRow, ToolCatalogRow, WorkflowRunRow, GuardrailEvalRow } from './db.js';
+export type { DatabaseAdapter, DatabaseConfig, UserRow, SessionRow, ChatRow, MessageRow, MetricRow, EvalRow, MetricsSummary, ChatSettingsRow, TraceRow, PromptRow, GuardrailRow, RoutingPolicyRow, WorkflowDefRow, ToolConfigRow, ToolCatalogRow, WorkflowRunRow, GuardrailEvalRow, ToolPolicyRow, ToolRateLimitBucketRow, ToolAuditEventRow, ToolHealthSnapshotRow, ToolCredentialRow } from './db.js';
 export { SQLiteAdapter, createDatabaseAdapter } from './db.js';
 export type { ProviderConfig, ChatEngineConfig, ChatSettings } from './chat.js';
 export { ChatEngine, calculateCost } from './chat.js';

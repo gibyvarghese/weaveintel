@@ -20,6 +20,7 @@ const ADMIN_TAB_LOCATIONS: Record<string, { group: string; key: string }> = {
   'Tool Policies': { group: 'Orchestration', key: 'tool-policies' },
   'Tool Audit': { group: 'Orchestration', key: 'tool-audit' },
   'Tool Health': { group: 'Orchestration', key: 'tool-health' },
+  'Tool Credentials': { group: 'Orchestration', key: 'tool-credentials' },
   'Workflow Runs': { group: 'Monitoring', key: 'workflow-runs' },
   'Guardrail Evals': { group: 'Monitoring', key: 'guardrail-evals' },
   'Task Policies': { group: 'Orchestration', key: 'task-policies' },
@@ -1568,5 +1569,39 @@ test.describe('Admin Validation Rules', () => {
       await page.waitForTimeout(300);
       await expect(m.getByRole('heading', { name: /^Edit / })).toBeVisible({ timeout: 3000 });
     }
+  });
+});
+
+/* ── Admin: Tool Credentials CRUD ───────────────────────────── */
+
+test.describe('Admin Tool Credentials CRUD', () => {
+  test('tool credentials tab is visible in admin sidebar', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await openAdminTab(page, 'Tool Credentials');
+    await expect(m.getByRole('heading', { name: /Tool Credential/i })).toBeVisible({ timeout: 5000 });
+  });
+
+  test('creates a new tool credential via form', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await openAdminTab(page, 'Tool Credentials');
+    await clickAdminNewButton(m);
+    await page.waitForTimeout(300);
+    await expect(m.locator('h3', { hasText: 'New Tool Credential' })).toBeVisible({ timeout: 3000 });
+    const textInputs = m.locator('input[type="text"]');
+    await textInputs.nth(0).fill('PW-Credential');
+    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await expect(m.locator('h3', { hasText: 'New Tool Credential' })).not.toBeVisible({ timeout: 5000 });
+  });
+
+  test('tool credentials tab has + New button', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+    const m = main(page);
+    await openAdminTab(page, 'Tool Credentials');
+    await expect(m.locator('button.nav-btn').filter({ hasText: /^\+ New$/ })).toBeVisible({ timeout: 5000 });
   });
 });

@@ -17,6 +17,8 @@ import { canUseTool, normalizePersona } from './rbac.js';
 import type { ExecutionLanguage } from '@weaveintel/sandbox';
 import { getCSE } from './cse.js';
 import type { DatabaseAdapter } from './db.js';
+import { weaveMCPClient, weaveMCPTools } from '@weaveintel/mcp-client';
+import { weaveA2AClient } from '@weaveintel/a2a';
 
 interface RuntimeAttachment {
   name: string;
@@ -502,18 +504,102 @@ export interface ToolRegistryOptions {
   /** Audit emitter for recording tool invocation outcomes. */
   auditEmitter?: ToolAuditEmitter;
   /** Rate limiter for per-tool, per-scope limiting. */
-  rateLimiter?: ToolRateLimiter;
-}
+  rateLimiter?: ToolRateLimiter;  /**
+   * Phase 4: Resolve a credential by ID from the operator-managed tool_credentials table.
+   * Returns null if not found or not enabled. Used to inject API key overrides for catalog-
+   * linked tools (e.g. web_search with a Tavily key bound via credential_id).
+   */
+  credentialResolver?: (credentialId: string) => Promise<import('./db-types.js').ToolCredentialRow | null>;
+  /**
+   * Phase 4: Enabled catalog entries from db.listEnabledToolCatalog(). Used to load
+   * MCP and A2A tool sources into the registry at runtime.
+   */
+  catalogEntries?: import('./db-types.js').ToolCatalogRow[];}
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
   return toolNames.filter((toolName) => canUseTool(persona, toolName));
+}
+
+// ─── Phase 4: MCP HTTP transport factory ──────────────────────
+// Creates a minimal HTTP-based MCPTransport that sends JSON-RPC requests
+// via POST to the given endpoint, optionally injecting a credential header.
+function createHttpMCPTransport(
+  endpoint: string,
+  credentialResolver?: (id: string) => Promise<import('./db-types.js').ToolCredentialRow | null>,
+  credentialId?: string,
+): import('@weaveintel/core').MCPTransport {
+  let messageHandler: ((msg: unknown) => void) | null = null;
+
+  async function resolveAuthHeader(): Promise<Record<string, string>> {
+    if (!credentialId || !credentialResolver) return {};
+    const cred = await credentialResolver(credentialId);
+    if (!cred?.enabled) return {};
+    const cfg = cred.config ? (JSON.parse(cred.config) as { headerName?: string; prefix?: string }) : {};
+    const envValue = process.env[cred.env_var_name ?? ''];
+    if (!envValue) return {};
+    const headerName = cfg.headerName ?? 'Authorization';
+    const prefix = cfg.prefix ?? 'Bearer ';
+    return { [headerName]: `${prefix}${envValue}` };
+  }
+
+  return {
+    type: 'http',
+    async send(message: unknown): Promise<void> {
+      const authHeaders = await resolveAuthHeader();
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify(message),
+      });
+      if (res.ok) {
+        const data: unknown = await res.json();
+        messageHandler?.(data);
+      }
+    },
+    onMessage(handler: (message: unknown) => void): void {
+      messageHandler = handler;
+    },
+    async close(): Promise<void> { /* HTTP is stateless, nothing to close */ },
+  };
+}
+
+// ─── Phase 4: A2A delegate tool factory ───────────────────────
+// Wraps an A2A agent URL as a tool that delegates work via weaveA2AClient.
+function buildA2ATool(toolKey: string, description: string, agentUrl: string): import('@weaveintel/core').Tool {
+  return weaveTool({
+    name: toolKey,
+    description,
+    parameters: {
+      type: 'object',
+      properties: {
+        task: { type: 'string', description: 'The task to delegate to the remote A2A agent' },
+        context: { type: 'object', description: 'Optional context key-values to pass with the task' },
+      },
+      required: ['task'],
+    },
+    execute: async (args: { task: string; context?: Record<string, unknown> }) => {
+      const client = weaveA2AClient();
+      const result = await client.sendTask(
+        { executionId: crypto.randomUUID(), metadata: args.context ?? {} },
+        agentUrl,
+        { id: crypto.randomUUID(), input: { role: 'user', parts: [{ type: 'text', text: args.task }] } },
+      );
+      if (result.error) return { content: `A2A error: ${result.error}`, isError: true };
+      const textParts = (result.output?.parts ?? [])
+        .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
+        .map((p) => p.text)
+        .join('\n');
+      return textParts || JSON.stringify(result);
+    },
+    tags: ['a2a', 'external'],
+  });
 }
 
 /**
  * Create a ToolRegistry pre-loaded with the selected built-in tools
  * plus any custom tools provided.
  */
-export function createToolRegistry(toolNames: string[], customTools?: Tool[], opts?: ToolRegistryOptions): ToolRegistry {
+export async function createToolRegistry(toolNames: string[], customTools?: Tool[], opts?: ToolRegistryOptions): Promise<ToolRegistry> {
   const registry = weaveToolRegistry();
   const actorPersona = opts?.actorPersona;
   const memoryRecallTool = weaveTool({
@@ -567,6 +653,45 @@ export function createToolRegistry(toolNames: string[], customTools?: Tool[], op
     for (const tool of customTools) {
       if (canUseTool(actorPersona, tool.schema.name)) {
         registry.register(tool);
+      }
+    }
+  }
+
+  // Phase 4: Load MCP and A2A tools from operator-managed catalog entries.
+  if (opts?.catalogEntries && opts.catalogEntries.length > 0) {
+    for (const entry of opts.catalogEntries) {
+      if (!entry.enabled) continue;
+      if (entry.source === 'mcp' && entry.config) {
+        try {
+          const mcpConfig = JSON.parse(entry.config) as { endpoint?: string; command?: string; args?: string[] };
+          if (mcpConfig.endpoint) {
+            // HTTP-based MCP transport
+            const mcpTransport = createHttpMCPTransport(mcpConfig.endpoint, opts.credentialResolver, entry.credential_id ?? undefined);
+            const mcpClient = weaveMCPClient();
+            await mcpClient.connect(mcpTransport);
+            const mcpToolDefs = await mcpClient.listTools();
+            const mcpRegistry = weaveMCPTools(mcpClient, mcpToolDefs);
+            for (const tool of mcpRegistry.list()) {
+              if (canUseTool(actorPersona, tool.schema.name)) {
+                registry.register(tool);
+              }
+            }
+          }
+        } catch {
+          // Non-fatal: log and continue so a single broken MCP server doesn't block the request
+        }
+      } else if (entry.source === 'a2a' && entry.config) {
+        try {
+          const a2aConfig = JSON.parse(entry.config) as { agentUrl?: string };
+          if (a2aConfig.agentUrl) {
+            const a2aTool = buildA2ATool(entry.tool_key ?? entry.name, entry.description ?? entry.name, a2aConfig.agentUrl);
+            if (canUseTool(actorPersona, a2aTool.schema.name)) {
+              registry.register(a2aTool);
+            }
+          }
+        } catch {
+          // Non-fatal
+        }
       }
     }
   }

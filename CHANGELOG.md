@@ -9,6 +9,20 @@ and this project adheres to [Fabric Versioning](VERSIONING.md).
 
 ## [Unreleased]
 
+### GeneWeave — Tool Platform Phase 4: Credentials + External Tool Support
+
+- **`tool_credentials` table** — DB-backed registry for operator-managed credentials (API keys, OAuth tokens, JWT, basic auth). UUID PKs. Secrets stay in environment variables; DB stores only `env_var_name` reference — no plaintext secrets in DB.
+- **`ToolCredentialRow`** — New type exported from `@weaveintel/geneweave` `db-types.ts` with 7 `DatabaseAdapter` methods: `createToolCredential`, `getToolCredential`, `listToolCredentials`, `listEnabledToolCredentials`, `updateToolCredential`, `deleteToolCredential`, `validateToolCredential(id)`.
+- **Admin API `/api/admin/tool-credentials`** — Full CRUD (GET list, GET by ID, POST, PUT, DELETE) + `POST /:id/validate` action. Validate endpoint checks env var presence, updates DB `validation_status`, returns `{ status, configured: boolean }` — never exposes the secret value.
+- **Admin UI** — New **Tool Credentials** tab under the Orchestration group. Fields: `name`, `description`, `credential_type` (select: api_key / oauth_token / basic_auth / jwt / custom), `tool_names` (JSON), `env_var_name`, `config` (JSON), `rotation_due_at`, `validation_status` (readonly), `enabled`.
+- **`tool_catalog.config` column** — New nullable JSON column on `tool_catalog` for storing MCP endpoint URLs (`{ endpoint }`) and A2A agent URLs (`{ agentUrl }`) for externally-sourced tools.
+- **`createToolRegistry()` is now async** — Breaking change. All call sites require `await`. MCP and A2A tools are loaded from `catalogEntries` at registry-creation time.
+- **`ToolRegistryOptions` extended** — New fields: `credentialResolver?: (id: string) => Promise<ToolCredentialRow | null>` and `catalogEntries?: ToolCatalogRow[]`.
+- **MCP catalog tool loading** — `catalog_entries` with `source='mcp'` are loaded at runtime via `createHttpMCPTransport()` which injects credential headers from `env_var_name`. Non-fatal per-entry (broken MCP servers do not block requests).
+- **A2A catalog tool loading** — `catalog_entries` with `source='a2a'` create delegate tools via `buildA2ATool()` wrapping `weaveA2AClient().sendTask()`. Non-fatal per-entry.
+- **`ChatEngine` wiring** — `credentialResolver` and `catalogEntries` wired in constructor and both streaming/non-streaming `toolOptions` assembly paths.
+- **3 new Playwright E2E tests** — Validate Tool Credentials tab visibility, New button, and create form.
+
 ### GeneWeave — Tool Platform Phase 3: Audit Trail + Health Persistence
 
 - **`tool_audit_events` table** — Persists every tool invocation with UUID PK, outcome (`success` | `error` | `denied` | `timeout` | `circuit_open`), duration_ms, chat/user/agent context, input/output previews, error message, and policy_id.

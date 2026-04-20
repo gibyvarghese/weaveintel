@@ -26,6 +26,7 @@ import {
   registerToolPolicyRoutes,
   registerToolAuditRoutes,
   registerToolHealthRoutes,
+  registerToolCredentialRoutes,
   registerSkillRoutes,
   registerWorkerAgentRoutes,
   registerGuardrailRoutes,
@@ -1087,6 +1088,7 @@ export function registerAdminRoutes(
   registerToolPolicyRoutes(router, db, adminHelpers);
   registerToolAuditRoutes(router, db, adminHelpers);
   registerToolHealthRoutes(router, db, adminHelpers);
+  registerToolCredentialRoutes(router, db, adminHelpers);
   registerSkillRoutes(router, db, adminHelpers);
   registerWorkerAgentRoutes(router, db, adminHelpers);
 

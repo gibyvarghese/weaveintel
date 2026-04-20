@@ -1323,6 +1323,64 @@ export class SQLiteAdapter implements DatabaseAdapter {
     `).all(since) as import('./db-types.js').ToolHealthSummary[];
   }
 
+  // ─── Phase 4: Tool Credentials ───────────────────────────────
+
+  async createToolCredential(c: Omit<import('./db-types.js').ToolCredentialRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tool_credentials (id, name, description, credential_type, tool_names, env_var_name, config, rotation_due_at, validation_status, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      c.id, c.name, c.description ?? null, c.credential_type,
+      c.tool_names ?? null, c.env_var_name ?? null, c.config ?? null,
+      c.rotation_due_at ?? null, c.validation_status, c.enabled,
+    );
+  }
+
+  async getToolCredential(id: string): Promise<import('./db-types.js').ToolCredentialRow | null> {
+    return (this.d.prepare('SELECT * FROM tool_credentials WHERE id = ?').get(id) as import('./db-types.js').ToolCredentialRow) ?? null;
+  }
+
+  async listToolCredentials(): Promise<import('./db-types.js').ToolCredentialRow[]> {
+    return this.d.prepare('SELECT * FROM tool_credentials ORDER BY name ASC').all() as import('./db-types.js').ToolCredentialRow[];
+  }
+
+  async listEnabledToolCredentials(): Promise<import('./db-types.js').ToolCredentialRow[]> {
+    return this.d.prepare('SELECT * FROM tool_credentials WHERE enabled = 1 ORDER BY name ASC').all() as import('./db-types.js').ToolCredentialRow[];
+  }
+
+  async updateToolCredential(id: string, fields: Partial<Omit<import('./db-types.js').ToolCredentialRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE tool_credentials SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteToolCredential(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM tool_credentials WHERE id = ?').run(id);
+  }
+
+  async validateToolCredential(id: string): Promise<{ status: 'valid' | 'invalid' | 'unknown'; value: string | null }> {
+    const row = await this.getToolCredential(id);
+    if (!row) return { status: 'unknown', value: null };
+
+    let status: 'valid' | 'invalid' | 'unknown' = 'unknown';
+    let value: string | null = null;
+
+    if (row.env_var_name) {
+      value = process.env[row.env_var_name] ?? null;
+      status = value ? 'valid' : 'invalid';
+    }
+
+    // Persist the updated validation_status
+    await this.updateToolCredential(id, { validation_status: status });
+    return { status, value };
+  }
+
   // ─── Admin: Skills ─────────────────────────────────────────
 
   async createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void> {

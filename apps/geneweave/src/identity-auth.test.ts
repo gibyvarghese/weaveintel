@@ -24,16 +24,16 @@ describe('GeneWeave identity/persona auth for agents + tools', () => {
     expect(canUseTool('tenant_admin', 'browser_open')).toBe(true);
   });
 
-  it('creates an empty registry when actor persona is missing/invalid', () => {
-    const noPersona = createToolRegistry(['web_search', 'calculator'], undefined, { actorPersona: undefined });
+  it('creates an empty registry when actor persona is missing/invalid', async () => {
+    const noPersona = await createToolRegistry(['web_search', 'calculator'], undefined, { actorPersona: undefined });
     expect(noPersona.list().length).toBe(0);
 
-    const invalidPersona = createToolRegistry(['web_search', 'calculator'], undefined, { actorPersona: 'bad_persona' });
+    const invalidPersona = await createToolRegistry(['web_search', 'calculator'], undefined, { actorPersona: 'bad_persona' });
     expect(invalidPersona.list().length).toBe(0);
   });
 
-  it('attaches the right tool access when actor persona is valid', () => {
-    const tenantUserRegistry = createToolRegistry(
+  it('attaches the right tool access when actor persona is valid', async () => {
+    const tenantUserRegistry = await createToolRegistry(
       ['web_search', 'browser_open', 'calculator'],
       undefined,
       { actorPersona: 'tenant_user' },
@@ -44,7 +44,7 @@ describe('GeneWeave identity/persona auth for agents + tools', () => {
     expect(tenantUserNames).toContain('calculator');
     expect(tenantUserNames).not.toContain('browser_open');
 
-    const researcherRegistry = createToolRegistry(
+    const researcherRegistry = await createToolRegistry(
       ['web_search', 'browser_open', 'calculator'],
       undefined,
       { actorPersona: 'agent_researcher' },
@@ -55,7 +55,7 @@ describe('GeneWeave identity/persona auth for agents + tools', () => {
     expect(researcherNames.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('normalizes worker personas and keeps agent identity usable', () => {
+  it('normalizes worker personas and keeps agent identity usable', async () => {
     const row: ChatSettingsRow = {
       chat_id: 'chat-1',
       mode: 'supervisor',
@@ -74,7 +74,7 @@ describe('GeneWeave identity/persona auth for agents + tools', () => {
     expect(settings.workers[0]?.persona).toBe('agent_worker');
 
     const workerPersona = normalizePersona(settings.workers[0]?.persona, 'agent');
-    const workerRegistry = createToolRegistry(settings.workers[0]?.tools ?? [], undefined, {
+    const workerRegistry = await createToolRegistry(settings.workers[0]?.tools ?? [], undefined, {
       actorPersona: workerPersona,
     });
     const workerTools = workerRegistry.list().map((t) => t.schema.name);

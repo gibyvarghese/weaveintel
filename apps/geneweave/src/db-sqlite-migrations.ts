@@ -632,4 +632,30 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
     )
   `);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_health_name_time ON tool_health_snapshots(tool_name, snapshot_at)`);
+
+  // ─── Phase 4: Tool Credentials ────────────────────────────
+  // Stores external API credentials bound to tools. The credential secret
+  // lives in the referenced environment variable (env_var_name) so no plaintext
+  // secrets are persisted. The config JSON carries transport metadata such as
+  // header name and value prefix.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tool_credentials (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      credential_type TEXT NOT NULL DEFAULT 'api_key',
+      tool_names TEXT,
+      env_var_name TEXT,
+      config TEXT,
+      rotation_due_at TEXT,
+      validation_status TEXT NOT NULL DEFAULT 'unknown',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_credentials_enabled ON tool_credentials(enabled)`);
+
+  // Add config column to tool_catalog for MCP endpoint / A2A agent URL storage.
+  safeExec(db, `ALTER TABLE tool_catalog ADD COLUMN config TEXT`);
 }
