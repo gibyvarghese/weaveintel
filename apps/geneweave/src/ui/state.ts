@@ -50,6 +50,15 @@ export const state: any = {
   adminMenuExpanded: false,
   adminGroupExpanded: {} as Record<string, boolean>,
 
+  // Admin list controls (search / sort / group / page)
+  adminListCurrentTab: '' as string,
+  adminListSearch: '' as string,
+  adminListSortCol: null as string | null,
+  adminListSortDir: 'asc' as 'asc' | 'desc',
+  adminListGroupBy: '' as string,
+  adminListPage: 1 as number,
+  adminListGroupCollapsed: {} as Record<string, boolean>,
+
   // Connectors
   connectors: { enterprise: [] as any[], social: [] as any[] },
   connectorsLoading: false,

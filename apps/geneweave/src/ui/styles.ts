@@ -509,6 +509,30 @@ input{font-family:inherit;outline:none}
 .admin-content-grid{display:grid;grid-template-columns:minmax(0,1fr);gap:12px;align-items:start}
 .admin-content-grid.editing{grid-template-columns:minmax(0,1fr) minmax(300px,380px)}
 .admin-list-panel{min-width:0}
+.admin-list-header{display:flex;align-items:center;justify-content:space-between;padding:20px 20px 0}
+.admin-list-header h3{margin:0;font-size:14px;color:var(--fg2);font-weight:600}
+.admin-list-toolbar{display:flex;align-items:center;gap:10px;padding:14px 20px 10px;flex-wrap:wrap}
+.admin-list-search-wrap{position:relative;flex:1;min-width:160px}
+.admin-list-search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--fg3);font-size:13px;pointer-events:none;line-height:1}
+.admin-list-search{width:100%;padding:8px 12px 8px 32px;border-radius:9px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg);font-size:13px;box-sizing:border-box}
+.admin-list-search:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px color-mix(in oklab,var(--accent) 18%, transparent)}
+.admin-list-groupby{padding:8px 10px;border-radius:9px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg);font-size:12px;cursor:pointer;white-space:nowrap}
+.admin-list-footer{display:flex;align-items:center;justify-content:space-between;padding:12px 20px;border-top:1px solid var(--bg4);background:var(--bg2);gap:12px;flex-wrap:wrap}
+.admin-list-info{font-size:12px;color:var(--fg3)}
+.admin-list-pagination{display:flex;align-items:center;gap:4px}
+.admin-page-btn{padding:5px 10px;font-size:12px;border-radius:7px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg2);cursor:pointer;min-width:32px;text-align:center}
+.admin-page-btn:hover:not([disabled]){background:var(--bg);color:var(--fg);border-color:var(--fg3)}
+.admin-page-btn[disabled]{opacity:.4;cursor:default;pointer-events:none}
+.admin-page-btn.active{background:var(--accent-dim);color:var(--accent2);border-color:var(--accent);font-weight:700}
+.admin-page-ellipsis{font-size:12px;color:var(--fg3);padding:0 4px;line-height:1}
+.eval-table th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+.eval-table th.sortable:hover{color:var(--fg);background:color-mix(in oklab,var(--bg4) 55%, transparent)}
+.eval-table th.sort-active{color:var(--accent2)}
+.sort-indicator{font-size:10px;opacity:.55;display:inline-block}
+.eval-table th.sort-active .sort-indicator{opacity:1}
+.admin-group-header-row td{background:color-mix(in oklab,var(--bg4) 55%, var(--bg2));color:var(--fg2);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;padding:7px 14px;cursor:pointer;user-select:none}
+.admin-group-header-row td:hover{background:var(--bg4)}
+.admin-group-count{font-size:10px;font-weight:400;color:var(--fg3);margin-left:8px;text-transform:none;letter-spacing:0}
 .admin-editor-panel{position:sticky;top:16px;align-self:start}
 .admin-editor-panel .chart-box{margin:0}
 .admin-detail-panel .chart-box{margin:0}
