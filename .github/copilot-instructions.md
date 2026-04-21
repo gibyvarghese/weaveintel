@@ -49,6 +49,21 @@
 - Add concise comments only where the control flow or data mapping is non-obvious.
 - Keep prompts grounded in runtime reality: if a prompt requires tools, data freshness, or deterministic checks, route that requirement through skills/tools/runtime policies instead of relying on instruction text alone.
 
+## Durable Cross-Cutting Principles
+
+These principles emerged from the Scientific Validation feature (sv:) but apply framework-wide. Every new contribution must follow them.
+
+- **Every database row uses a UUID primary key** — UUIDs prevent ID collisions across replay, export/import, and future sharding. SQLite uses `TEXT` (UUID v7 preferred for sortability via `newUUIDv7()` in `apps/geneweave/src/lib/uuid.ts`); Postgres adopters get `uuid` natively. Never use `INTEGER PRIMARY KEY AUTOINCREMENT` for new tables.
+- **The evidence ledger is always `@weaveintel/contracts`** — Any feature that needs to track "things an agent discovered that justify a conclusion" uses completion contracts with evidence bundles. Never invent a parallel ledger table.
+- **Reproducibility is always `@weaveintel/replay`** — Any feature that needs "run it again and get the same answer" uses replay traces. Never invent a bespoke bundle format.
+- **Sandboxed compute for anything with native code, subprocesses, or non-trivial memory** — The in-process sandbox executor is not sufficient for SymPy, SciPy, R, RDKit, OpenMM, Biopython, and similar. Use the container executor (`ContainerExecutor` in `@weaveintel/sandbox`).
+- **Tool invocations flow through `@weaveintel/tools` with risk tags** — No ad-hoc subprocess spawning. Every tool is a registration with versioning, risk classification, and health tracking. Guardrails enforce the risk policy.
+- **Multi-agent dialogue flows through `@weaveintel/a2a`** — In-process bus for local; HTTP transport for distributed. Never pass messages between agents by shared module state.
+- **Model selection flows through `@weaveintel/routing`** — Agents never hard-code a model id. They declare a capability requirement; routing decides.
+- **Redaction happens before the model call, not after** — `@weaveintel/redaction` with reversible tokenisation sits as middleware on the model client. LLMs never see raw PII.
+- **Every workflow step is observable** — `@weaveintel/observability` tracer wraps every step. Every cost item is attributed. Budget envelopes are enforced at step boundaries.
+- **Idempotency on writes** — `@weaveintel/reliability` provides the idempotency key mechanism. Every POST route that creates or modifies state uses an `Idempotency-Key` header.
+
 ## Grounding Reality Guardrails
 - Treat prompt text as guidance, not guaranteed execution. Any requirement that must always happen (tool call, policy check, verification pass, formatting guarantee) belongs in code-level orchestration and shared runtime hooks.
 - Keep execution strategies DB-driven and traceable: strategy selection should come from prompt metadata (`executionDefaults.strategy`) plus admin-managed strategy records, not hardcoded app-only conditionals.

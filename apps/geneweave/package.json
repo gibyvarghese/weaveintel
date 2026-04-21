@@ -50,11 +50,20 @@
     "@weaveintel/devtools": "*",
     "@weaveintel/sandbox": "*",
     "@weaveintel/recipes": "*",
+    "@weaveintel/a2a": "*",
+    "@weaveintel/replay": "*",
+    "@weaveintel/tenancy": "*",
+    "@weaveintel/reliability": "*",
+    "@weaveintel/triggers": "*",
+    "@weaveintel/models": "*",
+    "@weaveintel/tools": "*",
+    "@weaveintel/collaboration": "*",
     "better-sqlite3": "^11.9.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
-    "@types/better-sqlite3": "^7.6.13"
+    "@types/better-sqlite3": "^7.6.13",
+    "@weaveintel/testing": "*"
   },
   "peerDependencies": {
     "@weaveintel/provider-anthropic": "*",
