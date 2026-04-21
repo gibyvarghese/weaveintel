@@ -20,6 +20,8 @@ import type { SvClaimType } from '../../db-types.js';
 import { weaveToolRegistry, weaveContext } from '@weaveintel/core';
 import { createPolicyEnforcedRegistry, noopAuditEmitter } from '@weaveintel/tools';
 import type { ToolPolicyResolver, ToolAuditEmitter } from '@weaveintel/tools';
+import { weaveConsoleTracer } from '@weaveintel/observability';
+import type { Tracer } from '@weaveintel/core';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseAdapter } from '../../db.js';
 import type { Tool, ExecutionContext, Model } from '@weaveintel/core';
@@ -47,6 +49,8 @@ export interface SVRunnerOptions {
   policyResolver?: ToolPolicyResolver;
   /** Optional audit emitter — paired with policyResolver to persist invocation records. */
   auditEmitter?: ToolAuditEmitter;
+  /** Optional tracer — when present, each SV step emits sv.step.* spans for observability. */
+  tracer?: Tracer;
 }
 
 export interface SVRunInput {
@@ -148,6 +152,7 @@ export class SVWorkflowRunner {
   private db: DatabaseAdapter;
   private policyResolver?: ToolPolicyResolver;
   private auditEmitter?: ToolAuditEmitter;
+  private tracer: Tracer;
   /** System prompts loaded from DB at construction, keyed by agent name. */
   private prompts: Record<string, string> = {};
   /** Map of hypothesisId → workflowRunId for cancellation. */
@@ -160,6 +165,7 @@ export class SVWorkflowRunner {
     this.makeToolModel = opts.makeToolModel;
     this.policyResolver = opts.policyResolver;
     this.auditEmitter = opts.auditEmitter;
+    this.tracer = opts.tracer ?? weaveConsoleTracer();
 
     this.engine.createDefinition(scientificValidationWorkflow).catch(() => {
       // best-effort — definition might already be registered
@@ -191,6 +197,7 @@ export class SVWorkflowRunner {
       makeToolModel: mkTool,
       policyResolver,
       auditEmitter,
+      tracer,
     } = this;
 
     /** Create a per-run execution context from the variables dict. */
@@ -217,217 +224,264 @@ export class SVWorkflowRunner {
     this.engine.registerHandler('decomposer', async (vars) => {
       const input = getInput(vars);
       const ctx = makeCtx(vars);
-      const agent = createDecomposerAgent({ model: await mkReasoning(), systemPrompt: prompts['decomposer'] ?? '' });
-      const result = await agent.run(ctx, {
-        messages: [{ role: 'user', content: `Hypothesis: ${input.statement}\nDomain tags: ${input.domainTags.join(', ')}` }],
-      });
-      const text = result.output ?? '';
-      await appendTurn(db, input.hypothesisId, 0, 'decomposer', text);
-      // Persist sub-claims extracted from the JSON output
-      try {
-        const parsed = JSON.parse(text) as { subClaims?: Array<{ statement: string; claimType: string; testabilityScore: number; rationale: string }> };
-        const subClaims = parsed.subClaims ?? [];
-        for (const sc of subClaims) {
-          await db.createSubClaim({
-            id: randomUUID(),
-            tenant_id: input.tenantId,
-            hypothesis_id: input.hypothesisId,
-            parent_sub_claim_id: null,
-            claim_type: (sc.claimType ?? 'other') as SvClaimType,
-            statement: sc.statement,
-            testability_score: sc.testabilityScore ?? 0.5,
-          });
+      return tracer.withSpan(ctx, 'sv.step.decompose', async (span) => {
+        span.addEvent('sv.step.start', { 'sv.step': 'decomposer', 'sv.hypothesis_id': input.hypothesisId });
+        const agent = createDecomposerAgent({ model: await mkReasoning(), systemPrompt: prompts['decomposer'] ?? '' });
+        const result = await agent.run(ctx, {
+          messages: [{ role: 'user', content: `Hypothesis: ${input.statement}\nDomain tags: ${input.domainTags.join(', ')}` }],
+        });
+        const text = result.output ?? '';
+        await appendTurn(db, input.hypothesisId, 0, 'decomposer', text);
+        // Persist sub-claims extracted from the JSON output
+        try {
+          const parsed = JSON.parse(text) as { subClaims?: Array<{ statement: string; claimType: string; testabilityScore: number; rationale: string }> };
+          const subClaims = parsed.subClaims ?? [];
+          span.setAttribute('sv.sub_claim_count', subClaims.length);
+          for (const sc of subClaims) {
+            await db.createSubClaim({
+              id: randomUUID(),
+              tenant_id: input.tenantId,
+              hypothesis_id: input.hypothesisId,
+              parent_sub_claim_id: null,
+              claim_type: (sc.claimType ?? 'other') as SvClaimType,
+              statement: sc.statement,
+              testability_score: sc.testabilityScore ?? 0.5,
+            });
+          }
+        } catch {
+          // non-fatal — sub-claims will be empty if model returned invalid JSON
         }
-      } catch {
-        // non-fatal — sub-claims will be empty if model returned invalid JSON
-      }
-      return { decomposedText: text };
+        span.addEvent('sv.step.end', { 'sv.step': 'decomposer' });
+        return { decomposedText: text };
+      }, { 'sv.hypothesis_id': input.hypothesisId, 'sv.step': 'decomposer' });
     });
 
     // ── literature ──────────────────────────────────────────
     this.engine.registerHandler('literature', async (vars) => {
       const input = getInput(vars);
       const ctx = makeCtx(vars);
-      const reg = registryFromKeys(toolMap, [
-        'arxiv.search', 'pubmed.search', 'semanticscholar.search',
-        'openalex.search', 'crossref.resolve', 'europepmc.search',
-      ], { policyResolver, auditEmitter, userId: input.userId });
-      const agent = createLiteratureAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['literature'] ?? '' });
-      const decomposedText = ((vars['__step_decompose'] as { decomposedText?: string } | undefined)?.decomposedText) ?? '';
-      const result = await agent.run(ctx, {
-        messages: [{ role: 'user', content: `Sub-claims:\n${decomposedText}\n\nHypothesis: ${input.statement}` }],
-      });
-      const text = result.output ?? '';
-      await appendTurn(db, input.hypothesisId, 0, 'literature', text);
-      // Emit evidence events for each paper found
-      try {
-        const jsonStart = text.lastIndexOf('{');
-        if (jsonStart >= 0) {
-          const parsed = JSON.parse(text.slice(jsonStart)) as { evidence?: Array<{ id: string; title: string; summary: string; toolKey?: string }> };
-          for (const ev of (parsed.evidence ?? [])) {
-            await appendEvidence(db, input.hypothesisId, 'gather', 'literature', 'lit_hit', ev.summary, {
-              toolKey: ev.toolKey,
-              evidenceId: randomUUID(),
-            });
+      return tracer.withSpan(ctx, 'sv.step.gather', async (span) => {
+        span.addEvent('sv.step.start', { 'sv.step': 'literature', 'sv.hypothesis_id': input.hypothesisId });
+        const reg = registryFromKeys(toolMap, [
+          'arxiv.search', 'pubmed.search', 'semanticscholar.search',
+          'openalex.search', 'crossref.resolve', 'europepmc.search',
+        ], { policyResolver, auditEmitter, userId: input.userId });
+        const agent = createLiteratureAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['literature'] ?? '' });
+        const decomposedText = ((vars['__step_decompose'] as { decomposedText?: string } | undefined)?.decomposedText) ?? '';
+        const result = await agent.run(ctx, {
+          messages: [{ role: 'user', content: `Sub-claims:\n${decomposedText}\n\nHypothesis: ${input.statement}` }],
+        });
+        const text = result.output ?? '';
+        await appendTurn(db, input.hypothesisId, 0, 'literature', text);
+        // Emit evidence events for each paper found
+        let evidenceCount = 0;
+        try {
+          const jsonStart = text.lastIndexOf('{');
+          if (jsonStart >= 0) {
+            const parsed = JSON.parse(text.slice(jsonStart)) as { evidence?: Array<{ id: string; title: string; summary: string; toolKey?: string }> };
+            for (const ev of (parsed.evidence ?? [])) {
+              await appendEvidence(db, input.hypothesisId, 'gather', 'literature', 'lit_hit', ev.summary, {
+                toolKey: ev.toolKey,
+                evidenceId: randomUUID(),
+              });
+              evidenceCount++;
+            }
           }
+        } catch {
+          // non-fatal
         }
-      } catch {
-        // non-fatal
-      }
-      return { literatureText: text };
+        span.setAttribute('sv.evidence_count', evidenceCount);
+        span.addEvent('sv.evidence.write', { 'sv.step': 'literature', count: evidenceCount });
+        span.addEvent('sv.step.end', { 'sv.step': 'literature' });
+        return { literatureText: text };
+      }, { 'sv.hypothesis_id': input.hypothesisId, 'sv.step': 'literature' });
     });
 
     // ── statistical ─────────────────────────────────────────
     this.engine.registerHandler('statistical', async (vars) => {
       const input = getInput(vars);
       const ctx = makeCtx(vars);
-      const reg = registryFromKeys(toolMap, [
-        'scipy.stats.test', 'statsmodels.meta', 'scipy.power', 'pymc.mcmc', 'r.metafor',
-      ], { policyResolver, auditEmitter, userId: input.userId });
-      const agent = createStatisticalAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['statistical'] ?? '' });
-      const literatureText = ((vars['__step_gather'] as { literatureText?: string } | undefined)?.literatureText) ?? '';
-      const result = await agent.run(ctx, {
-        messages: [{ role: 'user', content: `Literature evidence:\n${literatureText}` }],
-      });
-      const text = result.output ?? '';
-      await appendTurn(db, input.hypothesisId, 0, 'statistical', text);
-      await appendEvidence(db, input.hypothesisId, 'statistical', 'statistical', 'stat_finding', text.slice(0, 200));
-      return { statisticalText: text };
+      return tracer.withSpan(ctx, 'sv.step.statistical', async (span) => {
+        span.addEvent('sv.step.start', { 'sv.step': 'statistical', 'sv.hypothesis_id': input.hypothesisId });
+        const reg = registryFromKeys(toolMap, [
+          'scipy.stats.test', 'statsmodels.meta', 'scipy.power', 'pymc.mcmc', 'r.metafor',
+        ], { policyResolver, auditEmitter, userId: input.userId });
+        const agent = createStatisticalAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['statistical'] ?? '' });
+        const literatureText = ((vars['__step_gather'] as { literatureText?: string } | undefined)?.literatureText) ?? '';
+        const result = await agent.run(ctx, {
+          messages: [{ role: 'user', content: `Literature evidence:\n${literatureText}` }],
+        });
+        const text = result.output ?? '';
+        await appendTurn(db, input.hypothesisId, 0, 'statistical', text);
+        await appendEvidence(db, input.hypothesisId, 'statistical', 'statistical', 'stat_finding', text.slice(0, 200));
+        span.addEvent('sv.evidence.write', { 'sv.step': 'statistical', count: 1 });
+        span.addEvent('sv.step.end', { 'sv.step': 'statistical' });
+        return { statisticalText: text };
+      }, { 'sv.hypothesis_id': input.hypothesisId, 'sv.step': 'statistical' });
     });
 
     // ── mathematical ────────────────────────────────────────
     this.engine.registerHandler('mathematical', async (vars) => {
       const input = getInput(vars);
       const ctx = makeCtx(vars);
-      const reg = registryFromKeys(toolMap, [
-        'sympy.simplify', 'sympy.solve', 'sympy.integrate', 'wolfram.query',
-      ], { policyResolver, auditEmitter, userId: input.userId });
-      const agent = createMathematicalAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['mathematical'] ?? '' });
-      const decomposedText = ((vars['__step_decompose'] as { decomposedText?: string } | undefined)?.decomposedText) ?? '';
-      const result = await agent.run(ctx, {
-        messages: [{ role: 'user', content: `Sub-claims:\n${decomposedText}` }],
-      });
-      const text = result.output ?? '';
-      await appendTurn(db, input.hypothesisId, 0, 'mathematical', text);
-      await appendEvidence(db, input.hypothesisId, 'mathematical', 'mathematical', 'math_result', text.slice(0, 200));
-      return { mathematicalText: text };
+      return tracer.withSpan(ctx, 'sv.step.mathematical', async (span) => {
+        span.addEvent('sv.step.start', { 'sv.step': 'mathematical', 'sv.hypothesis_id': input.hypothesisId });
+        const reg = registryFromKeys(toolMap, [
+          'sympy.simplify', 'sympy.solve', 'sympy.integrate', 'wolfram.query',
+        ], { policyResolver, auditEmitter, userId: input.userId });
+        const agent = createMathematicalAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['mathematical'] ?? '' });
+        const decomposedText = ((vars['__step_decompose'] as { decomposedText?: string } | undefined)?.decomposedText) ?? '';
+        const result = await agent.run(ctx, {
+          messages: [{ role: 'user', content: `Sub-claims:\n${decomposedText}` }],
+        });
+        const text = result.output ?? '';
+        await appendTurn(db, input.hypothesisId, 0, 'mathematical', text);
+        await appendEvidence(db, input.hypothesisId, 'mathematical', 'mathematical', 'math_result', text.slice(0, 200));
+        span.addEvent('sv.evidence.write', { 'sv.step': 'mathematical', count: 1 });
+        span.addEvent('sv.step.end', { 'sv.step': 'mathematical' });
+        return { mathematicalText: text };
+      }, { 'sv.hypothesis_id': input.hypothesisId, 'sv.step': 'mathematical' });
     });
 
     // ── simulation ──────────────────────────────────────────
     this.engine.registerHandler('simulation', async (vars) => {
       const input = getInput(vars);
       const ctx = makeCtx(vars);
-      const reg = registryFromKeys(toolMap, [
-        'scipy.power', 'pymc.mcmc', 'rdkit.descriptors', 'biopython.align', 'networkx.analyse',
-      ], { policyResolver, auditEmitter, userId: input.userId });
-      const agent = createSimulationAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['simulation'] ?? '' });
-      const literatureText = ((vars['__step_gather'] as { literatureText?: string } | undefined)?.literatureText) ?? '';
-      const result = await agent.run(ctx, {
-        messages: [{ role: 'user', content: `Literature evidence:\n${literatureText}\n\nHypothesis: ${input.statement}` }],
-      });
-      const text = result.output ?? '';
-      await appendTurn(db, input.hypothesisId, 0, 'simulation', text);
-      await appendEvidence(db, input.hypothesisId, 'simulation', 'simulation', 'sim_result', text.slice(0, 200));
-      return { simulationText: text };
+      return tracer.withSpan(ctx, 'sv.step.simulation', async (span) => {
+        span.addEvent('sv.step.start', { 'sv.step': 'simulation', 'sv.hypothesis_id': input.hypothesisId });
+        const reg = registryFromKeys(toolMap, [
+          'scipy.power', 'pymc.mcmc', 'rdkit.descriptors', 'biopython.align', 'networkx.analyse',
+        ], { policyResolver, auditEmitter, userId: input.userId });
+        const agent = createSimulationAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['simulation'] ?? '' });
+        const literatureText = ((vars['__step_gather'] as { literatureText?: string } | undefined)?.literatureText) ?? '';
+        const result = await agent.run(ctx, {
+          messages: [{ role: 'user', content: `Literature evidence:\n${literatureText}\n\nHypothesis: ${input.statement}` }],
+        });
+        const text = result.output ?? '';
+        await appendTurn(db, input.hypothesisId, 0, 'simulation', text);
+        await appendEvidence(db, input.hypothesisId, 'simulation', 'simulation', 'sim_result', text.slice(0, 200));
+        span.addEvent('sv.evidence.write', { 'sv.step': 'simulation', count: 1 });
+        span.addEvent('sv.step.end', { 'sv.step': 'simulation' });
+        return { simulationText: text };
+      }, { 'sv.hypothesis_id': input.hypothesisId, 'sv.step': 'simulation' });
     });
 
     // ── adversarial ─────────────────────────────────────────
     this.engine.registerHandler('adversarial', async (vars) => {
       const input = getInput(vars);
       const ctx = makeCtx(vars);
-      const reg = registryFromKeys(toolMap, [
-        'arxiv.search', 'pubmed.search', 'semanticscholar.search',
-        'openalex.search', 'europepmc.search',
-        'scipy.stats.test', 'statsmodels.meta',
-        'sympy.simplify', 'sympy.solve',
-      ], { policyResolver, auditEmitter, userId: input.userId });
-      const agent = createAdversarialAgent({ model: await mkReasoning(), tools: reg, systemPrompt: prompts['adversarial'] ?? '' });
-      const statText = ((vars['__step_statistical'] as { statisticalText?: string } | undefined)?.statisticalText) ?? '';
-      const mathText = ((vars['__step_mathematical'] as { mathematicalText?: string } | undefined)?.mathematicalText) ?? '';
-      const simText = ((vars['__step_simulation'] as { simulationText?: string } | undefined)?.simulationText) ?? '';
-      const result = await agent.run(ctx, {
-        messages: [{
-          role: 'user',
-          content: `Hypothesis: ${input.statement}\n\nStatistical analysis:\n${statText}\n\nMath analysis:\n${mathText}\n\nSimulation:\n${simText}`,
-        }],
-      });
-      const text = result.output ?? '';
-      await appendTurn(db, input.hypothesisId, 0, 'adversarial', text, { dissent: true });
-      return { adversarialText: text };
+      return tracer.withSpan(ctx, 'sv.step.falsify', async (span) => {
+        span.addEvent('sv.step.start', { 'sv.step': 'adversarial', 'sv.hypothesis_id': input.hypothesisId });
+        const reg = registryFromKeys(toolMap, [
+          'arxiv.search', 'pubmed.search', 'semanticscholar.search',
+          'openalex.search', 'europepmc.search',
+          'scipy.stats.test', 'statsmodels.meta',
+          'sympy.simplify', 'sympy.solve',
+        ], { policyResolver, auditEmitter, userId: input.userId });
+        const agent = createAdversarialAgent({ model: await mkReasoning(), tools: reg, systemPrompt: prompts['adversarial'] ?? '' });
+        const statText = ((vars['__step_statistical'] as { statisticalText?: string } | undefined)?.statisticalText) ?? '';
+        const mathText = ((vars['__step_mathematical'] as { mathematicalText?: string } | undefined)?.mathematicalText) ?? '';
+        const simText = ((vars['__step_simulation'] as { simulationText?: string } | undefined)?.simulationText) ?? '';
+        const result = await agent.run(ctx, {
+          messages: [{
+            role: 'user',
+            content: `Hypothesis: ${input.statement}\n\nStatistical analysis:\n${statText}\n\nMath analysis:\n${mathText}\n\nSimulation:\n${simText}`,
+          }],
+        });
+        const text = result.output ?? '';
+        await appendTurn(db, input.hypothesisId, 0, 'adversarial', text, { dissent: true });
+        span.addEvent('sv.step.end', { 'sv.step': 'adversarial' });
+        return { adversarialText: text };
+      }, { 'sv.hypothesis_id': input.hypothesisId, 'sv.step': 'adversarial' });
     });
 
     // ── deliberate (dialogue loop) ──────────────────────────
     this.engine.registerHandler('deliberate', async (vars) => {
       const input = getInput(vars);
-      const adversarialText = ((vars['__step_falsify'] as { adversarialText?: string } | undefined)?.adversarialText) ?? '';
-      const statText = ((vars['__step_statistical'] as { statisticalText?: string } | undefined)?.statisticalText) ?? '';
-      // Single-round deliberation: adversarial challenges, statistical responds
-      await appendTurn(db, input.hypothesisId, 1, 'adversarial', adversarialText.slice(0, 500), {
-        toAgent: 'statistical', dissent: true,
-      });
-      await appendTurn(db, input.hypothesisId, 1, 'statistical', `In response to adversarial challenge: ${statText.slice(0, 300)}`, {
-        toAgent: 'adversarial', dissent: false,
-      });
-      return { deliberationText: adversarialText + '\n\n' + statText };
+      const ctx = makeCtx(vars);
+      return tracer.withSpan(ctx, 'sv.step.deliberate', async (span) => {
+        span.addEvent('sv.step.start', { 'sv.step': 'deliberate', 'sv.hypothesis_id': input.hypothesisId });
+        const adversarialText = ((vars['__step_falsify'] as { adversarialText?: string } | undefined)?.adversarialText) ?? '';
+        const statText = ((vars['__step_statistical'] as { statisticalText?: string } | undefined)?.statisticalText) ?? '';
+        // Single-round deliberation: adversarial challenges, statistical responds
+        await appendTurn(db, input.hypothesisId, 1, 'adversarial', adversarialText.slice(0, 500), {
+          toAgent: 'statistical', dissent: true,
+        });
+        await appendTurn(db, input.hypothesisId, 1, 'statistical', `In response to adversarial challenge: ${statText.slice(0, 300)}`, {
+          toAgent: 'adversarial', dissent: false,
+        });
+        span.addEvent('sv.step.end', { 'sv.step': 'deliberate' });
+        return { deliberationText: adversarialText + '\n\n' + statText };
+      }, { 'sv.hypothesis_id': input.hypothesisId, 'sv.step': 'deliberate' });
     });
 
     // ── supervisor ──────────────────────────────────────────
     this.engine.registerHandler('supervisor', async (vars) => {
       const input = getInput(vars);
       const ctx = makeCtx(vars);
-      const allOutputs = [
-        ((vars['__step_gather'] as { literatureText?: string } | undefined)?.literatureText) ?? '',
-        ((vars['__step_statistical'] as { statisticalText?: string } | undefined)?.statisticalText) ?? '',
-        ((vars['__step_mathematical'] as { mathematicalText?: string } | undefined)?.mathematicalText) ?? '',
-        ((vars['__step_simulation'] as { simulationText?: string } | undefined)?.simulationText) ?? '',
-        ((vars['__step_falsify'] as { adversarialText?: string } | undefined)?.adversarialText) ?? '',
-        ((vars['__step_deliberate'] as { deliberationText?: string } | undefined)?.deliberationText) ?? '',
-      ].join('\n\n---\n\n');
+      return tracer.withSpan(ctx, 'sv.step.supervisor', async (span) => {
+        span.addEvent('sv.step.start', { 'sv.step': 'supervisor', 'sv.hypothesis_id': input.hypothesisId });
+        const allOutputs = [
+          ((vars['__step_gather'] as { literatureText?: string } | undefined)?.literatureText) ?? '',
+          ((vars['__step_statistical'] as { statisticalText?: string } | undefined)?.statisticalText) ?? '',
+          ((vars['__step_mathematical'] as { mathematicalText?: string } | undefined)?.mathematicalText) ?? '',
+          ((vars['__step_simulation'] as { simulationText?: string } | undefined)?.simulationText) ?? '',
+          ((vars['__step_falsify'] as { adversarialText?: string } | undefined)?.adversarialText) ?? '',
+          ((vars['__step_deliberate'] as { deliberationText?: string } | undefined)?.deliberationText) ?? '',
+        ].join('\n\n---\n\n');
 
-      const agent = createSupervisorAgent({ model: await mkReasoning(), systemPrompt: prompts['supervisor'] ?? '' });
-      const result = await agent.run(ctx, {
-        messages: [{
-          role: 'user',
-          content: `Hypothesis: ${input.statement}\n\nFull evidence package:\n${allOutputs}`,
-        }],
-      });
-      const text = result.output ?? '';
-      await appendTurn(db, input.hypothesisId, 2, 'supervisor', text);
+        const agent = createSupervisorAgent({ model: await mkReasoning(), systemPrompt: prompts['supervisor'] ?? '' });
+        const result = await agent.run(ctx, {
+          messages: [{
+            role: 'user',
+            content: `Hypothesis: ${input.statement}\n\nFull evidence package:\n${allOutputs}`,
+          }],
+        });
+        const text = result.output ?? '';
+        await appendTurn(db, input.hypothesisId, 2, 'supervisor', text);
 
-      // Parse and persist the verdict
-      try {
-        const jsonStart = text.indexOf('{');
-        const verdictJson = jsonStart >= 0
-          ? JSON.parse(text.slice(jsonStart)) as { verdict?: string; confidence?: number; summary?: string }
-          : {} as { verdict?: string; confidence?: number; summary?: string };
-        if (verdictJson.verdict) {
-          const verdictMap: Record<string, string> = {
-            SUPPORTED: 'supported', PARTIALLY_SUPPORTED: 'supported',
-            CONTRADICTED: 'refuted', INSUFFICIENT_EVIDENCE: 'inconclusive',
-            REQUIRES_REPLICATION: 'inconclusive',
-          };
-          const lo = Math.max(0, (verdictJson.confidence ?? 0.5) - 0.1);
-          const hi = Math.min(1, (verdictJson.confidence ?? 0.5) + 0.1);
-          await db.createVerdict({
-            id: randomUUID(),
-            tenant_id: input.tenantId,
-            hypothesis_id: input.hypothesisId,
-            verdict: (verdictMap[verdictJson.verdict] ?? 'inconclusive') as 'supported' | 'refuted' | 'inconclusive' | 'ill_posed' | 'out_of_scope',
-            confidence_lo: lo,
-            confidence_hi: hi,
-            key_evidence_ids: '[]',
-            falsifiers: '[]',
-            limitations: verdictJson.summary ?? '',
-            contract_id: randomUUID(),
-            replay_trace_id: randomUUID(),
-            emitted_by: 'supervisor',
-          });
-          await db.updateHypothesisStatus(input.hypothesisId, 'verdict', new Date().toISOString());
+        // Parse and persist the verdict
+        try {
+          const jsonStart = text.indexOf('{');
+          const verdictJson = jsonStart >= 0
+            ? JSON.parse(text.slice(jsonStart)) as { verdict?: string; confidence?: number; summary?: string }
+            : {} as { verdict?: string; confidence?: number; summary?: string };
+          if (verdictJson.verdict) {
+            const verdictMap: Record<string, string> = {
+              SUPPORTED: 'supported', PARTIALLY_SUPPORTED: 'supported',
+              CONTRADICTED: 'refuted', INSUFFICIENT_EVIDENCE: 'inconclusive',
+              REQUIRES_REPLICATION: 'inconclusive',
+            };
+            const lo = Math.max(0, (verdictJson.confidence ?? 0.5) - 0.1);
+            const hi = Math.min(1, (verdictJson.confidence ?? 0.5) + 0.1);
+            await db.createVerdict({
+              id: randomUUID(),
+              tenant_id: input.tenantId,
+              hypothesis_id: input.hypothesisId,
+              verdict: (verdictMap[verdictJson.verdict] ?? 'inconclusive') as 'supported' | 'refuted' | 'inconclusive' | 'ill_posed' | 'out_of_scope',
+              confidence_lo: lo,
+              confidence_hi: hi,
+              key_evidence_ids: '[]',
+              falsifiers: '[]',
+              limitations: verdictJson.summary ?? '',
+              contract_id: randomUUID(),
+              replay_trace_id: randomUUID(),
+              emitted_by: 'supervisor',
+            });
+            await db.updateHypothesisStatus(input.hypothesisId, 'verdict', new Date().toISOString());
+            span.addEvent('sv.verdict.emit', {
+              'sv.hypothesis_id': input.hypothesisId,
+              'sv.verdict': verdictJson.verdict,
+              'sv.confidence': verdictJson.confidence ?? 0.5,
+            });
+          }
+        } catch {
+          await db.updateHypothesisStatus(input.hypothesisId, 'abandoned', new Date().toISOString()).catch(() => {});
+          span.status = 'error';
         }
-      } catch {
-        await db.updateHypothesisStatus(input.hypothesisId, 'abandoned', new Date().toISOString()).catch(() => {});
-      }
-      return { supervisorText: text };
+        span.addEvent('sv.step.end', { 'sv.step': 'supervisor' });
+        return { supervisorText: text };
+      }, { 'sv.hypothesis_id': input.hypothesisId, 'sv.step': 'supervisor' });
     });
 
     // ── analyse-fanout (branch coordinator) ─────────────────
@@ -439,10 +493,17 @@ export class SVWorkflowRunner {
   /** Start an async validation run. Returns the workflowRunId immediately. */
   async startRun(input: SVRunInput): Promise<string> {
     await this.db.updateHypothesisStatus(input.hypothesisId, 'running', new Date().toISOString());
+    const ctx = weaveContext({ tenantId: input.tenantId, userId: input.userId });
+    const rootSpan = this.tracer.startSpan(ctx, 'sv.run', {
+      'sv.hypothesis_id': input.hypothesisId,
+      'sv.tenant_id': input.tenantId,
+      'sv.budget_id': input.budgetId,
+    });
+    rootSpan.addEvent('sv.run.start', { 'sv.hypothesis_id': input.hypothesisId });
     const run = await this.engine.startRun('sv-workflow-v1', input as unknown as Record<string, unknown>);
     this.runIndex.set(input.hypothesisId, run.id);
-    // Update status on run completion (non-blocking)
-    run; // already completed synchronously in the engine for now
+    rootSpan.addEvent('sv.run.end', { 'sv.run_id': run.id });
+    rootSpan.end();
     return run.id;
   }
 

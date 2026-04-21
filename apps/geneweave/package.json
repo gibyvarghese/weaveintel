@@ -21,7 +21,9 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "test": "vitest run",
     "test:api": "vitest run src/api.test.ts",
-    "test:e2e": "npx playwright test --config playwright.config.ts"
+    "test:e2e": "npx playwright test --config playwright.config.ts",
+    "sv:eval": "npx tsx src/features/scientific-validation/evals/run-corpus.ts",
+    "sv:cost-gate": "npx tsx src/features/scientific-validation/evals/cost-gate.ts"
   },
   "dependencies": {
     "@weaveintel/agents": "*",
