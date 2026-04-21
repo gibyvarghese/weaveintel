@@ -270,3 +270,18 @@ Valid values: `'mechanism' | 'epidemiological' | 'mathematical' | 'dose_response
 - Emit `keepalive` pings every 15 s via `startSSEKeepalive(res)` / `clearInterval(ka)`.
 - Wrap SSE handlers in `try/finally` to always call `clearInterval(ka)` and `res.end()`.
 - Maximum SSE stream duration: 5 minutes (enforced inside `pollRows`).
+
+### UI Architecture (Phases 7–9 — complete)
+- Three views: `sv-submit-view.ts` (form), `sv-live-view.ts` (SSE deliberation), `sv-verdict-view.ts` (verdict + bundle).
+- All views exported from `features/scientific-validation/ui/index.ts` barrel.
+- State fields: `state.svView` (`'submit' | 'live' | 'verdict'`), `state.svHypothesisId`, `state.svHypothesis`, `state.svVerdict`.
+- View routing: `ui-client.ts` `else if (state.view === 'scientific-validation')` branch routes on `state.svView`.
+- `'scientific-validation'` is in the `allowedViews` Set; sidebar nav entry is in `workspace-shell.ts`.
+- SSE cleanup: `MutationObserver` on `document.body` detects DOM removal of the live view element and calls `cleanup()` to close `EventSource` instances and clear the polling interval.
+- `EventSource` opens with `{ withCredentials: true }`. SSE event types: `evidence`, `turn`, `verdict`, `keepalive`.
+
+### Eval Corpus
+- `evals/corpus.json` — 20 curated hypotheses (5 known-true, 5 known-false, 5 ill-posed, 5 p-hacked).
+- `evals/run-corpus.ts` — CLI runner; submits each hypothesis, polls for verdict, reports per-category pass/fail rates.
+- Target accuracy ≥ 85% on known-true, known-false, and p-hacked categories.
+- `expectedVerdict` values: `'supported' | 'refuted' | 'inconclusive' | 'needs_revision'`.

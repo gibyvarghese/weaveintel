@@ -1274,6 +1274,25 @@ queued → running → verdict
                 ↘ abandoned
 ```
 
+### UI
+
+The 🔬 **Validation** entry in the geneWeave sidebar opens a three-step UI:
+
+1. **Submit form** — enter a title, hypothesis statement, and optional domain tags.
+2. **Live deliberation** — real-time evidence events and agent dialogue streamed via SSE.
+3. **Verdict** — verdict badge, confidence interval, sub-claims list, key evidence, and bundle download link.
+
+### Eval Corpus
+
+`apps/geneweave/src/features/scientific-validation/evals/corpus.json` contains 20 curated hypotheses (5 known-true, 5 known-false, 5 ill-posed, 5 p-hacked). Run against a live server:
+
+```bash
+npx ts-node --esm apps/geneweave/src/features/scientific-validation/evals/run-corpus.ts \
+  --url http://localhost:3500
+```
+
+See [docs/scientific-validation/feature-readme.md](docs/scientific-validation/feature-readme.md) for full API reference, bundle schema, and seed data documentation.
+
 ### Available SV tools
 
 18 built-in tools grouped by domain:

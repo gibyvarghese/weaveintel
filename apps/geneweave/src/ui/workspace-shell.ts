@@ -115,6 +115,14 @@ export function renderWorkspaceNav(options: {
     renderSidebarIcon('connectors'),
     h('span', { className: 'nav-label' }, 'Connectors')
   ));
+  menu.appendChild(h('button', {
+    className: state.view === 'scientific-validation' ? 'active' : '',
+    title: 'Scientific Validation',
+    onClick: () => { state.view = 'scientific-validation'; options.render(); },
+  },
+    h('span', { className: 'side-icon', style: 'font-size:15px' }, '🔬'),
+    h('span', { className: 'nav-label' }, 'Validation')
+  ));
 
   const adminNode = h('div', { className: 'admin-nav-tree' });
   const adminActive = state.view === 'admin';

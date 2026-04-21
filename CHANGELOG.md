@@ -9,6 +9,30 @@ and this project adheres to [Fabric Versioning](VERSIONING.md).
 
 ## [Unreleased]
 
+### GeneWeave — Scientific Validation (sv:) Phases 7–9: UI, Evals, and Docs
+
+#### Phase 7 — Three-View UI
+
+- **`sv-submit-view.ts`** — Hypothesis submission form: title, statement textarea, comma-separated domain tags. Posts to `/api/sv/hypotheses`; on success transitions state to `live` view with the returned hypothesis ID.
+- **`sv-live-view.ts`** — Real-time deliberation view. Opens two `EventSource` streams (`/events` + `/dialogue`) with `withCredentials`. Evidence panel shows agent ID, step, kind badge, and summary. Dialogue panel shows agent turns with dissent highlighting and round index. `verdict` SSE event transitions to `verdict` view. Status polling every 4 s as fallback. `MutationObserver` cleans up streams when the element is removed from DOM.
+- **`sv-verdict-view.ts`** — Verdict display: verdict badge with colour-coded card, confidence interval bar, limitations text, sub-claims list (with claim type and testability score), evidence kind summary chips, and a `<a download>` bundle link. "New Hypothesis" button resets state to `submit` view.
+- **`ui/index.ts`** — Barrel export for all three views.
+- **`state.ts`** — Added `svView`, `svHypothesisId`, `svHypothesis`, `svVerdict` fields to the app state object.
+- **`ui-client.ts`** — Added `'scientific-validation'` to `allowedViews`; added `else if (state.view === 'scientific-validation')` branch that routes to the correct SV sub-view based on `state.svView`.
+- **`workspace-shell.ts`** — Added 🔬 **Validation** nav entry to the sidebar.
+
+#### Phase 8 — Eval Corpus
+
+- **`evals/corpus.json`** — 20 curated hypotheses: 5 known-true, 5 known-false, 5 ill-posed, 5 p-hacked. Each entry has `id`, `category`, `title`, `statement`, `domainTags`, `expectedVerdict`, and `rationale`.
+- **`evals/run-corpus.ts`** — CLI runner that iterates all corpus entries, submits each to a live server, polls for verdict, and reports per-category pass/fail rates. Supports `--url`, `--apiKey`, `--timeout`, `--category`, `--dryRun` flags.
+
+#### Phase 9 — Tests, Example, and Docs
+
+- **`examples/35-scientific-validation.ts`** — Runnable example demonstrating submit, SSE streaming, verdict polling, bundle download, cancel, and reproduce. Requires a live server and model provider credentials.
+- **`sv-ui.e2e.ts`** — 8 Playwright E2E tests: SV nav button visibility, form render, required-field validation, submission → live-view transition, live-view panel presence, cancel button, verdict view rendering, and bundle download link.
+- **`docs/scientific-validation/feature-readme.md`** — Full feature documentation: API reference, SSE event shapes, bundle schema, DB tables, seed data, UI views, eval corpus usage, and test commands.
+- **`README.md`** — Scientific Validation section extended with UI description, eval corpus usage, and link to feature-readme.
+
 ### @weaveintel/sandbox — Phase 1: Container Executor
 
 - **`ContainerExecutor`** — New class (`packages/sandbox/src/executors/container/`) that gates every container run through an image allow-list, clamps resource limits to per-image ceilings, strips disallowed env keys, filters the network allow-list, and wraps each execution in an `@weaveintel/core` `Tracer` span with `cache=hit|miss` attribution.

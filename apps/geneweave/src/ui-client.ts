@@ -118,6 +118,11 @@ import {
   renderSettingsDropdown as renderSettingsDropdownView,
 } from './ui/chat-view.js';
 import type { Message, Chat } from './ui/types.js';
+import {
+  renderSVSubmitView,
+  renderSVLiveView,
+  renderSVVerdictView,
+} from './features/scientific-validation/ui/index.js';
 
 
 // ============================================================================
@@ -1200,6 +1205,15 @@ function renderApp() {
     main.appendChild(renderConnectorsView(render));
   } else if (state.view === 'preferences') {
     main.appendChild(renderPreferencesView());
+  } else if (state.view === 'scientific-validation') {
+    const svView = (state as any).svView as string;
+    if (svView === 'live') {
+      main.appendChild(renderSVLiveView({ render }));
+    } else if (svView === 'verdict') {
+      main.appendChild(renderSVVerdictView({ render }));
+    } else {
+      main.appendChild(renderSVSubmitView({ render }));
+    }
   } else {
     main.appendChild(renderHomeWorkspace());
   }
@@ -1217,7 +1231,7 @@ function restoreUiStateFromStorage() {
     const raw = window.localStorage.getItem(UI_STATE_KEY);
     if (!raw) return;
     const saved = JSON.parse(raw) as any;
-    const allowedViews = new Set(['chat', 'connectors', 'admin', 'dashboard', 'preferences']);
+    const allowedViews = new Set(['chat', 'connectors', 'admin', 'dashboard', 'preferences', 'scientific-validation']);
 
     if (typeof saved?.view === 'string' && allowedViews.has(saved.view)) {
       state.view = saved.view;

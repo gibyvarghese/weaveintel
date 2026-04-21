@@ -97,6 +97,12 @@ export const state: any = {
   _aboutInfo: null as any,
   _upgradeStatus: null,
   _upgradeMsg: '',
+
+  // Scientific Validation
+  svView: 'submit' as 'submit' | 'live' | 'verdict',
+  svHypothesisId: null as string | null,
+  svHypothesis: null as any,
+  svVerdict: null as any,
 };
 
 // Helper to get calendar focus date
