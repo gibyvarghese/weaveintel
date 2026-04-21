@@ -101,12 +101,21 @@ export function registerSVRoutes(
       json(res, 400, { error: 'Invalid JSON body' }); return;
     }
 
-    const { title, statement, domainTags = [], budgetId = '' } = body;
+    const { title, statement, domainTags = [], budgetId: rawBudgetId = '' } = body;
     if (!title || typeof title !== 'string') { json(res, 400, { error: 'title is required' }); return; }
     if (!statement || typeof statement !== 'string') { json(res, 400, { error: 'statement is required' }); return; }
 
     const id = randomUUID();
     const tenantId = (auth.tenantId ?? 'default') as string;
+
+    // Resolve budget envelope: use caller-supplied id, or fall back to first available.
+    let budgetId = rawBudgetId;
+    if (!budgetId) {
+      const envelopes = await db.listBudgetEnvelopes(tenantId);
+      const fallback = envelopes[0] ?? (await db.listBudgetEnvelopes('system'))[0];
+      if (!fallback) { json(res, 422, { error: 'No budget envelope available. Seed default data first.' }); return; }
+      budgetId = fallback.id;
+    }
     const traceId = randomUUID();
     const contractId = randomUUID();
 
