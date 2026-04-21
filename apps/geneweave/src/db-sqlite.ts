@@ -4439,6 +4439,45 @@ export class SQLiteAdapter implements DatabaseAdapter {
     ];
     for (const r of validationRules) await this.createValidationRule(r);
     }
+
+    // ── Scientific Validation seed data ──────────────────────
+    if (cnt('sv_budget_envelope') === 0) {
+      await this.createBudgetEnvelope({
+        id: '019500000-0000-7000-8000-000000000001',
+        tenant_id: 'system',
+        name: 'Default Research Budget',
+        max_llm_cents: 500,
+        max_sandbox_cents: 200,
+        max_wall_seconds: 300,
+        max_rounds: 10,
+        diminishing_returns_epsilon: 0.05,
+      });
+      await this.createBudgetEnvelope({
+        id: '019500000-0000-7000-8000-000000000002',
+        tenant_id: 'system',
+        name: 'High-Throughput Budget',
+        max_llm_cents: 2000,
+        max_sandbox_cents: 1000,
+        max_wall_seconds: 600,
+        max_rounds: 20,
+        diminishing_returns_epsilon: 0.02,
+      });
+    }
+    if (cnt('sv_hypothesis') === 0) {
+      await this.createHypothesis({
+        id: '019500000-0000-7000-8000-000000000010',
+        tenant_id: 'system',
+        submitted_by: 'system',
+        title: 'Sample: Vitamin D reduces COVID-19 severity',
+        statement: 'Supplementation with vitamin D at therapeutic doses (≥4000 IU/day) reduces ICU admission rate in COVID-19 patients by at least 20% compared to standard care.',
+        domain_tags: JSON.stringify(['medicine', 'nutrition', 'covid-19']),
+        status: 'queued',
+        budget_envelope_id: '019500000-0000-7000-8000-000000000001',
+        workflow_run_id: null,
+        trace_id: null,
+        contract_id: null,
+      });
+    }
   }
 
   // ─── Scientific Validation ──────────────────────────────────
