@@ -9,6 +9,10 @@
  *
  * The runner is constructed with a model factory so that agents can be
  * created per-run without leaking state between runs.
+ *
+ * System prompts are loaded from the `prompts` DB table on construction
+ * (via keys from SV_PROMPT_KEY). Operators may edit them at runtime via
+ * the admin UI without a code deploy.
  */
 
 import { createWorkflowEngine } from '@weaveintel/workflows';
@@ -18,6 +22,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseAdapter } from '../../db.js';
 import type { Tool, ExecutionContext, Model } from '@weaveintel/core';
 import { scientificValidationWorkflow } from './workflow.js';
+import { SV_PROMPT_KEY } from './sv-seed.js';
 import {
   createDecomposerAgent,
   createLiteratureAgent,
@@ -118,6 +123,8 @@ export class SVWorkflowRunner {
   private makeReasoningModel: () => Promise<Model>;
   private makeToolModel: () => Promise<Model>;
   private db: DatabaseAdapter;
+  /** System prompts loaded from DB at construction, keyed by agent name. */
+  private prompts: Record<string, string> = {};
   /** Map of hypothesisId → workflowRunId for cancellation. */
   private runIndex = new Map<string, string>();
 
@@ -131,13 +138,28 @@ export class SVWorkflowRunner {
       // best-effort — definition might already be registered
     });
 
+    // Load prompts async; handlers fall back to empty string if not yet loaded.
+    this._loadPrompts().catch(() => {});
     this._registerHandlers();
+  }
+
+  /** Load all 7 SV system prompts from the DB into memory. Non-fatal. */
+  private async _loadPrompts(): Promise<void> {
+    for (const [agentName, promptKey] of Object.entries(SV_PROMPT_KEY)) {
+      try {
+        const row = await this.db.getPromptByKey(promptKey);
+        if (row?.template) this.prompts[agentName] = row.template;
+      } catch {
+        // best-effort — agent will use empty string if DB is unavailable
+      }
+    }
   }
 
   private _registerHandlers(): void {
     const {
       db,
       toolMap,
+      prompts,
       makeReasoningModel: mkReasoning,
       makeToolModel: mkTool,
     } = this;
@@ -166,7 +188,7 @@ export class SVWorkflowRunner {
     this.engine.registerHandler('decomposer', async (vars) => {
       const input = getInput(vars);
       const ctx = makeCtx(vars);
-      const agent = createDecomposerAgent({ model: await mkReasoning() });
+      const agent = createDecomposerAgent({ model: await mkReasoning(), systemPrompt: prompts['decomposer'] ?? '' });
       const result = await agent.run(ctx, {
         messages: [{ role: 'user', content: `Hypothesis: ${input.statement}\nDomain tags: ${input.domainTags.join(', ')}` }],
       });
@@ -201,7 +223,7 @@ export class SVWorkflowRunner {
         'arxiv.search', 'pubmed.search', 'semanticscholar.search',
         'openalex.search', 'crossref.resolve', 'europepmc.search',
       ]);
-      const agent = createLiteratureAgent({ model: await mkTool(), tools: reg });
+      const agent = createLiteratureAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['literature'] ?? '' });
       const decomposedText = ((vars['__step_decompose'] as { decomposedText?: string } | undefined)?.decomposedText) ?? '';
       const result = await agent.run(ctx, {
         messages: [{ role: 'user', content: `Sub-claims:\n${decomposedText}\n\nHypothesis: ${input.statement}` }],
@@ -233,7 +255,7 @@ export class SVWorkflowRunner {
       const reg = registryFromKeys(toolMap, [
         'scipy.stats.test', 'statsmodels.meta', 'scipy.power', 'pymc.mcmc', 'r.metafor',
       ]);
-      const agent = createStatisticalAgent({ model: await mkTool(), tools: reg });
+      const agent = createStatisticalAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['statistical'] ?? '' });
       const literatureText = ((vars['__step_gather'] as { literatureText?: string } | undefined)?.literatureText) ?? '';
       const result = await agent.run(ctx, {
         messages: [{ role: 'user', content: `Literature evidence:\n${literatureText}` }],
@@ -251,7 +273,7 @@ export class SVWorkflowRunner {
       const reg = registryFromKeys(toolMap, [
         'sympy.simplify', 'sympy.solve', 'sympy.integrate', 'wolfram.query',
       ]);
-      const agent = createMathematicalAgent({ model: await mkTool(), tools: reg });
+      const agent = createMathematicalAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['mathematical'] ?? '' });
       const decomposedText = ((vars['__step_decompose'] as { decomposedText?: string } | undefined)?.decomposedText) ?? '';
       const result = await agent.run(ctx, {
         messages: [{ role: 'user', content: `Sub-claims:\n${decomposedText}` }],
@@ -269,7 +291,7 @@ export class SVWorkflowRunner {
       const reg = registryFromKeys(toolMap, [
         'scipy.power', 'pymc.mcmc', 'rdkit.descriptors', 'biopython.align', 'networkx.analyse',
       ]);
-      const agent = createSimulationAgent({ model: await mkTool(), tools: reg });
+      const agent = createSimulationAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['simulation'] ?? '' });
       const literatureText = ((vars['__step_gather'] as { literatureText?: string } | undefined)?.literatureText) ?? '';
       const result = await agent.run(ctx, {
         messages: [{ role: 'user', content: `Literature evidence:\n${literatureText}\n\nHypothesis: ${input.statement}` }],
@@ -290,7 +312,7 @@ export class SVWorkflowRunner {
         'scipy.stats.test', 'statsmodels.meta',
         'sympy.simplify', 'sympy.solve',
       ]);
-      const agent = createAdversarialAgent({ model: await mkReasoning(), tools: reg });
+      const agent = createAdversarialAgent({ model: await mkReasoning(), tools: reg, systemPrompt: prompts['adversarial'] ?? '' });
       const statText = ((vars['__step_statistical'] as { statisticalText?: string } | undefined)?.statisticalText) ?? '';
       const mathText = ((vars['__step_mathematical'] as { mathematicalText?: string } | undefined)?.mathematicalText) ?? '';
       const simText = ((vars['__step_simulation'] as { simulationText?: string } | undefined)?.simulationText) ?? '';
@@ -333,7 +355,7 @@ export class SVWorkflowRunner {
         ((vars['__step_deliberate'] as { deliberationText?: string } | undefined)?.deliberationText) ?? '',
       ].join('\n\n---\n\n');
 
-      const agent = createSupervisorAgent({ model: await mkReasoning() });
+      const agent = createSupervisorAgent({ model: await mkReasoning(), systemPrompt: prompts['supervisor'] ?? '' });
       const result = await agent.run(ctx, {
         messages: [{
           role: 'user',

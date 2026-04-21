@@ -1001,6 +1001,9 @@ CREATE TABLE IF NOT EXISTS worker_agents (
   max_retries INTEGER NOT NULL DEFAULT 0,
   -- Priority for ordering when building supervisor worker list (higher = listed first)
   priority INTEGER NOT NULL DEFAULT 0,
+  -- Feature grouping: 'general' | 'scientific-validation' | other domain categories
+  -- Workers with category != 'general' are excluded from the main chat supervisor dispatch list
+  category TEXT NOT NULL DEFAULT 'general',
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))

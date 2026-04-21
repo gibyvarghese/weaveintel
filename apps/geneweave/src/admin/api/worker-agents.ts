@@ -52,6 +52,7 @@ export function registerWorkerAgentRoutes(
       task_contract_id: (body['task_contract_id'] as string) ?? null,
       max_retries: body['max_retries'] !== undefined ? Number(body['max_retries']) : 0,
       priority: body['priority'] !== undefined ? Number(body['priority']) : 0,
+      category: (body['category'] as string) ?? 'general',
       enabled: body['enabled'] !== false ? 1 : 0,
     });
     const workerAgent = await db.getWorkerAgent(id);

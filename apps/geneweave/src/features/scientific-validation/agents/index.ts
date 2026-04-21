@@ -10,19 +10,13 @@
  *   adversarial   — falsification and confounders (all layers read)
  *   supervisor    — weighs evidence and emits verdict (no tool calls)
  *
- * Callers supply a model-factory and a ToolRegistry; the agents are
- * stateless factories that create a new weaveAgent per workflow run.
+ * System prompts are resolved from the DB at runner construction time (via
+ * sv-seed.ts keys like `sv.decomposer`) and passed in as plain strings.
+ * No prompt constants live in TypeScript — edit prompts via the admin UI.
  */
 
 import { weaveAgent } from '@weaveintel/agents';
 import type { Agent, Model, ToolRegistry } from '@weaveintel/core';
-import { DECOMPOSER_PROMPT } from '../prompts/decomposer.js';
-import { LITERATURE_PROMPT } from '../prompts/literature.js';
-import { STATISTICAL_PROMPT } from '../prompts/statistical.js';
-import { MATHEMATICAL_PROMPT } from '../prompts/mathematical.js';
-import { SIMULATION_PROMPT } from '../prompts/simulation.js';
-import { ADVERSARIAL_PROMPT } from '../prompts/adversarial.js';
-import { SUPERVISOR_PROMPT } from '../prompts/supervisor.js';
 
 export interface SVAgentOptions {
   /** Model used for reasoning-only agents (decomposer, adversarial, supervisor). */
@@ -39,95 +33,98 @@ export interface SVAgentOptions {
   numericalTools: ToolRegistry;
   /** Domain-layer tools only. */
   domainTools: ToolRegistry;
+  /** System prompts loaded from DB, keyed by agent name. */
+  prompts: Record<string, string>;
 }
 
 /** Create the decomposer agent — splits hypothesis into sub-claims (no tools). */
-export function createDecomposerAgent(opts: { model: Model }): Agent {
+export function createDecomposerAgent(opts: { model: Model; systemPrompt: string }): Agent {
   return weaveAgent({
     name: 'decomposer',
     model: opts.model,
-    systemPrompt: DECOMPOSER_PROMPT,
+    systemPrompt: opts.systemPrompt,
     maxSteps: 1,
   });
 }
 
 /** Create the literature agent — retrieves prior work using evidence tools. */
-export function createLiteratureAgent(opts: { model: Model; tools: ToolRegistry }): Agent {
+export function createLiteratureAgent(opts: { model: Model; tools: ToolRegistry; systemPrompt: string }): Agent {
   return weaveAgent({
     name: 'literature',
     model: opts.model,
-    systemPrompt: LITERATURE_PROMPT,
+    systemPrompt: opts.systemPrompt,
     tools: opts.tools,
     maxSteps: 8,
   });
 }
 
 /** Create the statistical agent — numerical analysis and meta-analysis. */
-export function createStatisticalAgent(opts: { model: Model; tools: ToolRegistry }): Agent {
+export function createStatisticalAgent(opts: { model: Model; tools: ToolRegistry; systemPrompt: string }): Agent {
   return weaveAgent({
     name: 'statistical',
     model: opts.model,
-    systemPrompt: STATISTICAL_PROMPT,
+    systemPrompt: opts.systemPrompt,
     tools: opts.tools,
     maxSteps: 10,
   });
 }
 
 /** Create the mathematical agent — symbolic verification and derivations. */
-export function createMathematicalAgent(opts: { model: Model; tools: ToolRegistry }): Agent {
+export function createMathematicalAgent(opts: { model: Model; tools: ToolRegistry; systemPrompt: string }): Agent {
   return weaveAgent({
     name: 'mathematical',
     model: opts.model,
-    systemPrompt: MATHEMATICAL_PROMPT,
+    systemPrompt: opts.systemPrompt,
     tools: opts.tools,
     maxSteps: 10,
   });
 }
 
 /** Create the simulation agent — Monte Carlo, ODE/PDE, and domain simulations. */
-export function createSimulationAgent(opts: { model: Model; tools: ToolRegistry }): Agent {
+export function createSimulationAgent(opts: { model: Model; tools: ToolRegistry; systemPrompt: string }): Agent {
   return weaveAgent({
     name: 'simulation',
     model: opts.model,
-    systemPrompt: SIMULATION_PROMPT,
+    systemPrompt: opts.systemPrompt,
     tools: opts.tools,
     maxSteps: 12,
   });
 }
 
 /** Create the adversarial agent — falsification and counter-evidence. */
-export function createAdversarialAgent(opts: { model: Model; tools: ToolRegistry }): Agent {
+export function createAdversarialAgent(opts: { model: Model; tools: ToolRegistry; systemPrompt: string }): Agent {
   return weaveAgent({
     name: 'adversarial',
     model: opts.model,
-    systemPrompt: ADVERSARIAL_PROMPT,
+    systemPrompt: opts.systemPrompt,
     tools: opts.tools,
     maxSteps: 8,
   });
 }
 
 /** Create the supervisor agent — no tool calls; synthesises evidence and emits verdict. */
-export function createSupervisorAgent(opts: { model: Model }): Agent {
+export function createSupervisorAgent(opts: { model: Model; systemPrompt: string }): Agent {
   return weaveAgent({
     name: 'supervisor',
     model: opts.model,
-    systemPrompt: SUPERVISOR_PROMPT,
+    systemPrompt: opts.systemPrompt,
     maxSteps: 1,
   });
 }
 
 /** Convenience: create all seven agents from a unified options object. */
 export function createSVAgents(opts: SVAgentOptions): Record<string, Agent> {
-  // Build tool registries per layer
+  const p = opts.prompts;
   const numericalAndDomain = opts.numericalTools;
 
   return {
-    decomposer: createDecomposerAgent({ model: opts.reasoningModel }),
-    literature: createLiteratureAgent({ model: opts.toolModel, tools: opts.evidenceTools }),
-    statistical: createStatisticalAgent({ model: opts.toolModel, tools: opts.numericalTools }),
-    mathematical: createMathematicalAgent({ model: opts.toolModel, tools: opts.symbolicTools }),
-    simulation: createSimulationAgent({ model: opts.toolModel, tools: numericalAndDomain }),
-    adversarial: createAdversarialAgent({ model: opts.reasoningModel, tools: opts.tools }),
-    supervisor: createSupervisorAgent({ model: opts.reasoningModel }),
+    decomposer:  createDecomposerAgent({ model: opts.reasoningModel, systemPrompt: p['decomposer'] ?? '' }),
+    literature:  createLiteratureAgent({ model: opts.toolModel, tools: opts.evidenceTools, systemPrompt: p['literature'] ?? '' }),
+    statistical: createStatisticalAgent({ model: opts.toolModel, tools: opts.numericalTools, systemPrompt: p['statistical'] ?? '' }),
+    mathematical: createMathematicalAgent({ model: opts.toolModel, tools: opts.symbolicTools, systemPrompt: p['mathematical'] ?? '' }),
+    simulation:  createSimulationAgent({ model: opts.toolModel, tools: numericalAndDomain, systemPrompt: p['simulation'] ?? '' }),
+    adversarial: createAdversarialAgent({ model: opts.reasoningModel, tools: opts.tools, systemPrompt: p['adversarial'] ?? '' }),
+    supervisor:  createSupervisorAgent({ model: opts.reasoningModel, systemPrompt: p['supervisor'] ?? '' }),
   };
 }
+

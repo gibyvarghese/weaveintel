@@ -601,6 +601,8 @@ export interface WorkerAgentRow {
   task_contract_id: string | null;
   max_retries: number;
   priority: number;
+  /** Feature grouping: 'general' | 'scientific-validation' | other domain categories. */
+  category: string;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -1399,6 +1401,7 @@ export interface DatabaseAdapter {
   // ─── Admin: Prompts ────────────────────────────────────────
   createPrompt(p: Omit<PromptRow, 'created_at' | 'updated_at'>): Promise<void>;
   getPrompt(id: string): Promise<PromptRow | null>;
+  getPromptByKey(key: string): Promise<PromptRow | null>;
   getPromptByName(name: string): Promise<PromptRow | null>;
   listPrompts(): Promise<PromptRow[]>;
   updatePrompt(id: string, fields: Partial<Omit<PromptRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
@@ -1575,6 +1578,8 @@ export interface DatabaseAdapter {
   getWorkerAgent(id: string): Promise<WorkerAgentRow | null>;
   listWorkerAgents(): Promise<WorkerAgentRow[]>;
   listEnabledWorkerAgents(): Promise<WorkerAgentRow[]>;
+  /** Returns enabled worker agents for a specific category (e.g. 'scientific-validation'). */
+  listWorkerAgentsByCategory(category: string): Promise<WorkerAgentRow[]>;
   updateWorkerAgent(id: string, fields: Partial<Omit<WorkerAgentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteWorkerAgent(id: string): Promise<void>;
 

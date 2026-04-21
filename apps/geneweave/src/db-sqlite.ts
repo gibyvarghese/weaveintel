@@ -516,6 +516,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return (this.d.prepare('SELECT * FROM prompts WHERE id = ?').get(id) as PromptRow) ?? null;
   }
 
+  async getPromptByKey(key: string): Promise<PromptRow | null> {
+    return (this.d.prepare('SELECT * FROM prompts WHERE key = ?').get(key) as PromptRow) ?? null;
+  }
+
   async getPromptByName(name: string): Promise<PromptRow | null> {
     return (this.d.prepare('SELECT * FROM prompts WHERE name = ?').get(name) as PromptRow) ?? null;
   }
@@ -1495,7 +1499,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createWorkerAgent(w: Omit<WorkerAgentRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO worker_agents (id, name, description, system_prompt, tool_names, persona, trigger_patterns, task_contract_id, max_retries, priority, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO worker_agents (id, name, description, system_prompt, tool_names, persona, trigger_patterns, task_contract_id, max_retries, priority, category, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       w.id,
       w.name,
@@ -1507,6 +1511,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       w.task_contract_id ?? null,
       w.max_retries,
       w.priority,
+      w.category ?? 'general',
       w.enabled,
     );
   }
@@ -1520,7 +1525,11 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   async listEnabledWorkerAgents(): Promise<WorkerAgentRow[]> {
-    return this.d.prepare('SELECT * FROM worker_agents WHERE enabled = 1 ORDER BY priority DESC, name ASC').all() as WorkerAgentRow[];
+    return this.d.prepare("SELECT * FROM worker_agents WHERE enabled = 1 AND category = 'general' ORDER BY priority DESC, name ASC").all() as WorkerAgentRow[];
+  }
+
+  async listWorkerAgentsByCategory(category: string): Promise<WorkerAgentRow[]> {
+    return this.d.prepare('SELECT * FROM worker_agents WHERE enabled = 1 AND category = ? ORDER BY priority DESC, name ASC').all(category) as WorkerAgentRow[];
   }
 
   async updateWorkerAgent(id: string, fields: Partial<Omit<WorkerAgentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
@@ -3410,7 +3419,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
             '- If blocked: exact blocker + next best fallback',
           ].join('\n'),
           tool_names: JSON.stringify(['cse_run_code', 'cse_session_status', 'cse_end_session', 'calculator', 'text_analysis']),
-          persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 50, enabled: 1,
+          persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 50, category: 'general', enabled: 1,
         },
         {
           id: 'aebc3dc5-cc5b-4ad2-a10c-dedf8a9a5c3e', name: 'statsnz_specialist',
@@ -3447,28 +3456,28 @@ export class SQLiteAdapter implements DatabaseAdapter {
             'cost of living new zealand', 'cost of living nz', 'inflation new zealand', 'inflation nz',
             'new zealand gdp', 'new zealand inflation', 'new zealand cost of living',
           ]),
-          task_contract_id: 'eb6561e5-46a8-446d-8056-0d1a6fac751e', max_retries: 2, priority: 40, enabled: 1,
+          task_contract_id: 'eb6561e5-46a8-446d-8056-0d1a6fac751e', max_retries: 2, priority: 40, category: 'general', enabled: 1,
         },
         {
           id: 'bf3c7feb-5471-4e17-a46c-f2c84efbf613', name: 'researcher',
           description: 'Researches topics, searches the web, browses websites, and gathers information. Can open a headless browser to navigate dynamic sites, read page content, click links, fill forms, and interact with web applications. Has full browser authentication capabilities: can detect login forms, auto-login using stored website credentials from the credential vault, save session cookies, and hand off the browser to the user for manual steps like 2FA or CAPTCHA. Always delegate login/auth tasks to this worker — it has the browser_detect_auth, browser_login, browser_save_cookies, browser_handoff_request, and browser_handoff_resume tools.',
           system_prompt: '',
           tool_names: JSON.stringify(['web_search', 'text_analysis', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume']),
-          persona: 'agent_researcher', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 30, enabled: 1,
+          persona: 'agent_researcher', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 30, category: 'general', enabled: 1,
         },
         {
           id: '63566924-9e94-41e5-8e55-6e9ddee168c5', name: 'analyst',
           description: 'Analyzes data, performs calculations, validates computed outputs, formats JSON, provides structured insights, and handles temporal/timer queries. Good for math, data processing, output verification, formatting, date/time questions, and time management.',
           system_prompt: '',
           tool_names: JSON.stringify(['calculator', 'json_format', 'text_analysis', 'memory_recall', 'datetime', 'datetime_add', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel']),
-          persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 20, enabled: 1,
+          persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 20, category: 'general', enabled: 1,
         },
         {
           id: '1111d2e3-2828-4570-9bf2-91320b536a2e', name: 'writer',
           description: 'Writes, edits, and refines text. Good for drafting content, summarizing, and creative writing tasks.',
           system_prompt: '',
           tool_names: JSON.stringify(['text_analysis', 'memory_recall', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel']),
-          persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 10, enabled: 1,
+          persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 10, category: 'general', enabled: 1,
         },
       ];
       for (const w of workers) await this.createWorkerAgent(w);

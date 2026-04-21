@@ -30,6 +30,7 @@ import { createGeneWeaveServer } from './server.js';
 import { syncModelPricing, type PricingSyncReport } from './pricing-sync.js';
 import { syncToolCatalog } from './tools.js';
 import { startToolHealthJob } from './tool-health-job.js';
+import { seedSVData } from './features/scientific-validation/sv-seed.js';
 
 export type { PricingSyncReport };
 
@@ -116,6 +117,9 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
   // 3. Seed default admin data (no-op if already seeded)
   await db.seedDefaultData();
+
+  // 3a. Seed Scientific Validation prompts and worker agents
+  await seedSVData(db);
 
   // 4. Sync BUILTIN_TOOLS into tool_catalog so operators can manage them
   await syncToolCatalog(db);

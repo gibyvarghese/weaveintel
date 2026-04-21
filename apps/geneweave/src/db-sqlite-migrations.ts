@@ -759,4 +759,41 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
       CHECK (confidence_lo <= confidence_hi)
     )
   `);
+
+  // ── worker_agents: add category column ──────────────────────────────────────
+  // Existing DBs need the column added. New DBs get it from CREATE TABLE.
+  safeExec(db, `ALTER TABLE worker_agents ADD COLUMN category TEXT NOT NULL DEFAULT 'general'`);
+
+  // ── sv_evidence_event and sv_agent_turn ─────────────────────────────────────
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS sv_evidence_event (
+      id TEXT PRIMARY KEY,
+      hypothesis_id TEXT NOT NULL REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+      step_id TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      evidence_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      source_type TEXT NOT NULL DEFAULT 'model_inference',
+      tool_key TEXT,
+      reproducibility_hash TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sv_evidence_hypothesis ON sv_evidence_event(hypothesis_id, created_at ASC)`);
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS sv_agent_turn (
+      id TEXT PRIMARY KEY,
+      hypothesis_id TEXT NOT NULL REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+      round_index INTEGER NOT NULL DEFAULT 0,
+      from_agent TEXT NOT NULL,
+      to_agent TEXT,
+      message TEXT NOT NULL,
+      cites_evidence_ids TEXT NOT NULL DEFAULT '[]',
+      dissent INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sv_agent_turn_hypothesis ON sv_agent_turn(hypothesis_id, created_at ASC)`);
 }
