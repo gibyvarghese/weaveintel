@@ -685,4 +685,78 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   `);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_approval_chat ON tool_approval_requests(chat_id, status)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_approval_tool ON tool_approval_requests(tool_name, status)`);
+
+  // ── Scientific Validation — Phase 2 bootstrap migrations ──
+  // These CREATE TABLE IF NOT EXISTS statements allow existing databases
+  // to receive the sv_* tables without a full schema wipe.
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS sv_budget_envelope (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      max_llm_cents INTEGER NOT NULL,
+      max_sandbox_cents INTEGER NOT NULL,
+      max_wall_seconds INTEGER NOT NULL,
+      max_rounds INTEGER NOT NULL,
+      diminishing_returns_epsilon REAL NOT NULL,
+      created_at TEXT NOT NULL
+    )
+  `);
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS sv_hypothesis (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      submitted_by TEXT NOT NULL,
+      title TEXT NOT NULL,
+      statement TEXT NOT NULL,
+      domain_tags TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (status IN ('queued','running','verdict','abandoned')),
+      budget_envelope_id TEXT NOT NULL REFERENCES sv_budget_envelope(id),
+      workflow_run_id TEXT,
+      trace_id TEXT,
+      contract_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sv_hypothesis_tenant ON sv_hypothesis(tenant_id, created_at DESC)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sv_hypothesis_status ON sv_hypothesis(tenant_id, status)`);
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS sv_sub_claim (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      hypothesis_id TEXT NOT NULL REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+      parent_sub_claim_id TEXT REFERENCES sv_sub_claim(id),
+      statement TEXT NOT NULL,
+      claim_type TEXT NOT NULL
+        CHECK (claim_type IN ('mechanism','epidemiological','mathematical','dose_response','causal','other')),
+      testability_score REAL NOT NULL CHECK (testability_score BETWEEN 0 AND 1),
+      created_at TEXT NOT NULL
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sv_sub_claim_hypothesis ON sv_sub_claim(hypothesis_id)`);
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS sv_verdict (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      hypothesis_id TEXT NOT NULL UNIQUE REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+      verdict TEXT NOT NULL
+        CHECK (verdict IN ('supported','refuted','inconclusive','ill_posed','out_of_scope')),
+      confidence_lo REAL NOT NULL CHECK (confidence_lo BETWEEN 0 AND 1),
+      confidence_hi REAL NOT NULL CHECK (confidence_hi BETWEEN 0 AND 1),
+      key_evidence_ids TEXT NOT NULL,
+      falsifiers TEXT NOT NULL,
+      limitations TEXT NOT NULL,
+      contract_id TEXT NOT NULL,
+      replay_trace_id TEXT NOT NULL,
+      emitted_by TEXT NOT NULL DEFAULT 'supervisor',
+      created_at TEXT NOT NULL,
+      CHECK (confidence_lo <= confidence_hi)
+    )
+  `);
 }

@@ -29,6 +29,7 @@ import type {
   MemoryExtractionEventRow,
   MetricsSummary, WorkflowRunRow, GuardrailEvalRow, ModelPricingRow,
   WebsiteCredentialRow,
+  SvBudgetEnvelopeRow, SvHypothesisRow, SvHypothesisStatus, SvSubClaimRow, SvVerdictRow,
 } from './db-types.js';
 
 export class SQLiteAdapter implements DatabaseAdapter {
@@ -4438,6 +4439,132 @@ export class SQLiteAdapter implements DatabaseAdapter {
     ];
     for (const r of validationRules) await this.createValidationRule(r);
     }
+  }
+
+  // ─── Scientific Validation ──────────────────────────────────
+
+  async createBudgetEnvelope(envelope: Omit<SvBudgetEnvelopeRow, 'created_at'>): Promise<void> {
+    const now = new Date().toISOString();
+    this.d.prepare(
+      `INSERT INTO sv_budget_envelope
+         (id, tenant_id, name, max_llm_cents, max_sandbox_cents, max_wall_seconds,
+          max_rounds, diminishing_returns_epsilon, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      envelope.id, envelope.tenant_id, envelope.name,
+      envelope.max_llm_cents, envelope.max_sandbox_cents, envelope.max_wall_seconds,
+      envelope.max_rounds, envelope.diminishing_returns_epsilon, now,
+    );
+  }
+
+  async getBudgetEnvelope(id: string, tenantId: string): Promise<SvBudgetEnvelopeRow | null> {
+    return (this.d.prepare(
+      `SELECT * FROM sv_budget_envelope WHERE id = ? AND tenant_id = ?`,
+    ).get(id, tenantId) as SvBudgetEnvelopeRow | undefined) ?? null;
+  }
+
+  async listBudgetEnvelopes(tenantId: string): Promise<SvBudgetEnvelopeRow[]> {
+    return this.d.prepare(
+      `SELECT * FROM sv_budget_envelope WHERE tenant_id = ? ORDER BY created_at DESC`,
+    ).all(tenantId) as SvBudgetEnvelopeRow[];
+  }
+
+  async createHypothesis(hypothesis: Omit<SvHypothesisRow, 'created_at' | 'updated_at'>): Promise<void> {
+    const now = new Date().toISOString();
+    this.d.prepare(
+      `INSERT INTO sv_hypothesis
+         (id, tenant_id, submitted_by, title, statement, domain_tags, status,
+          budget_envelope_id, workflow_run_id, trace_id, contract_id, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      hypothesis.id, hypothesis.tenant_id, hypothesis.submitted_by,
+      hypothesis.title, hypothesis.statement, hypothesis.domain_tags,
+      hypothesis.status, hypothesis.budget_envelope_id,
+      hypothesis.workflow_run_id ?? null, hypothesis.trace_id ?? null,
+      hypothesis.contract_id ?? null, now, now,
+    );
+  }
+
+  async getHypothesis(id: string, tenantId: string): Promise<SvHypothesisRow | null> {
+    return (this.d.prepare(
+      `SELECT * FROM sv_hypothesis WHERE id = ? AND tenant_id = ?`,
+    ).get(id, tenantId) as SvHypothesisRow | undefined) ?? null;
+  }
+
+  async listHypotheses(tenantId: string, limit = 50, offset = 0): Promise<SvHypothesisRow[]> {
+    return this.d.prepare(
+      `SELECT * FROM sv_hypothesis WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    ).all(tenantId, limit, offset) as SvHypothesisRow[];
+  }
+
+  async updateHypothesisStatus(id: string, status: SvHypothesisStatus, updatedAt: string): Promise<void> {
+    this.d.prepare(
+      `UPDATE sv_hypothesis SET status = ?, updated_at = ? WHERE id = ?`,
+    ).run(status, updatedAt, id);
+  }
+
+  async updateHypothesisWorkflowIds(
+    id: string,
+    opts: { workflowRunId?: string; traceId?: string; contractId?: string; updatedAt: string },
+  ): Promise<void> {
+    const sets: string[] = ['updated_at = ?'];
+    const vals: unknown[] = [opts.updatedAt];
+    if (opts.workflowRunId !== undefined) { sets.push('workflow_run_id = ?'); vals.push(opts.workflowRunId); }
+    if (opts.traceId !== undefined) { sets.push('trace_id = ?'); vals.push(opts.traceId); }
+    if (opts.contractId !== undefined) { sets.push('contract_id = ?'); vals.push(opts.contractId); }
+    vals.push(id);
+    this.d.prepare(`UPDATE sv_hypothesis SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async createSubClaim(claim: Omit<SvSubClaimRow, 'created_at'>): Promise<void> {
+    const now = new Date().toISOString();
+    this.d.prepare(
+      `INSERT INTO sv_sub_claim
+         (id, tenant_id, hypothesis_id, parent_sub_claim_id, statement, claim_type,
+          testability_score, created_at)
+       VALUES (?,?,?,?,?,?,?,?)`,
+    ).run(
+      claim.id, claim.tenant_id, claim.hypothesis_id,
+      claim.parent_sub_claim_id ?? null, claim.statement,
+      claim.claim_type, claim.testability_score, now,
+    );
+  }
+
+  async getSubClaim(id: string): Promise<SvSubClaimRow | null> {
+    return (this.d.prepare(`SELECT * FROM sv_sub_claim WHERE id = ?`).get(id) as SvSubClaimRow | undefined) ?? null;
+  }
+
+  async listSubClaims(hypothesisId: string): Promise<SvSubClaimRow[]> {
+    return this.d.prepare(
+      `SELECT * FROM sv_sub_claim WHERE hypothesis_id = ? ORDER BY created_at ASC`,
+    ).all(hypothesisId) as SvSubClaimRow[];
+  }
+
+  async createVerdict(verdict: Omit<SvVerdictRow, 'created_at'>): Promise<void> {
+    const now = new Date().toISOString();
+    this.d.prepare(
+      `INSERT INTO sv_verdict
+         (id, tenant_id, hypothesis_id, verdict, confidence_lo, confidence_hi,
+          key_evidence_ids, falsifiers, limitations, contract_id, replay_trace_id,
+          emitted_by, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      verdict.id, verdict.tenant_id, verdict.hypothesis_id,
+      verdict.verdict, verdict.confidence_lo, verdict.confidence_hi,
+      verdict.key_evidence_ids, verdict.falsifiers, verdict.limitations,
+      verdict.contract_id, verdict.replay_trace_id,
+      verdict.emitted_by ?? 'supervisor', now,
+    );
+  }
+
+  async getVerdictByHypothesis(hypothesisId: string): Promise<SvVerdictRow | null> {
+    return (this.d.prepare(
+      `SELECT * FROM sv_verdict WHERE hypothesis_id = ?`,
+    ).get(hypothesisId) as SvVerdictRow | undefined) ?? null;
+  }
+
+  async getVerdictById(id: string): Promise<SvVerdictRow | null> {
+    return (this.d.prepare(`SELECT * FROM sv_verdict WHERE id = ?`).get(id) as SvVerdictRow | undefined) ?? null;
   }
 }
 

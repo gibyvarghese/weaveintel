@@ -1005,5 +1005,73 @@ CREATE TABLE IF NOT EXISTS worker_agents (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ── Scientific Validation ────────────────────────────────────
+
+-- Budget envelopes cap cost/time for a validation run. Created once, never mutated after use.
+CREATE TABLE IF NOT EXISTS sv_budget_envelope (
+  id TEXT PRIMARY KEY,                       -- uuid v7
+  tenant_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  max_llm_cents INTEGER NOT NULL,            -- max LLM cost in US cents
+  max_sandbox_cents INTEGER NOT NULL,        -- max container compute cost in US cents
+  max_wall_seconds INTEGER NOT NULL,         -- wall-clock timeout
+  max_rounds INTEGER NOT NULL,               -- max deliberation rounds
+  diminishing_returns_epsilon REAL NOT NULL, -- halt when CI improvement < epsilon
+  created_at TEXT NOT NULL
+);
+
+-- A scientific hypothesis submitted for multi-agent validation.
+CREATE TABLE IF NOT EXISTS sv_hypothesis (
+  id TEXT PRIMARY KEY,                       -- uuid v7
+  tenant_id TEXT NOT NULL,
+  submitted_by TEXT NOT NULL,                -- user id
+  title TEXT NOT NULL,
+  statement TEXT NOT NULL,
+  domain_tags TEXT NOT NULL,                 -- JSON: string[]
+  status TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued','running','verdict','abandoned')),
+  budget_envelope_id TEXT NOT NULL REFERENCES sv_budget_envelope(id),
+  workflow_run_id TEXT,
+  trace_id TEXT,                             -- @weaveintel/replay trace
+  contract_id TEXT,                          -- @weaveintel/contracts completion contract
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sv_hypothesis_tenant ON sv_hypothesis(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sv_hypothesis_status ON sv_hypothesis(tenant_id, status);
+
+-- Sub-claims decomposed from a hypothesis by the Decomposer agent.
+CREATE TABLE IF NOT EXISTS sv_sub_claim (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  hypothesis_id TEXT NOT NULL REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+  parent_sub_claim_id TEXT REFERENCES sv_sub_claim(id),
+  statement TEXT NOT NULL,
+  claim_type TEXT NOT NULL
+    CHECK (claim_type IN ('mechanism','epidemiological','mathematical','dose_response','causal','other')),
+  testability_score REAL NOT NULL CHECK (testability_score BETWEEN 0 AND 1),
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sv_sub_claim_hypothesis ON sv_sub_claim(hypothesis_id);
+
+-- Supervisor-emitted verdict for a completed hypothesis run.
+CREATE TABLE IF NOT EXISTS sv_verdict (
+  id TEXT PRIMARY KEY,
+  tenant_id TEXT NOT NULL,
+  hypothesis_id TEXT NOT NULL UNIQUE REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+  verdict TEXT NOT NULL
+    CHECK (verdict IN ('supported','refuted','inconclusive','ill_posed','out_of_scope')),
+  confidence_lo REAL NOT NULL CHECK (confidence_lo BETWEEN 0 AND 1),
+  confidence_hi REAL NOT NULL CHECK (confidence_hi BETWEEN 0 AND 1),
+  key_evidence_ids TEXT NOT NULL,  -- JSON: string[]
+  falsifiers TEXT NOT NULL,        -- JSON: string[]
+  limitations TEXT NOT NULL,
+  contract_id TEXT NOT NULL,
+  replay_trace_id TEXT NOT NULL,
+  emitted_by TEXT NOT NULL DEFAULT 'supervisor',
+  created_at TEXT NOT NULL,
+  CHECK (confidence_lo <= confidence_hi)
+);
 `;
 

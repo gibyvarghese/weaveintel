@@ -1117,6 +1117,87 @@ export interface GuardrailEvalRow {
   created_at: string;
 }
 
+// ─── Scientific Validation row types ────────────────────────
+
+/**
+ * A budget envelope caps LLM cost, sandbox cost, wall-clock time, and deliberation
+ * rounds for one hypothesis validation run. Never mutated after use.
+ */
+export interface SvBudgetEnvelopeRow {
+  id: string;                         // uuid v7
+  tenant_id: string;
+  name: string;
+  max_llm_cents: number;              // max LLM cost in US cents
+  max_sandbox_cents: number;          // max container compute cost in US cents
+  max_wall_seconds: number;           // wall-clock timeout seconds
+  max_rounds: number;                 // max deliberation rounds
+  diminishing_returns_epsilon: number; // halt when CI improvement < epsilon
+  created_at: string;
+}
+
+/** Status of a scientific hypothesis validation run. */
+export type SvHypothesisStatus = 'queued' | 'running' | 'verdict' | 'abandoned';
+
+/**
+ * A scientific hypothesis submitted for multi-agent validation.
+ */
+export interface SvHypothesisRow {
+  id: string;                         // uuid v7
+  tenant_id: string;
+  submitted_by: string;               // user id
+  title: string;
+  statement: string;
+  domain_tags: string;                // JSON: string[]
+  status: SvHypothesisStatus;
+  budget_envelope_id: string;         // FK → sv_budget_envelope.id
+  workflow_run_id: string | null;
+  trace_id: string | null;            // @weaveintel/replay trace
+  contract_id: string | null;         // @weaveintel/contracts completion contract
+  created_at: string;
+  updated_at: string;
+}
+
+/** The type of scientific claim for a sub-claim. */
+export type SvClaimType = 'mechanism' | 'epidemiological' | 'mathematical' | 'dose_response' | 'causal' | 'other';
+
+/**
+ * A sub-claim decomposed from a hypothesis by the Decomposer agent.
+ */
+export interface SvSubClaimRow {
+  id: string;
+  tenant_id: string;
+  hypothesis_id: string;              // FK → sv_hypothesis.id ON DELETE CASCADE
+  parent_sub_claim_id: string | null; // self-ref for nested decomposition
+  statement: string;
+  claim_type: SvClaimType;
+  testability_score: number;          // 0–1 float
+  created_at: string;
+}
+
+/** The possible verdicts a Supervisor can emit. */
+export type SvVerdictValue = 'supported' | 'refuted' | 'inconclusive' | 'ill_posed' | 'out_of_scope';
+
+/**
+ * Supervisor-emitted verdict for a completed hypothesis run.
+ * Invariant: confidence_lo <= confidence_hi.
+ * Invariant: supported/refuted verdicts must cite ≥1 sandbox-tool evidence item.
+ */
+export interface SvVerdictRow {
+  id: string;
+  tenant_id: string;
+  hypothesis_id: string;              // FK → sv_hypothesis.id ON DELETE CASCADE (UNIQUE)
+  verdict: SvVerdictValue;
+  confidence_lo: number;              // 0–1 float
+  confidence_hi: number;              // 0–1 float, ≥ confidence_lo
+  key_evidence_ids: string;           // JSON: string[]
+  falsifiers: string;                 // JSON: string[]
+  limitations: string;
+  contract_id: string;
+  replay_trace_id: string;
+  emitted_by: string;                 // default 'supervisor'
+  created_at: string;
+}
+
 // ─── Adapter interface ───────────────────────────────────────
 
 export interface DatabaseAdapter {
@@ -1730,6 +1811,30 @@ export interface DatabaseAdapter {
 
   // ─── Admin: Seed data ──────────────────────────────────────
   seedDefaultData(): Promise<void>;
+
+  // ─── Scientific Validation ───────────────────────────────────
+
+  // Budget envelopes
+  createBudgetEnvelope(envelope: Omit<SvBudgetEnvelopeRow, 'created_at'>): Promise<void>;
+  getBudgetEnvelope(id: string, tenantId: string): Promise<SvBudgetEnvelopeRow | null>;
+  listBudgetEnvelopes(tenantId: string): Promise<SvBudgetEnvelopeRow[]>;
+
+  // Hypotheses
+  createHypothesis(hypothesis: Omit<SvHypothesisRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getHypothesis(id: string, tenantId: string): Promise<SvHypothesisRow | null>;
+  listHypotheses(tenantId: string, limit?: number, offset?: number): Promise<SvHypothesisRow[]>;
+  updateHypothesisStatus(id: string, status: SvHypothesisStatus, updatedAt: string): Promise<void>;
+  updateHypothesisWorkflowIds(id: string, opts: { workflowRunId?: string; traceId?: string; contractId?: string; updatedAt: string }): Promise<void>;
+
+  // Sub-claims
+  createSubClaim(claim: Omit<SvSubClaimRow, 'created_at'>): Promise<void>;
+  getSubClaim(id: string): Promise<SvSubClaimRow | null>;
+  listSubClaims(hypothesisId: string): Promise<SvSubClaimRow[]>;
+
+  // Verdicts
+  createVerdict(verdict: Omit<SvVerdictRow, 'created_at'>): Promise<void>;
+  getVerdictByHypothesis(hypothesisId: string): Promise<SvVerdictRow | null>;
+  getVerdictById(id: string): Promise<SvVerdictRow | null>;
 }
 
 

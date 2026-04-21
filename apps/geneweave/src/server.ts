@@ -29,6 +29,7 @@ import {
 } from './auth.js';
 import { getHTML } from './ui-server.js';
 import { registerAdminRoutes } from './server-admin.js';
+import { registerSVRoutes } from './features/scientific-validation/index.js';
 import { encryptCredential, decryptCredential } from './vault.js';
 import { setBrowserAuthProvider, type SSOPassThroughAuth } from '@weaveintel/tools-browser';
 import { OAuthClient, createOAuthProvider, type OAuthProviderName } from '@weaveintel/oauth';
@@ -888,6 +889,9 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   };
 
   registerAdminRoutes(adminRouter, db, json, readBody, providers, html);
+
+  // ── Scientific Validation feature routes ────────────────────
+  registerSVRoutes(router, db, json, readBody);
 
   router.get('/api/admin/rbac/personas', async (_req, res, _params, auth) => {
     const gate = ensurePermission(auth, 'admin:platform:write');
