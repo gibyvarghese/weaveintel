@@ -19,7 +19,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@weaveintel/core": "*"
+    "@weaveintel/core": "*",
+    "@weaveintel/sandbox": "*"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

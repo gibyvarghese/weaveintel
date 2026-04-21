@@ -9,6 +9,19 @@ and this project adheres to [Fabric Versioning](VERSIONING.md).
 
 ## [Unreleased]
 
+### @weaveintel/sandbox — Phase 1: Container Executor
+
+- **`ContainerExecutor`** — New class (`packages/sandbox/src/executors/container/`) that gates every container run through an image allow-list, clamps resource limits to per-image ceilings, strips disallowed env keys, filters the network allow-list, and wraps each execution in an `@weaveintel/core` `Tracer` span with `cache=hit|miss` attribution.
+- **`DockerRuntime`** — Real Docker-based `ContainerRuntime` with hardened security flags: `--rm`, `--read-only`, `--tmpfs /tmp`, `--pids-limit 256`, `--cap-drop ALL`, `--security-opt no-new-privileges`, `--user 65534`, `--memory`, `--cpus`, hard wall-time kill via `SIGKILL`. Stdout/stderr capped per `limits.stdoutBytes`/`stderrBytes` with `truncated` tracking.
+- **`FakeRuntime`** — Deterministic in-memory `ContainerRuntime` keyed by `sha256(imageDigest + stdin)`. Supports `register()` seeding, `calls` recording, and `resetCalls()` for test assertions. No Docker required.
+- **`ImagePolicy` / `createImagePolicy()`** — O(1) allow-list by exact `sha256:` digest. Each entry declares `networkAllowList`, `envAllowList`, and `resourceCeiling` (`cpuMillis`, `memoryMB`, `wallTimeSeconds`).
+- **`ResultCache<T>`** — Simple `get(key)/set(key, value)` interface for deterministic hash-keyed result caching (distinct from `SemanticCache` which is embedding-based).
+- **Typed errors** — `DigestRequired`, `ImageNotAllowed`, `NetworkDenied`, `ResourceLimitExceeded`, `EnvKeyDenied` — all with `readonly code` discriminant fields.
+- **`weaveContainerExecutor(opts)`** — Factory function exported from `@weaveintel/sandbox` following shared factory convention.
+- **`weaveFakeContainerRuntime(opts?)`** — Helper exported from `@weaveintel/testing` for DI-based test setups.
+- **20 tests** — Cover determinism, isolation (network), resource limit clamping, image policy enforcement, cache interop, env allow-list, stdout cap, and backwards compatibility with `createSandbox()`.
+- **Spec compliance** — Tags (non-`sha256:` digests) are rejected at executor entry; only successful (exit 0) results are cached; existing in-process `createSandbox()` API is fully unchanged.
+
 ### GeneWeave — Tool Platform Phase 4: Credentials + External Tool Support
 
 - **`tool_credentials` table** — DB-backed registry for operator-managed credentials (API keys, OAuth tokens, JWT, basic auth). UUID PKs. Secrets stay in environment variables; DB stores only `env_var_name` reference — no plaintext secrets in DB.

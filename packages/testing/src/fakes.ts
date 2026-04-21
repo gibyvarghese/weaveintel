@@ -268,3 +268,37 @@ export function weaveFakeTransport(): { client: MCPTransport; server: MCPTranspo
 
   return { client, server };
 }
+
+// ─── Fake container runtime ───────────────────────────────────
+
+import {
+  FakeRuntime,
+  type FakeRuntimeOptions,
+  type ContainerRuntime,
+  type ContainerRunResult,
+} from '@weaveintel/sandbox';
+
+export type { FakeRuntimeOptions, ContainerRuntime, ContainerRunResult };
+
+/**
+ * Creates a deterministic FakeRuntime for container executor tests.
+ *
+ * @example
+ * ```ts
+ * import { weaveFakeContainerRuntime, FakeRuntime } from '@weaveintel/testing';
+ *
+ * const fake = weaveFakeContainerRuntime({
+ *   responses: new Map([
+ *     [FakeRuntime.key('sha256:abc', '{"x":1}'), {
+ *       stdout: '{"result":42}', stderr: '', exitCode: 0,
+ *       wallMs: 1, cpuMs: 1, truncated: { stdout: false, stderr: false },
+ *     }],
+ *   ]),
+ * });
+ * ```
+ */
+export function weaveFakeContainerRuntime(opts: FakeRuntimeOptions = {}): FakeRuntime {
+  return new FakeRuntime(opts);
+}
+
+export { FakeRuntime };
