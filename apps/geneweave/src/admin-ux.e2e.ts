@@ -205,33 +205,34 @@ test.describe('Admin UX Regression', () => {
     await expect(traceEntries.first()).toBeVisible({ timeout: 3000 });
   });
 
-  test('tool-approval-requests tab is accessible and shows read-only list', async ({ page }) => {
+  test('tool-approval-requests tab is accessible and renders custom view', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
 
-    const m = page.locator('.main');
     await openAdminTab(page, 'tool-approval-requests');
 
-    // Standard list panel should be rendered
-    await expect(m.locator('.admin-list-panel')).toBeVisible({ timeout: 8000 });
+    // Custom view container should render with the approval-specific heading
+    const container = page.locator('.approval-container').first();
+    await expect(container).toBeVisible({ timeout: 8000 });
+    await expect(container.locator('h3', { hasText: 'Tool Approval Requests' })).toBeVisible({ timeout: 3000 });
 
-    // readOnly tab shows "Read only" label, not a "+ New" button, in the header
-    await expect(m.locator('.admin-list-header .nav-btn')).toHaveCount(0);
-    await expect(m.locator('.admin-list-header', { hasText: 'Read only' })).toBeVisible({ timeout: 3000 });
+    // Status filter buttons should be present
+    await expect(container.locator('button', { hasText: 'Pending' })).toBeVisible({ timeout: 3000 });
+    await expect(container.locator('button', { hasText: 'All' })).toBeVisible({ timeout: 3000 });
+    await expect(container.locator('button', { hasText: 'Approved' })).toBeVisible({ timeout: 3000 });
+    await expect(container.locator('button', { hasText: 'Denied' })).toBeVisible({ timeout: 3000 });
   });
 
-  test('tool-approval-requests tab shows empty state or rows', async ({ page }) => {
+  test('tool-approval-requests tab shows empty state or request cards', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
 
-    const m = page.locator('.main');
     await openAdminTab(page, 'tool-approval-requests');
 
-    await expect(m.locator('.admin-list-panel')).toBeVisible({ timeout: 8000 });
+    await expect(page.locator('.approval-container').first()).toBeVisible({ timeout: 8000 });
 
-    // Either shows table rows or the "No records found" inline message
-    const hasRows  = await m.locator('table tbody tr').count();
-    const hasEmpty = await m.locator('.admin-list-panel', { hasText: 'No records found' }).count();
-    expect(hasRows + hasEmpty).toBeGreaterThan(0);
+    // Wait for async load to settle — either an empty state or cards must appear in any container
+    const emptyOrCards = page.locator('.approval-container .approval-empty, .approval-container .approval-card');
+    await expect(emptyOrCards.first()).toBeVisible({ timeout: 15000 });
   });
 });

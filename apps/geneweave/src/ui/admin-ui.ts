@@ -4,6 +4,7 @@ import { state } from './state.js';
 import { normalizeAdminPath } from './prompt-wizard-utils.js';
 import { resetPromptWizard } from './prompt-wizard-state.js';
 import { renderToolSimulationView } from './tool-simulation-ui.js';
+import { renderToolApprovalView } from './tool-approval-ui.js';
 
 // ── Admin deep-link URL helpers ───────────────────────────────────────────────
 // Hash format:  #admin/{tab}          → opens the tab's list view
@@ -705,6 +706,12 @@ export function renderAdminView(options: {
   // Custom views (e.g. Tool Simulation step-through UI)
   if (schema?.customView === 'tool-simulation') {
     right.appendChild(renderToolSimulationView({ render: options.render }));
+    page.appendChild(right);
+    return page;
+  }
+
+  if (schema?.customView === 'tool-approval-requests') {
+    right.appendChild(renderToolApprovalView({ render: options.render }));
     page.appendChild(right);
     return page;
   }
