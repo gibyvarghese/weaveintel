@@ -6,12 +6,12 @@
  * based on the request parameters so identical queries produce identical hashes.
  *
  * Tools:
- *   arxiv.search            — arXiv search API
- *   pubmed.search           — PubMed E-utilities (NCBI)
- *   semanticscholar.search  — Semantic Scholar Graph API
- *   openalex.search         — OpenAlex works API
- *   crossref.resolve        — Crossref DOI metadata resolution
- *   europepmc.search        — Europe PMC RESTful search
+ *   arxiv_search            — arXiv search API
+ *   pubmed_search           — PubMed E-utilities (NCBI)
+ *   semanticscholar_search  — Semantic Scholar Graph API
+ *   openalex_search         — OpenAlex works API
+ *   crossref_resolve        — Crossref DOI metadata resolution
+ *   europepmc_search        — Europe PMC RESTful search
  *
  * Risk level: external-side-effect (read-only API calls to external services)
  */
@@ -66,10 +66,10 @@ function errResult(toolKey: string, query: string, error: string): string {
   return JSON.stringify(r, null, 2);
 }
 
-// ─── arxiv.search ────────────────────────────────────────────────────────────
+// ─── arxiv_search ────────────────────────────────────────────────────────────
 
 const arxivSearch = weaveTool({
-  name: 'arxiv.search',
+  name: 'arxiv_search',
   description:
     'Search arXiv for preprints and papers. Returns structured evidence items with id, title, authors, year, DOI, abstract, and arXiv URL. Risk: external-side-effect.',
   parameters: {
@@ -105,11 +105,11 @@ const arxivSearch = weaveTool({
     try {
       resp = await httpRequest({ url, method: 'GET', timeout: 15_000 });
     } catch (e) {
-      return errResult('arxiv.search', args.query, `Network error: ${(e as Error).message}`);
+      return errResult('arxiv_search', args.query, `Network error: ${(e as Error).message}`);
     }
 
     if (resp.status !== 200) {
-      return errResult('arxiv.search', args.query, `HTTP ${resp.status}`);
+      return errResult('arxiv_search', args.query, `HTTP ${resp.status}`);
     }
 
     // Parse Atom XML
@@ -132,9 +132,9 @@ const arxivSearch = weaveTool({
     const result: EvidenceResult = {
       ok: true,
       sourceType: 'http_api',
-      toolKey: 'arxiv.search',
+      toolKey: 'arxiv_search',
       query: args.query,
-      reproducibilityHash: hashQuery('arxiv.search', { query: args.query, maxResults, sortBy }),
+      reproducibilityHash: hashQuery('arxiv_search', { query: args.query, maxResults, sortBy }),
       results: entries,
       totalHits: entries.length,
     };
@@ -144,10 +144,10 @@ const arxivSearch = weaveTool({
   riskLevel: 'external-side-effect',
 });
 
-// ─── pubmed.search ───────────────────────────────────────────────────────────
+// ─── pubmed_search ───────────────────────────────────────────────────────────
 
 const pubmedSearch = weaveTool({
-  name: 'pubmed.search',
+  name: 'pubmed_search',
   description:
     'Search PubMed via NCBI E-utilities. Returns structured evidence items with PMID, title, authors, year, DOI, abstract, and journal. Risk: external-side-effect.',
   parameters: {
@@ -184,11 +184,11 @@ const pubmedSearch = weaveTool({
         timeout: 15_000,
       });
     } catch (e) {
-      return errResult('pubmed.search', args.query, `Network error: ${(e as Error).message}`);
+      return errResult('pubmed_search', args.query, `Network error: ${(e as Error).message}`);
     }
 
     if (searchResp.status !== 200) {
-      return errResult('pubmed.search', args.query, `esearch HTTP ${searchResp.status}`);
+      return errResult('pubmed_search', args.query, `esearch HTTP ${searchResp.status}`);
     }
 
     let pmids: string[] = [];
@@ -200,13 +200,13 @@ const pubmedSearch = weaveTool({
       pmids = searchJson.esearchresult?.idlist ?? [];
       totalHits = Number(searchJson.esearchresult?.count ?? 0);
     } catch {
-      return errResult('pubmed.search', args.query, 'Could not parse esearch response');
+      return errResult('pubmed_search', args.query, 'Could not parse esearch response');
     }
 
     if (pmids.length === 0) {
       const result: EvidenceResult = {
-        ok: true, sourceType: 'http_api', toolKey: 'pubmed.search', query: args.query,
-        reproducibilityHash: hashQuery('pubmed.search', { query: args.query, maxResults }),
+        ok: true, sourceType: 'http_api', toolKey: 'pubmed_search', query: args.query,
+        reproducibilityHash: hashQuery('pubmed_search', { query: args.query, maxResults }),
         results: [], totalHits: 0,
       };
       return JSON.stringify(result, null, 2);
@@ -225,7 +225,7 @@ const pubmedSearch = weaveTool({
         timeout: 15_000,
       });
     } catch (e) {
-      return errResult('pubmed.search', args.query, `Network error on efetch: ${(e as Error).message}`);
+      return errResult('pubmed_search', args.query, `Network error on efetch: ${(e as Error).message}`);
     }
 
     const items: EvidenceItem[] = [];
@@ -254,12 +254,12 @@ const pubmedSearch = weaveTool({
         });
       }
     } catch {
-      return errResult('pubmed.search', args.query, 'Could not parse efetch response');
+      return errResult('pubmed_search', args.query, 'Could not parse efetch response');
     }
 
     const result: EvidenceResult = {
-      ok: true, sourceType: 'http_api', toolKey: 'pubmed.search', query: args.query,
-      reproducibilityHash: hashQuery('pubmed.search', { query: args.query, maxResults }),
+      ok: true, sourceType: 'http_api', toolKey: 'pubmed_search', query: args.query,
+      reproducibilityHash: hashQuery('pubmed_search', { query: args.query, maxResults }),
       results: items, totalHits,
     };
     return JSON.stringify(result, null, 2);
@@ -268,10 +268,10 @@ const pubmedSearch = weaveTool({
   riskLevel: 'external-side-effect',
 });
 
-// ─── semanticscholar.search ──────────────────────────────────────────────────
+// ─── semanticscholar_search ──────────────────────────────────────────────────
 
 const semanticscholarSearch = weaveTool({
-  name: 'semanticscholar.search',
+  name: 'semanticscholar_search',
   description:
     'Search the Semantic Scholar Graph API for academic papers. Returns title, authors, year, venue, citation count, DOI, and abstract. Risk: external-side-effect.',
   parameters: {
@@ -318,11 +318,11 @@ const semanticscholarSearch = weaveTool({
         timeout: 15_000,
       });
     } catch (e) {
-      return errResult('semanticscholar.search', args.query, `Network error: ${(e as Error).message}`);
+      return errResult('semanticscholar_search', args.query, `Network error: ${(e as Error).message}`);
     }
 
     if (resp.status !== 200) {
-      return errResult('semanticscholar.search', args.query, `HTTP ${resp.status}`);
+      return errResult('semanticscholar_search', args.query, `HTTP ${resp.status}`);
     }
 
     let items: EvidenceItem[] = [];
@@ -354,12 +354,12 @@ const semanticscholarSearch = weaveTool({
         url: `https://www.semanticscholar.org/paper/${paper.paperId}`,
       }));
     } catch {
-      return errResult('semanticscholar.search', args.query, 'Could not parse API response');
+      return errResult('semanticscholar_search', args.query, 'Could not parse API response');
     }
 
     const result: EvidenceResult = {
-      ok: true, sourceType: 'http_api', toolKey: 'semanticscholar.search', query: args.query,
-      reproducibilityHash: hashQuery('semanticscholar.search', { query: args.query, maxResults }),
+      ok: true, sourceType: 'http_api', toolKey: 'semanticscholar_search', query: args.query,
+      reproducibilityHash: hashQuery('semanticscholar_search', { query: args.query, maxResults }),
       results: items, totalHits,
     };
     return JSON.stringify(result, null, 2);
@@ -368,10 +368,10 @@ const semanticscholarSearch = weaveTool({
   riskLevel: 'external-side-effect',
 });
 
-// ─── openalex.search ─────────────────────────────────────────────────────────
+// ─── openalex_search ─────────────────────────────────────────────────────────
 
 const openalexSearch = weaveTool({
-  name: 'openalex.search',
+  name: 'openalex_search',
   description:
     'Search OpenAlex works API for scholarly papers. Returns title, authors, year, venue, DOI, abstract, and citation count. Risk: external-side-effect.',
   parameters: {
@@ -410,11 +410,11 @@ const openalexSearch = weaveTool({
         timeout: 15_000,
       });
     } catch (e) {
-      return errResult('openalex.search', args.query, `Network error: ${(e as Error).message}`);
+      return errResult('openalex_search', args.query, `Network error: ${(e as Error).message}`);
     }
 
     if (resp.status !== 200) {
-      return errResult('openalex.search', args.query, `HTTP ${resp.status}`);
+      return errResult('openalex_search', args.query, `HTTP ${resp.status}`);
     }
 
     let items: EvidenceItem[] = [];
@@ -457,12 +457,12 @@ const openalexSearch = weaveTool({
         };
       });
     } catch {
-      return errResult('openalex.search', args.query, 'Could not parse API response');
+      return errResult('openalex_search', args.query, 'Could not parse API response');
     }
 
     const result: EvidenceResult = {
-      ok: true, sourceType: 'http_api', toolKey: 'openalex.search', query: args.query,
-      reproducibilityHash: hashQuery('openalex.search', { query: args.query, maxResults, filter: args.filter }),
+      ok: true, sourceType: 'http_api', toolKey: 'openalex_search', query: args.query,
+      reproducibilityHash: hashQuery('openalex_search', { query: args.query, maxResults, filter: args.filter }),
       results: items, totalHits,
     };
     return JSON.stringify(result, null, 2);
@@ -471,10 +471,10 @@ const openalexSearch = weaveTool({
   riskLevel: 'external-side-effect',
 });
 
-// ─── crossref.resolve ─────────────────────────────────────────────────────────
+// ─── crossref_resolve ─────────────────────────────────────────────────────────
 
 const crossrefResolve = weaveTool({
-  name: 'crossref.resolve',
+  name: 'crossref_resolve',
   description:
     'Resolve a DOI via the Crossref REST API to retrieve structured metadata: title, authors, year, journal, volume, issue, pages, abstract, URL. Risk: external-side-effect.',
   parameters: {
@@ -498,14 +498,14 @@ const crossrefResolve = weaveTool({
     try {
       resp = await httpRequest({ url, method: 'GET', headers, timeout: 15_000 });
     } catch (e) {
-      return errResult('crossref.resolve', doi, `Network error: ${(e as Error).message}`);
+      return errResult('crossref_resolve', doi, `Network error: ${(e as Error).message}`);
     }
 
     if (resp.status === 404) {
-      return errResult('crossref.resolve', doi, `DOI not found: ${doi}`);
+      return errResult('crossref_resolve', doi, `DOI not found: ${doi}`);
     }
     if (resp.status !== 200) {
-      return errResult('crossref.resolve', doi, `HTTP ${resp.status}`);
+      return errResult('crossref_resolve', doi, `HTTP ${resp.status}`);
     }
 
     let item: EvidenceItem;
@@ -537,12 +537,12 @@ const crossrefResolve = weaveTool({
         citationCount: msg['citation-count'],
       };
     } catch {
-      return errResult('crossref.resolve', doi, 'Could not parse Crossref response');
+      return errResult('crossref_resolve', doi, 'Could not parse Crossref response');
     }
 
     const result: EvidenceResult = {
-      ok: true, sourceType: 'http_api', toolKey: 'crossref.resolve', query: doi,
-      reproducibilityHash: hashQuery('crossref.resolve', { doi }),
+      ok: true, sourceType: 'http_api', toolKey: 'crossref_resolve', query: doi,
+      reproducibilityHash: hashQuery('crossref_resolve', { doi }),
       results: [item], totalHits: 1,
     };
     return JSON.stringify(result, null, 2);
@@ -551,10 +551,10 @@ const crossrefResolve = weaveTool({
   riskLevel: 'external-side-effect',
 });
 
-// ─── europepmc.search ────────────────────────────────────────────────────────
+// ─── europepmc_search ────────────────────────────────────────────────────────
 
 const europepmcSearch = weaveTool({
-  name: 'europepmc.search',
+  name: 'europepmc_search',
   description:
     'Search Europe PubMed Central for life-science literature. Returns structured evidence items with PMID/PMCID, title, authors, year, DOI, abstract, and journal. Risk: external-side-effect.',
   parameters: {
@@ -588,11 +588,11 @@ const europepmcSearch = weaveTool({
         timeout: 15_000,
       });
     } catch (e) {
-      return errResult('europepmc.search', args.query, `Network error: ${(e as Error).message}`);
+      return errResult('europepmc_search', args.query, `Network error: ${(e as Error).message}`);
     }
 
     if (resp.status !== 200) {
-      return errResult('europepmc.search', args.query, `HTTP ${resp.status}`);
+      return errResult('europepmc_search', args.query, `HTTP ${resp.status}`);
     }
 
     let items: EvidenceItem[] = [];
@@ -626,12 +626,12 @@ const europepmcSearch = weaveTool({
           : undefined,
       }));
     } catch {
-      return errResult('europepmc.search', args.query, 'Could not parse API response');
+      return errResult('europepmc_search', args.query, 'Could not parse API response');
     }
 
     const result: EvidenceResult = {
-      ok: true, sourceType: 'http_api', toolKey: 'europepmc.search', query: args.query,
-      reproducibilityHash: hashQuery('europepmc.search', { query: args.query, maxResults }),
+      ok: true, sourceType: 'http_api', toolKey: 'europepmc_search', query: args.query,
+      reproducibilityHash: hashQuery('europepmc_search', { query: args.query, maxResults }),
       results: items, totalHits,
     };
     return JSON.stringify(result, null, 2);
@@ -644,11 +644,11 @@ const europepmcSearch = weaveTool({
 
 export function createEvidenceTools(): Record<string, Tool> {
   return {
-    'arxiv.search': arxivSearch,
-    'pubmed.search': pubmedSearch,
-    'semanticscholar.search': semanticscholarSearch,
-    'openalex.search': openalexSearch,
-    'crossref.resolve': crossrefResolve,
-    'europepmc.search': europepmcSearch,
+    'arxiv_search': arxivSearch,
+    'pubmed_search': pubmedSearch,
+    'semanticscholar_search': semanticscholarSearch,
+    'openalex_search': openalexSearch,
+    'crossref_resolve': crossrefResolve,
+    'europepmc_search': europepmcSearch,
   };
 }

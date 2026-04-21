@@ -84,17 +84,17 @@ describe('createSymbolicTools', () => {
   const tools = createSymbolicTools({ executor, symDigest: SYM_DIGEST });
 
   it('exports exactly 4 tools', () => {
-    expect(Object.keys(tools)).toEqual(['sympy.simplify', 'sympy.solve', 'sympy.integrate', 'wolfram.query']);
+    expect(Object.keys(tools)).toEqual(['sympy_simplify', 'sympy_solve', 'sympy_integrate', 'wolfram_query']);
   });
 
-  it('sympy.simplify has correct risk tags', () => {
-    const tool = tools['sympy.simplify']!;
+  it('sympy_simplify has correct risk tags', () => {
+    const tool = tools['sympy_simplify']!;
     expect(tool.schema.tags).toContain('sandbox');
     expect(tool.schema.tags).toContain('scientific');
   });
 
-  it('sympy.simplify returns JSON result from container', async () => {
-    const tool = tools['sympy.simplify']!;
+  it('sympy_simplify returns JSON result from container', async () => {
+    const tool = tools['sympy_simplify']!;
     const parsed = await callTool(tool, { expression: 'x**2 + 0' });
     expect((parsed as Record<string, unknown>)['ok']).toBe(true);
     expect((parsed as Record<string, unknown>)['result']).toBe('x**2');
@@ -115,8 +115,8 @@ describe('createSymbolicTools', () => {
     expect(h1).not.toBe(h2);
   });
 
-  it('wolfram.query tool has external tag', () => {
-    const tool = tools['wolfram.query']!;
+  it('wolfram_query tool has external tag', () => {
+    const tool = tools['wolfram_query']!;
     expect(tool.schema.tags).toContain('external');
   });
 });
@@ -134,21 +134,21 @@ describe('createNumericalTools', () => {
 
   it('exports exactly 5 tools', () => {
     expect(Object.keys(tools).sort()).toEqual([
-      'pymc.mcmc',
-      'r.metafor',
-      'scipy.power',
-      'scipy.stats.test',
-      'statsmodels.meta',
+      'pymc_mcmc',
+      'r_metafor',
+      'scipy_power',
+      'scipy_stats_test',
+      'statsmodels_meta',
     ]);
   });
 
-  it('scipy.stats.test has sandbox tag', () => {
-    const tool = tools['scipy.stats.test']!;
+  it('scipy_stats_test has sandbox tag', () => {
+    const tool = tools['scipy_stats_test']!;
     expect(tool.schema.tags).toContain('sandbox');
   });
 
-  it('scipy.stats.test returns parsed result', async () => {
-    const tool = tools['scipy.stats.test']!;
+  it('scipy_stats_test returns parsed result', async () => {
+    const tool = tools['scipy_stats_test']!;
     const parsed = await callTool(tool, {
       test: 'ttest_ind',
       data_a: [1, 2, 3, 4, 5],
@@ -158,8 +158,8 @@ describe('createNumericalTools', () => {
     expect(typeof parsed['pvalue']).toBe('number');
   });
 
-  it('pymc.mcmc does not throw', async () => {
-    const tool = tools['pymc.mcmc']!;
+  it('pymc_mcmc does not throw', async () => {
+    const tool = tools['pymc_mcmc']!;
     const result = await callTool(tool, {
       model: { data: [1.1, 2.2, 1.8, 2.0, 1.9] },
       draws: 100,
@@ -167,13 +167,13 @@ describe('createNumericalTools', () => {
     expect(result).toBeTruthy();
   });
 
-  it('statsmodels.meta has meta-analysis tag', () => {
-    const tool = tools['statsmodels.meta']!;
+  it('statsmodels_meta has meta-analysis tag', () => {
+    const tool = tools['statsmodels_meta']!;
     expect(tool.schema.tags).toContain('meta-analysis');
   });
 
-  it('r.metafor has r tag', () => {
-    const tool = tools['r.metafor']!;
+  it('r_metafor has r tag', () => {
+    const tool = tools['r_metafor']!;
     expect(tool.schema.tags).toContain('r');
   });
 });
@@ -191,29 +191,29 @@ describe('createDomainTools', () => {
 
   it('exports exactly 3 tools', () => {
     expect(Object.keys(tools).sort()).toEqual([
-      'biopython.align',
-      'networkx.analyse',
-      'rdkit.descriptors',
+      'biopython_align',
+      'networkx_analyse',
+      'rdkit_descriptors',
     ]);
   });
 
-  it('rdkit.descriptors has chemistry tag', () => {
-    const tool = tools['rdkit.descriptors']!;
+  it('rdkit_descriptors has chemistry tag', () => {
+    const tool = tools['rdkit_descriptors']!;
     expect(tool.schema.tags).toContain('chemistry');
   });
 
-  it('biopython.align has biology tag', () => {
-    const tool = tools['biopython.align']!;
+  it('biopython_align has biology tag', () => {
+    const tool = tools['biopython_align']!;
     expect(tool.schema.tags).toContain('biology');
   });
 
-  it('networkx.analyse has graph tag', () => {
-    const tool = tools['networkx.analyse']!;
+  it('networkx_analyse has graph tag', () => {
+    const tool = tools['networkx_analyse']!;
     expect(tool.schema.tags).toContain('graph');
   });
 
-  it('rdkit.descriptors returns parsed result', async () => {
-    const tool = tools['rdkit.descriptors']!;
+  it('rdkit_descriptors returns parsed result', async () => {
+    const tool = tools['rdkit_descriptors']!;
     const parsed = await callTool(tool, { smiles: 'CC(=O)Oc1ccccc1C(=O)O' }) as Record<string, unknown>;
     expect(parsed['ok']).toBe(true);
     expect(typeof parsed['MolWt']).toBe('number');
@@ -227,12 +227,12 @@ describe('createEvidenceTools', () => {
 
   it('exports exactly 6 tools', () => {
     expect(Object.keys(tools).sort()).toEqual([
-      'arxiv.search',
-      'crossref.resolve',
-      'europepmc.search',
-      'openalex.search',
-      'pubmed.search',
-      'semanticscholar.search',
+      'arxiv_search',
+      'crossref_resolve',
+      'europepmc_search',
+      'openalex_search',
+      'pubmed_search',
+      'semanticscholar_search',
     ]);
   });
 
@@ -248,17 +248,17 @@ describe('createEvidenceTools', () => {
     }
   });
 
-  it('arxiv.search returns JSON (ok:boolean) on any network outcome', async () => {
-    const tool = tools['arxiv.search']!;
-    const out = await tool.invoke(CTX, { name: 'arxiv.search', arguments: { query: 'quantum gravity', max_results: 2 } });
+  it('arxiv_search returns JSON (ok:boolean) on any network outcome', async () => {
+    const tool = tools['arxiv_search']!;
+    const out = await tool.invoke(CTX, { name: 'arxiv_search', arguments: { query: 'quantum gravity', max_results: 2 } });
     // output must be a parseable JSON string
     const parsed = JSON.parse(out.content) as { ok?: boolean };
     expect(typeof parsed.ok).toBe('boolean');
   });
 
-  it('crossref.resolve returns JSON on any network outcome', async () => {
-    const tool = tools['crossref.resolve']!;
-    const out = await tool.invoke(CTX, { name: 'crossref.resolve', arguments: { doi: '10.1234/test.doi' } });
+  it('crossref_resolve returns JSON on any network outcome', async () => {
+    const tool = tools['crossref_resolve']!;
+    const out = await tool.invoke(CTX, { name: 'crossref_resolve', arguments: { doi: '10.1234/test.doi' } });
     const parsed = JSON.parse(out.content) as { ok?: boolean };
     expect(typeof parsed.ok).toBe('boolean');
   });
@@ -271,8 +271,8 @@ describe('createEvidenceTools', () => {
         .update(JSON.stringify(params, Object.keys(params).sort()))
         .digest('hex');
     }
-    const h1 = hash('arxiv.search', { query: 'deep learning', maxResults: 5 });
-    const h2 = hash('arxiv.search', { query: 'deep learning', maxResults: 5 });
+    const h1 = hash('arxiv_search', { query: 'deep learning', maxResults: 5 });
+    const h2 = hash('arxiv_search', { query: 'deep learning', maxResults: 5 });
     expect(h1).toBe(h2);
     expect(h1).toHaveLength(64);
   });

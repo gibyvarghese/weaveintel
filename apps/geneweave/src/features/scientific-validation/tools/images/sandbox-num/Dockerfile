@@ -9,8 +9,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN pip install --no-cache-dir \
+    "setuptools<81" \
+    numpy==1.26.4 \
+    pandas==2.2.3 \
     scipy==1.14.1 \
-    numpy==2.1.3 \
     statsmodels==0.14.4 \
     pymc==5.18.2 \
     arviz==0.20.0

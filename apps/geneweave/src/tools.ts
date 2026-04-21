@@ -395,6 +395,7 @@ function cseToolMap(opts?: ToolRegistryOptions): Record<string, Tool> {
       }, null, 2);
     },
     tags: ['sandbox', 'compute', 'code'],
+    riskLevel: 'external-side-effect',
   });
 
   const sessionStatus = weaveTool({
@@ -466,9 +467,9 @@ export async function syncToolCatalog(db: DatabaseAdapter): Promise<void> {
   const { randomUUID } = await import('node:crypto');
   for (const [key, tool] of Object.entries(BUILTIN_TOOLS)) {
     const existing = await db.getToolCatalogByKey(key);
+    const riskLevel = tool.schema.riskLevel ?? 'read-only';
+    const hasSideEffects = riskLevel !== 'read-only' ? 1 : 0;
     if (!existing) {
-      const riskLevel = tool.schema.riskLevel ?? 'read-only';
-      const hasSideEffects = riskLevel !== 'read-only' ? 1 : 0;
       await db.createToolConfig({
         id: randomUUID(),
         name: tool.schema.name,
@@ -485,6 +486,14 @@ export async function syncToolCatalog(db: DatabaseAdapter): Promise<void> {
         tags: tool.schema.tags ? JSON.stringify(tool.schema.tags) : null,
         source: 'builtin',
         credential_id: null,
+      });
+    } else {
+      // Upsert risk_level, side_effects, name, and description so code-side changes propagate.
+      await db.updateToolConfig(existing.id, {
+        risk_level: riskLevel,
+        side_effects: hasSideEffects,
+        name: tool.schema.name,
+        description: tool.schema.description,
       });
     }
   }

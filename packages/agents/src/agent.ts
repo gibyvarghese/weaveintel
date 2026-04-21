@@ -366,8 +366,9 @@ async function executeToolCall(
   stepStart: number,
 ): Promise<AgentStep> {
   const tool = toolReg.get(tc.name);
+  const toolName = tc.name;
 
-  eventBus?.emit(weaveEvent(EventTypes.ToolCallStart, { tool: tc.name, agent: agentName }, ctx));
+  eventBus?.emit(weaveEvent(EventTypes.ToolCallStart, { tool: toolName, agent: agentName }, ctx));
 
   let resultContent: string;
 
@@ -379,11 +380,11 @@ async function executeToolCall(
       const decision = await policy.approveToolCall(ctx, tool.schema, JSON.parse(tc.arguments));
       if (!decision.approved) {
         resultContent = `Tool call denied by policy: ${decision.reason ?? 'no reason'}`;
-        eventBus?.emit(weaveEvent(EventTypes.ToolCallError, { tool: tc.name, reason: 'policy_denied' }, ctx));
+        eventBus?.emit(weaveEvent(EventTypes.ToolCallError, { tool: toolName, reason: 'policy_denied' }, ctx));
         return {
           index: 0,
           type: 'tool_call',
-          toolCall: { name: tc.name, arguments: JSON.parse(tc.arguments), result: resultContent },
+          toolCall: { name: toolName, arguments: JSON.parse(tc.arguments), result: resultContent },
           durationMs: Date.now() - stepStart,
         };
       }
@@ -391,19 +392,19 @@ async function executeToolCall(
 
     try {
       const args = JSON.parse(tc.arguments);
-      const output = await tool.invoke(ctx, { name: tc.name, arguments: args });
+      const output = await tool.invoke(ctx, { name: toolName, arguments: args });
       resultContent = output.isError ? `Error: ${output.content}` : output.content;
     } catch (err) {
       resultContent = `Tool error: ${err instanceof Error ? err.message : String(err)}`;
     }
   }
 
-  eventBus?.emit(weaveEvent(EventTypes.ToolCallEnd, { tool: tc.name, agent: agentName, result: resultContent }, ctx));
+  eventBus?.emit(weaveEvent(EventTypes.ToolCallEnd, { tool: toolName, agent: agentName, result: resultContent }, ctx));
 
   return {
     index: 0,
     type: 'tool_call',
-    toolCall: { name: tc.name, arguments: safeParseJson(tc.arguments), result: resultContent },
+    toolCall: { name: toolName, arguments: safeParseJson(tc.arguments), result: resultContent },
     durationMs: Date.now() - stepStart,
   };
 }

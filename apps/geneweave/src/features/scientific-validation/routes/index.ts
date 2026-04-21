@@ -18,7 +18,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { createIdempotencyStore } from '@weaveintel/reliability';
 import type { DatabaseAdapter } from '../../../db.js';
-import type { SVWorkflowRunner, SVRunInput } from '../runner.js';
+import type { SVChatBridge, SVRunInput } from '../chat-bridge.js';
 
 type RouteHandler = (
   req: IncomingMessage,
@@ -75,10 +75,25 @@ export function registerSVRoutes(
   db: DatabaseAdapter,
   json: JsonHelper,
   readBody: ReadBodyHelper,
-  runner?: SVWorkflowRunner,
+  runner?: SVChatBridge,
 ): void {
   // Idempotency store for POST mutation routes (24-hour TTL, 10k entries max)
   const iStore = createIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000, maxEntries: 10_000 });
+
+  // ── GET /api/sv/hypotheses ──────────────────────────────────────────────
+  router.get('/api/sv/hypotheses', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const tenantId = auth.tenantId ?? auth.userId;
+    const rows = await db.listHypotheses(tenantId, 20, 0);
+    json(res, 200, {
+      hypotheses: rows.map(r => ({
+        id: r.id,
+        title: r.title,
+        status: r.status,
+        createdAt: r.created_at,
+      })),
+    });
+  }, { auth: true });
 
   // ── POST /api/sv/hypotheses ─────────────────────────────────────────────
   router.post('/api/sv/hypotheses', async (req, res, _params, auth) => {
@@ -106,7 +121,7 @@ export function registerSVRoutes(
     if (!statement || typeof statement !== 'string') { json(res, 400, { error: 'statement is required' }); return; }
 
     const id = randomUUID();
-    const tenantId = (auth.tenantId ?? 'default') as string;
+    const tenantId = (auth.tenantId ?? auth.userId) as string;
 
     // Resolve budget envelope: use caller-supplied id, or fall back to first available.
     let budgetId = rawBudgetId;
@@ -160,7 +175,7 @@ export function registerSVRoutes(
 
     const { id } = params;
     if (!id) { json(res, 400, { error: 'id required' }); return; }
-    const tenantId = (auth.tenantId ?? 'default') as string;
+    const tenantId = (auth.tenantId ?? auth.userId) as string;
 
     const hypothesis = await db.getHypothesis(id, tenantId);
     if (!hypothesis) { json(res, 404, { error: 'Hypothesis not found' }); return; }
@@ -198,7 +213,7 @@ export function registerSVRoutes(
 
     const { id } = params;
     if (!id) { json(res, 400, { error: 'id required' }); return; }
-    const tenantId = (auth.tenantId ?? 'default') as string;
+    const tenantId = (auth.tenantId ?? auth.userId) as string;
 
     const hypothesis = await db.getHypothesis(id, tenantId);
     if (!hypothesis) { json(res, 404, { error: 'Hypothesis not found' }); return; }
@@ -247,7 +262,7 @@ export function registerSVRoutes(
 
     const { id } = params;
     if (!id) { json(res, 400, { error: 'id required' }); return; }
-    const tenantId = (auth.tenantId ?? 'default') as string;
+    const tenantId = (auth.tenantId ?? auth.userId) as string;
 
     const hypothesis = await db.getHypothesis(id, tenantId);
     if (!hypothesis) { json(res, 404, { error: 'Hypothesis not found' }); return; }
@@ -306,7 +321,7 @@ export function registerSVRoutes(
 
     const { id } = params;
     if (!id) { json(res, 400, { error: 'id required' }); return; }
-    const tenantId = (auth.tenantId ?? 'default') as string;
+    const tenantId = (auth.tenantId ?? auth.userId) as string;
 
     const hypothesis = await db.getHypothesis(id, tenantId);
     if (!hypothesis) { json(res, 404, { error: 'Hypothesis not found' }); return; }
@@ -334,7 +349,7 @@ export function registerSVRoutes(
       if (check.isDuplicate) { json(res, 201, check.previousResult); return; }
     }
 
-    const tenantId = (auth.tenantId ?? 'default') as string;
+    const tenantId = (auth.tenantId ?? auth.userId) as string;
 
     const original = await db.getHypothesis(id, tenantId);
     if (!original) { json(res, 404, { error: 'Hypothesis not found' }); return; }
@@ -389,7 +404,7 @@ export function registerSVRoutes(
     if (!verdict) { json(res, 404, { error: 'Verdict not found' }); return; }
 
     // Verify tenant ownership via the hypothesis
-    const tenantId = (auth.tenantId ?? 'default') as string;
+    const tenantId = (auth.tenantId ?? auth.userId) as string;
     const hypothesis = await db.getHypothesis(verdict.hypothesis_id, tenantId);
     if (!hypothesis) { json(res, 404, { error: 'Verdict not found' }); return; }
 

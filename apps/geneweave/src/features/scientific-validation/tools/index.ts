@@ -18,7 +18,7 @@
  *   FAKE_CONTAINER_RUNTIME   — Set to '1' to use FakeRuntime (local dev / CI)
  */
 
-import { ContainerExecutor, FakeRuntime, DockerRuntime, weaveContainerExecutor } from '@weaveintel/sandbox';
+import { FakeRuntime, DockerRuntime, weaveContainerExecutor } from '@weaveintel/sandbox';
 import type { Tool } from '@weaveintel/core';
 
 import { loadSvDigests, createSvImagePolicy } from './image-policy.js';

@@ -2,11 +2,11 @@
  * Scientific Validation — Numerical-layer tools
  *
  * Tools that run inside the weaveintel/sandbox-num container:
- *   scipy.stats.test    — Parametric and non-parametric statistical tests
- *   statsmodels.meta    — Random-effects meta-analysis (REML)
- *   scipy.power         — Power analysis (sample size / achieved power)
- *   pymc.mcmc           — Bayesian posterior sampling via PyMC
- *   r.metafor           — Meta-analysis via R metafor package
+ *   scipy_stats_test    — Parametric and non-parametric statistical tests
+ *   statsmodels_meta    — Random-effects meta-analysis (REML)
+ *   scipy_power         — Power analysis (sample size / achieved power)
+ *   pymc_mcmc           — Bayesian posterior sampling via PyMC
+ *   r_metafor           — Meta-analysis via R metafor package
  *
  * All tools require a sha256 image digest via ImagePolicy.
  * The caller must supply a ContainerExecutor instance.
@@ -54,9 +54,9 @@ export function createNumericalTools(opts: {
 }): Record<string, Tool> {
   const { executor, numDigest } = opts;
 
-  // ── scipy.stats.test ────────────────────────────────────────────────────────
+  // ── scipy_stats_test ────────────────────────────────────────────────────────
   const scipyStatsTest = weaveTool({
-    name: 'scipy.stats.test',
+    name: 'scipy_stats_test',
     description:
       'Run parametric or non-parametric statistical tests (t-test, Mann-Whitney U, Wilcoxon, Kruskal-Wallis, chi-squared). Returns test statistic and p-value.',
     parameters: {
@@ -113,7 +113,7 @@ export function createNumericalTools(opts: {
       if (result.exitCode !== 0) {
         const errOut = parseContainerOutput(result.stdout) as { error?: string };
         return {
-          content: `scipy.stats.test failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
+          content: `scipy_stats_test failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
           isError: true,
         };
       }
@@ -123,9 +123,9 @@ export function createNumericalTools(opts: {
     riskLevel: 'external-side-effect',
   });
 
-  // ── statsmodels.meta ────────────────────────────────────────────────────────
+  // ── statsmodels_meta ────────────────────────────────────────────────────────
   const statsmodelsMeta = weaveTool({
-    name: 'statsmodels.meta',
+    name: 'statsmodels_meta',
     description:
       'Perform random-effects meta-analysis using statsmodels (REML estimator). Accepts arrays of effect sizes and their variances. Returns pooled effect, confidence interval, I², and τ².',
     parameters: {
@@ -156,7 +156,7 @@ export function createNumericalTools(opts: {
       if (result.exitCode !== 0) {
         const errOut = parseContainerOutput(result.stdout) as { error?: string };
         return {
-          content: `statsmodels.meta failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
+          content: `statsmodels_meta failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
           isError: true,
         };
       }
@@ -166,9 +166,9 @@ export function createNumericalTools(opts: {
     riskLevel: 'external-side-effect',
   });
 
-  // ── scipy.power ─────────────────────────────────────────────────────────────
+  // ── scipy_power ─────────────────────────────────────────────────────────────
   const scipyPower = weaveTool({
-    name: 'scipy.power',
+    name: 'scipy_power',
     description:
       'Compute statistical power or required sample size using statsmodels power analysis. Supports independent t-test, paired t-test, and normal test. Provide either n_obs (to compute achieved power) or power (to compute required n).',
     parameters: {
@@ -216,7 +216,7 @@ export function createNumericalTools(opts: {
       if (result.exitCode !== 0) {
         const errOut = parseContainerOutput(result.stdout) as { error?: string };
         return {
-          content: `scipy.power failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
+          content: `scipy_power failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
           isError: true,
         };
       }
@@ -226,9 +226,9 @@ export function createNumericalTools(opts: {
     riskLevel: 'external-side-effect',
   });
 
-  // ── pymc.mcmc ───────────────────────────────────────────────────────────────
+  // ── pymc_mcmc ───────────────────────────────────────────────────────────────
   const pymcMcmc = weaveTool({
-    name: 'pymc.mcmc',
+    name: 'pymc_mcmc',
     description:
       'Sample from a Bayesian posterior distribution using PyMC (NUTS sampler). Currently supports Gaussian models (infer μ and σ from data). Returns summary statistics and R-hat convergence diagnostics.',
     parameters: {
@@ -281,7 +281,7 @@ export function createNumericalTools(opts: {
       if (result.exitCode !== 0) {
         const errOut = parseContainerOutput(result.stdout) as { error?: string };
         return {
-          content: `pymc.mcmc failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
+          content: `pymc_mcmc failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
           isError: true,
         };
       }
@@ -291,9 +291,9 @@ export function createNumericalTools(opts: {
     riskLevel: 'external-side-effect',
   });
 
-  // ── r.metafor ────────────────────────────────────────────────────────────────
+  // ── r_metafor ────────────────────────────────────────────────────────────────
   const rMetafor = weaveTool({
-    name: 'r.metafor',
+    name: 'r_metafor',
     description:
       'Run meta-analysis using the R metafor package (rma() with REML estimator). Returns pooled estimate, confidence interval, I², τ², and p-value.',
     parameters: {
@@ -324,7 +324,7 @@ export function createNumericalTools(opts: {
       if (result.exitCode !== 0) {
         const errOut = parseContainerOutput(result.stdout) as { error?: string };
         return {
-          content: `r.metafor failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
+          content: `r_metafor failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
           isError: true,
         };
       }
@@ -335,10 +335,10 @@ export function createNumericalTools(opts: {
   });
 
   return {
-    'scipy.stats.test': scipyStatsTest,
-    'statsmodels.meta': statsmodelsMeta,
-    'scipy.power': scipyPower,
-    'pymc.mcmc': pymcMcmc,
-    'r.metafor': rMetafor,
+    'scipy_stats_test': scipyStatsTest,
+    'statsmodels_meta': statsmodelsMeta,
+    'scipy_power': scipyPower,
+    'pymc_mcmc': pymcMcmc,
+    'r_metafor': rMetafor,
   };
 }

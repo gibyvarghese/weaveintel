@@ -166,7 +166,13 @@ export function renderSVLiveView(options: { render: () => void }): HTMLElement {
       if (h2.status === 'verdict' || h2.status === 'abandoned') {
         (state as any).svHypothesis = data.hypothesis;
         if (data.verdict) (state as any).svVerdict = data.verdict;
-        if (h2.status === 'verdict') (state as any).svView = 'verdict';
+        if (h2.status === 'verdict' || data.verdict) {
+          (state as any).svView = 'verdict';
+        } else {
+          // abandoned with no verdict — return to submit
+          (state as any).svView = 'submit';
+          (state as any).svHypothesisId = null;
+        }
         cleanup();
         render();
       }
@@ -198,6 +204,7 @@ export function renderSVLiveView(options: { render: () => void }): HTMLElement {
                 credentials: 'include',
               }).finally(() => {
                 (state as any).svView = 'submit';
+                (state as any).svHypothesisId = null;
                 cleanup();
                 render();
               });
@@ -207,6 +214,7 @@ export function renderSVLiveView(options: { render: () => void }): HTMLElement {
             className: 'nav-btn',
             onClick: () => {
               (state as any).svView = 'submit';
+              (state as any).svHypothesisId = null;
               cleanup();
               render();
             },

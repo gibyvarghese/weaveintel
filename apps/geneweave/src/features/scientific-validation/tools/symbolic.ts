@@ -2,12 +2,12 @@
  * Scientific Validation — Symbolic-layer tools
  *
  * Tools that run inside the weaveintel/sandbox-sym container:
- *   sympy.simplify  — Algebraic expression simplification
- *   sympy.solve     — Symbolic equation solving
- *   sympy.integrate — Symbolic / definite integration
+ *   sympy_simplify  — Algebraic expression simplification
+ *   sympy_solve     — Symbolic equation solving
+ *   sympy_integrate — Symbolic / definite integration
  *
  * Plus one HTTP tool:
- *   wolfram.query   — Wolfram Alpha natural-language query (external API)
+ *   wolfram_query   — Wolfram Alpha natural-language query (external API)
  *
  * All container tools require a sha256 image digest via ImagePolicy.
  * The caller must supply a ContainerExecutor instance.
@@ -58,9 +58,9 @@ export function createSymbolicTools(opts: {
 }): Record<string, Tool> {
   const { executor, symDigest } = opts;
 
-  // ── sympy.simplify ──────────────────────────────────────────────────────────
+  // ── sympy_simplify ──────────────────────────────────────────────────────────
   const sympySimplify = weaveTool({
-    name: 'sympy.simplify',
+    name: 'sympy_simplify',
     description:
       'Algebraically simplify a mathematical expression using SymPy. Returns the simplified form and LaTeX representation. Risk: read-only sandboxed compute.',
     parameters: {
@@ -86,7 +86,7 @@ export function createSymbolicTools(opts: {
       if (result.exitCode !== 0) {
         const errOut = parseContainerOutput(result.stdout) as { error?: string };
         return {
-          content: `sympy.simplify failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
+          content: `sympy_simplify failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
           isError: true,
         };
       }
@@ -96,9 +96,9 @@ export function createSymbolicTools(opts: {
     riskLevel: 'external-side-effect',
   });
 
-  // ── sympy.solve ────────────────────────────────────────────────────────────
+  // ── sympy_solve ────────────────────────────────────────────────────────────
   const sympySolve = weaveTool({
-    name: 'sympy.solve',
+    name: 'sympy_solve',
     description:
       'Solve one or more equations symbolically using SymPy. Accepts a list of equation strings (SymPy syntax) and a list of symbol names to solve for.',
     parameters: {
@@ -133,7 +133,7 @@ export function createSymbolicTools(opts: {
       if (result.exitCode !== 0) {
         const errOut = parseContainerOutput(result.stdout) as { error?: string };
         return {
-          content: `sympy.solve failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
+          content: `sympy_solve failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
           isError: true,
         };
       }
@@ -143,9 +143,9 @@ export function createSymbolicTools(opts: {
     riskLevel: 'external-side-effect',
   });
 
-  // ── sympy.integrate ────────────────────────────────────────────────────────
+  // ── sympy_integrate ────────────────────────────────────────────────────────
   const sympyIntegrate = weaveTool({
-    name: 'sympy.integrate',
+    name: 'sympy_integrate',
     description:
       'Compute the indefinite or definite integral of an expression using SymPy. For definite integrals supply lower and upper bounds via the limits array.',
     parameters: {
@@ -184,7 +184,7 @@ export function createSymbolicTools(opts: {
       if (result.exitCode !== 0) {
         const errOut = parseContainerOutput(result.stdout) as { error?: string };
         return {
-          content: `sympy.integrate failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
+          content: `sympy_integrate failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
           isError: true,
         };
       }
@@ -194,9 +194,9 @@ export function createSymbolicTools(opts: {
     riskLevel: 'external-side-effect',
   });
 
-  // ── wolfram.query (HTTP) ───────────────────────────────────────────────────
+  // ── wolfram_query (HTTP) ───────────────────────────────────────────────────
   const wolframQuery = weaveTool({
-    name: 'wolfram.query',
+    name: 'wolfram_query',
     description:
       'Query Wolfram Alpha with a natural-language or mathematical question. Requires WOLFRAM_APP_ID environment variable. Risk: external-side-effect.',
     parameters: {
@@ -271,9 +271,9 @@ export function createSymbolicTools(opts: {
   });
 
   return {
-    'sympy.simplify': sympySimplify,
-    'sympy.solve': sympySolve,
-    'sympy.integrate': sympyIntegrate,
-    'wolfram.query': wolframQuery,
+    'sympy_simplify': sympySimplify,
+    'sympy_solve': sympySolve,
+    'sympy_integrate': sympyIntegrate,
+    'wolfram_query': wolframQuery,
   };
 }

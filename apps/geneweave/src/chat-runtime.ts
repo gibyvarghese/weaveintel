@@ -98,6 +98,13 @@ export interface ChatSettings {
   workers: WorkerDef[];
   /** Phase 6: tool policy key from the top-matched active skill; overrides global tool policy */
   skillPolicyKey?: string;
+  /**
+   * Tools that the currently active skill(s) contribute. When non-empty, the
+   * supervisor's default extra-tool set is filtered to exclude these tools so
+   * the supervisor cannot short-circuit around the skill's intended worker
+   * delegation. Purely data-driven from the `skills.tool_names` column.
+   */
+  skillContributedTools?: string[];
 }
 
 export interface WorkerDef {

@@ -1251,6 +1251,12 @@ function restoreUiStateFromStorage() {
     if (typeof saved?.sidebarCollapsed === 'boolean') {
       state.sidebarCollapsed = saved.sidebarCollapsed;
     }
+    if (typeof saved?.svView === 'string' && ['submit', 'live', 'verdict'].includes(saved.svView)) {
+      (state as any).svView = saved.svView;
+    }
+    if (typeof saved?.svHypothesisId === 'string') {
+      (state as any).svHypothesisId = saved.svHypothesisId;
+    }
     if (saved?.adminGroupExpanded && typeof saved.adminGroupExpanded === 'object') {
       const next: Record<string, boolean> = {};
       Object.entries(saved.adminGroupExpanded).forEach(([k, v]) => {
@@ -1274,6 +1280,8 @@ function persistUiStateToStorage() {
       adminGroupExpanded: state.adminGroupExpanded || {},
       recentChatsExpanded: typeof state.recentChatsExpanded === 'boolean' ? state.recentChatsExpanded : true,
       sidebarCollapsed: !!state.sidebarCollapsed,
+      svView: (state as any).svView ?? 'submit',
+      svHypothesisId: (state as any).svHypothesisId ?? null,
     };
     window.localStorage.setItem(UI_STATE_KEY, JSON.stringify(payload));
   } catch {

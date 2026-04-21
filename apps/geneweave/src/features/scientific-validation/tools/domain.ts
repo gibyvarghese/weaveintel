@@ -2,9 +2,9 @@
  * Scientific Validation — Domain-layer tools
  *
  * Tools that run inside the weaveintel/sandbox-dom container:
- *   rdkit.descriptors   — Compute molecular descriptors from a SMILES string
- *   biopython.align     — Pairwise sequence alignment (global/local)
- *   networkx.analyse    — Compute graph metrics (nodes, edges, centrality, etc.)
+ *   rdkit_descriptors   — Compute molecular descriptors from a SMILES string
+ *   biopython_align     — Pairwise sequence alignment (global/local)
+ *   networkx_analyse    — Compute graph metrics (nodes, edges, centrality, etc.)
  *
  * All tools require a sha256 image digest via ImagePolicy.
  * The caller must supply a ContainerExecutor instance.
@@ -52,9 +52,9 @@ export function createDomainTools(opts: {
 }): Record<string, Tool> {
   const { executor, domDigest } = opts;
 
-  // ── rdkit.descriptors ────────────────────────────────────────────────────────
+  // ── rdkit_descriptors ────────────────────────────────────────────────────────
   const rdkitDescriptors = weaveTool({
-    name: 'rdkit.descriptors',
+    name: 'rdkit_descriptors',
     description:
       'Compute molecular descriptors and properties from a SMILES string using RDKit. Returns molecular weight, LogP, TPSA, H-bond donors/acceptors, and any additional requested descriptors.',
     parameters: {
@@ -85,7 +85,7 @@ export function createDomainTools(opts: {
       if (result.exitCode !== 0) {
         const errOut = parseContainerOutput(result.stdout) as { error?: string };
         return {
-          content: `rdkit.descriptors failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
+          content: `rdkit_descriptors failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
           isError: true,
         };
       }
@@ -95,9 +95,9 @@ export function createDomainTools(opts: {
     riskLevel: 'external-side-effect',
   });
 
-  // ── biopython.align ──────────────────────────────────────────────────────────
+  // ── biopython_align ──────────────────────────────────────────────────────────
   const biopythonAlign = weaveTool({
-    name: 'biopython.align',
+    name: 'biopython_align',
     description:
       'Perform pairwise sequence alignment using BioPython (global or local). Returns the best alignment, alignment score, and formatted alignment text.',
     parameters: {
@@ -155,7 +155,7 @@ export function createDomainTools(opts: {
       if (result.exitCode !== 0) {
         const errOut = parseContainerOutput(result.stdout) as { error?: string };
         return {
-          content: `biopython.align failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
+          content: `biopython_align failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
           isError: true,
         };
       }
@@ -165,9 +165,9 @@ export function createDomainTools(opts: {
     riskLevel: 'external-side-effect',
   });
 
-  // ── networkx.analyse ──────────────────────────────────────────────────────────
+  // ── networkx_analyse ──────────────────────────────────────────────────────────
   const networkxAnalyse = weaveTool({
-    name: 'networkx.analyse',
+    name: 'networkx_analyse',
     description:
       'Compute structural graph metrics (node/edge counts, density, degree centrality, betweenness centrality, clustering, diameter) using NetworkX.',
     parameters: {
@@ -180,7 +180,11 @@ export function createDomainTools(opts: {
         },
         edges: {
           type: 'array',
-          items: { type: 'array' },
+          items: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Edge as [source, target] or [source, target, weight]',
+          },
           description:
             'List of edges as [source, target] pairs, or [source, target, weight] for weighted graphs',
         },
@@ -212,7 +216,7 @@ export function createDomainTools(opts: {
       if (result.exitCode !== 0) {
         const errOut = parseContainerOutput(result.stdout) as { error?: string };
         return {
-          content: `networkx.analyse failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
+          content: `networkx_analyse failed (exit ${result.exitCode}): ${errOut.error ?? result.stderr.slice(0, 500)}`,
           isError: true,
         };
       }
@@ -223,8 +227,8 @@ export function createDomainTools(opts: {
   });
 
   return {
-    'rdkit.descriptors': rdkitDescriptors,
-    'biopython.align': biopythonAlign,
-    'networkx.analyse': networkxAnalyse,
+    'rdkit_descriptors': rdkitDescriptors,
+    'biopython_align': biopythonAlign,
+    'networkx_analyse': networkxAnalyse,
   };
 }

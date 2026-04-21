@@ -208,6 +208,15 @@ export function createPolicyEnforcedTool(
     },
   ): Promise<ToolAuditEvent> {
     const ctx = opts.resolutionContext;
+    const previewify = (v: unknown): string | undefined => {
+      if (v === undefined) return undefined;
+      try {
+        const s = typeof v === 'string' ? v : JSON.stringify(v);
+        return s.length > 4000 ? s.slice(0, 4000) + '...[truncated]' : s;
+      } catch {
+        return String(v).slice(0, 4000);
+      }
+    };
     return {
       toolName: tool.schema.name,
       chatId: ctx?.chatId,
@@ -220,6 +229,8 @@ export function createPolicyEnforcedTool(
       durationMs,
       createdAt: new Date().toISOString(),
       errorMessage: extra?.errorMessage,
+      inputPreview: previewify(extra?.input),
+      outputPreview: previewify(extra?.output),
     };
   }
 
@@ -304,12 +315,22 @@ export function createPolicyEnforcedTool(
     }
 
     const durationMs = Date.now() - startMs;
-    opts.healthTracker?.record(tool.schema.name, durationMs, false);
+    // A tool may resolve normally yet still indicate failure via `isError: true`
+    // (e.g. a sandboxed runner that returned a JSON error payload). Record that
+    // as an error outcome so health metrics and audit dashboards reflect reality.
+    const toolReportedError = !!result.isError;
+    opts.healthTracker?.record(tool.schema.name, durationMs, toolReportedError);
 
-    await emitter.emit(await buildAuditEvent('success', durationMs, {
+    const outcome: ToolAuditOutcome = toolReportedError ? 'error' : 'success';
+    const errorMessage = toolReportedError
+      ? (typeof result.content === 'string' ? result.content : 'Tool reported isError=true').slice(0, 1000)
+      : undefined;
+
+    await emitter.emit(await buildAuditEvent(outcome, durationMs, {
       policyId: policy.policyId,
       input: policy.logInputOutput ? input : undefined,
       output: policy.logInputOutput ? result : undefined,
+      errorMessage,
     }));
 
     return result;

@@ -539,6 +539,7 @@ export class ChatEngine {
       enabledTools,
       systemPrompt: augmentedPrompt,
       skillPolicyKey,
+      skillContributedTools: skillTools,
     };
 
     let assistantContent: string = '';
@@ -899,6 +900,7 @@ export class ChatEngine {
       enabledTools: streamEnabledTools,
       systemPrompt: streamAugmentedPrompt,
       skillPolicyKey: streamSkillPolicyKey,
+      skillContributedTools: streamSkillTools,
     };
 
     // SSE headers
@@ -1210,10 +1212,16 @@ export class ChatEngine {
         }));
         const allWorkers = [...baseWorkers, ...enterpriseWorkers];
         console.log(`[chat] Supervisor with ${allWorkers.length} workers (${baseWorkers.length} base + ${enterpriseWorkers.length} enterprise)`);
-        const supervisorCseTools = forceWorkerDataAnalysis
+        // Default extras the supervisor itself can call directly. Any tool that
+        // an active skill claims (via the `skills.tool_names` DB column) is
+        // removed here so it can only be reached through worker delegation.
+        const skillClaimedToolKeys = new Set(settings.skillContributedTools ?? []);
+        const supervisorExtraToolKeys = ['cse_run_code', 'cse_session_status', 'cse_end_session']
+          .filter((k) => !skillClaimedToolKeys.has(k));
+        const supervisorCseTools = forceWorkerDataAnalysis || supervisorExtraToolKeys.length === 0
           ? undefined
           : await createToolRegistry(
-              ['cse_run_code', 'cse_session_status', 'cse_end_session'],
+              supervisorExtraToolKeys,
               undefined,
               { ...toolOptions, actorPersona: 'agent_worker' },
             );
@@ -1375,10 +1383,16 @@ export class ChatEngine {
           };
         }));
         const allWorkers = [...baseWorkers, ...enterpriseWorkers];
-        const supervisorCseToolsStream = forceWorkerDataAnalysis
+        // Mirror the non-streaming path: filter the supervisor's hardcoded extras
+        // by any tool already claimed by an active skill (data-driven via
+        // `skills.tool_names`).
+        const skillClaimedToolKeysStream = new Set(settings.skillContributedTools ?? []);
+        const supervisorExtraToolKeysStream = ['cse_run_code', 'cse_session_status', 'cse_end_session']
+          .filter((k) => !skillClaimedToolKeysStream.has(k));
+        const supervisorCseToolsStream = forceWorkerDataAnalysis || supervisorExtraToolKeysStream.length === 0
           ? undefined
           : await createToolRegistry(
-              ['cse_run_code', 'cse_session_status', 'cse_end_session'],
+              supervisorExtraToolKeysStream,
               undefined,
               { ...toolOptions, actorPersona: 'agent_worker' },
             );

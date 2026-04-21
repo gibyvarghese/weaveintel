@@ -15,7 +15,7 @@ import type { ChatEngine } from './chat.js';
 import type { ChatAttachment } from './chat.js';
 import { getOrCreateModel } from './chat.js';
 import { DashboardService } from './dashboard.js';
-import { getAvailableTools } from './tools.js';
+import { getAvailableTools, BUILTIN_TOOLS } from './tools.js';
 import { canPersonaAccess, isValidPersona, normalizePersona, personaPermissions } from './rbac.js';
 import {
   authenticateRequest,
@@ -31,7 +31,7 @@ import {
 import { getHTML } from './ui-server.js';
 import { registerAdminRoutes } from './server-admin.js';
 import { registerSVRoutes } from './features/scientific-validation/index.js';
-import { SVWorkflowRunner } from './features/scientific-validation/runner.js';
+import { SVChatBridge } from './features/scientific-validation/chat-bridge.js';
 import { createSVToolMap } from './features/scientific-validation/tools/index.js';
 import { DbToolPolicyResolver } from './tool-policy-resolver.js';
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
@@ -899,7 +899,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   // Build async model factories from the configured providers (models are cached by chat-runtime).
   const svProviderCfg = providers?.['openai'] ?? providers?.['anthropic'] ?? { apiKey: '' };
   const svProviderKey = providers?.['openai'] ? 'openai' : 'anthropic';
-  const svRunner = new SVWorkflowRunner({
+  const svRunner = new SVChatBridge({
     db,
     makeReasoningModel: () => getOrCreateModel(
       svProviderKey,
@@ -911,7 +911,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       svProviderKey === 'openai' ? 'gpt-4o-mini' : 'claude-haiku-4-20250414',
       svProviderCfg,
     ),
-    toolMap: createSVToolMap(),
+    toolMap: { ...BUILTIN_TOOLS, ...createSVToolMap() },
     policyResolver: new DbToolPolicyResolver(db),
     auditEmitter: new DbToolAuditEmitter(db),
   });

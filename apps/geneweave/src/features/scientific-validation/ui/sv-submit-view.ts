@@ -89,6 +89,64 @@ export function renderSVSubmitView(options: { render: () => void }): HTMLElement
     hint ? h('div', { style: 'font-size:11px;color:var(--fg3);margin-top:4px' }, hint) : null,
   );
 
+  // ── Recent hypotheses panel ──────────────────────────────────────────────
+  const recentEl = h('div', { style: 'display:none' });
+
+  const STATUS_COLOR: Record<string, string> = {
+    running: '#f59e0b', queued: '#6366f1', verdict: '#059669', abandoned: '#6b7280',
+  };
+
+  async function loadRecent() {
+    try {
+      const res = await fetch('/api/sv/hypotheses', { credentials: 'include' });
+      if (!res.ok) return;
+      const data = await res.json() as { hypotheses: Array<{ id: string; title: string; status: string; createdAt: string }> };
+      if (!data.hypotheses.length) return;
+      recentEl.style.display = 'block';
+      recentEl.innerHTML = '';
+      recentEl.appendChild(
+        h('div', {
+          style: 'background:var(--bg2);border:1px solid var(--bg4);border-radius:14px;padding:20px 24px;margin-bottom:24px',
+        },
+          h('div', { style: 'font-size:13px;font-weight:600;color:var(--fg2);margin-bottom:14px;text-transform:uppercase;letter-spacing:.04em' }, 'Recent Validations'),
+          h('div', { style: 'display:flex;flex-direction:column;gap:8px' },
+            ...data.hypotheses.slice(0, 5).map(hyp => {
+              const isActive = hyp.status === 'running' || hyp.status === 'queued';
+              const color = STATUS_COLOR[hyp.status] ?? '#6b7280';
+              const row = h('div', {
+                style: `display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;background:var(--bg);border:1px solid var(--bg4);${isActive ? 'cursor:pointer' : ''}`,
+                onClick: isActive ? () => {
+                  (state as any).svHypothesisId = hyp.id;
+                  (state as any).svView = 'live';
+                  render();
+                } : undefined,
+              },
+                h('span', {
+                  style: `display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};flex-shrink:0`,
+                }),
+                h('span', { style: 'font-size:13px;color:var(--fg);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, hyp.title),
+                h('span', { style: `font-size:11px;font-weight:600;color:${color};text-transform:uppercase;letter-spacing:.04em;flex-shrink:0` }, hyp.status),
+                isActive ? h('button', {
+                  className: 'nav-btn active',
+                  style: 'padding:4px 12px;font-size:12px;flex-shrink:0',
+                  onClick: (e: Event) => {
+                    e.stopPropagation();
+                    (state as any).svHypothesisId = hyp.id;
+                    (state as any).svView = 'live';
+                    render();
+                  },
+                }, 'Resume') : null,
+              );
+              return row;
+            }),
+          ),
+        )
+      );
+    } catch { /* ignore */ }
+  }
+
+  setTimeout(() => { void loadRecent(); }, 50);
+
   return h('div', { className: 'dash-view' },
     h('div', { style: 'max-width:700px;margin:0 auto' },
       h('div', { style: 'display:flex;align-items:center;gap:12px;margin-bottom:32px' },
@@ -99,6 +157,7 @@ export function renderSVSubmitView(options: { render: () => void }): HTMLElement
             'Submit a hypothesis for multi-agent literature, statistical, and mechanistic analysis.'),
         )
       ),
+      recentEl,
       h('div', {
         style: 'background:var(--bg2);border:1px solid var(--bg4);border-radius:14px;padding:28px 30px',
       },
