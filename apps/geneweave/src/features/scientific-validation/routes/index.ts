@@ -16,6 +16,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { createIdempotencyStore } from '@weaveintel/reliability';
 import type { DatabaseAdapter } from '../../../db.js';
 import type { SVWorkflowRunner, SVRunInput } from '../runner.js';
 
@@ -76,10 +77,19 @@ export function registerSVRoutes(
   readBody: ReadBodyHelper,
   runner?: SVWorkflowRunner,
 ): void {
+  // Idempotency store for POST mutation routes (24-hour TTL, 10k entries max)
+  const iStore = createIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000, maxEntries: 10_000 });
 
   // ── POST /api/sv/hypotheses ─────────────────────────────────────────────
   router.post('/api/sv/hypotheses', async (req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+
+    // Idempotency-Key deduplication
+    const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
+    if (idempotencyKey) {
+      const check = iStore.check(`hypotheses:${idempotencyKey}`);
+      if (check.isDuplicate) { json(res, 201, check.previousResult); return; }
+    }
 
     let body: {
       title?: string; statement?: string;
@@ -130,7 +140,9 @@ export function registerSVRoutes(
       });
     }
 
-    json(res, 201, { id, status: 'queued', traceId, contractId });
+    const responseBody = { id, status: 'queued', traceId, contractId };
+    if (idempotencyKey) iStore.record(`hypotheses:${idempotencyKey}`, responseBody);
+    json(res, 201, responseBody);
   }, { auth: true, csrf: true });
 
   // ── GET /api/sv/hypotheses/:id ──────────────────────────────────────────
@@ -300,11 +312,19 @@ export function registerSVRoutes(
   }, { auth: true, csrf: true });
 
   // ── POST /api/sv/hypotheses/:id/reproduce ───────────────────────────────
-  router.post('/api/sv/hypotheses/:id/reproduce', async (_req, res, params, auth) => {
+  router.post('/api/sv/hypotheses/:id/reproduce', async (req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
 
     const { id } = params;
     if (!id) { json(res, 400, { error: 'id required' }); return; }
+
+    // Idempotency-Key deduplication
+    const reproduceKey = req.headers['idempotency-key'] as string | undefined;
+    if (reproduceKey) {
+      const check = iStore.check(`reproduce:${reproduceKey}`);
+      if (check.isDuplicate) { json(res, 201, check.previousResult); return; }
+    }
+
     const tenantId = (auth.tenantId ?? 'default') as string;
 
     const original = await db.getHypothesis(id, tenantId);
@@ -344,7 +364,9 @@ export function registerSVRoutes(
       });
     }
 
-    json(res, 201, { id: newId, originalId: id, status: 'queued', traceId: newTraceId });
+    const reproduceBody = { id: newId, originalId: id, status: 'queued', traceId: newTraceId };
+    if (reproduceKey) iStore.record(`reproduce:${reproduceKey}`, reproduceBody);
+    json(res, 201, reproduceBody);
   }, { auth: true, csrf: true });
 
   // ── GET /api/sv/verdicts/:id/bundle ─────────────────────────────────────

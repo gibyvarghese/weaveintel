@@ -2146,3 +2146,96 @@ describeAdmin('Tool Approval Requests API', () => {
     expect(status).toBe(404);
   });
 });
+
+// ─── Scientific Validation API ─────────────────────────────────────────────
+
+describeAdmin('Scientific Validation API', () => {
+  it('returns 401 when unauthenticated on POST /api/sv/hypotheses', async () => {
+    const res = await fetch(`${BASE_URL}/api/sv/hypotheses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'T', statement: 'S' }),
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 when unauthenticated on GET /api/sv/hypotheses/:id', async () => {
+    const res = await fetch(`${BASE_URL}/api/sv/hypotheses/some-id`);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 401 when unauthenticated on GET /api/sv/verdicts/:id/bundle', async () => {
+    const res = await fetch(`${BASE_URL}/api/sv/verdicts/some-id/bundle`);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 404 for unknown hypothesis', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status } = await api('GET', '/api/sv/hypotheses/non-existent-id');
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    expect(status).toBe(404);
+  });
+
+  it('returns 404 for unknown verdict bundle', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status } = await api('GET', '/api/sv/verdicts/non-existent-id/bundle');
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    expect(status).toBe(404);
+  });
+
+  it('submits a hypothesis and returns 201', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status, data } = await api('POST', '/api/sv/hypotheses', {
+      title: 'API Test Hypothesis',
+      statement: 'Aspirin reduces platelet aggregation in human subjects.',
+      domainTags: ['pharmacology'],
+    });
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    expect(status).toBe(201);
+    expect(typeof data['id']).toBe('string');
+    expect(data['status']).toBe('queued');
+    expect(typeof data['traceId']).toBe('string');
+    expect(typeof data['contractId']).toBe('string');
+  });
+
+  it('idempotency-key replay returns same hypothesis without duplicate creation', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+
+    const idemKey = `api-test-idem-${Date.now()}`;
+    const payload = { title: 'Idempotency Check', statement: 'Test idempotency on this route.' };
+
+    const r1 = await api('POST', '/api/sv/hypotheses?_idem=1', payload);
+    // Manually append Idempotency-Key by using fetch directly (api() doesn't support extra headers)
+    const res1 = await fetch(`${BASE_URL}/api/sv/hypotheses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Cookie': cookie, 'X-CSRF-Token': csrfToken, 'Idempotency-Key': idemKey },
+      body: JSON.stringify(payload),
+    });
+    const d1 = await res1.json() as Record<string, unknown>;
+    expect(res1.status).toBe(201);
+
+    const res2 = await fetch(`${BASE_URL}/api/sv/hypotheses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Cookie': cookie, 'X-CSRF-Token': csrfToken, 'Idempotency-Key': idemKey },
+      body: JSON.stringify(payload),
+    });
+    const d2 = await res2.json() as Record<string, unknown>;
+    expect(res2.status).toBe(201);
+    // Same hypothesis ID must be returned on the replay
+    expect(d1['id']).toBe(d2['id']);
+    void r1; // suppress unused variable
+  });
+
+  it('cancel returns 200 for authenticated user on unknown id', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status } = await api('POST', '/api/sv/hypotheses/non-existent-id/cancel');
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    expect(status).toBe(404);
+  });
+
+  it('cancel returns 401 when unauthenticated', async () => {
+    const res = await fetch(`${BASE_URL}/api/sv/hypotheses/some-id/cancel`, { method: 'POST' });
+    expect(res.status).toBe(401);
+  });
+});

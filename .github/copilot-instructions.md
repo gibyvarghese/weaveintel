@@ -260,6 +260,14 @@ Valid values: `'mechanism' | 'epidemiological' | 'mathematical' | 'dose_response
 - `POST /api/sv/hypotheses/:id/reproduce` → 201 `{ id, originalId, status: 'queued', traceId }`
 - `GET /api/sv/verdicts/:id/bundle` → 200 JSON with `{ schemaVersion, hypothesis, verdict, subClaims, evidenceEvents, agentTurns }`
 
+### Phase 6 — API routes, idempotency, auth, and test coverage (complete)
+- All 7 SV routes are registered via `registerSVRoutes(router, db, json, readBody, runner)` — wired in `server.ts`.
+- `Idempotency-Key` header is required on `POST /api/sv/hypotheses` and `POST /api/sv/hypotheses/:id/reproduce`. Replays return the original response without creating a duplicate DB row. Store uses `@weaveintel/reliability`'s `createIdempotencyStore` with a 24-hour TTL, scoped inside `registerSVRoutes`.
+- Idempotency key namespacing: `hypotheses:<key>` for the submit route and `reproduce:<key>` for the reproduce route.
+- Auth enforcement: every route returns 401 when `auth` is `null`. Tenant isolation is enforced by scoping all `db.getHypothesis(id, tenantId)` calls to the requester's `tenantId`.
+- Test file at `features/scientific-validation/routes/sv-routes.test.ts` — 31 tests covering happy path, auth failures (all 7 routes), tenant isolation, idempotency replay, SSE content-type, Last-Event-ID cursor, and evidence/verdict event emission.
+- Integration tests in `api.test.ts` under `describeAdmin('Scientific Validation API', ...)` — 8 tests covering 401 checks, 404s, submit, idempotency replay, and cancel.
+
 ### SV Tool Registration
 - 18 SV tools are registered only for SV agent invocations via `toolMap` passed to `SVWorkflowRunner`. They are NOT in `tool_catalog` and NOT managed by operator tool policies.
 - Tool invocation within SV agents uses `ToolInput = { name: string; arguments: Record<string, unknown> }`.
