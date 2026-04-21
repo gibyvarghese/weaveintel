@@ -112,12 +112,6 @@ function createFakeDb(): Partial<DatabaseAdapter> & {
     async listAgentTurns(_hypothesisId: string): Promise<SvAgentTurnRow[]> {
       return turns.filter((at) => at.hypothesis_id === _hypothesisId);
     },
-    async getAgentTurnsSince(_hypothesisId: string, _afterId: string | null): Promise<SvAgentTurnRow[]> {
-      return turns.filter((at) => at.hypothesis_id === _hypothesisId);
-    },
-    async getEvidenceEventsSince(_hypothesisId: string, _afterId: string | null): Promise<SvEvidenceEventRow[]> {
-      return evidence.filter((ev) => ev.hypothesis_id === _hypothesisId);
-    },
 
     // Budget envelope (not used in workflow but may be called)
     async getBudgetEnvelope(_id: string): Promise<SvBudgetEnvelopeRow | null> {
@@ -265,7 +259,7 @@ describe('SV workflow — canned hypothesis: known-true (aerobic exercise)', () 
     expect(hyp?.status).toBe('verdict');
 
     // A verdict row must be written
-    const verdict = await db.getVerdictByHypothesis('hyp-known-true-001');
+    const verdict = await db.getVerdictByHypothesis!('hyp-known-true-001');
     expect(verdict).not.toBeNull();
     expect(verdict?.verdict).toBe('supported');
     expect(verdict?.confidence_lo).toBeGreaterThan(0);
@@ -331,7 +325,7 @@ describe('SV workflow — canned hypothesis: known-false (homeopathy)', () => {
       budgetId: 'budget-test',
     });
 
-    const verdict = await db.getVerdictByHypothesis('hyp-known-false-001');
+    const verdict = await db.getVerdictByHypothesis!('hyp-known-false-001');
     expect(verdict).not.toBeNull();
     expect(verdict?.verdict).toBe('refuted');
   });
@@ -375,7 +369,7 @@ describe('SV workflow — canned hypothesis: ill-posed (consciousness)', () => {
       budgetId: 'budget-test',
     });
 
-    const verdict = await db.getVerdictByHypothesis('hyp-ill-posed-001');
+    const verdict = await db.getVerdictByHypothesis!('hyp-ill-posed-001');
     expect(verdict).not.toBeNull();
     expect(verdict?.verdict).toBe('inconclusive');
   });
@@ -391,7 +385,7 @@ describe('SV workflow — canned hypothesis: ill-posed (consciousness)', () => {
       budgetId: 'budget-test',
     });
 
-    const verdict = await db.getVerdictByHypothesis('hyp-ill-posed-001');
+    const verdict = await db.getVerdictByHypothesis!('hyp-ill-posed-001');
     expect(verdict?.confidence_lo).toBeGreaterThanOrEqual(0);
     expect(verdict?.confidence_hi).toBeLessThanOrEqual(1);
     expect(verdict?.confidence_hi).toBeGreaterThanOrEqual(verdict?.confidence_lo ?? 0);
@@ -431,7 +425,7 @@ describe('SV workflow — compensation / cancellation', () => {
     const runner = makeRunner(db, SUPERVISOR_SUPPORTED);
     await runner.cancelRun('hyp-cancel-003');
 
-    const verdict = await db.getVerdictByHypothesis('hyp-cancel-003');
+    const verdict = await db.getVerdictByHypothesis!('hyp-cancel-003');
     // No run was started, so no verdict should exist
     expect(verdict).toBeNull();
   });
@@ -466,7 +460,7 @@ describe('SV workflow — contract integrity', () => {
       budgetId: 'budget-test',
     });
 
-    const verdict = await db.getVerdictByHypothesis('hyp-contract-001');
+    const verdict = await db.getVerdictByHypothesis!('hyp-contract-001');
     expect(verdict?.contract_id).toBeTruthy();
     expect(verdict?.replay_trace_id).toBeTruthy();
     // UUIDs should not be empty strings
@@ -488,7 +482,7 @@ describe('SV workflow — contract integrity', () => {
       budgetId: 'budget-test',
     });
 
-    const verdict = await db.getVerdictByHypothesis('hyp-contract-002');
+    const verdict = await db.getVerdictByHypothesis!('hyp-contract-002');
     expect(verdict?.emitted_by).toBe('supervisor');
   });
 
@@ -506,7 +500,7 @@ describe('SV workflow — contract integrity', () => {
       budgetId: 'budget-test',
     });
 
-    const verdict = await db.getVerdictByHypothesis('hyp-contract-003');
+    const verdict = await db.getVerdictByHypothesis!('hyp-contract-003');
     expect(verdict?.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
   });
 });

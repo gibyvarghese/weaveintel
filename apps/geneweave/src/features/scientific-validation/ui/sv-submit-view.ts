@@ -16,12 +16,12 @@ export function renderSVSubmitView(options: { render: () => void }): HTMLElement
 
   const titleInput = h('input', {
     type: 'text',
-    placeholder: 'e.g. "Aspirin reduces cardiovascular event risk in primary prevention"',
+    placeholder: 'Enter a short title for this hypothesis (e.g. "Aspirin reduces MI risk")',
     style: 'width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--bg4);background:var(--bg2);color:var(--fg);font-size:14px;box-sizing:border-box',
   }) as HTMLInputElement;
 
   const statementArea = h('textarea', {
-    placeholder: 'State the hypothesis clearly and precisely. Include measurable claims, target population, and expected effect direction.',
+    placeholder: 'State the hypothesis statement clearly and precisely. Include measurable claims, target population, and expected effect direction.',
     rows: '5',
     style: 'width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--bg4);background:var(--bg2);color:var(--fg);font-size:13px;font-family:var(--font);resize:vertical;box-sizing:border-box',
   }) as HTMLTextAreaElement;
@@ -94,7 +94,7 @@ export function renderSVSubmitView(options: { render: () => void }): HTMLElement
       h('div', { style: 'display:flex;align-items:center;gap:12px;margin-bottom:32px' },
         h('span', { style: 'font-size:28px' }, '🔬'),
         h('div', null,
-          h('h2', { style: 'font-size:22px;font-weight:700;color:var(--fg);margin:0 0 4px' }, 'Scientific Validation'),
+          h('h2', { style: 'font-size:22px;font-weight:700;color:var(--fg);margin:0 0 4px' }, 'Validate a Hypothesis'),
           h('p', { style: 'color:var(--fg3);font-size:13px;margin:0' },
             'Submit a hypothesis for multi-agent literature, statistical, and mechanistic analysis.'),
         )

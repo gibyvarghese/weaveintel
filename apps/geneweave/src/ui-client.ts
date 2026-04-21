@@ -1397,3 +1397,4 @@ export function initialize() {
 (globalThis as any).selectChat = selectChat;
 (globalThis as any).doLogout = doLogout;
 (globalThis as any).initialize = initialize;
+(globalThis as any).state = state;

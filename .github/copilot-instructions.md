@@ -279,7 +279,7 @@ Valid values: `'mechanism' | 'epidemiological' | 'mathematical' | 'dose_response
 - Wrap SSE handlers in `try/finally` to always call `clearInterval(ka)` and `res.end()`.
 - Maximum SSE stream duration: 5 minutes (enforced inside `pollRows`).
 
-### UI Architecture (Phases 7–9 — complete)
+### UI Architecture (Phases 7–9 — complete, Playwright verified)
 - Three views: `sv-submit-view.ts` (form), `sv-live-view.ts` (SSE deliberation), `sv-verdict-view.ts` (verdict + bundle).
 - All views exported from `features/scientific-validation/ui/index.ts` barrel.
 - State fields: `state.svView` (`'submit' | 'live' | 'verdict'`), `state.svHypothesisId`, `state.svHypothesis`, `state.svVerdict`.
@@ -287,6 +287,12 @@ Valid values: `'mechanism' | 'epidemiological' | 'mathematical' | 'dose_response
 - `'scientific-validation'` is in the `allowedViews` Set; sidebar nav entry is in `workspace-shell.ts`.
 - SSE cleanup: `MutationObserver` on `document.body` detects DOM removal of the live view element and calls `cleanup()` to close `EventSource` instances and clear the polling interval.
 - `EventSource` opens with `{ withCredentials: true }`. SSE event types: `evidence`, `turn`, `verdict`, `keepalive`.
+- `globalThis.state` is exposed at the bottom of `ui-client.ts` (alongside `render`, `initialize`, etc.) so Playwright tests and devtools can manipulate SV state (`svView`, `svHypothesisId`) directly.
+- `server.ts` static-file route regex covers `/features/` paths so ES module imports in `ui-client.js` (e.g. `./features/scientific-validation/ui/index.js`) are served correctly from `dist/`.
+- `sv-submit-view.ts` title input placeholder must include the word "title" (for test selector `input[placeholder*="title" i]`) and the textarea placeholder must include "statement" (for `textarea[placeholder*="statement" i]`).
+- Live deliberation view h2 text is `'Live Deliberation'` — Playwright selects via `/Deliberation|Live|Running/i`.
+- Cancel button calls `POST /api/sv/hypotheses/:id/cancel` and on response (or error) sets `svView = 'submit'` and re-renders.
+- Playwright E2E test file: `apps/geneweave/src/sv-ui.e2e.ts` — 8 tests covering nav entry, submit form, validation, live view, cancel, verdict, and bundle download.
 
 ### Eval Corpus
 - `evals/corpus.json` — 20 curated hypotheses (5 known-true, 5 known-false, 5 ill-posed, 5 p-hacked).

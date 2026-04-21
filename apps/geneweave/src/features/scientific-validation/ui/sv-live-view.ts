@@ -188,15 +188,30 @@ export function renderSVLiveView(options: { render: () => void }): HTMLElement {
           h('h2', { style: 'font-size:20px;font-weight:700;color:var(--fg);margin:0 0 2px' }, 'Live Deliberation'),
           statusEl,
         ),
-        h('button', {
-          className: 'nav-btn',
-          style: 'margin-left:auto',
-          onClick: () => {
-            (state as any).svView = 'submit';
-            cleanup();
-            render();
-          },
-        }, '← Back'),
+        h('div', { style: 'margin-left:auto;display:flex;gap:8px' },
+          h('button', {
+            className: 'nav-btn',
+            style: 'color:var(--danger,#dc2626)',
+            onClick: () => {
+              fetch(`/api/sv/hypotheses/${hypothesisId}/cancel`, {
+                method: 'POST',
+                credentials: 'include',
+              }).finally(() => {
+                (state as any).svView = 'submit';
+                cleanup();
+                render();
+              });
+            },
+          }, 'Cancel'),
+          h('button', {
+            className: 'nav-btn',
+            onClick: () => {
+              (state as any).svView = 'submit';
+              cleanup();
+              render();
+            },
+          }, '← Back'),
+        ),
       ),
       h('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:20px' },
         h('div', null,

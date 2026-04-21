@@ -1327,7 +1327,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     console.log(`[DEBUG] Request: ${method} ${pathname}`);
 
     // Serve UI module files (but NOT admin-schema.js - it's embedded in HTML)
-    if ((method === 'GET' || method === 'HEAD') && pathname.match(/^\/(?:ui(?:\/|\.))/)) {
+    if ((method === 'GET' || method === 'HEAD') && pathname.match(/^\/(?:ui(?:\/|\.)|features\/)/)) {
       // Map /ui.js to /ui-client.js (client-side only module)
       let filename = pathname.slice(1);
       if (filename === 'ui.js') {
