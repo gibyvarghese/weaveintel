@@ -30,6 +30,7 @@ import type {
   MetricsSummary, WorkflowRunRow, GuardrailEvalRow, ModelPricingRow,
   WebsiteCredentialRow,
   SvBudgetEnvelopeRow, SvHypothesisRow, SvHypothesisStatus, SvSubClaimRow, SvVerdictRow,
+  SvEvidenceEventRow, SvAgentTurnRow,
 } from './db-types.js';
 
 export class SQLiteAdapter implements DatabaseAdapter {
@@ -4604,6 +4605,68 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async getVerdictById(id: string): Promise<SvVerdictRow | null> {
     return (this.d.prepare(`SELECT * FROM sv_verdict WHERE id = ?`).get(id) as SvVerdictRow | undefined) ?? null;
+  }
+
+  // ─── Evidence events (SSE /events) ────────────────────────
+
+  async createEvidenceEvent(event: Omit<SvEvidenceEventRow, 'created_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO sv_evidence_event
+       (id, hypothesis_id, step_id, agent_id, evidence_id, kind, summary, source_type, tool_key, reproducibility_hash, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      event.id, event.hypothesis_id, event.step_id, event.agent_id,
+      event.evidence_id, event.kind, event.summary, event.source_type,
+      event.tool_key ?? null, event.reproducibility_hash ?? null,
+      new Date().toISOString(),
+    );
+  }
+
+  async listEvidenceEvents(hypothesisId: string, afterId?: string, limit = 100): Promise<SvEvidenceEventRow[]> {
+    if (afterId) {
+      const anchor = this.d.prepare(
+        `SELECT created_at FROM sv_evidence_event WHERE id = ?`,
+      ).get(afterId) as { created_at: string } | undefined;
+      if (anchor) {
+        return this.d.prepare(
+          `SELECT * FROM sv_evidence_event WHERE hypothesis_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT ?`,
+        ).all(hypothesisId, anchor.created_at, limit) as SvEvidenceEventRow[];
+      }
+    }
+    return this.d.prepare(
+      `SELECT * FROM sv_evidence_event WHERE hypothesis_id = ? ORDER BY created_at ASC LIMIT ?`,
+    ).all(hypothesisId, limit) as SvEvidenceEventRow[];
+  }
+
+  // ─── Agent dialogue turns (SSE /dialogue) ─────────────────
+
+  async createAgentTurn(turn: Omit<SvAgentTurnRow, 'created_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO sv_agent_turn
+       (id, hypothesis_id, round_index, from_agent, to_agent, message, cites_evidence_ids, dissent, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`,
+    ).run(
+      turn.id, turn.hypothesis_id, turn.round_index,
+      turn.from_agent, turn.to_agent ?? null, turn.message,
+      turn.cites_evidence_ids, turn.dissent ? 1 : 0,
+      new Date().toISOString(),
+    );
+  }
+
+  async listAgentTurns(hypothesisId: string, afterId?: string, limit = 200): Promise<SvAgentTurnRow[]> {
+    if (afterId) {
+      const anchor = this.d.prepare(
+        `SELECT created_at FROM sv_agent_turn WHERE id = ?`,
+      ).get(afterId) as { created_at: string } | undefined;
+      if (anchor) {
+        return this.d.prepare(
+          `SELECT * FROM sv_agent_turn WHERE hypothesis_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT ?`,
+        ).all(hypothesisId, anchor.created_at, limit) as SvAgentTurnRow[];
+      }
+    }
+    return this.d.prepare(
+      `SELECT * FROM sv_agent_turn WHERE hypothesis_id = ? ORDER BY created_at ASC LIMIT ?`,
+    ).all(hypothesisId, limit) as SvAgentTurnRow[];
   }
 }
 

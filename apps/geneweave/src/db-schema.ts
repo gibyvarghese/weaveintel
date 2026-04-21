@@ -1073,5 +1073,37 @@ CREATE TABLE IF NOT EXISTS sv_verdict (
   created_at TEXT NOT NULL,
   CHECK (confidence_lo <= confidence_hi)
 );
+
+-- Evidence events emitted by specialist agents during a run.
+-- Powers GET /api/sv/hypotheses/:id/events SSE stream.
+CREATE TABLE IF NOT EXISTS sv_evidence_event (
+  id TEXT PRIMARY KEY,                           -- UUID
+  hypothesis_id TEXT NOT NULL REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+  step_id TEXT NOT NULL,                         -- workflow step that emitted this (e.g. 'statistical')
+  agent_id TEXT NOT NULL,                        -- agent name
+  evidence_id TEXT NOT NULL,                     -- contract evidence item id
+  kind TEXT NOT NULL,                            -- e.g. 'stat_finding', 'lit_hit', 'sim_result'
+  summary TEXT NOT NULL,
+  source_type TEXT NOT NULL,                     -- 'sandbox_tool_run' | 'http_fetch' | 'model_inference'
+  tool_key TEXT,                                 -- tool that produced this (nullable for model inferences)
+  reproducibility_hash TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sv_evidence_event_hypothesis ON sv_evidence_event(hypothesis_id, created_at ASC);
+
+-- Agent-to-agent dialogue turns during the deliberation loop.
+-- Powers GET /api/sv/hypotheses/:id/dialogue SSE stream.
+CREATE TABLE IF NOT EXISTS sv_agent_turn (
+  id TEXT PRIMARY KEY,                           -- UUID
+  hypothesis_id TEXT NOT NULL REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+  round_index INTEGER NOT NULL DEFAULT 0,
+  from_agent TEXT NOT NULL,
+  to_agent TEXT,                                 -- null = broadcast
+  message TEXT NOT NULL,
+  cites_evidence_ids TEXT NOT NULL DEFAULT '[]', -- JSON: string[]
+  dissent INTEGER NOT NULL DEFAULT 0,            -- boolean (0 | 1)
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sv_agent_turn_hypothesis ON sv_agent_turn(hypothesis_id, created_at ASC);
 `;
 

@@ -1,12 +1,23 @@
 /**
- * Scientific Validation — HTTP route stubs
+ * Scientific Validation — HTTP route handlers
  *
- * Phase 2: all routes are wired and authenticated; bodies return 501 Not Implemented.
- * Implementations land in Phase 3 (workflow) and Phase 4 (SSE + bundle).
+ * Implements the full SV REST + SSE surface:
+ *  POST   /api/sv/hypotheses                — submit hypothesis, start async workflow
+ *  GET    /api/sv/hypotheses/:id            — fetch hypothesis + verdict
+ *  GET    /api/sv/hypotheses/:id/events     — SSE evidence stream (Last-Event-ID supported)
+ *  GET    /api/sv/hypotheses/:id/dialogue   — SSE agent-turn stream + verdict event
+ *  POST   /api/sv/hypotheses/:id/cancel     — cancel in-progress run
+ *  POST   /api/sv/hypotheses/:id/reproduce  — re-run from replay trace (new IDs)
+ *  GET    /api/sv/verdicts/:id/bundle       — download verdict JSON bundle
+ *
+ * Status values: 'queued' | 'running' | 'verdict' | 'abandoned'
+ * Terminal statuses (run over): 'verdict' | 'abandoned'
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import type { DatabaseAdapter } from '../../../db.js';
+import type { SVWorkflowRunner, SVRunInput } from '../runner.js';
 
 type RouteHandler = (
   req: IncomingMessage,
@@ -23,64 +34,394 @@ interface Router {
   post(path: string, handler: RouteHandler, opts?: { auth?: boolean; csrf?: boolean }): void;
 }
 
+const TERMINAL_STATUSES = new Set(['verdict', 'abandoned']);
+
+/** Send a single SSE frame. */
+function sseFrame(res: ServerResponse, event: string, id: string, data: unknown): void {
+  res.write(`event: ${event}\nid: ${id}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+/** SSE keep-alive comment every 15 s. */
+function startSSEKeepalive(res: ServerResponse): NodeJS.Timeout {
+  return setInterval(() => { res.write(': ping\n\n'); }, 15_000);
+}
+
+/** Poll the DB for new rows after `lastId` for up to `maxWaitMs`. Yields rows as they arrive. */
+async function* pollRows<T extends { id: string; created_at: string }>(
+  fetch: (afterId: string | undefined) => Promise<T[]>,
+  lastId: string | undefined,
+  isTerminal: () => Promise<boolean>,
+  pollIntervalMs = 1_000,
+  maxWaitMs = 300_000,
+): AsyncGenerator<T> {
+  const deadline = Date.now() + maxWaitMs;
+  let cursor = lastId;
+  while (Date.now() < deadline) {
+    const rows = await fetch(cursor);
+    for (const row of rows) {
+      cursor = row.id;
+      yield row;
+    }
+    if (rows.length === 0) {
+      if (await isTerminal()) return;
+      await new Promise(r => setTimeout(r, pollIntervalMs));
+    }
+  }
+}
+
 export function registerSVRoutes(
   router: Router,
-  _db: DatabaseAdapter,
+  db: DatabaseAdapter,
   json: JsonHelper,
-  _readBody: ReadBodyHelper,
+  readBody: ReadBodyHelper,
+  runner?: SVWorkflowRunner,
 ): void {
-  // POST /api/sv/hypotheses
-  // Submit a new hypothesis for validation. Idempotent via Idempotency-Key header.
-  // Starts the scientific validation workflow asynchronously.
-  router.post('/api/sv/hypotheses', async (_req, res, _params, auth) => {
+
+  // ── POST /api/sv/hypotheses ─────────────────────────────────────────────
+  router.post('/api/sv/hypotheses', async (req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    json(res, 501, { error: 'Not Implemented', feature: 'scientific-validation', route: 'POST /api/sv/hypotheses' });
+
+    let body: {
+      title?: string; statement?: string;
+      domainTags?: string[]; budgetId?: string;
+    };
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch {
+      json(res, 400, { error: 'Invalid JSON body' }); return;
+    }
+
+    const { title, statement, domainTags = [], budgetId = '' } = body;
+    if (!title || typeof title !== 'string') { json(res, 400, { error: 'title is required' }); return; }
+    if (!statement || typeof statement !== 'string') { json(res, 400, { error: 'statement is required' }); return; }
+
+    const id = randomUUID();
+    const tenantId = (auth.tenantId ?? 'default') as string;
+    const traceId = randomUUID();
+    const contractId = randomUUID();
+
+    await db.createHypothesis({
+      id,
+      tenant_id: tenantId,
+      submitted_by: auth.userId,
+      title,
+      statement,
+      domain_tags: JSON.stringify(domainTags),
+      budget_envelope_id: budgetId,
+      status: 'queued',
+      workflow_run_id: null,
+      trace_id: traceId,
+      contract_id: contractId,
+    });
+
+    // Fire-and-forget: start workflow asynchronously if runner is available.
+    if (runner) {
+      const runInput: SVRunInput = {
+        hypothesisId: id,
+        tenantId,
+        userId: auth.userId,
+        statement,
+        domainTags,
+        budgetId,
+      };
+      runner.startRun(runInput).catch((err: unknown) => {
+        console.error('[sv] workflow run failed for hypothesis', id, err);
+        db.updateHypothesisStatus(id, 'abandoned', new Date().toISOString()).catch(() => {});
+      });
+    }
+
+    json(res, 201, { id, status: 'queued', traceId, contractId });
   }, { auth: true, csrf: true });
 
-  // GET /api/sv/hypotheses/:id
-  // Retrieve a hypothesis plus its verdict (if available).
-  // Returns 404 if the hypothesis does not belong to the authenticated tenant.
-  router.get('/api/sv/hypotheses/:id', async (_req, res, _params, auth) => {
+  // ── GET /api/sv/hypotheses/:id ──────────────────────────────────────────
+  router.get('/api/sv/hypotheses/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    json(res, 501, { error: 'Not Implemented', feature: 'scientific-validation', route: 'GET /api/sv/hypotheses/:id' });
+
+    const { id } = params;
+    if (!id) { json(res, 400, { error: 'id required' }); return; }
+    const tenantId = (auth.tenantId ?? 'default') as string;
+
+    const hypothesis = await db.getHypothesis(id, tenantId);
+    if (!hypothesis) { json(res, 404, { error: 'Hypothesis not found' }); return; }
+
+    const verdict = await db.getVerdictByHypothesis(hypothesis.id);
+
+    json(res, 200, {
+      hypothesis: {
+        id: hypothesis.id,
+        title: hypothesis.title,
+        statement: hypothesis.statement,
+        domainTags: JSON.parse(hypothesis.domain_tags ?? '[]') as string[],
+        status: hypothesis.status,
+        traceId: hypothesis.trace_id,
+        contractId: hypothesis.contract_id,
+        createdAt: hypothesis.created_at,
+        updatedAt: hypothesis.updated_at,
+      },
+      verdict: verdict
+        ? {
+            id: verdict.id,
+            verdict: verdict.verdict,
+            confidenceLo: verdict.confidence_lo,
+            confidenceHi: verdict.confidence_hi,
+            limitations: verdict.limitations,
+            emittedBy: verdict.emitted_by,
+          }
+        : null,
+    });
   }, { auth: true });
 
-  // GET /api/sv/hypotheses/:id/events
-  // SSE stream of contract evidence items as they are written during the run.
-  // Supports Last-Event-ID header for resume.
-  router.get('/api/sv/hypotheses/:id/events', async (_req, res, _params, auth) => {
+  // ── GET /api/sv/hypotheses/:id/events (SSE) ─────────────────────────────
+  router.get('/api/sv/hypotheses/:id/events', async (req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    json(res, 501, { error: 'Not Implemented', feature: 'scientific-validation', route: 'GET /api/sv/hypotheses/:id/events' });
+
+    const { id } = params;
+    if (!id) { json(res, 400, { error: 'id required' }); return; }
+    const tenantId = (auth.tenantId ?? 'default') as string;
+
+    const hypothesis = await db.getHypothesis(id, tenantId);
+    if (!hypothesis) { json(res, 404, { error: 'Hypothesis not found' }); return; }
+
+    // Set SSE headers
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const lastEventId = (req.headers['last-event-id'] as string | undefined) ?? undefined;
+    const ka = startSSEKeepalive(res);
+
+    try {
+      const isTerminal = async () => {
+        const h = await db.getHypothesis(id, tenantId);
+        return TERMINAL_STATUSES.has(h?.status ?? '');
+      };
+      for await (const row of pollRows(
+        (afterId) => db.listEvidenceEvents(id, afterId, 50),
+        lastEventId,
+        isTerminal,
+      )) {
+        sseFrame(res, 'evidence', row['evidence_id'] as string, {
+          stepId: row['step_id'],
+          agentId: row['agent_id'],
+          evidenceId: row['evidence_id'],
+          kind: row['kind'],
+          summary: row['summary'],
+          sourceType: row['source_type'],
+          toolKey: row['tool_key'],
+          reproducibilityHash: row['reproducibility_hash'],
+        });
+      }
+    } finally {
+      clearInterval(ka);
+      res.end();
+    }
   }, { auth: true });
 
-  // GET /api/sv/hypotheses/:id/dialogue
-  // SSE stream of agent turns and deliberation rounds.
-  // Supports Last-Event-ID header for resume.
-  router.get('/api/sv/hypotheses/:id/dialogue', async (_req, res, _params, auth) => {
+  // ── GET /api/sv/hypotheses/:id/dialogue (SSE) ──────────────────────────
+  router.get('/api/sv/hypotheses/:id/dialogue', async (req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    json(res, 501, { error: 'Not Implemented', feature: 'scientific-validation', route: 'GET /api/sv/hypotheses/:id/dialogue' });
+
+    const { id } = params;
+    if (!id) { json(res, 400, { error: 'id required' }); return; }
+    const tenantId = (auth.tenantId ?? 'default') as string;
+
+    const hypothesis = await db.getHypothesis(id, tenantId);
+    if (!hypothesis) { json(res, 404, { error: 'Hypothesis not found' }); return; }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const lastEventId = (req.headers['last-event-id'] as string | undefined) ?? undefined;
+    const ka = startSSEKeepalive(res);
+
+    try {
+      const isTerminal = async () => {
+        const h = await db.getHypothesis(id, tenantId);
+        return TERMINAL_STATUSES.has(h?.status ?? '');
+      };
+      for await (const row of pollRows(
+        (afterId) => db.listAgentTurns(id, afterId, 50),
+        lastEventId,
+        isTerminal,
+      )) {
+        sseFrame(res, 'turn', row.id, {
+          roundIndex: row.round_index,
+          fromAgent: row.from_agent,
+          toAgent: row.to_agent,
+          message: row.message,
+          citesEvidenceIds: JSON.parse(row.cites_evidence_ids ?? '[]') as string[],
+          dissent: row.dissent === 1,
+        });
+      }
+      // Emit verdict event when run is complete
+      const final = await db.getHypothesis(id, tenantId);
+      if (final?.status === 'verdict') {
+        const v = await db.getVerdictByHypothesis(id);
+        if (v) {
+          sseFrame(res, 'verdict', v.id, {
+            verdictId: v.id,
+            verdict: v.verdict,
+            confidenceLo: v.confidence_lo,
+            confidenceHi: v.confidence_hi,
+          });
+        }
+      }
+    } finally {
+      clearInterval(ka);
+      res.end();
+    }
   }, { auth: true });
 
-  // POST /api/sv/hypotheses/:id/cancel
-  // Cancel an in-progress validation run (triggers workflow compensation).
-  // Idempotent: cancelling an already-abandoned run returns 200.
-  router.post('/api/sv/hypotheses/:id/cancel', async (_req, res, _params, auth) => {
+  // ── POST /api/sv/hypotheses/:id/cancel ──────────────────────────────────
+  router.post('/api/sv/hypotheses/:id/cancel', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    json(res, 501, { error: 'Not Implemented', feature: 'scientific-validation', route: 'POST /api/sv/hypotheses/:id/cancel' });
+
+    const { id } = params;
+    if (!id) { json(res, 400, { error: 'id required' }); return; }
+    const tenantId = (auth.tenantId ?? 'default') as string;
+
+    const hypothesis = await db.getHypothesis(id, tenantId);
+    if (!hypothesis) { json(res, 404, { error: 'Hypothesis not found' }); return; }
+
+    // Idempotent: already abandoned → 200
+    if (hypothesis.status !== 'abandoned') {
+      if (runner) await runner.cancelRun(id);
+      else await db.updateHypothesisStatus(id, 'abandoned', new Date().toISOString());
+    }
+
+    json(res, 200, { id, status: 'abandoned' });
   }, { auth: true, csrf: true });
 
-  // POST /api/sv/hypotheses/:id/reproduce
-  // Re-run validation from the recorded replay trace. Creates a new trace_id and contract_id.
-  // Requires Idempotency-Key header. Only the original submitter or a user with reproduce ACL may call this.
-  router.post('/api/sv/hypotheses/:id/reproduce', async (_req, res, _params, auth) => {
+  // ── POST /api/sv/hypotheses/:id/reproduce ───────────────────────────────
+  router.post('/api/sv/hypotheses/:id/reproduce', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    json(res, 501, { error: 'Not Implemented', feature: 'scientific-validation', route: 'POST /api/sv/hypotheses/:id/reproduce' });
+
+    const { id } = params;
+    if (!id) { json(res, 400, { error: 'id required' }); return; }
+    const tenantId = (auth.tenantId ?? 'default') as string;
+
+    const original = await db.getHypothesis(id, tenantId);
+    if (!original) { json(res, 404, { error: 'Hypothesis not found' }); return; }
+
+    const newId = randomUUID();
+    const newTraceId = randomUUID();
+    const newContractId = randomUUID();
+
+    await db.createHypothesis({
+      id: newId,
+      tenant_id: tenantId,
+      submitted_by: auth.userId,
+      title: `[Repro] ${original.title}`,
+      statement: original.statement,
+      domain_tags: original.domain_tags,
+      budget_envelope_id: original.budget_envelope_id,
+      status: 'queued',
+      workflow_run_id: null,
+      trace_id: newTraceId,
+      contract_id: newContractId,
+    });
+
+    if (runner) {
+      const domainTags = JSON.parse(original.domain_tags ?? '[]') as string[];
+      const runInput: SVRunInput = {
+        hypothesisId: newId,
+        tenantId,
+        userId: auth.userId,
+        statement: original.statement,
+        domainTags,
+        budgetId: original.budget_envelope_id ?? '',
+      };
+      runner.startRun(runInput).catch((err: unknown) => {
+        console.error('[sv] reproduce run failed for hypothesis', newId, err);
+        db.updateHypothesisStatus(newId, 'abandoned', new Date().toISOString()).catch(() => {});
+      });
+    }
+
+    json(res, 201, { id: newId, originalId: id, status: 'queued', traceId: newTraceId });
   }, { auth: true, csrf: true });
 
-  // GET /api/sv/verdicts/:id/bundle
-  // Download the complete replay trace bundle as application/zip.
-  router.get('/api/sv/verdicts/:id/bundle', async (_req, res, _params, auth) => {
+  // ── GET /api/sv/verdicts/:id/bundle ─────────────────────────────────────
+  router.get('/api/sv/verdicts/:id/bundle', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    json(res, 501, { error: 'Not Implemented', feature: 'scientific-validation', route: 'GET /api/sv/verdicts/:id/bundle' });
+
+    const { id } = params;
+    if (!id) { json(res, 400, { error: 'id required' }); return; }
+
+    const verdict = await db.getVerdictById(id);
+    if (!verdict) { json(res, 404, { error: 'Verdict not found' }); return; }
+
+    // Verify tenant ownership via the hypothesis
+    const tenantId = (auth.tenantId ?? 'default') as string;
+    const hypothesis = await db.getHypothesis(verdict.hypothesis_id, tenantId);
+    if (!hypothesis) { json(res, 404, { error: 'Verdict not found' }); return; }
+
+    // Gather sub-claims, evidence events and agent turns for the bundle
+    const subClaims = await db.listSubClaims(verdict.hypothesis_id);
+    const evidenceEvents = await db.listEvidenceEvents(verdict.hypothesis_id, undefined, 500);
+    const agentTurns = await db.listAgentTurns(verdict.hypothesis_id, undefined, 500);
+
+    const bundle = {
+      schemaVersion: '1.0.0',
+      hypothesis: {
+        id: hypothesis.id,
+        title: hypothesis.title,
+        statement: hypothesis.statement,
+        domainTags: JSON.parse(hypothesis.domain_tags ?? '[]') as string[],
+        traceId: hypothesis.trace_id,
+        contractId: hypothesis.contract_id,
+        createdAt: hypothesis.created_at,
+        updatedAt: hypothesis.updated_at,
+      },
+      verdict: {
+        id: verdict.id,
+        verdict: verdict.verdict,
+        confidenceLo: verdict.confidence_lo,
+        confidenceHi: verdict.confidence_hi,
+        limitations: verdict.limitations,
+        emittedBy: verdict.emitted_by,
+        keyEvidenceIds: JSON.parse(verdict.key_evidence_ids ?? '[]') as string[],
+        falsifiers: JSON.parse(verdict.falsifiers ?? '[]') as string[],
+      },
+      subClaims: subClaims.map(sc => ({
+        id: sc.id,
+        statement: sc.statement,
+        claimType: sc.claim_type,
+        testabilityScore: sc.testability_score,
+      })),
+      evidenceEvents: evidenceEvents.map(ev => ({
+        evidenceId: ev['evidence_id'],
+        stepId: ev['step_id'],
+        agentId: ev['agent_id'],
+        kind: ev['kind'],
+        summary: ev['summary'],
+        sourceType: ev['source_type'],
+        toolKey: ev['tool_key'],
+        reproducibilityHash: ev['reproducibility_hash'],
+        createdAt: ev.created_at,
+      })),
+      agentTurns: agentTurns.map(t => ({
+        id: t.id,
+        roundIndex: t.round_index,
+        fromAgent: t.from_agent,
+        toAgent: t.to_agent,
+        message: t.message,
+        dissent: t.dissent === 1,
+        createdAt: t.created_at,
+      })),
+    };
+
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Content-Disposition': `attachment; filename="verdict-${id}.json"`,
+    });
+    res.end(JSON.stringify(bundle, null, 2));
   }, { auth: true });
 }
+

@@ -1,8 +1,9 @@
 /**
  * Scientific Validation Feature — entry point
  *
- * Exports the route registration function consumed by the geneweave server.
- * Phase 2: scaffolding only — all route handlers return 501 Not Implemented.
+ * Exports the route registration function and runner consumed by the geneweave server.
  */
 
 export { registerSVRoutes } from './routes/index.js';
+export { SVWorkflowRunner, getSVRunner, resetSVRunner } from './runner.js';
+export type { SVRunnerOptions, SVRunInput } from './runner.js';

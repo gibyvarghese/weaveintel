@@ -19,6 +19,7 @@ import { getCSE } from './cse.js';
 import type { DatabaseAdapter } from './db.js';
 import { weaveMCPClient, weaveMCPTools } from '@weaveintel/mcp-client';
 import { weaveA2AClient } from '@weaveintel/a2a';
+import { createSVToolMap } from './features/scientific-validation/tools/index.js';
 
 interface RuntimeAttachment {
   name: string;
@@ -453,6 +454,7 @@ export const BUILTIN_TOOLS: Record<string, Tool> = {
   ...browserToolMap(),
   ...cseToolMap(),
   ...statsNzToolMap(),
+  ...createSVToolMap(),
 };
 
 /**

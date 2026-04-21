@@ -233,3 +233,40 @@ These principles emerged from the Scientific Validation feature (sv:) but apply 
 - Keep defaults safe for operators (e.g., draft status, conservative thresholds, deterministic starter optimizer).
 - Ensure admin CRUD stays aligned with DB schema and shared runtime contracts when fields evolve.
 
+
+## Scientific Validation Feature (sv: — complete)
+
+### Design Patterns
+- `SVWorkflowRunner` is instantiated once at server startup and passed to `registerSVRoutes`. Never create per-request runner instances.
+- Model factories on `SVRunnerOptions` are **async**: `makeReasoningModel: () => Promise<Model>` and `makeToolModel: () => Promise<Model>`. Never use sync lazy wrappers.
+- Specialist agents (literature, statistical, mechanistic, simulation, synthesis, critique) are composed inside the runner via the workflow engine. The router never invokes agents directly.
+- `SvHypothesisStatus` values are `'queued' | 'running' | 'verdict' | 'abandoned'`. Never use `'pending'`, `'completed'`, or `'error'`.
+- Terminal statuses are `new Set(['verdict', 'abandoned'])`. Use this set when checking SSE poll termination conditions.
+
+### DB Tables
+- `sv_hypothesis` — one row per submitted hypothesis; UUID PK.
+- `sv_sub_claim` — decomposed sub-claims from the supervisor; UUID PK. Fields: `id, tenant_id, hypothesis_id, parent_sub_claim_id, statement, claim_type, testability_score, created_at`. No `rationale` or `status` columns.
+- `sv_verdict` — final verdict row; UUID PK.
+- `sv_evidence_event` — evidence records emitted per agent per step; UUID PK. Fields: `id, hypothesis_id, step_id, agent_id, evidence_id, kind, summary, source_type, tool_key, reproducibility_hash, created_at`. No `tenant_id` column.
+- `sv_agent_turn` — inter-agent dialogue messages; UUID PK.
+
+### `SvClaimType` Values
+Valid values: `'mechanism' | 'epidemiological' | 'mathematical' | 'dose_response' | 'causal' | 'other'`. Do NOT use `'empirical'`.
+
+### Route Contracts
+- `POST /api/sv/hypotheses` → 201 `{ id, status: 'queued', traceId, contractId }`
+- `GET /api/sv/hypotheses/:id` → 200 `{ hypothesis: {..., domainTags: string[]}, verdict: VerdictShape | null }`
+- `POST /api/sv/hypotheses/:id/cancel` → 200 `{ id, status: 'abandoned' }` (idempotent — no 409 for already-abandoned)
+- `POST /api/sv/hypotheses/:id/reproduce` → 201 `{ id, originalId, status: 'queued', traceId }`
+- `GET /api/sv/verdicts/:id/bundle` → 200 JSON with `{ schemaVersion, hypothesis, verdict, subClaims, evidenceEvents, agentTurns }`
+
+### SV Tool Registration
+- 18 SV tools are registered only for SV agent invocations via `toolMap` passed to `SVWorkflowRunner`. They are NOT in `tool_catalog` and NOT managed by operator tool policies.
+- Tool invocation within SV agents uses `ToolInput = { name: string; arguments: Record<string, unknown> }`.
+- All index-signature result properties must use bracket notation (`result['ok']`, not `result.ok`) because `noPropertyAccessFromIndexSignature` is enabled.
+
+### SSE Streaming Pattern
+- Use `pollRows(rowFetcher, afterId, isTerminalFn)` async generator for both events and dialogue streams.
+- Emit `keepalive` pings every 15 s via `startSSEKeepalive(res)` / `clearInterval(ka)`.
+- Wrap SSE handlers in `try/finally` to always call `clearInterval(ka)` and `res.end()`.
+- Maximum SSE stream duration: 5 minutes (enforced inside `pollRows`).

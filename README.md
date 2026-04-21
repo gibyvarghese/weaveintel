@@ -1202,6 +1202,93 @@ Edit the host in the Ingress to match your domain.
 | [`deploy-gcp.yml`](.github/workflows/deploy-gcp.yml) | Manual | Deploys to Google Cloud Run |
 | [`deploy-aws.yml`](.github/workflows/deploy-aws.yml) | Manual | Deploys to AWS ECS Fargate |
 
+## Scientific Validation (sv:)
+
+GeneWeave ships a **Scientific Validation** feature that submits a natural-language hypothesis to a multi-agent pipeline and returns a structured verdict backed by literature search, statistical analysis, computational simulation, and formal critique.
+
+### How it works
+
+1. A client `POST`s a hypothesis to `/api/sv/hypotheses`.
+2. A supervisor agent decomposes it into sub-claims and dispatches them to specialist agents (literature, statistical, mechanistic, simulation, synthesis, critique).
+3. Each agent calls SV tools (arxiv, CrossRef, statistical tests, molecular property calculation, etc.) and records evidence events.
+4. The pipeline concludes with a `verdict` row (`supported | refuted | inconclusive | needs_more_data`) and a bundled replay trace.
+
+### API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/sv/hypotheses` | Submit a new hypothesis; returns `{ id, status: "queued", traceId, contractId }` |
+| `GET` | `/api/sv/hypotheses/:id` | Fetch hypothesis status + verdict (if complete) |
+| `GET` | `/api/sv/hypotheses/:id/events` | SSE stream of evidence events as they arrive |
+| `GET` | `/api/sv/hypotheses/:id/dialogue` | SSE stream of agent-turn messages |
+| `POST` | `/api/sv/hypotheses/:id/cancel` | Abort a queued or running hypothesis |
+| `POST` | `/api/sv/hypotheses/:id/reproduce` | Re-run a completed hypothesis for reproducibility check |
+| `GET` | `/api/sv/verdicts/:id/bundle` | Download a self-contained JSON bundle (verdict + evidence + agent turns) |
+
+### Request body — POST /api/sv/hypotheses
+
+```json
+{
+  "title": "Short display title",
+  "statement": "Full hypothesis statement in natural language.",
+  "domainTags": ["biology", "epidemiology"],
+  "budgetId": "optional-budget-envelope-id"
+}
+```
+
+### SSE event shapes
+
+**`/events` stream** — emits `event: evidence` frames:
+```
+event: evidence
+id: <evidenceId>
+data: {"kind":"lit_hit","stepId":"literature","agentId":"literature-agent","summary":"...","sourceType":"http_fetch","toolKey":"arxiv.search","createdAt":"..."}
+```
+
+**`/dialogue` stream** — emits `event: turn` frames:
+```
+event: turn
+id: <turnId>
+data: {"roundIndex":1,"fromAgent":"statistical-agent","toAgent":null,"message":"...","citesEvidenceIds":[],"dissent":false}
+```
+
+Both streams emit `event: keepalive` every 15 s and terminate when status reaches `verdict` or `abandoned`.
+
+### Verdict bundle schema
+
+```json
+{
+  "schemaVersion": "1.0.0",
+  "hypothesis": { "id", "title", "statement", "domainTags", "traceId", "contractId", "createdAt" },
+  "verdict": { "id", "verdict", "confidenceLo", "confidenceHi", "limitations", "emittedBy", "keyEvidenceIds", "falsifiers" },
+  "subClaims": [ { "id", "statement", "claimType", "testabilityScore" } ],
+  "evidenceEvents": [ { "evidenceId", "stepId", "agentId", "kind", "summary", "sourceType", "toolKey", "reproducibilityHash" } ],
+  "agentTurns": [ { "id", "roundIndex", "fromAgent", "toAgent", "message", "dissent" } ]
+}
+```
+
+### Status lifecycle
+
+```
+queued → running → verdict
+                ↘ abandoned
+```
+
+### Available SV tools
+
+18 built-in tools grouped by domain:
+
+| Group | Tools |
+|-------|-------|
+| **Symbolic** | `symbolic.simplify`, `symbolic.solve`, `symbolic.differentiate` |
+| **Numerical** | `numerical.integrate`, `numerical.ode_solve`, `numerical.matrix_solve`, `numerical.fft` |
+| **Domain** | `domain.molecular_props`, `domain.protein_analysis`, `domain.gene_ontology_lookup`, `domain.biodiversity_lookup` |
+| **Statistical** | `statistical.ttest`, `statistical.chi_square`, `statistical.mann_whitney`, `statistical.correlation` |
+| **Evidence** | `arxiv.search`, `crossref.resolve` |
+| **Image policy** | `image_policy.encode_figure` |
+
+---
+
 ## Versioning — Fabric Releases
 
 weaveIntel uses **Fabric Versioning**: each major release is named after a fabric,

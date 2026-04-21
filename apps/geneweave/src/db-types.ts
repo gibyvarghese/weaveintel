@@ -1198,6 +1198,32 @@ export interface SvVerdictRow {
   created_at: string;
 }
 
+export interface SvEvidenceEventRow {
+  id: string;                         // UUID
+  hypothesis_id: string;             // FK → sv_hypothesis.id
+  step_id: string;                   // workflow step that emitted this (e.g. 'statistical')
+  agent_id: string;                  // agent name
+  evidence_id: string;               // contract evidence item id
+  kind: string;                      // 'stat_finding' | 'lit_hit' | 'sim_result' | etc.
+  summary: string;
+  source_type: string;               // 'sandbox_tool_run' | 'http_fetch' | 'model_inference'
+  tool_key: string | null;
+  reproducibility_hash: string | null;
+  created_at: string;
+}
+
+export interface SvAgentTurnRow {
+  id: string;                         // UUID
+  hypothesis_id: string;             // FK → sv_hypothesis.id
+  round_index: number;
+  from_agent: string;
+  to_agent: string | null;           // null = broadcast
+  message: string;
+  cites_evidence_ids: string;        // JSON: string[]
+  dissent: number;                   // 0 | 1 (boolean)
+  created_at: string;
+}
+
 // ─── Adapter interface ───────────────────────────────────────
 
 export interface DatabaseAdapter {
@@ -1835,6 +1861,14 @@ export interface DatabaseAdapter {
   createVerdict(verdict: Omit<SvVerdictRow, 'created_at'>): Promise<void>;
   getVerdictByHypothesis(hypothesisId: string): Promise<SvVerdictRow | null>;
   getVerdictById(id: string): Promise<SvVerdictRow | null>;
+
+  // Evidence events (SSE /events stream)
+  createEvidenceEvent(event: Omit<SvEvidenceEventRow, 'created_at'>): Promise<void>;
+  listEvidenceEvents(hypothesisId: string, afterId?: string, limit?: number): Promise<SvEvidenceEventRow[]>;
+
+  // Agent dialogue turns (SSE /dialogue stream)
+  createAgentTurn(turn: Omit<SvAgentTurnRow, 'created_at'>): Promise<void>;
+  listAgentTurns(hypothesisId: string, afterId?: string, limit?: number): Promise<SvAgentTurnRow[]>;
 }
 
 

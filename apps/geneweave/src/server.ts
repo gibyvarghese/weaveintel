@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import type { DatabaseAdapter } from './db.js';
 import type { ChatEngine } from './chat.js';
 import type { ChatAttachment } from './chat.js';
+import { getOrCreateModel } from './chat.js';
 import { DashboardService } from './dashboard.js';
 import { getAvailableTools } from './tools.js';
 import { canPersonaAccess, isValidPersona, normalizePersona, personaPermissions } from './rbac.js';
@@ -30,6 +31,7 @@ import {
 import { getHTML } from './ui-server.js';
 import { registerAdminRoutes } from './server-admin.js';
 import { registerSVRoutes } from './features/scientific-validation/index.js';
+import { SVWorkflowRunner } from './features/scientific-validation/runner.js';
 import { encryptCredential, decryptCredential } from './vault.js';
 import { setBrowserAuthProvider, type SSOPassThroughAuth } from '@weaveintel/tools-browser';
 import { OAuthClient, createOAuthProvider, type OAuthProviderName } from '@weaveintel/oauth';
@@ -891,7 +893,24 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerAdminRoutes(adminRouter, db, json, readBody, providers, html);
 
   // ── Scientific Validation feature routes ────────────────────
-  registerSVRoutes(router, db, json, readBody);
+  // Build async model factories from the configured providers (models are cached by chat-runtime).
+  const svProviderCfg = providers?.['openai'] ?? providers?.['anthropic'] ?? { apiKey: '' };
+  const svProviderKey = providers?.['openai'] ? 'openai' : 'anthropic';
+  const svRunner = new SVWorkflowRunner({
+    db,
+    makeReasoningModel: () => getOrCreateModel(
+      svProviderKey,
+      svProviderKey === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-20250514',
+      svProviderCfg,
+    ),
+    makeToolModel: () => getOrCreateModel(
+      svProviderKey,
+      svProviderKey === 'openai' ? 'gpt-4o-mini' : 'claude-haiku-4-20250414',
+      svProviderCfg,
+    ),
+    toolMap: {},
+  });
+  registerSVRoutes(router, db, json, readBody, svRunner);
 
   router.get('/api/admin/rbac/personas', async (_req, res, _params, auth) => {
     const gate = ensurePermission(auth, 'admin:platform:write');
