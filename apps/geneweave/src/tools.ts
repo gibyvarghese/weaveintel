@@ -467,19 +467,21 @@ export async function syncToolCatalog(db: DatabaseAdapter): Promise<void> {
   for (const [key, tool] of Object.entries(BUILTIN_TOOLS)) {
     const existing = await db.getToolCatalogByKey(key);
     if (!existing) {
+      const riskLevel = tool.schema.riskLevel ?? 'read-only';
+      const hasSideEffects = riskLevel !== 'read-only' ? 1 : 0;
       await db.createToolConfig({
         id: randomUUID(),
         name: tool.schema.name,
         description: tool.schema.description,
         category: (tool.schema.tags?.[0] ?? null) as string | null,
-        risk_level: 'read-only',
-        requires_approval: 0,
+        risk_level: riskLevel,
+        requires_approval: tool.schema.requiresApproval ? 1 : 0,
         max_execution_ms: null,
         rate_limit_per_min: null,
         enabled: 1,
         tool_key: key,
         version: '1.0',
-        side_effects: 0,
+        side_effects: hasSideEffects,
         tags: tool.schema.tags ? JSON.stringify(tool.schema.tags) : null,
         source: 'builtin',
         credential_id: null,

@@ -32,6 +32,9 @@ import { getHTML } from './ui-server.js';
 import { registerAdminRoutes } from './server-admin.js';
 import { registerSVRoutes } from './features/scientific-validation/index.js';
 import { SVWorkflowRunner } from './features/scientific-validation/runner.js';
+import { createSVToolMap } from './features/scientific-validation/tools/index.js';
+import { DbToolPolicyResolver } from './tool-policy-resolver.js';
+import { DbToolAuditEmitter } from './tool-audit-emitter.js';
 import { encryptCredential, decryptCredential } from './vault.js';
 import { setBrowserAuthProvider, type SSOPassThroughAuth } from '@weaveintel/tools-browser';
 import { OAuthClient, createOAuthProvider, type OAuthProviderName } from '@weaveintel/oauth';
@@ -908,7 +911,9 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       svProviderKey === 'openai' ? 'gpt-4o-mini' : 'claude-haiku-4-20250414',
       svProviderCfg,
     ),
-    toolMap: {},
+    toolMap: createSVToolMap(),
+    policyResolver: new DbToolPolicyResolver(db),
+    auditEmitter: new DbToolAuditEmitter(db),
   });
   registerSVRoutes(router, db, json, readBody, svRunner);
 

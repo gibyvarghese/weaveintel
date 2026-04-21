@@ -8,6 +8,7 @@
 
 import type { ExecutionContext } from './context.js';
 import type { JsonSchema } from './models.js';
+import type { ToolRiskLevel } from './tool-lifecycle.js';
 
 export interface ToolSchema {
   readonly name: string;
@@ -16,6 +17,8 @@ export interface ToolSchema {
   readonly returns?: JsonSchema;
   readonly requiresApproval?: boolean;
   readonly tags?: readonly string[];
+  /** Declared risk level for this tool. Used by syncToolCatalog to populate tool_catalog. Defaults to 'read-only'. */
+  readonly riskLevel?: ToolRiskLevel;
 }
 
 export interface ToolInput {
@@ -100,6 +103,7 @@ export function defineTool<TArgs extends Record<string, unknown>>(opts: {
   execute: (args: TArgs, ctx: ExecutionContext) => Promise<string | ToolOutput>;
   requiresApproval?: boolean;
   tags?: string[];
+  riskLevel?: ToolRiskLevel;
 }): Tool {
   return {
     schema: {
@@ -108,6 +112,7 @@ export function defineTool<TArgs extends Record<string, unknown>>(opts: {
       parameters: opts.parameters,
       requiresApproval: opts.requiresApproval,
       tags: opts.tags,
+      riskLevel: opts.riskLevel,
     },
     async invoke(ctx: ExecutionContext, input: ToolInput): Promise<ToolOutput> {
       const result = await opts.execute(input.arguments as TArgs, ctx);

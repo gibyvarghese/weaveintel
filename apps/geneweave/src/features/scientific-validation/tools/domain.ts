@@ -92,6 +92,7 @@ export function createDomainTools(opts: {
       return JSON.stringify(parseContainerOutput(result.stdout), null, 2);
     },
     tags: ['scientific', 'domain', 'chemistry', 'sandbox'],
+    riskLevel: 'external-side-effect',
   });
 
   // ── biopython.align ──────────────────────────────────────────────────────────
@@ -161,6 +162,7 @@ export function createDomainTools(opts: {
       return JSON.stringify(parseContainerOutput(result.stdout), null, 2);
     },
     tags: ['scientific', 'domain', 'biology', 'sandbox'],
+    riskLevel: 'external-side-effect',
   });
 
   // ── networkx.analyse ──────────────────────────────────────────────────────────
@@ -217,6 +219,7 @@ export function createDomainTools(opts: {
       return JSON.stringify(parseContainerOutput(result.stdout), null, 2);
     },
     tags: ['scientific', 'domain', 'graph', 'sandbox'],
+    riskLevel: 'external-side-effect',
   });
 
   return {

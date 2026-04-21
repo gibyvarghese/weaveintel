@@ -93,6 +93,7 @@ export function createSymbolicTools(opts: {
       return JSON.stringify(parseContainerOutput(result.stdout), null, 2);
     },
     tags: ['scientific', 'symbolic', 'math', 'sandbox'],
+    riskLevel: 'external-side-effect',
   });
 
   // ── sympy.solve ────────────────────────────────────────────────────────────
@@ -139,6 +140,7 @@ export function createSymbolicTools(opts: {
       return JSON.stringify(parseContainerOutput(result.stdout), null, 2);
     },
     tags: ['scientific', 'symbolic', 'math', 'sandbox'],
+    riskLevel: 'external-side-effect',
   });
 
   // ── sympy.integrate ────────────────────────────────────────────────────────
@@ -189,6 +191,7 @@ export function createSymbolicTools(opts: {
       return JSON.stringify(parseContainerOutput(result.stdout), null, 2);
     },
     tags: ['scientific', 'symbolic', 'math', 'sandbox'],
+    riskLevel: 'external-side-effect',
   });
 
   // ── wolfram.query (HTTP) ───────────────────────────────────────────────────
@@ -264,6 +267,7 @@ export function createSymbolicTools(opts: {
       }
     },
     tags: ['scientific', 'symbolic', 'external', 'math'],
+    riskLevel: 'external-side-effect',
   });
 
   return {

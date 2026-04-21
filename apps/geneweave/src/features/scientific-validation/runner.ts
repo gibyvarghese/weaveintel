@@ -18,6 +18,8 @@
 import { createWorkflowEngine } from '@weaveintel/workflows';
 import type { SvClaimType } from '../../db-types.js';
 import { weaveToolRegistry, weaveContext } from '@weaveintel/core';
+import { createPolicyEnforcedRegistry, noopAuditEmitter } from '@weaveintel/tools';
+import type { ToolPolicyResolver, ToolAuditEmitter } from '@weaveintel/tools';
 import { randomUUID } from 'node:crypto';
 import type { DatabaseAdapter } from '../../db.js';
 import type { Tool, ExecutionContext, Model } from '@weaveintel/core';
@@ -41,6 +43,10 @@ export interface SVRunnerOptions {
   makeToolModel: () => Promise<Model>;
   /** Full SV tool map from createSVToolMap(). */
   toolMap: Record<string, Tool>;
+  /** Optional policy resolver — when present, all tool calls are policy-gated and audited. */
+  policyResolver?: ToolPolicyResolver;
+  /** Optional audit emitter — paired with policyResolver to persist invocation records. */
+  auditEmitter?: ToolAuditEmitter;
 }
 
 export interface SVRunInput {
@@ -52,12 +58,29 @@ export interface SVRunInput {
   budgetId: string;
 }
 
-/** Helper: build a ToolRegistry from a subset of keys in the tool map. */
-function registryFromKeys(toolMap: Record<string, Tool>, keys: string[]) {
+/** Helper: build a ToolRegistry from a subset of keys in the tool map.
+ *  When a policyResolver is supplied the returned registry is wrapped with
+ *  `createPolicyEnforcedRegistry` so every invocation is policy-gated and audited.
+ */
+function registryFromKeys(
+  toolMap: Record<string, Tool>,
+  keys: string[],
+  opts?: { policyResolver?: ToolPolicyResolver; auditEmitter?: ToolAuditEmitter; userId?: string },
+) {
   const registry = weaveToolRegistry();
   for (const k of keys) {
     const t = toolMap[k];
     if (t) registry.register(t);
+  }
+  if (opts?.policyResolver) {
+    return createPolicyEnforcedRegistry(registry, {
+      resolver: opts.policyResolver,
+      auditEmitter: opts.auditEmitter ?? noopAuditEmitter,
+      resolutionContext: {
+        skillPolicyKey: 'scientific_validation',
+        userId: opts.userId,
+      },
+    });
   }
   return registry;
 }
@@ -123,6 +146,8 @@ export class SVWorkflowRunner {
   private makeReasoningModel: () => Promise<Model>;
   private makeToolModel: () => Promise<Model>;
   private db: DatabaseAdapter;
+  private policyResolver?: ToolPolicyResolver;
+  private auditEmitter?: ToolAuditEmitter;
   /** System prompts loaded from DB at construction, keyed by agent name. */
   private prompts: Record<string, string> = {};
   /** Map of hypothesisId → workflowRunId for cancellation. */
@@ -133,6 +158,8 @@ export class SVWorkflowRunner {
     this.toolMap = opts.toolMap;
     this.makeReasoningModel = opts.makeReasoningModel;
     this.makeToolModel = opts.makeToolModel;
+    this.policyResolver = opts.policyResolver;
+    this.auditEmitter = opts.auditEmitter;
 
     this.engine.createDefinition(scientificValidationWorkflow).catch(() => {
       // best-effort — definition might already be registered
@@ -162,6 +189,8 @@ export class SVWorkflowRunner {
       prompts,
       makeReasoningModel: mkReasoning,
       makeToolModel: mkTool,
+      policyResolver,
+      auditEmitter,
     } = this;
 
     /** Create a per-run execution context from the variables dict. */
@@ -222,7 +251,7 @@ export class SVWorkflowRunner {
       const reg = registryFromKeys(toolMap, [
         'arxiv.search', 'pubmed.search', 'semanticscholar.search',
         'openalex.search', 'crossref.resolve', 'europepmc.search',
-      ]);
+      ], { policyResolver, auditEmitter, userId: input.userId });
       const agent = createLiteratureAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['literature'] ?? '' });
       const decomposedText = ((vars['__step_decompose'] as { decomposedText?: string } | undefined)?.decomposedText) ?? '';
       const result = await agent.run(ctx, {
@@ -254,7 +283,7 @@ export class SVWorkflowRunner {
       const ctx = makeCtx(vars);
       const reg = registryFromKeys(toolMap, [
         'scipy.stats.test', 'statsmodels.meta', 'scipy.power', 'pymc.mcmc', 'r.metafor',
-      ]);
+      ], { policyResolver, auditEmitter, userId: input.userId });
       const agent = createStatisticalAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['statistical'] ?? '' });
       const literatureText = ((vars['__step_gather'] as { literatureText?: string } | undefined)?.literatureText) ?? '';
       const result = await agent.run(ctx, {
@@ -272,7 +301,7 @@ export class SVWorkflowRunner {
       const ctx = makeCtx(vars);
       const reg = registryFromKeys(toolMap, [
         'sympy.simplify', 'sympy.solve', 'sympy.integrate', 'wolfram.query',
-      ]);
+      ], { policyResolver, auditEmitter, userId: input.userId });
       const agent = createMathematicalAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['mathematical'] ?? '' });
       const decomposedText = ((vars['__step_decompose'] as { decomposedText?: string } | undefined)?.decomposedText) ?? '';
       const result = await agent.run(ctx, {
@@ -290,7 +319,7 @@ export class SVWorkflowRunner {
       const ctx = makeCtx(vars);
       const reg = registryFromKeys(toolMap, [
         'scipy.power', 'pymc.mcmc', 'rdkit.descriptors', 'biopython.align', 'networkx.analyse',
-      ]);
+      ], { policyResolver, auditEmitter, userId: input.userId });
       const agent = createSimulationAgent({ model: await mkTool(), tools: reg, systemPrompt: prompts['simulation'] ?? '' });
       const literatureText = ((vars['__step_gather'] as { literatureText?: string } | undefined)?.literatureText) ?? '';
       const result = await agent.run(ctx, {
@@ -311,7 +340,7 @@ export class SVWorkflowRunner {
         'openalex.search', 'europepmc.search',
         'scipy.stats.test', 'statsmodels.meta',
         'sympy.simplify', 'sympy.solve',
-      ]);
+      ], { policyResolver, auditEmitter, userId: input.userId });
       const agent = createAdversarialAgent({ model: await mkReasoning(), tools: reg, systemPrompt: prompts['adversarial'] ?? '' });
       const statText = ((vars['__step_statistical'] as { statisticalText?: string } | undefined)?.statisticalText) ?? '';
       const mathText = ((vars['__step_mathematical'] as { mathematicalText?: string } | undefined)?.mathematicalText) ?? '';

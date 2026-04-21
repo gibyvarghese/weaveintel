@@ -141,6 +141,7 @@ const arxivSearch = weaveTool({
     return JSON.stringify(result, null, 2);
   },
   tags: ['scientific', 'evidence', 'literature', 'external'],
+  riskLevel: 'external-side-effect',
 });
 
 // ─── pubmed.search ───────────────────────────────────────────────────────────
@@ -264,6 +265,7 @@ const pubmedSearch = weaveTool({
     return JSON.stringify(result, null, 2);
   },
   tags: ['scientific', 'evidence', 'literature', 'external'],
+  riskLevel: 'external-side-effect',
 });
 
 // ─── semanticscholar.search ──────────────────────────────────────────────────
@@ -363,6 +365,7 @@ const semanticscholarSearch = weaveTool({
     return JSON.stringify(result, null, 2);
   },
   tags: ['scientific', 'evidence', 'literature', 'external'],
+  riskLevel: 'external-side-effect',
 });
 
 // ─── openalex.search ─────────────────────────────────────────────────────────
@@ -465,6 +468,7 @@ const openalexSearch = weaveTool({
     return JSON.stringify(result, null, 2);
   },
   tags: ['scientific', 'evidence', 'literature', 'external'],
+  riskLevel: 'external-side-effect',
 });
 
 // ─── crossref.resolve ─────────────────────────────────────────────────────────
@@ -544,6 +548,7 @@ const crossrefResolve = weaveTool({
     return JSON.stringify(result, null, 2);
   },
   tags: ['scientific', 'evidence', 'literature', 'external'],
+  riskLevel: 'external-side-effect',
 });
 
 // ─── europepmc.search ────────────────────────────────────────────────────────
@@ -632,6 +637,7 @@ const europepmcSearch = weaveTool({
     return JSON.stringify(result, null, 2);
   },
   tags: ['scientific', 'evidence', 'literature', 'external'],
+  riskLevel: 'external-side-effect',
 });
 
 // ─── Exports ────────────────────────────────────────────────────────────────

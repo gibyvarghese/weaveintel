@@ -796,4 +796,20 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
     )
   `);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sv_agent_turn_hypothesis ON sv_agent_turn(hypothesis_id, created_at ASC)`);
+
+  // ── Scientific Validation tool policy ────────────────────────────────────────
+  // A dedicated policy for the 18 SV tools so operators can tune rate limits,
+  // execution timeouts, and logging without touching the default policy.
+  // All SV tools are external-side-effect (container compute or external HTTP).
+  safeExec(db, `
+    INSERT OR IGNORE INTO tool_policies
+      (id, key, name, description, applies_to, applies_to_risk_levels, approval_required, allowed_risk_levels, max_execution_ms, rate_limit_per_minute, max_concurrent, require_dry_run, log_input_output, persona_scope, enabled)
+    VALUES
+      ('c5e6f7a8-b9c0-41d2-e3f4-a5b6c7d8e9f0', 'scientific_validation', 'Scientific Validation Policy',
+       'Governs the 18 sandboxed scientific and evidence tools used by the SV workflow. Allows external-side-effect and read-only risk levels. 60 s max execution for container tools. 30 req/min per scope. Full I/O logging for reproducibility audits.',
+       '["sympy.simplify","sympy.solve","sympy.integrate","wolfram.query","scipy.stats","scipy.meta","scipy.power","pymc.sample","r.meta","rdkit.describe","rdkit.similarity","biopython.align","networkx.analyse","arxiv.search","pubmed.search","semanticscholar.search","openalex.search","crossref.resolve","europepmc.search"]',
+       NULL, 0,
+       '["read-only","external-side-effect"]',
+       60000, 30, NULL, 0, 1, NULL, 1)
+  `);
 }

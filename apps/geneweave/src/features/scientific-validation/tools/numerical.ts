@@ -120,6 +120,7 @@ export function createNumericalTools(opts: {
       return JSON.stringify(parseContainerOutput(result.stdout), null, 2);
     },
     tags: ['scientific', 'numerical', 'statistics', 'sandbox'],
+    riskLevel: 'external-side-effect',
   });
 
   // ── statsmodels.meta ────────────────────────────────────────────────────────
@@ -162,6 +163,7 @@ export function createNumericalTools(opts: {
       return JSON.stringify(parseContainerOutput(result.stdout), null, 2);
     },
     tags: ['scientific', 'numerical', 'meta-analysis', 'sandbox'],
+    riskLevel: 'external-side-effect',
   });
 
   // ── scipy.power ─────────────────────────────────────────────────────────────
@@ -221,6 +223,7 @@ export function createNumericalTools(opts: {
       return JSON.stringify(parseContainerOutput(result.stdout), null, 2);
     },
     tags: ['scientific', 'numerical', 'power', 'sandbox'],
+    riskLevel: 'external-side-effect',
   });
 
   // ── pymc.mcmc ───────────────────────────────────────────────────────────────
@@ -285,6 +288,7 @@ export function createNumericalTools(opts: {
       return JSON.stringify(parseContainerOutput(result.stdout), null, 2);
     },
     tags: ['scientific', 'numerical', 'bayesian', 'sandbox'],
+    riskLevel: 'external-side-effect',
   });
 
   // ── r.metafor ────────────────────────────────────────────────────────────────
@@ -327,6 +331,7 @@ export function createNumericalTools(opts: {
       return JSON.stringify(parseContainerOutput(result.stdout), null, 2);
     },
     tags: ['scientific', 'numerical', 'meta-analysis', 'r', 'sandbox'],
+    riskLevel: 'external-side-effect',
   });
 
   return {
