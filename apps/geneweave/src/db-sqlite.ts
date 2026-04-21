@@ -1385,7 +1385,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO skills (id, name, description, category, trigger_patterns, instructions, tool_names, examples, tags, priority, version, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO skills (id, name, description, category, trigger_patterns, instructions, tool_names, examples, tags, priority, version, tool_policy_key, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       s.id,
       s.name,
@@ -1398,6 +1398,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       s.tags ?? null,
       s.priority,
       s.version,
+      s.tool_policy_key ?? null,
       s.enabled,
     );
   }
@@ -1429,6 +1430,63 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteSkill(id: string): Promise<void> {
     this.d.prepare('DELETE FROM skills WHERE id = ?').run(id);
+  }
+
+  // ─── Phase 6: Tool Approval Requests ────────────────────
+
+  async createToolApprovalRequest(r: Omit<import('./db-types.js').ToolApprovalRequestRow, 'requested_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tool_approval_requests (id, tool_name, chat_id, user_id, input_json, policy_key, skill_key, status, resolved_at, resolved_by, resolution_note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      r.id,
+      r.tool_name,
+      r.chat_id,
+      r.user_id ?? null,
+      r.input_json,
+      r.policy_key ?? null,
+      r.skill_key ?? null,
+      r.status,
+      r.resolved_at ?? null,
+      r.resolved_by ?? null,
+      r.resolution_note ?? null,
+    );
+  }
+
+  async getToolApprovalRequest(id: string): Promise<import('./db-types.js').ToolApprovalRequestRow | null> {
+    return (this.d.prepare('SELECT * FROM tool_approval_requests WHERE id = ?').get(id) as import('./db-types.js').ToolApprovalRequestRow | undefined) ?? null;
+  }
+
+  async getApprovedToolRequest(toolName: string, chatId: string): Promise<import('./db-types.js').ToolApprovalRequestRow | null> {
+    return (this.d.prepare(
+      `SELECT * FROM tool_approval_requests WHERE tool_name = ? AND chat_id = ? AND status = 'approved' ORDER BY resolved_at DESC LIMIT 1`,
+    ).get(toolName, chatId) as import('./db-types.js').ToolApprovalRequestRow | undefined) ?? null;
+  }
+
+  async getPendingToolRequest(toolName: string, chatId: string): Promise<import('./db-types.js').ToolApprovalRequestRow | null> {
+    return (this.d.prepare(
+      `SELECT * FROM tool_approval_requests WHERE tool_name = ? AND chat_id = ? AND status = 'pending' ORDER BY requested_at ASC LIMIT 1`,
+    ).get(toolName, chatId) as import('./db-types.js').ToolApprovalRequestRow | undefined) ?? null;
+  }
+
+  async listToolApprovalRequests(opts?: { status?: string; chatId?: string; toolName?: string; limit?: number; offset?: number }): Promise<import('./db-types.js').ToolApprovalRequestRow[]> {
+    const wheres: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.status) { wheres.push('status = ?'); vals.push(opts.status); }
+    if (opts?.chatId) { wheres.push('chat_id = ?'); vals.push(opts.chatId); }
+    if (opts?.toolName) { wheres.push('tool_name = ?'); vals.push(opts.toolName); }
+    const where = wheres.length ? `WHERE ${wheres.join(' AND ')}` : '';
+    const limit = Math.min(opts?.limit ?? 100, 500);
+    const offset = opts?.offset ?? 0;
+    return this.d.prepare(
+      `SELECT * FROM tool_approval_requests ${where} ORDER BY requested_at DESC LIMIT ? OFFSET ?`,
+    ).all(...vals, limit, offset) as import('./db-types.js').ToolApprovalRequestRow[];
+  }
+
+  async resolveToolApprovalRequest(id: string, fields: { status: string; resolved_by?: string; resolution_note?: string }): Promise<void> {
+    this.d.prepare(
+      `UPDATE tool_approval_requests SET status = ?, resolved_at = datetime('now'), resolved_by = ?, resolution_note = ? WHERE id = ?`,
+    ).run(fields.status, fields.resolved_by ?? null, fields.resolution_note ?? null, id);
   }
 
   // ─── Worker Agents ─────────────────────────────────────────
@@ -3254,6 +3312,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
           priority: s.priority ?? 0,
           version: s.version ?? '1.0',
           enabled: s.enabled === false ? 0 : 1,
+          tool_policy_key: s.toolPolicyKey ?? null,
         });
       }
     }

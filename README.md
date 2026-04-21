@@ -6,6 +6,9 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 
 ## Latest Development (April 2026)
 
+- **Phase 6 Skill→Tool Policy Closure + Approval Workflow** — When a skill is activated in a chat session, its declared `toolPolicyKey` is automatically forwarded to the policy-enforced tool registry so every tool invocation runs under that skill's policy without any per-call wiring. Approval-required tools produce a `tool_approval_requests` DB row; operators resolve pending requests (approve/deny) via the admin API with full audit trail.
+  - Admin API: `GET|POST /api/admin/tool-approval-requests[/:id/approve|deny]`
+  - New example: [examples/34-skill-tool-policy-approval.ts](examples/34-skill-tool-policy-approval.ts)
 - **Phase 5 Tool Simulation + Test Harness** — Admin operators can now dry-run or live-simulate any registered tool directly from the geneWeave admin dashboard without starting a chat session. Full policy trace (enabled check → risk gate → approval → rate limit) is returned on every request. See [Tool Platform (Phase 5)](#tool-platform-phase-5) below.
   - New example: [examples/33-tool-simulation-harness.ts](examples/33-tool-simulation-harness.ts)
 - geneWeave app moved from packages to apps: [apps/geneweave](apps/geneweave)
@@ -172,6 +175,8 @@ The geneWeave app in [apps/geneweave](apps/geneweave) is the reference full-stac
   - time tools, search tools, browser automation/auth handoff tools
   - enterprise connectors and social APIs via tool packages
   - dynamic tool availability by persona
+  - skill→tool policy closure: activated skill `toolPolicyKey` automatically scopes every tool call in that session
+  - operator approval workflow: policy-gated tools produce `tool_approval_requests`; resolved via admin API
 - Safety and governance:
   - pre/post execution guardrails
   - PII redaction
@@ -262,6 +267,7 @@ Implemented now:
 - Provider-aware prompt render adapters
 - Strategy runtime + DB strategy records + chat metadata wiring
 - Admin CRUD and UI tabs for frameworks/fragments/contracts/strategies
+- Phase 6 Tool Policy Closure + Approval Workflow (skill `toolPolicyKey` → runtime enforcement; `tool_approval_requests` admin API)
 
 Implemented now (Phase 9 initial modularization):
 
@@ -1006,6 +1012,8 @@ The [examples](examples) directory contains 29 runnable demonstrations:
 | 27 | [Browser Automation](examples/27-browser-automation.ts) | Browser fetch/extract/readability/scrape/sitemap, browser pool sessions, auth handoff tools, agent browser delegation | tools-browser, agents, core, testing | None |
 | 28 | [Package Auth RBAC](examples/28-package-auth-rbac.ts) | Identity creation, persona extension, permission checks, evaluateAccess, deny-by-default | identity, core | None |
 | 29 | [Authenticated Agent + Tools](examples/29-authenticated-agent-tools.ts) | End-to-end agent/tool invocation with identity context and permission-gated tool execution | identity, agents, core, testing | None |
+| 33 | [Tool Simulation Harness](examples/33-tool-simulation-harness.ts) | Dry-run and live tool simulation, policy trace inspection, audit event output | tools, geneweave | None |
+| 34 | [Skill→Tool Policy + Approval](examples/34-skill-tool-policy-approval.ts) | Skill activation binds toolPolicyKey; approval queue list, approve, deny, conflict and 404 paths | tools, geneweave, human-tasks | None |
 
 ## Deployment
 

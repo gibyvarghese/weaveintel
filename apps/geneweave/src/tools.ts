@@ -514,7 +514,17 @@ export interface ToolRegistryOptions {
    * Phase 4: Enabled catalog entries from db.listEnabledToolCatalog(). Used to load
    * MCP and A2A tool sources into the registry at runtime.
    */
-  catalogEntries?: import('./db-types.js').ToolCatalogRow[];}
+  catalogEntries?: import('./db-types.js').ToolCatalogRow[];
+  /**
+   * Phase 6: Approval gate that checks/creates tool_approval_requests before allowing
+   * execution of tools that require operator approval per their policy.
+   */
+  approvalGate?: import('@weaveintel/tools').ToolApprovalGate;
+  /**
+   * Phase 6: Active skill's tool_policy_key, propagated from the top-matched skill
+   * via discoverSkillsForInput(). Overrides the global tool policy when set.
+   */
+  skillPolicyKey?: string;}
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
   return toolNames.filter((toolName) => canUseTool(persona, toolName));
@@ -702,10 +712,12 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
       resolver: opts.policyResolver,
       auditEmitter: opts.auditEmitter ?? noopAuditEmitter,
       rateLimiter: opts.rateLimiter,
+      approvalGate: opts.approvalGate,
       resolutionContext: {
         agentPersona: opts.actorPersona,
         chatId: opts.currentChatId,
         userId: opts.currentUserId,
+        skillPolicyKey: opts.skillPolicyKey,
       },
     });
   }

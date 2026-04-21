@@ -30,6 +30,7 @@ import {
   registerToolSimulationRoutes,
   registerSkillRoutes,
   registerWorkerAgentRoutes,
+  registerToolApprovalRequestRoutes,
   registerGuardrailRoutes,
   registerRoutingRoutes,
   registerModelPricingRoutes,
@@ -1093,6 +1094,7 @@ export function registerAdminRoutes(
   registerToolSimulationRoutes(router, db, adminHelpers);
   registerSkillRoutes(router, db, adminHelpers);
   registerWorkerAgentRoutes(router, db, adminHelpers);
+  registerToolApprovalRequestRoutes(router, db, adminHelpers);
 
   // ── Workflow Runs ──────────────────────────────────────────
 

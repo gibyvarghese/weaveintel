@@ -8,6 +8,7 @@ const ADMIN_TAB_GROUPS: Record<string, string> = {
   guardrails: 'Governance',
   routing: 'Orchestration',
   'tool-simulation': 'Orchestration',
+  'tool-approval-requests': 'Orchestration',
 };
 
 async function registerAndEnter(page: Page, email?: string) {
@@ -202,5 +203,35 @@ test.describe('Admin UX Regression', () => {
     await expect(m.locator('.sim-policy-trace')).toBeVisible({ timeout: 8000 });
     const traceEntries = m.locator('.sim-trace-entry');
     await expect(traceEntries.first()).toBeVisible({ timeout: 3000 });
+  });
+
+  test('tool-approval-requests tab is accessible and shows read-only list', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+
+    const m = page.locator('.main');
+    await openAdminTab(page, 'tool-approval-requests');
+
+    // Standard list panel should be rendered
+    await expect(m.locator('.admin-list-panel')).toBeVisible({ timeout: 8000 });
+
+    // readOnly tab shows "Read only" label, not a "+ New" button, in the header
+    await expect(m.locator('.admin-list-header .nav-btn')).toHaveCount(0);
+    await expect(m.locator('.admin-list-header', { hasText: 'Read only' })).toBeVisible({ timeout: 3000 });
+  });
+
+  test('tool-approval-requests tab shows empty state or rows', async ({ page }) => {
+    await registerAndEnter(page);
+    await goAdmin(page);
+
+    const m = page.locator('.main');
+    await openAdminTab(page, 'tool-approval-requests');
+
+    await expect(m.locator('.admin-list-panel')).toBeVisible({ timeout: 8000 });
+
+    // Either shows table rows or the "No records found" inline message
+    const hasRows  = await m.locator('table tbody tr').count();
+    const hasEmpty = await m.locator('.admin-list-panel', { hasText: 'No records found' }).count();
+    expect(hasRows + hasEmpty).toBeGreaterThan(0);
   });
 });

@@ -39,6 +39,7 @@ import type { DatabaseAdapter, MessageRow, ChatSettingsRow, GuardrailRow, HumanT
 import { BUILTIN_TOOLS, createToolRegistry, type ToolRegistryOptions } from './tools.js';
 import { DbToolPolicyResolver, DbToolRateLimiter, consoleAuditEmitter } from './tool-policy-resolver.js';
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
+import { DbToolApprovalGate } from './tool-approval-gate.js';
 import { createTemporalStore } from './temporal-store.js';
 import {
   applySkillsToPrompt,
@@ -177,6 +178,8 @@ export class ChatEngine {
       policyResolver: new DbToolPolicyResolver(db),
       rateLimiter: new DbToolRateLimiter(db),
       auditEmitter: new DbToolAuditEmitter(db),
+      // Phase 6: gate tool calls that require operator approval
+      approvalGate: new DbToolApprovalGate(db),
       // Phase 4: credential and catalog injection
       credentialResolver: (id: string) => db.getToolCredential(id),
     };
@@ -435,6 +438,10 @@ export class ChatEngine {
       skillContext.matches,
       settings.mode === 'direct' ? 'advisory' : 'tool_assisted',
     );
+    // Phase 6: extract the top-matched skill's tool policy key so it can be
+    // propagated into the tool registry options for policy-override behaviour.
+    const skillPolicyKey = skillContext.matches[0]?.skill.toolPolicyKey;
+
     const enabledTools = Array.from(new Set([...settings.enabledTools, ...skillContext.toolNames]));
     const skillTools = enabledTools.filter((tool) => !settings.enabledTools.includes(tool));
     const activeSkills = skillContext.matches.map((m) => ({
@@ -531,6 +538,7 @@ export class ChatEngine {
       ...settings,
       enabledTools,
       systemPrompt: augmentedPrompt,
+      skillPolicyKey,
     };
 
     let assistantContent: string = '';
@@ -782,6 +790,8 @@ export class ChatEngine {
       settings.mode === 'direct' ? 'advisory' : 'tool_assisted',
     );
     const streamEnabledTools = Array.from(new Set([...settings.enabledTools, ...streamSkillContext.toolNames]));
+    // Phase 6: extract active skill's tool policy key for streaming path
+    const streamSkillPolicyKey = streamSkillContext.matches[0]?.skill.toolPolicyKey;
     const streamSkillTools = streamEnabledTools.filter((tool) => !settings.enabledTools.includes(tool));
     const streamActiveSkills = streamSkillContext.matches.map((m) => ({
       id: m.skill.id,
@@ -888,6 +898,7 @@ export class ChatEngine {
       ...settings,
       enabledTools: streamEnabledTools,
       systemPrompt: streamAugmentedPrompt,
+      skillPolicyKey: streamSkillPolicyKey,
     };
 
     // SSE headers
@@ -1134,6 +1145,8 @@ export class ChatEngine {
       },
       disabledToolKeys,
       catalogEntries,
+      // Phase 6: apply active skill's tool policy key for scoped policy enforcement
+      skillPolicyKey: settings.skillPolicyKey,
     };
     const customTools = enterpriseTools.length > 0 ? enterpriseTools : undefined;
     const tools = settings.enabledTools.length
@@ -1290,6 +1303,8 @@ export class ChatEngine {
       },
       disabledToolKeys,
       catalogEntries,
+      // Phase 6: apply active skill's tool policy key for scoped policy enforcement
+      skillPolicyKey: settings.skillPolicyKey,
     };
     const customTools = enterpriseTools.length > 0 ? enterpriseTools : undefined;
     const tools = settings.enabledTools.length

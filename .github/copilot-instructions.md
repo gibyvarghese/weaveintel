@@ -145,6 +145,21 @@
 - Start with `defaultPromptStrategyRegistry`, then layer DB-defined strategies for app/tenant-specific behavior.
 - GeneWeave DB: `prompt_strategies` table; admin CRUD at `/api/admin/prompt-strategies`.
 
+## Tool Platform (Phase 6 complete — Skill→Tool Policy Closure + Approval Workflow)
+- When a skill is activated in chat, its `toolPolicyKey` is passed as `skillPolicyKey` in `PolicyResolutionContext` so every tool call in that session is evaluated under the skill's effective policy.
+- Tools whose effective policy has `requireApproval: true` are blocked at runtime; the approval gate creates a `tool_approval_requests` row (UUID PK) with `status: 'pending'`.
+- `tool_approval_requests` table: `id (UUID), tool_name, chat_id, skill_key, policy_key, status ('pending'|'approved'|'denied'), requested_at, resolved_at, resolved_by, resolution_note, input_preview`.
+- Admin API at `/api/admin/tool-approval-requests`:
+  - `GET /api/admin/tool-approval-requests` — list with `status`, `chat_id`, `tool_name`, `limit`, `offset` filters
+  - `GET /api/admin/tool-approval-requests/:id` — single request (404 if not found)
+  - `POST /api/admin/tool-approval-requests/:id/approve` — approve with optional `{ note }`; 409 if already resolved
+  - `POST /api/admin/tool-approval-requests/:id/deny` — deny with optional `{ note }`; 409 if already resolved
+- All routes require authentication (`{ auth: true }` option) and return 401 for unauthenticated callers.
+- `registerToolApprovalRequestRoutes(router, db, helpers)` is wired in `server-admin.ts` on the direct `router` (not `adminRouter`) with manual `if (!auth)` guard per route.
+- `DbToolApprovalGate` (in `apps/geneweave/src/tool-approval-gate.ts`) implements the approval gate by inserting `tool_approval_requests` rows when policy requires approval.
+- API tests: `describeAdmin('Tool Approval Requests API', ...)` in `api.test.ts` (5 tests — all pass).
+- Example: `examples/34-skill-tool-policy-approval.ts`.
+
 ## Tool Platform (Phase 5 complete — Tool Simulation + Test Harness)
 - Admin operators can run dry-run or live simulations of any registered tool without starting a real chat session.
 - `GET /api/admin/tool-simulation/tools` — lists BUILTIN_TOOLS + enabled catalog entries for simulation selection.

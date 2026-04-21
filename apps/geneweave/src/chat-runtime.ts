@@ -96,6 +96,8 @@ export interface ChatSettings {
   redactionEnabled: boolean;
   redactionPatterns: string[];
   workers: WorkerDef[];
+  /** Phase 6: tool policy key from the top-matched active skill; overrides global tool policy */
+  skillPolicyKey?: string;
 }
 
 export interface WorkerDef {

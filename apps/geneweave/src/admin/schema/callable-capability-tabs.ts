@@ -146,4 +146,23 @@ export const CALLABLE_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
     readOnly: true,
     customView: 'tool-simulation',
   },
+  'tool-approval-requests': {
+    singular: 'Tool Approval Request', apiPath: 'admin/tool-approval-requests', listKey: 'requests',
+    readOnly: true,
+    cols: ['tool_name', 'status', 'chat_id', 'skill_key', 'requested_at'],
+    fields: [
+      { key: 'id', label: 'Request ID', readonly: true },
+      { key: 'tool_name', label: 'Tool Name', readonly: true },
+      { key: 'chat_id', label: 'Chat ID', readonly: true },
+      { key: 'user_id', label: 'User ID', readonly: true },
+      { key: 'status', label: 'Status', readonly: true },
+      { key: 'policy_key', label: 'Policy Key', readonly: true },
+      { key: 'skill_key', label: 'Skill Key', readonly: true },
+      { key: 'input_json', label: 'Input', readonly: true, textarea: true, rows: 4 },
+      { key: 'requested_at', label: 'Requested At', readonly: true },
+      { key: 'resolved_at', label: 'Resolved At', readonly: true },
+      { key: 'resolved_by', label: 'Resolved By', readonly: true },
+      { key: 'resolution_note', label: 'Resolution Note', readonly: true },
+    ],
+  },
 };

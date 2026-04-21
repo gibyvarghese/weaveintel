@@ -97,6 +97,8 @@ export interface SkillDefinition {
   readonly triggerPatterns?: readonly string[];
   readonly toolNames?: readonly string[];
   readonly priority?: number;
+  /** Phase 6: key of the tool_policies row that governs tool calls while this skill is active */
+  readonly toolPolicyKey?: string;
 }
 
 export interface SkillExtensionOverlay {
@@ -909,6 +911,8 @@ export interface SkillRow {
   tags: string | null;
   priority: number;
   version: string;
+  /** Phase 6: tool policy key that overrides the global tool policy while this skill is active */
+  tool_policy_key: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -971,6 +975,7 @@ export function skillFromRow(row: SkillRow): SkillDefinition {
     description: row.description,
     instructions: row.instructions,
     priority: row.priority,
+    toolPolicyKey: row.tool_policy_key ?? undefined,
     policy: tools.length ? { allowedTools: tools } : undefined,
     completionContract: {
       narrative: 'Provide a complete response with evidence and surface ambiguity explicitly when confidence is low.',

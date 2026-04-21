@@ -947,10 +947,39 @@ CREATE TABLE IF NOT EXISTS skills (
   tags TEXT,
   priority INTEGER NOT NULL DEFAULT 0,
   version TEXT NOT NULL DEFAULT '1.0',
+  -- Phase 6: optional key referencing a tool_policies row; overrides the global tool policy for all tool calls while this skill is active
+  tool_policy_key TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ── Tool Approval Requests (Phase 6) ──────────────────────
+-- Created by DbToolApprovalGate when a tool invocation requires operator approval.
+-- Operators approve or deny via the admin UI; the policy-enforced tool gate
+-- checks this table before allowing or blocking execution.
+
+CREATE TABLE IF NOT EXISTS tool_approval_requests (
+  id TEXT PRIMARY KEY,
+  tool_name TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  user_id TEXT,
+  -- JSON snapshot of the tool input at the time of the request
+  input_json TEXT NOT NULL DEFAULT '{}',
+  -- Tool policy key that triggered the approval requirement
+  policy_key TEXT,
+  -- Skill that was active when the request was created (if any)
+  skill_key TEXT,
+  -- pending | approved | denied | expired
+  status TEXT NOT NULL DEFAULT 'pending',
+  requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT,
+  resolved_by TEXT,
+  resolution_note TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_approval_chat ON tool_approval_requests(chat_id, status);
+CREATE INDEX IF NOT EXISTS idx_tool_approval_tool ON tool_approval_requests(tool_name, status);
 
 -- ── Worker Agents: database-driven supervisor workers ──────
 

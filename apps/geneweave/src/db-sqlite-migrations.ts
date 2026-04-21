@@ -658,4 +658,31 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
 
   // Add config column to tool_catalog for MCP endpoint / A2A agent URL storage.
   safeExec(db, `ALTER TABLE tool_catalog ADD COLUMN config TEXT`);
+
+  // ─── Phase 6: Skill → Tool Policy Closure ────────────────
+  // Adds tool_policy_key to skills so each skill can declare which tool policy
+  // governs tool calls made during its activation window.
+  safeExec(db, `ALTER TABLE skills ADD COLUMN tool_policy_key TEXT`);
+
+  // Creates the tool_approval_requests table used by DbToolApprovalGate to
+  // persist pending/approved/denied approval decisions for tools that require
+  // operator approval before execution.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tool_approval_requests (
+      id TEXT PRIMARY KEY,
+      tool_name TEXT NOT NULL,
+      chat_id TEXT NOT NULL,
+      user_id TEXT,
+      input_json TEXT NOT NULL DEFAULT '{}',
+      policy_key TEXT,
+      skill_key TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT,
+      resolved_by TEXT,
+      resolution_note TEXT
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_approval_chat ON tool_approval_requests(chat_id, status)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_approval_tool ON tool_approval_requests(tool_name, status)`);
 }

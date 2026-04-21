@@ -54,6 +54,7 @@ export function registerSkillRoutes(
       priority: Number(body['priority'] ?? 0),
       version: (body['version'] as string) ?? '1.0',
       enabled: body['enabled'] !== false ? 1 : 0,
+      tool_policy_key: (body['tool_policy_key'] as string) ?? null,
     });
     const skill = await db.getSkill(id);
     json(res, 201, { skill });

@@ -565,9 +565,29 @@ export interface SkillRow {
   tags: string | null;           // JSON string[]
   priority: number;
   version: string;
+  /** Phase 6: tool policy key that overrides the global tool policy while this skill is active */
+  tool_policy_key: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;
+}
+
+/** Phase 6: Tool Approval Request — created by DbToolApprovalGate when a tool requires operator approval */
+export interface ToolApprovalRequestRow {
+  id: string;
+  tool_name: string;
+  chat_id: string;
+  user_id: string | null;
+  /** JSON snapshot of the tool input at the time of the request */
+  input_json: string;
+  policy_key: string | null;
+  skill_key: string | null;
+  /** pending | approved | denied | expired */
+  status: string;
+  requested_at: string;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  resolution_note: string | null;
 }
 
 export interface WorkerAgentRow {
@@ -1432,6 +1452,16 @@ export interface DatabaseAdapter {
   listEnabledSkills(): Promise<SkillRow[]>;
   updateSkill(id: string, fields: Partial<Omit<SkillRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteSkill(id: string): Promise<void>;
+
+  // ─── Phase 6: Tool Approval Requests ──────────────────────
+  createToolApprovalRequest(r: Omit<ToolApprovalRequestRow, 'requested_at'>): Promise<void>;
+  getToolApprovalRequest(id: string): Promise<ToolApprovalRequestRow | null>;
+  /** Returns most-recent approved request for a specific tool in a chat session, or null. */
+  getApprovedToolRequest(toolName: string, chatId: string): Promise<ToolApprovalRequestRow | null>;
+  /** Returns the oldest pending approval request for a tool+chat combo, or null. */
+  getPendingToolRequest(toolName: string, chatId: string): Promise<ToolApprovalRequestRow | null>;
+  listToolApprovalRequests(opts?: { status?: string; chatId?: string; toolName?: string; limit?: number; offset?: number }): Promise<ToolApprovalRequestRow[]>;
+  resolveToolApprovalRequest(id: string, fields: { status: string; resolved_by?: string; resolution_note?: string }): Promise<void>;
 
   // ─── Worker Agents ─────────────────────────────────────────
   createWorkerAgent(w: Omit<WorkerAgentRow, 'created_at' | 'updated_at'>): Promise<void>;

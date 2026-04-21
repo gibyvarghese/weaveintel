@@ -2102,3 +2102,47 @@ describeAdmin('Tool Simulation API', () => {
     expect(steps).toContain('rate_limit');
   });
 });
+
+// ─── Tool Approval Requests API (Phase 6) ─────────────────────────
+
+describeAdmin('Tool Approval Requests API', () => {
+  let createdRequestId: string | undefined;
+
+  it('lists approval requests (empty initially)', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status, data } = await api('GET', '/api/admin/tool-approval-requests');
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    if (status === 403) { expect(typeof data['error']).toBe('string'); return; }
+    expect(status).toBe(200);
+    expect(Array.isArray(data['requests'])).toBe(true);
+  });
+
+  it('returns 401 on list when unauthenticated', async () => {
+    const res = await fetch(`${BASE_URL}/api/admin/tool-approval-requests`, { method: 'GET' });
+    expect(res.status).toBe(401);
+  });
+
+  it('returns 404 for unknown approval request', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status, data } = await api('GET', '/api/admin/tool-approval-requests/nonexistent-id');
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    if (status === 403) { expect(typeof data['error']).toBe('string'); return; }
+    expect(status).toBe(404);
+  });
+
+  it('approve endpoint returns 404 for unknown request', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status, data } = await api('POST', '/api/admin/tool-approval-requests/nonexistent-id/approve', { note: 'ok' });
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    if (status === 403) { expect(typeof data['error']).toBe('string'); return; }
+    expect(status).toBe(404);
+  });
+
+  it('deny endpoint returns 404 for unknown request', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status, data } = await api('POST', '/api/admin/tool-approval-requests/nonexistent-id/deny', { note: 'nope' });
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    if (status === 403) { expect(typeof data['error']).toBe('string'); return; }
+    expect(status).toBe(404);
+  });
+});
