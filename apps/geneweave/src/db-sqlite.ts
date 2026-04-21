@@ -7,6 +7,7 @@
 import { randomUUID } from 'node:crypto';
 import { SCHEMA_SQL } from './db-schema.js';
 import { applySQLiteBootstrapMigrations } from './db-sqlite-migrations.js';
+import { seedSVRecipe } from './features/scientific-validation/recipe.js';
 import { stringifyPromptVariables } from '@weaveintel/prompts';
 import { BUILT_IN_SKILLS } from '@weaveintel/skills';
 import type {
@@ -4363,6 +4364,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
     ];
     for (const r of recipeConfigs) await this.createRecipeConfig(r);
     }
+
+    // Scientific Validation recipe (Phase 5)
+    await seedSVRecipe(this);
 
     // Widget Configs (Phase 9)
     if (cnt('widget_configs') === 0) {

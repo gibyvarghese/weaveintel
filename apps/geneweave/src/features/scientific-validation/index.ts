@@ -7,3 +7,4 @@
 export { registerSVRoutes } from './routes/index.js';
 export { SVWorkflowRunner, getSVRunner, resetSVRunner } from './runner.js';
 export type { SVRunnerOptions, SVRunInput } from './runner.js';
+export { seedSVRecipe, SV_RECIPE_CONFIG, SV_RECIPE_ID } from './recipe.js';
