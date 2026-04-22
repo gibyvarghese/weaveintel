@@ -36,11 +36,14 @@ export function buildSupervisorInstructionsPrompt(options: {
   if (workerRows) {
     for (const row of workerRows) {
       if (!row.description?.trim()) continue;
+      const displayName = (row.display_name?.trim() || row.name).trim();
+      const jobProfile = (row.job_profile?.trim() || 'Worker Agent').trim();
       routingBlocks.push(
-        `WORKER CAPABILITY — ${row.name.toUpperCase()}:\n`
+        `WORKER CAPABILITY — ${displayName.toUpperCase()} (${row.name}):\n`
+          + `- Job Profile: ${jobProfile}\n`
           + `- Delegate to \`${row.name}\` when the user's query intent aligns with this capability.\n`
           + `- ${row.description}\n`
-          + '- Select workers semantically based on meaning and task requirements, not keyword overlap.',
+          + '- Select workers semantically based on job profile, meaning, and task requirements, not keyword overlap or worker identifier names.',
       );
     }
   }

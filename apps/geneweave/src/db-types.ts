@@ -593,6 +593,8 @@ export interface ToolApprovalRequestRow {
 export interface WorkerAgentRow {
   id: string;
   name: string;
+  display_name: string | null;
+  job_profile: string | null;
   description: string;
   system_prompt: string;
   tool_names: string;            // JSON string[]
@@ -601,7 +603,7 @@ export interface WorkerAgentRow {
   task_contract_id: string | null;
   max_retries: number;
   priority: number;
-  /** Feature grouping: 'general' | 'scientific-validation' | other domain categories. */
+  /** Feature grouping: 'general' | 'hypothesis-validation' | other domain categories. */
   category: string;
   enabled: number;
   created_at: string;
@@ -1119,7 +1121,7 @@ export interface GuardrailEvalRow {
   created_at: string;
 }
 
-// ─── Scientific Validation row types ────────────────────────
+// ─── Hypothesis Validation row types ────────────────────────
 
 /**
  * A budget envelope caps LLM cost, sandbox cost, wall-clock time, and deliberation
@@ -1137,11 +1139,11 @@ export interface SvBudgetEnvelopeRow {
   created_at: string;
 }
 
-/** Status of a scientific hypothesis validation run. */
+/** Status of a hypothesis validation run. */
 export type SvHypothesisStatus = 'queued' | 'running' | 'verdict' | 'abandoned';
 
 /**
- * A scientific hypothesis submitted for multi-agent validation.
+ * A hypothesis submitted for multi-agent validation.
  */
 export interface SvHypothesisRow {
   id: string;                         // uuid v7
@@ -1151,7 +1153,7 @@ export interface SvHypothesisRow {
   statement: string;
   domain_tags: string;                // JSON: string[]
   status: SvHypothesisStatus;
-  budget_envelope_id: string;         // FK → sv_budget_envelope.id
+  budget_envelope_id: string;         // FK → hv_budget_envelope.id
   workflow_run_id: string | null;
   trace_id: string | null;            // @weaveintel/replay trace
   contract_id: string | null;         // @weaveintel/contracts completion contract
@@ -1159,7 +1161,7 @@ export interface SvHypothesisRow {
   updated_at: string;
 }
 
-/** The type of scientific claim for a sub-claim. */
+/** The type of claim for a sub-claim. */
 export type SvClaimType = 'mechanism' | 'epidemiological' | 'mathematical' | 'dose_response' | 'causal' | 'other';
 
 /**
@@ -1168,7 +1170,7 @@ export type SvClaimType = 'mechanism' | 'epidemiological' | 'mathematical' | 'do
 export interface SvSubClaimRow {
   id: string;
   tenant_id: string;
-  hypothesis_id: string;              // FK → sv_hypothesis.id ON DELETE CASCADE
+  hypothesis_id: string;              // FK → hv_hypothesis.id ON DELETE CASCADE
   parent_sub_claim_id: string | null; // self-ref for nested decomposition
   statement: string;
   claim_type: SvClaimType;
@@ -1187,7 +1189,7 @@ export type SvVerdictValue = 'supported' | 'refuted' | 'inconclusive' | 'ill_pos
 export interface SvVerdictRow {
   id: string;
   tenant_id: string;
-  hypothesis_id: string;              // FK → sv_hypothesis.id ON DELETE CASCADE (UNIQUE)
+  hypothesis_id: string;              // FK → hv_hypothesis.id ON DELETE CASCADE (UNIQUE)
   verdict: SvVerdictValue;
   confidence_lo: number;              // 0–1 float
   confidence_hi: number;              // 0–1 float, ≥ confidence_lo
@@ -1202,7 +1204,7 @@ export interface SvVerdictRow {
 
 export interface SvEvidenceEventRow {
   id: string;                         // UUID
-  hypothesis_id: string;             // FK → sv_hypothesis.id
+  hypothesis_id: string;             // FK → hv_hypothesis.id
   step_id: string;                   // workflow step that emitted this (e.g. 'statistical')
   agent_id: string;                  // agent name
   evidence_id: string;               // contract evidence item id
@@ -1216,7 +1218,7 @@ export interface SvEvidenceEventRow {
 
 export interface SvAgentTurnRow {
   id: string;                         // UUID
-  hypothesis_id: string;             // FK → sv_hypothesis.id
+  hypothesis_id: string;             // FK → hv_hypothesis.id
   round_index: number;
   from_agent: string;
   to_agent: string | null;           // null = broadcast
@@ -1578,7 +1580,7 @@ export interface DatabaseAdapter {
   getWorkerAgent(id: string): Promise<WorkerAgentRow | null>;
   listWorkerAgents(): Promise<WorkerAgentRow[]>;
   listEnabledWorkerAgents(): Promise<WorkerAgentRow[]>;
-  /** Returns enabled worker agents for a specific category (e.g. 'scientific-validation'). */
+  /** Returns enabled worker agents for a specific category (e.g. 'hypothesis-validation'). */
   listWorkerAgentsByCategory(category: string): Promise<WorkerAgentRow[]>;
   updateWorkerAgent(id: string, fields: Partial<Omit<WorkerAgentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteWorkerAgent(id: string): Promise<void>;
@@ -1839,6 +1841,13 @@ export interface DatabaseAdapter {
   }): Promise<void>;
   getMemoryExtractionEvent(id: string): Promise<MemoryExtractionEventRow | null>;
   listMemoryExtractionEvents(chatId?: string, limit?: number): Promise<MemoryExtractionEventRow[]>;
+
+  // ─── SGAP Admin Tables ───────────────────────────────────
+  listSgapTableRows(tableName: string): Promise<Array<Record<string, unknown>>>;
+  getSgapTableRow(tableName: string, id: string): Promise<Record<string, unknown> | null>;
+  createSgapTableRow(tableName: string, row: Record<string, unknown>): Promise<void>;
+  updateSgapTableRow(tableName: string, id: string, fields: Record<string, unknown>): Promise<void>;
+  deleteSgapTableRow(tableName: string, id: string): Promise<void>;
 
   // ─── Admin: Seed data ──────────────────────────────────────
   seedDefaultData(): Promise<void>;

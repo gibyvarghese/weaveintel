@@ -90,6 +90,56 @@ export function registerAdminRoutes(
     }
     return validation.description;
   }
+
+  function registerSgapCrud(opts: {
+    routeKey: string;
+    tableName: string;
+    listKey: string;
+    singularKey: string;
+  }): void {
+    const basePath = `/api/admin/${opts.routeKey}`;
+    router.get(basePath, async (_req, res, _params, auth) => {
+      if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+      const rows = await db.listSgapTableRows(opts.tableName);
+      json(res, 200, { [opts.listKey]: rows });
+    });
+
+    router.get(`${basePath}/:id`, async (_req, res, params, auth) => {
+      if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+      const row = await db.getSgapTableRow(opts.tableName, params['id']!);
+      if (!row) { json(res, 404, { error: `${opts.singularKey} not found` }); return; }
+      json(res, 200, { [opts.singularKey]: row });
+    });
+
+    router.post(basePath, async (req, res, _params, auth) => {
+      if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+      const raw = await readBody(req);
+      let body: Record<string, unknown>;
+      try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+      const id = (body['id'] as string) ?? randomUUID();
+      await db.createSgapTableRow(opts.tableName, { ...body, id });
+      const row = await db.getSgapTableRow(opts.tableName, id);
+      json(res, 201, { [opts.singularKey]: row });
+    }, { auth: true, csrf: true });
+
+    router.put(`${basePath}/:id`, async (req, res, params, auth) => {
+      if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+      const existing = await db.getSgapTableRow(opts.tableName, params['id']!);
+      if (!existing) { json(res, 404, { error: `${opts.singularKey} not found` }); return; }
+      const raw = await readBody(req);
+      let body: Record<string, unknown>;
+      try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+      await db.updateSgapTableRow(opts.tableName, params['id']!, body);
+      const row = await db.getSgapTableRow(opts.tableName, params['id']!);
+      json(res, 200, { [opts.singularKey]: row });
+    }, { auth: true, csrf: true });
+
+    router.del(`${basePath}/:id`, async (_req, res, params, auth) => {
+      if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+      await db.deleteSgapTableRow(opts.tableName, params['id']!);
+      json(res, 200, { ok: true });
+    }, { auth: true, csrf: true });
+  }
   // ── Admin: Prompts ──────────────────────────────────────────
 
   router.get('/api/admin/prompts', async (_req, res, _params, auth) => {
@@ -1095,6 +1145,91 @@ export function registerAdminRoutes(
   registerSkillRoutes(router, db, adminHelpers);
   registerWorkerAgentRoutes(router, db, adminHelpers);
   registerToolApprovalRequestRoutes(router, db, adminHelpers);
+
+  // ── SGAP: Social Growth Admin Tables ─────────────────────
+  registerSgapCrud({ routeKey: 'sg-brands', tableName: 'sg_brands', listKey: 'sg-brands', singularKey: 'sg-brand' });
+  registerSgapCrud({ routeKey: 'sg-channels', tableName: 'sg_channels', listKey: 'sg-channels', singularKey: 'sg-channel' });
+  registerSgapCrud({ routeKey: 'sg-campaigns', tableName: 'sg_campaigns', listKey: 'sg-campaigns', singularKey: 'sg-campaign' });
+  registerSgapCrud({ routeKey: 'sg-content-pillars', tableName: 'sg_content_pillars', listKey: 'sg-content-pillars', singularKey: 'sg-content-pillar' });
+  registerSgapCrud({ routeKey: 'sg-content-queue', tableName: 'sg_content_queue', listKey: 'sg-content-queue', singularKey: 'sg-content-item' });
+  registerSgapCrud({ routeKey: 'sg-growth-experiments', tableName: 'sg_growth_experiments', listKey: 'sg-growth-experiments', singularKey: 'sg-growth-experiment' });
+  registerSgapCrud({ routeKey: 'sg-kpi-snapshots', tableName: 'sg_kpi_snapshots', listKey: 'sg-kpi-snapshots', singularKey: 'sg-kpi-snapshot' });
+  registerSgapCrud({ routeKey: 'sg-agent-profiles', tableName: 'sg_agent_profiles', listKey: 'sg-agent-profiles', singularKey: 'sg-agent-profile' });
+  registerSgapCrud({ routeKey: 'sg-workflow-templates', tableName: 'sg_workflow_templates', listKey: 'sg-workflow-templates', singularKey: 'sg-workflow-template' });
+  registerSgapCrud({ routeKey: 'sg-tool-bindings', tableName: 'sg_tool_bindings', listKey: 'sg-tool-bindings', singularKey: 'sg-tool-binding' });
+  registerSgapCrud({ routeKey: 'sg-strategy-settings', tableName: 'sg_strategy_settings', listKey: 'sg-strategy-settings', singularKey: 'sg-strategy-setting' });
+  registerSgapCrud({ routeKey: 'sg-prompt-variants', tableName: 'sg_prompt_variants', listKey: 'sg-prompt-variants', singularKey: 'sg-prompt-variant' });
+
+  router.post('/api/admin/sg-workflow-templates/:id/run', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+
+    const template = await db.getSgapTableRow('sg_workflow_templates', params['id']!);
+    if (!template) { json(res, 404, { error: 'SG workflow template not found' }); return; }
+
+    const raw = await readBody(req);
+    let body: Record<string, unknown> = {};
+    if (raw.trim()) {
+      try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    }
+
+    const brandId = (template['brand_id'] as string) ?? (body['brand_id'] as string);
+    if (!brandId) { json(res, 400, { error: 'brand_id missing on workflow template' }); return; }
+
+    const runId = randomUUID();
+    const startedAt = new Date().toISOString();
+    await db.createWorkflowRun({
+      id: runId,
+      workflow_id: params['id']!,
+      status: 'running',
+      state: JSON.stringify({ currentStepId: 'measure', variables: body, history: [] }),
+      input: Object.keys(body).length > 0 ? JSON.stringify(body) : null,
+      error: null,
+      started_at: startedAt,
+    });
+
+    const contentRows = await db.listSgapTableRows('sg_content_queue');
+    const channelRows = await db.listSgapTableRows('sg_channels');
+    const campaignRows = await db.listSgapTableRows('sg_campaigns');
+
+    const brandContent = contentRows.filter(row => row['brand_id'] === brandId);
+    const brandChannels = channelRows.filter(row => row['brand_id'] === brandId && row['enabled'] === 1);
+    const brandCampaigns = campaignRows.filter(row => row['brand_id'] === brandId && row['status'] !== 'completed');
+
+    const statusCount = (s: string): number => brandContent.filter(row => row['status'] === s).length;
+    const metrics = {
+      queue_total: brandContent.length,
+      draft_count: statusCount('draft'),
+      ready_count: statusCount('ready'),
+      scheduled_count: statusCount('scheduled'),
+      published_count: statusCount('published'),
+      active_channels: brandChannels.length,
+      active_campaigns: brandCampaigns.length,
+      estimated_output_velocity: statusCount('ready') + statusCount('scheduled') + statusCount('published'),
+      recorded_at: startedAt,
+    };
+
+    const snapshotId = randomUUID();
+    await db.createSgapTableRow('sg_kpi_snapshots', {
+      id: snapshotId,
+      brand_id: brandId,
+      channel_id: (body['channel_id'] as string) ?? null,
+      snapshot_date: new Date().toISOString().slice(0, 10),
+      metrics_json: JSON.stringify(metrics),
+      source: 'sg_workflow_run',
+    });
+
+    const completedAt = new Date().toISOString();
+    await db.updateWorkflowRun(runId, {
+      status: 'completed',
+      state: JSON.stringify({ currentStepId: 'done', variables: body, history: [{ stepId: 'measure', status: 'completed', output: { snapshotId, metrics }, startedAt, completedAt }] }),
+      completed_at: completedAt,
+      error: null,
+    });
+
+    const run = await db.getWorkflowRun(runId);
+    const snapshot = await db.getSgapTableRow('sg_kpi_snapshots', snapshotId);
+    json(res, 201, { run, snapshot, metrics });
+  }, { auth: true, csrf: true });
 
   // ── Workflow Runs ──────────────────────────────────────────
 

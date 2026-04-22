@@ -34,8 +34,30 @@ import type {
   SvEvidenceEventRow, SvAgentTurnRow,
 } from './db-types.js';
 
+const SGAP_TABLES = new Set([
+  'sg_brands',
+  'sg_channels',
+  'sg_campaigns',
+  'sg_content_pillars',
+  'sg_content_queue',
+  'sg_growth_experiments',
+  'sg_kpi_snapshots',
+  'sg_agent_profiles',
+  'sg_workflow_templates',
+  'sg_tool_bindings',
+  'sg_strategy_settings',
+  'sg_prompt_variants',
+]);
+
+function normalizeSgapTableName(input: string): string {
+  const normalized = input.trim().replace(/-/g, '_').toLowerCase();
+  if (!SGAP_TABLES.has(normalized)) throw new Error(`Unsupported SGAP table: ${input}`);
+  return normalized;
+}
+
 export class SQLiteAdapter implements DatabaseAdapter {
   private db: import('better-sqlite3').Database | null = null;
+  private readonly sgapColumnCache = new Map<string, Set<string>>();
   constructor(private readonly path: string) {}
 
   async initialize(): Promise<void> {
@@ -1500,10 +1522,12 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createWorkerAgent(w: Omit<WorkerAgentRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO worker_agents (id, name, description, system_prompt, tool_names, persona, trigger_patterns, task_contract_id, max_retries, priority, category, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO worker_agents (id, name, display_name, job_profile, description, system_prompt, tool_names, persona, trigger_patterns, task_contract_id, max_retries, priority, category, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       w.id,
       w.name,
+      w.display_name ?? null,
+      w.job_profile ?? null,
       w.description,
       w.system_prompt,
       w.tool_names,
@@ -1522,15 +1546,15 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   async listWorkerAgents(): Promise<WorkerAgentRow[]> {
-    return this.d.prepare('SELECT * FROM worker_agents ORDER BY priority DESC, name ASC').all() as WorkerAgentRow[];
+    return this.d.prepare('SELECT * FROM worker_agents ORDER BY priority DESC, COALESCE(display_name, name) ASC').all() as WorkerAgentRow[];
   }
 
   async listEnabledWorkerAgents(): Promise<WorkerAgentRow[]> {
-    return this.d.prepare("SELECT * FROM worker_agents WHERE enabled = 1 AND category = 'general' ORDER BY priority DESC, name ASC").all() as WorkerAgentRow[];
+    return this.d.prepare("SELECT * FROM worker_agents WHERE enabled = 1 AND category = 'general' ORDER BY priority DESC, COALESCE(display_name, name) ASC").all() as WorkerAgentRow[];
   }
 
   async listWorkerAgentsByCategory(category: string): Promise<WorkerAgentRow[]> {
-    return this.d.prepare('SELECT * FROM worker_agents WHERE enabled = 1 AND category = ? ORDER BY priority DESC, name ASC').all(category) as WorkerAgentRow[];
+    return this.d.prepare('SELECT * FROM worker_agents WHERE enabled = 1 AND category = ? ORDER BY priority DESC, COALESCE(display_name, name) ASC').all(category) as WorkerAgentRow[];
   }
 
   async updateWorkerAgent(id: string, fields: Partial<Omit<WorkerAgentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
@@ -2626,6 +2650,64 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare('SELECT * FROM memory_extraction_events ORDER BY created_at DESC LIMIT ?').all(limit) as MemoryExtractionEventRow[];
   }
 
+  // ─── SGAP Admin Tables ───────────────────────────────────
+
+  private getSgapColumns(tableName: string): Set<string> {
+    const table = normalizeSgapTableName(tableName);
+    const cached = this.sgapColumnCache.get(table);
+    if (cached) return cached;
+    const rows = this.d.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    const cols = new Set(rows.map(r => r.name));
+    this.sgapColumnCache.set(table, cols);
+    return cols;
+  }
+
+  private sanitizeSgapPayload(tableName: string, input: Record<string, unknown>, options?: { requireId?: boolean }): Record<string, unknown> {
+    const cols = this.getSgapColumns(tableName);
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(input)) {
+      if (!cols.has(key)) continue;
+      out[key] = value;
+    }
+    if (options?.requireId && !out['id']) out['id'] = randomUUID();
+    if (cols.has('updated_at') && out['updated_at'] === undefined) out['updated_at'] = new Date().toISOString();
+    return out;
+  }
+
+  async listSgapTableRows(tableName: string): Promise<Array<Record<string, unknown>>> {
+    const table = normalizeSgapTableName(tableName);
+    return this.d.prepare(`SELECT * FROM ${table} ORDER BY created_at DESC`).all() as Array<Record<string, unknown>>;
+  }
+
+  async getSgapTableRow(tableName: string, id: string): Promise<Record<string, unknown> | null> {
+    const table = normalizeSgapTableName(tableName);
+    return (this.d.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(id) as Record<string, unknown> | undefined) ?? null;
+  }
+
+  async createSgapTableRow(tableName: string, row: Record<string, unknown>): Promise<void> {
+    const table = normalizeSgapTableName(tableName);
+    const payload = this.sanitizeSgapPayload(table, row, { requireId: true });
+    const keys = Object.keys(payload);
+    if (keys.length === 0) throw new Error(`No valid fields provided for ${table}`);
+    const placeholders = keys.map(() => '?').join(', ');
+    const sql = `INSERT INTO ${table} (${keys.join(', ')}) VALUES (${placeholders})`;
+    this.d.prepare(sql).run(...keys.map(k => payload[k]));
+  }
+
+  async updateSgapTableRow(tableName: string, id: string, fields: Record<string, unknown>): Promise<void> {
+    const table = normalizeSgapTableName(tableName);
+    const payload = this.sanitizeSgapPayload(table, fields);
+    const keys = Object.keys(payload).filter(k => k !== 'id' && k !== 'created_at');
+    if (keys.length === 0) return;
+    const assigns = keys.map(k => `${k} = ?`).join(', ');
+    this.d.prepare(`UPDATE ${table} SET ${assigns} WHERE id = ?`).run(...keys.map(k => payload[k]), id);
+  }
+
+  async deleteSgapTableRow(tableName: string, id: string): Promise<void> {
+    const table = normalizeSgapTableName(tableName);
+    this.d.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
+  }
+
   // ─── Website Credentials (Browser Auth Vault) ──────────────
 
   async createWebsiteCredential(c: Omit<WebsiteCredentialRow, 'created_at' | 'updated_at'>): Promise<void> {
@@ -3411,6 +3493,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
       const workers: Omit<WorkerAgentRow, 'created_at' | 'updated_at'>[] = [
         {
           id: '8d2598f8-775d-4e67-841d-1cb5fb16713e', name: 'code_executor',
+          display_name: 'Casey',
+          job_profile: 'Code Execution Specialist',
           description: '[USE FIRST FOR ANY CODE/SCRIPT/RUN REQUEST] Writes AND executes code in real isolated Docker containers via CSE. Uses the dedicated data-analysis sandbox for dataframe/charting work and returns actual stdout. Use for: "run", "execute", "run it", "run in a container", "write and run", "test", "script that runs", and dataset analysis that requires real execution.',
           system_prompt: [
             'You are a code writing + execution + verification agent.',
@@ -3448,6 +3532,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
         },
         {
           id: 'aebc3dc5-cc5b-4ad2-a10c-dedf8a9a5c3e', name: 'statsnz_specialist',
+          display_name: 'Nia',
+          job_profile: 'NZ Data Specialist',
           description: 'Specialist for Stats NZ Aotearoa Data Explorer data retrieval. Use this worker for NZ census/population/demographics requests and any task that should be grounded in Stats NZ APIs.',
           system_prompt: [
             'You are a Stats NZ specialist worker.',
@@ -3485,6 +3571,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
         },
         {
           id: 'bf3c7feb-5471-4e17-a46c-f2c84efbf613', name: 'researcher',
+          display_name: 'Riley',
+          job_profile: 'Research Specialist',
           description: 'Researches topics, searches the web, browses websites, and gathers information. Can open a headless browser to navigate dynamic sites, read page content, click links, fill forms, and interact with web applications. Has full browser authentication capabilities: can detect login forms, auto-login using stored website credentials from the credential vault, save session cookies, and hand off the browser to the user for manual steps like 2FA or CAPTCHA. Always delegate login/auth tasks to this worker — it has the browser_detect_auth, browser_login, browser_save_cookies, browser_handoff_request, and browser_handoff_resume tools.',
           system_prompt: '',
           tool_names: JSON.stringify(['web_search', 'text_analysis', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume']),
@@ -3492,6 +3580,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
         },
         {
           id: '63566924-9e94-41e5-8e55-6e9ddee168c5', name: 'analyst',
+          display_name: 'Avery',
+          job_profile: 'Data Analyst',
           description: 'Analyzes data, performs calculations, validates computed outputs, formats JSON, provides structured insights, and handles temporal/timer queries. Good for math, data processing, output verification, formatting, date/time questions, and time management.',
           system_prompt: '',
           tool_names: JSON.stringify(['calculator', 'json_format', 'text_analysis', 'memory_recall', 'datetime', 'datetime_add', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel']),
@@ -3499,6 +3589,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
         },
         {
           id: '1111d2e3-2828-4570-9bf2-91320b536a2e', name: 'writer',
+          display_name: 'Wren',
+          job_profile: 'Writing Specialist',
           description: 'Writes, edits, and refines text. Good for drafting content, summarizing, and creative writing tasks.',
           system_prompt: '',
           tool_names: JSON.stringify(['text_analysis', 'memory_recall', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel']),
@@ -3521,6 +3613,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
         ...parsedToolNames,
         'cse_run_data_analysis',
       ]));
+      const desiredDisplayName = 'Casey';
+      const desiredJobProfile = 'Code Execution Specialist';
       const desiredDescription = '[USE FIRST FOR ANY CODE/SCRIPT/RUN REQUEST] Writes AND executes code in real isolated Docker containers via CSE. Uses the dedicated data-analysis sandbox for dataframe/charting work and returns actual stdout. Use for: "run", "execute", "run it", "run in a container", "write and run", "test", "script that runs", and dataset analysis that requires real execution.';
       const desiredSystemPrompt = [
         'You are a code writing + execution + verification agent.',
@@ -3554,11 +3648,15 @@ export class SQLiteAdapter implements DatabaseAdapter {
         '- If blocked: exact blocker + next best fallback',
       ].join('\n');
       if (
-        codeExecutorWorker.description !== desiredDescription
+        codeExecutorWorker.display_name !== desiredDisplayName
+        || codeExecutorWorker.job_profile !== desiredJobProfile
+        || codeExecutorWorker.description !== desiredDescription
         || codeExecutorWorker.system_prompt !== desiredSystemPrompt
         || nextToolNames.length !== parsedToolNames.length
       ) {
         await this.updateWorkerAgent(codeExecutorWorker.id, {
+          display_name: desiredDisplayName,
+          job_profile: desiredJobProfile,
           description: desiredDescription,
           system_prompt: desiredSystemPrompt,
           tool_names: JSON.stringify(nextToolNames),
@@ -4543,8 +4641,340 @@ export class SQLiteAdapter implements DatabaseAdapter {
     for (const r of validationRules) await this.createValidationRule(r);
     }
 
-    // ── Scientific Validation seed data ──────────────────────
-    if (cnt('sv_budget_envelope') === 0) {
+    // SGAP seed data (Tech Lunch)
+    if (cnt('sg_brands') === 0) {
+      await this.createSgapTableRow('sg_brands', {
+        id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+        name: 'Tech Lunch',
+        slug: 'tech-lunch',
+        description: 'Daily social growth operations for a startup-focused media brand.',
+        voice: 'Curious, practical, founder-friendly. Prioritize concise and useful posts.',
+        website_url: 'https://techlunch.example.com',
+        goals_json: JSON.stringify({
+          north_star: 'qualified_leads',
+          monthly_targets: { impressions: 500000, followers: 5000, qualified_leads: 300 },
+        }),
+        enabled: 1,
+      });
+    }
+
+    if (cnt('sg_channels') === 0) {
+      const channelRows: Array<Record<string, unknown>> = [
+        {
+          id: '44e1364d-df3c-47e1-aa80-c2f4244f6f8c',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'linkedin',
+          handle: '@techlunchhq',
+          account_ref: 'social-linkedin-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 5, preferred_hours: [9, 12] }),
+          status: 'active',
+          enabled: 1,
+        },
+        {
+          id: 'd8266e74-bf65-496e-a516-a275d9f04d3a',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'instagram',
+          handle: '@techlunchmedia',
+          account_ref: 'social-instagram-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 4, preferred_hours: [10, 18] }),
+          status: 'active',
+          enabled: 1,
+        },
+        {
+          id: 'fecaac70-59a8-4c1b-b123-4ecde0227ae0',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'tiktok',
+          handle: '@techlunchclips',
+          account_ref: 'social-tiktok-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 3, preferred_hours: [16, 20] }),
+          status: 'active',
+          enabled: 1,
+        },
+      ];
+      for (const row of channelRows) await this.createSgapTableRow('sg_channels', row);
+    }
+
+    if (cnt('sg_strategy_settings') === 0) {
+      const strategyRows: Array<Record<string, unknown>> = [
+        {
+          id: '495d9396-9b8d-47a5-929c-0785b44e5077',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          key: 'kpi_ladder',
+          value_json: JSON.stringify({ awareness: ['reach', 'video_views'], engagement: ['comments', 'saves', 'shares'], conversion: ['profile_clicks', 'qualified_leads'] }),
+          enabled: 1,
+        },
+        {
+          id: '99f5f1fb-2089-4166-ae5f-f19ad0d3fcf8',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          key: 'content_mix',
+          value_json: JSON.stringify({ educational: 0.5, founder_story: 0.2, product_demo: 0.2, community: 0.1 }),
+          enabled: 1,
+        },
+      ];
+      for (const row of strategyRows) await this.createSgapTableRow('sg_strategy_settings', row);
+    }
+
+    if (cnt('sg_campaigns') === 0) {
+      await this.createSgapTableRow('sg_campaigns', {
+        id: 'e6ef837e-84c0-4eeb-8a22-909f9982db88',
+        brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+        name: 'Q2 Startup Playbook Push',
+        objective: 'Grow inbound founder leads through educational short-form content.',
+        target_audience: 'Seed to Series A founders and GTM leaders',
+        start_date: '2026-04-01',
+        end_date: '2026-06-30',
+        budget_json: JSON.stringify({ paid_boost_usd: 1500, creator_collab_usd: 2500 }),
+        status: 'active',
+        enabled: 1,
+      });
+    }
+
+    if (cnt('sg_content_pillars') === 0) {
+      const pillarRows: Array<Record<string, unknown>> = [
+        {
+          id: '5a8bf6be-3ae8-4340-b44f-7f8c7119d3b0',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          name: 'AI Performance Explained',
+          description: 'Benchmarks, trade-offs, latency, cost, and practical model selection guidance.',
+          weight: 0.4,
+          themes_json: JSON.stringify(['benchmarks', 'latency', 'cost', 'quality']),
+          enabled: 1,
+        },
+        {
+          id: 'a093568e-ce9d-47ba-ab4f-fafdf60a59fc',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          name: 'Advisory Snippets',
+          description: 'Short implementation snippets and architecture tips for startups.',
+          weight: 0.35,
+          themes_json: JSON.stringify(['code-snippets', 'architecture', 'implementation-advice']),
+          enabled: 1,
+        },
+        {
+          id: '12f5f228-0487-42f9-90b4-f2487fe5fef6',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          name: 'Founder Ops Narratives',
+          description: 'Weekly breakdowns of what worked, what failed, and what changed.',
+          weight: 0.25,
+          themes_json: JSON.stringify(['founder-lessons', 'growth', 'ops']),
+          enabled: 1,
+        },
+      ];
+      for (const row of pillarRows) await this.createSgapTableRow('sg_content_pillars', row);
+    }
+
+    if (cnt('sg_content_queue') === 0) {
+      await this.createSgapTableRow('sg_content_queue', {
+        id: '7835eb9a-6f09-440b-a875-e4e42d2f40f2',
+        brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+        campaign_id: 'e6ef837e-84c0-4eeb-8a22-909f9982db88',
+        channel_id: '44e1364d-df3c-47e1-aa80-c2f4244f6f8c',
+        title: '3 GTM mistakes founders repeat every quarter',
+        brief: 'Carousel post with one tactical takeaway per slide and CTA for newsletter signup.',
+        format: 'carousel',
+        status: 'ready',
+        scheduled_for: '2026-04-15T16:00:00.000Z',
+        asset_urls_json: JSON.stringify([]),
+        metadata_json: JSON.stringify({ pillar: 'educational', cta: 'newsletter_signup' }),
+        enabled: 1,
+      });
+    }
+
+    if (cnt('sg_growth_experiments') === 0) {
+      await this.createSgapTableRow('sg_growth_experiments', {
+        id: '1e0f47f3-4991-4d6b-bde2-b6f0fac9eff2',
+        brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+        campaign_id: 'e6ef837e-84c0-4eeb-8a22-909f9982db88',
+        hypothesis: 'Adding one implementation snippet in the first 30% of a post improves save-rate by at least 20%.',
+        variant_a_json: JSON.stringify({ snippetPlacement: 'early', cta: 'save_for_later' }),
+        variant_b_json: JSON.stringify({ snippetPlacement: 'late', cta: 'comment' }),
+        success_metric: 'save_rate',
+        status: 'running',
+        result_summary: null,
+        enabled: 1,
+      });
+    }
+
+    if (cnt('sg_agent_profiles') === 0) {
+      const agentRows: Array<Record<string, unknown>> = [
+        {
+          id: '9b6f9b6d-c7fa-4445-8562-f97a64bbef0e',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          name: 'sg-editorial-strategist',
+          role: 'strategy',
+          instructions: 'Translate campaign goals into channel-specific editorial plans and KPI-aware briefs.',
+          tool_names: JSON.stringify(['web_search', 'text_analysis', 'memory_recall']),
+          policy_key: 'default',
+          enabled: 1,
+        },
+        {
+          id: '0b4e9d53-b58b-4f8f-a7d4-55e43c9ecb40',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          name: 'sg-growth-analyst',
+          role: 'analytics',
+          instructions: 'Measure campaign performance, detect trend breaks, and propose experiment updates.',
+          tool_names: JSON.stringify(['calculator', 'json_format', 'text_analysis']),
+          policy_key: 'read_only',
+          enabled: 1,
+        },
+      ];
+      for (const row of agentRows) await this.createSgapTableRow('sg_agent_profiles', row);
+    }
+
+    if (cnt('sg_workflow_templates') === 0) {
+      await this.createSgapTableRow('sg_workflow_templates', {
+        id: '675d4a3d-7c6f-4b4b-95c4-2eeb3d0b43f1',
+        brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+        name: 'Weekly Tech Lunch Content Loop',
+        description: 'Plan, draft, review, schedule, and measure weekly posts.',
+        step_graph_json: JSON.stringify({
+          steps: [
+            { id: 'plan', name: 'Plan topics', type: 'plan' },
+            { id: 'generate', name: 'Generate drafts', type: 'generate' },
+            { id: 'review', name: 'Editorial review', type: 'review' },
+            { id: 'schedule', name: 'Schedule posts', type: 'schedule' },
+            { id: 'measure', name: 'Measure performance', type: 'measure' },
+          ],
+        }),
+        trigger_type: 'schedule',
+        enabled: 1,
+      });
+    }
+
+    if (cnt('sg_tool_bindings') === 0) {
+      const toolBindingRows: Array<Record<string, unknown>> = [
+        {
+          id: 'ca57eb96-c49a-4f39-99f6-d9633fd9fffd',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          channel_id: '44e1364d-df3c-47e1-aa80-c2f4244f6f8c',
+          tool_name: 'social_post',
+          provider: 'linkedin',
+          config_json: JSON.stringify({ mode: 'draft', includeHashtags: true }),
+          enabled: 1,
+        },
+        {
+          id: '736b4fa0-93fc-4ce2-b541-e8264c8acb4f',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          channel_id: 'd8266e74-bf65-496e-a516-a275d9f04d3a',
+          tool_name: 'social_post',
+          provider: 'instagram',
+          config_json: JSON.stringify({ mode: 'draft', maxTags: 8 }),
+          enabled: 1,
+        },
+      ];
+      for (const row of toolBindingRows) await this.createSgapTableRow('sg_tool_bindings', row);
+    }
+
+    if (cnt('sg_prompt_variants') === 0) {
+      await this.createSgapTableRow('sg_prompt_variants', {
+        id: '5d126ec8-f89c-4e7f-b7d6-26cd03b43a08',
+        brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+        key: 'post.brief.v1',
+        name: 'Tech Lunch Post Brief Generator',
+        template: 'Create a concise {{platform}} post brief for {{audience}} with one actionable implementation snippet and a measurable CTA.',
+        variables: JSON.stringify(['platform', 'audience']),
+        version: '1.0',
+        is_active: 1,
+        enabled: 1,
+      });
+    }
+
+    if (cnt('sg_kpi_snapshots') === 0) {
+      await this.createSgapTableRow('sg_kpi_snapshots', {
+        id: '1b714a2c-50ff-431b-b10b-b4974043fdf1',
+        brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+        channel_id: '44e1364d-df3c-47e1-aa80-c2f4244f6f8c',
+        snapshot_date: '2026-04-20',
+        metrics_json: JSON.stringify({ impressions: 12400, engagement_rate: 0.062, saves: 241, profile_clicks: 128, qualified_leads: 14 }),
+        source: 'seed-demo',
+      });
+    }
+
+    if (cnt('prompts') > 0 && !await this.getPromptByKey('sgap.tech_lunch.post_brief')) {
+      await this.createPrompt({
+        id: 'ec4226c3-c4be-48e9-a492-b4d7acb2e69e',
+        key: 'sgap.tech_lunch.post_brief',
+        name: 'SGAP: Tech Lunch Post Brief',
+        description: 'Model-facing template for creating short social post briefs focused on actionable AI implementation guidance and measurable outcomes.',
+        category: 'social-growth',
+        prompt_type: 'template',
+        owner: 'system',
+        status: 'published',
+        tags: JSON.stringify(['sgap', 'social-growth', 'content-brief']),
+        template: 'Generate a {{platform}} brief for {{audience}}. Include one practical AI implementation snippet, one advisory insight, and one KPI-focused CTA.',
+        variables: JSON.stringify(['platform', 'audience']),
+        version: '1.0',
+        model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
+        execution_defaults: JSON.stringify({ strategy: 'singlePass' }),
+        framework: null,
+        metadata: JSON.stringify({ domain: 'sgap', brandSlug: 'tech-lunch' }),
+        is_default: 0,
+        enabled: 1,
+      });
+    }
+
+    if (!await this.getSkill('0533eb6b-c030-44c9-bba2-79fca66ae213')) {
+      await this.createSkill({
+        id: '0533eb6b-c030-44c9-bba2-79fca66ae213',
+        name: 'SGAP Tech Lunch Growth Loop',
+        description: 'Activates social growth planning for Tech Lunch with KPI-aware content sequencing and channel-specific advisory snippets.',
+        category: 'social-growth',
+        trigger_patterns: JSON.stringify(['tech lunch growth', 'create social campaign', 'content calendar', 'brand development']),
+        instructions: 'When active, structure output into planning, content production, distribution, and measurement. Use SGAP workflow templates and preserve KPI traceability.',
+        tool_names: JSON.stringify(['web_search', 'text_analysis', 'calculator', 'json_format']),
+        examples: JSON.stringify([
+          { input: 'Create a weekly social plan for AI performance content', output: 'Plan includes channels, cadence, and KPI ladder' },
+        ]),
+        tags: JSON.stringify(['sgap', 'growth', 'social']),
+        priority: 30,
+        version: '1.0',
+        tool_policy_key: 'default',
+        enabled: 1,
+      });
+    }
+
+    if (!await this.getWorkerAgent('4af84061-f85c-4f6f-9979-2a5a6eb7dbd7')) {
+      await this.createWorkerAgent({
+        id: '4af84061-f85c-4f6f-9979-2a5a6eb7dbd7',
+        name: 'sg-content-operator',
+        display_name: 'Sage',
+        job_profile: 'Social Content Operator',
+        description: 'Operates SGAP content workflows: transforms briefs into channel-ready posts and proposes KPI-grounded optimizations.',
+        system_prompt: 'You are a social growth content operator. Produce concise, platform-aware drafts with implementation-first AI guidance.',
+        tool_names: JSON.stringify(['text_analysis', 'json_format', 'memory_recall']),
+        persona: 'agent_worker',
+        trigger_patterns: JSON.stringify(['social post', 'content queue', 'campaign brief']),
+        task_contract_id: null,
+        max_retries: 1,
+        priority: 20,
+        category: 'social-growth',
+        enabled: 1,
+      });
+    }
+
+    if (!(await this.listWorkflowDefs()).some(w => w.id === '4c1f9b5f-8f89-4f9f-bb8f-65248a4f131d')) {
+      await this.createWorkflowDef({
+        id: '4c1f9b5f-8f89-4f9f-bb8f-65248a4f131d',
+        name: 'SGAP Tech Lunch Weekly Loop',
+        description: 'Database-defined SGAP workflow for planning, drafting, review, scheduling, and KPI measurement.',
+        version: '1.0',
+        steps: JSON.stringify([
+          { id: 'plan', name: 'Plan weekly topics', type: 'deterministic', handler: 'plan' },
+          { id: 'draft', name: 'Draft channel content', type: 'agentic', handler: 'generate' },
+          { id: 'review', name: 'Review and align KPI', type: 'deterministic', handler: 'review' },
+          { id: 'schedule', name: 'Schedule posts', type: 'deterministic', handler: 'schedule' },
+          { id: 'measure', name: 'Capture KPI snapshots', type: 'deterministic', handler: 'measure' },
+        ]),
+        entry_step_id: 'plan',
+        metadata: JSON.stringify({ domain: 'sgap', brandSlug: 'tech-lunch' }),
+        enabled: 1,
+      });
+    }
+
+    // ── Hypothesis Validation seed data ──────────────────────
+    if (cnt('hv_budget_envelope') === 0) {
       await this.createBudgetEnvelope({
         id: '019500000-0000-7000-8000-000000000001',
         tenant_id: 'system',
@@ -4566,7 +4996,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         diminishing_returns_epsilon: 0.02,
       });
     }
-    if (cnt('sv_hypothesis') === 0) {
+    if (cnt('hv_hypothesis') === 0) {
       await this.createHypothesis({
         id: '019500000-0000-7000-8000-000000000010',
         tenant_id: 'system',
@@ -4583,12 +5013,12 @@ export class SQLiteAdapter implements DatabaseAdapter {
     }
   }
 
-  // ─── Scientific Validation ──────────────────────────────────
+  // ─── Hypothesis Validation ──────────────────────────────────
 
   async createBudgetEnvelope(envelope: Omit<SvBudgetEnvelopeRow, 'created_at'>): Promise<void> {
     const now = new Date().toISOString();
     this.d.prepare(
-      `INSERT INTO sv_budget_envelope
+      `INSERT INTO hv_budget_envelope
          (id, tenant_id, name, max_llm_cents, max_sandbox_cents, max_wall_seconds,
           max_rounds, diminishing_returns_epsilon, created_at)
        VALUES (?,?,?,?,?,?,?,?,?)`,
@@ -4601,20 +5031,20 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async getBudgetEnvelope(id: string, tenantId: string): Promise<SvBudgetEnvelopeRow | null> {
     return (this.d.prepare(
-      `SELECT * FROM sv_budget_envelope WHERE id = ? AND tenant_id = ?`,
+      `SELECT * FROM hv_budget_envelope WHERE id = ? AND tenant_id = ?`,
     ).get(id, tenantId) as SvBudgetEnvelopeRow | undefined) ?? null;
   }
 
   async listBudgetEnvelopes(tenantId: string): Promise<SvBudgetEnvelopeRow[]> {
     return this.d.prepare(
-      `SELECT * FROM sv_budget_envelope WHERE tenant_id = ? ORDER BY created_at DESC`,
+      `SELECT * FROM hv_budget_envelope WHERE tenant_id = ? ORDER BY created_at DESC`,
     ).all(tenantId) as SvBudgetEnvelopeRow[];
   }
 
   async createHypothesis(hypothesis: Omit<SvHypothesisRow, 'created_at' | 'updated_at'>): Promise<void> {
     const now = new Date().toISOString();
     this.d.prepare(
-      `INSERT INTO sv_hypothesis
+      `INSERT INTO hv_hypothesis
          (id, tenant_id, submitted_by, title, statement, domain_tags, status,
           budget_envelope_id, workflow_run_id, trace_id, contract_id, created_at, updated_at)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -4629,19 +5059,19 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async getHypothesis(id: string, tenantId: string): Promise<SvHypothesisRow | null> {
     return (this.d.prepare(
-      `SELECT * FROM sv_hypothesis WHERE id = ? AND tenant_id = ?`,
+      `SELECT * FROM hv_hypothesis WHERE id = ? AND tenant_id = ?`,
     ).get(id, tenantId) as SvHypothesisRow | undefined) ?? null;
   }
 
   async listHypotheses(tenantId: string, limit = 50, offset = 0): Promise<SvHypothesisRow[]> {
     return this.d.prepare(
-      `SELECT * FROM sv_hypothesis WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      `SELECT * FROM hv_hypothesis WHERE tenant_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     ).all(tenantId, limit, offset) as SvHypothesisRow[];
   }
 
   async updateHypothesisStatus(id: string, status: SvHypothesisStatus, updatedAt: string): Promise<void> {
     this.d.prepare(
-      `UPDATE sv_hypothesis SET status = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE hv_hypothesis SET status = ?, updated_at = ? WHERE id = ?`,
     ).run(status, updatedAt, id);
   }
 
@@ -4655,13 +5085,13 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (opts.traceId !== undefined) { sets.push('trace_id = ?'); vals.push(opts.traceId); }
     if (opts.contractId !== undefined) { sets.push('contract_id = ?'); vals.push(opts.contractId); }
     vals.push(id);
-    this.d.prepare(`UPDATE sv_hypothesis SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+    this.d.prepare(`UPDATE hv_hypothesis SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
   }
 
   async createSubClaim(claim: Omit<SvSubClaimRow, 'created_at'>): Promise<void> {
     const now = new Date().toISOString();
     this.d.prepare(
-      `INSERT INTO sv_sub_claim
+      `INSERT INTO hv_sub_claim
          (id, tenant_id, hypothesis_id, parent_sub_claim_id, statement, claim_type,
           testability_score, created_at)
        VALUES (?,?,?,?,?,?,?,?)`,
@@ -4673,19 +5103,19 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   async getSubClaim(id: string): Promise<SvSubClaimRow | null> {
-    return (this.d.prepare(`SELECT * FROM sv_sub_claim WHERE id = ?`).get(id) as SvSubClaimRow | undefined) ?? null;
+    return (this.d.prepare(`SELECT * FROM hv_sub_claim WHERE id = ?`).get(id) as SvSubClaimRow | undefined) ?? null;
   }
 
   async listSubClaims(hypothesisId: string): Promise<SvSubClaimRow[]> {
     return this.d.prepare(
-      `SELECT * FROM sv_sub_claim WHERE hypothesis_id = ? ORDER BY created_at ASC`,
+      `SELECT * FROM hv_sub_claim WHERE hypothesis_id = ? ORDER BY created_at ASC`,
     ).all(hypothesisId) as SvSubClaimRow[];
   }
 
   async createVerdict(verdict: Omit<SvVerdictRow, 'created_at'>): Promise<void> {
     const now = new Date().toISOString();
     this.d.prepare(
-      `INSERT INTO sv_verdict
+      `INSERT INTO hv_verdict
          (id, tenant_id, hypothesis_id, verdict, confidence_lo, confidence_hi,
           key_evidence_ids, falsifiers, limitations, contract_id, replay_trace_id,
           emitted_by, created_at)
@@ -4701,19 +5131,19 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async getVerdictByHypothesis(hypothesisId: string): Promise<SvVerdictRow | null> {
     return (this.d.prepare(
-      `SELECT * FROM sv_verdict WHERE hypothesis_id = ?`,
+      `SELECT * FROM hv_verdict WHERE hypothesis_id = ?`,
     ).get(hypothesisId) as SvVerdictRow | undefined) ?? null;
   }
 
   async getVerdictById(id: string): Promise<SvVerdictRow | null> {
-    return (this.d.prepare(`SELECT * FROM sv_verdict WHERE id = ?`).get(id) as SvVerdictRow | undefined) ?? null;
+    return (this.d.prepare(`SELECT * FROM hv_verdict WHERE id = ?`).get(id) as SvVerdictRow | undefined) ?? null;
   }
 
   // ─── Evidence events (SSE /events) ────────────────────────
 
   async createEvidenceEvent(event: Omit<SvEvidenceEventRow, 'created_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO sv_evidence_event
+      `INSERT INTO hv_evidence_event
        (id, hypothesis_id, step_id, agent_id, evidence_id, kind, summary, source_type, tool_key, reproducibility_hash, created_at)
        VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
@@ -4727,16 +5157,16 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async listEvidenceEvents(hypothesisId: string, afterId?: string, limit = 100): Promise<SvEvidenceEventRow[]> {
     if (afterId) {
       const anchor = this.d.prepare(
-        `SELECT created_at FROM sv_evidence_event WHERE id = ?`,
+        `SELECT created_at FROM hv_evidence_event WHERE id = ?`,
       ).get(afterId) as { created_at: string } | undefined;
       if (anchor) {
         return this.d.prepare(
-          `SELECT * FROM sv_evidence_event WHERE hypothesis_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT ?`,
+          `SELECT * FROM hv_evidence_event WHERE hypothesis_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT ?`,
         ).all(hypothesisId, anchor.created_at, limit) as SvEvidenceEventRow[];
       }
     }
     return this.d.prepare(
-      `SELECT * FROM sv_evidence_event WHERE hypothesis_id = ? ORDER BY created_at ASC LIMIT ?`,
+      `SELECT * FROM hv_evidence_event WHERE hypothesis_id = ? ORDER BY created_at ASC LIMIT ?`,
     ).all(hypothesisId, limit) as SvEvidenceEventRow[];
   }
 
@@ -4744,7 +5174,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createAgentTurn(turn: Omit<SvAgentTurnRow, 'created_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO sv_agent_turn
+      `INSERT INTO hv_agent_turn
        (id, hypothesis_id, round_index, from_agent, to_agent, message, cites_evidence_ids, dissent, created_at)
        VALUES (?,?,?,?,?,?,?,?,?)`,
     ).run(
@@ -4758,16 +5188,16 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async listAgentTurns(hypothesisId: string, afterId?: string, limit = 200): Promise<SvAgentTurnRow[]> {
     if (afterId) {
       const anchor = this.d.prepare(
-        `SELECT created_at FROM sv_agent_turn WHERE id = ?`,
+        `SELECT created_at FROM hv_agent_turn WHERE id = ?`,
       ).get(afterId) as { created_at: string } | undefined;
       if (anchor) {
         return this.d.prepare(
-          `SELECT * FROM sv_agent_turn WHERE hypothesis_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT ?`,
+          `SELECT * FROM hv_agent_turn WHERE hypothesis_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT ?`,
         ).all(hypothesisId, anchor.created_at, limit) as SvAgentTurnRow[];
       }
     }
     return this.d.prepare(
-      `SELECT * FROM sv_agent_turn WHERE hypothesis_id = ? ORDER BY created_at ASC LIMIT ?`,
+      `SELECT * FROM hv_agent_turn WHERE hypothesis_id = ? ORDER BY created_at ASC LIMIT ?`,
     ).all(hypothesisId, limit) as SvAgentTurnRow[];
   }
 }

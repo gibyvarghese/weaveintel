@@ -1,5 +1,5 @@
 /**
- * Scientific Validation — Live Deliberation View
+ * Hypothesis Validation — Live Deliberation View
  *
  * Streams evidence events and agent-dialogue turns via SSE as the
  * multi-agent workflow runs. When the run reaches a terminal status
@@ -46,7 +46,24 @@ const AGENT_EMOJI: Record<string, string> = {
   supervisor: '🧠',
 };
 
+const AGENT_DISPLAY_NAME: Record<string, string> = {
+  'sv-supervisor': 'geneWeave',
+  'sv-decomposer': 'Dylan',
+  'sv-literature': 'Larry',
+  'sv-statistical': 'Stella',
+  'sv-mathematical': 'Max',
+  'sv-simulation': 'Sima',
+  'sv-adversarial': 'Ada',
+  code_executor: 'Casey',
+  statsnz_specialist: 'Nia',
+  researcher: 'Riley',
+  analyst: 'Avery',
+  writer: 'Wren',
+};
+
 function agentLabel(id: string): string {
+  const explicit = AGENT_DISPLAY_NAME[id];
+  if (explicit) return explicit;
   return id.replace(/^sv-/, '').replace(/-/g, ' ');
 }
 

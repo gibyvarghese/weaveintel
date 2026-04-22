@@ -207,6 +207,13 @@ export class ChatEngine {
     const sorted = [...workerRows].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
     return Promise.all(sorted.map(async (row) => {
       const toolNames = (this.safeParseJson(row.tool_names) as string[]) ?? [];
+      const displayName = (row.display_name?.trim() || row.name).trim();
+      const jobProfile = (row.job_profile?.trim() || 'Worker Agent').trim();
+      const workerDescription = [
+        `Display Name: ${displayName}`,
+        `Job Profile: ${jobProfile}`,
+        row.description,
+      ].filter(Boolean).join('\n');
       const systemPrompt = applyTemporalToolPolicy({
         basePrompt: row.system_prompt ?? undefined,
         toolNames,
@@ -221,7 +228,7 @@ export class ChatEngine {
 
       return {
         name: row.name,
-        description: row.description,
+        description: workerDescription,
         systemPrompt,
         model,
         tools,
@@ -607,6 +614,14 @@ export class ChatEngine {
     // Human-task policy checks on tool calls
     const policyChecks = steps ? await evaluateTaskPolicies(this.db, steps) : undefined;
 
+    // Guard against persisting empty assistant text after successful execution.
+    if (!assistantContent.trim()) {
+      const hadExecutionActivity = Boolean(steps?.length);
+      assistantContent = hadExecutionActivity
+        ? 'I completed execution steps but could not produce a final response text. Please retry this request; if this repeats, check the trace for this run.'
+        : 'I could not produce a response text for this request. Please retry.';
+    }
+
     // Post-execution guardrails (must run before eval so the decision feeds into the eval score)
     const SUPERVISOR_INTERNAL_TOOLS = new Set(['think', 'plan', 'synthesize', 'reflect', 'log']);
     const toolEvidence = steps
@@ -979,6 +994,15 @@ export class ChatEngine {
     const policyChecks = steps.length ? await evaluateTaskPolicies(this.db, steps) : undefined;
     if (policyChecks?.length) {
       res.write(`data: ${JSON.stringify({ type: 'policy_checks', checks: policyChecks })}\n\n`);
+    }
+
+    // Guard against sending/persisting empty stream output after execution.
+    if (!fullText.trim()) {
+      const hadExecutionActivity = steps.length > 0;
+      fullText = hadExecutionActivity
+        ? 'I completed execution steps but could not produce a final response text. Please retry this request; if this repeats, check the trace for this run.'
+        : 'I could not produce a response text for this request. Please retry.';
+      res.write(`data: ${JSON.stringify({ type: 'text', text: fullText })}\n\n`);
     }
 
     // Post-execution guardrails (must run before eval so the decision feeds into the eval score)

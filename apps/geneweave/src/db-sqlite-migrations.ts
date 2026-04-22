@@ -686,12 +686,11 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_approval_chat ON tool_approval_requests(chat_id, status)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_approval_tool ON tool_approval_requests(tool_name, status)`);
 
-  // ── Scientific Validation — Phase 2 bootstrap migrations ──
-  // These CREATE TABLE IF NOT EXISTS statements allow existing databases
-  // to receive the sv_* tables without a full schema wipe.
+  // ── Hypothesis Validation — Phase 2 bootstrap migrations ──
+  // Canonical tables are hv_*. Existing sv_* deployments are backfilled.
 
   safeExec(db, `
-    CREATE TABLE IF NOT EXISTS sv_budget_envelope (
+    CREATE TABLE IF NOT EXISTS hv_budget_envelope (
       id TEXT PRIMARY KEY,
       tenant_id TEXT NOT NULL,
       name TEXT NOT NULL,
@@ -705,7 +704,7 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   `);
 
   safeExec(db, `
-    CREATE TABLE IF NOT EXISTS sv_hypothesis (
+    CREATE TABLE IF NOT EXISTS hv_hypothesis (
       id TEXT PRIMARY KEY,
       tenant_id TEXT NOT NULL,
       submitted_by TEXT NOT NULL,
@@ -714,7 +713,7 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
       domain_tags TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'queued'
         CHECK (status IN ('queued','running','verdict','abandoned')),
-      budget_envelope_id TEXT NOT NULL REFERENCES sv_budget_envelope(id),
+      budget_envelope_id TEXT NOT NULL REFERENCES hv_budget_envelope(id),
       workflow_run_id TEXT,
       trace_id TEXT,
       contract_id TEXT,
@@ -722,15 +721,15 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
       updated_at TEXT NOT NULL
     )
   `);
-  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sv_hypothesis_tenant ON sv_hypothesis(tenant_id, created_at DESC)`);
-  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sv_hypothesis_status ON sv_hypothesis(tenant_id, status)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_hv_hypothesis_tenant ON hv_hypothesis(tenant_id, created_at DESC)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_hv_hypothesis_status ON hv_hypothesis(tenant_id, status)`);
 
   safeExec(db, `
-    CREATE TABLE IF NOT EXISTS sv_sub_claim (
+    CREATE TABLE IF NOT EXISTS hv_sub_claim (
       id TEXT PRIMARY KEY,
       tenant_id TEXT NOT NULL,
-      hypothesis_id TEXT NOT NULL REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
-      parent_sub_claim_id TEXT REFERENCES sv_sub_claim(id),
+      hypothesis_id TEXT NOT NULL REFERENCES hv_hypothesis(id) ON DELETE CASCADE,
+      parent_sub_claim_id TEXT REFERENCES hv_sub_claim(id),
       statement TEXT NOT NULL,
       claim_type TEXT NOT NULL
         CHECK (claim_type IN ('mechanism','epidemiological','mathematical','dose_response','causal','other')),
@@ -738,13 +737,13 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
       created_at TEXT NOT NULL
     )
   `);
-  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sv_sub_claim_hypothesis ON sv_sub_claim(hypothesis_id)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_hv_sub_claim_hypothesis ON hv_sub_claim(hypothesis_id)`);
 
   safeExec(db, `
-    CREATE TABLE IF NOT EXISTS sv_verdict (
+    CREATE TABLE IF NOT EXISTS hv_verdict (
       id TEXT PRIMARY KEY,
       tenant_id TEXT NOT NULL,
-      hypothesis_id TEXT NOT NULL UNIQUE REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+      hypothesis_id TEXT NOT NULL UNIQUE REFERENCES hv_hypothesis(id) ON DELETE CASCADE,
       verdict TEXT NOT NULL
         CHECK (verdict IN ('supported','refuted','inconclusive','ill_posed','out_of_scope')),
       confidence_lo REAL NOT NULL CHECK (confidence_lo BETWEEN 0 AND 1),
@@ -763,12 +762,52 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   // ── worker_agents: add category column ──────────────────────────────────────
   // Existing DBs need the column added. New DBs get it from CREATE TABLE.
   safeExec(db, `ALTER TABLE worker_agents ADD COLUMN category TEXT NOT NULL DEFAULT 'general'`);
-
-  // ── sv_evidence_event and sv_agent_turn ─────────────────────────────────────
+  safeExec(db, `ALTER TABLE worker_agents ADD COLUMN display_name TEXT`);
+  safeExec(db, `ALTER TABLE worker_agents ADD COLUMN job_profile TEXT`);
   safeExec(db, `
-    CREATE TABLE IF NOT EXISTS sv_evidence_event (
+    UPDATE worker_agents
+    SET display_name = CASE name
+      WHEN 'code_executor' THEN 'Casey'
+      WHEN 'statsnz_specialist' THEN 'Nia'
+      WHEN 'researcher' THEN 'Riley'
+      WHEN 'analyst' THEN 'Avery'
+      WHEN 'writer' THEN 'Wren'
+      WHEN 'sv-supervisor' THEN 'geneWeave'
+      WHEN 'sv-decomposer' THEN 'Dylan'
+      WHEN 'sv-literature' THEN 'Larry'
+      WHEN 'sv-statistical' THEN 'Stella'
+      WHEN 'sv-mathematical' THEN 'Max'
+      WHEN 'sv-simulation' THEN 'Sima'
+      WHEN 'sv-adversarial' THEN 'Ada'
+      ELSE name
+    END
+    WHERE COALESCE(display_name, '') = ''
+  `);
+  safeExec(db, `
+    UPDATE worker_agents
+    SET job_profile = CASE name
+      WHEN 'code_executor' THEN 'Code Execution Specialist'
+      WHEN 'statsnz_specialist' THEN 'NZ Data Specialist'
+      WHEN 'researcher' THEN 'Research Specialist'
+      WHEN 'analyst' THEN 'Data Analyst'
+      WHEN 'writer' THEN 'Writing Specialist'
+      WHEN 'sv-supervisor' THEN 'Hypothesis Validation Supervisor'
+      WHEN 'sv-decomposer' THEN 'Claim Decomposition Specialist'
+      WHEN 'sv-literature' THEN 'Literator validator'
+      WHEN 'sv-statistical' THEN 'Statistical Validator'
+      WHEN 'sv-mathematical' THEN 'Mathematical Validator'
+      WHEN 'sv-simulation' THEN 'Simulation Validator'
+      WHEN 'sv-adversarial' THEN 'Adversarial Validator'
+      ELSE 'Worker Agent'
+    END
+    WHERE COALESCE(job_profile, '') = ''
+  `);
+
+  // ── hv_evidence_event and hv_agent_turn ─────────────────────────────────────
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS hv_evidence_event (
       id TEXT PRIMARY KEY,
-      hypothesis_id TEXT NOT NULL REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+      hypothesis_id TEXT NOT NULL REFERENCES hv_hypothesis(id) ON DELETE CASCADE,
       step_id TEXT NOT NULL,
       agent_id TEXT NOT NULL,
       evidence_id TEXT NOT NULL,
@@ -780,12 +819,12 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
-  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sv_evidence_hypothesis ON sv_evidence_event(hypothesis_id, created_at ASC)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_hv_evidence_hypothesis ON hv_evidence_event(hypothesis_id, created_at ASC)`);
 
   safeExec(db, `
-    CREATE TABLE IF NOT EXISTS sv_agent_turn (
+    CREATE TABLE IF NOT EXISTS hv_agent_turn (
       id TEXT PRIMARY KEY,
-      hypothesis_id TEXT NOT NULL REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+      hypothesis_id TEXT NOT NULL REFERENCES hv_hypothesis(id) ON DELETE CASCADE,
       round_index INTEGER NOT NULL DEFAULT 0,
       from_agent TEXT NOT NULL,
       to_agent TEXT,
@@ -795,21 +834,83 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
-  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sv_agent_turn_hypothesis ON sv_agent_turn(hypothesis_id, created_at ASC)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_hv_agent_turn_hypothesis ON hv_agent_turn(hypothesis_id, created_at ASC)`);
 
-  // ── Scientific Validation tool policy ────────────────────────────────────────
-  // A dedicated policy for the 18 SV tools so operators can tune rate limits,
+  // Backfill from legacy sv_* tables for existing installations.
+  safeExec(db, `
+    INSERT OR IGNORE INTO hv_budget_envelope
+    (id, tenant_id, name, max_llm_cents, max_sandbox_cents, max_wall_seconds, max_rounds, diminishing_returns_epsilon, created_at)
+    SELECT id, tenant_id, name, max_llm_cents, max_sandbox_cents, max_wall_seconds, max_rounds, diminishing_returns_epsilon, created_at
+    FROM sv_budget_envelope
+  `);
+  safeExec(db, `
+    INSERT OR IGNORE INTO hv_hypothesis
+    (id, tenant_id, submitted_by, title, statement, domain_tags, status, budget_envelope_id, workflow_run_id, trace_id, contract_id, created_at, updated_at)
+    SELECT id, tenant_id, submitted_by, title, statement, domain_tags, status, budget_envelope_id, workflow_run_id, trace_id, contract_id, created_at, updated_at
+    FROM sv_hypothesis
+  `);
+  safeExec(db, `
+    INSERT OR IGNORE INTO hv_sub_claim
+    (id, tenant_id, hypothesis_id, parent_sub_claim_id, statement, claim_type, testability_score, created_at)
+    SELECT id, tenant_id, hypothesis_id, parent_sub_claim_id, statement, claim_type, testability_score, created_at
+    FROM sv_sub_claim
+  `);
+  safeExec(db, `
+    INSERT OR IGNORE INTO hv_verdict
+    (id, tenant_id, hypothesis_id, verdict, confidence_lo, confidence_hi, key_evidence_ids, falsifiers, limitations, contract_id, replay_trace_id, emitted_by, created_at)
+    SELECT id, tenant_id, hypothesis_id, verdict, confidence_lo, confidence_hi, key_evidence_ids, falsifiers, limitations, contract_id, replay_trace_id, emitted_by, created_at
+    FROM sv_verdict
+  `);
+  safeExec(db, `
+    INSERT OR IGNORE INTO hv_evidence_event
+    (id, hypothesis_id, step_id, agent_id, evidence_id, kind, summary, source_type, tool_key, reproducibility_hash, created_at)
+    SELECT id, hypothesis_id, step_id, agent_id, evidence_id, kind, summary, source_type, tool_key, reproducibility_hash, created_at
+    FROM sv_evidence_event
+  `);
+  safeExec(db, `
+    INSERT OR IGNORE INTO hv_agent_turn
+    (id, hypothesis_id, round_index, from_agent, to_agent, message, cites_evidence_ids, dissent, created_at)
+    SELECT id, hypothesis_id, round_index, from_agent, to_agent, message, cites_evidence_ids, dissent, created_at
+    FROM sv_agent_turn
+  `);
+
+  // ── Hypothesis Validation tool policy ────────────────────────────────────────
+  // A dedicated policy for the hypothesis-validation tools so operators can tune rate limits,
   // execution timeouts, and logging without touching the default policy.
   // All SV tools are external-side-effect (container compute or external HTTP).
   safeExec(db, `
     INSERT OR IGNORE INTO tool_policies
       (id, key, name, description, applies_to, applies_to_risk_levels, approval_required, allowed_risk_levels, max_execution_ms, rate_limit_per_minute, max_concurrent, require_dry_run, log_input_output, persona_scope, enabled)
     VALUES
-      ('c5e6f7a8-b9c0-41d2-e3f4-a5b6c7d8e9f0', 'scientific_validation', 'Scientific Validation Policy',
-       'Governs the 18 sandboxed scientific and evidence tools used by the SV workflow. Allows external-side-effect and read-only risk levels. 60 s max execution for container tools. 30 req/min per scope. Full I/O logging for reproducibility audits.',
+      ('c5e6f7a8-b9c0-41d2-e3f4-a5b6c7d8e9f0', 'hypothesis_validation', 'Hypothesis Validation Policy',
+       'Governs sandboxed and evidence tools used by hypothesis-validation workflows. Allows external-side-effect and read-only risk levels. 60 s max execution for container tools. 30 req/min per scope. Full I/O logging for reproducibility audits.',
        '["sympy.simplify","sympy.solve","sympy.integrate","wolfram.query","scipy.stats","scipy.meta","scipy.power","pymc.sample","r.meta","rdkit.describe","rdkit.similarity","biopython.align","networkx.analyse","arxiv.search","pubmed.search","semanticscholar.search","openalex.search","crossref.resolve","europepmc.search"]',
        NULL, 0,
        '["read-only","external-side-effect"]',
        60000, 30, NULL, 0, 1, NULL, 1)
+  `);
+
+  // Backward-compatible alias key for existing skill configurations.
+  safeExec(db, `
+    INSERT OR IGNORE INTO tool_policies
+      (id, key, name, description, applies_to, applies_to_risk_levels, approval_required, allowed_risk_levels, max_execution_ms, rate_limit_per_minute, max_concurrent, require_dry_run, log_input_output, persona_scope, enabled)
+    SELECT
+      'd6f7a8b9-c0d1-42e3-f4a5-b6c7d8e9f011',
+      'scientific_validation',
+      'Scientific Validation Policy (Alias)',
+      description,
+      applies_to,
+      applies_to_risk_levels,
+      approval_required,
+      allowed_risk_levels,
+      max_execution_ms,
+      rate_limit_per_minute,
+      max_concurrent,
+      require_dry_run,
+      log_input_output,
+      persona_scope,
+      enabled
+    FROM tool_policies
+    WHERE key = 'hypothesis_validation'
   `);
 }

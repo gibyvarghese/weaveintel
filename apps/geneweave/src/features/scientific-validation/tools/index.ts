@@ -1,5 +1,5 @@
 /**
- * Scientific Validation — Tools barrel and top-level factory
+ * Hypothesis Validation — Tools barrel and top-level factory
  *
  * Usage (in apps/geneweave/src/tools.ts):
  *
@@ -36,7 +36,7 @@ export type { SvImageDigests } from './image-policy.js';
 export type { EvidenceResult, EvidenceItem } from './evidence.js';
 
 /**
- * Create all 18 Scientific Validation tools and return them as a flat
+ * Create all hypothesis-validation tools and return them as a flat
  * `Record<string, Tool>` suitable for spreading into `BUILTIN_TOOLS`.
  *
  * Container images:
@@ -47,7 +47,7 @@ export type { EvidenceResult, EvidenceItem } from './evidence.js';
  * Digests are loaded from `digests.json` at call time. In local dev the
  * placeholder zeros are always present; use FakeRuntime to bypass policy.
  */
-export function createSVToolMap(): Record<string, Tool> {
+export function createHypothesisValidationToolMap(): Record<string, Tool> {
   const digests = loadSvDigests();
   const policy = createSvImagePolicy(digests);
 
@@ -71,3 +71,6 @@ export function createSVToolMap(): Record<string, Tool> {
     ...evidence,
   };
 }
+
+// Backward-compatible export used by existing imports.
+export const createSVToolMap = createHypothesisValidationToolMap;

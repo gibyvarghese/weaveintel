@@ -110,9 +110,11 @@ export const CALLABLE_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
   },
   'worker-agents': {
     singular: 'Worker Agent', apiPath: 'admin/worker-agents', listKey: 'workerAgents',
-    cols: ['name', 'persona', 'priority', 'enabled'],
+    cols: ['display_name', 'job_profile', 'persona', 'priority', 'enabled'],
     fields: [
-      { key: 'name', label: 'Name' },
+      { key: 'name', label: 'Identifier Name' },
+      { key: 'display_name', label: 'Display Name' },
+      { key: 'job_profile', label: 'Job Profile' },
       { key: 'description', label: 'Detailed Description (model-facing)' },
       { key: 'system_prompt', label: 'System Prompt', textarea: true, rows: 6 },
       { key: 'tool_names', label: 'Tool Names (JSON array)', textarea: true, rows: 3, save: 'json' },

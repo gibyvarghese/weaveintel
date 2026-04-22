@@ -1,7 +1,7 @@
 /**
- * Scientific Validation — Submit Hypothesis View
+ * Hypothesis Validation — Submit Hypothesis View
  *
- * Renders a form to submit a new scientific hypothesis for multi-agent
+ * Renders a form to submit a new hypothesis for multi-agent
  * validation. On success, transitions the state to the live deliberation view.
  */
 import { h } from '../../../ui/dom.js';
@@ -16,7 +16,7 @@ export function renderSVSubmitView(options: { render: () => void }): HTMLElement
 
   const titleInput = h('input', {
     type: 'text',
-    placeholder: 'Enter a short title for this hypothesis (e.g. "Aspirin reduces MI risk")',
+    placeholder: 'Enter a short title for this hypothesis (e.g. "Shorter onboarding improves activation")',
     style: 'width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--bg4);background:var(--bg2);color:var(--fg);font-size:14px;box-sizing:border-box',
   }) as HTMLInputElement;
 
@@ -28,7 +28,7 @@ export function renderSVSubmitView(options: { render: () => void }): HTMLElement
 
   const tagsInput = h('input', {
     type: 'text',
-    placeholder: 'cardiology, pharmacology, rct (comma-separated)',
+    placeholder: 'growth, operations, policy, finance (comma-separated)',
     style: 'width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--bg4);background:var(--bg2);color:var(--fg);font-size:14px;box-sizing:border-box',
   }) as HTMLInputElement;
 
@@ -154,7 +154,7 @@ export function renderSVSubmitView(options: { render: () => void }): HTMLElement
         h('div', null,
           h('h2', { style: 'font-size:22px;font-weight:700;color:var(--fg);margin:0 0 4px' }, 'Validate a Hypothesis'),
           h('p', { style: 'color:var(--fg3);font-size:13px;margin:0' },
-            'Submit a hypothesis for multi-agent literature, statistical, and mechanistic analysis.'),
+            'Submit a hypothesis for multi-agent evidence gathering, quantitative analysis, simulation, and adversarial review.'),
         )
       ),
       recentEl,
@@ -163,7 +163,7 @@ export function renderSVSubmitView(options: { render: () => void }): HTMLElement
       },
         h('div', { style: 'font-size:15px;font-weight:600;color:var(--fg);margin-bottom:20px' }, 'New Hypothesis'),
         field('Title', titleInput, 'Short descriptive title for the hypothesis.'),
-        field('Statement', statementArea, 'Full falsifiable statement. Be precise about population, intervention, comparator, and outcome.'),
+        field('Statement', statementArea, 'Full falsifiable statement. Be precise about scope, metrics, and expected direction of effect.'),
         field('Domain Tags', tagsInput, 'Optional. Helps route to domain-specific tools.'),
         errorEl,
         h('div', { style: 'margin-top:8px' }, submitBtn),

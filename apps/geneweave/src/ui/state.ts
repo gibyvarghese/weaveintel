@@ -98,7 +98,7 @@ export const state: any = {
   _upgradeStatus: null,
   _upgradeMsg: '',
 
-  // Scientific Validation
+  // Hypothesis Validation
   svView: 'submit' as 'submit' | 'live' | 'verdict',
   svHypothesisId: null as string | null,
   svHypothesis: null as any,

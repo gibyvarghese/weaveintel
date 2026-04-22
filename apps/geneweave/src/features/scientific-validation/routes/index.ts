@@ -1,5 +1,5 @@
 /**
- * Scientific Validation — HTTP route handlers
+ * Hypothesis Validation — HTTP route handlers
  *
  * Implements the full SV REST + SSE surface:
  *  POST   /api/sv/hypotheses                — submit hypothesis, start async workflow
@@ -80,8 +80,18 @@ export function registerSVRoutes(
   // Idempotency store for POST mutation routes (24-hour TTL, 10k entries max)
   const iStore = createIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000, maxEntries: 10_000 });
 
+  const getHv = (suffix: string, handler: RouteHandler, opts?: { auth?: boolean; csrf?: boolean }) => {
+    router.get(`/api/sv${suffix}`, handler, opts);
+    router.get(`/api/hv${suffix}`, handler, opts);
+  };
+
+  const postHv = (suffix: string, handler: RouteHandler, opts?: { auth?: boolean; csrf?: boolean }) => {
+    router.post(`/api/sv${suffix}`, handler, opts);
+    router.post(`/api/hv${suffix}`, handler, opts);
+  };
+
   // ── GET /api/sv/hypotheses ──────────────────────────────────────────────
-  router.get('/api/sv/hypotheses', async (_req, res, _params, auth) => {
+  getHv('/hypotheses', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const tenantId = auth.tenantId ?? auth.userId;
     const rows = await db.listHypotheses(tenantId, 20, 0);
@@ -96,7 +106,7 @@ export function registerSVRoutes(
   }, { auth: true });
 
   // ── POST /api/sv/hypotheses ─────────────────────────────────────────────
-  router.post('/api/sv/hypotheses', async (req, res, _params, auth) => {
+  postHv('/hypotheses', async (req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
 
     // Idempotency-Key deduplication
@@ -170,7 +180,7 @@ export function registerSVRoutes(
   }, { auth: true, csrf: true });
 
   // ── GET /api/sv/hypotheses/:id ──────────────────────────────────────────
-  router.get('/api/sv/hypotheses/:id', async (_req, res, params, auth) => {
+  getHv('/hypotheses/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
 
     const { id } = params;
@@ -208,7 +218,7 @@ export function registerSVRoutes(
   }, { auth: true });
 
   // ── GET /api/sv/hypotheses/:id/events (SSE) ─────────────────────────────
-  router.get('/api/sv/hypotheses/:id/events', async (req, res, params, auth) => {
+  getHv('/hypotheses/:id/events', async (req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
 
     const { id } = params;
@@ -257,7 +267,7 @@ export function registerSVRoutes(
   }, { auth: true });
 
   // ── GET /api/sv/hypotheses/:id/dialogue (SSE) ──────────────────────────
-  router.get('/api/sv/hypotheses/:id/dialogue', async (req, res, params, auth) => {
+  getHv('/hypotheses/:id/dialogue', async (req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
 
     const { id } = params;
@@ -316,7 +326,7 @@ export function registerSVRoutes(
   }, { auth: true });
 
   // ── POST /api/sv/hypotheses/:id/cancel ──────────────────────────────────
-  router.post('/api/sv/hypotheses/:id/cancel', async (_req, res, params, auth) => {
+  postHv('/hypotheses/:id/cancel', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
 
     const { id } = params;
@@ -336,7 +346,7 @@ export function registerSVRoutes(
   }, { auth: true, csrf: true });
 
   // ── POST /api/sv/hypotheses/:id/reproduce ───────────────────────────────
-  router.post('/api/sv/hypotheses/:id/reproduce', async (req, res, params, auth) => {
+  postHv('/hypotheses/:id/reproduce', async (req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
 
     const { id } = params;
@@ -394,7 +404,7 @@ export function registerSVRoutes(
   }, { auth: true, csrf: true });
 
   // ── GET /api/sv/verdicts/:id/bundle ─────────────────────────────────────
-  router.get('/api/sv/verdicts/:id/bundle', async (_req, res, params, auth) => {
+  getHv('/verdicts/:id/bundle', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
 
     const { id } = params;

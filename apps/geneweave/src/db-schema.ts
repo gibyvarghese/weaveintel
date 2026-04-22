@@ -874,6 +874,171 @@ CREATE TABLE IF NOT EXISTS validation_rules (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- ── Social Growth Acceleration Platform (SGAP) ─────────────
+
+CREATE TABLE IF NOT EXISTS sg_brands (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE,
+  description TEXT,
+  voice TEXT,
+  website_url TEXT,
+  goals_json TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sg_channels (
+  id TEXT PRIMARY KEY,
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  platform TEXT NOT NULL,
+  handle TEXT,
+  account_ref TEXT,
+  posting_timezone TEXT,
+  cadence_json TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sg_channels_brand ON sg_channels(brand_id, platform);
+
+CREATE TABLE IF NOT EXISTS sg_campaigns (
+  id TEXT PRIMARY KEY,
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  objective TEXT,
+  target_audience TEXT,
+  start_date TEXT,
+  end_date TEXT,
+  budget_json TEXT,
+  status TEXT NOT NULL DEFAULT 'planning',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sg_campaigns_brand ON sg_campaigns(brand_id, status);
+
+CREATE TABLE IF NOT EXISTS sg_content_pillars (
+  id TEXT PRIMARY KEY,
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  weight REAL NOT NULL DEFAULT 1,
+  themes_json TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sg_content_queue (
+  id TEXT PRIMARY KEY,
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  campaign_id TEXT REFERENCES sg_campaigns(id) ON DELETE SET NULL,
+  channel_id TEXT REFERENCES sg_channels(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  brief TEXT,
+  format TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  scheduled_for TEXT,
+  asset_urls_json TEXT,
+  metadata_json TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sg_content_queue_brand ON sg_content_queue(brand_id, status, scheduled_for);
+
+CREATE TABLE IF NOT EXISTS sg_growth_experiments (
+  id TEXT PRIMARY KEY,
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  campaign_id TEXT REFERENCES sg_campaigns(id) ON DELETE SET NULL,
+  hypothesis TEXT NOT NULL,
+  variant_a_json TEXT,
+  variant_b_json TEXT,
+  success_metric TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  result_summary TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sg_kpi_snapshots (
+  id TEXT PRIMARY KEY,
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  channel_id TEXT REFERENCES sg_channels(id) ON DELETE SET NULL,
+  snapshot_date TEXT NOT NULL,
+  metrics_json TEXT NOT NULL,
+  source TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sg_kpi_snapshots_brand ON sg_kpi_snapshots(brand_id, snapshot_date DESC);
+
+CREATE TABLE IF NOT EXISTS sg_agent_profiles (
+  id TEXT PRIMARY KEY,
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  instructions TEXT,
+  tool_names TEXT,
+  policy_key TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sg_workflow_templates (
+  id TEXT PRIMARY KEY,
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT,
+  step_graph_json TEXT NOT NULL,
+  trigger_type TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sg_tool_bindings (
+  id TEXT PRIMARY KEY,
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  channel_id TEXT REFERENCES sg_channels(id) ON DELETE SET NULL,
+  tool_name TEXT NOT NULL,
+  provider TEXT,
+  config_json TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sg_strategy_settings (
+  id TEXT PRIMARY KEY,
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  value_json TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(brand_id, key)
+);
+
+CREATE TABLE IF NOT EXISTS sg_prompt_variants (
+  id TEXT PRIMARY KEY,
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  template TEXT NOT NULL,
+  variables TEXT,
+  version TEXT NOT NULL DEFAULT '1.0',
+  is_active INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(brand_id, key, version)
+);
+
 CREATE TABLE IF NOT EXISTS semantic_memory (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -986,6 +1151,8 @@ CREATE INDEX IF NOT EXISTS idx_tool_approval_tool ON tool_approval_requests(tool
 CREATE TABLE IF NOT EXISTS worker_agents (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
+  display_name TEXT,
+  job_profile TEXT,
   description TEXT NOT NULL DEFAULT '',
   -- System prompt / instructions for this worker
   system_prompt TEXT NOT NULL DEFAULT '',
@@ -1001,7 +1168,7 @@ CREATE TABLE IF NOT EXISTS worker_agents (
   max_retries INTEGER NOT NULL DEFAULT 0,
   -- Priority for ordering when building supervisor worker list (higher = listed first)
   priority INTEGER NOT NULL DEFAULT 0,
-  -- Feature grouping: 'general' | 'scientific-validation' | other domain categories
+  -- Feature grouping: 'general' | 'hypothesis-validation' | other domain categories
   -- Workers with category != 'general' are excluded from the main chat supervisor dispatch list
   category TEXT NOT NULL DEFAULT 'general',
   enabled INTEGER NOT NULL DEFAULT 1,
@@ -1009,10 +1176,10 @@ CREATE TABLE IF NOT EXISTS worker_agents (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- ── Scientific Validation ────────────────────────────────────
+-- ── Hypothesis Validation ────────────────────────────────────
 
 -- Budget envelopes cap cost/time for a validation run. Created once, never mutated after use.
-CREATE TABLE IF NOT EXISTS sv_budget_envelope (
+CREATE TABLE IF NOT EXISTS hv_budget_envelope (
   id TEXT PRIMARY KEY,                       -- uuid v7
   tenant_id TEXT NOT NULL,
   name TEXT NOT NULL,
@@ -1024,8 +1191,8 @@ CREATE TABLE IF NOT EXISTS sv_budget_envelope (
   created_at TEXT NOT NULL
 );
 
--- A scientific hypothesis submitted for multi-agent validation.
-CREATE TABLE IF NOT EXISTS sv_hypothesis (
+-- A hypothesis submitted for multi-agent validation.
+CREATE TABLE IF NOT EXISTS hv_hypothesis (
   id TEXT PRIMARY KEY,                       -- uuid v7
   tenant_id TEXT NOT NULL,
   submitted_by TEXT NOT NULL,                -- user id
@@ -1034,35 +1201,35 @@ CREATE TABLE IF NOT EXISTS sv_hypothesis (
   domain_tags TEXT NOT NULL,                 -- JSON: string[]
   status TEXT NOT NULL DEFAULT 'queued'
     CHECK (status IN ('queued','running','verdict','abandoned')),
-  budget_envelope_id TEXT NOT NULL REFERENCES sv_budget_envelope(id),
+  budget_envelope_id TEXT NOT NULL REFERENCES hv_budget_envelope(id),
   workflow_run_id TEXT,
   trace_id TEXT,                             -- @weaveintel/replay trace
   contract_id TEXT,                          -- @weaveintel/contracts completion contract
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_sv_hypothesis_tenant ON sv_hypothesis(tenant_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_sv_hypothesis_status ON sv_hypothesis(tenant_id, status);
+CREATE INDEX IF NOT EXISTS idx_hv_hypothesis_tenant ON hv_hypothesis(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_hv_hypothesis_status ON hv_hypothesis(tenant_id, status);
 
 -- Sub-claims decomposed from a hypothesis by the Decomposer agent.
-CREATE TABLE IF NOT EXISTS sv_sub_claim (
+CREATE TABLE IF NOT EXISTS hv_sub_claim (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,
-  hypothesis_id TEXT NOT NULL REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
-  parent_sub_claim_id TEXT REFERENCES sv_sub_claim(id),
+  hypothesis_id TEXT NOT NULL REFERENCES hv_hypothesis(id) ON DELETE CASCADE,
+  parent_sub_claim_id TEXT REFERENCES hv_sub_claim(id),
   statement TEXT NOT NULL,
   claim_type TEXT NOT NULL
     CHECK (claim_type IN ('mechanism','epidemiological','mathematical','dose_response','causal','other')),
   testability_score REAL NOT NULL CHECK (testability_score BETWEEN 0 AND 1),
   created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_sv_sub_claim_hypothesis ON sv_sub_claim(hypothesis_id);
+CREATE INDEX IF NOT EXISTS idx_hv_sub_claim_hypothesis ON hv_sub_claim(hypothesis_id);
 
 -- Supervisor-emitted verdict for a completed hypothesis run.
-CREATE TABLE IF NOT EXISTS sv_verdict (
+CREATE TABLE IF NOT EXISTS hv_verdict (
   id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,
-  hypothesis_id TEXT NOT NULL UNIQUE REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+  hypothesis_id TEXT NOT NULL UNIQUE REFERENCES hv_hypothesis(id) ON DELETE CASCADE,
   verdict TEXT NOT NULL
     CHECK (verdict IN ('supported','refuted','inconclusive','ill_posed','out_of_scope')),
   confidence_lo REAL NOT NULL CHECK (confidence_lo BETWEEN 0 AND 1),
@@ -1078,10 +1245,10 @@ CREATE TABLE IF NOT EXISTS sv_verdict (
 );
 
 -- Evidence events emitted by specialist agents during a run.
--- Powers GET /api/sv/hypotheses/:id/events SSE stream.
-CREATE TABLE IF NOT EXISTS sv_evidence_event (
+-- Powers GET /api/hv/hypotheses/:id/events SSE stream.
+CREATE TABLE IF NOT EXISTS hv_evidence_event (
   id TEXT PRIMARY KEY,                           -- UUID
-  hypothesis_id TEXT NOT NULL REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+  hypothesis_id TEXT NOT NULL REFERENCES hv_hypothesis(id) ON DELETE CASCADE,
   step_id TEXT NOT NULL,                         -- workflow step that emitted this (e.g. 'statistical')
   agent_id TEXT NOT NULL,                        -- agent name
   evidence_id TEXT NOT NULL,                     -- contract evidence item id
@@ -1092,13 +1259,13 @@ CREATE TABLE IF NOT EXISTS sv_evidence_event (
   reproducibility_hash TEXT,
   created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_sv_evidence_event_hypothesis ON sv_evidence_event(hypothesis_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_hv_evidence_event_hypothesis ON hv_evidence_event(hypothesis_id, created_at ASC);
 
 -- Agent-to-agent dialogue turns during the deliberation loop.
--- Powers GET /api/sv/hypotheses/:id/dialogue SSE stream.
-CREATE TABLE IF NOT EXISTS sv_agent_turn (
+-- Powers GET /api/hv/hypotheses/:id/dialogue SSE stream.
+CREATE TABLE IF NOT EXISTS hv_agent_turn (
   id TEXT PRIMARY KEY,                           -- UUID
-  hypothesis_id TEXT NOT NULL REFERENCES sv_hypothesis(id) ON DELETE CASCADE,
+  hypothesis_id TEXT NOT NULL REFERENCES hv_hypothesis(id) ON DELETE CASCADE,
   round_index INTEGER NOT NULL DEFAULT 0,
   from_agent TEXT NOT NULL,
   to_agent TEXT,                                 -- null = broadcast
@@ -1107,6 +1274,14 @@ CREATE TABLE IF NOT EXISTS sv_agent_turn (
   dissent INTEGER NOT NULL DEFAULT 0,            -- boolean (0 | 1)
   created_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_sv_agent_turn_hypothesis ON sv_agent_turn(hypothesis_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_hv_agent_turn_hypothesis ON hv_agent_turn(hypothesis_id, created_at ASC);
+
+-- Backward-compatible read-only aliases for legacy SV names.
+CREATE VIEW IF NOT EXISTS sv_budget_envelope AS SELECT * FROM hv_budget_envelope;
+CREATE VIEW IF NOT EXISTS sv_hypothesis AS SELECT * FROM hv_hypothesis;
+CREATE VIEW IF NOT EXISTS sv_sub_claim AS SELECT * FROM hv_sub_claim;
+CREATE VIEW IF NOT EXISTS sv_verdict AS SELECT * FROM hv_verdict;
+CREATE VIEW IF NOT EXISTS sv_evidence_event AS SELECT * FROM hv_evidence_event;
+CREATE VIEW IF NOT EXISTS sv_agent_turn AS SELECT * FROM hv_agent_turn;
 `;
 

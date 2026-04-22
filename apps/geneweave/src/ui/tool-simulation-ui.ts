@@ -20,6 +20,7 @@ interface SimTool {
   description: string;
   tags: string[];
   source: string;
+  sampleInputJson?: string;
 }
 
 interface PolicyTraceEntry {
@@ -46,6 +47,7 @@ interface SimState {
   loading: boolean;
   selectedTool: string;
   inputJson: string;
+  hydratedToolKey: string;
   agentPersona: string;
   skillPolicyKey: string;
   running: boolean;
@@ -60,6 +62,7 @@ const simState: SimState = {
   loading: false,
   selectedTool: '',
   inputJson: '{}',
+  hydratedToolKey: '',
   agentPersona: '',
   skillPolicyKey: '',
   running: false,
@@ -136,8 +139,14 @@ async function loadSimulationTools(render: () => void): Promise<void> {
     const resp = await api.get('/api/admin/tool-simulation/tools');
     const data = await resp.json() as { tools?: SimTool[] };
     simState.tools = data.tools ?? [];
-    if (!simState.selectedTool && simState.tools.length > 0) {
-      simState.selectedTool = simState.tools[0]!.key;
+    const fallbackTool = simState.tools[0];
+    const selectedTool = simState.tools.find(t => t.key === simState.selectedTool) ?? fallbackTool;
+    if (selectedTool) {
+      simState.selectedTool = selectedTool.key;
+      if (!simState.inputJson.trim() || simState.inputJson.trim() === '{}' || simState.hydratedToolKey !== selectedTool.key) {
+        simState.inputJson = selectedTool.sampleInputJson ?? '{}';
+        simState.hydratedToolKey = selectedTool.key;
+      }
     }
   } catch (err) {
     simState.error = `Failed to load tools: ${(err as Error).message}`;
@@ -190,6 +199,10 @@ export function renderToolSimulationView(options: { render: () => void }): HTMLE
   }
 
   const selectedToolInfo = simState.tools.find(t => t.key === simState.selectedTool);
+  if (selectedToolInfo && (!simState.inputJson.trim() || simState.inputJson.trim() === '{}' || simState.hydratedToolKey !== selectedToolInfo.key)) {
+    simState.inputJson = selectedToolInfo.sampleInputJson ?? '{}';
+    simState.hydratedToolKey = selectedToolInfo.key;
+  }
 
   const container = h('div', { className: 'sim-container', style: 'max-width:900px;' },
     // Header
@@ -225,6 +238,9 @@ export function renderToolSimulationView(options: { render: () => void }): HTMLE
     style: 'width:100%;margin-bottom:8px;',
     onChange: (e: Event) => {
       simState.selectedTool = (e.target as HTMLSelectElement).value;
+      const nextTool = simState.tools.find(t => t.key === simState.selectedTool);
+      simState.inputJson = nextTool?.sampleInputJson ?? '{}';
+      simState.hydratedToolKey = nextTool?.key ?? '';
       simState.lastResult = null;
       render();
     },
@@ -255,7 +271,10 @@ export function renderToolSimulationView(options: { render: () => void }): HTMLE
     placeholder: '{\n  "query": "hello world"\n}',
     style: 'width:100%;height:140px;font-family:monospace;font-size:12px;resize:vertical;',
     value: simState.inputJson,
-    onInput: (e: Event) => { simState.inputJson = (e.target as HTMLTextAreaElement).value; },
+    onInput: (e: Event) => {
+      simState.inputJson = (e.target as HTMLTextAreaElement).value;
+      simState.hydratedToolKey = simState.selectedTool;
+    },
   }) as HTMLTextAreaElement;
   leftPanel.appendChild(h('div', { className: 'admin-field-group' },
     h('label', { className: 'admin-field-label', style: 'font-size:12px;' }, 'Input JSON (tool arguments)'),

@@ -44,6 +44,8 @@ export function registerWorkerAgentRoutes(
     await db.createWorkerAgent({
       id,
       name: body['name'] as string,
+      display_name: (body['display_name'] as string) ?? null,
+      job_profile: (body['job_profile'] as string) ?? null,
       description: validatedDescription,
       system_prompt: (body['system_prompt'] as string) ?? null,
       tool_names: body['tool_names'] ? JSON.stringify(body['tool_names']) : '[]',
@@ -70,6 +72,8 @@ export function registerWorkerAgentRoutes(
 
     const fields: Record<string, unknown> = {};
     if (body['name'] !== undefined) fields['name'] = body['name'];
+    if (body['display_name'] !== undefined) fields['display_name'] = body['display_name'];
+    if (body['job_profile'] !== undefined) fields['job_profile'] = body['job_profile'];
     if (body['description'] !== undefined) {
       const validatedDescription = requireDetailedDescription(body['description'], 'agent', res);
       if (!validatedDescription) return;

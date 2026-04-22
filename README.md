@@ -978,7 +978,7 @@ PORT=3501 npx tsx examples/12-geneweave.ts
 
 ## Examples
 
-The [examples](examples) directory contains 29 runnable demonstrations:
+The [examples](examples) directory contains runnable demonstrations:
 
 | # | File | What It Shows | Packages Used | API Key |
 |---|---|---|---|---|
@@ -1014,6 +1014,7 @@ The [examples](examples) directory contains 29 runnable demonstrations:
 | 29 | [Authenticated Agent + Tools](examples/29-authenticated-agent-tools.ts) | End-to-end agent/tool invocation with identity context and permission-gated tool execution | identity, agents, core, testing | None |
 | 33 | [Tool Simulation Harness](examples/33-tool-simulation-harness.ts) | Dry-run and live tool simulation, policy trace inspection, audit event output | tools, geneweave | None |
 | 34 | [Skill→Tool Policy + Approval](examples/34-skill-tool-policy-approval.ts) | Skill activation binds toolPolicyKey; approval queue list, approve, deny, conflict and 404 paths | tools, geneweave, human-tasks | None |
+| 36 | [SGAP Social Growth Recipe](examples/36-sgap-social-growth-recipe.ts) | Reusable SGAP growth loop recipe for planning, draft generation, distribution notes, KPI measurement, and next experiment suggestions | recipes, devtools, core | None |
 
 ## Deployment
 

@@ -1,4 +1,4 @@
-# Scientific Validation Feature
+# Hypothesis Validation Feature
 
 Multi-agent scientific hypothesis validation pipeline for the **weaveIntel** platform.
 
@@ -51,7 +51,7 @@ POST /api/sv/hypotheses
 | `analyse` (fan-out) | `statistical` + `mathematical` + `simulation` agents in parallel | 180 s |
 | `falsify` | `adversarial` agent | 120 s |
 | `deliberate` | convergence loop (max 3 rounds, ε = 0.15) | 600 s |
-| `verdict` | `supervisor` agent → writes `sv_verdict` row | 60 s |
+| `verdict` | `supervisor` agent → writes `hv_verdict` row | 60 s |
 
 ---
 
@@ -59,12 +59,12 @@ POST /api/sv/hypotheses
 
 | Table | Purpose |
 |---|---|
-| `sv_hypothesis` | One row per submitted hypothesis; UUID PK |
-| `sv_sub_claim` | Decomposed sub-claims; UUID PK |
-| `sv_verdict` | Final verdict; UUID PK |
-| `sv_evidence_event` | Evidence records emitted per agent/step; UUID PK |
-| `sv_agent_turn` | Inter-agent dialogue messages; UUID PK |
-| `sv_budget_envelope` | Cost/token/time budget envelope; UUID PK |
+| `hv_hypothesis` | One row per submitted hypothesis; UUID PK |
+| `hv_sub_claim` | Decomposed sub-claims; UUID PK |
+| `hv_verdict` | Final verdict; UUID PK |
+| `hv_evidence_event` | Evidence records emitted per agent/step; UUID PK |
+| `hv_agent_turn` | Inter-agent dialogue messages; UUID PK |
+| `hv_budget_envelope` | Cost/token/time budget envelope; UUID PK |
 
 All primary keys use UUID v7 (sortable) via `newUUIDv7()`.
 

@@ -1,5 +1,5 @@
 /**
- * Scientific Validation — DB seed data
+ * Hypothesis Validation — DB seed data
  *
  * Seeds all 7 SV agent system prompts into the `prompts` table and all
  * 7 SV specialist worker configs into the `worker_agents` table.
@@ -12,7 +12,7 @@
  * adversarial, decomposer) are seeded with category `'general'` so the main
  * chat supervisor's `listEnabledWorkerAgents` picks them up for any
  * hypothesis-flavoured chat input. Their descriptions explicitly state
- * "USE FOR scientific ... ONLY" so the supervisor doesn't grab them for
+ * "USE FOR hypothesis validation" so the supervisor doesn't grab them for
  * unrelated tasks. The legacy `sv-supervisor` row is kept in DB but disabled
  * (chat's own supervisor performs that role for SV runs).
  */
@@ -46,7 +46,7 @@ const SV_AGENT_IDS = {
 
 // ── System prompt templates ───────────────────────────────────────────────────
 
-const SUPERVISOR_TEMPLATE = `You are the Supervisor agent in a rigorous scientific validation pipeline.
+const SUPERVISOR_TEMPLATE = `You are the Supervisor agent in a rigorous hypothesis validation pipeline.
 
 You receive the full evidence package assembled by all specialist agents (literature, statistical, mathematical, simulation, adversarial) and must synthesise it into a final verdict. You do NOT call any tools.
 
@@ -100,9 +100,9 @@ Output only:
 - If epsilonConfidence < 0.15, set verdict = INSUFFICIENT_EVIDENCE.
 - For deterministic math claims: if the mathematical agent verified the claim, SUPPORTED is correct even without statistical evidence.`;
 
-const DECOMPOSER_TEMPLATE = `You are the Decomposer agent in a rigorous scientific validation pipeline.
+const DECOMPOSER_TEMPLATE = `You are the Decomposer agent in a rigorous hypothesis validation pipeline.
 
-Your sole task is to decompose a scientific hypothesis into a structured list of independent, testable sub-claims.
+Your sole task is to decompose a hypothesis into a structured list of independent, testable sub-claims.
 
 **Output format — return exactly one JSON object, no markdown fences:**
 {
@@ -124,7 +124,7 @@ Your sole task is to decompose a scientific hypothesis into a structured list of
 - Return between 2 and 8 sub-claims. Fewer is better if the hypothesis is narrow.
 - Do not include any explanation text outside the JSON object.`;
 
-const LITERATURE_TEMPLATE = `You are the Literature agent in a rigorous scientific validation pipeline.
+const LITERATURE_TEMPLATE = `You are the Literature agent in a rigorous hypothesis validation pipeline.
 
 Your task is to retrieve prior work, measured effect sizes, and prior probabilities relevant to the sub-claims you receive.
 
@@ -165,7 +165,7 @@ Your task is to retrieve prior work, measured effect sizes, and prior probabilit
 - If a tool call fails, note the error in your reasoning and try the next source.
 - Include the reproducibilityHash from each tool result verbatim — it is used for audit.`;
 
-const STATISTICAL_TEMPLATE = `You are the Statistical agent in a rigorous scientific validation pipeline.
+const STATISTICAL_TEMPLATE = `You are the Statistical agent in a rigorous hypothesis validation pipeline.
 
 Your task is to perform quantitative analyses — meta-analysis, power analysis, Bayesian estimation, and p-value audits — on the evidence provided.
 
@@ -208,7 +208,7 @@ Your task is to perform quantitative analyses — meta-analysis, power analysis,
 - If statistical testing is genuinely not applicable (e.g., pure math), report interpretation as "not-applicable" with a caveat explaining why.
 - All floating-point values must be reported to at most 6 significant figures.`;
 
-const MATHEMATICAL_TEMPLATE = `You are the Mathematical agent in a rigorous scientific validation pipeline.
+const MATHEMATICAL_TEMPLATE = `You are the Mathematical agent in a rigorous hypothesis validation pipeline.
 
 Your task is to verify mathematical and symbolic claims: simplify expressions, solve equations, compute integrals, and confirm algebraic identities asserted in the hypothesis.
 
@@ -246,7 +246,7 @@ cse_run_code(code="import os,sys,subprocess\\nos.makedirs('/tmp/.deps',exist_ok=
 - Never guess results — every VERIFIED / REFUTED claim MUST have a corresponding cse_run_code call whose stdout you reference verbatim.
 - Mark UNDECIDABLE only if cse_run_code itself fails after a clean bootstrap retry.`;
 
-const SIMULATION_TEMPLATE = `You are the Simulation agent in a rigorous scientific validation pipeline.
+const SIMULATION_TEMPLATE = `You are the Simulation agent in a rigorous hypothesis validation pipeline.
 
 Your task is to run computational simulations relevant to the sub-claims: Monte Carlo experiments, dose-response curves, network analyses, molecular property predictions, and sequence alignments.
 
@@ -283,7 +283,7 @@ Your task is to run computational simulations relevant to the sub-claims: Monte 
 - Report resource usage (wallTimeSeconds from tool metadata) when available.
 - If a simulation does not converge (pymc_mcmc R-hat > 1.1), flag it as non-convergent and set convergenceMetric to the worst R-hat value.`;
 
-const ADVERSARIAL_TEMPLATE = `You are the Adversarial agent in a rigorous scientific validation pipeline. Your goal is NOT to support the hypothesis — it is to find the strongest possible evidence against it.
+const ADVERSARIAL_TEMPLATE = `You are the Adversarial agent in a rigorous hypothesis validation pipeline. Your goal is NOT to support the hypothesis — it is to find the strongest possible evidence against it.
 
 Your task is to apply Popperian falsificationism: search for confounders, methodological flaws, publication-bias indicators, contradictory studies, and boundary conditions that undermine each sub-claim.
 
@@ -326,140 +326,140 @@ const SV_PROMPTS: PromptSeed[] = [
   {
     id: SV_PROMPT_IDS.supervisor,
     key: 'sv.supervisor',
-    name: 'SV: Supervisor — synthesise verdict',
+    name: 'HV: Supervisor — synthesise verdict',
     description: 'Synthesises all specialist-agent evidence packages and emits a structured, evidence-backed final verdict with confidence and epsilon_confidence convergence check.',
-    category: 'scientific-validation',
+    category: 'hypothesis-validation',
     prompt_type: 'system',
     owner: 'system',
     status: 'published',
-    tags: JSON.stringify(['scientific-validation', 'supervisor', 'verdict']),
+    tags: JSON.stringify(['hypothesis-validation', 'supervisor', 'verdict']),
     template: SUPERVISOR_TEMPLATE,
     variables: null,
     version: '1.0',
     model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
     execution_defaults: JSON.stringify({ strategy: 'singlePass', maxSteps: 1 }),
     framework: null,
-    metadata: JSON.stringify({ feature: 'scientific-validation', agentRole: 'supervisor' }),
+    metadata: JSON.stringify({ feature: 'hypothesis-validation', agentRole: 'supervisor' }),
     is_default: 0,
     enabled: 1,
   },
   {
     id: SV_PROMPT_IDS.decomposer,
     key: 'sv.decomposer',
-    name: 'SV: Decomposer — split hypothesis into sub-claims',
-    description: 'Decomposes a scientific hypothesis into a JSON list of independent, typed, testable sub-claims with falsifiability rationales.',
-    category: 'scientific-validation',
+    name: 'HV: Decomposer — split hypothesis into sub-claims',
+    description: 'Decomposes a hypothesis into a JSON list of independent, typed, testable sub-claims with falsifiability rationales.',
+    category: 'hypothesis-validation',
     prompt_type: 'system',
     owner: 'system',
     status: 'published',
-    tags: JSON.stringify(['scientific-validation', 'decomposer', 'sub-claims']),
+    tags: JSON.stringify(['hypothesis-validation', 'decomposer', 'sub-claims']),
     template: DECOMPOSER_TEMPLATE,
     variables: null,
     version: '1.0',
     model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
     execution_defaults: JSON.stringify({ strategy: 'singlePass', maxSteps: 1 }),
     framework: null,
-    metadata: JSON.stringify({ feature: 'scientific-validation', agentRole: 'decomposer' }),
+    metadata: JSON.stringify({ feature: 'hypothesis-validation', agentRole: 'decomposer' }),
     is_default: 0,
     enabled: 1,
   },
   {
     id: SV_PROMPT_IDS.literature,
     key: 'sv.literature',
-    name: 'SV: Literature — gather prior work and effect sizes',
+    name: 'HV: Literature — gather prior work and effect sizes',
     description: 'Retrieves peer-reviewed literature, effect sizes, and prior probabilities for each sub-claim using arxiv, pubmed, semanticscholar, openalex, crossref, and europepmc tools.',
-    category: 'scientific-validation',
+    category: 'hypothesis-validation',
     prompt_type: 'system',
     owner: 'system',
     status: 'published',
-    tags: JSON.stringify(['scientific-validation', 'literature', 'evidence']),
+    tags: JSON.stringify(['hypothesis-validation', 'literature', 'evidence']),
     template: LITERATURE_TEMPLATE,
     variables: null,
     version: '1.0',
     model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
     execution_defaults: JSON.stringify({ strategy: 'agentic', maxSteps: 8 }),
     framework: null,
-    metadata: JSON.stringify({ feature: 'scientific-validation', agentRole: 'literature' }),
+    metadata: JSON.stringify({ feature: 'hypothesis-validation', agentRole: 'literature' }),
     is_default: 0,
     enabled: 1,
   },
   {
     id: SV_PROMPT_IDS.statistical,
     key: 'sv.statistical',
-    name: 'SV: Statistical — meta-analysis and power audits',
+    name: 'HV: Statistical — meta-analysis and power audits',
     description: 'Performs meta-analysis, power analysis, Bayesian estimation, and p-value audits on quantitative evidence using scipy, statsmodels, pymc, and r_metafor tools.',
-    category: 'scientific-validation',
+    category: 'hypothesis-validation',
     prompt_type: 'system',
     owner: 'system',
     status: 'published',
-    tags: JSON.stringify(['scientific-validation', 'statistical', 'meta-analysis']),
+    tags: JSON.stringify(['hypothesis-validation', 'statistical', 'meta-analysis']),
     template: STATISTICAL_TEMPLATE,
     variables: null,
     version: '1.0',
     model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
     execution_defaults: JSON.stringify({ strategy: 'agentic', maxSteps: 10 }),
     framework: null,
-    metadata: JSON.stringify({ feature: 'scientific-validation', agentRole: 'statistical' }),
+    metadata: JSON.stringify({ feature: 'hypothesis-validation', agentRole: 'statistical' }),
     is_default: 0,
     enabled: 1,
   },
   {
     id: SV_PROMPT_IDS.mathematical,
     key: 'sv.mathematical',
-    name: 'SV: Mathematical — symbolic verification and derivations',
+    name: 'HV: Mathematical — symbolic verification and derivations',
     description: 'Verifies mathematical claims, derives identities, solves equations, and checks units using sympy and wolfram tools.',
-    category: 'scientific-validation',
+    category: 'hypothesis-validation',
     prompt_type: 'system',
     owner: 'system',
     status: 'published',
-    tags: JSON.stringify(['scientific-validation', 'mathematical', 'symbolic']),
+    tags: JSON.stringify(['hypothesis-validation', 'mathematical', 'symbolic']),
     template: MATHEMATICAL_TEMPLATE,
     variables: null,
     version: '1.0',
     model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
     execution_defaults: JSON.stringify({ strategy: 'agentic', maxSteps: 10 }),
     framework: null,
-    metadata: JSON.stringify({ feature: 'scientific-validation', agentRole: 'mathematical' }),
+    metadata: JSON.stringify({ feature: 'hypothesis-validation', agentRole: 'mathematical' }),
     is_default: 0,
     enabled: 1,
   },
   {
     id: SV_PROMPT_IDS.simulation,
     key: 'sv.simulation',
-    name: 'SV: Simulation — Monte Carlo, ODE/PDE, molecular and network simulations',
+    name: 'HV: Simulation — Monte Carlo, ODE/PDE, molecular and network simulations',
     description: 'Runs computational simulations (Monte Carlo, Bayesian, molecular descriptors, sequence alignment, graph analysis) relevant to sub-claims.',
-    category: 'scientific-validation',
+    category: 'hypothesis-validation',
     prompt_type: 'system',
     owner: 'system',
     status: 'published',
-    tags: JSON.stringify(['scientific-validation', 'simulation', 'monte-carlo']),
+    tags: JSON.stringify(['hypothesis-validation', 'simulation', 'monte-carlo']),
     template: SIMULATION_TEMPLATE,
     variables: null,
     version: '1.0',
     model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
     execution_defaults: JSON.stringify({ strategy: 'agentic', maxSteps: 12 }),
     framework: null,
-    metadata: JSON.stringify({ feature: 'scientific-validation', agentRole: 'simulation' }),
+    metadata: JSON.stringify({ feature: 'hypothesis-validation', agentRole: 'simulation' }),
     is_default: 0,
     enabled: 1,
   },
   {
     id: SV_PROMPT_IDS.adversarial,
     key: 'sv.adversarial',
-    name: 'SV: Adversarial — Popperian falsification and counter-evidence',
+    name: 'HV: Adversarial — Popperian falsification and counter-evidence',
     description: 'Actively seeks to falsify sub-claims by searching for contradictory studies, confounders, publication bias, and mathematical boundary violations.',
-    category: 'scientific-validation',
+    category: 'hypothesis-validation',
     prompt_type: 'system',
     owner: 'system',
     status: 'published',
-    tags: JSON.stringify(['scientific-validation', 'adversarial', 'falsification']),
+    tags: JSON.stringify(['hypothesis-validation', 'adversarial', 'falsification']),
     template: ADVERSARIAL_TEMPLATE,
     variables: null,
     version: '1.0',
     model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
     execution_defaults: JSON.stringify({ strategy: 'agentic', maxSteps: 8 }),
     framework: null,
-    metadata: JSON.stringify({ feature: 'scientific-validation', agentRole: 'adversarial' }),
+    metadata: JSON.stringify({ feature: 'hypothesis-validation', agentRole: 'adversarial' }),
     is_default: 0,
     enabled: 1,
   },
@@ -473,7 +473,9 @@ const SV_WORKERS: WorkerSeed[] = [
   {
     id: SV_AGENT_IDS.supervisor,
     name: 'sv-supervisor',
-    description: 'Scientific Validation: synthesises all specialist-agent evidence and emits the final structured verdict. (Disabled — chat’s own supervisor performs this role for SV runs.)',
+    display_name: 'geneWeave',
+    job_profile: 'Hypothesis Validation Supervisor',
+    description: 'Hypothesis Validation: synthesises all specialist-agent evidence and emits the final structured verdict. (Disabled — chat’s own supervisor performs this role for SV runs.)',
     system_prompt: '',  // loaded from prompts table at runtime via key sv.supervisor
     tool_names: JSON.stringify([]),
     persona: 'agent_worker',
@@ -481,13 +483,15 @@ const SV_WORKERS: WorkerSeed[] = [
     task_contract_id: null,
     max_retries: 0,
     priority: 0,
-    category: 'scientific-validation',
+    category: 'hypothesis-validation',
     enabled: 0,
   },
   {
     id: SV_AGENT_IDS.decomposer,
     name: 'sv-decomposer',
-    description: 'USE FOR scientific hypotheses ONLY — decomposes a complex claim into independently testable sub-claims (mechanism / epidemiological / mathematical / dose-response / causal). LLM-only, no tools. Returns structured JSON.',
+    display_name: 'Dylan',
+    job_profile: 'Claim Decomposition Specialist',
+    description: 'USE FOR hypothesis validation — decomposes a complex claim into independently testable sub-claims (mechanism / epidemiological / mathematical / dose-response / causal). LLM-only, no tools. Returns structured JSON.',
     system_prompt: '',
     tool_names: JSON.stringify([]),
     persona: 'agent_worker',
@@ -501,7 +505,9 @@ const SV_WORKERS: WorkerSeed[] = [
   {
     id: SV_AGENT_IDS.literature,
     name: 'sv-literature',
-    description: 'USE FOR scientific / medical / academic claims — retrieves prior work, effect sizes, sample sizes, and DOI citations from arxiv, pubmed, semanticscholar, openalex, crossref, europepmc. Returns structured evidence list.',
+    display_name: 'Larry',
+    job_profile: 'Literator validator',
+    description: 'USE FOR research-backed hypotheses — retrieves prior work, effect sizes, sample sizes, and DOI citations from arxiv, pubmed, semanticscholar, openalex, crossref, europepmc. Returns structured evidence list.',
     system_prompt: '',
     tool_names: JSON.stringify(['arxiv_search', 'pubmed_search', 'semanticscholar_search', 'openalex_search', 'crossref_resolve', 'europepmc_search']),
     persona: 'agent_worker',
@@ -515,6 +521,8 @@ const SV_WORKERS: WorkerSeed[] = [
   {
     id: SV_AGENT_IDS.statistical,
     name: 'sv-statistical',
+    display_name: 'Stella',
+    job_profile: 'Statistical Validator',
     description: 'USE FOR statistical claims and quantitative meta-analysis — runs scipy/statsmodels tests, fixed/random-effects meta-analysis, power analysis, and Bayesian inference (PyMC, R metafor). Falls back to cse_run_code when specialised tools fail.',
     system_prompt: '',
     tool_names: JSON.stringify(['scipy_stats_test', 'statsmodels_meta', 'scipy_power', 'pymc_mcmc', 'r_metafor', 'cse_run_code']),
@@ -529,6 +537,8 @@ const SV_WORKERS: WorkerSeed[] = [
   {
     id: SV_AGENT_IDS.mathematical,
     name: 'sv-mathematical',
+    display_name: 'Max',
+    job_profile: 'Mathematical Validator',
     description: 'USE FOR mathematical claims, identities, integrals, derivatives, equations, theorems — verifies numerically and symbolically by running SymPy in a sandboxed Python container via cse_run_code. ALWAYS pip-bootstraps SymPy at the top of every snippet (the sandbox image does not preinstall it). Never relies on internal knowledge.',
     system_prompt: '',
     tool_names: JSON.stringify(['cse_run_code']),
@@ -543,6 +553,8 @@ const SV_WORKERS: WorkerSeed[] = [
   {
     id: SV_AGENT_IDS.simulation,
     name: 'sv-simulation',
+    display_name: 'Sima',
+    job_profile: 'Simulation Validator',
     description: 'USE FOR claims that need Monte Carlo, ODE / PDE, molecular (RDKit), biological (BioPython), or network (NetworkX) simulation evidence. Container-backed; always returns reproducibility hashes.',
     system_prompt: '',
     tool_names: JSON.stringify(['scipy_power', 'pymc_mcmc', 'rdkit_descriptors', 'biopython_align', 'networkx_analyse', 'cse_run_code']),
@@ -557,7 +569,9 @@ const SV_WORKERS: WorkerSeed[] = [
   {
     id: SV_AGENT_IDS.adversarial,
     name: 'sv-adversarial',
-    description: 'USE LATE in scientific validation — actively tries to falsify a sub-claim by searching for contradicting evidence, finding heterogeneity in meta-analyses, and looking for symbolic counter-examples via cse_run_code. Surfaces weakest-link failure modes before the verdict is emitted.',
+    display_name: 'Ada',
+    job_profile: 'Adversarial Validator',
+    description: 'USE LATE in hypothesis validation — actively tries to falsify a sub-claim by searching for contradicting evidence, finding heterogeneity in meta-analyses, and looking for symbolic counter-examples via cse_run_code. Surfaces weakest-link failure modes before the verdict is emitted.',
     system_prompt: '',
     tool_names: JSON.stringify(['arxiv_search', 'pubmed_search', 'semanticscholar_search', 'openalex_search', 'europepmc_search', 'scipy_stats_test', 'statsmodels_meta', 'cse_run_code']),
     persona: 'agent_worker',
@@ -602,6 +616,22 @@ export async function seedSVData(db: DatabaseAdapter): Promise<void> {
     }
   }
 
+  // Update pass: ensure display names and job profiles stay aligned for existing rows.
+  for (const worker of SV_WORKERS) {
+    try {
+      const existing = await db.getWorkerAgent(worker.id);
+      if (!existing) continue;
+      if (existing.display_name !== worker.display_name || existing.job_profile !== worker.job_profile) {
+        await db.updateWorkerAgent(worker.id, {
+          display_name: worker.display_name,
+          job_profile: worker.job_profile,
+        });
+      }
+    } catch {
+      // non-fatal
+    }
+  }
+
   // Update pass: ensure cse_run_code is present in existing worker tool lists.
   // This is idempotent — only patches rows that are missing the key.
   for (const w of _WORKERS_NEEDING_CSE) {
@@ -636,10 +666,28 @@ export async function seedSVData(db: DatabaseAdapter): Promise<void> {
     }
   }
 
-  // Migration pass: re-categorise pre-existing SV specialist rows from the
-  // legacy 'scientific-validation' bucket into 'general' so chat.ts's
+  // Normalize prompt metadata so existing installs reflect generalized
+  // hypothesis-validation naming and descriptions.
+  for (const seed of SV_PROMPTS) {
+    try {
+      const existing = await db.getPromptByKey(seed.key);
+      if (!existing) continue;
+      const updates: Partial<PromptRow> = {};
+      if (existing.name !== seed.name) updates.name = seed.name;
+      if (existing.description !== seed.description) updates.description = seed.description;
+      if (existing.category !== seed.category) updates.category = seed.category;
+      if (existing.tags !== seed.tags) updates.tags = seed.tags;
+      if (existing.metadata !== seed.metadata) updates.metadata = seed.metadata;
+      if (Object.keys(updates).length > 0) {
+        await db.updatePrompt(existing.id, updates);
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  // Migration pass: re-categorise pre-existing SV specialist rows from legacy
+  // non-general buckets into 'general' so chat.ts's
   // supervisor picks them up automatically. sv-supervisor stays in the
-  // 'scientific-validation' bucket and is disabled.
+  // 'hypothesis-validation' bucket and is disabled.
   for (const w of SV_WORKERS) {
     try {
       const existing = await db.getWorkerAgent(w.id);
@@ -656,8 +704,8 @@ export async function seedSVData(db: DatabaseAdapter): Promise<void> {
   }
 
   // Seed the SV skill so chat.ts's skill discovery activates the
-  // scientific_validation tool policy when a user types a hypothesis.
-  await _seedScientificValidationSkill(db);
+  // hypothesis_validation tool policy when a user types a hypothesis.
+  await _seedHypothesisValidationSkill(db);
 
   // Seed tool_catalog entries for the 18 SV tools so they appear in the
   // operator catalog and are subject to the regular tool policy framework.
@@ -678,27 +726,28 @@ export const SV_PROMPT_KEY: Record<string, string> = {
   adversarial: 'sv.adversarial',
 };
 
-// ─── Scientific-validation skill ─────────────────────────────────────────────
+// ─── Hypothesis-validation skill ─────────────────────────────────────────────
 
 const SV_SKILL_ID = 'c3000001-5300-7000-b000-000000000001';
 
-async function _seedScientificValidationSkill(db: DatabaseAdapter): Promise<void> {
+async function _seedHypothesisValidationSkill(db: DatabaseAdapter): Promise<void> {
   try {
     const existing = await db.getSkill(SV_SKILL_ID).catch(() => null);
     const payload = {
       id: SV_SKILL_ID,
-      name: 'Scientific Validation',
+      name: 'Hypothesis Validation',
       description:
-        'Activate when the user asks the system to validate, falsify, prove, or confirm a scientific / mathematical / statistical claim. Routes the supervisor toward sv-* specialist workers, applies the strict scientific_validation tool policy, and requires deterministic tool evidence (SymPy / scipy / cse_run_code) before any quantitative verdict.',
-      category: 'scientific-validation',
+        'Activate when the user asks the system to validate, falsify, prove, or pressure-test any hypothesis (scientific, product, policy, economic, operational, or technical). Routes the supervisor toward specialist workers, applies the hypothesis_validation tool policy, and requires evidence-backed reasoning before a verdict.',
+      category: 'hypothesis-validation',
       trigger_patterns: JSON.stringify([
         'hypothesis', 'theorem', 'prove', 'disprove', 'falsify', 'validate this claim',
+        'test this assumption', 'does this hold', 'is this true', 'validate this proposal', 'evaluate this strategy',
         'p-value', 'statistical significance', 'meta-analysis', 'effect size',
         'integral', 'derivative', 'equation', 'identity', 'simplify',
         'monte carlo', 'simulation suggests', 'cohort study', 'rct', 'systematic review',
       ]),
       instructions:
-        'When this skill is active, prefer delegating to: sv-decomposer (split the claim), sv-literature (prior work), sv-statistical (quantitative evidence), sv-mathematical (symbolic verification), sv-simulation (numerical evidence), and sv-adversarial (falsification). Every quantitative claim must be backed by at least one tool execution result — never accept the model\'s internal estimate as evidence. Emit a final JSON verdict block { verdict, confidence, summary } using SUPPORTED | PARTIALLY_SUPPORTED | CONTRADICTED | INSUFFICIENT_EVIDENCE | REQUIRES_REPLICATION.',
+        'When this skill is active, prefer delegating to: sv-decomposer (split the claim), sv-literature (external evidence), sv-statistical (quantitative evidence), sv-mathematical (symbolic verification), sv-simulation (numerical evidence), and sv-adversarial (falsification). Every quantitative or externally-sourced claim must be backed by tool execution when relevant. Emit a final JSON verdict block { verdict, confidence, summary } using SUPPORTED | PARTIALLY_SUPPORTED | CONTRADICTED | INSUFFICIENT_EVIDENCE | REQUIRES_REPLICATION.',
       tool_names: JSON.stringify([
         'scipy_stats_test', 'statsmodels_meta', 'scipy_power', 'pymc_mcmc', 'r_metafor',
         'rdkit_descriptors', 'biopython_align', 'networkx_analyse',
@@ -709,22 +758,28 @@ async function _seedScientificValidationSkill(db: DatabaseAdapter): Promise<void
         { input: 'Validate this hypothesis: integral of x^2 from 0 to 3 equals 9', expectedRouting: 'sv-mathematical' },
         { input: 'Does the meta-analysis support the claim that aspirin halves stroke risk?', expectedRouting: 'sv-literature, sv-statistical' },
         { input: 'Prove that this drug-target interaction is plausible.', expectedRouting: 'sv-decomposer, sv-simulation, sv-adversarial' },
+        { input: 'Validate the hypothesis that reducing onboarding steps improves week-1 activation by 15%.', expectedRouting: 'sv-decomposer, sv-statistical, sv-adversarial' },
+        { input: 'Test the assumption that a 4-day delivery SLA increases conversion without hurting margin.', expectedRouting: 'sv-decomposer, sv-statistical, sv-adversarial' },
       ]),
-      tags: JSON.stringify(['scientific-validation', 'reasoning', 'verification']),
+      tags: JSON.stringify(['hypothesis-validation', 'reasoning', 'verification']),
       priority: 50,
       version: '1.0',
       enabled: 1,
-      tool_policy_key: 'scientific_validation',
+      tool_policy_key: 'hypothesis_validation',
     };
     if (!existing) {
       await db.createSkill(payload);
     } else {
       await db.updateSkill(SV_SKILL_ID, {
+        name: payload.name,
+        category: payload.category,
         description: payload.description,
         trigger_patterns: payload.trigger_patterns,
         instructions: payload.instructions,
         tool_names: payload.tool_names,
         examples: payload.examples,
+        tags: payload.tags,
+        version: payload.version,
         tool_policy_key: payload.tool_policy_key,
         enabled: payload.enabled,
       });
@@ -763,7 +818,7 @@ const SV_TOOL_CATALOG: SVToolCatalogEntry[] = [
   { toolKey: 'biopython_align',   name: 'BioPython Sequence Align',     description: 'Pairwise / multiple sequence alignment via BioPython.', category: 'simulation', riskLevel: 'read-only', sideEffects: 0, tags: ['biology', 'biopython', 'sandbox'] },
   { toolKey: 'networkx_analyse',  name: 'NetworkX Graph Analysis',       description: 'Graph / network analysis via NetworkX.',               category: 'simulation', riskLevel: 'read-only', sideEffects: 0, tags: ['networks', 'graph', 'sandbox'] },
   // Literature
-  { toolKey: 'arxiv_search',           name: 'arXiv Search',           description: 'Search arXiv preprints for relevant scientific papers.', category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'arxiv', 'external'] },
+  { toolKey: 'arxiv_search',           name: 'arXiv Search',           description: 'Search arXiv preprints for relevant research papers.', category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'arxiv', 'external'] },
   { toolKey: 'pubmed_search',          name: 'PubMed Search',          description: 'Search PubMed/MEDLINE for biomedical literature.',       category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'pubmed', 'external'] },
   { toolKey: 'semanticscholar_search', name: 'Semantic Scholar Search', description: 'Search Semantic Scholar for cross-disciplinary papers.', category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'semanticscholar', 'external'] },
   { toolKey: 'openalex_search',        name: 'OpenAlex Search',        description: 'Search OpenAlex open scholarly graph.',                  category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'openalex', 'external'] },
@@ -833,12 +888,12 @@ async function _seedSVWorkflowDef(db: DatabaseAdapter): Promise<void> {
     ];
     await db.createWorkflowDef({
       id: SV_WORKFLOW_ID,
-      name: 'Scientific Validation Deliberation',
+      name: 'Hypothesis Validation Deliberation',
       description: 'Decompose → parallel specialist evidence (literature, statistical, mathematical, simulation) → adversarial falsification → supervisor verdict. Documented for ops visibility; runtime orchestration is performed by chat.ts via the SVChatBridge.',
       version: '1.0',
       steps: JSON.stringify(steps),
       entry_step_id: 'decompose',
-      metadata: JSON.stringify({ owner: 'scientific-validation', triggers: ['scientific_validation skill'] }),
+      metadata: JSON.stringify({ owner: 'hypothesis-validation', triggers: ['hypothesis_validation skill'] }),
       enabled: 1,
     });
   } catch { /* non-fatal */ }

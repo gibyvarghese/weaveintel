@@ -8,3 +8,4 @@ export { createEvalRoutedAssistant, type EvalRoutedAssistantOptions } from './cr
 export { createMemoryGovernedAssistant, type MemoryGovernedAssistantOptions } from './createMemoryGovernedAssistant.js';
 export { createEventDrivenAgent, type EventDrivenAgentOptions } from './createEventDrivenAgent.js';
 export { createSafeExecutionAgent, type SafeExecutionAgentOptions } from './createSafeExecutionAgent.js';
+export { weaveSocialGrowthRecipe, type WeaveSocialGrowthRecipeOptions } from './weaveSocialGrowthRecipe.js';

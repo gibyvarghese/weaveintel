@@ -895,7 +895,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
   registerAdminRoutes(adminRouter, db, json, readBody, providers, html);
 
-  // ── Scientific Validation feature routes ────────────────────
+  // ── Hypothesis Validation feature routes ────────────────────
   // Build async model factories from the configured providers (models are cached by chat-runtime).
   const svProviderCfg = providers?.['openai'] ?? providers?.['anthropic'] ?? { apiKey: '' };
   const svProviderKey = providers?.['openai'] ? 'openai' : 'anthropic';

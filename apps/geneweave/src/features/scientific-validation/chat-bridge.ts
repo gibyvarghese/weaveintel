@@ -1,5 +1,5 @@
 /**
- * Scientific Validation — Chat Bridge
+ * Hypothesis Validation — Chat Bridge
  *
  * Replaces the legacy `runner.ts` workflow engine. Uses the SAME building blocks
  * that `chat.ts` uses for its supervisor mode (`weaveSupervisor` + DB-loaded
@@ -12,11 +12,11 @@
  *  - All system prompts come from the `prompts` table (sv.* keys for SV-specific
  *    workers; chat-supervisor instructions are built by the same DB policy
  *    prompts chat.ts uses)
- *  - Worker turns and tool calls are streamed to `sv_agent_turn` and
- *    `sv_evidence_event` via the agent event bus, so the SV UI's SSE endpoints
+ *  - Worker turns and tool calls are streamed to `hv_agent_turn` and
+ *    `hv_evidence_event` via the agent event bus, so the UI's SSE endpoints
  *    keep working unchanged.
  *  - The supervisor's final output is parsed for a verdict JSON block which
- *    becomes a `sv_verdict` row.
+ *    becomes a `hv_verdict` row.
  *
  * The runner contract (`startRun(input)` / `cancelRun(id)`) is preserved so the
  * existing route handlers (and the SV UI) require no changes beyond an import
@@ -94,7 +94,7 @@ function registryFromKeys(
       resolver: opts.policyResolver,
       auditEmitter: opts.auditEmitter ?? noopAuditEmitter,
       resolutionContext: {
-        skillPolicyKey: opts.skillPolicyKey ?? 'scientific_validation',
+        skillPolicyKey: opts.skillPolicyKey ?? 'hypothesis_validation',
         userId: opts.userId,
       },
     });
@@ -161,7 +161,7 @@ async function persistEvidence(
  *  2. Builds a `weaveSupervisor` with those workers (same path chat.ts uses
  *     when delegating to general workers).
  *  3. Subscribes to AgentDelegation + ToolCallEnd events, persisting them to
- *     `sv_agent_turn` and `sv_evidence_event` so the live deliberation view
+ *     `hv_agent_turn` and `hv_evidence_event` so the live deliberation view
  *     keeps streaming.
  *  4. Parses the supervisor's final output for a JSON verdict block.
  */
@@ -208,7 +208,7 @@ export class SVChatBridge {
     //    supervisor sees the same delegation pool chat.ts does) AND any workers
     //    tagged with the dedicated SV category (kept for ops visibility).
     const generalWorkers = await this.db.listEnabledWorkerAgents();
-    const svWorkers = await this.db.listWorkerAgentsByCategory('scientific-validation');
+    const svWorkers = await this.db.listWorkerAgentsByCategory('hypothesis-validation');
     const allWorkers = dedupeById([...generalWorkers, ...svWorkers]);
 
     // 2. Build worker definitions for weaveSupervisor.
@@ -260,7 +260,7 @@ export class SVChatBridge {
           {
             role: 'user',
             content: [
-              `Validate the following scientific hypothesis using the available specialist workers.`,
+              `Validate the following hypothesis using the available specialist workers.`,
               `When done, emit a single JSON verdict block (no markdown fences) following the supervisor schema.`,
               ``,
               `Title: (none)`,
@@ -314,9 +314,17 @@ export class SVChatBridge {
       }
     }
 
+    const displayName = (row.display_name?.trim() || row.name).trim();
+    const jobProfile = (row.job_profile?.trim() || 'Worker Agent').trim();
+    const description = [
+      `Display Name: ${displayName}`,
+      `Job Profile: ${jobProfile}`,
+      row.description,
+    ].filter(Boolean).join('\n');
+
     return {
       name: row.name,
-      description: row.description,
+      description,
       systemPrompt,
       model,
       tools,
@@ -333,7 +341,7 @@ export class SVChatBridge {
     }
   }
 
-  /** Best-effort decomposer pre-pass — populates `sv_sub_claim` rows. */
+  /** Best-effort decomposer pre-pass — populates `hv_sub_claim` rows. */
   private async _runDecomposer(input: SVRunInput, model: Model): Promise<void> {
     let prompt = '';
     try {

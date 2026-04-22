@@ -23,6 +23,153 @@ function truncatePreview(s: string, max = 500): string {
   return s.length > max ? s.slice(0, max) + '…' : s;
 }
 
+function sampleStringForKey(key: string, schema: Record<string, unknown> | undefined): string {
+  const normalized = key.toLowerCase();
+  const description = typeof schema?.['description'] === 'string' ? schema['description'].toLowerCase() : '';
+
+  if (normalized.includes('url') || description.includes('url')) return 'https://example.com';
+  if (normalized.includes('query') || normalized.includes('search')) return 'example search query';
+  if (normalized.includes('expression')) return '2 + 2';
+  if (normalized === 'json' || normalized.endsWith('_json')) return '{"hello":"world"}';
+  if (normalized.includes('text') || normalized.includes('content') || normalized.includes('message')) return 'Example text';
+  if (normalized.includes('name')) return 'example-name';
+  if (normalized.includes('title')) return 'Example Title';
+  if (normalized.includes('path') || normalized.includes('file')) return '/tmp/example.txt';
+  if (normalized.includes('email')) return 'user@example.com';
+  if (normalized.includes('model')) return 'gpt-4o-mini';
+  if (normalized.includes('provider')) return 'openai';
+  if (normalized.includes('timezone')) return 'UTC';
+  return 'example';
+}
+
+function buildFallbackSampleInput(toolKey: string, description: string): Record<string, unknown> {
+  const normalizedKey = toolKey.toLowerCase();
+  const normalizedDescription = description.toLowerCase();
+
+  if (normalizedKey === 'api_caller') {
+    return {
+      url: 'https://example.com/api/health',
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    };
+  }
+
+  if (normalizedKey === 'database_query') {
+    return {
+      connection: 'default',
+      query: 'SELECT 1 AS ok',
+    };
+  }
+
+  if (normalizedKey === 'calculator') {
+    return { expression: '2 + 2' };
+  }
+
+  if (normalizedKey === 'web_search') {
+    return { query: 'example search query' };
+  }
+
+  if (normalizedKey === 'json_format') {
+    return { json: '{"hello":"world"}' };
+  }
+
+  if (normalizedKey === 'cse_run_code') {
+    return { code: "print('hello world')" };
+  }
+
+  if (normalizedKey === 'cse_run_data_analysis') {
+    return {
+      code: "import pandas as pd\ndf = pd.DataFrame({'value': [1, 2, 3]})\nprint(df.describe())",
+    };
+  }
+
+  if (normalizedKey.startsWith('browser_')) {
+    if (normalizedKey.includes('scrape')) {
+      return {
+        url: 'https://example.com',
+        selectors: { title: 'title' },
+      };
+    }
+    return { url: 'https://example.com' };
+  }
+
+  if (normalizedKey.startsWith('statsnz_')) {
+    return { query: 'estimated resident population new zealand 2023' };
+  }
+
+  if (normalizedDescription.includes('sql')) {
+    return { query: 'SELECT 1 AS ok' };
+  }
+  if (normalizedDescription.includes('http') || normalizedDescription.includes('api')) {
+    return { url: 'https://example.com/api/health', method: 'GET' };
+  }
+  if (normalizedDescription.includes('web page') || normalizedDescription.includes('url')) {
+    return { url: 'https://example.com' };
+  }
+  if (normalizedDescription.includes('search')) {
+    return { query: 'example search query' };
+  }
+
+  return { input: 'example' };
+}
+
+function isEmptySample(sample: unknown): boolean {
+  return Boolean(sample) && typeof sample === 'object' && !Array.isArray(sample) && Object.keys(sample as Record<string, unknown>).length === 0;
+}
+
+function buildSampleValueFromSchema(
+  schema: Record<string, unknown> | undefined,
+  key = '',
+  depth = 0,
+): unknown {
+  if (!schema || depth > 4) return null;
+
+  const enumValues = Array.isArray(schema['enum']) ? schema['enum'] : null;
+  if (enumValues && enumValues.length > 0) return enumValues[0];
+
+  const explicitDefault = schema['default'];
+  if (explicitDefault !== undefined) return explicitDefault;
+
+  const type = typeof schema['type'] === 'string' ? schema['type'] : undefined;
+  switch (type) {
+    case 'object': {
+      const properties = schema['properties'];
+      const required = new Set(Array.isArray(schema['required']) ? schema['required'].filter((v): v is string => typeof v === 'string') : []);
+      const propertyEntries = properties && typeof properties === 'object'
+        ? Object.entries(properties as Record<string, unknown>)
+        : [];
+      const keysToInclude = required.size > 0
+        ? propertyEntries.filter(([propertyKey]) => required.has(propertyKey))
+        : propertyEntries;
+      const out: Record<string, unknown> = {};
+      for (const [propertyKey, value] of keysToInclude) {
+        out[propertyKey] = buildSampleValueFromSchema((value as Record<string, unknown>) ?? undefined, propertyKey, depth + 1);
+      }
+      return out;
+    }
+    case 'array': {
+      const items = schema['items'];
+      return [buildSampleValueFromSchema((items as Record<string, unknown>) ?? undefined, key, depth + 1)];
+    }
+    case 'number':
+    case 'integer':
+      return 1;
+    case 'boolean':
+      return true;
+    case 'string':
+    default:
+      return sampleStringForKey(key, schema);
+  }
+}
+
+function buildSampleInputJson(toolKey: string, tool: { schema: { parameters?: Record<string, unknown>; description: string } }): string {
+  let sample = buildSampleValueFromSchema(tool.schema.parameters);
+  if (sample == null || isEmptySample(sample)) {
+    sample = buildFallbackSampleInput(toolKey, tool.schema.description ?? '');
+  }
+  return JSON.stringify(sample ?? {}, null, 2);
+}
+
 export function registerToolSimulationRoutes(
   router: RouterLike,
   db: DatabaseAdapter,
@@ -40,6 +187,7 @@ export function registerToolSimulationRoutes(
       description: tool.schema.description,
       tags: tool.schema.tags ?? [],
       source: 'builtin',
+      sampleInputJson: buildSampleInputJson(key, tool),
     }));
 
     const catalogEntries = await db.listEnabledToolCatalog();
@@ -51,6 +199,7 @@ export function registerToolSimulationRoutes(
         description: e.description ?? '',
         tags: [] as string[],
         source: e.source ?? 'custom',
+        sampleInputJson: JSON.stringify(buildFallbackSampleInput(e.tool_key ?? e.name, e.description ?? ''), null, 2),
       }));
 
     json(res, 200, { tools: [...builtinTools, ...customTools] });

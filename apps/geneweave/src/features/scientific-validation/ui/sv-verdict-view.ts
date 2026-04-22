@@ -1,5 +1,5 @@
 /**
- * Scientific Validation — Verdict View
+ * Hypothesis Validation — Verdict View
  *
  * Displays the final verdict produced by the supervisor agent after all
  * specialist agents have completed their analysis. Shows the verdict label,

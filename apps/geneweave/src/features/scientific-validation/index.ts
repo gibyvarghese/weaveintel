@@ -1,5 +1,5 @@
 /**
- * Scientific Validation Feature — entry point
+ * Hypothesis Validation Feature — entry point
  *
  * Exports the route registration function and the chat-bridge consumed by the
  * geneweave server. The legacy `runner.ts` workflow engine, custom agents,
