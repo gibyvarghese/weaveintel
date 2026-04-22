@@ -939,6 +939,7 @@ CREATE TABLE IF NOT EXISTS sg_content_queue (
   channel_id TEXT REFERENCES sg_channels(id) ON DELETE SET NULL,
   title TEXT NOT NULL,
   brief TEXT,
+  content_text TEXT,
   format TEXT,
   status TEXT NOT NULL DEFAULT 'draft',
   scheduled_for TEXT,
@@ -1038,6 +1039,40 @@ CREATE TABLE IF NOT EXISTS sg_prompt_variants (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(brand_id, key, version)
 );
+
+CREATE TABLE IF NOT EXISTS sgap_phase2_configs (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  workflow_template_id TEXT NOT NULL REFERENCES sg_workflow_templates(id) ON DELETE CASCADE,
+  writer_agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+  researcher_agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+  editor_agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+  max_feedback_rounds INTEGER NOT NULL DEFAULT 2,
+  min_research_confidence REAL NOT NULL DEFAULT 0.7,
+  require_research_citations INTEGER NOT NULL DEFAULT 1,
+  auto_escalate_to_compliance INTEGER NOT NULL DEFAULT 1,
+  output_format TEXT NOT NULL DEFAULT 'markdown',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(brand_id, workflow_template_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sgap_phase2_configs_brand ON sgap_phase2_configs(brand_id, enabled);
+
+CREATE TABLE IF NOT EXISTS sgap_content_revisions (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  workflow_run_id TEXT NOT NULL REFERENCES sgap_workflow_runs(id) ON DELETE CASCADE,
+  content_item_id TEXT NOT NULL REFERENCES sg_content_queue(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+  stage TEXT NOT NULL,
+  revision_index INTEGER NOT NULL DEFAULT 1,
+  content_text TEXT NOT NULL,
+  notes_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sgap_content_revisions_run ON sgap_content_revisions(workflow_run_id, content_item_id, revision_index);
 
 CREATE TABLE IF NOT EXISTS semantic_memory (
   id TEXT PRIMARY KEY,
@@ -1283,5 +1318,161 @@ CREATE VIEW IF NOT EXISTS sv_sub_claim AS SELECT * FROM hv_sub_claim;
 CREATE VIEW IF NOT EXISTS sv_verdict AS SELECT * FROM hv_verdict;
 CREATE VIEW IF NOT EXISTS sv_evidence_event AS SELECT * FROM hv_evidence_event;
 CREATE VIEW IF NOT EXISTS sv_agent_turn AS SELECT * FROM hv_agent_turn;
+
+-- ── SGAP Multi-Agent Organization (Phase 1) ──────────────────
+
+-- Agent role definitions for organizational structure
+CREATE TABLE IF NOT EXISTS sgap_agents (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  name TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  role TEXT NOT NULL,
+  description TEXT NOT NULL,
+  system_prompt TEXT NOT NULL,
+  tool_names TEXT NOT NULL DEFAULT '[]',
+  authority_level TEXT NOT NULL,
+  skill_key TEXT,
+  worker_agent_id TEXT REFERENCES worker_agents(id),
+  priority INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sgap_agents_role ON sgap_agents(role, enabled);
+
+-- Workflow execution instances
+CREATE TABLE IF NOT EXISTS sgap_workflow_runs (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  workflow_template_id TEXT NOT NULL REFERENCES sg_workflow_templates(id),
+  status TEXT NOT NULL DEFAULT 'pending',
+  current_stage TEXT,
+  current_agent_id TEXT REFERENCES sgap_agents(id),
+  input_json TEXT NOT NULL DEFAULT '{}',
+  state_json TEXT NOT NULL DEFAULT '{}',
+  error_message TEXT,
+  started_at TEXT NOT NULL DEFAULT (datetime('now')),
+  completed_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sgap_workflow_runs_brand ON sgap_workflow_runs(brand_id, status);
+CREATE INDEX IF NOT EXISTS idx_sgap_workflow_runs_status ON sgap_workflow_runs(status, created_at DESC);
+
+-- Inter-agent conversation threads
+CREATE TABLE IF NOT EXISTS sgap_agent_threads (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  workflow_run_id TEXT NOT NULL REFERENCES sgap_workflow_runs(id) ON DELETE CASCADE,
+  stage TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sgap_agent_threads_run ON sgap_agent_threads(workflow_run_id);
+
+-- Agent-to-agent messages
+CREATE TABLE IF NOT EXISTS sgap_agent_messages (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  thread_id TEXT NOT NULL REFERENCES sgap_agent_threads(id) ON DELETE CASCADE,
+  from_agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+  to_agent_id TEXT REFERENCES sgap_agents(id),
+  message_type TEXT NOT NULL,
+  content_json TEXT NOT NULL,
+  requires_response INTEGER NOT NULL DEFAULT 0,
+  responded INTEGER NOT NULL DEFAULT 0,
+  response_message_id TEXT,
+  response_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  responded_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sgap_agent_messages_thread ON sgap_agent_messages(thread_id);
+CREATE INDEX IF NOT EXISTS idx_sgap_agent_messages_from ON sgap_agent_messages(from_agent_id, responded);
+
+-- Approval gates
+CREATE TABLE IF NOT EXISTS sgap_approvals (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  workflow_run_id TEXT NOT NULL REFERENCES sgap_workflow_runs(id) ON DELETE CASCADE,
+  content_item_id TEXT REFERENCES sg_content_queue(id),
+  required_by_agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+  approval_from_agent_id TEXT REFERENCES sgap_agents(id),
+  status TEXT NOT NULL DEFAULT 'pending',
+  feedback_json TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at TEXT,
+  resolved_by_agent_id TEXT REFERENCES sgap_agents(id)
+);
+CREATE INDEX IF NOT EXISTS idx_sgap_approvals_run ON sgap_approvals(workflow_run_id, status);
+CREATE INDEX IF NOT EXISTS idx_sgap_approvals_content ON sgap_approvals(content_item_id, status);
+
+-- Audit trail for all SGAP actions
+CREATE TABLE IF NOT EXISTS sgap_audit_log (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  workflow_run_id TEXT NOT NULL REFERENCES sgap_workflow_runs(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+  action TEXT NOT NULL,
+  details_json TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sgap_audit_log_run ON sgap_audit_log(workflow_run_id);
+CREATE INDEX IF NOT EXISTS idx_sgap_audit_log_agent ON sgap_audit_log(agent_id, created_at DESC);
+
+-- SGAP-specific skills mapping
+CREATE TABLE IF NOT EXISTS sgap_skills (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  agent_role TEXT NOT NULL,
+  skill_id TEXT NOT NULL REFERENCES skills(id),
+  tool_policy_key TEXT REFERENCES tool_policies(key),
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Social media platform configurations
+CREATE TABLE IF NOT EXISTS sgap_social_media_tools (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  platform TEXT NOT NULL UNIQUE,
+  api_base_url TEXT NOT NULL,
+  api_version TEXT NOT NULL DEFAULT '1.0',
+  auth_type TEXT NOT NULL,
+  rate_limit_per_min INTEGER NOT NULL DEFAULT 100,
+  supports_scheduling INTEGER NOT NULL DEFAULT 0,
+  supports_video INTEGER NOT NULL DEFAULT 0,
+  supports_images INTEGER NOT NULL DEFAULT 0,
+  supports_analytics INTEGER NOT NULL DEFAULT 0,
+  max_characters INTEGER,
+  config_json TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sgap_social_media_tools_platform ON sgap_social_media_tools(platform);
+
+-- Content performance metrics
+CREATE TABLE IF NOT EXISTS sgap_content_performance (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  content_item_id TEXT NOT NULL REFERENCES sg_content_queue(id) ON DELETE CASCADE,
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id),
+  platform TEXT NOT NULL,
+  published_at TEXT NOT NULL DEFAULT (datetime('now')),
+  views INTEGER NOT NULL DEFAULT 0,
+  engagement INTEGER NOT NULL DEFAULT 0,
+  reach INTEGER NOT NULL DEFAULT 0,
+  impressions INTEGER NOT NULL DEFAULT 0,
+  clicks INTEGER NOT NULL DEFAULT 0,
+  conversions INTEGER NOT NULL DEFAULT 0,
+  metadata_json TEXT,
+  synced_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sgap_content_performance_item ON sgap_content_performance(content_item_id, platform);
+CREATE INDEX IF NOT EXISTS idx_sgap_content_performance_brand ON sgap_content_performance(brand_id, published_at DESC);
 `;
 

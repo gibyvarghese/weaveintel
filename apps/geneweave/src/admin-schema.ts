@@ -77,6 +77,17 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'sg-tool-bindings', label: 'Tool Bindings' },
     { key: 'sg-strategy-settings', label: 'Strategy Settings' },
     { key: 'sg-prompt-variants', label: 'Prompt Variants' },
+    { key: 'sgap-agents', label: 'Org Agents' },
+    { key: 'sgap-workflow-runs', label: 'Org Workflow Runs' },
+    { key: 'sgap-agent-threads', label: 'Agent Threads' },
+    { key: 'sgap-agent-messages', label: 'Agent Messages' },
+    { key: 'sgap-approvals', label: 'Approvals' },
+    { key: 'sgap-audit-log', label: 'Audit Log' },
+    { key: 'sgap-skills', label: 'Role Skills' },
+    { key: 'sgap-social-media-tools', label: 'Platform Catalog' },
+    { key: 'sgap-content-performance', label: 'Performance' },
+    { key: 'sgap-phase2-configs', label: 'Phase 2 Configs' },
+    { key: 'sgap-content-revisions', label: 'Content Revisions' },
   ]},
   { label: 'Knowledge', icon: '\uD83D\uDCC2', tabs: [
     { key: 'extraction-pipelines', label: 'Extraction' },
@@ -103,6 +114,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'validation-rules', label: 'Validation' },
   ]},
   { label: 'System', icon: '\u2139\uFE0F', tabs: [
+    { key: 'users', label: 'Users' },
     { key: 'about', label: 'About' },
   ]},
 ];

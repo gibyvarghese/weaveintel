@@ -32,6 +32,9 @@ import type {
   WebsiteCredentialRow,
   SvBudgetEnvelopeRow, SvHypothesisRow, SvHypothesisStatus, SvSubClaimRow, SvVerdictRow,
   SvEvidenceEventRow, SvAgentTurnRow,
+  SgapAgentRow, SgapWorkflowRunRow, SgapAgentThreadRow, SgapAgentMessageRow,
+  SgapApprovalRow, SgapAuditLogRow, SgapSkillRow, SgapSocialMediaToolRow, SgapContentPerformanceRow,
+  SgapPhase2ConfigRow, SgapContentRevisionRow,
 } from './db-types.js';
 
 const SGAP_TABLES = new Set([
@@ -47,6 +50,17 @@ const SGAP_TABLES = new Set([
   'sg_tool_bindings',
   'sg_strategy_settings',
   'sg_prompt_variants',
+  'sgap_agents',
+  'sgap_workflow_runs',
+  'sgap_agent_threads',
+  'sgap_agent_messages',
+  'sgap_approvals',
+  'sgap_audit_log',
+  'sgap_skills',
+  'sgap_social_media_tools',
+  'sgap_content_performance',
+  'sgap_phase2_configs',
+  'sgap_content_revisions',
 ]);
 
 function normalizeSgapTableName(input: string): string {
@@ -103,6 +117,44 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async listUsers(): Promise<UserRow[]> {
     return this.d.prepare('SELECT * FROM users ORDER BY created_at ASC').all() as UserRow[];
+  }
+
+  async updateUser(userId: string, updates: {
+    email?: string;
+    name?: string;
+    persona?: string;
+    tenantId?: string | null;
+    passwordHash?: string;
+  }): Promise<void> {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    if (updates.email !== undefined) {
+      fields.push('email = ?');
+      values.push(updates.email);
+    }
+    if (updates.name !== undefined) {
+      fields.push('name = ?');
+      values.push(updates.name);
+    }
+    if (updates.persona !== undefined) {
+      fields.push('persona = ?');
+      values.push(updates.persona);
+    }
+    if (updates.tenantId !== undefined) {
+      fields.push('tenant_id = ?');
+      values.push(updates.tenantId);
+    }
+    if (updates.passwordHash !== undefined) {
+      fields.push('password_hash = ?');
+      values.push(updates.passwordHash);
+    }
+    if (fields.length === 0) return;
+    values.push(userId);
+    this.d.prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    this.d.prepare('DELETE FROM users WHERE id = ?').run(userId);
   }
 
   async updateUserPersona(userId: string, persona: string): Promise<void> {
@@ -2708,6 +2760,257 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id);
   }
 
+  // ─── SGAP Multi-Agent Organization (Phase 1) ─────────────
+
+  async listSgapAgents(): Promise<SgapAgentRow[]> {
+    return this.d.prepare('SELECT * FROM sgap_agents ORDER BY priority DESC, created_at ASC').all() as SgapAgentRow[];
+  }
+
+  async getSgapAgent(id: string): Promise<SgapAgentRow | null> {
+    return (this.d.prepare('SELECT * FROM sgap_agents WHERE id = ?').get(id) as SgapAgentRow | undefined) ?? null;
+  }
+
+  async createSgapAgent(agent: Omit<SgapAgentRow, 'created_at' | 'updated_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_agents', agent as unknown as Record<string, unknown>);
+    return agent.id;
+  }
+
+  async updateSgapAgent(id: string, fields: Partial<SgapAgentRow>): Promise<void> {
+    await this.updateSgapTableRow('sgap_agents', id, fields as unknown as Record<string, unknown>);
+  }
+
+  async deleteSgapAgent(id: string): Promise<void> {
+    await this.deleteSgapTableRow('sgap_agents', id);
+  }
+
+  async listSgapWorkflowRuns(brandId: string): Promise<SgapWorkflowRunRow[]> {
+    return this.d.prepare('SELECT * FROM sgap_workflow_runs WHERE brand_id = ? ORDER BY created_at DESC').all(brandId) as SgapWorkflowRunRow[];
+  }
+
+  async getSgapWorkflowRun(id: string): Promise<SgapWorkflowRunRow | null> {
+    return (this.d.prepare('SELECT * FROM sgap_workflow_runs WHERE id = ?').get(id) as SgapWorkflowRunRow | undefined) ?? null;
+  }
+
+  async createSgapWorkflowRun(run: Omit<SgapWorkflowRunRow, 'created_at' | 'updated_at' | 'started_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_workflow_runs', {
+      ...run,
+      started_at: new Date().toISOString(),
+    });
+    return run.id;
+  }
+
+  async updateSgapWorkflowRun(id: string, fields: Partial<SgapWorkflowRunRow>): Promise<void> {
+    await this.updateSgapTableRow('sgap_workflow_runs', id, fields as unknown as Record<string, unknown>);
+  }
+
+  async getSgapWorkflowRunsByStatus(status: string, limit = 50): Promise<SgapWorkflowRunRow[]> {
+    return this.d.prepare('SELECT * FROM sgap_workflow_runs WHERE status = ? ORDER BY created_at DESC LIMIT ?').all(status, limit) as SgapWorkflowRunRow[];
+  }
+
+  async listSgapAgentThreads(workflowRunId: string): Promise<SgapAgentThreadRow[]> {
+    return this.d.prepare('SELECT * FROM sgap_agent_threads WHERE workflow_run_id = ? ORDER BY created_at ASC').all(workflowRunId) as SgapAgentThreadRow[];
+  }
+
+  async getSgapAgentThread(id: string): Promise<SgapAgentThreadRow | null> {
+    return (this.d.prepare('SELECT * FROM sgap_agent_threads WHERE id = ?').get(id) as SgapAgentThreadRow | undefined) ?? null;
+  }
+
+  async createSgapAgentThread(thread: Omit<SgapAgentThreadRow, 'created_at' | 'updated_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_agent_threads', thread as unknown as Record<string, unknown>);
+    return thread.id;
+  }
+
+  async listSgapAgentMessages(threadId: string): Promise<SgapAgentMessageRow[]> {
+    return this.d.prepare('SELECT * FROM sgap_agent_messages WHERE thread_id = ? ORDER BY created_at ASC').all(threadId) as SgapAgentMessageRow[];
+  }
+
+  async getSgapAgentMessage(id: string): Promise<SgapAgentMessageRow | null> {
+    return (this.d.prepare('SELECT * FROM sgap_agent_messages WHERE id = ?').get(id) as SgapAgentMessageRow | undefined) ?? null;
+  }
+
+  async createSgapAgentMessage(message: Omit<SgapAgentMessageRow, 'created_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_agent_messages', message as unknown as Record<string, unknown>);
+    return message.id;
+  }
+
+  async respondToSgapAgentMessage(messageId: string, responseMessageId: string, responseJson: Record<string, unknown>): Promise<void> {
+    await this.updateSgapTableRow('sgap_agent_messages', messageId, {
+      responded: 1,
+      response_message_id: responseMessageId,
+      response_json: JSON.stringify(responseJson),
+      responded_at: new Date().toISOString(),
+    });
+  }
+
+  async getPendingSgapAgentMessages(agentId: string, limit = 50): Promise<SgapAgentMessageRow[]> {
+    return this.d.prepare(
+      `SELECT * FROM sgap_agent_messages
+       WHERE to_agent_id = ? AND requires_response = 1 AND responded = 0
+       ORDER BY created_at ASC
+       LIMIT ?`,
+    ).all(agentId, limit) as SgapAgentMessageRow[];
+  }
+
+  async listSgapApprovals(workflowRunId?: string, status?: string): Promise<SgapApprovalRow[]> {
+    if (workflowRunId && status) {
+      return this.d.prepare('SELECT * FROM sgap_approvals WHERE workflow_run_id = ? AND status = ? ORDER BY created_at DESC').all(workflowRunId, status) as SgapApprovalRow[];
+    }
+    if (workflowRunId) {
+      return this.d.prepare('SELECT * FROM sgap_approvals WHERE workflow_run_id = ? ORDER BY created_at DESC').all(workflowRunId) as SgapApprovalRow[];
+    }
+    if (status) {
+      return this.d.prepare('SELECT * FROM sgap_approvals WHERE status = ? ORDER BY created_at DESC').all(status) as SgapApprovalRow[];
+    }
+    return this.d.prepare('SELECT * FROM sgap_approvals ORDER BY created_at DESC').all() as SgapApprovalRow[];
+  }
+
+  async getSgapApproval(id: string): Promise<SgapApprovalRow | null> {
+    return (this.d.prepare('SELECT * FROM sgap_approvals WHERE id = ?').get(id) as SgapApprovalRow | undefined) ?? null;
+  }
+
+  async createSgapApproval(approval: Omit<SgapApprovalRow, 'created_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_approvals', approval as unknown as Record<string, unknown>);
+    return approval.id;
+  }
+
+  async updateSgapApprovalStatus(id: string, status: string, resolvedByAgentId: string, feedback?: Record<string, unknown>): Promise<void> {
+    await this.updateSgapTableRow('sgap_approvals', id, {
+      status,
+      resolved_by_agent_id: resolvedByAgentId,
+      resolved_at: new Date().toISOString(),
+      feedback_json: feedback ? JSON.stringify(feedback) : undefined,
+    });
+  }
+
+  async getPendingSgapApprovals(requiredByAgentId?: string): Promise<SgapApprovalRow[]> {
+    if (requiredByAgentId) {
+      return this.d.prepare('SELECT * FROM sgap_approvals WHERE status = ? AND required_by_agent_id = ? ORDER BY created_at ASC').all('pending', requiredByAgentId) as SgapApprovalRow[];
+    }
+    return this.d.prepare('SELECT * FROM sgap_approvals WHERE status = ? ORDER BY created_at ASC').all('pending') as SgapApprovalRow[];
+  }
+
+  async createSgapAuditLog(log: Omit<SgapAuditLogRow, 'created_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_audit_log', log as unknown as Record<string, unknown>);
+    return log.id;
+  }
+
+  async listSgapAuditLog(workflowRunId?: string, agentId?: string, limit = 100): Promise<SgapAuditLogRow[]> {
+    if (workflowRunId && agentId) {
+      return this.d.prepare(
+        'SELECT * FROM sgap_audit_log WHERE workflow_run_id = ? AND agent_id = ? ORDER BY created_at DESC LIMIT ?',
+      ).all(workflowRunId, agentId, limit) as SgapAuditLogRow[];
+    }
+    if (workflowRunId) {
+      return this.d.prepare('SELECT * FROM sgap_audit_log WHERE workflow_run_id = ? ORDER BY created_at DESC LIMIT ?').all(workflowRunId, limit) as SgapAuditLogRow[];
+    }
+    if (agentId) {
+      return this.d.prepare('SELECT * FROM sgap_audit_log WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?').all(agentId, limit) as SgapAuditLogRow[];
+    }
+    return this.d.prepare('SELECT * FROM sgap_audit_log ORDER BY created_at DESC LIMIT ?').all(limit) as SgapAuditLogRow[];
+  }
+
+  async listSgapSkills(): Promise<SgapSkillRow[]> {
+    return this.d.prepare('SELECT * FROM sgap_skills ORDER BY created_at DESC').all() as SgapSkillRow[];
+  }
+
+  async getSgapSkillByRole(agentRole: string): Promise<SgapSkillRow | null> {
+    return (this.d.prepare('SELECT * FROM sgap_skills WHERE agent_role = ? AND enabled = 1 ORDER BY created_at DESC LIMIT 1').get(agentRole) as SgapSkillRow | undefined) ?? null;
+  }
+
+  async createSgapSkill(skill: Omit<SgapSkillRow, 'created_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_skills', skill as unknown as Record<string, unknown>);
+    return skill.id;
+  }
+
+  async updateSgapSkill(id: string, fields: Partial<SgapSkillRow>): Promise<void> {
+    await this.updateSgapTableRow('sgap_skills', id, fields as unknown as Record<string, unknown>);
+  }
+
+  async listSgapSocialMediaTools(): Promise<SgapSocialMediaToolRow[]> {
+    return this.d.prepare('SELECT * FROM sgap_social_media_tools ORDER BY platform ASC').all() as SgapSocialMediaToolRow[];
+  }
+
+  async getSgapSocialMediaTool(platform: string): Promise<SgapSocialMediaToolRow | null> {
+    return (this.d.prepare('SELECT * FROM sgap_social_media_tools WHERE platform = ?').get(platform) as SgapSocialMediaToolRow | undefined) ?? null;
+  }
+
+  async createSgapSocialMediaTool(tool: Omit<SgapSocialMediaToolRow, 'created_at' | 'updated_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_social_media_tools', tool as unknown as Record<string, unknown>);
+    return tool.id;
+  }
+
+  async updateSgapSocialMediaTool(id: string, fields: Partial<SgapSocialMediaToolRow>): Promise<void> {
+    await this.updateSgapTableRow('sgap_social_media_tools', id, fields as unknown as Record<string, unknown>);
+  }
+
+  async listSgapContentPerformance(contentItemId?: string, brandId?: string): Promise<SgapContentPerformanceRow[]> {
+    if (contentItemId && brandId) {
+      return this.d.prepare('SELECT * FROM sgap_content_performance WHERE content_item_id = ? AND brand_id = ? ORDER BY published_at DESC').all(contentItemId, brandId) as SgapContentPerformanceRow[];
+    }
+    if (contentItemId) {
+      return this.d.prepare('SELECT * FROM sgap_content_performance WHERE content_item_id = ? ORDER BY published_at DESC').all(contentItemId) as SgapContentPerformanceRow[];
+    }
+    if (brandId) {
+      return this.d.prepare('SELECT * FROM sgap_content_performance WHERE brand_id = ? ORDER BY published_at DESC').all(brandId) as SgapContentPerformanceRow[];
+    }
+    return this.d.prepare('SELECT * FROM sgap_content_performance ORDER BY published_at DESC').all() as SgapContentPerformanceRow[];
+  }
+
+  async getSgapContentPerformance(id: string): Promise<SgapContentPerformanceRow | null> {
+    return (this.d.prepare('SELECT * FROM sgap_content_performance WHERE id = ?').get(id) as SgapContentPerformanceRow | undefined) ?? null;
+  }
+
+  async createSgapContentPerformance(perf: Omit<SgapContentPerformanceRow, 'created_at' | 'updated_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_content_performance', perf as unknown as Record<string, unknown>);
+    return perf.id;
+  }
+
+  async updateSgapContentPerformance(id: string, fields: Partial<SgapContentPerformanceRow>): Promise<void> {
+    await this.updateSgapTableRow('sgap_content_performance', id, fields as unknown as Record<string, unknown>);
+  }
+
+  async listSgapPhase2Configs(brandId?: string, workflowTemplateId?: string): Promise<SgapPhase2ConfigRow[]> {
+    if (brandId && workflowTemplateId) {
+      return this.d.prepare('SELECT * FROM sgap_phase2_configs WHERE brand_id = ? AND workflow_template_id = ? ORDER BY created_at DESC').all(brandId, workflowTemplateId) as SgapPhase2ConfigRow[];
+    }
+    if (brandId) {
+      return this.d.prepare('SELECT * FROM sgap_phase2_configs WHERE brand_id = ? ORDER BY created_at DESC').all(brandId) as SgapPhase2ConfigRow[];
+    }
+    if (workflowTemplateId) {
+      return this.d.prepare('SELECT * FROM sgap_phase2_configs WHERE workflow_template_id = ? ORDER BY created_at DESC').all(workflowTemplateId) as SgapPhase2ConfigRow[];
+    }
+    return this.d.prepare('SELECT * FROM sgap_phase2_configs ORDER BY created_at DESC').all() as SgapPhase2ConfigRow[];
+  }
+
+  async getSgapPhase2Config(id: string): Promise<SgapPhase2ConfigRow | null> {
+    return (this.d.prepare('SELECT * FROM sgap_phase2_configs WHERE id = ?').get(id) as SgapPhase2ConfigRow | undefined) ?? null;
+  }
+
+  async createSgapPhase2Config(config: Omit<SgapPhase2ConfigRow, 'created_at' | 'updated_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_phase2_configs', config as unknown as Record<string, unknown>);
+    return config.id;
+  }
+
+  async updateSgapPhase2Config(id: string, fields: Partial<SgapPhase2ConfigRow>): Promise<void> {
+    await this.updateSgapTableRow('sgap_phase2_configs', id, fields as unknown as Record<string, unknown>);
+  }
+
+  async listSgapContentRevisions(workflowRunId: string, contentItemId?: string): Promise<SgapContentRevisionRow[]> {
+    if (contentItemId) {
+      return this.d.prepare(
+        'SELECT * FROM sgap_content_revisions WHERE workflow_run_id = ? AND content_item_id = ? ORDER BY revision_index ASC, created_at ASC',
+      ).all(workflowRunId, contentItemId) as SgapContentRevisionRow[];
+    }
+    return this.d.prepare(
+      'SELECT * FROM sgap_content_revisions WHERE workflow_run_id = ? ORDER BY content_item_id ASC, revision_index ASC, created_at ASC',
+    ).all(workflowRunId) as SgapContentRevisionRow[];
+  }
+
+  async createSgapContentRevision(revision: Omit<SgapContentRevisionRow, 'created_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_content_revisions', revision as unknown as Record<string, unknown>);
+    return revision.id;
+  }
+
   // ─── Website Credentials (Browser Auth Vault) ──────────────
 
   async createWebsiteCredential(c: Omit<WebsiteCredentialRow, 'created_at' | 'updated_at'>): Promise<void> {
@@ -4693,6 +4996,50 @@ export class SQLiteAdapter implements DatabaseAdapter {
           status: 'active',
           enabled: 1,
         },
+        {
+          id: '18e0d31f-7e11-43c5-9f4c-4e2b2e30988d',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'facebook',
+          handle: '@techlunch',
+          account_ref: 'social-facebook-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 3, preferred_hours: [11, 19] }),
+          status: 'active',
+          enabled: 1,
+        },
+        {
+          id: 'f6ca17e5-9c3e-4da7-bf2b-001a8db4f6be',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'medium',
+          handle: '@techlunch',
+          account_ref: 'social-medium-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 2, preferred_hours: [8, 15] }),
+          status: 'active',
+          enabled: 1,
+        },
+        {
+          id: 'f334372d-76bc-43d2-b27d-a9fef24e5ac2',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'blogger',
+          handle: '@techlunch',
+          account_ref: 'social-blogger-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 2, preferred_hours: [7, 14] }),
+          status: 'active',
+          enabled: 1,
+        },
+        {
+          id: '51eb3f4a-9db1-44ce-af3c-4928ebd58c04',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'x',
+          handle: '@techlunchhq',
+          account_ref: 'social-x-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 7, preferred_hours: [8, 12, 17] }),
+          status: 'active',
+          enabled: 1,
+        },
       ];
       for (const row of channelRows) await this.createSgapTableRow('sg_channels', row);
     }
@@ -4766,20 +5113,51 @@ export class SQLiteAdapter implements DatabaseAdapter {
     }
 
     if (cnt('sg_content_queue') === 0) {
-      await this.createSgapTableRow('sg_content_queue', {
-        id: '7835eb9a-6f09-440b-a875-e4e42d2f40f2',
-        brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-        campaign_id: 'e6ef837e-84c0-4eeb-8a22-909f9982db88',
-        channel_id: '44e1364d-df3c-47e1-aa80-c2f4244f6f8c',
-        title: '3 GTM mistakes founders repeat every quarter',
-        brief: 'Carousel post with one tactical takeaway per slide and CTA for newsletter signup.',
-        format: 'carousel',
-        status: 'ready',
-        scheduled_for: '2026-04-15T16:00:00.000Z',
-        asset_urls_json: JSON.stringify([]),
-        metadata_json: JSON.stringify({ pillar: 'educational', cta: 'newsletter_signup' }),
-        enabled: 1,
-      });
+      const queueRows: Array<Record<string, unknown>> = [
+        {
+          id: '7835eb9a-6f09-440b-a875-e4e42d2f40f2',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          campaign_id: 'e6ef837e-84c0-4eeb-8a22-909f9982db88',
+          channel_id: '44e1364d-df3c-47e1-aa80-c2f4244f6f8c',
+          title: '3 GTM mistakes founders repeat every quarter',
+          brief: 'Carousel post with one tactical takeaway per slide and CTA for newsletter signup.',
+          format: 'carousel',
+          status: 'ready',
+          scheduled_for: '2026-04-15T16:00:00.000Z',
+          asset_urls_json: JSON.stringify([]),
+          metadata_json: JSON.stringify({ pillar: 'educational', cta: 'newsletter_signup', lane: 'advisory' }),
+          enabled: 1,
+        },
+        {
+          id: 'd31fd9b2-d3d9-48cc-8096-291ac4023976',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          campaign_id: 'e6ef837e-84c0-4eeb-8a22-909f9982db88',
+          channel_id: 'f6ca17e5-9c3e-4da7-bf2b-001a8db4f6be',
+          title: 'How to benchmark agent latency without fooling yourself',
+          brief: 'Long-form Medium post with a practical checklist, sample benchmark table, and interpretation pitfalls.',
+          format: 'article',
+          status: 'draft',
+          scheduled_for: '2026-04-18T17:30:00.000Z',
+          asset_urls_json: JSON.stringify([]),
+          metadata_json: JSON.stringify({ pillar: 'AI Performance Explained', cta: 'download_checklist', lane: 'deep-dive' }),
+          enabled: 1,
+        },
+        {
+          id: '7f5295f7-aa5b-4f86-96d5-a9cd0076fb31',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          campaign_id: 'e6ef837e-84c0-4eeb-8a22-909f9982db88',
+          channel_id: '18e0d31f-7e11-43c5-9f4c-4e2b2e30988d',
+          title: 'Founder advisory: stop shipping models without failure budgets',
+          brief: 'Facebook text + image concept focused on reliability budgets and simple governance steps.',
+          format: 'image_post',
+          status: 'draft',
+          scheduled_for: '2026-04-19T19:00:00.000Z',
+          asset_urls_json: JSON.stringify([]),
+          metadata_json: JSON.stringify({ pillar: 'Advisory Snippets', cta: 'comment_template', lane: 'advisory' }),
+          enabled: 1,
+        },
+      ];
+      for (const row of queueRows) await this.createSgapTableRow('sg_content_queue', row);
     }
 
     if (cnt('sg_growth_experiments') === 0) {
@@ -5065,6 +5443,288 @@ export class SQLiteAdapter implements DatabaseAdapter {
         entry_step_id: 'plan',
         metadata: JSON.stringify({ domain: 'sgap', brandSlug: 'tech-lunch' }),
         enabled: 1,
+      });
+    }
+
+    // SGAP Phase 1 seed data (multi-agent organization)
+    const sgapPromptRows: Array<Omit<PromptRow, 'created_at' | 'updated_at'>> = [
+      {
+        id: 'd68fbcfd-f591-4668-bc0c-e9140a367d79', key: 'sgap.ceo.system', name: 'SGAP CEO System Prompt',
+        description: 'Top-level SGAP orchestrator responsible for strategic delegation and final approval decisions.',
+        category: 'social-growth', prompt_type: 'template', owner: 'system', status: 'published',
+        tags: JSON.stringify(['sgap', 'ceo', 'orchestration']),
+        template: 'You are SGAP CEO. Delegate to specialist agents, enforce KPI accountability, require evidence-backed recommendations, and gate final approvals based on brand strategy and compliance.',
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
+        execution_defaults: JSON.stringify({ strategy: 'singlePass' }), framework: null, metadata: JSON.stringify({ domain: 'sgap' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: 'f8ea47e1-92ef-4d67-a084-c20ebbf4ef2c', key: 'sgap.strategist.system', name: 'SGAP Strategist System Prompt',
+        description: 'Creates campaign strategy and weekly content direction tied to measurable outcomes.',
+        category: 'social-growth', prompt_type: 'template', owner: 'system', status: 'published',
+        tags: JSON.stringify(['sgap', 'strategist']),
+        template: 'You are SGAP Strategist. Convert business goals into campaign plans, channel allocation, content pillars, and KPI ladders. Return practical plans with explicit success criteria.',
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass' }), framework: null, metadata: JSON.stringify({ domain: 'sgap' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: '85e0773d-f57e-4bb0-b338-a8a4f1657d3f', key: 'sgap.writer.system', name: 'SGAP Writer System Prompt',
+        description: 'Produces channel-native social drafts with actionable, implementation-first writing style.',
+        category: 'social-growth', prompt_type: 'template', owner: 'system', status: 'published',
+        tags: JSON.stringify(['sgap', 'writer']),
+        template: 'You are SGAP Writer. Draft publish-ready posts with strong hooks, practical substance, and measurable CTA. Keep tone technical yet accessible.',
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass' }), framework: null, metadata: JSON.stringify({ domain: 'sgap' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: '7d44b30e-c2b7-4ca2-9ff0-c5377ddb3643', key: 'sgap.researcher.system', name: 'SGAP Researcher System Prompt',
+        description: 'Validates claims, gathers evidence, and protects factual integrity for SGAP outputs.',
+        category: 'social-growth', prompt_type: 'template', owner: 'system', status: 'published',
+        tags: JSON.stringify(['sgap', 'researcher']),
+        template: 'You are SGAP Researcher. Fact-check claims, provide source-backed evidence summaries, and flag unsupported assertions before publication.',
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass' }), framework: null, metadata: JSON.stringify({ domain: 'sgap' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: '5f6fce4d-12cb-48ad-b8d8-441cbdf4f9b4', key: 'sgap.editor.system', name: 'SGAP Editor System Prompt',
+        description: 'Performs clarity, coherence, and structure review to ensure high readability and consistency.',
+        category: 'social-growth', prompt_type: 'template', owner: 'system', status: 'published',
+        tags: JSON.stringify(['sgap', 'editor']),
+        template: 'You are SGAP Editor. Improve structure, tighten language, preserve intent, and enforce consistency with brand voice and audience comprehension.',
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass' }), framework: null, metadata: JSON.stringify({ domain: 'sgap' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: '3d501b16-3ac5-4b5f-a687-f1e8ebf38668', key: 'sgap.compliance.system', name: 'SGAP Compliance System Prompt',
+        description: 'Enforces content policy, legal risk checks, and platform guideline adherence.',
+        category: 'social-growth', prompt_type: 'template', owner: 'system', status: 'published',
+        tags: JSON.stringify(['sgap', 'compliance']),
+        template: 'You are SGAP Compliance Officer. Review for policy risk, legal sensitivity, and platform restrictions. Approve, reject, or escalate with concise rationale.',
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass' }), framework: null, metadata: JSON.stringify({ domain: 'sgap' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: '023e9cb0-c4f2-42da-8d0e-f6e92f6dfec4', key: 'sgap.social_manager.system', name: 'SGAP Social Manager System Prompt',
+        description: 'Handles scheduling, platform adaptation, and publishing readiness across channels.',
+        category: 'social-growth', prompt_type: 'template', owner: 'system', status: 'published',
+        tags: JSON.stringify(['sgap', 'social-manager']),
+        template: 'You are SGAP Social Manager. Convert approved content into channel-specific publish artifacts with timing and distribution plans.',
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass' }), framework: null, metadata: JSON.stringify({ domain: 'sgap' }), is_default: 0, enabled: 1,
+      },
+      {
+        id: '29f0dbb9-8ff0-40e7-a845-6f8db702f10a', key: 'sgap.analytics.system', name: 'SGAP Analytics System Prompt',
+        description: 'Tracks performance, evaluates experiments, and recommends growth adjustments.',
+        category: 'social-growth', prompt_type: 'template', owner: 'system', status: 'published',
+        tags: JSON.stringify(['sgap', 'analytics']),
+        template: 'You are SGAP Analytics Lead. Evaluate content KPIs, detect trends, and propose the next iteration with threshold-based recommendations.',
+        variables: null, version: '1.0', model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }), execution_defaults: JSON.stringify({ strategy: 'singlePass' }), framework: null, metadata: JSON.stringify({ domain: 'sgap' }), is_default: 0, enabled: 1,
+      },
+    ];
+    for (const prompt of sgapPromptRows) {
+      if (!prompt.key) continue;
+      if (!await this.getPromptByKey(prompt.key)) await this.createPrompt(prompt);
+    }
+
+    const sgapSkillRows: Array<Omit<SkillRow, 'created_at' | 'updated_at'>> = [
+      {
+        id: '7c84cf61-b6f0-446a-ae5e-ddd0ffde9f15', name: 'SGAP CEO Orchestrator', description: 'Coordinates specialist agents and owns final workflow outcomes.',
+        category: 'social-growth', trigger_patterns: JSON.stringify(['run sgap workflow', 'orchestrate campaign']),
+        instructions: 'Delegate work to specialist SGAP agents, keep execution trace explicit, and enforce approval gates before completion.',
+        tool_names: JSON.stringify(['json_format', 'text_analysis', 'memory_recall']), examples: JSON.stringify([]), tags: JSON.stringify(['sgap', 'ceo']), priority: 40, version: '1.0', tool_policy_key: 'default', enabled: 1,
+      },
+      {
+        id: 'a70e7bb6-66f4-4e37-a38f-ff4770f3bbce', name: 'SGAP Strategist', description: 'Creates campaign and channel strategy plans.',
+        category: 'social-growth', trigger_patterns: JSON.stringify(['strategy plan', 'campaign strategy']),
+        instructions: 'Produce plans with measurable targets and clear prioritization per channel.',
+        tool_names: JSON.stringify(['text_analysis', 'web_search', 'json_format']), examples: JSON.stringify([]), tags: JSON.stringify(['sgap', 'strategy']), priority: 32, version: '1.0', tool_policy_key: 'read_only', enabled: 1,
+      },
+      {
+        id: 'd9ac4ecc-38a8-4f1f-913f-5ecbce4f4ec5', name: 'SGAP Writer', description: 'Generates high-quality social content drafts.',
+        category: 'social-growth', trigger_patterns: JSON.stringify(['draft post', 'write content']),
+        instructions: 'Generate channel-ready copy with hooks, practical insights, and one clear CTA.',
+        tool_names: JSON.stringify(['text_analysis', 'json_format']), examples: JSON.stringify([]), tags: JSON.stringify(['sgap', 'writer']), priority: 30, version: '1.0', tool_policy_key: 'read_only', enabled: 1,
+      },
+      {
+        id: '0678e9d8-57b9-4b2e-8e06-32f1fdb357cd', name: 'SGAP Researcher', description: 'Fact-checks and compiles supporting evidence.',
+        category: 'social-growth', trigger_patterns: JSON.stringify(['fact check', 'evidence review']),
+        instructions: 'Verify factual claims and provide source-grounded notes before publication.',
+        tool_names: JSON.stringify(['web_search', 'text_analysis', 'json_format']), examples: JSON.stringify([]), tags: JSON.stringify(['sgap', 'research']), priority: 31, version: '1.0', tool_policy_key: 'read_only', enabled: 1,
+      },
+      {
+        id: '7e2cc2f4-aa14-48df-b2b9-15086a3a367f', name: 'SGAP Editor', description: 'Refines quality and readability of content.',
+        category: 'social-growth', trigger_patterns: JSON.stringify(['edit draft', 'improve clarity']),
+        instructions: 'Tighten language, improve flow, and maintain voice consistency.',
+        tool_names: JSON.stringify(['text_analysis', 'json_format']), examples: JSON.stringify([]), tags: JSON.stringify(['sgap', 'editor']), priority: 29, version: '1.0', tool_policy_key: 'read_only', enabled: 1,
+      },
+      {
+        id: '10609f5d-b4e8-4ef8-8dcb-95687b31f403', name: 'SGAP Compliance Officer', description: 'Checks policy and legal content risk.',
+        category: 'social-growth', trigger_patterns: JSON.stringify(['compliance review', 'policy check']),
+        instructions: 'Block risky claims, require substantiation, and escalate uncertain cases.',
+        tool_names: JSON.stringify(['text_analysis', 'json_format']), examples: JSON.stringify([]), tags: JSON.stringify(['sgap', 'compliance']), priority: 35, version: '1.0', tool_policy_key: 'strict_external', enabled: 1,
+      },
+      {
+        id: '7d8fefef-71d0-4bd7-baf6-22a4ff42d983', name: 'SGAP Social Manager', description: 'Coordinates scheduling and publishing for each channel.',
+        category: 'social-growth', trigger_patterns: JSON.stringify(['schedule posts', 'publish queue']),
+        instructions: 'Adapt output for platform constraints, optimize publish windows, and prepare posting artifacts.',
+        tool_names: JSON.stringify(['social_post', 'social_insights_read', 'json_format']), examples: JSON.stringify([]), tags: JSON.stringify(['sgap', 'distribution']), priority: 34, version: '1.0', tool_policy_key: 'strict_external', enabled: 1,
+      },
+      {
+        id: 'e65196cb-0916-49f7-a895-59c2e0fad26e', name: 'SGAP Analytics Lead', description: 'Tracks KPI outcomes and recommends next experiments.',
+        category: 'social-growth', trigger_patterns: JSON.stringify(['analyze performance', 'kpi report']),
+        instructions: 'Use KPI snapshots and experiment results to propose data-backed next actions.',
+        tool_names: JSON.stringify(['calculator', 'social_insights_read', 'json_format']), examples: JSON.stringify([]), tags: JSON.stringify(['sgap', 'analytics']), priority: 33, version: '1.0', tool_policy_key: 'read_only', enabled: 1,
+      },
+    ];
+    for (const skill of sgapSkillRows) {
+      if (!await this.getSkill(skill.id)) await this.createSkill(skill);
+    }
+
+    const sgapWorkerRows: Array<Omit<WorkerAgentRow, 'created_at' | 'updated_at'>> = [
+      {
+        id: 'b8147de2-f761-4d6d-b04a-b88ce452f7e5', name: 'sgap-ceo', display_name: 'SGAP CEO', job_profile: 'Supervisor', description: 'Coordinates SGAP specialists and final outputs.',
+        system_prompt: 'Coordinate SGAP specialist agents and provide final decision-ready outputs.', tool_names: JSON.stringify(['json_format', 'text_analysis']), persona: 'agent_supervisor', trigger_patterns: JSON.stringify(['sgap run']), task_contract_id: null, max_retries: 1, priority: 50, category: 'social-growth', enabled: 1,
+      },
+      {
+        id: '8db29651-5ca8-4305-94eb-8af4b741f2fa', name: 'sgap-strategist', display_name: 'SGAP Strategist', job_profile: 'Planner', description: 'Campaign planning specialist.',
+        system_prompt: 'Build practical campaign plans with KPI accountability.', tool_names: JSON.stringify(['text_analysis', 'web_search']), persona: 'agent_worker', trigger_patterns: JSON.stringify(['strategy']), task_contract_id: null, max_retries: 1, priority: 40, category: 'social-growth', enabled: 1,
+      },
+      {
+        id: 'ca5adf98-c4ee-4b05-8f4b-ac53097a89fc', name: 'sgap-writer', display_name: 'SGAP Writer', job_profile: 'Content Author', description: 'Drafting specialist.',
+        system_prompt: 'Write channel-ready drafts with practical value and clear CTA.', tool_names: JSON.stringify(['text_analysis']), persona: 'agent_worker', trigger_patterns: JSON.stringify(['draft']), task_contract_id: null, max_retries: 1, priority: 38, category: 'social-growth', enabled: 1,
+      },
+      {
+        id: '30290714-f17a-4d6d-a1fc-47c07103b6bd', name: 'sgap-researcher', display_name: 'SGAP Researcher', job_profile: 'Evidence Reviewer', description: 'Fact-check specialist.',
+        system_prompt: 'Validate claims and provide evidence-backed confidence judgments.', tool_names: JSON.stringify(['web_search', 'text_analysis']), persona: 'agent_researcher', trigger_patterns: JSON.stringify(['verify']), task_contract_id: null, max_retries: 1, priority: 38, category: 'social-growth', enabled: 1,
+      },
+      {
+        id: '8d5e41fd-b573-4ac3-9cb4-c1770fed7390', name: 'sgap-editor', display_name: 'SGAP Editor', job_profile: 'Quality Editor', description: 'Narrative quality specialist.',
+        system_prompt: 'Refine clarity, structure, and consistency for audience readability.', tool_names: JSON.stringify(['text_analysis']), persona: 'agent_worker', trigger_patterns: JSON.stringify(['edit']), task_contract_id: null, max_retries: 1, priority: 37, category: 'social-growth', enabled: 1,
+      },
+      {
+        id: 'd7b4f9de-72f1-4c42-83fe-9616d7053bd6', name: 'sgap-compliance', display_name: 'SGAP Compliance', job_profile: 'Policy Reviewer', description: 'Policy and risk reviewer.',
+        system_prompt: 'Assess risk, enforce policy compliance, and require correction when needed.', tool_names: JSON.stringify(['text_analysis']), persona: 'agent_worker', trigger_patterns: JSON.stringify(['compliance']), task_contract_id: null, max_retries: 1, priority: 42, category: 'social-growth', enabled: 1,
+      },
+      {
+        id: '7823f852-7250-4c74-96c5-e9562e5b76af', name: 'sgap-social-manager', display_name: 'SGAP Social Manager', job_profile: 'Distribution Lead', description: 'Publishing and channel adaptation specialist.',
+        system_prompt: 'Prepare final publish-ready channel outputs and scheduling recommendations.', tool_names: JSON.stringify(['social_post', 'social_insights_read']), persona: 'agent_worker', trigger_patterns: JSON.stringify(['publish']), task_contract_id: null, max_retries: 1, priority: 39, category: 'social-growth', enabled: 1,
+      },
+      {
+        id: '74d19379-77e2-4610-aea3-534551f1cd64', name: 'sgap-analytics', display_name: 'SGAP Analytics', job_profile: 'Performance Analyst', description: 'Performance and experimentation specialist.',
+        system_prompt: 'Analyze KPI movement and propose next experiments with thresholds.', tool_names: JSON.stringify(['calculator', 'social_insights_read']), persona: 'agent_worker', trigger_patterns: JSON.stringify(['kpi', 'analytics']), task_contract_id: null, max_retries: 1, priority: 39, category: 'social-growth', enabled: 1,
+      },
+    ];
+    for (const worker of sgapWorkerRows) {
+      if (!await this.getWorkerAgent(worker.id)) await this.createWorkerAgent(worker);
+    }
+
+    if (cnt('sgap_agents') === 0) {
+      const sgapAgents: Array<Record<string, unknown>> = [
+        { id: '593098bf-2f3d-4627-a7ee-b785e0ba2f8a', application_scope: 'sgap', name: 'sgap-ceo', display_name: 'Chief Strategy Officer', role: 'ceo', description: 'Supervises SGAP workflow execution and final decisions.', system_prompt: 'Orchestrate specialists, resolve conflicts, and enforce final quality bars.', tool_names: JSON.stringify(['json_format', 'text_analysis']), authority_level: 'final_approval', skill_key: 'SGAP CEO Orchestrator', worker_agent_id: 'b8147de2-f761-4d6d-b04a-b88ce452f7e5', priority: 100, enabled: 1 },
+        { id: '53025851-bf2d-49be-a070-f3a597f2daf4', application_scope: 'sgap', name: 'sgap-strategist', display_name: 'Editorial Strategist', role: 'strategist', description: 'Creates plans and priorities.', system_prompt: 'Translate goals into campaign plans and KPI ladders.', tool_names: JSON.stringify(['web_search', 'text_analysis']), authority_level: 'recommend', skill_key: 'SGAP Strategist', worker_agent_id: '8db29651-5ca8-4305-94eb-8af4b741f2fa', priority: 90, enabled: 1 },
+        { id: 'c092da65-e39b-4ef8-9db5-c2f76666d5ce', application_scope: 'sgap', name: 'sgap-writer', display_name: 'Senior Writer', role: 'writer', description: 'Produces publishable copy.', system_prompt: 'Draft high-value posts with actionable content.', tool_names: JSON.stringify(['text_analysis']), authority_level: 'create_draft', skill_key: 'SGAP Writer', worker_agent_id: 'ca5adf98-c4ee-4b05-8f4b-ac53097a89fc', priority: 80, enabled: 1 },
+        { id: '0f30f5be-72d7-44c4-b96e-98cc95f6d4f8', application_scope: 'sgap', name: 'sgap-researcher', display_name: 'Research Lead', role: 'researcher', description: 'Validates claims and sources.', system_prompt: 'Fact-check claims and summarize supporting evidence.', tool_names: JSON.stringify(['web_search', 'text_analysis']), authority_level: 'recommend', skill_key: 'SGAP Researcher', worker_agent_id: '30290714-f17a-4d6d-a1fc-47c07103b6bd', priority: 78, enabled: 1 },
+        { id: 'e9e4c8e9-05db-40dd-a660-70d2be7a6d6f', application_scope: 'sgap', name: 'sgap-editor', display_name: 'Editor', role: 'editor', description: 'Improves readability and narrative quality.', system_prompt: 'Edit for clarity, flow, and coherence.', tool_names: JSON.stringify(['text_analysis']), authority_level: 'recommend', skill_key: 'SGAP Editor', worker_agent_id: '8d5e41fd-b573-4ac3-9cb4-c1770fed7390', priority: 76, enabled: 1 },
+        { id: '8458f368-df5b-4500-b236-1f444d53ced8', application_scope: 'sgap', name: 'sgap-compliance', display_name: 'Compliance Officer', role: 'compliance', description: 'Approves or blocks risky content.', system_prompt: 'Enforce policy compliance and risk controls.', tool_names: JSON.stringify(['text_analysis']), authority_level: 'veto', skill_key: 'SGAP Compliance Officer', worker_agent_id: 'd7b4f9de-72f1-4c42-83fe-9616d7053bd6', priority: 88, enabled: 1 },
+        { id: 'fa905f6a-bcbc-4d6b-b3cf-77638f1f4745', application_scope: 'sgap', name: 'sgap-social-manager', display_name: 'Social Channel Manager', role: 'social-manager', description: 'Adapts and schedules content per channel.', system_prompt: 'Prepare channel-ready publishing plans and scheduling recommendations.', tool_names: JSON.stringify(['social_post', 'social_insights_read']), authority_level: 'recommend', skill_key: 'SGAP Social Manager', worker_agent_id: '7823f852-7250-4c74-96c5-e9562e5b76af', priority: 74, enabled: 1 },
+        { id: 'fc446af5-6e85-4605-86cb-8586b5c9ea93', application_scope: 'sgap', name: 'sgap-analytics', display_name: 'Growth Analytics Lead', role: 'analytics', description: 'Evaluates outcomes and next experiments.', system_prompt: 'Analyze KPI performance and propose data-backed iteration steps.', tool_names: JSON.stringify(['calculator', 'social_insights_read']), authority_level: 'recommend', skill_key: 'SGAP Analytics Lead', worker_agent_id: '74d19379-77e2-4610-aea3-534551f1cd64', priority: 72, enabled: 1 },
+      ];
+      for (const row of sgapAgents) await this.createSgapTableRow('sgap_agents', row);
+    }
+
+    if (cnt('sgap_skills') === 0) {
+      const roleToSkillId: Record<string, string> = {
+        ceo: '7c84cf61-b6f0-446a-ae5e-ddd0ffde9f15',
+        strategist: 'a70e7bb6-66f4-4e37-a38f-ff4770f3bbce',
+        writer: 'd9ac4ecc-38a8-4f1f-913f-5ecbce4f4ec5',
+        researcher: '0678e9d8-57b9-4b2e-8e06-32f1fdb357cd',
+        editor: '7e2cc2f4-aa14-48df-b2b9-15086a3a367f',
+        compliance: '10609f5d-b4e8-4ef8-8dcb-95687b31f403',
+        'social-manager': '7d8fefef-71d0-4bd7-baf6-22a4ff42d983',
+        analytics: 'e65196cb-0916-49f7-a895-59c2e0fad26e',
+      };
+      for (const [agentRole, skillId] of Object.entries(roleToSkillId)) {
+        await this.createSgapTableRow('sgap_skills', {
+          id: randomUUID(),
+          application_scope: 'sgap',
+          agent_role: agentRole,
+          skill_id: skillId,
+          tool_policy_key: agentRole === 'compliance' || agentRole === 'social-manager' ? 'strict_external' : 'default',
+          enabled: 1,
+        });
+      }
+    }
+
+    if (cnt('sgap_phase2_configs') === 0) {
+      await this.createSgapTableRow('sgap_phase2_configs', {
+        id: 'f9bb9554-e4e8-4545-b80e-12cf9f643868',
+        application_scope: 'sgap',
+        brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+        workflow_template_id: '675d4a3d-7c6f-4b4b-95c4-2eeb3d0b43f1',
+        writer_agent_id: 'c092da65-e39b-4ef8-9db5-c2f76666d5ce',
+        researcher_agent_id: '0f30f5be-72d7-44c4-b96e-98cc95f6d4f8',
+        editor_agent_id: 'e9e4c8e9-05db-40dd-a660-70d2be7a6d6f',
+        max_feedback_rounds: 2,
+        min_research_confidence: 0.72,
+        require_research_citations: 1,
+        auto_escalate_to_compliance: 1,
+        output_format: 'markdown',
+        enabled: 1,
+      });
+    }
+
+    if (cnt('sgap_social_media_tools') === 0) {
+      const socialPlatforms: Array<Record<string, unknown>> = [
+        { id: randomUUID(), platform: 'x', api_base_url: 'https://api.twitter.com', api_version: '2', auth_type: 'oauth2', rate_limit_per_min: 50, supports_scheduling: 1, supports_video: 1, supports_images: 1, supports_analytics: 1, max_characters: 280 },
+        { id: randomUUID(), platform: 'linkedin', api_base_url: 'https://api.linkedin.com', api_version: 'v2', auth_type: 'oauth2', rate_limit_per_min: 100, supports_scheduling: 1, supports_video: 1, supports_images: 1, supports_analytics: 1, max_characters: 3000 },
+        { id: randomUUID(), platform: 'facebook', api_base_url: 'https://graph.facebook.com', api_version: 'v19.0', auth_type: 'oauth2', rate_limit_per_min: 100, supports_scheduling: 1, supports_video: 1, supports_images: 1, supports_analytics: 1, max_characters: 63206 },
+        { id: randomUUID(), platform: 'instagram', api_base_url: 'https://graph.facebook.com', api_version: 'v19.0', auth_type: 'oauth2', rate_limit_per_min: 80, supports_scheduling: 1, supports_video: 1, supports_images: 1, supports_analytics: 1, max_characters: 2200 },
+        { id: randomUUID(), platform: 'tiktok', api_base_url: 'https://open.tiktokapis.com', api_version: 'v2', auth_type: 'oauth2', rate_limit_per_min: 60, supports_scheduling: 1, supports_video: 1, supports_images: 0, supports_analytics: 1, max_characters: 2200 },
+        { id: randomUUID(), platform: 'youtube', api_base_url: 'https://www.googleapis.com/youtube', api_version: 'v3', auth_type: 'oauth2', rate_limit_per_min: 30, supports_scheduling: 1, supports_video: 1, supports_images: 1, supports_analytics: 1, max_characters: 5000 },
+        { id: randomUUID(), platform: 'medium', api_base_url: 'https://api.medium.com', api_version: 'v1', auth_type: 'bearer', rate_limit_per_min: 40, supports_scheduling: 0, supports_video: 0, supports_images: 1, supports_analytics: 0, max_characters: null },
+        { id: randomUUID(), platform: 'devto', api_base_url: 'https://dev.to/api', api_version: 'v1', auth_type: 'api_key', rate_limit_per_min: 30, supports_scheduling: 0, supports_video: 0, supports_images: 1, supports_analytics: 0, max_characters: null },
+        { id: randomUUID(), platform: 'hashnode', api_base_url: 'https://gql.hashnode.com', api_version: 'v2', auth_type: 'bearer', rate_limit_per_min: 30, supports_scheduling: 0, supports_video: 0, supports_images: 1, supports_analytics: 0, max_characters: null },
+        { id: randomUUID(), platform: 'substack', api_base_url: 'https://substack.com/api', api_version: 'v1', auth_type: 'oauth2', rate_limit_per_min: 20, supports_scheduling: 1, supports_video: 0, supports_images: 1, supports_analytics: 0, max_characters: null },
+        { id: randomUUID(), platform: 'blogger', api_base_url: 'https://www.googleapis.com/blogger', api_version: 'v3', auth_type: 'oauth2', rate_limit_per_min: 20, supports_scheduling: 0, supports_video: 0, supports_images: 1, supports_analytics: 0, max_characters: null },
+      ];
+
+      for (const row of socialPlatforms) {
+        await this.createSgapTableRow('sgap_social_media_tools', {
+          application_scope: 'sgap',
+          ...row,
+          config_json: JSON.stringify({}),
+          enabled: 1,
+        });
+      }
+    }
+
+    const socialToolCatalogRows: Array<Omit<ToolCatalogRow, 'created_at' | 'updated_at'>> = [
+      { id: '7cc0cad6-12e7-4c90-8ec1-d713635ebbfa', name: 'Social: X Post Publish', description: 'Publish post content to X/Twitter via official API.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 20, enabled: 1, tool_key: 'social_x_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'x', 'social']), source: 'custom', credential_id: null },
+      { id: '8f5b834f-8225-4bfc-9d48-5e8e356b7c3d', name: 'Social: LinkedIn Publish', description: 'Publish post content to LinkedIn company or creator feed.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 20, enabled: 1, tool_key: 'social_linkedin_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'linkedin', 'social']), source: 'custom', credential_id: null },
+      { id: '67f2f90b-3a80-4bc3-b29e-a4ba2e6f7f4a', name: 'Social: Facebook Publish', description: 'Publish posts to Facebook pages.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 20, enabled: 1, tool_key: 'social_facebook_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'facebook', 'social']), source: 'custom', credential_id: null },
+      { id: 'f8f1f486-1bf5-4f17-916a-1fefecf8f0e4', name: 'Social: Instagram Publish', description: 'Publish media posts to Instagram business accounts.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 20, enabled: 1, tool_key: 'social_instagram_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'instagram', 'social']), source: 'custom', credential_id: null },
+      { id: 'c1f9fb3c-75dc-40ab-9748-c1c29ca8fba3', name: 'Social: TikTok Publish', description: 'Publish videos to TikTok.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'social_tiktok_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'tiktok', 'social']), source: 'custom', credential_id: null },
+      { id: 'e0f2eb4b-c08b-40d5-98d5-bcf7a620d53f', name: 'Social: YouTube Publish', description: 'Publish YouTube videos and metadata.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'social_youtube_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'youtube', 'social']), source: 'custom', credential_id: null },
+      { id: '8fb39628-bae8-4836-b41c-e24d4455dd39', name: 'Social: Medium Publish', description: 'Publish articles to Medium.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 15, enabled: 1, tool_key: 'social_medium_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'medium', 'social']), source: 'custom', credential_id: null },
+      { id: '397e8fea-1167-4892-8ec0-9863651af8f6', name: 'Social: Dev.to Publish', description: 'Publish technical articles to Dev.to.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 15, enabled: 1, tool_key: 'social_devto_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'devto', 'social']), source: 'custom', credential_id: null },
+      { id: 'f9e8eaf4-51c8-4342-bad3-0f175fca7e3e', name: 'Social: Hashnode Publish', description: 'Publish technical articles to Hashnode.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 15, enabled: 1, tool_key: 'social_hashnode_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'hashnode', 'social']), source: 'custom', credential_id: null },
+      { id: 'f448c963-5f17-46e3-9fbe-7f7f24303f8f', name: 'Social: Substack Publish', description: 'Publish newsletter content to Substack.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'social_substack_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'substack', 'social']), source: 'custom', credential_id: null },
+      { id: '03046f7f-9073-4baa-b5ef-f812bdd0ca6d', name: 'Social: Blogger Publish', description: 'Publish articles to Google Blogger.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'social_blogger_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'blogger', 'social']), source: 'custom', credential_id: null },
+    ];
+    for (const tool of socialToolCatalogRows) {
+      if (!tool.tool_key) continue;
+      if (!await this.getToolCatalogByKey(tool.tool_key)) await this.createToolConfig(tool);
+    }
+
+    if (cnt('sgap_content_performance') === 0) {
+      await this.createSgapTableRow('sgap_content_performance', {
+        id: randomUUID(),
+        application_scope: 'sgap',
+        content_item_id: '7835eb9a-6f09-440b-a875-e4e42d2f40f2',
+        brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+        platform: 'linkedin',
+        published_at: '2026-04-20T09:15:00.000Z',
+        views: 12400,
+        engagement: 768,
+        reach: 10650,
+        impressions: 18880,
+        clicks: 327,
+        conversions: 29,
+        metadata_json: JSON.stringify({ campaign: 'Q2 Startup Playbook Push', source: 'seed-demo' }),
+        synced_at: new Date().toISOString(),
       });
     }
 

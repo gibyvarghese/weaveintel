@@ -46,6 +46,12 @@ export function weaveSocialGrowthRecipe(opts: WeaveSocialGrowthRecipeOptions): A
     `Publishing cadence: ${opts.cadence ?? 'weekly planning with daily channel execution'}.`,
     sgapLoop,
     'Always return output in sections: Plan, Drafts, Distribution Notes, KPI Measurement, Next Experiment.',
+    'Depth requirements:',
+    '- Plan must include at least 3 concrete priorities with rationale and expected KPI impact.',
+    '- Drafts must include complete post-ready copy, not placeholders or single-line summaries.',
+    '- Distribution Notes must include timing, format adaptation, and a repost/iteration rule.',
+    '- KPI Measurement must include explicit targets and one experiment with a decision threshold.',
+    '- Avoid one-liners unless explicitly requested by the user.',
     opts.systemPrompt ?? '',
   ].join('\n\n');
 

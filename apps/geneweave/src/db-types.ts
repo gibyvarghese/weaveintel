@@ -1239,6 +1239,14 @@ export interface DatabaseAdapter {
   getUserByEmail(email: string): Promise<UserRow | null>;
   getUserById(id: string): Promise<UserRow | null>;
   listUsers(): Promise<UserRow[]>;
+  updateUser(userId: string, updates: {
+    email?: string;
+    name?: string;
+    persona?: string;
+    tenantId?: string | null;
+    passwordHash?: string;
+  }): Promise<void>;
+  deleteUser(userId: string): Promise<void>;
   updateUserPersona(userId: string, persona: string): Promise<void>;
 
   // Sessions
@@ -1883,6 +1891,72 @@ export interface DatabaseAdapter {
   // Agent dialogue turns (SSE /dialogue stream)
   createAgentTurn(turn: Omit<SvAgentTurnRow, 'created_at'>): Promise<void>;
   listAgentTurns(hypothesisId: string, afterId?: string, limit?: number): Promise<SvAgentTurnRow[]>;
+
+  // ─── SGAP Multi-Agent Organization (Phase 1) ──────────────────
+
+  // Agent definitions
+  listSgapAgents(): Promise<SgapAgentRow[]>;
+  getSgapAgent(id: string): Promise<SgapAgentRow | null>;
+  createSgapAgent(agent: Omit<SgapAgentRow, 'created_at' | 'updated_at'>): Promise<string>;
+  updateSgapAgent(id: string, fields: Partial<SgapAgentRow>): Promise<void>;
+  deleteSgapAgent(id: string): Promise<void>;
+
+  // Workflow runs
+  listSgapWorkflowRuns(brandId: string): Promise<SgapWorkflowRunRow[]>;
+  getSgapWorkflowRun(id: string): Promise<SgapWorkflowRunRow | null>;
+  createSgapWorkflowRun(run: Omit<SgapWorkflowRunRow, 'created_at' | 'updated_at' | 'started_at'>): Promise<string>;
+  updateSgapWorkflowRun(id: string, fields: Partial<SgapWorkflowRunRow>): Promise<void>;
+  getSgapWorkflowRunsByStatus(status: string, limit?: number): Promise<SgapWorkflowRunRow[]>;
+
+  // Agent threads
+  listSgapAgentThreads(workflowRunId: string): Promise<SgapAgentThreadRow[]>;
+  getSgapAgentThread(id: string): Promise<SgapAgentThreadRow | null>;
+  createSgapAgentThread(thread: Omit<SgapAgentThreadRow, 'created_at' | 'updated_at'>): Promise<string>;
+
+  // Agent messages
+  listSgapAgentMessages(threadId: string): Promise<SgapAgentMessageRow[]>;
+  getSgapAgentMessage(id: string): Promise<SgapAgentMessageRow | null>;
+  createSgapAgentMessage(message: Omit<SgapAgentMessageRow, 'created_at'>): Promise<string>;
+  respondToSgapAgentMessage(messageId: string, responseMessageId: string, responseJson: Record<string, unknown>): Promise<void>;
+  getPendingSgapAgentMessages(agentId: string, limit?: number): Promise<SgapAgentMessageRow[]>;
+
+  // Approvals
+  listSgapApprovals(workflowRunId?: string, status?: string): Promise<SgapApprovalRow[]>;
+  getSgapApproval(id: string): Promise<SgapApprovalRow | null>;
+  createSgapApproval(approval: Omit<SgapApprovalRow, 'created_at'>): Promise<string>;
+  updateSgapApprovalStatus(id: string, status: string, resolvedByAgentId: string, feedback?: Record<string, unknown>): Promise<void>;
+  getPendingSgapApprovals(requiredByAgentId?: string): Promise<SgapApprovalRow[]>;
+
+  // Audit log
+  createSgapAuditLog(log: Omit<SgapAuditLogRow, 'created_at'>): Promise<string>;
+  listSgapAuditLog(workflowRunId?: string, agentId?: string, limit?: number): Promise<SgapAuditLogRow[]>;
+
+  // Skills mapping
+  listSgapSkills(): Promise<SgapSkillRow[]>;
+  getSgapSkillByRole(agentRole: string): Promise<SgapSkillRow | null>;
+  createSgapSkill(skill: Omit<SgapSkillRow, 'created_at'>): Promise<string>;
+  updateSgapSkill(id: string, fields: Partial<SgapSkillRow>): Promise<void>;
+
+  // Social media tools
+  listSgapSocialMediaTools(): Promise<SgapSocialMediaToolRow[]>;
+  getSgapSocialMediaTool(platform: string): Promise<SgapSocialMediaToolRow | null>;
+  createSgapSocialMediaTool(tool: Omit<SgapSocialMediaToolRow, 'created_at' | 'updated_at'>): Promise<string>;
+  updateSgapSocialMediaTool(id: string, fields: Partial<SgapSocialMediaToolRow>): Promise<void>;
+
+  // Content performance
+  listSgapContentPerformance(contentItemId?: string, brandId?: string): Promise<SgapContentPerformanceRow[]>;
+  getSgapContentPerformance(id: string): Promise<SgapContentPerformanceRow | null>;
+  createSgapContentPerformance(perf: Omit<SgapContentPerformanceRow, 'created_at' | 'updated_at'>): Promise<string>;
+  updateSgapContentPerformance(id: string, fields: Partial<SgapContentPerformanceRow>): Promise<void>;
+
+  // Phase 2 configurations and revisions
+  listSgapPhase2Configs(brandId?: string, workflowTemplateId?: string): Promise<SgapPhase2ConfigRow[]>;
+  getSgapPhase2Config(id: string): Promise<SgapPhase2ConfigRow | null>;
+  createSgapPhase2Config(config: Omit<SgapPhase2ConfigRow, 'created_at' | 'updated_at'>): Promise<string>;
+  updateSgapPhase2Config(id: string, fields: Partial<SgapPhase2ConfigRow>): Promise<void>;
+
+  listSgapContentRevisions(workflowRunId: string, contentItemId?: string): Promise<SgapContentRevisionRow[]>;
+  createSgapContentRevision(revision: Omit<SgapContentRevisionRow, 'created_at'>): Promise<string>;
 }
 
 
@@ -1892,5 +1966,170 @@ export interface DatabaseConfig {
   path?: string;
   /** Provide your own adapter for Postgres, MySQL, Mongo, etc. */
   adapter?: DatabaseAdapter;
+}
+
+// ─── SGAP Row Types ──────────────────────────────────────────────
+
+export interface SgapAgentRow {
+  id: string;
+  application_scope: string;
+  name: string;
+  display_name: string;
+  role: string;
+  description: string;
+  system_prompt: string;
+  tool_names: string;
+  authority_level: string;
+  skill_key?: string;
+  worker_agent_id?: string;
+  priority: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SgapWorkflowRunRow {
+  id: string;
+  application_scope: string;
+  brand_id: string;
+  workflow_template_id: string;
+  status: string;
+  current_stage?: string;
+  current_agent_id?: string;
+  input_json: string;
+  state_json: string;
+  error_message?: string;
+  started_at: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SgapAgentThreadRow {
+  id: string;
+  application_scope: string;
+  workflow_run_id: string;
+  stage: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SgapAgentMessageRow {
+  id: string;
+  application_scope: string;
+  thread_id: string;
+  from_agent_id: string;
+  to_agent_id?: string;
+  message_type: string;
+  content_json: string;
+  requires_response: number;
+  responded: number;
+  response_message_id?: string;
+  response_json?: string;
+  created_at: string;
+  responded_at?: string;
+}
+
+export interface SgapApprovalRow {
+  id: string;
+  application_scope: string;
+  workflow_run_id: string;
+  content_item_id?: string;
+  required_by_agent_id: string;
+  approval_from_agent_id?: string;
+  status: string;
+  feedback_json?: string;
+  created_at: string;
+  resolved_at?: string;
+  resolved_by_agent_id?: string;
+}
+
+export interface SgapAuditLogRow {
+  id: string;
+  application_scope: string;
+  workflow_run_id: string;
+  agent_id: string;
+  action: string;
+  details_json: string;
+  created_at: string;
+}
+
+export interface SgapSkillRow {
+  id: string;
+  application_scope: string;
+  agent_role: string;
+  skill_id: string;
+  tool_policy_key?: string;
+  enabled: number;
+  created_at: string;
+}
+
+export interface SgapSocialMediaToolRow {
+  id: string;
+  application_scope: string;
+  platform: string;
+  api_base_url: string;
+  api_version: string;
+  auth_type: string;
+  rate_limit_per_min: number;
+  supports_scheduling: number;
+  supports_video: number;
+  supports_images: number;
+  supports_analytics: number;
+  max_characters?: number;
+  config_json?: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SgapContentPerformanceRow {
+  id: string;
+  application_scope: string;
+  content_item_id: string;
+  brand_id: string;
+  platform: string;
+  published_at: string;
+  views: number;
+  engagement: number;
+  reach: number;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  metadata_json?: string;
+  synced_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SgapPhase2ConfigRow {
+  id: string;
+  application_scope: string;
+  brand_id: string;
+  workflow_template_id: string;
+  writer_agent_id: string;
+  researcher_agent_id: string;
+  editor_agent_id: string;
+  max_feedback_rounds: number;
+  min_research_confidence: number;
+  require_research_citations: number;
+  auto_escalate_to_compliance: number;
+  output_format: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SgapContentRevisionRow {
+  id: string;
+  application_scope: string;
+  workflow_run_id: string;
+  content_item_id: string;
+  agent_id: string;
+  stage: string;
+  revision_index: number;
+  content_text: string;
+  notes_json?: string;
+  created_at: string;
 }
 

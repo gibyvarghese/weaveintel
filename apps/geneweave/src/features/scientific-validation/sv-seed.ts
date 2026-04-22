@@ -670,6 +670,7 @@ export async function seedSVData(db: DatabaseAdapter): Promise<void> {
   // hypothesis-validation naming and descriptions.
   for (const seed of SV_PROMPTS) {
     try {
+      if (!seed.key) continue;
       const existing = await db.getPromptByKey(seed.key);
       if (!existing) continue;
       const updates: Partial<PromptRow> = {};

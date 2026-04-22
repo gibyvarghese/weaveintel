@@ -37,6 +37,7 @@ import { DbToolPolicyResolver } from './tool-policy-resolver.js';
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
 import { encryptCredential, decryptCredential } from './vault.js';
 import { setBrowserAuthProvider, type SSOPassThroughAuth } from '@weaveintel/tools-browser';
+import { weaveContext } from '@weaveintel/core';
 import { OAuthClient, createOAuthProvider, type OAuthProviderName } from '@weaveintel/oauth';
 import { getAllProviders, getProvider, checkAllProviders, type ExternalCredential } from './password-providers.js';
 
@@ -916,6 +917,550 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     auditEmitter: new DbToolAuditEmitter(db),
   });
   registerSVRoutes(router, db, json, readBody, svRunner);
+
+  // ── SGAP workflow execution routes ─────────────────────────
+
+  router.post('/api/sgap/workflows/:workflowTemplateId/run', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+
+    const template = await db.getSgapTableRow('sg_workflow_templates', params['workflowTemplateId']!);
+    if (!template) { json(res, 404, { error: 'Workflow template not found' }); return; }
+
+    const raw = await readBody(req);
+    let body: Record<string, unknown> = {};
+    if (raw.trim()) {
+      try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    }
+
+    const brandId = String(body['brand_id'] ?? template['brand_id'] ?? '');
+    if (!brandId) { json(res, 400, { error: 'brand_id is required' }); return; }
+
+    const brand = await db.getSgapTableRow('sg_brands', brandId);
+    if (!brand) { json(res, 404, { error: 'Brand not found' }); return; }
+
+    const runId = randomUUID();
+    const threadId = randomUUID();
+    const now = new Date().toISOString();
+    await db.createSgapWorkflowRun({
+      id: runId,
+      application_scope: 'sgap',
+      brand_id: brandId,
+      workflow_template_id: params['workflowTemplateId']!,
+      status: 'running',
+      current_stage: 'strategy',
+      current_agent_id: undefined,
+      input_json: JSON.stringify(body),
+      state_json: JSON.stringify({ history: [{ stage: 'strategy', started_at: now }], initiated_by: auth.userId }),
+      error_message: undefined,
+      completed_at: undefined,
+    });
+
+    await db.createSgapAgentThread({
+      id: threadId,
+      application_scope: 'sgap',
+      workflow_run_id: runId,
+      stage: 'strategy',
+    });
+
+    const ceoAgent = await db.getSgapTableRow('sgap_agents', '593098bf-2f3d-4627-a7ee-b785e0ba2f8a');
+    const strategistAgent = await db.getSgapTableRow('sgap_agents', '53025851-bf2d-49be-a070-f3a597f2daf4');
+    if (ceoAgent && strategistAgent) {
+      await db.createSgapAgentMessage({
+        id: randomUUID(),
+        application_scope: 'sgap',
+        thread_id: threadId,
+        from_agent_id: String(ceoAgent['id']),
+        to_agent_id: String(strategistAgent['id']),
+        message_type: 'instruction',
+        content_json: JSON.stringify({
+          task: 'Create the strategy phase plan',
+          brand_name: String(brand['name'] ?? ''),
+          objective: String(template['description'] ?? 'Drive growth outcomes with channel-ready content'),
+        }),
+        requires_response: 1,
+        responded: 0,
+        response_message_id: undefined,
+        response_json: undefined,
+        responded_at: undefined,
+      });
+    }
+
+    await db.createSgapAuditLog({
+      id: randomUUID(),
+      application_scope: 'sgap',
+      workflow_run_id: runId,
+      agent_id: String(ceoAgent?.['id'] ?? 'system'),
+      action: 'workflow_started',
+      details_json: JSON.stringify({
+        brand_id: brandId,
+        workflow_template_id: params['workflowTemplateId'],
+        initiated_by: auth.userId,
+      }),
+    });
+
+    const run = await db.getSgapWorkflowRun(runId);
+    const threads = await db.listSgapAgentThreads(runId);
+    json(res, 201, { run, threads });
+  }, { auth: true, csrf: true });
+
+  router.get('/api/sgap/workflow-runs/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const run = await db.getSgapWorkflowRun(params['id']!);
+    if (!run) { json(res, 404, { error: 'Workflow run not found' }); return; }
+
+    const threads = await db.listSgapAgentThreads(run.id);
+    const approvals = await db.listSgapApprovals(run.id);
+    const audit = await db.listSgapAuditLog(run.id, undefined, 200);
+    json(res, 200, { run, threads, approvals, audit });
+  }, { auth: true });
+
+  router.post('/api/sgap/workflow-runs/:id/cancel', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const run = await db.getSgapWorkflowRun(params['id']!);
+    if (!run) { json(res, 404, { error: 'Workflow run not found' }); return; }
+
+    await db.updateSgapWorkflowRun(run.id, {
+      status: 'cancelled',
+      completed_at: new Date().toISOString(),
+    });
+
+    const preferredAuditAgentId = run.current_agent_id || '593098bf-2f3d-4627-a7ee-b785e0ba2f8a';
+    const preferredAuditAgent = await db.getSgapAgent(preferredAuditAgentId);
+    const fallbackAuditAgent = preferredAuditAgent ? null : (await db.listSgapAgents())[0] ?? null;
+    const auditAgentId = preferredAuditAgent?.id || fallbackAuditAgent?.id || null;
+
+    if (auditAgentId) {
+      try {
+        await db.createSgapAuditLog({
+          id: randomUUID(),
+          application_scope: 'sgap',
+          workflow_run_id: run.id,
+          agent_id: auditAgentId,
+          action: 'workflow_cancelled',
+          details_json: JSON.stringify({ cancelled_by: auth.userId }),
+        });
+      } catch {
+        // Best-effort audit logging should not block cancellation.
+      }
+    }
+
+    const updated = await db.getSgapWorkflowRun(run.id);
+    json(res, 200, { run: updated });
+  }, { auth: true, csrf: true });
+
+  router.post('/api/sgap/workflow-runs/:id/phase2/execute', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+
+    const run = await db.getSgapWorkflowRun(params['id']!);
+    if (!run) { json(res, 404, { error: 'Workflow run not found' }); return; }
+
+    const raw = await readBody(req);
+    let body: Record<string, unknown> = {};
+    if (raw.trim()) {
+      try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    }
+
+    const configuredProviders = Object.entries(providers ?? {}).filter(([, cfg]) => Boolean(cfg?.apiKey?.trim()));
+    if (configuredProviders.length === 0) {
+      json(res, 503, { error: 'No model providers configured for SGAP Phase 2 execution' });
+      return;
+    }
+
+    const requestedProvider = String(body['provider'] ?? '').trim();
+    const requestedModel = String(body['model'] ?? '').trim();
+    const fallbackProvider = providers?.['openai'] ? 'openai' : providers?.['anthropic'] ? 'anthropic' : configuredProviders[0]![0];
+    const selectedProvider = requestedProvider && providers?.[requestedProvider] ? requestedProvider : fallbackProvider;
+    const selectedModel = requestedModel
+      || (selectedProvider === 'openai'
+        ? 'gpt-4o-mini'
+        : selectedProvider === 'anthropic'
+          ? 'claude-sonnet-4-20250514'
+          : 'mock-model');
+
+    const providerCandidates = [
+      selectedProvider,
+      ...configuredProviders.map(([name]) => name).filter((name) => name !== selectedProvider),
+    ];
+
+    const getModelForProvider = async (providerName: string) => {
+      const modelName = requestedModel
+        || (providerName === 'openai'
+          ? 'gpt-4o-mini'
+          : providerName === 'anthropic'
+            ? 'claude-sonnet-4-20250514'
+            : 'mock-model');
+      const config = providers?.[providerName];
+      if (!config) throw new Error(`Missing provider configuration for ${providerName}`);
+      const modelInstance = await getOrCreateModel(providerName, modelName, config);
+      return { providerName, modelName, modelInstance };
+    };
+
+    const safeParse = (input: string | null | undefined): Record<string, unknown> => {
+      if (!input) return {};
+      try {
+        const parsed = JSON.parse(input);
+        if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
+      } catch {
+        // ignore parse errors
+      }
+      return {};
+    };
+
+    const runState = safeParse(run.state_json);
+    const strategyRows = await db.listSgapTableRows('sg_strategy_settings');
+    const brandStrategyRows = strategyRows.filter((row) => row['brand_id'] === run.brand_id && Number(row['enabled'] ?? 1) === 1);
+    const strategySummary = brandStrategyRows
+      .map((row) => `${String(row['key'] ?? 'setting')}: ${String(row['value_json'] ?? '{}')}`)
+      .join('\n');
+
+    const phase2Configs = await db.listSgapPhase2Configs(run.brand_id, run.workflow_template_id);
+    const phase2Config = phase2Configs.find((row) => row.enabled === 1) ?? null;
+
+    const agents = await db.listSgapAgents();
+    const byRole = (role: string) => agents.find((agent) => agent.role === role && agent.enabled === 1) ?? null;
+    const byId = (id?: string) => (id ? agents.find((agent) => agent.id === id && agent.enabled === 1) ?? null : null);
+
+    const writer = byId(phase2Config?.writer_agent_id) ?? byRole('writer');
+    const researcher = byId(phase2Config?.researcher_agent_id) ?? byRole('researcher');
+    const editor = byId(phase2Config?.editor_agent_id) ?? byRole('editor');
+    const compliance = byRole('compliance');
+    if (!writer || !researcher || !editor) {
+      json(res, 400, { error: 'Phase 2 requires writer, researcher, and editor agents to be configured' });
+      return;
+    }
+
+    const loadRolePromptAndSkill = async (role: string, fallbackPrompt: string) => {
+      const promptMap: Record<string, string> = {
+        writer: 'sgap.writer.system',
+        researcher: 'sgap.researcher.system',
+        editor: 'sgap.editor.system',
+      };
+      const promptKey = promptMap[role];
+      const prompt = promptKey ? await db.getPromptByKey(promptKey) : null;
+
+      const skillMap = await db.getSgapSkillByRole(role);
+      const skill = skillMap ? await db.getSkill(skillMap.skill_id) : null;
+
+      return {
+        promptText: prompt?.template ?? fallbackPrompt,
+        skillText: skill?.instructions ?? '',
+      };
+    };
+
+    const generateStageOutput = async (role: string, fallbackPrompt: string, task: string): Promise<string> => {
+      const loaded = await loadRolePromptAndSkill(role, fallbackPrompt);
+      const systemText = [
+        loaded.promptText,
+        loaded.skillText ? `Skill Guidance:\n${loaded.skillText}` : '',
+        'Workflow Boundary: You must produce output only for your assigned stage in the SGAP phase 2 chain.',
+      ].filter(Boolean).join('\n\n');
+
+      let lastError: unknown = null;
+      for (const providerName of providerCandidates) {
+        try {
+          const { modelName, modelInstance } = await getModelForProvider(providerName);
+          const response = await modelInstance.generate(
+            weaveContext({
+              userId: auth.userId,
+              executionId: randomUUID(),
+              metadata: {
+                sgap_run_id: run.id,
+                stage: role,
+                workflow_stage: 'phase2',
+                model_provider: providerName,
+                model_name: modelName,
+              },
+            }),
+            {
+              messages: [
+                { role: 'system', content: systemText },
+                { role: 'user', content: task },
+              ],
+              temperature: 0.3,
+              maxTokens: 1000,
+            },
+          );
+          return String(response.content ?? '').trim();
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error('All configured model providers failed');
+    };
+
+    const queueRows = await db.listSgapTableRows('sg_content_queue');
+    const requestedItemIds = Array.isArray(body['content_item_ids'])
+      ? body['content_item_ids'].map((value) => String(value))
+      : null;
+    const maxItems = Math.max(1, Math.min(10, Number(body['max_items'] ?? 3)));
+
+    const targetItems = queueRows
+      .filter((row) => row['brand_id'] === run.brand_id && Number(row['enabled'] ?? 1) === 1)
+      .filter((row) => requestedItemIds ? requestedItemIds.includes(String(row['id'])) : ['draft', 'ready'].includes(String(row['status'] ?? 'draft')))
+      .slice(0, maxItems)
+      .map((row) => ({
+        id: String(row['id'] ?? ''),
+        title: String(row['title'] ?? 'Untitled'),
+        brief: String(row['brief'] ?? ''),
+        format: String(row['format'] ?? 'text'),
+        channel_id: String(row['channel_id'] ?? ''),
+        content_text: String(row['content_text'] ?? ''),
+      }));
+
+    if (targetItems.length === 0) {
+      json(res, 400, { error: 'No eligible content items found for phase 2 execution' });
+      return;
+    }
+
+    const channels = await db.listSgapTableRows('sg_channels');
+    const maxFeedbackRounds = Math.max(0, Math.min(5, phase2Config?.max_feedback_rounds ?? 2));
+    const minResearchConfidence = Math.max(0, Math.min(1, phase2Config?.min_research_confidence ?? 0.7));
+    const requireCitations = (phase2Config?.require_research_citations ?? 1) === 1;
+    const autoEscalateToCompliance = (phase2Config?.auto_escalate_to_compliance ?? 1) === 1;
+
+    const executionResults: Array<Record<string, unknown>> = [];
+    for (const item of targetItems) {
+      const channel = channels.find((row) => String(row['id'] ?? '') === item.channel_id);
+      const platform = String(channel?.['platform'] ?? 'linkedin');
+
+      const threadId = randomUUID();
+      await db.createSgapAgentThread({
+        id: threadId,
+        application_scope: 'sgap',
+        workflow_run_id: run.id,
+        stage: 'phase2-content-creation',
+      });
+
+      let revisionIndex = 1;
+      const writerTaskBase = [
+        `Title: ${item.title}`,
+        `Brief: ${item.brief}`,
+        `Format: ${item.format}`,
+        `Platform: ${platform}`,
+        `Existing Content (if any): ${item.content_text || 'None'}`,
+        strategySummary ? `Brand Strategy:\n${strategySummary}` : '',
+        'Write publish-ready content that is specific, practical, and implementation-oriented.',
+      ].filter(Boolean).join('\n\n');
+
+      let writerOutput = await generateStageOutput('writer', writer.system_prompt, writerTaskBase);
+      await db.createSgapContentRevision({
+        id: randomUUID(),
+        application_scope: 'sgap',
+        workflow_run_id: run.id,
+        content_item_id: item.id,
+        agent_id: writer.id,
+        stage: 'writer',
+        revision_index: revisionIndex,
+        content_text: writerOutput,
+        notes_json: JSON.stringify({ reason: 'initial-draft' }),
+      });
+
+      await db.createSgapAgentMessage({
+        id: randomUUID(),
+        application_scope: 'sgap',
+        thread_id: threadId,
+        from_agent_id: writer.id,
+        to_agent_id: researcher.id,
+        message_type: 'draft',
+        content_json: JSON.stringify({ content_item_id: item.id, draft: writerOutput, revision_index: revisionIndex }),
+        requires_response: 1,
+        responded: 0,
+      });
+
+      let confidence = 1;
+      let citationsCount = 0;
+      let researchOutput = '';
+      let feedbackLoopCount = 0;
+
+      const runResearchReview = async (draftText: string): Promise<void> => {
+        const researchTask = [
+          `Review this draft for factual quality and implementation correctness for ${platform}.`,
+          'Return strict JSON with keys: confidence (0..1), citations (string[]), risks (string[]), feedback (string).',
+          `Draft:\n${draftText}`,
+        ].join('\n\n');
+        researchOutput = await generateStageOutput('researcher', researcher.system_prompt, researchTask);
+
+        let parsed: Record<string, unknown> = {};
+        try {
+          const maybe = JSON.parse(researchOutput);
+          if (maybe && typeof maybe === 'object') parsed = maybe as Record<string, unknown>;
+        } catch {
+          parsed = {};
+        }
+
+        const parsedConfidence = Number(parsed['confidence']);
+        confidence = Number.isFinite(parsedConfidence) ? parsedConfidence : 0.5;
+        const citations = Array.isArray(parsed['citations']) ? parsed['citations'] : [];
+        citationsCount = citations.length;
+      };
+
+      await runResearchReview(writerOutput);
+      while ((confidence < minResearchConfidence || (requireCitations && citationsCount === 0)) && feedbackLoopCount < maxFeedbackRounds) {
+        feedbackLoopCount += 1;
+
+        await db.createSgapAgentMessage({
+          id: randomUUID(),
+          application_scope: 'sgap',
+          thread_id: threadId,
+          from_agent_id: researcher.id,
+          to_agent_id: writer.id,
+          message_type: 'feedback',
+          content_json: JSON.stringify({
+            content_item_id: item.id,
+            confidence,
+            citations_count: citationsCount,
+            feedback: researchOutput,
+          }),
+          requires_response: 1,
+          responded: 0,
+        });
+
+        const rewriteTask = [
+          writerTaskBase,
+          `Research feedback loop ${feedbackLoopCount}:\n${researchOutput}`,
+          'Rewrite and strengthen evidence quality. Keep it publish-ready and practical.',
+        ].join('\n\n');
+        writerOutput = await generateStageOutput('writer', writer.system_prompt, rewriteTask);
+        revisionIndex += 1;
+
+        await db.createSgapContentRevision({
+          id: randomUUID(),
+          application_scope: 'sgap',
+          workflow_run_id: run.id,
+          content_item_id: item.id,
+          agent_id: writer.id,
+          stage: 'writer',
+          revision_index: revisionIndex,
+          content_text: writerOutput,
+          notes_json: JSON.stringify({ reason: 'research-feedback-loop', loop: feedbackLoopCount }),
+        });
+
+        await runResearchReview(writerOutput);
+      }
+
+      await db.createSgapContentRevision({
+        id: randomUUID(),
+        application_scope: 'sgap',
+        workflow_run_id: run.id,
+        content_item_id: item.id,
+        agent_id: researcher.id,
+        stage: 'researcher',
+        revision_index: revisionIndex,
+        content_text: researchOutput,
+        notes_json: JSON.stringify({ confidence, citations_count: citationsCount }),
+      });
+
+      let finalStatus = 'ready';
+      if ((confidence < minResearchConfidence || (requireCitations && citationsCount === 0)) && autoEscalateToCompliance && compliance) {
+        finalStatus = 'blocked';
+        await db.createSgapApproval({
+          id: randomUUID(),
+          application_scope: 'sgap',
+          workflow_run_id: run.id,
+          content_item_id: item.id,
+          required_by_agent_id: writer.id,
+          approval_from_agent_id: compliance.id,
+          status: 'pending',
+          feedback_json: JSON.stringify({ reason: 'phase2-low-confidence', confidence, citations_count: citationsCount }),
+          resolved_at: undefined,
+          resolved_by_agent_id: undefined,
+        });
+      }
+
+      const editorTask = [
+        `Finalize this draft for ${platform}.`,
+        'Preserve technical accuracy and improve readability and flow.',
+        `Draft:\n${writerOutput}`,
+        `Research Notes:\n${researchOutput}`,
+      ].join('\n\n');
+      const editorOutput = await generateStageOutput('editor', editor.system_prompt, editorTask);
+
+      await db.createSgapContentRevision({
+        id: randomUUID(),
+        application_scope: 'sgap',
+        workflow_run_id: run.id,
+        content_item_id: item.id,
+        agent_id: editor.id,
+        stage: 'editor',
+        revision_index: revisionIndex,
+        content_text: editorOutput,
+        notes_json: JSON.stringify({ confidence, citations_count: citationsCount }),
+      });
+
+      await db.updateSgapTableRow('sg_content_queue', item.id, {
+        content_text: editorOutput,
+        status: finalStatus,
+        metadata_json: JSON.stringify({
+          phase2: {
+            writer_agent_id: writer.id,
+            researcher_agent_id: researcher.id,
+            editor_agent_id: editor.id,
+            feedback_loops: feedbackLoopCount,
+            confidence,
+            citations_count: citationsCount,
+          },
+        }),
+        updated_at: new Date().toISOString(),
+      });
+
+      await db.createSgapAuditLog({
+        id: randomUUID(),
+        application_scope: 'sgap',
+        workflow_run_id: run.id,
+        agent_id: editor.id,
+        action: 'phase2_content_finalized',
+        details_json: JSON.stringify({
+          content_item_id: item.id,
+          feedback_loops: feedbackLoopCount,
+          confidence,
+          citations_count: citationsCount,
+          status: finalStatus,
+        }),
+      });
+
+      executionResults.push({
+        content_item_id: item.id,
+        title: item.title,
+        platform,
+        final_status: finalStatus,
+        confidence,
+        citations_count: citationsCount,
+        feedback_loops: feedbackLoopCount,
+      });
+    }
+
+    const blockedCount = executionResults.filter((item) => String(item['final_status']) === 'blocked').length;
+    const nextStatus = blockedCount > 0 ? 'blocked' : 'running';
+    const nextStage = blockedCount > 0 ? 'compliance-approval' : 'optimization-distribution';
+
+    await db.updateSgapWorkflowRun(run.id, {
+      status: nextStatus,
+      current_stage: nextStage,
+      state_json: JSON.stringify({
+        ...runState,
+        phase2: {
+          executed_at: new Date().toISOString(),
+          model_provider: selectedProvider,
+          model: selectedModel,
+          item_count: executionResults.length,
+          blocked_count: blockedCount,
+          results: executionResults,
+        },
+      }),
+    });
+
+    const updatedRun = await db.getSgapWorkflowRun(run.id);
+    const revisions = await db.listSgapContentRevisions(run.id);
+    json(res, 200, {
+      run: updatedRun,
+      phase2: {
+        provider: selectedProvider,
+        model: selectedModel,
+        results: executionResults,
+        revision_count: revisions.length,
+      },
+    });
+  }, { auth: true, csrf: true });
 
   router.get('/api/admin/rbac/personas', async (_req, res, _params, auth) => {
     const gate = ensurePermission(auth, 'admin:platform:write');

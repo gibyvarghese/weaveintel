@@ -49,6 +49,10 @@ import {
   clearDefaultPromptExcept,
   safeParsePromptVariables,
 } from './admin/api/admin-route-helpers.js';
+import { hashPassword } from './auth.js';
+import { getOrCreateModel } from './chat.js';
+import { weaveContext } from '@weaveintel/core';
+import { weaveSocialGrowthRecipe } from '@weaveintel/recipes';
 
 type Handler = (
   req: IncomingMessage,
@@ -140,6 +144,145 @@ export function registerAdminRoutes(
       json(res, 200, { ok: true });
     }, { auth: true, csrf: true });
   }
+
+  const sanitizeUser = (user: Awaited<ReturnType<DatabaseAdapter['getUserById']>>) => {
+    if (!user) return null;
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      persona: user.persona,
+      tenant_id: user.tenant_id,
+      created_at: user.created_at,
+    };
+  };
+
+  // ── Admin: Users ─────────────────────────────────────────
+
+  router.get('/api/admin/users', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const users = await db.listUsers();
+    json(res, 200, {
+      users: users.map((u) => ({
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        persona: u.persona,
+        tenant_id: u.tenant_id,
+        created_at: u.created_at,
+      })),
+    });
+  });
+
+  router.get('/api/admin/users/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const user = await db.getUserById(params['id']!);
+    if (!user) { json(res, 404, { error: 'User not found' }); return; }
+    json(res, 200, { user: sanitizeUser(user) });
+  });
+
+  router.post('/api/admin/users', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const email = String(body['email'] ?? '').trim().toLowerCase();
+    const name = String(body['name'] ?? '').trim();
+    const password = String(body['password'] ?? '');
+    const persona = String(body['persona'] ?? 'tenant_user').trim() || 'tenant_user';
+    const tenantId = body['tenant_id'] === undefined || body['tenant_id'] === null || body['tenant_id'] === ''
+      ? null
+      : String(body['tenant_id']);
+
+    if (!email || !name || !password) {
+      json(res, 400, { error: 'email, name, and password are required' });
+      return;
+    }
+
+    const existing = await db.getUserByEmail(email);
+    if (existing) {
+      json(res, 409, { error: 'A user with this email already exists' });
+      return;
+    }
+
+    const id = randomUUID();
+    await db.createUser({
+      id,
+      email,
+      name,
+      passwordHash: hashPassword(password),
+      persona,
+      tenantId,
+    });
+    const user = await db.getUserById(id);
+    json(res, 201, { user: sanitizeUser(user) });
+  }, { auth: true, csrf: true });
+
+  router.put('/api/admin/users/:id', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getUserById(params['id']!);
+    if (!existing) { json(res, 404, { error: 'User not found' }); return; }
+
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const updates: {
+      email?: string;
+      name?: string;
+      persona?: string;
+      tenantId?: string | null;
+      passwordHash?: string;
+    } = {};
+
+    if (body['email'] !== undefined) {
+      const email = String(body['email'] ?? '').trim().toLowerCase();
+      if (!email) { json(res, 400, { error: 'email cannot be empty' }); return; }
+      const emailOwner = await db.getUserByEmail(email);
+      if (emailOwner && emailOwner.id !== existing.id) {
+        json(res, 409, { error: 'A user with this email already exists' });
+        return;
+      }
+      updates.email = email;
+    }
+    if (body['name'] !== undefined) {
+      const name = String(body['name'] ?? '').trim();
+      if (!name) { json(res, 400, { error: 'name cannot be empty' }); return; }
+      updates.name = name;
+    }
+    if (body['persona'] !== undefined) {
+      updates.persona = String(body['persona'] ?? '').trim() || 'tenant_user';
+    }
+    if (body['tenant_id'] !== undefined) {
+      updates.tenantId = body['tenant_id'] === null || body['tenant_id'] === ''
+        ? null
+        : String(body['tenant_id']);
+    }
+    if (body['password'] !== undefined) {
+      const password = String(body['password'] ?? '').trim();
+      if (password) {
+        updates.passwordHash = hashPassword(password);
+      }
+    }
+
+    await db.updateUser(existing.id, updates);
+    const user = await db.getUserById(existing.id);
+    json(res, 200, { user: sanitizeUser(user) });
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/users/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const user = await db.getUserById(params['id']!);
+    if (!user) { json(res, 404, { error: 'User not found' }); return; }
+    if (user.id === auth.userId) {
+      json(res, 400, { error: 'Cannot delete currently authenticated user' });
+      return;
+    }
+    await db.deleteUser(user.id);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
   // ── Admin: Prompts ──────────────────────────────────────────
 
   router.get('/api/admin/prompts', async (_req, res, _params, auth) => {
@@ -1159,12 +1302,29 @@ export function registerAdminRoutes(
   registerSgapCrud({ routeKey: 'sg-tool-bindings', tableName: 'sg_tool_bindings', listKey: 'sg-tool-bindings', singularKey: 'sg-tool-binding' });
   registerSgapCrud({ routeKey: 'sg-strategy-settings', tableName: 'sg_strategy_settings', listKey: 'sg-strategy-settings', singularKey: 'sg-strategy-setting' });
   registerSgapCrud({ routeKey: 'sg-prompt-variants', tableName: 'sg_prompt_variants', listKey: 'sg-prompt-variants', singularKey: 'sg-prompt-variant' });
+  registerSgapCrud({ routeKey: 'sgap-agents', tableName: 'sgap_agents', listKey: 'sgap-agents', singularKey: 'sgap-agent' });
+  registerSgapCrud({ routeKey: 'sgap-workflow-runs', tableName: 'sgap_workflow_runs', listKey: 'sgap-workflow-runs', singularKey: 'sgap-workflow-run' });
+  registerSgapCrud({ routeKey: 'sgap-agent-threads', tableName: 'sgap_agent_threads', listKey: 'sgap-agent-threads', singularKey: 'sgap-agent-thread' });
+  registerSgapCrud({ routeKey: 'sgap-agent-messages', tableName: 'sgap_agent_messages', listKey: 'sgap-agent-messages', singularKey: 'sgap-agent-message' });
+  registerSgapCrud({ routeKey: 'sgap-approvals', tableName: 'sgap_approvals', listKey: 'sgap-approvals', singularKey: 'sgap-approval' });
+  registerSgapCrud({ routeKey: 'sgap-audit-log', tableName: 'sgap_audit_log', listKey: 'sgap-audit-log', singularKey: 'sgap-audit-log' });
+  registerSgapCrud({ routeKey: 'sgap-skills', tableName: 'sgap_skills', listKey: 'sgap-skills', singularKey: 'sgap-skill' });
+  registerSgapCrud({ routeKey: 'sgap-social-media-tools', tableName: 'sgap_social_media_tools', listKey: 'sgap-social-media-tools', singularKey: 'sgap-social-media-tool' });
+  registerSgapCrud({ routeKey: 'sgap-content-performance', tableName: 'sgap_content_performance', listKey: 'sgap-content-performance', singularKey: 'sgap-content-performance' });
+  registerSgapCrud({ routeKey: 'sgap-phase2-configs', tableName: 'sgap_phase2_configs', listKey: 'sgap-phase2-configs', singularKey: 'sgap-phase2-config' });
+  registerSgapCrud({ routeKey: 'sgap-content-revisions', tableName: 'sgap_content_revisions', listKey: 'sgap-content-revisions', singularKey: 'sgap-content-revision' });
 
   router.post('/api/admin/sg-workflow-templates/:id/run', async (req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
 
     const template = await db.getSgapTableRow('sg_workflow_templates', params['id']!);
     if (!template) { json(res, 404, { error: 'SG workflow template not found' }); return; }
+
+    const configuredProviders = Object.entries(providers ?? {}).filter(([, cfg]) => Boolean(cfg?.apiKey?.trim()));
+    if (configuredProviders.length === 0) {
+      json(res, 503, { error: 'No model providers configured for SGAP generation' });
+      return;
+    }
 
     const raw = await readBody(req);
     let body: Record<string, unknown> = {};
@@ -1174,6 +1334,9 @@ export function registerAdminRoutes(
 
     const brandId = (template['brand_id'] as string) ?? (body['brand_id'] as string);
     if (!brandId) { json(res, 400, { error: 'brand_id missing on workflow template' }); return; }
+
+    const brand = await db.getSgapTableRow('sg_brands', brandId);
+    if (!brand) { json(res, 404, { error: 'SG brand not found' }); return; }
 
     const runId = randomUUID();
     const startedAt = new Date().toISOString();
@@ -1191,10 +1354,12 @@ export function registerAdminRoutes(
     const channelRows = await db.listSgapTableRows('sg_channels');
     const campaignRows = await db.listSgapTableRows('sg_campaigns');
     const agentRows = await db.listSgapTableRows('sg_agent_profiles');
+    const strategyRows = await db.listSgapTableRows('sg_strategy_settings');
 
     const brandContent = contentRows.filter(row => row['brand_id'] === brandId);
     const brandChannels = channelRows.filter(row => row['brand_id'] === brandId && row['enabled'] === 1);
     const brandCampaigns = campaignRows.filter(row => row['brand_id'] === brandId && row['status'] !== 'completed');
+    const brandStrategies = strategyRows.filter((row) => row['brand_id'] === brandId && row['enabled'] === 1);
     const brandAgents = agentRows
       .filter((row) => row['brand_id'] === brandId && row['enabled'] === 1)
       .map((row) => ({
@@ -1211,9 +1376,48 @@ export function registerAdminRoutes(
         id: String(row['id'] ?? ''),
         title: String(row['title'] ?? 'Untitled draft'),
         format: String(row['format'] ?? 'post'),
+        brief: String(row['brief'] ?? ''),
         status: String(row['status'] ?? 'draft'),
       }));
     const channelList = brandChannels.map((row) => String(row['platform'] ?? 'unknown'));
+    const strategySummary = brandStrategies
+      .map((row) => `${String(row['key'] ?? 'setting')}: ${String(row['value_json'] ?? '{}')}`)
+      .join('\n');
+
+    const requestedProvider = String(body['provider'] ?? '').trim();
+    const requestedModel = String(body['model'] ?? '').trim();
+    const fallbackProvider = providers?.['openai'] ? 'openai' : providers?.['anthropic'] ? 'anthropic' : configuredProviders[0]![0];
+    const selectedProvider = requestedProvider && providers?.[requestedProvider] ? requestedProvider : fallbackProvider;
+    const selectedModel = requestedModel
+      || (selectedProvider === 'openai'
+        ? 'gpt-4o-mini'
+        : selectedProvider === 'anthropic'
+          ? 'claude-sonnet-4-20250514'
+          : 'mock-model');
+
+    const model = await getOrCreateModel(selectedProvider, selectedModel, providers?.[selectedProvider]!);
+    const sgapAgent = weaveSocialGrowthRecipe({
+      model,
+      brandName: String(brand['name'] ?? 'Unknown Brand'),
+      brandVoice: String(brand['voice'] ?? 'clear, practical, and audience-focused'),
+      campaignObjective: String(brand['description'] ?? 'increase qualified audience growth'),
+      channels: channelList.length > 0 ? channelList : ['linkedin'],
+      contentPillars: topQueue.map((item) => item.title).slice(0, 3),
+      kpis: ['engagement_rate', 'saves', 'comments', 'profile_clicks'],
+      cadence: 'weekly planning with daily channel execution',
+    });
+
+    const runSgapAgent = async (instruction: string): Promise<string> => {
+      const result = await sgapAgent.run(
+        weaveContext({
+          userId: auth.userId,
+          executionId: randomUUID(),
+          metadata: { runId },
+        }),
+        { messages: [{ role: 'user', content: instruction }] },
+      );
+      return String(result.output ?? '').trim();
+    };
 
     const strategist = brandAgents.find((a) => a.name === 'sg-editorial-strategist') ?? null;
     const hookOptimizer = brandAgents.find((a) => a.name === 'sg-hook-optimizer') ?? null;
@@ -1222,69 +1426,93 @@ export function registerAdminRoutes(
     const distributionOptimizer = brandAgents.find((a) => a.name === 'sg-distribution-optimizer') ?? null;
     const analyst = brandAgents.find((a) => a.name === 'sg-growth-analyst') ?? null;
 
+    const planningContext = [
+      `Brand: ${String(brand['name'] ?? '')}`,
+      `Voice: ${String(brand['voice'] ?? '')}`,
+      `Channels: ${channelList.join(', ') || 'linkedin'}`,
+      `Queue: ${topQueue.map((item, idx) => `${idx + 1}. ${item.title} (${item.format})`).join('; ') || 'no queued items'}`,
+      strategySummary ? `Strategy Settings:\n${strategySummary}` : '',
+    ].filter(Boolean).join('\n');
+
+    const planText = await runSgapAgent([
+      'Create the SGAP planning section only.',
+      'Return at least 3 priorities. For each priority include: action, rationale, and expected KPI impact.',
+      'Use multi-line output with clear bullets and do not compress into one-liners.',
+      planningContext,
+    ].join('\n\n'));
+
     const generatedPlan = {
-      summary: `Plan ${Math.max(1, channelList.length)} channel${channelList.length === 1 ? '' : 's'} with ${Math.max(1, topQueue.length)} prioritized queue items and one retention-focused hook variant per item.`,
-      priorities: topQueue.map((item, index) => ({
-        rank: index + 1,
-        content_id: item.id,
-        title: item.title,
-        action: index === 0 ? 'publish_candidate' : 'revise_and_schedule',
-      })),
+      text: planText,
       owner: strategist?.name ?? 'sg-editorial-strategist',
     };
 
-    const generatedDrafts = topQueue.map((item, index) => {
-      const opening = index === 0
-        ? 'Most teams overcomplicate growth loops. Here is the 15-minute version we use every week.'
-        : 'If this post gives you one useful move today, start with this framework.';
-      const cta = index === 0 ? 'Comment LOOP and I will share the checklist.' : 'Reply with your current bottleneck and I will suggest the next experiment.';
-      return {
+    const generatedDrafts: Array<Record<string, unknown>> = [];
+    for (const [index, item] of topQueue.entries()) {
+      const platformHint = channelList[index % Math.max(1, channelList.length)] ?? 'linkedin';
+      const draftText = await runSgapAgent([
+        'Generate one channel-ready post body only (no explanation, no labels).',
+        `Platform: ${platformHint}`,
+        `Title: ${item.title}`,
+        `Format: ${item.format}`,
+        `Brief: ${item.brief || 'Create an implementation-first growth insight post.'}`,
+        'Requirements: strong opening hook, specific value, one measurable CTA.',
+        'Output requirements: minimum 140 words, with paragraph breaks and complete post-ready copy.',
+        'Do not return a one-liner or summary-only text.',
+      ].join('\n'));
+
+      await db.updateSgapTableRow('sg_content_queue', item.id, {
+        content_text: draftText,
+        status: 'ready',
+        updated_at: new Date().toISOString(),
+      });
+
+      generatedDrafts.push({
         content_id: item.id,
         title: item.title,
-        platform_hint: channelList[index % Math.max(1, channelList.length)] ?? 'linkedin',
-        draft_text: `${opening}\n\n1) Define one measurable outcome.\n2) Ship one testable variation.\n3) Review audience response within 48h.\n\n${cta}`,
+        platform_hint: platformHint,
+        draft_text: draftText,
         owner: hookOptimizer?.name ?? 'sg-hook-optimizer',
-      };
-    });
+      });
+    }
+
+    const critiqueText = await runSgapAgent([
+      'Act as SGAP critic squad. Review the generated drafts from audience and brand perspectives.',
+      'Return critique only with concrete rewrites and risk flags.',
+      'Include at least 5 actionable critiques total across audience and brand dimensions.',
+      'Use multi-line output and include example rewrite snippets.',
+      `Drafts:\n${generatedDrafts.map((d, idx) => `${idx + 1}) ${(d['platform_hint'] as string)}\n${(d['draft_text'] as string)}`).join('\n\n') || 'No drafts generated.'}`,
+    ].join('\n\n'));
 
     const generatedCritique = {
-      audience_findings: {
-        clarity_score: 0.86,
-        relevance_score: 0.82,
-        trust_score: 0.79,
-        friction_points: ['cta_too_late_in_long_posts', 'needs_one_numeric_proof_point'],
-        owner: audienceCritic?.name ?? 'sg-audience-critic',
-      },
-      brand_findings: {
-        voice_consistency: 0.91,
-        risk_flags: [],
-        rewrite_notes: ['avoid absolute phrasing like always/never', 'prefer concrete proof language'],
-        owner: brandGuardian?.name ?? 'sg-brand-guardian',
-      },
+      text: critiqueText,
+      audience_owner: audienceCritic?.name ?? 'sg-audience-critic',
+      brand_owner: brandGuardian?.name ?? 'sg-brand-guardian',
     };
 
+    const distributionText = await runSgapAgent([
+      'Generate distribution guidance only: platform, timing, format adaptation, and repost logic.',
+      `Channels: ${channelList.join(', ') || 'linkedin'}`,
+      `Draft titles: ${generatedDrafts.map((d) => String(d['title'] ?? '')).join(', ') || 'none'}`,
+      'Return a schedule table-like layout in plain text with channel, time, format, and reason.',
+      'Include one fallback distribution plan if engagement underperforms after 48h.',
+    ].join('\n\n'));
+
     const generatedDistribution = {
-      channel_plan: channelList.map((platform, idx) => ({
-        platform,
-        local_time: idx % 2 === 0 ? '09:15' : '13:40',
-        format: platform === 'instagram' ? 'carousel' : platform === 'tiktok' ? 'short-video' : 'text-post',
-      })),
-      repurpose_rule: 'If saves > median after 48h, repurpose into short-form variant with a contrarian opener.',
+      text: distributionText,
       owner: distributionOptimizer?.name ?? 'sg-distribution-optimizer',
     };
 
+    const measurementText = await runSgapAgent([
+      'Generate KPI measurement and next experiment guidance only.',
+      'Return explicit KPI targets and one experiment with decision rule.',
+      `Current queue size: ${brandContent.length}`,
+      `Draft count generated: ${generatedDrafts.length}`,
+      'Include baseline assumption, target threshold, and stop/continue criteria.',
+      'Use multi-line output and avoid one-line summaries.',
+    ].join('\n\n'));
+
     const generatedMeasurement = {
-      kpi_targets: {
-        engagement_rate: 0.055,
-        saves: 24,
-        comments: 18,
-        profile_clicks: 14,
-      },
-      experiment: {
-        name: 'hook-format-question-vs-contrarian',
-        sample_size_posts: 6,
-        decision_rule: 'promote winner when uplift >= 12% on engagement_rate and comments',
-      },
+      text: measurementText,
       owner: analyst?.name ?? 'sg-growth-analyst',
     };
 
@@ -1299,6 +1527,9 @@ export function registerAdminRoutes(
       active_campaigns: brandCampaigns.length,
       estimated_output_velocity: statusCount('ready') + statusCount('scheduled') + statusCount('published'),
       active_specialists: brandAgents.length,
+      generated_drafts_count: generatedDrafts.length,
+      generation_provider: selectedProvider,
+      generation_model: selectedModel,
       recorded_at: startedAt,
     };
 
@@ -1362,6 +1593,10 @@ export function registerAdminRoutes(
           distribution: generatedDistribution,
           measurement: generatedMeasurement,
         },
+        generation: {
+          provider: selectedProvider,
+          model: selectedModel,
+        },
         history: stepHistory,
       }),
       completed_at: completedAt,
@@ -1380,6 +1615,10 @@ export function registerAdminRoutes(
         critique: generatedCritique,
         distribution: generatedDistribution,
         measurement: generatedMeasurement,
+      },
+      generation: {
+        provider: selectedProvider,
+        model: selectedModel,
       },
       specialist_agents: brandAgents,
     });
