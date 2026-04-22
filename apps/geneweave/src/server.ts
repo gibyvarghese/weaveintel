@@ -1116,11 +1116,10 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     };
 
     const runState = safeParse(run.state_json);
-    const strategyRows = await db.listSgapTableRows('sg_strategy_settings');
-    const brandStrategyRows = strategyRows.filter((row) => row['brand_id'] === run.brand_id && Number(row['enabled'] ?? 1) === 1);
-    const strategySummary = brandStrategyRows
-      .map((row) => `${String(row['key'] ?? 'setting')}: ${String(row['value_json'] ?? '{}')}`)
-      .join('\n');
+    const brandRow = await db.getSgapTableRow('sg_brands', run.brand_id);
+    const strategySummary = typeof brandRow?.['goals_json'] === 'string' && String(brandRow['goals_json']).trim()
+      ? `Brand goals JSON: ${String(brandRow['goals_json'])}`
+      : '';
 
     const phase2Configs = await db.listSgapPhase2Configs(run.brand_id, run.workflow_template_id);
     const phase2Config = phase2Configs.find((row) => row.enabled === 1) ?? null;
@@ -1147,8 +1146,16 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       const promptKey = promptMap[role];
       const prompt = promptKey ? await db.getPromptByKey(promptKey) : null;
 
-      const skillMap = await db.getSgapSkillByRole(role);
-      const skill = skillMap ? await db.getSkill(skillMap.skill_id) : null;
+      const roleSkillNameMap: Record<string, string> = {
+        writer: 'SGAP Writer',
+        researcher: 'SGAP Researcher',
+        editor: 'SGAP Editor',
+      };
+      const allSkills = await db.listSkills();
+      const roleSkillName = roleSkillNameMap[role];
+      const skill = roleSkillName
+        ? allSkills.find((candidate) => candidate.name === roleSkillName && candidate.enabled === 1) ?? null
+        : null;
 
       return {
         promptText: prompt?.template ?? fallbackPrompt,
@@ -1561,8 +1568,15 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       const promptKey = promptMap[role];
       const prompt = promptKey ? await db.getPromptByKey(promptKey) : null;
 
-      const skillMap = await db.getSgapSkillByRole(role);
-      const skill = skillMap ? await db.getSkill(skillMap.skill_id) : null;
+      const roleSkillNameMap: Record<string, string> = {
+        'social-manager': 'SGAP Distribution Lead',
+        analytics: 'SGAP Analytics Lead',
+      };
+      const allSkills = await db.listSkills();
+      const roleSkillName = roleSkillNameMap[role];
+      const skill = roleSkillName
+        ? allSkills.find((candidate) => candidate.name === roleSkillName && candidate.enabled === 1) ?? null
+        : null;
 
       return {
         promptText: prompt?.template ?? fallbackPrompt,
@@ -2069,50 +2083,67 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
     const platforms = [...new Set(plans.map((p) => (p as unknown as Record<string, unknown>)['platform'] as string).filter(Boolean))];
     const insights: Array<Record<string, unknown>> = [];
+    const analyticsPromptRecord = await db.getPromptByKey('sgap.phase4.analytics_review');
+    const brandRow = await db.getSgapTableRow('sg_brands', run.brand_id);
+
+    const perfSummary = runPerf.length > 0
+      ? JSON.stringify(runPerf.slice(0, 10), null, 2)
+      : 'No performance data yet for this run. Use distribution plan data to forecast improvement areas.';
+
+    const plansSummary = plans.length > 0
+      ? JSON.stringify((plans as unknown as Array<Record<string, unknown>>).slice(0, 10).map((p) => ({
+          platform: p['platform'],
+          status: p['status'],
+          publish_mode: p['publish_mode'],
+          distribution_text: String(p['distribution_text'] ?? '').slice(0, 200),
+        })), null, 2)
+      : 'No distribution plans found.';
+
+    const renderAnalyticsPrompt = (template: string, values: Record<string, string>): string =>
+      template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => values[key] ?? '');
+
+    const analyticsPromptTemplate = analyticsPromptRecord?.template
+      ?? [
+        'You are the SGAP analytics agent for {{brand_name}}. Review the following performance data and produce structured insights.',
+        '',
+        'DISTRIBUTION PLANS ({{plan_count}} plans):',
+        '{{plans_summary}}',
+        '',
+        'CONTENT PERFORMANCE ({{perf_count}} items):',
+        '{{performance_summary}}',
+        '',
+        'KPI THRESHOLDS:',
+        '{{kpi_thresholds}}',
+        '',
+        'REVIEW WINDOW: {{review_window_days}} days',
+      ].join('\n');
 
     let lastError: Error | undefined;
     for (const providerName of providerCandidates) {
       try {
         const { providerName: usedProvider, modelName: usedModel, modelInstance } = await getModelForProvider(providerName);
 
-        // Generate one consolidated performance review via the analytics agent
-        const perfSummary = runPerf.length > 0
-          ? JSON.stringify(runPerf.slice(0, 10), null, 2)
-          : 'No performance data yet for this run. Use distribution plan data to forecast improvement areas.';
+        const systemPrompt = renderAnalyticsPrompt(analyticsPromptTemplate, {
+          brand_name: String(brandRow?.['name'] ?? run.brand_id),
+          plan_count: String(plans.length),
+          plans_summary: plansSummary,
+          perf_count: String(runPerf.length),
+          performance_summary: perfSummary,
+          kpi_thresholds: JSON.stringify(kpiThresholds),
+          review_window_days: String(reviewWindowDays),
+        });
 
-        const plansSummary = plans.length > 0
-          ? JSON.stringify((plans as unknown as Array<Record<string, unknown>>).slice(0, 10).map((p) => ({
-              platform: p['platform'],
-              status: p['status'],
-              publish_mode: p['publish_mode'],
-              distribution_text: String(p['distribution_text'] ?? '').slice(0, 200),
-            })), null, 2)
-          : 'No distribution plans found.';
-
-        const systemPrompt = `You are an expert analytics agent for social media content performance review.
-Your job is to analyze published content performance metrics and provide actionable improvement recommendations.
-Focus on engagement rates, reach, and content quality improvements.
-KPI thresholds: ${JSON.stringify(kpiThresholds)}
-Review window: ${reviewWindowDays} days`;
-
-        const userPrompt = `Analyze the following SGAP workflow run performance for brand ${run.brand_id}.
-
-Distribution Plans:
-${plansSummary}
-
-Performance Data:
-${perfSummary}
-
-Platforms covered: ${platforms.length > 0 ? platforms.join(', ') : 'multiple'}
-
-Provide a structured performance review with:
-1. Overall engagement score (0-1)
-2. Per-platform insights (if multiple platforms)
-3. Top 3 actionable improvement recommendations
-4. Content quality assessment
-5. Next cycle improvements
-
-Respond as JSON: { "overall_score": number, "platform_insights": [{"platform": string, "score": number, "notes": string}], "recommendations": string[], "action_items": string[], "summary": string }`;
+        const userPrompt = [
+          `Analyze SGAP workflow run ${params['id']} performance across platforms: ${platforms.length > 0 ? platforms.join(', ') : 'multiple'}.`,
+          'Provide a structured performance review with:',
+          '1. Overall engagement score (0-1)',
+          '2. Per-platform insights (if multiple platforms)',
+          '3. Top 3 actionable improvement recommendations',
+          '4. Content quality assessment',
+          '5. Next cycle improvements',
+          '',
+          'Respond as JSON: { "overall_score": number, "platform_insights": [{"platform": string, "score": number, "notes": string}], "recommendations": string[], "action_items": string[], "summary": string }',
+        ].join('\n');
 
         const response = await modelInstance.generate(
           weaveContext({

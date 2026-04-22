@@ -33,10 +33,10 @@ import type {
   SvBudgetEnvelopeRow, SvHypothesisRow, SvHypothesisStatus, SvSubClaimRow, SvVerdictRow,
   SvEvidenceEventRow, SvAgentTurnRow,
   SgapAgentRow, SgapWorkflowRunRow, SgapAgentThreadRow, SgapAgentMessageRow,
-  SgapApprovalRow, SgapAuditLogRow, SgapSkillRow, SgapSocialMediaToolRow, SgapContentPerformanceRow,
+  SgapApprovalRow, SgapAuditLogRow, SgapContentPerformanceRow,
   SgapPhase2ConfigRow, SgapContentRevisionRow,
   SgapPhase3ConfigRow, SgapDistributionPlanRow,
-  SgapPhase4ConfigRow, SgapPerformanceInsightRow,
+  SgapPhase4ConfigRow, SgapPerformanceInsightRow, SgPlatformConfigRow,
 } from './db-types.js';
 
 const SGAP_TABLES = new Set([
@@ -47,19 +47,14 @@ const SGAP_TABLES = new Set([
   'sg_content_queue',
   'sg_growth_experiments',
   'sg_kpi_snapshots',
-  'sg_agent_profiles',
   'sg_workflow_templates',
-  'sg_tool_bindings',
-  'sg_strategy_settings',
-  'sg_prompt_variants',
+  'sg_platform_configs',
   'sgap_agents',
   'sgap_workflow_runs',
   'sgap_agent_threads',
   'sgap_agent_messages',
   'sgap_approvals',
   'sgap_audit_log',
-  'sgap_skills',
-  'sgap_social_media_tools',
   'sgap_content_performance',
   'sgap_phase2_configs',
   'sgap_content_revisions',
@@ -2915,38 +2910,12 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare('SELECT * FROM sgap_audit_log ORDER BY created_at DESC LIMIT ?').all(limit) as SgapAuditLogRow[];
   }
 
-  async listSgapSkills(): Promise<SgapSkillRow[]> {
-    return this.d.prepare('SELECT * FROM sgap_skills ORDER BY created_at DESC').all() as SgapSkillRow[];
+  async listSgPlatformConfigs(): Promise<SgPlatformConfigRow[]> {
+    return this.d.prepare('SELECT * FROM sg_platform_configs ORDER BY display_name ASC').all() as SgPlatformConfigRow[];
   }
 
-  async getSgapSkillByRole(agentRole: string): Promise<SgapSkillRow | null> {
-    return (this.d.prepare('SELECT * FROM sgap_skills WHERE agent_role = ? AND enabled = 1 ORDER BY created_at DESC LIMIT 1').get(agentRole) as SgapSkillRow | undefined) ?? null;
-  }
-
-  async createSgapSkill(skill: Omit<SgapSkillRow, 'created_at'>): Promise<string> {
-    await this.createSgapTableRow('sgap_skills', skill as unknown as Record<string, unknown>);
-    return skill.id;
-  }
-
-  async updateSgapSkill(id: string, fields: Partial<SgapSkillRow>): Promise<void> {
-    await this.updateSgapTableRow('sgap_skills', id, fields as unknown as Record<string, unknown>);
-  }
-
-  async listSgapSocialMediaTools(): Promise<SgapSocialMediaToolRow[]> {
-    return this.d.prepare('SELECT * FROM sgap_social_media_tools ORDER BY platform ASC').all() as SgapSocialMediaToolRow[];
-  }
-
-  async getSgapSocialMediaTool(platform: string): Promise<SgapSocialMediaToolRow | null> {
-    return (this.d.prepare('SELECT * FROM sgap_social_media_tools WHERE platform = ?').get(platform) as SgapSocialMediaToolRow | undefined) ?? null;
-  }
-
-  async createSgapSocialMediaTool(tool: Omit<SgapSocialMediaToolRow, 'created_at' | 'updated_at'>): Promise<string> {
-    await this.createSgapTableRow('sgap_social_media_tools', tool as unknown as Record<string, unknown>);
-    return tool.id;
-  }
-
-  async updateSgapSocialMediaTool(id: string, fields: Partial<SgapSocialMediaToolRow>): Promise<void> {
-    await this.updateSgapTableRow('sgap_social_media_tools', id, fields as unknown as Record<string, unknown>);
+  async getSgPlatformConfig(platform: string): Promise<SgPlatformConfigRow | null> {
+    return (this.d.prepare('SELECT * FROM sg_platform_configs WHERE platform = ? AND enabled = 1').get(platform) as SgPlatformConfigRow | undefined) ?? null;
   }
 
   async listSgapContentPerformance(contentItemId?: string, brandId?: string): Promise<SgapContentPerformanceRow[]> {
@@ -5136,28 +5105,93 @@ export class SQLiteAdapter implements DatabaseAdapter {
           status: 'active',
           enabled: 1,
         },
+        {
+          id: '61ef8de8-f089-4628-8bc4-4ad7e83865a2',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'youtube',
+          handle: '@techlunchhq',
+          account_ref: 'social-youtube-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 2, preferred_hours: [10, 18] }),
+          status: 'active',
+          enabled: 1,
+        },
+        {
+          id: 'a69264a7-40fc-4f9f-b18b-6e36ab0b9764',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'pinterest',
+          handle: '@techlunchhq',
+          account_ref: 'social-pinterest-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 2, preferred_hours: [9, 16] }),
+          status: 'active',
+          enabled: 1,
+        },
+        {
+          id: 'e739d778-8a78-4cd7-902c-3cbce2ad1a6b',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'substack',
+          handle: '@techlunch',
+          account_ref: 'social-substack-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 1, preferred_hours: [8] }),
+          status: 'active',
+          enabled: 1,
+        },
+        {
+          id: '329ee2c0-4709-4a98-b311-da5057f86f6a',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'threads',
+          handle: '@techlunchhq',
+          account_ref: 'social-threads-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 5, preferred_hours: [11, 17] }),
+          status: 'active',
+          enabled: 1,
+        },
+        {
+          id: 'd151eb98-60d3-4254-910c-0376c8f9caf6',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'reddit',
+          handle: 'u/techlunchhq',
+          account_ref: 'social-reddit-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 3, preferred_hours: [10, 20] }),
+          status: 'active',
+          enabled: 1,
+        },
+        {
+          id: 'ca8dcef5-7533-4646-bf21-cf4cc0f8e2f8',
+          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+          platform: 'mastodon',
+          handle: '@techlunch@techhub.social',
+          account_ref: 'social-mastodon-techlunch',
+          posting_timezone: 'America/Los_Angeles',
+          cadence_json: JSON.stringify({ per_week: 3, preferred_hours: [9, 14, 19] }),
+          status: 'active',
+          enabled: 1,
+        },
       ];
       for (const row of channelRows) await this.createSgapTableRow('sg_channels', row);
     }
 
-    if (cnt('sg_strategy_settings') === 0) {
-      const strategyRows: Array<Record<string, unknown>> = [
-        {
-          id: '495d9396-9b8d-47a5-929c-0785b44e5077',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          key: 'kpi_ladder',
-          value_json: JSON.stringify({ awareness: ['reach', 'video_views'], engagement: ['comments', 'saves', 'shares'], conversion: ['profile_clicks', 'qualified_leads'] }),
-          enabled: 1,
-        },
-        {
-          id: '99f5f1fb-2089-4166-ae5f-f19ad0d3fcf8',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          key: 'content_mix',
-          value_json: JSON.stringify({ educational: 0.5, founder_story: 0.2, product_demo: 0.2, community: 0.1 }),
-          enabled: 1,
-        },
+    if (cnt('sg_platform_configs') === 0) {
+      const platformConfigRows: Array<Record<string, unknown>> = [
+        { id: '0314f838-2d95-4fef-bf2c-7abce6f0c002', platform: 'linkedin', display_name: 'LinkedIn', icon_emoji: null, max_char_limit: 3000, max_video_length_seconds: 600, supported_formats: JSON.stringify(['text', 'image_post', 'carousel', 'video', 'article']), hashtag_limit: 5, link_in_bio_only: 0, api_endpoint: 'https://api.linkedin.com', analytics_fields: JSON.stringify(['impressions', 'engagement_rate', 'comments', 'saves', 'profile_clicks']), posting_tips: 'Lead with a practical hook in the first line.' , enabled: 1 },
+        { id: 'f54e6bde-5e48-4faf-aedf-23666d8f4b67', platform: 'instagram', display_name: 'Instagram', icon_emoji: null, max_char_limit: 2200, max_video_length_seconds: 90, supported_formats: JSON.stringify(['image_post', 'carousel', 'reel', 'story']), hashtag_limit: 30, link_in_bio_only: 1, api_endpoint: 'https://graph.instagram.com', analytics_fields: JSON.stringify(['views', 'reach', 'engagement_rate', 'saves', 'shares']), posting_tips: 'Prioritize visual-first storytelling and save-worthy tips.', enabled: 1 },
+        { id: 'f95ee6df-b623-4f03-9eaf-6cd37cbf5c4f', platform: 'facebook', display_name: 'Facebook', icon_emoji: null, max_char_limit: 63206, max_video_length_seconds: 240, supported_formats: JSON.stringify(['text', 'image_post', 'video', 'article']), hashtag_limit: 10, link_in_bio_only: 0, api_endpoint: 'https://graph.facebook.com', analytics_fields: JSON.stringify(['impressions', 'engagement', 'comments', 'shares', 'clicks']), posting_tips: 'Use discussion-driven prompts and concrete examples.', enabled: 1 },
+        { id: '4eac2d53-c0a9-43a2-9cd2-4e63de8d7308', platform: 'tiktok', display_name: 'TikTok', icon_emoji: null, max_char_limit: 2200, max_video_length_seconds: 600, supported_formats: JSON.stringify(['video']), hashtag_limit: 10, link_in_bio_only: 1, api_endpoint: 'https://open.tiktokapis.com', analytics_fields: JSON.stringify(['views', 'watch_time_seconds_avg', 'engagement_rate', 'shares']), posting_tips: 'Hook in first 2 seconds and pace edits tightly.', enabled: 1 },
+        { id: '782978a2-f7cc-4464-9fd3-6cf1667ac681', platform: 'x', display_name: 'X', icon_emoji: null, max_char_limit: 280, max_video_length_seconds: 140, supported_formats: JSON.stringify(['text', 'thread', 'video']), hashtag_limit: 3, link_in_bio_only: 0, api_endpoint: 'https://api.x.com', analytics_fields: JSON.stringify(['impressions', 'engagement_rate', 'reposts', 'likes', 'link_clicks']), posting_tips: 'Make one idea per post and thread only when depth is required.', enabled: 1 },
+        { id: '8df7f126-2e2f-4692-93b5-a6e3f3f8cb57', platform: 'youtube', display_name: 'YouTube', icon_emoji: null, max_char_limit: 5000, max_video_length_seconds: 7200, supported_formats: JSON.stringify(['video', 'short']), hashtag_limit: 15, link_in_bio_only: 0, api_endpoint: 'https://www.googleapis.com/youtube/v3', analytics_fields: JSON.stringify(['views', 'watch_time', 'retention', 'subscribers_gained', 'ctr']), posting_tips: 'Thumbnail and title quality drive distribution most.', enabled: 1 },
+        { id: 'eb6d6edf-d745-4626-85f4-6484788cf9e9', platform: 'pinterest', display_name: 'Pinterest', icon_emoji: null, max_char_limit: 500, max_video_length_seconds: 900, supported_formats: JSON.stringify(['image_post', 'video']), hashtag_limit: 20, link_in_bio_only: 0, api_endpoint: 'https://api.pinterest.com', analytics_fields: JSON.stringify(['impressions', 'outbound_clicks', 'saves', 'engagement_rate']), posting_tips: 'Strong image composition and keyword-rich titles perform best.', enabled: 1 },
+        { id: 'f9a0e5bb-d90a-4fb2-b6b7-0935ae53f117', platform: 'substack', display_name: 'Substack', icon_emoji: null, max_char_limit: null, max_video_length_seconds: null, supported_formats: JSON.stringify(['article', 'newsletter']), hashtag_limit: null, link_in_bio_only: 0, api_endpoint: 'https://substackapi.com', analytics_fields: JSON.stringify(['opens', 'click_rate', 'new_subscribers', 'paid_conversions']), posting_tips: 'Open with a sharp thesis and one actionable takeaway.', enabled: 1 },
+        { id: '5d72888e-bcf2-4316-bec1-6f9338d286f2', platform: 'threads', display_name: 'Threads', icon_emoji: null, max_char_limit: 500, max_video_length_seconds: 300, supported_formats: JSON.stringify(['text', 'image_post', 'video']), hashtag_limit: 5, link_in_bio_only: 1, api_endpoint: 'https://graph.threads.net', analytics_fields: JSON.stringify(['views', 'likes', 'replies', 'reposts', 'follows']), posting_tips: 'Lean into conversational tone and rapid response loops.', enabled: 1 },
+        { id: 'f4045663-f7a4-46f6-9d3d-822684f7e7d4', platform: 'reddit', display_name: 'Reddit', icon_emoji: null, max_char_limit: 40000, max_video_length_seconds: 900, supported_formats: JSON.stringify(['text', 'image_post', 'video', 'link']), hashtag_limit: 0, link_in_bio_only: 0, api_endpoint: 'https://oauth.reddit.com', analytics_fields: JSON.stringify(['upvotes', 'comments', 'ctr', 'shares']), posting_tips: 'Respect subreddit norms and provide value before promotion.', enabled: 1 },
+        { id: 'f3502ce4-4441-4f3f-b6e8-2148f5f2af77', platform: 'mastodon', display_name: 'Mastodon', icon_emoji: null, max_char_limit: 500, max_video_length_seconds: 300, supported_formats: JSON.stringify(['text', 'image_post', 'video']), hashtag_limit: 5, link_in_bio_only: 0, api_endpoint: 'https://mastodon.social/api/v1', analytics_fields: JSON.stringify(['impressions', 'favourites', 'reblogs', 'replies']), posting_tips: 'Use community-first tone and transparent sourcing.', enabled: 1 },
+        { id: '25a18b59-43e9-4516-a769-0c44a45dc9b5', platform: 'medium', display_name: 'Medium', icon_emoji: null, max_char_limit: null, max_video_length_seconds: null, supported_formats: JSON.stringify(['article']), hashtag_limit: 5, link_in_bio_only: 0, api_endpoint: 'https://api.medium.com', analytics_fields: JSON.stringify(['views', 'reads', 'read_ratio', 'fans']), posting_tips: 'Structure with concise sections and practical examples.', enabled: 1 },
+        { id: 'f1ad2fc4-2f39-4efe-ab16-5955b4d80930', platform: 'blogger', display_name: 'Blogger', icon_emoji: null, max_char_limit: null, max_video_length_seconds: null, supported_formats: JSON.stringify(['article']), hashtag_limit: null, link_in_bio_only: 0, api_endpoint: 'https://www.googleapis.com/blogger/v3', analytics_fields: JSON.stringify(['pageviews', 'sessions', 'avg_time_on_page']), posting_tips: 'Use durable evergreen tutorials with clear headings.', enabled: 1 },
       ];
-      for (const row of strategyRows) await this.createSgapTableRow('sg_strategy_settings', row);
+      for (const row of platformConfigRows) await this.createSgapTableRow('sg_platform_configs', row);
     }
 
     if (cnt('sg_campaigns') === 0) {
@@ -5271,82 +5305,6 @@ export class SQLiteAdapter implements DatabaseAdapter {
       });
     }
 
-    if (cnt('sg_agent_profiles') === 0) {
-      const agentRows: Array<Record<string, unknown>> = [
-        {
-          id: '9b6f9b6d-c7fa-4445-8562-f97a64bbef0e',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          name: 'sg-editorial-strategist',
-          role: 'strategy',
-          instructions: 'Translate campaign goals into channel-specific editorial plans and KPI-aware briefs.',
-          tool_names: JSON.stringify(['web_search', 'text_analysis', 'memory_recall', 'social_insights_read']),
-          policy_key: 'default',
-          enabled: 1,
-        },
-        {
-          id: '0b4e9d53-b58b-4f8f-a7d4-55e43c9ecb40',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          name: 'sg-growth-analyst',
-          role: 'analytics',
-          instructions: 'Measure campaign performance, detect trend breaks, and propose experiment updates.',
-          tool_names: JSON.stringify(['calculator', 'json_format', 'text_analysis', 'social_insights_read', 'social_comments_read']),
-          policy_key: 'read_only',
-          enabled: 1,
-        },
-        {
-          id: '17e72a61-470c-4ffd-a8f9-c48167733224',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          name: 'sg-audience-critic',
-          role: 'audience',
-          instructions: 'Evaluate drafts from audience perspective: clarity, relevance, trust, and CTA friction per segment.',
-          tool_names: JSON.stringify(['social_comments_read', 'social_insights_read', 'text_analysis', 'json_format']),
-          policy_key: 'read_only',
-          enabled: 1,
-        },
-        {
-          id: 'cce339b9-08ce-4be7-a612-d95bc4e0dd2f',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          name: 'sg-brand-guardian',
-          role: 'brand-safety',
-          instructions: 'Critique content for brand voice consistency, risky claims, and policy-safe phrasing before publication.',
-          tool_names: JSON.stringify(['text_analysis', 'json_format', 'memory_recall']),
-          policy_key: 'read_only',
-          enabled: 1,
-        },
-        {
-          id: '6c798848-a296-44f3-ae88-c745595f5ee5',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          name: 'sg-hook-optimizer',
-          role: 'creative',
-          instructions: 'Improve first-line hooks and opening structure for retention while preserving factual integrity.',
-          tool_names: JSON.stringify(['text_analysis', 'calculator', 'json_format']),
-          policy_key: 'read_only',
-          enabled: 1,
-        },
-        {
-          id: '0cd4a8de-4fd6-4d52-a194-a3df08a3fd8c',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          name: 'sg-distribution-optimizer',
-          role: 'distribution',
-          instructions: 'Generate channel variants, recommend timing windows, and align format to expected distribution lift.',
-          tool_names: JSON.stringify(['social_insights_read', 'text_analysis', 'json_format', 'memory_recall']),
-          policy_key: 'read_only',
-          enabled: 1,
-        },
-        {
-          id: '8fd4d4da-f4db-454e-b1e5-725305ce61c0',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          name: 'sg-experiment-designer',
-          role: 'experimentation',
-          instructions: 'Design audience and creative experiments with clear variants, target KPI, and minimum evidence thresholds.',
-          tool_names: JSON.stringify(['calculator', 'json_format', 'text_analysis', 'social_insights_read']),
-          policy_key: 'read_only',
-          enabled: 1,
-        },
-      ];
-      for (const row of agentRows) await this.createSgapTableRow('sg_agent_profiles', row);
-    }
-
     if (cnt('sg_workflow_templates') === 0) {
       await this.createSgapTableRow('sg_workflow_templates', {
         id: '675d4a3d-7c6f-4b4b-95c4-2eeb3d0b43f1',
@@ -5363,89 +5321,6 @@ export class SQLiteAdapter implements DatabaseAdapter {
           ],
         }),
         trigger_type: 'schedule',
-        enabled: 1,
-      });
-    }
-
-    if (cnt('sg_tool_bindings') === 0) {
-      const toolBindingRows: Array<Record<string, unknown>> = [
-        {
-          id: 'ca57eb96-c49a-4f39-99f6-d9633fd9fffd',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          channel_id: '44e1364d-df3c-47e1-aa80-c2f4244f6f8c',
-          tool_name: 'social_post',
-          provider: 'linkedin',
-          config_json: JSON.stringify({ mode: 'draft', includeHashtags: true }),
-          enabled: 1,
-        },
-        {
-          id: '00b58b8f-f743-43cf-b50b-8c8fbb2ebf9c',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          channel_id: '44e1364d-df3c-47e1-aa80-c2f4244f6f8c',
-          tool_name: 'social_insights_read',
-          provider: 'linkedin',
-          config_json: JSON.stringify({ metrics: ['views', 'engagement_rate', 'comments', 'saves', 'profile_clicks'] }),
-          enabled: 1,
-        },
-        {
-          id: 'ff83f0f2-a7ed-493f-b1f1-f637efff9285',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          channel_id: '44e1364d-df3c-47e1-aa80-c2f4244f6f8c',
-          tool_name: 'social_comments_read',
-          provider: 'linkedin',
-          config_json: JSON.stringify({ limit: 25, includeSentiment: true }),
-          enabled: 1,
-        },
-        {
-          id: '736b4fa0-93fc-4ce2-b541-e8264c8acb4f',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          channel_id: 'd8266e74-bf65-496e-a516-a275d9f04d3a',
-          tool_name: 'social_post',
-          provider: 'instagram',
-          config_json: JSON.stringify({ mode: 'draft', maxTags: 8 }),
-          enabled: 1,
-        },
-        {
-          id: '71661f04-7d3a-4968-87ad-4fcc783dbbd2',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          channel_id: 'd8266e74-bf65-496e-a516-a275d9f04d3a',
-          tool_name: 'social_insights_read',
-          provider: 'instagram',
-          config_json: JSON.stringify({ metrics: ['views', 'engagement_rate', 'comments', 'saves', 'shares'] }),
-          enabled: 1,
-        },
-        {
-          id: '4648f626-dfd6-482f-bf01-e8c6ed238703',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          channel_id: 'd8266e74-bf65-496e-a516-a275d9f04d3a',
-          tool_name: 'social_comments_read',
-          provider: 'instagram',
-          config_json: JSON.stringify({ limit: 30, includeSentiment: true }),
-          enabled: 1,
-        },
-        {
-          id: 'ec668be5-f856-4984-b042-3e4af66d6d89',
-          brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-          channel_id: 'fecaac70-59a8-4c1b-b123-4ecde0227ae0',
-          tool_name: 'social_insights_read',
-          provider: 'tiktok',
-          config_json: JSON.stringify({ metrics: ['views', 'watch_time_seconds_avg', 'engagement_rate', 'shares'] }),
-          enabled: 1,
-        },
-      ];
-      for (const row of toolBindingRows) await this.createSgapTableRow('sg_tool_bindings', row);
-    }
-
-    if (cnt('sg_prompt_variants') === 0) {
-      await this.createSgapTableRow('sg_prompt_variants', {
-        id: '5d126ec8-f89c-4e7f-b7d6-26cd03b43a08',
-        brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
-        key: 'post.brief.v1',
-        name: 'Tech Lunch Post Brief Generator',
-        template: 'Create a concise {{platform}} post brief for {{audience}} with one actionable implementation snippet and a measurable CTA.',
-        variables: JSON.stringify(['platform', 'audience']),
-        version: '1.0',
-        is_active: 1,
         enabled: 1,
       });
     }
@@ -5484,6 +5359,47 @@ export class SQLiteAdapter implements DatabaseAdapter {
       });
     }
 
+    if (cnt('prompts') > 0 && !await this.getPromptByKey('sgap.phase4.analytics_review')) {
+      await this.createPrompt({
+        id: 'f1a2b3c4-d5e6-47f8-a9b0-c1d2e3f4a5b6',
+        key: 'sgap.phase4.analytics_review',
+        name: 'SGAP: Phase 4 Analytics Review',
+        description: 'Model-facing template for analytics review, insight extraction, and next-cycle optimization actions.',
+        category: 'social-growth',
+        prompt_type: 'template',
+        owner: 'system',
+        status: 'published',
+        tags: JSON.stringify(['sgap', 'analytics', 'phase4']),
+        template: `You are the SGAP analytics agent for {{brand_name}}. Review the following performance data and produce structured insights.
+
+DISTRIBUTION PLANS ({{plan_count}} plans):
+{{plans_summary}}
+
+CONTENT PERFORMANCE ({{perf_count}} items):
+{{performance_summary}}
+
+KPI THRESHOLDS:
+{{kpi_thresholds}}
+
+REVIEW WINDOW: {{review_window_days}} days
+
+For each content item and each platform, produce:
+1. A performance score (0-1) vs thresholds
+2. A plain-language insight (1-2 sentences)
+3. 1-3 concrete action items for the next cycle
+
+Return a JSON object: { "insights": [ { "platform": "...", "content_item_id": "...", "score": 0.0, "insight_type": "summary", "recommendation": "...", "action_items": ["..."] } ], "overall_summary": "..." }`,
+        variables: JSON.stringify(['brand_name', 'plan_count', 'plans_summary', 'perf_count', 'performance_summary', 'kpi_thresholds', 'review_window_days']),
+        version: '1.0',
+        model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
+        execution_defaults: JSON.stringify({ strategy: 'singlePass' }),
+        framework: null,
+        metadata: JSON.stringify({ domain: 'sgap', phase: 4, brandSlug: 'tech-lunch' }),
+        is_default: 0,
+        enabled: 1,
+      });
+    }
+
     if (!await this.getSkill('0533eb6b-c030-44c9-bba2-79fca66ae213')) {
       await this.createSkill({
         id: '0533eb6b-c030-44c9-bba2-79fca66ae213',
@@ -5500,6 +5416,60 @@ export class SQLiteAdapter implements DatabaseAdapter {
         priority: 30,
         version: '1.0',
         tool_policy_key: 'default',
+        enabled: 1,
+      });
+    }
+
+    if (!await this.getSkill('1a2b3c4d-5e6f-47a8-b9c0-d1e2f3a4b5c6')) {
+      await this.createSkill({
+        id: '1a2b3c4d-5e6f-47a8-b9c0-d1e2f3a4b5c6',
+        name: 'SGAP Content Writer',
+        description: 'Writes platform-specific content drafts with one actionable AI implementation snippet per piece.',
+        category: 'social-growth',
+        trigger_patterns: JSON.stringify(['write post', 'draft content', 'create article']),
+        instructions: 'Produce concise platform-aware drafts. Include one implementation snippet, one advisory insight, and one measurable CTA. Respect character limits.',
+        tool_names: JSON.stringify(['text_analysis', 'json_format', 'memory_recall']),
+        examples: JSON.stringify([]),
+        tags: JSON.stringify(['sgap', 'content', 'writing']),
+        priority: 25,
+        version: '1.0',
+        tool_policy_key: 'read_only',
+        enabled: 1,
+      });
+    }
+
+    if (!await this.getSkill('2b3c4d5e-6f7a-48b9-c0d1-e2f3a4b5c6d7')) {
+      await this.createSkill({
+        id: '2b3c4d5e-6f7a-48b9-c0d1-e2f3a4b5c6d7',
+        name: 'SGAP Research Analyst',
+        description: 'Researches trending AI topics, benchmark data, and industry developments to feed the editorial calendar.',
+        category: 'social-growth',
+        trigger_patterns: JSON.stringify(['research topic', 'find trending', 'benchmark data']),
+        instructions: 'Search for recent AI performance data and technical developments. Summarize with source traceability. Filter for technical accuracy.',
+        tool_names: JSON.stringify(['web_search', 'text_analysis', 'json_format']),
+        examples: JSON.stringify([]),
+        tags: JSON.stringify(['sgap', 'research']),
+        priority: 20,
+        version: '1.0',
+        tool_policy_key: 'default',
+        enabled: 1,
+      });
+    }
+
+    if (!await this.getSkill('3c4d5e6f-7a8b-49c0-d1e2-f3a4b5c6d7e8')) {
+      await this.createSkill({
+        id: '3c4d5e6f-7a8b-49c0-d1e2-f3a4b5c6d7e8',
+        name: 'SGAP Distribution Optimizer',
+        description: 'Generates channel-specific variants of approved content and recommends optimal timing windows per platform.',
+        category: 'social-growth',
+        trigger_patterns: JSON.stringify(['schedule post', 'distribute content', 'optimize timing']),
+        instructions: 'Adapt approved content to each channel format and character limit. Recommend timing based on cadence config. Generate up to 3 variants.',
+        tool_names: JSON.stringify(['text_analysis', 'json_format', 'memory_recall']),
+        examples: JSON.stringify([]),
+        tags: JSON.stringify(['sgap', 'distribution']),
+        priority: 15,
+        version: '1.0',
+        tool_policy_key: 'read_only',
         enabled: 1,
       });
     }
@@ -5721,29 +5691,6 @@ export class SQLiteAdapter implements DatabaseAdapter {
       for (const row of sgapAgents) await this.createSgapTableRow('sgap_agents', row);
     }
 
-    if (cnt('sgap_skills') === 0) {
-      const roleToSkillId: Record<string, string> = {
-        ceo: '7c84cf61-b6f0-446a-ae5e-ddd0ffde9f15',
-        strategist: 'a70e7bb6-66f4-4e37-a38f-ff4770f3bbce',
-        writer: 'd9ac4ecc-38a8-4f1f-913f-5ecbce4f4ec5',
-        researcher: '0678e9d8-57b9-4b2e-8e06-32f1fdb357cd',
-        editor: '7e2cc2f4-aa14-48df-b2b9-15086a3a367f',
-        compliance: '10609f5d-b4e8-4ef8-8dcb-95687b31f403',
-        'social-manager': '7d8fefef-71d0-4bd7-baf6-22a4ff42d983',
-        analytics: 'e65196cb-0916-49f7-a895-59c2e0fad26e',
-      };
-      for (const [agentRole, skillId] of Object.entries(roleToSkillId)) {
-        await this.createSgapTableRow('sgap_skills', {
-          id: randomUUID(),
-          application_scope: 'sgap',
-          agent_role: agentRole,
-          skill_id: skillId,
-          tool_policy_key: agentRole === 'compliance' || agentRole === 'social-manager' ? 'strict_external' : 'default',
-          enabled: 1,
-        });
-      }
-    }
-
     if (cnt('sgap_phase2_configs') === 0) {
       await this.createSgapTableRow('sgap_phase2_configs', {
         id: 'f9bb9554-e4e8-4545-b80e-12cf9f643868',
@@ -5798,44 +5745,20 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: 1,
       });
     }
-
-    if (cnt('sgap_social_media_tools') === 0) {
-      const socialPlatforms: Array<Record<string, unknown>> = [
-        { id: randomUUID(), platform: 'x', api_base_url: 'https://api.twitter.com', api_version: '2', auth_type: 'oauth2', rate_limit_per_min: 50, supports_scheduling: 1, supports_video: 1, supports_images: 1, supports_analytics: 1, max_characters: 280 },
-        { id: randomUUID(), platform: 'linkedin', api_base_url: 'https://api.linkedin.com', api_version: 'v2', auth_type: 'oauth2', rate_limit_per_min: 100, supports_scheduling: 1, supports_video: 1, supports_images: 1, supports_analytics: 1, max_characters: 3000 },
-        { id: randomUUID(), platform: 'facebook', api_base_url: 'https://graph.facebook.com', api_version: 'v19.0', auth_type: 'oauth2', rate_limit_per_min: 100, supports_scheduling: 1, supports_video: 1, supports_images: 1, supports_analytics: 1, max_characters: 63206 },
-        { id: randomUUID(), platform: 'instagram', api_base_url: 'https://graph.facebook.com', api_version: 'v19.0', auth_type: 'oauth2', rate_limit_per_min: 80, supports_scheduling: 1, supports_video: 1, supports_images: 1, supports_analytics: 1, max_characters: 2200 },
-        { id: randomUUID(), platform: 'tiktok', api_base_url: 'https://open.tiktokapis.com', api_version: 'v2', auth_type: 'oauth2', rate_limit_per_min: 60, supports_scheduling: 1, supports_video: 1, supports_images: 0, supports_analytics: 1, max_characters: 2200 },
-        { id: randomUUID(), platform: 'youtube', api_base_url: 'https://www.googleapis.com/youtube', api_version: 'v3', auth_type: 'oauth2', rate_limit_per_min: 30, supports_scheduling: 1, supports_video: 1, supports_images: 1, supports_analytics: 1, max_characters: 5000 },
-        { id: randomUUID(), platform: 'medium', api_base_url: 'https://api.medium.com', api_version: 'v1', auth_type: 'bearer', rate_limit_per_min: 40, supports_scheduling: 0, supports_video: 0, supports_images: 1, supports_analytics: 0, max_characters: null },
-        { id: randomUUID(), platform: 'devto', api_base_url: 'https://dev.to/api', api_version: 'v1', auth_type: 'api_key', rate_limit_per_min: 30, supports_scheduling: 0, supports_video: 0, supports_images: 1, supports_analytics: 0, max_characters: null },
-        { id: randomUUID(), platform: 'hashnode', api_base_url: 'https://gql.hashnode.com', api_version: 'v2', auth_type: 'bearer', rate_limit_per_min: 30, supports_scheduling: 0, supports_video: 0, supports_images: 1, supports_analytics: 0, max_characters: null },
-        { id: randomUUID(), platform: 'substack', api_base_url: 'https://substack.com/api', api_version: 'v1', auth_type: 'oauth2', rate_limit_per_min: 20, supports_scheduling: 1, supports_video: 0, supports_images: 1, supports_analytics: 0, max_characters: null },
-        { id: randomUUID(), platform: 'blogger', api_base_url: 'https://www.googleapis.com/blogger', api_version: 'v3', auth_type: 'oauth2', rate_limit_per_min: 20, supports_scheduling: 0, supports_video: 0, supports_images: 1, supports_analytics: 0, max_characters: null },
-      ];
-
-      for (const row of socialPlatforms) {
-        await this.createSgapTableRow('sgap_social_media_tools', {
-          application_scope: 'sgap',
-          ...row,
-          config_json: JSON.stringify({}),
-          enabled: 1,
-        });
-      }
-    }
-
     const socialToolCatalogRows: Array<Omit<ToolCatalogRow, 'created_at' | 'updated_at'>> = [
-      { id: '7cc0cad6-12e7-4c90-8ec1-d713635ebbfa', name: 'Social: X Post Publish', description: 'Publish post content to X/Twitter via official API.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 20, enabled: 1, tool_key: 'social_x_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'x', 'social']), source: 'custom', credential_id: null },
-      { id: '8f5b834f-8225-4bfc-9d48-5e8e356b7c3d', name: 'Social: LinkedIn Publish', description: 'Publish post content to LinkedIn company or creator feed.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 20, enabled: 1, tool_key: 'social_linkedin_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'linkedin', 'social']), source: 'custom', credential_id: null },
-      { id: '67f2f90b-3a80-4bc3-b29e-a4ba2e6f7f4a', name: 'Social: Facebook Publish', description: 'Publish posts to Facebook pages.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 20, enabled: 1, tool_key: 'social_facebook_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'facebook', 'social']), source: 'custom', credential_id: null },
-      { id: 'f8f1f486-1bf5-4f17-916a-1fefecf8f0e4', name: 'Social: Instagram Publish', description: 'Publish media posts to Instagram business accounts.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 20, enabled: 1, tool_key: 'social_instagram_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'instagram', 'social']), source: 'custom', credential_id: null },
-      { id: 'c1f9fb3c-75dc-40ab-9748-c1c29ca8fba3', name: 'Social: TikTok Publish', description: 'Publish videos to TikTok.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'social_tiktok_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'tiktok', 'social']), source: 'custom', credential_id: null },
-      { id: 'e0f2eb4b-c08b-40d5-98d5-bcf7a620d53f', name: 'Social: YouTube Publish', description: 'Publish YouTube videos and metadata.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'social_youtube_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'youtube', 'social']), source: 'custom', credential_id: null },
-      { id: '8fb39628-bae8-4836-b41c-e24d4455dd39', name: 'Social: Medium Publish', description: 'Publish articles to Medium.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 15, enabled: 1, tool_key: 'social_medium_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'medium', 'social']), source: 'custom', credential_id: null },
-      { id: '397e8fea-1167-4892-8ec0-9863651af8f6', name: 'Social: Dev.to Publish', description: 'Publish technical articles to Dev.to.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 15, enabled: 1, tool_key: 'social_devto_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'devto', 'social']), source: 'custom', credential_id: null },
-      { id: 'f9e8eaf4-51c8-4342-bad3-0f175fca7e3e', name: 'Social: Hashnode Publish', description: 'Publish technical articles to Hashnode.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 15, enabled: 1, tool_key: 'social_hashnode_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'hashnode', 'social']), source: 'custom', credential_id: null },
-      { id: 'f448c963-5f17-46e3-9fbe-7f7f24303f8f', name: 'Social: Substack Publish', description: 'Publish newsletter content to Substack.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'social_substack_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'substack', 'social']), source: 'custom', credential_id: null },
-      { id: '03046f7f-9073-4baa-b5ef-f812bdd0ca6d', name: 'Social: Blogger Publish', description: 'Publish articles to Google Blogger.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'social_blogger_post', version: '1.0.0', side_effects: 1, tags: JSON.stringify(['sgap', 'blogger', 'social']), source: 'custom', credential_id: null },
+      { id: '13fef74d-02f5-4897-a4d0-57f09564bca0', name: 'LinkedIn Post', description: 'Draft and publish posts to LinkedIn (text, image, carousel, article).', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_post.linkedin', version: '1.0', side_effects: 1, tags: JSON.stringify(['social', 'sgap', 'linkedin']), source: 'custom', credential_id: null },
+      { id: '7ce1ac0a-815f-44dc-89b5-5675dc732f2a', name: 'Instagram Post', description: 'Draft and publish posts to Instagram (image, reel, carousel).', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_post.instagram', version: '1.0', side_effects: 1, tags: JSON.stringify(['social', 'sgap', 'instagram']), source: 'custom', credential_id: null },
+      { id: 'e9e6e2e8-a628-430c-b9dd-f26d1f205f2e', name: 'Facebook Post', description: 'Draft and publish posts to Facebook (text, image, video).', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_post.facebook', version: '1.0', side_effects: 1, tags: JSON.stringify(['social', 'sgap', 'facebook']), source: 'custom', credential_id: null },
+      { id: '65d743ce-51d1-4d65-b6dd-d15b5dc02e9b', name: 'TikTok Post', description: 'Draft and schedule TikTok video posts with captions and hashtags.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_post.tiktok', version: '1.0', side_effects: 1, tags: JSON.stringify(['social', 'sgap', 'tiktok']), source: 'custom', credential_id: null },
+      { id: '9aa8a522-0dca-4707-a02e-d7adbb33ef12', name: 'YouTube Post', description: 'Schedule and publish YouTube videos with metadata and chapters.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_post.youtube', version: '1.0', side_effects: 1, tags: JSON.stringify(['social', 'sgap', 'youtube']), source: 'custom', credential_id: null },
+      { id: '1e01eb99-6700-4510-b702-d8f8d4f39a80', name: 'Medium Post', description: 'Draft and publish Medium articles with tags and canonical URL.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_post.medium', version: '1.0', side_effects: 1, tags: JSON.stringify(['social', 'sgap', 'medium']), source: 'custom', credential_id: null },
+      { id: 'c1f5f709-cbaa-4468-92e9-f3a4ac37079d', name: 'Blogger Post', description: 'Draft and publish Blogger posts with SEO metadata.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_post.blogger', version: '1.0', side_effects: 1, tags: JSON.stringify(['social', 'sgap', 'blogger']), source: 'custom', credential_id: null },
+      { id: '7dfd50a4-965a-4e8b-98c3-449f952f95fa', name: 'X (Twitter) Post', description: 'Draft and publish X posts and threads.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_post.x', version: '1.0', side_effects: 1, tags: JSON.stringify(['social', 'sgap', 'x']), source: 'custom', credential_id: null },
+      { id: '38996571-e04f-46d6-a913-fa655e0f83b4', name: 'Pinterest Pin', description: 'Create and publish Pinterest pins with board targeting.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_post.pinterest', version: '1.0', side_effects: 1, tags: JSON.stringify(['social', 'sgap', 'pinterest']), source: 'custom', credential_id: null },
+      { id: '9c14f90d-c1a2-445b-aa5f-02b5d8ecbe72', name: 'Substack Newsletter', description: 'Draft and send Substack newsletter issues to subscribers.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_post.substack', version: '1.0', side_effects: 1, tags: JSON.stringify(['social', 'sgap', 'substack']), source: 'custom', credential_id: null },
+      { id: '4ae11bd3-58c9-42e5-836d-0e2f6596e010', name: 'Threads Post', description: 'Draft and publish Threads posts.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_post.threads', version: '1.0', side_effects: 1, tags: JSON.stringify(['social', 'sgap', 'threads']), source: 'custom', credential_id: null },
+      { id: 'a2419f17-16d4-4c78-b7e5-4dd53b1c03e7', name: 'Reddit Post', description: 'Draft and publish Reddit posts aligned with subreddit rules.', category: 'social', risk_level: 'external-side-effect', requires_approval: 1, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_post.reddit', version: '1.0', side_effects: 1, tags: JSON.stringify(['social', 'sgap', 'reddit']), source: 'custom', credential_id: null },
+      { id: 'aec69104-5eb7-4cb9-a79d-8f3e67f87d59', name: 'Social Analytics Reader', description: 'Read performance metrics and insights across configured social channels (read-only).', category: 'social', risk_level: 'read-only', requires_approval: 0, max_execution_ms: 120000, rate_limit_per_min: 10, enabled: 1, tool_key: 'sgap.social_analytics.read', version: '1.0', side_effects: 0, tags: JSON.stringify(['social', 'sgap', 'analytics', 'read-only']), source: 'custom', credential_id: null },
     ];
     for (const tool of socialToolCatalogRows) {
       if (!tool.tool_key) continue;

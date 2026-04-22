@@ -1004,35 +1004,6 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
 
-  safeExec(db, `CREATE TABLE IF NOT EXISTS sgap_skills (
-    id TEXT PRIMARY KEY,
-    application_scope TEXT NOT NULL DEFAULT 'sgap',
-    agent_role TEXT NOT NULL,
-    skill_id TEXT NOT NULL REFERENCES skills(id),
-    tool_policy_key TEXT REFERENCES tool_policies(key),
-    enabled INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )`);
-
-  safeExec(db, `CREATE TABLE IF NOT EXISTS sgap_social_media_tools (
-    id TEXT PRIMARY KEY,
-    application_scope TEXT NOT NULL DEFAULT 'sgap',
-    platform TEXT NOT NULL UNIQUE,
-    api_base_url TEXT NOT NULL,
-    api_version TEXT NOT NULL DEFAULT '1.0',
-    auth_type TEXT NOT NULL,
-    rate_limit_per_min INTEGER NOT NULL DEFAULT 100,
-    supports_scheduling INTEGER NOT NULL DEFAULT 0,
-    supports_video INTEGER NOT NULL DEFAULT 0,
-    supports_images INTEGER NOT NULL DEFAULT 0,
-    supports_analytics INTEGER NOT NULL DEFAULT 0,
-    max_characters INTEGER,
-    config_json TEXT,
-    enabled INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )`);
-
   safeExec(db, `CREATE TABLE IF NOT EXISTS sgap_content_performance (
     id TEXT PRIMARY KEY,
     application_scope TEXT NOT NULL DEFAULT 'sgap',
@@ -1095,7 +1066,6 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_approvals_content ON sgap_approvals(content_item_id, status)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_audit_log_run ON sgap_audit_log(workflow_run_id)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_audit_log_agent ON sgap_audit_log(agent_id, created_at DESC)`);
-  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_social_media_tools_platform ON sgap_social_media_tools(platform)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_content_performance_item ON sgap_content_performance(content_item_id, platform)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_content_performance_brand ON sgap_content_performance(brand_id, published_at DESC)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_phase2_configs_brand ON sgap_phase2_configs(brand_id, enabled)`);
@@ -1181,4 +1151,33 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_phase4_configs_brand ON sgap_phase4_configs(brand_id, enabled)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_performance_insights_run ON sgap_performance_insights(workflow_run_id, platform)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_performance_insights_brand ON sgap_performance_insights(brand_id, created_at DESC)`);
+
+  // SGAP cleanup — remove tables that duplicate GeneWeave platform tables.
+  // These are replaced by: prompts, skills, tool_catalog, workers.
+  safeExec(db, 'DROP TABLE IF EXISTS sg_tool_bindings');
+  safeExec(db, 'DROP TABLE IF EXISTS sg_strategy_settings');
+  safeExec(db, 'DROP TABLE IF EXISTS sg_agent_profiles');
+  safeExec(db, 'DROP TABLE IF EXISTS sgap_skills');
+  safeExec(db, 'DROP TABLE IF EXISTS sgap_social_media_tools');
+
+  // Platform configs — per-platform settings for social channels (char limits, formats, etc.)
+  safeExec(db, `CREATE TABLE IF NOT EXISTS sg_platform_configs (
+    id TEXT PRIMARY KEY,
+    platform TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    icon_emoji TEXT,
+    max_char_limit INTEGER,
+    max_video_length_seconds INTEGER,
+    supported_formats TEXT NOT NULL DEFAULT '["text"]',
+    hashtag_limit INTEGER,
+    link_in_bio_only INTEGER NOT NULL DEFAULT 0,
+    api_endpoint TEXT,
+    analytics_fields TEXT NOT NULL DEFAULT '[]',
+    posting_tips TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_sg_platform_configs_platform ON sg_platform_configs(platform, enabled)');
 }

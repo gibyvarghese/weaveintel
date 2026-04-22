@@ -977,18 +977,24 @@ CREATE TABLE IF NOT EXISTS sg_kpi_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_sg_kpi_snapshots_brand ON sg_kpi_snapshots(brand_id, snapshot_date DESC);
 
-CREATE TABLE IF NOT EXISTS sg_agent_profiles (
+CREATE TABLE IF NOT EXISTS sg_platform_configs (
   id TEXT PRIMARY KEY,
-  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
-  name TEXT NOT NULL,
-  role TEXT NOT NULL,
-  instructions TEXT,
-  tool_names TEXT,
-  policy_key TEXT,
+  platform TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
+  icon_emoji TEXT,
+  max_char_limit INTEGER,
+  max_video_length_seconds INTEGER,
+  supported_formats TEXT,
+  hashtag_limit INTEGER,
+  link_in_bio_only INTEGER NOT NULL DEFAULT 0,
+  api_endpoint TEXT,
+  analytics_fields TEXT,
+  posting_tips TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX IF NOT EXISTS idx_sg_platform_configs_platform ON sg_platform_configs(platform, enabled);
 
 CREATE TABLE IF NOT EXISTS sg_workflow_templates (
   id TEXT PRIMARY KEY,
@@ -1000,44 +1006,6 @@ CREATE TABLE IF NOT EXISTS sg_workflow_templates (
   enabled INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS sg_tool_bindings (
-  id TEXT PRIMARY KEY,
-  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
-  channel_id TEXT REFERENCES sg_channels(id) ON DELETE SET NULL,
-  tool_name TEXT NOT NULL,
-  provider TEXT,
-  config_json TEXT,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS sg_strategy_settings (
-  id TEXT PRIMARY KEY,
-  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
-  key TEXT NOT NULL,
-  value_json TEXT,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(brand_id, key)
-);
-
-CREATE TABLE IF NOT EXISTS sg_prompt_variants (
-  id TEXT PRIMARY KEY,
-  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
-  key TEXT NOT NULL,
-  name TEXT NOT NULL,
-  template TEXT NOT NULL,
-  variables TEXT,
-  version TEXT NOT NULL DEFAULT '1.0',
-  is_active INTEGER NOT NULL DEFAULT 0,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE(brand_id, key, version)
 );
 
 CREATE TABLE IF NOT EXISTS sgap_phase2_configs (
@@ -1460,38 +1428,6 @@ CREATE TABLE IF NOT EXISTS sgap_audit_log (
 );
 CREATE INDEX IF NOT EXISTS idx_sgap_audit_log_run ON sgap_audit_log(workflow_run_id);
 CREATE INDEX IF NOT EXISTS idx_sgap_audit_log_agent ON sgap_audit_log(agent_id, created_at DESC);
-
--- SGAP-specific skills mapping
-CREATE TABLE IF NOT EXISTS sgap_skills (
-  id TEXT PRIMARY KEY,
-  application_scope TEXT NOT NULL DEFAULT 'sgap',
-  agent_role TEXT NOT NULL,
-  skill_id TEXT NOT NULL REFERENCES skills(id),
-  tool_policy_key TEXT REFERENCES tool_policies(key),
-  enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
--- Social media platform configurations
-CREATE TABLE IF NOT EXISTS sgap_social_media_tools (
-  id TEXT PRIMARY KEY,
-  application_scope TEXT NOT NULL DEFAULT 'sgap',
-  platform TEXT NOT NULL UNIQUE,
-  api_base_url TEXT NOT NULL,
-  api_version TEXT NOT NULL DEFAULT '1.0',
-  auth_type TEXT NOT NULL,
-  rate_limit_per_min INTEGER NOT NULL DEFAULT 100,
-  supports_scheduling INTEGER NOT NULL DEFAULT 0,
-  supports_video INTEGER NOT NULL DEFAULT 0,
-  supports_images INTEGER NOT NULL DEFAULT 0,
-  supports_analytics INTEGER NOT NULL DEFAULT 0,
-  max_characters INTEGER,
-  config_json TEXT,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_sgap_social_media_tools_platform ON sgap_social_media_tools(platform);
 
 -- Content performance metrics
 CREATE TABLE IF NOT EXISTS sgap_content_performance (

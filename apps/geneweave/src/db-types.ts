@@ -1932,16 +1932,10 @@ export interface DatabaseAdapter {
   listSgapAuditLog(workflowRunId?: string, agentId?: string, limit?: number): Promise<SgapAuditLogRow[]>;
 
   // Skills mapping
-  listSgapSkills(): Promise<SgapSkillRow[]>;
-  getSgapSkillByRole(agentRole: string): Promise<SgapSkillRow | null>;
-  createSgapSkill(skill: Omit<SgapSkillRow, 'created_at'>): Promise<string>;
-  updateSgapSkill(id: string, fields: Partial<SgapSkillRow>): Promise<void>;
-
-  // Social media tools
-  listSgapSocialMediaTools(): Promise<SgapSocialMediaToolRow[]>;
-  getSgapSocialMediaTool(platform: string): Promise<SgapSocialMediaToolRow | null>;
-  createSgapSocialMediaTool(tool: Omit<SgapSocialMediaToolRow, 'created_at' | 'updated_at'>): Promise<string>;
-  updateSgapSocialMediaTool(id: string, fields: Partial<SgapSocialMediaToolRow>): Promise<void>;
+  // Content performance
+  // Platform configs
+  listSgPlatformConfigs(): Promise<SgPlatformConfigRow[]>;
+  getSgPlatformConfig(platform: string): Promise<SgPlatformConfigRow | null>;
 
   // Content performance
   listSgapContentPerformance(contentItemId?: string, brandId?: string): Promise<SgapContentPerformanceRow[]>;
@@ -2074,30 +2068,19 @@ export interface SgapAuditLogRow {
   created_at: string;
 }
 
-export interface SgapSkillRow {
+export interface SgPlatformConfigRow {
   id: string;
-  application_scope: string;
-  agent_role: string;
-  skill_id: string;
-  tool_policy_key?: string;
-  enabled: number;
-  created_at: string;
-}
-
-export interface SgapSocialMediaToolRow {
-  id: string;
-  application_scope: string;
   platform: string;
-  api_base_url: string;
-  api_version: string;
-  auth_type: string;
-  rate_limit_per_min: number;
-  supports_scheduling: number;
-  supports_video: number;
-  supports_images: number;
-  supports_analytics: number;
-  max_characters?: number;
-  config_json?: string;
+  display_name: string;
+  icon_emoji: string | null;
+  max_char_limit: number | null;
+  max_video_length_seconds: number | null;
+  supported_formats: string;    // JSON string[]
+  hashtag_limit: number | null;
+  link_in_bio_only: number;
+  api_endpoint: string | null;
+  analytics_fields: string;     // JSON string[]
+  posting_tips: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;

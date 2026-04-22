@@ -1297,19 +1297,14 @@ export function registerAdminRoutes(
   registerSgapCrud({ routeKey: 'sg-content-queue', tableName: 'sg_content_queue', listKey: 'sg-content-queue', singularKey: 'sg-content-item' });
   registerSgapCrud({ routeKey: 'sg-growth-experiments', tableName: 'sg_growth_experiments', listKey: 'sg-growth-experiments', singularKey: 'sg-growth-experiment' });
   registerSgapCrud({ routeKey: 'sg-kpi-snapshots', tableName: 'sg_kpi_snapshots', listKey: 'sg-kpi-snapshots', singularKey: 'sg-kpi-snapshot' });
-  registerSgapCrud({ routeKey: 'sg-agent-profiles', tableName: 'sg_agent_profiles', listKey: 'sg-agent-profiles', singularKey: 'sg-agent-profile' });
+  registerSgapCrud({ routeKey: 'sg-platform-configs', tableName: 'sg_platform_configs', listKey: 'sg-platform-configs', singularKey: 'sg-platform-config' });
   registerSgapCrud({ routeKey: 'sg-workflow-templates', tableName: 'sg_workflow_templates', listKey: 'sg-workflow-templates', singularKey: 'sg-workflow-template' });
-  registerSgapCrud({ routeKey: 'sg-tool-bindings', tableName: 'sg_tool_bindings', listKey: 'sg-tool-bindings', singularKey: 'sg-tool-binding' });
-  registerSgapCrud({ routeKey: 'sg-strategy-settings', tableName: 'sg_strategy_settings', listKey: 'sg-strategy-settings', singularKey: 'sg-strategy-setting' });
-  registerSgapCrud({ routeKey: 'sg-prompt-variants', tableName: 'sg_prompt_variants', listKey: 'sg-prompt-variants', singularKey: 'sg-prompt-variant' });
   registerSgapCrud({ routeKey: 'sgap-agents', tableName: 'sgap_agents', listKey: 'sgap-agents', singularKey: 'sgap-agent' });
   registerSgapCrud({ routeKey: 'sgap-workflow-runs', tableName: 'sgap_workflow_runs', listKey: 'sgap-workflow-runs', singularKey: 'sgap-workflow-run' });
   registerSgapCrud({ routeKey: 'sgap-agent-threads', tableName: 'sgap_agent_threads', listKey: 'sgap-agent-threads', singularKey: 'sgap-agent-thread' });
   registerSgapCrud({ routeKey: 'sgap-agent-messages', tableName: 'sgap_agent_messages', listKey: 'sgap-agent-messages', singularKey: 'sgap-agent-message' });
   registerSgapCrud({ routeKey: 'sgap-approvals', tableName: 'sgap_approvals', listKey: 'sgap-approvals', singularKey: 'sgap-approval' });
   registerSgapCrud({ routeKey: 'sgap-audit-log', tableName: 'sgap_audit_log', listKey: 'sgap-audit-log', singularKey: 'sgap-audit-log' });
-  registerSgapCrud({ routeKey: 'sgap-skills', tableName: 'sgap_skills', listKey: 'sgap-skills', singularKey: 'sgap-skill' });
-  registerSgapCrud({ routeKey: 'sgap-social-media-tools', tableName: 'sgap_social_media_tools', listKey: 'sgap-social-media-tools', singularKey: 'sgap-social-media-tool' });
   registerSgapCrud({ routeKey: 'sgap-content-performance', tableName: 'sgap_content_performance', listKey: 'sgap-content-performance', singularKey: 'sgap-content-performance' });
   registerSgapCrud({ routeKey: 'sgap-phase2-configs', tableName: 'sgap_phase2_configs', listKey: 'sgap-phase2-configs', singularKey: 'sgap-phase2-config' });
   registerSgapCrud({ routeKey: 'sgap-content-revisions', tableName: 'sgap_content_revisions', listKey: 'sgap-content-revisions', singularKey: 'sgap-content-revision' });
@@ -1357,20 +1352,19 @@ export function registerAdminRoutes(
     const contentRows = await db.listSgapTableRows('sg_content_queue');
     const channelRows = await db.listSgapTableRows('sg_channels');
     const campaignRows = await db.listSgapTableRows('sg_campaigns');
-    const agentRows = await db.listSgapTableRows('sg_agent_profiles');
-    const strategyRows = await db.listSgapTableRows('sg_strategy_settings');
+    const brandGoals = (() => {
+      const rawGoals = brand['goals_json'];
+      if (typeof rawGoals === 'string' && rawGoals.trim()) return rawGoals;
+      return '{}';
+    })();
+    const sgapAgents = await db.listSgapAgents();
 
     const brandContent = contentRows.filter(row => row['brand_id'] === brandId);
     const brandChannels = channelRows.filter(row => row['brand_id'] === brandId && row['enabled'] === 1);
     const brandCampaigns = campaignRows.filter(row => row['brand_id'] === brandId && row['status'] !== 'completed');
-    const brandStrategies = strategyRows.filter((row) => row['brand_id'] === brandId && row['enabled'] === 1);
-    const brandAgents = agentRows
-      .filter((row) => row['brand_id'] === brandId && row['enabled'] === 1)
-      .map((row) => ({
-        id: String(row['id'] ?? ''),
-        name: String(row['name'] ?? ''),
-        role: String(row['role'] ?? 'general'),
-      }));
+    const brandAgents = sgapAgents
+      .filter((row) => row.enabled === 1)
+      .map((row) => ({ id: row.id, name: row.name, role: row.role }));
 
     const stepStartedAt = startedAt;
     const topQueue = brandContent
@@ -1384,9 +1378,7 @@ export function registerAdminRoutes(
         status: String(row['status'] ?? 'draft'),
       }));
     const channelList = brandChannels.map((row) => String(row['platform'] ?? 'unknown'));
-    const strategySummary = brandStrategies
-      .map((row) => `${String(row['key'] ?? 'setting')}: ${String(row['value_json'] ?? '{}')}`)
-      .join('\n');
+    const strategySummary = `Brand goals JSON: ${brandGoals}`;
 
     const requestedProvider = String(body['provider'] ?? '').trim();
     const requestedModel = String(body['model'] ?? '').trim();
