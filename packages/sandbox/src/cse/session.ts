@@ -45,12 +45,14 @@ export class SessionManager {
     const affinityKey = this.affinityKey(userId, chatId);
     const existingId = this.affinityToSession.get(affinityKey);
     const needsNetwork = config.networkAccess ?? false;
+    const requestedImage = config.executionImage ?? null;
     if (existingId) {
       const session = this.sessions.get(existingId);
       if (session && session.status !== 'terminated' && session.status !== 'error') {
         const supportsRequestedBrowser = !withBrowser || session.hasBrowser;
         const supportsRequestedNetwork = !needsNetwork || session.networkAccess === true;
-        if (supportsRequestedBrowser && supportsRequestedNetwork) {
+        const supportsRequestedImage = requestedImage == null || session.executionImage === requestedImage;
+        if (supportsRequestedBrowser && supportsRequestedNetwork && supportsRequestedImage) {
           return session;
         }
         await this.terminateSession(existingId, provider, config);
@@ -127,6 +129,7 @@ export class SessionManager {
     userId?: string;
     chatId?: string;
     status: SessionStatus;
+    executionImage?: string;
     hasBrowser: boolean;
     executionCount: number;
     idleSec: number;
@@ -137,6 +140,7 @@ export class SessionManager {
       userId: s.userId,
       chatId: s.chatId,
       status: s.status,
+      executionImage: s.executionImage,
       hasBrowser: s.hasBrowser,
       executionCount: s.executionCount,
       idleSec: Math.round((now - s.lastUsedAt) / 1_000),

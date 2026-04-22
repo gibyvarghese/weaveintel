@@ -9,6 +9,7 @@ import { SCHEMA_SQL } from './db-schema.js';
 import { applySQLiteBootstrapMigrations } from './db-sqlite-migrations.js';
 import { stringifyPromptVariables } from '@weaveintel/prompts';
 import { BUILT_IN_SKILLS } from '@weaveintel/skills';
+import { HARD_EXECUTION_GUARD_POLICY, SUPERVISOR_CODE_EXECUTION_POLICY } from './chat-policies.js';
 import type {
   DatabaseAdapter, DatabaseConfig,
   UserRow, SessionRow, ChatRow, MessageRow,
@@ -3328,6 +3329,30 @@ export class SQLiteAdapter implements DatabaseAdapter {
       }
     }
 
+    const dataAnalysisSkill = BUILT_IN_SKILLS.find((skill) => skill.id === 'skill-data-analysis-execution');
+    if (dataAnalysisSkill) {
+      const existingSkill = await this.getSkill(dataAnalysisSkill.id);
+      const skillFields = {
+        name: dataAnalysisSkill.name,
+        description: dataAnalysisSkill.description ?? dataAnalysisSkill.summary,
+        category: dataAnalysisSkill.category ?? 'general',
+        trigger_patterns: JSON.stringify(dataAnalysisSkill.triggerPatterns),
+        instructions: dataAnalysisSkill.instructions ?? dataAnalysisSkill.executionGuidance ?? dataAnalysisSkill.summary,
+        tool_names: dataAnalysisSkill.toolNames ? JSON.stringify(dataAnalysisSkill.toolNames) : null,
+        examples: dataAnalysisSkill.examples ? JSON.stringify(dataAnalysisSkill.examples) : null,
+        tags: dataAnalysisSkill.tags ? JSON.stringify(dataAnalysisSkill.tags) : null,
+        priority: dataAnalysisSkill.priority ?? 0,
+        version: dataAnalysisSkill.version ?? '1.0',
+        enabled: dataAnalysisSkill.enabled === false ? 0 : 1,
+        tool_policy_key: dataAnalysisSkill.toolPolicyKey ?? null,
+      };
+      if (existingSkill) {
+        await this.updateSkill(existingSkill.id, skillFields);
+      } else {
+        await this.createSkill({ id: dataAnalysisSkill.id, ...skillFields });
+      }
+    }
+
     // Task Contracts (must seed before worker_agents for FK reference tc-nz-statistics)
     if (cnt('task_contracts') === 0) {
     const contracts: Omit<TaskContractRow, 'created_at' | 'updated_at'>[] = [
@@ -3386,7 +3411,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       const workers: Omit<WorkerAgentRow, 'created_at' | 'updated_at'>[] = [
         {
           id: '8d2598f8-775d-4e67-841d-1cb5fb16713e', name: 'code_executor',
-          description: '[USE FIRST FOR ANY CODE/SCRIPT/RUN REQUEST] Writes AND executes code in real isolated Docker containers via CSE. Returns actual stdout. Use for: "run", "execute", "run it", "run in a container", "write and run", "test", "script that runs". NOT a simulation — real execution.',
+          description: '[USE FIRST FOR ANY CODE/SCRIPT/RUN REQUEST] Writes AND executes code in real isolated Docker containers via CSE. Uses the dedicated data-analysis sandbox for dataframe/charting work and returns actual stdout. Use for: "run", "execute", "run it", "run in a container", "write and run", "test", "script that runs", and dataset analysis that requires real execution.',
           system_prompt: [
             'You are a code writing + execution + verification agent.',
             'Your mission is not just to write code, but to make it run successfully and produce validated results.',
@@ -3394,16 +3419,16 @@ export class SQLiteAdapter implements DatabaseAdapter {
             'Execution workflow (MANDATORY):',
             '1. Understand objective and available attached files from context.',
             '2. Generate a runnable script.',
-            '3. Execute with `cse_run_code`.',
+            '3. Execute with the correct CSE tool: use `cse_run_data_analysis` for file/data analysis, charting, dataframe, Excel/Parquet, or statistical workflows; use `cse_run_code` for generic scripts that are not data-analysis tasks.',
             '4. Verify stdout/stderr and correctness against requested output.',
             '5. If errors or weak output, revise code and run again (iterate).',
             '6. Stop only when output is successful and materially answers the request, or when a clear environment blocker is proven.',
             '',
             'For file/data analysis tasks:',
             '- Treat attached filenames as real files in container workspace.',
-            '- Prefer robust Python stdlib (`csv`, `json`, `statistics`) first for portability.',
-            '- If using third-party libraries (pandas/numpy/etc.), install and verify explicitly before relying on them.',
-            '- If import fails, immediately fallback to stdlib approach and rerun.',
+            '- Default to `cse_run_data_analysis`; it already includes pandas, numpy, matplotlib, seaborn, plotly, statsmodels, scikit-learn, openpyxl, and pyarrow.',
+            '- Prefer robust Python stdlib (`csv`, `json`, `statistics`) when it is sufficient, but do not waste turns reinstalling standard analysis libraries that are already present in the analysis sandbox.',
+            '- If an analysis-library import fails inside `cse_run_data_analysis`, treat that as an environment issue and report it clearly.',
             '- If file path fails, probe workspace via code (e.g., os.listdir("."), os.listdir("/workspace")) and retry with corrected path.',
             '',
             'Quality bar before returning:',
@@ -3418,7 +3443,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
             '- Verification notes (why output is correct)',
             '- If blocked: exact blocker + next best fallback',
           ].join('\n'),
-          tool_names: JSON.stringify(['cse_run_code', 'cse_session_status', 'cse_end_session', 'calculator', 'text_analysis']),
+          tool_names: JSON.stringify(['cse_run_code', 'cse_run_data_analysis', 'cse_session_status', 'cse_end_session', 'calculator', 'text_analysis']),
           persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 50, category: 'general', enabled: 1,
         },
         {
@@ -3481,6 +3506,74 @@ export class SQLiteAdapter implements DatabaseAdapter {
         },
       ];
       for (const w of workers) await this.createWorkerAgent(w);
+    }
+
+    const codeExecutorWorker = await this.getWorkerAgent('8d2598f8-775d-4e67-841d-1cb5fb16713e');
+    if (codeExecutorWorker) {
+      const parsedToolNames = (() => {
+        try {
+          return JSON.parse(codeExecutorWorker.tool_names ?? '[]') as string[];
+        } catch {
+          return [] as string[];
+        }
+      })();
+      const nextToolNames = Array.from(new Set([
+        ...parsedToolNames,
+        'cse_run_data_analysis',
+      ]));
+      const desiredDescription = '[USE FIRST FOR ANY CODE/SCRIPT/RUN REQUEST] Writes AND executes code in real isolated Docker containers via CSE. Uses the dedicated data-analysis sandbox for dataframe/charting work and returns actual stdout. Use for: "run", "execute", "run it", "run in a container", "write and run", "test", "script that runs", and dataset analysis that requires real execution.';
+      const desiredSystemPrompt = [
+        'You are a code writing + execution + verification agent.',
+        'Your mission is not just to write code, but to make it run successfully and produce validated results.',
+        '',
+        'Execution workflow (MANDATORY):',
+        '1. Understand objective and available attached files from context.',
+        '2. Generate a runnable script.',
+        '3. Execute with the correct CSE tool: use `cse_run_data_analysis` for file/data analysis, charting, dataframe, Excel/Parquet, or statistical workflows; use `cse_run_code` for generic scripts that are not data-analysis tasks.',
+        '4. Verify stdout/stderr and correctness against requested output.',
+        '5. If errors or weak output, revise code and run again (iterate).',
+        '6. Stop only when output is successful and materially answers the request, or when a clear environment blocker is proven.',
+        '',
+        'For file/data analysis tasks:',
+        '- Treat attached filenames as real files in container workspace.',
+        '- Default to `cse_run_data_analysis`; it already includes pandas, numpy, matplotlib, seaborn, plotly, statsmodels, scikit-learn, openpyxl, and pyarrow.',
+        '- Prefer robust Python stdlib (`csv`, `json`, `statistics`) when it is sufficient, but do not waste turns reinstalling standard analysis libraries that are already present in the analysis sandbox.',
+        '- If an analysis-library import fails inside `cse_run_data_analysis`, treat that as an environment issue and report it clearly.',
+        '- If file path fails, probe workspace via code (e.g., os.listdir("."), os.listdir("/workspace")) and retry with corrected path.',
+        '',
+        'Quality bar before returning:',
+        '- Code executed successfully (status success).',
+        '- Output includes concrete computed values (not generic commentary).',
+        '- At least 3 clear insights when the user asks for analysis/insights.',
+        '- Include assumptions and any residual limitations.',
+        '',
+        'Response format back to supervisor:',
+        '- Final code used',
+        '- Execution stdout',
+        '- Verification notes (why output is correct)',
+        '- If blocked: exact blocker + next best fallback',
+      ].join('\n');
+      if (
+        codeExecutorWorker.description !== desiredDescription
+        || codeExecutorWorker.system_prompt !== desiredSystemPrompt
+        || nextToolNames.length !== parsedToolNames.length
+      ) {
+        await this.updateWorkerAgent(codeExecutorWorker.id, {
+          description: desiredDescription,
+          system_prompt: desiredSystemPrompt,
+          tool_names: JSON.stringify(nextToolNames),
+        });
+      }
+    }
+
+    const supervisorExecutionPrompt = await this.getPromptByKey('runtime.supervisor-code-execution');
+    if (supervisorExecutionPrompt && !supervisorExecutionPrompt.template.includes('cse_run_data_analysis')) {
+      await this.updatePrompt(supervisorExecutionPrompt.id, { template: SUPERVISOR_CODE_EXECUTION_POLICY });
+    }
+
+    const hardExecutionGuardPrompt = await this.getPromptByKey('runtime.hard-execution-guard');
+    if (hardExecutionGuardPrompt && !hardExecutionGuardPrompt.template.includes('cse_run_data_analysis')) {
+      await this.updatePrompt(hardExecutionGuardPrompt.id, { template: HARD_EXECUTION_GUARD_POLICY });
     }
 
     // Workflow runs (sample completed and in-progress runs)

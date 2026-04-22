@@ -317,6 +317,83 @@ function browserToolMap(): Record<string, Tool> {
 }
 
 function cseToolMap(opts?: ToolRegistryOptions): Record<string, Tool> {
+  const buildSandboxFiles = () => (opts?.currentAttachments ?? []).flatMap((attachment) => {
+    const safeName = attachment.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 180) || `attachment-${Date.now()}`;
+    const lowerMime = attachment.mimeType.toLowerCase();
+    const isText =
+      lowerMime.startsWith('text/') ||
+      lowerMime === 'application/json' ||
+      lowerMime === 'application/xml' ||
+      lowerMime === 'application/javascript' ||
+      lowerMime === 'application/x-javascript' ||
+      lowerMime === 'application/csv' ||
+      lowerMime.includes('markdown');
+
+    const built: Array<{ name: string; content: string; binary?: boolean }> = [];
+    if (attachment.dataBase64) {
+      if (isText) {
+        try {
+          built.push({
+            name: safeName,
+            content: Buffer.from(attachment.dataBase64, 'base64').toString('utf8'),
+            binary: false,
+          });
+        } catch {
+          // Skip malformed base64 payloads.
+        }
+      } else {
+        built.push({ name: safeName, content: attachment.dataBase64, binary: true });
+      }
+    }
+
+    if (attachment.transcript) {
+      built.push({
+        name: `${safeName}.transcript.txt`,
+        content: attachment.transcript,
+        binary: false,
+      });
+    }
+
+    return built;
+  });
+
+  const serializeCseResult = (chatId: string | undefined, result: Awaited<ReturnType<NonNullable<Awaited<ReturnType<typeof getCSE>>>['run']>>) => JSON.stringify({
+    status: result.status,
+    userId: opts?.currentUserId,
+    chatId,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    error: result.error,
+    sessionId: result.sessionId,
+    provider: result.providerInfo.provider,
+  }, null, 2);
+
+  const runInSandbox = async (args: {
+    code: string;
+    language?: ExecutionLanguage;
+    chatId?: string;
+    timeoutMs?: number;
+    networkAccess?: boolean;
+  }, executionImage?: string) => {
+    const cse = await getCSE();
+    if (!cse) return { content: 'CSE is not configured in this environment.', isError: true };
+
+    const chatId = args.chatId ?? opts?.currentChatId;
+    const files = buildSandboxFiles();
+    const result = await cse.run({
+      code: args.code,
+      language: args.language,
+      executionImage,
+      userId: opts?.currentUserId,
+      chatId,
+      files: files.length > 0 ? files : undefined,
+      timeoutMs: args.timeoutMs,
+      networkAccess: args.networkAccess,
+    });
+
+    return serializeCseResult(chatId, result);
+  };
+
   const runCode = weaveTool({
     name: 'cse_run_code',
     description: 'Run Python/JavaScript/bash code in the Compute Sandbox Engine. Starts or reuses a container session scoped to the current user and chat.',
@@ -331,70 +408,28 @@ function cseToolMap(opts?: ToolRegistryOptions): Record<string, Tool> {
       },
       required: ['code'],
     },
-    execute: async (args: { code: string; language?: ExecutionLanguage; chatId?: string; timeoutMs?: number; networkAccess?: boolean }) => {
-      const cse = await getCSE();
-      if (!cse) return { content: 'CSE is not configured in this environment.', isError: true };
-      const chatId = args.chatId ?? opts?.currentChatId;
-      const files = (opts?.currentAttachments ?? []).flatMap((attachment) => {
-        const safeName = attachment.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 180) || `attachment-${Date.now()}`;
-        const lowerMime = attachment.mimeType.toLowerCase();
-        const isText =
-          lowerMime.startsWith('text/') ||
-          lowerMime === 'application/json' ||
-          lowerMime === 'application/xml' ||
-          lowerMime === 'application/javascript' ||
-          lowerMime === 'application/x-javascript' ||
-          lowerMime === 'application/csv' ||
-          lowerMime.includes('markdown');
-
-        const built: Array<{ name: string; content: string; binary?: boolean }> = [];
-        if (attachment.dataBase64) {
-          if (isText) {
-            try {
-              built.push({
-                name: safeName,
-                content: Buffer.from(attachment.dataBase64, 'base64').toString('utf8'),
-                binary: false,
-              });
-            } catch {
-              // Skip malformed base64 payloads.
-            }
-          } else {
-            built.push({ name: safeName, content: attachment.dataBase64, binary: true });
-          }
-        }
-
-        if (attachment.transcript) {
-          built.push({
-            name: `${safeName}.transcript.txt`,
-            content: attachment.transcript,
-            binary: false,
-          });
-        }
-
-        return built;
-      });
-      const result = await cse.run({
-        code: args.code,
-        language: args.language,
-        userId: opts?.currentUserId,
-        chatId,
-        files: files.length > 0 ? files : undefined,
-        timeoutMs: args.timeoutMs,
-        networkAccess: args.networkAccess,
-      });
-      return JSON.stringify({
-        status: result.status,
-        userId: opts?.currentUserId,
-        chatId,
-        stdout: result.stdout,
-        stderr: result.stderr,
-        error: result.error,
-        sessionId: result.sessionId,
-        provider: result.providerInfo.provider,
-      }, null, 2);
-    },
+    execute: async (args: { code: string; language?: ExecutionLanguage; chatId?: string; timeoutMs?: number; networkAccess?: boolean }) => runInSandbox(args),
     tags: ['sandbox', 'compute', 'code'],
+    riskLevel: 'external-side-effect',
+  });
+
+  const dataAnalysisImage = process.env['CSE_DATA_ANALYSIS_IMAGE'] ?? 'weaveintel/cse-data-analysis:local';
+  const runDataAnalysis = weaveTool({
+    name: 'cse_run_data_analysis',
+    description: 'Run Python data-analysis and charting code in a preloaded sandbox with pandas, numpy, matplotlib, seaborn, plotly, pyarrow, openpyxl, scikit-learn, and statsmodels already installed.',
+    parameters: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', description: 'Python analysis code to execute in the data-analysis sandbox.' },
+        language: { type: 'string', enum: ['python'], description: 'Execution language. Only python is supported in the data-analysis sandbox.' },
+        chatId: { type: 'string', description: 'Optional chat ID. Defaults to current chat context.' },
+        timeoutMs: { type: 'number', description: 'Optional execution timeout in milliseconds.' },
+        networkAccess: { type: 'boolean', description: 'Allow outbound network access for this run.' },
+      },
+      required: ['code'],
+    },
+    execute: async (args: { code: string; language?: 'python'; chatId?: string; timeoutMs?: number; networkAccess?: boolean }) => runInSandbox({ ...args, language: 'python' }, dataAnalysisImage),
+    tags: ['sandbox', 'compute', 'analysis', 'charting'],
     riskLevel: 'external-side-effect',
   });
 
@@ -441,6 +476,7 @@ function cseToolMap(opts?: ToolRegistryOptions): Record<string, Tool> {
 
   return {
     cse_run_code: runCode,
+    cse_run_data_analysis: runDataAnalysis,
     cse_session_status: sessionStatus,
     cse_end_session: endSession,
   };

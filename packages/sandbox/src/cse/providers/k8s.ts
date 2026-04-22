@@ -451,6 +451,7 @@ export abstract class K8sContainerProvider implements ContainerProvider {
       sessionId,
       chatId,
       provider: this.kind,
+      executionImage: image,
       handle: podName,
       status: 'ready',
       hasBrowser: withBrowser,

@@ -56,6 +56,7 @@ export class ComputeSandboxEngine {
   async run(request: ExecutionRequest): Promise<ExecutionResult> {
     const effectiveConfig: CSEConfig = {
       ...this.config,
+      executionImage: request.executionImage ?? this.config.executionImage,
       networkAccess: request.networkAccess ?? this.config.networkAccess,
     };
 
@@ -86,6 +87,9 @@ export class ComputeSandboxEngine {
       if (!session) throw new Error(`Session ${request.sessionId} not found or expired`);
       if (request.userId && session.userId && session.userId !== request.userId) {
         throw new Error(`Session ${request.sessionId} does not belong to current user`);
+      }
+      if (request.executionImage && session.executionImage && session.executionImage !== request.executionImage) {
+        throw new Error(`Session ${request.sessionId} is bound to ${session.executionImage}, not ${request.executionImage}`);
       }
       this.sessions.markBusy(session.sessionId);
       try {

@@ -102,6 +102,12 @@ export interface ExecutionRequest {
   code: string;
   language?: ExecutionLanguage;
 
+  /**
+   * Optional OCI image override for this execution/session. When omitted, the
+   * provider falls back to config.executionImage.
+   */
+  executionImage?: string;
+
   /** Authenticated user identity for tenant/session isolation. */
   userId?: string;
 
@@ -171,6 +177,8 @@ export interface CSESession {
   userId?: string;
   chatId?: string;
   provider: CSEProviderKind;
+  /** OCI image backing this session container. */
+  executionImage?: string;
   /** Provider-specific handle (container name, pod name, etc.). */
   handle: string;
   status: SessionStatus;

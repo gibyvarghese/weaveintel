@@ -190,7 +190,7 @@ function buildProcessViewModel(msg: any, isStreamingCurrent: boolean) {
       const result = s?.result ?? s?.toolCall?.result;
       const delegatedWorker = toolName === 'delegate_to_worker' ? extractDelegatedWorkerName(input) : '';
       const toolBadges: Array<{ label: string; tone: string }> = [];
-      if (toolName === 'cse_run_code') {
+      if (toolName === 'cse_run_code' || toolName === 'cse_run_data_analysis') {
         toolBadges.push({ label: 'Code execution', tone: 'ok' });
       }
       if (delegatedWorker) {
@@ -219,7 +219,7 @@ function buildProcessViewModel(msg: any, isStreamingCurrent: boolean) {
           : null;
         const cseTone = resultRecord?.['status'] === 'error' ? 'deny' : resultRecord?.['status'] === 'success' ? 'ok' : 'warn';
         const badges: Array<{ label: string; tone: string }> = [];
-        if (entry?.name === 'cse_run_code') {
+        if (entry?.name === 'cse_run_code' || entry?.name === 'cse_run_data_analysis') {
           const provider = typeof resultRecord?.['provider'] === 'string' ? resultRecord['provider'] : 'local';
           const sessionId = typeof resultRecord?.['sessionId'] === 'string' ? resultRecord['sessionId'] : '';
           const shortSession = sessionId ? sessionId.slice(0, 8) : '';

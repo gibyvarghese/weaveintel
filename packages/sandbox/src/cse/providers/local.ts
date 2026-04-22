@@ -280,7 +280,7 @@ export class LocalDockerProvider implements ContainerProvider {
       '--security-opt', 'no-new-privileges',
       '--tmpfs', '/tmp:size=100m,noexec,nosuid',
       '--tmpfs', '/nonexistent:size=200m,nosuid,uid=65534,gid=65534,mode=1777',
-      '--tmpfs', '/workspace:size=1g,exec',
+      '--tmpfs', '/workspace:size=1g,exec,nosuid,uid=65534,gid=65534,mode=1777',
       '--label', `cse.created=${Date.now()}`,
       '--label', 'cse.managed=true',
     ];
@@ -302,10 +302,23 @@ export class LocalDockerProvider implements ContainerProvider {
     const { exitCode, stderr } = await run('docker', dockerArgs);
     if (exitCode !== 0) throw new Error(`Failed to create session container: ${stderr}`);
 
+    const workspaceInit = await run('docker', [
+      'exec',
+      containerName,
+      'sh',
+      '-lc',
+      'mkdir -p /workspace/output /workspace/.pyuser /workspace/.cache /workspace/.mplconfig && chmod 1777 /workspace /workspace/output /workspace/.pyuser /workspace/.cache /workspace/.mplconfig',
+    ]);
+    if (workspaceInit.exitCode !== 0) {
+      await run('docker', ['rm', '-f', containerName]);
+      throw new Error(`Failed to initialize session workspace: ${workspaceInit.stderr}`);
+    }
+
     return {
       sessionId,
       chatId,
       provider: 'local',
+      executionImage: image,
       handle: containerName,
       status: 'ready',
       hasBrowser: withBrowser,

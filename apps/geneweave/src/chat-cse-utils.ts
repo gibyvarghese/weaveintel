@@ -1,5 +1,7 @@
 import type { AgentResult } from '@weaveintel/core';
 
+const CSE_EXECUTION_TOOLS = new Set(['cse_run_code', 'cse_run_data_analysis']);
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
@@ -62,11 +64,11 @@ function scanForSuccessfulCseExecution(value: unknown, seen: WeakSet<object>): b
 
   const record = value as Record<string, unknown>;
   const toolCall = asRecord(record['toolCall']);
-  if (toolCall && toolCall['name'] === 'cse_run_code' && isSuccessfulCseToolResult(toolCall['result'])) {
+  if (toolCall && CSE_EXECUTION_TOOLS.has(String(toolCall['name'] ?? '')) && isSuccessfulCseToolResult(toolCall['result'])) {
     return true;
   }
 
-  if (record['name'] === 'cse_run_code' && isSuccessfulCseToolResult(record['result'])) {
+  if (CSE_EXECUTION_TOOLS.has(String(record['name'] ?? '')) && isSuccessfulCseToolResult(record['result'])) {
     return true;
   }
 

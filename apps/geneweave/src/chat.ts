@@ -334,7 +334,7 @@ export class ChatEngine {
 
     return {
       ...second,
-      output: '[Execution guard failure] The workflow did not satisfy required execution constraints. A successful cse_run_code run through delegated worker "code_executor" is required, and the final result must be renderable (no sandbox-local file paths, no incomplete insights). Please retry.',
+      output: '[Execution guard failure] The workflow did not satisfy required execution constraints. A successful CSE run (`cse_run_code` or `cse_run_data_analysis`) through delegated worker "code_executor" is required, and the final result must be renderable (no sandbox-local file paths, no incomplete insights). Please retry.',
     };
   }
 
