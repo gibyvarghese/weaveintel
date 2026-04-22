@@ -1012,9 +1012,12 @@ The [examples](examples) directory contains runnable demonstrations:
 | 27 | [Browser Automation](examples/27-browser-automation.ts) | Browser fetch/extract/readability/scrape/sitemap, browser pool sessions, auth handoff tools, agent browser delegation | tools-browser, agents, core, testing | None |
 | 28 | [Package Auth RBAC](examples/28-package-auth-rbac.ts) | Identity creation, persona extension, permission checks, evaluateAccess, deny-by-default | identity, core | None |
 | 29 | [Authenticated Agent + Tools](examples/29-authenticated-agent-tools.ts) | End-to-end agent/tool invocation with identity context and permission-gated tool execution | identity, agents, core, testing | None |
+| 35 | [Scientific Validation](examples/35-scientific-validation.ts) | End-to-end hypothesis validation API flow: submit, stream evidence, poll verdict, fetch bundle, reproduce | geneweave, contracts, replay | None |
 | 33 | [Tool Simulation Harness](examples/33-tool-simulation-harness.ts) | Dry-run and live tool simulation, policy trace inspection, audit event output | tools, geneweave | None |
 | 34 | [Skill→Tool Policy + Approval](examples/34-skill-tool-policy-approval.ts) | Skill activation binds toolPolicyKey; approval queue list, approve, deny, conflict and 404 paths | tools, geneweave, human-tasks | None |
 | 36 | [SGAP Social Growth Recipe](examples/36-sgap-social-growth-recipe.ts) | Reusable SGAP growth loop recipe for planning, draft generation, distribution notes, KPI measurement, and next experiment suggestions | recipes, devtools, core | None |
+| 37 | [SGAP Admin Workflow Run](examples/37-sgap-admin-workflow-run.ts) | Local SGAP admin flow: login, load SGAP brand/template, run workflow template, print KPI snapshot metrics | geneweave | None |
+| 38 | [SGAP Growth Loop Iteration](examples/38-sgap-growth-loop-iteration.ts) | Two-pass SGAP loop with KPI-informed optimization using reusable SGAP recipe and mock model | recipes, devtools, core | None |
 
 ## Deployment
 

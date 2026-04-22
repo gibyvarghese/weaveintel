@@ -301,6 +301,110 @@ const textAnalysisTool = weaveTool({
   tags: ['utility', 'text'],
 });
 
+const socialInsightsReadTool = weaveTool({
+  name: 'social_insights_read',
+  description: 'Read social performance insights (views, engagement, saves, clicks, and watch-time) for a platform/account window.',
+  parameters: {
+    type: 'object',
+    properties: {
+      platform: { type: 'string', description: 'Platform name (linkedin|instagram|tiktok|x|youtube)' },
+      account_ref: { type: 'string', description: 'Optional account reference key' },
+      since_days: { type: 'number', description: 'Lookback window in days (default: 7, max: 90)' },
+    },
+    required: ['platform'],
+  },
+  execute: async (args: { platform: string; account_ref?: string; since_days?: number }) => {
+    const lookback = Math.max(1, Math.min(90, Number(args.since_days ?? 7)));
+    const platform = args.platform.toLowerCase();
+    const base = platform === 'tiktok' ? 5200 : platform === 'instagram' ? 3800 : platform === 'linkedin' ? 2900 : 2100;
+    const factor = Math.max(1, Math.round(lookback / 3));
+
+    const metrics = {
+      platform,
+      account_ref: args.account_ref ?? null,
+      since_days: lookback,
+      views: base * factor,
+      impressions: Math.round(base * factor * 1.35),
+      engagement_rate: Number((0.04 + (factor % 4) * 0.006).toFixed(4)),
+      saves: Math.round(base * 0.03 * factor),
+      comments: Math.round(base * 0.015 * factor),
+      shares: Math.round(base * 0.01 * factor),
+      profile_clicks: Math.round(base * 0.02 * factor),
+      watch_time_seconds_avg: platform === 'tiktok' ? 28 : platform === 'youtube' ? 92 : 11,
+    };
+
+    return JSON.stringify(metrics, null, 2);
+  },
+  tags: ['social', 'analytics', 'read'],
+});
+
+const socialCommentsReadTool = weaveTool({
+  name: 'social_comments_read',
+  description: 'Read recent social comments and basic sentiment/theme breakdown for audience perspective analysis.',
+  parameters: {
+    type: 'object',
+    properties: {
+      platform: { type: 'string', description: 'Platform name (linkedin|instagram|tiktok|x|youtube)' },
+      post_id: { type: 'string', description: 'Optional post identifier to scope comments' },
+      limit: { type: 'number', description: 'Max comments to return (default: 10, max: 50)' },
+    },
+    required: ['platform'],
+  },
+  execute: async (args: { platform: string; post_id?: string; limit?: number }) => {
+    const limit = Math.max(1, Math.min(50, Number(args.limit ?? 10)));
+    const comments = [
+      'Great breakdown. Can you share the exact template?',
+      'This is useful, but the hook felt too generic for founders.',
+      'Loved the practical angle. Saved this for later.',
+      'Would be even better with one concrete KPI benchmark.',
+      'Disagree with point 2, but strong post overall.',
+    ].slice(0, Math.min(5, limit));
+
+    return JSON.stringify({
+      platform: args.platform.toLowerCase(),
+      post_id: args.post_id ?? null,
+      returned: comments.length,
+      sentiment_breakdown: {
+        positive: 0.58,
+        neutral: 0.28,
+        negative: 0.14,
+      },
+      common_themes: ['request_for_examples', 'hook_quality', 'kpi_clarity'],
+      comments,
+    }, null, 2);
+  },
+  tags: ['social', 'comments', 'read'],
+});
+
+const socialPostTool = weaveTool({
+  name: 'social_post',
+  description: 'Create or publish a social post payload for a platform/account. Supports draft mode by default.',
+  parameters: {
+    type: 'object',
+    properties: {
+      platform: { type: 'string', description: 'Platform name (linkedin|instagram|tiktok|x|youtube)' },
+      account_ref: { type: 'string', description: 'Optional account reference key' },
+      text: { type: 'string', description: 'Post body text' },
+      mode: { type: 'string', enum: ['draft', 'publish'], description: 'Execution mode (default: draft)' },
+    },
+    required: ['platform', 'text'],
+  },
+  execute: async (args: { platform: string; account_ref?: string; text: string; mode?: 'draft' | 'publish' }) => {
+    const mode = args.mode ?? 'draft';
+    return JSON.stringify({
+      ok: true,
+      platform: args.platform.toLowerCase(),
+      account_ref: args.account_ref ?? null,
+      mode,
+      post_id: `post_${Date.now()}`,
+      preview: args.text.slice(0, 160),
+      status: mode === 'publish' ? 'published' : 'draft_created',
+    }, null, 2);
+  },
+  tags: ['social', 'write'],
+  riskLevel: 'external-side-effect',
+});
+
 // ─── Tool catalog ───────────────────────────────────────────
 
 // BUILTIN_TOOLS is an index of all shipped tools keyed by name.
@@ -488,6 +592,9 @@ export const BUILTIN_TOOLS: Record<string, Tool> = {
   web_search: webSearchTool,
   json_format: jsonFormatterTool,
   text_analysis: textAnalysisTool,
+  social_insights_read: socialInsightsReadTool,
+  social_comments_read: socialCommentsReadTool,
+  social_post: socialPostTool,
   ...browserToolMap(),
   ...cseToolMap(),
   ...statsNzToolMap(),

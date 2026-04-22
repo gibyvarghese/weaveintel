@@ -15,6 +15,8 @@ describe('SQLite SGAP CRUD and seed data', () => {
     const brands = await db.listSgapTableRows('sg_brands');
     const channels = await db.listSgapTableRows('sg_channels');
     const queue = await db.listSgapTableRows('sg_content_queue');
+    const agents = await db.listSgapTableRows('sg_agent_profiles');
+    const bindings = await db.listSgapTableRows('sg_tool_bindings');
     const prompt = await db.getPromptByKey('sgap.tech_lunch.post_brief');
     const skill = await db.getSkill('0533eb6b-c030-44c9-bba2-79fca66ae213');
     const worker = await db.getWorkerAgent('4af84061-f85c-4f6f-9979-2a5a6eb7dbd7');
@@ -23,6 +25,14 @@ describe('SQLite SGAP CRUD and seed data', () => {
     expect(brands.some((b) => b['slug'] === 'tech-lunch')).toBe(true);
     expect(channels.length).toBeGreaterThanOrEqual(3);
     expect(queue.length).toBeGreaterThanOrEqual(1);
+    expect(agents.some((a) => a['name'] === 'sg-audience-critic')).toBe(true);
+    expect(agents.some((a) => a['name'] === 'sg-brand-guardian')).toBe(true);
+    expect(agents.some((a) => a['name'] === 'sg-hook-optimizer')).toBe(true);
+    expect(agents.some((a) => a['name'] === 'sg-distribution-optimizer')).toBe(true);
+    expect(agents.some((a) => a['name'] === 'sg-experiment-designer')).toBe(true);
+    expect(bindings.some((b) => b['tool_name'] === 'social_insights_read')).toBe(true);
+    expect(bindings.some((b) => b['tool_name'] === 'social_comments_read')).toBe(true);
+    expect(bindings.some((b) => b['tool_name'] === 'social_post')).toBe(true);
     expect(prompt?.key).toBe('sgap.tech_lunch.post_brief');
     expect(skill?.name).toBe('SGAP Tech Lunch Growth Loop');
     expect(worker?.name).toBe('sg-content-operator');
