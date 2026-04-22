@@ -30,7 +30,7 @@ async function api(method: string, path: string, body?: unknown): Promise<{ stat
 }
 
 describeLive('SGAP Live API', () => {
-  it('executes phase 1 + phase 2 workflow successfully', async () => {
+  it('executes phase 1 + phase 2 + phase 3 workflow successfully', async () => {
     const email = `sgap-live-${Date.now()}@example.com`;
     const password = 'TestPass123!';
 
@@ -77,6 +77,24 @@ describeLive('SGAP Live API', () => {
     expect(typeof phase2Run?.['status']).toBe('string');
     expect(typeof phase2Run?.['current_stage']).toBe('string');
     expect(Number(phase2Meta?.['revision_count'] ?? 0)).toBeGreaterThan(0);
+
+    let phase3 = await api('POST', `/api/sgap/workflow-runs/${runId}/phase3/execute`, {
+      max_items: 1,
+      content_item_ids: ['7835eb9a-6f09-440b-a875-e4e42d2f40f2'],
+      publish_mode: 'draft',
+    });
+    for (let i = 0; i < 2 && phase3.status >= 500; i += 1) {
+      phase3 = await api('POST', `/api/sgap/workflow-runs/${runId}/phase3/execute`, {
+        max_items: 1,
+        content_item_ids: ['7835eb9a-6f09-440b-a875-e4e42d2f40f2'],
+        publish_mode: 'draft',
+      });
+    }
+    expect(phase3.status).toBe(200);
+    const phase3Run = phase3.data['run'] as Record<string, unknown>;
+    const phase3Meta = phase3.data['phase3'] as Record<string, unknown>;
+    expect(phase3Run?.['current_stage']).toBe('performance-review');
+    expect(Number(phase3Meta?.['plans_count'] ?? 0)).toBeGreaterThan(0);
 
     const runDetails = await api('GET', `/api/sgap/workflow-runs/${runId}`);
     expect(runDetails.status).toBe(200);

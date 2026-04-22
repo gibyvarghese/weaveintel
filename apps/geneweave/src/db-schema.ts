@@ -1074,6 +1074,46 @@ CREATE TABLE IF NOT EXISTS sgap_content_revisions (
 );
 CREATE INDEX IF NOT EXISTS idx_sgap_content_revisions_run ON sgap_content_revisions(workflow_run_id, content_item_id, revision_index);
 
+CREATE TABLE IF NOT EXISTS sgap_phase3_configs (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+  workflow_template_id TEXT NOT NULL REFERENCES sg_workflow_templates(id) ON DELETE CASCADE,
+  social_manager_agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+  analytics_agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+  primary_platforms_json TEXT,
+  publish_mode TEXT NOT NULL DEFAULT 'draft',
+  schedule_strategy TEXT NOT NULL DEFAULT 'best_window',
+  min_engagement_target REAL NOT NULL DEFAULT 0.03,
+  require_analytics_snapshot INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(brand_id, workflow_template_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sgap_phase3_configs_brand ON sgap_phase3_configs(brand_id, enabled);
+
+CREATE TABLE IF NOT EXISTS sgap_distribution_plans (
+  id TEXT PRIMARY KEY,
+  application_scope TEXT NOT NULL DEFAULT 'sgap',
+  workflow_run_id TEXT NOT NULL REFERENCES sgap_workflow_runs(id) ON DELETE CASCADE,
+  content_item_id TEXT NOT NULL REFERENCES sg_content_queue(id) ON DELETE CASCADE,
+  social_manager_agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+  analytics_agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+  platform TEXT NOT NULL,
+  publish_mode TEXT NOT NULL DEFAULT 'draft',
+  scheduled_for TEXT,
+  tool_name TEXT,
+  distribution_text TEXT NOT NULL,
+  hashtags_json TEXT,
+  optimization_notes_json TEXT,
+  tool_result_json TEXT,
+  status TEXT NOT NULL DEFAULT 'planned',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sgap_distribution_plans_run ON sgap_distribution_plans(workflow_run_id, content_item_id, platform);
+
 CREATE TABLE IF NOT EXISTS semantic_memory (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

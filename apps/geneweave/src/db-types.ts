@@ -1957,6 +1957,16 @@ export interface DatabaseAdapter {
 
   listSgapContentRevisions(workflowRunId: string, contentItemId?: string): Promise<SgapContentRevisionRow[]>;
   createSgapContentRevision(revision: Omit<SgapContentRevisionRow, 'created_at'>): Promise<string>;
+
+  // Phase 3 configurations and distribution plans
+  listSgapPhase3Configs(brandId?: string, workflowTemplateId?: string): Promise<SgapPhase3ConfigRow[]>;
+  getSgapPhase3Config(id: string): Promise<SgapPhase3ConfigRow | null>;
+  createSgapPhase3Config(config: Omit<SgapPhase3ConfigRow, 'created_at' | 'updated_at'>): Promise<string>;
+  updateSgapPhase3Config(id: string, fields: Partial<SgapPhase3ConfigRow>): Promise<void>;
+
+  listSgapDistributionPlans(workflowRunId: string, contentItemId?: string): Promise<SgapDistributionPlanRow[]>;
+  createSgapDistributionPlan(plan: Omit<SgapDistributionPlanRow, 'created_at' | 'updated_at'>): Promise<string>;
+  updateSgapDistributionPlan(id: string, fields: Partial<SgapDistributionPlanRow>): Promise<void>;
 }
 
 
@@ -2131,5 +2141,42 @@ export interface SgapContentRevisionRow {
   content_text: string;
   notes_json?: string;
   created_at: string;
+}
+
+export interface SgapPhase3ConfigRow {
+  id: string;
+  application_scope: string;
+  brand_id: string;
+  workflow_template_id: string;
+  social_manager_agent_id: string;
+  analytics_agent_id: string;
+  primary_platforms_json?: string;
+  publish_mode: string;
+  schedule_strategy: string;
+  min_engagement_target: number;
+  require_analytics_snapshot: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SgapDistributionPlanRow {
+  id: string;
+  application_scope: string;
+  workflow_run_id: string;
+  content_item_id: string;
+  social_manager_agent_id: string;
+  analytics_agent_id: string;
+  platform: string;
+  publish_mode: string;
+  scheduled_for?: string;
+  tool_name?: string;
+  distribution_text: string;
+  hashtags_json?: string;
+  optimization_notes_json?: string;
+  tool_result_json?: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
 }
 

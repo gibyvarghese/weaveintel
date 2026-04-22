@@ -1070,12 +1070,24 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     const requestedModel = String(body['model'] ?? '').trim();
     const fallbackProvider = providers?.['openai'] ? 'openai' : providers?.['anthropic'] ? 'anthropic' : configuredProviders[0]![0];
     const selectedProvider = requestedProvider && providers?.[requestedProvider] ? requestedProvider : fallbackProvider;
-    const selectedModel = requestedModel
-      || (selectedProvider === 'openai'
-        ? 'gpt-4o-mini'
-        : selectedProvider === 'anthropic'
-          ? 'claude-sonnet-4-20250514'
-          : 'mock-model');
+
+    const isModelCompatibleWithProvider = (providerName: string, modelName: string): boolean => {
+      const normalized = modelName.toLowerCase();
+      if (!normalized) return false;
+      if (providerName === 'openai') return !normalized.includes('claude');
+      if (providerName === 'anthropic') return normalized.includes('claude');
+      return true;
+    };
+
+    const defaultModelForProvider = (providerName: string): string => {
+      if (providerName === 'openai') return 'gpt-4o-mini';
+      if (providerName === 'anthropic') return 'claude-sonnet-4-20250514';
+      return 'mock-model';
+    };
+
+    const selectedModel = requestedModel && isModelCompatibleWithProvider(selectedProvider, requestedModel)
+      ? requestedModel
+      : defaultModelForProvider(selectedProvider);
 
     const providerCandidates = [
       selectedProvider,
@@ -1083,12 +1095,9 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     ];
 
     const getModelForProvider = async (providerName: string) => {
-      const modelName = requestedModel
-        || (providerName === 'openai'
-          ? 'gpt-4o-mini'
-          : providerName === 'anthropic'
-            ? 'claude-sonnet-4-20250514'
-            : 'mock-model');
+      const modelName = requestedModel && isModelCompatibleWithProvider(providerName, requestedModel)
+        ? requestedModel
+        : defaultModelForProvider(providerName);
       const config = providers?.[providerName];
       if (!config) throw new Error(`Missing provider configuration for ${providerName}`);
       const modelInstance = await getOrCreateModel(providerName, modelName, config);
@@ -1458,6 +1467,374 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
         model: selectedModel,
         results: executionResults,
         revision_count: revisions.length,
+      },
+    });
+  }, { auth: true, csrf: true });
+
+  router.post('/api/sgap/workflow-runs/:id/phase3/execute', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+
+    const run = await db.getSgapWorkflowRun(params['id']!);
+    if (!run) { json(res, 404, { error: 'Workflow run not found' }); return; }
+
+    const raw = await readBody(req);
+    let body: Record<string, unknown> = {};
+    if (raw.trim()) {
+      try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    }
+
+    const configuredProviders = Object.entries(providers ?? {}).filter(([, cfg]) => Boolean(cfg?.apiKey?.trim()));
+    if (configuredProviders.length === 0) {
+      json(res, 503, { error: 'No model providers configured for SGAP Phase 3 execution' });
+      return;
+    }
+
+    const requestedProvider = String(body['provider'] ?? '').trim();
+    const requestedModel = String(body['model'] ?? '').trim();
+    const fallbackProvider = providers?.['openai'] ? 'openai' : providers?.['anthropic'] ? 'anthropic' : configuredProviders[0]![0];
+    const selectedProvider = requestedProvider && providers?.[requestedProvider] ? requestedProvider : fallbackProvider;
+    const selectedModel = requestedModel
+      || (selectedProvider === 'openai'
+        ? 'gpt-4o-mini'
+        : selectedProvider === 'anthropic'
+          ? 'claude-sonnet-4-20250514'
+          : 'mock-model');
+
+    const providerCandidates = [
+      selectedProvider,
+      ...configuredProviders.map(([name]) => name).filter((name) => name !== selectedProvider),
+    ];
+
+    const getModelForProvider = async (providerName: string) => {
+      const modelName = requestedModel
+        || (providerName === 'openai'
+          ? 'gpt-4o-mini'
+          : providerName === 'anthropic'
+            ? 'claude-sonnet-4-20250514'
+            : 'mock-model');
+      const config = providers?.[providerName];
+      if (!config) throw new Error(`Missing provider configuration for ${providerName}`);
+      const modelInstance = await getOrCreateModel(providerName, modelName, config);
+      return { providerName, modelName, modelInstance };
+    };
+
+    const safeParse = (input: string | null | undefined): Record<string, unknown> => {
+      if (!input) return {};
+      try {
+        const parsed = JSON.parse(input);
+        if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
+      } catch {
+        // ignore parse errors
+      }
+      return {};
+    };
+
+    const runState = safeParse(run.state_json);
+    const phase3Configs = await db.listSgapPhase3Configs(run.brand_id, run.workflow_template_id);
+    const phase3Config = phase3Configs.find((row) => row.enabled === 1) ?? null;
+
+    const agents = await db.listSgapAgents();
+    const byRole = (role: string) => agents.find((agent) => agent.role === role && agent.enabled === 1) ?? null;
+    const byId = (id?: string) => (id ? agents.find((agent) => agent.id === id && agent.enabled === 1) ?? null : null);
+
+    const socialManager = byId(phase3Config?.social_manager_agent_id) ?? byRole('social-manager');
+    const analytics = byId(phase3Config?.analytics_agent_id) ?? byRole('analytics');
+    if (!socialManager || !analytics) {
+      json(res, 400, { error: 'Phase 3 requires social-manager and analytics agents to be configured' });
+      return;
+    }
+
+    const loadRolePromptAndSkill = async (role: string, fallbackPrompt: string) => {
+      const promptMap: Record<string, string> = {
+        'social-manager': 'sgap.social_manager.system',
+        analytics: 'sgap.analytics.system',
+      };
+      const promptKey = promptMap[role];
+      const prompt = promptKey ? await db.getPromptByKey(promptKey) : null;
+
+      const skillMap = await db.getSgapSkillByRole(role);
+      const skill = skillMap ? await db.getSkill(skillMap.skill_id) : null;
+
+      return {
+        promptText: prompt?.template ?? fallbackPrompt,
+        skillText: skill?.instructions ?? '',
+      };
+    };
+
+    const generateStageOutput = async (role: string, fallbackPrompt: string, task: string): Promise<string> => {
+      const loaded = await loadRolePromptAndSkill(role, fallbackPrompt);
+      const systemText = [
+        loaded.promptText,
+        loaded.skillText ? `Skill Guidance:\n${loaded.skillText}` : '',
+        'Workflow Boundary: You must produce output only for your assigned stage in the SGAP phase 3 chain.',
+      ].filter(Boolean).join('\n\n');
+
+      let lastError: unknown = null;
+      for (const providerName of providerCandidates) {
+        try {
+          const { modelName, modelInstance } = await getModelForProvider(providerName);
+          const response = await modelInstance.generate(
+            weaveContext({
+              userId: auth.userId,
+              executionId: randomUUID(),
+              metadata: {
+                sgap_run_id: run.id,
+                stage: role,
+                workflow_stage: 'phase3',
+                model_provider: providerName,
+                model_name: modelName,
+              },
+            }),
+            {
+              messages: [
+                { role: 'system', content: systemText },
+                { role: 'user', content: task },
+              ],
+              temperature: 0.25,
+              maxTokens: 900,
+            },
+          );
+          return String(response.content ?? '').trim();
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error('All configured model providers failed');
+    };
+
+    const queueRows = await db.listSgapTableRows('sg_content_queue');
+    const requestedItemIds = Array.isArray(body['content_item_ids'])
+      ? body['content_item_ids'].map((value) => String(value))
+      : null;
+    const maxItems = Math.max(1, Math.min(10, Number(body['max_items'] ?? 3)));
+
+    const targetItems = queueRows
+      .filter((row) => row['brand_id'] === run.brand_id && Number(row['enabled'] ?? 1) === 1)
+      .filter((row) => requestedItemIds ? requestedItemIds.includes(String(row['id'])) : ['ready', 'scheduled'].includes(String(row['status'] ?? 'draft')))
+      .slice(0, maxItems)
+      .map((row) => ({
+        id: String(row['id'] ?? ''),
+        title: String(row['title'] ?? 'Untitled'),
+        brief: String(row['brief'] ?? ''),
+        content_text: String(row['content_text'] ?? ''),
+        channel_id: String(row['channel_id'] ?? ''),
+        metadata_json: String(row['metadata_json'] ?? ''),
+      }))
+      .filter((row) => row.content_text.trim().length > 0);
+
+    if (targetItems.length === 0) {
+      json(res, 400, { error: 'No eligible ready content items found for phase 3 execution' });
+      return;
+    }
+
+    const channels = await db.listSgapTableRows('sg_channels');
+    const channelPlatforms = channels
+      .filter((row) => String(row['brand_id'] ?? '') === run.brand_id)
+      .map((row) => String(row['platform'] ?? '').toLowerCase())
+      .filter(Boolean);
+
+    const configuredPlatforms = (() => {
+      try {
+        const parsed = JSON.parse(phase3Config?.primary_platforms_json ?? '[]');
+        if (Array.isArray(parsed)) {
+          return parsed.map((value) => String(value).toLowerCase()).filter(Boolean);
+        }
+      } catch {
+        // ignore
+      }
+      return [] as string[];
+    })();
+
+    const platforms = (configuredPlatforms.length > 0 ? configuredPlatforms : channelPlatforms.length > 0 ? channelPlatforms : ['linkedin'])
+      .slice(0, 8);
+
+    const publishMode = String(body['publish_mode'] ?? phase3Config?.publish_mode ?? 'draft');
+    const scheduleStrategy = String(phase3Config?.schedule_strategy ?? 'best_window');
+    const minEngagementTarget = Number(phase3Config?.min_engagement_target ?? 0.03);
+
+    const platformToolMap: Record<string, string> = {
+      x: 'social_x_post',
+      linkedin: 'social_linkedin_post',
+      facebook: 'social_facebook_post',
+      instagram: 'social_instagram_post',
+      tiktok: 'social_tiktok_post',
+      youtube: 'social_youtube_post',
+      medium: 'social_medium_post',
+      devto: 'social_devto_post',
+      hashnode: 'social_hashnode_post',
+      substack: 'social_substack_post',
+      blogger: 'social_blogger_post',
+    };
+
+    const phase3Results: Array<Record<string, unknown>> = [];
+    for (const item of targetItems) {
+      const threadId = randomUUID();
+      await db.createSgapAgentThread({
+        id: threadId,
+        application_scope: 'sgap',
+        workflow_run_id: run.id,
+        stage: 'phase3-distribution-optimization',
+      });
+
+      for (const platform of platforms) {
+        const distributionTask = [
+          `Prepare a platform-optimized distribution variant for ${platform}.`,
+          `Title: ${item.title}`,
+          `Brief: ${item.brief}`,
+          `Core Content:\n${item.content_text}`,
+          `Publish Mode: ${publishMode}`,
+          `Schedule Strategy: ${scheduleStrategy}`,
+          'Return publish-ready text suitable for this platform only.',
+        ].join('\n\n');
+
+        const distributionText = await generateStageOutput('social-manager', socialManager.system_prompt, distributionTask);
+
+        const analyticsTask = [
+          `Create KPI optimization guidance for ${platform}.`,
+          `Minimum engagement target: ${minEngagementTarget}`,
+          'Return strict JSON with keys: optimal_time_iso, kpi_targets, hashtags, notes, projected_engagement.',
+          `Distribution Draft:\n${distributionText}`,
+        ].join('\n\n');
+        const analyticsOutput = await generateStageOutput('analytics', analytics.system_prompt, analyticsTask);
+
+        let analyticsJson: Record<string, unknown> = {};
+        try {
+          const parsed = JSON.parse(analyticsOutput);
+          if (parsed && typeof parsed === 'object') analyticsJson = parsed as Record<string, unknown>;
+        } catch {
+          analyticsJson = { notes: analyticsOutput };
+        }
+
+        const scheduledFor = String(analyticsJson['optimal_time_iso'] ?? new Date(Date.now() + 3600 * 1000).toISOString());
+        const hashtags = Array.isArray(analyticsJson['hashtags']) ? analyticsJson['hashtags'] : [];
+        const projectedEngagement = Number(analyticsJson['projected_engagement'] ?? 0);
+        const toolName = platformToolMap[platform] ?? 'social_post';
+
+        const planId = randomUUID();
+        await db.createSgapDistributionPlan({
+          id: planId,
+          application_scope: 'sgap',
+          workflow_run_id: run.id,
+          content_item_id: item.id,
+          social_manager_agent_id: socialManager.id,
+          analytics_agent_id: analytics.id,
+          platform,
+          publish_mode: publishMode,
+          scheduled_for: scheduledFor,
+          tool_name: toolName,
+          distribution_text: distributionText,
+          hashtags_json: JSON.stringify(hashtags),
+          optimization_notes_json: JSON.stringify({
+            kpi_targets: analyticsJson['kpi_targets'] ?? {},
+            notes: analyticsJson['notes'] ?? '',
+            projected_engagement: projectedEngagement,
+          }),
+          tool_result_json: JSON.stringify({ status: 'planned', publish_mode: publishMode }),
+          status: publishMode === 'publish' ? 'scheduled' : 'planned',
+        });
+
+        await db.createSgapAgentMessage({
+          id: randomUUID(),
+          application_scope: 'sgap',
+          thread_id: threadId,
+          from_agent_id: socialManager.id,
+          to_agent_id: analytics.id,
+          message_type: 'handoff',
+          content_json: JSON.stringify({ content_item_id: item.id, platform, distribution_plan_id: planId }),
+          requires_response: 0,
+          responded: 1,
+          response_message_id: undefined,
+          response_json: undefined,
+          responded_at: undefined,
+        });
+
+        await db.createSgapContentPerformance({
+          id: randomUUID(),
+          application_scope: 'sgap',
+          content_item_id: item.id,
+          brand_id: run.brand_id,
+          platform,
+          published_at: scheduledFor,
+          views: 0,
+          engagement: 0,
+          reach: 0,
+          impressions: 0,
+          clicks: 0,
+          conversions: 0,
+          metadata_json: JSON.stringify({
+            workflow_run_id: run.id,
+            distribution_plan_id: planId,
+            kpi_targets: analyticsJson['kpi_targets'] ?? {},
+            projected_engagement: projectedEngagement,
+          }),
+          synced_at: new Date().toISOString(),
+        });
+
+        phase3Results.push({
+          content_item_id: item.id,
+          platform,
+          distribution_plan_id: planId,
+          tool_name: toolName,
+          publish_mode: publishMode,
+          scheduled_for: scheduledFor,
+          projected_engagement: projectedEngagement,
+        });
+      }
+
+      await db.updateSgapTableRow('sg_content_queue', item.id, {
+        status: publishMode === 'publish' ? 'scheduled' : 'ready',
+        metadata_json: JSON.stringify({
+          ...safeParse(item.metadata_json),
+          phase3: {
+            workflow_run_id: run.id,
+            publish_mode: publishMode,
+            platforms,
+          },
+        }),
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    await db.createSgapAuditLog({
+      id: randomUUID(),
+      application_scope: 'sgap',
+      workflow_run_id: run.id,
+      agent_id: analytics.id,
+      action: 'phase3_distribution_planned',
+      details_json: JSON.stringify({
+        publish_mode: publishMode,
+        platform_count: platforms.length,
+        planned_records: phase3Results.length,
+      }),
+    });
+
+    await db.updateSgapWorkflowRun(run.id, {
+      status: 'running',
+      current_stage: 'performance-review',
+      current_agent_id: analytics.id,
+      state_json: JSON.stringify({
+        ...runState,
+        phase3: {
+          executed_at: new Date().toISOString(),
+          model_provider: selectedProvider,
+          model: selectedModel,
+          publish_mode: publishMode,
+          planned_records: phase3Results.length,
+          results: phase3Results,
+        },
+      }),
+    });
+
+    const updatedRun = await db.getSgapWorkflowRun(run.id);
+    const plans = await db.listSgapDistributionPlans(run.id);
+    json(res, 200, {
+      run: updatedRun,
+      phase3: {
+        provider: selectedProvider,
+        model: selectedModel,
+        publish_mode: publishMode,
+        plans_count: plans.length,
+        results: phase3Results,
       },
     });
   }, { auth: true, csrf: true });

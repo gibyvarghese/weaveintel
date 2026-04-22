@@ -35,6 +35,7 @@ import type {
   SgapAgentRow, SgapWorkflowRunRow, SgapAgentThreadRow, SgapAgentMessageRow,
   SgapApprovalRow, SgapAuditLogRow, SgapSkillRow, SgapSocialMediaToolRow, SgapContentPerformanceRow,
   SgapPhase2ConfigRow, SgapContentRevisionRow,
+  SgapPhase3ConfigRow, SgapDistributionPlanRow,
 } from './db-types.js';
 
 const SGAP_TABLES = new Set([
@@ -61,6 +62,8 @@ const SGAP_TABLES = new Set([
   'sgap_content_performance',
   'sgap_phase2_configs',
   'sgap_content_revisions',
+  'sgap_phase3_configs',
+  'sgap_distribution_plans',
 ]);
 
 function normalizeSgapTableName(input: string): string {
@@ -3011,6 +3014,52 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return revision.id;
   }
 
+  async listSgapPhase3Configs(brandId?: string, workflowTemplateId?: string): Promise<SgapPhase3ConfigRow[]> {
+    if (brandId && workflowTemplateId) {
+      return this.d.prepare('SELECT * FROM sgap_phase3_configs WHERE brand_id = ? AND workflow_template_id = ? ORDER BY created_at DESC').all(brandId, workflowTemplateId) as SgapPhase3ConfigRow[];
+    }
+    if (brandId) {
+      return this.d.prepare('SELECT * FROM sgap_phase3_configs WHERE brand_id = ? ORDER BY created_at DESC').all(brandId) as SgapPhase3ConfigRow[];
+    }
+    if (workflowTemplateId) {
+      return this.d.prepare('SELECT * FROM sgap_phase3_configs WHERE workflow_template_id = ? ORDER BY created_at DESC').all(workflowTemplateId) as SgapPhase3ConfigRow[];
+    }
+    return this.d.prepare('SELECT * FROM sgap_phase3_configs ORDER BY created_at DESC').all() as SgapPhase3ConfigRow[];
+  }
+
+  async getSgapPhase3Config(id: string): Promise<SgapPhase3ConfigRow | null> {
+    return (this.d.prepare('SELECT * FROM sgap_phase3_configs WHERE id = ?').get(id) as SgapPhase3ConfigRow | undefined) ?? null;
+  }
+
+  async createSgapPhase3Config(config: Omit<SgapPhase3ConfigRow, 'created_at' | 'updated_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_phase3_configs', config as unknown as Record<string, unknown>);
+    return config.id;
+  }
+
+  async updateSgapPhase3Config(id: string, fields: Partial<SgapPhase3ConfigRow>): Promise<void> {
+    await this.updateSgapTableRow('sgap_phase3_configs', id, fields as unknown as Record<string, unknown>);
+  }
+
+  async listSgapDistributionPlans(workflowRunId: string, contentItemId?: string): Promise<SgapDistributionPlanRow[]> {
+    if (contentItemId) {
+      return this.d.prepare(
+        'SELECT * FROM sgap_distribution_plans WHERE workflow_run_id = ? AND content_item_id = ? ORDER BY created_at ASC',
+      ).all(workflowRunId, contentItemId) as SgapDistributionPlanRow[];
+    }
+    return this.d.prepare(
+      'SELECT * FROM sgap_distribution_plans WHERE workflow_run_id = ? ORDER BY created_at ASC',
+    ).all(workflowRunId) as SgapDistributionPlanRow[];
+  }
+
+  async createSgapDistributionPlan(plan: Omit<SgapDistributionPlanRow, 'created_at' | 'updated_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_distribution_plans', plan as unknown as Record<string, unknown>);
+    return plan.id;
+  }
+
+  async updateSgapDistributionPlan(id: string, fields: Partial<SgapDistributionPlanRow>): Promise<void> {
+    await this.updateSgapTableRow('sgap_distribution_plans', id, fields as unknown as Record<string, unknown>);
+  }
+
   // ─── Website Credentials (Browser Auth Vault) ──────────────
 
   async createWebsiteCredential(c: Omit<WebsiteCredentialRow, 'created_at' | 'updated_at'>): Promise<void> {
@@ -5662,6 +5711,23 @@ export class SQLiteAdapter implements DatabaseAdapter {
         require_research_citations: 1,
         auto_escalate_to_compliance: 1,
         output_format: 'markdown',
+        enabled: 1,
+      });
+    }
+
+    if (cnt('sgap_phase3_configs') === 0) {
+      await this.createSgapTableRow('sgap_phase3_configs', {
+        id: 'fa17de85-f4fa-4be3-a570-33677e5f40f0',
+        application_scope: 'sgap',
+        brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+        workflow_template_id: '675d4a3d-7c6f-4b4b-95c4-2eeb3d0b43f1',
+        social_manager_agent_id: 'fa905f6a-bcbc-4d6b-b3cf-77638f1f4745',
+        analytics_agent_id: 'fc446af5-6e85-4605-86cb-8586b5c9ea93',
+        primary_platforms_json: JSON.stringify(['linkedin', 'instagram', 'medium', 'facebook', 'tiktok', 'blogger']),
+        publish_mode: 'draft',
+        schedule_strategy: 'best_window',
+        min_engagement_target: 0.035,
+        require_analytics_snapshot: 1,
         enabled: 1,
       });
     }

@@ -22,6 +22,7 @@ describe('SQLite SGAP CRUD and seed data', () => {
     const worker = await db.getWorkerAgent('4af84061-f85c-4f6f-9979-2a5a6eb7dbd7');
     const workflow = await db.getWorkflowDef('4c1f9b5f-8f89-4f9f-bb8f-65248a4f131d');
     const phase2Configs = await db.listSgapPhase2Configs('a80c1586-f133-4626-b2af-2a945b854f22', '675d4a3d-7c6f-4b4b-95c4-2eeb3d0b43f1');
+    const phase3Configs = await db.listSgapPhase3Configs('a80c1586-f133-4626-b2af-2a945b854f22', '675d4a3d-7c6f-4b4b-95c4-2eeb3d0b43f1');
 
     expect(brands.some((b) => b['slug'] === 'tech-lunch')).toBe(true);
     expect(channels.length).toBeGreaterThanOrEqual(6);
@@ -40,6 +41,8 @@ describe('SQLite SGAP CRUD and seed data', () => {
     expect(workflow?.name).toBe('SGAP Tech Lunch Weekly Loop');
     expect(phase2Configs.length).toBeGreaterThanOrEqual(1);
     expect(phase2Configs[0]?.writer_agent_id).toBe('c092da65-e39b-4ef8-9db5-c2f76666d5ce');
+    expect(phase3Configs.length).toBeGreaterThanOrEqual(1);
+    expect(phase3Configs[0]?.social_manager_agent_id).toBe('fa905f6a-bcbc-4d6b-b3cf-77638f1f4745');
   });
 
   it('supports generic CRUD for SGAP tables', async () => {
@@ -168,5 +171,113 @@ describe('SQLite SGAP CRUD and seed data', () => {
     const revisions = await db.listSgapContentRevisions(runId);
     expect(revisions.length).toBe(1);
     expect(revisions[0]?.id).toBe(revisionId);
+  });
+
+  it('supports SGAP Phase 3 config and distribution plan APIs', async () => {
+    const db = new SQLiteAdapter(makeTempDbPath());
+    await db.initialize();
+    await db.seedDefaultData();
+
+    const configId = randomUUID();
+    const brandId = `test-brand-${randomUUID().slice(0, 8)}`;
+    const workflowTemplateId = `test-workflow-${randomUUID().slice(0, 8)}`;
+
+    await db.createSgapTableRow('sg_brands', {
+      id: brandId,
+      name: 'Phase 3 Test Brand',
+      slug: `phase3-${randomUUID().slice(0, 6)}`,
+      description: 'Phase 3 config test brand',
+      enabled: 1,
+    });
+
+    await db.createSgapTableRow('sg_workflow_templates', {
+      id: workflowTemplateId,
+      brand_id: brandId,
+      name: 'Phase 3 Test Workflow',
+      description: 'Workflow for SGAP phase 3 tests',
+      step_graph_json: JSON.stringify({ steps: [] }),
+      trigger_type: 'manual',
+      enabled: 1,
+    });
+
+    await db.createSgapPhase3Config({
+      id: configId,
+      application_scope: 'sgap',
+      brand_id: brandId,
+      workflow_template_id: workflowTemplateId,
+      social_manager_agent_id: 'fa905f6a-bcbc-4d6b-b3cf-77638f1f4745',
+      analytics_agent_id: 'fc446af5-6e85-4605-86cb-8586b5c9ea93',
+      primary_platforms_json: JSON.stringify(['linkedin', 'medium']),
+      publish_mode: 'draft',
+      schedule_strategy: 'best_window',
+      min_engagement_target: 0.04,
+      require_analytics_snapshot: 1,
+      enabled: 1,
+    });
+
+    const config = await db.getSgapPhase3Config(configId);
+    expect(config).not.toBeNull();
+    expect(config?.publish_mode).toBe('draft');
+
+    await db.updateSgapPhase3Config(configId, { publish_mode: 'publish', min_engagement_target: 0.05 });
+    const updated = await db.getSgapPhase3Config(configId);
+    expect(updated?.publish_mode).toBe('publish');
+    expect(updated?.min_engagement_target).toBe(0.05);
+
+    const runId = randomUUID();
+    await db.createSgapWorkflowRun({
+      id: runId,
+      application_scope: 'sgap',
+      brand_id: brandId,
+      workflow_template_id: workflowTemplateId,
+      status: 'running',
+      current_stage: 'optimization-distribution',
+      current_agent_id: 'fa905f6a-bcbc-4d6b-b3cf-77638f1f4745',
+      input_json: JSON.stringify({ test: true }),
+      state_json: JSON.stringify({}),
+      error_message: undefined,
+      completed_at: undefined,
+    });
+
+    const contentId = randomUUID();
+    await db.createSgapTableRow('sg_content_queue', {
+      id: contentId,
+      brand_id: brandId,
+      campaign_id: null,
+      channel_id: null,
+      title: 'Phase 3 content',
+      brief: 'Distribution test content',
+      content_text: 'Ready content body',
+      format: 'text',
+      status: 'ready',
+      enabled: 1,
+    });
+
+    const planId = randomUUID();
+    await db.createSgapDistributionPlan({
+      id: planId,
+      application_scope: 'sgap',
+      workflow_run_id: runId,
+      content_item_id: contentId,
+      social_manager_agent_id: 'fa905f6a-bcbc-4d6b-b3cf-77638f1f4745',
+      analytics_agent_id: 'fc446af5-6e85-4605-86cb-8586b5c9ea93',
+      platform: 'linkedin',
+      publish_mode: 'draft',
+      scheduled_for: new Date().toISOString(),
+      tool_name: 'social_linkedin_post',
+      distribution_text: 'LinkedIn distribution variant',
+      hashtags_json: JSON.stringify(['#ai', '#growth']),
+      optimization_notes_json: JSON.stringify({ kpi: 'engagement_rate' }),
+      tool_result_json: JSON.stringify({ status: 'planned' }),
+      status: 'planned',
+    });
+
+    const plans = await db.listSgapDistributionPlans(runId);
+    expect(plans.length).toBe(1);
+    expect(plans[0]?.id).toBe(planId);
+
+    await db.updateSgapDistributionPlan(planId, { status: 'scheduled' });
+    const updatedPlans = await db.listSgapDistributionPlans(runId, contentId);
+    expect(updatedPlans[0]?.status).toBe('scheduled');
   });
 });
