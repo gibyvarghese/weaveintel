@@ -36,6 +36,7 @@ import type {
   SgapApprovalRow, SgapAuditLogRow, SgapSkillRow, SgapSocialMediaToolRow, SgapContentPerformanceRow,
   SgapPhase2ConfigRow, SgapContentRevisionRow,
   SgapPhase3ConfigRow, SgapDistributionPlanRow,
+  SgapPhase4ConfigRow, SgapPerformanceInsightRow,
 } from './db-types.js';
 
 const SGAP_TABLES = new Set([
@@ -64,6 +65,8 @@ const SGAP_TABLES = new Set([
   'sgap_content_revisions',
   'sgap_phase3_configs',
   'sgap_distribution_plans',
+  'sgap_phase4_configs',
+  'sgap_performance_insights',
 ]);
 
 function normalizeSgapTableName(input: string): string {
@@ -3060,6 +3063,50 @@ export class SQLiteAdapter implements DatabaseAdapter {
     await this.updateSgapTableRow('sgap_distribution_plans', id, fields as unknown as Record<string, unknown>);
   }
 
+  // ─── Phase 4 — Performance Review ──────────────────────────
+
+  async listSgapPhase4Configs(brandId?: string, workflowTemplateId?: string): Promise<SgapPhase4ConfigRow[]> {
+    if (brandId && workflowTemplateId) {
+      return this.d.prepare('SELECT * FROM sgap_phase4_configs WHERE brand_id = ? AND workflow_template_id = ? ORDER BY created_at DESC').all(brandId, workflowTemplateId) as SgapPhase4ConfigRow[];
+    }
+    if (brandId) {
+      return this.d.prepare('SELECT * FROM sgap_phase4_configs WHERE brand_id = ? ORDER BY created_at DESC').all(brandId) as SgapPhase4ConfigRow[];
+    }
+    if (workflowTemplateId) {
+      return this.d.prepare('SELECT * FROM sgap_phase4_configs WHERE workflow_template_id = ? ORDER BY created_at DESC').all(workflowTemplateId) as SgapPhase4ConfigRow[];
+    }
+    return this.d.prepare('SELECT * FROM sgap_phase4_configs ORDER BY created_at DESC').all() as SgapPhase4ConfigRow[];
+  }
+
+  async getSgapPhase4Config(id: string): Promise<SgapPhase4ConfigRow | null> {
+    return (this.d.prepare('SELECT * FROM sgap_phase4_configs WHERE id = ?').get(id) as SgapPhase4ConfigRow | undefined) ?? null;
+  }
+
+  async createSgapPhase4Config(config: Omit<SgapPhase4ConfigRow, 'created_at' | 'updated_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_phase4_configs', config as unknown as Record<string, unknown>);
+    return config.id;
+  }
+
+  async updateSgapPhase4Config(id: string, fields: Partial<SgapPhase4ConfigRow>): Promise<void> {
+    await this.updateSgapTableRow('sgap_phase4_configs', id, fields as unknown as Record<string, unknown>);
+  }
+
+  async listSgapPerformanceInsights(workflowRunId: string, platform?: string): Promise<SgapPerformanceInsightRow[]> {
+    if (platform) {
+      return this.d.prepare('SELECT * FROM sgap_performance_insights WHERE workflow_run_id = ? AND platform = ? ORDER BY created_at DESC').all(workflowRunId, platform) as SgapPerformanceInsightRow[];
+    }
+    return this.d.prepare('SELECT * FROM sgap_performance_insights WHERE workflow_run_id = ? ORDER BY created_at DESC').all(workflowRunId) as SgapPerformanceInsightRow[];
+  }
+
+  async listSgapBrandPerformanceInsights(brandId: string, limit = 50): Promise<SgapPerformanceInsightRow[]> {
+    return this.d.prepare('SELECT * FROM sgap_performance_insights WHERE brand_id = ? ORDER BY created_at DESC LIMIT ?').all(brandId, limit) as SgapPerformanceInsightRow[];
+  }
+
+  async createSgapPerformanceInsight(insight: Omit<SgapPerformanceInsightRow, 'created_at'>): Promise<string> {
+    await this.createSgapTableRow('sgap_performance_insights', insight as unknown as Record<string, unknown>);
+    return insight.id;
+  }
+
   // ─── Website Credentials (Browser Auth Vault) ──────────────
 
   async createWebsiteCredential(c: Omit<WebsiteCredentialRow, 'created_at' | 'updated_at'>): Promise<void> {
@@ -5728,6 +5775,26 @@ export class SQLiteAdapter implements DatabaseAdapter {
         schedule_strategy: 'best_window',
         min_engagement_target: 0.035,
         require_analytics_snapshot: 1,
+        enabled: 1,
+      });
+    }
+
+    if (cnt('sgap_phase4_configs') === 0) {
+      await this.createSgapTableRow('sgap_phase4_configs', {
+        id: 'e94bdc23-1c4e-4bcd-8a1f-2f7d3e45c102',
+        application_scope: 'sgap',
+        brand_id: 'a80c1586-f133-4626-b2af-2a945b854f22',
+        workflow_template_id: '675d4a3d-7c6f-4b4b-95c4-2eeb3d0b43f1',
+        analytics_agent_id: 'fc446af5-6e85-4605-86cb-8586b5c9ea93',
+        review_window_days: 7,
+        min_data_points: 3,
+        kpi_thresholds_json: JSON.stringify({
+          min_engagement_rate: 0.03,
+          min_reach: 500,
+          min_impressions: 1000,
+          target_click_through: 0.02,
+        }),
+        auto_promote: 0,
         enabled: 1,
       });
     }

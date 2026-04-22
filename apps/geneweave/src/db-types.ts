@@ -1967,6 +1967,16 @@ export interface DatabaseAdapter {
   listSgapDistributionPlans(workflowRunId: string, contentItemId?: string): Promise<SgapDistributionPlanRow[]>;
   createSgapDistributionPlan(plan: Omit<SgapDistributionPlanRow, 'created_at' | 'updated_at'>): Promise<string>;
   updateSgapDistributionPlan(id: string, fields: Partial<SgapDistributionPlanRow>): Promise<void>;
+
+  // Phase 4 configs and performance insights
+  listSgapPhase4Configs(brandId?: string, workflowTemplateId?: string): Promise<SgapPhase4ConfigRow[]>;
+  getSgapPhase4Config(id: string): Promise<SgapPhase4ConfigRow | null>;
+  createSgapPhase4Config(config: Omit<SgapPhase4ConfigRow, 'created_at' | 'updated_at'>): Promise<string>;
+  updateSgapPhase4Config(id: string, fields: Partial<SgapPhase4ConfigRow>): Promise<void>;
+
+  listSgapPerformanceInsights(workflowRunId: string, platform?: string): Promise<SgapPerformanceInsightRow[]>;
+  listSgapBrandPerformanceInsights(brandId: string, limit?: number): Promise<SgapPerformanceInsightRow[]>;
+  createSgapPerformanceInsight(insight: Omit<SgapPerformanceInsightRow, 'created_at'>): Promise<string>;
 }
 
 
@@ -2178,5 +2188,36 @@ export interface SgapDistributionPlanRow {
   status: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface SgapPhase4ConfigRow {
+  id: string;
+  application_scope: string;
+  brand_id: string;
+  workflow_template_id: string;
+  analytics_agent_id: string;
+  review_window_days: number;
+  min_data_points: number;
+  kpi_thresholds_json: string;
+  auto_promote: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SgapPerformanceInsightRow {
+  id: string;
+  application_scope: string;
+  workflow_run_id: string;
+  brand_id: string;
+  analytics_agent_id: string;
+  platform: string;
+  content_item_id?: string;
+  insight_type: string;
+  score: number;
+  recommendation: string;
+  raw_metrics_json: string;
+  action_items_json: string;
+  created_at: string;
 }
 

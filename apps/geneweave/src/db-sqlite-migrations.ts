@@ -1141,4 +1141,44 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
 
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_phase3_configs_brand ON sgap_phase3_configs(brand_id, enabled)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_distribution_plans_run ON sgap_distribution_plans(workflow_run_id, content_item_id, platform)`);
+
+  // Backfill missing created_at on eval_results (existing DBs lack this column).
+  safeExec(db, "ALTER TABLE eval_results ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'))");
+
+  // Phase 4 — Performance Review
+  safeExec(db, `CREATE TABLE IF NOT EXISTS sgap_phase4_configs (
+    id TEXT PRIMARY KEY,
+    application_scope TEXT NOT NULL DEFAULT 'sgap',
+    brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+    workflow_template_id TEXT NOT NULL REFERENCES sg_workflow_templates(id) ON DELETE CASCADE,
+    analytics_agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+    review_window_days INTEGER NOT NULL DEFAULT 7,
+    min_data_points INTEGER NOT NULL DEFAULT 3,
+    kpi_thresholds_json TEXT NOT NULL DEFAULT '{}',
+    auto_promote INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(brand_id, workflow_template_id)
+  )`);
+
+  safeExec(db, `CREATE TABLE IF NOT EXISTS sgap_performance_insights (
+    id TEXT PRIMARY KEY,
+    application_scope TEXT NOT NULL DEFAULT 'sgap',
+    workflow_run_id TEXT NOT NULL REFERENCES sgap_workflow_runs(id) ON DELETE CASCADE,
+    brand_id TEXT NOT NULL REFERENCES sg_brands(id) ON DELETE CASCADE,
+    analytics_agent_id TEXT NOT NULL REFERENCES sgap_agents(id),
+    platform TEXT NOT NULL,
+    content_item_id TEXT,
+    insight_type TEXT NOT NULL DEFAULT 'summary',
+    score REAL NOT NULL DEFAULT 0,
+    recommendation TEXT NOT NULL DEFAULT '',
+    raw_metrics_json TEXT NOT NULL DEFAULT '{}',
+    action_items_json TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_phase4_configs_brand ON sgap_phase4_configs(brand_id, enabled)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_performance_insights_run ON sgap_performance_insights(workflow_run_id, platform)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_sgap_performance_insights_brand ON sgap_performance_insights(brand_id, created_at DESC)`);
 }

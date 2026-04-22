@@ -1493,12 +1493,24 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     const requestedModel = String(body['model'] ?? '').trim();
     const fallbackProvider = providers?.['openai'] ? 'openai' : providers?.['anthropic'] ? 'anthropic' : configuredProviders[0]![0];
     const selectedProvider = requestedProvider && providers?.[requestedProvider] ? requestedProvider : fallbackProvider;
-    const selectedModel = requestedModel
-      || (selectedProvider === 'openai'
-        ? 'gpt-4o-mini'
-        : selectedProvider === 'anthropic'
-          ? 'claude-sonnet-4-20250514'
-          : 'mock-model');
+
+    const isModelCompatibleWithProvider = (providerName: string, modelName: string): boolean => {
+      const normalized = modelName.toLowerCase();
+      if (!normalized) return false;
+      if (providerName === 'openai') return !normalized.includes('claude');
+      if (providerName === 'anthropic') return normalized.includes('claude');
+      return true;
+    };
+
+    const defaultModelForProvider = (providerName: string): string => {
+      if (providerName === 'openai') return 'gpt-4o-mini';
+      if (providerName === 'anthropic') return 'claude-sonnet-4-20250514';
+      return 'mock-model';
+    };
+
+    const selectedModel = requestedModel && isModelCompatibleWithProvider(selectedProvider, requestedModel)
+      ? requestedModel
+      : defaultModelForProvider(selectedProvider);
 
     const providerCandidates = [
       selectedProvider,
@@ -1506,12 +1518,9 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     ];
 
     const getModelForProvider = async (providerName: string) => {
-      const modelName = requestedModel
-        || (providerName === 'openai'
-          ? 'gpt-4o-mini'
-          : providerName === 'anthropic'
-            ? 'claude-sonnet-4-20250514'
-            : 'mock-model');
+      const modelName = requestedModel && isModelCompatibleWithProvider(providerName, requestedModel)
+        ? requestedModel
+        : defaultModelForProvider(providerName);
       const config = providers?.[providerName];
       if (!config) throw new Error(`Missing provider configuration for ${providerName}`);
       const modelInstance = await getOrCreateModel(providerName, modelName, config);
@@ -1837,6 +1846,368 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
         results: phase3Results,
       },
     });
+  }, { auth: true, csrf: true });
+
+  // ── SGAP Production Listing/Detail APIs ───────────────────
+
+  router.get('/api/sgap/workflow-runs', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const brandId = url.searchParams.get('brand_id') ?? undefined;
+    const status = url.searchParams.get('status') ?? undefined;
+    const limit = Math.min(Number(url.searchParams.get('limit') ?? '50'), 200);
+    const offset = Number(url.searchParams.get('offset') ?? '0');
+    const allRuns = await db.listSgapTableRows('sgap_workflow_runs') as Array<Record<string, unknown>>;
+    let filtered = allRuns;
+    if (brandId) filtered = filtered.filter((r) => r['brand_id'] === brandId);
+    if (status) filtered = filtered.filter((r) => r['status'] === status);
+    const total = filtered.length;
+    const runs = filtered.slice(offset, offset + limit);
+    json(res, 200, { runs, total, limit, offset });
+  }, { auth: true });
+
+  router.get('/api/sgap/brands', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const brands = await db.listSgapTableRows('sg_brands');
+    json(res, 200, { brands });
+  }, { auth: true });
+
+  router.get('/api/sgap/brands/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const brand = await db.getSgapTableRow('sg_brands', params['id']!);
+    if (!brand) { json(res, 404, { error: 'Brand not found' }); return; }
+    const allChannels = await db.listSgapTableRows('sg_channels') as Array<Record<string, unknown>>;
+    const channels = allChannels.filter((c) => c['brand_id'] === params['id']);
+    const allRuns = await db.listSgapTableRows('sgap_workflow_runs') as Array<Record<string, unknown>>;
+    const recentRuns = allRuns.filter((r) => r['brand_id'] === params['id']).slice(0, 10);
+    json(res, 200, { brand, channels, recent_runs: recentRuns });
+  }, { auth: true });
+
+  router.get('/api/sgap/brands/:id/content', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const brand = await db.getSgapTableRow('sg_brands', params['id']!);
+    if (!brand) { json(res, 404, { error: 'Brand not found' }); return; }
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const status = url.searchParams.get('status') ?? undefined;
+    const limit = Math.min(Number(url.searchParams.get('limit') ?? '50'), 200);
+    const offset = Number(url.searchParams.get('offset') ?? '0');
+    const allContent = await db.listSgapTableRows('sg_content_queue') as Array<Record<string, unknown>>;
+    let filtered = allContent.filter((c) => c['brand_id'] === params['id']);
+    if (status) filtered = filtered.filter((c) => c['status'] === status);
+    const total = filtered.length;
+    const items = filtered.slice(offset, offset + limit);
+    json(res, 200, { items, total, limit, offset });
+  }, { auth: true });
+
+  router.get('/api/sgap/brands/:id/channels', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const brand = await db.getSgapTableRow('sg_brands', params['id']!);
+    if (!brand) { json(res, 404, { error: 'Brand not found' }); return; }
+    const allChannels = await db.listSgapTableRows('sg_channels') as Array<Record<string, unknown>>;
+    const channels = allChannels.filter((c) => c['brand_id'] === params['id']);
+    json(res, 200, { channels });
+  }, { auth: true });
+
+  router.get('/api/sgap/brands/:id/performance', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const brand = await db.getSgapTableRow('sg_brands', params['id']!);
+    if (!brand) { json(res, 404, { error: 'Brand not found' }); return; }
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const limit = Math.min(Number(url.searchParams.get('limit') ?? '20'), 100);
+    const insights = await db.listSgapBrandPerformanceInsights(params['id']!, limit);
+    json(res, 200, { brand_id: params['id'], insights });
+  }, { auth: true });
+
+  router.get('/api/sgap/workflow-runs/:id/revisions', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const run = await db.getSgapWorkflowRun(params['id']!);
+    if (!run) { json(res, 404, { error: 'Workflow run not found' }); return; }
+    const allRevisions = await db.listSgapTableRows('sgap_content_revisions') as Array<Record<string, unknown>>;
+    const revisions = allRevisions.filter((r) => r['workflow_run_id'] === params['id']);
+    json(res, 200, { revisions });
+  }, { auth: true });
+
+  router.get('/api/sgap/workflow-runs/:id/distribution-plans', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const run = await db.getSgapWorkflowRun(params['id']!);
+    if (!run) { json(res, 404, { error: 'Workflow run not found' }); return; }
+    const plans = await db.listSgapDistributionPlans(params['id']!);
+    json(res, 200, { plans });
+  }, { auth: true });
+
+  router.get('/api/sgap/workflow-runs/:id/messages', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const run = await db.getSgapWorkflowRun(params['id']!);
+    if (!run) { json(res, 404, { error: 'Workflow run not found' }); return; }
+    const allThreads = await db.listSgapTableRows('sgap_agent_threads') as Array<Record<string, unknown>>;
+    const threadIds = allThreads.filter((t) => t['workflow_run_id'] === params['id']).map((t) => t['id'] as string);
+    const allMessages = await db.listSgapTableRows('sgap_agent_messages') as Array<Record<string, unknown>>;
+    const messages = allMessages.filter((m) => threadIds.includes(m['thread_id'] as string))
+      .sort((a, b) => String(a['created_at'] ?? '').localeCompare(String(b['created_at'] ?? '')));
+    json(res, 200, { messages });
+  }, { auth: true });
+
+  router.post('/api/sgap/approvals/:id/approve', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const approval = await db.getSgapTableRow('sgap_approvals', params['id']!);
+    if (!approval) { json(res, 404, { error: 'Approval not found' }); return; }
+    const row = approval as Record<string, unknown>;
+    if (row['status'] !== 'pending') {
+      json(res, 409, { error: 'Approval already resolved' }); return;
+    }
+    const raw = await readBody(req);
+    let body: { feedback?: string } = {};
+    if (raw.trim()) {
+      try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    }
+    await db.updateSgapTableRow('sgap_approvals', params['id']!, {
+      status: 'approved',
+      resolved_at: new Date().toISOString(),
+      resolved_by: auth.userId,
+      feedback: body.feedback ?? '',
+    });
+    const updated = await db.getSgapTableRow('sgap_approvals', params['id']!);
+    json(res, 200, { approval: updated });
+  }, { auth: true, csrf: true });
+
+  router.post('/api/sgap/approvals/:id/reject', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const approval = await db.getSgapTableRow('sgap_approvals', params['id']!);
+    if (!approval) { json(res, 404, { error: 'Approval not found' }); return; }
+    const row = approval as Record<string, unknown>;
+    if (row['status'] !== 'pending') {
+      json(res, 409, { error: 'Approval already resolved' }); return;
+    }
+    const raw = await readBody(req);
+    let body: { feedback?: string } = {};
+    if (raw.trim()) {
+      try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    }
+    await db.updateSgapTableRow('sgap_approvals', params['id']!, {
+      status: 'rejected',
+      resolved_at: new Date().toISOString(),
+      resolved_by: auth.userId,
+      feedback: body.feedback ?? '',
+    });
+    const updated = await db.getSgapTableRow('sgap_approvals', params['id']!);
+    json(res, 200, { approval: updated });
+  }, { auth: true, csrf: true });
+
+  // ── SGAP Phase 4: Performance Review ─────────────────────
+
+  router.post('/api/sgap/workflow-runs/:id/phase4/execute', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+
+    const run = await db.getSgapWorkflowRun(params['id']!);
+    if (!run) { json(res, 404, { error: 'Workflow run not found' }); return; }
+
+    const raw = await readBody(req);
+    let body: Record<string, unknown> = {};
+    if (raw.trim()) {
+      try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    }
+
+    const configuredProviders = Object.entries(providers ?? {}).filter(([, cfg]) => Boolean(cfg?.apiKey?.trim()));
+    if (configuredProviders.length === 0) {
+      json(res, 503, { error: 'No model providers configured for SGAP Phase 4 execution' });
+      return;
+    }
+
+    const requestedProvider = String(body['provider'] ?? '').trim();
+    const requestedModel = String(body['model'] ?? '').trim();
+    const fallbackProvider = providers?.['openai'] ? 'openai' : providers?.['anthropic'] ? 'anthropic' : configuredProviders[0]![0];
+    const selectedProvider = requestedProvider && providers?.[requestedProvider] ? requestedProvider : fallbackProvider;
+
+    const isModelCompatibleWithProvider = (providerName: string, modelName: string): boolean => {
+      const normalized = modelName.toLowerCase();
+      if (!normalized) return false;
+      if (providerName === 'openai') return !normalized.includes('claude');
+      if (providerName === 'anthropic') return normalized.includes('claude');
+      return true;
+    };
+
+    const defaultModelForProvider = (providerName: string): string => {
+      if (providerName === 'openai') return 'gpt-4o-mini';
+      if (providerName === 'anthropic') return 'claude-sonnet-4-20250514';
+      return 'mock-model';
+    };
+
+    const selectedModel = requestedModel && isModelCompatibleWithProvider(selectedProvider, requestedModel)
+      ? requestedModel
+      : defaultModelForProvider(selectedProvider);
+
+    const providerCandidates = [
+      selectedProvider,
+      ...configuredProviders.map(([name]) => name).filter((name) => name !== selectedProvider),
+    ];
+
+    const getModelForProvider = async (providerName: string) => {
+      const modelName = requestedModel && isModelCompatibleWithProvider(providerName, requestedModel)
+        ? requestedModel
+        : defaultModelForProvider(providerName);
+      const config = providers?.[providerName];
+      if (!config) throw new Error(`Missing provider configuration for ${providerName}`);
+      const modelInstance = await getOrCreateModel(providerName, modelName, config);
+      return { providerName, modelName, modelInstance };
+    };
+
+    const safeParse = (input: string | null | undefined): Record<string, unknown> => {
+      if (!input) return {};
+      try { return JSON.parse(input); } catch { return {}; }
+    };
+
+    // Load context: distribution plans and performance data for this run
+    const plans = await db.listSgapDistributionPlans(params['id']!);
+    const allPerf = await db.listSgapTableRows('sgap_content_performance') as Array<Record<string, unknown>>;
+    const runPerf = allPerf.filter((p) => p['workflow_run_id'] === params['id']);
+    const reviewWindowDays = Number(body['review_window_days'] ?? 7);
+
+    // Load analytics agent from phase4 config or fall back to finding any analytics agent
+    const phase4Configs = await db.listSgapPhase4Configs(run.brand_id as string);
+    const phase4Config = phase4Configs[0];
+    const kpiThresholds = phase4Config ? safeParse(phase4Config.kpi_thresholds_json) : {};
+
+    const platforms = [...new Set(plans.map((p) => (p as unknown as Record<string, unknown>)['platform'] as string).filter(Boolean))];
+    const insights: Array<Record<string, unknown>> = [];
+
+    let lastError: Error | undefined;
+    for (const providerName of providerCandidates) {
+      try {
+        const { providerName: usedProvider, modelName: usedModel, modelInstance } = await getModelForProvider(providerName);
+
+        // Generate one consolidated performance review via the analytics agent
+        const perfSummary = runPerf.length > 0
+          ? JSON.stringify(runPerf.slice(0, 10), null, 2)
+          : 'No performance data yet for this run. Use distribution plan data to forecast improvement areas.';
+
+        const plansSummary = plans.length > 0
+          ? JSON.stringify((plans as unknown as Array<Record<string, unknown>>).slice(0, 10).map((p) => ({
+              platform: p['platform'],
+              status: p['status'],
+              publish_mode: p['publish_mode'],
+              distribution_text: String(p['distribution_text'] ?? '').slice(0, 200),
+            })), null, 2)
+          : 'No distribution plans found.';
+
+        const systemPrompt = `You are an expert analytics agent for social media content performance review.
+Your job is to analyze published content performance metrics and provide actionable improvement recommendations.
+Focus on engagement rates, reach, and content quality improvements.
+KPI thresholds: ${JSON.stringify(kpiThresholds)}
+Review window: ${reviewWindowDays} days`;
+
+        const userPrompt = `Analyze the following SGAP workflow run performance for brand ${run.brand_id}.
+
+Distribution Plans:
+${plansSummary}
+
+Performance Data:
+${perfSummary}
+
+Platforms covered: ${platforms.length > 0 ? platforms.join(', ') : 'multiple'}
+
+Provide a structured performance review with:
+1. Overall engagement score (0-1)
+2. Per-platform insights (if multiple platforms)
+3. Top 3 actionable improvement recommendations
+4. Content quality assessment
+5. Next cycle improvements
+
+Respond as JSON: { "overall_score": number, "platform_insights": [{"platform": string, "score": number, "notes": string}], "recommendations": string[], "action_items": string[], "summary": string }`;
+
+        const response = await modelInstance.generate(
+          weaveContext({
+            userId: auth.userId,
+            executionId: randomUUID(),
+            metadata: {
+              sgap_run_id: params['id'],
+              stage: 'analytics',
+              workflow_stage: 'phase4',
+              model_provider: providerName,
+              model_name: usedModel,
+            },
+          }),
+          {
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt },
+            ],
+          },
+        );
+
+        let parsed: Record<string, unknown> = {};
+        const responseText = String(response.content ?? '').trim();
+        try {
+          const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+          if (jsonMatch) parsed = JSON.parse(jsonMatch[0]);
+        } catch { /* use empty */ }
+
+        const overallScore = typeof parsed['overall_score'] === 'number' ? parsed['overall_score'] : 0.5;
+        const summary = String(parsed['summary'] ?? responseText.slice(0, 500));
+        const recommendations = Array.isArray(parsed['recommendations']) ? parsed['recommendations'] : [summary];
+        const actionItems = Array.isArray(parsed['action_items']) ? parsed['action_items'] : [];
+        const platformInsights = Array.isArray(parsed['platform_insights']) ? parsed['platform_insights'] : [];
+
+        // Create overall summary insight
+        const summaryInsightId = await db.createSgapPerformanceInsight({
+          id: randomUUID(),
+          application_scope: 'sgap',
+          workflow_run_id: params['id']!,
+          brand_id: run.brand_id as string,
+          analytics_agent_id: phase4Config?.analytics_agent_id ?? '',
+          platform: 'all',
+          insight_type: 'summary',
+          score: overallScore,
+          recommendation: recommendations.join('\n'),
+          raw_metrics_json: JSON.stringify({ run_id: params['id'], perf_count: runPerf.length }),
+          action_items_json: JSON.stringify(actionItems),
+        });
+
+        insights.push({ id: summaryInsightId, platform: 'all', insight_type: 'summary', score: overallScore });
+
+        // Create per-platform insights
+        for (const pi of platformInsights as Array<Record<string, unknown>>) {
+          const insightId = await db.createSgapPerformanceInsight({
+            id: randomUUID(),
+            application_scope: 'sgap',
+            workflow_run_id: params['id']!,
+            brand_id: run.brand_id as string,
+            analytics_agent_id: phase4Config?.analytics_agent_id ?? '',
+            platform: String(pi['platform'] ?? 'unknown'),
+            insight_type: 'platform_specific',
+            score: typeof pi['score'] === 'number' ? pi['score'] : overallScore,
+            recommendation: String(pi['notes'] ?? ''),
+            raw_metrics_json: JSON.stringify(pi),
+            action_items_json: JSON.stringify([]),
+          });
+          insights.push({ id: insightId, platform: pi['platform'], insight_type: 'platform_specific', score: pi['score'] });
+        }
+
+        // Transition run stage to completed
+        await db.updateSgapWorkflowRun(params['id']!, {
+          current_stage: 'completed',
+          status: 'completed',
+          completed_at: new Date().toISOString(),
+        });
+
+        const updatedRun = await db.getSgapWorkflowRun(params['id']!);
+        json(res, 200, {
+          run: updatedRun,
+          phase4: {
+            provider: usedProvider,
+            model: usedModel,
+            review_window_days: reviewWindowDays,
+            insights_count: insights.length,
+            insights,
+          },
+        });
+        return;
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        continue;
+      }
+    }
+
+    json(res, 502, { error: `Phase 4 execution failed across all providers: ${lastError?.message ?? 'unknown error'}` });
   }, { auth: true, csrf: true });
 
   router.get('/api/admin/rbac/personas', async (_req, res, _params, auth) => {

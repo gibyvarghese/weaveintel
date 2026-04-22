@@ -1315,6 +1315,8 @@ export function registerAdminRoutes(
   registerSgapCrud({ routeKey: 'sgap-content-revisions', tableName: 'sgap_content_revisions', listKey: 'sgap-content-revisions', singularKey: 'sgap-content-revision' });
   registerSgapCrud({ routeKey: 'sgap-phase3-configs', tableName: 'sgap_phase3_configs', listKey: 'sgap-phase3-configs', singularKey: 'sgap-phase3-config' });
   registerSgapCrud({ routeKey: 'sgap-distribution-plans', tableName: 'sgap_distribution_plans', listKey: 'sgap-distribution-plans', singularKey: 'sgap-distribution-plan' });
+  registerSgapCrud({ routeKey: 'sgap-phase4-configs', tableName: 'sgap_phase4_configs', listKey: 'sgap-phase4-configs', singularKey: 'sgap-phase4-config' });
+  registerSgapCrud({ routeKey: 'sgap-performance-insights', tableName: 'sgap_performance_insights', listKey: 'sgap-performance-insights', singularKey: 'sgap-performance-insight' });
 
   router.post('/api/admin/sg-workflow-templates/:id/run', async (req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }

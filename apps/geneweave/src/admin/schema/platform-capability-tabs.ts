@@ -820,6 +820,39 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
     ],
   },
 
+  'sgap-phase4-configs': {
+    singular: 'SGAP Phase 4 Config', apiPath: 'admin/sgap-phase4-configs', listKey: 'sgap-phase4-configs',
+    cols: ['brand_id', 'review_window_days', 'min_data_points', 'auto_promote', 'enabled'],
+    fields: [
+      { key: 'application_scope', label: 'Scope', default: 'sgap' },
+      { key: 'brand_id', label: 'Brand ID' },
+      { key: 'workflow_template_id', label: 'Workflow Template ID' },
+      { key: 'analytics_agent_id', label: 'Analytics Agent ID' },
+      { key: 'review_window_days', label: 'Review Window (Days)', default: '7' },
+      { key: 'min_data_points', label: 'Min Data Points', default: '3' },
+      { key: 'kpi_thresholds_json', label: 'KPI Thresholds (JSON)', textarea: true, save: 'jsonStr' },
+      { key: 'auto_promote', label: 'Auto Promote', options: ['0', '1'], default: '0' },
+      { key: 'enabled', label: 'Enabled', options: ['1', '0'], default: '1' },
+    ],
+  },
+
+  'sgap-performance-insights': {
+    singular: 'SGAP Performance Insight', apiPath: 'admin/sgap-performance-insights', listKey: 'sgap-performance-insights',
+    cols: ['workflow_run_id', 'brand_id', 'platform', 'insight_type', 'score', 'created_at'],
+    fields: [
+      { key: 'workflow_run_id', label: 'Workflow Run ID' },
+      { key: 'brand_id', label: 'Brand ID' },
+      { key: 'platform', label: 'Platform' },
+      { key: 'content_item_id', label: 'Content Item ID' },
+      { key: 'insight_type', label: 'Insight Type', options: ['summary', 'platform_specific', 'trend', 'recommendation'], default: 'summary' },
+      { key: 'score', label: 'Score (0–1)' },
+      { key: 'recommendation', label: 'Recommendation', textarea: true, rows: 4 },
+      { key: 'raw_metrics_json', label: 'Raw Metrics (JSON)', textarea: true, save: 'jsonStr' },
+      { key: 'action_items_json', label: 'Action Items (JSON)', textarea: true, save: 'jsonStr' },
+    ],
+    readOnly: true,
+  },
+
   'workflow-runs': {
     singular: 'Workflow Run', apiPath: 'workflow-runs', listKey: 'runs',
     cols: ['id', 'workflow_id', 'status', 'started_at'],

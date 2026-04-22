@@ -90,6 +90,8 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'sgap-content-revisions', label: 'Content Revisions' },
     { key: 'sgap-phase3-configs', label: 'Phase 3 Configs' },
     { key: 'sgap-distribution-plans', label: 'Distribution Plans' },
+    { key: 'sgap-phase4-configs', label: 'Phase 4 Configs' },
+    { key: 'sgap-performance-insights', label: 'Performance Insights' },
   ]},
   { label: 'Knowledge', icon: '\uD83D\uDCC2', tabs: [
     { key: 'extraction-pipelines', label: 'Extraction' },
