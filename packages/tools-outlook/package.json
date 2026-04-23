@@ -1,0 +1,32 @@
+{
+  "name": "@weaveintel/tools-outlook",
+  "version": "0.1.0",
+  "description": "Microsoft Outlook MCP tool server — list, read, search, send, label, thread, subscribe",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@weaveintel/core": "*",
+    "@weaveintel/mcp-server": "*",
+    "@weaveintel/tools": "*"
+  },
+  "devDependencies": {
+    "@weaveintel/testing": "*",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "license": "MIT"
+}
