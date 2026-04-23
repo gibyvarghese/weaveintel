@@ -85,6 +85,82 @@ These principles emerged from the Scientific Validation feature (sv:) but apply 
 - New features must wire shared observability/eval hooks by default so prompts, skills, agents, and tools emit comparable telemetry without app-only pipelines.
 - When modularizing UI/admin surfaces, preserve operator UX: explicit labels, safe defaults, and JSON hints for advanced fields.
 
+## Live-Agents Framework (Phases 14-16)
+
+### When to use live-agents vs @weaveintel/agents
+
+**Use live-agents when:**
+- Agents run continuously over hours/days/weeks (not one-shot interactions)
+- Agents need to persist and accumulate learnings in contracts
+- Multiple agents run in parallel (need distributed coordination)
+- Agents need to respond to external events (webhooks, file changes) continuously
+- You need mesh-level isolation and cross-mesh bridges for multi-team collaboration
+
+**Use @weaveintel/agents when:**
+- Single request/response interaction (user query → agent response)
+- Stateless tool-calling chains
+- ReAct loop with bounded depth
+
+### Live-agents core patterns
+
+**Mesh and agents:**
+```typescript
+const mesh = await createMesh('my-team', { stateStore });
+const agent = await mesh.spawnAgent('assistant', { 
+  instructions: '...',
+  attentionPolicy: (agent) => [...], // Defines when agent should work
+});
+```
+
+**Contracts and evidence:**
+- Contracts are immutable work products (findings, decisions, errors)
+- Evidence links contracts to tool outputs (reproducible and auditable)
+- Use contracts for cross-mesh collaboration (bridges filter by contract type)
+
+**Heartbeat and ticks:**
+- Heartbeat scheduler runs every 10 minutes
+- Attention policy decides what work each agent should do
+- Ticks are scheduled units of work (atomic, claimed by workers)
+- Supports time-based (daily compression, hourly email check) and event-based (new contracts) scheduling
+
+**Account binding (critical invariant):**
+- Only humans bind accounts to agents (agent cannot self-bind)
+- Binding includes capabilities array (SEND_EMAIL, READ_INBOX, etc.)
+- Revocation is immediate (next tick sees revoked binding)
+- See docs/live-agents/ADR/001-account-binding-invariants.md
+
+**MCP integration:**
+- MCP tools connect agents to external systems (Gmail, Slack, Drive)
+- Credentials live in environment variables (never in DB)
+- Account binding controls which agent can use which account's credentials
+- Fixtures enable testing without real API calls
+
+**Cross-mesh bridges:**
+- Bridge: source mesh → target mesh, filters by contract type, requires both meshes to approve
+- Authorization: source registers bridge, target approves
+- Revocation: either mesh can revoke, stops message routing immediately
+
+### Live-agents documentation
+
+- [`@weaveintel/live-agents`](packages/live-agents/README.md) — Framework overview, core concepts, when to use
+- [Use Cases](docs/live-agents/use-cases.md) — Six scenarios with examples 52-57
+- [Account Model](docs/live-agents/account-model.md) — Why humans bind accounts, threat model, anti-patterns
+- [MCP Integration](docs/live-agents/mcp-integration.md) — How external tools connect, credential scoping, testing
+- [StateStore Guide](docs/live-agents/statestore-guide.md) — Persistence layer, in-memory/Redis/Postgres, implementing custom stores
+- [Compression Guide](docs/live-agents/compression-guide.md) — Context compression strategies, token budgeting, daily/weekly/hierarchical summaries
+- [ADRs](docs/live-agents/ADR/) — Architectural decision records (account binding, heartbeat, bridges, state store, credentials)
+
+### Tools for live-agents
+
+- [`@weaveintel/tools-webhook`](packages/tools-webhook/README.md) — Receive webhooks (GitHub push, Stripe payment, Slack mention) and route to agents
+- [`@weaveintel/tools-filewatch`](packages/tools-filewatch/README.md) — Monitor file system, trigger agent actions on file events
+
+### Reference implementation
+
+- [`apps/live-agents-demo`](apps/live-agents-demo) — Complete HTTP API, PostgreSQL state store, in-memory/Redis options, interactive UI
+- [`examples/52-57`](examples/) — Six core examples covering all major use cases
+- [`examples/58-live-agents-demo-e2e.ts`](examples/58-live-agents-demo-e2e.ts) — E2E test of demo app API
+
 ## LLM-Callable Metadata
 - Enforce detailed model-facing descriptions for prompts, skills, tools, and agents through shared validation helpers in `@weaveintel/core`.
 - Prefer shared prompt runtime helpers in `@weaveintel/prompts` for DB-backed rendering with lifecycle hooks and evaluations.

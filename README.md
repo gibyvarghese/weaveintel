@@ -6,6 +6,13 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 
 ## Latest Development (April 2026)
 
+- **Live-Agents Framework (Phases 14-16)** — Long-lived agent runtime with persistent state, distributed heartbeat scheduling, cross-mesh bridges, MCP integration, and multi-worker support. Agents run continuously, accumulate learnings in contracts, and coordinate via shared database. Production-ready reference implementation in [apps/live-agents-demo](apps/live-agents-demo).
+  - Phase 14: Six core examples (52-57) covering research assistants, workflow automation, cross-mesh collaboration, context compression, permission boundaries, and mesh administration
+  - Phase 15: Reference app with HTTP API, PostgreSQL state store, in-memory/Redis options, and interactive UI for testing
+  - Phase 16: Comprehensive documentation ([docs/live-agents/](docs/live-agents/)), architecture decision records, use case guide, and tools integration
+  - New package: [`@weaveintel/live-agents`](packages/live-agents) — Framework core
+  - New tools: [`@weaveintel/tools-webhook`](packages/tools-webhook) — External system integration via webhooks; [`@weaveintel/tools-filewatch`](packages/tools-filewatch) — File system monitoring
+  - Examples: [examples/52-57-live-agents.ts](examples) (research, workflows, compression, admin) + [examples/58-live-agents-demo-e2e.ts](examples/58-live-agents-demo-e2e.ts)
 - **Phase 6 Skill→Tool Policy Closure + Approval Workflow** — When a skill is activated in a chat session, its declared `toolPolicyKey` is automatically forwarded to the policy-enforced tool registry so every tool invocation runs under that skill's policy without any per-call wiring. Approval-required tools produce a `tool_approval_requests` DB row; operators resolve pending requests (approve/deny) via the admin API with full audit trail.
   - Admin API: `GET|POST /api/admin/tool-approval-requests[/:id/approve|deny]`
   - New example: [examples/34-skill-tool-policy-approval.ts](examples/34-skill-tool-policy-approval.ts)
@@ -64,19 +71,20 @@ If you are building a production app today, prefer the tool governance and promp
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                           Your Application                               │
-├──────────┬───────────┬──────────┬───────────┬────────────┬──────────────┤
-│  recipes │  devtools  │ geneweave│ ui-prims  │ triggers   │ collaboration│
-├──────────┴───────────┴──────────┴───────────┴────────────┴──────────────┤
-│                        Agent Layer                                       │
-│   agents · workflows · human-tasks · contracts · prompts · routing       │
+├────────┬───────────┬──────────┬───────────┬────────────┬─────────────────┤
+│ recipes│  devtools │ geneweave│ ui-prims  │ triggers   │ collaboration   │
+├────────┴───────────┴──────────┴───────────┴────────────┴─────────────────┤
+│                     Agent Layer & Long-Lived Agents                       │
+│ agents · workflows · human-tasks · contracts · prompts · routing         │
+│ live-agents · heartbeat · bridges · compression · account-binding · mcp  │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                        Capability Layer                                  │
 │   retrieval · memory · graph · extraction · cache · artifacts · evals    │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                        Tool Layer                                        │
-│   tools · tools-search · tools-browser · tools-http · tools-enterprise   │
-│   tools-social · tools-time · oauth · mcp-client · mcp-server · a2a      │
-│   plugins                                                                 │
+│   tools · tools-search · tools-browser · tools-http · tools-webhook      │
+│   tools-filewatch · tools-enterprise · tools-social · tools-time         │
+│   oauth · mcp-client · mcp-server · a2a · plugins                        │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                        Safety & Governance                               │
 │   guardrails · redaction · compliance · sandbox · identity · tenancy     │
@@ -90,7 +98,7 @@ If you are building a production app today, prefer the tool governance and promp
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Packages (45)
+## Packages (48)
 
 ### Core & Models
 
@@ -106,6 +114,7 @@ If you are building a production app today, prefer the tool governance and promp
 
 | Package | Description |
 |---|---|
+| [`@weaveintel/live-agents`](packages/live-agents) | Long-lived agent framework — persistent state, distributed heartbeat, cross-mesh bridges, MCP integration, account binding |
 | [`@weaveintel/agents`](packages/agents) | Agent runtime — ReAct tool-calling loop, supervisor-worker hierarchies |
 | [`@weaveintel/workflows`](packages/workflows) | Multi-step workflow engine with conditional branching, checkpointing, and compensation |
 | [`@weaveintel/human-tasks`](packages/human-tasks) | Human-in-the-loop — approval tasks, review queues, escalation, decision logging, policy evaluation |
@@ -132,6 +141,8 @@ If you are building a production app today, prefer the tool governance and promp
 | [`@weaveintel/tools-search`](packages/tools-search) | Web search tools — DuckDuckGo, Brave, with structured result parsing |
 | [`@weaveintel/tools-browser`](packages/tools-browser) | Browser tools — URL fetching, content extraction, page rendering |
 | [`@weaveintel/tools-http`](packages/tools-http) | HTTP endpoint tools — REST client with auth, rate limiting, schema validation |
+| [`@weaveintel/tools-webhook`](packages/tools-webhook) | Webhook integration — receive external events (GitHub, Stripe, Slack) and route to agents |
+| [`@weaveintel/tools-filewatch`](packages/tools-filewatch) | File system monitoring — watch directories, trigger agent actions on file events |
 | [`@weaveintel/tools-enterprise`](packages/tools-enterprise) | Enterprise connectors — Jira (31 tools), ServiceNow (283 tools), Canva (21 tools), Confluence, Salesforce, Notion |
 | [`@weaveintel/tools-social`](packages/tools-social) | Social media tools — Twitter/X, LinkedIn, with content formatting |
 | [`@weaveintel/tools-time`](packages/tools-time) | Temporal tools — datetime, timezone, timers, stopwatches, reminders with pluggable state stores |

@@ -1,0 +1,43 @@
+export const MIGRATIONS_SQL = `
+CREATE TABLE IF NOT EXISTS la_meshes (
+  id TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS la_agents (
+  id TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS la_contracts (
+  id TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS la_messages (
+  id TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS la_heartbeat_ticks (
+  id TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS la_accounts (
+  id TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS la_account_bindings (
+  id TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+`;
