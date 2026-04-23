@@ -18,11 +18,16 @@ import type {
   HeartbeatRunOptions,
   LiveAgentsRuntime,
   LiveAgent,
+  Message,
   StateStore,
 } from './types.js';
 import { asStateStore } from './state-store.js';
 import { createStandardAttentionPolicy } from './attention.js';
 import { createActionExecutor } from './action-executor.js';
+
+function makeId(prefix: string, nowIso: string, suffix: string): string {
+  return `${prefix}_${Date.parse(nowIso)}_${suffix}`;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -382,14 +387,126 @@ export function createCompressionMaintainer(opts: {
 export function createExternalEventHandler(opts: {
   stateStore: StateStore;
 }): ExternalEventHandler {
+  const matchesRoute = (event: ExternalEvent, matchExpr: string): boolean => {
+    const expr = matchExpr.trim();
+    if (!expr || expr === '*') {
+      return true;
+    }
+
+    if (expr.startsWith('sourceType:')) {
+      return event.sourceType === expr.slice('sourceType:'.length).trim();
+    }
+    if (expr.startsWith('sourceRef:')) {
+      return event.sourceRef === expr.slice('sourceRef:'.length).trim();
+    }
+    if (expr.startsWith('summaryContains:')) {
+      const needle = expr.slice('summaryContains:'.length).trim().toLowerCase();
+      return event.payloadSummary.toLowerCase().includes(needle);
+    }
+
+    try {
+      const parsed = JSON.parse(expr) as {
+        sourceType?: string;
+        sourceRef?: string;
+        summaryIncludes?: string;
+      };
+      if (parsed.sourceType && parsed.sourceType !== event.sourceType) {
+        return false;
+      }
+      if (parsed.sourceRef && parsed.sourceRef !== event.sourceRef) {
+        return false;
+      }
+      if (parsed.summaryIncludes && !event.payloadSummary.toLowerCase().includes(parsed.summaryIncludes.toLowerCase())) {
+        return false;
+      }
+      return true;
+    } catch {
+      return event.payloadSummary.toLowerCase().includes(expr.toLowerCase());
+    }
+  };
+
+  const mapTargetTypeToMessageRecipient = (targetType: 'AGENT' | 'TEAM' | 'BROADCAST'): Message['toType'] => {
+    if (targetType === 'TEAM') return 'TEAM';
+    if (targetType === 'BROADCAST') return 'BROADCAST';
+    return 'AGENT';
+  };
+
   return {
     async process(event: ExternalEvent, _ctx: ExecutionContext) {
       const existing = await opts.stateStore.findExternalEvent(event.accountId, event.sourceType, event.sourceRef);
       if (existing) {
         return { routedMessageCount: existing.producedMessageIds.length };
       }
-      await opts.stateStore.saveExternalEvent(event);
-      return { routedMessageCount: 0 };
+
+      const nowIso = new Date().toISOString();
+      const baseEvent: ExternalEvent = {
+        ...event,
+        processedAt: null,
+        producedMessageIds: [],
+        processingStatus: 'RECEIVED',
+        error: null,
+      };
+      await opts.stateStore.saveExternalEvent(baseEvent);
+
+      try {
+        const routes = await opts.stateStore.listEventRoutes(event.accountId);
+        const matchingRoutes = routes.filter((route) => matchesRoute(event, route.matchExpr));
+
+        const producedMessageIds: string[] = [];
+        for (const route of matchingRoutes) {
+          if (route.targetType !== 'BROADCAST' && !route.targetId) {
+            throw new Error(`Route ${route.id} has targetType ${route.targetType} but no targetId.`);
+          }
+
+          const messageId = makeId('msg', nowIso, Math.random().toString(36).slice(2, 10));
+          const toType = mapTargetTypeToMessageRecipient(route.targetType);
+          const toId = toType === 'BROADCAST' ? null : route.targetId;
+
+          await opts.stateStore.saveMessage({
+            id: messageId,
+            meshId: route.meshId,
+            fromType: 'INGRESS',
+            fromId: event.accountId,
+            fromMeshId: null,
+            toType,
+            toId,
+            topic: route.targetTopic ?? event.sourceType,
+            kind: 'TELL',
+            replyToMessageId: null,
+            threadId: messageId,
+            contextRefs: [event.id, event.payloadContextRef],
+            contextPacketRef: event.payloadContextRef,
+            expiresAt: null,
+            priority: route.priorityOverride ?? 'NORMAL',
+            status: 'PENDING',
+            deliveredAt: null,
+            readAt: null,
+            processedAt: null,
+            createdAt: nowIso,
+            subject: `External event: ${event.sourceType}`,
+            body: `${event.payloadSummary}\n\nEvent reference: ${event.sourceRef}`,
+          });
+          producedMessageIds.push(messageId);
+        }
+
+        await opts.stateStore.saveExternalEvent({
+          ...baseEvent,
+          processedAt: nowIso,
+          producedMessageIds,
+          processingStatus: producedMessageIds.length > 0 ? 'ROUTED' : 'NO_MATCH',
+          error: null,
+        });
+        return { routedMessageCount: producedMessageIds.length };
+      } catch (error) {
+        await opts.stateStore.saveExternalEvent({
+          ...baseEvent,
+          processedAt: nowIso,
+          producedMessageIds: [],
+          processingStatus: 'FAILED',
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return { routedMessageCount: 0 };
+      }
     },
   };
 }

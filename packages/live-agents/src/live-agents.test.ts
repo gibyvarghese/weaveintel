@@ -110,6 +110,141 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
     expect(second.routedMessageCount).toBe(0);
   });
 
+  it('phase 11 routes external events into agent inbox using event routes', async () => {
+    const store = weaveInMemoryStateStore();
+    const handler = createExternalEventHandler({ stateStore: store });
+    const now = new Date().toISOString();
+
+    await store.saveEventRoute({
+      id: 'route-evt-1',
+      meshId: 'mesh-evt-1',
+      accountId: 'account-evt-1',
+      matchDescriptionProse: 'Route all received customer emails.',
+      matchExpr: '{"sourceType":"email.received","summaryIncludes":"customer"}',
+      targetType: 'AGENT',
+      targetId: 'agent-evt-1',
+      targetTopic: 'customer-support',
+      priorityOverride: 'HIGH',
+      enabled: true,
+      createdAt: now,
+    });
+
+    const result = await handler.process(
+      {
+        id: 'evt-route-1',
+        accountId: 'account-evt-1',
+        sourceType: 'email.received',
+        sourceRef: 'msg-evt-1',
+        receivedAt: now,
+        payloadSummary: 'Customer emailed about delayed shipment',
+        payloadContextRef: 'mcp://gmail/messages/msg-evt-1',
+        processedAt: null,
+        producedMessageIds: [],
+        processingStatus: 'RECEIVED',
+        error: null,
+      },
+      weaveContext({ userId: 'human:ops-admin-1' }),
+    );
+
+    expect(result.routedMessageCount).toBe(1);
+
+    const inbox = await store.listMessagesForRecipient('AGENT', 'agent-evt-1');
+    expect(inbox).toHaveLength(1);
+    expect(inbox[0]?.fromType).toBe('INGRESS');
+    expect(inbox[0]?.topic).toBe('customer-support');
+    expect(inbox[0]?.priority).toBe('HIGH');
+
+    const savedEvent = await store.findExternalEvent('account-evt-1', 'email.received', 'msg-evt-1');
+    expect(savedEvent?.processingStatus).toBe('ROUTED');
+    expect(savedEvent?.producedMessageIds).toHaveLength(1);
+    expect(savedEvent?.processedAt).not.toBeNull();
+  });
+
+  it('phase 11 marks external events as NO_MATCH when no route applies', async () => {
+    const store = weaveInMemoryStateStore();
+    const handler = createExternalEventHandler({ stateStore: store });
+    const now = new Date().toISOString();
+
+    await store.saveEventRoute({
+      id: 'route-evt-2',
+      meshId: 'mesh-evt-1',
+      accountId: 'account-evt-1',
+      matchDescriptionProse: 'Only invoice routes',
+      matchExpr: 'summaryContains:invoice',
+      targetType: 'TEAM',
+      targetId: 'team-finance',
+      targetTopic: 'finance',
+      priorityOverride: null,
+      enabled: true,
+      createdAt: now,
+    });
+
+    const result = await handler.process(
+      {
+        id: 'evt-route-2',
+        accountId: 'account-evt-1',
+        sourceType: 'email.received',
+        sourceRef: 'msg-evt-2',
+        receivedAt: now,
+        payloadSummary: 'Customer asked about support hours',
+        payloadContextRef: 'mcp://gmail/messages/msg-evt-2',
+        processedAt: null,
+        producedMessageIds: [],
+        processingStatus: 'RECEIVED',
+        error: null,
+      },
+      weaveContext({ userId: 'human:ops-admin-1' }),
+    );
+
+    expect(result.routedMessageCount).toBe(0);
+    const savedEvent = await store.findExternalEvent('account-evt-1', 'email.received', 'msg-evt-2');
+    expect(savedEvent?.processingStatus).toBe('NO_MATCH');
+    expect(savedEvent?.producedMessageIds).toHaveLength(0);
+    expect(savedEvent?.error).toBeNull();
+  });
+
+  it('phase 11 marks external events as FAILED on invalid route configuration', async () => {
+    const store = weaveInMemoryStateStore();
+    const handler = createExternalEventHandler({ stateStore: store });
+    const now = new Date().toISOString();
+
+    await store.saveEventRoute({
+      id: 'route-evt-3',
+      meshId: 'mesh-evt-1',
+      accountId: 'account-evt-1',
+      matchDescriptionProse: 'Invalid route with missing team target',
+      matchExpr: '*',
+      targetType: 'TEAM',
+      targetId: null,
+      targetTopic: null,
+      priorityOverride: null,
+      enabled: true,
+      createdAt: now,
+    });
+
+    const result = await handler.process(
+      {
+        id: 'evt-route-3',
+        accountId: 'account-evt-1',
+        sourceType: 'webhook.invoked',
+        sourceRef: 'hook-1',
+        receivedAt: now,
+        payloadSummary: 'Webhook received',
+        payloadContextRef: 'mcp://webhook/events/hook-1',
+        processedAt: null,
+        producedMessageIds: [],
+        processingStatus: 'RECEIVED',
+        error: null,
+      },
+      weaveContext({ userId: 'human:ops-admin-1' }),
+    );
+
+    expect(result.routedMessageCount).toBe(0);
+    const savedEvent = await store.findExternalEvent('account-evt-1', 'webhook.invoked', 'hook-1');
+    expect(savedEvent?.processingStatus).toBe('FAILED');
+    expect(savedEvent?.error).toContain('targetType TEAM but no targetId');
+  });
+
   it('heartbeat processes scheduled tick with standard-v1 attention policy', async () => {
     const store = weaveInMemoryStateStore();
     const now = '2025-01-01T00:00:00.000Z';
