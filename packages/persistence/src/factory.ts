@@ -1,3 +1,4 @@
+import { CloudNoSqlPersistenceAdapter } from './adapters/cloud-nosql-adapter.js';
 import { CosmosDbPersistenceAdapter } from './adapters/cosmosdb-adapter.js';
 import { InMemoryPersistenceAdapter } from './adapters/in-memory-adapter.js';
 import { MongoDbPersistenceAdapter } from './adapters/mongodb-adapter.js';
@@ -18,6 +19,8 @@ export function createPersistenceAdapter(options: PersistenceFactoryOptions): Pe
       return new SqlitePersistenceAdapter();
     case 'mongodb':
       return new MongoDbPersistenceAdapter();
+    case 'cloud-nosql':
+      return new CloudNoSqlPersistenceAdapter();
     case 'cosmosdb':
       return new CosmosDbPersistenceAdapter();
     default:

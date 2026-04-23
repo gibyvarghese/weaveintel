@@ -17,6 +17,7 @@ export {
 } from './live-agents-inventory.js';
 
 export { AbstractPersistenceAdapter } from './adapters/abstract-adapter.js';
+export { CloudNoSqlPersistenceAdapter } from './adapters/cloud-nosql-adapter.js';
 export { InMemoryPersistenceAdapter } from './adapters/in-memory-adapter.js';
 export { PostgresPersistenceAdapter } from './adapters/postgres-adapter.js';
 export { RedisPersistenceAdapter } from './adapters/redis-adapter.js';

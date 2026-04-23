@@ -602,6 +602,17 @@ export interface MongoDbStateStore extends StateStore {
   close(): Promise<void>;
 }
 
+export interface CloudNoSqlStateStore extends StateStore {
+  __kind: 'cloud-nosql';
+  provider: 'dynamodb';
+  initialize(): Promise<void>;
+  close(): Promise<void>;
+}
+
+export interface DynamoDbStateStore extends CloudNoSqlStateStore {
+  provider: 'dynamodb';
+}
+
 export interface Heartbeat {
   tick(ctx: ExecutionContext): Promise<{ processed: number }>;
   run(ctx: ExecutionContext): Promise<void>;

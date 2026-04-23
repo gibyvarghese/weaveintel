@@ -2,6 +2,8 @@ import type { Server } from 'node:http';
 import { createInMemoryDemoStateStore } from './inmemory-state-store.js';
 import { createLiveAgentsDemoServer } from './app.js';
 import {
+  type CloudNoSqlStateStore,
+  weaveCloudNoSqlStateStore,
   type MongoDbStateStore,
   weaveRedisStateStore,
   weaveMongoDbStateStore,
@@ -16,13 +18,17 @@ import {
 export interface LiveAgentsDemoOptions {
   host?: string;
   port?: number;
-  persistenceBackend?: 'in-memory' | 'postgres' | 'redis' | 'sqlite' | 'mongodb';
+  persistenceBackend?: 'in-memory' | 'postgres' | 'redis' | 'sqlite' | 'mongodb' | 'cloud-nosql';
   databaseUrl?: string;
   redisUrl?: string;
   redisMode?: 'coordination-only' | 'durable-explicit';
   sqlitePath?: string;
   mongoUrl?: string;
   mongoDatabaseName?: string;
+  cloudNoSqlProvider?: 'dynamodb';
+  dynamoDbEndpoint?: string;
+  dynamoDbRegion?: string;
+  dynamoDbTableName?: string;
 }
 
 export interface LiveAgentsDemoHandle {
@@ -40,6 +46,7 @@ export async function createLiveAgentsDemo(options: LiveAgentsDemoOptions = {}):
       | 'redis'
       | 'sqlite'
       | 'mongodb'
+      | 'cloud-nosql'
       | undefined);
 
   const databaseUrl = options.databaseUrl ?? process.env['LIVE_AGENTS_DEMO_DATABASE_URL'];
@@ -47,6 +54,13 @@ export async function createLiveAgentsDemo(options: LiveAgentsDemoOptions = {}):
   const sqlitePath = options.sqlitePath ?? process.env['LIVE_AGENTS_DEMO_SQLITE_PATH'];
   const mongoUrl = options.mongoUrl ?? process.env['LIVE_AGENTS_DEMO_MONGODB_URL'];
   const mongoDatabaseName = options.mongoDatabaseName ?? process.env['LIVE_AGENTS_DEMO_MONGODB_DATABASE'] ?? 'live_agents_demo';
+  const cloudNoSqlProvider =
+    options.cloudNoSqlProvider ??
+    (process.env['LIVE_AGENTS_DEMO_CLOUD_NOSQL_PROVIDER'] as 'dynamodb' | undefined) ??
+    'dynamodb';
+  const dynamoDbEndpoint = options.dynamoDbEndpoint ?? process.env['LIVE_AGENTS_DEMO_DYNAMODB_ENDPOINT'];
+  const dynamoDbRegion = options.dynamoDbRegion ?? process.env['LIVE_AGENTS_DEMO_DYNAMODB_REGION'] ?? 'us-east-1';
+  const dynamoDbTableName = options.dynamoDbTableName ?? process.env['LIVE_AGENTS_DEMO_DYNAMODB_TABLE'] ?? 'la_entities';
   const redisMode =
     options.redisMode ??
     (process.env['LIVE_AGENTS_DEMO_REDIS_MODE'] as 'coordination-only' | 'durable-explicit' | undefined) ??
@@ -55,7 +69,13 @@ export async function createLiveAgentsDemo(options: LiveAgentsDemoOptions = {}):
   // Resolution order preserves backward compatibility while allowing explicit overrides.
   const resolvedBackend = configuredBackend ?? (databaseUrl ? 'postgres' : 'in-memory');
 
-  let store: StateStore | PostgresStateStore | RedisStateStore | SqliteStateStore | MongoDbStateStore;
+  let store:
+    | StateStore
+    | PostgresStateStore
+    | RedisStateStore
+    | SqliteStateStore
+    | MongoDbStateStore
+    | CloudNoSqlStateStore;
   if (resolvedBackend === 'postgres') {
     if (!databaseUrl) {
       throw new Error('LIVE_AGENTS_DEMO_DATABASE_URL is required when persistence backend is postgres');
@@ -74,6 +94,15 @@ export async function createLiveAgentsDemo(options: LiveAgentsDemoOptions = {}):
       url: mongoUrl,
       databaseName: mongoDatabaseName,
       collectionName: 'la_entities',
+    });
+  } else if (resolvedBackend === 'cloud-nosql') {
+    store = await weaveCloudNoSqlStateStore({
+      provider: cloudNoSqlProvider,
+      dynamodb: {
+        endpoint: dynamoDbEndpoint,
+        region: dynamoDbRegion,
+        tableName: dynamoDbTableName,
+      },
     });
   } else if (resolvedBackend === 'redis') {
     if (!redisUrl) {

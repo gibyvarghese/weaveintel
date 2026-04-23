@@ -2,6 +2,7 @@ import {
   createActionExecutor,
   createHeartbeat,
   type StateStore,
+  weaveCloudNoSqlStateStore,
   weaveMongoDbStateStore,
   weaveRedisStateStore,
   weavePostgresStateStore,
@@ -17,12 +18,18 @@ async function main() {
     | 'redis'
     | 'sqlite'
     | 'mongodb'
+    | 'cloud-nosql'
     | undefined;
   const databaseUrl = process.env['LIVE_AGENTS_DEMO_DATABASE_URL'];
   const redisUrl = process.env['LIVE_AGENTS_DEMO_REDIS_URL'];
   const sqlitePath = process.env['LIVE_AGENTS_DEMO_SQLITE_PATH'];
   const mongoUrl = process.env['LIVE_AGENTS_DEMO_MONGODB_URL'];
   const mongoDatabaseName = process.env['LIVE_AGENTS_DEMO_MONGODB_DATABASE'] ?? 'live_agents_demo';
+  const cloudNoSqlProvider =
+    (process.env['LIVE_AGENTS_DEMO_CLOUD_NOSQL_PROVIDER'] as 'dynamodb' | undefined) ?? 'dynamodb';
+  const dynamoDbEndpoint = process.env['LIVE_AGENTS_DEMO_DYNAMODB_ENDPOINT'];
+  const dynamoDbRegion = process.env['LIVE_AGENTS_DEMO_DYNAMODB_REGION'] ?? 'us-east-1';
+  const dynamoDbTableName = process.env['LIVE_AGENTS_DEMO_DYNAMODB_TABLE'] ?? 'la_entities';
   const redisMode =
     (process.env['LIVE_AGENTS_DEMO_REDIS_MODE'] as 'coordination-only' | 'durable-explicit' | undefined) ??
     'coordination-only';
@@ -48,6 +55,15 @@ async function main() {
       url: mongoUrl,
       databaseName: mongoDatabaseName,
       collectionName: 'la_entities',
+    });
+  } else if (resolvedBackend === 'cloud-nosql') {
+    stateStore = await weaveCloudNoSqlStateStore({
+      provider: cloudNoSqlProvider,
+      dynamodb: {
+        endpoint: dynamoDbEndpoint,
+        region: dynamoDbRegion,
+        tableName: dynamoDbTableName,
+      },
     });
   } else if (resolvedBackend === 'redis') {
     if (!redisUrl) {

@@ -20,6 +20,8 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.810.0",
+    "@aws-sdk/lib-dynamodb": "^3.810.0",
     "@weaveintel/core": "*",
     "@weaveintel/observability": "*",
     "@weaveintel/replay": "*",

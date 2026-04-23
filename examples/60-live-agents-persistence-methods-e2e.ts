@@ -10,6 +10,7 @@
  * 4) Redis backend in durable-explicit mode (restart durability)
  * 5) SQLite backend (single-node local durable mode)
  * 6) MongoDB backend (document-store durable mode)
+ * 7) Cloud NoSQL backend via DynamoDB Local (managed KV/document style)
  *
  * Environment variables:
  * - LIVE_AGENTS_EXAMPLE_POSTGRES_URL=postgres://...
@@ -17,12 +18,16 @@
  * - LIVE_AGENTS_EXAMPLE_SQLITE_PATH=/absolute/path/to/file.db (optional)
  * - LIVE_AGENTS_EXAMPLE_MONGODB_URL=mongodb://...
  * - LIVE_AGENTS_EXAMPLE_MONGODB_DATABASE=live_agents_example (optional)
+ * - LIVE_AGENTS_EXAMPLE_DYNAMODB_ENDPOINT=http://localhost:8000
+ * - LIVE_AGENTS_EXAMPLE_DYNAMODB_REGION=us-east-1 (optional)
+ * - LIVE_AGENTS_EXAMPLE_DYNAMODB_TABLE=la_entities (optional)
  */
 
 import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  weaveCloudNoSqlStateStore,
   weaveInMemoryStateStore,
   weaveMongoDbStateStore,
   weavePostgresStateStore,
@@ -39,6 +44,9 @@ const REDIS_URL = process.env['LIVE_AGENTS_EXAMPLE_REDIS_URL'];
 const SQLITE_PATH = process.env['LIVE_AGENTS_EXAMPLE_SQLITE_PATH'];
 const MONGODB_URL = process.env['LIVE_AGENTS_EXAMPLE_MONGODB_URL'];
 const MONGODB_DATABASE = process.env['LIVE_AGENTS_EXAMPLE_MONGODB_DATABASE'] ?? 'live_agents_example';
+const DYNAMODB_ENDPOINT = process.env['LIVE_AGENTS_EXAMPLE_DYNAMODB_ENDPOINT'];
+const DYNAMODB_REGION = process.env['LIVE_AGENTS_EXAMPLE_DYNAMODB_REGION'] ?? 'us-east-1';
+const DYNAMODB_TABLE = process.env['LIVE_AGENTS_EXAMPLE_DYNAMODB_TABLE'] ?? 'la_entities';
 
 interface ScenarioFixture {
   mesh: Mesh;
@@ -111,7 +119,7 @@ async function seedAndClaim(store: StateStore, fixture: ScenarioFixture): Promis
 }
 
 async function runInMemoryScenario(): Promise<void> {
-  console.log('\n[1/6] In-memory scenario');
+  console.log('\n[1/7] In-memory scenario');
   const fixture = createFixture(`example:memory:${Date.now()}`);
   const store = weaveInMemoryStateStore();
 
@@ -126,7 +134,7 @@ async function runInMemoryScenario(): Promise<void> {
 }
 
 async function runPostgresScenario(): Promise<void> {
-  console.log('\n[2/6] Postgres restart-durability scenario');
+  console.log('\n[2/7] Postgres restart-durability scenario');
   if (!POSTGRES_URL) {
     console.log('  - skipped (LIVE_AGENTS_EXAMPLE_POSTGRES_URL not set)');
     return;
@@ -151,7 +159,7 @@ async function runPostgresScenario(): Promise<void> {
 }
 
 async function runRedisCoordinationScenario(): Promise<void> {
-  console.log('\n[3/6] Redis coordination-only scenario');
+  console.log('\n[3/7] Redis coordination-only scenario');
   if (!REDIS_URL) {
     console.log('  - skipped (LIVE_AGENTS_EXAMPLE_REDIS_URL not set)');
     return;
@@ -193,7 +201,7 @@ async function runRedisCoordinationScenario(): Promise<void> {
 }
 
 async function runRedisDurableScenario(): Promise<void> {
-  console.log('\n[4/6] Redis durable-explicit restart scenario');
+  console.log('\n[4/7] Redis durable-explicit restart scenario');
   if (!REDIS_URL) {
     console.log('  - skipped (LIVE_AGENTS_EXAMPLE_REDIS_URL not set)');
     return;
@@ -231,7 +239,7 @@ async function runRedisDurableScenario(): Promise<void> {
 }
 
 async function runSqliteScenario(): Promise<void> {
-  console.log('\n[5/6] SQLite local durable scenario');
+  console.log('\n[5/7] SQLite local durable scenario');
 
   const sqlitePath = SQLITE_PATH ?? join(tmpdir(), `weave-live-agents-${Date.now()}.db`);
   const fixture = createFixture(`example:sqlite:${Date.now()}`);
@@ -257,7 +265,7 @@ async function runSqliteScenario(): Promise<void> {
 }
 
 async function runMongoDbScenario(): Promise<void> {
-  console.log('\n[6/6] MongoDB durable scenario');
+  console.log('\n[6/7] MongoDB durable scenario');
   if (!MONGODB_URL) {
     console.log('  - skipped (LIVE_AGENTS_EXAMPLE_MONGODB_URL not set)');
     return;
@@ -289,6 +297,45 @@ async function runMongoDbScenario(): Promise<void> {
   console.log('  ✓ mongodb durability verified');
 }
 
+async function runCloudNoSqlScenario(): Promise<void> {
+  console.log('\n[7/7] Cloud NoSQL (DynamoDB Local) durable scenario');
+  if (!DYNAMODB_ENDPOINT) {
+    console.log('  - skipped (LIVE_AGENTS_EXAMPLE_DYNAMODB_ENDPOINT not set)');
+    return;
+  }
+
+  const fixture = createFixture(`example:dynamodb:${Date.now()}`);
+
+  const first = await weaveCloudNoSqlStateStore({
+    provider: 'dynamodb',
+    dynamodb: {
+      endpoint: DYNAMODB_ENDPOINT,
+      region: DYNAMODB_REGION,
+      tableName: DYNAMODB_TABLE,
+    },
+  });
+  await seedAndClaim(first, fixture);
+  await closeIfNeeded(first);
+
+  const second = await weaveCloudNoSqlStateStore({
+    provider: 'dynamodb',
+    dynamodb: {
+      endpoint: DYNAMODB_ENDPOINT,
+      region: DYNAMODB_REGION,
+      tableName: DYNAMODB_TABLE,
+    },
+  });
+  const mesh = await second.loadMesh(fixture.mesh.id);
+  const tick = await second.loadHeartbeatTick(fixture.tick.id);
+  await closeIfNeeded(second);
+
+  if (!mesh || !tick) {
+    throw new Error('Cloud NoSQL durability scenario failed after restart');
+  }
+
+  console.log('  ✓ cloud-nosql dynamodb durability verified');
+}
+
 async function main(): Promise<void> {
   console.log('Live-agents persistence backend E2E scenarios');
 
@@ -298,6 +345,7 @@ async function main(): Promise<void> {
   await runRedisDurableScenario();
   await runSqliteScenario();
   await runMongoDbScenario();
+  await runCloudNoSqlScenario();
 
   console.log('\nAll requested persistence scenarios completed.');
 }

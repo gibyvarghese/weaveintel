@@ -17,6 +17,7 @@ export type {
   BreakGlassConstraints,
   BreakGlassInvocation,
   CapabilityGrant,
+  CloudNoSqlStateStore,
   CapabilityIssueBody,
   CapabilityRequestBody,
   CompressionMaintainer,
@@ -28,6 +29,7 @@ export type {
   BacklogItem,
   CrossMeshBridge,
   DelegationEdge,
+  DynamoDbStateStore,
   EventRoute,
   ExternalEvent,
   ExternalEventHandler,
@@ -88,6 +90,7 @@ export {
 export { weavePostgresStateStore } from './postgres-state-store.js';
 export { weaveSqliteStateStore } from './sqlite-state-store.js';
 export { weaveMongoDbStateStore } from './mongodb-state-store.js';
+export { weaveCloudNoSqlStateStore, weaveDynamoDbStateStore } from './dynamodb-state-store.js';
 
 export {
   LiveAgentsError,

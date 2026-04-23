@@ -4,6 +4,7 @@ export type PersistenceBackendKind =
   | 'redis'
   | 'sqlite'
   | 'mongodb'
+  | 'cloud-nosql'
   | 'cosmosdb';
 
 export type PersistenceDomain =
@@ -16,6 +17,7 @@ export type PersistenceDomain =
 
 export interface PersistenceBackendConfig {
   kind: PersistenceBackendKind;
+  provider?: 'dynamodb' | 'cosmosdb';
   connectionString?: string;
   database?: string;
   namespace?: string;

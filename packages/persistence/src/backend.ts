@@ -17,6 +17,9 @@ export function parsePersistenceBackendKind(input: string | undefined): Persiste
     case 'mongodb':
     case 'mongo':
       return 'mongodb';
+    case 'cloud-nosql':
+    case 'dynamodb':
+      return 'cloud-nosql';
     case 'cosmosdb':
     case 'cosmos':
       return 'cosmosdb';
