@@ -4,7 +4,7 @@
 
 // ─── Workflow Definition ─────────────────────────────────────
 
-export type WorkflowStepType = 'deterministic' | 'agentic' | 'branch' | 'loop' | 'condition' | 'wait' | 'parallel' | 'sub-workflow';
+export type WorkflowStepType = 'deterministic' | 'agentic' | 'branch' | 'loop' | 'condition' | 'wait' | 'parallel' | 'sub-workflow' | 'human-task';
 
 export interface WorkflowStep {
   id: string;
@@ -17,6 +17,8 @@ export interface WorkflowStep {
   condition?: string;
   timeout?: number;
   retries?: number;
+  /** Milliseconds to wait between retry attempts. */
+  retryDelayMs?: number;
 }
 
 export interface WorkflowDefinition {
@@ -64,6 +66,8 @@ export interface WorkflowRun {
 export interface WorkflowCheckpoint {
   id: string;
   runId: string;
+  /** ID of the workflow definition this run belongs to. Required for post-restart recovery. */
+  workflowId?: string;
   stepId: string;
   state: WorkflowState;
   createdAt: string;
@@ -151,4 +155,10 @@ export interface WorkflowEngine {
   getRun(runId: string): Promise<WorkflowRun | null>;
   resumeRun(runId: string, data?: unknown): Promise<WorkflowRun>;
   cancelRun(runId: string): Promise<void>;
+  listRuns(workflowId?: string): WorkflowRun[];
+  /**
+   * Recover a run after process restart by replaying from the latest checkpoint.
+   * Returns null if no checkpoint exists for the given runId.
+   */
+  recoverRun(runId: string): Promise<WorkflowRun | null>;
 }

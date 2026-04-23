@@ -92,6 +92,10 @@ export interface HumanTaskQueue {
   get(taskId: string): Promise<HumanTask | null>;
   list(filter?: HumanTaskFilter): Promise<HumanTask[]>;
   complete(taskId: string, decision: HumanDecision): Promise<void>;
+  /**
+   * Reject a task (sets status to 'rejected'). Safe to call on any non-terminal task.
+   */
+  reject(taskId: string, decision: HumanDecision): Promise<void>;
   expire(taskId: string): Promise<void>;
 }
 

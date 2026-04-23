@@ -54,6 +54,17 @@ export function resolveNextStep(
 
   if (typeof step.next === 'string') return step.next;
   if (Array.isArray(step.next)) return step.next[0];
+
+  const isBranchTarget = def.steps.some(s => Array.isArray(s.next) && s.next.includes(currentStepId));
+  if (isBranchTarget) {
+    return undefined;
+  }
+
+  // Default to declaration order when next is not explicitly provided.
+  const currentIndex = def.steps.findIndex(s => s.id === currentStepId);
+  if (currentIndex >= 0) {
+    return def.steps[currentIndex + 1]?.id;
+  }
   return undefined;
 }
 

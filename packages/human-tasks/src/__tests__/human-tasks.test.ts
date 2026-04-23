@@ -296,3 +296,61 @@ describe('createPolicy', () => {
     expect(p.enabled).toBe(true);
   });
 });
+
+// ─── Phase 3C: InMemoryTaskQueue.reject() ───────────────────
+
+describe('InMemoryTaskQueue.reject()', () => {
+  let queue: InMemoryTaskQueue;
+
+  beforeEach(() => {
+    queue = new InMemoryTaskQueue();
+  });
+
+  it('rejects a pending task and sets status to rejected', async () => {
+    const task = await queue.enqueue({ type: 'approval', title: 'Reject Me', status: 'pending', priority: 'normal' });
+    await queue.reject(task.id, {
+      taskId: task.id,
+      decidedBy: 'manager',
+      decision: 'rejected',
+      reason: 'Not acceptable',
+      decidedAt: new Date().toISOString(),
+    });
+    const updated = await queue.get(task.id);
+    expect(updated?.status).toBe('rejected');
+    expect(updated?.completedAt).toBeDefined();
+  });
+
+  it('rejects an assigned task', async () => {
+    const task = await queue.enqueue({ type: 'review', title: 'Assigned Task', status: 'pending', priority: 'normal' });
+    await queue.dequeue('reviewer'); // assigns it
+    await queue.reject(task.id, {
+      taskId: task.id,
+      decidedBy: 'reviewer',
+      decision: 'rejected',
+      decidedAt: new Date().toISOString(),
+    });
+    const updated = await queue.get(task.id);
+    expect(updated?.status).toBe('rejected');
+  });
+
+  it('throws when rejecting a task that is already in terminal state', async () => {
+    const task = await queue.enqueue({ type: 'approval', title: 'Done', status: 'pending', priority: 'normal' });
+    await queue.expire(task.id);
+    await expect(queue.reject(task.id, {
+      taskId: task.id,
+      decidedBy: 'x',
+      decision: 'rejected',
+      decidedAt: new Date().toISOString(),
+    })).rejects.toThrow('already in terminal state');
+  });
+
+  it('throws when rejecting a nonexistent task', async () => {
+    await expect(queue.reject('nonexistent-id', {
+      taskId: 'nonexistent-id',
+      decidedBy: 'x',
+      decision: 'rejected',
+      decidedAt: new Date().toISOString(),
+    })).rejects.toThrow('not found');
+  });
+});
+

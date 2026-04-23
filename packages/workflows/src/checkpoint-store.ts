@@ -6,7 +6,7 @@ import type { WorkflowCheckpoint, WorkflowState } from '@weaveintel/core';
 import { randomUUID } from 'node:crypto';
 
 export interface CheckpointStore {
-  save(runId: string, stepId: string, state: WorkflowState): Promise<WorkflowCheckpoint>;
+  save(runId: string, stepId: string, state: WorkflowState, workflowId?: string): Promise<WorkflowCheckpoint>;
   load(checkpointId: string): Promise<WorkflowCheckpoint | null>;
   latest(runId: string): Promise<WorkflowCheckpoint | null>;
   list(runId: string): Promise<WorkflowCheckpoint[]>;
@@ -19,10 +19,11 @@ export interface CheckpointStore {
 export class InMemoryCheckpointStore implements CheckpointStore {
   private store = new Map<string, WorkflowCheckpoint>();
 
-  async save(runId: string, stepId: string, state: WorkflowState): Promise<WorkflowCheckpoint> {
+  async save(runId: string, stepId: string, state: WorkflowState, workflowId?: string): Promise<WorkflowCheckpoint> {
     const cp: WorkflowCheckpoint = {
       id: randomUUID(),
       runId,
+      workflowId,
       stepId,
       state: structuredClone(state),
       createdAt: new Date().toISOString(),

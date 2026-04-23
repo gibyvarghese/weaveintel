@@ -87,6 +87,18 @@ export class InMemoryTaskQueue implements HumanTaskQueue {
     task.completedAt = decision.decidedAt;
   }
 
+  async reject(taskId: string, decision: HumanDecision): Promise<void> {
+    const task = this.tasks.get(taskId);
+    if (!task) throw new Error(`Task ${taskId} not found`);
+    if (task.status === 'completed' || task.status === 'rejected' || task.status === 'expired') {
+      throw new Error(`Task ${taskId} is already in terminal state: ${task.status}`);
+    }
+
+    task.status = 'rejected';
+    task.result = decision.data ?? { decision: 'rejected', reason: decision.reason };
+    task.completedAt = decision.decidedAt;
+  }
+
   async expire(taskId: string): Promise<void> {
     const task = this.tasks.get(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);

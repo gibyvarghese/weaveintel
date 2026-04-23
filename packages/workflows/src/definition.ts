@@ -45,13 +45,55 @@ export class WorkflowBuilder {
   }
 
   /** Shortcut: add a deterministic step. */
-  deterministic(id: string, name: string, opts?: { handler?: string; next?: string | string[]; config?: Record<string, unknown> }): this {
-    return this.addStep({ id, name, type: 'deterministic', handler: opts?.handler, next: opts?.next, config: opts?.config });
+  deterministic(
+    id: string,
+    name: string,
+    opts?: {
+      handler?: string;
+      next?: string | string[];
+      config?: Record<string, unknown>;
+      timeout?: number;
+      retries?: number;
+      retryDelayMs?: number;
+    },
+  ): this {
+    return this.addStep({
+      id,
+      name,
+      type: 'deterministic',
+      handler: opts?.handler,
+      next: opts?.next,
+      config: opts?.config,
+      timeout: opts?.timeout,
+      retries: opts?.retries,
+      retryDelayMs: opts?.retryDelayMs,
+    });
   }
 
   /** Shortcut: add an agentic step. */
-  agentic(id: string, name: string, opts?: { handler?: string; next?: string | string[]; config?: Record<string, unknown>; timeout?: number }): this {
-    return this.addStep({ id, name, type: 'agentic', handler: opts?.handler, next: opts?.next, config: opts?.config, timeout: opts?.timeout });
+  agentic(
+    id: string,
+    name: string,
+    opts?: {
+      handler?: string;
+      next?: string | string[];
+      config?: Record<string, unknown>;
+      timeout?: number;
+      retries?: number;
+      retryDelayMs?: number;
+    },
+  ): this {
+    return this.addStep({
+      id,
+      name,
+      type: 'agentic',
+      handler: opts?.handler,
+      next: opts?.next,
+      config: opts?.config,
+      timeout: opts?.timeout,
+      retries: opts?.retries,
+      retryDelayMs: opts?.retryDelayMs,
+    });
   }
 
   /** Shortcut: add a condition step. */
@@ -67,6 +109,47 @@ export class WorkflowBuilder {
   /** Shortcut: add a wait step (pauses for approval or external input). */
   wait(id: string, name: string, opts?: { next?: string }): this {
     return this.addStep({ id, name, type: 'wait', next: opts?.next });
+  }
+
+  /** Shortcut: add a parallel step that executes named handlers concurrently. */
+  parallel(
+    id: string,
+    name: string,
+    opts: { parallelHandlers: string[]; next?: string },
+  ): this {
+    return this.addStep({
+      id,
+      name,
+      type: 'parallel',
+      next: opts.next,
+      config: { parallelHandlers: opts.parallelHandlers },
+    });
+  }
+
+  /** Shortcut: add a human-task step that creates a task in the queue and pauses. */
+  humanTask(
+    id: string,
+    name: string,
+    opts?: {
+      taskType?: string;
+      title?: string;
+      description?: string;
+      priority?: string;
+      next?: string;
+    },
+  ): this {
+    return this.addStep({
+      id,
+      name,
+      type: 'human-task',
+      next: opts?.next,
+      config: {
+        taskType: opts?.taskType ?? 'approval',
+        title: opts?.title ?? name,
+        description: opts?.description,
+        priority: opts?.priority ?? 'normal',
+      },
+    });
   }
 
   build(): WorkflowDefinition & { policy?: WorkflowPolicy; compensations?: WorkflowCompensation[] } {
