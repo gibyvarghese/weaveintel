@@ -579,6 +579,9 @@ export interface InMemoryStateStore extends StateStore {
 
 export interface RedisStateStore extends StateStore {
   __kind: 'redis';
+  mode: 'coordination-only' | 'durable-explicit';
+  initialize(): Promise<void>;
+  close(): Promise<void>;
 }
 
 export interface PostgresStateStore extends StateStore {

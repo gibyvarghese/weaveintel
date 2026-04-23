@@ -34,6 +34,7 @@ import {
   SelfPromotionForbiddenError,
   SelfGrantForbiddenError,
 } from './errors.js';
+import { createRedisStateStoreAdapter } from './redis-state-store.js';
 
 function isHumanPrincipal(id: string): boolean {
   const normalized = id.trim().toLowerCase();
@@ -711,12 +712,12 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
   };
 }
 
-export function weaveRedisStateStore(_opts: { url: string }): RedisStateStore {
-  const inMemory = weaveInMemoryStateStore();
-  return {
-    ...inMemory,
-    __kind: 'redis',
-  };
+export function weaveRedisStateStore(opts: {
+  url: string;
+  mode?: 'coordination-only' | 'durable-explicit';
+  keyPrefix?: string;
+}): RedisStateStore {
+  return createRedisStateStoreAdapter(opts, weaveInMemoryStateStore);
 }
 
 export function asStateStore(store?: StateStore): StateStore {

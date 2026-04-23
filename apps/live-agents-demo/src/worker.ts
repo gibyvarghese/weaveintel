@@ -1,16 +1,50 @@
 import {
   createActionExecutor,
   createHeartbeat,
+  type StateStore,
+  weaveRedisStateStore,
   weavePostgresStateStore,
 } from '@weaveintel/live-agents';
 import { weaveContext } from '@weaveintel/core';
 import { createInMemoryDemoStateStore } from './inmemory-state-store.js';
 
 async function main() {
+  const configuredBackend = process.env['LIVE_AGENTS_DEMO_PERSISTENCE_BACKEND'] as
+    | 'in-memory'
+    | 'postgres'
+    | 'redis'
+    | undefined;
   const databaseUrl = process.env['LIVE_AGENTS_DEMO_DATABASE_URL'];
-  const stateStore = databaseUrl
-    ? await weavePostgresStateStore({ url: databaseUrl })
-    : await createInMemoryDemoStateStore();
+  const redisUrl = process.env['LIVE_AGENTS_DEMO_REDIS_URL'];
+  const redisMode =
+    (process.env['LIVE_AGENTS_DEMO_REDIS_MODE'] as 'coordination-only' | 'durable-explicit' | undefined) ??
+    'coordination-only';
+
+  const resolvedBackend = configuredBackend ?? (databaseUrl ? 'postgres' : 'in-memory');
+
+  let stateStore: StateStore;
+  if (resolvedBackend === 'postgres') {
+    if (!databaseUrl) {
+      throw new Error('LIVE_AGENTS_DEMO_DATABASE_URL is required when persistence backend is postgres');
+    }
+    stateStore = await weavePostgresStateStore({ url: databaseUrl });
+  } else if (resolvedBackend === 'redis') {
+    if (!redisUrl) {
+      throw new Error('LIVE_AGENTS_DEMO_REDIS_URL is required when persistence backend is redis');
+    }
+    stateStore = weaveRedisStateStore({
+      url: redisUrl,
+      mode: redisMode,
+      keyPrefix: 'weave:live-agents-demo',
+    });
+  } else {
+    stateStore = await createInMemoryDemoStateStore();
+  }
+
+  const maybeInit = (stateStore as { initialize?: () => Promise<void> }).initialize;
+  if (maybeInit) {
+    await maybeInit.call(stateStore);
+  }
 
   const heartbeat = createHeartbeat({
     stateStore,

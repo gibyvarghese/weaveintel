@@ -26,7 +26,8 @@
     "@weaveintel/memory": "*",
     "@weaveintel/mcp-client": "*",
     "@weaveintel/identity": "*",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "redis": "^4.7.0"
   },
   "license": "MIT"
 }
