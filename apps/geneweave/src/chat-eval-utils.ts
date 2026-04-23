@@ -16,7 +16,7 @@ export async function applyRedaction(
   ctx: ExecutionContext,
   text: string,
   patterns: string[],
-): Promise<{ redacted: string; wasModified: boolean; detections: Array<{ type: string; start: number; end: number }> }> {
+): Promise<{ redacted: string; wasModified: boolean; detections: Array<{ type: string; start: number; end: number }>; error?: string }> {
   try {
     const redactor = weaveRedactor({
       patterns: patterns.map((p) => ({ name: p, type: 'builtin' as const, builtinType: p })),
@@ -29,7 +29,12 @@ export async function applyRedaction(
       detections: result.detections.map((d) => ({ type: d.type, start: d.start, end: d.end })),
     };
   } catch {
-    return { redacted: text, wasModified: false, detections: [] };
+    return {
+      redacted: '',
+      wasModified: false,
+      detections: [],
+      error: 'redaction_failed',
+    };
   }
 }
 
@@ -45,7 +50,7 @@ export async function runPostEval(
   latencyMs: number,
   cost: number,
   guardrailDecision?: 'allow' | 'warn' | 'deny',
-): Promise<{ passed: number; failed: number; total: number; score: number } | undefined> {
+): Promise<{ passed: number; failed: number; total: number; score: number } | { error: string }> {
   try {
     const runner = weaveEvalRunner({
       executor: async (_ctx, inp) => ({
@@ -86,6 +91,6 @@ export async function runPostEval(
 
     return info;
   } catch {
-    return undefined;
+    return { error: 'post_eval_failed' };
   }
 }

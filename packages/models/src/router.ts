@@ -333,9 +333,16 @@ async function* wrapStreamWithMiddleware(
           model: model.info.modelId,
         };
       });
-    } catch {
-      // If middleware throws during pre-processing, propagate
-      // but only if it didn't call next (validation middleware)
+    } catch (err) {
+      if (!requestPassedToNext) {
+        // Middleware threw before calling next — this is an enforcement failure
+        // (e.g. content policy blocked the request). Propagate it so callers
+        // know the request was rejected, not silently degraded.
+        throw err;
+      }
+      // Middleware called next successfully but threw during post-processing
+      // on the dummy response (e.g. response transformation on a stub result).
+      // Treat as non-fatal and continue with the captured request.
     }
     if (requestPassedToNext) {
       preProcessedRequest = requestPassedToNext;

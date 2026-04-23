@@ -76,7 +76,7 @@ function checkAssertion(output: unknown, criteria: AcceptanceCriteria): Validati
 }
 
 function checkCustom(_output: unknown, criteria: AcceptanceCriteria): ValidationResult {
-  // Custom criteria always pass by default — meant to be overridden
+  // Custom criteria always pass by default — meant to be overridden via registerChecker()
   return {
     criteriaId: criteria.id,
     passed: true,
@@ -85,12 +85,34 @@ function checkCustom(_output: unknown, criteria: AcceptanceCriteria): Validation
   };
 }
 
+/**
+ * These criterion types require a real evaluator to be registered.
+ * They intentionally fail closed rather than auto-passing, because
+ * silently approving model-graded or human-review criteria is a
+ * correctness and safety hazard in production.
+ *
+ * To use these types: call `validator.registerChecker('model-graded', myFn)`.
+ */
+function checkNotImplemented(type: string) {
+  return function (_output: unknown, criteria: AcceptanceCriteria): ValidationResult {
+    return {
+      criteriaId: criteria.id,
+      passed: false,
+      score: 0,
+      explanation:
+        `Criterion type "${type}" has no evaluator registered. ` +
+        `Register one with validator.registerChecker("${type}", fn) before calling validate().`,
+    };
+  };
+}
+
 const BUILTIN_CHECKERS: Record<string, CriterionChecker> = {
   schema: checkSchema,
   assertion: checkAssertion,
   custom: checkCustom,
-  'model-graded': checkCustom,    // placeholder — real impl would call a model
-  'human-review': checkCustom,    // placeholder — real impl would create a human task
+  // Enforcement-oriented types fail closed until a real evaluator is registered.
+  'model-graded': checkNotImplemented('model-graded'),
+  'human-review': checkNotImplemented('human-review'),
 };
 
 // ─── Default validator ───────────────────────────────────────

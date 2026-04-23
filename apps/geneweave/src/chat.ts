@@ -169,6 +169,44 @@ export class ChatEngine {
     return base ? `${base}\n\n${policy}` : policy;
   }
 
+  private async writeSseEvent(res: ServerResponse, payload: Record<string, unknown>): Promise<boolean> {
+    if (res.writableEnded || res.destroyed) {
+      return false;
+    }
+
+    const frame = `data: ${JSON.stringify(payload)}\n\n`;
+    const canContinue = res.write(frame);
+    if (canContinue) {
+      return !(res.writableEnded || res.destroyed);
+    }
+
+    await new Promise<void>((resolve) => {
+      const onDrain = () => {
+        cleanup();
+        resolve();
+      };
+      const onClose = () => {
+        cleanup();
+        resolve();
+      };
+      const cleanup = () => {
+        res.off('drain', onDrain);
+        res.off('close', onClose);
+      };
+
+      res.on('drain', onDrain);
+      res.on('close', onClose);
+    });
+
+    return !(res.writableEnded || res.destroyed);
+  }
+
+  private endSse(res: ServerResponse): void {
+    if (!res.writableEnded && !res.destroyed) {
+      res.end();
+    }
+  }
+
   constructor(
     private readonly config: ChatEngineConfig,
     private readonly db: DatabaseAdapter,
@@ -432,6 +470,28 @@ export class ChatEngine {
     let redactionInfo: { count: number; types: string[] } | undefined;
     if (settings.redactionEnabled) {
       const rd = await applyRedaction(ctx, contentWithAttachments, settings.redactionPatterns);
+      if (rd.error) {
+        const denyContent = 'Your message could not be processed safely because redaction failed before execution.';
+        const assistMsgId = randomUUID();
+        await this.db.addMessage({
+          id: assistMsgId,
+          chatId,
+          role: 'assistant',
+          content: denyContent,
+          metadata: JSON.stringify({
+            guardrail: { decision: 'deny', reason: denyContent },
+            redaction: { error: rd.error },
+            traceId,
+          }),
+        });
+        return {
+          assistantContent: denyContent,
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          cost: 0,
+          latencyMs: Date.now() - startMs,
+          guardrail: { decision: 'deny', reason: denyContent },
+        };
+      }
       processedContent = rd.redacted;
       if (rd.wasModified) {
         redactionInfo = { count: rd.detections.length, types: [...new Set(rd.detections.map((d: any) => d.type))] };
@@ -649,7 +709,13 @@ export class ChatEngine {
     // Eval — pass the overall guardrail decision so the score reflects grounding/sycophancy warnings
     const overallGuardrailDecision = guardrailInfo?.decision ?? 'allow';
     let evalInfo: { passed: number; failed: number; total: number; score: number } | undefined;
-    evalInfo = await runPostEval(this.db, ctx, userId, chatId, processedContent, assistantContent, latencyMs, cost, overallGuardrailDecision);
+    let evalError: string | undefined;
+    const evalResult = await runPostEval(this.db, ctx, userId, chatId, processedContent, assistantContent, latencyMs, cost, overallGuardrailDecision);
+    if ('error' in evalResult) {
+      evalError = evalResult.error;
+    } else {
+      evalInfo = evalResult;
+    }
 
     // Save assistant message
     const assistMsgId = randomUUID();
@@ -670,7 +736,9 @@ export class ChatEngine {
         redactionEnabled: settings.redactionEnabled || undefined,
         steps: steps ? steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })) : undefined,
         eval: evalInfo,
+        evalError,
         guardrail: guardrailInfo,
+        guardrailError: preGuardrail.error ?? postGuardrail.error,
         cognitive: postGuardrail.cognitive,
         policyChecks: policyChecks?.length ? policyChecks : undefined,
         promptContracts: contractInfo,
@@ -782,7 +850,20 @@ export class ChatEngine {
     const resolvedSystemPrompt = await resolveSystemPrompt(this.db, settings);
     const resolvedPrompt = await this.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
     const traceId = randomUUID();
-    const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
+    const abortController = new AbortController();
+    let clientDisconnected = false;
+    const onClientClose = () => {
+      clientDisconnected = true;
+      abortController.abort();
+    };
+    res.once('close', onClientClose);
+
+    const ctx = weaveContext({
+      userId,
+      deadline: Date.now() + 120_000,
+      signal: abortController.signal,
+      metadata: { traceId, chatId },
+    });
 
     const attachments = normalizeAttachments(opts?.attachments);
     const contentWithAttachments = composeUserInput(content, attachments);
@@ -792,6 +873,26 @@ export class ChatEngine {
     let redactionInfo: { count: number; types: string[] } | undefined;
     if (settings.redactionEnabled) {
       const rd = await applyRedaction(ctx, contentWithAttachments, settings.redactionPatterns);
+      if (rd.error) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+        const denyContent = 'Your message could not be processed safely because redaction failed before execution.';
+        await this.writeSseEvent(res, { type: 'text', text: denyContent });
+        await this.writeSseEvent(res, { type: 'guardrail', decision: 'deny', reason: denyContent, error: rd.error });
+        await this.writeSseEvent(res, { type: 'done', usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, cost: 0, latencyMs: 0 });
+        this.endSse(res);
+        await this.db.addMessage({
+          id: randomUUID(),
+          chatId,
+          role: 'assistant',
+          content: denyContent,
+          metadata: JSON.stringify({
+            guardrail: { decision: 'deny', reason: denyContent },
+            redaction: { error: rd.error },
+            traceId,
+          }),
+        });
+        return;
+      }
       processedContent = rd.redacted;
       if (rd.wasModified) {
         redactionInfo = { count: rd.detections.length, types: [...new Set(rd.detections.map((d: any) => d.type))] };
@@ -833,13 +934,13 @@ export class ChatEngine {
     if (preGuardrail.decision === 'deny') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
       const denyContent = preGuardrail.reason || 'Your message was blocked by a guardrail policy.';
-      res.write(`data: ${JSON.stringify({ type: 'text', text: denyContent })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: 'guardrail', decision: 'deny', reason: preGuardrail.reason })}\n\n`);
+      await this.writeSseEvent(res, { type: 'text', text: denyContent });
+      await this.writeSseEvent(res, { type: 'guardrail', decision: 'deny', reason: preGuardrail.reason });
       if (preGuardrail.cognitive) {
-        res.write(`data: ${JSON.stringify({ type: 'cognitive', ...preGuardrail.cognitive })}\n\n`);
+        await this.writeSseEvent(res, { type: 'cognitive', ...preGuardrail.cognitive });
       }
-      res.write(`data: ${JSON.stringify({ type: 'done', usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, cost: 0, latencyMs: 0 })}\n\n`);
-      res.end();
+      await this.writeSseEvent(res, { type: 'done', usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, cost: 0, latencyMs: 0 });
+      this.endSse(res);
       await this.db.addMessage({
         id: randomUUID(),
         chatId,
@@ -860,10 +961,10 @@ export class ChatEngine {
         'X-Accel-Buffering': 'no',
       });
       if (redactionInfo) {
-        res.write(`data: ${JSON.stringify({ type: 'redaction', ...redactionInfo })}\n\n`);
+        await this.writeSseEvent(res, { type: 'redaction', ...redactionInfo });
       }
-      res.write(`data: ${JSON.stringify({ type: 'text', text: identityRecall })}\n\n`);
-      res.write(`data: ${JSON.stringify({
+      await this.writeSseEvent(res, { type: 'text', text: identityRecall });
+      await this.writeSseEvent(res, {
         type: 'done',
         usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
         cost: 0,
@@ -871,7 +972,7 @@ export class ChatEngine {
         model: 'memory-recall',
         provider: 'local',
         mode: settings.mode,
-      })}\n\n`);
+      });
 
       await this.db.addMessage({
         id: randomUUID(),
@@ -896,7 +997,7 @@ export class ChatEngine {
         promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0, latencyMs,
       });
 
-      res.end();
+      this.endSse(res);
       return;
     }
 
@@ -928,7 +1029,7 @@ export class ChatEngine {
 
     // Send redaction event
     if (redactionInfo) {
-      res.write(`data: ${JSON.stringify({ type: 'redaction', ...redactionInfo })}\n\n`);
+      await this.writeSseEvent(res, { type: 'redaction', ...redactionInfo });
     }
 
     const startMs = Date.now();
@@ -937,6 +1038,8 @@ export class ChatEngine {
     let steps: AgentStep[] = [];
     let toolCallEvents: ToolCallObservableEvent[] = [];
     let streamContractInfo: PromptContractValidationReport | undefined;
+    let streamErrored = false;
+    let streamErrorMessage: string | undefined;
 
     try {
       if (settings.mode === 'agent' || settings.mode === 'supervisor') {
@@ -962,9 +1065,19 @@ export class ChatEngine {
           for await (const chunk of stream) {
             if (chunk.type === 'text' && chunk.text) {
               fullText += chunk.text;
-              res.write(`data: ${JSON.stringify({ type: 'text', text: chunk.text })}\n\n`);
+              const delivered = await this.writeSseEvent(res, { type: 'text', text: chunk.text });
+              if (!delivered) {
+                clientDisconnected = true;
+                abortController.abort();
+                break;
+              }
             } else if (chunk.type === 'reasoning' && chunk.reasoning) {
-              res.write(`data: ${JSON.stringify({ type: 'reasoning', text: chunk.reasoning })}\n\n`);
+              const delivered = await this.writeSseEvent(res, { type: 'reasoning', text: chunk.reasoning });
+              if (!delivered) {
+                clientDisconnected = true;
+                abortController.abort();
+                break;
+              }
             } else if (chunk.type === 'usage' && chunk.usage) {
               finalUsage = { promptTokens: chunk.usage.promptTokens, completionTokens: chunk.usage.completionTokens, totalTokens: chunk.usage.totalTokens };
             } else if (chunk.type === 'done') {
@@ -975,12 +1088,15 @@ export class ChatEngine {
           const response = await model.generate(ctx, request);
           fullText = response.content;
           finalUsage = { ...response.usage };
-          res.write(`data: ${JSON.stringify({ type: 'text', text: response.content })}\n\n`);
+          await this.writeSseEvent(res, { type: 'text', text: response.content });
         }
       }
     } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : 'Stream error';
-      res.write(`data: ${JSON.stringify({ type: 'error', error: errMsg })}\n\n`);
+      streamErrored = true;
+      streamErrorMessage = err instanceof Error ? err.message : 'Stream error';
+      if (!clientDisconnected) {
+        await this.writeSseEvent(res, { type: 'error', error: streamErrorMessage });
+      }
     }
 
     const latencyMs = Date.now() - startMs;
@@ -988,12 +1104,34 @@ export class ChatEngine {
     const cost = calculateCost(modelId, finalUsage.promptTokens, finalUsage.completionTokens, streamDbPricing.get(modelId));
 
     // Record health outcome
-    this.recordModelOutcome(modelId, provider, latencyMs, true);
+    this.recordModelOutcome(modelId, provider, latencyMs, !streamErrored && !clientDisconnected);
+
+    if (clientDisconnected) {
+      return;
+    }
+
+    // If stream failed before any content, avoid persisting misleading assistant rows.
+    if (streamErrored && !fullText.trim()) {
+      await this.writeSseEvent(res, {
+        type: 'done',
+        usage: finalUsage,
+        cost,
+        latencyMs,
+        model: modelId,
+        provider,
+        mode: settings.mode,
+        streamInterrupted: true,
+        error: streamErrorMessage,
+        traceId,
+      });
+      this.endSse(res);
+      return;
+    }
 
     // Human-task policy checks on tool calls
     const policyChecks = steps.length ? await evaluateTaskPolicies(this.db, steps) : undefined;
     if (policyChecks?.length) {
-      res.write(`data: ${JSON.stringify({ type: 'policy_checks', checks: policyChecks })}\n\n`);
+      await this.writeSseEvent(res, { type: 'policy_checks', checks: policyChecks });
     }
 
     // Guard against sending/persisting empty stream output after execution.
@@ -1002,7 +1140,7 @@ export class ChatEngine {
       fullText = hadExecutionActivity
         ? 'I completed execution steps but could not produce a final response text. Please retry this request; if this repeats, check the trace for this run.'
         : 'I could not produce a response text for this request. Please retry.';
-      res.write(`data: ${JSON.stringify({ type: 'text', text: fullText })}\n\n`);
+      await this.writeSseEvent(res, { type: 'text', text: fullText });
     }
 
     // Post-execution guardrails (must run before eval so the decision feeds into the eval score)
@@ -1024,26 +1162,30 @@ export class ChatEngine {
       toolEvidence: streamToolEvidence,
     });
     if (postGuardrail.cognitive) {
-      res.write(`data: ${JSON.stringify({ type: 'cognitive', ...postGuardrail.cognitive })}\n\n`);
+      await this.writeSseEvent(res, { type: 'cognitive', ...postGuardrail.cognitive });
     }
     if (postGuardrail.decision !== 'allow') {
-      res.write(`data: ${JSON.stringify({ type: 'guardrail', decision: postGuardrail.decision, reason: postGuardrail.reason })}\n\n`);
+      await this.writeSseEvent(res, { type: 'guardrail', decision: postGuardrail.decision, reason: postGuardrail.reason });
     }
 
     // Eval — pass guardrail decision so the score reflects grounding/sycophancy warnings
     const streamGuardrailDecision = postGuardrail.decision as 'allow' | 'warn' | 'deny';
-    const evalInfo = await runPostEval(this.db, ctx, userId, chatId, processedContent, fullText, latencyMs, cost, streamGuardrailDecision);
+    const evalResult = await runPostEval(this.db, ctx, userId, chatId, processedContent, fullText, latencyMs, cost, streamGuardrailDecision);
+    const evalInfo = 'error' in evalResult ? undefined : evalResult;
+    const evalError = 'error' in evalResult ? evalResult.error : undefined;
     if (evalInfo) {
-      res.write(`data: ${JSON.stringify({ type: 'eval', ...evalInfo })}\n\n`);
+      await this.writeSseEvent(res, { type: 'eval', ...evalInfo });
+    } else if (evalError) {
+      await this.writeSseEvent(res, { type: 'eval_error', error: evalError });
     }
 
     streamContractInfo = await validatePromptContractsAgainstDb(fullText, this.db);
     if (streamContractInfo) {
-      res.write(`data: ${JSON.stringify({ type: 'contracts', ...streamContractInfo })}\n\n`);
+      await this.writeSseEvent(res, { type: 'contracts', ...streamContractInfo });
     }
 
     // Done event
-    res.write(`data: ${JSON.stringify({
+    await this.writeSseEvent(res, {
       type: 'done',
       usage: finalUsage,
       cost,
@@ -1058,10 +1200,13 @@ export class ChatEngine {
       steps: steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })),
       cognitive: postGuardrail.cognitive,
       contracts: streamContractInfo,
+      evalError,
+      guardrailError: preGuardrail.error ?? postGuardrail.error,
       promptStrategy: resolvedSystemPrompt.strategy,
       promptResolution: resolvedSystemPrompt.resolution,
+      streamInterrupted: streamErrored || undefined,
       traceId,
-    })}\n\n`);
+    });
 
     // Persist before closing the stream so immediate follow-up chats can recall memory.
     const assistMsgId = randomUUID();
@@ -1078,12 +1223,15 @@ export class ChatEngine {
         redactionEnabled: settings.redactionEnabled || undefined,
         steps: steps.length ? steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })) : undefined,
         eval: evalInfo,
+        evalError,
         guardrail: postGuardrail.decision !== 'allow' ? { decision: postGuardrail.decision, reason: postGuardrail.reason } : undefined,
+        guardrailError: preGuardrail.error ?? postGuardrail.error,
         cognitive: postGuardrail.cognitive,
         policyChecks: policyChecks?.length ? policyChecks : undefined,
         promptContracts: streamContractInfo,
         promptStrategy: resolvedSystemPrompt.strategy,
         promptResolution: resolvedSystemPrompt.resolution,
+        streamInterrupted: streamErrored || undefined,
         traceId,
       }),
       tokensUsed: finalUsage.totalTokens, cost, latencyMs,
@@ -1121,7 +1269,7 @@ export class ChatEngine {
         streamMemorySettings.enabledTools,
       ),
     );
-    res.end();
+    this.endSse(res);
   }
 
   // ── Enterprise tools loader ─────────────────────────────────
@@ -1354,7 +1502,7 @@ export class ChatEngine {
         try {
           const parsed = JSON.parse(event.data['result'] as string);
           if (parsed.base64) {
-            res.write(`data: ${JSON.stringify({ type: 'screenshot', base64: parsed.base64, format: parsed.format || 'png' })}\n\n`);
+            void this.writeSseEvent(res, { type: 'screenshot', base64: parsed.base64, format: parsed.format || 'png' });
           }
         } catch { /* not JSON or no base64 — ignore */ }
       }
@@ -1448,13 +1596,13 @@ export class ChatEngine {
 
     if (forceWorkerDataAnalysis) {
       const guarded = await this.runWithCseSuccessGuard(agent, ctx, messages, routedGoal, true);
-      res.write(`data: ${JSON.stringify({ type: 'text', text: guarded.output })}\n\n`);
+      await this.writeSseEvent(res, { type: 'text', text: guarded.output });
       for (const step of guarded.steps) {
-        res.write(`data: ${JSON.stringify({
+        await this.writeSseEvent(res, {
           type: 'step',
           step: { index: step.index, type: step.type, content: step.content, toolCall: step.toolCall, delegation: step.delegation, durationMs: step.durationMs },
           phase: 'step_end',
-        })}\n\n`);
+        });
       }
       return { result: guarded, toolCallEvents: toolCallObserver.events };
     }
@@ -1469,7 +1617,7 @@ export class ChatEngine {
           case 'step_start':
           case 'step_end':
             if (event.step) {
-              res.write(`data: ${JSON.stringify({
+              await this.writeSseEvent(res, {
                 type: 'step',
                 step: {
                   index: event.step.index,
@@ -1480,31 +1628,31 @@ export class ChatEngine {
                   durationMs: event.step.durationMs,
                 },
                 phase: event.type,
-              })}\n\n`);
+              });
             }
             break;
           case 'text_chunk':
             if (event.text) {
-              res.write(`data: ${JSON.stringify({ type: 'text', text: event.text })}\n\n`);
+              await this.writeSseEvent(res, { type: 'text', text: event.text });
             }
             break;
           case 'tool_start':
             if (event.step?.toolCall) {
-              res.write(`data: ${JSON.stringify({
+              await this.writeSseEvent(res, {
                 type: 'tool_start',
                 name: event.step.toolCall.name,
                 arguments: event.step.toolCall.arguments,
-              })}\n\n`);
+              });
             }
             break;
           case 'tool_end':
             if (event.step?.toolCall) {
-              res.write(`data: ${JSON.stringify({
+              await this.writeSseEvent(res, {
                 type: 'tool_end',
                 name: event.step.toolCall.name,
                 result: event.step.toolCall.result,
                 durationMs: event.step.durationMs,
-              })}\n\n`);
+              });
             }
             break;
           case 'done':
@@ -1518,15 +1666,15 @@ export class ChatEngine {
 
     // Fallback: non-streaming agent run, send result as single text event
     const result = await agent.run(ctx, { messages, goal: routedGoal });
-    res.write(`data: ${JSON.stringify({ type: 'text', text: result.output })}\n\n`);
+    await this.writeSseEvent(res, { type: 'text', text: result.output });
 
     // Send step summaries
     for (const step of result.steps) {
-      res.write(`data: ${JSON.stringify({
+      await this.writeSseEvent(res, {
         type: 'step',
         step: { index: step.index, type: step.type, content: step.content, toolCall: step.toolCall, delegation: step.delegation, durationMs: step.durationMs },
         phase: 'step_end',
-      })}\n\n`);
+      });
     }
 
     return { result, toolCallEvents: toolCallObserver.events };

@@ -26,7 +26,7 @@ import {
   type ContainerRunResult,
   type ResultCache,
 } from './index.js';
-import { createSandbox } from '../../sandbox.js';
+import { createSandbox, createSimulatedSandbox } from '../../sandbox.js';
 import { createSandboxPolicy } from '../../policy.js';
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -300,14 +300,27 @@ describe('7. Stdout / stderr cap (via FakeRuntime truncation flag)', () => {
 // ─── 8. Backwards compatibility ──────────────────────────────
 
 describe('8. Backwards compatibility — in-process executor unchanged', () => {
-  it('createSandbox() still executes code without error', async () => {
-    const sandbox = createSandbox();
+  it('createSimulatedSandbox() still executes code without error', async () => {
+    const sandbox = createSimulatedSandbox();
     const policy = createSandboxPolicy({ name: 'compat-test' });
     const result = await sandbox.execute('const x = 1 + 1;', policy);
     expect(result.status).toBe('success');
   });
 
-  it('createSandbox() terminate() resolves cleanly for unknown id', async () => {
+  it('createSimulatedSandbox() terminate() resolves cleanly for unknown id', async () => {
+    const sandbox = createSimulatedSandbox();
+    await expect(sandbox.terminate('nonexistent-id')).resolves.toBeUndefined();
+  });
+
+  it('createSandbox() returns not-available error (no real executor configured)', async () => {
+    const sandbox = createSandbox();
+    const policy = createSandboxPolicy({ name: 'na-test' });
+    const result = await sandbox.execute('const x = 1;', policy);
+    expect(result.status).toBe('error');
+    expect(result.error).toMatch(/No sandbox executor is configured/);
+  });
+
+  it('createSandbox() terminate() resolves cleanly', async () => {
     const sandbox = createSandbox();
     await expect(sandbox.terminate('nonexistent-id')).resolves.toBeUndefined();
   });

@@ -27,6 +27,7 @@ import type {
   CollaborationSessionRow, ComplianceRuleRow, GraphConfigRow, PluginConfigRow,
   ScaffoldTemplateRow, RecipeConfigRow, WidgetConfigRow, ValidationRuleRow,
   SemanticMemoryRow, EntityMemoryRow,
+  IdempotencyRecordRow,
   MemoryExtractionEventRow,
   MetricsSummary, WorkflowRunRow, GuardrailEvalRow, ModelPricingRow,
   WebsiteCredentialRow,
@@ -178,6 +179,51 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteExpiredSessions(): Promise<void> {
     this.d.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
+  }
+
+  async createIdempotencyRecord(record: Omit<IdempotencyRecordRow, 'created_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO idempotency_records (id, key, result_json, expires_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET
+         id = excluded.id,
+         result_json = excluded.result_json,
+         expires_at = excluded.expires_at`,
+    ).run(record.id, record.key, record.result_json, record.expires_at);
+  }
+
+  async getIdempotencyRecordByKey(key: string): Promise<IdempotencyRecordRow | null> {
+    return (this.d.prepare(
+      `SELECT * FROM idempotency_records WHERE key = ? AND expires_at > datetime('now')`,
+    ).get(key) as IdempotencyRecordRow | undefined) ?? null;
+  }
+
+  async deleteExpiredIdempotencyRecords(nowIso?: string): Promise<void> {
+    if (nowIso) {
+      this.d.prepare('DELETE FROM idempotency_records WHERE expires_at <= ?').run(nowIso);
+      return;
+    }
+    this.d.prepare("DELETE FROM idempotency_records WHERE expires_at <= datetime('now')").run();
+  }
+
+  async trimIdempotencyRecords(maxEntries: number): Promise<void> {
+    if (maxEntries <= 0) {
+      this.d.prepare('DELETE FROM idempotency_records').run();
+      return;
+    }
+    const stale = this.d.prepare(
+      'SELECT id FROM idempotency_records ORDER BY created_at DESC, id DESC LIMIT -1 OFFSET ?',
+    ).all(maxEntries) as Array<{ id: string }>;
+    if (stale.length === 0) return;
+    const del = this.d.prepare('DELETE FROM idempotency_records WHERE id = ?');
+    const tx = this.d.transaction((ids: Array<{ id: string }>) => {
+      for (const row of ids) del.run(row.id);
+    });
+    tx(stale);
+  }
+
+  async clearIdempotencyRecords(): Promise<void> {
+    this.d.prepare('DELETE FROM idempotency_records').run();
   }
 
   // ── OAuth Linked Accounts ──────────────────────────────────

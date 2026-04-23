@@ -11,6 +11,10 @@ import type {
   EventBus,
   AgentMemory,
   AgentPolicy,
+  ExecutionContext,
+  AgentStep,
+  AgentUsage,
+  ToolSchema,
 } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 
@@ -23,17 +27,26 @@ export interface GovernedAssistantOptions {
   policy?: AgentPolicy;
   /** Domain-specific system prompt */
   systemPrompt?: string;
-  /** Governance rules to inject into the system prompt */
+  /** Governance rules injected into the system prompt for model guidance */
   governanceRules?: string[];
+  /**
+   * Tool names explicitly denied at runtime via AgentPolicy.approveToolCall.
+   * This is the runtime enforcement layer; governanceRules is advisory only.
+   */
+  deniedTools?: string[];
   maxSteps?: number;
 }
 
 /**
- * Create an assistant with governance rules baked into the system prompt
- * and an optional policy for tool-call approval.
+ * Create an assistant with governance rules and runtime tool enforcement.
+ *
+ * Governance rules are injected into the system prompt as model-facing
+ * guidance. Denied tools are enforced at runtime via AgentPolicy so the
+ * block cannot be circumvented by model instructions.
  */
 export function createGovernedAssistant(opts: GovernedAssistantOptions): Agent {
   const rules = opts.governanceRules ?? [];
+  const denied = opts.deniedTools ?? [];
   const rulesBlock = rules.length > 0
     ? `\n\nGovernance rules:\n${rules.map((r, i) => `${i + 1}. ${r}`).join('\n')}`
     : '';
@@ -42,13 +55,44 @@ export function createGovernedAssistant(opts: GovernedAssistantOptions): Agent {
 If a user request violates any rule, decline politely and explain which rule applies.
 ${opts.systemPrompt ?? ''}${rulesBlock}`;
 
+  const callerPolicy = opts.policy;
+  const effectivePolicy: AgentPolicy = {
+    async shouldContinue(
+      ctx: ExecutionContext,
+      steps: readonly AgentStep[],
+      usage: AgentUsage,
+    ) {
+      if (callerPolicy) return callerPolicy.shouldContinue(ctx, steps, usage);
+      return { continue: true };
+    },
+
+    async approveToolCall(
+      ctx: ExecutionContext,
+      tool: ToolSchema,
+      args: Record<string, unknown>,
+    ) {
+      // Runtime enforcement for denied tools — not advisory prompt text.
+      if (denied.includes(tool.name)) {
+        return { approved: false, reason: `Tool "${tool.name}" is denied by governance policy.` };
+      }
+      if (callerPolicy?.approveToolCall) {
+        return callerPolicy.approveToolCall(ctx, tool, args);
+      }
+      return { approved: true };
+    },
+
+    ...(callerPolicy?.approveDelegation
+      ? { approveDelegation: callerPolicy.approveDelegation.bind(callerPolicy) }
+      : {}),
+  };
+
   return weaveAgent({
     name: opts.name ?? 'governed-assistant',
     model: opts.model,
     tools: opts.tools,
     bus: opts.bus,
     memory: opts.memory,
-    policy: opts.policy,
+    policy: effectivePolicy,
     systemPrompt,
     maxSteps: opts.maxSteps ?? 20,
   });

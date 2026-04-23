@@ -20,7 +20,7 @@ export async function evaluateGuardrails(
   input: string,
   stage: GuardrailStage,
   refs?: { userInput?: string; assistantOutput?: string; toolEvidence?: string },
-): Promise<{ decision: 'allow' | 'deny' | 'warn'; reason?: string; results: GuardrailResult[]; cognitive?: GuardrailCategorySummary }> {
+): Promise<{ decision: 'allow' | 'deny' | 'warn'; reason?: string; results: GuardrailResult[]; cognitive?: GuardrailCategorySummary; error?: string }> {
   try {
     const rows = await db.listGuardrails();
     const enabledRows = rows.filter(r => r.enabled && stageMatches(r.stage, stage));
@@ -53,7 +53,15 @@ export async function evaluateGuardrails(
 
     return { decision, reason, results, cognitive };
   } catch {
-    return { decision: 'allow', results: [] };
+    const reason = stage === 'pre-execution'
+      ? 'Guardrail evaluation failed before execution; request blocked.'
+      : 'Guardrail evaluation failed after execution; treat response as unverified.';
+    return {
+      decision: stage === 'pre-execution' ? 'deny' : 'warn',
+      reason,
+      results: [],
+      error: 'guardrail_evaluation_failed',
+    };
   }
 }
 

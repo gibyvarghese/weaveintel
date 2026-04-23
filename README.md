@@ -40,6 +40,25 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 - **Composable middleware** — Intercept any model call with typed middleware for logging, retries, redaction, caching, or custom logic.
 - **Production patterns built in** — Fallback chains, budget enforcement, PII redaction, structured output, evaluation suites, and observability from day one.
 
+## Maturity Status
+
+weaveIntel is not uniformly mature across every package surface. The framework is strongest where runtime enforcement and reference-app consumption are both real.
+
+- Production-ready in practice:
+  - tool catalog, tool policy enforcement, approvals, audit trails
+  - prompt runtime resolution, prompt versions/experiments, fragments/frameworks/contracts
+  - geneWeave auth/session/RBAC foundations
+- Beta:
+  - chat orchestration across direct, agent, and supervisor modes
+  - evaluation and guardrail composition in geneWeave
+  - policy-aware tool execution across the reference app
+- Preview / partial adoption:
+  - recipes as a framework runtime abstraction
+  - workflow-engine-led orchestration as the default path inside geneWeave chat flows
+  - package-owned durability adapters for every stateful subsystem
+
+If you are building a production app today, prefer the tool governance and prompt runtime layers first, and validate recipe/workflow abstractions against your exact execution path before relying on them as hard platform guarantees.
+
 ## Architecture
 
 ```

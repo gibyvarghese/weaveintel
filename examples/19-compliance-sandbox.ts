@@ -23,7 +23,7 @@
  *     • createResidencyEngine()    — Data residency rules (allowed/denied regions per data type)
  *     • createAuditExportManager() — Export audit records in specified format for regulators
  *   @weaveintel/sandbox     — Safe code execution environment:
- *     • createSandbox()            — Isolated execution environment for untrusted code
+ *     • createSimulatedSandbox()   — In-process simulator for dev/test (not real isolation)
  *     • createSandboxPolicy()      — Defines what the sandbox can access (network, FS, modules)
  *     • enforceLimits()            — CPU/memory/duration budgets for sandbox runs
  *   @weaveintel/reliability — Production reliability patterns:
@@ -47,7 +47,7 @@ import {
 } from '@weaveintel/compliance';
 
 import {
-  createSandbox,
+  createSimulatedSandbox,
   createSandboxPolicy,
   createDefaultLimits,
   enforceLimits,
@@ -252,10 +252,12 @@ console.log(`  Marked ready: ${ready?.recordCount} records, ${(ready?.sizeBytes 
 
 header('7. Code Sandbox — Safe Execution');
 
-// createSandbox() provides an isolated code execution environment.
+// createSimulatedSandbox() provides an in-process simulation environment for
+// development and testing. It does NOT execute code; use ContainerExecutor for
+// real isolated execution in production.
 // createSandboxPolicy() defines what is allowed (network, FS, modules).
 // .execute(code, policy) runs the code and returns status + output/error.
-const sandbox = createSandbox();
+const sandbox = createSimulatedSandbox();
 const policy = createSandboxPolicy({
   name: 'restricted',
   networkAccess: false,

@@ -184,6 +184,26 @@ export async function* anthropicStreamRequest(
 
   const decoder = new TextDecoder();
   let buffer = '';
+  let currentEvent = '';
+  let dataLines: string[] = [];
+
+  const flushEvent = (): AnthropicSSEEvent | undefined => {
+    if (dataLines.length === 0) {
+      currentEvent = '';
+      return undefined;
+    }
+    const dataStr = dataLines.join('\n');
+    dataLines = [];
+    try {
+      const data = JSON.parse(dataStr) as Record<string, unknown>;
+      const event = currentEvent || String(data['type'] ?? '');
+      currentEvent = '';
+      return { event, data };
+    } catch {
+      currentEvent = '';
+      return undefined;
+    }
+  };
 
   try {
     while (true) {
@@ -191,31 +211,37 @@ export async function* anthropicStreamRequest(
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
+      const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? '';
 
-      let currentEvent = '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          currentEvent = '';
-          continue;
-        }
-        if (trimmed.startsWith('event: ')) {
-          currentEvent = trimmed.slice(7);
-          continue;
-        }
-        if (trimmed.startsWith('data: ')) {
-          const dataStr = trimmed.slice(6);
-          try {
-            const data = JSON.parse(dataStr);
-            yield { event: currentEvent || (data as Record<string, unknown>)['type'] as string || '', data };
-          } catch {
-            // skip malformed data
+      for (const rawLine of lines) {
+        const line = rawLine.trimEnd();
+        if (line === '') {
+          const evt = flushEvent();
+          if (evt) {
+            yield evt;
           }
-          currentEvent = '';
+          continue;
+        }
+
+        if (line.startsWith(':')) {
+          continue;
+        }
+
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trimStart();
+          continue;
+        }
+
+        if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trimStart());
         }
       }
+    }
+
+    const trailing = flushEvent();
+    if (trailing) {
+      yield trailing;
     }
   } finally {
     reader.releaseLock();

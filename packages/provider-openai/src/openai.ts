@@ -154,6 +154,19 @@ async function* openaiStreamRequest(
 
   const decoder = new TextDecoder();
   let buffer = '';
+  let eventType = '';
+  let dataLines: string[] = [];
+
+  const flushEvent = (): { event: string; data: string } | undefined => {
+    if (dataLines.length === 0) {
+      eventType = '';
+      return undefined;
+    }
+    const event = { event: eventType, data: dataLines.join('\n') };
+    eventType = '';
+    dataLines = [];
+    return event;
+  };
 
   try {
     while (true) {
@@ -161,18 +174,48 @@ async function* openaiStreamRequest(
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
+      const lines = buffer.split(/\r?\n/);
       buffer = lines.pop() ?? '';
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || !trimmed.startsWith('data: ')) continue;
-        const data = trimmed.slice(6);
-        if (data === '[DONE]') return;
+      for (const rawLine of lines) {
+        const line = rawLine.trimEnd();
+        if (line === '') {
+          const event = flushEvent();
+          if (!event) continue;
+          const data = event.data.trim();
+          if (data === '[DONE]') return;
+          try {
+            yield JSON.parse(data);
+          } catch {
+            // skip malformed chunks
+          }
+          continue;
+        }
+
+        if (line.startsWith(':')) {
+          continue;
+        }
+
+        if (line.startsWith('event:')) {
+          eventType = line.slice(6).trimStart();
+          continue;
+        }
+
+        if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trimStart());
+        }
+      }
+    }
+
+    // Flush trailing event when stream ends without an extra blank line.
+    const trailing = flushEvent();
+    if (trailing) {
+      const data = trailing.data.trim();
+      if (data !== '[DONE]') {
         try {
           yield JSON.parse(data);
         } catch {
-          // skip malformed chunks
+          // skip malformed trailing chunk
         }
       }
     }

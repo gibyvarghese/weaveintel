@@ -33,6 +33,15 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   safeExec(db, "ALTER TABLE users ADD COLUMN persona TEXT NOT NULL DEFAULT 'tenant_user'");
   safeExec(db, 'ALTER TABLE users ADD COLUMN tenant_id TEXT');
 
+  safeExec(db, `CREATE TABLE IF NOT EXISTS idempotency_records (
+    id TEXT PRIMARY KEY,
+    key TEXT NOT NULL UNIQUE,
+    result_json TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_idempotency_expires_at ON idempotency_records(expires_at)');
+
   safeExec(db, 'ALTER TABLE prompts ADD COLUMN key TEXT');
   safeExec(db, "ALTER TABLE prompts ADD COLUMN prompt_type TEXT NOT NULL DEFAULT 'template'");
   safeExec(db, 'ALTER TABLE prompts ADD COLUMN owner TEXT');

@@ -590,6 +590,14 @@ export interface ToolApprovalRequestRow {
   resolution_note: string | null;
 }
 
+export interface IdempotencyRecordRow {
+  id: string;
+  key: string;
+  result_json: string;
+  expires_at: string;
+  created_at: string;
+}
+
 export interface WorkerAgentRow {
   id: string;
   name: string;
@@ -1254,6 +1262,13 @@ export interface DatabaseAdapter {
   getSession(id: string): Promise<SessionRow | null>;
   deleteSession(id: string): Promise<void>;
   deleteExpiredSessions(): Promise<void>;
+
+  // Idempotency records
+  createIdempotencyRecord(record: Omit<IdempotencyRecordRow, 'created_at'>): Promise<void>;
+  getIdempotencyRecordByKey(key: string): Promise<IdempotencyRecordRow | null>;
+  deleteExpiredIdempotencyRecords(nowIso?: string): Promise<void>;
+  trimIdempotencyRecords(maxEntries: number): Promise<void>;
+  clearIdempotencyRecords(): Promise<void>;
 
   // OAuth Linked Accounts
   createOAuthLinkedAccount(account: Omit<OAuthLinkedAccountRow, 'linked_at'>): Promise<void>;

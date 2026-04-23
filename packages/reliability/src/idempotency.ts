@@ -20,6 +20,26 @@ export interface IdempotencyStore {
   getPolicy(): IdempotencyPolicy;
 }
 
+export interface AsyncIdempotencyStore {
+  check(key: string): Promise<IdempotencyCheckResult>;
+  record(key: string, result: unknown): Promise<void>;
+  clear(): Promise<void>;
+  getPolicy(): IdempotencyPolicy;
+}
+
+export interface DurableIdempotencyEntry {
+  readonly result: unknown;
+  readonly expiresAt: number;
+}
+
+export interface DurableIdempotencyRepository {
+  get(key: string): Promise<DurableIdempotencyEntry | null>;
+  set(key: string, entry: DurableIdempotencyEntry): Promise<void>;
+  deleteExpired(nowMs: number): Promise<void>;
+  trimOldest(maxEntries: number): Promise<void>;
+  clear(): Promise<void>;
+}
+
 export function createIdempotencyStore(policy: IdempotencyPolicy): IdempotencyStore {
   const entries = new Map<string, StoredEntry>();
 
@@ -66,6 +86,42 @@ export function createIdempotencyStore(policy: IdempotencyPolicy): IdempotencySt
 
     clear(): void {
       entries.clear();
+    },
+
+    getPolicy(): IdempotencyPolicy {
+      return policy;
+    },
+  };
+}
+
+export function createDurableIdempotencyStore(
+  policy: IdempotencyPolicy,
+  repository: DurableIdempotencyRepository,
+): AsyncIdempotencyStore {
+  return {
+    async check(key: string): Promise<IdempotencyCheckResult> {
+      await repository.deleteExpired(Date.now());
+      const entry = await repository.get(key);
+      if (entry === null) {
+        return { isDuplicate: false };
+      }
+      return { isDuplicate: true, previousResult: entry.result };
+    },
+
+    async record(key: string, result: unknown): Promise<void> {
+      const nowMs = Date.now();
+      await repository.deleteExpired(nowMs);
+      await repository.set(key, {
+        result,
+        expiresAt: nowMs + policy.ttlMs,
+      });
+      if (policy.maxEntries !== undefined) {
+        await repository.trimOldest(policy.maxEntries);
+      }
+    },
+
+    async clear(): Promise<void> {
+      await repository.clear();
     },
 
     getPolicy(): IdempotencyPolicy {

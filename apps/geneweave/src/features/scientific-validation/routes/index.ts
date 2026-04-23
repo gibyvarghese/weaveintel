@@ -16,7 +16,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { createIdempotencyStore } from '@weaveintel/reliability';
+import { createDurableIdempotencyStore, type DurableIdempotencyEntry } from '@weaveintel/reliability';
 import type { DatabaseAdapter } from '../../../db.js';
 import type { SVChatBridge, SVRunInput } from '../chat-bridge.js';
 
@@ -36,6 +36,39 @@ interface Router {
 }
 
 const TERMINAL_STATUSES = new Set(['verdict', 'abandoned']);
+
+function createDbBackedIdempotencyStore(db: DatabaseAdapter) {
+  return createDurableIdempotencyStore(
+    { ttlMs: 24 * 60 * 60 * 1000, maxEntries: 10_000 },
+    {
+      async get(key: string) {
+        const record = await db.getIdempotencyRecordByKey(key);
+        if (!record) return null;
+        return {
+          result: JSON.parse(record.result_json) as unknown,
+          expiresAt: Date.parse(record.expires_at),
+        };
+      },
+      async set(key: string, entry: DurableIdempotencyEntry) {
+        await db.createIdempotencyRecord({
+          id: randomUUID(),
+          key,
+          result_json: JSON.stringify(entry.result),
+          expires_at: new Date(entry.expiresAt).toISOString(),
+        });
+      },
+      async deleteExpired(nowMs: number) {
+        await db.deleteExpiredIdempotencyRecords(new Date(nowMs).toISOString());
+      },
+      async trimOldest(maxEntries: number) {
+        await db.trimIdempotencyRecords(maxEntries);
+      },
+      async clear() {
+        await db.clearIdempotencyRecords();
+      },
+    },
+  );
+}
 
 /** Send a single SSE frame. */
 function sseFrame(res: ServerResponse, event: string, id: string, data: unknown): void {
@@ -77,8 +110,7 @@ export function registerSVRoutes(
   readBody: ReadBodyHelper,
   runner?: SVChatBridge,
 ): void {
-  // Idempotency store for POST mutation routes (24-hour TTL, 10k entries max)
-  const iStore = createIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000, maxEntries: 10_000 });
+  const iStore = createDbBackedIdempotencyStore(db);
 
   const getHv = (suffix: string, handler: RouteHandler, opts?: { auth?: boolean; csrf?: boolean }) => {
     router.get(`/api/sv${suffix}`, handler, opts);
@@ -112,7 +144,7 @@ export function registerSVRoutes(
     // Idempotency-Key deduplication
     const idempotencyKey = req.headers['idempotency-key'] as string | undefined;
     if (idempotencyKey) {
-      const check = iStore.check(`hypotheses:${idempotencyKey}`);
+      const check = await iStore.check(`hypotheses:${idempotencyKey}`);
       if (check.isDuplicate) { json(res, 201, check.previousResult); return; }
     }
 
@@ -175,7 +207,7 @@ export function registerSVRoutes(
     }
 
     const responseBody = { id, status: 'queued', traceId, contractId };
-    if (idempotencyKey) iStore.record(`hypotheses:${idempotencyKey}`, responseBody);
+    if (idempotencyKey) await iStore.record(`hypotheses:${idempotencyKey}`, responseBody);
     json(res, 201, responseBody);
   }, { auth: true, csrf: true });
 
@@ -355,7 +387,7 @@ export function registerSVRoutes(
     // Idempotency-Key deduplication
     const reproduceKey = req.headers['idempotency-key'] as string | undefined;
     if (reproduceKey) {
-      const check = iStore.check(`reproduce:${reproduceKey}`);
+      const check = await iStore.check(`reproduce:${reproduceKey}`);
       if (check.isDuplicate) { json(res, 201, check.previousResult); return; }
     }
 
@@ -399,7 +431,7 @@ export function registerSVRoutes(
     }
 
     const reproduceBody = { id: newId, originalId: id, status: 'queued', traceId: newTraceId };
-    if (reproduceKey) iStore.record(`reproduce:${reproduceKey}`, reproduceBody);
+    if (reproduceKey) await iStore.record(`reproduce:${reproduceKey}`, reproduceBody);
     json(res, 201, reproduceBody);
   }, { auth: true, csrf: true });
 

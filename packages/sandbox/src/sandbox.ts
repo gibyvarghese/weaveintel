@@ -1,5 +1,13 @@
 /**
  * @weaveintel/sandbox — Main sandbox execution environment
+ *
+ * createSandbox() produces a not-available sandbox by default because the
+ * in-process simulator does not provide real isolation. Callers that need
+ * a development/test environment should use createSimulatedSandbox() and
+ * make that choice explicit in their configuration.
+ *
+ * For production isolated execution, wire in ContainerExecutor from the
+ * container executor package and pass it via SandboxExecutorOptions.
  */
 
 import type { Sandbox, SandboxPolicy, SandboxResult } from '@weaveintel/core';
@@ -7,6 +15,41 @@ import { randomUUID } from 'node:crypto';
 import { validatePolicy } from './policy.js';
 import { enforceLimits } from './limits.js';
 import { createSuccessResult, createErrorResult } from './result.js';
+
+// ─── Not-available sandbox ────────────────────────────────────────────────────
+
+/**
+ * createSandbox() returns a sandbox that declines all execution requests.
+ *
+ * Rationale: the former default was an in-process simulator that returned
+ * `status: 'success'` without running real code, module deny lists were
+ * bypassed by anything not matching a narrow regex, and callers had no way
+ * to know execution did not actually occur.
+ *
+ * To get simulation behavior (dev/test only), call createSimulatedSandbox().
+ */
+export function createSandbox(): Sandbox {
+  return {
+    async execute(code: string, policy: SandboxPolicy): Promise<SandboxResult> {
+      const executionId = randomUUID();
+      void code;
+      void policy;
+      return {
+        executionId,
+        status: 'error',
+        error:
+          'No sandbox executor is configured. ' +
+          'For isolated production execution, wire in ContainerExecutor. ' +
+          'For development/test simulation, use createSimulatedSandbox() instead.',
+        artifacts: [],
+        resourceUsage: { cpuMs: 0, memoryMb: 0, durationMs: 0 },
+      };
+    },
+    async terminate(_executionId: string): Promise<void> {
+      // No-op — no active executions
+    },
+  };
+}
 
 interface ExecutionEntry {
   id: string;
@@ -16,7 +59,16 @@ interface ExecutionEntry {
   abortController: AbortController;
 }
 
-export function createSandbox(): Sandbox {
+/**
+ * createSimulatedSandbox() provides an in-process simulator for development
+ * and testing only. It does NOT provide real isolation — the code is not
+ * executed at all; resource usage is estimated from code length. Module
+ * deny/allow lists are enforced via static analysis (regex), which can be
+ * bypassed by dynamic require patterns.
+ *
+ * Never use this in production for untrusted code.
+ */
+export function createSimulatedSandbox(): Sandbox {
   const executions = new Map<string, ExecutionEntry>();
 
   async function execute(code: string, policy: SandboxPolicy): Promise<SandboxResult> {

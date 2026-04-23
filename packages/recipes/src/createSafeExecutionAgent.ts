@@ -11,6 +11,10 @@ import type {
   EventBus,
   AgentMemory,
   AgentPolicy,
+  ExecutionContext,
+  AgentStep,
+  AgentUsage,
+  ToolSchema,
 } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 
@@ -21,7 +25,7 @@ export interface SafeExecutionAgentOptions {
   bus?: EventBus;
   memory?: AgentMemory;
   policy?: AgentPolicy;
-  /** Denied tool names (always blocked) */
+  /** Denied tool names (always blocked at runtime via AgentPolicy.approveToolCall) */
   deniedTools?: string[];
   /** Max execution time per tool call (ms) */
   maxToolExecutionMs?: number;
@@ -31,8 +35,9 @@ export interface SafeExecutionAgentOptions {
 }
 
 /**
- * Create an agent with safety constraints — denied tool list,
- * execution time limits, and defensive system prompt.
+ * Create an agent with safety constraints — denied tool list enforced at
+ * runtime via AgentPolicy.approveToolCall (not just prompt text), execution
+ * time limits in the system prompt advisory, and a defensive system prompt.
  */
 export function createSafeExecutionAgent(opts: SafeExecutionAgentOptions): Agent {
   const denied = opts.deniedTools ?? [];
@@ -47,13 +52,47 @@ ${denied.length > 0 ? `- Blocked tools: ${denied.join(', ')}\n` : ''}- Never exe
 Follow all safety rules. Prefer minimal, read-only operations.
 ${opts.systemPrompt ?? ''}${safetyBlock}`;
 
+  // Build an effective policy that enforces the denied-tool list at runtime,
+  // then delegates to any caller-supplied policy.
+  const callerPolicy = opts.policy;
+  const effectivePolicy: AgentPolicy = {
+    async shouldContinue(
+      ctx: ExecutionContext,
+      steps: readonly AgentStep[],
+      usage: AgentUsage,
+    ) {
+      if (callerPolicy) return callerPolicy.shouldContinue(ctx, steps, usage);
+      return { continue: true };
+    },
+
+    async approveToolCall(
+      ctx: ExecutionContext,
+      tool: ToolSchema,
+      args: Record<string, unknown>,
+    ) {
+      // Enforce denied list first — this is a hard runtime block, not advisory text.
+      if (denied.includes(tool.name)) {
+        return { approved: false, reason: `Tool "${tool.name}" is on the denied list for this agent.` };
+      }
+      // Delegate to caller policy if present
+      if (callerPolicy?.approveToolCall) {
+        return callerPolicy.approveToolCall(ctx, tool, args);
+      }
+      return { approved: true };
+    },
+
+    ...(callerPolicy?.approveDelegation
+      ? { approveDelegation: callerPolicy.approveDelegation.bind(callerPolicy) }
+      : {}),
+  };
+
   return weaveAgent({
     name: opts.name ?? 'safe-execution-agent',
     model: opts.model,
     tools: opts.tools,
     bus: opts.bus,
     memory: opts.memory,
-    policy: opts.policy,
+    policy: effectivePolicy,
     systemPrompt,
     maxSteps: opts.maxSteps ?? 15,
   });

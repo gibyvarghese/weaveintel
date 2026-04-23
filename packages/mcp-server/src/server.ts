@@ -36,7 +36,27 @@ interface JsonRpcResponse {
   error?: { code: number; message: string; data?: unknown };
 }
 
-export function weaveMCPServer(config: MCPServerConfig): MCPServer {
+/**
+ * Options for creating an MCP server.
+ *
+ * contextFactory — optional. Called for every tool/resource/prompt invocation
+ * to build the ExecutionContext that flows into handler functions. Use this to
+ * propagate caller identity (userId, tenantId), cancellation signal, and budget
+ * from the transport layer.
+ *
+ * If omitted, a fresh anonymous context is created per call (legacy behaviour —
+ * no identity, no tenant, no budget, no cancellation signal).
+ */
+export interface WeaveMCPServerOptions {
+  /**
+   * Factory that produces an ExecutionContext for each incoming request.
+   * Receives the raw JSON-RPC params so the factory can extract caller
+   * identity from an authentication header forwarded through params, etc.
+   */
+  contextFactory?: (params: Record<string, unknown>) => ExecutionContext;
+}
+
+export function weaveMCPServer(config: MCPServerConfig, options: WeaveMCPServerOptions = {}): MCPServer {
   const tools = new Map<string, { definition: MCPToolDefinition; handler: MCPToolHandler }>();
   const resources = new Map<string, { resource: MCPResource; handler: MCPResourceHandler }>();
   const prompts = new Map<string, { prompt: MCPPrompt; handler: MCPPromptHandler }>();
@@ -77,7 +97,13 @@ export function weaveMCPServer(config: MCPServerConfig): MCPServer {
           if (!tool) {
             error = { code: -32602, message: `Tool not found: ${name}` };
           } else {
-            const ctx = weaveContext();
+            // Use the caller-supplied context factory so identity, tenant,
+            // budget, and cancellation signal flow into the handler.
+            // Fall back to a fresh anonymous context when no factory is provided.
+            const params = request.params ?? {};
+            const ctx = options.contextFactory
+              ? options.contextFactory(params)
+              : weaveContext();
             result = await tool.handler(ctx, args);
           }
           break;

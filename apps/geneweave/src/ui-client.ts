@@ -224,63 +224,91 @@ async function sendMessage(text: string) {
     scrollMessages();
 
     let buf = '';
+    let dataLines: string[] = [];
+
+    const flushEvent = () => {
+      if (dataLines.length === 0) {
+        return;
+      }
+
+      const payload = dataLines.join('\n');
+      dataLines = [];
+
+      try {
+        const d = JSON.parse(payload);
+        if (d.type === 'text') assistantMsg.content += d.text || '';
+        else if (d.type === 'reasoning' && d.text) assistantMsg.steps.push({ type: 'thinking', text: d.text });
+        else if (d.type === 'step') assistantMsg.steps.push(d.step || d);
+        else if (d.type === 'tool_start') assistantMsg.steps.push({ kind: 'tool_start', name: d.name, input: d.input });
+        else if (d.type === 'tool_end') {
+          const last = assistantMsg.steps[assistantMsg.steps.length - 1];
+          if (last && last.kind === 'tool_start') last.result = d.result;
+        }
+        else if (d.type === 'redaction') assistantMsg.redaction = d;
+        else if (d.type === 'eval') assistantMsg.evalResult = d;
+        else if (d.type === 'cognitive') assistantMsg.cognitive = d;
+        else if (d.type === 'guardrail') assistantMsg.guardrail = d;
+        else if (d.type === 'screenshot') {
+          if (!assistantMsg.screenshots) assistantMsg.screenshots = [];
+          assistantMsg.screenshots.push({ base64: d.base64, format: d.format || 'png' });
+        }
+        else if (d.type === 'handoff') {
+          state.handoffRequest = d;
+          render();
+        }
+        else if (d.type === 'done') {
+          assistantMsg.usage = d.usage;
+          assistantMsg.cost = d.cost;
+          assistantMsg.latency_ms = d.latencyMs;
+          if (d.steps) assistantMsg.steps = d.steps;
+          if (d.eval) assistantMsg.evalResult = d.eval;
+          if (d.cognitive) assistantMsg.cognitive = d.cognitive;
+          assistantMsg.activeSkills = Array.isArray(d.activeSkills) ? d.activeSkills : [];
+          assistantMsg.enabledTools = Array.isArray(d.enabledTools) ? d.enabledTools : [];
+          assistantMsg.skillTools = Array.isArray(d.skillTools) ? d.skillTools : [];
+          assistantMsg.skillPromptApplied = !!d.skillPromptApplied;
+          if (d.redaction) assistantMsg.redaction = d.redaction;
+          if (d.guardrail) assistantMsg.guardrail = d.guardrail;
+          assistantMsg.processState = 'completed';
+          assistantMsg.processExpanded = false;
+          touchChat(chatId, d.title || undefined);
+        }
+      } catch {
+        // Ignore malformed stream chunks.
+      }
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
       buf += decoder.decode(value, { stream: true });
-      const lines = buf.split('\n');
+      const lines = buf.split(/\r?\n/);
       buf = lines.pop() || '';
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const d = JSON.parse(line.slice(6));
-          if (d.type === 'text') assistantMsg.content += d.text || '';
-          else if (d.type === 'reasoning' && d.text) assistantMsg.steps.push({ type: 'thinking', text: d.text });
-          else if (d.type === 'step') assistantMsg.steps.push(d.step || d);
-          else if (d.type === 'tool_start') assistantMsg.steps.push({ kind: 'tool_start', name: d.name, input: d.input });
-          else if (d.type === 'tool_end') {
-            const last = assistantMsg.steps[assistantMsg.steps.length - 1];
-            if (last && last.kind === 'tool_start') last.result = d.result;
-          }
-          else if (d.type === 'redaction') assistantMsg.redaction = d;
-          else if (d.type === 'eval') assistantMsg.evalResult = d;
-          else if (d.type === 'cognitive') assistantMsg.cognitive = d;
-          else if (d.type === 'guardrail') assistantMsg.guardrail = d;
-          else if (d.type === 'screenshot') {
-            if (!assistantMsg.screenshots) assistantMsg.screenshots = [];
-            assistantMsg.screenshots.push({ base64: d.base64, format: d.format || 'png' });
-          }
-          else if (d.type === 'handoff') {
-            state.handoffRequest = d;
-            render();
-          }
-          else if (d.type === 'done') {
-            assistantMsg.usage = d.usage;
-            assistantMsg.cost = d.cost;
-            assistantMsg.latency_ms = d.latencyMs;
-            if (d.steps) assistantMsg.steps = d.steps;
-            if (d.eval) assistantMsg.evalResult = d.eval;
-            if (d.cognitive) assistantMsg.cognitive = d.cognitive;
-            assistantMsg.activeSkills = Array.isArray(d.activeSkills) ? d.activeSkills : [];
-            assistantMsg.enabledTools = Array.isArray(d.enabledTools) ? d.enabledTools : [];
-            assistantMsg.skillTools = Array.isArray(d.skillTools) ? d.skillTools : [];
-            assistantMsg.skillPromptApplied = !!d.skillPromptApplied;
-            if (d.redaction) assistantMsg.redaction = d.redaction;
-            if (d.guardrail) assistantMsg.guardrail = d.guardrail;
-            assistantMsg.processState = 'completed';
-            assistantMsg.processExpanded = false;
-            touchChat(chatId, d.title || undefined);
-          }
-        } catch {
-          // Ignore malformed stream chunks.
+      for (const rawLine of lines) {
+        const line = rawLine.trimEnd();
+        if (line === '') {
+          flushEvent();
+          continue;
+        }
+        if (line.startsWith(':')) {
+          continue;
+        }
+        if (line.startsWith('event:')) {
+          continue;
+        }
+        if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trimStart());
         }
       }
 
       render();
       scrollMessages();
     }
+
+    // Flush trailing event if stream ended without a trailing blank line.
+    flushEvent();
   } catch (error: any) {
     if (assistantMsg) {
       assistantMsg.processState = 'error';

@@ -107,7 +107,8 @@ test('chat ui streaming behavior for steps and thinking cards', async ({ page })
   await expect(processToggle).toHaveAttribute('aria-expanded', 'false', { timeout: 60_000 });
   await expect(page.locator('.msg.assistant .process-card .process-summary').first()).toBeVisible({ timeout: 60_000 });
   await expect(page.locator('.msg.assistant .process-card')).toHaveCount(1);
-  await expect(page.locator('.msg.assistant .process-card .summary-chip').first()).toBeVisible();
+  // Summary chips are populated when the done event is received; give it time to process.
+  await expect(page.locator('.msg.assistant .process-card .summary-chip').first()).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('.msg.assistant .step-card.skill')).toHaveCount(0);
   await expect(page.locator('.msg.assistant .process-card [role="status"][aria-live="polite"]')).toHaveCount(1);
 
