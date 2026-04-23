@@ -69,10 +69,12 @@ describe('phase7 runtime persistence', () => {
     await store.saveReplayCheckpoint(ctx, {
       runId: 'run-1',
       checkpoint: sampleCheckpoint('run-1', 'step-a'),
+      createdAt: '2026-01-01T00:00:00.000Z',
     });
     await store.saveReplayCheckpoint(ctx, {
       runId: 'run-1',
       checkpoint: sampleCheckpoint('run-1', 'step-b'),
+      createdAt: '2026-01-01T00:00:01.000Z',
     });
 
     const latest = await store.loadLatestReplayCheckpoint(ctx, 'run-1');

@@ -219,6 +219,36 @@ Deliverables:
 Acceptance criteria:
 - Defined SLOs met for write/read/claim latencies.
 
+Status: implemented with a shared benchmark harness in `@weaveintel/persistence`.
+
+Phase 8 implementation notes:
+- Added `createPhase8PersistenceBenchmark()` in `packages/persistence/src/phase8-benchmark.ts`.
+- Added benchmark dimensions:
+  - load: configurable `iterationCount` + `concurrency`
+  - failover: close/reopen cycle with replay checkpoint recovery assertion
+  - chaos: injected transient failure with retry-budget recovery accounting
+- Added percentile and throughput reporting:
+  - latency: `p50`, `p95`, `p99`, `avg`, `max`
+  - throughput: `opsPerSecond`, total ops, total duration
+- Reused reliability package primitives for runtime hardening behavior in the benchmark path:
+  - `createConcurrencyLimiter()`
+  - `createRetryBudget()`
+  - `createHealthChecker()`
+- Added package tests in `packages/persistence/src/phase8-benchmark.test.ts` for in-memory and sqlite failover durability.
+- Added end-to-end benchmark example in `examples/63-phase8-persistence-performance-reliability-e2e.ts` for in-memory/postgres/redis/sqlite/mongodb/cloud-nosql backend scenarios.
+
+Phase 8 SLO framing (initial targets):
+- in-memory `p95` write/read/claim latency <= 10 ms
+- sqlite local `p95` write/read/claim latency <= 50 ms
+- service-backed local-dev backends (postgres/redis/mongodb/cloud-nosql) `p95` write/read/claim latency <= 200 ms
+- no unrecovered transient failures in chaos retry path for single injected retryable fault
+
+Phase 8 validation completed:
+- PASS: `npm run typecheck --workspace @weaveintel/persistence`
+- PASS: `npm run build --workspace @weaveintel/persistence`
+- PASS: `npm run test --workspace @weaveintel/persistence`
+- PASS: `node --import tsx examples/63-phase8-persistence-performance-reliability-e2e.ts` using in-memory and sqlite locally, with service-backed scenarios gated behind env vars for Postgres, Redis, MongoDB, and DynamoDB Local.
+
 ## Phase 9: Documentation and Release
 Deliverables:
 - Operator guides per backend.

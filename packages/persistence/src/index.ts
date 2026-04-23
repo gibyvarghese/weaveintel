@@ -35,3 +35,13 @@ export {
   type TraceSpanFilter,
   type EvalSuiteRunFilter,
 } from './phase7-runtime-persistence.js';
+
+export {
+  createPhase8PersistenceBenchmark,
+  type Phase8PersistenceBenchmark,
+  type Phase8BenchmarkOptions,
+  type Phase8BenchmarkScenario,
+  type Phase8LatencySummary,
+  type Phase8ThroughputSummary,
+  type Phase8BenchmarkReport,
+} from './phase8-benchmark.js';
