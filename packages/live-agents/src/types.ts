@@ -83,11 +83,27 @@ export interface AgentContract {
     timezone: string;
     cronActive: string;
   };
+  grantAuthority?: GrantAuthorityConstraints | null;
+  breakGlass?: BreakGlassConstraints | null;
   accountBindingRefs: string[];
   attentionPolicyRef: string;
   reviewCadence: string;
   contextPolicy: ContextPolicy;
   createdAt: string;
+}
+
+export interface GrantAuthorityConstraints {
+  mayIssueKinds: GrantKind[];
+  scopePredicate: string;
+  maxBudgetIncreaseUsd: number | null;
+  requiresEvidence: boolean;
+  dualControl: boolean;
+}
+
+export interface BreakGlassConstraints {
+  allowedCapabilityKinds: GrantKind[];
+  maxDurationMinutes: number;
+  requiredEmergencyConditionsDescription: string;
 }
 
 export interface ContextPolicy {
@@ -285,6 +301,81 @@ export interface EventRoute {
   createdAt: string;
 }
 
+export type GrantTrigger =
+  | 'REQUEST'
+  | 'DELEGATE'
+  | 'SCOPE_CHANGE'
+  | 'RECOMMENDATION'
+  | 'PROBATION'
+  | 'BREAK_GLASS'
+  | 'ROLE_CHANGE'
+  | 'SUCCESSION'
+  | 'USER_INITIATED'
+  | 'REFUSAL_REMEDIATION';
+
+export interface CapabilityGrant {
+  id: string;
+  meshId: string;
+  recipientType: 'AGENT' | 'TEAM';
+  recipientId: string;
+  issuerType: 'HUMAN' | 'AGENT' | 'SYSTEM';
+  issuerId: string;
+  kind: GrantKind;
+  trigger: GrantTrigger;
+  grantedAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  revokedByType: 'HUMAN' | 'AGENT' | 'SYSTEM' | null;
+  revokedById: string | null;
+  probation: boolean;
+  probationUntil: string | null;
+  descriptionProse: string;
+  scopeProse: string;
+  reasonProse: string;
+  revocationReasonProse: string | null;
+  probationConditionsProse: string | null;
+  limits: {
+    extraBudgetMonthlyUsd?: number;
+    workingHoursExtensionMinutes?: number;
+  };
+  evidenceRefs: string[];
+}
+
+export interface GrantRequest {
+  id: string;
+  meshId: string;
+  recipientType: 'AGENT' | 'TEAM';
+  recipientId: string;
+  requestedByType: 'AGENT' | 'HUMAN';
+  requestedById: string;
+  kindHint: GrantKind;
+  status: 'OPEN' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
+  resolvedByType: 'HUMAN' | 'AGENT' | null;
+  resolvedById: string | null;
+  resolvedGrantId: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  expiresAt: string | null;
+  descriptionProse: string;
+  reasonProse: string;
+  resolutionReasonProse: string | null;
+  evidenceRefs: string[];
+}
+
+export interface BreakGlassInvocation {
+  id: string;
+  agentId: string;
+  grantId: string;
+  invokedAt: string;
+  expiresAt: string;
+  postReviewTaskId: string;
+  reviewOutcome: 'PENDING' | 'APPROVED' | 'REJECTED' | null;
+  reviewedAt: string | null;
+  capabilityDescriptionProse: string;
+  emergencyReasonProse: string;
+  evidenceRefs: string[];
+}
+
 export interface StateStore {
   saveMesh(mesh: Mesh): Promise<void>;
   loadMesh(id: string): Promise<Mesh | null>;
@@ -362,6 +453,39 @@ export interface StateStore {
 
   saveOutboundActionRecord(record: OutboundActionRecord): Promise<void>;
   listOutboundActionRecords(agentId: string): Promise<OutboundActionRecord[]>;
+
+  saveCapabilityGrant(grant: CapabilityGrant): Promise<void>;
+  loadCapabilityGrant(id: string): Promise<CapabilityGrant | null>;
+  listCapabilityGrantsForRecipient(recipientType: CapabilityGrant['recipientType'], recipientId: string): Promise<CapabilityGrant[]>;
+  revokeCapabilityGrant(
+    grantId: string,
+    revokedByType: CapabilityGrant['revokedByType'],
+    revokedById: string,
+    revocationReasonProse: string,
+    at: string,
+  ): Promise<CapabilityGrant | null>;
+
+  saveGrantRequest(request: GrantRequest): Promise<void>;
+  loadGrantRequest(id: string): Promise<GrantRequest | null>;
+  listGrantRequests(meshId: string): Promise<GrantRequest[]>;
+  resolveGrantRequest(
+    requestId: string,
+    status: 'APPROVED' | 'REJECTED' | 'EXPIRED',
+    resolvedByType: 'HUMAN' | 'AGENT',
+    resolvedById: string,
+    resolvedAt: string,
+    resolutionReasonProse: string,
+    resolvedGrantId?: string | null,
+  ): Promise<GrantRequest | null>;
+
+  saveBreakGlassInvocation(invocation: BreakGlassInvocation): Promise<void>;
+  loadBreakGlassInvocation(id: string): Promise<BreakGlassInvocation | null>;
+  listBreakGlassInvocations(agentId: string): Promise<BreakGlassInvocation[]>;
+  reviewBreakGlassInvocation(
+    invocationId: string,
+    reviewOutcome: 'APPROVED' | 'REJECTED',
+    reviewedAt: string,
+  ): Promise<BreakGlassInvocation | null>;
 }
 
 export interface InMemoryStateStore extends StateStore {

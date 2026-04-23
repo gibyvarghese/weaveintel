@@ -5,13 +5,18 @@ import type {
   ActionExecutionResult,
   ActionExecutor,
   AttentionAction,
+  CapabilityGrant,
+  GrantRequest,
   ExternalActionAdapter,
   ExternalActionToolCall,
   Message,
   OutboundActionRecord,
 } from './types.js';
 import type { ExecutionContext, MCPToolCallResponse } from '@weaveintel/core';
-import { NoAuthorisedAccountError } from './errors.js';
+import {
+  BreakGlassPolicyViolationError,
+  NoAuthorisedAccountError,
+} from './errors.js';
 
 function makeId(prefix: string, nowIso: string, suffix: string): string {
   return `${prefix}_${Date.parse(nowIso)}_${suffix}`;
@@ -192,6 +197,18 @@ function createDefaultExternalActionAdapter(): ExternalActionAdapter {
   };
 }
 
+function includesEmergencyCondition(requiredConditionDescription: string, emergencyReasonProse: string): boolean {
+  const requiredTokens = requiredConditionDescription
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 4);
+  if (requiredTokens.length === 0) {
+    return true;
+  }
+  const reason = emergencyReasonProse.toLowerCase();
+  return requiredTokens.some((token) => reason.includes(token));
+}
+
 async function tryExecuteExternalAction(
   action: AttentionAction,
   context: ActionExecutionContext,
@@ -337,6 +354,29 @@ export function createActionExecutor(opts?: {
           };
         }
         case 'RequestCapability': {
+          const requestId = makeId('grant_request', context.nowIso, Math.random().toString(36).slice(2, 10));
+          const request: GrantRequest = {
+            id: requestId,
+            meshId: context.agent.meshId,
+            recipientType: 'AGENT',
+            recipientId: context.agent.id,
+            requestedByType: 'AGENT',
+            requestedById: context.agent.id,
+            kindHint: action.capability.kindHint,
+            status: 'OPEN',
+            resolvedByType: null,
+            resolvedById: null,
+            resolvedGrantId: null,
+            createdAt: context.nowIso,
+            resolvedAt: null,
+            expiresAt: null,
+            descriptionProse: action.capability.descriptionProse,
+            reasonProse: action.capability.reasonProse,
+            resolutionReasonProse: null,
+            evidenceRefs: action.capability.evidenceMessageIds,
+          };
+          await context.stateStore.saveGrantRequest(request);
+
           const messageId = makeId('msg', context.nowIso, Math.random().toString(36).slice(2, 10));
           const message: Message = {
             id: messageId,
@@ -350,7 +390,7 @@ export function createActionExecutor(opts?: {
             kind: 'GRANT_REQUEST',
             replyToMessageId: null,
             threadId: messageId,
-            contextRefs: action.capability.evidenceMessageIds,
+            contextRefs: [requestId, ...action.capability.evidenceMessageIds],
             contextPacketRef: null,
             expiresAt: null,
             priority: 'HIGH',
@@ -436,6 +476,33 @@ export function createActionExecutor(opts?: {
           };
         }
         case 'IssueGrant': {
+          const grantId = makeId('grant', context.nowIso, Math.random().toString(36).slice(2, 10));
+          const capabilityGrant: CapabilityGrant = {
+            id: grantId,
+            meshId: context.agent.meshId,
+            recipientType: 'AGENT',
+            recipientId: action.recipientAgentId,
+            issuerType: 'AGENT',
+            issuerId: context.agent.id,
+            kind: action.capability.kindHint,
+            trigger: 'DELEGATE',
+            grantedAt: context.nowIso,
+            expiresAt: null,
+            revokedAt: null,
+            revokedByType: null,
+            revokedById: null,
+            probation: false,
+            probationUntil: null,
+            descriptionProse: action.capability.descriptionProse,
+            scopeProse: action.capability.scopeProse,
+            reasonProse: action.capability.reasonProse,
+            revocationReasonProse: null,
+            probationConditionsProse: null,
+            limits: {},
+            evidenceRefs: [],
+          };
+          await context.stateStore.saveCapabilityGrant(capabilityGrant);
+
           const messageId = makeId('msg', context.nowIso, Math.random().toString(36).slice(2, 10));
           await context.stateStore.saveMessage({
             id: messageId,
@@ -449,7 +516,7 @@ export function createActionExecutor(opts?: {
             kind: 'GRANT_NOTICE',
             replyToMessageId: null,
             threadId: messageId,
-            contextRefs: [],
+            contextRefs: [grantId],
             contextPacketRef: null,
             expiresAt: null,
             priority: 'NORMAL',
@@ -601,6 +668,122 @@ export function createActionExecutor(opts?: {
           };
         }
         case 'InvokeBreakGlass': {
+          const contract = await context.stateStore.loadLatestContractForAgent(context.agent.id);
+          if (!contract?.breakGlass) {
+            throw new BreakGlassPolicyViolationError(
+              `Agent ${context.agent.id} cannot invoke break-glass without contract breakGlass constraints.`,
+            );
+          }
+          if (!contract.breakGlass.allowedCapabilityKinds.includes(action.capability.kindHint)) {
+            throw new BreakGlassPolicyViolationError(
+              `Break-glass kind ${action.capability.kindHint} is not allowed for agent ${context.agent.id}.`,
+            );
+          }
+          if (
+            !includesEmergencyCondition(
+              contract.breakGlass.requiredEmergencyConditionsDescription,
+              action.emergencyReasonProse,
+            )
+          ) {
+            throw new BreakGlassPolicyViolationError(
+              `Emergency reason does not satisfy contract emergency conditions for agent ${context.agent.id}.`,
+            );
+          }
+
+          const nowMs = Date.parse(context.nowIso);
+          const expiryMs = nowMs + contract.breakGlass.maxDurationMinutes * 60_000;
+          const expiresAt = new Date(expiryMs).toISOString();
+          const grantId = makeId('grant', context.nowIso, Math.random().toString(36).slice(2, 10));
+          const reviewTaskId = makeId('bl', context.nowIso, Math.random().toString(36).slice(2, 10));
+          const invocationId = makeId('breakglass', context.nowIso, Math.random().toString(36).slice(2, 10));
+
+          await context.stateStore.saveCapabilityGrant({
+            id: grantId,
+            meshId: context.agent.meshId,
+            recipientType: 'AGENT',
+            recipientId: context.agent.id,
+            issuerType: 'AGENT',
+            issuerId: context.agent.id,
+            kind: action.capability.kindHint,
+            trigger: 'BREAK_GLASS',
+            grantedAt: context.nowIso,
+            expiresAt,
+            revokedAt: null,
+            revokedByType: null,
+            revokedById: null,
+            probation: false,
+            probationUntil: null,
+            descriptionProse: action.capability.descriptionProse,
+            scopeProse: 'Emergency-only temporary elevation.',
+            reasonProse: action.emergencyReasonProse,
+            revocationReasonProse: null,
+            probationConditionsProse: null,
+            limits: {},
+            evidenceRefs: action.capability.evidenceMessageIds,
+          });
+
+          await context.stateStore.saveBacklogItem({
+            id: reviewTaskId,
+            agentId: context.agent.id,
+            priority: 'HIGH',
+            status: 'PROPOSED',
+            originType: 'SYSTEM',
+            originRef: invocationId,
+            blockedOnMessageId: null,
+            blockedOnGrantRequestId: null,
+            blockedOnPromotionRequestId: null,
+            blockedOnAccountBindingRequestId: null,
+            estimatedEffort: 'PT30M',
+            deadline: expiresAt,
+            acceptedAt: null,
+            startedAt: null,
+            completedAt: null,
+            createdAt: context.nowIso,
+            title: 'Break-glass post-incident review',
+            description: `Review required for break-glass invocation ${invocationId}.`,
+          });
+
+          await context.stateStore.saveBreakGlassInvocation({
+            id: invocationId,
+            agentId: context.agent.id,
+            grantId,
+            invokedAt: context.nowIso,
+            expiresAt,
+            postReviewTaskId: reviewTaskId,
+            reviewOutcome: 'PENDING',
+            reviewedAt: null,
+            capabilityDescriptionProse: action.capability.descriptionProse,
+            emergencyReasonProse: action.emergencyReasonProse,
+            evidenceRefs: action.capability.evidenceMessageIds,
+          });
+
+          const reviewMessageId = makeId('msg', context.nowIso, Math.random().toString(36).slice(2, 10));
+          await context.stateStore.saveMessage({
+            id: reviewMessageId,
+            meshId: context.agent.meshId,
+            fromType: 'AGENT',
+            fromId: context.agent.id,
+            fromMeshId: context.agent.meshId,
+            toType: 'HUMAN',
+            toId: null,
+            topic: 'break-glass-review',
+            kind: 'ESCALATION',
+            replyToMessageId: null,
+            threadId: reviewMessageId,
+            contextRefs: [grantId, invocationId, reviewTaskId],
+            contextPacketRef: null,
+            expiresAt: null,
+            priority: 'URGENT',
+            status: 'PENDING',
+            deliveredAt: null,
+            readAt: null,
+            processedAt: null,
+            createdAt: context.nowIso,
+            subject: 'Break-glass invoked: human review required',
+            body: action.emergencyReasonProse,
+          });
+          createdMessageIds.push(reviewMessageId);
+
           if (opts?.sessionProvider) {
             const externalResult = await tryExecuteExternalAction(
               action,
@@ -617,7 +800,7 @@ export function createActionExecutor(opts?: {
                   context,
                   'external.breakglass.invoke.stub',
                   action.emergencyReasonProse,
-                  action.capability.descriptionProse,
+                  `breakglass:${invocationId}`,
                 ),
               );
             }
@@ -627,13 +810,13 @@ export function createActionExecutor(opts?: {
                 context,
                 'external.breakglass.invoke.stub',
                 action.emergencyReasonProse,
-                action.capability.descriptionProse,
+                `breakglass:${invocationId}`,
               ),
             );
           }
           return {
-            status: 'PARTIAL',
-            summaryProse: 'Created break-glass outbound stub for manual follow-through',
+            status: 'SUCCESS',
+            summaryProse: `Break-glass invoked with temporary grant ${grantId} and review task ${reviewTaskId}`,
             createdMessageIds,
             createdOutboundRecordIds,
             updatedBacklogItemIds,

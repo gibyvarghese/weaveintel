@@ -4,11 +4,14 @@ import { weaveContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveFakeTransport } from '@weaveintel/testing';
 import {
+  BreakGlassPolicyViolationError,
   createActionExecutor,
   createExternalEventHandler,
+  GrantAuthorityViolationError,
   createMcpAccountSessionProvider,
   InvalidAccountBindingError,
   NoAuthorisedAccountError,
+  SelfGrantForbiddenError,
   createHeartbeat,
   type AttentionAction,
   weaveInMemoryStateStore,
@@ -219,6 +222,60 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
       createdAt: now,
       archivedAt: null,
     });
+    await store.saveAgent({
+      id: 'agent-exec-2',
+      meshId: 'mesh-exec-1',
+      name: 'Recipient Agent',
+      role: 'Operator',
+      contractVersionId: 'contract-exec-2',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-exec-1',
+      agentId: 'agent-exec-1',
+      version: 1,
+      persona: 'Executor persona',
+      objectives: 'Execute action variants',
+      successIndicators: 'All action variants are routable',
+      budget: {
+        monthlyUsdCap: 50,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: {
+        mayIssueKinds: ['BUDGET_INCREASE', 'WORKING_HOURS_OVERRIDE', 'AUTHORITY_EXTENSION', 'COLLEAGUE_INTRODUCTION', 'MESH_BRIDGE'],
+        scopePredicate: 'same mesh collaborators',
+        maxBudgetIncreaseUsd: 100,
+        requiresEvidence: false,
+        dualControl: false,
+      },
+      breakGlass: {
+        allowedCapabilityKinds: ['AUTHORITY_EXTENSION', 'MESH_BRIDGE'],
+        maxDurationMinutes: 60,
+        requiredEmergencyConditionsDescription: 'incident emergency outage',
+      },
+      accountBindingRefs: ['account-exec-1'],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
     await store.saveBacklogItem({
       id: 'bl-exec-1',
       agentId: 'agent-exec-1',
@@ -320,7 +377,7 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
       },
       {
         type: 'IssueGrant',
-        recipientAgentId: 'agent-exec-1',
+        recipientAgentId: 'agent-exec-2',
         capability: {
           kindHint: 'BUDGET_INCREASE' as const,
           descriptionProse: 'Increase budget',
@@ -343,12 +400,12 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
       {
         type: 'InvokeBreakGlass',
         capability: {
-          kindHint: 'MESH_BRIDGE' as const,
+          kindHint: 'AUTHORITY_EXTENSION' as const,
           descriptionProse: 'Emergency bridge',
-          reasonProse: 'Incident',
+          reasonProse: 'Incident emergency outage',
           evidenceMessageIds: ['msg-exec-1'],
         },
-        emergencyReasonProse: 'Production incident',
+        emergencyReasonProse: 'Critical incident emergency outage affecting customers',
       },
       { type: 'EmitEpisodicMarker', summaryProse: 'Checkpointed run', tags: ['phase4'] },
       { type: 'RequestCompressionRefresh' as const },
@@ -1149,5 +1206,436 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
     expect(tick?.actionOutcomeStatus).toBe('SKIPPED');
     expect(tick?.actionOutcomeProse).toContain('budget guardrail');
     expect(agent?.status).toBe('PAUSED');
+  });
+
+  it('phase 7 forbids self-grants outside break-glass', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+
+    await store.saveAgent({
+      id: 'agent-self-grant-1',
+      meshId: 'mesh-self-grant-1',
+      name: 'Self Grant Agent',
+      role: 'Operator',
+      contractVersionId: 'contract-self-grant-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-self-grant-1',
+      agentId: 'agent-self-grant-1',
+      version: 1,
+      persona: 'Operator',
+      objectives: 'Issue grants responsibly',
+      successIndicators: 'No invalid grants',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: {
+        mayIssueKinds: ['AUTHORITY_EXTENSION'],
+        scopePredicate: 'same mesh',
+        maxBudgetIncreaseUsd: null,
+        requiresEvidence: false,
+        dualControl: false,
+      },
+      breakGlass: null,
+      accountBindingRefs: [],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+
+    await expect(
+      store.saveCapabilityGrant({
+        id: 'grant-self-grant-1',
+        meshId: 'mesh-self-grant-1',
+        recipientType: 'AGENT',
+        recipientId: 'agent-self-grant-1',
+        issuerType: 'AGENT',
+        issuerId: 'agent-self-grant-1',
+        kind: 'AUTHORITY_EXTENSION',
+        trigger: 'DELEGATE',
+        grantedAt: now,
+        expiresAt: null,
+        revokedAt: null,
+        revokedByType: null,
+        revokedById: null,
+        probation: false,
+        probationUntil: null,
+        descriptionProse: 'Self-grant attempt',
+        scopeProse: 'self',
+        reasonProse: 'unauthorized',
+        revocationReasonProse: null,
+        probationConditionsProse: null,
+        limits: {},
+        evidenceRefs: [],
+      }),
+    ).rejects.toBeInstanceOf(SelfGrantForbiddenError);
+  });
+
+  it('phase 7 enforces grant authority for IssueGrant action', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+    const executor = createActionExecutor();
+
+    await store.saveAgent({
+      id: 'agent-issuer-1',
+      meshId: 'mesh-phase7-1',
+      name: 'Issuer',
+      role: 'Operator',
+      contractVersionId: 'contract-issuer-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveAgent({
+      id: 'agent-recipient-1',
+      meshId: 'mesh-phase7-1',
+      name: 'Recipient',
+      role: 'Operator',
+      contractVersionId: 'contract-recipient-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-issuer-1',
+      agentId: 'agent-issuer-1',
+      version: 1,
+      persona: 'Issuer persona',
+      objectives: 'Issue grants',
+      successIndicators: 'Controlled grants only',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: {
+        mayIssueKinds: ['COLLEAGUE_INTRODUCTION'],
+        scopePredicate: 'same mesh only',
+        maxBudgetIncreaseUsd: null,
+        requiresEvidence: true,
+        dualControl: false,
+      },
+      breakGlass: null,
+      accountBindingRefs: [],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+
+    await expect(
+      executor.execute(
+        {
+          type: 'IssueGrant',
+          recipientAgentId: 'agent-recipient-1',
+          capability: {
+            kindHint: 'AUTHORITY_EXTENSION',
+            descriptionProse: 'Need extension',
+            scopeProse: 'workflow scope',
+            durationHint: null,
+            reasonProse: 'No evidence attached',
+          },
+        },
+        {
+          tickId: 'tick-phase7-issuer-1',
+          nowIso: now,
+          stateStore: store,
+          agent: {
+            id: 'agent-issuer-1',
+            meshId: 'mesh-phase7-1',
+            name: 'Issuer',
+            role: 'Operator',
+            contractVersionId: 'contract-issuer-1',
+            status: 'ACTIVE',
+            createdAt: now,
+            archivedAt: null,
+          },
+          activeBindings: [],
+        },
+        weaveContext({ userId: 'human:admin-1' }),
+      ),
+    ).rejects.toBeInstanceOf(GrantAuthorityViolationError);
+  });
+
+  it('phase 7 break-glass creates invocation + grant and rejected review suspends agent', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+    const executor = createActionExecutor();
+
+    await store.saveAgent({
+      id: 'agent-breakglass-1',
+      meshId: 'mesh-breakglass-1',
+      name: 'Responder',
+      role: 'Operator',
+      contractVersionId: 'contract-breakglass-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-breakglass-1',
+      agentId: 'agent-breakglass-1',
+      version: 1,
+      persona: 'Incident responder',
+      objectives: 'Handle emergencies',
+      successIndicators: 'Safe emergency actions',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: {
+        mayIssueKinds: ['AUTHORITY_EXTENSION'],
+        scopePredicate: 'same mesh',
+        maxBudgetIncreaseUsd: null,
+        requiresEvidence: false,
+        dualControl: false,
+      },
+      breakGlass: {
+        allowedCapabilityKinds: ['AUTHORITY_EXTENSION'],
+        maxDurationMinutes: 30,
+        requiredEmergencyConditionsDescription: 'emergency outage',
+      },
+      accountBindingRefs: [],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+
+    const result = await executor.execute(
+      {
+        type: 'InvokeBreakGlass',
+        capability: {
+          kindHint: 'AUTHORITY_EXTENSION',
+          descriptionProse: 'Emergency authority extension',
+          reasonProse: 'Need immediate mitigation rights',
+          evidenceMessageIds: ['msg-incident-1'],
+        },
+        emergencyReasonProse: 'Customer-impacting emergency outage in production',
+      },
+      {
+        tickId: 'tick-breakglass-1',
+        nowIso: now,
+        stateStore: store,
+        agent: {
+          id: 'agent-breakglass-1',
+          meshId: 'mesh-breakglass-1',
+          name: 'Responder',
+          role: 'Operator',
+          contractVersionId: 'contract-breakglass-1',
+          status: 'ACTIVE',
+          createdAt: now,
+          archivedAt: null,
+        },
+        activeBindings: [],
+      },
+      weaveContext({ userId: 'human:admin-1' }),
+    );
+
+    expect(result.status).toBe('SUCCESS');
+    const invocations = await store.listBreakGlassInvocations('agent-breakglass-1');
+    expect(invocations).toHaveLength(1);
+    const invocation = invocations[0]!;
+    const grant = await store.loadCapabilityGrant(invocation.grantId);
+    expect(grant?.trigger).toBe('BREAK_GLASS');
+
+    await store.reviewBreakGlassInvocation(invocation.id, 'REJECTED', now);
+    const updatedAgent = await store.loadAgent('agent-breakglass-1');
+    expect(updatedAgent?.status).toBe('SUSPENDED');
+  });
+
+  it('phase 7 validates emergency-condition matching for break-glass', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+    const executor = createActionExecutor();
+
+    await store.saveAgent({
+      id: 'agent-breakglass-2',
+      meshId: 'mesh-breakglass-2',
+      name: 'Responder',
+      role: 'Operator',
+      contractVersionId: 'contract-breakglass-2',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-breakglass-2',
+      agentId: 'agent-breakglass-2',
+      version: 1,
+      persona: 'Incident responder',
+      objectives: 'Handle emergencies',
+      successIndicators: 'Safe emergency actions',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: null,
+      breakGlass: {
+        allowedCapabilityKinds: ['AUTHORITY_EXTENSION'],
+        maxDurationMinutes: 30,
+        requiredEmergencyConditionsDescription: 'critical outage',
+      },
+      accountBindingRefs: [],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+
+    await expect(
+      executor.execute(
+        {
+          type: 'InvokeBreakGlass',
+          capability: {
+            kindHint: 'AUTHORITY_EXTENSION',
+            descriptionProse: 'Emergency authority extension',
+            reasonProse: 'Need temporary rights',
+            evidenceMessageIds: [],
+          },
+          emergencyReasonProse: 'minor maintenance window adjustment',
+        },
+        {
+          tickId: 'tick-breakglass-2',
+          nowIso: now,
+          stateStore: store,
+          agent: {
+            id: 'agent-breakglass-2',
+            meshId: 'mesh-breakglass-2',
+            name: 'Responder',
+            role: 'Operator',
+            contractVersionId: 'contract-breakglass-2',
+            status: 'ACTIVE',
+            createdAt: now,
+            archivedAt: null,
+          },
+          activeBindings: [],
+        },
+        weaveContext({ userId: 'human:admin-1' }),
+      ),
+    ).rejects.toBeInstanceOf(BreakGlassPolicyViolationError);
+  });
+
+  it('phase 7 supports all active grant triggers in the state store', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+    const triggers = [
+      'REQUEST',
+      'DELEGATE',
+      'SCOPE_CHANGE',
+      'RECOMMENDATION',
+      'PROBATION',
+      'BREAK_GLASS',
+      'ROLE_CHANGE',
+      'SUCCESSION',
+      'USER_INITIATED',
+      'REFUSAL_REMEDIATION',
+    ] as const;
+
+    await store.saveAgent({
+      id: 'agent-grant-target-1',
+      meshId: 'mesh-grant-triggers-1',
+      name: 'Target',
+      role: 'Operator',
+      contractVersionId: 'contract-grant-target-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+
+    for (const [index, trigger] of triggers.entries()) {
+      await store.saveCapabilityGrant({
+        id: `grant-trigger-${index + 1}`,
+        meshId: 'mesh-grant-triggers-1',
+        recipientType: 'AGENT',
+        recipientId: 'agent-grant-target-1',
+        issuerType: 'HUMAN',
+        issuerId: 'human:admin-1',
+        kind: 'AUTHORITY_EXTENSION',
+        trigger,
+        grantedAt: now,
+        expiresAt: null,
+        revokedAt: null,
+        revokedByType: null,
+        revokedById: null,
+        probation: trigger === 'PROBATION',
+        probationUntil: trigger === 'PROBATION' ? '2025-01-02T00:00:00.000Z' : null,
+        descriptionProse: `Grant for ${trigger}`,
+        scopeProse: 'test scope',
+        reasonProse: 'test reason',
+        revocationReasonProse: null,
+        probationConditionsProse: trigger === 'PROBATION' ? 'must satisfy review' : null,
+        limits: {},
+        evidenceRefs: [],
+      });
+    }
+
+    const grants = await store.listCapabilityGrantsForRecipient('AGENT', 'agent-grant-target-1');
+    expect(grants).toHaveLength(triggers.length);
+    expect(new Set(grants.map((grant) => grant.trigger))).toEqual(new Set(triggers));
   });
 });

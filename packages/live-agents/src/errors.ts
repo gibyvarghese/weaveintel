@@ -32,3 +32,24 @@ export class NoAuthorisedAccountError extends LiveAgentsError {
     this.name = 'NoAuthorisedAccountError';
   }
 }
+
+export class SelfGrantForbiddenError extends LiveAgentsError {
+  constructor(issuerId: string) {
+    super(`Self-grants are forbidden for issuer ${issuerId} unless trigger is BREAK_GLASS.`);
+    this.name = 'SelfGrantForbiddenError';
+  }
+}
+
+export class GrantAuthorityViolationError extends LiveAgentsError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'GrantAuthorityViolationError';
+  }
+}
+
+export class BreakGlassPolicyViolationError extends LiveAgentsError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BreakGlassPolicyViolationError';
+  }
+}

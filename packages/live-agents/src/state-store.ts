@@ -4,9 +4,12 @@ import type {
   AccountBindingRequest,
   AgentContract,
   BacklogItem,
+  BreakGlassInvocation,
+  CapabilityGrant,
   DelegationEdge,
   EventRoute,
   ExternalEvent,
+  GrantRequest,
   HeartbeatTick,
   InMemoryStateStore,
   LiveAgent,
@@ -19,7 +22,12 @@ import type {
   Team,
   TeamMembership,
 } from './types.js';
-import { InvalidAccountBindingError, OnlyHumansMayBindAccountsError } from './errors.js';
+import {
+  GrantAuthorityViolationError,
+  InvalidAccountBindingError,
+  OnlyHumansMayBindAccountsError,
+  SelfGrantForbiddenError,
+} from './errors.js';
 
 function isHumanPrincipal(id: string): boolean {
   const normalized = id.trim().toLowerCase();
@@ -42,6 +50,57 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
   const externalEvents = new Map<string, ExternalEvent>();
   const eventRoutes = new Map<string, EventRoute>();
   const outboundRecords = new Map<string, OutboundActionRecord>();
+  const capabilityGrants = new Map<string, CapabilityGrant>();
+  const grantRequests = new Map<string, GrantRequest>();
+  const breakGlassInvocations = new Map<string, BreakGlassInvocation>();
+
+  const enforceGrantAuthority = (grant: CapabilityGrant): void => {
+    if (grant.recipientId === grant.issuerId && grant.trigger !== 'BREAK_GLASS') {
+      throw new SelfGrantForbiddenError(grant.issuerId);
+    }
+
+    if (grant.issuerType !== 'AGENT') {
+      return;
+    }
+
+    if (grant.trigger === 'BREAK_GLASS') {
+      return;
+    }
+
+    const issuerAgent = agents.get(grant.issuerId);
+    if (!issuerAgent) {
+      throw new GrantAuthorityViolationError(`Issuer agent ${grant.issuerId} was not found.`);
+    }
+
+    const issuerContract = [...contracts.values()]
+      .filter((contract) => contract.agentId === issuerAgent.id)
+      .sort((a, b) => b.version - a.version)[0] ?? null;
+
+    const authority = issuerContract?.grantAuthority;
+    if (!authority) {
+      throw new GrantAuthorityViolationError(`Agent ${grant.issuerId} has no grant authority.`);
+    }
+    if (!authority.mayIssueKinds.includes(grant.kind)) {
+      throw new GrantAuthorityViolationError(
+        `Agent ${grant.issuerId} cannot issue grant kind ${grant.kind}.`,
+      );
+    }
+    if (authority.requiresEvidence && grant.evidenceRefs.length === 0) {
+      throw new GrantAuthorityViolationError(
+        `Agent ${grant.issuerId} must provide evidence when issuing grants.`,
+      );
+    }
+    if (
+      grant.kind === 'BUDGET_INCREASE' &&
+      authority.maxBudgetIncreaseUsd !== null &&
+      typeof grant.limits.extraBudgetMonthlyUsd === 'number' &&
+      grant.limits.extraBudgetMonthlyUsd > authority.maxBudgetIncreaseUsd
+    ) {
+      throw new GrantAuthorityViolationError(
+        `Agent ${grant.issuerId} exceeds max budget increase cap ${authority.maxBudgetIncreaseUsd}.`,
+      );
+    }
+  };
 
   return {
     __kind: 'in-memory',
@@ -384,6 +443,105 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
       return [...outboundRecords.values()]
         .filter((record) => record.agentId === agentId)
         .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    },
+
+    async saveCapabilityGrant(grant) {
+      enforceGrantAuthority(grant);
+      if (grant.recipientType === 'AGENT' && !agents.has(grant.recipientId)) {
+        throw new GrantAuthorityViolationError(`Recipient agent ${grant.recipientId} was not found.`);
+      }
+      if (grant.recipientType === 'TEAM' && !teams.has(grant.recipientId)) {
+        throw new GrantAuthorityViolationError(`Recipient team ${grant.recipientId} was not found.`);
+      }
+      capabilityGrants.set(grant.id, grant);
+    },
+    async loadCapabilityGrant(id) {
+      return capabilityGrants.get(id) ?? null;
+    },
+    async listCapabilityGrantsForRecipient(recipientType, recipientId) {
+      return [...capabilityGrants.values()]
+        .filter((grant) => grant.recipientType === recipientType && grant.recipientId === recipientId)
+        .sort((a, b) => Date.parse(a.grantedAt) - Date.parse(b.grantedAt));
+    },
+    async revokeCapabilityGrant(grantId, revokedByType, revokedById, revocationReasonProse, at) {
+      const current = capabilityGrants.get(grantId);
+      if (!current) {
+        return null;
+      }
+      const updated: CapabilityGrant = {
+        ...current,
+        revokedAt: at,
+        revokedByType,
+        revokedById,
+        revocationReasonProse,
+      };
+      capabilityGrants.set(grantId, updated);
+      return updated;
+    },
+
+    async saveGrantRequest(request) {
+      grantRequests.set(request.id, request);
+    },
+    async loadGrantRequest(id) {
+      return grantRequests.get(id) ?? null;
+    },
+    async listGrantRequests(meshId) {
+      return [...grantRequests.values()]
+        .filter((request) => request.meshId === meshId)
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    },
+    async resolveGrantRequest(requestId, status, resolvedByType, resolvedById, resolvedAt, resolutionReasonProse, resolvedGrantId) {
+      const current = grantRequests.get(requestId);
+      if (!current) {
+        return null;
+      }
+      const updated: GrantRequest = {
+        ...current,
+        status,
+        resolvedByType,
+        resolvedById,
+        resolvedAt,
+        resolutionReasonProse,
+        resolvedGrantId: status === 'APPROVED' ? (resolvedGrantId ?? null) : null,
+      };
+      grantRequests.set(requestId, updated);
+      return updated;
+    },
+
+    async saveBreakGlassInvocation(invocation) {
+      breakGlassInvocations.set(invocation.id, invocation);
+    },
+    async loadBreakGlassInvocation(id) {
+      return breakGlassInvocations.get(id) ?? null;
+    },
+    async listBreakGlassInvocations(agentId) {
+      return [...breakGlassInvocations.values()]
+        .filter((invocation) => invocation.agentId === agentId)
+        .sort((a, b) => Date.parse(a.invokedAt) - Date.parse(b.invokedAt));
+    },
+    async reviewBreakGlassInvocation(invocationId, reviewOutcome, reviewedAt) {
+      const current = breakGlassInvocations.get(invocationId);
+      if (!current) {
+        return null;
+      }
+      const updated: BreakGlassInvocation = {
+        ...current,
+        reviewOutcome,
+        reviewedAt,
+      };
+      breakGlassInvocations.set(invocationId, updated);
+
+      if (reviewOutcome === 'REJECTED') {
+        const agent = agents.get(updated.agentId);
+        if (agent) {
+          agents.set(agent.id, {
+            ...agent,
+            status: 'SUSPENDED',
+          });
+        }
+      }
+
+      return updated;
     },
   };
 }
