@@ -33,3 +33,10 @@ export type {
   MemoryExtractionResult,
   LlmEntityExtractor,
 } from './extraction.js';
+
+export {
+  weaveWorkingMemory,
+  createCompressorRegistry,
+  createNoopCompressor,
+} from './working.js';
+export type { CompressorRegistry } from './working.js';

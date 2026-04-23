@@ -188,6 +188,12 @@ export {
   type ConversationMemory,
   type SemanticMemory,
   type EntityMemory,
+  type WorkingMemoryPatch,
+  type WorkingMemorySnapshot,
+  type WorkingMemory,
+  type CompressionInput,
+  type CompressionArtefact,
+  type ContextCompressor,
 } from './memory.js';
 
 // Security contracts

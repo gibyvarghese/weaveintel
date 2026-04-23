@@ -46,6 +46,7 @@
     { "path": "packages/devtools" },
     { "path": "packages/recipes" },
     { "path": "packages/social-growth" },
+    { "path": "packages/live-agents" },
     { "path": "apps/geneweave" }
   ]
 }

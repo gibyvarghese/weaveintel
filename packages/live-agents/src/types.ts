@@ -1,0 +1,247 @@
+import type { ExecutionContext } from '@weaveintel/core';
+import type { ContextCompressor } from '@weaveintel/core';
+
+export type LiveAgentStatus =
+  | 'HIRING'
+  | 'ONBOARDING'
+  | 'ACTIVE'
+  | 'PAUSED'
+  | 'SUSPENDED'
+  | 'TERMINATING'
+  | 'ARCHIVED';
+
+export interface Mesh {
+  id: string;
+  tenantId: string;
+  name: string;
+  charter: string;
+  status: 'ACTIVE' | 'PAUSED' | 'ARCHIVED';
+  dualControlRequiredFor: string[];
+  createdAt: string;
+}
+
+export interface LiveAgent {
+  id: string;
+  meshId: string;
+  name: string;
+  role: string;
+  contractVersionId: string;
+  status: LiveAgentStatus;
+  createdAt: string;
+  archivedAt: string | null;
+}
+
+export interface AgentContract {
+  id: string;
+  agentId: string;
+  version: number;
+  persona: string;
+  objectives: string;
+  successIndicators: string;
+  budget: {
+    monthlyUsdCap: number;
+    perActionUsdCap: number;
+  };
+  workingHoursSchedule: {
+    timezone: string;
+    cronActive: string;
+  };
+  accountBindingRefs: string[];
+  attentionPolicyRef: string;
+  reviewCadence: string;
+  contextPolicy: ContextPolicy;
+  createdAt: string;
+}
+
+export interface ContextPolicy {
+  compressors: Array<{
+    id: string;
+    schedule?: string;
+    onEvent?: string;
+    onDemand?: boolean;
+  }>;
+  weighting: Array<{ id: string }>;
+  budgets: {
+    attentionTokensMax: number;
+    actionTokensMax: number;
+    handoffTokensMax: number;
+    reportTokensMax: number;
+    monthlyCompressionUsdCap: number;
+  };
+  defaultsProfile?: 'standard' | 'knowledge-worker' | 'operational' | null;
+}
+
+export interface Account {
+  id: string;
+  meshId: string;
+  provider: string;
+  accountIdentifier: string;
+  description: string;
+  mcpServerRef: McpServerRef;
+  credentialVaultRef: string;
+  upstreamScopesDescription: string;
+  ownerHumanId: string;
+  status: 'ACTIVE' | 'REVOKED' | 'EXPIRED';
+  createdAt: string;
+  revokedAt: string | null;
+}
+
+export interface AccountBinding {
+  id: string;
+  agentId: string;
+  accountId: string;
+  purpose: string;
+  constraints: string;
+  grantedByHumanId: string;
+  grantedAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  revokedByHumanId: string | null;
+  revocationReason: string | null;
+}
+
+export interface AccountBindingRequest {
+  id: string;
+  meshId: string;
+  agentId: string;
+  accountId: string | null;
+  requestedByType: 'AGENT' | 'HUMAN';
+  requestedById: string;
+  status: 'OPEN' | 'APPROVED' | 'REJECTED' | 'EXPIRED';
+  resolvedByHumanId: string | null;
+  resolvedAccountBindingId: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  expiresAt: string | null;
+  purposeProse: string;
+  reasonProse: string;
+  resolutionReasonProse: string | null;
+  evidenceRefs: string[];
+}
+
+export interface McpServerRef {
+  url: string;
+  serverType: 'STDIO' | 'HTTP' | 'WEBSOCKET';
+  discoveryHint: string | null;
+}
+
+export interface HeartbeatTick {
+  id: string;
+  agentId: string;
+  scheduledFor: string;
+  pickedUpAt: string | null;
+  completedAt: string | null;
+  workerId: string;
+  leaseExpiresAt: string | null;
+  actionChosen: string | null;
+  actionOutcomeProse: string | null;
+  actionOutcomeStatus: 'SUCCESS' | 'PARTIAL' | 'FAILED' | null;
+  status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
+}
+
+export interface OutboundActionRecord {
+  id: string;
+  agentId: string;
+  accountId: string;
+  mcpToolName: string;
+  idempotencyKey: string;
+  requiresHumanApproval: boolean;
+  approvalTaskId: string | null;
+  status: 'DRAFTED' | 'APPROVED' | 'REJECTED' | 'SENT' | 'FAILED';
+  sentAt: string | null;
+  externalRef: string | null;
+  createdAt: string;
+  purposeProse: string;
+  summaryProse: string;
+  errorProse: string | null;
+}
+
+export interface ExternalEvent {
+  id: string;
+  accountId: string;
+  sourceType: string;
+  sourceRef: string;
+  receivedAt: string;
+  payloadSummary: string;
+  payloadContextRef: string;
+  processedAt: string | null;
+  producedMessageIds: string[];
+  processingStatus: 'RECEIVED' | 'ROUTED' | 'NO_MATCH' | 'FAILED';
+  error: string | null;
+}
+
+export interface EventRoute {
+  id: string;
+  meshId: string;
+  accountId: string;
+  matchDescriptionProse: string;
+  matchExpr: string;
+  targetType: 'AGENT' | 'TEAM' | 'BROADCAST';
+  targetId: string | null;
+  targetTopic: string | null;
+  priorityOverride: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT' | null;
+  enabled: boolean;
+  createdAt: string;
+}
+
+export interface StateStore {
+  saveMesh(mesh: Mesh): Promise<void>;
+  loadMesh(id: string): Promise<Mesh | null>;
+  listMeshes(tenantId: string): Promise<Mesh[]>;
+
+  saveAgent(agent: LiveAgent): Promise<void>;
+  loadAgent(id: string): Promise<LiveAgent | null>;
+  listAgents(meshId: string): Promise<LiveAgent[]>;
+
+  saveContract(contract: AgentContract): Promise<void>;
+  loadContract(id: string): Promise<AgentContract | null>;
+  loadLatestContractForAgent(agentId: string): Promise<AgentContract | null>;
+
+  saveAccount(account: Account): Promise<void>;
+  loadAccount(id: string): Promise<Account | null>;
+  listAccounts(meshId: string): Promise<Account[]>;
+
+  saveAccountBinding(binding: AccountBinding): Promise<void>;
+  loadAccountBinding(id: string): Promise<AccountBinding | null>;
+  listAccountBindings(agentId: string): Promise<AccountBinding[]>;
+  listActiveAccountBindingsForAgent(agentId: string, at: string): Promise<AccountBinding[]>;
+  saveAccountBindingRequest(request: AccountBindingRequest): Promise<void>;
+
+  saveHeartbeatTick(tick: HeartbeatTick): Promise<void>;
+  claimNextTicks(workerId: string, nowIso: string, limit: number): Promise<HeartbeatTick[]>;
+
+  saveExternalEvent(event: ExternalEvent): Promise<void>;
+  findExternalEvent(accountId: string, sourceType: string, sourceRef: string): Promise<ExternalEvent | null>;
+  saveEventRoute(route: EventRoute): Promise<void>;
+  listEventRoutes(accountId: string): Promise<EventRoute[]>;
+
+  saveOutboundActionRecord(record: OutboundActionRecord): Promise<void>;
+}
+
+export interface InMemoryStateStore extends StateStore {
+  __kind: 'in-memory';
+}
+
+export interface RedisStateStore extends StateStore {
+  __kind: 'redis';
+}
+
+export interface Heartbeat {
+  tick(ctx: ExecutionContext): Promise<{ processed: number }>;
+  run(ctx: ExecutionContext): Promise<void>;
+  stop(): Promise<void>;
+}
+
+export interface CompressionMaintainer {
+  run(ctx: ExecutionContext): Promise<void>;
+  stop(): Promise<void>;
+}
+
+export interface ExternalEventHandler {
+  process(event: ExternalEvent, ctx: ExecutionContext): Promise<{ routedMessageCount: number }>;
+}
+
+export interface LiveAgentsRuntime {
+  readonly stateStore: StateStore;
+  readonly compressors: Map<string, ContextCompressor>;
+}

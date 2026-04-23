@@ -101,3 +101,63 @@ export interface EntityMemory {
   getEntity(ctx: ExecutionContext, name: string): Promise<MemoryEntry | undefined>;
   searchEntities(ctx: ExecutionContext, query: string): Promise<MemoryEntry[]>;
 }
+
+export type WorkingMemoryPatch =
+  | { op: 'set'; key: string; value: unknown }
+  | { op: 'delete'; key: string }
+  | { op: 'merge'; value: Record<string, unknown> };
+
+export interface WorkingMemorySnapshot {
+  readonly id: string;
+  readonly agentId: string;
+  readonly content: Record<string, unknown>;
+  readonly createdAt: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface WorkingMemory {
+  patch(
+    ctx: ExecutionContext,
+    agentId: string,
+    operations: readonly WorkingMemoryPatch[],
+    metadata?: Record<string, unknown>,
+  ): Promise<WorkingMemorySnapshot>;
+  checkpoint(
+    ctx: ExecutionContext,
+    agentId: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<WorkingMemorySnapshot>;
+  restore(ctx: ExecutionContext, agentId: string, snapshotId: string): Promise<WorkingMemorySnapshot | null>;
+  getCurrent(ctx: ExecutionContext, agentId: string): Promise<WorkingMemorySnapshot | null>;
+}
+
+export interface CompressionInput {
+  readonly agentId: string;
+  readonly messages: readonly MemoryEntry[];
+  readonly episodicEvents?: readonly MemoryEntry[];
+  readonly workingState?: Record<string, unknown>;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface CompressionArtefact {
+  readonly id: string;
+  readonly compressorId: string;
+  readonly agentId: string;
+  readonly summary: string;
+  readonly tokensEstimated: number;
+  readonly sourceRefs: readonly string[];
+  readonly createdAt: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface ContextCompressor {
+  readonly id: string;
+  readonly name: string;
+  describe(): string;
+  compress(input: CompressionInput, ctx: ExecutionContext): Promise<CompressionArtefact>;
+  render(
+    artefacts: readonly CompressionArtefact[],
+    tokenBudget: number,
+    ctx: ExecutionContext,
+  ): Promise<string>;
+}
