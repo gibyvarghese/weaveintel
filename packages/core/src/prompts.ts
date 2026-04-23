@@ -139,6 +139,11 @@ export interface PromptVariable {
   type: PromptVariableType;
   required: boolean;
   defaultValue?: unknown;
+  /**
+   * Interpolation behavior for this variable when rendered through the
+   * escaped template mode. Defaults to `escaped`.
+   */
+  interpolation?: 'escaped' | 'raw';
 }
 
 export interface TemplatePromptVersion extends PromptVersionBase {

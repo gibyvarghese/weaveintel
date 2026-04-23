@@ -28,6 +28,9 @@ import { lintPromptTemplate, type LintVariable, type LintContext, type PromptLin
 // ─── Variable pattern ────────────────────────────────────────
 
 const VAR_RE = /\{\{(\w+)\}\}/g;
+const RAW_VAR_RE = /\{\{\{(\w+)\}\}\}/g;
+
+export type TemplateRenderMode = 'legacy-raw' | 'escaped-default';
 
 type TextRenderablePromptVersion =
   | TemplatePromptVersion
@@ -44,11 +47,14 @@ class WeavePromptTemplate implements PromptTemplate {
     public readonly name: string,
     public readonly template: string,
     public readonly variables: PromptVariable[],
+    private readonly renderMode: TemplateRenderMode,
   ) {}
 
   render(values: Record<string, unknown>): string {
     const varMap = new Map(this.variables.map(v => [v.name, v]));
-    return this.template.replace(VAR_RE, (_match, varName: string) => {
+
+    // Triple-brace placeholders always insert raw values.
+    const withRaw = this.template.replace(RAW_VAR_RE, (_match, varName: string) => {
       const spec = varMap.get(varName);
       const raw = values[varName] ?? spec?.defaultValue;
       if (raw === undefined || raw === null) {
@@ -57,7 +63,32 @@ class WeavePromptTemplate implements PromptTemplate {
       }
       return String(raw);
     });
+
+    return withRaw.replace(VAR_RE, (_match, varName: string) => {
+      const spec = varMap.get(varName);
+      const raw = values[varName] ?? spec?.defaultValue;
+      if (raw === undefined || raw === null) {
+        if (spec?.required) throw new Error(`Missing required variable "${varName}"`);
+        return '';
+      }
+
+      const interpolation = spec?.interpolation
+        ?? (this.renderMode === 'escaped-default' ? 'escaped' : 'raw');
+
+      const value = String(raw);
+      return interpolation === 'escaped' ? escapePromptValue(value) : value;
+    });
   }
+}
+
+function escapePromptValue(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/`/g, '&#96;');
 }
 
 // ─── Factory ─────────────────────────────────────────────────
@@ -71,11 +102,14 @@ export function createTemplate(opts: {
   name: string;
   template: string;
   variables?: PromptVariable[];
+  renderMode?: TemplateRenderMode;
 }): PromptTemplate {
   const detectedVars = new Set<string>();
   let m: RegExpExecArray | null;
-  const re = new RegExp(VAR_RE.source, 'g');
-  while ((m = re.exec(opts.template)) !== null) detectedVars.add(m[1]!);
+  const reEscaped = new RegExp(VAR_RE.source, 'g');
+  const reRaw = new RegExp(RAW_VAR_RE.source, 'g');
+  while ((m = reEscaped.exec(opts.template)) !== null) detectedVars.add(m[1]!);
+  while ((m = reRaw.exec(opts.template)) !== null) detectedVars.add(m[1]!);
 
   const variables = opts.variables
     ? opts.variables
@@ -90,7 +124,25 @@ export function createTemplate(opts: {
     opts.name,
     opts.template,
     variables,
+    opts.renderMode ?? 'legacy-raw',
   );
+}
+
+/**
+ * Create a prompt template that escapes variable values by default.
+ * Use triple-brace placeholders (`{{{var}}}`) or `interpolation: 'raw'` when
+ * a variable must be inserted without escaping.
+ */
+export function createSafeTemplate(opts: {
+  id?: string;
+  name: string;
+  template: string;
+  variables?: PromptVariable[];
+}): PromptTemplate {
+  return createTemplate({
+    ...opts,
+    renderMode: 'escaped-default',
+  });
 }
 
 /**
@@ -99,8 +151,10 @@ export function createTemplate(opts: {
 export function extractVariables(template: string): string[] {
   const vars = new Set<string>();
   let m: RegExpExecArray | null;
-  const re = new RegExp(VAR_RE.source, 'g');
-  while ((m = re.exec(template)) !== null) vars.add(m[1]!);
+  const reEscaped = new RegExp(VAR_RE.source, 'g');
+  const reRaw = new RegExp(RAW_VAR_RE.source, 'g');
+  while ((m = reEscaped.exec(template)) !== null) vars.add(m[1]!);
+  while ((m = reRaw.exec(template)) !== null) vars.add(m[1]!);
   return [...vars];
 }
 
@@ -164,6 +218,24 @@ export function renderStructuredPromptMessages(
   }));
 }
 
+/**
+ * Render structured messages with escaped interpolation as the default mode.
+ */
+export function renderStructuredPromptMessagesSafe(
+  messages: StructuredPromptMessage[],
+  variables: PromptVariable[],
+  values: Record<string, unknown>,
+): StructuredPromptMessage[] {
+  return messages.map((message) => ({
+    ...message,
+    content: createSafeTemplate({
+      name: message.role,
+      template: message.content,
+      variables,
+    }).render(values),
+  }));
+}
+
 // ─── Phase 2: Unified render with fragments + lint ────────────
 
 /**
@@ -190,6 +262,11 @@ export interface RenderWithOptions {
    * Only used when `runLint: true`.
    */
   lintContext?: LintContext;
+  /**
+   * Interpolation mode used by createTemplate during variable insertion.
+   * Defaults to `escaped-default` for the unified Phase 2 entrypoint.
+   */
+  renderMode?: TemplateRenderMode;
 }
 
 /**
@@ -273,6 +350,7 @@ export function renderWithOptions(
     name: 'renderWithOptions',
     template: expandedTemplate,
     variables,
+    renderMode: options.renderMode ?? 'escaped-default',
   });
 
   const text = tpl.render(values);

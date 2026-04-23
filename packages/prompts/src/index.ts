@@ -5,11 +5,14 @@
 // Template engine (Phase 1 + Phase 2: fragment expansion, lint integration)
 export {
   createTemplate,
+  createSafeTemplate,
   extractVariables,
   isTextRenderablePromptVersion,
   renderPromptVersion,
   renderStructuredPromptMessages,
+  renderStructuredPromptMessagesSafe,
   renderWithOptions,
+  type TemplateRenderMode,
   type RenderWithOptions,
   type RenderResult,
 } from './template.js';

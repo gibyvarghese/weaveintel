@@ -4,6 +4,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   createTemplate,
+  createSafeTemplate,
   extractVariables,
   InMemoryPromptRegistry,
   PromptResolver,
@@ -67,6 +68,33 @@ describe('createTemplate', () => {
   it('coerces numbers to strings', () => {
     const tpl = createTemplate({ name: 'test', template: 'Count: {{n}}' });
     expect(tpl.render({ n: 42 })).toBe('Count: 42');
+  });
+
+  it('createSafeTemplate escapes values by default', () => {
+    const tpl = createSafeTemplate({ name: 'safe', template: 'Hello {{name}}' });
+    expect(tpl.render({ name: '<script>alert(1)</script>' }))
+      .toBe('Hello &lt;script&gt;alert(1)&lt;/script&gt;');
+  });
+
+  it('supports explicit raw insertion with triple braces', () => {
+    const tpl = createSafeTemplate({ name: 'safe', template: 'Hello {{{name}}}' });
+    expect(tpl.render({ name: '<b>Alice</b>' })).toBe('Hello <b>Alice</b>');
+  });
+
+  it('supports per-variable raw interpolation override', () => {
+    const tpl = createSafeTemplate({
+      name: 'safe',
+      template: '{{safe}} + {{unsafe}}',
+      variables: [
+        { name: 'safe', type: 'string', required: true },
+        { name: 'unsafe', type: 'string', required: true, interpolation: 'raw' },
+      ],
+    });
+
+    expect(tpl.render({
+      safe: '<div>x</div>',
+      unsafe: '<div>y</div>',
+    })).toBe('&lt;div&gt;x&lt;/div&gt; + <div>y</div>');
   });
 });
 

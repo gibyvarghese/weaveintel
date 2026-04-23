@@ -1,4 +1,4 @@
-import { createTemplate } from '@weaveintel/prompts';
+import { createSafeTemplate } from '@weaveintel/prompts';
 import type { DatabaseAdapter } from './db.js';
 
 export interface PolicyPromptCache {
@@ -34,7 +34,7 @@ export function renderNamedPolicyPromptTemplate(
   vars: Record<string, unknown>,
 ): string {
   try {
-    const tpl = createTemplate({ id: name, name, template });
+    const tpl = createSafeTemplate({ id: name, name, template });
     return tpl.render(vars);
   } catch {
     return fallbackTemplate;
