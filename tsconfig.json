@@ -56,6 +56,7 @@
     { "path": "packages/ui-primitives" },
     { "path": "packages/devtools" },
     { "path": "packages/recipes" },
+    { "path": "packages/persistence" },
     { "path": "packages/social-growth" },
     { "path": "packages/live-agents" },
     { "path": "apps/geneweave" },
