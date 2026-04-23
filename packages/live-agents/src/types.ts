@@ -172,7 +172,7 @@ export interface HeartbeatTick {
   leaseExpiresAt: string | null;
   actionChosen: AttentionAction | null;
   actionOutcomeProse: string | null;
-  actionOutcomeStatus: 'SUCCESS' | 'PARTIAL' | 'FAILED' | null;
+  actionOutcomeStatus: 'SUCCESS' | 'PARTIAL' | 'FAILED' | 'SKIPPED' | null;
   status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
 }
 
@@ -338,7 +338,7 @@ export interface StateStore {
 
   saveHeartbeatTick(tick: HeartbeatTick): Promise<void>;
   loadHeartbeatTick(id: string): Promise<HeartbeatTick | null>;
-  claimNextTicks(workerId: string, nowIso: string, limit: number): Promise<HeartbeatTick[]>;
+  claimNextTicks(workerId: string, nowIso: string, limit: number, leaseDurationMs?: number): Promise<HeartbeatTick[]>;
 
   saveMessage(message: Message): Promise<void>;
   loadMessage(id: string): Promise<Message | null>;
@@ -376,6 +376,16 @@ export interface Heartbeat {
   tick(ctx: ExecutionContext): Promise<{ processed: number }>;
   run(ctx: ExecutionContext): Promise<void>;
   stop(): Promise<void>;
+}
+
+export interface HeartbeatRunOptions {
+  leaseDurationMs?: number;
+  runPollIntervalMs?: number;
+  shouldPauseAgent?: (args: {
+    ctx: ExecutionContext;
+    contract: AgentContract | null;
+    agent: LiveAgent;
+  }) => { shouldPause: boolean; reason: string };
 }
 
 export interface CompressionMaintainer {

@@ -244,27 +244,38 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
     async loadHeartbeatTick(id) {
       return ticks.get(id) ?? null;
     },
-    async claimNextTicks(workerId, nowIso, limit) {
+    async claimNextTicks(workerId, nowIso, limit, leaseDurationMs = 30_000) {
       const now = Date.parse(nowIso);
-      const claimable = [...ticks.values()]
-        .filter((tick) => tick.status === 'SCHEDULED' && Date.parse(tick.scheduledFor) <= now)
-        .sort((a, b) => Date.parse(a.scheduledFor) - Date.parse(b.scheduledFor))
-        .slice(0, Math.max(0, limit));
+      const leaseExpiresAt = new Date(now + Math.max(1, leaseDurationMs)).toISOString();
+      const claimable = [...ticks.values()].filter((tick) => {
+        if (tick.status === 'SCHEDULED') {
+          return Date.parse(tick.scheduledFor) <= now;
+        }
+        if (tick.status === 'IN_PROGRESS') {
+          if (!tick.leaseExpiresAt) return true;
+          return Date.parse(tick.leaseExpiresAt) <= now;
+        }
+        return false;
+      })
+      .sort((a, b) => Date.parse(a.scheduledFor) - Date.parse(b.scheduledFor))
+      .slice(0, Math.max(0, limit));
 
       for (const tick of claimable) {
         ticks.set(tick.id, {
           ...tick,
           workerId,
-          pickedUpAt: nowIso,
+          pickedUpAt: tick.pickedUpAt ?? nowIso,
           status: 'IN_PROGRESS',
+          leaseExpiresAt,
         });
       }
 
       return claimable.map((tick) => ({
         ...tick,
         workerId,
-        pickedUpAt: nowIso,
+        pickedUpAt: tick.pickedUpAt ?? nowIso,
         status: 'IN_PROGRESS',
+        leaseExpiresAt,
       }));
     },
 

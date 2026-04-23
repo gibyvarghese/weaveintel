@@ -931,4 +931,223 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
     expect(resolved?.status).toBe('REJECTED');
     expect(resolved?.resolvedByHumanId).toBe('human:admin-1');
   });
+
+  it('phase 6 reclaims stale in-progress ticks when lease expires', async () => {
+    const store = weaveInMemoryStateStore();
+    const staleNow = '2025-01-01T00:00:00.000Z';
+    const reclaimNow = '2025-01-01T00:01:00.000Z';
+
+    await store.saveHeartbeatTick({
+      id: 'tick-lease-reclaim-1',
+      agentId: 'agent-lease-reclaim-1',
+      scheduledFor: staleNow,
+      pickedUpAt: staleNow,
+      completedAt: null,
+      workerId: 'worker-old',
+      leaseExpiresAt: '2025-01-01T00:00:10.000Z',
+      actionChosen: null,
+      actionOutcomeProse: null,
+      actionOutcomeStatus: null,
+      status: 'IN_PROGRESS',
+    });
+
+    const claimed = await store.claimNextTicks('worker-new', reclaimNow, 1, 5_000);
+
+    expect(claimed).toHaveLength(1);
+    expect(claimed[0]?.workerId).toBe('worker-new');
+    expect(claimed[0]?.status).toBe('IN_PROGRESS');
+    expect(claimed[0]?.leaseExpiresAt).not.toBeNull();
+    expect(Date.parse(claimed[0]?.leaseExpiresAt ?? '')).toBeGreaterThan(Date.parse(reclaimNow));
+  });
+
+  it('phase 6 avoids double-execution with two workers sharing the same store', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+    let executed = 0;
+
+    await store.saveAgent({
+      id: 'agent-mw-1',
+      meshId: 'mesh-mw-1',
+      name: 'Multi Worker Agent',
+      role: 'Coordinator',
+      contractVersionId: 'contract-mw-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-mw-1',
+      agentId: 'agent-mw-1',
+      version: 1,
+      persona: 'Coordinator',
+      objectives: 'Run exactly once.',
+      successIndicators: 'Single execution across workers',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      accountBindingRefs: [],
+      attentionPolicyRef: 'phase6-multi-worker',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+    await store.saveHeartbeatTick({
+      id: 'tick-mw-1',
+      agentId: 'agent-mw-1',
+      scheduledFor: now,
+      pickedUpAt: null,
+      completedAt: null,
+      workerId: 'scheduler',
+      leaseExpiresAt: null,
+      actionChosen: null,
+      actionOutcomeProse: null,
+      actionOutcomeStatus: null,
+      status: 'SCHEDULED',
+    });
+
+    const attentionPolicy = {
+      key: 'phase6-multi-worker',
+      async decide() {
+        return {
+          type: 'NoopRest' as const,
+          nextTickAt: '2025-01-01T00:05:00.000Z',
+        };
+      },
+    };
+
+    const actionExecutor = {
+      async execute() {
+        executed += 1;
+        return {
+          status: 'SUCCESS' as const,
+          summaryProse: 'Executed once.',
+          createdMessageIds: [],
+          createdOutboundRecordIds: [],
+          updatedBacklogItemIds: [],
+          artifacts: [],
+        };
+      },
+    };
+
+    const worker1 = createHeartbeat({
+      stateStore: store,
+      workerId: 'worker-a',
+      concurrency: 1,
+      now: () => now,
+      attentionPolicy,
+      actionExecutor,
+    });
+    const worker2 = createHeartbeat({
+      stateStore: store,
+      workerId: 'worker-b',
+      concurrency: 1,
+      now: () => now,
+      attentionPolicy,
+      actionExecutor,
+    });
+
+    const [result1, result2] = await Promise.all([
+      worker1.tick(weaveContext({ userId: 'human:admin-1' })),
+      worker2.tick(weaveContext({ userId: 'human:admin-1' })),
+    ]);
+
+    const finalTick = await store.loadHeartbeatTick('tick-mw-1');
+    expect(result1.processed + result2.processed).toBe(1);
+    expect(executed).toBe(1);
+    expect(finalTick?.status).toBe('COMPLETED');
+  });
+
+  it('phase 6 pauses agents when budget guardrail triggers', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+
+    await store.saveAgent({
+      id: 'agent-budget-1',
+      meshId: 'mesh-budget-1',
+      name: 'Budget Guardrail Agent',
+      role: 'Coordinator',
+      contractVersionId: 'contract-budget-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-budget-1',
+      agentId: 'agent-budget-1',
+      version: 1,
+      persona: 'Coordinator',
+      objectives: 'Respect budget limits',
+      successIndicators: 'Pause when budget is exhausted',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 0,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      accountBindingRefs: [],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+    await store.saveHeartbeatTick({
+      id: 'tick-budget-1',
+      agentId: 'agent-budget-1',
+      scheduledFor: now,
+      pickedUpAt: null,
+      completedAt: null,
+      workerId: 'scheduler',
+      leaseExpiresAt: null,
+      actionChosen: null,
+      actionOutcomeProse: null,
+      actionOutcomeStatus: null,
+      status: 'SCHEDULED',
+    });
+
+    const heartbeat = createHeartbeat({
+      stateStore: store,
+      workerId: 'worker-budget-1',
+      concurrency: 1,
+      now: () => now,
+    });
+
+    const result = await heartbeat.tick(weaveContext({ userId: 'human:admin-1' }));
+    const tick = await store.loadHeartbeatTick('tick-budget-1');
+    const agent = await store.loadAgent('agent-budget-1');
+
+    expect(result.processed).toBe(1);
+    expect(tick?.status).toBe('SKIPPED');
+    expect(tick?.actionOutcomeStatus).toBe('SKIPPED');
+    expect(tick?.actionOutcomeProse).toContain('budget guardrail');
+    expect(agent?.status).toBe('PAUSED');
+  });
 });
