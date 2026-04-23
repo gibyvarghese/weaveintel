@@ -6,6 +6,11 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 
 ## Latest Development (April 2026)
 
+- **Persistence Platform Phase 9 (Documentation + Release Validation)** — Added backend operator runbooks, migration playbook, and a release-grade E2E validator that executes persistence scenarios across phases.
+  - Operator guide: [docs/persistence/OPERATOR_GUIDE.md](docs/persistence/OPERATOR_GUIDE.md)
+  - Migration playbook: [docs/persistence/MIGRATION_PLAYBOOK.md](docs/persistence/MIGRATION_PLAYBOOK.md)
+  - Backend example matrix: [docs/persistence/BACKEND_E2E_EXAMPLES.md](docs/persistence/BACKEND_E2E_EXAMPLES.md)
+  - Release validator example: [examples/64-phase9-persistence-release-e2e.ts](examples/64-phase9-persistence-release-e2e.ts)
 - **Live-Agents Framework (Phases 14-16)** — Long-lived agent runtime with persistent state, distributed heartbeat scheduling, cross-mesh bridges, MCP integration, and multi-worker support. Agents run continuously, accumulate learnings in contracts, and coordinate via shared database. Production-ready reference implementation in [apps/live-agents-demo](apps/live-agents-demo).
   - Phase 14: Six core examples (52-57) covering research assistants, workflow automation, cross-mesh collaboration, context compression, permission boundaries, and mesh administration
   - Phase 15: Reference app with HTTP API, PostgreSQL state store, in-memory/Redis options, and interactive UI for testing

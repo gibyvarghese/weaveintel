@@ -258,6 +258,28 @@ Deliverables:
 Acceptance criteria:
 - End-to-end deployment docs validated from clean environment.
 
+Status: implemented with operator runbooks, migration guidance, and release E2E orchestration.
+
+Phase 9 implementation notes:
+- Added backend operator runbook: `docs/persistence/OPERATOR_GUIDE.md`.
+- Added migration procedure and rollback playbook: `docs/persistence/MIGRATION_PLAYBOOK.md`.
+- Added backend example matrix and execution map: `docs/persistence/BACKEND_E2E_EXAMPLES.md`.
+- Added release-grade E2E validation orchestrator: `examples/64-phase9-persistence-release-e2e.ts`.
+- Existing backend-method E2E examples used by the release validator:
+  - `examples/60-live-agents-persistence-methods-e2e.ts`
+  - `examples/61-agent-persistence-methods-e2e.ts`
+  - `examples/62-phase7-observability-replay-eval-persistence-e2e.ts`
+  - `examples/63-phase8-persistence-performance-reliability-e2e.ts`
+
+Phase 9 validation completed:
+- PASS: `npm run typecheck --workspace @weaveintel/memory`
+- PASS: `npm run build --workspace @weaveintel/memory`
+- PASS: `npm run test --workspace @weaveintel/memory`
+- PASS: `npm run typecheck --workspace @weaveintel/persistence`
+- PASS: `npm run build --workspace @weaveintel/persistence`
+- PASS: `npm run test --workspace @weaveintel/persistence`
+- PASS: `node --import tsx examples/64-phase9-persistence-release-e2e.ts`
+
 ## Configuration Model
 Proposed env variables:
 - `WEAVE_PERSISTENCE_BACKEND=inmemory|postgres|redis|sqlite|mongo|cloud-nosql`
