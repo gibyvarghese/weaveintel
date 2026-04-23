@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import type { AccessTokenResolver } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
+import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { weaveFakeTransport } from '@weaveintel/testing';
 import {
   createActionExecutor,
   createExternalEventHandler,
+  createMcpAccountSessionProvider,
   InvalidAccountBindingError,
+  NoAuthorisedAccountError,
   createHeartbeat,
   type AttentionAction,
   weaveInMemoryStateStore,
@@ -388,6 +393,230 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
       );
       expect(output.status).toMatch(/SUCCESS|PARTIAL/);
     }
+  });
+
+  it('phase 5 delivers external draft messages through a pooled MCP account session', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+    const deliveries: Array<Record<string, unknown>> = [];
+    let transportCreateCount = 0;
+
+    const { client, server } = weaveFakeTransport();
+    const mcpServer = weaveMCPServer({ name: 'gmail-fixture', version: '1.0.0' });
+    mcpServer.addTool(
+      {
+        name: 'gmail.send',
+        description: 'Send an email through Gmail.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            to: { type: 'string' },
+            subject: { type: 'string' },
+            body: { type: 'string' },
+          },
+          required: ['to', 'subject', 'body'],
+        },
+      },
+      async (_ctx, args) => {
+        deliveries.push(args);
+        return {
+          content: [
+            { type: 'text', text: 'sent fixture email' },
+            { type: 'resource', uri: `gmail://messages/${deliveries.length}` },
+          ],
+        };
+      },
+    );
+    await mcpServer.start(server);
+
+    const tokenResolver: AccessTokenResolver = {
+      async resolve() {
+        return 'fixture-token';
+      },
+      async revoke() {
+        return;
+      },
+    };
+
+    const sessionProvider = createMcpAccountSessionProvider({
+      tokenResolver,
+      transportFactory: {
+        async createTransport() {
+          transportCreateCount += 1;
+          return client;
+        },
+      },
+    });
+    const executor = createActionExecutor({ sessionProvider });
+
+    await store.saveAgent({
+      id: 'agent-mcp-1',
+      meshId: 'mesh-mcp-1',
+      name: 'Mailer',
+      role: 'Coordinator',
+      contractVersionId: 'contract-mcp-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveAccount({
+      id: 'account-mcp-1',
+      meshId: 'mesh-mcp-1',
+      provider: 'gmail',
+      accountIdentifier: 'mailer@example.com',
+      description: 'Fixture Gmail account',
+      mcpServerRef: { url: 'fixture://gmail', serverType: 'HTTP', discoveryHint: 'gmail send fixture' },
+      credentialVaultRef: 'vault://mailer',
+      upstreamScopesDescription: 'send only',
+      ownerHumanId: 'human:admin-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      revokedAt: null,
+    });
+    await store.saveAccountBinding({
+      id: 'binding-mcp-1',
+      agentId: 'agent-mcp-1',
+      accountId: 'account-mcp-1',
+      purpose: 'Send customer updates',
+      constraints: 'Low-risk transactional mail only',
+      grantedByHumanId: 'human:admin-1',
+      grantedAt: now,
+      expiresAt: null,
+      revokedAt: null,
+      revokedByHumanId: null,
+      revocationReason: null,
+    });
+
+    const baseContext = {
+      tickId: 'tick-mcp-1',
+      nowIso: now,
+      stateStore: store,
+      agent: {
+        id: 'agent-mcp-1',
+        meshId: 'mesh-mcp-1',
+        name: 'Mailer',
+        role: 'Coordinator',
+        contractVersionId: 'contract-mcp-1',
+        status: 'ACTIVE' as const,
+        createdAt: now,
+        archivedAt: null,
+      },
+      activeBindings: [
+        {
+          id: 'binding-mcp-1',
+          agentId: 'agent-mcp-1',
+          accountId: 'account-mcp-1',
+          purpose: 'Send customer updates',
+          constraints: 'Low-risk transactional mail only',
+          grantedByHumanId: 'human:admin-1',
+          grantedAt: now,
+          expiresAt: null,
+          revokedAt: null,
+          revokedByHumanId: null,
+          revocationReason: null,
+        },
+      ],
+    };
+
+    await executor.execute(
+      {
+        type: 'DraftMessage',
+        to: { type: 'HUMAN', id: 'customer@example.com' },
+        kind: 'REPORT',
+        subject: 'Status update',
+        bodySeed: 'Your request is complete.',
+      },
+      baseContext,
+      weaveContext({ userId: 'human:admin-1' }),
+    );
+
+    await executor.execute(
+      {
+        type: 'DraftMessage',
+        to: { type: 'HUMAN', id: 'customer@example.com' },
+        kind: 'REPORT',
+        subject: 'Follow-up',
+        bodySeed: 'Please let us know if you need anything else.',
+      },
+      { ...baseContext, tickId: 'tick-mcp-2' },
+      weaveContext({ userId: 'human:admin-1' }),
+    );
+
+    const outboundRecords = await store.listOutboundActionRecords('agent-mcp-1');
+    const deliveredMessages = await store.listMessagesForRecipient('HUMAN', 'customer@example.com');
+
+    expect(transportCreateCount).toBe(1);
+    expect(deliveries).toEqual([
+      {
+        to: 'customer@example.com',
+        subject: 'Status update',
+        body: 'Your request is complete.',
+      },
+      {
+        to: 'customer@example.com',
+        subject: 'Follow-up',
+        body: 'Please let us know if you need anything else.',
+      },
+    ]);
+    expect(outboundRecords).toHaveLength(2);
+    expect(outboundRecords.every((record) => record.status === 'SENT' && record.mcpToolName === 'gmail.send')).toBe(true);
+    expect(deliveredMessages.every((message) => message.status === 'DELIVERED')).toBe(true);
+
+    await sessionProvider.disconnectAll?.();
+    await mcpServer.stop();
+  });
+
+  it('phase 5 rejects external delivery when no authorised account is bound', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+    const tokenResolver: AccessTokenResolver = {
+      async resolve() {
+        return 'fixture-token';
+      },
+      async revoke() {
+        return;
+      },
+    };
+
+    const executor = createActionExecutor({
+      sessionProvider: createMcpAccountSessionProvider({
+        tokenResolver,
+        transportFactory: {
+          async createTransport() {
+            throw new Error('transport should not be created without an authorised account');
+          },
+        },
+      }),
+    });
+
+    await expect(
+      executor.execute(
+        {
+          type: 'DraftMessage',
+          to: { type: 'HUMAN', id: 'customer@example.com' },
+          kind: 'REPORT',
+          subject: 'Status update',
+          bodySeed: 'Your request is complete.',
+        },
+        {
+          tickId: 'tick-mcp-missing',
+          nowIso: now,
+          stateStore: store,
+          agent: {
+            id: 'agent-mcp-missing',
+            meshId: 'mesh-mcp-missing',
+            name: 'Mailer',
+            role: 'Coordinator',
+            contractVersionId: 'contract-mcp-missing',
+            status: 'ACTIVE',
+            createdAt: now,
+            archivedAt: null,
+          },
+          activeBindings: [],
+        },
+        weaveContext({ userId: 'human:admin-1' }),
+      ),
+    ).rejects.toBeInstanceOf(NoAuthorisedAccountError);
   });
 
   it('supports phase 2 mesh/team/delegation CRUD and message flow', async () => {

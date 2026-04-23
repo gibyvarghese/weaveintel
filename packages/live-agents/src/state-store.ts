@@ -369,6 +369,11 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
     async saveOutboundActionRecord(record) {
       outboundRecords.set(record.idempotencyKey, record);
     },
+    async listOutboundActionRecords(agentId) {
+      return [...outboundRecords.values()]
+        .filter((record) => record.agentId === agentId)
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    },
   };
 }
 

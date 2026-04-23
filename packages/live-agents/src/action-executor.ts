@@ -1,11 +1,17 @@
 import type {
+  Account,
+  AccountSessionProvider,
   ActionExecutionContext,
   ActionExecutionResult,
   ActionExecutor,
   AttentionAction,
+  ExternalActionAdapter,
+  ExternalActionToolCall,
   Message,
   OutboundActionRecord,
 } from './types.js';
+import type { ExecutionContext, MCPToolCallResponse } from '@weaveintel/core';
+import { NoAuthorisedAccountError } from './errors.js';
 
 function makeId(prefix: string, nowIso: string, suffix: string): string {
   return `${prefix}_${Date.parse(nowIso)}_${suffix}`;
@@ -55,9 +61,189 @@ async function saveOutboundStub(
   return id;
 }
 
-export function createActionExecutor(): ActionExecutor {
+async function saveOutboundRecord(
+  context: ActionExecutionContext,
+  accountId: string,
+  toolName: string,
+  purposeProse: string,
+  summaryProse: string,
+  status: OutboundActionRecord['status'],
+  externalRef: string | null,
+  errorProse: string | null,
+): Promise<string> {
+  const id = makeId('outbound', context.nowIso, Math.random().toString(36).slice(2, 10));
+  await context.stateStore.saveOutboundActionRecord({
+    id,
+    agentId: context.agent.id,
+    accountId,
+    mcpToolName: toolName,
+    idempotencyKey: `${context.tickId}:${id}`,
+    requiresHumanApproval: false,
+    approvalTaskId: null,
+    status,
+    sentAt: status === 'SENT' ? context.nowIso : null,
+    externalRef,
+    createdAt: context.nowIso,
+    purposeProse,
+    summaryProse,
+    errorProse,
+  });
+  return id;
+}
+
+function responseSummary(response: MCPToolCallResponse): string {
+  return response.content
+    .map((part: MCPToolCallResponse['content'][number]) => {
+      if (part.type === 'text') {
+        return part.text;
+      }
+      if (part.type === 'resource') {
+        return part.text ?? part.uri;
+      }
+      return `${part.mimeType}:${part.data.slice(0, 24)}`;
+    })
+    .join('\n')
+    .trim();
+}
+
+function responseExternalRef(response: MCPToolCallResponse): string | null {
+  const resourceRef = response.content.find((part: MCPToolCallResponse['content'][number]) => part.type === 'resource');
+  if (resourceRef && resourceRef.type === 'resource') {
+    return resourceRef.uri;
+  }
+  const textRef = response.content.find((part: MCPToolCallResponse['content'][number]) => part.type === 'text');
+  return textRef && textRef.type === 'text' ? textRef.text : null;
+}
+
+async function loadPrimaryAccount(context: ActionExecutionContext, purpose: string): Promise<Account> {
+  const binding = context.activeBindings[0];
+  if (!binding) {
+    throw new NoAuthorisedAccountError(context.agent.id, purpose);
+  }
+  const account = await context.stateStore.loadAccount(binding.accountId);
+  if (!account || account.status !== 'ACTIVE' || account.revokedAt !== null) {
+    throw new NoAuthorisedAccountError(context.agent.id, purpose);
+  }
+  return account;
+}
+
+function createDefaultExternalActionAdapter(): ExternalActionAdapter {
   return {
-    async execute(action, context): Promise<ActionExecutionResult> {
+    async resolve(action, _context, account): Promise<ExternalActionToolCall | null> {
+      switch (action.type) {
+        case 'DraftMessage': {
+          if (action.to.type !== 'HUMAN' || action.to.id === null) {
+            return null;
+          }
+          return {
+            toolName: account.provider === 'slack' ? 'slack.post' : `${account.provider}.send`,
+            arguments:
+              account.provider === 'slack'
+                ? { channel: action.to.id, text: `${action.subject}\n\n${action.bodySeed}` }
+                : { to: action.to.id, subject: action.subject, body: action.bodySeed },
+            purposeProse: `Deliver message to ${action.to.id}`,
+            summaryProse: action.subject,
+          };
+        }
+        case 'IssueGrant':
+          return {
+            toolName: `${account.provider}.issue_grant`,
+            arguments: {
+              recipientAgentId: action.recipientAgentId,
+              kind: action.capability.kindHint,
+              description: action.capability.descriptionProse,
+              scope: action.capability.scopeProse,
+              durationHint: action.capability.durationHint,
+              reason: action.capability.reasonProse,
+            },
+            purposeProse: `Issue grant to ${action.recipientAgentId}`,
+            summaryProse: action.capability.descriptionProse,
+          };
+        case 'IssuePromotion':
+          return {
+            toolName: `${account.provider}.issue_promotion`,
+            arguments: {
+              recipientAgentId: action.recipientAgentId,
+              role: action.newContractDraft.role,
+              objectives: action.newContractDraft.objectives,
+              successIndicators: action.newContractDraft.successIndicators,
+              reason: action.reasonProse,
+            },
+            purposeProse: `Issue promotion to ${action.recipientAgentId}`,
+            summaryProse: action.reasonProse,
+          };
+        case 'InvokeBreakGlass':
+          return {
+            toolName: `${account.provider}.invoke_break_glass`,
+            arguments: {
+              kind: action.capability.kindHint,
+              description: action.capability.descriptionProse,
+              reason: action.capability.reasonProse,
+              emergencyReason: action.emergencyReasonProse,
+              evidenceMessageIds: action.capability.evidenceMessageIds,
+            },
+            purposeProse: action.emergencyReasonProse,
+            summaryProse: action.capability.descriptionProse,
+          };
+        default:
+          return null;
+      }
+    },
+  };
+}
+
+async function tryExecuteExternalAction(
+  action: AttentionAction,
+  context: ActionExecutionContext,
+  ctx: ExecutionContext,
+  sessionProvider: AccountSessionProvider,
+  externalActionAdapter: ExternalActionAdapter,
+): Promise<{
+  recordId: string;
+  response: MCPToolCallResponse;
+} | null> {
+  const account = await loadPrimaryAccount(context, `execute ${action.type}`);
+  const plan = await externalActionAdapter.resolve(action, context, account);
+  if (!plan) {
+    return null;
+  }
+
+  const session = await sessionProvider.getSession({
+    account,
+    agent: context.agent,
+    ctx,
+  });
+  const tools = await session.listTools();
+  if (!tools.some((tool) => tool.name === plan.toolName)) {
+    return null;
+  }
+
+  const response = await session.callTool(ctx, {
+    name: plan.toolName,
+    arguments: plan.arguments,
+  });
+
+  const recordId = await saveOutboundRecord(
+    context,
+    account.id,
+    plan.toolName,
+    plan.purposeProse,
+    responseSummary(response) || plan.summaryProse,
+    response.isError ? 'FAILED' : 'SENT',
+    responseExternalRef(response),
+    response.isError ? responseSummary(response) || 'MCP tool returned an error.' : null,
+  );
+
+  return { recordId, response };
+}
+
+export function createActionExecutor(opts?: {
+  sessionProvider?: AccountSessionProvider;
+  externalActionAdapter?: ExternalActionAdapter;
+}): ActionExecutor {
+  const externalActionAdapter = opts?.externalActionAdapter ?? createDefaultExternalActionAdapter();
+  return {
+    async execute(action, context, ctx): Promise<ActionExecutionResult> {
       const createdMessageIds: string[] = [];
       const createdOutboundRecordIds: string[] = [];
       const updatedBacklogItemIds: string[] = [];
@@ -98,6 +284,24 @@ export function createActionExecutor(): ActionExecutor {
         case 'DraftMessage': {
           const messageId = makeId('msg', context.nowIso, Math.random().toString(36).slice(2, 10));
           const recipient = messageRecipientToFields(action);
+          let messageStatus: Message['status'] = 'PENDING';
+          let deliveredAt: string | null = null;
+
+          if (opts?.sessionProvider) {
+            const externalResult = await tryExecuteExternalAction(
+              action,
+              context,
+              ctx,
+              opts.sessionProvider,
+              externalActionAdapter,
+            );
+            if (externalResult) {
+              createdOutboundRecordIds.push(externalResult.recordId);
+              messageStatus = externalResult.response.isError ? 'FAILED' : 'DELIVERED';
+              deliveredAt = externalResult.response.isError ? null : context.nowIso;
+            }
+          }
+
           const message: Message = {
             id: messageId,
             meshId: context.agent.meshId,
@@ -114,8 +318,8 @@ export function createActionExecutor(): ActionExecutor {
             contextPacketRef: null,
             expiresAt: null,
             priority: 'NORMAL',
-            status: 'PENDING',
-            deliveredAt: null,
+            status: messageStatus,
+            deliveredAt,
             readAt: null,
             processedAt: null,
             createdAt: context.nowIso,
@@ -125,8 +329,8 @@ export function createActionExecutor(): ActionExecutor {
           await context.stateStore.saveMessage(message);
           createdMessageIds.push(messageId);
           return {
-            status: 'SUCCESS',
-            summaryProse: `Drafted message ${messageId}`,
+            status: messageStatus === 'FAILED' ? 'FAILED' : 'SUCCESS',
+            summaryProse: messageStatus === 'DELIVERED' ? `Delivered message ${messageId}` : `Drafted message ${messageId}`,
             createdMessageIds,
             createdOutboundRecordIds,
             updatedBacklogItemIds,
@@ -258,14 +462,36 @@ export function createActionExecutor(): ActionExecutor {
             body: action.capability.descriptionProse,
           });
           createdMessageIds.push(messageId);
-          createdOutboundRecordIds.push(
-            await saveOutboundStub(
+          if (opts?.sessionProvider) {
+            const externalResult = await tryExecuteExternalAction(
+              action,
               context,
-              'external.grants.issue.stub',
-              `Issue grant to ${action.recipientAgentId}`,
-              action.capability.reasonProse,
-            ),
-          );
+              ctx,
+              opts.sessionProvider,
+              externalActionAdapter,
+            );
+            if (externalResult) {
+              createdOutboundRecordIds.push(externalResult.recordId);
+            } else {
+              createdOutboundRecordIds.push(
+                await saveOutboundStub(
+                  context,
+                  'external.grants.issue.stub',
+                  `Issue grant to ${action.recipientAgentId}`,
+                  action.capability.reasonProse,
+                ),
+              );
+            }
+          } else {
+            createdOutboundRecordIds.push(
+              await saveOutboundStub(
+                context,
+                'external.grants.issue.stub',
+                `Issue grant to ${action.recipientAgentId}`,
+                action.capability.reasonProse,
+              ),
+            );
+          }
           return {
             status: 'SUCCESS',
             summaryProse: `Issued grant for ${action.recipientAgentId}`,
@@ -301,14 +527,36 @@ export function createActionExecutor(): ActionExecutor {
             body: action.reasonProse,
           });
           createdMessageIds.push(messageId);
-          createdOutboundRecordIds.push(
-            await saveOutboundStub(
+          if (opts?.sessionProvider) {
+            const externalResult = await tryExecuteExternalAction(
+              action,
               context,
-              'external.promotion.issue.stub',
-              `Issue promotion to ${action.recipientAgentId}`,
-              action.reasonProse,
-            ),
-          );
+              ctx,
+              opts.sessionProvider,
+              externalActionAdapter,
+            );
+            if (externalResult) {
+              createdOutboundRecordIds.push(externalResult.recordId);
+            } else {
+              createdOutboundRecordIds.push(
+                await saveOutboundStub(
+                  context,
+                  'external.promotion.issue.stub',
+                  `Issue promotion to ${action.recipientAgentId}`,
+                  action.reasonProse,
+                ),
+              );
+            }
+          } else {
+            createdOutboundRecordIds.push(
+              await saveOutboundStub(
+                context,
+                'external.promotion.issue.stub',
+                `Issue promotion to ${action.recipientAgentId}`,
+                action.reasonProse,
+              ),
+            );
+          }
           return {
             status: 'SUCCESS',
             summaryProse: `Issued promotion for ${action.recipientAgentId}`,
@@ -353,14 +601,36 @@ export function createActionExecutor(): ActionExecutor {
           };
         }
         case 'InvokeBreakGlass': {
-          createdOutboundRecordIds.push(
-            await saveOutboundStub(
+          if (opts?.sessionProvider) {
+            const externalResult = await tryExecuteExternalAction(
+              action,
               context,
-              'external.breakglass.invoke.stub',
-              action.emergencyReasonProse,
-              action.capability.descriptionProse,
-            ),
-          );
+              ctx,
+              opts.sessionProvider,
+              externalActionAdapter,
+            );
+            if (externalResult) {
+              createdOutboundRecordIds.push(externalResult.recordId);
+            } else {
+              createdOutboundRecordIds.push(
+                await saveOutboundStub(
+                  context,
+                  'external.breakglass.invoke.stub',
+                  action.emergencyReasonProse,
+                  action.capability.descriptionProse,
+                ),
+              );
+            }
+          } else {
+            createdOutboundRecordIds.push(
+              await saveOutboundStub(
+                context,
+                'external.breakglass.invoke.stub',
+                action.emergencyReasonProse,
+                action.capability.descriptionProse,
+              ),
+            );
+          }
           return {
             status: 'PARTIAL',
             summaryProse: 'Created break-glass outbound stub for manual follow-through',

@@ -1,4 +1,13 @@
-import type { ExecutionContext } from '@weaveintel/core';
+import type {
+  ExecutionContext,
+  AccessTokenResolver,
+  MCPToolCallRequest,
+  MCPToolCallResponse,
+  MCPToolDefinition,
+  MCPTransport,
+  RuntimeIdentity,
+  SecretScope,
+} from '@weaveintel/core';
 import type { ContextCompressor } from '@weaveintel/core';
 
 export type LiveAgentStatus =
@@ -352,6 +361,7 @@ export interface StateStore {
   listEventRoutes(accountId: string): Promise<EventRoute[]>;
 
   saveOutboundActionRecord(record: OutboundActionRecord): Promise<void>;
+  listOutboundActionRecords(agentId: string): Promise<OutboundActionRecord[]>;
 }
 
 export interface InMemoryStateStore extends StateStore {
@@ -452,6 +462,52 @@ export interface ActionExecutionContext {
   stateStore: StateStore;
   agent: LiveAgent;
   activeBindings: AccountBinding[];
+}
+
+export interface ExternalActionToolCall {
+  toolName: string;
+  arguments: Record<string, unknown>;
+  purposeProse: string;
+  summaryProse: string;
+}
+
+export interface ExternalActionAdapter {
+  resolve(action: AttentionAction, context: ActionExecutionContext, account: Account): Promise<ExternalActionToolCall | null>;
+}
+
+export interface AccountToolSession {
+  listTools(): Promise<MCPToolDefinition[]>;
+  callTool(ctx: ExecutionContext, request: MCPToolCallRequest): Promise<MCPToolCallResponse>;
+  disconnect(): Promise<void>;
+}
+
+export interface AccountSessionProvider {
+  getSession(args: {
+    account: Account;
+    agent: LiveAgent;
+    ctx: ExecutionContext;
+  }): Promise<AccountToolSession>;
+  disconnectAccount?(accountId: string): Promise<void>;
+  disconnectAll?(): Promise<void>;
+}
+
+export interface McpTransportFactoryInput {
+  account: Account;
+  agent: LiveAgent;
+  token: string;
+  identity: RuntimeIdentity;
+  ctx: ExecutionContext;
+}
+
+export interface McpTransportFactory {
+  createTransport(input: McpTransportFactoryInput): Promise<MCPTransport>;
+}
+
+export interface McpAccountSessionProviderOptions {
+  tokenResolver: AccessTokenResolver;
+  transportFactory: McpTransportFactory;
+  scopeFactory?: (account: Account, agent: LiveAgent) => SecretScope;
+  identityFactory?: (agent: LiveAgent) => RuntimeIdentity;
 }
 
 export interface ActionExecutionResult {

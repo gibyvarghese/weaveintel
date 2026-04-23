@@ -25,3 +25,10 @@ export class InvalidAccountBindingError extends LiveAgentsError {
     this.name = 'InvalidAccountBindingError';
   }
 }
+
+export class NoAuthorisedAccountError extends LiveAgentsError {
+  constructor(agentId: string, purpose: string) {
+    super(`No authorised account is available for agent ${agentId} to ${purpose}.`);
+    this.name = 'NoAuthorisedAccountError';
+  }
+}

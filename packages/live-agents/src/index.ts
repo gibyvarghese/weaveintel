@@ -1,4 +1,8 @@
 export type {
+  AccountSessionProvider,
+  AccountToolSession,
+  ExternalActionAdapter,
+  ExternalActionToolCall,
   ActionExecutionContext,
   ActionExecutionResult,
   ActionExecutor,
@@ -26,6 +30,9 @@ export type {
   LiveAgentsRuntime,
   LiveAgentStatus,
   GrantKind,
+  McpAccountSessionProviderOptions,
+  McpTransportFactory,
+  McpTransportFactoryInput,
   McpServerRef,
   Message,
   MessageKind,
@@ -49,6 +56,7 @@ export {
 
 export { createStandardAttentionPolicy } from './attention.js';
 export { createActionExecutor } from './action-executor.js';
+export { createMcpAccountSessionProvider } from './mcp-session-provider.js';
 
 export {
   weaveInMemoryStateStore,
@@ -59,6 +67,7 @@ export {
 export {
   LiveAgentsError,
   InvalidAccountBindingError,
+  NoAuthorisedAccountError,
   NotImplementedLiveAgentsError,
   OnlyHumansMayBindAccountsError,
 } from './errors.js';
