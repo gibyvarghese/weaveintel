@@ -7,8 +7,10 @@ import {
   BreakGlassPolicyViolationError,
   ContractAuthorityViolationError,
   createActionExecutor,
+  createCompressionMaintainer,
   createExternalEventHandler,
   GrantAuthorityViolationError,
+  createLiveAgentsRuntime,
   createMcpAccountSessionProvider,
   InvalidAccountBindingError,
   NoAuthorisedAccountError,
@@ -2109,5 +2111,115 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
         weaveContext({ userId: 'human:admin-1' }),
       ),
     ).rejects.toBeInstanceOf(ContractAuthorityViolationError);
+  });
+});
+
+describe('@weaveintel/live-agents phase 9 compression maintainer', () => {
+  it('initializes runtime with default compression toolkit', () => {
+    const runtime = createLiveAgentsRuntime();
+    expect(runtime.compressors.size).toBe(10);
+    expect(runtime.compressors.has('rolling-conversation-summary')).toBe(true);
+  });
+
+  it('runs compression and emits callback payload for active agents', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-03-01T00:00:00.000Z';
+
+    await store.saveMesh({
+      id: 'mesh-phase9-1',
+      tenantId: 'tenant-1',
+      name: 'Phase9 Mesh',
+      charter: 'Validate compression maintainer',
+      status: 'ACTIVE',
+      dualControlRequiredFor: [],
+      createdAt: now,
+    });
+    await store.saveAgent({
+      id: 'agent-phase9-1',
+      meshId: 'mesh-phase9-1',
+      name: 'Phase9 Agent',
+      role: 'Operator',
+      contractVersionId: 'contract-phase9-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-phase9-1',
+      agentId: 'agent-phase9-1',
+      version: 1,
+      persona: 'Compress context',
+      objectives: 'Maintain concise active context',
+      successIndicators: 'Context remains within token budget',
+      budget: {
+        monthlyUsdCap: 50,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: null,
+      contractAuthority: null,
+      breakGlass: null,
+      accountBindingRefs: [],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [{ id: 'episodic-memory' }, { id: 'contract-anchored-weighting' }],
+        budgets: {
+          attentionTokensMax: 120,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+    await store.saveMessage({
+      id: 'msg-phase9-1',
+      meshId: 'mesh-phase9-1',
+      fromType: 'HUMAN',
+      fromId: 'human:ops-admin-1',
+      fromMeshId: null,
+      toType: 'AGENT',
+      toId: 'agent-phase9-1',
+      topic: null,
+      kind: 'REPORT',
+      replyToMessageId: null,
+      threadId: 'thread-phase9-1',
+      contextRefs: [],
+      contextPacketRef: null,
+      expiresAt: null,
+      priority: 'NORMAL',
+      status: 'PENDING',
+      deliveredAt: null,
+      readAt: null,
+      processedAt: null,
+      createdAt: now,
+      subject: 'Daily update',
+      body: 'Escalation has been resolved and SLA recovered.',
+    });
+
+    const observed: Array<{ agentId: string; profile: string; rendered: string; artefactCount: number }> = [];
+    const maintainer = createCompressionMaintainer({
+      stateStore: store,
+      runOnce: true,
+      agentIds: ['agent-phase9-1'],
+      onCompressed(payload) {
+        observed.push(payload);
+      },
+    });
+
+    await maintainer.run(weaveContext({ tenantId: 'tenant-1' }));
+
+    expect(observed).toHaveLength(1);
+    expect(observed[0]?.agentId).toBe('agent-phase9-1');
+    expect(observed[0]?.profile).toBe('standard');
+    expect(observed[0]?.artefactCount).toBe(2);
+    expect(observed[0]?.rendered.length).toBeGreaterThan(0);
   });
 });

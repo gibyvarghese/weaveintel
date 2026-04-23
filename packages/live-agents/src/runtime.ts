@@ -1,4 +1,11 @@
-import type { ExecutionContext } from '@weaveintel/core';
+import type { ExecutionContext, MemoryEntry, WorkingMemory } from '@weaveintel/core';
+import {
+  createCompressorRegistry,
+  createContextAssembler,
+  createDefaultContextCompressors,
+  weaveWorkingMemory,
+  type CompressionProfile,
+} from '@weaveintel/memory';
 import type {
   ActionExecutionContext,
   ActionExecutor,
@@ -13,7 +20,6 @@ import type {
   LiveAgent,
   StateStore,
 } from './types.js';
-import { NotImplementedLiveAgentsError } from './errors.js';
 import { asStateStore } from './state-store.js';
 import { createStandardAttentionPolicy } from './attention.js';
 import { createActionExecutor } from './action-executor.js';
@@ -88,9 +94,10 @@ function defaultPauseEvaluator(args: {
 export function createLiveAgentsRuntime(opts?: {
   stateStore?: StateStore;
 }): LiveAgentsRuntime {
+  const compressors = createDefaultContextCompressors();
   return {
     stateStore: asStateStore(opts?.stateStore),
-    compressors: new Map(),
+    compressors: new Map(compressors.map((compressor) => [compressor.id, compressor])),
   };
 }
 
@@ -234,15 +241,140 @@ export function createHeartbeat(opts: {
   };
 }
 
-export function createCompressionMaintainer(_opts: {
-  stateStore: StateStore;
-}): CompressionMaintainer {
+function mapMessageToMemoryEntry(message: {
+  id: string;
+  body: string;
+  subject: string;
+  createdAt: string;
+}): MemoryEntry {
   return {
-    async run(_ctx: ExecutionContext) {
-      throw new NotImplementedLiveAgentsError('CompressionMaintainer.run');
+    id: message.id,
+    type: 'conversation',
+    content: `${message.subject}: ${message.body}`,
+    metadata: {},
+    createdAt: message.createdAt,
+  };
+}
+
+export function createCompressionMaintainer(opts: {
+  stateStore: StateStore;
+  runIntervalMs?: number;
+  now?: () => string;
+  workingMemory?: WorkingMemory;
+  agentIds?: string[];
+  meshIds?: string[];
+  tenantId?: string;
+  runOnce?: boolean;
+  onCompressed?: (payload: {
+    agentId: string;
+    profile: CompressionProfile;
+    rendered: string;
+    artefactCount: number;
+  }, ctx: ExecutionContext) => Promise<void> | void;
+}): CompressionMaintainer {
+  const runIntervalMs = Math.max(1, opts.runIntervalMs ?? 30_000);
+  const now = opts.now ?? (() => new Date().toISOString());
+  const workingMemory = opts.workingMemory ?? weaveWorkingMemory();
+  const registry = createCompressorRegistry(createDefaultContextCompressors());
+  const assembler = createContextAssembler(registry);
+  let running = false;
+
+  const resolveAgentIds = async (ctx: ExecutionContext): Promise<string[]> => {
+    if (opts.agentIds && opts.agentIds.length > 0) {
+      return opts.agentIds;
+    }
+
+    const meshIds = opts.meshIds && opts.meshIds.length > 0
+      ? opts.meshIds
+      : (await opts.stateStore.listMeshes(opts.tenantId ?? ctx.tenantId ?? '')).map((mesh) => mesh.id);
+
+    const allAgents = await Promise.all(meshIds.map((meshId) => opts.stateStore.listAgents(meshId)));
+    return allAgents.flat().map((agent) => agent.id);
+  };
+
+  const maintainAgent = async (agentId: string, ctx: ExecutionContext): Promise<void> => {
+    const agent = await opts.stateStore.loadAgent(agentId);
+    if (!agent || agent.status !== 'ACTIVE') {
+      return;
+    }
+
+    const [contract, messages, current] = await Promise.all([
+      opts.stateStore.loadLatestContractForAgent(agent.id),
+      opts.stateStore.listMessagesForRecipient('AGENT', agent.id),
+      workingMemory.getCurrent(ctx, agent.id),
+    ]);
+    if (!contract) {
+      return;
+    }
+
+    const memoryEntries = messages.map(mapMessageToMemoryEntry);
+    const episodicEntries = messages
+      .filter((message) => message.kind === 'REPORT' || message.kind === 'ESCALATION')
+      .slice(-10)
+      .map((message) => ({
+        id: `${message.id}:episodic`,
+        type: 'episodic' as const,
+        content: `${message.subject}: ${message.body}`,
+        metadata: { kind: message.kind },
+        createdAt: message.createdAt,
+      }));
+
+    const assembled = await assembler.assemble({
+      agentId: agent.id,
+      messages: memoryEntries,
+      episodicEvents: episodicEntries,
+      workingState: current?.content,
+      metadata: {
+        role: agent.role,
+        objectives: contract.objectives,
+      },
+    }, {
+      profile: contract.contextPolicy.defaultsProfile ?? 'standard',
+      tokenBudget: contract.contextPolicy.budgets.attentionTokensMax,
+      weighting: contract.contextPolicy.weighting,
+    }, ctx);
+
+    await workingMemory.patch(ctx, agent.id, [
+      { op: 'set', key: 'compressionProfile', value: contract.contextPolicy.defaultsProfile ?? 'standard' },
+      { op: 'set', key: 'compressedAt', value: now() },
+      { op: 'set', key: 'compressedContext', value: assembled.rendered },
+      {
+        op: 'set',
+        key: 'compressionArtefacts',
+        value: assembled.artefacts.map((artefact) => ({
+          id: artefact.id,
+          compressorId: artefact.compressorId,
+          summary: artefact.summary,
+          tokensEstimated: artefact.tokensEstimated,
+        })),
+      },
+    ]);
+
+    await opts.onCompressed?.({
+      agentId: agent.id,
+      profile: contract.contextPolicy.defaultsProfile ?? 'standard',
+      rendered: assembled.rendered,
+      artefactCount: assembled.artefacts.length,
+    }, ctx);
+  };
+
+  return {
+    async run(ctx: ExecutionContext) {
+      running = true;
+      while (running) {
+        const agentIds = await resolveAgentIds(ctx);
+        for (const agentId of agentIds) {
+          await maintainAgent(agentId, ctx);
+        }
+        if (opts.runOnce) {
+          running = false;
+          break;
+        }
+        await sleep(runIntervalMs);
+      }
     },
     async stop() {
-      throw new NotImplementedLiveAgentsError('CompressionMaintainer.stop');
+      running = false;
     },
   };
 }

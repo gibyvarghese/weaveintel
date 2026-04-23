@@ -38,5 +38,13 @@ export {
   weaveWorkingMemory,
   createCompressorRegistry,
   createNoopCompressor,
+  createDefaultContextCompressors,
+  createContextAssembler,
 } from './working.js';
-export type { CompressorRegistry } from './working.js';
+export type {
+  CompressorRegistry,
+  CompressionProfile,
+  AssembleContextOptions,
+  AssembledContext,
+  ContextAssembler,
+} from './working.js';
