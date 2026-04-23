@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { weaveContext } from '@weaveintel/core';
 import {
   createExternalEventHandler,
+  InvalidAccountBindingError,
   createHeartbeat,
   NotImplementedLiveAgentsError,
   weaveInMemoryStateStore,
@@ -10,6 +11,33 @@ import {
 describe('@weaveintel/live-agents phase 1 scaffold', () => {
   it('enforces human-only account bindings', async () => {
     const store = weaveInMemoryStateStore();
+    const now = new Date().toISOString();
+
+    await store.saveAgent({
+      id: 'agent-1',
+      meshId: 'mesh-1',
+      name: 'Alice',
+      role: 'Researcher',
+      contractVersionId: 'contract-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveAccount({
+      id: 'account-1',
+      meshId: 'mesh-1',
+      provider: 'gmail',
+      accountIdentifier: 'alice@example.com',
+      description: 'Alice support inbox',
+      mcpServerRef: { url: 'https://mcp.example.com/gmail', serverType: 'HTTP', discoveryHint: null },
+      credentialVaultRef: 'vault://alice',
+      upstreamScopesDescription: 'read/send',
+      ownerHumanId: 'human:ops-admin-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      revokedAt: null,
+    });
+
     await expect(
       store.saveAccountBinding({
         id: 'binding-1',
@@ -18,7 +46,7 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
         purpose: 'support mailbox triage',
         constraints: 'business-hours only',
         grantedByHumanId: 'agent:manager-1',
-        grantedAt: new Date().toISOString(),
+        grantedAt: now,
         expiresAt: null,
         revokedAt: null,
         revokedByHumanId: null,
@@ -34,7 +62,7 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
         purpose: 'support mailbox triage',
         constraints: 'business-hours only',
         grantedByHumanId: 'human:ops-admin-1',
-        grantedAt: new Date().toISOString(),
+        grantedAt: now,
         expiresAt: null,
         revokedAt: null,
         revokedByHumanId: null,
@@ -257,5 +285,139 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
     const backlog = await store.listBacklogForAgent('agent-b');
     expect(backlog).toHaveLength(1);
     expect(backlog[0]?.status).toBe('COMPLETED');
+  });
+
+  it('supports phase 3 account and binding lifecycle with active filtering', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = new Date().toISOString();
+
+    await store.saveAgent({
+      id: 'agent-acc-1',
+      meshId: 'mesh-acc-1',
+      name: 'Alice',
+      role: 'Researcher',
+      contractVersionId: 'contract-acc-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveAccount({
+      id: 'account-acc-1',
+      meshId: 'mesh-acc-1',
+      provider: 'gmail',
+      accountIdentifier: 'alice@example.com',
+      description: 'Alice support inbox',
+      mcpServerRef: { url: 'https://mcp.example.com/gmail', serverType: 'HTTP', discoveryHint: null },
+      credentialVaultRef: 'vault://alice',
+      upstreamScopesDescription: 'read/send',
+      ownerHumanId: 'human:admin-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      revokedAt: null,
+    });
+
+    await store.saveAccountBinding({
+      id: 'binding-acc-1',
+      agentId: 'agent-acc-1',
+      accountId: 'account-acc-1',
+      purpose: 'Handle support inbox',
+      constraints: 'Escalate refunds',
+      grantedByHumanId: 'human:admin-1',
+      grantedAt: now,
+      expiresAt: null,
+      revokedAt: null,
+      revokedByHumanId: null,
+      revocationReason: null,
+    });
+
+    const activeBefore = await store.listActiveAccountBindingsForAgent('agent-acc-1', now);
+    expect(activeBefore).toHaveLength(1);
+
+    await store.revokeAccountBinding('binding-acc-1', 'human:admin-2', 'Offboarded account', now);
+    const activeAfterBindingRevoke = await store.listActiveAccountBindingsForAgent('agent-acc-1', now);
+    expect(activeAfterBindingRevoke).toHaveLength(0);
+
+    await store.saveAccountBinding({
+      id: 'binding-acc-2',
+      agentId: 'agent-acc-1',
+      accountId: 'account-acc-1',
+      purpose: 'Temporary restoration',
+      constraints: 'Read-only',
+      grantedByHumanId: 'human:admin-1',
+      grantedAt: now,
+      expiresAt: null,
+      revokedAt: null,
+      revokedByHumanId: null,
+      revocationReason: null,
+    });
+
+    await store.transitionAccountStatus('account-acc-1', 'REVOKED', now);
+    const activeAfterAccountRevoke = await store.listActiveAccountBindingsForAgent('agent-acc-1', now);
+    expect(activeAfterAccountRevoke).toHaveLength(0);
+  });
+
+  it('rejects invalid bindings and enforces human-only request resolution', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = new Date().toISOString();
+
+    await store.saveAgent({
+      id: 'agent-bind-1',
+      meshId: 'mesh-bind-1',
+      name: 'Bob',
+      role: 'Researcher',
+      contractVersionId: 'contract-bind-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+
+    await expect(
+      store.saveAccountBinding({
+        id: 'binding-missing-account',
+        agentId: 'agent-bind-1',
+        accountId: 'missing-account',
+        purpose: 'Should fail',
+        constraints: 'N/A',
+        grantedByHumanId: 'human:admin-1',
+        grantedAt: now,
+        expiresAt: null,
+        revokedAt: null,
+        revokedByHumanId: null,
+        revocationReason: null,
+      }),
+    ).rejects.toBeInstanceOf(InvalidAccountBindingError);
+
+    await store.saveAccountBindingRequest({
+      id: 'abr-1',
+      meshId: 'mesh-bind-1',
+      agentId: 'agent-bind-1',
+      accountId: null,
+      requestedByType: 'AGENT',
+      requestedById: 'agent-bind-1',
+      status: 'OPEN',
+      resolvedByHumanId: null,
+      resolvedAccountBindingId: null,
+      createdAt: now,
+      resolvedAt: null,
+      expiresAt: null,
+      purposeProse: 'Need account access for support triage.',
+      reasonProse: 'Cannot process inbox without account.',
+      resolutionReasonProse: null,
+      evidenceRefs: ['msg-1'],
+    });
+
+    await expect(
+      store.resolveAccountBindingRequest('abr-1', 'REJECTED', 'agent:manager-1', now, 'Only humans may resolve.'),
+    ).rejects.toThrow('Account bindings must be granted by a human principal');
+
+    const resolved = await store.resolveAccountBindingRequest(
+      'abr-1',
+      'REJECTED',
+      'human:admin-1',
+      now,
+      'Deferred until audited inbox account is provisioned.',
+    );
+    expect(resolved?.status).toBe('REJECTED');
+    expect(resolved?.resolvedByHumanId).toBe('human:admin-1');
   });
 });

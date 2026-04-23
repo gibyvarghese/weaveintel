@@ -44,6 +44,7 @@ export {
 
 export {
   LiveAgentsError,
+  InvalidAccountBindingError,
   NotImplementedLiveAgentsError,
   OnlyHumansMayBindAccountsError,
 } from './errors.js';

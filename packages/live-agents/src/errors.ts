@@ -18,3 +18,10 @@ export class OnlyHumansMayBindAccountsError extends LiveAgentsError {
     this.name = 'OnlyHumansMayBindAccountsError';
   }
 }
+
+export class InvalidAccountBindingError extends LiveAgentsError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidAccountBindingError';
+  }
+}

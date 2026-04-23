@@ -19,7 +19,7 @@ import type {
   Team,
   TeamMembership,
 } from './types.js';
-import { OnlyHumansMayBindAccountsError } from './errors.js';
+import { InvalidAccountBindingError, OnlyHumansMayBindAccountsError } from './errors.js';
 
 function isHumanPrincipal(id: string): boolean {
   const normalized = id.trim().toLowerCase();
@@ -131,10 +131,39 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
     async listAccounts(meshId) {
       return [...accounts.values()].filter((account) => account.meshId === meshId);
     },
+    async transitionAccountStatus(accountId, nextStatus, at) {
+      const current = accounts.get(accountId);
+      if (!current) {
+        return null;
+      }
+      const updated: Account = {
+        ...current,
+        status: nextStatus,
+        revokedAt: nextStatus === 'REVOKED' ? at : current.revokedAt,
+      };
+      accounts.set(accountId, updated);
+      return updated;
+    },
 
     async saveAccountBinding(binding) {
       if (!isHumanPrincipal(binding.grantedByHumanId)) {
         throw new OnlyHumansMayBindAccountsError(binding.grantedByHumanId);
+      }
+      const account = accounts.get(binding.accountId);
+      if (!account) {
+        throw new InvalidAccountBindingError(`Account not found for binding: ${binding.accountId}`);
+      }
+      const agent = agents.get(binding.agentId);
+      if (!agent) {
+        throw new InvalidAccountBindingError(`Agent not found for binding: ${binding.agentId}`);
+      }
+      if (account.meshId !== agent.meshId) {
+        throw new InvalidAccountBindingError(
+          `Account and agent mesh mismatch for binding ${binding.id}: ${account.meshId} vs ${agent.meshId}`,
+        );
+      }
+      if (account.status !== 'ACTIVE' || account.revokedAt !== null) {
+        throw new InvalidAccountBindingError(`Account is not active for binding: ${binding.accountId}`);
       }
       bindings.set(binding.id, binding);
     },
@@ -150,11 +179,63 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
         if (binding.agentId !== agentId) return false;
         if (binding.revokedAt) return false;
         if (binding.expiresAt && Date.parse(binding.expiresAt) < atTime) return false;
+        const account = accounts.get(binding.accountId);
+        if (!account) return false;
+        if (account.status !== 'ACTIVE' || account.revokedAt !== null) return false;
         return true;
       });
     },
+    async revokeAccountBinding(bindingId, revokedByHumanId, revocationReason, at) {
+      if (!isHumanPrincipal(revokedByHumanId)) {
+        throw new OnlyHumansMayBindAccountsError(revokedByHumanId);
+      }
+      const current = bindings.get(bindingId);
+      if (!current) {
+        return null;
+      }
+      const updated: AccountBinding = {
+        ...current,
+        revokedAt: at,
+        revokedByHumanId,
+        revocationReason,
+      };
+      bindings.set(bindingId, updated);
+      return updated;
+    },
     async saveAccountBindingRequest(request) {
       bindingRequests.set(request.id, request);
+    },
+    async loadAccountBindingRequest(id) {
+      return bindingRequests.get(id) ?? null;
+    },
+    async listAccountBindingRequests(meshId) {
+      return [...bindingRequests.values()].filter((request) => request.meshId === meshId);
+    },
+    async resolveAccountBindingRequest(
+      requestId,
+      status,
+      resolvedByHumanId,
+      resolvedAt,
+      resolutionReasonProse,
+      resolvedAccountBindingId,
+    ) {
+      if (!isHumanPrincipal(resolvedByHumanId)) {
+        throw new OnlyHumansMayBindAccountsError(resolvedByHumanId);
+      }
+      const current = bindingRequests.get(requestId);
+      if (!current) {
+        return null;
+      }
+      const updated: AccountBindingRequest = {
+        ...current,
+        status,
+        resolvedByHumanId,
+        resolvedAt,
+        resolutionReasonProse,
+        resolvedAccountBindingId: status === 'APPROVED' ? (resolvedAccountBindingId ?? null) : null,
+      };
+      bindingRequests.set(requestId, updated);
+      return updated;
     },
 
     async saveHeartbeatTick(tick) {

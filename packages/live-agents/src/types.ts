@@ -303,12 +303,29 @@ export interface StateStore {
   saveAccount(account: Account): Promise<void>;
   loadAccount(id: string): Promise<Account | null>;
   listAccounts(meshId: string): Promise<Account[]>;
+  transitionAccountStatus(accountId: string, nextStatus: Account['status'], at: string): Promise<Account | null>;
 
   saveAccountBinding(binding: AccountBinding): Promise<void>;
   loadAccountBinding(id: string): Promise<AccountBinding | null>;
   listAccountBindings(agentId: string): Promise<AccountBinding[]>;
   listActiveAccountBindingsForAgent(agentId: string, at: string): Promise<AccountBinding[]>;
+  revokeAccountBinding(
+    bindingId: string,
+    revokedByHumanId: string,
+    revocationReason: string,
+    at: string,
+  ): Promise<AccountBinding | null>;
   saveAccountBindingRequest(request: AccountBindingRequest): Promise<void>;
+  loadAccountBindingRequest(id: string): Promise<AccountBindingRequest | null>;
+  listAccountBindingRequests(meshId: string): Promise<AccountBindingRequest[]>;
+  resolveAccountBindingRequest(
+    requestId: string,
+    status: 'APPROVED' | 'REJECTED' | 'EXPIRED',
+    resolvedByHumanId: string,
+    resolvedAt: string,
+    resolutionReasonProse: string,
+    resolvedAccountBindingId?: string | null,
+  ): Promise<AccountBindingRequest | null>;
 
   saveHeartbeatTick(tick: HeartbeatTick): Promise<void>;
   claimNextTicks(workerId: string, nowIso: string, limit: number): Promise<HeartbeatTick[]>;
