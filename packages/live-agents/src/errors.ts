@@ -53,3 +53,17 @@ export class BreakGlassPolicyViolationError extends LiveAgentsError {
     this.name = 'BreakGlassPolicyViolationError';
   }
 }
+
+export class SelfPromotionForbiddenError extends LiveAgentsError {
+  constructor(issuerId: string) {
+    super(`Self-promotion is forbidden for issuer ${issuerId}.`);
+    this.name = 'SelfPromotionForbiddenError';
+  }
+}
+
+export class ContractAuthorityViolationError extends LiveAgentsError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ContractAuthorityViolationError';
+  }
+}

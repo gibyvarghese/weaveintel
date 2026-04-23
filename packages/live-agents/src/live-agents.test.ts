@@ -5,12 +5,14 @@ import { weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveFakeTransport } from '@weaveintel/testing';
 import {
   BreakGlassPolicyViolationError,
+  ContractAuthorityViolationError,
   createActionExecutor,
   createExternalEventHandler,
   GrantAuthorityViolationError,
   createMcpAccountSessionProvider,
   InvalidAccountBindingError,
   NoAuthorisedAccountError,
+  SelfPromotionForbiddenError,
   SelfGrantForbiddenError,
   createHeartbeat,
   type AttentionAction,
@@ -254,12 +256,53 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
         requiresEvidence: false,
         dualControl: false,
       },
+      contractAuthority: {
+        canIssueContracts: true,
+        canIssuePromotions: true,
+        scopePredicate: 'same mesh collaborators',
+        requiresEvidence: false,
+      },
       breakGlass: {
         allowedCapabilityKinds: ['AUTHORITY_EXTENSION', 'MESH_BRIDGE'],
         maxDurationMinutes: 60,
         requiredEmergencyConditionsDescription: 'incident emergency outage',
       },
       accountBindingRefs: ['account-exec-1'],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+    await store.saveContract({
+      id: 'contract-exec-2',
+      agentId: 'agent-exec-2',
+      version: 1,
+      persona: 'Recipient persona',
+      objectives: 'Receive promotions',
+      successIndicators: 'Can transition contracts safely',
+      budget: {
+        monthlyUsdCap: 50,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: null,
+      contractAuthority: null,
+      breakGlass: null,
+      accountBindingRefs: [],
       attentionPolicyRef: 'standard-v1',
       reviewCadence: 'P1D',
       contextPolicy: {
@@ -388,7 +431,7 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
       },
       {
         type: 'IssuePromotion',
-        recipientAgentId: 'agent-exec-1',
+        recipientAgentId: 'agent-exec-2',
         newContractDraft: {
           role: 'Senior Operator',
           objectives: 'Run delivery',
@@ -1637,5 +1680,434 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
     const grants = await store.listCapabilityGrantsForRecipient('AGENT', 'agent-grant-target-1');
     expect(grants).toHaveLength(triggers.length);
     expect(new Set(grants.map((grant) => grant.trigger))).toEqual(new Set(triggers));
+  });
+
+  it('phase 8 self-request promotion creates promotion request record', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+    const executor = createActionExecutor();
+
+    await store.saveAgent({
+      id: 'agent-promo-self-1',
+      meshId: 'mesh-phase8-self-1',
+      name: 'Worker',
+      role: 'Operator',
+      contractVersionId: 'contract-promo-self-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-promo-self-1',
+      agentId: 'agent-promo-self-1',
+      version: 1,
+      persona: 'Worker persona',
+      objectives: 'Grow role responsibly',
+      successIndicators: 'Promotion requests are clear',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: null,
+      contractAuthority: null,
+      breakGlass: null,
+      accountBindingRefs: [],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+
+    const output = await executor.execute(
+      {
+        type: 'RequestPromotion',
+        targetRole: 'Senior Operator',
+        reasonProse: 'Delivered consistently for two quarters',
+        evidenceMessageIds: ['msg-promo-evidence-1'],
+      },
+      {
+        tickId: 'tick-promo-self-1',
+        nowIso: now,
+        stateStore: store,
+        agent: {
+          id: 'agent-promo-self-1',
+          meshId: 'mesh-phase8-self-1',
+          name: 'Worker',
+          role: 'Operator',
+          contractVersionId: 'contract-promo-self-1',
+          status: 'ACTIVE',
+          createdAt: now,
+          archivedAt: null,
+        },
+        activeBindings: [],
+      },
+      weaveContext({ userId: 'human:admin-1' }),
+    );
+
+    expect(output.status).toBe('SUCCESS');
+    const requests = await store.listPromotionRequests('mesh-phase8-self-1');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.requestedById).toBe('agent-promo-self-1');
+    expect(requests[0]?.recipientId).toBe('agent-promo-self-1');
+  });
+
+  it('phase 8 manager-issued promotion creates new contract and promotion record', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+    const executor = createActionExecutor();
+
+    await store.saveAgent({
+      id: 'agent-manager-1',
+      meshId: 'mesh-phase8-issue-1',
+      name: 'Manager',
+      role: 'Manager',
+      contractVersionId: 'contract-manager-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveAgent({
+      id: 'agent-worker-1',
+      meshId: 'mesh-phase8-issue-1',
+      name: 'Worker',
+      role: 'Operator',
+      contractVersionId: 'contract-worker-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+
+    await store.saveContract({
+      id: 'contract-manager-1',
+      agentId: 'agent-manager-1',
+      version: 1,
+      persona: 'Manager persona',
+      objectives: 'Manage growth',
+      successIndicators: 'Safe role transitions',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: null,
+      contractAuthority: {
+        canIssueContracts: true,
+        canIssuePromotions: true,
+        scopePredicate: 'same mesh',
+        requiresEvidence: false,
+      },
+      breakGlass: null,
+      accountBindingRefs: [],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+    await store.saveContract({
+      id: 'contract-worker-1',
+      agentId: 'agent-worker-1',
+      version: 1,
+      persona: 'Worker persona',
+      objectives: 'Deliver operator tasks',
+      successIndicators: 'Steady delivery',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: null,
+      contractAuthority: null,
+      breakGlass: null,
+      accountBindingRefs: [],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+
+    const output = await executor.execute(
+      {
+        type: 'IssuePromotion',
+        recipientAgentId: 'agent-worker-1',
+        newContractDraft: {
+          role: 'Senior Operator',
+          objectives: 'Lead operator workflows',
+          successIndicators: 'Team throughput improves',
+        },
+        reasonProse: 'Consistent delivery and mentoring contributions',
+      },
+      {
+        tickId: 'tick-promo-issue-1',
+        nowIso: now,
+        stateStore: store,
+        agent: {
+          id: 'agent-manager-1',
+          meshId: 'mesh-phase8-issue-1',
+          name: 'Manager',
+          role: 'Manager',
+          contractVersionId: 'contract-manager-1',
+          status: 'ACTIVE',
+          createdAt: now,
+          archivedAt: null,
+        },
+        activeBindings: [],
+      },
+      weaveContext({ userId: 'human:admin-1' }),
+    );
+
+    expect(output.status).toBe('SUCCESS');
+    const worker = await store.loadAgent('agent-worker-1');
+    expect(worker?.role).toBe('Senior Operator');
+
+    const promotions = await store.listPromotionsForAgent('agent-worker-1');
+    expect(promotions).toHaveLength(1);
+    expect(promotions[0]?.issuedById).toBe('agent-manager-1');
+
+    const latestContract = await store.loadLatestContractForAgent('agent-worker-1');
+    expect(latestContract?.version).toBe(2);
+    expect(latestContract?.objectives).toBe('Lead operator workflows');
+  });
+
+  it('phase 8 forbids self-issued promotions', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+
+    await store.saveAgent({
+      id: 'agent-self-promo-1',
+      meshId: 'mesh-phase8-selfpromo-1',
+      name: 'Self Promoter',
+      role: 'Operator',
+      contractVersionId: 'contract-self-promo-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-self-promo-1',
+      agentId: 'agent-self-promo-1',
+      version: 1,
+      persona: 'Operator persona',
+      objectives: 'Operate',
+      successIndicators: 'Stable operations',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: null,
+      contractAuthority: {
+        canIssueContracts: true,
+        canIssuePromotions: true,
+        scopePredicate: 'self',
+        requiresEvidence: false,
+      },
+      breakGlass: null,
+      accountBindingRefs: [],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+
+    await expect(
+      store.savePromotion({
+        id: 'promotion-self-1',
+        agentId: 'agent-self-promo-1',
+        fromContractVersionId: 'contract-self-promo-1',
+        toContractVersionId: 'contract-self-promo-2',
+        trigger: 'USER_INITIATED',
+        issuedByType: 'AGENT',
+        issuedById: 'agent-self-promo-1',
+        issuedAt: now,
+        scopeDeltaSummaryProse: 'Self promote',
+        evidenceRefs: [],
+      }),
+    ).rejects.toBeInstanceOf(SelfPromotionForbiddenError);
+  });
+
+  it('phase 8 enforces issuer contract authority for promotions', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+    const executor = createActionExecutor();
+
+    await store.saveAgent({
+      id: 'agent-noauthority-1',
+      meshId: 'mesh-phase8-noauthority-1',
+      name: 'No Authority',
+      role: 'Operator',
+      contractVersionId: 'contract-noauthority-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveAgent({
+      id: 'agent-target-1',
+      meshId: 'mesh-phase8-noauthority-1',
+      name: 'Target',
+      role: 'Operator',
+      contractVersionId: 'contract-target-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-noauthority-1',
+      agentId: 'agent-noauthority-1',
+      version: 1,
+      persona: 'No authority persona',
+      objectives: 'Operate only',
+      successIndicators: 'No unauthorized actions',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: null,
+      contractAuthority: null,
+      breakGlass: null,
+      accountBindingRefs: [],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+    await store.saveContract({
+      id: 'contract-target-1',
+      agentId: 'agent-target-1',
+      version: 1,
+      persona: 'Target persona',
+      objectives: 'Operate',
+      successIndicators: 'Steady',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 5,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: null,
+      contractAuthority: null,
+      breakGlass: null,
+      accountBindingRefs: [],
+      attentionPolicyRef: 'standard-v1',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+
+    await expect(
+      executor.execute(
+        {
+          type: 'IssuePromotion',
+          recipientAgentId: 'agent-target-1',
+          newContractDraft: {
+            role: 'Senior Operator',
+            objectives: 'Lead',
+            successIndicators: 'Faster delivery',
+          },
+          reasonProse: 'No authority but trying to promote',
+        },
+        {
+          tickId: 'tick-promo-noauthority-1',
+          nowIso: now,
+          stateStore: store,
+          agent: {
+            id: 'agent-noauthority-1',
+            meshId: 'mesh-phase8-noauthority-1',
+            name: 'No Authority',
+            role: 'Operator',
+            contractVersionId: 'contract-noauthority-1',
+            status: 'ACTIVE',
+            createdAt: now,
+            archivedAt: null,
+          },
+          activeBindings: [],
+        },
+        weaveContext({ userId: 'human:admin-1' }),
+      ),
+    ).rejects.toBeInstanceOf(ContractAuthorityViolationError);
   });
 });

@@ -11,10 +11,13 @@ import type {
   ExternalActionToolCall,
   Message,
   OutboundActionRecord,
+  Promotion,
+  PromotionRequest,
 } from './types.js';
 import type { ExecutionContext, MCPToolCallResponse } from '@weaveintel/core';
 import {
   BreakGlassPolicyViolationError,
+  ContractAuthorityViolationError,
   NoAuthorisedAccountError,
 } from './errors.js';
 
@@ -441,6 +444,28 @@ export function createActionExecutor(opts?: {
           };
         }
         case 'RequestPromotion': {
+          const requestId = makeId('promotion_request', context.nowIso, Math.random().toString(36).slice(2, 10));
+          const request: PromotionRequest = {
+            id: requestId,
+            meshId: context.agent.meshId,
+            recipientId: context.agent.id,
+            requestedByType: 'AGENT',
+            requestedById: context.agent.id,
+            status: 'OPEN',
+            reviewedByType: null,
+            reviewedById: null,
+            resolvedContractVersionId: null,
+            createdAt: context.nowIso,
+            resolvedAt: null,
+            expiresAt: null,
+            targetRole: action.targetRole,
+            scopeDeltaProse: action.reasonProse,
+            reasonProse: action.reasonProse,
+            resolutionReasonProse: null,
+            evidenceRefs: action.evidenceMessageIds,
+          };
+          await context.stateStore.savePromotionRequest(request);
+
           const messageId = makeId('msg', context.nowIso, Math.random().toString(36).slice(2, 10));
           await context.stateStore.saveMessage({
             id: messageId,
@@ -454,7 +479,7 @@ export function createActionExecutor(opts?: {
             kind: 'PROMOTION_REQUEST',
             replyToMessageId: null,
             threadId: messageId,
-            contextRefs: action.evidenceMessageIds,
+            contextRefs: [requestId, ...action.evidenceMessageIds],
             contextPacketRef: null,
             expiresAt: null,
             priority: 'HIGH',
@@ -568,6 +593,60 @@ export function createActionExecutor(opts?: {
           };
         }
         case 'IssuePromotion': {
+          const issuerContract = await context.stateStore.loadLatestContractForAgent(context.agent.id);
+          if (!issuerContract?.contractAuthority?.canIssuePromotions) {
+            throw new ContractAuthorityViolationError(
+              `Agent ${context.agent.id} is not allowed to issue promotions.`,
+            );
+          }
+
+          const recipient = await context.stateStore.loadAgent(action.recipientAgentId);
+          if (!recipient) {
+            throw new ContractAuthorityViolationError(
+              `Cannot issue promotion because recipient agent ${action.recipientAgentId} was not found.`,
+            );
+          }
+
+          const currentRecipientContract = await context.stateStore.loadLatestContractForAgent(recipient.id);
+          if (!currentRecipientContract) {
+            throw new ContractAuthorityViolationError(
+              `Cannot issue promotion because recipient ${recipient.id} has no active contract.`,
+            );
+          }
+
+          const nextContractVersion = currentRecipientContract.version + 1;
+          const promotedContractId = makeId('contract', context.nowIso, Math.random().toString(36).slice(2, 10));
+          await context.stateStore.saveContract({
+            ...currentRecipientContract,
+            id: promotedContractId,
+            version: nextContractVersion,
+            persona: currentRecipientContract.persona,
+            objectives: action.newContractDraft.objectives,
+            successIndicators: action.newContractDraft.successIndicators,
+            createdAt: context.nowIso,
+          });
+
+          await context.stateStore.saveAgent({
+            ...recipient,
+            role: action.newContractDraft.role,
+            contractVersionId: promotedContractId,
+          });
+
+          const promotionId = makeId('promotion', context.nowIso, Math.random().toString(36).slice(2, 10));
+          const promotion: Promotion = {
+            id: promotionId,
+            agentId: recipient.id,
+            fromContractVersionId: currentRecipientContract.id,
+            toContractVersionId: promotedContractId,
+            trigger: 'REQUESTED',
+            issuedByType: 'AGENT',
+            issuedById: context.agent.id,
+            issuedAt: context.nowIso,
+            scopeDeltaSummaryProse: action.reasonProse,
+            evidenceRefs: [],
+          };
+          await context.stateStore.savePromotion(promotion);
+
           const messageId = makeId('msg', context.nowIso, Math.random().toString(36).slice(2, 10));
           await context.stateStore.saveMessage({
             id: messageId,
@@ -581,7 +660,7 @@ export function createActionExecutor(opts?: {
             kind: 'PROMOTION_NOTICE',
             replyToMessageId: null,
             threadId: messageId,
-            contextRefs: [],
+            contextRefs: [promotionId, promotedContractId],
             contextPacketRef: null,
             expiresAt: null,
             priority: 'NORMAL',
@@ -626,7 +705,7 @@ export function createActionExecutor(opts?: {
           }
           return {
             status: 'SUCCESS',
-            summaryProse: `Issued promotion for ${action.recipientAgentId}`,
+            summaryProse: `Issued promotion for ${action.recipientAgentId} with new contract ${promotedContractId}`,
             createdMessageIds,
             createdOutboundRecordIds,
             updatedBacklogItemIds,

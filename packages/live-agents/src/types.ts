@@ -84,6 +84,7 @@ export interface AgentContract {
     cronActive: string;
   };
   grantAuthority?: GrantAuthorityConstraints | null;
+  contractAuthority?: ContractAuthorityConstraints | null;
   breakGlass?: BreakGlassConstraints | null;
   accountBindingRefs: string[];
   attentionPolicyRef: string;
@@ -104,6 +105,13 @@ export interface BreakGlassConstraints {
   allowedCapabilityKinds: GrantKind[];
   maxDurationMinutes: number;
   requiredEmergencyConditionsDescription: string;
+}
+
+export interface ContractAuthorityConstraints {
+  canIssueContracts: boolean;
+  canIssuePromotions: boolean;
+  scopePredicate: string;
+  requiresEvidence: boolean;
 }
 
 export interface ContextPolicy {
@@ -376,6 +384,39 @@ export interface BreakGlassInvocation {
   evidenceRefs: string[];
 }
 
+export interface PromotionRequest {
+  id: string;
+  meshId: string;
+  recipientId: string;
+  requestedByType: 'AGENT' | 'HUMAN';
+  requestedById: string;
+  status: 'OPEN' | 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'EXPIRED';
+  reviewedByType: 'HUMAN' | 'AGENT' | null;
+  reviewedById: string | null;
+  resolvedContractVersionId: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+  expiresAt: string | null;
+  targetRole: string;
+  scopeDeltaProse: string;
+  reasonProse: string;
+  resolutionReasonProse: string | null;
+  evidenceRefs: string[];
+}
+
+export interface Promotion {
+  id: string;
+  agentId: string;
+  fromContractVersionId: string;
+  toContractVersionId: string;
+  trigger: 'REQUESTED' | 'RECOMMENDED' | 'ROLE_CHANGE' | 'SUCCESSION' | 'USER_INITIATED';
+  issuedByType: 'HUMAN' | 'AGENT';
+  issuedById: string;
+  issuedAt: string;
+  scopeDeltaSummaryProse: string;
+  evidenceRefs: string[];
+}
+
 export interface StateStore {
   saveMesh(mesh: Mesh): Promise<void>;
   loadMesh(id: string): Promise<Mesh | null>;
@@ -486,6 +527,23 @@ export interface StateStore {
     reviewOutcome: 'APPROVED' | 'REJECTED',
     reviewedAt: string,
   ): Promise<BreakGlassInvocation | null>;
+
+  savePromotionRequest(request: PromotionRequest): Promise<void>;
+  loadPromotionRequest(id: string): Promise<PromotionRequest | null>;
+  listPromotionRequests(meshId: string): Promise<PromotionRequest[]>;
+  resolvePromotionRequest(
+    requestId: string,
+    status: 'APPROVED' | 'REJECTED' | 'WITHDRAWN' | 'EXPIRED',
+    reviewedByType: 'HUMAN' | 'AGENT',
+    reviewedById: string,
+    resolvedAt: string,
+    resolutionReasonProse: string,
+    resolvedContractVersionId?: string | null,
+  ): Promise<PromotionRequest | null>;
+
+  savePromotion(promotion: Promotion): Promise<void>;
+  loadPromotion(id: string): Promise<Promotion | null>;
+  listPromotionsForAgent(agentId: string): Promise<Promotion[]>;
 }
 
 export interface InMemoryStateStore extends StateStore {

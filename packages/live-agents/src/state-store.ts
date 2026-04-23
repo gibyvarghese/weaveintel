@@ -17,15 +17,19 @@ import type {
   MessageStatus,
   Mesh,
   OutboundActionRecord,
+  Promotion,
+  PromotionRequest,
   RedisStateStore,
   StateStore,
   Team,
   TeamMembership,
 } from './types.js';
 import {
+  ContractAuthorityViolationError,
   GrantAuthorityViolationError,
   InvalidAccountBindingError,
   OnlyHumansMayBindAccountsError,
+  SelfPromotionForbiddenError,
   SelfGrantForbiddenError,
 } from './errors.js';
 
@@ -53,6 +57,8 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
   const capabilityGrants = new Map<string, CapabilityGrant>();
   const grantRequests = new Map<string, GrantRequest>();
   const breakGlassInvocations = new Map<string, BreakGlassInvocation>();
+  const promotionRequests = new Map<string, PromotionRequest>();
+  const promotions = new Map<string, Promotion>();
 
   const enforceGrantAuthority = (grant: CapabilityGrant): void => {
     if (grant.recipientId === grant.issuerId && grant.trigger !== 'BREAK_GLASS') {
@@ -98,6 +104,36 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
     ) {
       throw new GrantAuthorityViolationError(
         `Agent ${grant.issuerId} exceeds max budget increase cap ${authority.maxBudgetIncreaseUsd}.`,
+      );
+    }
+  };
+
+  const enforcePromotionAuthority = (promotion: Promotion): void => {
+    if (promotion.issuedById === promotion.agentId) {
+      throw new SelfPromotionForbiddenError(promotion.issuedById);
+    }
+
+    if (promotion.issuedByType !== 'AGENT') {
+      return;
+    }
+
+    const issuerAgent = agents.get(promotion.issuedById);
+    if (!issuerAgent) {
+      throw new ContractAuthorityViolationError(`Issuer agent ${promotion.issuedById} was not found.`);
+    }
+
+    const issuerContract = [...contracts.values()]
+      .filter((contract) => contract.agentId === issuerAgent.id)
+      .sort((a, b) => b.version - a.version)[0] ?? null;
+    const authority = issuerContract?.contractAuthority;
+
+    if (!authority || !authority.canIssuePromotions) {
+      throw new ContractAuthorityViolationError(`Agent ${promotion.issuedById} cannot issue promotions.`);
+    }
+
+    if (authority.requiresEvidence && promotion.evidenceRefs.length === 0) {
+      throw new ContractAuthorityViolationError(
+        `Agent ${promotion.issuedById} must attach evidence when issuing promotions.`,
       );
     }
   };
@@ -542,6 +578,59 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
       }
 
       return updated;
+    },
+
+    async savePromotionRequest(request) {
+      promotionRequests.set(request.id, request);
+    },
+    async loadPromotionRequest(id) {
+      return promotionRequests.get(id) ?? null;
+    },
+    async listPromotionRequests(meshId) {
+      return [...promotionRequests.values()]
+        .filter((request) => request.meshId === meshId)
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    },
+    async resolvePromotionRequest(
+      requestId,
+      status,
+      reviewedByType,
+      reviewedById,
+      resolvedAt,
+      resolutionReasonProse,
+      resolvedContractVersionId,
+    ) {
+      const current = promotionRequests.get(requestId);
+      if (!current) {
+        return null;
+      }
+      const updated: PromotionRequest = {
+        ...current,
+        status,
+        reviewedByType,
+        reviewedById,
+        resolvedAt,
+        resolutionReasonProse,
+        resolvedContractVersionId: status === 'APPROVED' ? (resolvedContractVersionId ?? null) : null,
+      };
+      promotionRequests.set(requestId, updated);
+      return updated;
+    },
+
+    async savePromotion(promotion) {
+      enforcePromotionAuthority(promotion);
+      if (!agents.has(promotion.agentId)) {
+        throw new ContractAuthorityViolationError(`Promoted agent ${promotion.agentId} was not found.`);
+      }
+      promotions.set(promotion.id, promotion);
+    },
+    async loadPromotion(id) {
+      return promotions.get(id) ?? null;
+    },
+    async listPromotionsForAgent(agentId) {
+      return [...promotions.values()]
+        .filter((promotion) => promotion.agentId === agentId)
+        .sort((a, b) => Date.parse(a.issuedAt) - Date.parse(b.issuedAt));
     },
   };
 }
