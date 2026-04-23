@@ -7,15 +7,18 @@ import {
   type PostgresStateStore,
   type RedisStateStore,
   type StateStore,
+  type SqliteStateStore,
+  weaveSqliteStateStore,
 } from '@weaveintel/live-agents';
 
 export interface LiveAgentsDemoOptions {
   host?: string;
   port?: number;
-  persistenceBackend?: 'in-memory' | 'postgres' | 'redis';
+  persistenceBackend?: 'in-memory' | 'postgres' | 'redis' | 'sqlite';
   databaseUrl?: string;
   redisUrl?: string;
   redisMode?: 'coordination-only' | 'durable-explicit';
+  sqlitePath?: string;
 }
 
 export interface LiveAgentsDemoHandle {
@@ -31,10 +34,12 @@ export async function createLiveAgentsDemo(options: LiveAgentsDemoOptions = {}):
       | 'in-memory'
       | 'postgres'
       | 'redis'
+      | 'sqlite'
       | undefined);
 
   const databaseUrl = options.databaseUrl ?? process.env['LIVE_AGENTS_DEMO_DATABASE_URL'];
   const redisUrl = options.redisUrl ?? process.env['LIVE_AGENTS_DEMO_REDIS_URL'];
+  const sqlitePath = options.sqlitePath ?? process.env['LIVE_AGENTS_DEMO_SQLITE_PATH'];
   const redisMode =
     options.redisMode ??
     (process.env['LIVE_AGENTS_DEMO_REDIS_MODE'] as 'coordination-only' | 'durable-explicit' | undefined) ??
@@ -43,12 +48,17 @@ export async function createLiveAgentsDemo(options: LiveAgentsDemoOptions = {}):
   // Resolution order preserves backward compatibility while allowing explicit overrides.
   const resolvedBackend = configuredBackend ?? (databaseUrl ? 'postgres' : 'in-memory');
 
-  let store: StateStore | PostgresStateStore | RedisStateStore;
+  let store: StateStore | PostgresStateStore | RedisStateStore | SqliteStateStore;
   if (resolvedBackend === 'postgres') {
     if (!databaseUrl) {
       throw new Error('LIVE_AGENTS_DEMO_DATABASE_URL is required when persistence backend is postgres');
     }
     store = await weavePostgresStateStore({ url: databaseUrl });
+  } else if (resolvedBackend === 'sqlite') {
+    if (!sqlitePath) {
+      throw new Error('LIVE_AGENTS_DEMO_SQLITE_PATH is required when persistence backend is sqlite');
+    }
+    store = await weaveSqliteStateStore({ path: sqlitePath });
   } else if (resolvedBackend === 'redis') {
     if (!redisUrl) {
       throw new Error('LIVE_AGENTS_DEMO_REDIS_URL is required when persistence backend is redis');

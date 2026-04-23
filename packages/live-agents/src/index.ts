@@ -57,6 +57,7 @@ export type {
   ReplayLiveAgentsRunOptions,
   RedisStateStore,
   StateStore,
+  SqliteStateStore,
   Team,
   TeamMembership,
 } from './types.js';
@@ -84,6 +85,7 @@ export {
 } from './state-store.js';
 
 export { weavePostgresStateStore } from './postgres-state-store.js';
+export { weaveSqliteStateStore } from './sqlite-state-store.js';
 
 export {
   LiveAgentsError,

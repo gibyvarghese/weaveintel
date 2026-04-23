@@ -8,16 +8,22 @@
  * 2) Postgres backend (restart durability)
  * 3) Redis backend in coordination-only mode (distributed claim coordination)
  * 4) Redis backend in durable-explicit mode (restart durability)
+ * 5) SQLite backend (single-node local durable mode)
  *
  * Environment variables:
  * - LIVE_AGENTS_EXAMPLE_POSTGRES_URL=postgres://...
  * - LIVE_AGENTS_EXAMPLE_REDIS_URL=redis://...
+ * - LIVE_AGENTS_EXAMPLE_SQLITE_PATH=/absolute/path/to/file.db (optional)
  */
 
+import { rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   weaveInMemoryStateStore,
   weavePostgresStateStore,
   weaveRedisStateStore,
+  weaveSqliteStateStore,
   type HeartbeatTick,
   type LiveAgent,
   type Mesh,
@@ -26,6 +32,7 @@ import {
 
 const POSTGRES_URL = process.env['LIVE_AGENTS_EXAMPLE_POSTGRES_URL'];
 const REDIS_URL = process.env['LIVE_AGENTS_EXAMPLE_REDIS_URL'];
+const SQLITE_PATH = process.env['LIVE_AGENTS_EXAMPLE_SQLITE_PATH'];
 
 interface ScenarioFixture {
   mesh: Mesh;
@@ -98,7 +105,7 @@ async function seedAndClaim(store: StateStore, fixture: ScenarioFixture): Promis
 }
 
 async function runInMemoryScenario(): Promise<void> {
-  console.log('\n[1/4] In-memory scenario');
+  console.log('\n[1/5] In-memory scenario');
   const fixture = createFixture(`example:memory:${Date.now()}`);
   const store = weaveInMemoryStateStore();
 
@@ -113,7 +120,7 @@ async function runInMemoryScenario(): Promise<void> {
 }
 
 async function runPostgresScenario(): Promise<void> {
-  console.log('\n[2/4] Postgres restart-durability scenario');
+  console.log('\n[2/5] Postgres restart-durability scenario');
   if (!POSTGRES_URL) {
     console.log('  - skipped (LIVE_AGENTS_EXAMPLE_POSTGRES_URL not set)');
     return;
@@ -138,7 +145,7 @@ async function runPostgresScenario(): Promise<void> {
 }
 
 async function runRedisCoordinationScenario(): Promise<void> {
-  console.log('\n[3/4] Redis coordination-only scenario');
+  console.log('\n[3/5] Redis coordination-only scenario');
   if (!REDIS_URL) {
     console.log('  - skipped (LIVE_AGENTS_EXAMPLE_REDIS_URL not set)');
     return;
@@ -180,7 +187,7 @@ async function runRedisCoordinationScenario(): Promise<void> {
 }
 
 async function runRedisDurableScenario(): Promise<void> {
-  console.log('\n[4/4] Redis durable-explicit restart scenario');
+  console.log('\n[4/5] Redis durable-explicit restart scenario');
   if (!REDIS_URL) {
     console.log('  - skipped (LIVE_AGENTS_EXAMPLE_REDIS_URL not set)');
     return;
@@ -217,6 +224,32 @@ async function runRedisDurableScenario(): Promise<void> {
   console.log('  ✓ redis durable-explicit restart verified');
 }
 
+async function runSqliteScenario(): Promise<void> {
+  console.log('\n[5/5] SQLite local durable scenario');
+
+  const sqlitePath = SQLITE_PATH ?? join(tmpdir(), `weave-live-agents-${Date.now()}.db`);
+  const fixture = createFixture(`example:sqlite:${Date.now()}`);
+
+  rmSync(sqlitePath, { force: true });
+
+  const first = await weaveSqliteStateStore({ path: sqlitePath });
+  await seedAndClaim(first, fixture);
+  await closeIfNeeded(first);
+
+  const second = await weaveSqliteStateStore({ path: sqlitePath });
+  const mesh = await second.loadMesh(fixture.mesh.id);
+  const tick = await second.loadHeartbeatTick(fixture.tick.id);
+  await closeIfNeeded(second);
+
+  rmSync(sqlitePath, { force: true });
+
+  if (!mesh || !tick) {
+    throw new Error('SQLite local durability scenario failed after restart');
+  }
+
+  console.log('  ✓ sqlite local durability verified');
+}
+
 async function main(): Promise<void> {
   console.log('Live-agents persistence backend E2E scenarios');
 
@@ -224,6 +257,7 @@ async function main(): Promise<void> {
   await runPostgresScenario();
   await runRedisCoordinationScenario();
   await runRedisDurableScenario();
+  await runSqliteScenario();
 
   console.log('\nAll requested persistence scenarios completed.');
 }

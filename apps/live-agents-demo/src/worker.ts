@@ -4,6 +4,7 @@ import {
   type StateStore,
   weaveRedisStateStore,
   weavePostgresStateStore,
+  weaveSqliteStateStore,
 } from '@weaveintel/live-agents';
 import { weaveContext } from '@weaveintel/core';
 import { createInMemoryDemoStateStore } from './inmemory-state-store.js';
@@ -13,9 +14,11 @@ async function main() {
     | 'in-memory'
     | 'postgres'
     | 'redis'
+    | 'sqlite'
     | undefined;
   const databaseUrl = process.env['LIVE_AGENTS_DEMO_DATABASE_URL'];
   const redisUrl = process.env['LIVE_AGENTS_DEMO_REDIS_URL'];
+  const sqlitePath = process.env['LIVE_AGENTS_DEMO_SQLITE_PATH'];
   const redisMode =
     (process.env['LIVE_AGENTS_DEMO_REDIS_MODE'] as 'coordination-only' | 'durable-explicit' | undefined) ??
     'coordination-only';
@@ -28,6 +31,11 @@ async function main() {
       throw new Error('LIVE_AGENTS_DEMO_DATABASE_URL is required when persistence backend is postgres');
     }
     stateStore = await weavePostgresStateStore({ url: databaseUrl });
+  } else if (resolvedBackend === 'sqlite') {
+    if (!sqlitePath) {
+      throw new Error('LIVE_AGENTS_DEMO_SQLITE_PATH is required when persistence backend is sqlite');
+    }
+    stateStore = await weaveSqliteStateStore({ path: sqlitePath });
   } else if (resolvedBackend === 'redis') {
     if (!redisUrl) {
       throw new Error('LIVE_AGENTS_DEMO_REDIS_URL is required when persistence backend is redis');

@@ -590,6 +590,12 @@ export interface PostgresStateStore extends StateStore {
   close(): Promise<void>;
 }
 
+export interface SqliteStateStore extends StateStore {
+  __kind: 'sqlite';
+  initialize(): Promise<void>;
+  close(): Promise<void>;
+}
+
 export interface Heartbeat {
   tick(ctx: ExecutionContext): Promise<{ processed: number }>;
   run(ctx: ExecutionContext): Promise<void>;
