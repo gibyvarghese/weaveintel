@@ -386,4 +386,35 @@ describe('AuthManager — auto-refresh on getHeaders', () => {
     const headers = await mgr.getHeaders('test-cc');
     expect(headers['Authorization']).toBe('Bearer cc-auto');
   });
+
+  it('fails closed when auth-code token is expired and no refresh token exists', async () => {
+    const mgr = new AuthManager([oauthProfile({
+      tokenState: {
+        accessToken: 'expired-no-refresh',
+        expiresAt: Date.now() - 1_000,
+      },
+    })]);
+
+    await expect(mgr.getHeaders('test-oauth')).rejects.toThrow('expired and cannot be refreshed');
+  });
+
+  it('fails closed when refresh fails and emits onTokenError', async () => {
+    fetchSpy.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      text: async () => 'invalid_grant',
+    });
+
+    const onTokenError = vi.fn();
+    const mgr = new AuthManager([oauthProfile({
+      tokenState: {
+        accessToken: 'expired-with-refresh',
+        refreshToken: 'rt-bad',
+        expiresAt: Date.now() - 1_000,
+      },
+    })], { onTokenError });
+
+    await expect(mgr.getHeaders('test-oauth')).rejects.toThrow('Token request failed');
+    expect(onTokenError).toHaveBeenCalledOnce();
+  });
 });

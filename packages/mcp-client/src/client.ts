@@ -93,9 +93,21 @@ export function weaveMCPClient(): MCPClient {
     },
 
     async callTool(_ctx: ExecutionContext, request: MCPToolCallRequest): Promise<MCPToolCallResponse> {
+      const ctx = _ctx;
       const result = await send('tools/call', {
         name: request.name,
         arguments: request.arguments,
+        _meta: {
+          executionContext: {
+            executionId: ctx.executionId,
+            tenantId: ctx.tenantId,
+            userId: ctx.userId,
+            parentSpanId: ctx.parentSpanId,
+            deadline: ctx.deadline,
+            budget: ctx.budget,
+            metadata: ctx.metadata,
+          },
+        },
       }) as MCPToolCallResponse;
       return result;
     },

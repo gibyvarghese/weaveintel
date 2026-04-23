@@ -8,7 +8,7 @@
  * App-level integration handles session creation and account linking.
  */
 
-import { createHash, randomFillSync } from 'node:crypto';
+import { createHash, randomFillSync, randomUUID } from 'node:crypto';
 
 /* ================================================================== */
 /*  OAuth Provider Types                                              */
@@ -77,21 +77,33 @@ export interface OAuthLinkedAccount {
 /* ================================================================== */
 
 export interface OAuthStateStore {
-  set(key: string, data: { codeVerifier: string; expiresAt: number }): void;
-  get(key: string): { codeVerifier: string; expiresAt: number } | null;
+  set(key: string, data: OAuthFlowState): void;
+  get(key: string): OAuthFlowState | null;
   delete(key: string): void;
 }
 
-export class InMemoryOAuthStateStore implements OAuthStateStore {
-  private store = new Map<string, { codeVerifier: string; expiresAt: number }>();
+export interface OAuthFlowState {
+  codeVerifier: string;
+  expiresAt: number;
+  provider: OAuthProviderName;
+  redirectUri: string;
+  nonce?: string;
+}
 
-  set(key: string, data: { codeVerifier: string; expiresAt: number }): void {
+export class InMemoryOAuthStateStore implements OAuthStateStore {
+  private store = new Map<string, OAuthFlowState>();
+
+  set(key: string, data: OAuthFlowState): void {
     this.store.set(key, data);
     // Auto-cleanup expired entries
-    setTimeout(() => this.store.delete(key), (data.expiresAt - Date.now()) + 1000);
+    const ttl = Math.max(0, (data.expiresAt - Date.now()) + 1000);
+    const timer = setTimeout(() => this.store.delete(key), ttl);
+    if (typeof timer === 'object' && timer && 'unref' in timer && typeof timer.unref === 'function') {
+      timer.unref();
+    }
   }
 
-  get(key: string): { codeVerifier: string; expiresAt: number } | null {
+  get(key: string): OAuthFlowState | null {
     const data = this.store.get(key);
     if (!data) return null;
     if (Date.now() > data.expiresAt) {
@@ -227,14 +239,18 @@ export class OAuthClient {
    * Generate the authorization URL to redirect the user to.
    * Returns the URL and stores PKCE code verifier for later validation.
    */
-  async generateAuthorizationUrl(provider: OAuthProvider, state: string): Promise<{ authUrl: string; codeVerifier: string }> {
+  async generateAuthorizationUrl(provider: OAuthProvider, state: string): Promise<{ authUrl: string; codeVerifier: string; nonce?: string }> {
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = await generateCodeChallenge(codeVerifier);
+    const nonce = this.requiresNonce(provider) ? randomUUID() : undefined;
 
     // Store for later validation
     this.stateStore.set(state, {
       codeVerifier,
       expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
+      provider: provider.name,
+      redirectUri: provider.redirectUri,
+      nonce,
     });
 
     const params = new URLSearchParams({
@@ -246,12 +262,13 @@ export class OAuthClient {
       code_challenge: codeChallenge,
       code_challenge_method: 'S256', // PKCE
     });
+    if (nonce) params.set('nonce', nonce);
 
     // Keep callback GET-compatible for all providers.
     if (provider.name === 'apple') params.set('response_mode', 'query');
 
     const authUrl = `${provider.endpoints.authorization}?${params.toString()}`;
-    return { authUrl, codeVerifier };
+    return { authUrl, codeVerifier, nonce };
   }
 
   /**
@@ -264,6 +281,14 @@ export class OAuthClient {
   ): Promise<{ token: OAuthTokenResponse; codeVerifier: string }> {
     const stored = this.stateStore.get(state);
     if (!stored) throw new Error('Invalid or expired OAuth state');
+    if (stored.provider !== provider.name) {
+      this.stateStore.delete(state);
+      throw new Error('OAuth state/provider mismatch');
+    }
+    if (stored.redirectUri !== provider.redirectUri) {
+      this.stateStore.delete(state);
+      throw new Error('OAuth state/redirect mismatch');
+    }
 
     const { codeVerifier } = stored;
     this.stateStore.delete(state); // One-time use
@@ -292,6 +317,15 @@ export class OAuthClient {
     }
 
     const token = await response.json() as OAuthTokenResponse;
+    if (this.requiresIdToken(provider)) {
+      if (!token.id_token) {
+        throw new Error(`Missing id_token for provider ${provider.name}`);
+      }
+      this.validateIdTokenClaims(provider, token.id_token, {
+        nonce: stored.nonce,
+        audience: provider.clientId,
+      });
+    }
     return { token, codeVerifier };
   }
 
@@ -326,6 +360,62 @@ export class OAuthClient {
     if (parts.length < 2 || !parts[1]) throw new Error('Invalid JWT payload');
     const payload = Buffer.from(parts[1], 'base64url').toString('utf8');
     return JSON.parse(payload) as Record<string, unknown>;
+  }
+
+  private requiresIdToken(provider: OAuthProvider): boolean {
+    return this.requiresNonce(provider);
+  }
+
+  private requiresNonce(provider: OAuthProvider): boolean {
+    return provider.scopes.includes('openid') || provider.name === 'apple' || provider.name === 'microsoft' || provider.name === 'google';
+  }
+
+  private validateIdTokenClaims(
+    provider: OAuthProvider,
+    idToken: string,
+    expected: { nonce?: string; audience: string },
+  ): void {
+    const payload = this.parseJwtPayload(idToken);
+
+    const audRaw = payload['aud'];
+    const audience = Array.isArray(audRaw) ? audRaw.map(String) : [String(audRaw ?? '')];
+    if (!audience.includes(expected.audience)) {
+      throw new Error('Invalid id_token audience');
+    }
+
+    const nowSec = Math.floor(Date.now() / 1000);
+    const exp = Number(payload['exp'] ?? 0);
+    if (!Number.isFinite(exp) || exp <= nowSec) {
+      throw new Error('Expired id_token');
+    }
+
+    const nbf = payload['nbf'] != null ? Number(payload['nbf']) : undefined;
+    if (nbf != null && Number.isFinite(nbf) && nbf > nowSec + 60) {
+      throw new Error('id_token not yet valid');
+    }
+
+    if (expected.nonce) {
+      const nonce = String(payload['nonce'] ?? '');
+      if (!nonce || nonce !== expected.nonce) {
+        throw new Error('Invalid id_token nonce');
+      }
+    }
+
+    const issuer = String(payload['iss'] ?? '');
+    if (!this.isAllowedIssuer(provider.name, issuer)) {
+      throw new Error('Invalid id_token issuer');
+    }
+  }
+
+  private isAllowedIssuer(provider: OAuthProviderName, issuer: string): boolean {
+    const checks: Record<OAuthProviderName, (iss: string) => boolean> = {
+      google: (iss) => iss === 'https://accounts.google.com' || iss === 'accounts.google.com',
+      github: () => true,
+      microsoft: (iss) => iss.startsWith('https://login.microsoftonline.com/') || iss.startsWith('https://sts.windows.net/'),
+      apple: (iss) => iss === 'https://appleid.apple.com',
+      facebook: () => true,
+    };
+    return checks[provider](issuer);
   }
 
   /**

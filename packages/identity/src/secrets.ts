@@ -7,6 +7,10 @@
 
 import type { SecretScope, AccessTokenResolver, RuntimeIdentity } from '@weaveintel/core';
 
+type MutableInMemoryResolver = AccessTokenResolver & {
+  __setToken?: (scope: SecretScope, identity: RuntimeIdentity, token: string) => void;
+};
+
 /** In-memory access token resolver for development / testing. */
 export function weaveInMemoryTokenResolver(): AccessTokenResolver {
   const store = new Map<string, string>();
@@ -15,7 +19,7 @@ export function weaveInMemoryTokenResolver(): AccessTokenResolver {
     return `${scope.id}:${identity.id}`;
   }
 
-  return {
+  const resolver: MutableInMemoryResolver = {
     async resolve(scope: SecretScope, identity: RuntimeIdentity): Promise<string | null> {
       // Check allowed identities
       if (!scope.allowedIdentities.includes(identity.id) && !scope.allowedIdentities.includes('*')) {
@@ -27,7 +31,12 @@ export function weaveInMemoryTokenResolver(): AccessTokenResolver {
     async revoke(scope: SecretScope, identity: RuntimeIdentity): Promise<void> {
       store.delete(key(scope, identity));
     },
+    __setToken(scope: SecretScope, identity: RuntimeIdentity, token: string): void {
+      store.set(key(scope, identity), token);
+    },
   };
+
+  return resolver;
 }
 
 /** Set a token in the in-memory resolver (for testing / bootstrapping). */
@@ -37,10 +46,9 @@ export function setToken(
   identity: RuntimeIdentity,
   token: string,
 ): void {
-  // Access internal store via closure — this is a test helper
-  (resolver as { resolve: (s: SecretScope, i: RuntimeIdentity) => Promise<string | null> }).resolve(scope, identity);
-  // We need direct access to the map; use a different approach
-  void token;
-  void scope;
-  void identity;
+  const mutable = resolver as MutableInMemoryResolver;
+  if (!mutable.__setToken) {
+    throw new Error('Resolver does not support setToken helper');
+  }
+  mutable.__setToken(scope, identity, token);
 }

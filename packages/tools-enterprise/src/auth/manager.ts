@@ -231,11 +231,17 @@ export class AuthManager {
       try {
         if (profile.tokenState.refreshToken) {
           await this.refreshToken(profile.id);
-        } else if (profile.method === 'oauth2_client_credentials') {
-          await this.acquireClientCredentials(profile.id);
+          return;
         }
+        if (profile.method === 'oauth2_client_credentials') {
+          await this.acquireClientCredentials(profile.id);
+          return;
+        }
+        throw new Error(`Token for "${profile.id}" is expired and cannot be refreshed automatically`);
       } catch (err) {
-        this.events.onTokenError?.(profile.id, err instanceof Error ? err : new Error(String(err)));
+        const failure = err instanceof Error ? err : new Error(String(err));
+        this.events.onTokenError?.(profile.id, failure);
+        throw failure;
       }
     }
   }
