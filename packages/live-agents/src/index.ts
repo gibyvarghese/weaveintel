@@ -5,6 +5,8 @@ export type {
   AccountBindingRequest,
   CompressionMaintainer,
   ContextPolicy,
+  BacklogItem,
+  DelegationEdge,
   EventRoute,
   ExternalEvent,
   ExternalEventHandler,
@@ -15,10 +17,16 @@ export type {
   LiveAgentsRuntime,
   LiveAgentStatus,
   McpServerRef,
+  Message,
+  MessageKind,
+  MessagePriority,
+  MessageStatus,
   Mesh,
   OutboundActionRecord,
   RedisStateStore,
   StateStore,
+  Team,
+  TeamMembership,
 } from './types.js';
 
 export {

@@ -31,6 +31,34 @@ export interface LiveAgent {
   archivedAt: string | null;
 }
 
+export interface DelegationEdge {
+  id: string;
+  meshId: string;
+  fromAgentId: string;
+  toAgentId: string;
+  relationship: 'DIRECTS' | 'COLLABORATES_WITH' | 'MENTORS';
+  relationshipProse: string;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+}
+
+export interface Team {
+  id: string;
+  meshId: string;
+  name: string;
+  charter: string;
+  leadAgentId: string | null;
+}
+
+export interface TeamMembership {
+  id: string;
+  teamId: string;
+  agentId: string;
+  roleInTeam: string;
+  joinedAt: string;
+  leftAt: string | null;
+}
+
 export interface AgentContract {
   id: string;
   agentId: string;
@@ -139,6 +167,70 @@ export interface HeartbeatTick {
   status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
 }
 
+export type MessageKind =
+  | 'ASK'
+  | 'TELL'
+  | 'TASK'
+  | 'REPORT'
+  | 'ESCALATION'
+  | 'REPLY'
+  | 'BROADCAST'
+  | 'GRANT_REQUEST'
+  | 'GRANT_NOTICE'
+  | 'PROMOTION_REQUEST'
+  | 'PROMOTION_NOTICE'
+  | 'CONTEXT_HANDOFF';
+
+export type MessagePriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+
+export type MessageStatus = 'PENDING' | 'DELIVERED' | 'READ' | 'PROCESSED' | 'EXPIRED' | 'FAILED';
+
+export interface Message {
+  id: string;
+  meshId: string;
+  fromType: 'HUMAN' | 'AGENT' | 'SYSTEM' | 'INGRESS';
+  fromId: string;
+  fromMeshId: string | null;
+  toType: 'HUMAN' | 'AGENT' | 'BROADCAST' | 'TEAM';
+  toId: string | null;
+  topic: string | null;
+  kind: MessageKind;
+  replyToMessageId: string | null;
+  threadId: string;
+  contextRefs: string[];
+  contextPacketRef: string | null;
+  expiresAt: string | null;
+  priority: MessagePriority;
+  status: MessageStatus;
+  deliveredAt: string | null;
+  readAt: string | null;
+  processedAt: string | null;
+  createdAt: string;
+  subject: string;
+  body: string;
+}
+
+export interface BacklogItem {
+  id: string;
+  agentId: string;
+  priority: MessagePriority;
+  status: 'PROPOSED' | 'ACCEPTED' | 'IN_PROGRESS' | 'BLOCKED' | 'COMPLETED' | 'DROPPED';
+  originType: 'SELF' | 'MESSAGE' | 'MANAGER' | 'SYSTEM' | 'SCHEDULE' | 'INGRESS';
+  originRef: string | null;
+  blockedOnMessageId: string | null;
+  blockedOnGrantRequestId: string | null;
+  blockedOnPromotionRequestId: string | null;
+  blockedOnAccountBindingRequestId: string | null;
+  estimatedEffort: string;
+  deadline: string | null;
+  acceptedAt: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  title: string;
+  description: string;
+}
+
 export interface OutboundActionRecord {
   id: string;
   agentId: string;
@@ -192,6 +284,17 @@ export interface StateStore {
   saveAgent(agent: LiveAgent): Promise<void>;
   loadAgent(id: string): Promise<LiveAgent | null>;
   listAgents(meshId: string): Promise<LiveAgent[]>;
+  transitionAgentStatus(agentId: string, nextStatus: LiveAgentStatus, at: string): Promise<LiveAgent | null>;
+
+  saveDelegationEdge(edge: DelegationEdge): Promise<void>;
+  listDelegationEdges(meshId: string): Promise<DelegationEdge[]>;
+
+  saveTeam(team: Team): Promise<void>;
+  loadTeam(id: string): Promise<Team | null>;
+  listTeams(meshId: string): Promise<Team[]>;
+  saveTeamMembership(membership: TeamMembership): Promise<void>;
+  listTeamMemberships(teamId: string): Promise<TeamMembership[]>;
+  listTeamsForAgent(agentId: string): Promise<Team[]>;
 
   saveContract(contract: AgentContract): Promise<void>;
   loadContract(id: string): Promise<AgentContract | null>;
@@ -209,6 +312,21 @@ export interface StateStore {
 
   saveHeartbeatTick(tick: HeartbeatTick): Promise<void>;
   claimNextTicks(workerId: string, nowIso: string, limit: number): Promise<HeartbeatTick[]>;
+
+  saveMessage(message: Message): Promise<void>;
+  loadMessage(id: string): Promise<Message | null>;
+  listMessagesForRecipient(recipientType: Message['toType'], recipientId: string | null): Promise<Message[]>;
+  listThreadMessages(threadId: string): Promise<Message[]>;
+  transitionMessageStatus(messageId: string, status: MessageStatus, at: string): Promise<Message | null>;
+
+  saveBacklogItem(item: BacklogItem): Promise<void>;
+  loadBacklogItem(id: string): Promise<BacklogItem | null>;
+  listBacklogForAgent(agentId: string): Promise<BacklogItem[]>;
+  transitionBacklogItemStatus(
+    backlogItemId: string,
+    status: BacklogItem['status'],
+    at: string,
+  ): Promise<BacklogItem | null>;
 
   saveExternalEvent(event: ExternalEvent): Promise<void>;
   findExternalEvent(accountId: string, sourceType: string, sourceRef: string): Promise<ExternalEvent | null>;

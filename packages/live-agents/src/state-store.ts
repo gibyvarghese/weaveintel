@@ -3,15 +3,21 @@ import type {
   AccountBinding,
   AccountBindingRequest,
   AgentContract,
+  BacklogItem,
+  DelegationEdge,
   EventRoute,
   ExternalEvent,
   HeartbeatTick,
   InMemoryStateStore,
   LiveAgent,
+  Message,
+  MessageStatus,
   Mesh,
   OutboundActionRecord,
   RedisStateStore,
   StateStore,
+  Team,
+  TeamMembership,
 } from './types.js';
 import { OnlyHumansMayBindAccountsError } from './errors.js';
 
@@ -24,10 +30,15 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
   const meshes = new Map<string, Mesh>();
   const agents = new Map<string, LiveAgent>();
   const contracts = new Map<string, AgentContract>();
+  const delegationEdges = new Map<string, DelegationEdge>();
+  const teams = new Map<string, Team>();
+  const teamMemberships = new Map<string, TeamMembership>();
   const accounts = new Map<string, Account>();
   const bindings = new Map<string, AccountBinding>();
   const bindingRequests = new Map<string, AccountBindingRequest>();
   const ticks = new Map<string, HeartbeatTick>();
+  const messages = new Map<string, Message>();
+  const backlogItems = new Map<string, BacklogItem>();
   const externalEvents = new Map<string, ExternalEvent>();
   const eventRoutes = new Map<string, EventRoute>();
   const outboundRecords = new Map<string, OutboundActionRecord>();
@@ -53,6 +64,49 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
     },
     async listAgents(meshId) {
       return [...agents.values()].filter((a) => a.meshId === meshId);
+    },
+    async transitionAgentStatus(agentId, nextStatus, at) {
+      const current = agents.get(agentId);
+      if (!current) {
+        return null;
+      }
+      const updated: LiveAgent = {
+        ...current,
+        status: nextStatus,
+        archivedAt: nextStatus === 'ARCHIVED' ? at : current.archivedAt,
+      };
+      agents.set(agentId, updated);
+      return updated;
+    },
+
+    async saveDelegationEdge(edge) {
+      delegationEdges.set(edge.id, edge);
+    },
+    async listDelegationEdges(meshId) {
+      return [...delegationEdges.values()].filter((edge) => edge.meshId === meshId);
+    },
+
+    async saveTeam(team) {
+      teams.set(team.id, team);
+    },
+    async loadTeam(id) {
+      return teams.get(id) ?? null;
+    },
+    async listTeams(meshId) {
+      return [...teams.values()].filter((team) => team.meshId === meshId);
+    },
+    async saveTeamMembership(membership) {
+      teamMemberships.set(membership.id, membership);
+    },
+    async listTeamMemberships(teamId) {
+      return [...teamMemberships.values()].filter((membership) => membership.teamId === teamId);
+    },
+    async listTeamsForAgent(agentId) {
+      const activeMemberships = [...teamMemberships.values()].filter(
+        (membership) => membership.agentId === agentId && membership.leftAt === null,
+      );
+      const ids = new Set(activeMemberships.map((membership) => membership.teamId));
+      return [...teams.values()].filter((team) => ids.has(team.id));
     },
 
     async saveContract(contract) {
@@ -128,6 +182,91 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
         pickedUpAt: nowIso,
         status: 'IN_PROGRESS',
       }));
+    },
+
+    async saveMessage(message) {
+      messages.set(message.id, message);
+    },
+    async loadMessage(id) {
+      return messages.get(id) ?? null;
+    },
+    async listMessagesForRecipient(recipientType, recipientId) {
+      return [...messages.values()]
+        .filter((message) => message.toType === recipientType && message.toId === recipientId)
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    },
+    async listThreadMessages(threadId) {
+      return [...messages.values()]
+        .filter((message) => message.threadId === threadId)
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    },
+    async transitionMessageStatus(messageId, status, at) {
+      const current = messages.get(messageId);
+      if (!current) {
+        return null;
+      }
+
+      const timestamps: Pick<Message, 'deliveredAt' | 'readAt' | 'processedAt'> = {
+        deliveredAt: current.deliveredAt,
+        readAt: current.readAt,
+        processedAt: current.processedAt,
+      };
+
+      if (status === 'DELIVERED' && !timestamps.deliveredAt) {
+        timestamps.deliveredAt = at;
+      }
+      if (status === 'READ' && !timestamps.readAt) {
+        timestamps.readAt = at;
+        if (!timestamps.deliveredAt) {
+          timestamps.deliveredAt = at;
+        }
+      }
+      if (status === 'PROCESSED' && !timestamps.processedAt) {
+        timestamps.processedAt = at;
+        if (!timestamps.readAt) {
+          timestamps.readAt = at;
+        }
+        if (!timestamps.deliveredAt) {
+          timestamps.deliveredAt = at;
+        }
+      }
+
+      const updated: Message = {
+        ...current,
+        status: status as MessageStatus,
+        ...timestamps,
+      };
+      messages.set(messageId, updated);
+      return updated;
+    },
+
+    async saveBacklogItem(item) {
+      backlogItems.set(item.id, item);
+    },
+    async loadBacklogItem(id) {
+      return backlogItems.get(id) ?? null;
+    },
+    async listBacklogForAgent(agentId) {
+      return [...backlogItems.values()]
+        .filter((item) => item.agentId === agentId)
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    },
+    async transitionBacklogItemStatus(backlogItemId, status, at) {
+      const current = backlogItems.get(backlogItemId);
+      if (!current) {
+        return null;
+      }
+
+      const updated: BacklogItem = {
+        ...current,
+        status,
+        acceptedAt: status === 'ACCEPTED' && current.acceptedAt === null ? at : current.acceptedAt,
+        startedAt: status === 'IN_PROGRESS' && current.startedAt === null ? at : current.startedAt,
+        completedAt: status === 'COMPLETED' && current.completedAt === null ? at : current.completedAt,
+      };
+
+      backlogItems.set(backlogItemId, updated);
+      return updated;
     },
 
     async saveExternalEvent(event) {
