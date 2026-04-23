@@ -23,7 +23,8 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@weaveintel/core": "*"
+    "@weaveintel/core": "*",
+    "@weaveintel/memory": "*"
   },
   "devDependencies": {
     "vitest": "^2.1.0"

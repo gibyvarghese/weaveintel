@@ -199,6 +199,18 @@ Deliverables:
 Acceptance criteria:
 - Replay and evaluation flows survive restarts across backends.
 
+Status: implemented with shared runtime persistence APIs in `@weaveintel/persistence`.
+
+Phase 7 implementation notes:
+- Added `createPhase7RuntimePersistence()` in `packages/persistence/src/phase7-runtime-persistence.ts`.
+- Added backend-agnostic persistence methods for:
+  - trace span records (`saveTraceSpan`, `listTraceSpans`)
+  - replay checkpoints (`saveReplayCheckpoint`, `loadLatestReplayCheckpoint`)
+  - eval suite run metadata (`saveEvalSuiteRun`, `listEvalSuiteRuns`)
+- The Phase 7 store is wired to the same backend options introduced in Phase 6 by reusing configured memory-store backends (`in-memory`, `postgres`, `redis`, `sqlite`, `mongodb`, `cloud-nosql`).
+- Added package-level tests in `packages/persistence/src/phase7-runtime-persistence.test.ts`, including sqlite restart durability coverage.
+- Added end-to-end integration example in `examples/62-phase7-observability-replay-eval-persistence-e2e.ts` that uses `@weaveintel/observability`, `@weaveintel/replay`, and `@weaveintel/evals` with persisted artefacts.
+
 ## Phase 8: Performance and Reliability
 Deliverables:
 - Load tests, failover tests, chaos testing matrix.

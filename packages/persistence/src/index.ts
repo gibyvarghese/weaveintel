@@ -24,3 +24,14 @@ export { RedisPersistenceAdapter } from './adapters/redis-adapter.js';
 export { SqlitePersistenceAdapter } from './adapters/sqlite-adapter.js';
 export { MongoDbPersistenceAdapter } from './adapters/mongodb-adapter.js';
 export { CosmosDbPersistenceAdapter } from './adapters/cosmosdb-adapter.js';
+
+export {
+  createPhase7RuntimePersistence,
+  type Phase7RuntimePersistence,
+  type Phase7RuntimePersistenceOptions,
+  type PersistedEvalSuiteRun,
+  type PersistedReplayCheckpoint,
+  type PersistedTraceSpan,
+  type TraceSpanFilter,
+  type EvalSuiteRunFilter,
+} from './phase7-runtime-persistence.js';
