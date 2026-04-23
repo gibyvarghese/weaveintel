@@ -67,3 +67,10 @@ export class ContractAuthorityViolationError extends LiveAgentsError {
     this.name = 'ContractAuthorityViolationError';
   }
 }
+
+export class CrossMeshBridgeRequiredError extends LiveAgentsError {
+  constructor(fromMeshId: string, toMeshId: string, reason?: string) {
+    super(`Cross-mesh message is not authorised from ${fromMeshId} to ${toMeshId}.${reason ? ` ${reason}` : ''}`);
+    this.name = 'CrossMeshBridgeRequiredError';
+  }
+}

@@ -6,6 +6,7 @@ import type {
   BacklogItem,
   BreakGlassInvocation,
   CapabilityGrant,
+  CrossMeshBridge,
   DelegationEdge,
   EventRoute,
   ExternalEvent,
@@ -26,6 +27,7 @@ import type {
 } from './types.js';
 import {
   ContractAuthorityViolationError,
+  CrossMeshBridgeRequiredError,
   GrantAuthorityViolationError,
   InvalidAccountBindingError,
   OnlyHumansMayBindAccountsError,
@@ -45,6 +47,7 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
   const delegationEdges = new Map<string, DelegationEdge>();
   const teams = new Map<string, Team>();
   const teamMemberships = new Map<string, TeamMembership>();
+  const crossMeshBridges = new Map<string, CrossMeshBridge>();
   const accounts = new Map<string, Account>();
   const bindings = new Map<string, AccountBinding>();
   const bindingRequests = new Map<string, AccountBindingRequest>();
@@ -202,6 +205,32 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
       );
       const ids = new Set(activeMemberships.map((membership) => membership.teamId));
       return [...teams.values()].filter((team) => ids.has(team.id));
+    },
+
+    async saveCrossMeshBridge(bridge) {
+      crossMeshBridges.set(bridge.id, bridge);
+    },
+    async loadCrossMeshBridge(id) {
+      return crossMeshBridges.get(id) ?? null;
+    },
+    async listCrossMeshBridges(fromMeshId, toMeshId) {
+      return [...crossMeshBridges.values()].filter((bridge) => {
+        if (bridge.fromMeshId !== fromMeshId) return false;
+        if (toMeshId && bridge.toMeshId !== toMeshId) return false;
+        return true;
+      });
+    },
+    async revokeCrossMeshBridge(bridgeId, revokedAt) {
+      const current = crossMeshBridges.get(bridgeId);
+      if (!current) {
+        return null;
+      }
+      const updated: CrossMeshBridge = {
+        ...current,
+        revokedAt,
+      };
+      crossMeshBridges.set(bridgeId, updated);
+      return updated;
     },
 
     async saveContract(contract) {
@@ -375,6 +404,53 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
     },
 
     async saveMessage(message) {
+      if (message.fromMeshId) {
+        let targetMeshId: string | null = null;
+
+        if (message.toType === 'AGENT' && message.toId) {
+          const targetAgent = agents.get(message.toId);
+          targetMeshId = targetAgent?.meshId ?? null;
+        } else if (message.toType === 'TEAM' && message.toId) {
+          const targetTeam = teams.get(message.toId);
+          targetMeshId = targetTeam?.meshId ?? null;
+        }
+
+        if (targetMeshId && targetMeshId !== message.fromMeshId) {
+          const createdAtMs = Date.parse(message.createdAt);
+          const hasBridge = [...crossMeshBridges.values()].some((bridge) => {
+            if (bridge.fromMeshId !== message.fromMeshId) return false;
+            if (bridge.toMeshId !== targetMeshId) return false;
+            if (bridge.revokedAt !== null) return false;
+            if (Date.parse(bridge.effectiveFrom) > createdAtMs) return false;
+            if (bridge.effectiveTo && Date.parse(bridge.effectiveTo) < createdAtMs) return false;
+
+            if (bridge.allowedAgentPairs && message.toType === 'AGENT' && message.toId) {
+              const allowedPair = bridge.allowedAgentPairs.some(
+                (pair) => pair.fromAgentId === message.fromId && pair.toAgentId === message.toId,
+              );
+              if (!allowedPair) return false;
+            }
+
+            if (bridge.allowedTopics && bridge.allowedTopics.length > 0) {
+              const topic = message.topic ?? '';
+              if (!bridge.allowedTopics.includes(topic)) {
+                return false;
+              }
+            }
+
+            return true;
+          });
+
+          if (!hasBridge) {
+            throw new CrossMeshBridgeRequiredError(
+              message.fromMeshId,
+              targetMeshId,
+              `No active bridge allows message ${message.id}.`,
+            );
+          }
+        }
+      }
+
       messages.set(message.id, message);
     },
     async loadMessage(id) {

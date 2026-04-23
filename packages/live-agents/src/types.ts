@@ -68,6 +68,24 @@ export interface TeamMembership {
   leftAt: string | null;
 }
 
+export interface CrossMeshBridge {
+  id: string;
+  fromMeshId: string;
+  toMeshId: string;
+  allowedAgentPairs: Array<{ fromAgentId: string; toAgentId: string }> | null;
+  allowedTopics: string[] | null;
+  rateLimitPerHour: number | null;
+  authorisedByType: 'HUMAN' | 'AGENT';
+  authorisedById: string;
+  coAuthorisedByType: 'HUMAN' | 'AGENT' | null;
+  coAuthorisedById: string | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  revokedAt: string | null;
+  purposeProse: string;
+  constraintsProse: string;
+}
+
 export interface AgentContract {
   id: string;
   agentId: string;
@@ -436,6 +454,11 @@ export interface StateStore {
   saveTeamMembership(membership: TeamMembership): Promise<void>;
   listTeamMemberships(teamId: string): Promise<TeamMembership[]>;
   listTeamsForAgent(agentId: string): Promise<Team[]>;
+
+  saveCrossMeshBridge(bridge: CrossMeshBridge): Promise<void>;
+  loadCrossMeshBridge(id: string): Promise<CrossMeshBridge | null>;
+  listCrossMeshBridges(fromMeshId: string, toMeshId?: string): Promise<CrossMeshBridge[]>;
+  revokeCrossMeshBridge(bridgeId: string, revokedAt: string): Promise<CrossMeshBridge | null>;
 
   saveContract(contract: AgentContract): Promise<void>;
   loadContract(id: string): Promise<AgentContract | null>;

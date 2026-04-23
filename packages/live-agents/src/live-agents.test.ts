@@ -6,6 +6,7 @@ import { weaveFakeTransport } from '@weaveintel/testing';
 import {
   BreakGlassPolicyViolationError,
   ContractAuthorityViolationError,
+  CrossMeshBridgeRequiredError,
   createActionExecutor,
   createCompressionMaintainer,
   createExternalEventHandler,
@@ -243,6 +244,131 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
     const savedEvent = await store.findExternalEvent('account-evt-1', 'webhook.invoked', 'hook-1');
     expect(savedEvent?.processingStatus).toBe('FAILED');
     expect(savedEvent?.error).toContain('targetType TEAM but no targetId');
+  });
+
+  it('phase 12 rejects cross-mesh messages without an authorising bridge', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = new Date().toISOString();
+
+    await store.saveAgent({
+      id: 'agent-mesh-a-1',
+      meshId: 'mesh-a',
+      name: 'Sender',
+      role: 'Coordinator',
+      contractVersionId: 'contract-a',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveAgent({
+      id: 'agent-mesh-b-1',
+      meshId: 'mesh-b',
+      name: 'Receiver',
+      role: 'Coordinator',
+      contractVersionId: 'contract-b',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+
+    await expect(
+      store.saveMessage({
+        id: 'msg-cross-1',
+        meshId: 'mesh-a',
+        fromType: 'AGENT',
+        fromId: 'agent-mesh-a-1',
+        fromMeshId: 'mesh-a',
+        toType: 'AGENT',
+        toId: 'agent-mesh-b-1',
+        topic: 'handoff',
+        kind: 'TASK',
+        replyToMessageId: null,
+        threadId: 'thread-cross-1',
+        contextRefs: [],
+        contextPacketRef: null,
+        expiresAt: null,
+        priority: 'NORMAL',
+        status: 'PENDING',
+        deliveredAt: null,
+        readAt: null,
+        processedAt: null,
+        createdAt: now,
+        subject: 'Cross mesh task handoff',
+        body: 'Please continue this task in mesh-b.',
+      }),
+    ).rejects.toBeInstanceOf(CrossMeshBridgeRequiredError);
+  });
+
+  it('phase 12 allows cross-mesh messages with an active authorising bridge', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = new Date().toISOString();
+
+    await store.saveAgent({
+      id: 'agent-mesh-a-2',
+      meshId: 'mesh-a',
+      name: 'Sender',
+      role: 'Coordinator',
+      contractVersionId: 'contract-a2',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveAgent({
+      id: 'agent-mesh-b-2',
+      meshId: 'mesh-b',
+      name: 'Receiver',
+      role: 'Coordinator',
+      contractVersionId: 'contract-b2',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+
+    await store.saveCrossMeshBridge({
+      id: 'bridge-1',
+      fromMeshId: 'mesh-a',
+      toMeshId: 'mesh-b',
+      allowedAgentPairs: [{ fromAgentId: 'agent-mesh-a-2', toAgentId: 'agent-mesh-b-2' }],
+      allowedTopics: ['handoff'],
+      rateLimitPerHour: null,
+      authorisedByType: 'HUMAN',
+      authorisedById: 'human:admin-1',
+      coAuthorisedByType: null,
+      coAuthorisedById: null,
+      effectiveFrom: now,
+      effectiveTo: null,
+      revokedAt: null,
+      purposeProse: 'Cross-mesh handoffs between operations meshes.',
+      constraintsProse: 'Only handoff topic is allowed.',
+    });
+
+    await store.saveMessage({
+      id: 'msg-cross-2',
+      meshId: 'mesh-a',
+      fromType: 'AGENT',
+      fromId: 'agent-mesh-a-2',
+      fromMeshId: 'mesh-a',
+      toType: 'AGENT',
+      toId: 'agent-mesh-b-2',
+      topic: 'handoff',
+      kind: 'CONTEXT_HANDOFF',
+      replyToMessageId: null,
+      threadId: 'thread-cross-2',
+      contextRefs: [],
+      contextPacketRef: null,
+      expiresAt: null,
+      priority: 'HIGH',
+      status: 'PENDING',
+      deliveredAt: null,
+      readAt: null,
+      processedAt: null,
+      createdAt: now,
+      subject: 'Cross mesh handoff',
+      body: 'Handoff approved under active bridge.',
+    });
+
+    const inbox = await store.listMessagesForRecipient('AGENT', 'agent-mesh-b-2');
+    expect(inbox.map((message) => message.id)).toContain('msg-cross-2');
   });
 
   it('heartbeat processes scheduled tick with standard-v1 attention policy', async () => {
