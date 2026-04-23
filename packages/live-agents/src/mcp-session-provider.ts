@@ -24,7 +24,16 @@ function defaultIdentityFactory(agent: LiveAgent) {
 export function createMcpAccountSessionProvider(
   opts: McpAccountSessionProviderOptions,
 ): AccountSessionProvider {
-  const cache = new Map<string, Promise<AccountToolSession>>();
+  const cache = new Map<string, {
+    pending: Promise<AccountToolSession>;
+    createdAt: number;
+  }>();
+  const sessionTtlMs = Math.max(0, opts.sessionTtlMs ?? 5 * 60 * 1000);
+
+  function isExpired(createdAt: number): boolean {
+    if (sessionTtlMs === 0) return true;
+    return Date.now() - createdAt >= sessionTtlMs;
+  }
 
   async function connectSession(account: Account, agent: LiveAgent, ctx: Parameters<AccountSessionProvider['getSession']>[0]['ctx']) {
     const scope = (opts.scopeFactory ?? defaultScopeFactory)(account, agent);
@@ -47,6 +56,12 @@ export function createMcpAccountSessionProvider(
     return {
       listTools: () => client.listTools(),
       callTool: (executionCtx, request) => client.callTool(executionCtx, request),
+      streamToolCall: client.streamToolCall
+        ? (executionCtx, request, options) => client.streamToolCall!(executionCtx, request, options)
+        : undefined,
+      discoverCapabilities: client.discoverCapabilities
+        ? (query) => client.discoverCapabilities!(query)
+        : undefined,
       disconnect: () => client.disconnect(),
     } satisfies AccountToolSession;
   }
@@ -54,28 +69,36 @@ export function createMcpAccountSessionProvider(
   return {
     async getSession({ account, agent, ctx }) {
       const existing = cache.get(account.id);
-      if (existing) {
-        return existing;
+      if (existing && !isExpired(existing.createdAt)) {
+        return existing.pending;
+      }
+
+      if (existing && isExpired(existing.createdAt)) {
+        cache.delete(account.id);
+        void existing.pending.then((session) => session.disconnect()).catch(() => undefined);
       }
 
       const pending = connectSession(account, agent, ctx).catch((error) => {
         cache.delete(account.id);
         throw error;
       });
-      cache.set(account.id, pending);
+      cache.set(account.id, {
+        pending,
+        createdAt: Date.now(),
+      });
       return pending;
     },
     async disconnectAccount(accountId) {
       const session = cache.get(accountId);
       cache.delete(accountId);
       if (session) {
-        await (await session).disconnect();
+        await (await session.pending).disconnect();
       }
     },
     async disconnectAll() {
       const sessions = [...cache.values()];
       cache.clear();
-      await Promise.all(sessions.map(async (session) => (await session).disconnect()));
+      await Promise.all(sessions.map(async (session) => (await session.pending).disconnect()));
     },
   };
 }

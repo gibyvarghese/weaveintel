@@ -743,6 +743,37 @@ export interface ExternalActionAdapter {
 export interface AccountToolSession {
   listTools(): Promise<MCPToolDefinition[]>;
   callTool(ctx: ExecutionContext, request: MCPToolCallRequest): Promise<MCPToolCallResponse>;
+  streamToolCall?(
+    ctx: ExecutionContext,
+    request: MCPToolCallRequest,
+    options?: { timeoutMs?: number; signal?: AbortSignal },
+  ): AsyncGenerator<{
+    type: string;
+    timestamp: string;
+    message?: string;
+    output?: MCPToolCallResponse;
+    metadata?: Record<string, unknown>;
+  }, void, void>;
+  discoverCapabilities?(query?: {
+    cursor?: string;
+    limit?: number;
+    namespacePrefix?: string;
+    tags?: readonly string[];
+    includeDetails?: boolean;
+  }): Promise<{
+    items: readonly {
+      kind: 'tool' | 'resource' | 'prompt';
+      name: string;
+      source: string;
+      description?: string;
+      namespace?: string;
+      tags?: readonly string[];
+      lastRefreshedAt: string;
+    }[];
+    nextCursor?: string;
+    source: string;
+    fetchedAt: string;
+  }>;
   disconnect(): Promise<void>;
 }
 
@@ -773,6 +804,11 @@ export interface McpAccountSessionProviderOptions {
   transportFactory: McpTransportFactory;
   scopeFactory?: (account: Account, agent: LiveAgent) => SecretScope;
   identityFactory?: (agent: LiveAgent) => RuntimeIdentity;
+  /**
+   * Optional cache TTL for account sessions. When elapsed, a fresh session is
+   * created from durable account binding + token resolver state.
+   */
+  sessionTtlMs?: number;
 }
 
 export interface ActionExecutionResult {

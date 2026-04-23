@@ -932,6 +932,267 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
     await mcpServer.stop();
   });
 
+  it('phase 5 action executor prefers discovery and streaming MCP session surfaces when available', async () => {
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+    const streamedRequests: Array<{ name: string; arguments: Record<string, unknown> }> = [];
+    let listToolsCalled = false;
+    let callToolCalled = false;
+
+    const executor = createActionExecutor({
+      sessionProvider: {
+        async getSession() {
+          return {
+            async listTools() {
+              listToolsCalled = true;
+              return [];
+            },
+            async callTool() {
+              callToolCalled = true;
+              return { content: [{ type: 'text', text: 'fallback should not run' }], isError: false };
+            },
+            async *streamToolCall(_ctx, request) {
+              streamedRequests.push({
+                name: request.name,
+                arguments: request.arguments,
+              });
+              yield {
+                type: 'started',
+                timestamp: now,
+                message: `starting ${request.name}`,
+              };
+              yield {
+                type: 'final_output',
+                timestamp: now,
+                output: {
+                  content: [
+                    { type: 'text', text: 'sent via stream' },
+                    { type: 'resource', uri: 'gmail://messages/stream-1' },
+                  ],
+                  isError: false,
+                },
+              };
+            },
+            async discoverCapabilities() {
+              return {
+                items: [{
+                  kind: 'tool' as const,
+                  name: 'gmail.send',
+                  source: 'fixture',
+                  lastRefreshedAt: now,
+                }],
+                source: 'fixture',
+                fetchedAt: now,
+              };
+            },
+            async disconnect() {
+              return;
+            },
+          };
+        },
+      },
+    });
+
+    await store.saveAgent({
+      id: 'agent-mcp-stream-1',
+      meshId: 'mesh-mcp-stream-1',
+      name: 'Mailer',
+      role: 'Coordinator',
+      contractVersionId: 'contract-mcp-stream-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveAccount({
+      id: 'account-mcp-stream-1',
+      meshId: 'mesh-mcp-stream-1',
+      provider: 'gmail',
+      accountIdentifier: 'mailer@example.com',
+      description: 'Fixture Gmail account',
+      mcpServerRef: { url: 'fixture://gmail', serverType: 'HTTP', discoveryHint: 'gmail send fixture' },
+      credentialVaultRef: 'vault://mailer',
+      upstreamScopesDescription: 'send only',
+      ownerHumanId: 'human:admin-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      revokedAt: null,
+    });
+    await store.saveAccountBinding({
+      id: 'binding-mcp-stream-1',
+      agentId: 'agent-mcp-stream-1',
+      accountId: 'account-mcp-stream-1',
+      purpose: 'Send customer updates',
+      constraints: 'Low-risk transactional mail only',
+      grantedByHumanId: 'human:admin-1',
+      grantedAt: now,
+      expiresAt: null,
+      revokedAt: null,
+      revokedByHumanId: null,
+      revocationReason: null,
+    });
+
+    const result = await executor.execute(
+      {
+        type: 'DraftMessage',
+        to: { type: 'HUMAN', id: 'customer@example.com' },
+        kind: 'REPORT',
+        subject: 'Status update',
+        bodySeed: 'Your request is complete.',
+      },
+      {
+        tickId: 'tick-mcp-stream-1',
+        nowIso: now,
+        stateStore: store,
+        agent: {
+          id: 'agent-mcp-stream-1',
+          meshId: 'mesh-mcp-stream-1',
+          name: 'Mailer',
+          role: 'Coordinator',
+          contractVersionId: 'contract-mcp-stream-1',
+          status: 'ACTIVE' as const,
+          createdAt: now,
+          archivedAt: null,
+        },
+        activeBindings: [{
+          id: 'binding-mcp-stream-1',
+          agentId: 'agent-mcp-stream-1',
+          accountId: 'account-mcp-stream-1',
+          purpose: 'Send customer updates',
+          constraints: 'Low-risk transactional mail only',
+          grantedByHumanId: 'human:admin-1',
+          grantedAt: now,
+          expiresAt: null,
+          revokedAt: null,
+          revokedByHumanId: null,
+          revocationReason: null,
+        }],
+      },
+      weaveContext({ userId: 'human:admin-1' }),
+    );
+
+    expect(result.status).toBe('SUCCESS');
+    expect(streamedRequests).toEqual([{ name: 'gmail.send', arguments: {
+      to: 'customer@example.com',
+      subject: 'Status update',
+      body: 'Your request is complete.',
+    } }]);
+    expect(listToolsCalled).toBe(false);
+    expect(callToolCalled).toBe(false);
+
+    const outboundRecords = await store.listOutboundActionRecords('agent-mcp-stream-1');
+    expect(outboundRecords).toHaveLength(1);
+    expect(outboundRecords[0]?.externalRef).toBe('gmail://messages/stream-1');
+    expect(outboundRecords[0]?.status).toBe('SENT');
+  });
+
+  it('phase 5 refreshes MCP account sessions after TTL expiry', async () => {
+    let transportCreateCount = 0;
+    let transportCloseCount = 0;
+    const tokenResolver: AccessTokenResolver = {
+      async resolve() {
+        return 'fixture-token';
+      },
+      async revoke() {
+        return;
+      },
+    };
+
+    const provider = createMcpAccountSessionProvider({
+      tokenResolver,
+      transportFactory: {
+        async createTransport() {
+          transportCreateCount += 1;
+          let onMessage: ((message: unknown) => void) | null = null;
+          return {
+            type: 'stdio' as const,
+            async send(message: unknown): Promise<void> {
+              const request = message as { id?: number; method?: string; params?: Record<string, unknown> };
+              if (!request.method || request.id == null || !onMessage) return;
+
+              if (request.method === 'initialize') {
+                onMessage({
+                  jsonrpc: '2.0',
+                  id: request.id,
+                  result: {
+                    protocolVersion: '2025-03-26',
+                    capabilities: { tools: {}, resources: {}, prompts: {} },
+                    serverInfo: { name: 'ttl-fixture', version: '1.0.0' },
+                  },
+                });
+                return;
+              }
+
+              if (request.method === 'tools/call') {
+                onMessage({
+                  jsonrpc: '2.0',
+                  id: request.id,
+                  result: {
+                    content: [{ type: 'text', text: 'message-1\nmessage-2' }],
+                  },
+                });
+              }
+            },
+            onMessage(handler: (message: unknown) => void): void {
+              onMessage = handler;
+            },
+            async close(): Promise<void> {
+              transportCloseCount += 1;
+              onMessage = null;
+            },
+          };
+        },
+      },
+      sessionTtlMs: 0,
+    });
+
+    const nowIso = new Date().toISOString();
+    const account = {
+      id: 'acct-ttl-1',
+      meshId: 'mesh-ttl-1',
+      accountIdentifier: 'demo@example.com',
+      description: 'Fixture Gmail account',
+      mcpServerRef: { url: 'fixture://gmail', serverType: 'HTTP', discoveryHint: 'gmail list fixture' },
+      credentialVaultRef: 'vault:acct-ttl-1',
+      upstreamScopesDescription: 'read only',
+      ownerHumanId: 'human:admin-1',
+      provider: 'gmail',
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      status: 'ACTIVE',
+      revokedAt: null,
+    } as const;
+
+    const agent = {
+      id: 'agent-ttl-1',
+      meshId: 'mesh-ttl-1',
+      name: 'Mail Agent',
+      role: 'assistant',
+      contractVersionId: 'contract-ttl-1',
+      status: 'ACTIVE',
+      createdAt: nowIso,
+      archivedAt: null,
+    } as const;
+
+    const ctx = weaveContext({ tenantId: 'mesh-ttl-1', userId: 'user-ttl-1' });
+    const firstSession = await provider.getSession({ account, agent, ctx });
+    await firstSession.callTool(ctx, {
+      name: 'gmail.list_messages',
+      arguments: {},
+    });
+
+    const secondSession = await provider.getSession({ account, agent, ctx });
+    await secondSession.callTool(ctx, {
+      name: 'gmail.list_messages',
+      arguments: {},
+    });
+
+    expect(firstSession).not.toBe(secondSession);
+    expect(transportCreateCount).toBe(2);
+    expect(transportCloseCount).toBeGreaterThanOrEqual(1);
+
+    await provider.disconnectAll?.();
+  });
+
   it('phase 5 rejects external delivery when no authorised account is bound', async () => {
     const store = weaveInMemoryStateStore();
     const now = '2025-01-01T00:00:00.000Z';

@@ -20,6 +20,18 @@ export interface MCPToolDefinition {
 export interface MCPToolCallRequest {
   readonly name: string;
   readonly arguments: Record<string, unknown>;
+  /**
+   * Optional, explicitly propagated execution context metadata for policy,
+   * tenancy, and observability across transport boundaries.
+   */
+  readonly executionContext?: {
+    readonly executionId?: string;
+    readonly tenantId?: string;
+    readonly userId?: string;
+    readonly parentSpanId?: string;
+    readonly deadline?: number;
+    readonly metadata?: Record<string, unknown>;
+  };
 }
 
 export interface MCPToolCallResponse {
@@ -31,6 +43,111 @@ export type MCPContent =
   | { readonly type: 'text'; readonly text: string }
   | { readonly type: 'image'; readonly data: string; readonly mimeType: string }
   | { readonly type: 'resource'; readonly uri: string; readonly text?: string };
+
+// ─── Streaming, discovery, and composition contracts ────────
+
+export type MCPStreamEventType =
+  | 'started'
+  | 'progress'
+  | 'partial_output'
+  | 'final_output'
+  | 'warning'
+  | 'error'
+  | 'cancelled';
+
+export interface MCPStreamEvent {
+  readonly type: MCPStreamEventType;
+  readonly timestamp: string;
+  readonly executionId?: string;
+  readonly stepId?: string;
+  readonly message?: string;
+  readonly progress?: {
+    readonly status?: string;
+    readonly current?: number;
+    readonly total?: number;
+  };
+  readonly output?: MCPToolCallResponse;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface MCPToolCallStreamOptions {
+  readonly timeoutMs?: number;
+  readonly signal?: AbortSignal;
+  readonly requestMetadata?: Record<string, unknown>;
+}
+
+export type MCPCapabilityKind = 'tool' | 'resource' | 'prompt';
+
+export interface MCPCapabilitySummary {
+  readonly kind: MCPCapabilityKind;
+  readonly name: string;
+  readonly source: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly namespace?: string;
+  readonly tags?: readonly string[];
+  readonly lastRefreshedAt: string;
+  readonly etag?: string;
+}
+
+export interface MCPCapabilityDetails extends MCPCapabilitySummary {
+  readonly inputSchema?: JsonSchema;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface MCPCapabilityDiscoveryQuery {
+  readonly cursor?: string;
+  readonly limit?: number;
+  readonly namespacePrefix?: string;
+  readonly tags?: readonly string[];
+  readonly includeDetails?: boolean;
+}
+
+export interface MCPCapabilityDiscoveryPage {
+  readonly items: readonly MCPCapabilitySummary[];
+  readonly details?: Readonly<Record<string, MCPCapabilityDetails>>;
+  readonly nextCursor?: string;
+  readonly source: string;
+  readonly fetchedAt: string;
+}
+
+export interface MCPComposableCallStep {
+  readonly id: string;
+  readonly toolName: string;
+  readonly arguments?: Record<string, unknown>;
+  readonly dependsOn?: readonly string[];
+  readonly inputFromStepId?: string;
+  readonly inputPath?: string;
+  readonly mergeInputAs?: string;
+  readonly retries?: number;
+  readonly timeoutMs?: number;
+  readonly continueOnError?: boolean;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface MCPComposableCallPlan {
+  readonly id: string;
+  readonly steps: readonly MCPComposableCallStep[];
+}
+
+export interface MCPComposableStepResult {
+  readonly stepId: string;
+  readonly startedAt: string;
+  readonly endedAt: string;
+  readonly status: 'ok' | 'error' | 'skipped';
+  readonly request: MCPToolCallRequest;
+  readonly response?: MCPToolCallResponse;
+  readonly error?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface MCPComposableCallResult {
+  readonly planId: string;
+  readonly startedAt: string;
+  readonly endedAt: string;
+  readonly steps: readonly MCPComposableStepResult[];
+  readonly outputsByStepId: Readonly<Record<string, MCPToolCallResponse>>;
+}
 
 // ─── MCP Resource ────────────────────────────────────────────
 
@@ -86,6 +203,19 @@ export interface MCPClient {
   readResource(uri: string): Promise<MCPResourceContent>;
   listPrompts(): Promise<MCPPrompt[]>;
   getPrompt(name: string, args?: Record<string, string>): Promise<MCPPromptMessage[]>;
+  /** Optional streaming-first tool execution path. */
+  streamToolCall?(
+    ctx: ExecutionContext,
+    request: MCPToolCallRequest,
+    options?: MCPToolCallStreamOptions,
+  ): AsyncGenerator<MCPStreamEvent, void, void>;
+  /** Optional progressive capability discovery path. */
+  discoverCapabilities?(query?: MCPCapabilityDiscoveryQuery): Promise<MCPCapabilityDiscoveryPage>;
+  /** Optional composable call-chain execution helper. */
+  composeToolCalls?(
+    ctx: ExecutionContext,
+    plan: MCPComposableCallPlan,
+  ): Promise<MCPComposableCallResult>;
   disconnect(): Promise<void>;
 }
 

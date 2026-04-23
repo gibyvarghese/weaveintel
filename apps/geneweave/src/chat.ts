@@ -1591,6 +1591,7 @@ export class ChatEngine {
           systemPrompt: policyPrompt,
           maxSteps: 15,
           name: 'geneweave-agent',
+          bus: agentBus,
         });
       }
 

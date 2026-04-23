@@ -1,10 +1,3 @@
-/**
- * @weaveintel/mcp-server — MCP server implementation
- *
- * Exposes tools, resources, and prompts via JSON-RPC over any transport.
- * Register handlers, then start with a transport adapter.
- */
-
 import type {
   MCPServer,
   MCPServerConfig,
@@ -15,25 +8,56 @@ import type {
   MCPResourceContent,
   MCPPrompt,
   MCPPromptHandler,
-  MCPPromptMessage,
-  MCPToolCallResponse,
   MCPTransport,
   ExecutionContext,
 } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
+import { Server as SDKServer } from '@modelcontextprotocol/sdk/server/index.js';
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
+  type JSONRPCMessage,
+} from '@modelcontextprotocol/sdk/types.js';
+import type { Transport as SDKTransport } from '@modelcontextprotocol/sdk/shared/transport.js';
 
-interface JsonRpcRequest {
-  jsonrpc: '2.0';
-  id?: number;
-  method: string;
-  params?: Record<string, unknown>;
+class CoreTransportAdapter implements SDKTransport {
+  public onclose?: () => void;
+  public onerror?: (error: Error) => void;
+  public onmessage?: <T extends JSONRPCMessage>(message: T) => void;
+
+  public constructor(private readonly transport: MCPTransport) {}
+
+  public async start(): Promise<void> {
+    this.transport.onMessage((message) => {
+      this.onmessage?.(message as JSONRPCMessage);
+    });
+  }
+
+  public async send(message: JSONRPCMessage): Promise<void> {
+    try {
+      await this.transport.send(message);
+    } catch (error) {
+      this.onerror?.(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
+  }
+
+  public async close(): Promise<void> {
+    await this.transport.close();
+    this.onclose?.();
+  }
 }
 
-interface JsonRpcResponse {
-  jsonrpc: '2.0';
-  id?: number;
-  result?: unknown;
-  error?: { code: number; message: string; data?: unknown };
+function toSDKTransport(transport: MCPTransport): SDKTransport {
+  const candidate = transport as MCPTransport & { __sdkTransport?: SDKTransport };
+  if (candidate.__sdkTransport) {
+    return candidate.__sdkTransport;
+  }
+  return new CoreTransportAdapter(transport);
 }
 
 /**
@@ -61,127 +85,165 @@ export function weaveMCPServer(config: MCPServerConfig, options: WeaveMCPServerO
   const resources = new Map<string, { resource: MCPResource; handler: MCPResourceHandler }>();
   const prompts = new Map<string, { prompt: MCPPrompt; handler: MCPPromptHandler }>();
   let transport: MCPTransport | null = null;
+  const sdkServer = new SDKServer(
+    { name: config.name, version: config.version },
+    {
+      capabilities: {
+        tools: {},
+        resources: {},
+        prompts: {},
+      },
+      instructions: config.description,
+    },
+  );
 
-  async function handleRequest(msg: unknown): Promise<void> {
-    const request = msg as JsonRpcRequest;
-    if (!request.method) return;
+  sdkServer.setRequestHandler(ListToolsRequestSchema, async () => ({
+    tools: [...tools.values()].map((entry) => ({
+      name: entry.definition.name,
+      description: entry.definition.description,
+      inputSchema: entry.definition.inputSchema,
+    })),
+  }));
 
-    // Ignore notifications (no id)
-    if (request.id == null && request.method.startsWith('notifications/')) return;
+  sdkServer.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const name = request.params.name;
+    const args = request.params.arguments ?? {};
+    const tool = tools.get(name);
+    if (!tool) {
+      return {
+        content: [{ type: 'text', text: `Tool not found: ${name}` }],
+        isError: true,
+      };
+    }
 
-    let result: unknown;
-    let error: JsonRpcResponse['error'];
+    const paramsRecord = request.params as unknown as Record<string, unknown>;
+    const ctx = options.contextFactory
+      ? options.contextFactory(paramsRecord)
+      : weaveContext();
 
-    try {
-      switch (request.method) {
-        case 'initialize':
-          result = {
-            protocolVersion: '2024-11-05',
-            capabilities: {
-              tools: tools.size > 0 ? {} : undefined,
-              resources: resources.size > 0 ? {} : undefined,
-              prompts: prompts.size > 0 ? {} : undefined,
+    const result = await tool.handler(ctx, args as Record<string, unknown>);
+    return {
+      content: result.content.map((content) => {
+        if (content.type === 'resource') {
+          return {
+            type: 'resource' as const,
+            resource: {
+              uri: content.uri,
+              text: content.text ?? '',
             },
-            serverInfo: { name: config.name, version: config.version },
           };
-          break;
-
-        case 'tools/list':
-          result = { tools: [...tools.values()].map((t) => t.definition) };
-          break;
-
-        case 'tools/call': {
-          const name = request.params?.['name'] as string;
-          const args = (request.params?.['arguments'] ?? {}) as Record<string, unknown>;
-          const tool = tools.get(name);
-          if (!tool) {
-            error = { code: -32602, message: `Tool not found: ${name}` };
-          } else {
-            // Use the caller-supplied context factory so identity, tenant,
-            // budget, and cancellation signal flow into the handler.
-            // Fall back to a fresh anonymous context when no factory is provided.
-            const params = request.params ?? {};
-            const ctx = options.contextFactory
-              ? options.contextFactory(params)
-              : weaveContext();
-            result = await tool.handler(ctx, args);
-          }
-          break;
         }
+        return content;
+      }),
+      isError: result.isError,
+    };
+  });
 
-        case 'resources/list':
-          result = { resources: [...resources.values()].map((r) => r.resource) };
-          break;
+  sdkServer.setRequestHandler(ListResourcesRequestSchema, async () => ({
+    resources: [...resources.values()].map((entry) => ({
+      uri: entry.resource.uri,
+      name: entry.resource.name,
+      description: entry.resource.description,
+      mimeType: entry.resource.mimeType,
+    })),
+  }));
 
-        case 'resources/read': {
-          const uri = request.params?.['uri'] as string;
-          const res = resources.get(uri);
-          if (!res) {
-            error = { code: -32602, message: `Resource not found: ${uri}` };
-          } else {
-            const content = await res.handler(uri);
-            result = { contents: [content] };
-          }
-          break;
-        }
+  sdkServer.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    const uri = request.params.uri;
+    const resource = resources.get(uri);
+    if (!resource) {
+      return {
+        contents: [{ uri, text: `Resource not found: ${uri}` }],
+      };
+    }
+    const content = await resource.handler(uri);
+    return {
+      contents: [{
+        uri: content.uri,
+        mimeType: content.mimeType,
+        ...(content.text ? { text: content.text } : {}),
+        ...(content.blob ? { blob: content.blob } : {}),
+      }],
+    };
+  });
 
-        case 'prompts/list':
-          result = { prompts: [...prompts.values()].map((p) => p.prompt) };
-          break;
+  sdkServer.setRequestHandler(ListPromptsRequestSchema, async () => ({
+    prompts: [...prompts.values()].map((entry) => ({
+      name: entry.prompt.name,
+      description: entry.prompt.description,
+      arguments: entry.prompt.arguments,
+    })),
+  }));
 
-        case 'prompts/get': {
-          const promptName = request.params?.['name'] as string;
-          const promptArgs = (request.params?.['arguments'] ?? {}) as Record<string, string>;
-          const p = prompts.get(promptName);
-          if (!p) {
-            error = { code: -32602, message: `Prompt not found: ${promptName}` };
-          } else {
-            const messages = await p.handler(promptArgs);
-            result = { messages };
-          }
-          break;
-        }
-
-        default:
-          error = { code: -32601, message: `Method not found: ${request.method}` };
-      }
-    } catch (err) {
-      error = { code: -32603, message: err instanceof Error ? err.message : String(err) };
+  sdkServer.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    const name = request.params.name;
+    const args = request.params.arguments ?? {};
+    const prompt = prompts.get(name);
+    if (!prompt) {
+      return {
+        messages: [{
+          role: 'assistant' as const,
+          content: { type: 'text' as const, text: `Prompt not found: ${name}` },
+        }],
+      };
     }
 
-    if (request.id != null) {
-      const response: JsonRpcResponse = { jsonrpc: '2.0', id: request.id };
-      if (error) response.error = error;
-      else response.result = result;
-      await transport?.send(response);
-    }
-  }
+    const messages = await prompt.handler(args as Record<string, string>);
+    return {
+      messages: messages.map((message) => {
+        if (message.content.type === 'resource') {
+          return {
+            role: message.role,
+            content: {
+              type: 'resource' as const,
+              resource: {
+                uri: message.content.uri,
+                text: message.content.text ?? '',
+              },
+            },
+          };
+        }
+        return message as unknown as {
+          role: 'user' | 'assistant';
+          content: { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
+        };
+      }),
+    };
+  });
 
   return {
     config,
 
     addTool(definition: MCPToolDefinition, handler: MCPToolHandler): void {
       tools.set(definition.name, { definition, handler });
+      if (transport) {
+        void sdkServer.sendToolListChanged();
+      }
     },
 
     addResource(resource: MCPResource, handler: MCPResourceHandler): void {
       resources.set(resource.uri, { resource, handler });
+      if (transport) {
+        void sdkServer.sendResourceListChanged();
+      }
     },
 
     addPrompt(prompt: MCPPrompt, handler: MCPPromptHandler): void {
       prompts.set(prompt.name, { prompt, handler });
+      if (transport) {
+        void sdkServer.sendPromptListChanged();
+      }
     },
 
     async start(t: MCPTransport): Promise<void> {
       transport = t;
-      t.onMessage(handleRequest);
+      await sdkServer.connect(toSDKTransport(t));
     },
 
     async stop(): Promise<void> {
-      if (transport) {
-        await transport.close();
-        transport = null;
-      }
+      await sdkServer.close();
+      if (transport) await transport.close();
+      transport = null;
     },
   };
 }

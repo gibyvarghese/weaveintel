@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/mcp-server",
   "version": "0.0.1",
-  "description": "MCP server \u2014 expose tools/resources/prompts via MCP protocol",
+  "description": "MCP server — expose tools/resources/prompts via MCP protocol",
   "type": "module",
   "exports": {
     ".": {
@@ -19,6 +19,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@weaveintel/core": "*"
   },
   "devDependencies": {

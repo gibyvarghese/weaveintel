@@ -1,8 +1,7 @@
 import type { MCPServer, MCPTransport } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { createMCPStdioServerTransport, weaveMCPServer } from '@weaveintel/mcp-server';
 import { statsNzToolMap } from '@weaveintel/tools-http';
-import { createInterface } from 'node:readline';
 
 export interface StatsNzMCPServerConfig {
   name?: string;
@@ -55,38 +54,7 @@ export function createStatsNzMCPServer(config: StatsNzMCPServerConfig = {}): Sta
  * Creates a stdio transport for line-delimited JSON-RPC messages.
  */
 export function createStdioJsonRpcTransport(): MCPTransport {
-  const handlers: Array<(msg: unknown) => void> = [];
-
-  const rl = createInterface({ input: process.stdin, terminal: false });
-  rl.on('line', (line) => {
-    const trimmed = line.trim();
-    if (!trimmed) return;
-    try {
-      const msg = JSON.parse(trimmed);
-      for (const h of handlers) h(msg);
-    } catch {
-      // Ignore malformed lines.
-    }
-  });
-
-  return {
-    type: 'stdio',
-
-    async send(message: unknown): Promise<void> {
-      const line = JSON.stringify(message) + '\n';
-      await new Promise<void>((resolve, reject) => {
-        process.stdout.write(line, (err) => (err ? reject(err) : resolve()));
-      });
-    },
-
-    onMessage(handler: (message: unknown) => void): void {
-      handlers.push(handler);
-    },
-
-    async close(): Promise<void> {
-      rl.close();
-    },
-  };
+  return createMCPStdioServerTransport();
 }
 
 /**

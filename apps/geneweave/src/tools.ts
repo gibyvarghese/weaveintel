@@ -17,7 +17,11 @@ import { canUseTool, normalizePersona } from './rbac.js';
 import type { ExecutionLanguage } from '@weaveintel/sandbox';
 import { getCSE } from './cse.js';
 import type { DatabaseAdapter } from './db.js';
-import { weaveMCPClient, weaveMCPTools } from '@weaveintel/mcp-client';
+import {
+  createMCPStreamableHttpTransport,
+  weaveMCPClient,
+  weaveMCPTools,
+} from '@weaveintel/mcp-client';
 import { weaveA2AClient } from '@weaveintel/a2a';
 import { createSVToolMap } from './features/scientific-validation/tools/index.js';
 
@@ -33,6 +37,42 @@ function envFlag(name: string, defaultValue: boolean): boolean {
   const raw = process.env[name];
   if (!raw) return defaultValue;
   return ['1', 'true', 'yes', 'on'].includes(raw.toLowerCase());
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+async function resolveMCPToolDefinitions(mcpClient: ReturnType<typeof weaveMCPClient>) {
+  if (mcpClient.discoverCapabilities) {
+    const discoveredTools: import('@weaveintel/core').MCPToolDefinition[] = [];
+    let cursor: string | undefined;
+
+    do {
+      const page = await mcpClient.discoverCapabilities({
+        cursor,
+        limit: 100,
+        includeDetails: true,
+      });
+      for (const item of page.items) {
+        if (item.kind !== 'tool') continue;
+        const detail = page.details?.[`tool:${item.name}`];
+        if (!detail?.inputSchema) continue;
+        discoveredTools.push({
+          name: item.name,
+          description: detail.description ?? item.description ?? '',
+          inputSchema: detail.inputSchema,
+        });
+      }
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    if (discoveredTools.length > 0) {
+      return discoveredTools;
+    }
+  }
+
+  return mcpClient.listTools();
 }
 
 function isBrowserAutomationEnabledByEnv(): boolean {
@@ -853,16 +893,14 @@ export function filterToolNamesByPersona(toolNames: string[], persona: string | 
   return toolNames.filter((toolName) => canUseTool(persona, toolName));
 }
 
-// ─── Phase 4: MCP HTTP transport factory ──────────────────────
-// Creates a minimal HTTP-based MCPTransport that sends JSON-RPC requests
-// via POST to the given endpoint, optionally injecting a credential header.
+// ─── Phase 4+: MCP Streamable HTTP transport factory ───────────
+// Uses the official MCP SDK Streamable HTTP client transport in stateless-
+// compatible mode. Auth headers are resolved lazily per request.
 function createHttpMCPTransport(
   endpoint: string,
   credentialResolver?: (id: string) => Promise<import('./db-types.js').ToolCredentialRow | null>,
   credentialId?: string,
 ): import('@weaveintel/core').MCPTransport {
-  let messageHandler: ((msg: unknown) => void) | null = null;
-
   async function resolveAuthHeader(): Promise<Record<string, string>> {
     if (!credentialId || !credentialResolver) return {};
     const cred = await credentialResolver(credentialId);
@@ -875,25 +913,14 @@ function createHttpMCPTransport(
     return { [headerName]: `${prefix}${envValue}` };
   }
 
-  return {
-    type: 'http',
-    async send(message: unknown): Promise<void> {
-      const authHeaders = await resolveAuthHeader();
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify(message),
-      });
-      if (res.ok) {
-        const data: unknown = await res.json();
-        messageHandler?.(data);
-      }
+  return createMCPStreamableHttpTransport(endpoint, {
+    getHeaders: resolveAuthHeader,
+    requestInit: {
+      headers: {
+        'Content-Type': 'application/json',
+      },
     },
-    onMessage(handler: (message: unknown) => void): void {
-      messageHandler = handler;
-    },
-    async close(): Promise<void> { /* HTTP is stateless, nothing to close */ },
-  };
+  });
 }
 
 // ─── Phase 4: A2A delegate tool factory ───────────────────────
@@ -1002,7 +1029,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
             const mcpTransport = createHttpMCPTransport(mcpConfig.endpoint, opts.credentialResolver, entry.credential_id ?? undefined);
             const mcpClient = weaveMCPClient();
             await mcpClient.connect(mcpTransport);
-            const mcpToolDefs = await mcpClient.listTools();
+            const mcpToolDefs = await resolveMCPToolDefinitions(mcpClient);
             const mcpRegistry = weaveMCPTools(mcpClient, mcpToolDefs);
             for (const tool of mcpRegistry.list()) {
               if (canUseTool(actorPersona, tool.schema.name)) {
