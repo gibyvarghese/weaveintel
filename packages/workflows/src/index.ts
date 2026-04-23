@@ -27,3 +27,10 @@ export {
 
 // Checkpoint store
 export { InMemoryCheckpointStore, type CheckpointStore } from './checkpoint-store.js';
+
+// Run repository
+export {
+  InMemoryWorkflowRunRepository,
+  JsonFileWorkflowRunRepository,
+  type WorkflowRunRepository,
+} from './run-repository.js';

@@ -2,11 +2,15 @@
  * @weaveintel/workflows — Unit tests
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   DefaultWorkflowEngine,
   InMemoryScheduler,
   WorkflowBuilder,
   defineWorkflow,
+  JsonFileWorkflowRunRepository,
 } from './index.js';
 import { InMemoryCheckpointStore } from './checkpoint-store.js';
 import { InMemoryTaskQueue } from '@weaveintel/human-tasks';
@@ -611,7 +615,7 @@ describe('Human-task workflow integration', () => {
       decidedAt: new Date().toISOString(),
     });
     expect(resumed?.status).toBe('completed');
-    expect(run.state.variables['__resumeData']).toMatchObject({ decision: 'rejected' });
+    expect(resumed?.state.variables['__resumeData']).toMatchObject({ decision: 'rejected' });
   });
 
   it('throws when completeHumanTask is called without a queue', async () => {
@@ -650,6 +654,46 @@ describe('WorkflowBuilder Phase 3C shortcuts', () => {
     expect(step?.type).toBe('parallel');
     expect(step?.config?.['parallelHandlers']).toEqual(['h1', 'h2']);
     expect(step?.next).toBe('join');
+  });
+});
+
+// ─── Phase 3D: Durable Run Repository ──────────────────────
+
+describe('Phase 3D durable workflow state extraction', () => {
+  it('persists workflow runs in JsonFileWorkflowRunRepository across engine restarts', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'wf-runs-'));
+    const filePath = join(tempDir, 'runs.json');
+
+    try {
+      const repoA = new JsonFileWorkflowRunRepository(filePath);
+      const engineA = new DefaultWorkflowEngine({ runRepository: repoA });
+
+      const def = defineWorkflow('Durable Runs')
+        .setId('wf-durable-runs')
+        .deterministic('step-1', 'Step 1', { handler: 'noop' })
+        .build();
+
+      await engineA.createDefinition(def);
+      engineA.registerHandler('noop', async () => 'ok');
+
+      const run = await engineA.startRun('wf-durable-runs', { key: 'value' });
+      expect(run.status).toBe('completed');
+
+      // Simulate process restart with a fresh engine+repository instance.
+      const repoB = new JsonFileWorkflowRunRepository(filePath);
+      const engineB = new DefaultWorkflowEngine({ runRepository: repoB });
+
+      const loaded = await engineB.getRun(run.id);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.workflowId).toBe('wf-durable-runs');
+      expect(loaded?.status).toBe('completed');
+
+      const listed = engineB.listRuns('wf-durable-runs');
+      expect(listed).toHaveLength(1);
+      expect(listed[0]?.id).toBe(run.id);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

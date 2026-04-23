@@ -23,6 +23,7 @@ import { executeStep, type StepHandler, type StepHandlerMap } from './steps.js';
 import { createInitialState, advanceState, resolveNextStep, isTerminal } from './state.js';
 import { type CheckpointStore, InMemoryCheckpointStore } from './checkpoint-store.js';
 import { type CompensationRegistry, DefaultCompensationRegistry, runCompensations, type CompensationHandler } from './compensation.js';
+import { type WorkflowRunRepository, InMemoryWorkflowRunRepository } from './run-repository.js';
 
 export interface WorkflowEngineOptions {
   checkpointStore?: CheckpointStore;
@@ -30,6 +31,8 @@ export interface WorkflowEngineOptions {
   defaultPolicy?: WorkflowPolicy;
   /** Optional human task queue for human-task step integration. */
   humanTaskQueue?: HumanTaskQueue;
+  /** Optional durable repository for workflow run state. */
+  runRepository?: WorkflowRunRepository;
 }
 
 function now(): string { return new Date().toISOString(); }
@@ -66,9 +69,10 @@ function resolveResumeNextId(step: WorkflowStep, resumeData: unknown): string | 
 
 export class DefaultWorkflowEngine implements IWorkflowEngine {
   private definitions = new Map<string, WorkflowDefinition>();
-  private runs = new Map<string, WorkflowRun>();
+  private runCache = new Map<string, WorkflowRun>();
   private handlers: StepHandlerMap = new Map();
   private checkpointStore: CheckpointStore;
+  private runRepository: WorkflowRunRepository;
   private compensationRegistry: CompensationRegistry;
   private bus?: EventBus;
   private defaultPolicy?: WorkflowPolicy;
@@ -76,6 +80,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
 
   constructor(opts?: WorkflowEngineOptions) {
     this.checkpointStore = opts?.checkpointStore ?? new InMemoryCheckpointStore();
+    this.runRepository = opts?.runRepository ?? new InMemoryWorkflowRunRepository();
     this.bus = opts?.bus;
     this.defaultPolicy = opts?.defaultPolicy;
     this.compensationRegistry = new DefaultCompensationRegistry();
@@ -121,18 +126,23 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       state: createInitialState(def, input),
       startedAt: now(),
     };
-    this.runs.set(run.id, run);
+    await this.runRepository.save(run);
+    this.runCache.set(run.id, run);
     this.emit({ type: 'workflow:started', runId: run.id, timestamp: now() });
 
     return this.executeRun(run, def);
   }
 
   async getRun(runId: string): Promise<WorkflowRun | null> {
-    return this.runs.get(runId) ?? null;
+    const cached = this.runCache.get(runId);
+    if (cached) return cached;
+    const run = await this.runRepository.get(runId);
+    if (run) this.runCache.set(run.id, run);
+    return run;
   }
 
   async resumeRun(runId: string, data?: unknown): Promise<WorkflowRun> {
-    const run = this.runs.get(runId);
+    const run = await this.runRepository.get(runId);
     if (!run) throw new Error(`Workflow run not found: ${runId}`);
     if (run.status !== 'paused') throw new Error(`Run ${runId} is not paused (status: ${run.status})`);
 
@@ -143,7 +153,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       run.state.variables['__resumeData'] = data;
     }
     (run as { status: WorkflowRunStatus }).status = 'running';
-    this.runs.set(run.id, run);
+    await this.runRepository.save(run);
+    this.runCache.set(run.id, run);
 
     // Advance to the correct next step, respecting branch selectors in resume data.
     const currentStep = def.steps.find(s => s.id === run.state.currentStepId);
@@ -158,16 +169,17 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   }
 
   async cancelRun(runId: string): Promise<void> {
-    const run = this.runs.get(runId);
+    const run = await this.runRepository.get(runId);
     if (!run) throw new Error(`Workflow run not found: ${runId}`);
     (run as { status: WorkflowRunStatus }).status = 'cancelled';
     run.completedAt = now();
-    this.runs.set(run.id, run);
+    await this.runRepository.save(run);
+    this.runCache.set(run.id, run);
     this.emit({ type: 'workflow:failed', runId, timestamp: now(), data: { reason: 'cancelled' } });
   }
 
   listRuns(workflowId?: string): WorkflowRun[] {
-    const all = [...this.runs.values()];
+    const all = [...this.runCache.values()];
     return workflowId ? all.filter(r => r.workflowId === workflowId) : all;
   }
 
@@ -258,7 +270,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         (run.state as { currentStepId: string }).currentStepId = step.id;
         run.state.history.push(stepResult);
         (run as { status: WorkflowRunStatus }).status = 'paused';
-        this.runs.set(run.id, run);
+        await this.runRepository.save(run);
+        this.runCache.set(run.id, run);
         this.emit({ type: 'workflow:paused', runId: run.id, timestamp: now() });
         await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
         return run;
@@ -269,7 +282,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         (run.state as { currentStepId: string }).currentStepId = step.id;
         run.state.history.push(stepResult);
         (run as { status: WorkflowRunStatus }).status = 'paused';
-        this.runs.set(run.id, run);
+        await this.runRepository.save(run);
+        this.runCache.set(run.id, run);
         this.emit({ type: 'workflow:paused', runId: run.id, timestamp: now() });
         await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
         return run;
@@ -284,7 +298,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       }
     }
 
-    this.runs.set(run.id, run);
+    await this.runRepository.save(run);
+    this.runCache.set(run.id, run);
     return run;
   }
 
@@ -301,8 +316,14 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
    */
   async recoverRun(runId: string): Promise<WorkflowRun | null> {
     // Already in memory
-    const existing = this.runs.get(runId);
-    if (existing) return existing;
+    const cached = this.runCache.get(runId);
+    if (cached) return cached;
+
+    const existing = await this.runRepository.get(runId);
+    if (existing) {
+      this.runCache.set(existing.id, existing);
+      return existing;
+    }
 
     const cp = await this.checkpointStore.latest(runId);
     if (!cp) return null;
@@ -320,7 +341,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       state: structuredClone(cp.state),
       startedAt: cp.createdAt,
     };
-    this.runs.set(run.id, run);
+    await this.runRepository.save(run);
+    this.runCache.set(run.id, run);
     this.emit({ type: 'workflow:started', runId: run.id, timestamp: now() });
 
     return this.executeRun(run, def);

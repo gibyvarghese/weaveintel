@@ -355,6 +355,7 @@ function buildProcessViewModel(msg: any, isStreamingCurrent: boolean) {
   if (cseBadges.length) summaryChips.push({ label: 'CSE', tone: 'ok' });
   if (validations.length) summaryChips.push({ label: 'Checks: ' + validationTone, tone: validationTone });
   if (msg?.latency_ms) summaryChips.push({ label: 'Duration: ' + msg.latency_ms + 'ms', tone: 'ok' });
+  if (!summaryChips.length) summaryChips.push({ label: 'Events: ' + (timeline.length + workerTimeline.length), tone: 'ok' });
 
   const hasProcess = isStreamingCurrent || thoughtHistory.length > 0 || timeline.length > 0 || workerTimeline.length > 0 || skills.length > 0 || validations.length > 0;
   const cseSessions = Array.from(cseSessionMap.values()).map((session) => ({

@@ -130,11 +130,9 @@ function main(page: Page) {
 
 /** Wait for the table to load and ensure admin list is visible. */
 async function waitForListHeader(m: Locator, timeout = 5000) {
-  // Just wait for the table/list to be visible
-  await expect(m.locator('table')).toBeVisible({ timeout }).catch(async () => {
-    // Fallback: check for any list-like structure
-    await expect(m.locator('.admin-list-panel, .data-table, [role="table"]')).toBeVisible({ timeout });
-  });
+  await expect(m.locator('.admin-list-panel')).toBeVisible({ timeout });
+  await expect(m.locator('table, [role="table"]')).toBeVisible({ timeout });
+  await expect(m.locator('input.admin-list-search')).toBeVisible({ timeout });
 }
 
 /** Click the admin "+ New" button with exact text matching to avoid strict mode violations. */
@@ -209,7 +207,7 @@ test.describe('Admin Navigation', () => {
     await goAdmin(page);
     const m = main(page);
     await openAdminTab(page, 'Guardrails');
-    await waitForListHeader(m.locator('.main'));
+    await waitForListHeader(m);
   });
 
   test('seed defaults API succeeds for admin user', async ({ page }) => {
@@ -229,7 +227,7 @@ test.describe('Admin Seed & Data', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     // Prompts tab (default) should show search header with record count
-    await waitForListHeader(m.locator('.search-header'), 5000);
+    await waitForListHeader(m, 5000);
   });
 
   test('guardrails tab shows seeded data', async ({ page }) => {
@@ -239,7 +237,7 @@ test.describe('Admin Seed & Data', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Guardrails');
-    await waitForListHeader(m.locator('.search-header'), 5000);
+    await waitForListHeader(m, 5000);
   });
 });
 
@@ -259,15 +257,15 @@ test.describe('Admin Guardrail CRUD', () => {
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
     // Form should now be visible with "New Guardrail" heading
-    await expect(m.locator('h3', { hasText: 'New Guardrail' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Guardrail' })).toBeVisible({ timeout: 3000 });
     // Fill the Name input (first text input in the form)
     await m.locator('input[type="text"]').first().fill('PW-Test-Guard');
     // Select the Type (required field — UI doesn't auto-set state on initial render)
     await m.locator('select').first().selectOption('content_filter');
     // Click Create button in the form
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
     // Wait for the form to disappear (save + re-render triggered)
-    await expect(m.locator('h3', { hasText: 'New Guardrail' })).not.toBeVisible({ timeout: 5000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Guardrail' })).not.toBeVisible({ timeout: 5000 });
   });
 });
 
@@ -281,28 +279,21 @@ test.describe('Admin Prompts', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     // Prompts is the default tab, should show search header with items
-    await waitForListHeader(m.locator('.search-header'), 5000);
+    await waitForListHeader(m, 5000);
   });
 
-  test('creates a new prompt via form', async ({ page }) => {
+  test('creates a new prompt via wizard', async ({ page }) => {
     await registerAndEnter(page);
     await goAdmin(page);
     const m = main(page);
     await seedDefaults(page);
     await page.waitForTimeout(1500);
-    // Prompts is default tab — click + New
+    // Prompts now uses the setup wizard instead of the legacy CRUD form.
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Prompt' })).toBeVisible({ timeout: 3000 });
-    // Fill Name input
-    await m.locator('input[type="text"]').first().fill('PW-Test-Prompt');
-    // Fill Template textarea
-    const textareas = m.locator('textarea');
-    if ((await textareas.count()) > 0) {
-      await textareas.first().fill('Hello {{user}}!');
-    }
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Prompt' })).not.toBeVisible({ timeout: 5000 });
+    await expect(m.locator('.prompt-wizard')).toBeVisible({ timeout: 5000 });
+    await expect(m.locator('.prompt-wizard-head')).toContainText('Prompt Setup Wizard');
+    await expect(m.locator('[data-testid="prompt-template-editor"]')).toBeVisible({ timeout: 3000 });
   });
 
   test('edits a seeded prompt', async ({ page }) => {
@@ -332,7 +323,7 @@ test.describe('Admin Routing', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Routing');
-    await waitForListHeader(m.locator('.search-header'), 5000);
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new routing policy via form', async ({ page }) => {
@@ -344,7 +335,7 @@ test.describe('Admin Routing', () => {
     await openAdminTab(page, 'Routing');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Routing Policy' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Routing Policy' })).toBeVisible({ timeout: 3000 });
     // Fill Name input
     await m.locator('input[type="text"]').first().fill('PW-Test-Routing');
     // Select the Strategy from the dropdown
@@ -352,8 +343,8 @@ test.describe('Admin Routing', () => {
     if ((await selects.count()) > 0) {
       await selects.first().selectOption({ index: 1 });
     }
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Routing Policy' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Routing Policy' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded routing policy', async ({ page }) => {
@@ -401,7 +392,7 @@ test.describe('Admin Read-only Tabs', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Workflow Runs');
-    await waitForListHeader(m.locator('.search-header'), 5000);
+    await waitForListHeader(m, 5000);
   });
 });
 
@@ -415,7 +406,7 @@ test.describe('Admin Task Policies', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Task Policies');
-    await waitForListHeader(m.locator('.search-header'), 5000);
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new task policy via form', async ({ page }) => {
@@ -427,13 +418,13 @@ test.describe('Admin Task Policies', () => {
     await openAdminTab(page, 'Task Policies');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Task Policy' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Task Policy' })).toBeVisible({ timeout: 3000 });
     // Fill Name (1st text input), Description (2nd), Trigger (3rd)
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Test-Policy');
     await textInputs.nth(2).fill('test_action');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Task Policy' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Task Policy' })).not.toBeVisible({ timeout: 5000 });
   });
 });
 
@@ -447,7 +438,7 @@ test.describe('Admin Contracts', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Contracts');
-    await waitForListHeader(m.locator('.search-header'), 5000);
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new contract via form', async ({ page }) => {
@@ -459,10 +450,10 @@ test.describe('Admin Contracts', () => {
     await openAdminTab(page, 'Contracts');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Contract' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Contract' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Contract');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Contract' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Contract' })).not.toBeVisible({ timeout: 5000 });
   });
 });
 
@@ -476,7 +467,7 @@ test.describe('Admin Cache Policies', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Cache');
-    await waitForListHeader(m.locator('.search-header'), 5000);
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new cache policy via form', async ({ page }) => {
@@ -488,10 +479,10 @@ test.describe('Admin Cache Policies', () => {
     await openAdminTab(page, 'Cache');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Cache Policy' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Cache Policy' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Cache-Policy');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Cache Policy' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Cache Policy' })).not.toBeVisible({ timeout: 5000 });
   });
 });
 
@@ -505,7 +496,7 @@ test.describe('Admin Identity Rules', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Identity');
-    await waitForListHeader(m.locator('.search-header'), 5000);
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new identity rule via form', async ({ page }) => {
@@ -517,10 +508,10 @@ test.describe('Admin Identity Rules', () => {
     await openAdminTab(page, 'Identity');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Identity Rule' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Identity Rule' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Identity-Rule');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Identity Rule' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Identity Rule' })).not.toBeVisible({ timeout: 5000 });
   });
 });
 
@@ -534,7 +525,7 @@ test.describe('Admin Memory Governance', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Memory Gov');
-    await waitForListHeader(m.locator('.search-header'), 5000);
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new memory governance rule via form', async ({ page }) => {
@@ -546,10 +537,10 @@ test.describe('Admin Memory Governance', () => {
     await openAdminTab(page, 'Memory Gov');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Memory Governance' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Memory Governance' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Memory-Governance');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Memory Governance' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Memory Governance' })).not.toBeVisible({ timeout: 5000 });
   });
 });
 
@@ -575,7 +566,7 @@ test.describe('Admin Search Providers', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Search');
-    await waitForListHeader(m.locator('.search-header'), 5000);
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new search provider via form', async ({ page }) => {
@@ -587,14 +578,14 @@ test.describe('Admin Search Providers', () => {
     await openAdminTab(page, 'Search');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Search Provider' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Search Provider' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Search');
     const selects = m.locator('select');
     if ((await selects.count()) > 0) {
       await selects.first().selectOption({ index: 1 });
     }
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Search Provider' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Search Provider' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded search provider', async ({ page }) => {
@@ -623,7 +614,7 @@ test.describe('Admin HTTP Endpoints', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'HTTP');
-    await waitForListHeader(m.locator('.search-header'), 5000);
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new http endpoint via form', async ({ page }) => {
@@ -635,12 +626,12 @@ test.describe('Admin HTTP Endpoints', () => {
     await openAdminTab(page, 'HTTP');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New HTTP Endpoint' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New HTTP Endpoint' })).toBeVisible({ timeout: 3000 });
     const httpInputs = m.locator('input[type="text"]');
     await httpInputs.nth(0).fill('PW-Test-HTTP');
     await httpInputs.nth(2).fill('https://example.com/api/test');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New HTTP Endpoint' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New HTTP Endpoint' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded http endpoint', async ({ page }) => {
@@ -669,7 +660,7 @@ test.describe('Admin Social Accounts', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Social');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new social account via form', async ({ page }) => {
@@ -681,14 +672,14 @@ test.describe('Admin Social Accounts', () => {
     await openAdminTab(page, 'Social');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Social Account' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Social Account' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Social');
     const selects = m.locator('select');
     if ((await selects.count()) > 0) {
       await selects.first().selectOption({ index: 1 });
     }
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Social Account' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Social Account' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded social account', async ({ page }) => {
@@ -717,7 +708,7 @@ test.describe('Admin Enterprise Connectors', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Enterprise');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new enterprise connector via form', async ({ page }) => {
@@ -729,14 +720,14 @@ test.describe('Admin Enterprise Connectors', () => {
     await openAdminTab(page, 'Enterprise');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Enterprise Connector' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Enterprise Connector' })).toBeVisible({ timeout: 3000 });
     await m.locator('input[type="text"]').first().fill('PW-Test-Enterprise');
     const selects = m.locator('select');
     if ((await selects.count()) > 0) {
       await selects.first().selectOption({ index: 1 });
     }
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Enterprise Connector' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Enterprise Connector' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded enterprise connector', async ({ page }) => {
@@ -765,7 +756,7 @@ test.describe('Admin Tool Catalog', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Tools');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new tool catalog entry via form', async ({ page }) => {
@@ -777,12 +768,12 @@ test.describe('Admin Tool Catalog', () => {
     await openAdminTab(page, 'Tools');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Tool' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Tool' })).toBeVisible({ timeout: 3000 });
     const inputs = m.locator('input[type="text"]');
     await inputs.nth(0).fill('PW-Test-Tool');
     await inputs.nth(1).fill('pw-test-tool');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Tool' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Tool' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded tool catalog entry', async ({ page }) => {
@@ -811,7 +802,7 @@ test.describe('Admin Tool Policies', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Tool Policies');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new tool policy via form', async ({ page }) => {
@@ -823,12 +814,12 @@ test.describe('Admin Tool Policies', () => {
     await openAdminTab(page, 'Tool Policies');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Tool Policy' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Tool Policy' })).toBeVisible({ timeout: 3000 });
     const inputs = m.locator('input[type="text"]');
     await inputs.nth(0).fill('pw-test-policy');
     await inputs.nth(1).fill('PW Test Policy');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Tool Policy' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Tool Policy' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded tool policy', async ({ page }) => {
@@ -908,7 +899,7 @@ test.describe('Admin Replay Scenarios', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Replay');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new replay scenario via form', async ({ page }) => {
@@ -920,14 +911,14 @@ test.describe('Admin Replay Scenarios', () => {
     await openAdminTab(page, 'Replay');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Replay Scenario' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Replay Scenario' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Test-Replay');
     const textareas = m.locator('textarea');
     await textareas.nth(0).fill('What is 1+1?');
     await textareas.nth(1).fill('The answer is 2.');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Replay Scenario' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Replay Scenario' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded replay scenario', async ({ page }) => {
@@ -956,7 +947,7 @@ test.describe('Admin Trigger Definitions', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Triggers');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new trigger definition via form', async ({ page }) => {
@@ -968,12 +959,12 @@ test.describe('Admin Trigger Definitions', () => {
     await openAdminTab(page, 'Triggers');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Trigger Definition' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Trigger Definition' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Test-Trigger');
     await textInputs.nth(1).fill('0 6 * * *');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Trigger Definition' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Trigger Definition' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded trigger definition', async ({ page }) => {
@@ -1002,7 +993,7 @@ test.describe('Admin Tenant Configs', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Tenants');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new tenant config via form', async ({ page }) => {
@@ -1014,12 +1005,12 @@ test.describe('Admin Tenant Configs', () => {
     await openAdminTab(page, 'Tenants');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Tenant Config' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Tenant Config' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Test-Tenant');
     await textInputs.nth(2).fill('pw-tenant-id');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Tenant Config' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Tenant Config' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded tenant config', async ({ page }) => {
@@ -1048,7 +1039,7 @@ test.describe('Admin Sandbox Policies', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Sandbox');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new sandbox policy via form', async ({ page }) => {
@@ -1060,11 +1051,11 @@ test.describe('Admin Sandbox Policies', () => {
     await openAdminTab(page, 'Sandbox');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Sandbox Policy' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Sandbox Policy' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Sandbox');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Sandbox Policy' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Sandbox Policy' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded sandbox policy', async ({ page }) => {
@@ -1093,7 +1084,7 @@ test.describe('Admin Extraction Pipelines', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Extraction');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new extraction pipeline via form', async ({ page }) => {
@@ -1105,11 +1096,11 @@ test.describe('Admin Extraction Pipelines', () => {
     await openAdminTab(page, 'Extraction');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Extraction Pipeline' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Extraction Pipeline' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Pipeline');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Extraction Pipeline' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Extraction Pipeline' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded extraction pipeline', async ({ page }) => {
@@ -1138,7 +1129,7 @@ test.describe('Admin Artifact Policies', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Artifacts');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new artifact policy via form', async ({ page }) => {
@@ -1150,11 +1141,11 @@ test.describe('Admin Artifact Policies', () => {
     await openAdminTab(page, 'Artifacts');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Artifact Policy' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Artifact Policy' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Artifact-Policy');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Artifact Policy' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Artifact Policy' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded artifact policy', async ({ page }) => {
@@ -1183,7 +1174,7 @@ test.describe('Admin Reliability Policies', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Reliability');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new reliability policy via form', async ({ page }) => {
@@ -1195,11 +1186,11 @@ test.describe('Admin Reliability Policies', () => {
     await openAdminTab(page, 'Reliability');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Reliability Policy' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Reliability Policy' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Reliability');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Reliability Policy' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Reliability Policy' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded reliability policy', async ({ page }) => {
@@ -1228,7 +1219,7 @@ test.describe('Admin Collaboration Sessions', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Collaboration');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new collaboration session via form', async ({ page }) => {
@@ -1240,11 +1231,11 @@ test.describe('Admin Collaboration Sessions', () => {
     await openAdminTab(page, 'Collaboration');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Collaboration Session' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Collaboration Session' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Collab');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Collaboration Session' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Collaboration Session' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded collaboration session', async ({ page }) => {
@@ -1273,7 +1264,7 @@ test.describe('Admin Compliance Rules', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Compliance');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new compliance rule via form', async ({ page }) => {
@@ -1285,11 +1276,11 @@ test.describe('Admin Compliance Rules', () => {
     await openAdminTab(page, 'Compliance');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Compliance Rule' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Compliance Rule' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Compliance');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Compliance Rule' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Compliance Rule' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded compliance rule', async ({ page }) => {
@@ -1318,7 +1309,7 @@ test.describe('Admin Graph Configs', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Graph');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new graph config via form', async ({ page }) => {
@@ -1330,11 +1321,11 @@ test.describe('Admin Graph Configs', () => {
     await openAdminTab(page, 'Graph');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Graph Config' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Graph Config' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Graph');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Graph Config' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Graph Config' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded graph config', async ({ page }) => {
@@ -1363,7 +1354,7 @@ test.describe('Admin Plugin Configs', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Plugins');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new plugin config via form', async ({ page }) => {
@@ -1375,11 +1366,11 @@ test.describe('Admin Plugin Configs', () => {
     await openAdminTab(page, 'Plugins');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Plugin Config' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Plugin Config' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Plugin');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Plugin Config' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Plugin Config' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded plugin config', async ({ page }) => {
@@ -1408,7 +1399,7 @@ test.describe('Admin Scaffold Templates', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Scaffolds');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new scaffold template via form', async ({ page }) => {
@@ -1420,11 +1411,11 @@ test.describe('Admin Scaffold Templates', () => {
     await openAdminTab(page, 'Scaffolds');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Scaffold Template' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Scaffold Template' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Scaffold');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Scaffold Template' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Scaffold Template' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded scaffold template', async ({ page }) => {
@@ -1451,7 +1442,7 @@ test.describe('Admin Recipe Configs', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Recipes');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new recipe config via form', async ({ page }) => {
@@ -1463,11 +1454,11 @@ test.describe('Admin Recipe Configs', () => {
     await openAdminTab(page, 'Recipes');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Recipe Config' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Recipe Config' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Recipe');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Recipe Config' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Recipe Config' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded recipe config', async ({ page }) => {
@@ -1494,7 +1485,7 @@ test.describe('Admin Widget Configs', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Widgets');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new widget config via form', async ({ page }) => {
@@ -1506,11 +1497,11 @@ test.describe('Admin Widget Configs', () => {
     await openAdminTab(page, 'Widgets');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Widget Config' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Widget Config' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Widget');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Widget Config' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Widget Config' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded widget config', async ({ page }) => {
@@ -1537,7 +1528,7 @@ test.describe('Admin Validation Rules', () => {
     await seedDefaults(page);
     await page.waitForTimeout(1500);
     await openAdminTab(page, 'Validation');
-    await expect(m.getByText(/[1-9]\d* items?/)).toBeVisible({ timeout: 5000 });
+    await waitForListHeader(m, 5000);
   });
 
   test('creates a new validation rule via form', async ({ page }) => {
@@ -1549,11 +1540,11 @@ test.describe('Admin Validation Rules', () => {
     await openAdminTab(page, 'Validation');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Validation Rule' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Validation Rule' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Validation');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Validation Rule' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Validation Rule' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('edits a seeded validation rule', async ({ page }) => {
@@ -1590,11 +1581,11 @@ test.describe('Admin Tool Credentials CRUD', () => {
     await openAdminTab(page, 'Tool Credentials');
     await clickAdminNewButton(m);
     await page.waitForTimeout(300);
-    await expect(m.locator('h3', { hasText: 'New Tool Credential' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Tool Credential' })).toBeVisible({ timeout: 3000 });
     const textInputs = m.locator('input[type="text"]');
     await textInputs.nth(0).fill('PW-Credential');
-    await m.locator('button.nav-btn', { hasText: 'Create' }).click();
-    await expect(m.locator('h3', { hasText: 'New Tool Credential' })).not.toBeVisible({ timeout: 5000 });
+    await m.locator('.admin-form-action-btns button').filter({ hasText: 'Create' }).click();
+    await expect(m.locator('.admin-form-title', { hasText: 'New Tool Credential' })).not.toBeVisible({ timeout: 5000 });
   });
 
   test('tool credentials tab has + New button', async ({ page }) => {

@@ -117,7 +117,7 @@ export function renderWorkspaceNav(options: {
   ));
   menu.appendChild(h('button', {
     className: state.view === 'scientific-validation' ? 'active' : '',
-    title: 'Hypothesis Validation',
+    title: 'Scientific Validation',
     onClick: () => { state.view = 'scientific-validation'; options.render(); },
   },
     h('span', { className: 'side-icon', style: 'font-size:15px' }, '🔬'),

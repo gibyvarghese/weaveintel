@@ -67,17 +67,16 @@ test.describe('Admin UX Regression', () => {
 
     const m = page.locator('.main');
     await openAdminTab(page, 'guardrails');
-    // Use .first() to select admin panel's "+ New" button, not chat "+ New Chat"
-    await m.locator('button.nav-btn', { hasText: '+ New' }).first().click();
+    await m.locator('.admin-list-header button.nav-btn').filter({ hasText: /^\+ New$/ }).click();
 
     await expect(m.locator('.admin-breadcrumbs')).toBeVisible({ timeout: 3000 });
     await expect(m.locator('.admin-list-panel')).toHaveCount(0);
-    await expect(m.getByRole('heading', { name: 'New Guardrail' })).toBeVisible({ timeout: 3000 });
+    await expect(m.locator('.admin-form-title', { hasText: 'New Guardrail' })).toBeVisible({ timeout: 3000 });
 
     await openAdminTab(page, 'routing');
 
     await expect(m.locator('.admin-breadcrumbs')).toHaveCount(0);
-    await expect(m.getByRole('heading', { name: 'New Guardrail' })).toHaveCount(0);
+    await expect(m.locator('.admin-form-title', { hasText: 'New Guardrail' })).toHaveCount(0);
   });
 
   test('breadcrumb returns from form to list', async ({ page }) => {
@@ -91,8 +90,7 @@ test.describe('Admin UX Regression', () => {
     if (await editBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await editBtn.click();
     } else {
-      // Use .first() to select admin panel's "+ New" button, not chat "+ New Chat"
-      await m.locator('button.nav-btn', { hasText: '+ New' }).first().click();
+      await m.locator('.admin-list-header button.nav-btn').filter({ hasText: /^\+ New$/ }).click();
     }
 
     await expect(m.locator('.admin-breadcrumbs')).toBeVisible({ timeout: 3000 });
@@ -116,7 +114,7 @@ test.describe('Admin UX Regression', () => {
     if (await editBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
       await editBtn.click();
     } else {
-      await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+      await m.locator('.admin-list-header button.nav-btn').filter({ hasText: /^\+ New$/ }).click();
     }
 
     await expect(m.locator('.prompt-wizard')).toBeVisible({ timeout: 5000 });
@@ -129,7 +127,7 @@ test.describe('Admin UX Regression', () => {
 
     const m = page.locator('.main');
     await openAdminTab(page, 'prompts');
-    await m.locator('button.nav-btn', { hasText: '+ New' }).click();
+    await m.locator('.admin-list-header button.nav-btn').filter({ hasText: /^\+ New$/ }).click();
     await expect(m.locator('.prompt-wizard')).toBeVisible({ timeout: 5000 });
 
     const options = m.locator('[data-testid="prompt-fragment-select"] option');

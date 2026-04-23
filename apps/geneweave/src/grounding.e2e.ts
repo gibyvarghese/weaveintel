@@ -31,9 +31,9 @@ test.describe('Grounding Chat UI', () => {
     await registerAndEnter(page);
 
     await page.route('**/api/chats/*/messages', async (route) => {
-      const body = [
-        'data: ' + JSON.stringify({ type: 'text', text: 'BANANA' }),
-        'data: ' + JSON.stringify({
+      const events = [
+        { type: 'text', text: 'BANANA' },
+        {
           type: 'cognitive',
           confidence: 0.31,
           decision: 'warn',
@@ -52,11 +52,11 @@ test.describe('Grounding Chat UI', () => {
               confidence: 0.31,
             },
           ],
-        }),
-        'data: ' + JSON.stringify({ type: 'guardrail', decision: 'warn', reason: 'Low grounding overlap detected.' }),
-        'data: ' + JSON.stringify({ type: 'done', usage: { promptTokens: 10, completionTokens: 1, totalTokens: 11 }, cost: 0, latencyMs: 12 }),
-        '',
-      ].join('\n');
+        },
+        { type: 'guardrail', decision: 'warn', reason: 'Low grounding overlap detected.' },
+        { type: 'done', usage: { promptTokens: 10, completionTokens: 1, totalTokens: 11 }, cost: 0, latencyMs: 12 },
+      ];
+      const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('');
 
       await route.fulfill({
         status: 200,

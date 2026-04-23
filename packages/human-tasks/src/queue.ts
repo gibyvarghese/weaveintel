@@ -11,9 +11,17 @@ import type {
   HumanTaskFilter,
   HumanDecision,
 } from '@weaveintel/core';
+import {
+  type HumanTaskRepository,
+  InMemoryHumanTaskRepository,
+} from './repository.js';
 
-export class InMemoryTaskQueue implements HumanTaskQueue {
-  private readonly tasks = new Map<string, HumanTask>();
+export interface HumanTaskQueueOptions {
+  repository?: HumanTaskRepository;
+}
+
+export class RepositoryBackedTaskQueue implements HumanTaskQueue {
+  constructor(private readonly repository: HumanTaskRepository) {}
 
   async enqueue(task: Omit<HumanTask, 'id' | 'createdAt'>): Promise<HumanTask> {
     const id = (await import('node:crypto')).randomUUID();
@@ -22,46 +30,20 @@ export class InMemoryTaskQueue implements HumanTaskQueue {
       id,
       createdAt: new Date().toISOString(),
     };
-    this.tasks.set(id, full);
+    await this.repository.save(full);
     return full;
   }
 
   async dequeue(assignee: string): Promise<HumanTask | null> {
-    // Find the highest-priority pending task and assign it
-    const priorityOrder = ['urgent', 'high', 'normal', 'low'];
-    let best: HumanTask | null = null;
-    let bestPriIdx = priorityOrder.length;
-
-    for (const task of this.tasks.values()) {
-      if (task.status !== 'pending') continue;
-      const idx = priorityOrder.indexOf(task.priority);
-      if (idx < bestPriIdx || (idx === bestPriIdx && best && task.createdAt < best.createdAt)) {
-        best = task;
-        bestPriIdx = idx;
-      }
-    }
-
-    if (!best) return null;
-
-    best.status = 'assigned';
-    best.assignee = assignee;
-    return best;
+    return this.repository.claimNextPending(assignee);
   }
 
   async get(taskId: string): Promise<HumanTask | null> {
-    return this.tasks.get(taskId) ?? null;
+    return this.repository.get(taskId);
   }
 
   async list(filter?: HumanTaskFilter): Promise<HumanTask[]> {
-    let result = Array.from(this.tasks.values());
-
-    if (filter) {
-      if (filter.status?.length) result = result.filter(t => filter.status!.includes(t.status));
-      if (filter.type?.length) result = result.filter(t => filter.type!.includes(t.type));
-      if (filter.assignee) result = result.filter(t => t.assignee === filter.assignee);
-      if (filter.priority?.length) result = result.filter(t => filter.priority!.includes(t.priority));
-      if (filter.workflowRunId) result = result.filter(t => t.workflowRunId === filter.workflowRunId);
-    }
+    const result = await this.repository.list(filter);
 
     // Sort by priority (urgent first), then by creation time
     const priorityOrder = ['urgent', 'high', 'normal', 'low'];
@@ -76,44 +58,57 @@ export class InMemoryTaskQueue implements HumanTaskQueue {
   }
 
   async complete(taskId: string, decision: HumanDecision): Promise<void> {
-    const task = this.tasks.get(taskId);
+    const task = await this.repository.get(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
     if (task.status === 'completed' || task.status === 'rejected' || task.status === 'expired') {
       throw new Error(`Task ${taskId} is already in terminal state: ${task.status}`);
     }
 
-    task.status = 'completed';
-    task.result = decision.data ?? { decision: decision.decision, reason: decision.reason };
-    task.completedAt = decision.decidedAt;
+    await this.repository.save({
+      ...task,
+      status: 'completed',
+      result: decision.data ?? { decision: decision.decision, reason: decision.reason },
+      completedAt: decision.decidedAt,
+    });
   }
 
   async reject(taskId: string, decision: HumanDecision): Promise<void> {
-    const task = this.tasks.get(taskId);
+    const task = await this.repository.get(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
     if (task.status === 'completed' || task.status === 'rejected' || task.status === 'expired') {
       throw new Error(`Task ${taskId} is already in terminal state: ${task.status}`);
     }
 
-    task.status = 'rejected';
-    task.result = decision.data ?? { decision: 'rejected', reason: decision.reason };
-    task.completedAt = decision.decidedAt;
+    await this.repository.save({
+      ...task,
+      status: 'rejected',
+      result: decision.data ?? { decision: 'rejected', reason: decision.reason },
+      completedAt: decision.decidedAt,
+    });
   }
 
   async expire(taskId: string): Promise<void> {
-    const task = this.tasks.get(taskId);
+    const task = await this.repository.get(taskId);
     if (!task) throw new Error(`Task ${taskId} not found`);
-    task.status = 'expired';
-    task.completedAt = new Date().toISOString();
+    await this.repository.save({
+      ...task,
+      status: 'expired',
+      completedAt: new Date().toISOString(),
+    });
   }
 
   /** Expire all tasks whose SLA deadline has passed. Returns count of expired tasks. */
   async expireOverdue(): Promise<number> {
     const now = new Date().toISOString();
     let count = 0;
-    for (const task of this.tasks.values()) {
+    const tasks = await this.repository.list();
+    for (const task of tasks) {
       if (task.slaDeadline && task.slaDeadline < now && task.status !== 'completed' && task.status !== 'expired' && task.status !== 'rejected') {
-        task.status = 'expired';
-        task.completedAt = now;
+        await this.repository.save({
+          ...task,
+          status: 'expired',
+          completedAt: now,
+        });
         count++;
       }
     }
@@ -123,9 +118,56 @@ export class InMemoryTaskQueue implements HumanTaskQueue {
   /** Get count of tasks by status. */
   async stats(): Promise<Record<string, number>> {
     const counts: Record<string, number> = {};
-    for (const task of this.tasks.values()) {
+    const tasks = await this.repository.list();
+    for (const task of tasks) {
       counts[task.status] = (counts[task.status] ?? 0) + 1;
     }
     return counts;
+  }
+}
+
+export class InMemoryTaskQueue implements HumanTaskQueue {
+  private readonly delegate: RepositoryBackedTaskQueue;
+
+  constructor(opts?: HumanTaskQueueOptions) {
+    this.delegate = new RepositoryBackedTaskQueue(opts?.repository ?? new InMemoryHumanTaskRepository());
+  }
+
+  async enqueue(task: Omit<HumanTask, 'id' | 'createdAt'>): Promise<HumanTask> {
+    return this.delegate.enqueue(task);
+  }
+
+  async dequeue(assignee: string): Promise<HumanTask | null> {
+    return this.delegate.dequeue(assignee);
+  }
+
+  async get(taskId: string): Promise<HumanTask | null> {
+    return this.delegate.get(taskId);
+  }
+
+  async list(filter?: HumanTaskFilter): Promise<HumanTask[]> {
+    return this.delegate.list(filter);
+  }
+
+  async complete(taskId: string, decision: HumanDecision): Promise<void> {
+    return this.delegate.complete(taskId, decision);
+  }
+
+  async reject(taskId: string, decision: HumanDecision): Promise<void> {
+    return this.delegate.reject(taskId, decision);
+  }
+
+  async expire(taskId: string): Promise<void> {
+    return this.delegate.expire(taskId);
+  }
+
+  /** Expire all tasks whose SLA deadline has passed. Returns count of expired tasks. */
+  async expireOverdue(): Promise<number> {
+    return this.delegate.expireOverdue();
+  }
+
+  /** Get count of tasks by status. */
+  async stats(): Promise<Record<string, number>> {
+    return this.delegate.stats();
   }
 }

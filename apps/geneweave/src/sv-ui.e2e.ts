@@ -47,7 +47,7 @@ async function registerAndEnter(page: Page, email?: string) {
 }
 
 async function openSVView(page: Page) {
-  const svBtn = page.locator('.workspace-nav button[title="Scientific Validation"]');
+  const svBtn = page.getByRole('button', { name: /Validation/i }).first();
   await expect(svBtn).toBeVisible({ timeout: 5000 });
   await svBtn.click();
 }
@@ -57,7 +57,7 @@ async function openSVView(page: Page) {
 test.describe('Scientific Validation UI', () => {
   test('1. SV nav button is visible after login', async ({ page }) => {
     await registerAndEnter(page);
-    const svBtn = page.locator('.workspace-nav button[title="Scientific Validation"]');
+    const svBtn = page.getByRole('button', { name: /Validation/i }).first();
     await expect(svBtn).toBeVisible({ timeout: 5000 });
   });
 
@@ -263,7 +263,7 @@ test.describe('Scientific Validation UI', () => {
     }, hypothesisId);
 
     // Trigger a re-render by navigating again
-    const svBtn = page.locator('.workspace-nav button[title="Scientific Validation"]');
+    const svBtn = page.getByRole('button', { name: /Validation/i }).first();
     await svBtn.click();
 
     // Check verdict view content — label should be present
@@ -305,7 +305,7 @@ test.describe('Scientific Validation UI', () => {
       (window as any).state.svHypothesisId = 'test-bundle-hyp';
     });
 
-    const svBtn = page.locator('.workspace-nav button[title="Scientific Validation"]');
+    const svBtn = page.getByRole('button', { name: /Validation/i }).first();
     await svBtn.click();
 
     await expect(page.locator('a', { hasText: /Download.*Bundle/i })).toBeVisible({ timeout: 8000 });

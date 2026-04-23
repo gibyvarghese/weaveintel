@@ -2,12 +2,17 @@
  * @weaveintel/human-tasks — Unit tests
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   createHumanTask,
   createApprovalTask,
   createReviewTask,
   createEscalationTask,
   InMemoryTaskQueue,
+  RepositoryBackedTaskQueue,
+  JsonFileHumanTaskRepository,
   DecisionLog,
   createDecision,
   PolicyEvaluator,
@@ -351,6 +356,38 @@ describe('InMemoryTaskQueue.reject()', () => {
       decision: 'rejected',
       decidedAt: new Date().toISOString(),
     })).rejects.toThrow('not found');
+  });
+});
+
+describe('Phase 3D durable human-task state extraction', () => {
+  it('persists tasks in JsonFileHumanTaskRepository across queue instances', async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), 'ht-repo-'));
+    const filePath = join(tempDir, 'tasks.json');
+
+    try {
+      const repoA = new JsonFileHumanTaskRepository(filePath);
+      const queueA = new RepositoryBackedTaskQueue(repoA);
+
+      const created = await queueA.enqueue({
+        type: 'approval',
+        title: 'Approve deployment',
+        status: 'pending',
+        priority: 'high',
+      });
+
+      const repoB = new JsonFileHumanTaskRepository(filePath);
+      const queueB = new RepositoryBackedTaskQueue(repoB);
+
+      const loaded = await queueB.get(created.id);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.title).toBe('Approve deployment');
+
+      const claimed = await queueB.dequeue('alice');
+      expect(claimed?.assignee).toBe('alice');
+      expect(claimed?.status).toBe('assigned');
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -15,7 +15,18 @@ export {
 } from './task.js';
 
 // Queue
-export { InMemoryTaskQueue } from './queue.js';
+export {
+  InMemoryTaskQueue,
+  RepositoryBackedTaskQueue,
+  type HumanTaskQueueOptions,
+} from './queue.js';
+
+// Repository
+export {
+  InMemoryHumanTaskRepository,
+  JsonFileHumanTaskRepository,
+  type HumanTaskRepository,
+} from './repository.js';
 
 // Decision
 export { DecisionLog, createDecision, type DecisionRecord } from './decision.js';

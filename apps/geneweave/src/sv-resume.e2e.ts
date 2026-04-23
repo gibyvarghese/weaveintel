@@ -29,7 +29,7 @@ async function registerAndEnter(page: Page) {
 }
 
 async function openSVView(page: Page) {
-  const svBtn = page.locator('.workspace-nav button[title="Scientific Validation"]');
+  const svBtn = page.getByRole('button', { name: /Validation/i }).first();
   await expect(svBtn).toBeVisible({ timeout: 5000 });
   await svBtn.click();
   await expect(page.locator('h2', { hasText: 'Validate a Hypothesis' })).toBeVisible({ timeout: 5000 });
