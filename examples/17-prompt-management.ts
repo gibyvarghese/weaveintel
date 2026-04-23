@@ -215,7 +215,7 @@ console.log(`\n  Resolved (latest version):\n    ${resolved.split('\n').join('\n
 
 // Get specific version
 const oldVersion = await registry.get('summarize', '1.0');
-console.log(`\n  Version 1.0 template: "${oldVersion?.template}"`);
+console.log(`\n  Version 1.0 template: "${oldVersion?.kind === 'template' ? (oldVersion as { kind: 'template'; template: string }).template : '(not a template version)'}"`);
 
 // renderPromptVersion() is the package-level runtime helper that apps like
 // geneWeave can call after loading a typed prompt version from a DB adapter.

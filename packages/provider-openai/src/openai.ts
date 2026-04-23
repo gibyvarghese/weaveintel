@@ -64,6 +64,19 @@ function makeHeaders(options: OpenAIProviderOptions, apiKey: string): Record<str
   return headers;
 }
 
+function parseRetryAfterMs(retryAfterHeader: string | null | undefined, fallbackMs = 60_000): number {
+  if (!retryAfterHeader) return fallbackMs;
+  const asNumber = Number.parseInt(retryAfterHeader, 10);
+  if (!Number.isNaN(asNumber) && Number.isFinite(asNumber)) {
+    return Math.max(0, asNumber * 1000);
+  }
+  const asDate = Date.parse(retryAfterHeader);
+  if (!Number.isNaN(asDate)) {
+    return Math.max(0, asDate - Date.now());
+  }
+  return fallbackMs;
+}
+
 // ─── HTTP helpers ────────────────────────────────────────────
 
 async function openaiRequest(
@@ -102,7 +115,7 @@ async function openaiRequest(
         message: `OpenAI rate limited: ${String(errorMessage)}`,
         provider: 'openai',
         retryable: true,
-        retryAfterMs: retryAfter ? parseInt(retryAfter, 10) * 1000 : 60_000,
+        retryAfterMs: parseRetryAfterMs(retryAfter),
       });
     }
     if (res.status === 401 || res.status === 403) {
@@ -141,11 +154,41 @@ async function* openaiStreamRequest(
 
   if (!res.ok) {
     const errorBody = await res.text().catch(() => '');
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = JSON.parse(errorBody) as Record<string, unknown>;
+    } catch {
+      // non-json payload
+    }
+    const errorMessage =
+      (parsed['error'] as Record<string, unknown> | undefined)?.['message'] ??
+      errorBody ??
+      `HTTP ${res.status}`;
+
+    if (res.status === 429) {
+      throw new WeaveIntelError({
+        code: 'RATE_LIMITED',
+        message: `OpenAI stream rate limited: ${String(errorMessage)}`,
+        provider: 'openai',
+        retryable: true,
+        retryAfterMs: parseRetryAfterMs(res.headers.get('retry-after')),
+      });
+    }
+
+    if (res.status === 401 || res.status === 403) {
+      throw new WeaveIntelError({
+        code: 'AUTH_FAILED',
+        message: `OpenAI stream auth failed: ${String(errorMessage)}`,
+        provider: 'openai',
+      });
+    }
+
     throw new WeaveIntelError({
       code: 'PROVIDER_ERROR',
-      message: `OpenAI stream error (${res.status}): ${errorBody}`,
+      message: `OpenAI stream error (${res.status}): ${String(errorMessage)}`,
       provider: 'openai',
       retryable: res.status >= 500,
+      details: parsed,
     });
   }
 
@@ -272,19 +315,69 @@ function buildOpenAITools(tools: ModelRequest['tools']): unknown[] | undefined {
   }));
 }
 
-function determineCapabilities(modelId: string): CapabilityId[] {
-  const caps: CapabilityId[] = [Capabilities.Chat, Capabilities.Streaming];
+interface OpenAIModelMetadata {
+  pattern: RegExp;
+  capabilities: CapabilityId[];
+  maxContextTokens: number;
+}
 
-  if (modelId.includes('gpt-4') || modelId.includes('gpt-3.5')) {
-    caps.push(Capabilities.ToolCalling, Capabilities.StructuredOutput);
-  }
-  if (modelId.includes('gpt-4o') || modelId.includes('gpt-4-vision')) {
-    caps.push(Capabilities.Vision, Capabilities.Multimodal);
-  }
-  if (modelId.includes('o1') || modelId.includes('o3') || modelId.includes('o4')) {
-    caps.push(Capabilities.Reasoning);
-  }
-  return caps;
+const OPENAI_MODEL_METADATA: OpenAIModelMetadata[] = [
+  {
+    pattern: /^gpt-4o/i,
+    capabilities: [
+      Capabilities.Chat,
+      Capabilities.Streaming,
+      Capabilities.ToolCalling,
+      Capabilities.StructuredOutput,
+      Capabilities.Vision,
+      Capabilities.Multimodal,
+    ],
+    maxContextTokens: 128_000,
+  },
+  {
+    pattern: /^gpt-4(?:$|-)/i,
+    capabilities: [
+      Capabilities.Chat,
+      Capabilities.Streaming,
+      Capabilities.ToolCalling,
+      Capabilities.StructuredOutput,
+    ],
+    maxContextTokens: 128_000,
+  },
+  {
+    pattern: /^gpt-3\.5/i,
+    capabilities: [
+      Capabilities.Chat,
+      Capabilities.Streaming,
+      Capabilities.ToolCalling,
+      Capabilities.StructuredOutput,
+    ],
+    maxContextTokens: 16_385,
+  },
+  {
+    pattern: /^o[134](?:$|-)/i,
+    capabilities: [
+      Capabilities.Chat,
+      Capabilities.Streaming,
+      Capabilities.Reasoning,
+    ],
+    maxContextTokens: 128_000,
+  },
+];
+
+const OPENAI_DEFAULT_METADATA: OpenAIModelMetadata = {
+  // Unknown model variants fail conservatively on capability claims.
+  pattern: /.*/,
+  capabilities: [Capabilities.Chat, Capabilities.Streaming],
+  maxContextTokens: 16_385,
+};
+
+function resolveOpenAIModelMetadata(modelId: string): OpenAIModelMetadata {
+  return OPENAI_MODEL_METADATA.find(m => m.pattern.test(modelId)) ?? OPENAI_DEFAULT_METADATA;
+}
+
+function determineCapabilities(modelId: string): CapabilityId[] {
+  return [...resolveOpenAIModelMetadata(modelId).capabilities];
 }
 
 export function weaveOpenAIModel(
@@ -301,7 +394,7 @@ export function weaveOpenAIModel(
     provider: 'openai',
     modelId,
     capabilities: caps.capabilities,
-    maxContextTokens: modelId.includes('gpt-4o') ? 128_000 : modelId.includes('gpt-4') ? 128_000 : 16_385,
+    maxContextTokens: resolveOpenAIModelMetadata(modelId).maxContextTokens,
   };
 
   return {

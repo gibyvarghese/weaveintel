@@ -11,6 +11,7 @@
  * 3) Sends a chat message bound to the DB prompt to verify runtime adoption.
  * 4) Reads dashboard traces to confirm capability telemetry is queryable.
  */
+export {};
 
 const BASE = process.env.GENEWEAVE_BASE_URL ?? 'http://localhost:3500';
 

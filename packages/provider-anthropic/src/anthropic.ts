@@ -247,59 +247,113 @@ function buildToolChoice(
 
 // ─── Capability detection ────────────────────────────────────
 
+interface AnthropicModelMetadata {
+  pattern: RegExp;
+  capabilities: CapabilityId[];
+  contextWindow: number;
+  maxOutputTokens: number;
+}
+
+const ANTHROPIC_MODEL_METADATA: AnthropicModelMetadata[] = [
+  {
+    pattern: /mythos/i,
+    capabilities: [
+      Capabilities.Chat,
+      Capabilities.Streaming,
+      Capabilities.ToolCalling,
+      Capabilities.Vision,
+      Capabilities.Multimodal,
+      Capabilities.StructuredOutput,
+      Capabilities.Reasoning,
+      Capabilities.ComputerUse,
+    ],
+    contextWindow: 1_048_576,
+    maxOutputTokens: 128_000,
+  },
+  {
+    pattern: /(opus-4-6|opus-4-5)/i,
+    capabilities: [
+      Capabilities.Chat,
+      Capabilities.Streaming,
+      Capabilities.ToolCalling,
+      Capabilities.Vision,
+      Capabilities.Multimodal,
+      Capabilities.StructuredOutput,
+      Capabilities.Reasoning,
+      Capabilities.ComputerUse,
+    ],
+    contextWindow: 200_000,
+    maxOutputTokens: 128_000,
+  },
+  {
+    pattern: /sonnet-4-6/i,
+    capabilities: [
+      Capabilities.Chat,
+      Capabilities.Streaming,
+      Capabilities.ToolCalling,
+      Capabilities.Vision,
+      Capabilities.Multimodal,
+      Capabilities.StructuredOutput,
+      Capabilities.Reasoning,
+      Capabilities.ComputerUse,
+    ],
+    contextWindow: 200_000,
+    maxOutputTokens: 64_000,
+  },
+  {
+    pattern: /haiku-4-5/i,
+    capabilities: [
+      Capabilities.Chat,
+      Capabilities.Streaming,
+      Capabilities.ToolCalling,
+      Capabilities.Vision,
+      Capabilities.Multimodal,
+      Capabilities.StructuredOutput,
+      Capabilities.Reasoning,
+    ],
+    contextWindow: 200_000,
+    maxOutputTokens: 64_000,
+  },
+  {
+    pattern: /(claude-4|claude-opus|claude-sonnet|claude-haiku|claude-3)/i,
+    capabilities: [
+      Capabilities.Chat,
+      Capabilities.Streaming,
+      Capabilities.ToolCalling,
+      Capabilities.Vision,
+      Capabilities.Multimodal,
+      Capabilities.StructuredOutput,
+      Capabilities.Reasoning,
+    ],
+    contextWindow: 200_000,
+    maxOutputTokens: 8_192,
+  },
+];
+
+const ANTHROPIC_DEFAULT_METADATA: AnthropicModelMetadata = {
+  // Unknown model variants fail conservatively on capability claims.
+  pattern: /.*/,
+  capabilities: [Capabilities.Chat, Capabilities.Streaming],
+  contextWindow: 200_000,
+  maxOutputTokens: 8_192,
+};
+
+function resolveAnthropicModelMetadata(modelId: string): AnthropicModelMetadata {
+  return ANTHROPIC_MODEL_METADATA.find(m => m.pattern.test(modelId)) ?? ANTHROPIC_DEFAULT_METADATA;
+}
+
 function determineCapabilities(modelId: string): CapabilityId[] {
-  const caps: CapabilityId[] = [Capabilities.Chat, Capabilities.Streaming, Capabilities.ToolCalling];
-
-  // All Claude models support vision
-  caps.push(Capabilities.Vision, Capabilities.Multimodal);
-
-  // All Claude 3+ models support structured output via tool use
-  caps.push(Capabilities.StructuredOutput);
-
-  // Reasoning (extended thinking) for Claude 3.5 Sonnet+, Claude 4+
-  if (
-    modelId.includes('claude-3') ||
-    modelId.includes('claude-4') ||
-    modelId.includes('claude-sonnet') ||
-    modelId.includes('claude-opus') ||
-    modelId.includes('claude-haiku') ||
-    modelId.includes('claude-mythos')
-  ) {
-    caps.push(Capabilities.Reasoning);
-  }
-
-  // Computer use capability for models that support it
-  if (
-    modelId.includes('claude-opus') ||
-    modelId.includes('claude-sonnet') ||
-    modelId.includes('claude-4') ||
-    modelId.includes('claude-mythos')
-  ) {
-    caps.push(Capabilities.ComputerUse);
-  }
-
-  return caps;
+  return [...resolveAnthropicModelMetadata(modelId).capabilities];
 }
 
 // ─── Model context sizes ─────────────────────────────────────
 
 function getContextWindow(modelId: string): number {
-  if (modelId.includes('mythos')) return 1_048_576; // 1M
-  if (modelId.includes('opus-4-6') || modelId.includes('opus-4-5')) return 200_000;
-  if (modelId.includes('sonnet-4-6') || modelId.includes('sonnet-4-5')) return 200_000;
-  if (modelId.includes('claude-4') || modelId.includes('opus-4') || modelId.includes('sonnet-4')) return 200_000;
-  if (modelId.includes('haiku-4')) return 200_000;
-  if (modelId.includes('claude-3')) return 200_000;
-  return 200_000;
+  return resolveAnthropicModelMetadata(modelId).contextWindow;
 }
 
 function getMaxOutputTokens(modelId: string): number {
-  if (modelId.includes('mythos')) return 128_000;
-  if (modelId.includes('opus-4-6')) return 128_000;
-  if (modelId.includes('sonnet-4-6')) return 64_000;
-  if (modelId.includes('haiku-4-5')) return 64_000;
-  if (modelId.includes('opus-4-5')) return 128_000;
-  return 8_192;
+  return resolveAnthropicModelMetadata(modelId).maxOutputTokens;
 }
 
 // ─── Response parsing ────────────────────────────────────────

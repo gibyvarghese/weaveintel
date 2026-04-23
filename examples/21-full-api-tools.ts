@@ -61,13 +61,13 @@ async function main() {
   const auth = new AuthManager();
 
   // Register pre-built auth profiles (user supplies domain)
-  auth.register(jiraBasicAuth('mycompany.atlassian.net', 'admin@mycompany.com', 'API_TOKEN'));
-  auth.register(jiraOAuth2('mycompany.atlassian.net', 'JIRA_CLIENT_ID', 'JIRA_SECRET'));
-  auth.register(serviceNowBasicAuth('mycompany.service-now.com', 'admin', 'PASSWORD'));
-  auth.register(serviceNowOAuth2('mycompany.service-now.com', 'SN_CLIENT_ID', 'SN_SECRET'));
-  auth.register(canvaOAuth2('CANVA_CLIENT_ID', 'CANVA_SECRET'));
-  auth.register(facebookOAuth2('FB_APP_ID', 'FB_APP_SECRET'));
-  auth.register(instagramOAuth2('IG_APP_ID', 'IG_APP_SECRET'));
+  auth.register(jiraBasicAuth('jira-basic', 'mycompany.atlassian.net'));
+  auth.register(jiraOAuth2('jira-oauth2', 'mycompany.atlassian.net'));
+  auth.register(serviceNowBasicAuth('servicenow-basic', 'mycompany.service-now.com'));
+  auth.register(serviceNowOAuth2('servicenow-oauth2', 'mycompany.service-now.com'));
+  auth.register(canvaOAuth2('canva-oauth2', 'canva.com'));
+  auth.register(facebookOAuth2('facebook-oauth2', 'facebook.com'));
+  auth.register(instagramOAuth2('instagram-oauth2', 'instagram.com'));
 
   console.log('Registered auth profiles:');
   for (const p of auth.list()) {
@@ -97,7 +97,7 @@ async function main() {
       enabled: true,
       baseUrl: 'https://mycompany.atlassian.net',
       authType: 'basic',
-      credentials: { username: 'admin@mycompany.com', token: 'API_TOKEN' },
+      authConfig: { username: 'admin@mycompany.com', token: 'API_TOKEN' },
     },
   ]);
 
@@ -119,7 +119,7 @@ async function main() {
       enabled: true,
       baseUrl: 'https://mycompany.service-now.com',
       authType: 'basic',
-      credentials: { username: 'admin', password: 'PASSWORD' },
+      authConfig: { username: 'admin', password: 'PASSWORD' },
     },
   ]);
 
@@ -141,7 +141,7 @@ async function main() {
       enabled: true,
       baseUrl: 'https://api.canva.com/rest/v1',
       authType: 'oauth2',
-      credentials: { accessToken: 'CANVA_ACCESS_TOKEN' },
+      authConfig: { accessToken: 'CANVA_ACCESS_TOKEN' },
     },
   ]);
 
@@ -209,7 +209,7 @@ async function main() {
     bySvc.set(svc, (bySvc.get(svc) ?? 0) + 1);
   }
   console.log('\nBreakdown:');
-  for (const [svc, count] of bySvc) {
+  for (const [svc, count] of Array.from(bySvc.entries())) {
     console.log(`  ${svc}: ${count} tools`);
   }
 
@@ -224,12 +224,12 @@ async function main() {
   auth.setTokenState('jira-oauth2', {
     accessToken: 'eyJ_simulated_access_token',
     refreshToken: 'eyJ_simulated_refresh_token',
-    expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    expiresAt: Date.now() + 3600_000,
     scope: 'read:jira-work write:jira-work',
   });
   console.log('  Token stored for jira-oauth2');
 
-  const jiraHeaders = auth.getHeaders('jira-oauth2');
+  const jiraHeaders = await auth.getHeaders('jira-oauth2');
   console.log(`  Authorization: ${jiraHeaders['Authorization']?.slice(0, 30)}...`);
 
   // List all profiles with their status

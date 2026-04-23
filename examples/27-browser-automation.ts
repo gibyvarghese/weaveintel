@@ -66,7 +66,7 @@ import {
   createAutomationTools,
   createBrowserAuthTools,
 } from '@weaveintel/tools-browser';
-import { weaveContext, weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import { weaveContext, weaveToolRegistry } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveFakeModel } from '@weaveintel/testing';
 
@@ -78,13 +78,13 @@ async function main() {
   // In CI/CD environments where you want lightweight scraping without a browser,
   // this is the preferred approach.
   try {
-    const page = await fetchPage('https://example.com');
+    const page = await fetchPage({ url: 'https://example.com' });
     console.log(`Status:       ${page.status}`);
-    console.log(`Content-Type: ${page.contentType}`);
+    console.log(`Content-Type: ${page.headers['content-type'] ?? ''}`);
     console.log(`HTML length:  ${page.html.length} chars`);
 
     // extractContent() strips HTML to plain text for LLM ingestion.
-    const text = extractContent(page.html);
+    const text = extractContent(page.html).text;
     console.log(`Extracted text (first 200 chars):\n  ${text.slice(0, 200).replace(/\n/g, ' ')}`);
   } catch (err) {
     console.log(`  (network unavailable in this environment — skipped: ${(err as Error).message})`);
@@ -96,11 +96,12 @@ async function main() {
   // readability() applies Mozilla Readability to extract clean article content.
   // Perfect for ingesting blog posts or docs into a RAG pipeline.
   try {
-    const article = await readability('https://example.com');
+    const page = await fetchPage({ url: 'https://example.com' });
+    const article = readability(page.html);
     if (article) {
       console.log(`Title:    ${article.title}`);
       console.log(`Byline:   ${article.byline ?? '(none)'}`);
-      console.log(`Words:    ${article.wordCount}`);
+      console.log(`Words:    ${Math.round(article.textContent.split(/\s+/).length)}`);
       console.log(`Excerpt:  ${article.content.slice(0, 150).replace(/\n/g, ' ')}`);
     } else {
       console.log('  Readability returned no article (page may not be article-format)');
@@ -112,14 +113,16 @@ async function main() {
   // scrape() lets you extract specific fields using CSS selectors.
   // Define field→selector mappings; results are typed by your schema.
   try {
-    const page2 = await fetchPage('https://example.com');
-    const data = await scrape(page2.html, {
-      title: 'h1',
-      description: 'p',
-      links: 'a',
+    const data = await scrape('https://example.com', {
+      selectors: {
+        title: 'h1',
+        description: 'p',
+        links: 'a',
+      },
     });
-    console.log(`Scraped title: ${data['title']}`);
-    console.log(`Scraped description: ${String(data['description']).slice(0, 80)}`);
+    const scraped = data as unknown as Record<string, unknown>;
+    console.log(`Scraped title: ${String(scraped['title'] ?? '')}`);
+    console.log(`Scraped description: ${String(scraped['description'] ?? '').slice(0, 80)}`);
   } catch (err) {
     console.log(`  (scrape skipped: ${(err as Error).message})`);
   }
@@ -132,7 +135,7 @@ async function main() {
     const sitemapEntries = await parseSitemap('https://example.com/sitemap.xml');
     console.log(`Sitemap entries: ${sitemapEntries.length}`);
     for (const entry of sitemapEntries.slice(0, 3)) {
-      console.log(`  ${entry.url}${entry.lastmod ? ` (${entry.lastmod})` : ''}`);
+      console.log(`  ${entry.loc}${entry.lastmod ? ` (${entry.lastmod})` : ''}`);
     }
   } catch (err) {
     console.log(`  (sitemap unavailable — skipped: ${(err as Error).message})`);
@@ -168,9 +171,9 @@ async function main() {
 
     try {
       // open() creates a new BrowserSession (browser + context + page)
-      const session = await pool.open();
+      const { session } = await pool.open('https://example.com');
       console.log(`Session created: ${session.id}`);
-      console.log(`Active sessions: ${pool.activeSessions().length}`);
+      console.log(`Active sessions: ${pool.list().length}`);
 
       // Navigate the session's page directly via Playwright's Page API
       await session.page.goto('https://example.com', { waitUntil: 'domcontentloaded' });
@@ -178,7 +181,7 @@ async function main() {
       // settle() waits for networkidle — useful after clicking / form submission
       await session.settle();
 
-      const sessionInfo = pool.getSessionInfo(session.id);
+      const sessionInfo = pool.list().find((s) => s.id === session.id);
       console.log(`Session info: url=${sessionInfo?.url ?? session.page.url()}`);
 
       // --- 4. Page snapshot + login form detection ---
@@ -187,25 +190,23 @@ async function main() {
       // This lets an agent understand the page without processing raw HTML.
       console.log('\n=== 4. captureSnapshot() + detectLoginForm() ===');
 
-      const snapshot = await captureSnapshot(session.page);
-      console.log(`Snapshot title: ${snapshot.title}`);
-      console.log(`Snapshot URL:   ${snapshot.url}`);
-      console.log(`Interactive elements: ${snapshot.elements.length}`);
-      for (const el of snapshot.elements.slice(0, 5)) {
-        console.log(`  [${el.tag}] "${el.text.slice(0, 50)}" role=${el.role ?? 'none'}`);
+      const updatedSnapshot = await captureSnapshot(session.page);
+      console.log(`Snapshot title: ${updatedSnapshot.title}`);
+      console.log(`Snapshot URL:   ${updatedSnapshot.url}`);
+      console.log(`Interactive elements: ${updatedSnapshot.elements.length}`);
+      for (const el of updatedSnapshot.elements.slice(0, 5)) {
+        console.log(`  [${el.tag}] "${el.name.slice(0, 50)}" role=${el.role ?? 'none'}`);
       }
 
       // detectLoginForm() scans the snapshot for username/password patterns,
       // OAuth provider buttons (Google, GitHub, Microsoft), and SSO indicators.
       // Returns: { hasLoginForm, formType, confidence, fields }
-      const loginDetection = await detectLoginForm(snapshot);
+      const loginDetection = detectLoginForm(updatedSnapshot);
       console.log(`\nLogin form detection:`);
-      console.log(`  hasLoginForm: ${loginDetection.hasLoginForm}`);
-      console.log(`  formType:     ${loginDetection.formType ?? '(none)'}`);
-      console.log(`  confidence:   ${loginDetection.confidence.toFixed(2)}`);
-      if (loginDetection.fields && loginDetection.fields.length > 0) {
-        console.log(`  fields:       ${loginDetection.fields.join(', ')}`);
-      }
+      console.log(`  detected:      ${loginDetection.detected}`);
+      console.log(`  type:          ${loginDetection.type ?? '(none)'}`);
+      console.log(`  captchaPresent:${loginDetection.captchaPresent}`);
+      console.log(`  oauthButtons:  ${loginDetection.oauthButtons.join(', ') || '(none)'}`);
 
       // Close the session when done
       await pool.close(session.id);
@@ -213,7 +214,7 @@ async function main() {
     } catch (err) {
       console.log(`  BrowserPool error (browser launch may fail in headless CI): ${(err as Error).message}`);
     } finally {
-      await pool.closeAll();
+      await pool.dispose();
     }
   }
 
@@ -225,28 +226,19 @@ async function main() {
   console.log('\n=== 5. MCP tool wiring ===');
 
   const browserMCPTools = createBrowserTools();
-  const automationMCPTools = createAutomationTools(
-    new BrowserPool({ maxSessions: 1, headless: true }),
-  );
+  const automationMCPTools = createAutomationTools();
   const authMCPTools = createBrowserAuthTools();
 
   const allBrowserTools = [...browserMCPTools, ...automationMCPTools, ...authMCPTools];
   console.log(`Total MCP tools exposed: ${allBrowserTools.length}`);
   for (const t of allBrowserTools) {
-    console.log(`  • ${t.name}: ${(t.description ?? '').slice(0, 70)}`);
+    console.log(`  • ${t.schema.name}: ${(t.schema.description ?? '').slice(0, 70)}`);
   }
 
   // Wire into an agent's tool registry
   const registry = weaveToolRegistry();
   for (const toolDef of browserMCPTools) {
-    registry.register(
-      weaveTool({
-        name: toolDef.name,
-        description: toolDef.description ?? '',
-        parameters: toolDef.inputSchema ?? { type: 'object', properties: {} },
-        execute: toolDef.execute,
-      }),
-    );
+    registry.register(toolDef);
   }
 
   const ctx = weaveContext({ userId: 'browser-demo' });
@@ -273,7 +265,7 @@ async function main() {
     messages: [{ role: 'user', content: 'Fetch https://example.com and tell me what it says.' }],
   });
 
-  console.log(`\nAgent result: ${result.messages.at(-1)?.content}`);
+  console.log(`\nAgent result: ${result.messages[result.messages.length - 1]?.content}`);
 
   // --- Summary ---
   console.log('\n=== Summary ===');

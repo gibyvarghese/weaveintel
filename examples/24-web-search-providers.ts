@@ -55,7 +55,6 @@ import {
 import {
   weaveContext,
   weaveToolRegistry,
-  weaveTool,
 } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveFakeModel } from '@weaveintel/testing';
@@ -167,7 +166,7 @@ async function main() {
   console.log('\n=== 4. MCP tool exposure ===');
 
   const searchTools = createSearchTools(router);
-  console.log(`MCP tools created: ${searchTools.map((t) => t.name).join(', ')}`);
+  console.log(`MCP tools created: ${searchTools.map((t) => t.schema.name).join(', ')}`);
 
   // --- 5. Wiring into an agent ---
   // Register the search tools in a ToolRegistry so an agent can call web_search.
@@ -176,14 +175,7 @@ async function main() {
 
   const registry = weaveToolRegistry();
   for (const toolDef of searchTools) {
-    registry.register(
-      weaveTool({
-        name: toolDef.name,
-        description: toolDef.description ?? '',
-        parameters: toolDef.inputSchema ?? { type: 'object', properties: {} },
-        execute: toolDef.execute,
-      }),
-    );
+    registry.register(toolDef);
   }
 
   const model = weaveFakeModel({
@@ -216,7 +208,7 @@ async function main() {
     messages: [{ role: 'user', content: 'Find the weaveIntel GitHub repository.' }],
   });
 
-  console.log(`Agent answer: ${result.messages.at(-1)?.content}`);
+  console.log(`Agent answer: ${result.messages[result.messages.length - 1]?.content}`);
 
   // --- Summary ---
   console.log('\n=== Summary ===');

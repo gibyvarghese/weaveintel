@@ -46,10 +46,10 @@ import {
   resolvePolicy,
   weaveCacheKeyBuilder,
   evaluateInvalidationRules,
-  applySemanticInvalidation,
   type InvalidationEvent,
 } from '@weaveintel/cache';
 import { weaveFakeEmbedding } from '@weaveintel/testing';
+import { weaveContext, type CacheInvalidationRule } from '@weaveintel/core';
 
 async function main() {
   // --- 1. In-Memory Cache Store ---
@@ -58,10 +58,10 @@ async function main() {
   // the CacheStore interface (get/set/delete/clear).
   console.log('=== 1. In-Memory Cache Store ===');
 
-  const store = weaveInMemoryCacheStore({ maxEntries: 500, defaultTtlMs: 60_000 });
+  const store = weaveInMemoryCacheStore();
 
   await store.set('greeting:en', 'Hello, World!');
-  await store.set('greeting:fr', 'Bonjour, le Monde!', { ttlMs: 5000 });
+  await store.set('greeting:fr', 'Bonjour, le Monde!', 5000);
 
   const en = await store.get('greeting:en');
   const fr = await store.get('greeting:fr');
@@ -148,7 +148,10 @@ async function main() {
   const semanticCache = weaveSemanticCache({
     defaultThreshold: 0.92, // cosine similarity threshold
     maxEntries: 200,
-    embed: (text) => embedding.embed(text),
+    embed: async (text: string): Promise<readonly number[]> => {
+      const out = await embedding.embed(weaveContext({ userId: 'cache-demo' }), { input: [text] });
+      return out.embeddings[0] ?? [];
+    },
   });
 
   // Seed the cache with some question/answer pairs
@@ -194,32 +197,32 @@ async function main() {
   // applySemanticInvalidation() removes entries similar to the invalidation subject.
   console.log('\n=== 5. Event-Driven Invalidation ===');
 
-  const invalidationRules = [
+  const invalidationRules: CacheInvalidationRule[] = [
     {
       id: 'user-logout-rule',
-      eventType: 'user.logout',
-      scope: 'user' as const,
-      pattern: 'user:*',
+      name: 'User Logout Rule',
+      trigger: 'event',
+      pattern: 'u123',
+      enabled: true,
     },
     {
       id: 'model-update-rule',
-      eventType: 'model.updated',
-      scope: 'global' as const,
-      pattern: '*',
-      action: 'clear-all' as const,
+      name: 'Model Update Rule',
+      trigger: 'event',
+      enabled: true,
     },
   ];
 
   const logoutEvent: InvalidationEvent = {
     type: 'user.logout',
     payload: { userId: 'u123', sessionId: 's456' },
-    timestamp: new Date().toISOString(),
+    timestamp: Date.now(),
   };
 
   const triggered = evaluateInvalidationRules(invalidationRules, logoutEvent);
   console.log(`Event "${logoutEvent.type}" triggered ${triggered.length} invalidation rule(s):`);
   for (const rule of triggered) {
-    console.log(`  Rule "${rule.id}": clear scope=${rule.scope} pattern="${rule.pattern}"`);
+    console.log(`  Rule "${rule.id}": trigger=${rule.trigger} pattern="${rule.pattern ?? '(none)'}"`);
   }
 
   // applySemanticInvalidation() clears entries near a given subject
@@ -233,9 +236,9 @@ async function main() {
   const beforeInvalidate = await semanticCache.find('French geography', 0.75);
   console.log(`  Cache hit: ${beforeInvalidate ? 'YES' : 'NO'}`);
 
-  await applySemanticInvalidation(semanticCache, 'France geography', 0.9);
+  await semanticCache.invalidate('France geography');
 
-  console.log('After applySemanticInvalidation("France geography") — looking up "French geography":');
+  console.log('After invalidate("France geography") — looking up "French geography":');
   const afterInvalidate = await semanticCache.find('French geography', 0.75);
   console.log(`  Cache hit: ${afterInvalidate ? 'YES' : 'NO (invalidated)'}`);
 
@@ -246,7 +249,7 @@ async function main() {
   console.log('createCachePolicy:       TTL, scope, bypass patterns, event-based invalidation config');
   console.log('weaveSemanticCache:      cosine similarity lookup — serves equivalent questions from cache');
   console.log('evaluateInvalidationRules: event → rule matching for automated cache clearing');
-  console.log('applySemanticInvalidation: removes entries similar to an updated subject embedding');
+  console.log('semanticCache.invalidate: removes entries similar to an updated subject embedding');
 }
 
 main().catch(console.error);

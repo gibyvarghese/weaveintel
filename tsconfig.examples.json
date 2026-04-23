@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "include": ["examples/**/*.ts", "apps/geneweave/src/cse.ts"],
+  "compilerOptions": {
+    "noEmit": true,
+    "isolatedModules": false,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "verbatimModuleSyntax": false,
+    "strict": false,
+    "noPropertyAccessFromIndexSignature": false
+  }
+}

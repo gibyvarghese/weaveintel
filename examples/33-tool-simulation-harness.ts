@@ -15,6 +15,7 @@
  *  - geneWeave server running at BASE_URL (default: http://localhost:3500)
  *  - A tenant_admin account authenticated via API_EMAIL / API_PASSWORD env vars
  */
+export {};
 
 const BASE_URL = process.env['API_URL'] ?? 'http://localhost:3500';
 const EMAIL = process.env['API_EMAIL'] ?? 'admin@geneweave.ai';

@@ -21,6 +21,7 @@
  *  - An admin account configured via API_EMAIL / API_PASSWORD env vars
  *    (defaults: admin@geneweave.ai / admin123)
  */
+export {};
 
 const BASE_URL = process.env['API_URL'] ?? 'http://localhost:3500';
 const EMAIL    = process.env['API_EMAIL']    ?? 'admin@geneweave.ai';

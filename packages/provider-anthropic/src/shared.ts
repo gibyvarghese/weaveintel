@@ -52,6 +52,19 @@ export function makeHeaders(
   return headers;
 }
 
+export function parseRetryAfterMs(retryAfterHeader: string | null | undefined, fallbackMs = 60_000): number {
+  if (!retryAfterHeader) return fallbackMs;
+  const asNumber = Number.parseInt(retryAfterHeader, 10);
+  if (!Number.isNaN(asNumber) && Number.isFinite(asNumber)) {
+    return Math.max(0, asNumber * 1000);
+  }
+  const asDate = Date.parse(retryAfterHeader);
+  if (!Number.isNaN(asDate)) {
+    return Math.max(0, asDate - Date.now());
+  }
+  return fallbackMs;
+}
+
 // ─── HTTP helpers ────────────────────────────────────────────
 
 export async function anthropicRequest(
@@ -93,7 +106,7 @@ export async function anthropicRequest(
         message: `Anthropic rate limited: ${String(errorMessage)}`,
         provider: 'anthropic',
         retryable: true,
-        retryAfterMs: retryAfter ? parseInt(retryAfter, 10) * 1000 : 60_000,
+        retryAfterMs: parseRetryAfterMs(retryAfter),
       });
     }
     if (res.status === 401 || res.status === 403) {
@@ -165,11 +178,39 @@ export async function* anthropicStreamRequest(
 
   if (!res.ok) {
     const errorBody = await res.text().catch(() => '');
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = JSON.parse(errorBody) as Record<string, unknown>;
+    } catch {
+      // non-json payload
+    }
+    const errorObj = parsed['error'] as Record<string, unknown> | undefined;
+    const errorMessage = errorObj?.['message'] ?? errorBody ?? `HTTP ${res.status}`;
+
+    if (res.status === 429) {
+      throw new WeaveIntelError({
+        code: 'RATE_LIMITED',
+        message: `Anthropic stream rate limited: ${String(errorMessage)}`,
+        provider: 'anthropic',
+        retryable: true,
+        retryAfterMs: parseRetryAfterMs(res.headers.get('retry-after')),
+      });
+    }
+
+    if (res.status === 401 || res.status === 403) {
+      throw new WeaveIntelError({
+        code: 'AUTH_FAILED',
+        message: `Anthropic stream auth failed: ${String(errorMessage)}`,
+        provider: 'anthropic',
+      });
+    }
+
     throw new WeaveIntelError({
       code: 'PROVIDER_ERROR',
-      message: `Anthropic stream error (${res.status}): ${errorBody}`,
+      message: `Anthropic stream error (${res.status}): ${String(errorMessage)}`,
       provider: 'anthropic',
       retryable: res.status >= 500,
+      details: parsed,
     });
   }
 

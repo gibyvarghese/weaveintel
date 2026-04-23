@@ -50,6 +50,19 @@ export function makeMultipartHeaders(options: OpenAIProviderOptions, apiKey: str
   return headers;
 }
 
+export function parseRetryAfterMs(retryAfterHeader: string | null | undefined, fallbackMs = 60_000): number {
+  if (!retryAfterHeader) return fallbackMs;
+  const asNumber = Number.parseInt(retryAfterHeader, 10);
+  if (!Number.isNaN(asNumber) && Number.isFinite(asNumber)) {
+    return Math.max(0, asNumber * 1000);
+  }
+  const asDate = Date.parse(retryAfterHeader);
+  if (!Number.isNaN(asDate)) {
+    return Math.max(0, asDate - Date.now());
+  }
+  return fallbackMs;
+}
+
 export async function openaiRequest(
   baseUrl: string,
   path: string,
@@ -91,7 +104,7 @@ export async function openaiRequest(
         message: `OpenAI rate limited: ${String(errorMessage)}`,
         provider: 'openai',
         retryable: true,
-        retryAfterMs: retryAfter ? parseInt(retryAfter, 10) * 1000 : 60_000,
+        retryAfterMs: parseRetryAfterMs(retryAfter),
       });
     }
     if (res.status === 401 || res.status === 403) {
@@ -152,11 +165,41 @@ export async function* openaiStreamRequest(
 
   if (!res.ok) {
     const errorBody = await res.text().catch(() => '');
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = JSON.parse(errorBody) as Record<string, unknown>;
+    } catch {
+      // non-json payload
+    }
+    const errorMessage =
+      (parsed['error'] as Record<string, unknown> | undefined)?.['message'] ??
+      errorBody ??
+      `HTTP ${res.status}`;
+
+    if (res.status === 429) {
+      throw new WeaveIntelError({
+        code: 'RATE_LIMITED',
+        message: `OpenAI stream rate limited: ${String(errorMessage)}`,
+        provider: 'openai',
+        retryable: true,
+        retryAfterMs: parseRetryAfterMs(res.headers.get('retry-after')),
+      });
+    }
+
+    if (res.status === 401 || res.status === 403) {
+      throw new WeaveIntelError({
+        code: 'AUTH_FAILED',
+        message: `OpenAI stream auth failed: ${String(errorMessage)}`,
+        provider: 'openai',
+      });
+    }
+
     throw new WeaveIntelError({
       code: 'PROVIDER_ERROR',
-      message: `OpenAI stream error (${res.status}): ${errorBody}`,
+      message: `OpenAI stream error (${res.status}): ${String(errorMessage)}`,
       provider: 'openai',
       retryable: res.status >= 500,
+      details: parsed,
     });
   }
 

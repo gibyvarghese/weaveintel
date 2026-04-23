@@ -28,6 +28,7 @@ export interface SmartModelRouterOptions {
   qualities?: ModelQualityInfo[];
   decisionStore?: DecisionStore;
   healthWindowSize?: number;
+  initialHealth?: ModelHealth[];
 }
 
 // ─── Smart router ────────────────────────────────────────────
@@ -46,6 +47,9 @@ export class SmartModelRouter implements IModelRouter {
     this.costs = opts.costs ?? [];
     this.qualities = opts.qualities ?? [];
     this.decisionStore = opts.decisionStore;
+    for (const h of opts.initialHealth ?? []) {
+      this.healthTracker.applySnapshot(h);
+    }
   }
 
   /**
@@ -53,14 +57,25 @@ export class SmartModelRouter implements IModelRouter {
    * Returns the selected model + provider with an explanation.
    */
   async route(
-    _request: { prompt: string; context?: RoutingContext },
+    request: { prompt: string; context?: RoutingContext },
     policy: RoutingPolicy,
   ): Promise<RoutingDecision> {
     const healthList = this.healthTracker.listHealth();
     const healthMap = new Map(healthList.map(h => [`${h.providerId}:${h.modelId}`, h]));
+    const requiredFromContext = request.context?.requiredCapabilities ?? [];
+
+    const mergedConstraints = policy.constraints
+      ? {
+          ...policy.constraints,
+          requiredCapabilities: Array.from(new Set([
+            ...(policy.constraints.requiredCapabilities ?? []),
+            ...requiredFromContext,
+          ])),
+        }
+      : (requiredFromContext.length > 0 ? { requiredCapabilities: requiredFromContext } : undefined);
 
     // 1. Filter by constraints
-    let eligible = filterByConstraints(this.candidates, policy.constraints, healthMap);
+    let eligible = filterByConstraints(this.candidates, mergedConstraints, healthMap);
 
     // 2. Remove unhealthy
     eligible = eligible.filter(c => {

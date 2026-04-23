@@ -31,6 +31,7 @@
  *  API_EMAIL     Login email                 (default: admin@geneweave.ai)
  *  API_PASSWORD  Login password              (default: admin123)
  */
+export {};
 
 const BASE_URL = process.env['API_URL'] ?? 'http://localhost:3500';
 const EMAIL = process.env['API_EMAIL'] ?? 'admin@geneweave.ai';

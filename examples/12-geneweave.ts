@@ -123,15 +123,6 @@ async function main() {
         },
       },
     } : {}),
-
-    // Search providers — configure any combination; the built-in web_search tool
-    // will use DuckDuckGo (no key needed) with HTML SERP fallback by default.
-    // Add Brave/Tavily/Bing for higher-quality results with an API key.
-    search: {
-      defaultProvider: 'duckduckgo',
-      ...(process.env['BRAVE_API_KEY'] ? { brave: { apiKey: process.env['BRAVE_API_KEY'] } } : {}),
-      ...(process.env['TAVILY_API_KEY'] ? { tavily: { apiKey: process.env['TAVILY_API_KEY'] } } : {}),
-    },
   });
 
   // app.chatEngine.getAvailableModels() queries each registered provider

@@ -61,15 +61,12 @@ export async function routeModel(
       };
     });
 
-    const router = new SmartModelRouter({ candidates: routerCandidates, costs, qualities });
-
-    // Copy health data
-    for (const h of healthList) {
-      router.recordOutcome(
-        { modelId: h.modelId, providerId: h.providerId, reason: '', scores: {}, alternatives: [], timestamp: '' },
-        { latencyMs: h.avgLatencyMs, success: h.errorRate < 0.5 },
-      );
-    }
+    const router = new SmartModelRouter({
+      candidates: routerCandidates,
+      costs,
+      qualities,
+      initialHealth: healthList,
+    });
 
     const decision = await router.route(
       { prompt: '' },

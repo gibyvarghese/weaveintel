@@ -102,12 +102,12 @@ async function main() {
   // --- 0. Ingest documents (same as example 03) ---
   console.log('=== 0. Document Ingestion ===');
 
-  const chunker = weaveChunker({ chunkSize: 300, overlap: 50 });
+  const chunker = weaveChunker({ strategy: 'fixed_size', chunkSize: 300, chunkOverlap: 50 });
   const embeddingPipeline = weaveEmbeddingPipeline({ embeddingModel, vectorStore });
 
   for (const doc of KNOWLEDGE_BASE) {
-    const chunks = chunker.chunk(doc.content, { documentId: doc.id, source: { uri: doc.source } });
-    await embeddingPipeline.ingest(ctx, chunks);
+    const chunks = chunker.chunk(doc.content);
+    await embeddingPipeline.index(ctx, chunks);
     console.log(`  Ingested "${doc.source}" → ${chunks.length} chunk(s)`);
   }
 
@@ -227,7 +227,7 @@ async function main() {
   // annotate() adds citation markers to LLM-generated text
   const llmResponse = `WeaveIntel supports hybrid retrieval that combines dense embedding search
 with sparse keyword scoring. The results are merged using reciprocal rank fusion.`;
-  const annotated = citationExtractor.annotate(llmResponse, hybridResult.chunks);
+  const annotated = citationExtractor.annotate(llmResponse, [...hybridResult.chunks]);
   console.log(`\nAnnotated LLM response:\n${annotated}`);
 
   // --- 5. Retrieval diagnostics ---

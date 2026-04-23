@@ -61,6 +61,16 @@ describe('ModelHealthTracker', () => {
     expect(h.avgLatencyMs).toBe(100);
   });
 
+  it('recovers availability based on recent outcomes', () => {
+    const ht = new ModelHealthTracker({ windowSize: 6 });
+    // Older bad window
+    for (let i = 0; i < 6; i++) ht.record('m1', 'p1', { latencyMs: 100, success: false });
+    expect(ht.getHealth('m1', 'p1')!.available).toBe(false);
+    // Newer good window replaces old outcomes
+    for (let i = 0; i < 6; i++) ht.record('m1', 'p1', { latencyMs: 90, success: true });
+    expect(ht.getHealth('m1', 'p1')!.available).toBe(true);
+  });
+
   it('setAvailable overrides computed state', () => {
     const ht = new ModelHealthTracker();
     ht.record('m1', 'p1', { latencyMs: 100, success: true });
@@ -229,7 +239,7 @@ describe('InMemoryDecisionStore', () => {
 
 describe('SmartModelRouter', () => {
   const candidates: ModelCandidate[] = [
-    { modelId: 'gpt-4o', providerId: 'openai' },
+    { modelId: 'gpt-4o', providerId: 'openai', capabilities: ['chat', 'vision'] },
     { modelId: 'claude-sonnet', providerId: 'anthropic' },
   ];
   const costs: ModelCostInfo[] = [
@@ -301,5 +311,15 @@ describe('SmartModelRouter', () => {
     const h = await router.getHealth(decision.modelId, decision.providerId);
     expect(h).not.toBeNull();
     expect(h!.avgLatencyMs).toBe(150);
+  });
+
+  it('honors request context required capabilities', async () => {
+    const router = new SmartModelRouter({ candidates, costs, qualities });
+    const decision = await router.route(
+      { prompt: 'Describe image', context: { requiredCapabilities: ['vision'] } },
+      { id: 'p', name: 'Balanced', strategy: 'balanced', enabled: true },
+    );
+    expect(decision.modelId).toBe('gpt-4o');
+    expect(decision.providerId).toBe('openai');
   });
 });

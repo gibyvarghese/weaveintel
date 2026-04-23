@@ -4,6 +4,7 @@
  * Run (after starting geneweave server):
  *   npm run tsx -- examples/30-prompt-version-experiments.ts
  */
+export {};
 
 const BASE = process.env.GENEWEAVE_BASE_URL ?? 'http://localhost:3500';
 
