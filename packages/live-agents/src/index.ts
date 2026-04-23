@@ -49,6 +49,7 @@ export type {
   MessagePriority,
   MessageStatus,
   Mesh,
+  MongoDbStateStore,
   OutboundActionRecord,
   Promotion,
   PromotionRequest,
@@ -86,6 +87,7 @@ export {
 
 export { weavePostgresStateStore } from './postgres-state-store.js';
 export { weaveSqliteStateStore } from './sqlite-state-store.js';
+export { weaveMongoDbStateStore } from './mongodb-state-store.js';
 
 export {
   LiveAgentsError,

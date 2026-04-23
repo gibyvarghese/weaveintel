@@ -27,6 +27,7 @@
     "@weaveintel/mcp-client": "*",
     "@weaveintel/identity": "*",
     "better-sqlite3": "^11.10.0",
+    "mongodb": "^6.16.0",
     "pg": "^8.13.1",
     "redis": "^4.7.0"
   },

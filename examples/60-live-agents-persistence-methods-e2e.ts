@@ -9,11 +9,14 @@
  * 3) Redis backend in coordination-only mode (distributed claim coordination)
  * 4) Redis backend in durable-explicit mode (restart durability)
  * 5) SQLite backend (single-node local durable mode)
+ * 6) MongoDB backend (document-store durable mode)
  *
  * Environment variables:
  * - LIVE_AGENTS_EXAMPLE_POSTGRES_URL=postgres://...
  * - LIVE_AGENTS_EXAMPLE_REDIS_URL=redis://...
  * - LIVE_AGENTS_EXAMPLE_SQLITE_PATH=/absolute/path/to/file.db (optional)
+ * - LIVE_AGENTS_EXAMPLE_MONGODB_URL=mongodb://...
+ * - LIVE_AGENTS_EXAMPLE_MONGODB_DATABASE=live_agents_example (optional)
  */
 
 import { rmSync } from 'node:fs';
@@ -21,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   weaveInMemoryStateStore,
+  weaveMongoDbStateStore,
   weavePostgresStateStore,
   weaveRedisStateStore,
   weaveSqliteStateStore,
@@ -33,6 +37,8 @@ import {
 const POSTGRES_URL = process.env['LIVE_AGENTS_EXAMPLE_POSTGRES_URL'];
 const REDIS_URL = process.env['LIVE_AGENTS_EXAMPLE_REDIS_URL'];
 const SQLITE_PATH = process.env['LIVE_AGENTS_EXAMPLE_SQLITE_PATH'];
+const MONGODB_URL = process.env['LIVE_AGENTS_EXAMPLE_MONGODB_URL'];
+const MONGODB_DATABASE = process.env['LIVE_AGENTS_EXAMPLE_MONGODB_DATABASE'] ?? 'live_agents_example';
 
 interface ScenarioFixture {
   mesh: Mesh;
@@ -105,7 +111,7 @@ async function seedAndClaim(store: StateStore, fixture: ScenarioFixture): Promis
 }
 
 async function runInMemoryScenario(): Promise<void> {
-  console.log('\n[1/5] In-memory scenario');
+  console.log('\n[1/6] In-memory scenario');
   const fixture = createFixture(`example:memory:${Date.now()}`);
   const store = weaveInMemoryStateStore();
 
@@ -120,7 +126,7 @@ async function runInMemoryScenario(): Promise<void> {
 }
 
 async function runPostgresScenario(): Promise<void> {
-  console.log('\n[2/5] Postgres restart-durability scenario');
+  console.log('\n[2/6] Postgres restart-durability scenario');
   if (!POSTGRES_URL) {
     console.log('  - skipped (LIVE_AGENTS_EXAMPLE_POSTGRES_URL not set)');
     return;
@@ -145,7 +151,7 @@ async function runPostgresScenario(): Promise<void> {
 }
 
 async function runRedisCoordinationScenario(): Promise<void> {
-  console.log('\n[3/5] Redis coordination-only scenario');
+  console.log('\n[3/6] Redis coordination-only scenario');
   if (!REDIS_URL) {
     console.log('  - skipped (LIVE_AGENTS_EXAMPLE_REDIS_URL not set)');
     return;
@@ -187,7 +193,7 @@ async function runRedisCoordinationScenario(): Promise<void> {
 }
 
 async function runRedisDurableScenario(): Promise<void> {
-  console.log('\n[4/5] Redis durable-explicit restart scenario');
+  console.log('\n[4/6] Redis durable-explicit restart scenario');
   if (!REDIS_URL) {
     console.log('  - skipped (LIVE_AGENTS_EXAMPLE_REDIS_URL not set)');
     return;
@@ -225,7 +231,7 @@ async function runRedisDurableScenario(): Promise<void> {
 }
 
 async function runSqliteScenario(): Promise<void> {
-  console.log('\n[5/5] SQLite local durable scenario');
+  console.log('\n[5/6] SQLite local durable scenario');
 
   const sqlitePath = SQLITE_PATH ?? join(tmpdir(), `weave-live-agents-${Date.now()}.db`);
   const fixture = createFixture(`example:sqlite:${Date.now()}`);
@@ -250,6 +256,39 @@ async function runSqliteScenario(): Promise<void> {
   console.log('  ✓ sqlite local durability verified');
 }
 
+async function runMongoDbScenario(): Promise<void> {
+  console.log('\n[6/6] MongoDB durable scenario');
+  if (!MONGODB_URL) {
+    console.log('  - skipped (LIVE_AGENTS_EXAMPLE_MONGODB_URL not set)');
+    return;
+  }
+
+  const fixture = createFixture(`example:mongodb:${Date.now()}`);
+
+  const first = await weaveMongoDbStateStore({
+    url: MONGODB_URL,
+    databaseName: MONGODB_DATABASE,
+    collectionName: 'la_entities',
+  });
+  await seedAndClaim(first, fixture);
+  await closeIfNeeded(first);
+
+  const second = await weaveMongoDbStateStore({
+    url: MONGODB_URL,
+    databaseName: MONGODB_DATABASE,
+    collectionName: 'la_entities',
+  });
+  const mesh = await second.loadMesh(fixture.mesh.id);
+  const tick = await second.loadHeartbeatTick(fixture.tick.id);
+  await closeIfNeeded(second);
+
+  if (!mesh || !tick) {
+    throw new Error('MongoDB durability scenario failed after restart');
+  }
+
+  console.log('  ✓ mongodb durability verified');
+}
+
 async function main(): Promise<void> {
   console.log('Live-agents persistence backend E2E scenarios');
 
@@ -258,6 +297,7 @@ async function main(): Promise<void> {
   await runRedisCoordinationScenario();
   await runRedisDurableScenario();
   await runSqliteScenario();
+  await runMongoDbScenario();
 
   console.log('\nAll requested persistence scenarios completed.');
 }

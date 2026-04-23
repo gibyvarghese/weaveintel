@@ -596,6 +596,12 @@ export interface SqliteStateStore extends StateStore {
   close(): Promise<void>;
 }
 
+export interface MongoDbStateStore extends StateStore {
+  __kind: 'mongodb';
+  initialize(): Promise<void>;
+  close(): Promise<void>;
+}
+
 export interface Heartbeat {
   tick(ctx: ExecutionContext): Promise<{ processed: number }>;
   run(ctx: ExecutionContext): Promise<void>;

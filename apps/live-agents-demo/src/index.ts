@@ -2,7 +2,9 @@ import type { Server } from 'node:http';
 import { createInMemoryDemoStateStore } from './inmemory-state-store.js';
 import { createLiveAgentsDemoServer } from './app.js';
 import {
+  type MongoDbStateStore,
   weaveRedisStateStore,
+  weaveMongoDbStateStore,
   weavePostgresStateStore,
   type PostgresStateStore,
   type RedisStateStore,
@@ -14,11 +16,13 @@ import {
 export interface LiveAgentsDemoOptions {
   host?: string;
   port?: number;
-  persistenceBackend?: 'in-memory' | 'postgres' | 'redis' | 'sqlite';
+  persistenceBackend?: 'in-memory' | 'postgres' | 'redis' | 'sqlite' | 'mongodb';
   databaseUrl?: string;
   redisUrl?: string;
   redisMode?: 'coordination-only' | 'durable-explicit';
   sqlitePath?: string;
+  mongoUrl?: string;
+  mongoDatabaseName?: string;
 }
 
 export interface LiveAgentsDemoHandle {
@@ -35,11 +39,14 @@ export async function createLiveAgentsDemo(options: LiveAgentsDemoOptions = {}):
       | 'postgres'
       | 'redis'
       | 'sqlite'
+      | 'mongodb'
       | undefined);
 
   const databaseUrl = options.databaseUrl ?? process.env['LIVE_AGENTS_DEMO_DATABASE_URL'];
   const redisUrl = options.redisUrl ?? process.env['LIVE_AGENTS_DEMO_REDIS_URL'];
   const sqlitePath = options.sqlitePath ?? process.env['LIVE_AGENTS_DEMO_SQLITE_PATH'];
+  const mongoUrl = options.mongoUrl ?? process.env['LIVE_AGENTS_DEMO_MONGODB_URL'];
+  const mongoDatabaseName = options.mongoDatabaseName ?? process.env['LIVE_AGENTS_DEMO_MONGODB_DATABASE'] ?? 'live_agents_demo';
   const redisMode =
     options.redisMode ??
     (process.env['LIVE_AGENTS_DEMO_REDIS_MODE'] as 'coordination-only' | 'durable-explicit' | undefined) ??
@@ -48,7 +55,7 @@ export async function createLiveAgentsDemo(options: LiveAgentsDemoOptions = {}):
   // Resolution order preserves backward compatibility while allowing explicit overrides.
   const resolvedBackend = configuredBackend ?? (databaseUrl ? 'postgres' : 'in-memory');
 
-  let store: StateStore | PostgresStateStore | RedisStateStore | SqliteStateStore;
+  let store: StateStore | PostgresStateStore | RedisStateStore | SqliteStateStore | MongoDbStateStore;
   if (resolvedBackend === 'postgres') {
     if (!databaseUrl) {
       throw new Error('LIVE_AGENTS_DEMO_DATABASE_URL is required when persistence backend is postgres');
@@ -59,6 +66,15 @@ export async function createLiveAgentsDemo(options: LiveAgentsDemoOptions = {}):
       throw new Error('LIVE_AGENTS_DEMO_SQLITE_PATH is required when persistence backend is sqlite');
     }
     store = await weaveSqliteStateStore({ path: sqlitePath });
+  } else if (resolvedBackend === 'mongodb') {
+    if (!mongoUrl) {
+      throw new Error('LIVE_AGENTS_DEMO_MONGODB_URL is required when persistence backend is mongodb');
+    }
+    store = await weaveMongoDbStateStore({
+      url: mongoUrl,
+      databaseName: mongoDatabaseName,
+      collectionName: 'la_entities',
+    });
   } else if (resolvedBackend === 'redis') {
     if (!redisUrl) {
       throw new Error('LIVE_AGENTS_DEMO_REDIS_URL is required when persistence backend is redis');

@@ -2,6 +2,7 @@ import {
   createActionExecutor,
   createHeartbeat,
   type StateStore,
+  weaveMongoDbStateStore,
   weaveRedisStateStore,
   weavePostgresStateStore,
   weaveSqliteStateStore,
@@ -15,10 +16,13 @@ async function main() {
     | 'postgres'
     | 'redis'
     | 'sqlite'
+    | 'mongodb'
     | undefined;
   const databaseUrl = process.env['LIVE_AGENTS_DEMO_DATABASE_URL'];
   const redisUrl = process.env['LIVE_AGENTS_DEMO_REDIS_URL'];
   const sqlitePath = process.env['LIVE_AGENTS_DEMO_SQLITE_PATH'];
+  const mongoUrl = process.env['LIVE_AGENTS_DEMO_MONGODB_URL'];
+  const mongoDatabaseName = process.env['LIVE_AGENTS_DEMO_MONGODB_DATABASE'] ?? 'live_agents_demo';
   const redisMode =
     (process.env['LIVE_AGENTS_DEMO_REDIS_MODE'] as 'coordination-only' | 'durable-explicit' | undefined) ??
     'coordination-only';
@@ -36,6 +40,15 @@ async function main() {
       throw new Error('LIVE_AGENTS_DEMO_SQLITE_PATH is required when persistence backend is sqlite');
     }
     stateStore = await weaveSqliteStateStore({ path: sqlitePath });
+  } else if (resolvedBackend === 'mongodb') {
+    if (!mongoUrl) {
+      throw new Error('LIVE_AGENTS_DEMO_MONGODB_URL is required when persistence backend is mongodb');
+    }
+    stateStore = await weaveMongoDbStateStore({
+      url: mongoUrl,
+      databaseName: mongoDatabaseName,
+      collectionName: 'la_entities',
+    });
   } else if (resolvedBackend === 'redis') {
     if (!redisUrl) {
       throw new Error('LIVE_AGENTS_DEMO_REDIS_URL is required when persistence backend is redis');
