@@ -1,12 +1,15 @@
-import { createActionExecutor, createHeartbeat } from '@weaveintel/live-agents';
+import {
+  createActionExecutor,
+  createHeartbeat,
+  weavePostgresStateStore,
+} from '@weaveintel/live-agents';
 import { weaveContext } from '@weaveintel/core';
 import { createInMemoryDemoStateStore } from './inmemory-state-store.js';
-import { createPostgresStateStore } from './postgres-state-store.js';
 
 async function main() {
   const databaseUrl = process.env['LIVE_AGENTS_DEMO_DATABASE_URL'];
   const stateStore = databaseUrl
-    ? await createPostgresStateStore(databaseUrl)
+    ? await weavePostgresStateStore({ url: databaseUrl })
     : await createInMemoryDemoStateStore();
 
   const heartbeat = createHeartbeat({

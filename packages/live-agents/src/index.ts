@@ -52,6 +52,7 @@ export type {
   OutboundActionRecord,
   Promotion,
   PromotionRequest,
+  PostgresStateStore,
   Recipient,
   ReplayLiveAgentsRunOptions,
   RedisStateStore,
@@ -81,6 +82,8 @@ export {
   weaveRedisStateStore,
   asStateStore,
 } from './state-store.js';
+
+export { weavePostgresStateStore } from './postgres-state-store.js';
 
 export {
   LiveAgentsError,

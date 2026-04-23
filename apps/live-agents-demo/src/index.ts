@@ -1,8 +1,11 @@
 import type { Server } from 'node:http';
 import { createInMemoryDemoStateStore } from './inmemory-state-store.js';
-import { createPostgresStateStore, type PostgresStateStore } from './postgres-state-store.js';
 import { createLiveAgentsDemoServer } from './app.js';
-import type { StateStore } from '@weaveintel/live-agents';
+import {
+  weavePostgresStateStore,
+  type PostgresStateStore,
+  type StateStore,
+} from '@weaveintel/live-agents';
 
 export interface LiveAgentsDemoOptions {
   host?: string;
@@ -19,7 +22,7 @@ export interface LiveAgentsDemoHandle {
 export async function createLiveAgentsDemo(options: LiveAgentsDemoOptions = {}): Promise<LiveAgentsDemoHandle> {
   const databaseUrl = options.databaseUrl ?? process.env['LIVE_AGENTS_DEMO_DATABASE_URL'];
   const store: StateStore | PostgresStateStore = databaseUrl
-    ? await createPostgresStateStore(databaseUrl)
+    ? await weavePostgresStateStore({ url: databaseUrl })
     : await createInMemoryDemoStateStore();
 
   const app = createLiveAgentsDemoServer({
