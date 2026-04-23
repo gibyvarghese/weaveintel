@@ -25,6 +25,13 @@ export interface GmailCredentials {
   accessToken: string;
   /** Gmail user ID or 'me'. Defaults to 'me'. */
   userId?: string;
+  /** Optional callback used to refresh an expired access token. */
+  refreshAccessToken?: () => Promise<string | undefined>;
+}
+
+export interface GmailTokenProvider {
+  getToken(ctx: ExecutionContext): Promise<string | undefined>;
+  refreshToken(ctx: ExecutionContext): Promise<string | undefined>;
 }
 
 export interface GmailMessage {
@@ -51,8 +58,19 @@ export interface GmailAdapter {
 
 // ─── Live adapter (real Gmail REST API) ──────────────────────
 
-function extractCredentials(ctx: ExecutionContext): GmailCredentials {
-  const token = ctx.metadata?.['gmailAccessToken'] as string | undefined;
+function createMetadataTokenProvider(): GmailTokenProvider {
+  return {
+    async getToken(ctx) {
+      return ctx.metadata?.['gmailAccessToken'] as string | undefined;
+    },
+    async refreshToken(ctx) {
+      return ctx.metadata?.['gmailRefreshAccessToken'] as string | undefined;
+    },
+  };
+}
+
+async function extractCredentials(ctx: ExecutionContext, provider: GmailTokenProvider): Promise<GmailCredentials> {
+  const token = await provider.getToken(ctx);
   if (!token) throw new Error('Gmail access token missing from execution context metadata.gmailAccessToken');
   return { accessToken: token, userId: (ctx.metadata?.['gmailUserId'] as string) ?? 'me' };
 }
@@ -61,20 +79,36 @@ function gmailApiBase(userId: string): string {
   return `https://gmail.googleapis.com/gmail/v1/users/${encodeURIComponent(userId)}`;
 }
 
-async function gmailFetch(accessToken: string, url: string, init?: RequestInit): Promise<unknown> {
-  const resp = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      ...(init?.headers as Record<string, string> | undefined),
-    },
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => resp.statusText);
-    throw new Error(`Gmail API error ${resp.status}: ${text}`);
+async function gmailFetch(
+  accessToken: string,
+  url: string,
+  init?: RequestInit,
+  refreshToken?: () => Promise<string | undefined>,
+): Promise<unknown> {
+  let activeToken = accessToken;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const resp = await fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${activeToken}`,
+        'Content-Type': 'application/json',
+        ...(init?.headers as Record<string, string> | undefined),
+      },
+    });
+    if (resp.status === 401 && attempt === 0 && refreshToken) {
+      const refreshed = await refreshToken();
+      if (refreshed) {
+        activeToken = refreshed;
+        continue;
+      }
+    }
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => resp.statusText);
+      throw new Error(`Gmail API error ${resp.status}: ${text}`);
+    }
+    return resp.json();
   }
-  return resp.json();
+  throw new Error('Gmail API request failed after token refresh attempt');
 }
 
 function parseMessage(raw: Record<string, unknown>): GmailMessage {
@@ -114,20 +148,20 @@ function extractBody(payload: Record<string, unknown> | undefined): string {
 export const liveGmailAdapter: GmailAdapter = {
   async listMessages(creds, label, maxResults) {
     const base = gmailApiBase(creds.userId ?? 'me');
-    const data = await gmailFetch(creds.accessToken, `${base}/messages?labelIds=${encodeURIComponent(label)}&maxResults=${maxResults}`) as Record<string, unknown>;
+    const data = await gmailFetch(creds.accessToken, `${base}/messages?labelIds=${encodeURIComponent(label)}&maxResults=${maxResults}`, undefined, creds.refreshAccessToken) as Record<string, unknown>;
     const messages = (data['messages'] as Array<{ id: string }> | undefined) ?? [];
     return Promise.all(messages.map((m) => this.readMessage(creds, m.id)));
   },
 
   async readMessage(creds, messageId) {
     const base = gmailApiBase(creds.userId ?? 'me');
-    const raw = await gmailFetch(creds.accessToken, `${base}/messages/${encodeURIComponent(messageId)}?format=full`) as Record<string, unknown>;
+    const raw = await gmailFetch(creds.accessToken, `${base}/messages/${encodeURIComponent(messageId)}?format=full`, undefined, creds.refreshAccessToken) as Record<string, unknown>;
     return parseMessage(raw);
   },
 
   async searchMessages(creds, query, maxResults) {
     const base = gmailApiBase(creds.userId ?? 'me');
-    const data = await gmailFetch(creds.accessToken, `${base}/messages?q=${encodeURIComponent(query)}&maxResults=${maxResults}`) as Record<string, unknown>;
+    const data = await gmailFetch(creds.accessToken, `${base}/messages?q=${encodeURIComponent(query)}&maxResults=${maxResults}`, undefined, creds.refreshAccessToken) as Record<string, unknown>;
     const messages = (data['messages'] as Array<{ id: string }> | undefined) ?? [];
     return Promise.all(messages.map((m) => this.readMessage(creds, m.id)));
   },
@@ -145,7 +179,7 @@ export const liveGmailAdapter: GmailAdapter = {
     const result = await gmailFetch(creds.accessToken, `${base}/messages/send`, {
       method: 'POST',
       body: JSON.stringify({ raw: encoded }),
-    }) as Record<string, unknown>;
+    }, creds.refreshAccessToken) as Record<string, unknown>;
     return { messageId: result['id'] as string, threadId: result['threadId'] as string };
   },
 
@@ -154,12 +188,12 @@ export const liveGmailAdapter: GmailAdapter = {
     await gmailFetch(creds.accessToken, `${base}/messages/${encodeURIComponent(messageId)}/modify`, {
       method: 'POST',
       body: JSON.stringify({ addLabelIds: addLabels, removeLabelIds: removeLabels }),
-    });
+    }, creds.refreshAccessToken);
   },
 
   async listThread(creds, threadId) {
     const base = gmailApiBase(creds.userId ?? 'me');
-    const data = await gmailFetch(creds.accessToken, `${base}/threads/${encodeURIComponent(threadId)}?format=full`) as Record<string, unknown>;
+    const data = await gmailFetch(creds.accessToken, `${base}/threads/${encodeURIComponent(threadId)}?format=full`, undefined, creds.refreshAccessToken) as Record<string, unknown>;
     const messages = (data['messages'] as Array<Record<string, unknown>> | undefined) ?? [];
     return messages.map(parseMessage);
   },
@@ -174,10 +208,10 @@ export const liveGmailAdapter: GmailAdapter = {
         try {
           const base = gmailApiBase(creds.userId ?? 'me');
           if (!historyId) {
-            const profile = await gmailFetch(creds.accessToken, `${base}/profile`) as Record<string, unknown>;
+            const profile = await gmailFetch(creds.accessToken, `${base}/profile`, undefined, creds.refreshAccessToken) as Record<string, unknown>;
             historyId = profile['historyId'] as string;
           } else {
-            const data = await gmailFetch(creds.accessToken, `${base}/history?startHistoryId=${historyId}&historyTypes=messageAdded`) as Record<string, unknown>;
+            const data = await gmailFetch(creds.accessToken, `${base}/history?startHistoryId=${historyId}&historyTypes=messageAdded`, undefined, creds.refreshAccessToken) as Record<string, unknown>;
             const newHistoryId = data['historyId'] as string | undefined;
             if (newHistoryId) historyId = newHistoryId;
             const history = (data['history'] as Array<Record<string, unknown>> | undefined) ?? [];
@@ -209,10 +243,12 @@ export interface GmailMCPServerOptions {
    * Override with a fixture adapter in tests.
    */
   adapter?: GmailAdapter;
+  tokenProvider?: GmailTokenProvider;
 }
 
 export function createGmailMCPServer(opts: GmailMCPServerOptions = {}) {
   const adapter = opts.adapter ?? liveGmailAdapter;
+  const tokenProvider = opts.tokenProvider ?? createMetadataTokenProvider();
   const server = weaveMCPServer(
     { name: 'gmail', version: '0.1.0' },
     {
@@ -245,7 +281,8 @@ export function createGmailMCPServer(opts: GmailMCPServerOptions = {}) {
       },
     },
     async (ctx: ExecutionContext, args: Record<string, unknown>) => {
-      const creds = extractCredentials(ctx);
+      const creds = await extractCredentials(ctx, tokenProvider);
+      creds.refreshAccessToken = async () => tokenProvider.refreshToken(ctx);
       const messages = await adapter.listMessages(creds, String(args['label'] ?? 'INBOX'), Number(args['maxResults'] ?? 20));
       return { content: [{ type: 'text', text: JSON.stringify(messages) }] };
     },
@@ -264,7 +301,8 @@ export function createGmailMCPServer(opts: GmailMCPServerOptions = {}) {
       },
     },
     async (ctx: ExecutionContext, args: Record<string, unknown>) => {
-      const creds = extractCredentials(ctx);
+      const creds = await extractCredentials(ctx, tokenProvider);
+      creds.refreshAccessToken = async () => tokenProvider.refreshToken(ctx);
       const msg = await adapter.readMessage(creds, String(args['messageId']));
       return { content: [{ type: 'text', text: JSON.stringify(msg) }] };
     },
@@ -284,7 +322,8 @@ export function createGmailMCPServer(opts: GmailMCPServerOptions = {}) {
       },
     },
     async (ctx: ExecutionContext, args: Record<string, unknown>) => {
-      const creds = extractCredentials(ctx);
+      const creds = await extractCredentials(ctx, tokenProvider);
+      creds.refreshAccessToken = async () => tokenProvider.refreshToken(ctx);
       const messages = await adapter.searchMessages(creds, String(args['query']), Number(args['maxResults'] ?? 20));
       return { content: [{ type: 'text', text: JSON.stringify(messages) }] };
     },
@@ -305,7 +344,8 @@ export function createGmailMCPServer(opts: GmailMCPServerOptions = {}) {
       },
     },
     async (ctx: ExecutionContext, args: Record<string, unknown>) => {
-      const creds = extractCredentials(ctx);
+      const creds = await extractCredentials(ctx, tokenProvider);
+      creds.refreshAccessToken = async () => tokenProvider.refreshToken(ctx);
       const result = await adapter.sendMessage(creds, args['to'] as string[], String(args['subject']), String(args['body']));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
@@ -326,7 +366,8 @@ export function createGmailMCPServer(opts: GmailMCPServerOptions = {}) {
       },
     },
     async (ctx: ExecutionContext, args: Record<string, unknown>) => {
-      const creds = extractCredentials(ctx);
+      const creds = await extractCredentials(ctx, tokenProvider);
+      creds.refreshAccessToken = async () => tokenProvider.refreshToken(ctx);
       await adapter.labelMessage(creds, String(args['messageId']), (args['addLabels'] as string[]) ?? [], (args['removeLabels'] as string[]) ?? []);
       return { content: [{ type: 'text', text: 'Labels updated.' }] };
     },
@@ -345,7 +386,8 @@ export function createGmailMCPServer(opts: GmailMCPServerOptions = {}) {
       },
     },
     async (ctx: ExecutionContext, args: Record<string, unknown>) => {
-      const creds = extractCredentials(ctx);
+      const creds = await extractCredentials(ctx, tokenProvider);
+      creds.refreshAccessToken = async () => tokenProvider.refreshToken(ctx);
       const messages = await adapter.listThread(creds, String(args['threadId']));
       return { content: [{ type: 'text', text: JSON.stringify(messages) }] };
     },
@@ -364,7 +406,7 @@ export function createGmailMCPServer(opts: GmailMCPServerOptions = {}) {
     },
     async (ctx: ExecutionContext, _args: Record<string, unknown>) => {
       // In MCP context subscriptions are managed externally; this surfaces readiness
-      extractCredentials(ctx); // validate creds present
+      await extractCredentials(ctx, tokenProvider); // validate creds present
       return { content: [{ type: 'text', text: JSON.stringify({ subscribed: true, note: 'Use adapter.subscribeInbox for push delivery.' }) }] };
     },
   );

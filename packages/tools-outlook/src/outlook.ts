@@ -12,6 +12,12 @@ import { weaveToolDescriptor as describeT } from '@weaveintel/tools';
 export interface OutlookCredentials {
   accessToken: string;
   userId?: string; // defaults to 'me'
+  refreshAccessToken?: () => Promise<string | undefined>;
+}
+
+export interface OutlookTokenProvider {
+  getToken(ctx: ExecutionContext): Promise<string | undefined>;
+  refreshToken(ctx: ExecutionContext): Promise<string | undefined>;
 }
 
 export interface OutlookMessage {
@@ -37,8 +43,19 @@ export interface OutlookAdapter {
   subscribeInbox(creds: OutlookCredentials, onMessage: (msg: OutlookMessage) => Promise<void>): Promise<{ stop: () => void }>;
 }
 
-function extractCredentials(ctx: ExecutionContext): OutlookCredentials {
-  const token = ctx.metadata?.['outlookAccessToken'] as string | undefined;
+function createMetadataTokenProvider(): OutlookTokenProvider {
+  return {
+    async getToken(ctx) {
+      return ctx.metadata?.['outlookAccessToken'] as string | undefined;
+    },
+    async refreshToken(ctx) {
+      return ctx.metadata?.['outlookRefreshAccessToken'] as string | undefined;
+    },
+  };
+}
+
+async function extractCredentials(ctx: ExecutionContext, provider: OutlookTokenProvider): Promise<OutlookCredentials> {
+  const token = await provider.getToken(ctx);
   if (!token) throw new Error('Outlook access token missing from ctx.metadata.outlookAccessToken');
   return { accessToken: token, userId: (ctx.metadata?.['outlookUserId'] as string) ?? 'me' };
 }
@@ -48,21 +65,37 @@ function graphBase(userId: string): string {
   return `https://graph.microsoft.com/v1.0/${id}`;
 }
 
-async function graphFetch(accessToken: string, url: string, init?: RequestInit): Promise<unknown> {
-  const resp = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      ...(init?.headers as Record<string, string> | undefined),
-    },
-  });
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => resp.statusText);
-    throw new Error(`Graph API error ${resp.status}: ${text}`);
+async function graphFetch(
+  accessToken: string,
+  url: string,
+  init?: RequestInit,
+  refreshToken?: () => Promise<string | undefined>,
+): Promise<unknown> {
+  let activeToken = accessToken;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const resp = await fetch(url, {
+      ...init,
+      headers: {
+        Authorization: `Bearer ${activeToken}`,
+        'Content-Type': 'application/json',
+        ...(init?.headers as Record<string, string> | undefined),
+      },
+    });
+    if (resp.status === 401 && attempt === 0 && refreshToken) {
+      const refreshed = await refreshToken();
+      if (refreshed) {
+        activeToken = refreshed;
+        continue;
+      }
+    }
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => resp.statusText);
+      throw new Error(`Graph API error ${resp.status}: ${text}`);
+    }
+    if (resp.status === 204) return {};
+    return resp.json();
   }
-  if (resp.status === 204) return {};
-  return resp.json();
+  throw new Error('Graph API request failed after token refresh attempt');
 }
 
 function parseMessage(raw: Record<string, unknown>): OutlookMessage {
@@ -86,20 +119,20 @@ function parseMessage(raw: Record<string, unknown>): OutlookMessage {
 export const liveOutlookAdapter: OutlookAdapter = {
   async listMessages(creds, folder, maxResults) {
     const base = graphBase(creds.userId ?? 'me');
-    const data = await graphFetch(creds.accessToken, `${base}/mailFolders/${encodeURIComponent(folder)}/messages?$top=${maxResults}&$select=id,conversationId,from,toRecipients,subject,bodyPreview,body,categories,receivedDateTime,isRead`) as Record<string, unknown>;
+    const data = await graphFetch(creds.accessToken, `${base}/mailFolders/${encodeURIComponent(folder)}/messages?$top=${maxResults}&$select=id,conversationId,from,toRecipients,subject,bodyPreview,body,categories,receivedDateTime,isRead`, undefined, creds.refreshAccessToken) as Record<string, unknown>;
     const items = (data['value'] as Array<Record<string, unknown>>) ?? [];
     return items.map(parseMessage);
   },
 
   async readMessage(creds, messageId) {
     const base = graphBase(creds.userId ?? 'me');
-    const raw = await graphFetch(creds.accessToken, `${base}/messages/${encodeURIComponent(messageId)}`) as Record<string, unknown>;
+    const raw = await graphFetch(creds.accessToken, `${base}/messages/${encodeURIComponent(messageId)}`, undefined, creds.refreshAccessToken) as Record<string, unknown>;
     return parseMessage(raw);
   },
 
   async searchMessages(creds, query, maxResults) {
     const base = graphBase(creds.userId ?? 'me');
-    const data = await graphFetch(creds.accessToken, `${base}/messages?$search="${encodeURIComponent(query)}"&$top=${maxResults}`) as Record<string, unknown>;
+    const data = await graphFetch(creds.accessToken, `${base}/messages?$search="${encodeURIComponent(query)}"&$top=${maxResults}`, undefined, creds.refreshAccessToken) as Record<string, unknown>;
     const items = (data['value'] as Array<Record<string, unknown>>) ?? [];
     return items.map(parseMessage);
   },
@@ -114,7 +147,7 @@ export const liveOutlookAdapter: OutlookAdapter = {
     const result = await graphFetch(creds.accessToken, `${base}/sendMail`, {
       method: 'POST',
       body: JSON.stringify({ message }),
-    }) as Record<string, unknown>;
+    }, creds.refreshAccessToken) as Record<string, unknown>;
     return { messageId: (result['id'] as string) ?? 'sent' };
   },
 
@@ -123,12 +156,12 @@ export const liveOutlookAdapter: OutlookAdapter = {
     await graphFetch(creds.accessToken, `${base}/messages/${encodeURIComponent(messageId)}`, {
       method: 'PATCH',
       body: JSON.stringify({ categories }),
-    });
+    }, creds.refreshAccessToken);
   },
 
   async listConversation(creds, conversationId) {
     const base = graphBase(creds.userId ?? 'me');
-    const data = await graphFetch(creds.accessToken, `${base}/messages?$filter=conversationId eq '${encodeURIComponent(conversationId)}'`) as Record<string, unknown>;
+    const data = await graphFetch(creds.accessToken, `${base}/messages?$filter=conversationId eq '${encodeURIComponent(conversationId)}'`, undefined, creds.refreshAccessToken) as Record<string, unknown>;
     const items = (data['value'] as Array<Record<string, unknown>>) ?? [];
     return items.map(parseMessage);
   },
@@ -141,7 +174,7 @@ export const liveOutlookAdapter: OutlookAdapter = {
       while (running) {
         try {
           const base = graphBase(creds.userId ?? 'me');
-          const data = await graphFetch(creds.accessToken, `${base}/mailFolders/inbox/messages?$filter=receivedDateTime gt ${lastCheck}&$orderby=receivedDateTime desc&$top=10`) as Record<string, unknown>;
+          const data = await graphFetch(creds.accessToken, `${base}/mailFolders/inbox/messages?$filter=receivedDateTime gt ${lastCheck}&$orderby=receivedDateTime desc&$top=10`, undefined, creds.refreshAccessToken) as Record<string, unknown>;
           const items = (data['value'] as Array<Record<string, unknown>>) ?? [];
           if (items.length > 0) {
             lastCheck = new Date().toISOString();
@@ -161,10 +194,12 @@ export const liveOutlookAdapter: OutlookAdapter = {
 
 export interface OutlookMCPServerOptions {
   adapter?: OutlookAdapter;
+  tokenProvider?: OutlookTokenProvider;
 }
 
 export function createOutlookMCPServer(opts: OutlookMCPServerOptions = {}) {
   const adapter = opts.adapter ?? liveOutlookAdapter;
+  const tokenProvider = opts.tokenProvider ?? createMetadataTokenProvider();
   const server = weaveMCPServer(
     { name: 'outlook', version: '0.1.0' },
     {
@@ -186,7 +221,8 @@ export function createOutlookMCPServer(opts: OutlookMCPServerOptions = {}) {
   server.addTool(
     { name: 'outlook.list', description: 'List Outlook messages in a folder.', inputSchema: { type: 'object', properties: { folder: { type: 'string', default: 'inbox' }, maxResults: { type: 'number', default: 20 } } } },
     async (ctx, args) => {
-      const creds = extractCredentials(ctx);
+      const creds = await extractCredentials(ctx, tokenProvider);
+      creds.refreshAccessToken = async () => tokenProvider.refreshToken(ctx);
       const messages = await adapter.listMessages(creds, String(args['folder'] ?? 'inbox'), Number(args['maxResults'] ?? 20));
       return { content: [{ type: 'text', text: JSON.stringify(messages) }] };
     },
@@ -195,7 +231,8 @@ export function createOutlookMCPServer(opts: OutlookMCPServerOptions = {}) {
   server.addTool(
     { name: 'outlook.read', description: 'Read an Outlook message by ID.', inputSchema: { type: 'object', properties: { messageId: { type: 'string' } }, required: ['messageId'] } },
     async (ctx, args) => {
-      const creds = extractCredentials(ctx);
+      const creds = await extractCredentials(ctx, tokenProvider);
+      creds.refreshAccessToken = async () => tokenProvider.refreshToken(ctx);
       const msg = await adapter.readMessage(creds, String(args['messageId']));
       return { content: [{ type: 'text', text: JSON.stringify(msg) }] };
     },
@@ -204,7 +241,8 @@ export function createOutlookMCPServer(opts: OutlookMCPServerOptions = {}) {
   server.addTool(
     { name: 'outlook.search', description: 'Search Outlook messages.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, maxResults: { type: 'number', default: 20 } }, required: ['query'] } },
     async (ctx, args) => {
-      const creds = extractCredentials(ctx);
+      const creds = await extractCredentials(ctx, tokenProvider);
+      creds.refreshAccessToken = async () => tokenProvider.refreshToken(ctx);
       const messages = await adapter.searchMessages(creds, String(args['query']), Number(args['maxResults'] ?? 20));
       return { content: [{ type: 'text', text: JSON.stringify(messages) }] };
     },
@@ -213,7 +251,8 @@ export function createOutlookMCPServer(opts: OutlookMCPServerOptions = {}) {
   server.addTool(
     { name: 'outlook.send', description: 'Send an email via Outlook.', inputSchema: { type: 'object', properties: { to: { type: 'array', items: { type: 'string' } }, subject: { type: 'string' }, body: { type: 'string' } }, required: ['to', 'subject', 'body'] } },
     async (ctx, args) => {
-      const creds = extractCredentials(ctx);
+      const creds = await extractCredentials(ctx, tokenProvider);
+      creds.refreshAccessToken = async () => tokenProvider.refreshToken(ctx);
       const result = await adapter.sendMessage(creds, args['to'] as string[], String(args['subject']), String(args['body']));
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     },
@@ -222,7 +261,8 @@ export function createOutlookMCPServer(opts: OutlookMCPServerOptions = {}) {
   server.addTool(
     { name: 'outlook.categorize', description: 'Set categories on an Outlook message.', inputSchema: { type: 'object', properties: { messageId: { type: 'string' }, categories: { type: 'array', items: { type: 'string' } } }, required: ['messageId', 'categories'] } },
     async (ctx, args) => {
-      const creds = extractCredentials(ctx);
+      const creds = await extractCredentials(ctx, tokenProvider);
+      creds.refreshAccessToken = async () => tokenProvider.refreshToken(ctx);
       await adapter.categorizeMessage(creds, String(args['messageId']), args['categories'] as string[]);
       return { content: [{ type: 'text', text: 'Categories updated.' }] };
     },
@@ -231,7 +271,8 @@ export function createOutlookMCPServer(opts: OutlookMCPServerOptions = {}) {
   server.addTool(
     { name: 'outlook.thread', description: 'List messages in an Outlook conversation.', inputSchema: { type: 'object', properties: { conversationId: { type: 'string' } }, required: ['conversationId'] } },
     async (ctx, args) => {
-      const creds = extractCredentials(ctx);
+      const creds = await extractCredentials(ctx, tokenProvider);
+      creds.refreshAccessToken = async () => tokenProvider.refreshToken(ctx);
       const messages = await adapter.listConversation(creds, String(args['conversationId']));
       return { content: [{ type: 'text', text: JSON.stringify(messages) }] };
     },
@@ -240,7 +281,7 @@ export function createOutlookMCPServer(opts: OutlookMCPServerOptions = {}) {
   server.addTool(
     { name: 'outlook.subscribe', description: 'Subscribe to new inbox messages.', inputSchema: { type: 'object', properties: {} } },
     async (ctx, _args) => {
-      extractCredentials(ctx);
+      await extractCredentials(ctx, tokenProvider);
       return { content: [{ type: 'text', text: JSON.stringify({ subscribed: true }) }] };
     },
   );

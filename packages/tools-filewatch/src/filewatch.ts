@@ -27,7 +27,10 @@ function extractCredentials(ctx: ExecutionContext): FilewatchCredentials {
 function resolvePath(basePath: string | undefined, relPath: string): string {
   const base = basePath ? path.resolve(basePath) : process.cwd();
   const full = path.resolve(base, relPath || '.');
-  if (!full.startsWith(base)) throw new Error('Path escapes configured filewatch base path');
+  const relative = path.relative(base, full);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Path escapes configured filewatch base path');
+  }
   return full;
 }
 
@@ -35,12 +38,11 @@ export const liveFilewatchAdapter: FilewatchAdapter = {
   async list(creds, relPath) {
     const dir = resolvePath(creds.basePath, relPath || '.');
     const entries = await fs.readdir(dir, { withFileTypes: true });
-    const out: FilewatchEntry[] = [];
-    for (const ent of entries) {
+    const out = await Promise.all(entries.map(async (ent) => {
       const p = path.join(dir, ent.name);
       const st = await fs.stat(p);
-      out.push({ path: p, isDirectory: ent.isDirectory(), size: st.size, mtimeMs: st.mtimeMs });
-    }
+      return { path: p, isDirectory: ent.isDirectory(), size: st.size, mtimeMs: st.mtimeMs };
+    }));
     return out;
   },
   async read(creds, relPath, encoding = 'utf8') {

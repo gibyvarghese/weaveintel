@@ -44,4 +44,76 @@ describe('@weaveintel/tools-webhook (fixture)', () => {
     const result = await callTool('webhook.subscribe', { target: 'orders.created' });
     expect(JSON.parse(result.content[0]!.text).subscribed).toBe(true);
   });
+
+  it('enforces webhook host allow-list', async () => {
+    const { client, server: transport } = weaveFakeTransport();
+    const server = createWebhookMCPServer({
+      adapter: fixtureAdapter(),
+      security: { allowedHosts: ['hooks.example.com'] },
+    });
+    await server.start(transport);
+    const mc = weaveMCPClient();
+    await mc.connect(client);
+
+    await expect(
+      mc.callTool(weaveContext(), {
+        name: 'webhook.post',
+        arguments: {
+          url: 'https://not-allowed.example.com/hook',
+          body: { ok: true },
+        },
+      }),
+    ).rejects.toThrow('not in allow list');
+  });
+
+  it('refreshes bearer token and retries once on 401', async () => {
+    const attempts: string[] = [];
+    const adapter: WebhookAdapter = {
+      async post(creds) {
+        const token = creds.bearerToken ?? '';
+        attempts.push(token);
+        if (token === 'fresh-token') {
+          return { status: 200, headers: {}, body: 'ok' };
+        }
+        return { status: 401, headers: {}, body: 'unauthorized' };
+      },
+      async subscribe(target) {
+        return { subscribed: true, target };
+      },
+    };
+
+    const { client, server: transport } = weaveFakeTransport();
+    const server = createWebhookMCPServer({
+      adapter,
+      tokenProvider: {
+        async getToken() {
+          return 'stale-token';
+        },
+        async refreshToken() {
+          return 'fresh-token';
+        },
+      },
+    });
+    await server.start(transport);
+    const mc = weaveMCPClient();
+    await mc.connect(client);
+
+    const result = await mc.callTool(
+      weaveContext({ metadata: { webhookAuthType: 'bearer' } }),
+      {
+        name: 'webhook.post',
+        arguments: {
+          url: 'https://hooks.example.com/hook',
+          body: { ok: true },
+        },
+      },
+    );
+
+    const first = result.content[0];
+    if (!first || first.type !== 'text') {
+      throw new Error('Expected text content');
+    }
+    expect(JSON.parse(first.text).status).toBe(200);
+    expect(attempts).toEqual(['stale-token', 'fresh-token']);
+  });
 });
