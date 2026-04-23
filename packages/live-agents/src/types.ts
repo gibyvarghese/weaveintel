@@ -161,7 +161,7 @@ export interface HeartbeatTick {
   completedAt: string | null;
   workerId: string;
   leaseExpiresAt: string | null;
-  actionChosen: string | null;
+  actionChosen: AttentionAction | null;
   actionOutcomeProse: string | null;
   actionOutcomeStatus: 'SUCCESS' | 'PARTIAL' | 'FAILED' | null;
   status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'SKIPPED';
@@ -328,6 +328,7 @@ export interface StateStore {
   ): Promise<AccountBindingRequest | null>;
 
   saveHeartbeatTick(tick: HeartbeatTick): Promise<void>;
+  loadHeartbeatTick(id: string): Promise<HeartbeatTick | null>;
   claimNextTicks(workerId: string, nowIso: string, limit: number): Promise<HeartbeatTick[]>;
 
   saveMessage(message: Message): Promise<void>;
@@ -379,4 +380,88 @@ export interface ExternalEventHandler {
 export interface LiveAgentsRuntime {
   readonly stateStore: StateStore;
   readonly compressors: Map<string, ContextCompressor>;
+}
+
+export interface Recipient {
+  type: 'HUMAN' | 'AGENT' | 'TEAM' | 'BROADCAST';
+  id: string | null;
+}
+
+export type GrantKind =
+  | 'BUDGET_INCREASE'
+  | 'WORKING_HOURS_OVERRIDE'
+  | 'AUTHORITY_EXTENSION'
+  | 'COLLEAGUE_INTRODUCTION'
+  | 'MESH_BRIDGE';
+
+export interface CapabilityRequestBody {
+  kindHint: GrantKind;
+  descriptionProse: string;
+  reasonProse: string;
+  evidenceMessageIds: string[];
+}
+
+export interface CapabilityIssueBody {
+  kindHint: GrantKind;
+  descriptionProse: string;
+  scopeProse: string;
+  durationHint: string | null;
+  reasonProse: string;
+}
+
+export interface AgentContractDraft {
+  role: string;
+  objectives: string;
+  successIndicators: string;
+}
+
+export type AttentionAction =
+  | { type: 'ProcessMessage'; messageId: string }
+  | { type: 'ContinueTask'; backlogItemId: string }
+  | { type: 'StartTask'; backlogItemId: string }
+  | { type: 'DraftMessage'; to: Recipient; kind: MessageKind; subject: string; bodySeed: string }
+  | { type: 'RequestCapability'; capability: CapabilityRequestBody }
+  | { type: 'RequestAccountBinding'; account: string; purposeProse: string }
+  | { type: 'RequestPromotion'; targetRole: string; reasonProse: string; evidenceMessageIds: string[] }
+  | { type: 'IssueGrant'; recipientAgentId: string; capability: CapabilityIssueBody }
+  | { type: 'IssuePromotion'; recipientAgentId: string; newContractDraft: AgentContractDraft; reasonProse: string }
+  | { type: 'EscalateToHuman'; reasonProse: string; optionsProse: string }
+  | { type: 'InvokeBreakGlass'; capability: CapabilityRequestBody; emergencyReasonProse: string }
+  | { type: 'EmitEpisodicMarker'; summaryProse: string; tags: string[] }
+  | { type: 'RequestCompressionRefresh' }
+  | { type: 'CheckpointAndRest'; nextTickAt: string }
+  | { type: 'NoopRest'; nextTickAt: string };
+
+export interface AttentionContext {
+  nowIso: string;
+  agent: LiveAgent;
+  contract: AgentContract | null;
+  inbox: Message[];
+  backlog: BacklogItem[];
+  activeBindings: AccountBinding[];
+}
+
+export interface AttentionPolicy {
+  key: string;
+  decide(context: AttentionContext, ctx: ExecutionContext): Promise<AttentionAction>;
+}
+
+export interface ActionExecutionContext {
+  tickId: string;
+  nowIso: string;
+  stateStore: StateStore;
+  agent: LiveAgent;
+  activeBindings: AccountBinding[];
+}
+
+export interface ActionExecutionResult {
+  status: 'SUCCESS' | 'PARTIAL' | 'FAILED';
+  summaryProse: string;
+  createdMessageIds: string[];
+  createdOutboundRecordIds: string[];
+  updatedBacklogItemIds: string[];
+}
+
+export interface ActionExecutor {
+  execute(action: AttentionAction, context: ActionExecutionContext, ctx: ExecutionContext): Promise<ActionExecutionResult>;
 }

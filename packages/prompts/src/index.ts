@@ -30,6 +30,7 @@ export type { PromptExperimentStore } from './experiment.js';
 
 // Instructions
 export {
+  STANDARD_V1_ATTENTION_POLICY_REF,
   InstructionBundleBuilder,
   composeInstructions,
   createInstructionBundle,

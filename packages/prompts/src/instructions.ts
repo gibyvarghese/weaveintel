@@ -7,6 +7,8 @@
 
 import type { InstructionBundle } from '@weaveintel/core';
 
+export const STANDARD_V1_ATTENTION_POLICY_REF = 'standard-v1';
+
 // ─── Builder ─────────────────────────────────────────────────
 
 export class InstructionBundleBuilder {

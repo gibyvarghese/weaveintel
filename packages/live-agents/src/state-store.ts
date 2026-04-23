@@ -241,6 +241,9 @@ export function weaveInMemoryStateStore(): InMemoryStateStore {
     async saveHeartbeatTick(tick) {
       ticks.set(tick.id, tick);
     },
+    async loadHeartbeatTick(id) {
+      return ticks.get(id) ?? null;
+    },
     async claimNextTicks(workerId, nowIso, limit) {
       const now = Date.parse(nowIso);
       const claimable = [...ticks.values()]

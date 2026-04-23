@@ -1,8 +1,17 @@
 export type {
+  ActionExecutionContext,
+  ActionExecutionResult,
+  ActionExecutor,
   AgentContract,
+  AgentContractDraft,
   Account,
   AccountBinding,
   AccountBindingRequest,
+  AttentionAction,
+  AttentionContext,
+  AttentionPolicy,
+  CapabilityIssueBody,
+  CapabilityRequestBody,
   CompressionMaintainer,
   ContextPolicy,
   BacklogItem,
@@ -16,6 +25,7 @@ export type {
   LiveAgent,
   LiveAgentsRuntime,
   LiveAgentStatus,
+  GrantKind,
   McpServerRef,
   Message,
   MessageKind,
@@ -23,6 +33,7 @@ export type {
   MessageStatus,
   Mesh,
   OutboundActionRecord,
+  Recipient,
   RedisStateStore,
   StateStore,
   Team,
@@ -35,6 +46,9 @@ export {
   createCompressionMaintainer,
   createExternalEventHandler,
 } from './runtime.js';
+
+export { createStandardAttentionPolicy } from './attention.js';
+export { createActionExecutor } from './action-executor.js';
 
 export {
   weaveInMemoryStateStore,
