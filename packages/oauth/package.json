@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "description": "OAuth 2.0 provider integration (Google, GitHub, Microsoft, Apple, Facebook)",
   "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "files": ["dist"],

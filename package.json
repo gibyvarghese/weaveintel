@@ -15,6 +15,7 @@
   "scripts": {
     "build": "turbo build",
     "test": "turbo test",
+    "check:api-boundaries": "node scripts/validate-api-boundaries.mjs",
     "test:examples": "tsc --noEmit --project tsconfig.examples.json",
     "lint": "turbo lint",
     "clean": "turbo clean",
