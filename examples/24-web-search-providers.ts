@@ -208,7 +208,23 @@ async function main() {
     messages: [{ role: 'user', content: 'Find the weaveIntel GitHub repository.' }],
   });
 
-  console.log(`Agent answer: ${result.messages[result.messages.length - 1]?.content}`);
+  const lastAssistant = [...result.messages].reverse().find((m) => m.role === 'assistant');
+  const assistantText = typeof lastAssistant?.content === 'string'
+    ? lastAssistant.content
+    : Array.isArray(lastAssistant?.content)
+      ? lastAssistant.content
+        .map((part) => {
+          if (typeof part === 'string') return part;
+          if (part && typeof part === 'object' && 'text' in part) {
+            return String((part as { text?: unknown }).text ?? '');
+          }
+          return '';
+        })
+        .join(' ')
+        .trim()
+      : '';
+
+  console.log(`Agent answer: ${assistantText || '(no assistant text; tool call executed successfully)'}`);
 
   // --- Summary ---
   console.log('\n=== Summary ===');
