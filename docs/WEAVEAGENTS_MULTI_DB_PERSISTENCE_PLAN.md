@@ -174,6 +174,22 @@ Acceptance criteria:
 - Each runtime can run with in-memory, Postgres, Redis, SQLite at minimum.
 - Runtime smoke tests for every backend option.
 
+Status: implemented for non-live agent memory adoption.
+
+Phase 6 implementation notes:
+- `@weaveintel/memory` now exports `createConfiguredMemoryStore()` and `createConfiguredConversationMemory()` for `in-memory`, `postgres`, `redis`, `sqlite`, `mongodb`, and `cloud-nosql` backends.
+- Durable memory stores were added for Postgres, Redis, SQLite, MongoDB, and DynamoDB-style cloud NoSQL while preserving the existing in-memory default.
+- `@weaveintel/agents` already supported injected `memory?: AgentMemory`, so cross-runtime adoption was completed by wiring durable conversation memory through the shared memory package rather than app-local changes.
+- New validation coverage lives in `packages/memory/src/memory.test.ts`.
+- New end-to-end example for non-live agents lives in `examples/61-agent-persistence-methods-e2e.ts`.
+
+Phase 6 validation completed:
+- PASS: `npm run typecheck --workspace @weaveintel/memory`
+- PASS: `npm run build --workspace @weaveintel/memory`
+- PASS: `npm run test --workspace @weaveintel/memory`
+- PASS: `npm run build --workspace @weaveintel/agents`
+- PASS: `node --import tsx examples/61-agent-persistence-methods-e2e.ts` using in-memory and sqlite locally, with service-backed scenarios gated behind env vars for Postgres, Redis, MongoDB, and DynamoDB Local.
+
 ## Phase 7: Observability, Replay, and Eval Hardening
 Deliverables:
 - Backend-agnostic persistence telemetry.

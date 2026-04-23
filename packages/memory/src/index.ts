@@ -1,8 +1,20 @@
 export {
   weaveMemoryStore,
   weaveConversationMemory,
+  createConfiguredConversationMemory,
+  createConfiguredMemoryStore,
+  weavePostgresMemoryStore,
+  weaveRedisMemoryStore,
+  weaveSqliteMemoryStore,
+  weaveMongoDbMemoryStore,
+  weaveCloudNoSqlMemoryStore,
   weaveSemanticMemory,
   weaveEntityMemory,
+} from './memory.js';
+
+export type {
+  ConfiguredConversationMemory,
+  ConfiguredMemoryStoreOptions,
 } from './memory.js';
 
 export { weaveGovernancePolicy } from './governance.js';
