@@ -6,6 +6,7 @@ import type {
   ActionExecutor,
   AttentionAction,
   CapabilityGrant,
+  LiveAgentsObservability,
   GrantRequest,
   ExternalActionAdapter,
   ExternalActionToolCall,
@@ -46,6 +47,8 @@ async function saveOutboundStub(
   toolName: string,
   purposeProse: string,
   summaryProse: string,
+  executionCtx?: ExecutionContext,
+  observability?: LiveAgentsObservability,
 ): Promise<string> {
   const accountId = context.activeBindings[0]?.accountId ?? 'unbound-account';
   const id = makeId('outbound', context.nowIso, Math.random().toString(36).slice(2, 10));
@@ -65,7 +68,18 @@ async function saveOutboundStub(
     summaryProse,
     errorProse: null,
   };
-  await context.stateStore.saveOutboundActionRecord(record);
+  await withObservedSpan(
+    observability,
+    executionCtx,
+    'live_agents.outbound.save',
+    {
+      actionType: 'stub',
+      toolName,
+      status: record.status,
+      agentId: context.agent.id,
+    },
+    () => context.stateStore.saveOutboundActionRecord(record),
+  );
   return id;
 }
 
@@ -78,9 +92,11 @@ async function saveOutboundRecord(
   status: OutboundActionRecord['status'],
   externalRef: string | null,
   errorProse: string | null,
+  executionCtx?: ExecutionContext,
+  observability?: LiveAgentsObservability,
 ): Promise<string> {
   const id = makeId('outbound', context.nowIso, Math.random().toString(36).slice(2, 10));
-  await context.stateStore.saveOutboundActionRecord({
+  const record: OutboundActionRecord = {
     id,
     agentId: context.agent.id,
     accountId,
@@ -95,8 +111,34 @@ async function saveOutboundRecord(
     purposeProse,
     summaryProse,
     errorProse,
-  });
+  };
+  await withObservedSpan(
+    observability,
+    executionCtx,
+    'live_agents.outbound.save',
+    {
+      actionType: 'external',
+      toolName,
+      status,
+      agentId: context.agent.id,
+    },
+    () => context.stateStore.saveOutboundActionRecord(record),
+  );
   return id;
+}
+
+async function withObservedSpan<T>(
+  observability: LiveAgentsObservability | undefined,
+  executionCtx: ExecutionContext | undefined,
+  name: string,
+  attributes: Record<string, unknown>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const tracer = observability?.tracer;
+  if (!tracer || !executionCtx) {
+    return fn();
+  }
+  return tracer.withSpan(executionCtx, name, () => fn(), attributes);
 }
 
 function responseSummary(response: MCPToolCallResponse): string {
@@ -218,6 +260,7 @@ async function tryExecuteExternalAction(
   ctx: ExecutionContext,
   sessionProvider: AccountSessionProvider,
   externalActionAdapter: ExternalActionAdapter,
+  observability?: LiveAgentsObservability,
 ): Promise<{
   recordId: string;
   response: MCPToolCallResponse;
@@ -252,6 +295,8 @@ async function tryExecuteExternalAction(
     response.isError ? 'FAILED' : 'SENT',
     responseExternalRef(response),
     response.isError ? responseSummary(response) || 'MCP tool returned an error.' : null,
+    ctx,
+    observability,
   );
 
   return { recordId, response };
@@ -260,13 +305,63 @@ async function tryExecuteExternalAction(
 export function createActionExecutor(opts?: {
   sessionProvider?: AccountSessionProvider;
   externalActionAdapter?: ExternalActionAdapter;
+  observability?: LiveAgentsObservability;
 }): ActionExecutor {
   const externalActionAdapter = opts?.externalActionAdapter ?? createDefaultExternalActionAdapter();
   return {
     async execute(action, context, ctx): Promise<ActionExecutionResult> {
+      const runLogger = opts?.observability?.runLogger;
+      runLogger?.startRun(ctx.executionId);
+      const executeStart = Date.now();
       const createdMessageIds: string[] = [];
       const createdOutboundRecordIds: string[] = [];
       const updatedBacklogItemIds: string[] = [];
+      const saveMessageObserved = (message: Message) => withObservedSpan(
+        opts?.observability,
+        ctx,
+        'live_agents.message.save',
+        {
+          actionType: action.type,
+          kind: message.kind,
+          toType: message.toType,
+          agentId: context.agent.id,
+        },
+        () => context.stateStore.saveMessage(message),
+      );
+      const saveGrantObserved = (grant: CapabilityGrant) => withObservedSpan(
+        opts?.observability,
+        ctx,
+        'live_agents.grant.save',
+        {
+          actionType: action.type,
+          grantKind: grant.kind,
+          recipientId: grant.recipientId,
+          agentId: context.agent.id,
+        },
+        () => context.stateStore.saveCapabilityGrant(grant),
+      );
+      const savePromotionObserved = (promotion: Promotion) => withObservedSpan(
+        opts?.observability,
+        ctx,
+        'live_agents.promotion.save',
+        {
+          actionType: action.type,
+          promotionId: promotion.id,
+          agentId: context.agent.id,
+        },
+        () => context.stateStore.savePromotion(promotion),
+      );
+
+      return withObservedSpan<ActionExecutionResult>(
+        opts?.observability,
+        ctx,
+        'live_agents.action.execute',
+        {
+          actionType: action.type,
+          agentId: context.agent.id,
+          tickId: context.tickId,
+        },
+        async () => {
 
       switch (action.type) {
         case 'ProcessMessage': {
@@ -314,6 +409,7 @@ export function createActionExecutor(opts?: {
               ctx,
               opts.sessionProvider,
               externalActionAdapter,
+              opts?.observability,
             );
             if (externalResult) {
               createdOutboundRecordIds.push(externalResult.recordId);
@@ -346,7 +442,7 @@ export function createActionExecutor(opts?: {
             subject: action.subject,
             body: action.bodySeed,
           };
-          await context.stateStore.saveMessage(message);
+          await saveMessageObserved(message);
           createdMessageIds.push(messageId);
           return {
             status: messageStatus === 'FAILED' ? 'FAILED' : 'SUCCESS',
@@ -405,7 +501,7 @@ export function createActionExecutor(opts?: {
             subject: `Capability request: ${action.capability.kindHint}`,
             body: `${action.capability.descriptionProse}\n\nReason: ${action.capability.reasonProse}`,
           };
-          await context.stateStore.saveMessage(message);
+          await saveMessageObserved(message);
           createdMessageIds.push(messageId);
           return {
             status: 'SUCCESS',
@@ -467,7 +563,7 @@ export function createActionExecutor(opts?: {
           await context.stateStore.savePromotionRequest(request);
 
           const messageId = makeId('msg', context.nowIso, Math.random().toString(36).slice(2, 10));
-          await context.stateStore.saveMessage({
+          await saveMessageObserved({
             id: messageId,
             meshId: context.agent.meshId,
             fromType: 'AGENT',
@@ -526,10 +622,10 @@ export function createActionExecutor(opts?: {
             limits: {},
             evidenceRefs: [],
           };
-          await context.stateStore.saveCapabilityGrant(capabilityGrant);
+          await saveGrantObserved(capabilityGrant);
 
           const messageId = makeId('msg', context.nowIso, Math.random().toString(36).slice(2, 10));
-          await context.stateStore.saveMessage({
+          await saveMessageObserved({
             id: messageId,
             meshId: context.agent.meshId,
             fromType: 'AGENT',
@@ -561,6 +657,7 @@ export function createActionExecutor(opts?: {
               ctx,
               opts.sessionProvider,
               externalActionAdapter,
+              opts?.observability,
             );
             if (externalResult) {
               createdOutboundRecordIds.push(externalResult.recordId);
@@ -571,6 +668,8 @@ export function createActionExecutor(opts?: {
                   'external.grants.issue.stub',
                   `Issue grant to ${action.recipientAgentId}`,
                   action.capability.reasonProse,
+                  ctx,
+                  opts?.observability,
                 ),
               );
             }
@@ -581,6 +680,8 @@ export function createActionExecutor(opts?: {
                 'external.grants.issue.stub',
                 `Issue grant to ${action.recipientAgentId}`,
                 action.capability.reasonProse,
+                ctx,
+                opts?.observability,
               ),
             );
           }
@@ -645,10 +746,10 @@ export function createActionExecutor(opts?: {
             scopeDeltaSummaryProse: action.reasonProse,
             evidenceRefs: [],
           };
-          await context.stateStore.savePromotion(promotion);
+          await savePromotionObserved(promotion);
 
           const messageId = makeId('msg', context.nowIso, Math.random().toString(36).slice(2, 10));
-          await context.stateStore.saveMessage({
+          await saveMessageObserved({
             id: messageId,
             meshId: context.agent.meshId,
             fromType: 'AGENT',
@@ -680,6 +781,7 @@ export function createActionExecutor(opts?: {
               ctx,
               opts.sessionProvider,
               externalActionAdapter,
+              opts?.observability,
             );
             if (externalResult) {
               createdOutboundRecordIds.push(externalResult.recordId);
@@ -690,6 +792,8 @@ export function createActionExecutor(opts?: {
                   'external.promotion.issue.stub',
                   `Issue promotion to ${action.recipientAgentId}`,
                   action.reasonProse,
+                  ctx,
+                  opts?.observability,
                 ),
               );
             }
@@ -700,6 +804,8 @@ export function createActionExecutor(opts?: {
                 'external.promotion.issue.stub',
                 `Issue promotion to ${action.recipientAgentId}`,
                 action.reasonProse,
+                ctx,
+                opts?.observability,
               ),
             );
           }
@@ -713,7 +819,7 @@ export function createActionExecutor(opts?: {
         }
         case 'EscalateToHuman': {
           const messageId = makeId('msg', context.nowIso, Math.random().toString(36).slice(2, 10));
-          await context.stateStore.saveMessage({
+          await saveMessageObserved({
             id: messageId,
             meshId: context.agent.meshId,
             fromType: 'AGENT',
@@ -776,7 +882,7 @@ export function createActionExecutor(opts?: {
           const reviewTaskId = makeId('bl', context.nowIso, Math.random().toString(36).slice(2, 10));
           const invocationId = makeId('breakglass', context.nowIso, Math.random().toString(36).slice(2, 10));
 
-          await context.stateStore.saveCapabilityGrant({
+          await saveGrantObserved({
             id: grantId,
             meshId: context.agent.meshId,
             recipientType: 'AGENT',
@@ -837,7 +943,7 @@ export function createActionExecutor(opts?: {
           });
 
           const reviewMessageId = makeId('msg', context.nowIso, Math.random().toString(36).slice(2, 10));
-          await context.stateStore.saveMessage({
+          await saveMessageObserved({
             id: reviewMessageId,
             meshId: context.agent.meshId,
             fromType: 'AGENT',
@@ -870,6 +976,7 @@ export function createActionExecutor(opts?: {
               ctx,
               opts.sessionProvider,
               externalActionAdapter,
+              opts?.observability,
             );
             if (externalResult) {
               createdOutboundRecordIds.push(externalResult.recordId);
@@ -880,6 +987,8 @@ export function createActionExecutor(opts?: {
                   'external.breakglass.invoke.stub',
                   action.emergencyReasonProse,
                   `breakglass:${invocationId}`,
+                  ctx,
+                  opts?.observability,
                 ),
               );
             }
@@ -890,6 +999,8 @@ export function createActionExecutor(opts?: {
                 'external.breakglass.invoke.stub',
                 action.emergencyReasonProse,
                 `breakglass:${invocationId}`,
+                ctx,
+                opts?.observability,
               ),
             );
           }
@@ -943,6 +1054,27 @@ export function createActionExecutor(opts?: {
           };
         }
       }
+        },
+      ).then((result) => {
+        runLogger?.recordStep(ctx.executionId, {
+          type: 'action',
+          name: action.type,
+          startTime: executeStart,
+          endTime: Date.now(),
+          input: {
+            tickId: context.tickId,
+            agentId: context.agent.id,
+            actionType: action.type,
+          },
+          output: {
+            status: result.status,
+            summaryProse: result.summaryProse,
+            createdMessageCount: result.createdMessageIds.length,
+            createdOutboundCount: result.createdOutboundRecordIds.length,
+          },
+        });
+        return result;
+      });
     },
   };
 }

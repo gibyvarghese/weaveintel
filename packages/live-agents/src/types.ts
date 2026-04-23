@@ -1,6 +1,10 @@
 import type {
   ExecutionContext,
   AccessTokenResolver,
+  Tracer,
+  RunLog,
+  StepLog,
+  Model,
   MCPToolCallRequest,
   MCPToolCallResponse,
   MCPToolDefinition,
@@ -583,9 +587,23 @@ export interface Heartbeat {
   stop(): Promise<void>;
 }
 
+export interface LiveAgentsRunLogger {
+  startRun(executionId: string, startTime?: number): void;
+  recordStep(executionId: string, step: Omit<StepLog, 'index'>): void;
+  completeRun(executionId: string, status: RunLog['status'], endTime?: number): void;
+  getRunLog(executionId: string): RunLog | null;
+  listRunLogs(): RunLog[];
+}
+
+export interface LiveAgentsObservability {
+  tracer?: Tracer;
+  runLogger?: LiveAgentsRunLogger;
+}
+
 export interface HeartbeatRunOptions {
   leaseDurationMs?: number;
   runPollIntervalMs?: number;
+  observability?: LiveAgentsObservability;
   shouldPauseAgent?: (args: {
     ctx: ExecutionContext;
     contract: AgentContract | null;
@@ -735,4 +753,10 @@ export interface ActionExecutionResult {
 
 export interface ActionExecutor {
   execute(action: AttentionAction, context: ActionExecutionContext, ctx: ExecutionContext): Promise<ActionExecutionResult>;
+}
+
+export interface ReplayLiveAgentsRunOptions {
+  model?: Model;
+  preserveTiming?: boolean;
+  timeoutMs?: number;
 }

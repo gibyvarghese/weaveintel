@@ -21,6 +21,8 @@
   },
   "dependencies": {
     "@weaveintel/core": "*",
+    "@weaveintel/observability": "*",
+    "@weaveintel/replay": "*",
     "@weaveintel/memory": "*",
     "@weaveintel/mcp-client": "*",
     "@weaveintel/identity": "*"

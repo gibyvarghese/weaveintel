@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AccessTokenResolver } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { weaveInMemoryTracer } from '@weaveintel/observability';
 import { weaveFakeTransport } from '@weaveintel/testing';
 import {
   BreakGlassPolicyViolationError,
@@ -11,6 +12,8 @@ import {
   createCompressionMaintainer,
   createExternalEventHandler,
   GrantAuthorityViolationError,
+  createLiveAgentsRunLogger,
+  replayLiveAgentsRun,
   createLiveAgentsRuntime,
   createMcpAccountSessionProvider,
   InvalidAccountBindingError,
@@ -2372,6 +2375,235 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
         weaveContext({ userId: 'human:admin-1' }),
       ),
     ).rejects.toBeInstanceOf(ContractAuthorityViolationError);
+  });
+
+  it('phase 13 emits spans for tick, action, message, grant, promotion, outbound, and event flows', async () => {
+    const tracer = weaveInMemoryTracer();
+    const runLogger = createLiveAgentsRunLogger();
+    const store = weaveInMemoryStateStore();
+    const now = '2025-01-01T00:00:00.000Z';
+    const ctx = weaveContext({ userId: 'human:admin-1' });
+
+    await store.saveAgent({
+      id: 'agent-phase13-1',
+      meshId: 'mesh-phase13-1',
+      name: 'Phase13 Agent',
+      role: 'Coordinator',
+      contractVersionId: 'contract-phase13-1',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-phase13-1',
+      agentId: 'agent-phase13-1',
+      version: 1,
+      persona: 'Coordinator',
+      objectives: 'Produce observability signals',
+      successIndicators: 'Trace spans are emitted',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 10,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: {
+        mayIssueKinds: ['AUTHORITY_EXTENSION'],
+        scopePredicate: 'same mesh',
+        maxBudgetIncreaseUsd: null,
+        requiresEvidence: false,
+        dualControl: false,
+      },
+      contractAuthority: {
+        canIssueContracts: true,
+        canIssuePromotions: true,
+        scopePredicate: 'same mesh',
+        requiresEvidence: false,
+      },
+      breakGlass: null,
+      accountBindingRefs: [],
+      attentionPolicyRef: 'phase13',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+    await store.saveAgent({
+      id: 'agent-phase13-2',
+      meshId: 'mesh-phase13-1',
+      name: 'Phase13 Recipient',
+      role: 'Operator',
+      contractVersionId: 'contract-phase13-2',
+      status: 'ACTIVE',
+      createdAt: now,
+      archivedAt: null,
+    });
+    await store.saveContract({
+      id: 'contract-phase13-2',
+      agentId: 'agent-phase13-2',
+      version: 1,
+      persona: 'Operator',
+      objectives: 'Receive promotions',
+      successIndicators: 'Receives valid updates',
+      budget: {
+        monthlyUsdCap: 100,
+        perActionUsdCap: 10,
+      },
+      workingHoursSchedule: {
+        timezone: 'UTC',
+        cronActive: '* * * * *',
+      },
+      grantAuthority: null,
+      contractAuthority: null,
+      breakGlass: null,
+      accountBindingRefs: [],
+      attentionPolicyRef: 'phase13',
+      reviewCadence: 'P1D',
+      contextPolicy: {
+        compressors: [],
+        weighting: [],
+        budgets: {
+          attentionTokensMax: 1000,
+          actionTokensMax: 1000,
+          handoffTokensMax: 500,
+          reportTokensMax: 500,
+          monthlyCompressionUsdCap: 10,
+        },
+        defaultsProfile: 'standard',
+      },
+      createdAt: now,
+    });
+    await store.saveHeartbeatTick({
+      id: 'tick-phase13-1',
+      agentId: 'agent-phase13-1',
+      scheduledFor: now,
+      pickedUpAt: null,
+      completedAt: null,
+      workerId: 'scheduler',
+      leaseExpiresAt: null,
+      actionChosen: null,
+      actionOutcomeProse: null,
+      actionOutcomeStatus: null,
+      status: 'SCHEDULED',
+    });
+    await store.saveEventRoute({
+      id: 'route-phase13-1',
+      meshId: 'mesh-phase13-1',
+      accountId: 'account-phase13-1',
+      matchDescriptionProse: 'All ticket updates',
+      matchExpr: 'sourceType:ticket.updated',
+      targetType: 'AGENT',
+      targetId: 'agent-phase13-1',
+      targetTopic: 'ticket',
+      priorityOverride: 'NORMAL',
+      enabled: true,
+      createdAt: now,
+    });
+
+    const actionExecutor = createActionExecutor({
+      observability: { tracer, runLogger },
+    });
+    const heartbeat = createHeartbeat({
+      stateStore: store,
+      workerId: 'worker-phase13',
+      concurrency: 1,
+      now: () => now,
+      attentionPolicy: {
+        key: 'phase13',
+        async decide() {
+          return {
+            type: 'IssuePromotion',
+            recipientAgentId: 'agent-phase13-2',
+            newContractDraft: {
+              role: 'Senior Operator',
+              objectives: 'Lead operations',
+              successIndicators: 'SLA remains healthy',
+            },
+            reasonProse: 'Promotion due to strong delivery',
+          } as const;
+        },
+      },
+      actionExecutor,
+      runOptions: {
+        observability: { tracer, runLogger },
+      },
+    });
+
+    await heartbeat.tick(ctx);
+
+    const handler = createExternalEventHandler({
+      stateStore: store,
+      observability: { tracer, runLogger },
+    });
+    await handler.process(
+      {
+        id: 'evt-phase13-1',
+        accountId: 'account-phase13-1',
+        sourceType: 'ticket.updated',
+        sourceRef: 'ticket-1',
+        receivedAt: now,
+        payloadSummary: 'Ticket moved to in-progress',
+        payloadContextRef: 'mcp://ticket/1',
+        processedAt: null,
+        producedMessageIds: [],
+        processingStatus: 'RECEIVED',
+        error: null,
+      },
+      ctx,
+    );
+
+    const spanNames = tracer.spans.map((span) => span.name);
+    expect(spanNames).toContain('live_agents.heartbeat.tick');
+    expect(spanNames).toContain('live_agents.heartbeat.process_tick');
+    expect(spanNames).toContain('live_agents.action.execute');
+    expect(spanNames).toContain('live_agents.message.save');
+    expect(spanNames).toContain('live_agents.promotion.save');
+    expect(spanNames).toContain('live_agents.outbound.save');
+    expect(spanNames).toContain('live_agents.external_event.process');
+    expect(spanNames).toContain('live_agents.external_event.save');
+  });
+
+  it('phase 13 replays live-agent run logs deterministically', async () => {
+    const runLogger = createLiveAgentsRunLogger();
+    const executionId = 'phase13-replay-run';
+    runLogger.startRun(executionId, Date.now());
+    runLogger.recordStep(executionId, {
+      type: 'tick-loop',
+      name: 'claim-and-process',
+      startTime: Date.now(),
+      endTime: Date.now() + 1,
+      input: { workerId: 'worker-phase13', concurrency: 1 },
+      output: { claimedCount: 1 },
+    });
+    runLogger.recordStep(executionId, {
+      type: 'action',
+      name: 'IssuePromotion',
+      startTime: Date.now() + 2,
+      endTime: Date.now() + 3,
+      input: { agentId: 'agent-phase13-1', tickId: 'tick-phase13-1' },
+      output: { status: 'SUCCESS', createdOutboundCount: 1 },
+    });
+    runLogger.completeRun(executionId, 'completed', Date.now() + 4);
+
+    const runLog = runLogger.getRunLog(executionId);
+    expect(runLog).not.toBeNull();
+
+    const result = await replayLiveAgentsRun(weaveContext({ userId: 'human:admin-1' }), runLog!);
+    expect(result.status).toBe('completed');
+    expect(result.matchRate).toBe(1);
+    expect(result.steps).toHaveLength(2);
   });
 });
 

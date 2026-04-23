@@ -32,6 +32,8 @@ export type {
   ExternalEvent,
   ExternalEventHandler,
   Heartbeat,
+  LiveAgentsObservability,
+  LiveAgentsRunLogger,
   HeartbeatTick,
   InMemoryStateStore,
   LiveAgent,
@@ -51,6 +53,7 @@ export type {
   Promotion,
   PromotionRequest,
   Recipient,
+  ReplayLiveAgentsRunOptions,
   RedisStateStore,
   StateStore,
   Team,
@@ -67,6 +70,11 @@ export {
 export { createStandardAttentionPolicy } from './attention.js';
 export { createActionExecutor } from './action-executor.js';
 export { createMcpAccountSessionProvider } from './mcp-session-provider.js';
+export {
+  InMemoryLiveAgentsRunLogger,
+  createLiveAgentsRunLogger,
+  replayLiveAgentsRun,
+} from './replay.js';
 
 export {
   weaveInMemoryStateStore,
