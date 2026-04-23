@@ -39,6 +39,7 @@ async function runPhase7Scenario(label: string, persistence: Phase7RuntimePersis
   });
 
   // 1) Produce spans via the observability package and persist them.
+  // This demonstrates telemetry parity: trace artefacts now survive process restarts.
   const tracer = weaveInMemoryTracer();
   await tracer.withSpan(ctx, `${label}:root-span`, async () => {
     return Promise.resolve();
@@ -53,6 +54,7 @@ async function runPhase7Scenario(label: string, persistence: Phase7RuntimePersis
   }
 
   // 2) Produce a replay result and persist a replay checkpoint reference.
+  // We attach replay status/match metadata so operators can inspect replay health.
   const replay = createReplayEngine();
   const replayResult = await replay.replay(ctx, {
     executionId: ctx.executionId,
@@ -94,6 +96,7 @@ async function runPhase7Scenario(label: string, persistence: Phase7RuntimePersis
   });
 
   // 3) Run an eval suite and persist eval metadata.
+  // This keeps both aggregate score and case-level details available for auditing.
   const evalRunner = weaveEvalRunner({
     async executor(_execCtx, input) {
       return { output: String(input['prompt'] ?? '') };
@@ -127,6 +130,7 @@ async function runPhase7Scenario(label: string, persistence: Phase7RuntimePersis
   });
 
   // 4) Verify persisted artefacts for this execution.
+  // These assertions are intentionally strict because this file is an E2E smoke test.
   const spans = await persistence.listTraceSpans(ctx, { executionId: ctx.executionId });
   const checkpoint = await persistence.loadLatestReplayCheckpoint(ctx, `${label}-run`);
   const evalRuns = await persistence.listEvalSuiteRuns(ctx, { executionId: ctx.executionId });

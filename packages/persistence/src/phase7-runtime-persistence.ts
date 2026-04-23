@@ -79,7 +79,12 @@ export interface Phase7RuntimePersistence {
 export function createPhase7RuntimePersistence(
   options: Phase7RuntimePersistenceOptions,
 ): Phase7RuntimePersistence {
+  // We intentionally reuse the configured memory-store backend layer from Phase 6.
+  // This gives Phase 7 the same backend matrix (in-memory/postgres/redis/sqlite/
+  // mongodb/cloud-nosql) without duplicating backend clients in this package.
   const store = createConfiguredMemoryStore(options);
+  // Namespace lets operators isolate multiple app environments that share one DB.
+  // Example: "staging" and "prod" can write to the same table safely.
   const namespace = options.namespace ?? 'default';
 
   function nowIso(): string {
@@ -100,6 +105,9 @@ export function createPhase7RuntimePersistence(
       metadata: Record<string, unknown>;
     },
   ): MemoryEntry {
+    // Every persisted artefact becomes a normal MemoryEntry with a strongly-tagged
+    // category + namespace. This keeps Phase 7 records queryable through existing
+    // memory-store APIs while preserving strict filtering semantics.
     return {
       id: args.id,
       type: PHASE7_ENTRY_TYPE,
@@ -119,6 +127,9 @@ export function createPhase7RuntimePersistence(
     ctx: ExecutionContext,
     category: string,
   ): Promise<MemoryEntry[]> {
+    // Query once, then filter in-process by category/namespace to keep behavior
+    // backend-agnostic. Backends differ in query capabilities, but this path keeps
+    // correctness deterministic across all adapters.
     const rows = await store.query(ctx, {
       type: PHASE7_ENTRY_TYPE,
       topK: DEFAULT_TOP_K,
@@ -140,6 +151,8 @@ export function createPhase7RuntimePersistence(
 
   return {
     async saveTraceSpan(ctx, input): Promise<string> {
+      // Trace records persist the raw SpanRecord payload; executionId + traceId are
+      // duplicated into metadata for fast filtering without JSON parsing.
       const id = input.id ?? randomId('trace');
       const createdAt = input.createdAt ?? nowIso();
       const entry = createEntry(ctx, {
@@ -176,6 +189,8 @@ export function createPhase7RuntimePersistence(
     },
 
     async saveReplayCheckpoint(ctx, input): Promise<string> {
+      // Replay checkpoints are stored as full workflow checkpoint objects so run
+      // recovery can rehydrate exact checkpoint state after process restarts.
       const id = input.id ?? randomId('replay');
       const createdAt = input.createdAt ?? nowIso();
       const entry = createEntry(ctx, {
@@ -195,6 +210,8 @@ export function createPhase7RuntimePersistence(
 
     async loadLatestReplayCheckpoint(ctx, runId): Promise<PersistedReplayCheckpoint | null> {
       const rows = await listPhase7Entries(ctx, REPLAY_CATEGORY);
+      // "Latest" is defined by createdAt descending, which keeps behavior stable
+      // even when backends do not support server-side ordering for JSON payloads.
       const matches = rows
         .filter((row) => String(row.metadata['runId'] ?? '') === runId)
         .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -212,6 +229,8 @@ export function createPhase7RuntimePersistence(
     },
 
     async saveEvalSuiteRun(ctx, input): Promise<string> {
+      // Eval suite results are preserved in full to retain case-level diagnostics.
+      // This enables post-run audits and trend analysis without re-executing suites.
       const id = input.id ?? randomId('eval');
       const createdAt = input.createdAt ?? nowIso();
       const entry = createEntry(ctx, {
@@ -248,6 +267,7 @@ export function createPhase7RuntimePersistence(
     },
 
     async close(): Promise<void> {
+      // Always close the underlying store to release DB pools/clients where needed.
       await store.close();
     },
   };
