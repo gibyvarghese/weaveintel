@@ -3,7 +3,7 @@
  *
  * Encrypts / decrypts website credentials at rest.  Each row uses a
  * unique random IV.  The master key is derived from the VAULT_KEY
- * environment variable (or falls back to JWT_SECRET for dev).
+ * environment variable.
  */
 
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
@@ -18,8 +18,8 @@ let _derived: Buffer | null = null;
 
 function deriveKey(): Buffer {
   if (_derived) return _derived;
-  const master = process.env['VAULT_KEY'] ?? process.env['JWT_SECRET'];
-  if (!master) throw new Error('VAULT_KEY (or JWT_SECRET) must be set for credential encryption');
+  const master = process.env['VAULT_KEY'];
+  if (!master) throw new Error('VAULT_KEY must be set for credential encryption');
   _derived = scryptSync(master, SALT, KEY_LEN);
   return _derived;
 }

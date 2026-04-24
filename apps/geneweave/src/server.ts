@@ -8,7 +8,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { readFile as fsReadFile } from 'node:fs/promises';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseAdapter } from './db.js';
 import type { ChatEngine } from './chat.js';
@@ -2366,12 +2366,22 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
   router.get('/api/password-providers', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    if (process.env['NODE_ENV'] === 'production') { json(res, 404, { error: 'Not found' }); return; }
+    if (!canPersonaAccess(auth.persona, 'admin:platform:write')) {
+      json(res, 403, { error: 'Missing permission: admin:platform:write' });
+      return;
+    }
     const statuses = await checkAllProviders();
     json(res, 200, statuses);
   }, { auth: true });
 
   router.post('/api/password-providers/import', async (req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    if (process.env['NODE_ENV'] === 'production') { json(res, 404, { error: 'Not found' }); return; }
+    if (!canPersonaAccess(auth.persona, 'admin:platform:write')) {
+      json(res, 403, { error: 'Missing permission: admin:platform:write' });
+      return;
+    }
     const raw = await readBody(req);
     let body: { provider: string; config?: Record<string, string>; search?: string };
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
@@ -2637,6 +2647,8 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     join(process.cwd(), 'avatars'),
   ];
   const distDir = join(__dirname, '..', 'dist');
+  const distDirResolved = resolve(distDir);
+  const staticModuleExtensions = new Set(['.js', '.css', '.map']);
   // ── HTTP server ────────────────────────────────────────────
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -2653,8 +2665,6 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     const pathname = url.pathname;
     const method = req.method ?? 'GET';
 
-    console.log(`[DEBUG] Request: ${method} ${pathname}`);
-
     // Serve UI module files (but NOT admin-schema.js - it's embedded in HTML)
     if ((method === 'GET' || method === 'HEAD') && pathname.match(/^\/(?:ui(?:\/|\.)|features\/)/)) {
       // Map /ui.js to /ui-client.js (client-side only module)
@@ -2662,10 +2672,42 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       if (filename === 'ui.js') {
         filename = 'ui-client.js';
       }
-      const filepath = join(distDir, filename);
+
+      let decodedFilename = filename;
+      try {
+        decodedFilename = decodeURIComponent(filename);
+      } catch {
+        json(res, 404, { error: 'Not found' });
+        return;
+      }
+
+      const hasInvalidSegment = decodedFilename
+        .split('/')
+        .some((segment) => segment === '..' || segment.includes('\0'));
+      if (hasInvalidSegment) {
+        json(res, 404, { error: 'Not found' });
+        return;
+      }
+
+      const filepath = resolve(distDirResolved, decodedFilename);
+      if (!filepath.startsWith(distDirResolved + sep)) {
+        json(res, 404, { error: 'Not found' });
+        return;
+      }
+
+      const extension = extname(filepath);
+      if (!staticModuleExtensions.has(extension)) {
+        json(res, 404, { error: 'Not found' });
+        return;
+      }
+
       try {
         const data = await fsReadFile(filepath);
-        const contentType = filename.endsWith('.js') ? 'application/javascript' : 'application/json';
+        const contentType = extension === '.js'
+          ? 'application/javascript'
+          : extension === '.css'
+            ? 'text/css'
+            : 'application/json';
         res.writeHead(200, {
           'Content-Type': contentType + '; charset=utf-8',
           'Content-Length': data.length,
