@@ -113,35 +113,44 @@ class Router {
 
 // ─── Helpers ─────────────────────────────────────────────────
 
-async function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let size = 0;
-    const maxFromEnv = Number.parseInt(process.env['GENEWEAVE_MAX_REQUEST_BODY_BYTES'] ?? '', 10);
-    const MAX = Number.isFinite(maxFromEnv) && maxFromEnv > 0
-      ? maxFromEnv
-      : 50 * 1024 * 1024; // 50 MB default to support attachment payloads.
-    let tooLarge = false;
+async function readBody(req: IncomingMessage, opts?: { maxBytes?: number }): Promise<string> {
+  const release = await acquireBodyReadSlot();
+  try {
+    return await new Promise((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      const maxFromEnv = Number.parseInt(process.env['GENEWEAVE_MAX_REQUEST_BODY_BYTES'] ?? '', 10);
+      const maxBytes = opts?.maxBytes;
+      const MAX = Number.isFinite(maxBytes) && maxBytes && maxBytes > 0
+        ? maxBytes
+        : Number.isFinite(maxFromEnv) && maxFromEnv > 0
+          ? maxFromEnv
+          : DEFAULT_REQUEST_BODY_BYTES;
+      let tooLarge = false;
 
-    req.on('data', (chunk: Buffer) => {
-      if (tooLarge) return;
-      size += chunk.length;
-      if (size > MAX) {
-        tooLarge = true;
-        return;
-      }
-      chunks.push(chunk);
-    });
+      req.on('data', (chunk: Buffer) => {
+        if (tooLarge) return;
+        size += chunk.length;
+        if (size > MAX) {
+          tooLarge = true;
+          req.resume();
+          return;
+        }
+        chunks.push(chunk);
+      });
 
-    req.on('end', () => {
-      if (tooLarge) {
-        reject(new Error('Request body too large'));
-        return;
-      }
-      resolve(Buffer.concat(chunks).toString());
+      req.on('end', () => {
+        if (tooLarge) {
+          reject(new Error('Request body too large'));
+          return;
+        }
+        resolve(Buffer.concat(chunks).toString());
+      });
+      req.on('error', reject);
     });
-    req.on('error', reject);
-  });
+  } finally {
+    release();
+  }
 }
 
 function json(res: ServerResponse, status: number, data: unknown): void {
@@ -173,9 +182,41 @@ const REGISTER_EMAIL_LIMIT = envInt('GENEWEAVE_REGISTER_EMAIL_LIMIT', IS_TEST_EN
 const LOGIN_IP_LIMIT = envInt('GENEWEAVE_LOGIN_IP_LIMIT', IS_TEST_ENV ? 2_000 : 25);
 const LOGIN_EMAIL_LIMIT = envInt('GENEWEAVE_LOGIN_EMAIL_LIMIT', IS_TEST_ENV ? 1_000 : 10);
 const LOGIN_MAX_BACKOFF_MS = envInt('GENEWEAVE_LOGIN_MAX_BACKOFF_MS', IS_TEST_ENV ? 0 : 5 * 60_000);
+const DEFAULT_REQUEST_BODY_BYTES = envInt('GENEWEAVE_DEFAULT_REQUEST_BODY_BYTES', IS_TEST_ENV ? 20 * 1024 * 1024 : 2 * 1024 * 1024);
+const MAX_CONCURRENT_BODY_READS = envInt('GENEWEAVE_MAX_CONCURRENT_BODY_READS', IS_TEST_ENV ? 200 : 24);
+const MAX_QUEUED_BODY_READS = envInt('GENEWEAVE_MAX_QUEUED_BODY_READS', IS_TEST_ENV ? 5_000 : 512);
+const LARGE_REQUEST_BODY_BYTES = envInt('GENEWEAVE_LARGE_REQUEST_BODY_BYTES', 50 * 1024 * 1024);
+const SERVER_REQUEST_TIMEOUT_MS = envInt('GENEWEAVE_SERVER_REQUEST_TIMEOUT_MS', 30_000);
+const SERVER_HEADERS_TIMEOUT_MS = envInt('GENEWEAVE_SERVER_HEADERS_TIMEOUT_MS', 10_000);
+const SERVER_KEEP_ALIVE_TIMEOUT_MS = envInt('GENEWEAVE_SERVER_KEEPALIVE_TIMEOUT_MS', 5_000);
+const SERVER_MAX_HEADERS_COUNT = envInt('GENEWEAVE_SERVER_MAX_HEADERS_COUNT', 100);
+const SERVER_MAX_REQUESTS_PER_SOCKET = envInt('GENEWEAVE_SERVER_MAX_REQUESTS_PER_SOCKET', 100);
 
 const authRateStates = new Map<string, AuthRateState>();
 const loginFailureStates = new Map<string, LoginFailureState>();
+let activeBodyReads = 0;
+const bodyReadWaiters: Array<() => void> = [];
+
+function releaseBodyReadSlot(): void {
+  if (activeBodyReads > 0) activeBodyReads -= 1;
+  const next = bodyReadWaiters.shift();
+  if (next) next();
+}
+
+async function acquireBodyReadSlot(): Promise<() => void> {
+  if (activeBodyReads < MAX_CONCURRENT_BODY_READS) {
+    activeBodyReads += 1;
+    return releaseBodyReadSlot;
+  }
+  if (bodyReadWaiters.length >= MAX_QUEUED_BODY_READS) {
+    throw new Error('Too many concurrent request bodies');
+  }
+  await new Promise<void>((resolve) => {
+    bodyReadWaiters.push(resolve);
+  });
+  activeBodyReads += 1;
+  return releaseBodyReadSlot;
+}
 
 function cleanupAuthRateState(now: number): void {
   for (const [key, state] of authRateStates.entries()) {
@@ -311,28 +352,7 @@ async function ensureAtLeastOneTenantAdmin(db: DatabaseAdapter, preferredUserId?
   await db.updateUserPersona(fallback.id, 'tenant_admin');
 }
 
-// ─── OAuth Flow State (in-memory, production should use Redis) ──────────
-
 const oauthClient = new OAuthClient();
-const oauthStateStore = new Map<string, { userId: string | null; provider: OAuthProviderName; expiresAt: number }>();
-
-function setOAuthState(state: string, value: { userId: string | null; provider: OAuthProviderName; expiresAt: number }): void {
-  oauthStateStore.set(state, value);
-}
-
-function getOAuthState(state: string): { userId: string | null; provider: OAuthProviderName; expiresAt: number } | null {
-  const found = oauthStateStore.get(state);
-  if (!found) return null;
-  if (Date.now() > found.expiresAt) {
-    oauthStateStore.delete(state);
-    return null;
-  }
-  return found;
-}
-
-function deleteOAuthState(state: string): void {
-  oauthStateStore.delete(state);
-}
 
 function normalizePublicOrigin(value: string): string {
   const parsed = new URL(value);
@@ -355,14 +375,6 @@ function buildOAuthProviderFromRequest(provider: OAuthProviderName, req: Incomin
   if (!clientId || !clientSecret) throw new Error(`${provider} credentials not configured`);
   return createOAuthProvider(provider, clientId, clientSecret, redirectUri);
 }
-
-const oauthStateCleanupTimer = setInterval(() => {
-  const now = Date.now();
-  for (const [key, value] of oauthStateStore.entries()) {
-    if (now > value.expiresAt) oauthStateStore.delete(key);
-  }
-}, 60_000);
-oauthStateCleanupTimer.unref?.();
 
 // ─── Server factory ─────────────────────────────────────────
 
@@ -387,6 +399,33 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   const dashboard = new DashboardService(db);
   const router = new Router();
   const uiHtml = getHTML();
+
+  async function setOAuthState(state: string, value: { userId: string | null; provider: OAuthProviderName; expiresAt: number }): Promise<void> {
+    await db.createOAuthFlowState({
+      id: randomUUID(),
+      state_key: state,
+      user_id: value.userId,
+      provider: value.provider,
+      expires_at: new Date(value.expiresAt).toISOString(),
+    });
+  }
+
+  async function consumeOAuthState(state: string): Promise<{ userId: string | null; provider: OAuthProviderName; expiresAt: number } | null> {
+    const found = await db.consumeOAuthFlowStateByKey(state);
+    if (!found) return null;
+    return {
+      userId: found.user_id,
+      provider: found.provider as OAuthProviderName,
+      expiresAt: Date.parse(found.expires_at),
+    };
+  }
+
+  const oauthStateCleanupTimer = setInterval(() => {
+    void db.deleteExpiredOAuthFlowStates().catch(() => {
+      // Best effort cleanup only.
+    });
+  }, 60_000);
+  oauthStateCleanupTimer.unref?.();
 
   // ── Auth routes ────────────────────────────────────────
 
@@ -598,7 +637,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       const state = randomUUID();
       const oauthProvider = buildOAuthProviderFromRequest(provider, req);
       const { authUrl } = await oauthClient.generateAuthorizationUrl(oauthProvider, state);
-      setOAuthState(state, { userId: auth?.userId ?? null, provider, expiresAt: Date.now() + 600_000 });
+      await setOAuthState(state, { userId: auth?.userId ?? null, provider, expiresAt: Date.now() + 600_000 });
       json(res, 200, { authUrl });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -613,7 +652,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     if (error) { json(res, 400, { error: `OAuth error: ${error}` }); return; }
     if (!code || !state) { json(res, 400, { error: 'Missing code or state' }); return; }
 
-    const stateData = getOAuthState(state);
+    const stateData = await consumeOAuthState(state);
     if (!stateData) { json(res, 400, { error: 'Invalid or expired state' }); return; }
     if (Date.now() > stateData.expiresAt) { json(res, 400, { error: 'State expired' }); return; }
 
@@ -682,8 +721,6 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       );
     } catch (err) {
       json(res, 500, { error: `Failed to link account: ${(err as Error).message}` });
-    } finally {
-      deleteOAuthState(state);
     }
   };
 
@@ -921,7 +958,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     const chat = await db.getChat(params['chatId']!, auth.userId);
     if (!chat) { json(res, 404, { error: 'Chat not found' }); return; }
 
-    const raw = await readBody(req);
+    const raw = await readBody(req, { maxBytes: LARGE_REQUEST_BODY_BYTES });
     let body: {
       content?: string;
       stream?: boolean;
@@ -2718,7 +2755,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     const { getCSE, isCSEEnabled } = await import('./cse.js');
     if (!isCSEEnabled()) { json(res, 503, { error: 'CSE is not configured' }); return; }
 
-    const raw = await readBody(req);
+    const raw = await readBody(req, { maxBytes: LARGE_REQUEST_BODY_BYTES });
     let body: Record<string, unknown>;
     try {
       body = JSON.parse(raw) as Record<string, unknown>;
@@ -2912,6 +2949,8 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
         if (!res.headersSent) {
           if (msg === 'Request body too large') {
             json(res, 413, { error: 'Request body too large' });
+          } else if (msg === 'Too many concurrent request bodies') {
+            json(res, 503, { error: 'Server is busy reading other requests. Please retry shortly.' });
           } else {
             json(res, 500, { error: 'Internal server error', correlationId });
           }
@@ -2954,6 +2993,12 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
     json(res, 404, { error: 'Not found' });
   });
+
+  server.requestTimeout = SERVER_REQUEST_TIMEOUT_MS;
+  server.headersTimeout = SERVER_HEADERS_TIMEOUT_MS;
+  server.keepAliveTimeout = SERVER_KEEP_ALIVE_TIMEOUT_MS;
+  server.maxHeadersCount = SERVER_MAX_HEADERS_COUNT;
+  server.maxRequestsPerSocket = SERVER_MAX_REQUESTS_PER_SOCKET;
 
   return server;
 }

@@ -28,6 +28,7 @@ import type {
   ScaffoldTemplateRow, RecipeConfigRow, WidgetConfigRow, ValidationRuleRow,
   SemanticMemoryRow, EntityMemoryRow,
   IdempotencyRecordRow,
+  OAuthFlowStateRow,
   MemoryExtractionEventRow,
   MetricsSummary, WorkflowRunRow, GuardrailEvalRow, ModelPricingRow,
   WebsiteCredentialRow,
@@ -224,6 +225,43 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async clearIdempotencyRecords(): Promise<void> {
     this.d.prepare('DELETE FROM idempotency_records').run();
+  }
+
+  async createOAuthFlowState(state: Omit<OAuthFlowStateRow, 'created_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO oauth_flow_states (id, state_key, user_id, provider, expires_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(state_key) DO UPDATE SET
+         id = excluded.id,
+         user_id = excluded.user_id,
+         provider = excluded.provider,
+         expires_at = excluded.expires_at`,
+    ).run(state.id, state.state_key, state.user_id ?? null, state.provider, state.expires_at);
+  }
+
+  async consumeOAuthFlowStateByKey(stateKey: string): Promise<OAuthFlowStateRow | null> {
+    const tx = this.d.transaction((key: string) => {
+      const row = this.d.prepare(
+        `SELECT * FROM oauth_flow_states
+         WHERE state_key = ? AND expires_at > datetime('now')`,
+      ).get(key) as OAuthFlowStateRow | undefined;
+      if (!row) return null;
+      this.d.prepare('DELETE FROM oauth_flow_states WHERE state_key = ?').run(key);
+      return row;
+    });
+    return tx(stateKey);
+  }
+
+  async deleteOAuthFlowStateByKey(stateKey: string): Promise<void> {
+    this.d.prepare('DELETE FROM oauth_flow_states WHERE state_key = ?').run(stateKey);
+  }
+
+  async deleteExpiredOAuthFlowStates(nowIso?: string): Promise<void> {
+    if (nowIso) {
+      this.d.prepare('DELETE FROM oauth_flow_states WHERE expires_at <= ?').run(nowIso);
+      return;
+    }
+    this.d.prepare("DELETE FROM oauth_flow_states WHERE expires_at <= datetime('now')").run();
   }
 
   // ── OAuth Linked Accounts ──────────────────────────────────

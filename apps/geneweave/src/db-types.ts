@@ -598,6 +598,15 @@ export interface IdempotencyRecordRow {
   created_at: string;
 }
 
+export interface OAuthFlowStateRow {
+  id: string;
+  state_key: string;
+  user_id: string | null;
+  provider: string;
+  expires_at: string;
+  created_at: string;
+}
+
 export interface WorkerAgentRow {
   id: string;
   name: string;
@@ -1269,6 +1278,12 @@ export interface DatabaseAdapter {
   deleteExpiredIdempotencyRecords(nowIso?: string): Promise<void>;
   trimIdempotencyRecords(maxEntries: number): Promise<void>;
   clearIdempotencyRecords(): Promise<void>;
+
+  // OAuth flow state (authorization state nonce persistence)
+  createOAuthFlowState(state: Omit<OAuthFlowStateRow, 'created_at'>): Promise<void>;
+  consumeOAuthFlowStateByKey(stateKey: string): Promise<OAuthFlowStateRow | null>;
+  deleteOAuthFlowStateByKey(stateKey: string): Promise<void>;
+  deleteExpiredOAuthFlowStates(nowIso?: string): Promise<void>;
 
   // OAuth Linked Accounts
   createOAuthLinkedAccount(account: Omit<OAuthLinkedAccountRow, 'linked_at'>): Promise<void>;

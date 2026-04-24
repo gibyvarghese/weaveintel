@@ -42,6 +42,16 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   )`);
   safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_idempotency_expires_at ON idempotency_records(expires_at)');
 
+  safeExec(db, `CREATE TABLE IF NOT EXISTS oauth_flow_states (
+    id TEXT PRIMARY KEY,
+    state_key TEXT NOT NULL UNIQUE,
+    user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+    provider TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_oauth_flow_states_expires_at ON oauth_flow_states(expires_at)');
+
   safeExec(db, 'ALTER TABLE prompts ADD COLUMN key TEXT');
   safeExec(db, "ALTER TABLE prompts ADD COLUMN prompt_type TEXT NOT NULL DEFAULT 'template'");
   safeExec(db, 'ALTER TABLE prompts ADD COLUMN owner TEXT');
