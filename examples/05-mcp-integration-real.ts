@@ -7,19 +7,22 @@
  * the in-process fake transport.
  *
  * WeaveIntel packages used:
- *   @weaveintel/core          — ExecutionContext (passed through MCP tool calls)
+ *   @weaveintel/core          — ExecutionContext + weaveSetDefaultTracer for runtime tracing
  *   @weaveintel/mcp-server    — weaveMCPServer() creates an MCP-protocol server
  *   @weaveintel/mcp-client    — weaveMCPClient() connects to an MCP server;
  *                              weaveMCPTools() bridges MCP tools into weaveIntel
- *   @weaveintel/testing       — weaveRealMCPTransport() creates an HTTP-based
- *                              MCP server (replaces weaveFakeTransport)
+ *   @weaveintel/mcp-server    — weaveRealMCPTransport() creates an HTTP-based MCP server
+ *   @weaveintel/observability — weaveConsoleTracer() for default tracing across MCP calls
  */
-import { weaveContext } from '@weaveintel/core';
+import { weaveContext, weaveSetDefaultTracer } from '@weaveintel/core';
 import { weaveMCPClient, weaveMCPTools } from '@weaveintel/mcp-client';
 import { createMCPStreamableHttpTransport } from '@weaveintel/mcp-client';
-import { weaveRealMCPTransport } from '@weaveintel/testing';
+import { weaveRealMCPTransport } from '@weaveintel/mcp-server';
+import { weaveConsoleTracer } from '@weaveintel/observability';
 
 async function main() {
+  weaveSetDefaultTracer(weaveConsoleTracer());
+
   const ctx = weaveContext({ userId: 'demo-user' });
 
   // weaveRealMCPTransport() creates a real HTTP-based MCP server and returns

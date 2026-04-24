@@ -24,6 +24,8 @@
  */
 
 import type { Server } from 'node:http';
+import { weaveSetDefaultTracer } from '@weaveintel/core';
+import { weaveConsoleTracer } from '@weaveintel/observability';
 import { createDatabaseAdapter, type DatabaseAdapter, type DatabaseConfig } from './db.js';
 import { ChatEngine, type ProviderConfig } from './chat.js';
 import { createGeneWeaveServer } from './server.js';
@@ -89,6 +91,9 @@ export interface GeneWeaveApp {
  *  5. Returns a GeneWeaveApp handle with stop() for graceful shutdown
  */
 export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeaveApp> {
+  // Ensure cross-package runtime tracing is enabled by default for all execution paths.
+  weaveSetDefaultTracer(weaveConsoleTracer());
+
   const activeProviders = Object.fromEntries(
     Object.entries(config.providers).filter(([, provider]) => Boolean(provider?.apiKey?.trim())),
   );

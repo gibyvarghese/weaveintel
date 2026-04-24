@@ -234,6 +234,11 @@ export {
   type RunLog,
   type StepLog,
 } from './observability.js';
+export {
+  setDefaultTracer as weaveSetDefaultTracer,
+  getDefaultTracer as weaveGetDefaultTracer,
+  resolveTracer as weaveResolveTracer,
+} from './observability-runtime.js';
 
 // Admin capability schema helpers
 export {

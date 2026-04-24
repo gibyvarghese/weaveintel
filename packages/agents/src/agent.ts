@@ -34,7 +34,21 @@ import {
   weaveEvent,
   EventTypes,
   weaveToolRegistry,
+  weaveResolveTracer,
 } from '@weaveintel/core';
+
+async function withObservedSpan<T>(
+  ctx: ExecutionContext,
+  name: string,
+  attributes: Record<string, unknown>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const tracer = weaveResolveTracer(ctx);
+  if (!tracer) {
+    return fn();
+  }
+  return tracer.withSpan(ctx, name, () => fn(), attributes);
+}
 
 // ─── Agent builder ───────────────────────────────────────────
 
@@ -121,11 +135,16 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           eventBus?.emit(weaveEvent(EventTypes.AgentStepStart, { agent: config.name, stepIndex: stepIdx }, ctx));
 
           // Call model
-          const response = await model.generate(ctx, {
-            messages,
-            tools: toolDefs.length > 0 ? toolDefs : undefined,
-            toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
-          });
+          const response = await withObservedSpan(
+            ctx,
+            'agents.model.generate',
+            { agent: config.name, stepIndex: stepIdx, mode: 'run' },
+            () => model.generate(ctx, {
+              messages,
+              tools: toolDefs.length > 0 ? toolDefs : undefined,
+              toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
+            }),
+          );
 
           totalPromptTokens += response.usage.promptTokens;
           totalCompletionTokens += response.usage.completionTokens;
@@ -240,11 +259,16 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           let accToolCalls: ToolCall[] = [];
           let finalUsage = { prompt: 0, completion: 0 };
 
-          for await (const chunk of model.stream(ctx, {
-            messages,
-            tools: toolDefs.length > 0 ? toolDefs : undefined,
-            toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
-          })) {
+          for await (const chunk of await withObservedSpan(
+            ctx,
+            'agents.model.stream',
+            { agent: config.name, stepIndex: stepIdx, mode: 'stream' },
+            () => Promise.resolve(model.stream!(ctx, {
+              messages,
+              tools: toolDefs.length > 0 ? toolDefs : undefined,
+              toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
+            })),
+          )) {
             if (chunk.type === 'text' && chunk.text) {
               accText += chunk.text;
               yield { type: 'text_chunk', text: chunk.text };
@@ -303,11 +327,16 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         }
 
         // Non-streaming fallback
-        const response = await model.generate(ctx, {
-          messages,
-          tools: toolDefs.length > 0 ? toolDefs : undefined,
-          toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
-        });
+        const response = await withObservedSpan(
+          ctx,
+          'agents.model.generate',
+          { agent: config.name, stepIndex: stepIdx, mode: 'stream-fallback' },
+          () => model.generate(ctx, {
+            messages,
+            tools: toolDefs.length > 0 ? toolDefs : undefined,
+            toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
+          }),
+        );
 
         totalPromptTokens += response.usage.promptTokens;
         totalCompletionTokens += response.usage.completionTokens;
@@ -392,7 +421,12 @@ async function executeToolCall(
 
     try {
       const args = JSON.parse(tc.arguments);
-      const output = await tool.invoke(ctx, { name: toolName, arguments: args });
+      const output = await withObservedSpan(
+        ctx,
+        'agents.tool.invoke',
+        { agent: agentName, tool: toolName },
+        () => tool.invoke(ctx, { name: toolName, arguments: args }),
+      );
       resultContent = output.isError ? `Error: ${output.content}` : output.content;
     } catch (err) {
       resultContent = `Tool error: ${err instanceof Error ? err.message : String(err)}`;

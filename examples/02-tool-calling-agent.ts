@@ -17,13 +17,17 @@ import 'dotenv/config';
 import {
   weaveContext,
   weaveEventBus,
+  weaveSetDefaultTracer,
   weaveToolRegistry,
   weaveTool,
 } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
+import { weaveConsoleTracer } from '@weaveintel/observability';
 import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 
 async function main() {
+  weaveSetDefaultTracer(weaveConsoleTracer());
+
   const bus = weaveEventBus();
   const ctx = weaveContext({ userId: 'demo-user' });
 

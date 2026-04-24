@@ -1,4 +1,4 @@
-import type { ExecutionContext, MemoryEntry, WorkingMemory } from '@weaveintel/core';
+import { weaveResolveTracer, type ExecutionContext, type MemoryEntry, type WorkingMemory } from '@weaveintel/core';
 import {
   createCompressorRegistry,
   createContextAssembler,
@@ -24,6 +24,7 @@ import type {
 import { asStateStore } from './state-store.js';
 import { createStandardAttentionPolicy } from './attention.js';
 import { createActionExecutor } from './action-executor.js';
+import { createLiveAgentsRunLogger } from './replay.js';
 
 function makeId(prefix: string, nowIso: string, suffix: string): string {
   return `${prefix}_${Date.parse(nowIso)}_${suffix}`;
@@ -115,13 +116,18 @@ export function createHeartbeat(opts: {
   now?: () => string;
   runOptions?: HeartbeatRunOptions;
 }): Heartbeat {
+  const resolvedRunLogger = opts.runOptions?.observability?.runLogger ?? createLiveAgentsRunLogger();
+  const resolvedObservability = {
+    ...opts.runOptions?.observability,
+    runLogger: resolvedRunLogger,
+  };
   const attentionPolicy = opts.attentionPolicy ?? createStandardAttentionPolicy();
-  const actionExecutor = opts.actionExecutor ?? createActionExecutor({ observability: opts.runOptions?.observability });
+  const actionExecutor = opts.actionExecutor ?? createActionExecutor({ observability: resolvedObservability });
   const now = opts.now ?? (() => new Date().toISOString());
   const leaseDurationMs = Math.max(1, opts.runOptions?.leaseDurationMs ?? 30_000);
   const runPollIntervalMs = Math.max(1, opts.runOptions?.runPollIntervalMs ?? 100);
   const shouldPauseAgent = opts.runOptions?.shouldPauseAgent ?? defaultPauseEvaluator;
-  const observability = opts.runOptions?.observability;
+  const observability = resolvedObservability;
   let running = false;
 
   const withObservedSpan = <T>(
@@ -130,7 +136,7 @@ export function createHeartbeat(opts: {
     attributes: Record<string, unknown>,
     fn: () => Promise<T>,
   ): Promise<T> => {
-    const tracer = observability?.tracer;
+    const tracer = weaveResolveTracer(ctx, observability?.tracer);
     if (!tracer) {
       return fn();
     }
@@ -469,13 +475,17 @@ export function createExternalEventHandler(opts: {
   stateStore: StateStore;
   observability?: HeartbeatRunOptions['observability'];
 }): ExternalEventHandler {
+  const resolvedObservability = {
+    ...opts.observability,
+    runLogger: opts.observability?.runLogger ?? createLiveAgentsRunLogger(),
+  };
   const withObservedSpan = <T>(
     ctx: ExecutionContext,
     spanName: string,
     attributes: Record<string, unknown>,
     fn: () => Promise<T>,
   ): Promise<T> => {
-    const tracer = opts.observability?.tracer;
+    const tracer = weaveResolveTracer(ctx, resolvedObservability?.tracer);
     if (!tracer) {
       return fn();
     }
@@ -528,7 +538,7 @@ export function createExternalEventHandler(opts: {
 
   return {
     async process(event: ExternalEvent, ctx: ExecutionContext) {
-      opts.observability?.runLogger?.startRun(ctx.executionId);
+      resolvedObservability?.runLogger?.startRun(ctx.executionId);
       const eventStart = Date.now();
       return withObservedSpan(
         ctx,
@@ -621,7 +631,7 @@ export function createExternalEventHandler(opts: {
                 error: null,
               }),
             );
-            opts.observability?.runLogger?.recordStep(ctx.executionId, {
+            resolvedObservability?.runLogger?.recordStep(ctx.executionId, {
               type: 'external-event',
               name: event.sourceType,
               startTime: eventStart,
@@ -629,7 +639,7 @@ export function createExternalEventHandler(opts: {
               input: { eventId: event.id, sourceRef: event.sourceRef },
               output: { routedMessageCount: producedMessageIds.length },
             });
-            opts.observability?.runLogger?.completeRun(ctx.executionId, 'completed');
+            resolvedObservability?.runLogger?.completeRun(ctx.executionId, 'completed');
             return { routedMessageCount: producedMessageIds.length };
           } catch (error) {
             await withObservedSpan(

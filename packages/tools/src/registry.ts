@@ -16,7 +16,7 @@ import type {
   ToolDescriptor,
   ToolHealth,
 } from '@weaveintel/core';
-import { weaveToolRegistry } from '@weaveintel/core';
+import { weaveToolRegistry, weaveResolveTracer } from '@weaveintel/core';
 
 // ─── Descriptor ──────────────────────────────────────────────
 
@@ -248,7 +248,15 @@ export function createMCPToolHandler(
     }
     const start = Date.now();
     try {
-      const output = await tool.invoke(ctx, { name: toolName, arguments: args });
+      const tracer = weaveResolveTracer(ctx);
+      const output = tracer
+        ? await tracer.withSpan(
+          ctx,
+          'tools.mcp_handler.invoke',
+          () => tool.invoke(ctx, { name: toolName, arguments: args }),
+          { toolName },
+        )
+        : await tool.invoke(ctx, { name: toolName, arguments: args });
       healthTracker?.record(toolName, Date.now() - start, !!output.isError);
       return { content: [{ type: 'text' as const, text: output.content }], isError: output.isError };
     } catch (err) {

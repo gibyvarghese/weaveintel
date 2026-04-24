@@ -6,8 +6,9 @@
 
 import 'dotenv/config';
 
-import { weaveContext } from '@weaveintel/core';
+import { weaveContext, weaveSetDefaultTracer } from '@weaveintel/core';
 import { weaveMCPClient, createMCPStreamableHttpTransport } from '@weaveintel/mcp-client';
+import { weaveConsoleTracer } from '@weaveintel/observability';
 import {
   createHeartbeat,
   createStandardAttentionPolicy,
@@ -22,7 +23,7 @@ import {
   type Mesh,
   type StateStore,
 } from '@weaveintel/live-agents';
-import { weaveRealMCPTransport } from '@weaveintel/testing';
+import { weaveRealMCPTransport } from '@weaveintel/mcp-server';
 import { liveGmailAdapter, type GmailCredentials } from '@weaveintel/tools-gmail';
 
 const TARGET_SENDER = 'giby.varghese@tech-lunch.com';
@@ -753,6 +754,8 @@ function contractForAgent(args: {
 }
 
 async function main() {
+  weaveSetDefaultTracer(weaveConsoleTracer());
+
   const store = weaveInMemoryStateStore();
   const executor = createActionExecutor();
   const now = '2025-06-02T09:00:00.000Z';

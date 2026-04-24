@@ -3,12 +3,15 @@
  * progressive discovery, and streaming MCP progress passthrough.
  */
 
-import { weaveContext } from '@weaveintel/core';
+import { weaveContext, weaveSetDefaultTracer } from '@weaveintel/core';
 import { createMCPStreamableHttpTransport } from '@weaveintel/mcp-client';
-import { weaveRealMCPTransport } from '@weaveintel/testing';
+import { weaveRealMCPTransport } from '@weaveintel/mcp-server';
+import { weaveConsoleTracer } from '@weaveintel/observability';
 import { createMcpAccountSessionProvider, type Account } from '@weaveintel/live-agents';
 
 async function main(): Promise<void> {
+  weaveSetDefaultTracer(weaveConsoleTracer());
+
   const { server, endpoint, close } = await weaveRealMCPTransport();
 
   server.addTool(

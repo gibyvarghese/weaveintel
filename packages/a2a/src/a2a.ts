@@ -15,7 +15,20 @@ import type {
   InternalA2ABus,
   ExecutionContext,
 } from '@weaveintel/core';
-import { weaveContext, WeaveIntelError } from '@weaveintel/core';
+import { weaveContext, WeaveIntelError, weaveResolveTracer } from '@weaveintel/core';
+
+async function withObservedSpan<T>(
+  ctx: ExecutionContext,
+  name: string,
+  attributes: Record<string, unknown>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const tracer = weaveResolveTracer(ctx);
+  if (!tracer) {
+    return fn();
+  }
+  return tracer.withSpan(ctx, name, () => fn(), attributes);
+}
 
 // ─── HTTP-based A2A client ───────────────────────────────────
 
@@ -35,12 +48,17 @@ export function weaveA2AClient(): A2AClient {
 
     async sendTask(ctx: ExecutionContext, agentUrl: string, task: A2ATask): Promise<A2ATaskResult> {
       const taskUrl = agentUrl.replace(/\/$/, '') + '/tasks';
-      const response = await fetch(taskUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(task),
-        signal: ctx.signal,
-      });
+      const response = await withObservedSpan(
+        ctx,
+        'a2a.client.send_task',
+        { agentUrl, taskId: task.id },
+        () => fetch(taskUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(task),
+          signal: ctx.signal,
+        }),
+      );
       if (!response.ok) {
         throw new WeaveIntelError({
           code: 'PROTOCOL_ERROR',
@@ -52,12 +70,17 @@ export function weaveA2AClient(): A2AClient {
 
     async *streamTask(ctx: ExecutionContext, agentUrl: string, task: A2ATask): AsyncIterable<A2ATaskResult> {
       const taskUrl = agentUrl.replace(/\/$/, '') + '/tasks/stream';
-      const response = await fetch(taskUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-        body: JSON.stringify(task),
-        signal: ctx.signal,
-      });
+      const response = await withObservedSpan(
+        ctx,
+        'a2a.client.stream_task',
+        { agentUrl, taskId: task.id },
+        () => fetch(taskUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+          body: JSON.stringify(task),
+          signal: ctx.signal,
+        }),
+      );
       if (!response.ok || !response.body) {
         throw new WeaveIntelError({
           code: 'PROTOCOL_ERROR',
@@ -94,12 +117,22 @@ export function weaveA2AClient(): A2AClient {
 
     async cancelTask(ctx: ExecutionContext, agentUrl: string, taskId: string): Promise<void> {
       const url = agentUrl.replace(/\/$/, '') + `/tasks/${encodeURIComponent(taskId)}/cancel`;
-      await fetch(url, { method: 'POST', signal: ctx.signal });
+      await withObservedSpan(
+        ctx,
+        'a2a.client.cancel_task',
+        { agentUrl, taskId },
+        () => fetch(url, { method: 'POST', signal: ctx.signal }).then(() => undefined),
+      );
     },
 
     async getTaskStatus(ctx: ExecutionContext, agentUrl: string, taskId: string): Promise<A2ATaskResult> {
       const url = agentUrl.replace(/\/$/, '') + `/tasks/${encodeURIComponent(taskId)}`;
-      const response = await fetch(url, { signal: ctx.signal });
+      const response = await withObservedSpan(
+        ctx,
+        'a2a.client.get_status',
+        { agentUrl, taskId },
+        () => fetch(url, { signal: ctx.signal }),
+      );
       if (!response.ok) {
         throw new WeaveIntelError({
           code: 'PROTOCOL_ERROR',

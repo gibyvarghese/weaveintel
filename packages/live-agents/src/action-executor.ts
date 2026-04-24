@@ -16,11 +16,13 @@ import type {
   PromotionRequest,
 } from './types.js';
 import type { ExecutionContext, MCPToolCallResponse } from '@weaveintel/core';
+import { weaveResolveTracer } from '@weaveintel/core';
 import {
   BreakGlassPolicyViolationError,
   ContractAuthorityViolationError,
   NoAuthorisedAccountError,
 } from './errors.js';
+import { createLiveAgentsRunLogger } from './replay.js';
 
 function makeId(prefix: string, nowIso: string, suffix: string): string {
   return `${prefix}_${Date.parse(nowIso)}_${suffix}`;
@@ -134,7 +136,7 @@ async function withObservedSpan<T>(
   attributes: Record<string, unknown>,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const tracer = observability?.tracer;
+  const tracer = executionCtx ? weaveResolveTracer(executionCtx, observability?.tracer) : observability?.tracer;
   if (!tracer || !executionCtx) {
     return fn();
   }
@@ -356,17 +358,21 @@ export function createActionExecutor(opts?: {
   externalActionAdapter?: ExternalActionAdapter;
   observability?: LiveAgentsObservability;
 }): ActionExecutor {
+  const resolvedObservability = {
+    ...opts?.observability,
+    runLogger: opts?.observability?.runLogger ?? createLiveAgentsRunLogger(),
+  };
   const externalActionAdapter = opts?.externalActionAdapter ?? createDefaultExternalActionAdapter();
   return {
     async execute(action, context, ctx): Promise<ActionExecutionResult> {
-      const runLogger = opts?.observability?.runLogger;
+      const runLogger = resolvedObservability.runLogger;
       runLogger?.startRun(ctx.executionId);
       const executeStart = Date.now();
       const createdMessageIds: string[] = [];
       const createdOutboundRecordIds: string[] = [];
       const updatedBacklogItemIds: string[] = [];
       const saveMessageObserved = (message: Message) => withObservedSpan(
-        opts?.observability,
+        resolvedObservability,
         ctx,
         'live_agents.message.save',
         {
@@ -378,7 +384,7 @@ export function createActionExecutor(opts?: {
         () => context.stateStore.saveMessage(message),
       );
       const saveGrantObserved = (grant: CapabilityGrant) => withObservedSpan(
-        opts?.observability,
+        resolvedObservability,
         ctx,
         'live_agents.grant.save',
         {
@@ -390,7 +396,7 @@ export function createActionExecutor(opts?: {
         () => context.stateStore.saveCapabilityGrant(grant),
       );
       const savePromotionObserved = (promotion: Promotion) => withObservedSpan(
-        opts?.observability,
+        resolvedObservability,
         ctx,
         'live_agents.promotion.save',
         {
@@ -402,7 +408,7 @@ export function createActionExecutor(opts?: {
       );
 
       return withObservedSpan<ActionExecutionResult>(
-        opts?.observability,
+        resolvedObservability,
         ctx,
         'live_agents.action.execute',
         {

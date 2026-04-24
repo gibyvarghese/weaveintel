@@ -27,6 +27,9 @@ export interface ExecutionContext {
   /** Parent span ID for trace continuity */
   readonly parentSpanId?: string;
 
+  /** Optional tracer for automatic span emission across runtimes */
+  readonly tracer?: import('./observability.js').Tracer;
+
   /** Arbitrary request-scoped metadata */
   readonly metadata: Readonly<Record<string, unknown>>;
 
@@ -54,6 +57,7 @@ export function createExecutionContext(
     signal: overrides.signal,
     deadline: overrides.deadline,
     parentSpanId: overrides.parentSpanId,
+    tracer: overrides.tracer,
     metadata: overrides.metadata ?? {},
     budget: overrides.budget,
   };
@@ -68,6 +72,7 @@ export function childContext(
     ...parent,
     executionId: overrides.executionId ?? parent.executionId,
     parentSpanId: overrides.parentSpanId ?? parent.parentSpanId,
+    tracer: overrides.tracer ?? parent.tracer,
     metadata: { ...parent.metadata, ...overrides.metadata },
     budget: overrides.budget ?? parent.budget,
   };

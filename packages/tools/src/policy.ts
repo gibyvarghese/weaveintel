@@ -18,7 +18,7 @@ import type {
   ToolRiskLevel,
   ExecutionContext,
 } from '@weaveintel/core';
-import { weaveToolRegistry } from '@weaveintel/core';
+import { weaveToolRegistry, weaveResolveTracer } from '@weaveintel/core';
 import type {
   EffectiveToolPolicy,
   ToolAuditEvent,
@@ -285,7 +285,15 @@ export function createPolicyEnforcedTool(
     const startMs = Date.now();
     let timedOut = false;
 
-    const invokePromise = tool.invoke(ctx, input);
+    const tracer = weaveResolveTracer(ctx);
+    const invokePromise = tracer
+      ? tracer.withSpan(
+        ctx,
+        'tools.policy.invoke',
+        () => tool.invoke(ctx, input),
+        { toolName: tool.schema.name },
+      )
+      : tool.invoke(ctx, input);
     const timeoutMs = policy.timeoutMs;
 
     let result: ToolOutput;

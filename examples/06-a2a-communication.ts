@@ -19,11 +19,13 @@
 import {
   weaveContext,
   weaveEventBus,
+  weaveSetDefaultTracer,
   weaveToolRegistry,
 } from '@weaveintel/core';
 import type { AgentCard, A2AServer, A2ATask, A2ATaskResult, ExecutionContext } from '@weaveintel/core';
 import { weaveA2ABus } from '@weaveintel/a2a';
 import { weaveAgent } from '@weaveintel/agents';
+import { weaveConsoleTracer } from '@weaveintel/observability';
 import { weaveFakeModel } from '@weaveintel/testing';
 
 /** Helper to extract text from an A2ATask input */
@@ -35,6 +37,8 @@ function taskText(task: A2ATask): string {
 }
 
 async function main() {
+  weaveSetDefaultTracer(weaveConsoleTracer());
+
   const bus = weaveEventBus();
   const ctx = weaveContext({ userId: 'demo-user' });
 

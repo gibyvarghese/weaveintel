@@ -21,7 +21,7 @@ import type {
   ExecutionContext,
   JsonSchema,
 } from '@weaveintel/core';
-import { weaveToolRegistry } from '@weaveintel/core';
+import { weaveToolRegistry, weaveResolveTracer } from '@weaveintel/core';
 import { Client as SDKClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { CallToolResultSchema, type JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 import type { Transport as SDKTransport } from '@modelcontextprotocol/sdk/shared/transport.js';
@@ -74,6 +74,19 @@ function toExecutionContextMeta(ctx: ExecutionContext): Record<string, unknown> 
     budget: ctx.budget,
     metadata: ctx.metadata,
   };
+}
+
+async function withObservedSpan<T>(
+  ctx: ExecutionContext,
+  name: string,
+  attributes: Record<string, unknown>,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const tracer = weaveResolveTracer(ctx);
+  if (!tracer) {
+    return fn();
+  }
+  return tracer.withSpan(ctx, name, () => fn(), attributes);
 }
 
 function normalizeMCPContent(content: unknown): MCPToolCallResponse['content'] {
@@ -212,18 +225,23 @@ export function weaveMCPClient(): MCPClient {
 
   async function callToolInternal(ctx: ExecutionContext, request: MCPToolCallRequest): Promise<MCPToolCallResponse> {
     const client = assertClient();
-    const result = await client.callTool(
-      {
-        name: request.name,
-        arguments: request.arguments,
-        _meta: {
-          executionContext: {
-            ...toExecutionContextMeta(ctx),
-            ...(request.executionContext ?? {}),
+    const result = await withObservedSpan(
+      ctx,
+      'mcp.client.call_tool',
+      { toolName: request.name },
+      () => client.callTool(
+        {
+          name: request.name,
+          arguments: request.arguments,
+          _meta: {
+            executionContext: {
+              ...toExecutionContextMeta(ctx),
+              ...(request.executionContext ?? {}),
+            },
           },
         },
-      },
-      CallToolResultSchema,
+        CallToolResultSchema,
+      ),
     );
 
     return {
@@ -356,23 +374,28 @@ export function weaveMCPClient(): MCPClient {
       }
 
       try {
-        const stream = client.experimental.tasks.callToolStream(
-          {
-            name: request.name,
-            arguments: request.arguments,
-            _meta: {
-              executionContext: {
-                ...toExecutionContextMeta(ctx),
-                ...(request.executionContext ?? {}),
+        const stream = await withObservedSpan(
+          ctx,
+          'mcp.client.stream_tool_call',
+          { toolName: request.name },
+          () => Promise.resolve(client.experimental.tasks.callToolStream(
+            {
+              name: request.name,
+              arguments: request.arguments,
+              _meta: {
+                executionContext: {
+                  ...toExecutionContextMeta(ctx),
+                  ...(request.executionContext ?? {}),
+                },
+                ...(options?.requestMetadata ?? {}),
               },
-              ...(options?.requestMetadata ?? {}),
             },
-          },
-          CallToolResultSchema,
-          {
-            timeout: options?.timeoutMs,
-            signal: options?.signal,
-          },
+            CallToolResultSchema,
+            {
+              timeout: options?.timeoutMs,
+              signal: options?.signal,
+            },
+          )),
         );
 
         for await (const message of stream) {
