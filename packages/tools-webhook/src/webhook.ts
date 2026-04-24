@@ -5,7 +5,11 @@
 
 import { weaveContext, type ExecutionContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
-import { weaveToolDescriptor as describeT } from '@weaveintel/tools';
+import {
+  weaveToolDescriptor as describeT,
+  readResponseTextLimited,
+  validateOutboundUrl,
+} from '@weaveintel/tools';
 
 export interface WebhookCredentials {
   authType?: 'none' | 'bearer' | 'basic' | 'api_key';
@@ -47,51 +51,6 @@ export interface WebhookSecurityOptions {
   maxResponseBytes?: number;
 }
 
-function isPrivateHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (host === 'localhost' || host === '::1') return true;
-  if (host.endsWith('.local')) return true;
-  if (/^127\./.test(host)) return true;
-  if (/^10\./.test(host)) return true;
-  if (/^192\.168\./.test(host)) return true;
-  if (/^169\.254\./.test(host)) return true;
-  const match172 = /^172\.(\d{1,3})\./.exec(host);
-  if (match172) {
-    const secondOctet = Number.parseInt(match172[1] ?? '0', 10);
-    if (secondOctet >= 16 && secondOctet <= 31) return true;
-  }
-  return false;
-}
-
-function validateWebhookUrl(url: string, opts: WebhookSecurityOptions): URL {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error('Invalid webhook URL');
-  }
-
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    throw new Error('Webhook URL must use http or https');
-  }
-
-  const host = parsed.hostname.toLowerCase();
-  if ((opts.allowPrivateNetwork ?? false) === false && isPrivateHost(host)) {
-    throw new Error(`Webhook URL host is not allowed: ${host}`);
-  }
-
-  if ((opts.blockedHosts ?? []).map((h) => h.toLowerCase()).includes(host)) {
-    throw new Error(`Webhook URL host is blocked: ${host}`);
-  }
-
-  const allowed = opts.allowedHosts ?? [];
-  if (allowed.length > 0 && !allowed.map((h) => h.toLowerCase()).includes(host)) {
-    throw new Error(`Webhook URL host is not in allow list: ${host}`);
-  }
-
-  return parsed;
-}
-
 function extractCredentials(ctx: ExecutionContext, tokenProvider?: WebhookTokenProvider): Promise<WebhookCredentials> {
   const authType = (ctx.metadata?.['webhookAuthType'] as WebhookCredentials['authType'] | undefined) ?? 'bearer';
   const bearerToken = (ctx.metadata?.['webhookBearerToken'] as string | undefined) ?? undefined;
@@ -125,41 +84,7 @@ function extractCredentials(ctx: ExecutionContext, tokenProvider?: WebhookTokenP
 }
 
 async function readResponseBodyLimited(resp: Response, maxBytes: number): Promise<string> {
-  const len = resp.headers.get('content-length');
-  if (len) {
-    const size = Number.parseInt(len, 10);
-    if (Number.isFinite(size) && size > maxBytes) {
-      throw new Error(`Webhook response exceeds max size of ${maxBytes} bytes`);
-    }
-  }
-
-  const body = resp.body;
-  if (!body) {
-    return '';
-  }
-
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      total += value.byteLength;
-      if (total > maxBytes) {
-        throw new Error(`Webhook response exceeds max size of ${maxBytes} bytes`);
-      }
-      chunks.push(value);
-    }
-  }
-
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(merged);
+  return readResponseTextLimited(resp, maxBytes);
 }
 
 export const liveWebhookAdapter: WebhookAdapter = {
@@ -233,7 +158,11 @@ export function createWebhookMCPServer(opts: WebhookMCPServerOptions = {}) {
 
   server.addTool({ name: 'webhook.post', description: 'POST JSON payload to a webhook endpoint.', inputSchema: { type: 'object', properties: { url: { type: 'string' }, body: { type: 'object', additionalProperties: true }, headers: { type: 'object', additionalProperties: { type: 'string' } } }, required: ['url'] } }, async (ctx, args) => {
     const rawUrl = String(args['url']);
-    const parsed = validateWebhookUrl(rawUrl, security);
+    const parsed = await validateOutboundUrl(rawUrl, {
+      allowedHosts: security.allowedHosts,
+      blockedHosts: security.blockedHosts,
+      allowPrivateNetwork: security.allowPrivateNetwork,
+    });
     const creds = await extractCredentials(ctx, opts.tokenProvider);
     let result = await adapter.post(
       creds,

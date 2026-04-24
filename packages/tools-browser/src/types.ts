@@ -9,6 +9,10 @@ export interface FetchOptions {
   timeout?: number;
   followRedirects?: boolean;
   maxRedirects?: number;
+  allowedHosts?: string[];
+  blockedHosts?: string[];
+  allowPrivateNetwork?: boolean;
+  maxResponseBytes?: number;
 }
 
 export interface FetchResult {

@@ -30,3 +30,10 @@ export {
   createPolicyEnforcedTool,
   createPolicyEnforcedRegistry,
 } from './policy.js';
+
+export {
+  type OutboundNetworkPolicy,
+  isPrivateHostLiteral,
+  validateOutboundUrl,
+  readResponseTextLimited,
+} from './net-guard.js';

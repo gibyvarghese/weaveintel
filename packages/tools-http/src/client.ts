@@ -1,6 +1,7 @@
 /**
  * HTTP client with auth, retry, rate limiting, and response transforms
  */
+import { readResponseTextLimited, validateOutboundUrl } from '@weaveintel/tools';
 import type { HttpEndpointConfig, HttpRequestOptions, HttpResponse } from './types.js';
 
 /* ---------- Auth helpers ---------- */
@@ -32,6 +33,30 @@ function applyAuth(headers: Record<string, string>, config: HttpEndpointConfig):
 
 /* ---------- Retry wrapper ---------- */
 
+class HttpStatusError extends Error {
+  constructor(public readonly response: HttpResponse) {
+    super(`HTTP ${response.status} ${response.statusText}`);
+    this.name = 'HttpStatusError';
+  }
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || (status >= 500 && status <= 599);
+}
+
+function isRetryableError(err: unknown): boolean {
+  if (err instanceof HttpStatusError) return true;
+  if (err instanceof Error && /rate limit exceeded/i.test(err.message)) return false;
+  if (err instanceof Error && err.name === 'AbortError') return true;
+  return err instanceof TypeError;
+}
+
+function computeRetryDelayMs(baseDelayMs: number, attemptIndex: number): number {
+  const exponential = baseDelayMs * (2 ** attemptIndex);
+  const jitterFactor = 0.7 + Math.random() * 0.6;
+  return Math.min(30_000, Math.round(exponential * jitterFactor));
+}
+
 async function withRetry<T>(fn: () => Promise<T>, retries: number, delayMs: number): Promise<T> {
   let lastErr: unknown;
   for (let i = 0; i <= retries; i++) {
@@ -39,7 +64,12 @@ async function withRetry<T>(fn: () => Promise<T>, retries: number, delayMs: numb
       return await fn();
     } catch (err) {
       lastErr = err;
-      if (i < retries) await new Promise(r => setTimeout(r, delayMs * (i + 1)));
+      if (!isRetryableError(err) || i >= retries) {
+        if (err instanceof HttpStatusError) return err.response as T;
+        throw err;
+      }
+      const backoffMs = computeRetryDelayMs(delayMs, i);
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
     }
   }
   throw lastErr;
@@ -47,15 +77,28 @@ async function withRetry<T>(fn: () => Promise<T>, retries: number, delayMs: numb
 
 /* ---------- Rate limiter ---------- */
 
-const rateBuckets = new Map<string, { tokens: number; lastRefill: number; rpm: number }>();
+const rateBuckets = new Map<string, { tokens: number; lastRefill: number; rpm: number; lastSeen: number }>();
+const RATE_BUCKET_TTL_MS = 15 * 60_000;
+const RATE_BUCKET_MAX_SIZE = 1_000;
+
+function sweepRateBuckets(now: number): void {
+  if (rateBuckets.size <= RATE_BUCKET_MAX_SIZE) return;
+  for (const [key, bucket] of rateBuckets.entries()) {
+    if (now - bucket.lastSeen > RATE_BUCKET_TTL_MS) {
+      rateBuckets.delete(key);
+    }
+  }
+}
 
 function checkRate(name: string, rpm: number): void {
   const now = Date.now();
+  sweepRateBuckets(now);
   let bucket = rateBuckets.get(name);
   if (!bucket) {
-    bucket = { tokens: rpm, lastRefill: now, rpm };
+    bucket = { tokens: rpm, lastRefill: now, rpm, lastSeen: now };
     rateBuckets.set(name, bucket);
   }
+  bucket.lastSeen = now;
   const elapsed = now - bucket.lastRefill;
   if (elapsed > 60_000) {
     bucket.tokens = rpm;
@@ -99,16 +142,22 @@ function applyTemplate(template: string | undefined, input: Record<string, unkno
 
 export async function httpRequest(options: HttpRequestOptions): Promise<HttpResponse> {
   const start = Date.now();
+  const parsedUrl = await validateOutboundUrl(options.url, {
+    allowedHosts: options.allowedHosts,
+    blockedHosts: options.blockedHosts,
+    allowPrivateNetwork: options.allowPrivateNetwork,
+  });
   const controller = new AbortController();
   const timeoutId = options.timeout ? setTimeout(() => controller.abort(), options.timeout) : undefined;
+  const maxResponseBytes = options.maxResponseBytes ?? 1_000_000;
   try {
-    const resp = await fetch(options.url, {
+    const resp = await fetch(parsedUrl.toString(), {
       method: options.method ?? 'GET',
       headers: options.headers ?? {},
       body: options.body ? (typeof options.body === 'string' ? options.body : JSON.stringify(options.body)) : undefined,
       signal: controller.signal,
     });
-    const body = await resp.text();
+    const body = await readResponseTextLimited(resp, maxResponseBytes, controller.signal);
     const headers: Record<string, string> = {};
     resp.headers.forEach((v, k) => { headers[k] = v; });
     return { status: resp.status, statusText: resp.statusText, headers, body, latencyMs: Date.now() - start };
@@ -132,7 +181,23 @@ export async function executeEndpoint(
   const authedHeaders = applyAuth(baseHeaders, config);
   const body = applyTemplate(config.bodyTemplate, input) ?? (input['body'] ? JSON.stringify(input['body']) : undefined);
 
-  const fn = () => httpRequest({ url, method, headers: authedHeaders, body, timeout: config.timeout ?? 30_000 });
+  const fn = async () => {
+    const response = await httpRequest({
+      url,
+      method,
+      headers: authedHeaders,
+      body,
+      timeout: config.timeout ?? 30_000,
+      allowedHosts: config.allowedHosts,
+      blockedHosts: config.blockedHosts,
+      allowPrivateNetwork: config.allowPrivateNetwork,
+      maxResponseBytes: config.maxResponseBytes,
+    });
+    if (isRetryableStatus(response.status)) {
+      throw new HttpStatusError(response);
+    }
+    return response;
+  };
   const retries = config.retryCount ?? 0;
   const delay = config.retryDelayMs ?? 1000;
 

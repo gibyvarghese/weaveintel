@@ -15,6 +15,10 @@ export interface HttpEndpointConfig {
   rateLimit?: { requestsPerMinute: number };
   bodyTemplate?: string;
   responseTransform?: string;
+  allowedHosts?: string[];
+  blockedHosts?: string[];
+  allowPrivateNetwork?: boolean;
+  maxResponseBytes?: number;
   enabled?: boolean;
 }
 
@@ -24,6 +28,10 @@ export interface HttpRequestOptions {
   headers?: Record<string, string>;
   body?: string | Record<string, unknown>;
   timeout?: number;
+  allowedHosts?: string[];
+  blockedHosts?: string[];
+  allowPrivateNetwork?: boolean;
+  maxResponseBytes?: number;
 }
 
 export interface HttpResponse {
