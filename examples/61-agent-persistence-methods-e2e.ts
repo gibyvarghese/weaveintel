@@ -23,7 +23,14 @@ import {
   createConfiguredConversationMemory,
   type ConfiguredConversationMemory,
 } from '@weaveintel/memory';
-import { weaveContext, type Model, type ModelGenerateResult } from '@weaveintel/core';
+import {
+  weaveContext,
+  weaveCapabilities,
+  Capabilities,
+  type Model,
+  type ModelInfo,
+  type ModelResponse,
+} from '@weaveintel/core';
 
 const POSTGRES_URL = process.env['WEAVE_AGENT_EXAMPLE_POSTGRES_URL'];
 const REDIS_URL = process.env['WEAVE_AGENT_EXAMPLE_REDIS_URL'];
@@ -35,16 +42,27 @@ const DYNAMODB_REGION = process.env['WEAVE_AGENT_EXAMPLE_DYNAMODB_REGION'] ?? 'u
 const DYNAMODB_TABLE = process.env['WEAVE_AGENT_EXAMPLE_DYNAMODB_TABLE'] ?? 'weave_agent_memory';
 
 function createEchoModel(tag: string): Model {
+  const info: ModelInfo = {
+    provider: 'example',
+    modelId: `echo:${tag}`,
+    capabilities: new Set([Capabilities.Chat]),
+  };
+  const capSet = weaveCapabilities(Capabilities.Chat);
+
   return {
-    id: `echo:${tag}`,
-    async generate(_ctx, input): Promise<ModelGenerateResult> {
+    info,
+    ...capSet,
+    async generate(_ctx, input): Promise<ModelResponse> {
       const lastUserMessage = [...input.messages].reverse().find((message) => message.role === 'user');
       return {
+        id: `echo-resp:${tag}`,
         content: `[${tag}] ${typeof lastUserMessage?.content === 'string' ? lastUserMessage.content : ''}`,
         usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        finishReason: 'stop',
+        model: info.modelId,
       };
     },
-  } as Model;
+  };
 }
 
 async function runScenario(

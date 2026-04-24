@@ -117,3 +117,5 @@ main().catch((err) => {
   console.error('Example failed:', err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
+
+export {};

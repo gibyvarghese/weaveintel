@@ -6,7 +6,7 @@
 import { weaveContext } from '@weaveintel/core';
 import { weaveFakeTransport } from '@weaveintel/testing';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
-import { createMcpAccountSessionProvider } from '@weaveintel/live-agents';
+import { createMcpAccountSessionProvider, type Account } from '@weaveintel/live-agents';
 
 async function main(): Promise<void> {
   const { client, server } = weaveFakeTransport();
@@ -29,6 +29,9 @@ async function main(): Promise<void> {
       async resolve() {
         return 'token-demo';
       },
+      async revoke() {
+        return;
+      },
     },
     transportFactory: {
       async createTransport() {
@@ -38,16 +41,24 @@ async function main(): Promise<void> {
     sessionTtlMs: 1_000,
   });
 
-  const account = {
+  const account: Account = {
     id: 'acct-1',
     meshId: 'mesh-1',
     accountIdentifier: 'demo@example.com',
     credentialVaultRef: 'vault:acct-1',
     provider: 'gmail',
+    description: 'Demo Gmail account',
+    mcpServerRef: {
+      url: 'memory://gmail-demo',
+      serverType: 'HTTP',
+      discoveryHint: 'demo',
+    },
+    upstreamScopesDescription: 'gmail.readonly',
+    ownerHumanId: 'user-1',
     createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
     status: 'ACTIVE',
-  } as const;
+    revokedAt: null,
+  };
 
   const agent = {
     id: 'agent-1',

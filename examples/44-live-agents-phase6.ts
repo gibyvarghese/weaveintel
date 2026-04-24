@@ -131,7 +131,9 @@ async function main() {
       return {
         status: 'SUCCESS' as const,
         summaryProse: 'Handled by phase 6 worker.',
-        artifacts: [],
+        createdMessageIds: [],
+        createdOutboundRecordIds: [],
+        updatedBacklogItemIds: [],
       };
     },
   };

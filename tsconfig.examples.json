@@ -1,6 +1,11 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["examples/**/*.ts", "apps/geneweave/src/cse.ts"],
+  "include": [
+    "examples/**/*.ts",
+    "apps/geneweave/src/cse.ts",
+    "packages/tools-webhook/src/**/*.ts",
+    "packages/tools-filewatch/src/**/*.ts"
+  ],
   "compilerOptions": {
     "noEmit": true,
     "isolatedModules": false,

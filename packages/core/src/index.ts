@@ -20,6 +20,7 @@ export {
   childContext as weaveChildContext,
   isExpired,
   deadlineSignal,
+  withTimeoutSignal,
 } from './context.js';
 
 // Error model

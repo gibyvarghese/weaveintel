@@ -89,3 +89,13 @@ export function deadlineSignal(ctx: ExecutionContext): AbortSignal | undefined {
   if (!ctx.signal) return timeoutSignal;
   return AbortSignal.any([ctx.signal, timeoutSignal]);
 }
+
+/** Compose an optional caller signal with a mandatory timeout signal. */
+export function withTimeoutSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  if (timeoutMs <= 0) {
+    return signal ?? AbortSignal.abort('Timeout exceeded');
+  }
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  if (!signal) return timeoutSignal;
+  return AbortSignal.any([signal, timeoutSignal]);
+}

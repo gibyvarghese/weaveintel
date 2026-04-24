@@ -1,9 +1,13 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { anthropicStreamRequest, parseRetryAfterMs } from './shared.js';
+import { anthropicRequest, anthropicStreamRequest, parseRetryAfterMs } from './shared.js';
 
 describe('anthropic shared retry-after parsing', () => {
   it('parses delta-seconds retry-after', () => {
     expect(parseRetryAfterMs('9')).toBe(9000);
+  });
+
+  it('clamps retry-after to 30 seconds', () => {
+    expect(parseRetryAfterMs('120')).toBe(30_000);
   });
 
   it('falls back for invalid retry-after', () => {
@@ -35,5 +39,59 @@ describe('anthropic stream error classification', () => {
       retryable: true,
       retryAfterMs: 3000,
     });
+  });
+
+  it('cancels and releases stream reader when consumer stops', async () => {
+    const cancel = vi.fn(async () => undefined);
+    const releaseLock = vi.fn();
+    const read = vi
+      .fn<() => Promise<ReadableStreamReadResult<Uint8Array>>>()
+      .mockResolvedValueOnce({ done: false, value: new TextEncoder().encode('event: message_stop\ndata: {"type":"message_stop"}\n\n') })
+      .mockResolvedValueOnce({ done: true, value: undefined });
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => ({ read, cancel, releaseLock }),
+      },
+    } as unknown as Response);
+
+    for await (const _chunk of anthropicStreamRequest('https://example.com', '/v1/messages', {}, {})) {
+      // consume
+    }
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(releaseLock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('anthropic request timeout composition', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('always attaches a timeout-capable signal when caller provides none', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      capturedSignal = init?.signal as AbortSignal | undefined;
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+    await anthropicRequest('https://example.com', '/v1/messages', { ping: 'pong' }, {});
+    expect(capturedSignal).toBeDefined();
+  });
+
+  it('preserves caller cancellation when composing timeout signal', async () => {
+    const controller = new AbortController();
+    controller.abort('caller-abort');
+
+    let capturedSignal: AbortSignal | undefined;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init) => {
+      capturedSignal = init?.signal as AbortSignal | undefined;
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    });
+
+    await anthropicRequest('https://example.com', '/v1/messages', { ping: 'pong' }, {}, controller.signal);
+    expect(capturedSignal?.aborted).toBe(true);
   });
 });

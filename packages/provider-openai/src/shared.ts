@@ -14,6 +14,8 @@ export interface OpenAIProviderOptions {
 }
 
 export const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+const MAX_RETRY_AFTER_MS = 30_000;
 
 export function resolveApiKey(options?: OpenAIProviderOptions): string {
   const key = options?.apiKey ?? process.env['OPENAI_API_KEY'];
@@ -54,13 +56,19 @@ export function parseRetryAfterMs(retryAfterHeader: string | null | undefined, f
   if (!retryAfterHeader) return fallbackMs;
   const asNumber = Number.parseInt(retryAfterHeader, 10);
   if (!Number.isNaN(asNumber) && Number.isFinite(asNumber)) {
-    return Math.max(0, asNumber * 1000);
+    return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, asNumber * 1000));
   }
   const asDate = Date.parse(retryAfterHeader);
   if (!Number.isNaN(asDate)) {
-    return Math.max(0, asDate - Date.now());
+    return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, asDate - Date.now()));
   }
-  return fallbackMs;
+  return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, fallbackMs));
+}
+
+function composeRequestSignal(signal?: AbortSignal): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS);
+  if (!signal) return timeoutSignal;
+  return AbortSignal.any([signal, timeoutSignal]);
 }
 
 export async function openaiRequest(
@@ -75,7 +83,7 @@ export async function openaiRequest(
   const fetchOpts: RequestInit = {
     method,
     headers,
-    signal,
+    signal: composeRequestSignal(signal),
   };
   if (method !== 'GET' && method !== 'DELETE' && body !== undefined) {
     fetchOpts.body = JSON.stringify(body);
@@ -160,7 +168,7 @@ export async function* openaiStreamRequest(
     method: 'POST',
     headers,
     body: JSON.stringify(body),
-    signal,
+    signal: composeRequestSignal(signal),
   });
 
   if (!res.ok) {
@@ -231,6 +239,11 @@ export async function* openaiStreamRequest(
       }
     }
   } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // Ignore cancellation errors on already closed streams.
+    }
     reader.releaseLock();
   }
 }
