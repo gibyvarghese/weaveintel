@@ -23,6 +23,7 @@ import type {
   VectorSearchResult,
   ExecutionContext,
   CapabilityId,
+  MCPTransport,
 } from '@weaveintel/core';
 import { weaveCapabilities, Capabilities } from '@weaveintel/core';
 
@@ -231,8 +232,6 @@ export function weaveFakeVectorStore(opts?: { dimensions?: number }): VectorStor
 }
 
 // ─── Fake MCP transport (for testing MCP client/server) ──────
-
-import type { MCPTransport } from '@weaveintel/core';
 
 export function weaveFakeTransport(): { client: MCPTransport; server: MCPTransport } {
   let clientHandler: ((msg: unknown) => void) | null = null;

@@ -300,7 +300,7 @@ describe('7. Stdout / stderr cap (via FakeRuntime truncation flag)', () => {
 // ─── 8. Backwards compatibility ──────────────────────────────
 
 describe('8. Backwards compatibility — in-process executor unchanged', () => {
-  it('createSimulatedSandbox() still executes code without error', async () => {
+  it('createSimulatedSandbox() validates policy and returns success (code not executed)', async () => {
     const sandbox = createSimulatedSandbox();
     const policy = createSandboxPolicy({ name: 'compat-test' });
     const result = await sandbox.execute('const x = 1 + 1;', policy);

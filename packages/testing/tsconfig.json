@@ -2,5 +2,10 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "outDir": "dist", "rootDir": "src" },
   "include": ["src"],
-  "references": [{ "path": "../core" }, { "path": "../sandbox" }]
+  "references": [
+    { "path": "../core" },
+    { "path": "../sandbox" },
+    { "path": "../mcp-server" },
+    { "path": "../mcp-client" }
+  ]
 }

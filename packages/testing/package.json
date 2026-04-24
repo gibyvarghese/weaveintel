@@ -20,7 +20,9 @@
   },
   "dependencies": {
     "@weaveintel/core": "*",
-    "@weaveintel/sandbox": "*"
+    "@weaveintel/sandbox": "*",
+    "@weaveintel/mcp-server": "*",
+    "@weaveintel/mcp-client": "*"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

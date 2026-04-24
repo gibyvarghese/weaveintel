@@ -4,15 +4,14 @@
  */
 
 import { weaveContext } from '@weaveintel/core';
-import { weaveFakeTransport } from '@weaveintel/testing';
-import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { createMCPStreamableHttpTransport } from '@weaveintel/mcp-client';
+import { weaveRealMCPTransport } from '@weaveintel/testing';
 import { createMcpAccountSessionProvider, type Account } from '@weaveintel/live-agents';
 
 async function main(): Promise<void> {
-  const { client, server } = weaveFakeTransport();
+  const { server, endpoint, close } = await weaveRealMCPTransport();
 
-  const mcpServer = weaveMCPServer({ name: 'live-agent-mcp-example', version: '1.0.0' });
-  mcpServer.addTool(
+  server.addTool(
     {
       name: 'gmail.list_messages',
       description: 'List synthetic messages',
@@ -22,7 +21,6 @@ async function main(): Promise<void> {
       content: [{ type: 'text', text: 'message-1\nmessage-2' }],
     }),
   );
-  await mcpServer.start(server);
 
   const provider = createMcpAccountSessionProvider({
     tokenResolver: {
@@ -35,7 +33,7 @@ async function main(): Promise<void> {
     },
     transportFactory: {
       async createTransport() {
-        return client;
+        return createMCPStreamableHttpTransport(endpoint);
       },
     },
     sessionTtlMs: 1_000,
@@ -93,7 +91,7 @@ async function main(): Promise<void> {
   }
 
   await provider.disconnectAll?.();
-  await mcpServer.stop();
+  await close();
 }
 
 main().catch((error) => {
