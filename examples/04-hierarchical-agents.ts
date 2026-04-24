@@ -4,17 +4,21 @@
  * Demonstrates a supervisor agent that delegates tasks to specialized workers.
  * The supervisor decides which worker to route each sub-task to.
  *
+ * Required environment variables:
+ *   OPENAI_API_KEY — Your OpenAI API key
+ *
  * WeaveIntel packages used:
- *   @weaveintel/core    — ExecutionContext, EventBus, ToolRegistry, weaveTool()
- *   @weaveintel/agents  — weaveSupervisor() builds a multi-agent hierarchy where one
- *                         "boss" model delegates sub-tasks to named worker agents
- *   @weaveintel/testing — weaveFakeModel() provides deterministic model responses
+ *   @weaveintel/core          — ExecutionContext, EventBus, ToolRegistry, weaveTool()
+ *   @weaveintel/agents        — weaveSupervisor() builds a multi-agent hierarchy where one
+ *                               "boss" model delegates sub-tasks to named worker agents
+ *   @weaveintel/provider-openai — weaveOpenAIModel() for real model inference
  *
  * Architecture:
  *   Supervisor (with delegate_to_worker tool)
  *     ├─ researcher  — has search_web tool
  *     └─ writer      — has write_document tool
  */
+import 'dotenv/config';
 import {
   weaveContext,
   weaveEventBus,
@@ -22,7 +26,7 @@ import {
   weaveTool,
 } from '@weaveintel/core';
 import { weaveSupervisor } from '@weaveintel/agents';
-import { weaveFakeModel } from '@weaveintel/testing';
+import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 
 async function main() {
   const bus = weaveEventBus();
@@ -61,89 +65,20 @@ async function main() {
     }),
   );
 
-  // The supervisor's model is configured with a sequence of fake responses:
-  //   1. Delegates to 'researcher' via the built-in 'delegate_to_worker' tool
-  //   2. Delegates to 'writer' with the research results
-  //   3. Produces a final summary (no tool calls → loop ends)
-  // In production the supervisor model would be a real LLM that decides
-  // which worker to call based on the conversation and task decomposition.
-  const supervisorModel = weaveFakeModel({
-    responses: [
-      // Step 1: supervisor delegates to researcher
-      {
-        content: '',
-        toolCalls: [
-          {
-            id: 'call_1',
-            function: {
-              name: 'delegate_to_worker',
-              arguments: JSON.stringify({
-                worker: 'researcher',
-                goal: 'Search for popular AI frameworks',
-              }),
-            },
-          },
-        ],
-      },
-      // Step 2: supervisor delegates to writer
-      {
-        content: '',
-        toolCalls: [
-          {
-            id: 'call_2',
-            function: {
-              name: 'delegate_to_worker',
-              arguments: JSON.stringify({
-                worker: 'writer',
-                goal: 'Write a brief summary about AI frameworks',
-              }),
-            },
-          },
-        ],
-      },
-      // Step 3: supervisor produces final answer
-      {
-        content: 'The research team found that popular AI frameworks include LangChain, weaveIntel, and LlamaIndex. A report has been generated.',
-        toolCalls: [],
-      },
-    ],
+  // The supervisor's model is configured with the OpenAI API.
+  // The model will intelligently decide which worker to call based on the conversation
+  // and task decomposition.
+  const supervisorModel = weaveOpenAIModel('gpt-4o-mini', {
+    apiKey: process.env['OPENAI_API_KEY'],
   });
 
-  // Worker models
-  const researcherModel = weaveFakeModel({
-    responses: [
-      {
-        content: '',
-        toolCalls: [
-          {
-            id: 'wc_1',
-            function: {
-              name: 'search_web',
-              arguments: '{"query":"popular AI frameworks"}',
-            },
-          },
-        ],
-      },
-      { content: 'Found: LangChain, weaveIntel, LlamaIndex are popular AI frameworks.', toolCalls: [] },
-    ],
+  // Worker models — each uses the real OpenAI API
+  const researcherModel = weaveOpenAIModel('gpt-4o-mini', {
+    apiKey: process.env['OPENAI_API_KEY'],
   });
 
-  const writerModel = weaveFakeModel({
-    responses: [
-      {
-        content: '',
-        toolCalls: [
-          {
-            id: 'wc_2',
-            function: {
-              name: 'write_document',
-              arguments: '{"notes":"Popular AI frameworks: LangChain, weaveIntel, LlamaIndex"}',
-            },
-          },
-        ],
-      },
-      { content: 'Report written successfully.', toolCalls: [] },
-    ],
+  const writerModel = weaveOpenAIModel('gpt-4o-mini', {
+    apiKey: process.env['OPENAI_API_KEY'],
   });
 
   // weaveSupervisor() creates a hierarchical agent system:

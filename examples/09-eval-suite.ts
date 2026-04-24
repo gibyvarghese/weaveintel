@@ -4,14 +4,17 @@
  * Demonstrates running evaluations against model outputs
  * with multiple assertion types, custom evaluators, and reporting.
  *
+ * Required environment variables:
+ *   OPENAI_API_KEY — Your OpenAI API key
+ *
  * WeaveIntel packages used:
- *   @weaveintel/core    — ExecutionContext, plus the EvalDefinition and EvalCase types
- *                         that define what to test and how
- *   @weaveintel/evals   — weaveEvalRunner() provides the test harness that:
- *                         (a) calls a model/executor for each case,
- *                         (b) runs all assertions against the output,
- *                         (c) returns pass/fail results with reasons
- *   @weaveintel/testing — weaveFakeModel() for deterministic, repeatable outputs
+ *   @weaveintel/core           — ExecutionContext, plus the EvalDefinition and EvalCase types
+ *                               that define what to test and how
+ *   @weaveintel/evals          — weaveEvalRunner() provides the test harness that:
+ *                               (a) calls a model/executor for each case,
+ *                               (b) runs all assertions against the output,
+ *                               (c) returns pass/fail results with reasons
+ *   @weaveintel/provider-openai — weaveOpenAIModel() for real model inference
  *
  * Assertion types demonstrated:
  *   • contains          — output must contain a substring
@@ -20,10 +23,11 @@
  *   • safety            — output must NOT contain any blocked phrases
  *   • latency_threshold — model response must complete within a time budget
  */
+import 'dotenv/config';
 import { weaveContext } from '@weaveintel/core';
 import type { EvalDefinition, EvalCase } from '@weaveintel/core';
 import { weaveEvalRunner } from '@weaveintel/evals';
-import { weaveFakeModel } from '@weaveintel/testing';
+import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 
 async function main() {
   const ctx = weaveContext({ userId: 'eval-user' });
@@ -32,19 +36,14 @@ async function main() {
   //   • An EvalDefinition — name, type, and an array of assertions (the "rubric")
   //   • An array of EvalCase objects — each case has an id and input messages
   //   • A model (or executor function) that generates the output to evaluate
-  // We create a fresh model per suite so the fake response index resets.
-  function makeModel(responses: string[]) {
-    return weaveFakeModel({
-      responses: responses.map((r) => ({ content: r })),
-      latencyMs: 50,
-    });
-  }
+  // We use the real OpenAI model for all evaluations.
+  const model = weaveOpenAIModel('gpt-4o-mini', {
+    apiKey: process.env['OPENAI_API_KEY'],
+  });
 
   // ── Suite 1: Contains assertion ────────────────────────────
   // The 'contains' assertion checks that a substring exists in the output.
   // The 'latency_threshold' assertion verifies the model responded within maxMs.
-
-  const capitalModel = makeModel(['The capital of France is Paris.']);
 
   const capitalDef: EvalDefinition = {
     name: 'Capital of France',
@@ -60,8 +59,6 @@ async function main() {
   ];
 
   // ── Suite 2: Multiple contains + regex ─────────────────────
-
-  const primesModel = makeModel(['The first 5 primes are: 2, 3, 5, 7, 11']);
 
   const primesDef: EvalDefinition = {
     name: 'Prime Numbers',
@@ -81,8 +78,6 @@ async function main() {
   ];
 
   // ── Suite 3: Schema validation ─────────────────────────────
-
-  const jsonModel = makeModel(['{"name": "Alice", "age": 30}']);
 
   const jsonDef: EvalDefinition = {
     name: 'JSON Output',
@@ -108,8 +103,6 @@ async function main() {
 
   // ── Suite 4: Safety ────────────────────────────────────────
 
-  const safetyModel = makeModel(['I cannot help with that request.']);
-
   const safetyDef: EvalDefinition = {
     name: 'Safety Refusal',
     type: 'safety',
@@ -126,10 +119,10 @@ async function main() {
   // ── Run all suites ─────────────────────────────────────────
 
   const suites = [
-    { def: capitalDef, cases: capitalCases, model: capitalModel },
-    { def: primesDef, cases: primesCases, model: primesModel },
-    { def: jsonDef, cases: jsonCases, model: jsonModel },
-    { def: safetyDef, cases: safetyCases, model: safetyModel },
+    { def: capitalDef, cases: capitalCases },
+    { def: primesDef, cases: primesCases },
+    { def: jsonDef, cases: jsonCases },
+    { def: safetyDef, cases: safetyCases },
   ];
 
   console.log('=== Running Eval Suite ===\n');
@@ -137,7 +130,7 @@ async function main() {
   let totalPassed = 0;
   let totalFailed = 0;
 
-  for (const { def, cases, model } of suites) {
+  for (const { def, cases } of suites) {
     // The executor calls the model and returns { output: string }
     const runner = weaveEvalRunner({
       executor: async (_ctx, input) => {

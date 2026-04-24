@@ -2,15 +2,18 @@
  * Example 02: Tool-Calling Agent
  *
  * Demonstrates a ReAct-style agent that uses tools to answer questions.
- * Uses a fake model for deterministic, no-API-key-needed execution.
+ * Uses the OpenAI API with real model inference for tool calling.
+ *
+ * Required environment variables:
+ *   OPENAI_API_KEY — Your OpenAI API key
  *
  * WeaveIntel packages used:
- *   @weaveintel/core    — ExecutionContext, EventBus, ToolRegistry, and the weaveTool() factory
- *   @weaveintel/agents  — weaveAgent() creates a ReAct agent loop that alternates between
- *                         "think" (LLM call) and "act" (tool execution) steps
- *   @weaveintel/testing — weaveFakeModel() returns canned responses so the example runs
- *                         without an API key and produces deterministic output
+ *   @weaveintel/core          — ExecutionContext, EventBus, ToolRegistry, and the weaveTool() factory
+ *   @weaveintel/agents        — weaveAgent() creates a ReAct agent loop that alternates between
+ *                               "think" (LLM call) and "act" (tool execution) steps
+ *   @weaveintel/provider-openai — weaveOpenAIModel() for real model inference
  */
+import 'dotenv/config';
 import {
   weaveContext,
   weaveEventBus,
@@ -18,7 +21,7 @@ import {
   weaveTool,
 } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
-import { weaveFakeModel } from '@weaveintel/testing';
+import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 
 async function main() {
   const bus = weaveEventBus();
@@ -78,28 +81,11 @@ async function main() {
     }),
   );
 
-  // weaveFakeModel() returns responses from a pre-defined list, one per call.
-  // The first response contains a toolCalls array telling the agent to invoke
-  // 'get_weather'. The second response is the final answer (no tool calls),
-  // which causes the agent loop to terminate.
-  const model = weaveFakeModel({
-    responses: [
-      // Step 1: model calls the weather tool
-      {
-        content: '',
-        toolCalls: [
-          {
-            id: 'call_1',
-            function: { name: 'get_weather', arguments: '{"city":"Paris"}' },
-          },
-        ],
-      },
-      // Step 2: model synthesizes final answer
-      {
-        content: 'The weather in Paris is 22°C and Sunny!',
-        toolCalls: [],
-      },
-    ],
+  // weaveOpenAIModel() returns an object that implements weaveIntel's Model
+  // interface. It calls the real OpenAI API with the provided tools.
+  // The model will automatically decide which tools to call based on the user input.
+  const model = weaveOpenAIModel('gpt-4o-mini', {
+    apiKey: process.env['OPENAI_API_KEY'],
   });
 
   // weaveAgent() wires together model + tools + event bus into a ReAct loop.
