@@ -48,6 +48,13 @@ export function verifyJWT(token: string, secret: string): JWTPayload | null {
   const [headerB64, payloadB64, signatureB64] = parts;
   if (!headerB64 || !payloadB64 || !signatureB64) return null;
 
+  try {
+    const header = JSON.parse(Buffer.from(headerB64, 'base64url').toString()) as { alg?: string; typ?: string };
+    if (header.alg !== 'HS256' || header.typ !== 'JWT') return null;
+  } catch {
+    return null;
+  }
+
   const expectedSig = createHmac('sha256', secret)
     .update(`${headerB64}.${payloadB64}`)
     .digest('base64url');
@@ -93,11 +100,13 @@ export function generateCSRFToken(): string {
 // ─── Cookie helpers ──────────────────────────────────────────
 
 export function setAuthCookie(res: ServerResponse, token: string, maxAge = 86400): void {
-  res.setHeader('Set-Cookie', `gw_token=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}`);
+  const secure = process.env['NODE_ENV'] === 'production' ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `gw_token=${token}; HttpOnly${secure}; SameSite=Strict; Path=/; Max-Age=${maxAge}`);
 }
 
 export function clearAuthCookie(res: ServerResponse): void {
-  res.setHeader('Set-Cookie', 'gw_token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0');
+  const secure = process.env['NODE_ENV'] === 'production' ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `gw_token=; HttpOnly${secure}; SameSite=Strict; Path=/; Max-Age=0`);
 }
 
 export function parseCookies(req: IncomingMessage): Record<string, string> {
@@ -152,6 +161,7 @@ export async function authenticateRequest(
 
   const session = await db.getSession(payload.sessionId);
   if (!session) return null;
+  if (session.user_id !== payload.userId) return null;
   const user = await db.getUserById(payload.userId);
   if (!user) return null;
 

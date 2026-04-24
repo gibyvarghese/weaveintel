@@ -2748,12 +2748,13 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
         await matched.route.handler(req, res, matched.params, auth);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Internal server error';
-        console.error(`[geneWeave] Error handling ${method} ${pathname}:`, err);
+        const correlationId = randomUUID();
+        console.error(`[geneWeave][${correlationId}] Error handling ${method} ${pathname}:`, err);
         if (!res.headersSent) {
           if (msg === 'Request body too large') {
             json(res, 413, { error: 'Request body too large' });
           } else {
-            json(res, 500, { error: msg });
+            json(res, 500, { error: 'Internal server error', correlationId });
           }
         }
       }
