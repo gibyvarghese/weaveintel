@@ -34,6 +34,12 @@ export default defineConfig({
       PORT: String(managedPort),
       DATABASE_PATH: managedDbPath,
       PLAYWRIGHT_E2E: '1',
+      GENEWEAVE_AUTH_RATE_WINDOW_MS: '600000',
+      GENEWEAVE_REGISTER_IP_LIMIT: '100000',
+      GENEWEAVE_REGISTER_EMAIL_LIMIT: '100000',
+      GENEWEAVE_LOGIN_IP_LIMIT: '200000',
+      GENEWEAVE_LOGIN_EMAIL_LIMIT: '200000',
+      GENEWEAVE_LOGIN_MAX_BACKOFF_MS: '0',
       JWT_SECRET: process.env['JWT_SECRET'] ?? 'playwright-e2e-secret',
       DEFAULT_PROVIDER: process.env['DEFAULT_PROVIDER']
         ?? (process.env['ANTHROPIC_API_KEY'] ? 'anthropic' : process.env['OPENAI_API_KEY'] ? 'openai' : 'mock'),

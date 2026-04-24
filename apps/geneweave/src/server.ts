@@ -21,7 +21,7 @@ import {
   authenticateRequest,
   verifyCSRF,
   hashPassword,
-  verifyPassword,
+  verifyPasswordDetailed,
   signJWT,
   generateCSRFToken,
   setAuthCookie,
@@ -148,6 +148,120 @@ function json(res: ServerResponse, status: number, data: unknown): void {
   const body = JSON.stringify(data);
   res.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
   res.end(body);
+}
+
+interface AuthRateState {
+  count: number;
+  windowStart: number;
+}
+
+interface LoginFailureState {
+  failures: number;
+  blockedUntil: number;
+}
+
+const IS_TEST_ENV = process.env['NODE_ENV'] === 'test';
+
+function envInt(name: string, fallback: number): number {
+  const parsed = Number.parseInt(process.env[name] ?? '', 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+const AUTH_WINDOW_MS = envInt('GENEWEAVE_AUTH_RATE_WINDOW_MS', 10 * 60_000);
+const REGISTER_IP_LIMIT = envInt('GENEWEAVE_REGISTER_IP_LIMIT', IS_TEST_ENV ? 1_000 : 10);
+const REGISTER_EMAIL_LIMIT = envInt('GENEWEAVE_REGISTER_EMAIL_LIMIT', IS_TEST_ENV ? 500 : 5);
+const LOGIN_IP_LIMIT = envInt('GENEWEAVE_LOGIN_IP_LIMIT', IS_TEST_ENV ? 2_000 : 25);
+const LOGIN_EMAIL_LIMIT = envInt('GENEWEAVE_LOGIN_EMAIL_LIMIT', IS_TEST_ENV ? 1_000 : 10);
+const LOGIN_MAX_BACKOFF_MS = envInt('GENEWEAVE_LOGIN_MAX_BACKOFF_MS', IS_TEST_ENV ? 0 : 5 * 60_000);
+
+const authRateStates = new Map<string, AuthRateState>();
+const loginFailureStates = new Map<string, LoginFailureState>();
+
+function cleanupAuthRateState(now: number): void {
+  for (const [key, state] of authRateStates.entries()) {
+    if (now - state.windowStart > AUTH_WINDOW_MS) {
+      authRateStates.delete(key);
+    }
+  }
+  for (const [key, state] of loginFailureStates.entries()) {
+    if (state.blockedUntil + AUTH_WINDOW_MS < now) {
+      loginFailureStates.delete(key);
+    }
+  }
+}
+
+function readClientIp(req: IncomingMessage): string {
+  const forwardedFor = req.headers['x-forwarded-for'];
+  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+    const first = forwardedFor.split(',')[0]?.trim();
+    if (first) return first;
+  }
+  const realIp = req.headers['x-real-ip'];
+  if (typeof realIp === 'string' && realIp.trim()) {
+    return realIp.trim();
+  }
+  return req.socket.remoteAddress ?? 'unknown';
+}
+
+function checkRateLimit(key: string, limit: number, windowMs: number): { limited: boolean; retryAfterMs: number } {
+  const now = Date.now();
+  cleanupAuthRateState(now);
+  const current = authRateStates.get(key);
+  if (!current || now - current.windowStart >= windowMs) {
+    authRateStates.set(key, { count: 1, windowStart: now });
+    return { limited: false, retryAfterMs: 0 };
+  }
+  if (current.count >= limit) {
+    const retryAfterMs = Math.max(1_000, windowMs - (now - current.windowStart));
+    return { limited: true, retryAfterMs };
+  }
+  current.count += 1;
+  return { limited: false, retryAfterMs: 0 };
+}
+
+function checkAuthRateLimits(kind: 'login' | 'register', req: IncomingMessage, email?: string): { limited: boolean; retryAfterMs: number } {
+  const ip = readClientIp(req);
+  const ipLimit = kind === 'login' ? LOGIN_IP_LIMIT : REGISTER_IP_LIMIT;
+  const emailLimit = kind === 'login' ? LOGIN_EMAIL_LIMIT : REGISTER_EMAIL_LIMIT;
+
+  const ipCheck = checkRateLimit(`${kind}:ip:${ip}`, ipLimit, AUTH_WINDOW_MS);
+  if (ipCheck.limited) return ipCheck;
+
+  if (email) {
+    const emailCheck = checkRateLimit(`${kind}:email:${email.toLowerCase()}`, emailLimit, AUTH_WINDOW_MS);
+    if (emailCheck.limited) return emailCheck;
+  }
+
+  return { limited: false, retryAfterMs: 0 };
+}
+
+function getFailureKey(ip: string, email: string): string {
+  return `${ip}|${email.toLowerCase()}`;
+}
+
+function getLoginBackoffMs(ip: string, email: string): number {
+  const now = Date.now();
+  cleanupAuthRateState(now);
+  const key = getFailureKey(ip, email);
+  const current = loginFailureStates.get(key);
+  if (!current) return 0;
+  return Math.max(0, current.blockedUntil - now);
+}
+
+function recordLoginFailure(ip: string, email: string): void {
+  const key = getFailureKey(ip, email);
+  const now = Date.now();
+  const existing = loginFailureStates.get(key);
+  const failures = (existing?.failures ?? 0) + 1;
+  const backoffMs = Math.min(2 ** Math.min(failures, 8) * 1_000, LOGIN_MAX_BACKOFF_MS);
+  loginFailureStates.set(key, {
+    failures,
+    blockedUntil: now + backoffMs,
+  });
+}
+
+function clearLoginFailures(ip: string, email: string): void {
+  loginFailureStates.delete(getFailureKey(ip, email));
 }
 
 function html(res: ServerResponse, status: number, body: string): void {
@@ -290,6 +404,14 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     if (!name || !email || !password) { json(res, 400, { error: 'name, email, and password required' }); return; }
     if (password.length < 8) { json(res, 400, { error: 'Password must be at least 8 characters' }); return; }
 
+    const registerRate = checkAuthRateLimits('register', req, email);
+    if (registerRate.limited) {
+      const retryAfterSec = Math.ceil(registerRate.retryAfterMs / 1_000);
+      res.setHeader('Retry-After', String(retryAfterSec));
+      json(res, 429, { error: 'Too many registration attempts. Please retry later.' });
+      return;
+    }
+
     const existing = await db.getUserByEmail(email);
     if (existing) { json(res, 409, { error: 'Email already registered' }); return; }
 
@@ -297,8 +419,17 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     const assignedPersona = users.length === 0 ? 'tenant_admin' : 'tenant_user';
 
     const userId = randomUUID();
-    const passwordHash = hashPassword(password);
-    await db.createUser({ id: userId, email, name, passwordHash, persona: assignedPersona });
+    const passwordHash = await hashPassword(password);
+    try {
+      await db.createUser({ id: userId, email, name, passwordHash, persona: assignedPersona });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('UNIQUE constraint failed: users.email')) {
+        json(res, 409, { error: 'Email already registered' });
+        return;
+      }
+      throw error;
+    }
     await ensureAtLeastOneTenantAdmin(db, userId);
 
     const sessionId = randomUUID();
@@ -320,10 +451,38 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     const { email, password } = body;
     if (!email || !password) { json(res, 400, { error: 'email and password required' }); return; }
 
+    const clientIp = readClientIp(req);
+    const lockedMs = getLoginBackoffMs(clientIp, email);
+    if (lockedMs > 0) {
+      const retryAfterSec = Math.ceil(lockedMs / 1_000);
+      res.setHeader('Retry-After', String(retryAfterSec));
+      json(res, 429, { error: 'Too many login attempts. Please retry later.' });
+      return;
+    }
+
+    const loginRate = checkAuthRateLimits('login', req, email);
+    if (loginRate.limited) {
+      const retryAfterSec = Math.ceil(loginRate.retryAfterMs / 1_000);
+      res.setHeader('Retry-After', String(retryAfterSec));
+      json(res, 429, { error: 'Too many login attempts. Please retry later.' });
+      return;
+    }
+
     const user = await db.getUserByEmail(email);
-    if (!user || !verifyPassword(password, user.password_hash)) {
+    const verification = user
+      ? await verifyPasswordDetailed(password, user.password_hash)
+      : { ok: false, needsRehash: false };
+    if (!user || !verification.ok) {
+      recordLoginFailure(clientIp, email);
       json(res, 401, { error: 'Invalid credentials' });
       return;
+    }
+
+    clearLoginFailures(clientIp, email);
+
+    if (verification.needsRehash) {
+      const upgradedHash = await hashPassword(password);
+      await db.updateUser(user.id, { passwordHash: upgradedHash });
     }
 
     await ensureAtLeastOneTenantAdmin(db, user.id);
@@ -489,7 +648,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
           id: resolvedUserId,
           email: fallbackEmail,
           name: fallbackName,
-          passwordHash: hashPassword(randomUUID()),
+          passwordHash: await hashPassword(randomUUID()),
         });
       }
 

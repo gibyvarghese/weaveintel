@@ -207,11 +207,12 @@ export function registerAdminRoutes(
     }
 
     const id = randomUUID();
+    const passwordHash = await hashPassword(password);
     await db.createUser({
       id,
       email,
       name,
-      passwordHash: hashPassword(password),
+      passwordHash,
       persona,
       tenantId,
     });
@@ -262,7 +263,7 @@ export function registerAdminRoutes(
     if (body['password'] !== undefined) {
       const password = String(body['password'] ?? '').trim();
       if (password) {
-        updates.passwordHash = hashPassword(password);
+        updates.passwordHash = await hashPassword(password);
       }
     }
 

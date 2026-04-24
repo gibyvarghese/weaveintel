@@ -5,7 +5,7 @@
  * cookie-based session management. Zero external dependencies.
  */
 
-import { createHmac, scryptSync, randomBytes, timingSafeEqual, randomUUID } from 'node:crypto';
+import { createHmac, scrypt, randomBytes, timingSafeEqual, randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DatabaseAdapter, SessionRow } from './db.js';
 
@@ -73,22 +73,120 @@ export function verifyJWT(token: string, secret: string): JWTPayload | null {
 
 // ─── Password hashing (scrypt) ───────────────────────────────
 
-// Uses scrypt (memory-hard KDF) with random salt for password storage.
-// hashPassword() returns "salt:hash"; verifyPassword() uses timingSafeEqual
-// to prevent timing attacks during comparison.
+// Uses async scrypt (memory-hard KDF) with random salt for password storage.
+// Current format: scrypt$v2$N$r$p$salt$hash (hex).
+// Legacy format: salt:hash (from earlier implementation).
 
-export function hashPassword(password: string): string {
-  const salt = randomBytes(32).toString('hex');
-  const hash = scryptSync(password, salt, 64).toString('hex');
-  return `${salt}:${hash}`;
+const PASSWORD_KEY_LEN = 64;
+const PASSWORD_HASH_PREFIX = 'scrypt$v2$';
+const PASSWORD_HASH_R = 8;
+const PASSWORD_HASH_P = 1;
+const PASSWORD_HASH_MAXMEM = 256 * 1024 * 1024;
+const DEFAULT_PASSWORD_HASH_N = process.env['NODE_ENV'] === 'test' ? 2 ** 14 : 2 ** 17;
+
+function resolvePasswordHashN(): number {
+  const fromEnv = Number.parseInt(process.env['GENEWEAVE_SCRYPT_N'] ?? '', 10);
+  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  return DEFAULT_PASSWORD_HASH_N;
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
-  const [salt, hash] = stored.split(':');
-  if (!salt || !hash) return false;
-  const hashBuffer = Buffer.from(hash, 'hex');
-  const derivedKey = scryptSync(password, salt, 64);
-  return timingSafeEqual(hashBuffer, derivedKey);
+interface ParsedPasswordHash {
+  salt: string;
+  hash: Buffer;
+  n: number;
+  r: number;
+  p: number;
+  isLegacy: boolean;
+}
+
+function parseStoredPasswordHash(stored: string): ParsedPasswordHash | null {
+  if (stored.startsWith(PASSWORD_HASH_PREFIX)) {
+    const [kdf, version, nRaw, rRaw, pRaw, salt, hashHex] = stored.split('$');
+    if (kdf !== 'scrypt' || version !== 'v2' || !nRaw || !rRaw || !pRaw || !salt || !hashHex) return null;
+    const n = Number.parseInt(nRaw, 10);
+    const r = Number.parseInt(rRaw, 10);
+    const p = Number.parseInt(pRaw, 10);
+    if (!Number.isFinite(n) || n <= 0 || !Number.isFinite(r) || r <= 0 || !Number.isFinite(p) || p <= 0) return null;
+    try {
+      return {
+        salt,
+        hash: Buffer.from(hashHex, 'hex'),
+        n,
+        r,
+        p,
+        isLegacy: false,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const [salt, hashHex] = stored.split(':');
+  if (!salt || !hashHex) return null;
+  try {
+    return {
+      salt,
+      hash: Buffer.from(hashHex, 'hex'),
+      n: 16_384,
+      r: 8,
+      p: 1,
+      isLegacy: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function derivePasswordKey(password: string, salt: string, n: number, r: number, p: number): Promise<Buffer> {
+  return await new Promise<Buffer>((resolve, reject) => {
+    scrypt(password, salt, PASSWORD_KEY_LEN, {
+      N: n,
+      r,
+      p,
+      maxmem: PASSWORD_HASH_MAXMEM,
+    }, (err, derivedKey) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(Buffer.from(derivedKey));
+    });
+  });
+}
+
+export async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(32).toString('hex');
+  const n = resolvePasswordHashN();
+  const hash = await derivePasswordKey(password, salt, n, PASSWORD_HASH_R, PASSWORD_HASH_P);
+  return `scrypt$v2$${n}$${PASSWORD_HASH_R}$${PASSWORD_HASH_P}$${salt}$${hash.toString('hex')}`;
+}
+
+export interface PasswordVerificationResult {
+  ok: boolean;
+  needsRehash: boolean;
+}
+
+export async function verifyPasswordDetailed(password: string, stored: string): Promise<PasswordVerificationResult> {
+  const parsed = parseStoredPasswordHash(stored);
+  if (!parsed || parsed.hash.length === 0) {
+    return { ok: false, needsRehash: false };
+  }
+
+  const derived = await derivePasswordKey(password, parsed.salt, parsed.n, parsed.r, parsed.p);
+  if (derived.length !== parsed.hash.length) {
+    return { ok: false, needsRehash: false };
+  }
+  const ok = timingSafeEqual(parsed.hash, derived);
+  if (!ok) return { ok: false, needsRehash: false };
+
+  const currentN = resolvePasswordHashN();
+  const needsRehash = parsed.isLegacy || parsed.n !== currentN || parsed.r !== PASSWORD_HASH_R || parsed.p !== PASSWORD_HASH_P;
+  return { ok: true, needsRehash };
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const result = await verifyPasswordDetailed(password, stored);
+  return result.ok;
 }
 
 // ─── CSRF ────────────────────────────────────────────────────

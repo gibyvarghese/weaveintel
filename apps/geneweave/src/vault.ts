@@ -1,27 +1,36 @@
 /**
  * @weaveintel/geneweave — Credential vault (AES-256-GCM encryption)
  *
- * Encrypts / decrypts website credentials at rest.  Each row uses a
- * unique random IV.  The master key is derived from the VAULT_KEY
- * environment variable.
+ * Encrypts / decrypts website credentials at rest.
+ * Current format: v1:base64(salt || iv || ciphertext || authTag)
+ * Legacy format (still readable): base64(iv || ciphertext || authTag)
  */
 
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto';
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes, scryptSync } from 'node:crypto';
 
 const ALGO = 'aes-256-gcm';
-const IV_LEN = 16;
+const IV_LEN = 12;
 const TAG_LEN = 16;
 const KEY_LEN = 32;
-const SALT = 'weaveintel-vault-v1';   // fixed salt (key uniqueness via env var)
+const SALT_LEN = 16;
+const VAULT_FORMAT_VERSION = 'v1';
+const HKDF_INFO = Buffer.from('weaveintel-vault-key-v1', 'utf8');
 
-let _derived: Buffer | null = null;
+const LEGACY_IV_LEN = 16;
+const LEGACY_SALT = 'weaveintel-vault-v1';
 
-function deriveKey(): Buffer {
-  if (_derived) return _derived;
+function readVaultMasterKey(): Buffer {
   const master = process.env['VAULT_KEY'];
   if (!master) throw new Error('VAULT_KEY must be set for credential encryption');
-  _derived = scryptSync(master, SALT, KEY_LEN);
-  return _derived;
+  return Buffer.from(master, 'utf8');
+}
+
+function deriveKeyForSalt(salt: Buffer): Buffer {
+  return Buffer.from(hkdfSync('sha256', readVaultMasterKey(), salt, HKDF_INFO, KEY_LEN));
+}
+
+function deriveLegacyKey(): Buffer {
+  return scryptSync(readVaultMasterKey(), LEGACY_SALT, KEY_LEN);
 }
 
 /**
@@ -29,15 +38,16 @@ function deriveKey(): Buffer {
  * Format: base64( IV || ciphertext || authTag )
  */
 export function encryptCredential(plainObj: unknown): { encrypted: string; iv: string } {
-  const key = deriveKey();
+  const salt = randomBytes(SALT_LEN);
+  const key = deriveKeyForSalt(salt);
   const iv = randomBytes(IV_LEN);
   const cipher = createCipheriv(ALGO, key, iv);
   const json = JSON.stringify(plainObj);
   const enc = Buffer.concat([cipher.update(json, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
-  const payload = Buffer.concat([iv, enc, tag]);
+  const payload = Buffer.concat([salt, iv, enc, tag]);
   return {
-    encrypted: payload.toString('base64'),
+    encrypted: `${VAULT_FORMAT_VERSION}:${payload.toString('base64')}`,
     iv: iv.toString('hex'),
   };
 }
@@ -46,12 +56,31 @@ export function encryptCredential(plainObj: unknown): { encrypted: string; iv: s
  * Decrypt base64 string → parsed JSON object.
  */
 export function decryptCredential<T = unknown>(encrypted: string): T {
-  const key = deriveKey();
+  if (encrypted.startsWith(`${VAULT_FORMAT_VERSION}:`)) {
+    const encoded = encrypted.slice(VAULT_FORMAT_VERSION.length + 1);
+    const buf = Buffer.from(encoded, 'base64');
+    if (buf.length <= SALT_LEN + IV_LEN + TAG_LEN) {
+      throw new Error('Invalid credential payload');
+    }
+    const salt = buf.subarray(0, SALT_LEN);
+    const iv = buf.subarray(SALT_LEN, SALT_LEN + IV_LEN);
+    const tag = buf.subarray(buf.length - TAG_LEN);
+    const ciphertext = buf.subarray(SALT_LEN + IV_LEN, buf.length - TAG_LEN);
+    const decipher = createDecipheriv(ALGO, deriveKeyForSalt(salt), iv);
+    decipher.setAuthTag(tag);
+    const dec = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return JSON.parse(dec.toString('utf8')) as T;
+  }
+
+  // Backward compatibility for existing records written before versioned payloads.
   const buf = Buffer.from(encrypted, 'base64');
-  const iv = buf.subarray(0, IV_LEN);
+  if (buf.length <= LEGACY_IV_LEN + TAG_LEN) {
+    throw new Error('Invalid credential payload');
+  }
+  const iv = buf.subarray(0, LEGACY_IV_LEN);
   const tag = buf.subarray(buf.length - TAG_LEN);
-  const ciphertext = buf.subarray(IV_LEN, buf.length - TAG_LEN);
-  const decipher = createDecipheriv(ALGO, key, iv);
+  const ciphertext = buf.subarray(LEGACY_IV_LEN, buf.length - TAG_LEN);
+  const decipher = createDecipheriv(ALGO, deriveLegacyKey(), iv);
   decipher.setAuthTag(tag);
   const dec = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
   return JSON.parse(dec.toString('utf8')) as T;
