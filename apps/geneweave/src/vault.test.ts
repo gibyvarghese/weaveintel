@@ -46,4 +46,9 @@ describe('vault credential encryption', () => {
     const tampered = encrypted.slice(0, -2) + 'aa';
     expect(() => decryptCredential(tampered)).toThrow();
   });
+
+  it('fails fast when VAULT_KEY is missing', () => {
+    delete process.env['VAULT_KEY'];
+    expect(() => encryptCredential({ provider: 'x' })).toThrow(/VAULT_KEY must be set/);
+  });
 });
