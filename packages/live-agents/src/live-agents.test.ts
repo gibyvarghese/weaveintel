@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AccessTokenResolver } from '@weaveintel/core';
+import type { AccessTokenResolver, ExecutionContext, Model, ModelRequest, ModelResponse } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveInMemoryTracer } from '@weaveintel/observability';
@@ -24,6 +24,24 @@ import {
   type AttentionAction,
   weaveInMemoryStateStore,
 } from './index.js';
+
+// Helper: simple mock model for tests
+function createMockModel(): Model {
+  return {
+    info: { provider: 'mock', modelId: 'mock-model', capabilities: new Set() },
+    capabilities: new Set(),
+    hasCapability: () => false,
+    async generate(_ctx: ExecutionContext, _request: ModelRequest): Promise<ModelResponse> {
+      return {
+        id: 'mock-response',
+        content: JSON.stringify({ type: 'CheckpointAndRest', nextTickAt: new Date().toISOString() }),
+        finishReason: 'stop',
+        usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+        model: 'mock-model',
+      };
+    },
+  };
+}
 
 describe('@weaveintel/live-agents phase 1 scaffold', () => {
   it('enforces human-only account bindings', async () => {
@@ -462,6 +480,7 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
       stateStore: store,
       workerId: 'worker-1',
       concurrency: 1,
+      model: createMockModel(),
       now: () => now,
     });
 
@@ -1676,6 +1695,7 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
       stateStore: store,
       workerId: 'worker-a',
       concurrency: 1,
+      model: createMockModel(),
       now: () => now,
       attentionPolicy,
       actionExecutor,
@@ -1684,6 +1704,7 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
       stateStore: store,
       workerId: 'worker-b',
       concurrency: 1,
+      model: createMockModel(),
       now: () => now,
       attentionPolicy,
       actionExecutor,
@@ -1764,6 +1785,7 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
       stateStore: store,
       workerId: 'worker-budget-1',
       concurrency: 1,
+      model: createMockModel(),
       now: () => now,
     });
 
@@ -2780,6 +2802,7 @@ describe('@weaveintel/live-agents phase 1 scaffold', () => {
       stateStore: store,
       workerId: 'worker-phase13',
       concurrency: 1,
+      model: createMockModel(),
       now: () => now,
       attentionPolicy: {
         key: 'phase13',

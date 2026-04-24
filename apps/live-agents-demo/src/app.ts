@@ -13,7 +13,7 @@ import {
   type Message,
   type StateStore,
 } from '@weaveintel/live-agents';
-import { weaveContext } from '@weaveintel/core';
+import { weaveContext, type Model, type ExecutionContext, type ModelRequest, type ModelResponse } from '@weaveintel/core';
 
 export interface LiveAgentsDemoConfig {
   stateStore: StateStore;
@@ -418,10 +418,27 @@ function createAttentionPolicy(): AttentionPolicy {
 }
 
 function createHeartbeatRunner(stateStore: StateStore): Heartbeat {
+  // Simple mock model for demo
+  const mockModel: Model = {
+    info: { provider: 'mock', modelId: 'demo-mock', capabilities: new Set() },
+    capabilities: new Set(),
+    hasCapability: () => false,
+    async generate(_ctx: ExecutionContext, _request: ModelRequest): Promise<ModelResponse> {
+      return {
+        id: 'mock-res',
+        content: '{"type":"NoopRest"}',
+        finishReason: 'stop',
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        model: 'demo-mock',
+      };
+    },
+  };
+
   return createHeartbeat({
     stateStore,
     workerId: 'live-agents-demo-worker',
     concurrency: 4,
+    model: mockModel,
     attentionPolicy: createAttentionPolicy(),
     actionExecutor: createActionExecutor(),
   });

@@ -8,7 +8,7 @@ import {
   weavePostgresStateStore,
   weaveSqliteStateStore,
 } from '@weaveintel/live-agents';
-import { weaveContext } from '@weaveintel/core';
+import { weaveContext, type Model, type ExecutionContext, type ModelRequest, type ModelResponse } from '@weaveintel/core';
 import { createInMemoryDemoStateStore } from './inmemory-state-store.js';
 
 async function main() {
@@ -83,10 +83,27 @@ async function main() {
     await maybeInit.call(stateStore);
   }
 
+  // Simple mock model for demo
+  const mockModel: Model = {
+    info: { provider: 'mock', modelId: 'demo-mock', capabilities: new Set() },
+    capabilities: new Set(),
+    hasCapability: () => false,
+    async generate(_ctx: ExecutionContext, _request: ModelRequest): Promise<ModelResponse> {
+      return {
+        id: 'mock-res',
+        content: '{"type":"NoopRest"}',
+        finishReason: 'stop',
+        usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        model: 'demo-mock',
+      };
+    },
+  };
+
   const heartbeat = createHeartbeat({
     stateStore,
     workerId: process.env['LIVE_AGENTS_DEMO_WORKER_ID'] ?? 'live-agents-demo-worker',
     concurrency: Number.parseInt(process.env['LIVE_AGENTS_DEMO_WORKER_CONCURRENCY'] ?? '4', 10),
+    model: mockModel,
     actionExecutor: createActionExecutor(),
   });
 

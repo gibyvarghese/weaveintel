@@ -180,6 +180,58 @@ type AttentionAction =
 
 The framework ships a `standard-v1` policy. Applications can define custom policies.
 
+### Model-driven attention (automatic LLM invocation)
+
+`@weaveintel/live-agents` now supports an attention policy that calls an LLM on each tick,
+including contract, inbox, backlog, and active account-binding context in the model input.
+
+Use `createModelAttentionPolicy(...)` directly:
+
+```typescript
+import { createModelAttentionPolicy } from '@weaveintel/live-agents';
+
+const attentionPolicy = createModelAttentionPolicy({
+  model, // any @weaveintel/core Model
+});
+```
+
+Or route model selection per request using `@weaveintel/routing`:
+
+```typescript
+import { createModelAttentionPolicy } from '@weaveintel/live-agents';
+
+const attentionPolicy = createModelAttentionPolicy({
+  modelRouter,
+  routingPolicy,
+  resolveModel: async ({ decision }) => {
+    return modelRegistry.get(`${decision.providerId}:${decision.modelId}`)!;
+  },
+});
+```
+
+For automatic heartbeat wiring, pass `modelAttentionPolicy` to `createHeartbeat(...)`:
+
+```typescript
+const heartbeat = createHeartbeat({
+  stateStore,
+  workerId: 'worker-1',
+  concurrency: 4,
+  modelAttentionPolicy: {
+    modelRouter,
+    routingPolicy,
+    resolveModel,
+  },
+  actionExecutor: createActionExecutor(),
+});
+```
+
+Safety behavior:
+
+- Model output is parsed as JSON and validated against supported `AttentionAction` shapes.
+- Unknown/invalid actions are rejected.
+- Required references (`messageId`, `backlogItemId`) are constrained to known context IDs.
+- On parse/validation/model failure, policy falls back to `createStandardAttentionPolicy()`.
+
 ### Account Bindings
 
 An **account binding** represents a **human-granted** permission for an agent to use an external account (e.g., Gmail):

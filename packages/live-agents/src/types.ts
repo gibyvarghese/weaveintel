@@ -682,6 +682,7 @@ export interface CapabilityIssueBody {
   scopeProse: string;
   durationHint: string | null;
   reasonProse: string;
+  evidenceMessageIds?: string[];
 }
 
 export interface AgentContractDraft {
@@ -714,6 +715,7 @@ export interface AttentionContext {
   inbox: Message[];
   backlog: BacklogItem[];
   activeBindings: AccountBinding[];
+  model: Model;
 }
 
 export interface AttentionPolicy {

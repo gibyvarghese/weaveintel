@@ -65,6 +65,8 @@ export interface SupervisorOptions {
   instructions?: string;
   /** Additional tools the supervisor can call directly (e.g. CSE execution tools) */
   additionalTools?: ToolRegistry;
+  /** Tool names considered CSE code execution endpoints (direct or MCP-wrapped). */
+  cseCodeToolNames?: string[];
 }
 
 export function weaveSupervisor(opts: SupervisorOptions): Agent {
@@ -81,6 +83,7 @@ export function weaveSupervisor(opts: SupervisorOptions): Agent {
       opts.workers.map((w) => [w.name, { name: w.name, description: w.description }]),
     ),
   };
+  const cseCodeToolNames = opts.cseCodeToolNames ?? ['cse_run_code', 'cse.run_code'];
 
   // Build worker agents
   const workers = new Map<string, Agent>();
@@ -159,7 +162,7 @@ export function weaveSupervisor(opts: SupervisorOptions): Agent {
     },
   }));
 
-  // Merge any additional tools (e.g. CSE execution tools) BEFORE delegate_to_worker
+  // Merge any additional tools (including MCP-wrapped CSE execution tools) BEFORE delegate_to_worker
   // so they appear earlier in the tool list and the model prefers them.
   if (opts.additionalTools) {
     for (const tool of opts.additionalTools.list()) {
@@ -169,7 +172,7 @@ export function weaveSupervisor(opts: SupervisorOptions): Agent {
 
   supervisorTools.register(weaveTool<{ worker: string; goal: string }>({
     name: 'delegate_to_worker',
-    description: `Delegate a task to a worker agent. Available workers: ${[...workers.keys()].join(', ')}. Each worker has specialized capabilities. Describe the goal clearly. IMPORTANT: Do NOT use this for tasks that can be handled by a Direct Tool (e.g. use cse_run_code for code execution, not this).`,
+    description: `Delegate a task to a worker agent. Available workers: ${[...workers.keys()].join(', ')}. Each worker has specialized capabilities. Describe the goal clearly. IMPORTANT: Do NOT use this for tasks that can be handled by an available tool (including MCP-wrapped tools like cse_run_code).`,
     parameters: {
       type: 'object',
       properties: {
@@ -186,9 +189,9 @@ export function weaveSupervisor(opts: SupervisorOptions): Agent {
       required: ['worker', 'goal'],
     },
     async execute(args, ctx) {
-      // If a direct code-execution tool is available and the goal looks like code execution,
+      // If a CSE code-execution tool is available and the goal looks like code execution,
       // redirect automatically rather than delegating to a worker.
-      const cseRunCode = opts.additionalTools?.list().find((t) => t.schema.name === 'cse_run_code');
+      const cseRunCode = opts.additionalTools?.list().find((t) => cseCodeToolNames.includes(t.schema.name));
       if (cseRunCode) {
         const codeBlockMatch = args.goal.match(/```[\w]*\n([\s\S]*?)```/);
         const inlineCodeMatch = args.goal.match(/`([^`]{20,})`/);
@@ -197,7 +200,7 @@ export function weaveSupervisor(opts: SupervisorOptions): Agent {
           const code = codeBlockMatch?.[1] ?? inlineCodeMatch?.[1] ?? args.goal;
           const lang = args.goal.match(/```(\w+)/)?.[1] ?? 'python';
           const output = await cseRunCode.invoke(ctx, {
-            name: 'cse_run_code',
+            name: cseRunCode.schema.name,
             arguments: { code, language: lang, chatId: ctx.metadata['chatId'] },
           });
           return output.content;
@@ -268,9 +271,9 @@ export function weaveSupervisor(opts: SupervisorOptions): Agent {
   const directToolSection = directToolNames.length > 0
     ? [
         '',
-        '## Direct Tools (call these yourself — no delegation needed):',
+        '## Available Tools (direct or MCP-wrapped — call these yourself when applicable):',
         directToolNames.map((n) => `- \`${n}\``).join('\n'),
-        'When a task can be accomplished with a direct tool above, call it yourself instead of delegating.',
+        'When a task can be accomplished with a tool above, call it yourself instead of delegating.',
       ].join('\n')
     : '';
 
@@ -290,13 +293,13 @@ export function weaveSupervisor(opts: SupervisorOptions): Agent {
     '### PHASE 1: UNDERSTANDING & PLANNING',
     '1. First, use the `think` tool with reasoning_phase="planning" to analyze the user request:',
     '   - What is the user actually asking for?',
-    '   - Can I fulfill this directly with a Direct Tool listed above (e.g. cse_run_code for code execution)?',
+    '   - Can I fulfill this directly with an available tool listed above (e.g. cse_run_code for CSE execution)?',
     '   - If yes → skip delegation, call the direct tool yourself in Phase 2.',
     '   - If no → which workers are qualified to handle this?',
     '2. Use the `plan` tool to create an explicit decomposition.',
     '',
     '### PHASE 2: DIRECT TOOL CALLS OR DELEGATION',
-    '3a. If a Direct Tool can handle the task: call it directly (e.g. `cse_run_code` to execute code).',
+    '3a. If an available tool can handle the task: call it directly (e.g. `cse_run_code` to execute code).',
     '3b. Otherwise, delegate to workers using `delegate_to_worker`.',
     '',
     '### PHASE 3: ANALYSIS & REASONING',
@@ -311,8 +314,8 @@ export function weaveSupervisor(opts: SupervisorOptions): Agent {
     '- NEVER skip the planning phase. Always use `plan` before acting.',
     '- NEVER fire-and-forget. Always reason about results before responding.',
     '- ALWAYS use `think` with the appropriate reasoning_phase.',
-    '- If a Direct Tool is available for the task, YOU MUST call it yourself. Do NOT call delegate_to_worker.',
-    '- NEVER call `delegate_to_worker` for code execution when `cse_run_code` is listed as a Direct Tool.',
+    '- If an available tool can handle the task, YOU MUST call it yourself. Do NOT call delegate_to_worker.',
+    '- NEVER call `delegate_to_worker` for code execution when a CSE code tool (for example cse_run_code) is available.',
   ].join('\n');
 
   // The supervisor IS a tool-calling agent with thinking + delegation tools

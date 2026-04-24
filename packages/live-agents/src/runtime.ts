@@ -1,4 +1,4 @@
-import { weaveResolveTracer, type ExecutionContext, type MemoryEntry, type WorkingMemory } from '@weaveintel/core';
+import { weaveResolveTracer, type ExecutionContext, type MemoryEntry, type WorkingMemory, type Model } from '@weaveintel/core';
 import {
   createCompressorRegistry,
   createContextAssembler,
@@ -22,7 +22,7 @@ import type {
   StateStore,
 } from './types.js';
 import { asStateStore } from './state-store.js';
-import { createStandardAttentionPolicy } from './attention.js';
+import { createModelAttentionPolicy, createStandardAttentionPolicy, type ModelAttentionPolicyOptions } from './attention.js';
 import { createActionExecutor } from './action-executor.js';
 import { createLiveAgentsRunLogger } from './replay.js';
 
@@ -111,6 +111,7 @@ export function createHeartbeat(opts: {
   stateStore: StateStore;
   workerId: string;
   concurrency: number;
+  model: Model;
   attentionPolicy?: AttentionPolicy;
   actionExecutor?: ActionExecutor;
   now?: () => string;
@@ -234,6 +235,7 @@ export function createHeartbeat(opts: {
             inbox,
             backlog,
             activeBindings,
+            model: opts.model,
           },
           ctx,
         );

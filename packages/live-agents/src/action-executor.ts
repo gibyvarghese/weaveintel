@@ -653,6 +653,7 @@ export function createActionExecutor(opts?: {
         }
         case 'IssueGrant': {
           const grantId = makeId('grant', context.nowIso, Math.random().toString(36).slice(2, 10));
+          const evidenceRefs = action.capability.evidenceMessageIds ?? [];
           const capabilityGrant: CapabilityGrant = {
             id: grantId,
             meshId: context.agent.meshId,
@@ -675,7 +676,7 @@ export function createActionExecutor(opts?: {
             revocationReasonProse: null,
             probationConditionsProse: null,
             limits: {},
-            evidenceRefs: [],
+            evidenceRefs,
           };
           await saveGrantObserved(capabilityGrant);
 
@@ -692,7 +693,7 @@ export function createActionExecutor(opts?: {
             kind: 'GRANT_NOTICE',
             replyToMessageId: null,
             threadId: messageId,
-            contextRefs: [grantId],
+            contextRefs: [grantId, ...evidenceRefs],
             contextPacketRef: null,
             expiresAt: null,
             priority: 'NORMAL',

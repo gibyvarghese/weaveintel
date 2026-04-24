@@ -72,7 +72,11 @@ export {
   createExternalEventHandler,
 } from './runtime.js';
 
-export { createStandardAttentionPolicy } from './attention.js';
+export {
+  createStandardAttentionPolicy,
+  createModelAttentionPolicy,
+  type ModelAttentionPolicyOptions,
+} from './attention.js';
 export { createActionExecutor } from './action-executor.js';
 export { createMcpAccountSessionProvider } from './mcp-session-provider.js';
 export {
