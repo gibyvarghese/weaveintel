@@ -31,6 +31,8 @@ import {
 import { weaveContext } from '@weaveintel/core';
 import type { ExecutionContext, Tool, MCPToolCallResponse, JsonSchema } from '@weaveintel/core';
 import { BUILTIN_TOOLS, inferAllocationClass } from './tools.js';
+import type { DatabaseAdapter } from './db-types.js';
+import { randomUUID } from 'node:crypto';
 
 /** Allocation classes considered "external" — these are exposed by default. */
 export const DEFAULT_EXPOSED_ALLOCATION_CLASSES: ReadonlySet<string> = new Set([
@@ -42,6 +44,13 @@ export const DEFAULT_EXPOSED_ALLOCATION_CLASSES: ReadonlySet<string> = new Set([
   'enterprise',
   'communication',
 ]);
+
+/** Stable tool_key used to self-register the gateway in tool_catalog. */
+export const MCP_GATEWAY_TOOL_KEY = 'geneweave_mcp_gateway';
+/** Stable credential name used to self-register the gateway's bearer-token credential. */
+export const MCP_GATEWAY_CREDENTIAL_NAME = 'GeneWeave MCP Gateway Token';
+/** Default env var the gateway reads its bearer token from. */
+export const MCP_GATEWAY_DEFAULT_ENV_VAR = 'GENEWEAVE_MCP_GATEWAY_TOKEN';
 
 export interface MCPGatewayOptions {
   /** Override which tools are exposed. When omitted, BUILTIN_TOOLS is used. */
@@ -193,4 +202,117 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
       // No persistent resources held — nothing to clean up.
     },
   };
+}
+
+/**
+ * Options for {@link registerMCPGatewayInCatalog}.
+ */
+export interface RegisterMCPGatewayInCatalogOptions {
+  /** Allocation classes the gateway exposes (defaults to {@link DEFAULT_EXPOSED_ALLOCATION_CLASSES}). */
+  exposedClasses?: ReadonlySet<string>;
+  /**
+   * URL where this GeneWeave instance serves the gateway. Stored in the
+   * catalog row's `config.endpoint`. When omitted, defaults to the
+   * relative path `/api/mcp/gateway` so external readers can resolve it
+   * against the host's public base URL.
+   */
+  endpoint?: string;
+  /** Override the env var name recorded on the credential row. */
+  envVarName?: string;
+  /** Override the catalog tool_key (mainly for tests). */
+  toolKey?: string;
+  /** Override the credential record name (mainly for tests). */
+  credentialName?: string;
+  /** Override the BUILTIN_TOOLS map (mainly for tests). */
+  tools?: Record<string, Tool>;
+}
+
+/**
+ * Self-register the MCP gateway in the operator-managed `tool_catalog` table
+ * and create a paired `tool_credentials` entry whose `env_var_name` points to
+ * the bearer-token environment variable. Both rows are upserted, so this is
+ * safe to call on every startup.
+ *
+ * Why both rows: catalog gives the admin UI a discoverable entry with the
+ * gateway's allocation class (`gateway`), endpoint, and exposed tool list.
+ * Credentials follow Phase 4 conventions — the secret never lands in the
+ * DB; only the env var name is recorded so operators can rotate it.
+ */
+export async function registerMCPGatewayInCatalog(
+  db: DatabaseAdapter,
+  opts: RegisterMCPGatewayInCatalogOptions = {},
+): Promise<{ catalogId: string; credentialId: string }> {
+  const tools = opts.tools ?? BUILTIN_TOOLS;
+  const classes = opts.exposedClasses ?? DEFAULT_EXPOSED_ALLOCATION_CLASSES;
+  const exposed = selectExposedTools(tools, classes);
+  const endpoint = opts.endpoint ?? '/api/mcp/gateway';
+  const envVarName = opts.envVarName ?? MCP_GATEWAY_DEFAULT_ENV_VAR;
+  const toolKey = opts.toolKey ?? MCP_GATEWAY_TOOL_KEY;
+  const credentialName = opts.credentialName ?? MCP_GATEWAY_CREDENTIAL_NAME;
+
+  // 1) Upsert the credential row (find by name since there is no unique key on env_var_name).
+  const allCreds = await db.listToolCredentials();
+  const existingCred = allCreds.find((c) => c.name === credentialName) ?? null;
+  let credentialId: string;
+  const credentialFields = {
+    name: credentialName,
+    description: 'Bearer token for the internal MCP gateway. Set the env var to enable the gateway.',
+    credential_type: 'api_key',
+    tool_names: JSON.stringify([toolKey]),
+    env_var_name: envVarName,
+    config: JSON.stringify({ headerName: 'Authorization', prefix: 'Bearer' }),
+    rotation_due_at: null,
+    validation_status: 'unknown',
+    enabled: 1,
+  } as const;
+  if (existingCred) {
+    credentialId = existingCred.id;
+    await db.updateToolCredential(credentialId, credentialFields);
+  } else {
+    credentialId = randomUUID();
+    await db.createToolCredential({ id: credentialId, ...credentialFields });
+  }
+
+  // 2) Upsert the catalog row keyed by tool_key.
+  const exposedToolKeys = exposed.map((e) => e.key);
+  const config = JSON.stringify({
+    endpoint,
+    server_name: 'geneweave-gateway',
+    auth_scheme: 'Bearer',
+    exposed_classes: [...classes].sort(),
+    exposed_tool_keys: exposedToolKeys,
+  });
+  const description =
+    'Internal MCP Streamable HTTP gateway exposing GeneWeave external builtin tools ' +
+    `(${[...classes].sort().join(', ')}). ` +
+    `Surfaces ${exposedToolKeys.length} tool(s) behind a bearer-token authenticated endpoint.`;
+  const existingCatalog = await db.getToolCatalogByKey(toolKey);
+  const catalogFields = {
+    name: 'GeneWeave MCP Gateway',
+    description,
+    category: 'mcp',
+    risk_level: 'external-side-effect',
+    requires_approval: 0,
+    max_execution_ms: null,
+    rate_limit_per_min: null,
+    enabled: 1,
+    tool_key: toolKey,
+    version: '1.0',
+    side_effects: 1,
+    tags: JSON.stringify(['mcp', 'gateway', 'external']),
+    source: 'mcp',
+    credential_id: credentialId,
+    config,
+    allocation_class: 'gateway',
+  } as const;
+  let catalogId: string;
+  if (existingCatalog) {
+    catalogId = existingCatalog.id;
+    await db.updateToolConfig(catalogId, catalogFields);
+  } else {
+    catalogId = randomUUID();
+    await db.createToolConfig({ id: catalogId, ...catalogFields });
+  }
+
+  return { catalogId, credentialId };
 }

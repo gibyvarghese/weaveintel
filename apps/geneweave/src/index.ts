@@ -32,6 +32,7 @@ import { createGeneWeaveServer } from './server.js';
 import { syncModelPricing, type PricingSyncReport } from './pricing-sync.js';
 import { syncToolCatalog } from './tools.js';
 import { startToolHealthJob } from './tool-health-job.js';
+import { registerMCPGatewayInCatalog } from './mcp-gateway.js';
 import { seedSVData } from './features/scientific-validation/sv-seed.js';
 
 export type { PricingSyncReport };
@@ -128,6 +129,10 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
   // 4. Sync BUILTIN_TOOLS into tool_catalog so operators can manage them
   await syncToolCatalog(db);
+
+  // 4a. Self-register the internal MCP gateway in tool_catalog + tool_credentials
+  // so operators discover it through the admin UI. Idempotent on every boot.
+  await registerMCPGatewayInCatalog(db);
 
   // 5. Start background tool health snapshot job (writes every 15 min)
   startToolHealthJob(db);

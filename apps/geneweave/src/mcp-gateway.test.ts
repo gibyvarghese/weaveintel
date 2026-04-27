@@ -1,7 +1,18 @@
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createMCPGateway, DEFAULT_EXPOSED_ALLOCATION_CLASSES } from './mcp-gateway.js';
+import {
+  createMCPGateway,
+  DEFAULT_EXPOSED_ALLOCATION_CLASSES,
+  registerMCPGatewayInCatalog,
+  MCP_GATEWAY_TOOL_KEY,
+  MCP_GATEWAY_CREDENTIAL_NAME,
+  MCP_GATEWAY_DEFAULT_ENV_VAR,
+} from './mcp-gateway.js';
+import { createDatabaseAdapter } from './db.js';
 
 /**
  * Boots a tiny HTTP server fronted only by the MCP gateway handler so we
@@ -183,6 +194,63 @@ describe('Phase 1D — MCP gateway', () => {
       // Tools are still discovered; only the HTTP path is disabled.
       expect(gw.exposedToolNames.length).toBeGreaterThan(0);
       void gw.close();
+    });
+  });
+
+  describe('self-registration in tool_catalog', () => {
+    function makeTempDbPath(): { dir: string; dbPath: string } {
+      const dir = mkdtempSync(join(tmpdir(), 'gw-mcp-cat-'));
+      return { dir, dbPath: join(dir, 'test.db') };
+    }
+
+    it('upserts a catalog row + credential row idempotently', async () => {
+      const { dir, dbPath } = makeTempDbPath();
+      const db = await createDatabaseAdapter({ type: 'sqlite', path: dbPath });
+      try {
+        const first = await registerMCPGatewayInCatalog(db);
+        expect(first.catalogId).toMatch(/^[0-9a-f-]{36}$/);
+        expect(first.credentialId).toMatch(/^[0-9a-f-]{36}$/);
+
+        const catalog = await db.getToolCatalogByKey(MCP_GATEWAY_TOOL_KEY);
+        expect(catalog).not.toBeNull();
+        expect(catalog!.source).toBe('mcp');
+        expect(catalog!.allocation_class).toBe('gateway');
+        expect(catalog!.credential_id).toBe(first.credentialId);
+        expect(catalog!.enabled).toBe(1);
+
+        const config = JSON.parse(catalog!.config ?? '{}') as {
+          endpoint: string;
+          exposed_classes: string[];
+          exposed_tool_keys: string[];
+          auth_scheme: string;
+        };
+        expect(config.endpoint).toBe('/api/mcp/gateway');
+        expect(config.auth_scheme).toBe('Bearer');
+        // exposed_classes must match the default exposed set, sorted.
+        expect(config.exposed_classes).toEqual([...DEFAULT_EXPOSED_ALLOCATION_CLASSES].sort());
+        // exposed_tool_keys must include at least one external tool and exclude utility ones.
+        expect(config.exposed_tool_keys).toContain('web_search');
+        expect(config.exposed_tool_keys).not.toContain('calculator');
+
+        const cred = await db.getToolCredential(first.credentialId);
+        expect(cred).not.toBeNull();
+        expect(cred!.name).toBe(MCP_GATEWAY_CREDENTIAL_NAME);
+        expect(cred!.env_var_name).toBe(MCP_GATEWAY_DEFAULT_ENV_VAR);
+        expect(cred!.enabled).toBe(1);
+        // Tool names array must reference the catalog tool_key.
+        const credToolNames = JSON.parse(cred!.tool_names ?? '[]') as string[];
+        expect(credToolNames).toContain(MCP_GATEWAY_TOOL_KEY);
+
+        // Second call must not create duplicates and must reuse the same IDs.
+        const second = await registerMCPGatewayInCatalog(db);
+        expect(second.catalogId).toBe(first.catalogId);
+        expect(second.credentialId).toBe(first.credentialId);
+
+        const allCreds = await db.listToolCredentials();
+        expect(allCreds.filter((c) => c.name === MCP_GATEWAY_CREDENTIAL_NAME).length).toBe(1);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
   });
 });
