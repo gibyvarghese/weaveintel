@@ -30,6 +30,13 @@ import {
 } from '@weaveintel/mcp-server';
 import { weaveContext } from '@weaveintel/core';
 import type { ExecutionContext, Tool, MCPToolCallResponse, JsonSchema } from '@weaveintel/core';
+import {
+  createPolicyEnforcedTool,
+  type ToolPolicyResolver,
+  type ToolAuditEmitter,
+  type ToolRateLimiter,
+  type PolicyResolutionContext,
+} from '@weaveintel/tools';
 import { BUILTIN_TOOLS, inferAllocationClass } from './tools.js';
 import type { DatabaseAdapter } from './db-types.js';
 import { randomUUID } from 'node:crypto';
@@ -63,6 +70,25 @@ export interface MCPGatewayOptions {
   serverName?: string;
   /** Server version reported in the MCP initialize handshake. */
   serverVersion?: string;
+  /**
+   * Optional policy resolver. When provided, every tool exposed through the
+   * gateway is wrapped with the standard policy enforcement chain (enabled
+   * check → risk-level → approval → rate-limit → execute → audit) so the
+   * gateway honours the same operator policies as in-process chat tools.
+   */
+  policyResolver?: ToolPolicyResolver;
+  /** Optional audit emitter. Recommended whenever `policyResolver` is set. */
+  auditEmitter?: ToolAuditEmitter;
+  /** Optional rate limiter. Used by policy enforcement when a policy declares per-minute caps. */
+  rateLimiter?: ToolRateLimiter;
+  /**
+   * Synthetic chat id stamped on every audit event emitted by the gateway.
+   * Defaults to `'mcp-gateway'`. Use to distinguish external MCP traffic
+   * from in-process chat sessions in the audit log.
+   */
+  auditChatId?: string;
+  /** Synthetic agent persona stamped on every audit event. Defaults to `'mcp-gateway'`. */
+  auditAgentPersona?: string;
 }
 
 export interface MCPGatewayHandle {
@@ -113,6 +139,31 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
   const serverName = opts.serverName ?? 'geneweave-gateway';
   const serverVersion = opts.serverVersion ?? '1.0.0';
   const exposedToolNames = exposed.map((e) => e.key);
+  const policyResolver = opts.policyResolver;
+  const auditEmitter = opts.auditEmitter;
+  const rateLimiter = opts.rateLimiter;
+  const auditChatId = opts.auditChatId ?? 'mcp-gateway';
+  const auditAgentPersona = opts.auditAgentPersona ?? 'mcp-gateway';
+
+  // Pre-wrap each exposed tool with policy enforcement when a resolver is
+  // supplied. The audit emitter, rate limiter, and resolution-context tags
+  // are stamped once per gateway instance so external MCP traffic shows up
+  // in the same `tool_audit_events` stream as in-process tool calls.
+  const enforced: ExposedToolEntry[] = policyResolver
+    ? exposed.map((e) => {
+        const resolutionContext: PolicyResolutionContext = {
+          chatId: auditChatId,
+          agentPersona: auditAgentPersona,
+        };
+        const wrapped = createPolicyEnforcedTool(e.tool, {
+          resolver: policyResolver,
+          ...(auditEmitter ? { auditEmitter } : {}),
+          ...(rateLimiter ? { rateLimiter } : {}),
+          resolutionContext,
+        });
+        return { key: e.key, tool: wrapped, allocationClass: e.allocationClass };
+      })
+    : exposed;
 
   function unauthorized(res: ServerResponse): void {
     const body = JSON.stringify({ error: 'Unauthorized' });
@@ -157,7 +208,7 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
       },
     );
 
-    for (const { key, tool, allocationClass } of exposed) {
+    for (const { key, tool, allocationClass } of enforced) {
       server.addTool(
         {
           name: key,
@@ -169,6 +220,9 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
             const result = await tool.invoke(ctx, { name: key, arguments: args });
             return toMCPResponse(result.content, result.isError);
           } catch (err) {
+            // Policy violations and tool errors both surface here. The audit
+            // event has already been emitted by the policy wrapper; we only
+            // shape the MCP response back to the client.
             return toMCPResponse(`Error: ${(err as Error).message}`, true);
           }
         },

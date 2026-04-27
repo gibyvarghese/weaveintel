@@ -33,7 +33,7 @@ import { registerAdminRoutes } from './server-admin.js';
 import { registerSVRoutes } from './features/scientific-validation/index.js';
 import { SVChatBridge } from './features/scientific-validation/chat-bridge.js';
 import { createSVToolMap } from './features/scientific-validation/tools/index.js';
-import { DbToolPolicyResolver } from './tool-policy-resolver.js';
+import { DbToolPolicyResolver, DbToolRateLimiter } from './tool-policy-resolver.js';
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
 import { createMCPGateway, DEFAULT_EXPOSED_ALLOCATION_CLASSES } from './mcp-gateway.js';
 import { encryptCredential, decryptCredential } from './vault.js';
@@ -2843,6 +2843,13 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     token: mcpGatewayToken || undefined,
     serverName: 'geneweave-gateway',
     serverVersion: '1.0.0',
+    // Phase 3: every gateway invocation flows through the same policy +
+    // audit + rate-limit pipeline as in-process chat tools, so external
+    // MCP traffic is bound by operator-managed `tool_policies` and lands
+    // in `tool_audit_events` with chatId='mcp-gateway' for filtering.
+    policyResolver: new DbToolPolicyResolver(db),
+    auditEmitter: new DbToolAuditEmitter(db),
+    rateLimiter: new DbToolRateLimiter(db),
   });
 
   // Diagnostic info endpoint — auth-required, no secret leakage. Operators

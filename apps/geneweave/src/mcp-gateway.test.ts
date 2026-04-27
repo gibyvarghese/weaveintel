@@ -13,6 +13,11 @@ import {
   MCP_GATEWAY_DEFAULT_ENV_VAR,
 } from './mcp-gateway.js';
 import { createDatabaseAdapter } from './db.js';
+import {
+  InMemoryToolPolicyResolver,
+  type ToolAuditEmitter,
+} from '@weaveintel/tools';
+import type { Tool, ToolAuditEvent } from '@weaveintel/core';
 
 /**
  * Boots a tiny HTTP server fronted only by the MCP gateway handler so we
@@ -250,6 +255,99 @@ describe('Phase 1D — MCP gateway', () => {
         expect(allCreds.filter((c) => c.name === MCP_GATEWAY_CREDENTIAL_NAME).length).toBe(1);
       } finally {
         rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  // ── Phase 3 — policy enforcement + audit on gateway invocations ─────────────
+  describe('policy enforcement + audit emission', () => {
+    /**
+     * Boots the gateway with a stub web_search tool, an in-memory policy
+     * resolver (default permissive), and a capturing audit emitter so we
+     * can assert that traffic flowing through `/api/mcp/gateway` lands in
+     * the same audit pipeline as in-process chat tool calls.
+     */
+    function makeStubTool(record: { invoked: number }): Tool {
+      return {
+        schema: {
+          name: 'web_search',
+          description: 'stub web_search for gateway policy test',
+          parameters: { type: 'object', properties: { q: { type: 'string' } } },
+          tags: ['web-search', 'search'],
+          riskLevel: 'read-only',
+        },
+        async invoke() {
+          record.invoked += 1;
+          return { content: 'stub-ok' };
+        },
+      };
+    }
+
+    function startEnforcedGateway(token: string): Promise<{
+      url: string;
+      events: ToolAuditEvent[];
+      stubCalls: { invoked: number };
+      close: () => Promise<void>;
+    }> {
+      const stubCalls = { invoked: 0 };
+      const stub = makeStubTool(stubCalls);
+      const events: ToolAuditEvent[] = [];
+      const auditEmitter: ToolAuditEmitter = { emit: async (e) => { events.push(e); } };
+      const policyResolver = new InMemoryToolPolicyResolver();
+      const gateway = createMCPGateway({
+        token,
+        tools: { web_search: stub },
+        policyResolver,
+        auditEmitter,
+      });
+      const server = createServer((req, res) => {
+        void gateway.handle(req, res).catch(() => {
+          if (!res.headersSent) { res.writeHead(500); res.end('error'); }
+        });
+      });
+      return new Promise((resolve) => {
+        server.listen(0, '127.0.0.1', () => {
+          const addr = server.address() as AddressInfo;
+          resolve({
+            url: `http://127.0.0.1:${addr.port}`,
+            events,
+            stubCalls,
+            close: () =>
+              new Promise<void>((r, rej) => {
+                void gateway.close().then(() => server.close((err) => (err ? rej(err) : r())));
+              }),
+          });
+        });
+      });
+    }
+
+    it('emits a success audit event tagged with mcp-gateway chatId on tools/call', async () => {
+      const TOKEN = 'phase3-test-token';
+      const handle = await startEnforcedGateway(TOKEN);
+      try {
+        const r = await postJson(
+          `${handle.url}/api/mcp/gateway`,
+          {
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: { name: 'web_search', arguments: { q: 'hello' } },
+          },
+          { Authorization: `Bearer ${TOKEN}` },
+        );
+        expect(r.status).toBe(200);
+        expect(handle.stubCalls.invoked).toBe(1);
+
+        // Audit event must have been emitted exactly once with the synthetic
+        // gateway chatId so operators can filter MCP traffic in the admin UI.
+        expect(handle.events.length).toBe(1);
+        const evt = handle.events[0]!;
+        expect(evt.toolName).toBe('web_search');
+        expect(evt.outcome).toBe('success');
+        expect(evt.chatId).toBe('mcp-gateway');
+        expect(evt.agentPersona).toBe('mcp-gateway');
+      } finally {
+        await handle.close();
       }
     });
   });
