@@ -6,6 +6,28 @@ import { resetPromptWizard } from './prompt-wizard-state.js';
 import { renderToolSimulationView } from './tool-simulation-ui.js';
 import { renderToolApprovalView } from './tool-approval-ui.js';
 
+// ── Fast tooltip (escapes overflow:hidden ancestors) ──────────────────────────
+let _fastTipEl: HTMLDivElement | null = null;
+function ensureFastTip(): HTMLDivElement {
+  if (!_fastTipEl) {
+    _fastTipEl = document.createElement('div');
+    _fastTipEl.className = 'fast-tip';
+    document.body.appendChild(_fastTipEl);
+  }
+  return _fastTipEl;
+}
+function showFastTip(anchor: HTMLElement, text: string): void {
+  const tip = ensureFastTip();
+  tip.textContent = text;
+  const r = anchor.getBoundingClientRect();
+  tip.style.left = `${r.left}px`;
+  tip.style.top = `${r.bottom + 6}px`;
+  tip.classList.add('show');
+}
+function hideFastTip(): void {
+  if (_fastTipEl) _fastTipEl.classList.remove('show');
+}
+
 // ── Admin deep-link URL helpers ───────────────────────────────────────────────
 // Hash format:  #admin/{tab}          → opens the tab's list view
 //               #admin/{tab}/{id}     → opens the tab and immediately edits record {id}
@@ -795,7 +817,7 @@ export function renderAdminView(options: {
   const searchInput = h('input', {
     type: 'text',
     className: 'admin-list-search',
-    placeholder: `Search ${rows.length} records… (name is writer, score > 10, status is not draft)`,
+    placeholder: 'Search…',
     value: state.adminListSearch || '',
     onInput: (e: Event) => {
       state.adminListSearch = (e.target as HTMLInputElement).value;
@@ -832,7 +854,13 @@ export function renderAdminView(options: {
 
   listPanel.appendChild(
     h('div', { className: 'admin-list-toolbar' },
-      h('div', { className: 'admin-list-search-wrap' },
+      h('div', {
+        className: 'admin-list-search-wrap',
+        onMouseenter: function (this: HTMLElement) { showFastTip(this, 'Filter by text — or use: name is writer · score > 10 · status is not draft'); },
+        onMouseleave: () => hideFastTip(),
+        onFocusin: function (this: HTMLElement) { showFastTip(this, 'Filter by text — or use: name is writer · score > 10 · status is not draft'); },
+        onFocusout: () => hideFastTip(),
+      },
         h('span', { className: 'admin-list-search-icon' }, '🔍'),
         searchInput
       ),

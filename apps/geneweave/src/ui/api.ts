@@ -216,6 +216,20 @@ export async function loadModels() {
   }
 }
 
+// Active routing policy — when set, server overrides the chat model selection
+export async function loadActiveRoutingPolicy() {
+  try {
+    const r = await api.get('/routing/active');
+    if (!r.ok) { state.activeRoutingPolicy = null; return; }
+    const data = await r.json();
+    const first = Array.isArray(data?.active) && data.active.length > 0 ? data.active[0] : null;
+    state.activeRoutingPolicy = first ? { name: first.name, strategy: first.strategy } : null;
+    triggerRender();
+  } catch {
+    state.activeRoutingPolicy = null;
+  }
+}
+
 export async function loadTools() {
   try {
     const r = await api.get('/tools');

@@ -4,14 +4,14 @@
  * Orchestrates weaveIntel models for chat. Supports three modes:
  *  - **direct**: model.generate / model.stream (default, original behavior)
  *  - **agent**: weaveAgent with tool-calling ReAct loop
- *  - **supervisor**: weaveSupervisor with hierarchical worker delegation
+ *  - **supervisor**: weaveAgent in supervisor mode with hierarchical worker delegation
  *
  * Integrates redaction (PII scrubbing), observability (trace spans),
  * and eval (response quality assertions) into the message flow.
  *
  * WeaveIntel packages integrated here:
  *   @weaveintel/core         — ExecutionContext, EventBus, Model/ToolRegistry types
- *   @weaveintel/agents       — weaveAgent (ReAct loop) and weaveSupervisor
+ *   @weaveintel/agents       — weaveAgent (ReAct loop, with optional supervisor mode)
  *   @weaveintel/observability — weaveInMemoryTracer, weaveUsageTracker for spans
  *   @weaveintel/redaction     — weaveRedactor for PII scrubbing before/after LLM
  *   @weaveintel/evals         — weaveEvalRunner for response quality assertions
@@ -29,7 +29,7 @@ import type {
   ToolRegistry, AgentStepEvent, AgentStep, AgentResult, EventBus,
 } from '@weaveintel/core';
 import { weaveContext, weaveEventBus, EventTypes } from '@weaveintel/core';
-import { weaveAgent, weaveSupervisor } from '@weaveintel/agents';
+import { weaveAgent } from '@weaveintel/agents';
 import {
   weaveInMemoryTracer,
   weaveUsageTracker,
@@ -591,12 +591,12 @@ export class ChatEngine {
 
         const supervisorInstructions = await this.buildSupervisorInstructions(settings.systemPrompt, forceWorkerDataAnalysis, dbWorkerRows);
 
-        agent = weaveSupervisor({
+        agent = weaveAgent({
           model,
           workers: allWorkers,
           maxSteps: 20,
           name: 'geneweave-supervisor',
-          instructions: supervisorInstructions,
+          systemPrompt: supervisorInstructions,
           additionalTools: supervisorCseTools,
           bus: agentBus,
         });
@@ -762,12 +762,12 @@ export class ChatEngine {
             );
 
         const supervisorInstructions = await this.buildSupervisorInstructions(settings.systemPrompt, forceWorkerDataAnalysis, dbWorkerRows);
-        agent = weaveSupervisor({
+        agent = weaveAgent({
           model,
           workers: allWorkers,
           maxSteps: 20,
           name: 'geneweave-supervisor',
-          instructions: supervisorInstructions,
+          systemPrompt: supervisorInstructions,
           additionalTools: supervisorCseToolsStream,
           bus: agentBus,
         });

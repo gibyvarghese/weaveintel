@@ -26,7 +26,7 @@ import {
   weaveToolRegistry,
   weaveTool,
 } from '@weaveintel/core';
-import { weaveSupervisor } from '@weaveintel/agents';
+import { weaveAgent } from '@weaveintel/agents';
 import { weaveConsoleTracer } from '@weaveintel/observability';
 import { weaveOpenAIModel } from '@weaveintel/provider-openai';
 
@@ -85,14 +85,15 @@ async function main() {
     apiKey: process.env['OPENAI_API_KEY'],
   });
 
-  // weaveSupervisor() creates a hierarchical agent system:
+  // weaveAgent({ workers: [...] }) creates a hierarchical agent system:
   //   • It auto-injects a 'delegate_to_worker' tool into the supervisor's tool set
   //   • When the supervisor calls that tool, its loop pauses, spins up the named
   //     worker agent, runs it to completion, and returns the worker's output
   //     as the tool result to the supervisor.
   //   • Each worker is a full weaveAgent with its own model + tools + maxSteps.
   //   • maxSteps on the supervisor limits the total number of delegation rounds.
-  const supervisor = weaveSupervisor({
+  const supervisor = weaveAgent({
+    name: 'supervisor',
     model: supervisorModel,
     bus,
     workers: [

@@ -22,6 +22,8 @@ export const state: any = {
   // Models & settings
   models: [] as Model[],
   selectedModel: 'openai:gpt-4o' as string,
+  // Active LLM routing policy (when present, the user's model selection is overridden server-side)
+  activeRoutingPolicy: null as { name: string; strategy: string } | null,
   tools: [] as any[],
   defaultMode: 'direct',
   chatSettings: null as ChatSettings | null,

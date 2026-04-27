@@ -26,6 +26,7 @@ import type {
   ToolRegistry,
   ExecutionContext,
   EventBus,
+  SupervisorConfig,
 } from '@weaveintel/core';
 import {
   WeaveIntelError,
@@ -36,6 +37,7 @@ import {
   weaveToolRegistry,
   weaveResolveTracer,
 } from '@weaveintel/core';
+import { buildSupervisorRuntime, type WorkerDefinition } from './supervisor-runtime.js';
 
 async function withObservedSpan<T>(
   ctx: ExecutionContext,
@@ -69,18 +71,68 @@ export interface ToolCallingAgentOptions {
   memory?: AgentMemory;
   /** Policy for approval / budget */
   policy?: AgentPolicy;
+  /**
+   * Worker agents to delegate to. When provided, this agent runs in
+   * supervisor mode: built-in `think`, `plan`, and `delegate_to_worker`
+   * tools are auto-registered and the system prompt is composed with the
+   * supervisor workflow guidance.
+   */
+  workers?: WorkerDefinition[];
+  /**
+   * Additional tools the supervisor may call directly (e.g. CSE / MCP
+   * tools). Only meaningful when `workers` is set.
+   */
+  additionalTools?: ToolRegistry;
+  /**
+   * Tool names treated as CSE code-execution endpoints by the supervisor's
+   * delegate-to-code redirection. Only meaningful when `workers` is set.
+   */
+  cseCodeToolNames?: string[];
+  /**
+   * Maximum number of delegations. Only meaningful when `workers` is set.
+   * Defaults to `maxSteps` when omitted.
+   */
+  maxDelegations?: number;
 }
 
 export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
-  const config: AgentConfig = {
-    name: opts.name ?? 'tool-agent',
-    instructions: opts.systemPrompt,
-    maxSteps: opts.maxSteps ?? 20,
+  const isSupervisor = Array.isArray(opts.workers) && opts.workers.length > 0;
+  const supervisorRuntime = isSupervisor
+    ? buildSupervisorRuntime({
+        supervisorName: opts.name ?? 'supervisor',
+        baseInstructions: opts.systemPrompt,
+        workers: opts.workers!,
+        buildWorkerAgent: (w, bus) => weaveAgent({
+          name: w.name,
+          model: w.model,
+          systemPrompt: w.systemPrompt,
+          tools: w.tools,
+          bus,
+        }),
+        maxDelegations: opts.maxDelegations ?? opts.maxSteps ?? 10,
+        bus: opts.bus,
+        policy: opts.policy,
+        additionalTools: opts.additionalTools,
+        cseCodeToolNames: opts.cseCodeToolNames,
+      })
+    : undefined;
+
+  const baseConfig: AgentConfig = {
+    name: opts.name ?? (isSupervisor ? 'supervisor' : 'tool-agent'),
+    instructions: supervisorRuntime?.systemPrompt ?? opts.systemPrompt,
+    maxSteps: opts.maxSteps ?? (isSupervisor ? 30 : 20),
   };
+  const config: AgentConfig | SupervisorConfig = supervisorRuntime
+    ? {
+        ...baseConfig,
+        workers: supervisorRuntime.workersConfig,
+        maxDelegations: opts.maxDelegations ?? opts.maxSteps ?? 10,
+      } as SupervisorConfig
+    : baseConfig;
   const { model, memory, policy } = opts;
   const eventBus = opts.bus;
   const maxSteps = config.maxSteps ?? 20;
-  const toolReg = opts.tools ?? weaveToolRegistry();
+  const toolReg = supervisorRuntime?.tools ?? opts.tools ?? weaveToolRegistry();
 
   return {
     config,

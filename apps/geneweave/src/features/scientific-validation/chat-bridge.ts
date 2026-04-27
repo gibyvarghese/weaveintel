@@ -24,7 +24,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { weaveSupervisor } from '@weaveintel/agents';
+import { weaveAgent } from '@weaveintel/agents';
 import {
   weaveContext,
   weaveEventBus,
@@ -246,12 +246,12 @@ export class SVChatBridge {
 
     try {
       const supervisorPrompt = await this._loadSupervisorPrompt();
-      const supervisor = weaveSupervisor({
+      const supervisor = weaveAgent({
         model: reasoningModel,
         workers: workerDefs,
         maxSteps: 12,
         name: 'sv-supervisor',
-        instructions: supervisorPrompt,
+        systemPrompt: supervisorPrompt,
         bus,
       });
       const ctx: ExecutionContext = weaveContext({ tenantId: input.tenantId, userId: input.userId });

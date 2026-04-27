@@ -455,15 +455,15 @@ const results = await retriever.retrieve({ query: 'How does TypeScript handle ge
 Create a supervisor agent that delegates tasks to specialized worker agents.
 
 ```typescript
-import { weaveSupervisor, weaveAgent } from '@weaveintel/agents';
+import { weaveAgent } from '@weaveintel/agents';
 
-const researcher = weaveAgent({ model, tools: researchTools, systemPrompt: 'You are a researcher.' });
-const writer = weaveAgent({ model, tools: writeTools, systemPrompt: 'You are a writer.' });
-
-const supervisor = weaveSupervisor({
+const supervisor = weaveAgent({
   model,
-  workers: { researcher, writer },
   systemPrompt: 'Delegate research tasks to the researcher and writing tasks to the writer.',
+  workers: [
+    { name: 'researcher', description: 'Research expert', model, tools: researchTools, systemPrompt: 'You are a researcher.' },
+    { name: 'writer', description: 'Writing expert', model, tools: writeTools, systemPrompt: 'You are a writer.' },
+  ],
 });
 
 const result = await supervisor.run(

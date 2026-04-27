@@ -62,6 +62,121 @@ type StreamMessageDeps = {
   safeParseJson: (text: string) => unknown;
 };
 
+/**
+ * Fallback title from raw text — first non-empty line trimmed to ~60 chars.
+ * Only used when the LLM-based titler fails.
+ */
+function deriveChatTitleFallback(content: string): string {
+  const firstLine = String(content || '').split(/\r?\n/).map(s => s.trim()).find(s => s.length > 0) || '';
+  if (!firstLine) return 'New Chat';
+  const max = 60;
+  if (firstLine.length <= max) return firstLine;
+  const slice = firstLine.slice(0, max);
+  const lastSpace = slice.lastIndexOf(' ');
+  return (lastSpace > 30 ? slice.slice(0, lastSpace) : slice).trimEnd() + '\u2026';
+}
+
+function sanitizeGeneratedTitle(raw: string): string {
+  let t = String(raw || '').trim();
+  // Strip surrounding quotes
+  t = t.replace(/^["'`\u201C\u2018]+|["'`\u201D\u2019]+$/g, '').trim();
+  // Strip trailing punctuation
+  t = t.replace(/[.!?:;,\s]+$/g, '').trim();
+  // Single line only
+  t = t.split(/\r?\n/)[0]?.trim() || '';
+  // Cap length
+  if (t.length > 80) {
+    const slice = t.slice(0, 80);
+    const lastSpace = slice.lastIndexOf(' ');
+    t = (lastSpace > 40 ? slice.slice(0, lastSpace) : slice).trimEnd();
+  }
+  return t;
+}
+
+/**
+ * Use the LLM to generate a short topic-style chat title (3-7 words) from the
+ * conversation so far. If the existing title still fits the topic, returns
+ * null to leave it alone. Best-effort — returns null on any failure.
+ */
+async function generateChatTitleViaLLM(
+  model: any,
+  ctx: any,
+  currentTitle: string,
+  userMessage: string,
+  assistantReply: string,
+): Promise<string | null> {
+  const trimmedUser = String(userMessage || '').slice(0, 1500);
+  const trimmedReply = String(assistantReply || '').slice(0, 1500);
+  const isDefault = !currentTitle || currentTitle === 'New Chat';
+  const instruction = isDefault
+    ? 'Generate a concise topic title (3-7 words, Title Case, no punctuation, no quotes) that summarizes what the user is asking about. Return ONLY the title text.'
+    : `The current chat title is: "${currentTitle}". If it still summarizes the conversation well, respond with exactly the word KEEP. Otherwise return a new concise topic title (3-7 words, Title Case, no punctuation, no quotes). Return ONLY the title text or KEEP.`;
+  const prompt = [
+    instruction,
+    '',
+    `User message: ${trimmedUser}`,
+    '',
+    `Assistant reply: ${trimmedReply}`,
+  ].join('\n');
+  try {
+    const resp = await model.generate(ctx, {
+      messages: [
+        { role: 'system', content: 'You write very short, descriptive chat titles. Output a title only — no quotes, no punctuation, no preamble.' },
+        { role: 'user', content: prompt },
+      ],
+      temperature: 0.2,
+      maxTokens: 30,
+    });
+    const raw = String(resp?.content ?? '').trim();
+    if (!raw) return null;
+    if (/^keep$/i.test(raw.replace(/[^a-z]/gi, ''))) return null;
+    const cleaned = sanitizeGeneratedTitle(raw);
+    if (!cleaned) return null;
+    if (cleaned.toLowerCase() === currentTitle.toLowerCase()) return null;
+    return cleaned;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Auto-title a chat using the LLM. Runs after each assistant reply:
+ *   - If the chat title is the default ('New Chat'), always generate one.
+ *   - Otherwise, ask the LLM whether the existing title still fits the
+ *     evolving conversation and replace it if not.
+ * Always best-effort — returns null on any failure and never throws.
+ */
+async function maybeAutoTitleChat(
+  db: DatabaseAdapter,
+  userId: string,
+  chatId: string,
+  userContent: string,
+  assistantReply: string,
+  model: any,
+  ctx: any,
+): Promise<string | null> {
+  try {
+    const chat = await db.getChat(chatId, userId);
+    if (!chat) return null;
+    const current = String(chat.title || '').trim();
+    const isDefault = !current || current === 'New Chat';
+
+    let next = await generateChatTitleViaLLM(model, ctx, current, userContent, assistantReply);
+
+    // Fallback for the first message only — never overwrite a real title with a raw-text fallback.
+    if (!next && isDefault) {
+      next = deriveChatTitleFallback(userContent);
+    }
+    if (!next) return null;
+    if (next === current) return null;
+
+    await db.updateChatTitle(chatId, userId, next.slice(0, 200));
+    return next;
+  } catch {
+    return null;
+  }
+}
+
 export async function streamMessageImpl(
   deps: StreamMessageDeps,
   res: ServerResponse,
@@ -209,6 +324,7 @@ export async function streamMessageImpl(
       await deps.writeSseEvent(res, { type: 'redaction', ...redactionInfo });
     }
     await deps.writeSseEvent(res, { type: 'text', text: identityRecall });
+    const recallTitle = await maybeAutoTitleChat(deps.db, userId, chatId, content, identityRecall, model, ctx);
     await deps.writeSseEvent(res, {
       type: 'done',
       usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
@@ -217,6 +333,7 @@ export async function streamMessageImpl(
       model: 'memory-recall',
       provider: 'local',
       mode: settings.mode,
+      title: recallTitle ?? undefined,
     });
 
     await deps.db.addMessage({
@@ -417,6 +534,8 @@ export async function streamMessageImpl(
     await deps.writeSseEvent(res, { type: 'contracts', ...streamContractInfo });
   }
 
+  const autoTitle = await maybeAutoTitleChat(deps.db, userId, chatId, content, fullText, model, ctx);
+
   await deps.writeSseEvent(res, {
     type: 'done',
     usage: finalUsage,
@@ -437,6 +556,7 @@ export async function streamMessageImpl(
     promptStrategy: resolvedSystemPrompt.strategy,
     promptResolution: resolvedSystemPrompt.resolution,
     streamInterrupted: streamErrored || undefined,
+    title: autoTitle ?? undefined,
     traceId,
   });
 

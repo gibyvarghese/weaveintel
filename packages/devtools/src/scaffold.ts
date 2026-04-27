@@ -225,8 +225,7 @@ console.log('Workflow scaffold: {{PROJECT_NAME}}');
         path: 'src/index.ts',
         content: `import { weaveContext } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
-import { weaveSupervisor } from '@weaveintel/agents';
-// Multi-agent scaffold
+// Multi-agent scaffold (use weaveAgent with the \`workers\` option for supervisor mode)
 console.log('Multi-agent scaffold: {{PROJECT_NAME}}');
 `,
       },

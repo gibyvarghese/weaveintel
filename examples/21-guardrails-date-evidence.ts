@@ -41,7 +41,7 @@ import {
   type Guardrail,
   type AgentStep,
 } from '@weaveintel/core';
-import { weaveSupervisor } from '@weaveintel/agents';
+import { weaveAgent } from '@weaveintel/agents';
 import { weaveFakeModel } from '@weaveintel/testing';
 import { createGuardrailPipeline, summarizeGuardrailResults } from '@weaveintel/guardrails';
 
@@ -151,7 +151,8 @@ async function scenarioWithTool() {
     ],
   });
 
-  const supervisor = weaveSupervisor({
+  const supervisor = weaveAgent({
+    name: 'supervisor',
     model: supervisorModel,
     bus,
     workers: [{ name: 'analyst', description: 'Analyst with datetime tool.', model: workerModel, tools: analystTools }],

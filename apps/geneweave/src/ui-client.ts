@@ -31,6 +31,7 @@ import {
   deleteChat,
   normalizeServerMessage,
   loadModels,
+  loadActiveRoutingPolicy,
   loadTools,
   loadUserPreferences,
   saveUserPreferences,
@@ -1173,18 +1174,26 @@ function renderHomeWorkspace() {
     });
   }
 
-  const modelSel = h('select', {
-    className: 'model-sel',
-    onChange: function(this: HTMLSelectElement) {
-      state.selectedModel = this.value;
-    },
-  }) as HTMLSelectElement;
-  (state.models || []).forEach((m: any) => {
-    const val = `${m.provider}:${m.id}`;
-    const opt = h('option', { value: val }, `${m.provider}/${m.id}`) as HTMLOptionElement;
-    if (val === state.selectedModel) opt.selected = true;
-    modelSel.appendChild(opt);
-  });
+  // Model selection control: hide entirely when a routing policy is active
+  // (server overrides selection); otherwise let the user pick a model.
+  let modelControl: HTMLElement | null;
+  if (state.activeRoutingPolicy) {
+    modelControl = null;
+  } else {
+    const modelSel = h('select', {
+      className: 'model-sel',
+      onChange: function(this: HTMLSelectElement) {
+        state.selectedModel = this.value;
+      },
+    }) as HTMLSelectElement;
+    (state.models || []).forEach((m: any) => {
+      const val = `${m.provider}:${m.id}`;
+      const opt = h('option', { value: val }, `${m.provider}/${m.id}`) as HTMLOptionElement;
+      if (val === state.selectedModel) opt.selected = true;
+      modelSel.appendChild(opt);
+    });
+    modelControl = modelSel;
+  }
 
   const center = h('section', {className:'center-card'},
     h('div', {className:'center-card-hdr'},
@@ -1193,7 +1202,7 @@ function renderHomeWorkspace() {
       ),
       h('div', {style:'display:flex;align-items:center;gap:8px'},
         h('div', {className:'title'}, (state.chats.find((c: Chat) => c.id === state.currentChatId)?.title) || 'Conversation'),
-        modelSel,
+        modelControl,
         settingsAnchor
       )
     ),
@@ -1413,7 +1422,7 @@ export function initialize() {
         state.user = d.user;
         state.csrfToken = d.csrfToken;
         await loadChats();
-        await Promise.all([loadModels(), loadTools(), loadUserPreferences()]);
+        await Promise.all([loadModels(), loadActiveRoutingPolicy(), loadTools(), loadUserPreferences()]);
 
         if (state.view === 'dashboard') {
           await loadDashboard();
