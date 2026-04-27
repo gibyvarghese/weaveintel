@@ -341,32 +341,117 @@ export async function registerMCPGatewayInCatalog(
     `(${[...classes].sort().join(', ')}). ` +
     `Surfaces ${exposedToolKeys.length} tool(s) behind a bearer-token authenticated endpoint.`;
   const existingCatalog = await db.getToolCatalogByKey(toolKey);
-  const catalogFields = {
-    name: 'GeneWeave MCP Gateway',
-    description,
-    category: 'mcp',
-    risk_level: 'external-side-effect',
-    requires_approval: 0,
-    max_execution_ms: null,
-    rate_limit_per_min: null,
-    enabled: 1,
-    tool_key: toolKey,
-    version: '1.0',
-    side_effects: 1,
-    tags: JSON.stringify(['mcp', 'gateway', 'external']),
-    source: 'mcp',
-    credential_id: credentialId,
-    config,
-    allocation_class: 'gateway',
-  } as const;
+  // Phase 4: on update, preserve operator-edited fields (`enabled` toggle
+  // and `config.exposed_classes`) so admin changes survive restart. Only
+  // refresh derived metadata (description, exposed_tool_keys against the
+  // operator's class selection, endpoint when explicitly overridden).
   let catalogId: string;
   if (existingCatalog) {
     catalogId = existingCatalog.id;
-    await db.updateToolConfig(catalogId, catalogFields);
+    let mergedConfig = config;
+    let effectiveClasses = classes;
+    try {
+      const prev = existingCatalog.config ? JSON.parse(existingCatalog.config) : {};
+      if (Array.isArray(prev['exposed_classes']) && prev['exposed_classes'].length > 0) {
+        effectiveClasses = new Set<string>(prev['exposed_classes'].map((c: unknown) => String(c)));
+        const operatorExposed = selectExposedTools(tools, effectiveClasses);
+        const merged = JSON.parse(config) as Record<string, unknown>;
+        merged['exposed_classes'] = [...effectiveClasses].sort();
+        merged['exposed_tool_keys'] = operatorExposed.map((e) => e.key);
+        mergedConfig = JSON.stringify(merged);
+      }
+    } catch {
+      // Malformed prior config — fall back to code-defined defaults.
+    }
+    await db.updateToolConfig(catalogId, {
+      name: 'GeneWeave MCP Gateway',
+      description,
+      category: 'mcp',
+      risk_level: 'external-side-effect',
+      requires_approval: 0,
+      max_execution_ms: null,
+      rate_limit_per_min: null,
+      enabled: existingCatalog.enabled, // preserve operator toggle
+      tool_key: toolKey,
+      version: '1.0',
+      side_effects: 1,
+      tags: JSON.stringify(['mcp', 'gateway', 'external']),
+      source: 'mcp',
+      credential_id: credentialId,
+      config: mergedConfig,
+      allocation_class: 'gateway',
+    });
   } else {
     catalogId = randomUUID();
-    await db.createToolConfig({ id: catalogId, ...catalogFields });
+    await db.createToolConfig({
+      id: catalogId,
+      name: 'GeneWeave MCP Gateway',
+      description,
+      category: 'mcp',
+      risk_level: 'external-side-effect',
+      requires_approval: 0,
+      max_execution_ms: null,
+      rate_limit_per_min: null,
+      enabled: 1,
+      tool_key: toolKey,
+      version: '1.0',
+      side_effects: 1,
+      tags: JSON.stringify(['mcp', 'gateway', 'external']),
+      source: 'mcp',
+      credential_id: credentialId,
+      config,
+      allocation_class: 'gateway',
+    });
   }
 
   return { catalogId, credentialId };
+}
+
+/**
+ * Snapshot of the gateway's runtime configuration as resolved from the
+ * operator-managed `tool_catalog` row at startup. Phase 4: lets operators
+ * toggle the gateway and adjust which allocation classes it exposes
+ * without a code change.
+ */
+export interface LoadedGatewayConfig {
+  /** True when the operator has not disabled the gateway in tool_catalog. */
+  enabled: boolean;
+  /** Allocation classes to expose (operator-edited or code defaults). */
+  exposedClasses: ReadonlySet<string>;
+  /** Endpoint path recorded in the catalog row (defaults to /api/mcp/gateway). */
+  endpoint: string;
+}
+
+/**
+ * Read the gateway catalog row and return a runtime config snapshot.
+ * Falls back to {@link DEFAULT_EXPOSED_ALLOCATION_CLASSES} and `enabled=true`
+ * when the catalog row is missing (first boot before {@link registerMCPGatewayInCatalog}
+ * has run, or in tests using an empty DB).
+ */
+export async function loadGatewayConfigFromCatalog(
+  db: DatabaseAdapter,
+  toolKey: string = MCP_GATEWAY_TOOL_KEY,
+): Promise<LoadedGatewayConfig> {
+  const row = await db.getToolCatalogByKey(toolKey);
+  if (!row) {
+    return {
+      enabled: true,
+      exposedClasses: DEFAULT_EXPOSED_ALLOCATION_CLASSES,
+      endpoint: '/api/mcp/gateway',
+    };
+  }
+  let exposedClasses: ReadonlySet<string> = DEFAULT_EXPOSED_ALLOCATION_CLASSES;
+  let endpoint = '/api/mcp/gateway';
+  try {
+    const cfg = (row.config ? JSON.parse(row.config) : {}) as Record<string, unknown>;
+    const ec = cfg['exposed_classes'];
+    if (Array.isArray(ec) && ec.length > 0) {
+      exposedClasses = new Set<string>(ec.map((c) => String(c)));
+    }
+    const ep = cfg['endpoint'];
+    if (typeof ep === 'string' && ep.length > 0) endpoint = ep;
+  } catch {
+    // Malformed config JSON — keep defaults.
+  }
+  return { enabled: row.enabled === 1, exposedClasses, endpoint };
 }

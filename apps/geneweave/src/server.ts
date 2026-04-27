@@ -35,7 +35,7 @@ import { SVChatBridge } from './features/scientific-validation/chat-bridge.js';
 import { createSVToolMap } from './features/scientific-validation/tools/index.js';
 import { DbToolPolicyResolver, DbToolRateLimiter } from './tool-policy-resolver.js';
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
-import { createMCPGateway, DEFAULT_EXPOSED_ALLOCATION_CLASSES } from './mcp-gateway.js';
+import { createMCPGateway, DEFAULT_EXPOSED_ALLOCATION_CLASSES, type LoadedGatewayConfig } from './mcp-gateway.js';
 import { encryptCredential, decryptCredential } from './vault.js';
 import { setBrowserAuthProvider, type SSOPassThroughAuth } from '@weaveintel/tools-browser';
 import { weaveContext } from '@weaveintel/core';
@@ -393,10 +393,16 @@ export interface ServerConfig {
   corsOrigin?: string;
   providers?: Record<string, { apiKey: string }>;
   publicBaseUrl?: string;
+  /**
+   * Phase 4: snapshot of the gateway's exposure config loaded from the
+   * `tool_catalog` row at startup. When omitted, code-level defaults are
+   * used (for tests or embedded callers that have not seeded the catalog).
+   */
+  gatewayConfig?: LoadedGatewayConfig;
 }
 
 export function createGeneWeaveServer(config: ServerConfig): Server {
-  const { db, chatEngine, jwtSecret, corsOrigin, providers, publicBaseUrl } = config;
+  const { db, chatEngine, jwtSecret, corsOrigin, providers, publicBaseUrl, gatewayConfig } = config;
   const dashboard = new DashboardService(db);
   const router = new Router();
   const uiHtml = getHTML();
@@ -2835,12 +2841,18 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   });
 
   // ── Internal MCP Gateway (Phase 1D) ────────────────────────
-  // Exposes builtin tools whose allocation_class is in
-  // DEFAULT_EXPOSED_ALLOCATION_CLASSES (web/social/search/cse/http/enterprise/communication)
-  // over the MCP Streamable HTTP protocol with bearer-token auth.
+  // Exposes builtin tools whose allocation_class is in the operator-edited
+  // tool_catalog `config.exposed_classes` (defaulting to web/social/search/
+  // cse/http/enterprise/communication) over the MCP Streamable HTTP
+  // protocol with bearer-token auth. Phase 4: exposure classes and the
+  // enable toggle come from the DB so admin changes survive restart.
   const mcpGatewayToken = process.env['GENEWEAVE_MCP_GATEWAY_TOKEN'] ?? '';
+  const gatewayEnabled = gatewayConfig?.enabled ?? true;
+  const gatewayClasses = gatewayConfig?.exposedClasses ?? DEFAULT_EXPOSED_ALLOCATION_CLASSES;
+  const gatewayEndpoint = gatewayConfig?.endpoint ?? '/api/mcp/gateway';
   const mcpGateway = createMCPGateway({
-    token: mcpGatewayToken || undefined,
+    token: gatewayEnabled && mcpGatewayToken ? mcpGatewayToken : undefined,
+    exposedClasses: gatewayClasses,
     serverName: 'geneweave-gateway',
     serverVersion: '1.0.0',
     // Phase 3: every gateway invocation flows through the same policy +
@@ -2858,9 +2870,10 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
     json(res, 200, {
       enabled: mcpGateway.enabled,
-      exposedClasses: [...DEFAULT_EXPOSED_ALLOCATION_CLASSES],
+      operatorEnabled: gatewayEnabled,
+      exposedClasses: [...gatewayClasses].sort(),
       exposedToolNames: mcpGateway.exposedToolNames,
-      endpoint: '/api/mcp/gateway',
+      endpoint: gatewayEndpoint,
       authScheme: 'Bearer',
     });
   }, { auth: true });

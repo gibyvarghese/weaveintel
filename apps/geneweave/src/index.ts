@@ -32,7 +32,7 @@ import { createGeneWeaveServer } from './server.js';
 import { syncModelPricing, type PricingSyncReport } from './pricing-sync.js';
 import { syncToolCatalog } from './tools.js';
 import { startToolHealthJob } from './tool-health-job.js';
-import { registerMCPGatewayInCatalog } from './mcp-gateway.js';
+import { registerMCPGatewayInCatalog, loadGatewayConfigFromCatalog } from './mcp-gateway.js';
 import { seedSVData } from './features/scientific-validation/sv-seed.js';
 
 export type { PricingSyncReport };
@@ -131,8 +131,13 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   await syncToolCatalog(db);
 
   // 4a. Self-register the internal MCP gateway in tool_catalog + tool_credentials
-  // so operators discover it through the admin UI. Idempotent on every boot.
+  // so operators discover it through the admin UI. Idempotent on every boot;
+  // preserves operator-edited `enabled` and `config.exposed_classes`.
   await registerMCPGatewayInCatalog(db);
+
+  // 4b. Phase 4: load operator-edited gateway exposure config so admin
+  // toggles (enabled / exposed_classes) take effect on next boot.
+  const gatewayConfig = await loadGatewayConfigFromCatalog(db);
 
   // 5. Start background tool health snapshot job (writes every 15 min)
   startToolHealthJob(db);
@@ -145,6 +150,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     corsOrigin: config.corsOrigin,
     providers: activeProviders,
     publicBaseUrl: config.publicBaseUrl,
+    gatewayConfig,
   });
 
   // 5. Listen

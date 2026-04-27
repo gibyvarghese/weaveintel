@@ -8,6 +8,7 @@ import {
   createMCPGateway,
   DEFAULT_EXPOSED_ALLOCATION_CLASSES,
   registerMCPGatewayInCatalog,
+  loadGatewayConfigFromCatalog,
   MCP_GATEWAY_TOOL_KEY,
   MCP_GATEWAY_CREDENTIAL_NAME,
   MCP_GATEWAY_DEFAULT_ENV_VAR,
@@ -253,6 +254,95 @@ describe('Phase 1D — MCP gateway', () => {
 
         const allCreds = await db.listToolCredentials();
         expect(allCreds.filter((c) => c.name === MCP_GATEWAY_CREDENTIAL_NAME).length).toBe(1);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    // ── Phase 4 — DB-driven gateway exposure config ──────────────────────────
+    it('preserves operator-edited enabled toggle and exposed_classes on re-register', async () => {
+      const { dir, dbPath } = makeTempDbPath();
+      const db = await createDatabaseAdapter({ type: 'sqlite', path: dbPath });
+      try {
+        // Initial registration writes defaults.
+        const first = await registerMCPGatewayInCatalog(db);
+
+        // Operator disables the gateway and narrows the exposed classes.
+        await db.updateToolConfig(first.catalogId, {
+          enabled: 0,
+          config: JSON.stringify({
+            endpoint: '/api/mcp/gateway',
+            server_name: 'geneweave-gateway',
+            auth_scheme: 'Bearer',
+            // Operator decided only `web` and `search` should be reachable.
+            exposed_classes: ['web', 'search'],
+            exposed_tool_keys: ['web_search'],
+          }),
+        });
+
+        // Re-register (simulating next boot) must NOT clobber operator edits.
+        await registerMCPGatewayInCatalog(db);
+        const after = await db.getToolCatalogByKey(MCP_GATEWAY_TOOL_KEY);
+        expect(after).not.toBeNull();
+        expect(after!.enabled).toBe(0); // preserved
+        const cfg = JSON.parse(after!.config ?? '{}') as {
+          exposed_classes: string[];
+          exposed_tool_keys: string[];
+        };
+        expect(cfg.exposed_classes).toEqual(['search', 'web']); // sorted, preserved
+        // exposed_tool_keys is recomputed against the operator's class set,
+        // so utility / cse / enterprise tools must not leak in.
+        expect(cfg.exposed_tool_keys).toContain('web_search');
+        expect(cfg.exposed_tool_keys).not.toContain('calculator');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('loadGatewayConfigFromCatalog returns operator-edited classes', async () => {
+      const { dir, dbPath } = makeTempDbPath();
+      const db = await createDatabaseAdapter({ type: 'sqlite', path: dbPath });
+      try {
+        const reg = await registerMCPGatewayInCatalog(db);
+        await db.updateToolConfig(reg.catalogId, {
+          enabled: 1,
+          config: JSON.stringify({
+            endpoint: '/api/mcp/gateway',
+            exposed_classes: ['web', 'social'],
+            exposed_tool_keys: [],
+          }),
+        });
+        const loaded = await loadGatewayConfigFromCatalog(db);
+        expect(loaded.enabled).toBe(true);
+        expect([...loaded.exposedClasses].sort()).toEqual(['social', 'web']);
+        expect(loaded.endpoint).toBe('/api/mcp/gateway');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('loadGatewayConfigFromCatalog reports enabled=false when operator disabled', async () => {
+      const { dir, dbPath } = makeTempDbPath();
+      const db = await createDatabaseAdapter({ type: 'sqlite', path: dbPath });
+      try {
+        const reg = await registerMCPGatewayInCatalog(db);
+        await db.updateToolConfig(reg.catalogId, { enabled: 0 });
+        const loaded = await loadGatewayConfigFromCatalog(db);
+        expect(loaded.enabled).toBe(false);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('loadGatewayConfigFromCatalog falls back to defaults when catalog row absent', async () => {
+      const { dir, dbPath } = makeTempDbPath();
+      const db = await createDatabaseAdapter({ type: 'sqlite', path: dbPath });
+      try {
+        const loaded = await loadGatewayConfigFromCatalog(db);
+        expect(loaded.enabled).toBe(true);
+        expect([...loaded.exposedClasses].sort()).toEqual(
+          [...DEFAULT_EXPOSED_ALLOCATION_CLASSES].sort(),
+        );
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
