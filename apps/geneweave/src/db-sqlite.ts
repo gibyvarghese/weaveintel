@@ -1555,8 +1555,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createMCPGatewayClient(c: Omit<import('./db-types.js').MCPGatewayClientRow, 'created_at' | 'updated_at' | 'last_used_at' | 'revoked_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO mcp_gateway_clients (id, name, description, token_hash, allowed_classes, audit_chat_id, enabled) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(c.id, c.name, c.description ?? null, c.token_hash, c.allowed_classes ?? null, c.audit_chat_id ?? null, c.enabled);
+      `INSERT INTO mcp_gateway_clients (id, name, description, token_hash, allowed_classes, audit_chat_id, enabled, rate_limit_per_minute) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(c.id, c.name, c.description ?? null, c.token_hash, c.allowed_classes ?? null, c.audit_chat_id ?? null, c.enabled, c.rate_limit_per_minute ?? null);
   }
 
   async getMCPGatewayClient(id: string): Promise<import('./db-types.js').MCPGatewayClientRow | null> {
@@ -1602,6 +1602,30 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteMCPGatewayClient(id: string): Promise<void> {
     this.d.prepare('DELETE FROM mcp_gateway_clients WHERE id = ?').run(id);
+  }
+
+  /** Phase 7: per-client gateway rate-limit. Atomic upsert + check inside
+   *  one transaction so concurrent requests cannot both squeak past the
+   *  cap. Mirrors `checkAndIncrementRateLimit` for tools. */
+  async checkAndIncrementGatewayRateLimit(
+    clientId: string,
+    windowStartIso: string,
+    limitPerMinute: number,
+  ): Promise<boolean> {
+    const { randomUUID } = await import('node:crypto');
+    this.d.prepare(`
+      INSERT INTO mcp_gateway_rate_buckets (id, client_id, window_start, count)
+      VALUES (?, ?, ?, 0)
+      ON CONFLICT(client_id, window_start) DO NOTHING
+    `).run(randomUUID(), clientId, windowStartIso);
+    const row = this.d.prepare(
+      'SELECT count FROM mcp_gateway_rate_buckets WHERE client_id = ? AND window_start = ?',
+    ).get(clientId, windowStartIso) as { count: number } | undefined;
+    if (!row || row.count >= limitPerMinute) return false;
+    this.d.prepare(
+      'UPDATE mcp_gateway_rate_buckets SET count = count + 1 WHERE client_id = ? AND window_start = ?',
+    ).run(clientId, windowStartIso);
+    return true;
   }
 
   // ─── Admin: Skills ─────────────────────────────────────────

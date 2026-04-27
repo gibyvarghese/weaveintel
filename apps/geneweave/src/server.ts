@@ -2879,6 +2879,8 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
             return row;
           },
           touchClient: (id: string) => db.touchMCPGatewayClient(id),
+          gatewayRateLimiter: (clientId: string, windowStartIso: string, limit: number) =>
+            db.checkAndIncrementGatewayRateLimit(clientId, windowStartIso, limit),
         }
       : {}),
   });

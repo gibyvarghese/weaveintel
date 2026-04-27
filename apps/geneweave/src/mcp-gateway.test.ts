@@ -53,7 +53,7 @@ function startGatewayHttp(token: string | undefined): Promise<{ url: string; clo
   });
 }
 
-async function postJson(url: string, body: unknown, headers: Record<string, string> = {}): Promise<{ status: number; bodyText: string; bodyJson: unknown }> {
+async function postJson(url: string, body: unknown, headers: Record<string, string> = {}): Promise<{ status: number; bodyText: string; bodyJson: unknown; body: string; headers: Record<string, string> }> {
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -66,7 +66,9 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
   const bodyText = await res.text();
   let bodyJson: unknown = null;
   try { bodyJson = JSON.parse(bodyText); } catch { /* SSE or non-JSON */ }
-  return { status: res.status, bodyText, bodyJson };
+  const respHeaders: Record<string, string> = {};
+  res.headers.forEach((v, k) => { respHeaders[k.toLowerCase()] = v; });
+  return { status: res.status, bodyText, bodyJson, body: bodyText, headers: respHeaders };
 }
 
 /**
@@ -475,6 +477,7 @@ describe('Phase 5 — multi-tenant MCP gateway clients', () => {
       auditEmitter,
       clientResolver: (hash) => db.getMCPGatewayClientByTokenHash(hash),
       touchClient: (id) => db.touchMCPGatewayClient(id),
+      gatewayRateLimiter: (clientId, ws, limit) => db.checkAndIncrementGatewayRateLimit(clientId, ws, limit),
     });
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       void gateway.handle(req, res).catch(() => {
@@ -514,6 +517,7 @@ describe('Phase 5 — multi-tenant MCP gateway clients', () => {
       allowed_classes: null,
       audit_chat_id: null,
       enabled: 1,
+      rate_limit_per_minute: null,
     };
     await db.createMCPGatewayClient(client);
     const handle = await startMultiTenantHttp(db);
@@ -540,6 +544,7 @@ describe('Phase 5 — multi-tenant MCP gateway clients', () => {
       allowed_classes: null,
       audit_chat_id: null,
       enabled: 1,
+      rate_limit_per_minute: null,
     };
     await db.createMCPGatewayClient(client);
     const events: ToolAuditEvent[] = [];
@@ -586,6 +591,7 @@ describe('Phase 5 — multi-tenant MCP gateway clients', () => {
       allowed_classes: null,
       audit_chat_id: 'tenant-acme:ci',
       enabled: 1,
+      rate_limit_per_minute: null,
     };
     await db.createMCPGatewayClient(client);
     const events: ToolAuditEvent[] = [];
@@ -621,6 +627,7 @@ describe('Phase 5 — multi-tenant MCP gateway clients', () => {
       allowed_classes: JSON.stringify(['web']),
       audit_chat_id: null,
       enabled: 1,
+      rate_limit_per_minute: null,
     };
     await db.createMCPGatewayClient(client);
     const handle = await startMultiTenantHttp(db);
@@ -654,6 +661,7 @@ describe('Phase 5 — multi-tenant MCP gateway clients', () => {
       allowed_classes: null,
       audit_chat_id: null,
       enabled: 1,
+      rate_limit_per_minute: null,
     };
     await db.createMCPGatewayClient(client);
     await db.revokeMCPGatewayClient(client.id);
@@ -697,6 +705,7 @@ describe('Phase 5 — multi-tenant MCP gateway clients', () => {
       allowed_classes: null,
       audit_chat_id: null,
       enabled: 1,
+      rate_limit_per_minute: null,
     };
     await db.createMCPGatewayClient(client);
     const before = await db.getMCPGatewayClient(client.id);
@@ -716,6 +725,104 @@ describe('Phase 5 — multi-tenant MCP gateway clients', () => {
     } finally {
       await handle.close();
       await db.deleteMCPGatewayClient(client.id);
+    }
+  });
+
+  // ─── Phase 7: per-client rate limits ─────────────────────────
+
+  it('enforces per-client rate_limit_per_minute and returns 429 with Retry-After', async () => {
+    const plaintext = 'phase7-rl-secret';
+    const client = {
+      id: 'client-rl-7',
+      name: 'rate-limited-client',
+      description: null,
+      token_hash: hashGatewayToken(plaintext),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+      rate_limit_per_minute: 2,
+    };
+    await db.createMCPGatewayClient(client);
+    const handle = await startMultiTenantHttp(db);
+    try {
+      const auth = { Authorization: `Bearer ${plaintext}` };
+      // First two calls in the same minute window must succeed.
+      const r1 = await postJson(`${handle.url}/api/mcp/gateway`, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, auth);
+      expect(r1.status).toBe(200);
+      const r2 = await postJson(`${handle.url}/api/mcp/gateway`, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, auth);
+      expect(r2.status).toBe(200);
+      // Third call exhausts the bucket → 429 with Retry-After header.
+      const r3 = await postJson(`${handle.url}/api/mcp/gateway`, { jsonrpc: '2.0', id: 3, method: 'tools/list' }, auth);
+      expect(r3.status).toBe(429);
+      const retry = r3.headers['retry-after'];
+      expect(retry).toBeTruthy();
+      expect(Number(retry)).toBeGreaterThan(0);
+      expect(Number(retry)).toBeLessThanOrEqual(60);
+      const body = JSON.parse(r3.body) as { error: string; retry_after_seconds: number };
+      expect(body.error).toMatch(/rate limit/i);
+      expect(body.retry_after_seconds).toBeGreaterThan(0);
+    } finally {
+      await handle.close();
+      await db.deleteMCPGatewayClient(client.id);
+    }
+  });
+
+  it('does not rate limit clients with rate_limit_per_minute=null', async () => {
+    const plaintext = 'phase7-no-rl-secret';
+    const client = {
+      id: 'client-no-rl',
+      name: 'unlimited-client',
+      description: null,
+      token_hash: hashGatewayToken(plaintext),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+      rate_limit_per_minute: null,
+    };
+    await db.createMCPGatewayClient(client);
+    const handle = await startMultiTenantHttp(db);
+    try {
+      const auth = { Authorization: `Bearer ${plaintext}` };
+      // Five calls all succeed since no cap is set.
+      for (let i = 0; i < 5; i++) {
+        const r = await postJson(`${handle.url}/api/mcp/gateway`, { jsonrpc: '2.0', id: i, method: 'tools/list' }, auth);
+        expect(r.status).toBe(200);
+      }
+    } finally {
+      await handle.close();
+      await db.deleteMCPGatewayClient(client.id);
+    }
+  });
+
+  it('isolates rate-limit buckets per client', async () => {
+    const plaintextA = 'phase7-iso-a';
+    const plaintextB = 'phase7-iso-b';
+    const a = {
+      id: 'client-iso-a', name: 'iso-a', description: null,
+      token_hash: hashGatewayToken(plaintextA), allowed_classes: null,
+      audit_chat_id: null, enabled: 1, rate_limit_per_minute: 1,
+    };
+    const b = {
+      id: 'client-iso-b', name: 'iso-b', description: null,
+      token_hash: hashGatewayToken(plaintextB), allowed_classes: null,
+      audit_chat_id: null, enabled: 1, rate_limit_per_minute: 1,
+    };
+    await db.createMCPGatewayClient(a);
+    await db.createMCPGatewayClient(b);
+    const handle = await startMultiTenantHttp(db);
+    try {
+      // A consumes its quota.
+      const r1 = await postJson(`${handle.url}/api/mcp/gateway`, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, { Authorization: `Bearer ${plaintextA}` });
+      expect(r1.status).toBe(200);
+      const r2 = await postJson(`${handle.url}/api/mcp/gateway`, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, { Authorization: `Bearer ${plaintextA}` });
+      expect(r2.status).toBe(429);
+      // B still has its full quota — buckets are scoped per client.
+      const r3 = await postJson(`${handle.url}/api/mcp/gateway`, { jsonrpc: '2.0', id: 3, method: 'tools/list' }, { Authorization: `Bearer ${plaintextB}` });
+      expect(r3.status).toBe(200);
+    } finally {
+      await handle.close();
+      await db.deleteMCPGatewayClient(a.id);
+      await db.deleteMCPGatewayClient(b.id);
     }
   });
 });

@@ -63,6 +63,11 @@ export function registerMCPGatewayClientRoutes(
     }
     const id = randomUUID();
     const plaintext = mintToken();
+    const rlRaw = body['rate_limit_per_minute'];
+    let rate_limit_per_minute: number | null = null;
+    if (typeof rlRaw === 'number' && Number.isFinite(rlRaw) && rlRaw > 0) {
+      rate_limit_per_minute = Math.floor(rlRaw);
+    }
     await db.createMCPGatewayClient({
       id,
       name,
@@ -71,6 +76,7 @@ export function registerMCPGatewayClientRoutes(
       allowed_classes,
       audit_chat_id: (body['audit_chat_id'] as string) ?? null,
       enabled: body['enabled'] === false ? 0 : 1,
+      rate_limit_per_minute,
     });
     const client = await db.getMCPGatewayClient(id);
     json(res, 201, { client, token: plaintext });
@@ -99,6 +105,17 @@ export function registerMCPGatewayClientRoutes(
     }
     if (body['audit_chat_id'] !== undefined) fields['audit_chat_id'] = body['audit_chat_id'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    if (body['rate_limit_per_minute'] !== undefined) {
+      const v = body['rate_limit_per_minute'];
+      if (v === null) {
+        fields['rate_limit_per_minute'] = null;
+      } else if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+        fields['rate_limit_per_minute'] = Math.floor(v);
+      } else {
+        json(res, 400, { error: 'rate_limit_per_minute must be a positive number or null' });
+        return;
+      }
+    }
     await db.updateMCPGatewayClient(params['id']!, fields as Parameters<DatabaseAdapter['updateMCPGatewayClient']>[1]);
     const client = await db.getMCPGatewayClient(params['id']!);
     json(res, 200, { client });

@@ -105,6 +105,14 @@ export interface MCPGatewayOptions {
    * adapter can stamp `last_used_at`. Failures must not block the request.
    */
   touchClient?: (clientId: string) => Promise<void>;
+  /**
+   * Phase 7 — per-client tumbling 1-minute rate limit. When the matched
+   * client row carries a non-null `rate_limit_per_minute`, the gateway
+   * calls this hook before serving the request; a `false` return blocks
+   * the request with HTTP 429. The hook owns atomicity (typically a
+   * SQLite transaction in `checkAndIncrementGatewayRateLimit`).
+   */
+  gatewayRateLimiter?: (clientId: string, windowStartIso: string, limitPerMinute: number) => Promise<boolean>;
 }
 
 export interface MCPGatewayHandle {
@@ -153,6 +161,7 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
   const token = opts.token;
   const clientResolver = opts.clientResolver;
   const touchClient = opts.touchClient;
+  const gatewayRateLimiter = opts.gatewayRateLimiter;
   const enabled = clientResolver != null || (typeof token === 'string' && token.length > 0);
   const serverName = opts.serverName ?? 'geneweave-gateway';
   const serverVersion = opts.serverVersion ?? '1.0.0';
@@ -214,6 +223,16 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
   function unauthorized(res: ServerResponse): void {
     const body = JSON.stringify({ error: 'Unauthorized' });
     res.writeHead(401, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
+    res.end(body);
+  }
+
+  function rateLimited(res: ServerResponse, retryAfterSeconds: number): void {
+    const body = JSON.stringify({ error: 'Rate limit exceeded', retry_after_seconds: retryAfterSeconds });
+    res.writeHead(429, {
+      'Content-Type': 'application/json',
+      'Content-Length': Buffer.byteLength(body),
+      'Retry-After': String(retryAfterSeconds),
+    });
     res.end(body);
   }
 
@@ -323,6 +342,41 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
       if (!enabled) { disabledResponse(res); return; }
       const authResult = await authenticate(req);
       if (!authResult) { unauthorized(res); return; }
+      // Phase 7 — per-client rate limit. Only applies to multi-tenant
+      // requests where the client carries a non-null cap.
+      if (
+        authResult.client &&
+        gatewayRateLimiter &&
+        typeof authResult.client.rate_limit_per_minute === 'number' &&
+        authResult.client.rate_limit_per_minute > 0
+      ) {
+        // Tumbling 1-minute window keyed on the current minute boundary so
+        // every call in the same UTC minute lands in the same bucket.
+        const now = new Date();
+        const windowStart = new Date(Date.UTC(
+          now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+          now.getUTCHours(), now.getUTCMinutes(), 0, 0,
+        )).toISOString();
+        let allowed = true;
+        try {
+          allowed = await gatewayRateLimiter(
+            authResult.client.id,
+            windowStart,
+            authResult.client.rate_limit_per_minute,
+          );
+        } catch {
+          // Fail open on rate-limiter errors — never block traffic on
+          // bookkeeping failures. Operators see audit gaps; the client
+          // sees normal service.
+          allowed = true;
+        }
+        if (!allowed) {
+          // Seconds until the next minute boundary.
+          const retryAfter = Math.max(1, 60 - now.getUTCSeconds());
+          rateLimited(res, retryAfter);
+          return;
+        }
+      }
       const entries = authResult.client
         ? wrapForClient(authResult.client)
         : enforcedSingleTenant;

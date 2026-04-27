@@ -28,6 +28,7 @@ interface GatewayClient {
   enabled: 0 | 1;
   last_used_at: string | null;
   revoked_at: string | null;
+  rate_limit_per_minute: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -41,7 +42,7 @@ interface ClientsState {
   // when the operator dismisses the banner.
   revealedToken: { clientId: string; clientName: string; token: string; reason: 'created' | 'rotated' } | null;
   showCreateForm: boolean;
-  createForm: { name: string; description: string; auditChatId: string; allowedClasses: Set<string> };
+  createForm: { name: string; description: string; auditChatId: string; allowedClasses: Set<string>; rateLimitPerMinute: string };
   createError: string | null;
   acting: Record<string, 'rotating' | 'revoking' | 'deleting' | null>;
   actionError: Record<string, string>;
@@ -59,7 +60,7 @@ const clientsState: ClientsState = {
   initialized: false,
   revealedToken: null,
   showCreateForm: false,
-  createForm: { name: '', description: '', auditChatId: '', allowedClasses: new Set() },
+  createForm: { name: '', description: '', auditChatId: '', allowedClasses: new Set(), rateLimitPerMinute: '' },
   createError: null,
   acting: {},
   actionError: {},
@@ -86,17 +87,28 @@ async function loadClients(render: () => void): Promise<void> {
 
 async function createClient(render: () => void): Promise<void> {
   clientsState.createError = null;
-  const { name, description, auditChatId, allowedClasses } = clientsState.createForm;
+  const { name, description, auditChatId, allowedClasses, rateLimitPerMinute } = clientsState.createForm;
   if (!name.trim()) {
     clientsState.createError = 'Name is required';
     render();
     return;
+  }
+  let parsedRate: number | null = null;
+  if (rateLimitPerMinute.trim()) {
+    const n = Number(rateLimitPerMinute);
+    if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+      clientsState.createError = 'Rate limit must be a positive whole number or empty';
+      render();
+      return;
+    }
+    parsedRate = n;
   }
   try {
     const body: Record<string, unknown> = { name: name.trim() };
     if (description.trim()) body['description'] = description.trim();
     if (auditChatId.trim()) body['audit_chat_id'] = auditChatId.trim();
     if (allowedClasses.size > 0) body['allowed_classes'] = [...allowedClasses];
+    if (parsedRate !== null) body['rate_limit_per_minute'] = parsedRate;
     const resp = await api.post('/api/admin/mcp-gateway-clients', body);
     if (!resp.ok) {
       const e = await resp.json().catch(() => ({})) as { error?: string };
@@ -110,7 +122,7 @@ async function createClient(render: () => void): Promise<void> {
       reason: 'created',
     };
     clientsState.showCreateForm = false;
-    clientsState.createForm = { name: '', description: '', auditChatId: '', allowedClasses: new Set() };
+    clientsState.createForm = { name: '', description: '', auditChatId: '', allowedClasses: new Set(), rateLimitPerMinute: '' };
     await loadClients(render);
   } catch (err) {
     clientsState.createError = (err as Error).message;
@@ -307,6 +319,14 @@ function renderCreateForm(render: () => void): HTMLElement {
   }
   wrap.appendChild(field('Allowed allocation classes', classRow, 'Empty = inherit gateway-wide defaults; otherwise restrict to selected'));
 
+  wrap.appendChild(field('Rate limit (requests / minute, optional)', h('input', {
+    type: 'number', min: '1', step: '1', value: f.rateLimitPerMinute,
+    placeholder: 'e.g. 60',
+    'data-testid': 'gateway-client-rate-limit',
+    style: inputStyle,
+    onInput: (e: Event) => { f.rateLimitPerMinute = (e.target as HTMLInputElement).value; },
+  }), 'Empty = no per-client cap. Tumbling 1-minute windows. Exceeding returns HTTP 429 with Retry-After.'));
+
   if (clientsState.createError) {
     wrap.appendChild(h('div', { style: 'padding:8px;margin-bottom:10px;color:#c62828;background:#fce8e6;border-radius:4px;font-size:12px;' }, clientsState.createError));
   }
@@ -355,6 +375,7 @@ function renderClientRow(c: GatewayClient, render: () => void): HTMLElement {
   const metaItems: Array<[string, string]> = [
     ['Audit chat ID', c.audit_chat_id ?? `mcp-gateway:${c.name}`],
     ['Allowed classes', allowed.length === 0 ? '(inherit defaults)' : allowed.join(', ')],
+    ['Rate limit', c.rate_limit_per_minute ? `${c.rate_limit_per_minute}/min` : '—'],
     ['Token hash', c.token_hash.slice(0, 16) + '…'],
     ['Created', formatDate(c.created_at)],
   ];

@@ -1273,4 +1273,22 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   `);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gateway_clients_hash ON mcp_gateway_clients(token_hash)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gateway_clients_enabled ON mcp_gateway_clients(enabled)`);
+
+  // Phase 7: per-client rate limit. Nullable column = no per-client cap.
+  // safeExec swallows the duplicate-column error so this is idempotent on
+  // existing databases.
+  safeExec(db, `ALTER TABLE mcp_gateway_clients ADD COLUMN rate_limit_per_minute INTEGER`);
+
+  // Phase 7: tumbling 1-minute buckets for per-client rate limiting. Mirrors
+  // the tool_rate_limit_buckets pattern but scoped to gateway clients only.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS mcp_gateway_rate_buckets (
+      id TEXT PRIMARY KEY,
+      client_id TEXT NOT NULL,
+      window_start TEXT NOT NULL,
+      count INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(client_id, window_start)
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gateway_rate_buckets_client ON mcp_gateway_rate_buckets(client_id, window_start)`);
 }

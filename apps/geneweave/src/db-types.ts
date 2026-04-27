@@ -575,6 +575,8 @@ export interface MCPGatewayClientRow {
   last_used_at: string | null;
   /** ISO timestamp set when the operator revokes this client. NULL = active. */
   revoked_at: string | null;
+  /** Phase 7: per-client request rate cap (requests per minute). NULL = no cap. */
+  rate_limit_per_minute: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -1688,6 +1690,15 @@ export interface DatabaseAdapter {
    *  trail. Hard delete is via `deleteMCPGatewayClient`. */
   revokeMCPGatewayClient(id: string): Promise<void>;
   deleteMCPGatewayClient(id: string): Promise<void>;
+  /** Phase 7: atomic 1-minute tumbling rate-limit check for a gateway client.
+   *  Returns the bucket count after a successful increment, or `false` when
+   *  the client has already exhausted `limitPerMinute` for the current
+   *  window. Mirrors the tool_rate_limit_buckets contract. */
+  checkAndIncrementGatewayRateLimit(
+    clientId: string,
+    windowStartIso: string,
+    limitPerMinute: number,
+  ): Promise<boolean>;
 
   // ─── Admin: Skills ─────────────────────────────────────────
   createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void>;
