@@ -25,6 +25,7 @@ import {
   weaveTool,
   weaveToolRegistry,
 } from '@weaveintel/core';
+import { buildSupervisorUtilityTools } from './supervisor-tools.js';
 
 export interface WorkerDefinition {
   name: string;
@@ -56,6 +57,14 @@ export interface SupervisorRuntimeOptions {
   additionalTools?: ToolRegistry;
   /** Tool names treated as CSE code-execution endpoints. */
   cseCodeToolNames?: string[];
+  /**
+   * When true (default), the supervisor automatically gets pure utility tools:
+   * `datetime`, `math_eval`, `unit_convert`. These are deterministic, network-
+   * free, and safe at the supervisor level. Set to false to opt out.
+   */
+  includeUtilityTools?: boolean;
+  /** Default timezone passed to the `datetime` utility tool. */
+  defaultTimezone?: string;
 }
 
 export interface SupervisorRuntime {
@@ -117,6 +126,10 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
     },
   }));
 
+  // Supervisor-safe utility tools (datetime, math_eval, unit_convert).
+  // Registered after think/plan so the model sees reasoning tools first,
+  // then quick deterministic helpers, then any caller-provided extras,
+  // and finally `delegate_to_worker` as the fallback.
   // plan — explicit problem decomposition
   tools.register(weaveTool<{ objective: string; approach: string; workers_needed: string; blockers?: string }>({
     name: 'plan',
@@ -137,6 +150,15 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
       return plan;
     },
   }));
+
+  // Supervisor-safe utility tools (datetime, math_eval, unit_convert).
+  // Pure, deterministic helpers — registered after think/plan, before any
+  // caller-provided additionalTools and before delegate_to_worker.
+  if (opts.includeUtilityTools !== false) {
+    for (const utilityTool of buildSupervisorUtilityTools({ defaultTimezone: opts.defaultTimezone })) {
+      tools.register(utilityTool);
+    }
+  }
 
   // Merge caller's additional tools BEFORE delegate_to_worker so they appear earlier.
   if (additionalTools) {
@@ -236,12 +258,25 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
     },
   }));
 
-  // Compose the supervisor instruction prompt
+  // Compose the supervisor instruction prompt.
+  // The utility section lists supervisor-safe pure helpers (datetime, math_eval,
+  // unit_convert) so the model knows it can answer simple time/math/unit
+  // questions without delegating.
+  const utilitySection = opts.includeUtilityTools !== false
+    ? [
+        '',
+        '## Supervisor Utility Tools (call directly — pure, fast, no I/O):',
+        '- `datetime` — current date/time, formats: iso, unix, unix_ms, date, time, weekday, rfc2822',
+        '- `math_eval` — arithmetic expressions (+ - * / ** % parens)',
+        '- `unit_convert` — length, mass, volume, time, temperature conversions',
+      ].join('\n')
+    : '';
+
   const directToolNames = additionalTools?.list().map((t) => t.schema.name) ?? [];
   const directToolSection = directToolNames.length > 0
     ? [
         '',
-        '## Available Tools (direct or MCP-wrapped — call these yourself when applicable):',
+        '## Additional Direct Tools (call these yourself when applicable):',
         directToolNames.map((n) => `- \`${n}\``).join('\n'),
         'When a task can be accomplished with a tool above, call it yourself instead of delegating.',
       ].join('\n')
@@ -253,6 +288,7 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
 
   const systemPrompt = [
     baseInstructions ?? 'You are a supervisor that delegates work to specialized workers.',
+    utilitySection,
     directToolSection,
     '',
     '## Available Workers:',

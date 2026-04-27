@@ -575,19 +575,12 @@ export class ChatEngine {
         }));
         const allWorkers = [...baseWorkers, ...enterpriseWorkers];
         console.log(`[chat] Supervisor with ${allWorkers.length} workers (${baseWorkers.length} base + ${enterpriseWorkers.length} enterprise)`);
-        // Default extras the supervisor itself can call directly. Any tool that
-        // an active skill claims (via the `skills.tool_names` DB column) is
-        // removed here so it can only be reached through worker delegation.
-        const skillClaimedToolKeys = new Set(settings.skillContributedTools ?? []);
-        const supervisorExtraToolKeys = ['cse_run_code', 'cse_session_status', 'cse_end_session']
-          .filter((k) => !skillClaimedToolKeys.has(k));
-        const supervisorCseTools = forceWorkerDataAnalysis || supervisorExtraToolKeys.length === 0
-          ? undefined
-          : await createToolRegistry(
-              supervisorExtraToolKeys,
-              undefined,
-              { ...toolOptions, actorPersona: 'agent_worker' },
-            );
+        // Supervisor's direct toolset is now package-managed: think, plan,
+        // delegate_to_worker, plus the utility tools (datetime, math_eval,
+        // unit_convert) provided by @weaveintel/agents. CSE tools live on
+        // the `code_executor` worker; the supervisor must delegate to it.
+        // (Retain `skillContributedTools` plumbing — it is still consulted
+        // by skill activation code paths elsewhere.)
 
         const supervisorInstructions = await this.buildSupervisorInstructions(settings.systemPrompt, forceWorkerDataAnalysis, dbWorkerRows);
 
@@ -597,7 +590,7 @@ export class ChatEngine {
           maxSteps: 20,
           name: 'geneweave-supervisor',
           systemPrompt: supervisorInstructions,
-          additionalTools: supervisorCseTools,
+          defaultTimezone: settings.timezone,
           bus: agentBus,
         });
       } else {
@@ -747,19 +740,10 @@ export class ChatEngine {
           };
         }));
         const allWorkers = [...baseWorkers, ...enterpriseWorkers];
-        // Mirror the non-streaming path: filter the supervisor's hardcoded extras
-        // by any tool already claimed by an active skill (data-driven via
-        // `skills.tool_names`).
-        const skillClaimedToolKeysStream = new Set(settings.skillContributedTools ?? []);
-        const supervisorExtraToolKeysStream = ['cse_run_code', 'cse_session_status', 'cse_end_session']
-          .filter((k) => !skillClaimedToolKeysStream.has(k));
-        const supervisorCseToolsStream = forceWorkerDataAnalysis || supervisorExtraToolKeysStream.length === 0
-          ? undefined
-          : await createToolRegistry(
-              supervisorExtraToolKeysStream,
-              undefined,
-              { ...toolOptions, actorPersona: 'agent_worker' },
-            );
+        // Streaming path: same supervisor tool contract as the non-streaming
+        // path — supervisor gets package defaults (think/plan/datetime/
+        // math_eval/unit_convert/delegate_to_worker) and nothing else. CSE
+        // belongs to the `code_executor` worker.
 
         const supervisorInstructions = await this.buildSupervisorInstructions(settings.systemPrompt, forceWorkerDataAnalysis, dbWorkerRows);
         agent = weaveAgent({
@@ -768,7 +752,7 @@ export class ChatEngine {
           maxSteps: 20,
           name: 'geneweave-supervisor',
           systemPrompt: supervisorInstructions,
-          additionalTools: supervisorCseToolsStream,
+          defaultTimezone: settings.timezone,
           bus: agentBus,
         });
       } else {

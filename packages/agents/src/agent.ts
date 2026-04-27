@@ -89,6 +89,15 @@ export interface ToolCallingAgentOptions {
    */
   cseCodeToolNames?: string[];
   /**
+   * When true (default), the supervisor receives pure utility tools
+   * (`datetime`, `math_eval`, `unit_convert`) in addition to think/plan/
+   * delegate_to_worker. Set to false to opt out (e.g. for ultra-minimal
+   * supervisors). Only meaningful when `workers` is set.
+   */
+  includeUtilityTools?: boolean;
+  /** Default timezone passed to the supervisor's `datetime` utility tool. */
+  defaultTimezone?: string;
+  /**
    * Maximum number of delegations. Only meaningful when `workers` is set.
    * Defaults to `maxSteps` when omitted.
    */
@@ -114,6 +123,8 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         policy: opts.policy,
         additionalTools: opts.additionalTools,
         cseCodeToolNames: opts.cseCodeToolNames,
+        includeUtilityTools: opts.includeUtilityTools,
+        defaultTimezone: opts.defaultTimezone,
       })
     : undefined;
 
