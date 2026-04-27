@@ -9,6 +9,7 @@ import {
   DEFAULT_EXPOSED_ALLOCATION_CLASSES,
   registerMCPGatewayInCatalog,
   loadGatewayConfigFromCatalog,
+  hashGatewayToken,
   MCP_GATEWAY_TOOL_KEY,
   MCP_GATEWAY_CREDENTIAL_NAME,
   MCP_GATEWAY_DEFAULT_ENV_VAR,
@@ -440,5 +441,281 @@ describe('Phase 1D — MCP gateway', () => {
         await handle.close();
       }
     });
+  });
+});
+
+// ─── Phase 5: Per-client gateway tokens ──────────────────────
+
+describe('Phase 5 — multi-tenant MCP gateway clients', () => {
+  /**
+   * Build a gateway HTTP server backed by a SQLite-backed client resolver.
+   * Each test gets its own DB so we can register/revoke clients without
+   * cross-talk.
+   */
+  async function startMultiTenantHttp(
+    db: Awaited<ReturnType<typeof createDatabaseAdapter>>,
+    auditEvents?: ToolAuditEvent[],
+    tools?: Record<string, Tool>,
+  ): Promise<{ url: string; close: () => Promise<void> }> {
+    const auditEmitter: ToolAuditEmitter = {
+      async emit(evt: ToolAuditEvent): Promise<void> {
+        auditEvents?.push(evt);
+      },
+    };
+    // Permissive policy resolver so policy gating doesn't interfere with
+    // client-attribution assertions.
+    // Empty policy map → all tools fall through to DEFAULT_TOOL_POLICY
+    // (enabled, read-only risk level, all risk levels allowed) which keeps
+    // the gateway audit emit path active without blocking calls.
+    const policy = new InMemoryToolPolicyResolver();
+    const gateway = createMCPGateway({
+      token: 'legacy-fallback',
+      ...(tools ? { tools } : {}),
+      policyResolver: policy,
+      auditEmitter,
+      clientResolver: (hash) => db.getMCPGatewayClientByTokenHash(hash),
+      touchClient: (id) => db.touchMCPGatewayClient(id),
+    });
+    const server = createServer((req: IncomingMessage, res: ServerResponse) => {
+      void gateway.handle(req, res).catch(() => {
+        if (!res.headersSent) { res.writeHead(500); res.end('error'); }
+      });
+    });
+    return new Promise((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address() as AddressInfo;
+        resolve({
+          url: `http://127.0.0.1:${addr.port}`,
+          close: () => new Promise<void>((r, rej) => {
+            void gateway.close().then(() => server.close((err) => err ? rej(err) : r()));
+          }),
+        });
+      });
+    });
+  }
+
+  let dbDir: string;
+  let db: Awaited<ReturnType<typeof createDatabaseAdapter>>;
+
+  beforeAll(async () => {
+    dbDir = mkdtempSync(join(tmpdir(), 'gw-phase5-'));
+    db = await createDatabaseAdapter({ type: 'sqlite', path: join(dbDir, 'gw.db') });
+  });
+  afterAll(async () => {
+    rmSync(dbDir, { recursive: true, force: true });
+  });
+
+  it('rejects a registered client whose token is wrong (401)', async () => {
+    const client = {
+      id: 'client-bad-token',
+      name: 'bad-token-client',
+      description: null,
+      token_hash: hashGatewayToken('correct-token'),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+    };
+    await db.createMCPGatewayClient(client);
+    const handle = await startMultiTenantHttp(db);
+    try {
+      const r = await postJson(
+        `${handle.url}/api/mcp/gateway`,
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        { Authorization: 'Bearer attacker-guess' },
+      );
+      expect(r.status).toBe(401);
+    } finally {
+      await handle.close();
+      await db.deleteMCPGatewayClient(client.id);
+    }
+  });
+
+  it('accepts a registered client and stamps audit chatId from client name', async () => {
+    const plaintext = 'phase5-good-secret-xyz';
+    const client = {
+      id: 'client-good',
+      name: 'claude-desktop',
+      description: 'Test client',
+      token_hash: hashGatewayToken(plaintext),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+    };
+    await db.createMCPGatewayClient(client);
+    const events: ToolAuditEvent[] = [];
+    const stub: Tool = {
+      schema: { name: 'web_search', description: 'stub', parameters: { type: 'object' }, tags: ['web-search'], riskLevel: 'read-only' },
+      async invoke() { return { content: 'ok' }; },
+    };
+    const handle = await startMultiTenantHttp(db, events, { web_search: stub });
+    try {
+      const r = await postJson(
+        `${handle.url}/api/mcp/gateway`,
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        { Authorization: `Bearer ${plaintext}` },
+      );
+      expect(r.status).toBe(200);
+      // tools/list itself does not emit a tool audit event; trigger an
+      // actual tool call to verify chatId attribution.
+      const r2 = await postJson(
+        `${handle.url}/api/mcp/gateway`,
+        {
+          jsonrpc: '2.0', id: 2, method: 'tools/call',
+          params: { name: 'web_search', arguments: { query: 'test' } },
+        },
+        { Authorization: `Bearer ${plaintext}` },
+      );
+      expect(r2.status).toBe(200);
+      const evt = events.find((e) => e.toolName === 'web_search');
+      expect(evt).toBeTruthy();
+      expect(evt?.chatId).toBe('mcp-gateway:claude-desktop');
+      expect(evt?.agentPersona).toBe('mcp-gateway');
+    } finally {
+      await handle.close();
+      await db.deleteMCPGatewayClient(client.id);
+    }
+  });
+
+  it('honors explicit audit_chat_id override on the client row', async () => {
+    const plaintext = 'phase5-override-token';
+    const client = {
+      id: 'client-override',
+      name: 'ci-runner',
+      description: null,
+      token_hash: hashGatewayToken(plaintext),
+      allowed_classes: null,
+      audit_chat_id: 'tenant-acme:ci',
+      enabled: 1,
+    };
+    await db.createMCPGatewayClient(client);
+    const events: ToolAuditEvent[] = [];
+    const stub: Tool = {
+      schema: { name: 'web_search', description: 'stub', parameters: { type: 'object' }, tags: ['web-search'], riskLevel: 'read-only' },
+      async invoke() { return { content: 'ok' }; },
+    };
+    const handle = await startMultiTenantHttp(db, events, { web_search: stub });
+    try {
+      await postJson(
+        `${handle.url}/api/mcp/gateway`,
+        {
+          jsonrpc: '2.0', id: 1, method: 'tools/call',
+          params: { name: 'web_search', arguments: { query: 'x' } },
+        },
+        { Authorization: `Bearer ${plaintext}` },
+      );
+      const evt = events.find((e) => e.toolName === 'web_search');
+      expect(evt?.chatId).toBe('tenant-acme:ci');
+    } finally {
+      await handle.close();
+      await db.deleteMCPGatewayClient(client.id);
+    }
+  });
+
+  it('narrows exposed tools to the allowed_classes intersection', async () => {
+    const plaintext = 'phase5-scoped-token';
+    const client = {
+      id: 'client-scoped',
+      name: 'web-only',
+      description: null,
+      token_hash: hashGatewayToken(plaintext),
+      allowed_classes: JSON.stringify(['web']),
+      audit_chat_id: null,
+      enabled: 1,
+    };
+    await db.createMCPGatewayClient(client);
+    const handle = await startMultiTenantHttp(db);
+    try {
+      const r = await postJson(
+        `${handle.url}/api/mcp/gateway`,
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        { Authorization: `Bearer ${plaintext}` },
+      );
+      const env = parseRPCResponse(r.bodyText, r.bodyJson);
+      const tools = (env?.result as { tools?: Array<{ name: string; description: string }> })?.tools ?? [];
+      // All exposed descriptions must start with [web]; nothing else is
+      // visible to a web-only client.
+      expect(tools.length).toBeGreaterThan(0);
+      for (const t of tools) {
+        expect(t.description.startsWith('[web]')).toBe(true);
+      }
+    } finally {
+      await handle.close();
+      await db.deleteMCPGatewayClient(client.id);
+    }
+  });
+
+  it('rejects a revoked client even if its token hash still matches', async () => {
+    const plaintext = 'phase5-revoked-token';
+    const client = {
+      id: 'client-revoked',
+      name: 'old-laptop',
+      description: null,
+      token_hash: hashGatewayToken(plaintext),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+    };
+    await db.createMCPGatewayClient(client);
+    await db.revokeMCPGatewayClient(client.id);
+    const handle = await startMultiTenantHttp(db);
+    try {
+      const r = await postJson(
+        `${handle.url}/api/mcp/gateway`,
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        { Authorization: `Bearer ${plaintext}` },
+      );
+      expect(r.status).toBe(401);
+    } finally {
+      await handle.close();
+      await db.deleteMCPGatewayClient(client.id);
+    }
+  });
+
+  it('falls back to the legacy single token when no client row matches', async () => {
+    // No client rows registered with this hash — gateway should accept the
+    // legacy `token` we wired in startMultiTenantHttp.
+    const handle = await startMultiTenantHttp(db);
+    try {
+      const r = await postJson(
+        `${handle.url}/api/mcp/gateway`,
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        { Authorization: 'Bearer legacy-fallback' },
+      );
+      expect(r.status).toBe(200);
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it('updates last_used_at after a successful client request', async () => {
+    const plaintext = 'phase5-touch-token';
+    const client = {
+      id: 'client-touch',
+      name: 'touch-test',
+      description: null,
+      token_hash: hashGatewayToken(plaintext),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+    };
+    await db.createMCPGatewayClient(client);
+    const before = await db.getMCPGatewayClient(client.id);
+    expect(before?.last_used_at).toBeNull();
+    const handle = await startMultiTenantHttp(db);
+    try {
+      const r = await postJson(
+        `${handle.url}/api/mcp/gateway`,
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        { Authorization: `Bearer ${plaintext}` },
+      );
+      expect(r.status).toBe(200);
+      // The touch is fire-and-forget; give it a microtask to land.
+      await new Promise((r) => setTimeout(r, 50));
+      const after = await db.getMCPGatewayClient(client.id);
+      expect(after?.last_used_at).toBeTruthy();
+    } finally {
+      await handle.close();
+      await db.deleteMCPGatewayClient(client.id);
+    }
   });
 });

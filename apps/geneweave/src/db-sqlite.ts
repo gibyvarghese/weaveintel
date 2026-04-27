@@ -1551,6 +1551,59 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return { status, value };
   }
 
+  // ─── Phase 5: MCP Gateway Clients ──────────────────────────
+
+  async createMCPGatewayClient(c: Omit<import('./db-types.js').MCPGatewayClientRow, 'created_at' | 'updated_at' | 'last_used_at' | 'revoked_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO mcp_gateway_clients (id, name, description, token_hash, allowed_classes, audit_chat_id, enabled) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(c.id, c.name, c.description ?? null, c.token_hash, c.allowed_classes ?? null, c.audit_chat_id ?? null, c.enabled);
+  }
+
+  async getMCPGatewayClient(id: string): Promise<import('./db-types.js').MCPGatewayClientRow | null> {
+    return (this.d.prepare('SELECT * FROM mcp_gateway_clients WHERE id = ?').get(id) as import('./db-types.js').MCPGatewayClientRow | undefined) ?? null;
+  }
+
+  async getMCPGatewayClientByTokenHash(tokenHash: string): Promise<import('./db-types.js').MCPGatewayClientRow | null> {
+    return (this.d.prepare('SELECT * FROM mcp_gateway_clients WHERE token_hash = ?').get(tokenHash) as import('./db-types.js').MCPGatewayClientRow | undefined) ?? null;
+  }
+
+  async listMCPGatewayClients(): Promise<import('./db-types.js').MCPGatewayClientRow[]> {
+    return this.d.prepare('SELECT * FROM mcp_gateway_clients ORDER BY name').all() as import('./db-types.js').MCPGatewayClientRow[];
+  }
+
+  async listEnabledMCPGatewayClients(): Promise<import('./db-types.js').MCPGatewayClientRow[]> {
+    return this.d.prepare('SELECT * FROM mcp_gateway_clients WHERE enabled = 1 AND revoked_at IS NULL ORDER BY name').all() as import('./db-types.js').MCPGatewayClientRow[];
+  }
+
+  async updateMCPGatewayClient(id: string, fields: Partial<Omit<import('./db-types.js').MCPGatewayClientRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`);
+    vals.push(id);
+    this.d.prepare(`UPDATE mcp_gateway_clients SET ${sets.join(', ')} WHERE id = ?`).run(...(vals as never[]));
+  }
+
+  async touchMCPGatewayClient(id: string): Promise<void> {
+    try {
+      this.d.prepare(`UPDATE mcp_gateway_clients SET last_used_at = datetime('now') WHERE id = ?`).run(id);
+    } catch {
+      // Best-effort — never block a gateway request on this update.
+    }
+  }
+
+  async revokeMCPGatewayClient(id: string): Promise<void> {
+    this.d.prepare(`UPDATE mcp_gateway_clients SET enabled = 0, revoked_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`).run(id);
+  }
+
+  async deleteMCPGatewayClient(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM mcp_gateway_clients WHERE id = ?').run(id);
+  }
+
   // ─── Admin: Skills ─────────────────────────────────────────
 
   async createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void> {

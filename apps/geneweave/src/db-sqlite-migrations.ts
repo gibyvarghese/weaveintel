@@ -1248,4 +1248,29 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   // tools are appropriate for supervisor-level vs worker-level binding.
   // Values: 'supervisor' | 'worker' | 'shared' | NULL (unspecified).
   safeExec(db, 'ALTER TABLE tool_catalog ADD COLUMN allocation_class TEXT');
+
+  // ─── Phase 5: Per-client MCP gateway tokens ───────────────
+  // Stores SHA-256 hashes of per-client bearer tokens so external MCP
+  // callers can be individually attributed in audit events and scoped to a
+  // subset of allocation classes. The plaintext token is never stored —
+  // only the digest. token_lookup is the same digest used as a fast index
+  // on bearer-token presentation. allowed_classes is a JSON array; when
+  // null the client inherits the gateway-wide exposed_classes set.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS mcp_gateway_clients (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT,
+      token_hash TEXT NOT NULL UNIQUE,
+      allowed_classes TEXT,
+      audit_chat_id TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      last_used_at TEXT,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gateway_clients_hash ON mcp_gateway_clients(token_hash)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gateway_clients_enabled ON mcp_gateway_clients(enabled)`);
 }

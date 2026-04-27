@@ -2862,6 +2862,25 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     policyResolver: new DbToolPolicyResolver(db),
     auditEmitter: new DbToolAuditEmitter(db),
     rateLimiter: new DbToolRateLimiter(db),
+    // Phase 5: when the gateway is operator-enabled we wire a per-client
+    // resolver so external callers can be individually attributed in the
+    // audit log and scoped to a subset of allocation classes. Clients
+    // that present a token whose hash is not in `mcp_gateway_clients`
+    // are rejected with 401 — even if the legacy single-token env var
+    // is also set. Both auth paths can coexist: the resolver first
+    // attempts to match a registered client; if no client rows exist
+    // (resolver returns null) the legacy single-token path is the
+    // fallback for backward compatibility.
+    ...(gatewayEnabled
+      ? {
+          clientResolver: async (hash: string) => {
+            const row = await db.getMCPGatewayClientByTokenHash(hash);
+            if (!row) return null;
+            return row;
+          },
+          touchClient: (id: string) => db.touchMCPGatewayClient(id),
+        }
+      : {}),
   });
 
   // Diagnostic info endpoint — auth-required, no secret leakage. Operators

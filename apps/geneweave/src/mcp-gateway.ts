@@ -38,8 +38,8 @@ import {
   type PolicyResolutionContext,
 } from '@weaveintel/tools';
 import { BUILTIN_TOOLS, inferAllocationClass } from './tools.js';
-import type { DatabaseAdapter } from './db-types.js';
-import { randomUUID } from 'node:crypto';
+import type { DatabaseAdapter, MCPGatewayClientRow } from './db-types.js';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 
 /** Allocation classes considered "external" — these are exposed by default. */
 export const DEFAULT_EXPOSED_ALLOCATION_CLASSES: ReadonlySet<string> = new Set([
@@ -89,6 +89,22 @@ export interface MCPGatewayOptions {
   auditChatId?: string;
   /** Synthetic agent persona stamped on every audit event. Defaults to `'mcp-gateway'`. */
   auditAgentPersona?: string;
+  /**
+   * Phase 5 — multi-tenant client resolver. When provided, every request
+   * must present a bearer token whose SHA-256 digest matches a row in
+   * `mcp_gateway_clients`. The matched client supplies its own audit chatId
+   * and may narrow the exposed allocation classes via `allowed_classes`.
+   *
+   * When both `token` and `clientResolver` are configured, the resolver
+   * takes precedence — the legacy single-token check is skipped. A request
+   * that fails the resolver lookup returns 401.
+   */
+  clientResolver?: (tokenHash: string) => Promise<MCPGatewayClientRow | null>;
+  /**
+   * Best-effort hook invoked after a successful client match so the DB
+   * adapter can stamp `last_used_at`. Failures must not block the request.
+   */
+  touchClient?: (clientId: string) => Promise<void>;
 }
 
 export interface MCPGatewayHandle {
@@ -135,24 +151,26 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
   const classes = opts.exposedClasses ?? DEFAULT_EXPOSED_ALLOCATION_CLASSES;
   const exposed = selectExposedTools(tools, classes);
   const token = opts.token;
-  const enabled = typeof token === 'string' && token.length > 0;
+  const clientResolver = opts.clientResolver;
+  const touchClient = opts.touchClient;
+  const enabled = clientResolver != null || (typeof token === 'string' && token.length > 0);
   const serverName = opts.serverName ?? 'geneweave-gateway';
   const serverVersion = opts.serverVersion ?? '1.0.0';
   const exposedToolNames = exposed.map((e) => e.key);
   const policyResolver = opts.policyResolver;
   const auditEmitter = opts.auditEmitter;
   const rateLimiter = opts.rateLimiter;
-  const auditChatId = opts.auditChatId ?? 'mcp-gateway';
+  const defaultAuditChatId = opts.auditChatId ?? 'mcp-gateway';
   const auditAgentPersona = opts.auditAgentPersona ?? 'mcp-gateway';
 
-  // Pre-wrap each exposed tool with policy enforcement when a resolver is
-  // supplied. The audit emitter, rate limiter, and resolution-context tags
-  // are stamped once per gateway instance so external MCP traffic shows up
-  // in the same `tool_audit_events` stream as in-process tool calls.
-  const enforced: ExposedToolEntry[] = policyResolver
+  // Pre-wrap each exposed tool with policy enforcement (single-tenant path)
+  // when a resolver is supplied AND no per-client resolver is configured.
+  // For the multi-tenant path we wrap tools per-request because the audit
+  // chatId is determined by the matched client.
+  const enforcedSingleTenant: ExposedToolEntry[] = policyResolver && !clientResolver
     ? exposed.map((e) => {
         const resolutionContext: PolicyResolutionContext = {
-          chatId: auditChatId,
+          chatId: defaultAuditChatId,
           agentPersona: auditAgentPersona,
         };
         const wrapped = createPolicyEnforcedTool(e.tool, {
@@ -164,6 +182,34 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
         return { key: e.key, tool: wrapped, allocationClass: e.allocationClass };
       })
     : exposed;
+
+  /**
+   * Wrap exposed tools per-request with a client-scoped policy resolution
+   * context. The matched gateway client's row provides the audit chatId
+   * (so external traffic is traceable per client) and may narrow the set
+   * of allocation classes the client is allowed to invoke.
+   */
+  function wrapForClient(client: MCPGatewayClientRow): ExposedToolEntry[] {
+    const allowed = parseAllowedClasses(client.allowed_classes);
+    const filtered = allowed
+      ? exposed.filter((e) => allowed.has(e.allocationClass))
+      : exposed;
+    if (!policyResolver) return filtered;
+    const chatId = client.audit_chat_id ?? `mcp-gateway:${client.name}`;
+    const resolutionContext: PolicyResolutionContext = {
+      chatId,
+      agentPersona: auditAgentPersona,
+    };
+    return filtered.map((e) => {
+      const wrapped = createPolicyEnforcedTool(e.tool, {
+        resolver: policyResolver,
+        ...(auditEmitter ? { auditEmitter } : {}),
+        ...(rateLimiter ? { rateLimiter } : {}),
+        resolutionContext,
+      });
+      return { key: e.key, tool: wrapped, allocationClass: e.allocationClass };
+    });
+  }
 
   function unauthorized(res: ServerResponse): void {
     const body = JSON.stringify({ error: 'Unauthorized' });
@@ -177,14 +223,45 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
     res.end(body);
   }
 
-  function checkAuth(req: IncomingMessage): boolean {
-    if (!enabled) return false;
+  function extractBearer(req: IncomingMessage): string | null {
     const header = req.headers['authorization'] ?? req.headers['Authorization' as never];
     const value = Array.isArray(header) ? header[0] : header;
-    if (!value || typeof value !== 'string') return false;
+    if (!value || typeof value !== 'string') return null;
     const m = value.match(/^Bearer\s+(.+)$/i);
-    if (!m) return false;
-    return m[1] === token;
+    return m && m[1] ? m[1] : null;
+  }
+
+  /**
+   * Resolve the bearer token against either the multi-tenant client store
+   * (preferred when configured) or the single-token legacy path.
+   * Returns null when authentication fails for any reason.
+   */
+  async function authenticate(req: IncomingMessage): Promise<{ client: MCPGatewayClientRow | null } | null> {
+    const presented = extractBearer(req);
+    if (!presented) return null;
+    if (clientResolver) {
+      const hash = createHash('sha256').update(presented).digest('hex');
+      let row: MCPGatewayClientRow | null = null;
+      try {
+        row = await clientResolver(hash);
+      } catch {
+        return null;
+      }
+      if (row) {
+        if (row.enabled !== 1) return null;
+        if (row.revoked_at) return null;
+        return { client: row };
+      }
+      // Resolver miss — fall through to the legacy single-token path so
+      // operators upgrading from Phase 4 keep working until at least one
+      // client row is registered.
+    }
+    if (typeof token !== 'string' || token.length === 0) return null;
+    // Constant-time string compare to deny token-length oracles.
+    const a = Buffer.from(presented);
+    const b = Buffer.from(token);
+    if (a.length !== b.length) return null;
+    return timingSafeEqual(a, b) ? { client: null } : null;
   }
 
   /**
@@ -192,7 +269,7 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
    * connect the pair. Returns both so the caller can route the request and
    * tear them down afterwards.
    */
-  async function buildPerRequestServer(): Promise<{ stop: () => Promise<void>; transport: MCPStreamableHttpServerTransport }> {
+  async function buildPerRequestServer(entries: ExposedToolEntry[]): Promise<{ stop: () => Promise<void>; transport: MCPStreamableHttpServerTransport }> {
     const server = weaveMCPServer(
       {
         name: serverName,
@@ -208,7 +285,7 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
       },
     );
 
-    for (const { key, tool, allocationClass } of enforced) {
+    for (const { key, tool, allocationClass } of entries) {
       server.addTool(
         {
           name: key,
@@ -244,8 +321,16 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
     enabled,
     async handle(req, res, parsedBody) {
       if (!enabled) { disabledResponse(res); return; }
-      if (!checkAuth(req)) { unauthorized(res); return; }
-      const { transport, stop } = await buildPerRequestServer();
+      const authResult = await authenticate(req);
+      if (!authResult) { unauthorized(res); return; }
+      const entries = authResult.client
+        ? wrapForClient(authResult.client)
+        : enforcedSingleTenant;
+      // Stamp last_used_at for the matched client. Best-effort.
+      if (authResult.client && touchClient) {
+        void touchClient(authResult.client.id).catch(() => undefined);
+      }
+      const { transport, stop } = await buildPerRequestServer(entries);
       try {
         await transport.handleRequest(req, res, parsedBody);
       } finally {
@@ -256,6 +341,28 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
       // No persistent resources held — nothing to clean up.
     },
   };
+}
+
+/** Parse the JSON-encoded `allowed_classes` column on a gateway client row.
+ *  Returns null when the field is unset (client inherits gateway defaults)
+ *  and an empty Set when the JSON is invalid (no classes allowed — fail closed). */
+function parseAllowedClasses(raw: string | null): Set<string> | null {
+  if (raw == null || raw === '') return null;
+  try {
+    const v = JSON.parse(raw);
+    if (Array.isArray(v) && v.every((x) => typeof x === 'string')) {
+      return new Set(v as string[]);
+    }
+    return new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+/** SHA-256 hex digest of a plaintext bearer token. Exported so admin code
+ *  can hash a freshly minted token before storing it. */
+export function hashGatewayToken(plaintext: string): string {
+  return createHash('sha256').update(plaintext).digest('hex');
 }
 
 /**

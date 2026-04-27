@@ -555,6 +555,30 @@ export interface ToolCredentialRow {
   updated_at: string;
 }
 
+/** Phase 5: Per-client MCP gateway bearer token. The plaintext token is
+ *  never persisted — only its SHA-256 digest in `token_hash`. The client
+ *  presents the raw token; we hash + look up by hash in constant time. */
+export interface MCPGatewayClientRow {
+  id: string;
+  /** Operator-facing name (e.g. "claude-desktop-laptop", "ci-runner"). */
+  name: string;
+  description: string | null;
+  /** SHA-256 hex digest of the bearer token. Never null; never plaintext. */
+  token_hash: string;
+  /** JSON array of allocation classes this client may reach.
+   *  When null, the client inherits the gateway-wide exposed_classes set. */
+  allowed_classes: string | null;
+  /** Audit chat_id stamped on every tool_audit_events row from this client.
+   *  When null, defaults to `mcp-gateway:<name>`. */
+  audit_chat_id: string | null;
+  enabled: number;
+  last_used_at: string | null;
+  /** ISO timestamp set when the operator revokes this client. NULL = active. */
+  revoked_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface SkillRow {
   id: string;
   name: string;
@@ -1645,6 +1669,25 @@ export interface DatabaseAdapter {
   /** Resolve a credential by ID and attempt validation by checking env var presence.
    *  Updates validation_status in DB and returns the resolved secret value or null. */
   validateToolCredential(id: string): Promise<{ status: 'valid' | 'invalid' | 'unknown'; value: string | null }>;
+
+  // ─── Phase 5: MCP Gateway Clients (per-client bearer tokens) ──
+  /** Insert a new gateway client row. The token must be hashed by the
+   *  caller before being passed in (see `hashGatewayToken()`). */
+  createMCPGatewayClient(c: Omit<MCPGatewayClientRow, 'created_at' | 'updated_at' | 'last_used_at' | 'revoked_at'>): Promise<void>;
+  getMCPGatewayClient(id: string): Promise<MCPGatewayClientRow | null>;
+  /** Constant-time-ish lookup by token digest. Used on every gateway request
+   *  to attribute the call to a specific client and stamp audit events. */
+  getMCPGatewayClientByTokenHash(tokenHash: string): Promise<MCPGatewayClientRow | null>;
+  listMCPGatewayClients(): Promise<MCPGatewayClientRow[]>;
+  listEnabledMCPGatewayClients(): Promise<MCPGatewayClientRow[]>;
+  updateMCPGatewayClient(id: string, fields: Partial<Omit<MCPGatewayClientRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  /** Stamp last_used_at on the client row. Best-effort; called from the
+   *  gateway request hot path so failures must not block the request. */
+  touchMCPGatewayClient(id: string): Promise<void>;
+  /** Soft-delete: set revoked_at and enabled=0. The row stays for audit
+   *  trail. Hard delete is via `deleteMCPGatewayClient`. */
+  revokeMCPGatewayClient(id: string): Promise<void>;
+  deleteMCPGatewayClient(id: string): Promise<void>;
 
   // ─── Admin: Skills ─────────────────────────────────────────
   createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void>;
