@@ -174,4 +174,11 @@ export const CALLABLE_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
     cols: ['tool_name', 'status', 'chat_id', 'skill_key', 'requested_at'],
     fields: [],
   },
+  'mcp-gateway-clients': {
+    singular: 'MCP Gateway Client', apiPath: 'admin/mcp-gateway-clients', listKey: 'clients',
+    readOnly: true,
+    customView: 'mcp-gateway-clients',
+    cols: ['name', 'enabled', 'allowed_classes', 'last_used_at', 'created_at'],
+    fields: [],
+  },
 };
