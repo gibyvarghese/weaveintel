@@ -35,6 +35,7 @@ import { SVChatBridge } from './features/scientific-validation/chat-bridge.js';
 import { createSVToolMap } from './features/scientific-validation/tools/index.js';
 import { DbToolPolicyResolver } from './tool-policy-resolver.js';
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
+import { createMCPGateway, DEFAULT_EXPOSED_ALLOCATION_CLASSES } from './mcp-gateway.js';
 import { encryptCredential, decryptCredential } from './vault.js';
 import { setBrowserAuthProvider, type SSOPassThroughAuth } from '@weaveintel/tools-browser';
 import { weaveContext } from '@weaveintel/core';
@@ -2833,6 +2834,30 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     json(res, 200, { status: 'ok', service: 'geneweave', timestamp: new Date().toISOString() });
   });
 
+  // ── Internal MCP Gateway (Phase 1D) ────────────────────────
+  // Exposes builtin tools whose allocation_class is in
+  // DEFAULT_EXPOSED_ALLOCATION_CLASSES (web/social/search/cse/http/enterprise/communication)
+  // over the MCP Streamable HTTP protocol with bearer-token auth.
+  const mcpGatewayToken = process.env['GENEWEAVE_MCP_GATEWAY_TOKEN'] ?? '';
+  const mcpGateway = createMCPGateway({
+    token: mcpGatewayToken || undefined,
+    serverName: 'geneweave-gateway',
+    serverVersion: '1.0.0',
+  });
+
+  // Diagnostic info endpoint — auth-required, no secret leakage. Operators
+  // can use this to verify which tools the gateway is offering.
+  router.get('/api/mcp/gateway/info', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    json(res, 200, {
+      enabled: mcpGateway.enabled,
+      exposedClasses: [...DEFAULT_EXPOSED_ALLOCATION_CLASSES],
+      exposedToolNames: mcpGateway.exposedToolNames,
+      endpoint: '/api/mcp/gateway',
+      authScheme: 'Bearer',
+    });
+  }, { auth: true });
+
   // ── Avatar static files ────────────────────────────────────
 
   const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -2923,6 +2948,23 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
         json(res, 404, { error: 'Not found' });
         return;
       }
+    }
+
+    // ── MCP Gateway pass-through ──
+    // The gateway has its own bearer-token auth and the MCP SDK transport
+    // reads the body itself, so we bypass the router (which would consume
+    // the stream and apply CSRF). The gateway returns 503 when no token is
+    // configured, so it is loud-fail rather than silent.
+    if (pathname === '/api/mcp/gateway' && (method === 'POST' || method === 'GET' || method === 'DELETE')) {
+      try {
+        await mcpGateway.handle(req, res);
+      } catch (err) {
+        console.error('[geneWeave][mcp-gateway] handler error:', err);
+        if (!res.headersSent) {
+          json(res, 500, { error: 'MCP gateway error' });
+        }
+      }
+      return;
     }
 
     // API routing

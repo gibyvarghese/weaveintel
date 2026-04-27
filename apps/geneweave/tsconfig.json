@@ -23,6 +23,7 @@
     { "path": "../../packages/identity" },
     { "path": "../../packages/memory" },
     { "path": "../../packages/mcp-statsnz" },
+    { "path": "../../packages/mcp-server" },
     { "path": "../../packages/tools-http" },
     { "path": "../../packages/tools-time" },
     { "path": "../../packages/ui-primitives" },

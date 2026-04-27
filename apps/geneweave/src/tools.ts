@@ -860,7 +860,7 @@ export async function syncToolCatalog(db: DatabaseAdapter): Promise<void> {
  * Infer a default allocation_class for a builtin tool based on its key prefix and tags.
  * Operators can override this in the admin panel.
  */
-function inferAllocationClass(key: string, tags: readonly string[] | undefined): string | null {
+export function inferAllocationClass(key: string, tags: readonly string[] | undefined): string | null {
   const k = key.toLowerCase();
   const tagSet = new Set((tags ?? []).map((t) => t.toLowerCase()));
   if (k === 'datetime' || k === 'math_eval' || k === 'unit_convert' || k === 'calculator') return 'utility';

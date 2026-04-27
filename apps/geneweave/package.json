@@ -43,6 +43,7 @@
     "@weaveintel/identity": "*",
     "@weaveintel/memory": "*",
     "@weaveintel/mcp-statsnz": "*",
+    "@weaveintel/mcp-server": "*",
     "@weaveintel/tools-browser": "*",
     "@weaveintel/tools-enterprise": "*",
     "@weaveintel/tools-http": "*",
