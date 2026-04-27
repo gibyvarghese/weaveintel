@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { SQLiteAdapter } from './db-sqlite.js';
+import { buildSupervisorAdditionalTools } from './chat.js';
 
 function makeTempDbPath(): string {
   return `/tmp/geneweave-agents-test-${Date.now()}-${randomUUID()}.db`;
@@ -155,6 +156,58 @@ describe('Phase 1B — agents + agent_tools persistence', () => {
     });
     const r = await db.resolveSupervisorAgent({ category: 'ops' });
     expect(r?.agent.id).toBe('agent-supervisor-default');
+    await db.close();
+  });
+});
+
+describe('Phase 2 — buildSupervisorAdditionalTools', () => {
+  it('returns undefined when resolved is null', async () => {
+    const reg = await buildSupervisorAdditionalTools(null, {});
+    expect(reg).toBeUndefined();
+  });
+
+  it('returns undefined when resolved has no tools', async () => {
+    const db = await newSeededDb();
+    const resolved = await db.resolveSupervisorAgent({ category: 'no-such' });
+    expect(resolved?.agent.id).toBe('agent-supervisor-default');
+    expect(resolved?.tools).toEqual([]);
+    const reg = await buildSupervisorAdditionalTools(resolved, {});
+    expect(reg).toBeUndefined();
+    await db.close();
+  });
+
+  it('builds a registry containing allocated builtin tools', async () => {
+    const db = await newSeededDb();
+    const id = `agent-${randomUUID()}`;
+    await db.createSupervisorAgent(
+      {
+        id,
+        tenant_id: null,
+        category: 'utility-only',
+        name: 'utility-sup',
+        display_name: null,
+        description: null,
+        system_prompt: null,
+        default_timezone: null,
+        include_utility_tools: 1,
+        is_default: 0,
+        enabled: 1,
+      },
+      [
+        { tool_name: 'datetime', allocation: 'default' },
+        { tool_name: 'calculator', allocation: 'default' },
+        { tool_name: 'web_search', allocation: 'forbidden' },
+      ],
+    );
+    const resolved = await db.resolveSupervisorAgent({ category: 'utility-only' });
+    expect(resolved?.tools.length).toBe(3);
+    const reg = await buildSupervisorAdditionalTools(resolved, {});
+    expect(reg).toBeDefined();
+    const names = reg!.list().map((t) => t.schema.name).sort();
+    // forbidden allocation must be excluded
+    expect(names).not.toContain('web_search');
+    expect(names).toContain('datetime');
+    expect(names).toContain('calculator');
     await db.close();
   });
 });

@@ -141,6 +141,31 @@ export type { ChatAttachment, ProviderConfig, ChatEngineConfig, ChatSettings, Wo
 
 type CognitiveCheckSummary = GuardrailCategorySummary;
 
+/**
+ * Phase 2 — exported for unit tests. Build a ToolRegistry from a resolved
+ * supervisor agent's `agent_tools` allocations (skipping `forbidden`).
+ * Returns `undefined` when there is nothing to allocate.
+ */
+export async function buildSupervisorAdditionalTools(
+  resolved: import('./db-types.js').ResolvedSupervisorAgent | null,
+  toolOptions: ToolRegistryOptions,
+): Promise<ToolRegistry | undefined> {
+  if (!resolved || !resolved.tools.length) return undefined;
+  const toolNames = Array.from(new Set(
+    resolved.tools
+      .filter((t) => (t.allocation ?? 'default') !== 'forbidden')
+      .map((t) => t.tool_name)
+      .filter((n): n is string => typeof n === 'string' && n.length > 0),
+  ));
+  if (!toolNames.length) return undefined;
+  try {
+    return await createToolRegistry(toolNames, undefined, { ...toolOptions, actorPersona: 'agent_supervisor' });
+  } catch (err) {
+    console.warn('[chat] buildSupervisorAdditionalTools failed; supervisor will use defaults only', err);
+    return undefined;
+  }
+}
+
 export class ChatEngine {
   private readonly healthTracker = new ModelHealthTracker();
   private readonly responseCache = weaveInMemoryCacheStore();
@@ -375,6 +400,20 @@ export class ChatEngine {
     }
   }
 
+  /**
+   * Phase 2 — build a ToolRegistry of supervisor "additionalTools" from the
+   * resolved agent's `agent_tools` allocations. These tools are exposed to
+   * the supervisor directly (alongside utility tools and delegate_to_worker).
+   * Workers' tool allocations are NOT included here (workers manage their own
+   * tools). Returns `undefined` when there are no allocations or all fail.
+   */
+  private async buildSupervisorAdditionalTools(
+    resolved: import('./db-types.js').ResolvedSupervisorAgent | null,
+    toolOptions: ToolRegistryOptions,
+  ): Promise<ToolRegistry | undefined> {
+    return buildSupervisorAdditionalTools(resolved, toolOptions);
+  }
+
   private async runWithCseSuccessGuard(
     agent: { run: (ctx: ExecutionContext, input: { messages: Message[]; goal: string }) => Promise<AgentResult> },
     ctx: ExecutionContext,
@@ -599,6 +638,7 @@ export class ChatEngine {
         const resolvedSupervisor = await this.resolveSupervisorContext('general');
         const supervisorBasePrompt = resolvedSupervisor?.agent.system_prompt ?? settings.systemPrompt;
         const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
+        const supervisorAdditionalTools = await this.buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions);
 
         agent = weaveAgent({
           model,
@@ -608,6 +648,7 @@ export class ChatEngine {
           systemPrompt: supervisorInstructions,
           defaultTimezone: resolvedSupervisor?.agent.default_timezone ?? settings.timezone,
           includeUtilityTools: resolvedSupervisor ? resolvedSupervisor.agent.include_utility_tools !== 0 : true,
+          additionalTools: supervisorAdditionalTools,
           bus: agentBus,
         });
       } else {
@@ -765,6 +806,7 @@ export class ChatEngine {
         const resolvedSupervisor = await this.resolveSupervisorContext('general');
         const supervisorBasePrompt = resolvedSupervisor?.agent.system_prompt ?? settings.systemPrompt;
         const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
+        const supervisorAdditionalTools = await this.buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions);
         agent = weaveAgent({
           model,
           workers: allWorkers,
@@ -773,6 +815,7 @@ export class ChatEngine {
           systemPrompt: supervisorInstructions,
           defaultTimezone: resolvedSupervisor?.agent.default_timezone ?? settings.timezone,
           includeUtilityTools: resolvedSupervisor ? resolvedSupervisor.agent.include_utility_tools !== 0 : true,
+          additionalTools: supervisorAdditionalTools,
           bus: agentBus,
         });
       } else {
