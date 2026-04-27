@@ -15,4 +15,5 @@ export { registerToolCredentialRoutes } from './tool-credentials.js';
 export { registerToolSimulationRoutes } from './tool-simulation.js';
 export { registerSkillRoutes } from './skills.js';
 export { registerWorkerAgentRoutes } from './worker-agents.js';
+export { registerSupervisorAgentRoutes } from './agents.js';
 export { registerToolApprovalRequestRoutes } from './tool-approval-requests.js';

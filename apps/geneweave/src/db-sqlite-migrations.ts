@@ -1201,4 +1201,51 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   )`);
 
   safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_sg_platform_configs_platform ON sg_platform_configs(platform, enabled)');
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Phase 1B — DB-driven supervisor agents
+  //
+  // The `agents` table is the operator-managed registry of supervisor (and
+  // future specialist) agent definitions. Tool allocation is decoupled into
+  // `agent_tools` so a single agent row can claim a curated bundle without
+  // string-encoded JSON. Resolution at runtime is layered:
+  //   skill.supervisor_agent_id -> tenant_id+category -> global+category -> is_default=1
+  //
+  // This phase is additive; chat.ts continues to honour package defaults when
+  // no row resolves, and worker_agents/skills tables are untouched apart from
+  // an optional `supervisor_agent_id` column on `skills`.
+  // ─────────────────────────────────────────────────────────────────────────
+  safeExec(db, `CREATE TABLE IF NOT EXISTS agents (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT,
+    category TEXT NOT NULL DEFAULT 'general',
+    name TEXT NOT NULL,
+    display_name TEXT,
+    description TEXT,
+    system_prompt TEXT,
+    include_utility_tools INTEGER NOT NULL DEFAULT 1,
+    default_timezone TEXT,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_agents_tenant_category ON agents(tenant_id, category, enabled)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_agents_default ON agents(is_default, enabled)');
+
+  safeExec(db, `CREATE TABLE IF NOT EXISTS agent_tools (
+    agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    tool_name TEXT NOT NULL,
+    allocation TEXT NOT NULL DEFAULT 'default',
+    PRIMARY KEY(agent_id, tool_name)
+  )`);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_agent_tools_agent ON agent_tools(agent_id)');
+
+  // Skills may pin a specific supervisor agent (highest precedence at resolve time).
+  safeExec(db, 'ALTER TABLE skills ADD COLUMN supervisor_agent_id TEXT');
+
+  // Tool catalog gains an allocation_class hint so operators can flag which
+  // tools are appropriate for supervisor-level vs worker-level binding.
+  // Values: 'supervisor' | 'worker' | 'shared' | NULL (unspecified).
+  safeExec(db, 'ALTER TABLE tool_catalog ADD COLUMN allocation_class TEXT');
 }

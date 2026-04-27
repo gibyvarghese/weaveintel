@@ -568,6 +568,8 @@ export interface SkillRow {
   version: string;
   /** Phase 6: tool policy key that overrides the global tool policy while this skill is active */
   tool_policy_key: string | null;
+  /** Phase 1B: optional pin to a specific supervisor agent row in `agents`. */
+  supervisor_agent_id?: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -626,6 +628,53 @@ export interface WorkerAgentRow {
   enabled: number;
   created_at: string;
   updated_at: string;
+}
+
+/**
+ * Phase 1B — DB-driven supervisor agent definition.
+ * Operators register supervisor agents per-tenant and per-category. The
+ * runtime resolves which row applies to a chat session and uses it to drive
+ * the supervisor's name, system prompt, default timezone, utility-tools
+ * inclusion flag, and curated tool bundle (via `agent_tools`).
+ */
+export interface SupervisorAgentRow {
+  id: string;
+  /** Null = global default applicable across tenants. */
+  tenant_id: string | null;
+  /** Routing key — 'general' or domain-scoped (e.g. 'hypothesis-validation', 'sgap'). */
+  category: string;
+  name: string;
+  display_name: string | null;
+  description: string | null;
+  /** Optional override for supervisor system prompt. Falls back to settings.systemPrompt when null. */
+  system_prompt: string | null;
+  /** When 1, package-provided datetime/math_eval/unit_convert tools are auto-bound. */
+  include_utility_tools: number;
+  /** IANA timezone string used by the datetime utility tool. Falls back to settings.timezone. */
+  default_timezone: string | null;
+  /** When 1, this row is the global fallback agent if nothing else matches. */
+  is_default: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Phase 1B — explicit tool allocation per supervisor agent row. */
+export interface AgentToolRow {
+  agent_id: string;
+  tool_name: string;
+  /** 'default' | 'required' | 'optional' — operator hint, currently advisory. */
+  allocation: string;
+}
+
+/**
+ * Phase 1B — resolved supervisor agent + its tool allocations, ready for chat
+ * runtime consumption. The runtime never queries `agents`/`agent_tools`
+ * directly — it always goes through `resolveSupervisorAgent`.
+ */
+export interface ResolvedSupervisorAgent {
+  agent: SupervisorAgentRow;
+  tools: AgentToolRow[];
 }
 
 export interface HumanTaskPolicyRow {
@@ -1623,6 +1672,22 @@ export interface DatabaseAdapter {
   listWorkerAgentsByCategory(category: string): Promise<WorkerAgentRow[]>;
   updateWorkerAgent(id: string, fields: Partial<Omit<WorkerAgentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteWorkerAgent(id: string): Promise<void>;
+
+  // ─── Phase 1B: Supervisor Agents ───────────────────────────
+  createSupervisorAgent(a: Omit<SupervisorAgentRow, 'created_at' | 'updated_at'>, tools?: Array<{ tool_name: string; allocation?: string }>): Promise<void>;
+  getSupervisorAgent(id: string): Promise<SupervisorAgentRow | null>;
+  listSupervisorAgents(opts?: { tenantId?: string | null; category?: string; enabledOnly?: boolean }): Promise<SupervisorAgentRow[]>;
+  updateSupervisorAgent(id: string, fields: Partial<Omit<SupervisorAgentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteSupervisorAgent(id: string): Promise<void>;
+  listAgentTools(agentId: string): Promise<AgentToolRow[]>;
+  setAgentTools(agentId: string, tools: Array<{ tool_name: string; allocation?: string }>): Promise<void>;
+  /**
+   * Resolve which supervisor agent row applies to a chat session.
+   * Precedence: skill.supervisor_agent_id (if skillId provided) ->
+   *   tenant_id+category match -> tenant_id IS NULL+category match ->
+   *   is_default=1 row -> null (caller falls back to package defaults).
+   */
+  resolveSupervisorAgent(opts: { tenantId?: string | null; category?: string; skillId?: string | null }): Promise<ResolvedSupervisorAgent | null>;
 
   // ─── Workflow Runs ─────────────────────────────────────────
   createWorkflowRun(r: Omit<WorkflowRunRow, 'completed_at'>): Promise<void>;

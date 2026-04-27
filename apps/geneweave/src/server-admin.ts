@@ -30,6 +30,7 @@ import {
   registerToolSimulationRoutes,
   registerSkillRoutes,
   registerWorkerAgentRoutes,
+  registerSupervisorAgentRoutes,
   registerToolApprovalRequestRoutes,
   registerGuardrailRoutes,
   registerRoutingRoutes,
@@ -1288,6 +1289,7 @@ export function registerAdminRoutes(
   registerToolSimulationRoutes(router, db, adminHelpers);
   registerSkillRoutes(router, db, adminHelpers);
   registerWorkerAgentRoutes(router, db, adminHelpers);
+  registerSupervisorAgentRoutes(router, db, adminHelpers);
   registerToolApprovalRequestRoutes(router, db, adminHelpers);
 
   // ── SGAP: Social Growth Admin Tables ─────────────────────

@@ -19,6 +19,7 @@ import type {
   PromptVersionRow, PromptExperimentRow, PromptEvalDatasetRow, PromptEvalRunRow, PromptOptimizerRow, PromptOptimizationRunRow,
   GuardrailRow, RoutingPolicyRow, WorkflowDefRow,
   ToolConfigRow, ToolCatalogRow, ToolPolicyRow, SkillRow, WorkerAgentRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
+  SupervisorAgentRow, AgentToolRow, ResolvedSupervisorAgent,
   IdentityRuleRow, MemoryGovernanceRow, SearchProviderRow, HttpEndpointRow,
   MemoryExtractionRuleRow,
   SocialAccountRow, EnterpriseConnectorRow, ToolRegistryRow, ReplayScenarioRow,
@@ -1553,7 +1554,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO skills (id, name, description, category, trigger_patterns, instructions, tool_names, examples, tags, priority, version, tool_policy_key, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO skills (id, name, description, category, trigger_patterns, instructions, tool_names, examples, tags, priority, version, tool_policy_key, enabled, supervisor_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       s.id,
       s.name,
@@ -1568,6 +1569,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       s.version,
       s.tool_policy_key ?? null,
       s.enabled,
+      s.supervisor_agent_id ?? null,
     );
   }
 
@@ -1711,6 +1713,116 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteWorkerAgent(id: string): Promise<void> {
     this.d.prepare('DELETE FROM worker_agents WHERE id = ?').run(id);
+  }
+
+  // ─── Phase 1B: Supervisor Agents ───────────────────────────
+
+  async createSupervisorAgent(
+    a: Omit<SupervisorAgentRow, 'created_at' | 'updated_at'>,
+    tools?: Array<{ tool_name: string; allocation?: string }>,
+  ): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO agents (id, tenant_id, category, name, display_name, description, system_prompt, include_utility_tools, default_timezone, is_default, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      a.id,
+      a.tenant_id,
+      a.category,
+      a.name,
+      a.display_name,
+      a.description,
+      a.system_prompt,
+      a.include_utility_tools,
+      a.default_timezone,
+      a.is_default,
+      a.enabled,
+    );
+    if (tools && tools.length > 0) {
+      const stmt = this.d.prepare('INSERT OR REPLACE INTO agent_tools (agent_id, tool_name, allocation) VALUES (?, ?, ?)');
+      for (const t of tools) stmt.run(a.id, t.tool_name, t.allocation ?? 'default');
+    }
+  }
+
+  async getSupervisorAgent(id: string): Promise<SupervisorAgentRow | null> {
+    return (this.d.prepare('SELECT * FROM agents WHERE id = ?').get(id) as SupervisorAgentRow | undefined) ?? null;
+  }
+
+  async listSupervisorAgents(opts?: { tenantId?: string | null; category?: string; enabledOnly?: boolean }): Promise<SupervisorAgentRow[]> {
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (opts?.enabledOnly) where.push('enabled = 1');
+    if (opts?.category) { where.push('category = ?'); args.push(opts.category); }
+    if (opts?.tenantId === null) where.push('tenant_id IS NULL');
+    else if (typeof opts?.tenantId === 'string') { where.push('tenant_id = ?'); args.push(opts.tenantId); }
+    const sql = where.length
+      ? `SELECT * FROM agents WHERE ${where.join(' AND ')} ORDER BY is_default DESC, name ASC`
+      : 'SELECT * FROM agents ORDER BY is_default DESC, name ASC';
+    return this.d.prepare(sql).all(...args) as SupervisorAgentRow[];
+  }
+
+  async updateSupervisorAgent(id: string, fields: Partial<Omit<SupervisorAgentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE agents SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteSupervisorAgent(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM agents WHERE id = ?').run(id);
+  }
+
+  async listAgentTools(agentId: string): Promise<AgentToolRow[]> {
+    return this.d.prepare('SELECT agent_id, tool_name, allocation FROM agent_tools WHERE agent_id = ? ORDER BY tool_name ASC').all(agentId) as AgentToolRow[];
+  }
+
+  async setAgentTools(agentId: string, tools: Array<{ tool_name: string; allocation?: string }>): Promise<void> {
+    const tx = this.d.transaction((items: Array<{ tool_name: string; allocation?: string }>) => {
+      this.d.prepare('DELETE FROM agent_tools WHERE agent_id = ?').run(agentId);
+      const ins = this.d.prepare('INSERT INTO agent_tools (agent_id, tool_name, allocation) VALUES (?, ?, ?)');
+      for (const t of items) ins.run(agentId, t.tool_name, t.allocation ?? 'default');
+    });
+    tx(tools);
+  }
+
+  async resolveSupervisorAgent(opts: { tenantId?: string | null; category?: string; skillId?: string | null }): Promise<ResolvedSupervisorAgent | null> {
+    const category = opts.category ?? 'general';
+    const tenantId = opts.tenantId ?? null;
+
+    const fetchWithTools = (agent: SupervisorAgentRow): ResolvedSupervisorAgent => ({
+      agent,
+      tools: this.d.prepare('SELECT agent_id, tool_name, allocation FROM agent_tools WHERE agent_id = ?').all(agent.id) as AgentToolRow[],
+    });
+
+    // 1. skill.supervisor_agent_id pin
+    if (opts.skillId) {
+      const skill = this.d.prepare('SELECT supervisor_agent_id FROM skills WHERE id = ?').get(opts.skillId) as { supervisor_agent_id: string | null } | undefined;
+      if (skill?.supervisor_agent_id) {
+        const a = this.d.prepare('SELECT * FROM agents WHERE id = ? AND enabled = 1').get(skill.supervisor_agent_id) as SupervisorAgentRow | undefined;
+        if (a) return fetchWithTools(a);
+      }
+    }
+
+    // 2. tenant_id + category exact match
+    if (tenantId) {
+      const a = this.d.prepare('SELECT * FROM agents WHERE tenant_id = ? AND category = ? AND enabled = 1 ORDER BY is_default DESC LIMIT 1').get(tenantId, category) as SupervisorAgentRow | undefined;
+      if (a) return fetchWithTools(a);
+    }
+
+    // 3. global (tenant_id IS NULL) + category match
+    const globalCategoryMatch = this.d.prepare('SELECT * FROM agents WHERE tenant_id IS NULL AND category = ? AND enabled = 1 ORDER BY is_default DESC LIMIT 1').get(category) as SupervisorAgentRow | undefined;
+    if (globalCategoryMatch) return fetchWithTools(globalCategoryMatch);
+
+    // 4. is_default fallback (any category)
+    const defaultRow = this.d.prepare('SELECT * FROM agents WHERE is_default = 1 AND enabled = 1 ORDER BY tenant_id IS NULL ASC LIMIT 1').get() as SupervisorAgentRow | undefined;
+    if (defaultRow) return fetchWithTools(defaultRow);
+
+    return null;
   }
 
   // ─── Workflow Runs ─────────────────────────────────────────
@@ -4052,6 +4164,28 @@ export class SQLiteAdapter implements DatabaseAdapter {
         },
       ];
       for (const w of workers) await this.createWorkerAgent(w);
+    }
+
+    // Phase 1B — seed the global default supervisor agent row.
+    // Idempotent: only inserts if no row with this id exists. Operators may
+    // override behaviour by adding tenant- or category-scoped rows in admin.
+    {
+      const existing = this.d.prepare("SELECT id FROM agents WHERE id = ? OR (is_default = 1 AND tenant_id IS NULL)").get('agent-supervisor-default') as { id: string } | undefined;
+      if (!existing) {
+        await this.createSupervisorAgent({
+          id: 'agent-supervisor-default',
+          tenant_id: null,
+          category: 'general',
+          name: 'geneweave-supervisor',
+          display_name: 'Default Supervisor',
+          description: 'Global default supervisor agent. Plans work, delegates to workers, and uses the shared utility tools (datetime, math_eval, unit_convert) provided by @weaveintel/agents.',
+          system_prompt: null,
+          include_utility_tools: 1,
+          default_timezone: null,
+          is_default: 1,
+          enabled: 1,
+        });
+      }
     }
 
     const codeExecutorWorker = await this.getWorkerAgent('8d2598f8-775d-4e67-841d-1cb5fb16713e');

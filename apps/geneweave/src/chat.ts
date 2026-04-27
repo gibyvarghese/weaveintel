@@ -361,6 +361,20 @@ export class ChatEngine {
     });
   }
 
+  /**
+   * Phase 1B — resolve which DB-backed supervisor agent row applies to the
+   * current chat. Errors are non-fatal: when resolution fails the runtime
+   * falls back to the package defaults (geneweave-supervisor + utility tools).
+   */
+  private async resolveSupervisorContext(category: string): Promise<import('./db-types.js').ResolvedSupervisorAgent | null> {
+    try {
+      return await this.db.resolveSupervisorAgent({ category });
+    } catch (err) {
+      console.warn('[chat] resolveSupervisorAgent failed; using package defaults', err);
+      return null;
+    }
+  }
+
   private async runWithCseSuccessGuard(
     agent: { run: (ctx: ExecutionContext, input: { messages: Message[]; goal: string }) => Promise<AgentResult> },
     ctx: ExecutionContext,
@@ -582,15 +596,18 @@ export class ChatEngine {
         // (Retain `skillContributedTools` plumbing — it is still consulted
         // by skill activation code paths elsewhere.)
 
-        const supervisorInstructions = await this.buildSupervisorInstructions(settings.systemPrompt, forceWorkerDataAnalysis, dbWorkerRows);
+        const resolvedSupervisor = await this.resolveSupervisorContext('general');
+        const supervisorBasePrompt = resolvedSupervisor?.agent.system_prompt ?? settings.systemPrompt;
+        const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
 
         agent = weaveAgent({
           model,
           workers: allWorkers,
           maxSteps: 20,
-          name: 'geneweave-supervisor',
+          name: resolvedSupervisor?.agent.name ?? 'geneweave-supervisor',
           systemPrompt: supervisorInstructions,
-          defaultTimezone: settings.timezone,
+          defaultTimezone: resolvedSupervisor?.agent.default_timezone ?? settings.timezone,
+          includeUtilityTools: resolvedSupervisor ? resolvedSupervisor.agent.include_utility_tools !== 0 : true,
           bus: agentBus,
         });
       } else {
@@ -745,14 +762,17 @@ export class ChatEngine {
         // math_eval/unit_convert/delegate_to_worker) and nothing else. CSE
         // belongs to the `code_executor` worker.
 
-        const supervisorInstructions = await this.buildSupervisorInstructions(settings.systemPrompt, forceWorkerDataAnalysis, dbWorkerRows);
+        const resolvedSupervisor = await this.resolveSupervisorContext('general');
+        const supervisorBasePrompt = resolvedSupervisor?.agent.system_prompt ?? settings.systemPrompt;
+        const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
         agent = weaveAgent({
           model,
           workers: allWorkers,
           maxSteps: 20,
-          name: 'geneweave-supervisor',
+          name: resolvedSupervisor?.agent.name ?? 'geneweave-supervisor',
           systemPrompt: supervisorInstructions,
-          defaultTimezone: settings.timezone,
+          defaultTimezone: resolvedSupervisor?.agent.default_timezone ?? settings.timezone,
+          includeUtilityTools: resolvedSupervisor ? resolvedSupervisor.agent.include_utility_tools !== 0 : true,
           bus: agentBus,
         });
       } else {
