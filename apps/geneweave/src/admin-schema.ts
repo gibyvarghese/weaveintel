@@ -36,7 +36,8 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
   ]},
   { label: 'Orchestration', icon: '\uD83E\uDD16', tabs: [
     { key: 'skills', label: 'Skills' },
-    { key: 'worker-agents', label: 'Agents' },
+    { key: 'agents', label: 'Supervisor Agents' },
+    { key: 'worker-agents', label: 'Worker Agents' },
     { key: 'tool-catalog', label: 'Tool Catalog' },
     { key: 'tool-policies', label: 'Tool Policies' },
     { key: 'tool-audit', label: 'Tool Audit' },

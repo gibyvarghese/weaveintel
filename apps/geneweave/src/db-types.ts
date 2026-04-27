@@ -446,6 +446,7 @@ export interface ToolCatalogRow {
   source: string;                // 'builtin' | 'mcp' | 'a2a' | 'custom'
   credential_id: string | null;
   config?: string | null;        // JSON: e.g. { endpoint } for MCP, { agentUrl } for A2A
+  allocation_class?: string | null; // utility | web | social | search | cse | http | enterprise | code | data | communication
   created_at: string;
   updated_at: string;
 }

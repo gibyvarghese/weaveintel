@@ -819,6 +819,7 @@ export async function syncToolCatalog(db: DatabaseAdapter): Promise<void> {
     const existing = await db.getToolCatalogByKey(key);
     const riskLevel = tool.schema.riskLevel ?? 'read-only';
     const hasSideEffects = riskLevel !== 'read-only' ? 1 : 0;
+    const allocationClass = inferAllocationClass(key, tool.schema.tags);
     if (!existing) {
       await db.createToolConfig({
         id: randomUUID(),
@@ -836,17 +837,43 @@ export async function syncToolCatalog(db: DatabaseAdapter): Promise<void> {
         tags: tool.schema.tags ? JSON.stringify(tool.schema.tags) : null,
         source: 'builtin',
         credential_id: null,
+        allocation_class: allocationClass,
       });
     } else {
       // Upsert risk_level, side_effects, name, and description so code-side changes propagate.
-      await db.updateToolConfig(existing.id, {
+      // Only set allocation_class on upsert if currently null (do not stomp operator overrides).
+      const upsertFields: Record<string, unknown> = {
         risk_level: riskLevel,
         side_effects: hasSideEffects,
         name: tool.schema.name,
         description: tool.schema.description,
-      });
+      };
+      if (!existing.allocation_class && allocationClass) {
+        upsertFields['allocation_class'] = allocationClass;
+      }
+      await db.updateToolConfig(existing.id, upsertFields);
     }
   }
+}
+
+/**
+ * Infer a default allocation_class for a builtin tool based on its key prefix and tags.
+ * Operators can override this in the admin panel.
+ */
+function inferAllocationClass(key: string, tags: readonly string[] | undefined): string | null {
+  const k = key.toLowerCase();
+  const tagSet = new Set((tags ?? []).map((t) => t.toLowerCase()));
+  if (k === 'datetime' || k === 'math_eval' || k === 'unit_convert' || k === 'calculator') return 'utility';
+  if (k.startsWith('social_') || tagSet.has('social')) return 'social';
+  if (k.startsWith('cse_') || tagSet.has('cse')) return 'cse';
+  if (k === 'web_search' || tagSet.has('web-search') || tagSet.has('search')) return 'search';
+  if (k.startsWith('http_') || tagSet.has('http')) return 'http';
+  if (k.startsWith('enterprise_') || tagSet.has('enterprise')) return 'enterprise';
+  if (k === 'code_executor' || k === 'sandbox' || tagSet.has('code')) return 'code';
+  if (k.startsWith('browser_') || tagSet.has('browser') || tagSet.has('web')) return 'web';
+  if (tagSet.has('communication') || tagSet.has('email') || tagSet.has('messaging')) return 'communication';
+  if (tagSet.has('data') || tagSet.has('database') || tagSet.has('analytics')) return 'data';
+  return null;
 }
 
 export interface ToolRegistryOptions {

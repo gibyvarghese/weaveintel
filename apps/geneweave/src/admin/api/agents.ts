@@ -44,7 +44,11 @@ export function registerSupervisorAgentRoutes(
     const tenantId = tenantParam === '' ? null : tenantParam ?? undefined;
     const category = url.searchParams.get('category') ?? undefined;
     const enabledOnly = url.searchParams.get('enabledOnly') === '1';
-    const agents = await db.listSupervisorAgents({ tenantId, category, enabledOnly });
+    const rows = await db.listSupervisorAgents({ tenantId, category, enabledOnly });
+    // Inline tool allocations into each row so the admin UI list view can show them.
+    const agents = await Promise.all(
+      rows.map(async (a) => ({ ...a, tools: await db.listAgentTools(a.id) })),
+    );
     json(res, 200, { agents });
   }, { auth: true });
 
@@ -53,7 +57,9 @@ export function registerSupervisorAgentRoutes(
     const agent = await db.getSupervisorAgent(params['id']!);
     if (!agent) { json(res, 404, { error: 'Agent not found' }); return; }
     const tools = await db.listAgentTools(agent.id);
-    json(res, 200, { agent, tools });
+    // Flatten so the schema-driven admin form can hydrate the `tools` field
+    // alongside the agent fields.
+    json(res, 200, { agent: { ...agent, tools }, tools });
   }, { auth: true });
 
   router.post('/api/admin/agents', async (req, res, _params, auth) => {
@@ -90,7 +96,7 @@ export function registerSupervisorAgentRoutes(
     }, tools);
     const agent = await db.getSupervisorAgent(id);
     const persistedTools = await db.listAgentTools(id);
-    json(res, 201, { agent, tools: persistedTools });
+    json(res, 201, { agent: agent ? { ...agent, tools: persistedTools } : null, tools: persistedTools });
   }, { auth: true, csrf: true });
 
   router.put('/api/admin/agents/:id', async (req, res, params, auth) => {
@@ -129,7 +135,7 @@ export function registerSupervisorAgentRoutes(
 
     const agent = await db.getSupervisorAgent(id);
     const tools = await db.listAgentTools(id);
-    json(res, 200, { agent, tools });
+    json(res, 200, { agent: agent ? { ...agent, tools } : null, tools });
   }, { auth: true, csrf: true });
 
   router.del('/api/admin/agents/:id', async (_req, res, params, auth) => {

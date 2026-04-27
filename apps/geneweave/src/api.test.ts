@@ -2310,6 +2310,92 @@ describeAdmin('Tool Approval Requests API', () => {
   });
 });
 
+// ─── Supervisor Agents API (Phase 1B/1C) ──────────────────────────────────
+
+describeAdmin('Supervisor Agents API', () => {
+  let createdAgentId: string | undefined;
+
+  it('returns 401 on list when unauthenticated', async () => {
+    const res = await fetch(`${BASE_URL}/api/admin/agents`, { method: 'GET' });
+    expect(res.status).toBe(401);
+  });
+
+  it('lists supervisor agents (includes seeded default)', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status, data } = await api('GET', '/api/admin/agents');
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    expect(status).toBe(200);
+    expect(Array.isArray(data['agents'])).toBe(true);
+    const agents = data['agents'] as Array<Record<string, unknown>>;
+    const hasDefault = agents.some((a) => a['is_default'] === 1 || a['is_default'] === true);
+    expect(hasDefault).toBe(true);
+  });
+
+  it('returns 404 for unknown agent', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status } = await api('GET', '/api/admin/agents/agent-nonexistent');
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    expect(status).toBe(404);
+  });
+
+  it('rejects create with missing description', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status } = await api('POST', '/api/admin/agents', {
+      name: 'no-desc-supervisor',
+      category: 'general',
+    });
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    expect(status).toBe(400);
+  });
+
+  it('creates a supervisor agent with tool allocations', async () => {
+    const hasAuth = await ensureAuthenticated();
+    const { status, data } = await api('POST', '/api/admin/agents', {
+      name: `api-test-supervisor-${Date.now()}`,
+      display_name: 'API Test Supervisor',
+      description: 'Test supervisor agent created by api.test.ts. Routes general queries with utility tools enabled.',
+      category: 'general',
+      system_prompt: 'You are a test supervisor.',
+      include_utility_tools: true,
+      tools: [
+        { tool_name: 'datetime', allocation: 'default' },
+        { tool_name: 'math_eval', allocation: 'default' },
+      ],
+    });
+    if (!hasAuth) { expect(status).toBe(401); return; }
+    expect(status).toBe(201);
+    const agent = data['agent'] as Record<string, unknown>;
+    expect(typeof agent['id']).toBe('string');
+    createdAgentId = agent['id'] as string;
+    const tools = data['tools'] as Array<Record<string, unknown>>;
+    expect(tools.length).toBe(2);
+  });
+
+  it('updates the agent and replaces its tool allocations', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth || !createdAgentId) return;
+    const { status, data } = await api('PUT', `/api/admin/agents/${createdAgentId}`, {
+      display_name: 'Updated Supervisor',
+      tools: [{ tool_name: 'datetime', allocation: 'priority' }],
+    });
+    expect(status).toBe(200);
+    const agent = data['agent'] as Record<string, unknown>;
+    expect(agent['display_name']).toBe('Updated Supervisor');
+    const tools = data['tools'] as Array<Record<string, unknown>>;
+    expect(tools.length).toBe(1);
+    expect(tools[0]?.['allocation']).toBe('priority');
+  });
+
+  it('deletes the agent', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth || !createdAgentId) return;
+    const { status } = await api('DELETE', `/api/admin/agents/${createdAgentId}`);
+    expect(status).toBe(200);
+    const { status: getStatus } = await api('GET', `/api/admin/agents/${createdAgentId}`);
+    expect(getStatus).toBe(404);
+  });
+});
+
 // ─── Scientific Validation API ─────────────────────────────────────────────
 
 describeAdmin('Scientific Validation API', () => {

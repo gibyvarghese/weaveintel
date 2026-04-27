@@ -1270,12 +1270,13 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createToolConfig(t: Omit<ToolCatalogRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO tool_catalog (id, name, description, category, risk_level, requires_approval, max_execution_ms, rate_limit_per_min, enabled, tool_key, version, side_effects, tags, source, credential_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tool_catalog (id, name, description, category, risk_level, requires_approval, max_execution_ms, rate_limit_per_min, enabled, tool_key, version, side_effects, tags, source, credential_id, allocation_class) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       t.id, t.name, t.description ?? null, t.category ?? null, t.risk_level, t.requires_approval,
       t.max_execution_ms ?? null, t.rate_limit_per_min ?? null, t.enabled,
       t.tool_key ?? null, t.version ?? '1.0', t.side_effects ?? 0,
       t.tags ?? null, t.source ?? 'builtin', t.credential_id ?? null,
+      t.allocation_class ?? null,
     );
   }
 
