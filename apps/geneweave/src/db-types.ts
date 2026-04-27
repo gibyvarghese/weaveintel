@@ -91,6 +91,7 @@ export interface UserPreferencesRow {
   user_id: string;
   default_mode: string;
   theme: string;
+  show_process_card: number;
   updated_at: string;
 }
 
@@ -1347,7 +1348,7 @@ export interface DatabaseAdapter {
 
   // User preferences
   getUserPreferences(userId: string): Promise<UserPreferencesRow | null>;
-  saveUserPreferences(userId: string, defaultMode: string, theme: string): Promise<void>;
+  saveUserPreferences(userId: string, defaultMode: string, theme: string, showProcessCard?: boolean): Promise<void>;
 
   // Chat settings (agent mode, tools, redaction)
   getChatSettings(chatId: string): Promise<ChatSettingsRow | null>;

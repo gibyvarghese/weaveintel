@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS user_preferences (
   user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   default_mode TEXT NOT NULL DEFAULT 'agent',
   theme TEXT NOT NULL DEFAULT 'light',
+  show_process_card INTEGER NOT NULL DEFAULT 1,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

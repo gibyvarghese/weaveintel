@@ -420,15 +420,17 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return (this.d.prepare('SELECT * FROM user_preferences WHERE user_id = ?').get(userId) as UserPreferencesRow | undefined) ?? null;
   }
 
-  async saveUserPreferences(userId: string, defaultMode: string, theme: string): Promise<void> {
+  async saveUserPreferences(userId: string, defaultMode: string, theme: string, showProcessCard?: boolean): Promise<void> {
+    const showFlag = showProcessCard === false ? 0 : 1;
     this.d.prepare(
-      `INSERT INTO user_preferences (user_id, default_mode, theme)
-       VALUES (?, ?, ?)
+      `INSERT INTO user_preferences (user_id, default_mode, theme, show_process_card)
+       VALUES (?, ?, ?, ?)
        ON CONFLICT(user_id) DO UPDATE SET
          default_mode=excluded.default_mode,
          theme=excluded.theme,
+         show_process_card=excluded.show_process_card,
          updated_at=datetime('now')`,
-    ).run(userId, defaultMode, theme);
+    ).run(userId, defaultMode, theme, showFlag);
   }
 
   // ── Chat Settings ──────────────────────────────────────────

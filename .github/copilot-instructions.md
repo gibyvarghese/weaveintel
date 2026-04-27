@@ -20,7 +20,7 @@
 - When prompt metadata changes, update GeneWeave database schema, admin CRUD, and runtime resolution together so the app remains internally consistent.
 - Keep admin surfaces usable: prefer explicit labels, structured JSON fields only where needed, and defaults that make creation safe.
 - Favor modular changes that help reduce pressure on large files such as `chat.ts`, `ui.ts`, `server.ts`, and `server-admin.ts`.
-- For local runtime work, treat `./apps/geneweave/geneweave.db` as the canonical GeneWeave SQLite database because `.env` sets `DATABASE_PATH="./apps/geneweave/geneweave.db"` for `deploy/server.ts`. Do not apply data fixes or validation against `./data/geneweave.db` unless runtime configuration is intentionally changed.
+- For local runtime work, treat `./geneweave.db` as the canonical GeneWeave SQLite database. Both `examples/12-geneweave.ts` (dev) and `deploy/server.ts` (prod) honor `DATABASE_PATH` from `.env`, which is set to `./geneweave.db`. Do not apply data fixes or validation against `./apps/geneweave/geneweave.db` or `./data/geneweave.db` unless runtime configuration is intentionally changed.
 
 ## Tool Platform (Phase 1 complete — Runtime Bridge)
 - The `tool_catalog` table (renamed from `tool_configs`) is the DB-backed registry of all known tools. It replaces the legacy `tool_configs` table.

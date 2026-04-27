@@ -766,7 +766,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   router.get('/api/user/preferences', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const prefs = await db.getUserPreferences(auth.userId);
-    json(res, 200, { preferences: prefs ?? { default_mode: 'direct', theme: 'light' } });
+    json(res, 200, { preferences: prefs ?? { default_mode: 'direct', theme: 'light', show_process_card: 1 } });
   });
 
   router.post('/api/user/preferences', async (req, res, _params, auth) => {
@@ -776,13 +776,15 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     const mode = (body['default_mode'] as string) || 'direct';
     const theme = (body['theme'] as string) || 'light';
+    const rawShow = body['show_process_card'];
+    const showProcessCard = rawShow === undefined ? true : Boolean(rawShow);
     if (!['direct', 'agent', 'supervisor'].includes(mode)) {
       json(res, 400, { error: 'default_mode must be "direct", "agent", or "supervisor"' }); return;
     }
     if (!['light', 'dark'].includes(theme)) {
       json(res, 400, { error: 'theme must be "light" or "dark"' }); return;
     }
-    await db.saveUserPreferences(auth.userId, mode, theme);
+    await db.saveUserPreferences(auth.userId, mode, theme, showProcessCard);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 

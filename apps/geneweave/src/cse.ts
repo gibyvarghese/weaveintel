@@ -31,6 +31,9 @@ export async function getCSE(): Promise<ComputeSandboxEngine | null> {
   initPromise = ComputeSandboxEngine.create(buildCSEConfig()).then((e) => {
     engine = e;
     return e;
+  }).catch((err: unknown) => {
+    initPromise = null;
+    throw err;
   });
 
   return initPromise;

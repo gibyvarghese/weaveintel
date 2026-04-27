@@ -33,6 +33,7 @@ import {
   loadModels,
   loadTools,
   loadUserPreferences,
+  saveUserPreferences,
   loadAdmin,
   loadDashboard,
   loadChatSettings,
@@ -907,7 +908,7 @@ function renderMessages() {
       extras.push(h('span', { className: 'mode-badge' }, String((m as any).mode)));
     }
 
-    if (!isUser) {
+    if (!isUser && state.showProcessCard !== false) {
       const processCard = renderAssistantProcess(m as any, isStreamingCurrent, {
         rerenderMessages: renderMessages,
         renderProcessDetailView,
@@ -1073,48 +1074,64 @@ function renderPromptSetupWizard() {
 }
 
 function renderPreferencesView() {
-  const view = h('div', { className: 'dash-view' },
-    h('h2', null, '⚙ Preferences')
+  const view = h('div', { className: 'dash-view', style: 'max-width:640px;' },
+    h('h2', { style: 'margin-bottom:4px;' }, 'Preferences'),
+    h('p', { style: 'font-size:13px;color:var(--fg2);margin:0 0 20px;' },
+      state.user?.email ? `Signed in as ${state.user.email}` : 'Account settings')
   );
 
-  // Theme selection
-  view.appendChild(h('div', { className: 'chart-box', style: 'max-width:760px;' },
-    h('h3', null, 'Appearance'),
-    h('p', { style: 'font-size:13px;line-height:1.6;color:var(--fg2);margin-bottom:16px;' }, 'Choose how geneWeave looks for your account'),
-    h('div', { style: 'display:flex;gap:12px;margin-bottom:16px;' },
-      h('button', {
-        className: 'nav-btn' + (state.theme === 'light' ? ' active' : ''),
-        style: 'flex:1;',
-        onClick: () => {
-          state.theme = 'light';
-          document.documentElement.setAttribute('data-theme', 'light');
-          render();
-        }
-      }, '☀ Light'),
-      h('button', {
-        className: 'nav-btn' + (state.theme === 'dark' ? ' active' : ''),
-        style: 'flex:1;',
-        onClick: () => {
-          state.theme = 'dark';
-          document.documentElement.setAttribute('data-theme', 'dark');
-          render();
-        }
-      }, '🌙 Dark')
-    ),
-    h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;' },
-      h('div', { className: 'card', style: 'padding:18px;' },
-        h('div', { className: 'label' }, 'Current Theme'),
-        h('div', { style: 'font-size:20px;font-weight:700;color:var(--fg);margin-bottom:8px;' }, state.theme === 'dark' ? '🌙 Dark' : '☀ Light'),
-        h('div', { style: 'font-size:12px;color:var(--fg2);line-height:1.6;' }, state.theme === 'dark' ? 'Dark mode for reduced glare' : 'Light mode for better visibility')
+  // Helper to render a single preference row
+  const row = (label: string, hint: string, control: HTMLElement) =>
+    h('div', {
+      style: 'display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0;border-bottom:1px solid var(--bd);',
+    },
+      h('div', { style: 'min-width:0;flex:1;' },
+        h('div', { style: 'font-size:13px;font-weight:600;color:var(--fg);' }, label),
+        h('div', { style: 'font-size:12px;color:var(--fg2);margin-top:2px;line-height:1.4;' }, hint)
       ),
-      h('div', { className: 'card', style: 'padding:18px;' },
-        h('div', { className: 'label' }, 'Account'),
-        h('div', { style: 'font-size:15px;font-weight:700;color:var(--fg);margin-bottom:4px;' }, state.user?.name || 'User'),
-        h('div', { style: 'font-size:12px;color:var(--fg2);line-height:1.6;' }, state.user?.email || 'No email')
-      )
-    )
-  ));
+      control
+    );
 
+  // Theme: compact segmented control
+  const themeSegment = h('div', {
+    style: 'display:inline-flex;border:1px solid var(--bd);border-radius:6px;overflow:hidden;',
+  });
+  const themeOption = (value: 'light' | 'dark', label: string) => {
+    const active = state.theme === value;
+    return h('button', {
+      style: `padding:6px 12px;font-size:12px;border:none;cursor:pointer;background:${active ? 'var(--fg)' : 'transparent'};color:${active ? 'var(--bg)' : 'var(--fg2)'};`,
+      onClick: () => {
+        state.theme = value;
+        document.documentElement.setAttribute('data-theme', value);
+        saveUserPreferences();
+        render();
+      },
+    }, label);
+  };
+  themeSegment.appendChild(themeOption('light', 'Light'));
+  themeSegment.appendChild(themeOption('dark', 'Dark'));
+
+  // Show process card: simple checkbox
+  const showProcess = state.showProcessCard !== false;
+  const processToggle = h('input', {
+    type: 'checkbox',
+    checked: showProcess,
+    style: 'transform:scale(1.2);cursor:pointer;',
+    onChange: function (this: HTMLInputElement) {
+      state.showProcessCard = this.checked;
+      saveUserPreferences();
+      render();
+    },
+  });
+
+  const list = h('div', {
+    style: 'border-top:1px solid var(--bd);',
+  },
+    row('Theme', 'Light or dark interface', themeSegment),
+    row('Show agent flow in chat', 'Display skill activations, tool calls, and reasoning under assistant replies', processToggle)
+  );
+
+  view.appendChild(list);
   return view;
 }
 

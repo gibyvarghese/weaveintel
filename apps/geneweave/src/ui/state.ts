@@ -29,6 +29,9 @@ export const state: any = {
   // Theme
   theme: 'dark',
 
+  // Show the agent / tool process card under each assistant turn (user preference)
+  showProcessCard: true,
+
   // UI state
   showProfile: false,
   showNotifications: false,

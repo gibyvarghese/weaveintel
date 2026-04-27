@@ -13,6 +13,7 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
     user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     default_mode TEXT NOT NULL DEFAULT 'agent',
     theme TEXT NOT NULL DEFAULT 'light',
+    show_process_card INTEGER NOT NULL DEFAULT 1,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`);
 
@@ -30,6 +31,7 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
 
   safeExec(db, 'ALTER TABLE chat_settings ADD COLUMN timezone TEXT');
   safeExec(db, "ALTER TABLE user_preferences ADD COLUMN theme TEXT NOT NULL DEFAULT 'light'");
+  safeExec(db, 'ALTER TABLE user_preferences ADD COLUMN show_process_card INTEGER NOT NULL DEFAULT 1');
   safeExec(db, "ALTER TABLE users ADD COLUMN persona TEXT NOT NULL DEFAULT 'tenant_user'");
   safeExec(db, 'ALTER TABLE users ADD COLUMN tenant_id TEXT');
 

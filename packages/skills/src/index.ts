@@ -370,8 +370,35 @@ function skillSemanticDocument(skill: SkillDefinition): string {
     skill.description,
     skill.instructions,
     (skill.tags ?? []).join(' '),
+    // Operator-managed activation triggers / invocation criteria stored on the skill row.
+    // Treated as a first-class semantic signal so DB-driven activation works generically.
+    (skill.triggerPatterns ?? []).join('\n'),
   ];
   return parts.filter(Boolean).join('\n');
+}
+
+/**
+ * Generic, per-skill DB-driven trigger boost.
+ *
+ * Each skill row owns `triggerPatterns` (column `trigger_patterns` in the DB).
+ * When any of those phrases occur in the user query, we add a deterministic
+ * boost so the skill rises above the activation threshold. This is fully
+ * generic — no skill IDs, keywords, or domains are hardcoded in the runtime.
+ */
+function triggerPatternBoost(query: string, skill: SkillDefinition): number {
+  const patterns = skill.triggerPatterns ?? [];
+  if (!patterns.length) return 0;
+
+  const normalizedQuery = query.toLowerCase();
+  let matches = 0;
+  for (const pattern of patterns) {
+    const phrase = pattern.trim().toLowerCase();
+    if (!phrase) continue;
+    if (normalizedQuery.includes(phrase)) matches += 1;
+  }
+  if (matches === 0) return 0;
+  // Up to +0.25 for matching trigger phrases declared by the operator.
+  return Math.min(0.25, 0.12 + matches * 0.05);
 }
 
 function semanticScore(query: string, skill: SkillDefinition): number {
@@ -379,7 +406,8 @@ function semanticScore(query: string, skill: SkillDefinition): number {
   const docTf = termFrequency(tokenize(skillSemanticDocument(skill)));
   const base = cosineSimilarity(queryTf, docTf);
   const priorityBoost = Math.min(0.15, (skill.priority ?? 0) * 0.01);
-  return Math.min(1, base + priorityBoost);
+  const triggerBoost = triggerPatternBoost(query, skill);
+  return Math.min(1, base + priorityBoost + triggerBoost);
 }
 
 function semanticRationale(skill: SkillDefinition, query: string): string {
@@ -965,9 +993,6 @@ export function skillFromRow(row: SkillRow): SkillDefinition {
     summary: row.description || row.instructions,
     purpose: row.description,
     executionGuidance: row.instructions,
-    whenToUse: triggerPatterns.length
-      ? `Legacy hints from stored trigger patterns: ${triggerPatterns.join(', ')}`
-      : undefined,
     examples: examples.length ? examples : undefined,
     tags: tags.length ? tags : undefined,
     triggerPatterns,

@@ -234,9 +234,24 @@ export async function loadUserPreferences() {
     const data = await r.json();
     if (data.preferences?.theme) state.theme = data.preferences.theme;
     if (data.preferences?.default_mode) state.defaultMode = data.preferences.default_mode;
+    if (data.preferences?.show_process_card !== undefined) {
+      state.showProcessCard = !!Number(data.preferences.show_process_card);
+    }
     triggerRender();
   } catch (e) {
     console.error('Failed to load preferences', e);
+  }
+}
+
+export async function saveUserPreferences() {
+  try {
+    await api.post('/user/preferences', {
+      default_mode: state.defaultMode || 'direct',
+      theme: state.theme || 'light',
+      show_process_card: state.showProcessCard !== false,
+    });
+  } catch (e) {
+    console.error('Failed to save preferences', e);
   }
 }
 
@@ -292,7 +307,11 @@ export async function saveChatSettings() {
     await api.post(`/chats/${state.currentChatId}/settings`, state.chatSettings);
     if (state.chatSettings.mode && state.chatSettings.mode !== state.defaultMode) {
       state.defaultMode = state.chatSettings.mode;
-      await api.post('/user/preferences', { default_mode: state.chatSettings.mode, theme: state.theme });
+      await api.post('/user/preferences', {
+        default_mode: state.chatSettings.mode,
+        theme: state.theme,
+        show_process_card: state.showProcessCard !== false,
+      });
     }
   } catch (e) {
     console.error('Failed to save chat settings', e);

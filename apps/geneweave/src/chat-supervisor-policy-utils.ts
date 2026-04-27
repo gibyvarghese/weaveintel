@@ -16,10 +16,14 @@ export function buildSupervisorInstructionsPrompt(options: {
   forceWorkerDataAnalysis: boolean;
   workerRows?: WorkerAgentRow[];
   prompts: Map<string, string>;
+  hasActiveMandatorySkillPlan?: boolean;
 }): string {
-  const { basePrompt, forceWorkerDataAnalysis, workerRows, prompts } = options;
+  const { basePrompt, forceWorkerDataAnalysis, workerRows, prompts, hasActiveMandatorySkillPlan } = options;
 
-  const workflowBlock = forceWorkerDataAnalysis
+  // When an active skill defines its own mandatory multi-step plan, the generic
+  // FORCED_WORKER_REQUIREMENT (which implies a 2-step code_executor→analyst flow)
+  // must not be injected — it conflicts with and overrides the skill's plan.
+  const workflowBlock = forceWorkerDataAnalysis && !hasActiveMandatorySkillPlan
     ? prompts.get(POLICY_PROMPT_FORCED_WORKER_REQUIREMENT) ?? FORCED_WORKER_REQUIREMENT
     : undefined;
 

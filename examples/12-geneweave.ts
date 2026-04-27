@@ -100,8 +100,9 @@ async function main() {
     // In production, use a strong secret (e.g. from env: process.env.JWT_SECRET)
     jwtSecret: process.env['JWT_SECRET'] ?? 'change-me-in-production-' + Math.random().toString(36).slice(2),
     // SQLite database file — stores users, sessions, chats, messages, metrics,
-    // evals, traces, user_preferences, settings, and model pricing data
-    database: { type: 'sqlite', path: './geneweave.db' },
+    // evals, traces, user_preferences, settings, and model pricing data.
+    // Honors DATABASE_PATH from env (.env) so dev and deploy stay aligned.
+    database: { type: 'sqlite', path: process.env['DATABASE_PATH'] ?? './geneweave.db' },
     // provider keys — only providers with valid API keys are registered;
     // ChatEngine.getAvailableModels() returns models from all active providers
     providers: {

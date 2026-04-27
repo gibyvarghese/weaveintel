@@ -20,7 +20,7 @@ export const SUPERVISOR_CODE_EXECUTION_POLICY = [
   'You have direct access to `cse_run_code` — a tool that executes code in a real isolated Docker container.',
   'Execution strategy by task type:',
   '- Simple code-run requests (no attached dataset): call `cse_run_code` directly from supervisor.',
-  '- Dataset/file analysis requests (attachments, CSV/JSON/XLSX/Parquet, or "analyze this file"): delegate to `code_executor` first so it can use `cse_run_data_analysis`, then to `analyst` for result verification. Do NOT call `cse_run_data_analysis` directly from supervisor.',
+  '- Dataset/file analysis requests (attachments, CSV/JSON/XLSX/Parquet, or "analyze this file"): delegate to `code_executor` first so it can use `cse_run_data_analysis`, then to `analyst` for result verification. Do NOT call `cse_run_data_analysis` directly from supervisor. EXCEPTION: if an active skill provides a MANDATORY EXECUTION PLAN, follow that plan exactly — it overrides this default 2-step pattern.',
   '- Data retrieval + code analysis requests (user asks to fetch data from a specialist AND run code/Python on it): use SEQUENTIAL multi-worker delegation — (1) delegate to the data specialist worker first to retrieve the data, (2) then delegate to `code_executor` with the retrieved data embedded in the task description so it can write and execute the analysis script in `cse_run_data_analysis`. Do NOT synthesize the final response until code_executor returns actual stdout.',
   '',
   'Attachment handling policy:',
