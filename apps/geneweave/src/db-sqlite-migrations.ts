@@ -1291,4 +1291,27 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
     )
   `);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gateway_rate_buckets_client ON mcp_gateway_rate_buckets(client_id, window_start)`);
+
+  // Phase 8: gateway request log. Captures every terminal outcome
+  // (ok / rate_limited / unauthorized / error) so operators can audit
+  // traffic per client without having to reconstruct it from
+  // tool_audit_events (which only fires for tool invocations and not
+  // for tools/list, denied auth, or 429 rate-limited responses).
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS mcp_gateway_request_log (
+      id TEXT PRIMARY KEY,
+      client_id TEXT,
+      client_name TEXT,
+      method TEXT,
+      tool_name TEXT,
+      outcome TEXT NOT NULL,
+      status_code INTEGER NOT NULL,
+      duration_ms INTEGER,
+      error_message TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gw_req_log_created ON mcp_gateway_request_log(created_at DESC)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gw_req_log_client ON mcp_gateway_request_log(client_id, created_at DESC)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gw_req_log_outcome ON mcp_gateway_request_log(outcome, created_at DESC)`);
 }

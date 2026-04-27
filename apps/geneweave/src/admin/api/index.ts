@@ -14,6 +14,7 @@ export { registerToolHealthRoutes } from './tool-health.js';
 export { registerToolCredentialRoutes } from './tool-credentials.js';
 export { registerToolSimulationRoutes } from './tool-simulation.js';
 export { registerMCPGatewayClientRoutes } from './mcp-gateway-clients.js';
+export { registerMCPGatewayActivityRoutes } from './mcp-gateway-activity.js';
 export { registerSkillRoutes } from './skills.js';
 export { registerWorkerAgentRoutes } from './worker-agents.js';
 export { registerSupervisorAgentRoutes } from './agents.js';

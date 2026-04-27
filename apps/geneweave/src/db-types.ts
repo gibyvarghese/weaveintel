@@ -581,6 +581,44 @@ export interface MCPGatewayClientRow {
   updated_at: string;
 }
 
+/** Phase 8: terminal outcome of a single MCP gateway request. */
+export type MCPGatewayRequestOutcome =
+  | 'ok'
+  | 'rate_limited'
+  | 'unauthorized'
+  | 'disabled'
+  | 'error';
+
+/** Phase 8: Append-only log row capturing one MCP gateway request. */
+export interface MCPGatewayRequestLogRow {
+  id: string;
+  /** Matched client id; null for unauthorized requests or single-tenant mode. */
+  client_id: string | null;
+  /** Snapshot of the client name at request time (helps when clients are deleted). */
+  client_name: string | null;
+  /** JSON-RPC method (e.g. 'tools/list', 'tools/call'). Null when unparseable. */
+  method: string | null;
+  /** Tool name when method='tools/call'; null otherwise. */
+  tool_name: string | null;
+  outcome: MCPGatewayRequestOutcome;
+  status_code: number;
+  duration_ms: number | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+/** Phase 8: aggregate counts per gateway client over a time window. */
+export interface MCPGatewayActivitySummary {
+  client_id: string | null;
+  client_name: string | null;
+  total: number;
+  ok: number;
+  rate_limited: number;
+  unauthorized: number;
+  errors: number;
+  last_seen: string | null;
+}
+
 export interface SkillRow {
   id: string;
   name: string;
@@ -1699,6 +1737,22 @@ export interface DatabaseAdapter {
     windowStartIso: string,
     limitPerMinute: number,
   ): Promise<boolean>;
+  /** Phase 8: append-only gateway request log. Records every terminal
+   *  outcome (ok / rate_limited / unauthorized / error) so operators can
+   *  build per-client activity dashboards independent of tool_audit_events. */
+  insertMCPGatewayRequestLog(row: Omit<MCPGatewayRequestLogRow, 'created_at'>): Promise<void>;
+  /** Recent gateway requests, newest-first, optionally filtered by client. */
+  listMCPGatewayRequestLog(opts: {
+    clientId?: string;
+    outcome?: MCPGatewayRequestOutcome;
+    limit?: number;
+    offset?: number;
+  }): Promise<MCPGatewayRequestLogRow[]>;
+  /** Aggregate per-client counts since the given ISO timestamp.
+   *  Returns one row per client_id (NULL groups under client_id=null). */
+  summarizeMCPGatewayActivity(opts: {
+    sinceIso: string;
+  }): Promise<MCPGatewayActivitySummary[]>;
 
   // ─── Admin: Skills ─────────────────────────────────────────
   createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void>;

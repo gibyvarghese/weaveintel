@@ -46,6 +46,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'tool-simulation', label: 'Tool Simulation' },
     { key: 'tool-approval-requests', label: 'Tool Approvals' },
     { key: 'mcp-gateway-clients', label: 'MCP Gateway Clients' },
+    { key: 'mcp-gateway-activity', label: 'MCP Gateway Activity' },
     { key: 'workflows', label: 'Workflows' },
     { key: 'routing', label: 'Routing' },
     { key: 'task-policies', label: 'Task Policies' },

@@ -2881,6 +2881,22 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
           touchClient: (id: string) => db.touchMCPGatewayClient(id),
           gatewayRateLimiter: (clientId: string, windowStartIso: string, limit: number) =>
             db.checkAndIncrementGatewayRateLimit(clientId, windowStartIso, limit),
+          requestLogger: async (entry) => {
+            // Phase 8: persist every terminal outcome to mcp_gateway_request_log.
+            // Best-effort: errors are swallowed by the gateway hook caller.
+            const { randomUUID } = await import('node:crypto');
+            await db.insertMCPGatewayRequestLog({
+              id: randomUUID(),
+              client_id: entry.clientId,
+              client_name: entry.clientName,
+              method: entry.method,
+              tool_name: entry.toolName,
+              outcome: entry.outcome,
+              status_code: entry.statusCode,
+              duration_ms: entry.durationMs,
+              error_message: entry.errorMessage,
+            });
+          },
         }
       : {}),
   });

@@ -1628,6 +1628,68 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return true;
   }
 
+  /** Phase 8: append-only gateway request log. Best-effort writes from the
+   *  gateway hot path; the gateway itself swallows errors so a write
+   *  failure here never breaks an in-flight request. */
+  async insertMCPGatewayRequestLog(
+    row: Omit<import('./db-types.js').MCPGatewayRequestLogRow, 'created_at'>,
+  ): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO mcp_gateway_request_log
+        (id, client_id, client_name, method, tool_name, outcome, status_code, duration_ms, error_message, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.id,
+      row.client_id,
+      row.client_name,
+      row.method,
+      row.tool_name,
+      row.outcome,
+      row.status_code,
+      row.duration_ms,
+      row.error_message,
+      new Date().toISOString(),
+    );
+  }
+
+  async listMCPGatewayRequestLog(opts: {
+    clientId?: string;
+    outcome?: import('./db-types.js').MCPGatewayRequestOutcome;
+    limit?: number;
+    offset?: number;
+  }): Promise<import('./db-types.js').MCPGatewayRequestLogRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.clientId) { where.push('client_id = ?'); params.push(opts.clientId); }
+    if (opts.outcome) { where.push('outcome = ?'); params.push(opts.outcome); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const limit = Math.min(Math.max(1, opts.limit ?? 100), 1000);
+    const offset = Math.max(0, opts.offset ?? 0);
+    return this.d.prepare(
+      `SELECT * FROM mcp_gateway_request_log ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    ).all(...params, limit, offset) as import('./db-types.js').MCPGatewayRequestLogRow[];
+  }
+
+  async summarizeMCPGatewayActivity(opts: {
+    sinceIso: string;
+  }): Promise<import('./db-types.js').MCPGatewayActivitySummary[]> {
+    return this.d.prepare(`
+      SELECT
+        client_id,
+        MAX(client_name) AS client_name,
+        COUNT(*) AS total,
+        SUM(CASE WHEN outcome = 'ok' THEN 1 ELSE 0 END) AS ok,
+        SUM(CASE WHEN outcome = 'rate_limited' THEN 1 ELSE 0 END) AS rate_limited,
+        SUM(CASE WHEN outcome = 'unauthorized' THEN 1 ELSE 0 END) AS unauthorized,
+        SUM(CASE WHEN outcome = 'error' OR outcome = 'disabled' THEN 1 ELSE 0 END) AS errors,
+        MAX(created_at) AS last_seen
+      FROM mcp_gateway_request_log
+      WHERE created_at >= ?
+      GROUP BY client_id
+      ORDER BY total DESC
+    `).all(opts.sinceIso) as import('./db-types.js').MCPGatewayActivitySummary[];
+  }
+
   // ─── Admin: Skills ─────────────────────────────────────────
 
   async createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void> {

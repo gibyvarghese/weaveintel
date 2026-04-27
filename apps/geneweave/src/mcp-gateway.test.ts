@@ -478,6 +478,20 @@ describe('Phase 5 — multi-tenant MCP gateway clients', () => {
       clientResolver: (hash) => db.getMCPGatewayClientByTokenHash(hash),
       touchClient: (id) => db.touchMCPGatewayClient(id),
       gatewayRateLimiter: (clientId, ws, limit) => db.checkAndIncrementGatewayRateLimit(clientId, ws, limit),
+      requestLogger: async (entry) => {
+        const { randomUUID } = await import('node:crypto');
+        await db.insertMCPGatewayRequestLog({
+          id: randomUUID(),
+          client_id: entry.clientId,
+          client_name: entry.clientName,
+          method: entry.method,
+          tool_name: entry.toolName,
+          outcome: entry.outcome,
+          status_code: entry.statusCode,
+          duration_ms: entry.durationMs,
+          error_message: entry.errorMessage,
+        });
+      },
     });
     const server = createServer((req: IncomingMessage, res: ServerResponse) => {
       void gateway.handle(req, res).catch(() => {
@@ -823,6 +837,85 @@ describe('Phase 5 — multi-tenant MCP gateway clients', () => {
       await handle.close();
       await db.deleteMCPGatewayClient(a.id);
       await db.deleteMCPGatewayClient(b.id);
+    }
+  });
+
+  // ─── Phase 8 — gateway request log ───────────────────────────────
+
+  it('logs every terminal outcome to mcp_gateway_request_log (ok, unauthorized, rate_limited)', async () => {
+    const plaintext = 'phase8-log-token';
+    const client = {
+      id: 'client-phase8-log',
+      name: 'phase8-log',
+      description: null,
+      token_hash: hashGatewayToken(plaintext),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+      rate_limit_per_minute: 1,
+    };
+    await db.createMCPGatewayClient(client);
+    const handle = await startMultiTenantHttp(db);
+    try {
+      // ok
+      const r1 = await postJson(`${handle.url}/api/mcp/gateway`, { jsonrpc: '2.0', id: 1, method: 'tools/list' }, { Authorization: `Bearer ${plaintext}` });
+      expect(r1.status).toBe(200);
+      // rate_limited (cap=1)
+      const r2 = await postJson(`${handle.url}/api/mcp/gateway`, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, { Authorization: `Bearer ${plaintext}` });
+      expect(r2.status).toBe(429);
+      // unauthorized (no auth)
+      const r3 = await postJson(`${handle.url}/api/mcp/gateway`, { jsonrpc: '2.0', id: 3, method: 'tools/list' });
+      expect(r3.status).toBe(401);
+      // Allow async logger writes to flush.
+      await new Promise((r) => setTimeout(r, 50));
+      const events = await db.listMCPGatewayRequestLog({ limit: 50 });
+      const matched = events.filter((e) => e.client_id === client.id || (e.client_id == null && e.outcome === 'unauthorized'));
+      const outcomes = new Set(matched.map((e) => e.outcome));
+      expect(outcomes.has('ok')).toBe(true);
+      expect(outcomes.has('rate_limited')).toBe(true);
+      expect(outcomes.has('unauthorized')).toBe(true);
+      // The ok/rate_limited events carry the client name; method is 'tools/list'.
+      const okEvt = matched.find((e) => e.outcome === 'ok');
+      expect(okEvt?.client_name).toBe('phase8-log');
+      expect(okEvt?.method).toBe('tools/list');
+      expect(typeof okEvt?.duration_ms).toBe('number');
+    } finally {
+      await handle.close();
+      await db.deleteMCPGatewayClient(client.id);
+    }
+  });
+
+  it('summarizeMCPGatewayActivity aggregates per-client counts in window', async () => {
+    const plaintext = 'phase8-summary-token';
+    const client = {
+      id: 'client-phase8-summary',
+      name: 'phase8-summary',
+      description: null,
+      token_hash: hashGatewayToken(plaintext),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+      rate_limit_per_minute: null,
+    };
+    await db.createMCPGatewayClient(client);
+    const handle = await startMultiTenantHttp(db);
+    try {
+      for (let i = 0; i < 3; i++) {
+        const r = await postJson(`${handle.url}/api/mcp/gateway`, { jsonrpc: '2.0', id: i, method: 'tools/list' }, { Authorization: `Bearer ${plaintext}` });
+        expect(r.status).toBe(200);
+      }
+      await new Promise((r) => setTimeout(r, 50));
+      const sinceIso = new Date(Date.now() - 60_000).toISOString();
+      const summary = await db.summarizeMCPGatewayActivity({ sinceIso });
+      const row = summary.find((s) => s.client_id === client.id);
+      expect(row).toBeDefined();
+      expect(row!.total).toBeGreaterThanOrEqual(3);
+      expect(row!.ok).toBeGreaterThanOrEqual(3);
+      expect(row!.rate_limited).toBe(0);
+      expect(row!.last_seen).toBeTruthy();
+    } finally {
+      await handle.close();
+      await db.deleteMCPGatewayClient(client.id);
     }
   });
 });

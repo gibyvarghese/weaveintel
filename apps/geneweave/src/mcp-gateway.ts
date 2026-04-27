@@ -113,6 +113,22 @@ export interface MCPGatewayOptions {
    * SQLite transaction in `checkAndIncrementGatewayRateLimit`).
    */
   gatewayRateLimiter?: (clientId: string, windowStartIso: string, limitPerMinute: number) => Promise<boolean>;
+  /**
+   * Phase 8 — append-only request logger. Invoked once per terminal
+   * outcome (ok / rate_limited / unauthorized / disabled / error). The
+   * gateway swallows hook errors so logging failures never break
+   * in-flight traffic.
+   */
+  requestLogger?: (entry: {
+    clientId: string | null;
+    clientName: string | null;
+    method: string | null;
+    toolName: string | null;
+    outcome: 'ok' | 'rate_limited' | 'unauthorized' | 'disabled' | 'error';
+    statusCode: number;
+    durationMs: number;
+    errorMessage: string | null;
+  }) => Promise<void>;
 }
 
 export interface MCPGatewayHandle {
@@ -162,6 +178,7 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
   const clientResolver = opts.clientResolver;
   const touchClient = opts.touchClient;
   const gatewayRateLimiter = opts.gatewayRateLimiter;
+  const requestLogger = opts.requestLogger;
   const enabled = clientResolver != null || (typeof token === 'string' && token.length > 0);
   const serverName = opts.serverName ?? 'geneweave-gateway';
   const serverVersion = opts.serverVersion ?? '1.0.0';
@@ -339,9 +356,59 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
     exposedToolNames,
     enabled,
     async handle(req, res, parsedBody) {
-      if (!enabled) { disabledResponse(res); return; }
+      const startedAt = Date.now();
+      // If the caller didn't pre-parse the body, read it ourselves so we
+      // can both (a) attribute method/tool_name in activity logs and
+      // (b) hand the parsed body to the transport (which would otherwise
+      // consume the stream and leave us blind for telemetry).
+      if (parsedBody === undefined && req.method === 'POST') {
+        try {
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) {
+            chunks.push(chunk as Buffer);
+          }
+          const raw = Buffer.concat(chunks).toString('utf8');
+          if (raw.length > 0) {
+            try { parsedBody = JSON.parse(raw); } catch { /* leave undefined */ }
+          }
+        } catch { /* best-effort */ }
+      }
+      // Best-effort extract JSON-RPC method + tool name from the parsed body
+      // for activity logging. Never throws; missing data just becomes null.
+      let method: string | null = null;
+      let toolName: string | null = null;
+      try {
+        if (parsedBody && typeof parsedBody === 'object') {
+          const b = parsedBody as Record<string, unknown>;
+          if (typeof b['method'] === 'string') method = b['method'] as string;
+          const params = b['params'];
+          if (method === 'tools/call' && params && typeof params === 'object') {
+            const name = (params as Record<string, unknown>)['name'];
+            if (typeof name === 'string') toolName = name;
+          }
+        }
+      } catch { /* best-effort */ }
+      const log = (
+        client: MCPGatewayClientRow | null,
+        outcome: 'ok' | 'rate_limited' | 'unauthorized' | 'disabled' | 'error',
+        statusCode: number,
+        errorMessage: string | null = null,
+      ): void => {
+        if (!requestLogger) return;
+        void requestLogger({
+          clientId: client?.id ?? null,
+          clientName: client?.name ?? null,
+          method,
+          toolName,
+          outcome,
+          statusCode,
+          durationMs: Date.now() - startedAt,
+          errorMessage,
+        }).catch(() => undefined);
+      };
+      if (!enabled) { disabledResponse(res); log(null, 'disabled', 503); return; }
       const authResult = await authenticate(req);
-      if (!authResult) { unauthorized(res); return; }
+      if (!authResult) { unauthorized(res); log(null, 'unauthorized', 401); return; }
       // Phase 7 — per-client rate limit. Only applies to multi-tenant
       // requests where the client carries a non-null cap.
       if (
@@ -374,6 +441,7 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
           // Seconds until the next minute boundary.
           const retryAfter = Math.max(1, 60 - now.getUTCSeconds());
           rateLimited(res, retryAfter);
+          log(authResult.client, 'rate_limited', 429);
           return;
         }
       }
@@ -387,6 +455,10 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
       const { transport, stop } = await buildPerRequestServer(entries);
       try {
         await transport.handleRequest(req, res, parsedBody);
+        log(authResult.client, 'ok', res.statusCode || 200);
+      } catch (err) {
+        log(authResult.client, 'error', res.statusCode || 500, (err as Error).message);
+        throw err;
       } finally {
         try { await stop(); } catch { /* best-effort */ }
       }
