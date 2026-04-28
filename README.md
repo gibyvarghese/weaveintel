@@ -52,6 +52,183 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 - **Composable middleware** — Intercept any model call with typed middleware for logging, retries, redaction, caching, or custom logic.
 - **Production patterns built in** — Fallback chains, budget enforcement, PII redaction, structured output, evaluation suites, and observability from day one.
 
+## Getting Started — Run geneWeave Locally
+
+[`geneWeave`](apps/geneweave) is the reference full-stack app built on weaveIntel: streaming chat with auth, persona RBAC, an admin dashboard, tool/skill governance, observability traces, and the Scientific Validation pipeline. The steps below take you from a fresh `git clone` to a running app at `http://localhost:3500`.
+
+### 1. Prerequisites
+
+Install these first:
+
+| Tool | Version | Why |
+|---|---|---|
+| **Node.js** | `>= 20.0.0` | Runtime (matches `package.json#engines`) |
+| **npm** | `>= 10` | Workspace dependency manager |
+| **git** | any recent | Clone the repo |
+| **Python 3** + build tools | any recent | Required by `better-sqlite3` native build |
+| **sqlite3 CLI** *(optional)* | any | Inspect/repair `./geneweave.db` |
+| **OpenAI or Anthropic API key** | — | At least one is required to actually run chat |
+
+macOS quick install:
+
+```bash
+brew install node@20 git sqlite3
+# Xcode CLI tools (provides the C++ toolchain better-sqlite3 needs):
+xcode-select --install
+```
+
+Ubuntu/Debian:
+
+```bash
+sudo apt-get install -y nodejs npm git build-essential python3 sqlite3
+```
+
+### 2. Clone the repository
+
+```bash
+git clone https://github.com/gibyvarghese/weaveintel.git
+cd weaveintel
+```
+
+### 3. Install all workspace dependencies
+
+weaveIntel is an npm workspaces monorepo (60+ packages under `packages/*` plus `apps/*`). A single root install pulls everything in and links the internal `@weaveintel/*` packages together:
+
+```bash
+npm install
+```
+
+This step also compiles the `better-sqlite3` native binding. If it fails, re-check the prerequisites above.
+
+### 4. Build all packages
+
+Turborepo builds every workspace package in dependency order and emits `dist/` outputs that geneWeave loads at runtime:
+
+```bash
+npm run build
+```
+
+If you only want to rebuild geneWeave after changing its sources later:
+
+```bash
+npm run build --workspace @weaveintel/geneweave
+```
+
+### 5. Configure environment variables
+
+Copy the template and edit it with at least one provider key, a JWT signing secret, and a vault key:
+
+```bash
+cp .env.example .env
+```
+
+Minimum required keys in `.env`:
+
+```bash
+# Pick at least one provider:
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Required for auth:
+JWT_SECRET=replace-with-a-long-random-string
+
+# Required to encrypt/decrypt the credential vault:
+VAULT_KEY=replace-with-another-long-random-string
+
+# Optional — defaults shown:
+PORT=3500
+DATABASE_PATH=./geneweave.db
+```
+
+Generate strong secrets:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
+
+See [.env.example](.env.example) for the full list of optional variables (Stats NZ, Semantic Scholar, OAuth provider apps, ServiceNow, etc.).
+
+### 6. Start the geneWeave dev server
+
+Load `.env` into your shell, then run the dev entrypoint with `tsx`:
+
+```bash
+set -a && source .env && set +a
+npx tsx examples/12-geneweave.ts
+```
+
+You should see:
+
+```
+🧬 geneWeave running → http://localhost:3500
+```
+
+The SQLite database `./geneweave.db` is created automatically on first start, with default skills, tool catalog, prompts, frameworks, fragments, strategies, and policies seeded.
+
+### 7. Open the app and create the first user
+
+Open [http://localhost:3500](http://localhost:3500) in your browser:
+
+1. Click **Sign up** and create an account (email + password). The first user is provisioned with regular access; promote it to admin via SQL if needed:
+   ```bash
+   sqlite3 geneweave.db "UPDATE users SET personas = json('[\"platform_admin\",\"tenant_admin\",\"tenant_user\"]') WHERE email='you@example.com';"
+   ```
+2. Sign in. The left sidebar gives you **Chat**, **Admin**, **Traces**, and **🔬 Validation**.
+3. From **Admin → Models**, confirm a default model is selected (auto-detected from your provider keys).
+4. Open **Chat → New chat**, pick a mode (Direct / Agent / Supervisor), and start talking.
+
+### 8. Stop / restart
+
+```bash
+# Foreground process — Ctrl+C
+
+# Or, if you started it in the background:
+pkill -f 'tsx examples/12-geneweave'
+```
+
+### 9. Run the production server (optional)
+
+The production entrypoint at [`deploy/server.ts`](deploy/server.ts) honors the same `.env` and is what container deployments use:
+
+```bash
+set -a && source .env && set +a
+npx tsx deploy/server.ts
+```
+
+For Docker/Kubernetes/Fly/Render/Azure/AWS/GCP, jump to the [Deployment](#deployment) section.
+
+### 10. Run other examples (optional)
+
+With dependencies installed and `.env` populated, every standalone example under [`examples/`](examples) runs with `tsx`:
+
+```bash
+# No API key needed (fake models / in-memory):
+npx tsx examples/02-tool-calling-agent.ts
+npx tsx examples/03-rag-pipeline.ts
+npx tsx examples/04-hierarchical-agents.ts
+npx tsx examples/13-workflow-engine.ts
+
+# Provider key required:
+npx tsx examples/01-simple-chat.ts            # OPENAI_API_KEY
+npx tsx examples/11-anthropic-provider.ts     # ANTHROPIC_API_KEY
+
+# Live-agents (long-running) — see apps/live-agents-demo too:
+npx tsx examples/52-live-agents-basic.ts
+```
+
+The full catalog (73 examples) is documented in the [Examples](#examples) table further down.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `better-sqlite3` install fails | Install the prerequisites in step 1 (Xcode CLI on macOS, `build-essential` + `python3` on Linux), then `rm -rf node_modules && npm install` |
+| `EADDRINUSE: :3500` | Another process is using the port: `PORT=3501 npx tsx examples/12-geneweave.ts` or `lsof -i :3500` then kill the holder |
+| `JWT_SECRET is required` | Add `JWT_SECRET=...` to `.env` and re-source it |
+| `Cannot find module '@weaveintel/...'` | You skipped `npm run build` — packages must compile before `tsx` can load their `dist/` |
+| Admin tabs / UI look stale after edits | Rebuild geneWeave: `npm run build --workspace @weaveintel/geneweave`, then refresh the browser |
+| Want a clean slate | `rm geneweave.db` and restart — schema and seeds are recreated |
+
 ## Maturity Status
 
 weaveIntel is not uniformly mature across every package surface. The framework is strongest where runtime enforcement and reference-app consumption are both real.
@@ -330,35 +507,10 @@ After changing admin schema/UI TypeScript sources, rebuild before verifying UI c
 npm run build --workspace @weaveintel/geneweave
 ```
 
-## Quick Start
-
-### Prerequisites
-
-- Node.js >= 20
-- npm >= 10
-
-### Install
-
-```bash
-git clone https://github.com/gibyvarghese/weaveintel.git
-cd weaveintel
-npm install
-npm run build
-```
-
-### Environment Variables
-
-Set API keys as needed:
-
-```bash
-export OPENAI_API_KEY="sk-..."          # For OpenAI provider
-export ANTHROPIC_API_KEY="sk-ant-..."   # For Anthropic provider
-export STATSNZ_API_KEY="..."            # Optional: required for statsnz_* tools and Stats NZ MCP server
-```
-
----
-
 ## How-To Guides
+
+> Already cloned, installed, and built? See [Getting Started — Run geneWeave Locally](#getting-started--run-geneweave-locally) above for the full bootstrap. The recipes below show how to use individual `@weaveintel/*` packages programmatically.
+
 
 ### 1. Simple Chat Completion (OpenAI)
 
