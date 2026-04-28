@@ -10,3 +10,17 @@ coverage/
 geneweave.db
 geneweave.db-shm
 geneweave.db-wal
+
+# Internal audit / report / spec markdowns (not for public repo).
+# README.md, CHANGELOG.md, VERSIONING.md, LICENSE and per-package READMEs are kept.
+/ADMIN_PAGE_WIRING_AUDIT.md
+/LIVE_AGENTS_IMPLEMENTATION_AUDIT.md
+/PHASE_7_VALIDATION_REPORT.md
+/REFACTORING_COMPLETE.md
+apps/geneweave/PROCESS_CARD_UX_SPEC.md
+# Catch-all for future top-level audit/report/plan/spec docs:
+/*_AUDIT.md
+/*_REPORT.md
+/*_PLAN.md
+/*_SPEC.md
+/*_NOTES.md
