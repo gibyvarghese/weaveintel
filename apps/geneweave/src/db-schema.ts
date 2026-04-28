@@ -1500,6 +1500,8 @@ CREATE TABLE IF NOT EXISTS model_capability_scores (
   raw_benchmark_score REAL,
   is_active           INTEGER NOT NULL DEFAULT 1,
   last_evaluated_at   TEXT,
+  production_signal_score REAL,
+  signal_sample_count INTEGER NOT NULL DEFAULT 0,
   created_at          TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(tenant_id, model_id, provider, task_key)
@@ -1559,5 +1561,64 @@ CREATE TABLE IF NOT EXISTS routing_decision_traces (
 CREATE INDEX IF NOT EXISTS idx_decision_task ON routing_decision_traces(task_key, decided_at);
 CREATE INDEX IF NOT EXISTS idx_decision_tenant ON routing_decision_traces(tenant_id, decided_at);
 CREATE INDEX IF NOT EXISTS idx_decision_agent ON routing_decision_traces(agent_id, decided_at);
+
+-- ─── Phase 5 — Feedback loop ─────────────────────────────────
+CREATE TABLE IF NOT EXISTS routing_capability_signals (
+  id            TEXT PRIMARY KEY,
+  tenant_id     TEXT,
+  model_id      TEXT NOT NULL,
+  provider      TEXT NOT NULL,
+  task_key      TEXT NOT NULL,
+  source        TEXT NOT NULL,
+  signal_type   TEXT NOT NULL,
+  value         REAL NOT NULL,
+  weight        REAL NOT NULL DEFAULT 1.0,
+  evidence_id   TEXT,
+  message_id    TEXT,
+  trace_id      TEXT,
+  metadata      TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_signals_lookup ON routing_capability_signals(model_id, provider, task_key, created_at);
+CREATE INDEX IF NOT EXISTS idx_signals_source ON routing_capability_signals(source, created_at);
+CREATE INDEX IF NOT EXISTS idx_signals_tenant ON routing_capability_signals(tenant_id, created_at);
+
+CREATE TABLE IF NOT EXISTS message_feedback (
+  id          TEXT PRIMARY KEY,
+  message_id  TEXT NOT NULL,
+  chat_id     TEXT,
+  user_id     TEXT,
+  signal      TEXT NOT NULL,
+  comment     TEXT,
+  model_id    TEXT,
+  provider    TEXT,
+  task_key    TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_feedback_message ON message_feedback(message_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_signal ON message_feedback(signal, created_at);
+
+CREATE TABLE IF NOT EXISTS routing_surface_items (
+  id              TEXT PRIMARY KEY,
+  kind            TEXT NOT NULL,
+  severity        TEXT NOT NULL,
+  model_id        TEXT NOT NULL,
+  provider        TEXT NOT NULL,
+  task_key        TEXT NOT NULL,
+  tenant_id       TEXT,
+  message         TEXT NOT NULL,
+  metric_7d       REAL,
+  metric_30d      REAL,
+  drop_pct        REAL,
+  sample_count_7d INTEGER,
+  sample_count_30d INTEGER,
+  auto_disabled   INTEGER NOT NULL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'open',
+  resolution_note TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_surface_status ON routing_surface_items(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_surface_model ON routing_surface_items(model_id, provider, task_key);
 `;
 

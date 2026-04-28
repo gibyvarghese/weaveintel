@@ -1465,4 +1465,90 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   // The single fallback_model/fallback_provider columns remain for
   // backward compatibility — Phase 2 router prefers the chain when present.
   safeExec(db, 'ALTER TABLE routing_policies ADD COLUMN fallback_chain TEXT');
+
+  // ─── anyWeave Task-Aware Routing — Phase 5: Feedback loop ──
+  // Design doc: docs/ANYWEAVE_TASK_AWARE_ROUTING.md §13 Phase 5
+  //
+  // Four signal channels feed quality_score in model_capability_scores:
+  //   1. eval        — eval engine results
+  //   2. chat        — 👍/👎/regenerate/copy from chat UI
+  //   3. cache       — cache admission quality scores
+  //   4. production  — tool-call validity / json compliance / completion
+  //
+  // routing_capability_signals is the append-only ledger; recompute jobs
+  // produce rolling averages and write back to model_capability_scores.
+
+  // Append-only signal log. UUID v7 PK keeps inserts naturally sortable.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS routing_capability_signals (
+      id            TEXT PRIMARY KEY,
+      tenant_id     TEXT,
+      model_id      TEXT NOT NULL,
+      provider      TEXT NOT NULL,
+      task_key      TEXT NOT NULL,
+      source        TEXT NOT NULL,
+      signal_type   TEXT NOT NULL,
+      value         REAL NOT NULL,
+      weight        REAL NOT NULL DEFAULT 1.0,
+      evidence_id   TEXT,
+      message_id    TEXT,
+      trace_id      TEXT,
+      metadata      TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_signals_lookup ON routing_capability_signals(model_id, provider, task_key, created_at)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_signals_source ON routing_capability_signals(source, created_at)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_signals_tenant ON routing_capability_signals(tenant_id, created_at)');
+
+  // Per-message user feedback. signal ∈ {thumbs_up, thumbs_down, regenerate, copy}.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS message_feedback (
+      id          TEXT PRIMARY KEY,
+      message_id  TEXT NOT NULL,
+      chat_id     TEXT,
+      user_id     TEXT,
+      signal      TEXT NOT NULL,
+      comment     TEXT,
+      model_id    TEXT,
+      provider    TEXT,
+      task_key    TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_feedback_message ON message_feedback(message_id)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_feedback_signal ON message_feedback(signal, created_at)');
+
+  // Regression / surface-item alerts emitted by the regression detection job.
+  // status ∈ {open, acknowledged, resolved}.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS routing_surface_items (
+      id              TEXT PRIMARY KEY,
+      kind            TEXT NOT NULL,
+      severity        TEXT NOT NULL,
+      model_id        TEXT NOT NULL,
+      provider        TEXT NOT NULL,
+      task_key        TEXT NOT NULL,
+      tenant_id       TEXT,
+      message         TEXT NOT NULL,
+      metric_7d       REAL,
+      metric_30d      REAL,
+      drop_pct        REAL,
+      sample_count_7d INTEGER,
+      sample_count_30d INTEGER,
+      auto_disabled   INTEGER NOT NULL DEFAULT 0,
+      status          TEXT NOT NULL DEFAULT 'open',
+      resolution_note TEXT,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at     TEXT
+    )
+  `);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_surface_status ON routing_surface_items(status, created_at)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_surface_model ON routing_surface_items(model_id, provider, task_key)');
+
+  // Production signal score (separate from benchmark quality_score).
+  // Updated by the production telemetry channel; surfaced in the simulator
+  // for operators to compare benchmark vs lived-experience quality.
+  safeExec(db, 'ALTER TABLE model_capability_scores ADD COLUMN production_signal_score REAL');
+  safeExec(db, 'ALTER TABLE model_capability_scores ADD COLUMN signal_sample_count INTEGER NOT NULL DEFAULT 0');
 }

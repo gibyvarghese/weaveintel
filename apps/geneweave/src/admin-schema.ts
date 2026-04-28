@@ -61,6 +61,9 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'provider-tool-adapters', label: 'Provider Adapters' },
     { key: 'routing-simulator', label: 'Routing Simulator' },
     { key: 'routing-decision-traces', label: 'Decision Traces' },
+    { key: 'routing-capability-signals', label: 'Capability Signals' },
+    { key: 'message-feedback', label: 'Message Feedback' },
+    { key: 'routing-surface-items', label: 'Surface Items' },
   ]},
   { label: 'Governance', icon: '\uD83D\uDEE1\uFE0F', tabs: [
     { key: 'guardrails', label: 'Guardrails' },

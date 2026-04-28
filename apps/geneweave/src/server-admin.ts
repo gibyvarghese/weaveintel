@@ -49,6 +49,9 @@ import {
   registerTaskTypeTenantOverrideRoutes,
   registerRoutingDecisionTraceRoutes,
   registerRoutingSimulatorRoutes,
+  registerRoutingCapabilitySignalRoutes,
+  registerMessageFeedbackRoutes,
+  registerRoutingSurfaceItemRoutes,
 } from './admin/api/index.js';
 import {
   normalizePromptVariables,
@@ -1309,6 +1312,11 @@ export function registerAdminRoutes(
   registerTaskTypeTenantOverrideRoutes(router, db, adminHelpers);
   registerRoutingDecisionTraceRoutes(router, db, adminHelpers);
   registerRoutingSimulatorRoutes(router, db, adminHelpers);
+
+  // ── anyWeave Phase 5: Feedback loop ──────────────────────
+  registerRoutingCapabilitySignalRoutes(router, db, adminHelpers);
+  registerMessageFeedbackRoutes(router, db, adminHelpers);
+  registerRoutingSurfaceItemRoutes(router, db, adminHelpers);
 
   // ── SGAP: Social Growth Admin Tables ─────────────────────
   registerSgapCrud({ routeKey: 'sg-brands', tableName: 'sg_brands', listKey: 'sg-brands', singularKey: 'sg-brand' });

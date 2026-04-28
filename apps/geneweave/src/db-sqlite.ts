@@ -44,6 +44,9 @@ import type {
   TaskTypeDefinitionRow,
   ModelCapabilityScoreRow,
   RoutingDecisionTraceRow,
+  RoutingCapabilitySignalRow,
+  MessageFeedbackRow,
+  RoutingSurfaceItemRow,
   TaskTypeTenantOverrideRow,
 } from './db-types.js';
 
@@ -1315,6 +1318,121 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return (this.d.prepare('SELECT * FROM routing_decision_traces WHERE id = ?').get(id) as RoutingDecisionTraceRow) ?? null;
   }
 
+  // ─── anyWeave Phase 5: Feedback loop CRUD ─────────────────
+
+  async insertRoutingCapabilitySignal(row: Omit<RoutingCapabilitySignalRow, 'created_at'> & { created_at?: string }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO routing_capability_signals (
+         id, tenant_id, model_id, provider, task_key, source, signal_type,
+         value, weight, evidence_id, message_id, trace_id, metadata, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
+    ).run(
+      row.id, row.tenant_id ?? null, row.model_id, row.provider, row.task_key,
+      row.source, row.signal_type, row.value, row.weight ?? 1.0,
+      row.evidence_id ?? null, row.message_id ?? null, row.trace_id ?? null,
+      row.metadata ?? null, row.created_at ?? null,
+    );
+  }
+
+  async listRoutingCapabilitySignals(opts?: {
+    tenantId?: string | null; modelId?: string; provider?: string; taskKey?: string;
+    source?: string; afterIso?: string; beforeIso?: string; limit?: number;
+  }): Promise<RoutingCapabilitySignalRow[]> {
+    const where: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.tenantId !== undefined) {
+      if (opts.tenantId === null) where.push('tenant_id IS NULL');
+      else { where.push('tenant_id = ?'); vals.push(opts.tenantId); }
+    }
+    if (opts?.modelId)   { where.push('model_id = ?');  vals.push(opts.modelId); }
+    if (opts?.provider)  { where.push('provider = ?');  vals.push(opts.provider); }
+    if (opts?.taskKey)   { where.push('task_key = ?');  vals.push(opts.taskKey); }
+    if (opts?.source)    { where.push('source = ?');    vals.push(opts.source); }
+    if (opts?.afterIso)  { where.push('created_at >= ?'); vals.push(opts.afterIso); }
+    if (opts?.beforeIso) { where.push('created_at < ?');  vals.push(opts.beforeIso); }
+    const limit = Math.max(1, Math.min(opts?.limit ?? 200, 5000));
+    const sql = `SELECT * FROM routing_capability_signals${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT ${limit}`;
+    return this.d.prepare(sql).all(...vals) as RoutingCapabilitySignalRow[];
+  }
+
+  async getRoutingCapabilitySignal(id: string): Promise<RoutingCapabilitySignalRow | null> {
+    return (this.d.prepare('SELECT * FROM routing_capability_signals WHERE id = ?').get(id) as RoutingCapabilitySignalRow) ?? null;
+  }
+
+  async insertMessageFeedback(row: Omit<MessageFeedbackRow, 'created_at'> & { created_at?: string }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO message_feedback (
+         id, message_id, chat_id, user_id, signal, comment,
+         model_id, provider, task_key, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
+    ).run(
+      row.id, row.message_id, row.chat_id ?? null, row.user_id ?? null,
+      row.signal, row.comment ?? null,
+      row.model_id ?? null, row.provider ?? null, row.task_key ?? null,
+      row.created_at ?? null,
+    );
+  }
+
+  async listMessageFeedback(opts?: { messageId?: string; chatId?: string; signal?: string; limit?: number }): Promise<MessageFeedbackRow[]> {
+    const where: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.messageId) { where.push('message_id = ?'); vals.push(opts.messageId); }
+    if (opts?.chatId)    { where.push('chat_id = ?');    vals.push(opts.chatId); }
+    if (opts?.signal)    { where.push('signal = ?');     vals.push(opts.signal); }
+    const limit = Math.max(1, Math.min(opts?.limit ?? 200, 5000));
+    const sql = `SELECT * FROM message_feedback${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT ${limit}`;
+    return this.d.prepare(sql).all(...vals) as MessageFeedbackRow[];
+  }
+
+  async getMessageFeedback(id: string): Promise<MessageFeedbackRow | null> {
+    return (this.d.prepare('SELECT * FROM message_feedback WHERE id = ?').get(id) as MessageFeedbackRow) ?? null;
+  }
+
+  async insertRoutingSurfaceItem(row: Omit<RoutingSurfaceItemRow, 'created_at' | 'resolved_at'> & { created_at?: string; resolved_at?: string | null }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO routing_surface_items (
+         id, kind, severity, model_id, provider, task_key, tenant_id, message,
+         metric_7d, metric_30d, drop_pct, sample_count_7d, sample_count_30d,
+         auto_disabled, status, resolution_note, created_at, resolved_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?)`,
+    ).run(
+      row.id, row.kind, row.severity, row.model_id, row.provider, row.task_key,
+      row.tenant_id ?? null, row.message,
+      row.metric_7d ?? null, row.metric_30d ?? null, row.drop_pct ?? null,
+      row.sample_count_7d ?? null, row.sample_count_30d ?? null,
+      row.auto_disabled ?? 0, row.status ?? 'open', row.resolution_note ?? null,
+      row.created_at ?? null, row.resolved_at ?? null,
+    );
+  }
+
+  async listRoutingSurfaceItems(opts?: { status?: string; modelId?: string; provider?: string; taskKey?: string; limit?: number }): Promise<RoutingSurfaceItemRow[]> {
+    const where: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.status)   { where.push('status = ?');   vals.push(opts.status); }
+    if (opts?.modelId)  { where.push('model_id = ?'); vals.push(opts.modelId); }
+    if (opts?.provider) { where.push('provider = ?'); vals.push(opts.provider); }
+    if (opts?.taskKey)  { where.push('task_key = ?'); vals.push(opts.taskKey); }
+    const limit = Math.max(1, Math.min(opts?.limit ?? 100, 1000));
+    const sql = `SELECT * FROM routing_surface_items${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT ${limit}`;
+    return this.d.prepare(sql).all(...vals) as RoutingSurfaceItemRow[];
+  }
+
+  async getRoutingSurfaceItem(id: string): Promise<RoutingSurfaceItemRow | null> {
+    return (this.d.prepare('SELECT * FROM routing_surface_items WHERE id = ?').get(id) as RoutingSurfaceItemRow) ?? null;
+  }
+
+  async updateRoutingSurfaceItem(id: string, fields: Partial<Omit<RoutingSurfaceItemRow, 'id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    vals.push(id);
+    this.d.prepare(`UPDATE routing_surface_items SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
   // ─── anyWeave Phase 4: Task-aware routing CRUD ────────────
 
   async getTaskTypeById(id: string): Promise<TaskTypeDefinitionRow | null> {
@@ -1362,8 +1480,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
       `INSERT INTO model_capability_scores
         (id, tenant_id, model_id, provider, task_key, quality_score,
          supports_tools, supports_streaming, supports_thinking, supports_json_mode, supports_vision,
-         max_output_tokens, benchmark_source, raw_benchmark_score, is_active, last_evaluated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         max_output_tokens, benchmark_source, raw_benchmark_score, is_active, last_evaluated_at,
+         production_signal_score, signal_sample_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(tenant_id, model_id, provider, task_key) DO UPDATE SET
          quality_score = excluded.quality_score,
          supports_tools = excluded.supports_tools,
@@ -1383,6 +1502,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       row.supports_json_mode ?? 0, row.supports_vision ?? 0,
       row.max_output_tokens ?? null, row.benchmark_source ?? null, row.raw_benchmark_score ?? null,
       row.is_active ?? 1, row.last_evaluated_at ?? null,
+      row.production_signal_score ?? null, row.signal_sample_count ?? 0,
     );
   }
 

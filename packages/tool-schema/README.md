@@ -124,3 +124,4 @@ byte-equivalent to the prior inline implementations.
 | 2     | M9 — task-aware router + decision traces              | ✅ shipped |
 | **3** | **M12 — `@weaveintel/tool-schema` runtime translator + provider refactor** | ✅ **this package** |
 | 4     | M15 + M16 — task-aware routing admin API + UI (CRUD over task types, capability matrix heatmap, provider-tool adapters, tenant overrides, decision-trace log, simulator) | ✅ shipped (see [`examples/72-routing-admin-phase4.ts`](../../examples/72-routing-admin-phase4.ts)) |
+| 5     | M13 + M14 — capability-score feedback loop (eval / chat / cache / production signals → `routing_capability_signals`, `message_feedback`, `routing_surface_items`) + daily regression detector with auto-disable | ✅ shipped (see [`examples/73-routing-feedback-phase5.ts`](../../examples/73-routing-feedback-phase5.ts)) |

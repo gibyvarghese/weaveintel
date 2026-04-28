@@ -27,3 +27,8 @@ export { registerProviderToolAdapterRoutes } from './provider-tool-adapters.js';
 export { registerTaskTypeTenantOverrideRoutes } from './task-type-tenant-overrides.js';
 export { registerRoutingDecisionTraceRoutes } from './routing-decision-traces.js';
 export { registerRoutingSimulatorRoutes } from './routing-simulator.js';
+
+// ── anyWeave Phase 5: Feedback loop ─────────────────────────
+export { registerRoutingCapabilitySignalRoutes } from './routing-capability-signals.js';
+export { registerMessageFeedbackRoutes } from './message-feedback.js';
+export { registerRoutingSurfaceItemRoutes } from './routing-surface-items.js';

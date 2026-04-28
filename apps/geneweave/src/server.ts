@@ -35,6 +35,7 @@ import { SVChatBridge } from './features/scientific-validation/chat-bridge.js';
 import { createSVToolMap } from './features/scientific-validation/tools/index.js';
 import { DbToolPolicyResolver, DbToolRateLimiter } from './tool-policy-resolver.js';
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
+import { recordChatFeedbackSignal } from './routing-feedback.js';
 import { createMCPGateway, DEFAULT_EXPOSED_ALLOCATION_CLASSES, type LoadedGatewayConfig } from './mcp-gateway.js';
 import { encryptCredential, decryptCredential } from './vault.js';
 import { setBrowserAuthProvider, type SSOPassThroughAuth } from '@weaveintel/tools-browser';
@@ -1022,6 +1023,52 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     await db.deleteChat(params['chatId']!, auth.userId);
     json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── anyWeave Phase 5: Chat feedback bridge ─────────────
+  // Authenticated users can submit a 👍/👎/regenerate/copy signal on any
+  // assistant message. The signal is persisted to message_feedback and a
+  // capability signal is recorded that updates production_signal_score on
+  // the resolved (model, provider, task_key) row.
+  router.post('/api/messages/:id/feedback', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const messageId = params['id']!;
+    const raw = await readBody(req);
+    let body: {
+      signal?: string;
+      comment?: string | null;
+      modelId?: string;
+      provider?: string;
+      taskKey?: string;
+      chatId?: string;
+    };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const validSignals = new Set(['thumbs_up', 'thumbs_down', 'regenerate', 'copy']);
+    if (!body.signal || !validSignals.has(body.signal)) {
+      json(res, 400, { error: 'signal must be one of thumbs_up|thumbs_down|regenerate|copy' });
+      return;
+    }
+    if (!body.modelId || !body.provider || !body.taskKey) {
+      json(res, 400, { error: 'modelId, provider, and taskKey are required (snapshot from the resolved decision)' });
+      return;
+    }
+    try {
+      const result = await recordChatFeedbackSignal(db, {
+        signal: body.signal,
+        messageId,
+        modelId: body.modelId,
+        provider: body.provider,
+        taskKey: body.taskKey,
+        tenantId: auth.tenantId ?? null,
+        chatId: body.chatId ?? null,
+        userId: auth.userId,
+        comment: body.comment ?? null,
+      });
+      json(res, 201, result);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      json(res, 400, { error: msg });
+    }
   }, { auth: true, csrf: true });
 
   // ── Dashboard routes ───────────────────────────────────

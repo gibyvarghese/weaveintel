@@ -97,6 +97,8 @@ export function registerCapabilityScoreRoutes(
       raw_benchmark_score: body['raw_benchmark_score'] !== undefined && body['raw_benchmark_score'] !== null ? Number(body['raw_benchmark_score']) : null,
       is_active: body['is_active'] === false ? 0 : 1,
       last_evaluated_at: (body['last_evaluated_at'] as string | null) ?? null,
+      production_signal_score: body['production_signal_score'] !== undefined && body['production_signal_score'] !== null ? Number(body['production_signal_score']) : null,
+      signal_sample_count: body['signal_sample_count'] !== undefined ? Number(body['signal_sample_count']) : 0,
     });
     // Find row by unique key (insert may have hit ON CONFLICT path)
     const matches = await db.listCapabilityScores({

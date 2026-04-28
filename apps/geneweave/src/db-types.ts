@@ -462,6 +462,10 @@ export interface ModelCapabilityScoreRow {
   raw_benchmark_score: number | null;
   is_active: number;
   last_evaluated_at: string | null;
+  /** Phase 5 — separate production telemetry signal (0–100). Null until first signal. */
+  production_signal_score: number | null;
+  /** Phase 5 — number of signals contributing to production_signal_score. */
+  signal_sample_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -522,6 +526,70 @@ export interface RoutingDecisionTraceRow {
   source_provider: string | null;
   estimated_cost_usd: number | null;
   decided_at: string;
+}
+
+/** Phase 5 — append-only signal log feeding capability score recompute. */
+export interface RoutingCapabilitySignalRow {
+  id: string;
+  tenant_id: string | null;
+  model_id: string;
+  provider: string;
+  task_key: string;
+  /** 'eval' | 'chat' | 'cache' | 'production'. */
+  source: string;
+  /** Free-form per source (e.g. 'thumbs_up', 'json_compliance', 'rouge'). */
+  signal_type: string;
+  /** Normalised 0–100 contribution to quality_score. */
+  value: number;
+  /** Multiplier applied to the rolling-avg recompute (default 1.0). */
+  weight: number;
+  evidence_id: string | null;
+  message_id: string | null;
+  trace_id: string | null;
+  /** JSON object for source-specific context. */
+  metadata: string | null;
+  created_at: string;
+}
+
+/** Phase 5 — chat UI feedback (👍/👎/regenerate/copy) per message. */
+export interface MessageFeedbackRow {
+  id: string;
+  message_id: string;
+  chat_id: string | null;
+  user_id: string | null;
+  /** 'thumbs_up' | 'thumbs_down' | 'regenerate' | 'copy'. */
+  signal: string;
+  comment: string | null;
+  /** Snapshot of resolved (model, provider, task_key) at submit time. */
+  model_id: string | null;
+  provider: string | null;
+  task_key: string | null;
+  created_at: string;
+}
+
+/** Phase 5 — alerts emitted by the regression detection job. */
+export interface RoutingSurfaceItemRow {
+  id: string;
+  /** 'quality_regression' | 'auto_disabled' | 'low_signal_volume'. */
+  kind: string;
+  /** 'info' | 'warning' | 'critical'. */
+  severity: string;
+  model_id: string;
+  provider: string;
+  task_key: string;
+  tenant_id: string | null;
+  message: string;
+  metric_7d: number | null;
+  metric_30d: number | null;
+  drop_pct: number | null;
+  sample_count_7d: number | null;
+  sample_count_30d: number | null;
+  auto_disabled: number;
+  /** 'open' | 'acknowledged' | 'resolved'. */
+  status: string;
+  resolution_note: string | null;
+  created_at: string;
+  resolved_at: string | null;
 }
 
 export interface WorkflowDefRow {
@@ -1819,6 +1887,23 @@ export interface DatabaseAdapter {
   insertRoutingDecisionTrace(row: Omit<RoutingDecisionTraceRow, 'decided_at'> & { decided_at?: string }): Promise<void>;
   listRoutingDecisionTraces(opts?: { tenantId?: string; agentId?: string; taskKey?: string; limit?: number; after?: string }): Promise<RoutingDecisionTraceRow[]>;
   getRoutingDecisionTrace(id: string): Promise<RoutingDecisionTraceRow | null>;
+
+  // ─── anyWeave Phase 5: Feedback loop ───────────────────────
+  insertRoutingCapabilitySignal(row: Omit<RoutingCapabilitySignalRow, 'created_at'> & { created_at?: string }): Promise<void>;
+  listRoutingCapabilitySignals(opts?: {
+    tenantId?: string | null; modelId?: string; provider?: string; taskKey?: string;
+    source?: string; afterIso?: string; beforeIso?: string; limit?: number;
+  }): Promise<RoutingCapabilitySignalRow[]>;
+  getRoutingCapabilitySignal(id: string): Promise<RoutingCapabilitySignalRow | null>;
+
+  insertMessageFeedback(row: Omit<MessageFeedbackRow, 'created_at'> & { created_at?: string }): Promise<void>;
+  listMessageFeedback(opts?: { messageId?: string; chatId?: string; signal?: string; limit?: number }): Promise<MessageFeedbackRow[]>;
+  getMessageFeedback(id: string): Promise<MessageFeedbackRow | null>;
+
+  insertRoutingSurfaceItem(row: Omit<RoutingSurfaceItemRow, 'created_at' | 'resolved_at'> & { created_at?: string; resolved_at?: string | null }): Promise<void>;
+  listRoutingSurfaceItems(opts?: { status?: string; modelId?: string; provider?: string; taskKey?: string; limit?: number }): Promise<RoutingSurfaceItemRow[]>;
+  getRoutingSurfaceItem(id: string): Promise<RoutingSurfaceItemRow | null>;
+  updateRoutingSurfaceItem(id: string, fields: Partial<Omit<RoutingSurfaceItemRow, 'id' | 'created_at'>>): Promise<void>;
 
   // ─── Admin: Workflow definitions ───────────────────────────
   createWorkflowDef(w: Omit<WorkflowDefRow, 'created_at' | 'updated_at'>): Promise<void>;
