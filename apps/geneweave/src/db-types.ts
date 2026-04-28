@@ -649,6 +649,15 @@ export interface SkillRow {
    * instead of merging the whole playbook into the supervisor prompt.
    */
   domain_sections?: string | null;
+  /**
+   * Optional JSON object describing a machine-enforced execution contract
+   * for this skill (e.g. minimum delegations, required output substrings).
+   * Shape: { minDelegations?: number; requiredOutputSubstrings?: string[];
+   * requiredOutputPatterns?: string[] }. When set, the chat runtime
+   * validates the agent result against it and reports concrete deltas
+   * back to the model on retry.
+   */
+  execution_contract?: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;

@@ -1327,4 +1327,11 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   // time so a sales-only query keeps only the sales subsection in the
   // supervisor system prompt instead of the full multi-domain playbook.
   safeExec(db, 'ALTER TABLE skills ADD COLUMN domain_sections TEXT');
+
+  // Machine-enforced execution contract: JSON object with optional
+  // minDelegations / requiredOutputSubstrings / requiredOutputPatterns.
+  // The chat runtime extracts this via extractSkillExecutionContractsFromPrompt
+  // and validates the agent result, reporting concrete deltas on failure
+  // instead of an opaque "skill plan was selected but not followed" error.
+  safeExec(db, 'ALTER TABLE skills ADD COLUMN execution_contract TEXT');
 }

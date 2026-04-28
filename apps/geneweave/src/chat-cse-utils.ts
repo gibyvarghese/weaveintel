@@ -1,4 +1,5 @@
 import type { AgentResult } from '@weaveintel/core';
+import type { ResolvedSkillExecutionContract } from '@weaveintel/skills';
 
 const CSE_EXECUTION_TOOLS = new Set(['cse_run_code', 'cse_run_data_analysis']);
 
@@ -128,22 +129,60 @@ export function countWorkerDelegations(result: AgentResult): number {
   return count;
 }
 
-function hasBusinessReportStructure(output: string): boolean {
-  const lower = output.toLowerCase();
-  const sectionsPresent = Array.from({ length: 10 }, (_, i) => `section ${i + 1}`).every((section) => lower.includes(section));
-  const hasCompositeScore = lower.includes('composite health score');
-  const hasPriorityOne = lower.includes('priority-1') || lower.includes('priority 1') || lower.includes('\np1');
-
-  return sectionsPresent && hasCompositeScore && hasPriorityOne;
+/**
+ * Result of evaluating one or more {@link ResolvedSkillExecutionContract}
+ * against an {@link AgentResult}. `failures` is empty when every contract
+ * passed; otherwise each entry is a single concrete delta the model can
+ * act on during retry (e.g. "expected ≥ 2 delegations, got 1" or
+ * "missing required substring 'Composite Health Score'").
+ */
+export interface ExecutionContractEvaluation {
+  ok: boolean;
+  failures: Array<{ skillId: string; reason: string }>;
 }
 
-export function hasMandatoryBusinessDataPlanConformance(result: AgentResult): boolean {
-  const output = String(result.output ?? '');
-  const delegations = countWorkerDelegations(result);
+export function evaluateSkillExecutionContracts(
+  result: AgentResult,
+  contracts: readonly ResolvedSkillExecutionContract[],
+): ExecutionContractEvaluation {
+  if (!contracts.length) return { ok: true, failures: [] };
 
-  // Mandatory plan requires Step1, Step2, branch Steps3-8, Step9, Step10, and Final synthesis.
-  // Enforce minimum 11 worker delegations plus strict output structure contract.
-  return delegations >= 11 && hasBusinessReportStructure(output);
+  const output = String(result.output ?? '');
+  const lowerOutput = output.toLowerCase();
+  const delegations = countWorkerDelegations(result);
+  const failures: Array<{ skillId: string; reason: string }> = [];
+
+  for (const { skillId, contract } of contracts) {
+    if (typeof contract.minDelegations === 'number' && delegations < contract.minDelegations) {
+      failures.push({
+        skillId,
+        reason: `expected at least ${contract.minDelegations} worker delegation(s), observed ${delegations}`,
+      });
+    }
+    for (const sub of contract.requiredOutputSubstrings ?? []) {
+      if (!lowerOutput.includes(sub.toLowerCase())) {
+        failures.push({ skillId, reason: `final response is missing required text "${sub}"` });
+      }
+    }
+    for (const pattern of contract.requiredOutputPatterns ?? []) {
+      try {
+        const re = new RegExp(pattern, 'i');
+        if (!re.test(output)) {
+          failures.push({ skillId, reason: `final response does not match required pattern /${pattern}/i` });
+        }
+      } catch {
+        // Invalid regex — surface as a failure so the operator notices the misconfigured contract.
+        failures.push({ skillId, reason: `execution contract has invalid regex pattern: ${pattern}` });
+      }
+    }
+  }
+
+  return { ok: failures.length === 0, failures };
+}
+
+export function formatExecutionContractFailures(failures: ReadonlyArray<{ skillId: string; reason: string }>): string {
+  if (!failures.length) return '';
+  return failures.map((f, i) => `${i + 1}. [${f.skillId}] ${f.reason}`).join('\n');
 }
 
 export function isSuccessfulToolResult(value: unknown): boolean {

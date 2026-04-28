@@ -57,36 +57,58 @@ function semanticIntentScore(query: string, corpus: string): number {
   return cosineSimilarity(q, c);
 }
 
-function normalizeSelectionForIntent(
+// Tag-driven routing markers. Skills opt into these behaviors via their `tags`
+// array (DB column `tags`, JSON string[]). No skill IDs are hardcoded.
+//   - 'auto-on-tabular'        : auto-include this skill when a tabular
+//                                attachment is present.
+//   - 'requires-intent-match'  : drop this skill from selection when the
+//                                semantic match between the query and the
+//                                skill's own corpus (triggerPatterns +
+//                                description + tags) is below the threshold.
+const TAG_AUTO_ON_TABULAR = 'auto-on-tabular';
+const TAG_REQUIRES_INTENT_MATCH = 'requires-intent-match';
+const INTENT_MATCH_THRESHOLD = 0.14;
+
+function skillIntentCorpus(skill: SkillMatch['skill']): string {
+  const parts: string[] = [];
+  if (skill.description) parts.push(skill.description);
+  if (skill.summary) parts.push(skill.summary);
+  if (Array.isArray(skill.triggerPatterns)) parts.push(skill.triggerPatterns.join(' '));
+  if (Array.isArray(skill.tags)) parts.push(skill.tags.join(' '));
+  return parts.join(' ');
+}
+
+function hasTag(skill: SkillMatch['skill'], tag: string): boolean {
+  return Array.isArray(skill.tags) && skill.tags.includes(tag);
+}
+
+function applyTagBasedRouting(
   query: string,
   candidates: readonly SkillMatch[],
   selectedSkillIds: readonly string[],
   hasTabularAttachment: boolean,
 ): string[] {
-  const tabularIntent = semanticIntentScore(
-    query,
-    'csv spreadsheet dataset dataframe pandas python analysis chart plot exploratory statistics table columns rows',
-  );
-  const bankStatementIntent = semanticIntentScore(
-    query,
-    'bank statement transaction spending expenses merchant subscriptions personal finance income cash flow debt savings',
-  );
+  const candidateById = new Map(candidates.map((c) => [c.skill.id, c]));
+  let selected = [...selectedSkillIds];
 
-  const hasDataAnalysisCandidate = candidates.some((candidate) => candidate.skill.id === 'skill-data-analysis-execution');
-  const hasBankStatementCandidate = candidates.some((candidate) => candidate.skill.id === 'skill-bank-statement-analysis');
-
-  const selected = [...selectedSkillIds];
-
-  if ((hasTabularAttachment || tabularIntent >= 0.2) && bankStatementIntent < 0.14 && hasDataAnalysisCandidate) {
-    if (!selected.includes('skill-data-analysis-execution')) {
-      selected.unshift('skill-data-analysis-execution');
-    }
-
-    if (hasBankStatementCandidate) {
-      const pruned = selected.filter((id) => id !== 'skill-bank-statement-analysis');
-      return pruned.slice(0, 3);
+  // Auto-include any candidate tagged for tabular auto-activation.
+  if (hasTabularAttachment) {
+    for (const candidate of candidates) {
+      if (hasTag(candidate.skill, TAG_AUTO_ON_TABULAR) && !selected.includes(candidate.skill.id)) {
+        selected.unshift(candidate.skill.id);
+      }
     }
   }
+
+  // Drop selected skills tagged 'requires-intent-match' when the query does
+  // not semantically match the skill's own corpus.
+  selected = selected.filter((id) => {
+    const candidate = candidateById.get(id);
+    if (!candidate) return true;
+    if (!hasTag(candidate.skill, TAG_REQUIRES_INTENT_MATCH)) return true;
+    const score = semanticIntentScore(query, skillIntentCorpus(candidate.skill));
+    return score >= INTENT_MATCH_THRESHOLD;
+  });
 
   return selected.slice(0, 3);
 }
@@ -155,7 +177,7 @@ async function reasonAboutSkillSelection(
       .filter((id) => candidates.some((candidate) => candidate.skill.id === id))
       .slice(0, 3);
 
-    const normalizedSelected = normalizeSelectionForIntent(query, candidates, selectedSkillIds, hasTabularAttachment);
+    const normalizedSelected = applyTagBasedRouting(query, candidates, selectedSkillIds, hasTabularAttachment);
 
     const useNoSkillPath = rec['useNoSkillPath'] === true;
     const rationale = typeof rec['rationale'] === 'string' ? rec['rationale'] : undefined;
@@ -199,7 +221,7 @@ export async function discoverSkillsForInput(
         const decision = await reasonAboutSkillSelection(model, ctx, query, invokeMode, candidates, parseJson, hasTabularAttachment);
         if (!decision) {
           return {
-            selectedSkillIds: normalizeSelectionForIntent(
+            selectedSkillIds: applyTagBasedRouting(
               query,
               candidates,
               candidates.slice(0, 3).map((candidate) => candidate.skill.id),
@@ -225,15 +247,20 @@ export async function discoverSkillsForInput(
     let matches = [...activation.selected];
 
     if (hasTabularAttachment && mode !== 'direct') {
-      const dataSkill = allSkills.find((skill) => skill.id === 'skill-data-analysis-execution' && skill.enabled !== false);
-      if (dataSkill && !matches.some((match) => match.skill.id === dataSkill.id)) {
+      // Inject any enabled skill tagged 'auto-on-tabular' (skill metadata
+      // declares its own auto-activation, no IDs are hardcoded here).
+      const autoTabularSkills = allSkills.filter(
+        (skill) => skill.enabled !== false && Array.isArray(skill.tags) && skill.tags.includes('auto-on-tabular'),
+      );
+      for (const autoSkill of autoTabularSkills) {
+        if (matches.some((match) => match.skill.id === autoSkill.id)) continue;
         const syntheticScore = Math.max(0.25, matches[0]?.score ?? 0.25);
         matches = [
           {
-            skill: dataSkill,
+            skill: autoSkill,
             score: syntheticScore,
             matchedPatterns: [],
-            rationale: 'Tabular attachment detected; data-analysis execution skill is required for reliable analysis.',
+            rationale: `Tabular attachment detected; skill "${autoSkill.name}" is tagged auto-on-tabular.`,
             source: 'reasoning' as const,
           },
           ...matches,
@@ -242,13 +269,18 @@ export async function discoverSkillsForInput(
           .slice(0, 3);
       }
 
-      const bankIntentScore = semanticIntentScore(
-        userContent,
-        'bank statement transaction spending expenses merchant subscriptions personal finance income cash flow debt savings',
-      );
-      if (bankIntentScore < 0.14) {
-        matches = matches.filter((match) => match.skill.id !== 'skill-bank-statement-analysis');
-      }
+      // Drop any selected skill tagged 'requires-intent-match' when the query
+      // does not semantically match the skill's own corpus.
+      matches = matches.filter((match) => {
+        if (!Array.isArray(match.skill.tags) || !match.skill.tags.includes('requires-intent-match')) return true;
+        const corpus = [
+          match.skill.description,
+          match.skill.summary,
+          Array.isArray(match.skill.triggerPatterns) ? match.skill.triggerPatterns.join(' ') : '',
+          Array.isArray(match.skill.tags) ? match.skill.tags.join(' ') : '',
+        ].filter(Boolean).join(' ');
+        return semanticIntentScore(userContent, corpus) >= 0.14;
+      });
     }
 
     const toolNames = collectSkillTools(matches);

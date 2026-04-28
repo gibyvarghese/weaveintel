@@ -65,6 +65,29 @@ export interface SkillOutputContract {
 }
 
 /**
+ * Machine-enforced execution contract for skills that must produce a
+ * specific runtime shape (e.g. multi-pass delegations + structured report).
+ * When set, the chat runtime extracts this contract from the rendered
+ * system prompt and validates the agent result against it. Unset means
+ * "no enforcement — guidance only".
+ *
+ * Failure modes are reported back to the model as concrete deltas
+ * ("expected ≥ N delegations, got M"; "missing substring X") rather than
+ * an opaque "skill plan was selected but not followed" error.
+ */
+export interface SkillExecutionContract {
+  /** Minimum number of `delegate_to_worker` (or equivalent) calls expected. */
+  readonly minDelegations?: number;
+  /** Substrings that must appear in the final assistant output (case-insensitive). */
+  readonly requiredOutputSubstrings?: readonly string[];
+  /**
+   * Regex sources (no flags; matched case-insensitive) that must each match
+   * at least once in the final assistant output.
+   */
+  readonly requiredOutputPatterns?: readonly string[];
+}
+
+/**
  * A domain-scoped subsection of a skill playbook (e.g. sales/finance/operations).
  * Each section is treated as an optional, query-scorable PromptSection at render
  * time so query-aware filtering can pick only the domains relevant to the user
@@ -103,6 +126,13 @@ export interface SkillDefinition {
   readonly completionContract?: SkillCompletionContract;
   readonly policy?: SkillPolicyControls;
   readonly outputContract?: SkillOutputContract;
+  /**
+   * Optional machine-enforced execution contract. When set, the chat
+   * runtime validates the agent result against this contract and reports
+   * concrete failures back to the model on retry instead of a generic
+   * "skill plan not followed" message.
+   */
+  readonly executionContract?: SkillExecutionContract;
 
   readonly tags?: readonly string[];
   readonly description?: string;
@@ -576,6 +606,16 @@ export function buildSkillInvocationPrompt(
     }
 
     sections.push(sectionLabel('Selection Rationale', match.rationale));
+
+    // Machine-enforced execution contract marker. The chat runtime extracts
+    // these via extractSkillExecutionContractsFromPrompt() and validates the
+    // agent result. The line is intentionally compact and parseable so a
+    // single split('\n') + indexOf works without regex on the whole prompt.
+    if (skill.executionContract) {
+      const contractJson = JSON.stringify(skill.executionContract);
+      sections.push(`${SKILL_EXEC_CONTRACT_MARKER} skill_id=${skill.id}] ${contractJson}`);
+    }
+
     parts.push(...sections.filter((item): item is string => Boolean(item)));
   }
 
@@ -1110,12 +1150,78 @@ function safeParseDomainSections(raw: string | null | undefined): SkillDomainSec
   }
 }
 
+function safeParseExecutionContract(raw: string | null | undefined): SkillExecutionContract | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+    const rec = parsed as Record<string, unknown>;
+    const out: { -readonly [K in keyof SkillExecutionContract]: SkillExecutionContract[K] } = {};
+    if (typeof rec['minDelegations'] === 'number' && Number.isFinite(rec['minDelegations'])) {
+      out.minDelegations = rec['minDelegations'] as number;
+    }
+    if (Array.isArray(rec['requiredOutputSubstrings'])) {
+      out.requiredOutputSubstrings = (rec['requiredOutputSubstrings'] as unknown[])
+        .filter((s): s is string => typeof s === 'string' && s.length > 0);
+    }
+    if (Array.isArray(rec['requiredOutputPatterns'])) {
+      out.requiredOutputPatterns = (rec['requiredOutputPatterns'] as unknown[])
+        .filter((s): s is string => typeof s === 'string' && s.length > 0);
+    }
+    return out;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Sentinel marker line emitted into the rendered system prompt when a
+ * skill has an executionContract. The chat runtime extracts these via
+ * {@link extractSkillExecutionContractsFromPrompt} and enforces them.
+ *
+ * Format (one per line):
+ *   [SKILL_EXEC_CONTRACT skill_id=<id>] <json>
+ */
+const SKILL_EXEC_CONTRACT_MARKER = '[SKILL_EXEC_CONTRACT';
+
+export interface ResolvedSkillExecutionContract {
+  readonly skillId: string;
+  readonly skillName?: string;
+  readonly contract: SkillExecutionContract;
+}
+
+/**
+ * Extract every {@link SkillExecutionContract} embedded in a rendered
+ * supervisor system prompt. Returns an empty array when no contracts
+ * are present (or when the prompt is empty/undefined).
+ */
+export function extractSkillExecutionContractsFromPrompt(prompt: string | undefined | null): ResolvedSkillExecutionContract[] {
+  if (!prompt || !prompt.includes(SKILL_EXEC_CONTRACT_MARKER)) return [];
+  const out: ResolvedSkillExecutionContract[] = [];
+  const lines = prompt.split('\n');
+  for (const line of lines) {
+    const idx = line.indexOf(SKILL_EXEC_CONTRACT_MARKER);
+    if (idx < 0) continue;
+    const closeIdx = line.indexOf(']', idx);
+    if (closeIdx < 0) continue;
+    const header = line.slice(idx + SKILL_EXEC_CONTRACT_MARKER.length, closeIdx);
+    const json = line.slice(closeIdx + 1).trim();
+    const skillIdMatch = /skill_id=([^\s\]]+)/.exec(header);
+    const skillId = skillIdMatch?.[1] ?? 'unknown';
+    const contract = safeParseExecutionContract(json);
+    if (!contract) continue;
+    out.push({ skillId, contract });
+  }
+  return out;
+}
+
 export function skillFromRow(row: SkillRow): SkillDefinition {
   const examples = safeParseExamples(row.examples);
   const tools = safeParseStringArray(row.tool_names);
   const triggerPatterns = safeParseStringArray(row.trigger_patterns);
   const tags = safeParseStringArray(row.tags);
   const domainSections = safeParseDomainSections((row as { domain_sections?: string | null }).domain_sections);
+  const executionContract = safeParseExecutionContract((row as { execution_contract?: string | null }).execution_contract);
 
   return defineSkill({
     id: row.id,
@@ -1141,6 +1247,7 @@ export function skillFromRow(row: SkillRow): SkillDefinition {
       ambiguityBehavior: 'Use explicit uncertainty language when context is incomplete.',
     },
     domainSections: domainSections.length ? domainSections : undefined,
+    executionContract,
   });
 }
 

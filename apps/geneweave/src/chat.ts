@@ -67,10 +67,8 @@ import {
   POLICY_PROMPT_ENTERPRISE_WORKER_SYSTEM,
   POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
   POLICY_PROMPT_HARD_EXECUTION_GUARD,
-  POLICY_PROMPT_MANDATORY_SKILL_PLAN_GUARD,
   FORCED_WORKER_REQUIREMENT,
   HARD_EXECUTION_GUARD_POLICY,
-  MANDATORY_SKILL_PLAN_GUARD_POLICY,
   ENTERPRISE_WORKER_SYSTEM_PROMPT,
   RESPONSE_CARD_FORMAT_POLICY,
 } from './chat-policies.js';
@@ -98,10 +96,12 @@ import {
 } from './chat-attachment-utils.js';
 import {
   countWorkerDelegations,
+  evaluateSkillExecutionContracts,
+  formatExecutionContractFailures,
   hasCodeExecutorDelegation,
-  hasMandatoryBusinessDataPlanConformance,
   hasSuccessfulCseExecution,
 } from './chat-cse-utils.js';
+import { extractSkillExecutionContractsFromPrompt, type ResolvedSkillExecutionContract } from '@weaveintel/skills';
 import { hasRenderableAttachmentAnalysisOutput } from './chat-output-guards.js';
 import {
   extractFieldValue,
@@ -378,9 +378,7 @@ export class ChatEngine {
     workerRows?: import('./db-types.js').WorkerAgentRow[],
   ): Promise<string> {
     const prompts = await this.getPolicyPromptTemplates();
-    const hasActiveMandatorySkillPlan = Boolean(
-      basePrompt && basePrompt.includes('MANDATORY EXECUTION PLAN'),
-    );
+    const hasActiveMandatorySkillPlan = extractSkillExecutionContractsFromPrompt(basePrompt).length > 0;
     return buildSupervisorInstructionsPrompt({
       basePrompt,
       forceWorkerDataAnalysis,
@@ -424,43 +422,45 @@ export class ChatEngine {
     messages: Message[],
     goal: string,
     enforce: boolean,
-    enforceMandatorySkillPlan = false,
+    skillExecutionContracts: readonly ResolvedSkillExecutionContract[] = [],
   ): Promise<AgentResult> {
+    const enforceContracts = skillExecutionContracts.length > 0;
     const first = await agent.run(ctx, { messages, goal });
     const firstPassesExecutionGuard = !enforce || (
       hasSuccessfulCseExecution(first)
       && hasCodeExecutorDelegation(first)
       && hasRenderableAttachmentAnalysisOutput(first, goal)
     );
-    const firstPassesMandatoryPlan = !enforceMandatorySkillPlan || hasMandatoryBusinessDataPlanConformance(first);
-    if (firstPassesExecutionGuard && firstPassesMandatoryPlan) return first;
-
-    if (enforceMandatorySkillPlan && !firstPassesMandatoryPlan) {
-      const delegationCount = countWorkerDelegations(first);
-      return {
-        ...first,
-        output: `[Execution guard failure] Mandatory Business Data Analysis skill plan was selected but not followed. Observed worker delegations: ${delegationCount}. Required: ordered multi-pass delegations (Step 1→10 + Final) and final 10-section report with Composite Health Score and Priority-1 actions.`,
-      };
-    }
+    const firstContractEval = enforceContracts
+      ? evaluateSkillExecutionContracts(first, skillExecutionContracts)
+      : { ok: true, failures: [] };
+    if (firstPassesExecutionGuard && firstContractEval.ok) return first;
 
     const guardPolicy = await this.getPolicyPromptTemplate(POLICY_PROMPT_HARD_EXECUTION_GUARD, HARD_EXECUTION_GUARD_POLICY);
-    const mandatoryPlanPolicy = enforceMandatorySkillPlan
-      ? await this.getPolicyPromptTemplate(POLICY_PROMPT_MANDATORY_SKILL_PLAN_GUARD, MANDATORY_SKILL_PLAN_GUARD_POLICY)
+    const contractRetryHints = enforceContracts && !firstContractEval.ok
+      ? `\n\nSKILL EXECUTION CONTRACT — concrete failures from your previous attempt that you must fix:\n${formatExecutionContractFailures(firstContractEval.failures)}\nProduce a complete final response that satisfies every item above.`
       : '';
-    const retryGoal = `${goal}\n\n${guardPolicy}${mandatoryPlanPolicy ? `\n\n${mandatoryPlanPolicy}` : ''}`;
+    const retryGoal = `${goal}\n\n${guardPolicy}${contractRetryHints}`;
     const second = await agent.run(ctx, { messages, goal: retryGoal });
     const secondPassesExecutionGuard =
       hasSuccessfulCseExecution(second)
       && hasCodeExecutorDelegation(second)
       && hasRenderableAttachmentAnalysisOutput(second, retryGoal);
-    const secondPassesMandatoryPlan = !enforceMandatorySkillPlan || hasMandatoryBusinessDataPlanConformance(second);
-    if (secondPassesExecutionGuard && secondPassesMandatoryPlan) return second;
+    const secondContractEval = enforceContracts
+      ? evaluateSkillExecutionContracts(second, skillExecutionContracts)
+      : { ok: true, failures: [] };
+    if (secondPassesExecutionGuard && secondContractEval.ok) return second;
+
+    if (enforceContracts && !secondContractEval.ok) {
+      return {
+        ...second,
+        output: `[Execution guard failure] The skill execution contract was not satisfied after retry:\n${formatExecutionContractFailures(secondContractEval.failures)}`,
+      };
+    }
 
     return {
       ...second,
-      output: enforceMandatorySkillPlan
-        ? '[Execution guard failure] The workflow did not satisfy the mandatory Business Data Analysis skill plan. Required: ordered multi-pass worker delegations (Step 1→10 + Final), plus a 10-section report with Composite Health Score and Priority-1 actions. Please retry.'
-        : '[Execution guard failure] The workflow did not satisfy required execution constraints. A successful CSE run (`cse_run_code` or `cse_run_data_analysis`) through delegated worker "code_executor" is required, and the final result must be renderable (no sandbox-local file paths, no incomplete insights). Please retry.',
+      output: '[Execution guard failure] The workflow did not satisfy required execution constraints. A successful CSE run (`cse_run_code` or `cse_run_data_analysis`) through delegated worker "code_executor" is required, and the final result must be renderable (no sandbox-local file paths, no incomplete insights). Please retry.',
     };
   }
 
@@ -591,10 +591,13 @@ export class ChatEngine {
 
     try {
       const forceWorkerDataAnalysis = shouldForceWorkerDataAnalysis(userContent, attachments);
-      // When an active skill defines a mandatory multi-step plan, do not inject
-      // the generic 2-step "code_executor then analyst" requirement into the goal.
-      const hasActiveMandatorySkillPlan = Boolean(settings.systemPrompt?.includes('MANDATORY EXECUTION PLAN'));
-      const enforceMandatorySkillPlan = forceWorkerDataAnalysis && hasActiveMandatorySkillPlan;
+      // Skill execution contracts are extracted from the rendered supervisor
+      // system prompt (each active skill that defines one emits a marker line
+      // via @weaveintel/skills). When at least one contract is present, skip
+      // the generic "code_executor then analyst" requirement so we don't
+      // double-prescribe execution shape.
+      const skillExecutionContracts = extractSkillExecutionContractsFromPrompt(settings.systemPrompt);
+      const hasActiveMandatorySkillPlan = skillExecutionContracts.length > 0;
       const forceWorkerRequirement = await this.getPolicyPromptTemplate(
         POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
         FORCED_WORKER_REQUIREMENT,
@@ -699,7 +702,7 @@ export class ChatEngine {
         messages,
         routedGoal,
         forceWorkerDataAnalysis,
-        enforceMandatorySkillPlan,
+        skillExecutionContracts,
       );
       return { result, toolCallEvents: toolCallObserver.events, systemPromptSha256 };
     } finally {
@@ -779,8 +782,8 @@ export class ChatEngine {
 
     try {
       const forceWorkerDataAnalysis = shouldForceWorkerDataAnalysis(userContent, attachments);
-      const hasActiveMandatorySkillPlanStream = Boolean(settings.systemPrompt?.includes('MANDATORY EXECUTION PLAN'));
-      const enforceMandatorySkillPlanStream = forceWorkerDataAnalysis && hasActiveMandatorySkillPlanStream;
+      const skillExecutionContractsStream = extractSkillExecutionContractsFromPrompt(settings.systemPrompt);
+      const hasActiveMandatorySkillPlanStream = skillExecutionContractsStream.length > 0;
       const forceWorkerRequirement = await this.getPolicyPromptTemplate(
         POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
         FORCED_WORKER_REQUIREMENT,
@@ -866,7 +869,7 @@ export class ChatEngine {
       }
 
     if (forceWorkerDataAnalysis) {
-      const guarded = await this.runWithCseSuccessGuard(agent, ctx, messages, routedGoal, true, enforceMandatorySkillPlanStream);
+      const guarded = await this.runWithCseSuccessGuard(agent, ctx, messages, routedGoal, true, skillExecutionContractsStream);
       await this.writeSseEvent(res, { type: 'text', text: guarded.output });
       for (const step of guarded.steps) {
         await this.writeSseEvent(res, {

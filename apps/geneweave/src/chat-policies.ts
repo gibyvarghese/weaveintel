@@ -20,7 +20,7 @@ export const SUPERVISOR_CODE_EXECUTION_POLICY = [
   'You have direct access to `cse_run_code` — a tool that executes code in a real isolated Docker container.',
   'Execution strategy by task type:',
   '- Simple code-run requests (no attached dataset): call `cse_run_code` directly from supervisor.',
-  '- Dataset/file analysis requests (attachments, CSV/JSON/XLSX/Parquet, or "analyze this file"): delegate to `code_executor` first so it can use `cse_run_data_analysis`, then to `analyst` for result verification. Do NOT call `cse_run_data_analysis` directly from supervisor. EXCEPTION: if an active skill provides a MANDATORY EXECUTION PLAN, follow that plan exactly — it overrides this default 2-step pattern.',
+  '- Dataset/file analysis requests (attachments, CSV/JSON/XLSX/Parquet, or "analyze this file"): delegate to `code_executor` first so it can use `cse_run_data_analysis`, then to `analyst` for result verification. Do NOT call `cse_run_data_analysis` directly from supervisor. EXCEPTION: if an active skill defines its own execution plan in its instructions, follow that plan exactly — it overrides this default 2-step pattern.',
   '- Data retrieval + code analysis requests (user asks to fetch data from a specialist AND run code/Python on it): use SEQUENTIAL multi-worker delegation — (1) delegate to the data specialist worker first to retrieve the data, (2) then delegate to `code_executor` with the retrieved data embedded in the task description so it can write and execute the analysis script in `cse_run_data_analysis`. Do NOT synthesize the final response until code_executor returns actual stdout.',
   '',
   'Attachment handling policy:',
@@ -53,7 +53,6 @@ export const POLICY_PROMPT_MULTI_WORKER_PIPELINE = 'Runtime: Multi Worker Sequen
 export const POLICY_PROMPT_ENTERPRISE_WORKER_SYSTEM = 'Runtime: Enterprise ServiceNow Worker System Prompt';
 export const POLICY_PROMPT_FORCED_WORKER_REQUIREMENT = 'Runtime: Forced Worker Data Analysis Requirement';
 export const POLICY_PROMPT_HARD_EXECUTION_GUARD = 'Runtime: Hard Execution Guard';
-export const POLICY_PROMPT_MANDATORY_SKILL_PLAN_GUARD = 'Runtime: Mandatory Skill Plan Guard';
 
 export const FORCED_WORKER_REQUIREMENT = 'WORKFLOW REQUIREMENT: This request requires actual code execution. Delegate to code_executor to generate and run Python in container against attached files and/or retrieved tool data. If execution fails, retry with corrected code. After successful execution, delegate to analyst to verify computed outputs and produce at least 3 concrete insights.';
 
@@ -61,16 +60,6 @@ export const HARD_EXECUTION_GUARD_POLICY = [
   'HARD EXECUTION GUARD: The answer is invalid unless you explicitly call delegate_to_worker(worker="code_executor") and produce a successful CSE execution (`cse_run_code` or `cse_run_data_analysis`). Do not execute code directly in supervisor for this workflow. Delegate to code_executor, run code successfully, verify output, then respond.',
   '',
   'HARD PRESENTATION GUARD: Do not reference sandbox filesystem paths like /workspace/output/*.png or return img_path values that point to container files. If charts are requested, return renderable structured JSON with chart labels/values and optional table data instead of local file paths. If a prior run produced blank or incomplete insights, fix the script and rerun until the computed insights are non-empty.',
-].join('\n');
-
-export const MANDATORY_SKILL_PLAN_GUARD_POLICY = [
-  'MANDATORY SKILL PLAN GUARD: You are currently operating under an active skill with a mandatory execution plan. Your answer is invalid unless you follow that plan exactly.',
-  '- Execute each required step as a separate `delegate_to_worker` call in order. Do not merge steps.',
-  '- Complete Step 1, Step 2, the detected track branch Steps 3-8, then Step 9, Step 10, and Final synthesis.',
-  '- Final response MUST include explicit labels "Section 1" through "Section 10".',
-  '- Executive Summary MUST include "Composite Health Score" with a grade.',
-  '- Recommendations MUST include at least three Priority-1 actions (label as "Priority-1" or "P1").',
-  '- If prior execution skipped steps, rerun from the first missing step and complete all remaining required steps before final response.',
 ].join('\n');
 
 export const ENTERPRISE_WORKER_SYSTEM_PROMPT = [

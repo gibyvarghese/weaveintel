@@ -56,6 +56,7 @@ export function registerSkillRoutes(
       enabled: body['enabled'] !== false ? 1 : 0,
       tool_policy_key: (body['tool_policy_key'] as string) ?? null,
       domain_sections: body['domain_sections'] ? JSON.stringify(body['domain_sections']) : null,
+      execution_contract: body['execution_contract'] ? JSON.stringify(body['execution_contract']) : null,
     });
     const skill = await db.getSkill(id);
     json(res, 201, { skill });
@@ -87,6 +88,7 @@ export function registerSkillRoutes(
     if (body['version'] !== undefined) fields['version'] = body['version'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
     if (body['domain_sections'] !== undefined) fields['domain_sections'] = body['domain_sections'] ? JSON.stringify(body['domain_sections']) : null;
+    if (body['execution_contract'] !== undefined) fields['execution_contract'] = body['execution_contract'] ? JSON.stringify(body['execution_contract']) : null;
 
     await db.updateSkill(params['id']!, fields as any);
     const skill = await db.getSkill(params['id']!);

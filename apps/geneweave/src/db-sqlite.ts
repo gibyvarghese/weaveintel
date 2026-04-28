@@ -1717,7 +1717,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO skills (id, name, description, category, trigger_patterns, instructions, tool_names, examples, tags, priority, version, tool_policy_key, enabled, supervisor_agent_id, domain_sections) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO skills (id, name, description, category, trigger_patterns, instructions, tool_names, examples, tags, priority, version, tool_policy_key, enabled, supervisor_agent_id, domain_sections, execution_contract) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       s.id,
       s.name,
@@ -1734,6 +1734,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       s.enabled,
       s.supervisor_agent_id ?? null,
       s.domain_sections ?? null,
+      s.execution_contract ?? null,
     );
   }
 
