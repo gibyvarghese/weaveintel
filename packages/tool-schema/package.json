@@ -1,0 +1,40 @@
+{
+  "name": "@weaveintel/tool-schema",
+  "version": "0.1.0",
+  "description": "Tool schema translation — canonical ToolSchema → provider-specific tool formats (OpenAI, Anthropic, Google) plus conversation-history re-mapping",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./adapters/openai": {
+      "import": "./dist/adapters/openai.js",
+      "types": "./dist/adapters/openai.d.ts"
+    },
+    "./adapters/anthropic": {
+      "import": "./dist/adapters/anthropic.js",
+      "types": "./dist/adapters/anthropic.d.ts"
+    },
+    "./adapters/google": {
+      "import": "./dist/adapters/google.js",
+      "types": "./dist/adapters/google.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@weaveintel/core": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

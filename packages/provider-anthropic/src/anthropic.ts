@@ -33,6 +33,7 @@ import {
   deadlineSignal,
 } from '@weaveintel/core';
 import { weaveRegisterModel } from '@weaveintel/models';
+import { anthropicAdapter, translate } from '@weaveintel/tool-schema';
 
 import type { AnthropicProviderOptions, AnthropicSSEEvent } from './shared.js';
 import {
@@ -223,11 +224,9 @@ function buildAnthropicTools(
   tools: ModelRequest['tools'],
 ): unknown[] | undefined {
   if (!tools?.length) return undefined;
-  return tools.map((t) => ({
-    name: t.name,
-    description: t.description,
-    input_schema: t.parameters,
-  }));
+  // Delegate to @weaveintel/tool-schema so the canonical → Anthropic
+  // translation lives alongside every other provider in one DB-driven place.
+  return translate(tools, anthropicAdapter);
 }
 
 function buildToolChoice(

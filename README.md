@@ -303,6 +303,7 @@ If you are building a production app today, prefer the tool governance and promp
 | [`@weaveintel/contracts`](packages/contracts) | Completion contracts with evidence bundles and completion reports |
 | [`@weaveintel/prompts`](packages/prompts) | Versioned prompt templates, frameworks/fragments, linting, output contracts, provider render adapters, DB-backed strategy runtime |
 | [`@weaveintel/routing`](packages/routing) | Smart model routing — health tracking, capability matching, weighted scoring, explainable decisions |
+| [`@weaveintel/tool-schema`](packages/tool-schema) | Canonical tool schema → provider-specific format translation (OpenAI / Anthropic / Google) plus conversation-history re-shaping for mid-conversation provider swaps |
 
 ### Knowledge & Retrieval
 

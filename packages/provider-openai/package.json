@@ -23,7 +23,8 @@
   },
   "dependencies": {
     "@weaveintel/core": "*",
-    "@weaveintel/models": "*"
+    "@weaveintel/models": "*",
+    "@weaveintel/tool-schema": "*"
   },
   "license": "MIT"
 }

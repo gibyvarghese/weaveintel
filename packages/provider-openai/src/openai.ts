@@ -28,6 +28,7 @@ import {
   deadlineSignal,
 } from '@weaveintel/core';
 import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/models';
+import { openaiAdapter, translate } from '@weaveintel/tool-schema';
 
 // ─── Configuration ───────────────────────────────────────────
 
@@ -317,15 +318,10 @@ function buildOpenAIMessages(messages: ModelRequest['messages']): unknown[] {
 
 function buildOpenAITools(tools: ModelRequest['tools']): unknown[] | undefined {
   if (!tools?.length) return undefined;
-  return tools.map((t) => ({
-    type: 'function',
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: t.parameters,
-      ...(t.strict ? { strict: true } : {}),
-    },
-  }));
+  // Delegate to the shared @weaveintel/tool-schema translator so the
+  // OpenAI tool-format definition lives in one DB-driven place. The output
+  // shape is byte-equivalent to the prior inline implementation.
+  return translate(tools, openaiAdapter);
 }
 
 interface OpenAIModelMetadata {

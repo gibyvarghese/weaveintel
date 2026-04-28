@@ -24,6 +24,7 @@
     { "path": "packages/contracts" },
     { "path": "packages/prompts" },
     { "path": "packages/routing" },
+    { "path": "packages/tool-schema" },
     { "path": "packages/cache" },
     { "path": "packages/identity" },
     { "path": "packages/tools" },
