@@ -15,6 +15,7 @@ import {
   PROMPT_CAPABILITY_ADMIN_TABS,
   CALLABLE_CAPABILITY_ADMIN_TABS,
   PLATFORM_CAPABILITY_ADMIN_TABS,
+  ROUTING_ADMIN_TABS,
 } from './admin/schema/index.js';
 
 // ─── Tab groups (sidebar navigation) ─────────────────────────
@@ -52,6 +53,14 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'task-policies', label: 'Task Policies' },
     { key: 'trigger-definitions', label: 'Triggers' },
     { key: 'replay-scenarios', label: 'Replay' },
+  ]},
+  { label: 'Routing', icon: '\uD83D\uDDFA\uFE0F', tabs: [
+    { key: 'task-types', label: 'Task Types' },
+    { key: 'capability-matrix', label: 'Capability Matrix' },
+    { key: 'task-type-tenant-overrides', label: 'Tenant Overrides' },
+    { key: 'provider-tool-adapters', label: 'Provider Adapters' },
+    { key: 'routing-simulator', label: 'Routing Simulator' },
+    { key: 'routing-decision-traces', label: 'Decision Traces' },
   ]},
   { label: 'Governance', icon: '\uD83D\uDEE1\uFE0F', tabs: [
     { key: 'guardrails', label: 'Guardrails' },
@@ -127,4 +136,5 @@ export const ADMIN_TABS = normalizeAdminTabsForModelDiscovery({
   ...PROMPT_CAPABILITY_ADMIN_TABS,
   ...CALLABLE_CAPABILITY_ADMIN_TABS,
   ...PLATFORM_CAPABILITY_ADMIN_TABS,
+  ...ROUTING_ADMIN_TABS,
 });

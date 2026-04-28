@@ -4,6 +4,8 @@ import { state } from './state.js';
 import { normalizeAdminPath } from './prompt-wizard-utils.js';
 import { resetPromptWizard } from './prompt-wizard-state.js';
 import { renderToolSimulationView } from './tool-simulation-ui.js';
+import { renderCapabilityMatrixView } from './capability-matrix-ui.js';
+import { renderRoutingSimulatorView } from './routing-simulator-ui.js';
 import { renderToolApprovalView } from './tool-approval-ui.js';
 import { renderMCPGatewayClientsView } from './mcp-gateway-clients-ui.js';
 import { renderMCPGatewayActivityView } from './mcp-gateway-activity-ui.js';
@@ -748,6 +750,18 @@ export function renderAdminView(options: {
 
   if (schema?.customView === 'mcp-gateway-activity') {
     right.appendChild(renderMCPGatewayActivityView({ render: options.render }));
+    page.appendChild(right);
+    return page;
+  }
+
+  if (schema?.customView === 'capability-matrix') {
+    right.appendChild(renderCapabilityMatrixView({ render: options.render }));
+    page.appendChild(right);
+    return page;
+  }
+
+  if (schema?.customView === 'routing-simulator') {
+    right.appendChild(renderRoutingSimulatorView({ render: options.render }));
     page.appendChild(right);
     return page;
   }

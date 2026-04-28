@@ -123,3 +123,4 @@ byte-equivalent to the prior inline implementations.
 | 1     | M11 — `provider_tool_adapters` DB table + 3 seed rows | ✅ shipped |
 | 2     | M9 — task-aware router + decision traces              | ✅ shipped |
 | **3** | **M12 — `@weaveintel/tool-schema` runtime translator + provider refactor** | ✅ **this package** |
+| 4     | M15 + M16 — task-aware routing admin API + UI (CRUD over task types, capability matrix heatmap, provider-tool adapters, tenant overrides, decision-trace log, simulator) | ✅ shipped (see [`examples/72-routing-admin-phase4.ts`](../../examples/72-routing-admin-phase4.ts)) |

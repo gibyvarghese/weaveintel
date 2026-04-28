@@ -19,3 +19,11 @@ export { registerSkillRoutes } from './skills.js';
 export { registerWorkerAgentRoutes } from './worker-agents.js';
 export { registerSupervisorAgentRoutes } from './agents.js';
 export { registerToolApprovalRequestRoutes } from './tool-approval-requests.js';
+
+// ── anyWeave Phase 4: Task-aware routing admin API + UI ─────
+export { registerTaskTypeRoutes } from './task-types.js';
+export { registerCapabilityScoreRoutes } from './capability-scores.js';
+export { registerProviderToolAdapterRoutes } from './provider-tool-adapters.js';
+export { registerTaskTypeTenantOverrideRoutes } from './task-type-tenant-overrides.js';
+export { registerRoutingDecisionTraceRoutes } from './routing-decision-traces.js';
+export { registerRoutingSimulatorRoutes } from './routing-simulator.js';

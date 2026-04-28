@@ -43,6 +43,12 @@ import {
   registerIdentityRuleRoutes,
   registerMemoryGovernanceRoutes,
   registerComplianceRuleRoutes,
+  registerTaskTypeRoutes,
+  registerCapabilityScoreRoutes,
+  registerProviderToolAdapterRoutes,
+  registerTaskTypeTenantOverrideRoutes,
+  registerRoutingDecisionTraceRoutes,
+  registerRoutingSimulatorRoutes,
 } from './admin/api/index.js';
 import {
   normalizePromptVariables,
@@ -1295,6 +1301,14 @@ export function registerAdminRoutes(
   registerWorkerAgentRoutes(router, db, adminHelpers);
   registerSupervisorAgentRoutes(router, db, adminHelpers);
   registerToolApprovalRequestRoutes(router, db, adminHelpers);
+
+  // ── anyWeave Phase 4: Task-aware routing admin API ───────
+  registerTaskTypeRoutes(router, db, adminHelpers);
+  registerCapabilityScoreRoutes(router, db, adminHelpers);
+  registerProviderToolAdapterRoutes(router, db, adminHelpers);
+  registerTaskTypeTenantOverrideRoutes(router, db, adminHelpers);
+  registerRoutingDecisionTraceRoutes(router, db, adminHelpers);
+  registerRoutingSimulatorRoutes(router, db, adminHelpers);
 
   // ── SGAP: Social Growth Admin Tables ─────────────────────
   registerSgapCrud({ routeKey: 'sg-brands', tableName: 'sg_brands', listKey: 'sg-brands', singularKey: 'sg-brand' });

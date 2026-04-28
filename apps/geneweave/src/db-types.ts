@@ -1792,11 +1792,33 @@ export interface DatabaseAdapter {
   // ─── anyWeave routing Phase 2: task-aware routing ─────────
   listTaskTypes(): Promise<TaskTypeDefinitionRow[]>;
   getTaskType(taskKey: string): Promise<TaskTypeDefinitionRow | null>;
+  getTaskTypeById(id: string): Promise<TaskTypeDefinitionRow | null>;
+  createTaskType(row: Omit<TaskTypeDefinitionRow, 'created_at' | 'updated_at'>): Promise<void>;
+  updateTaskType(id: string, fields: Partial<Omit<TaskTypeDefinitionRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteTaskType(id: string): Promise<void>;
+
   listCapabilityScores(opts?: { taskKey?: string; tenantId?: string | null; modelId?: string; provider?: string }): Promise<ModelCapabilityScoreRow[]>;
+  getCapabilityScore(id: string): Promise<ModelCapabilityScoreRow | null>;
+  upsertCapabilityScore(row: Omit<ModelCapabilityScoreRow, 'created_at' | 'updated_at'>): Promise<void>;
+  updateCapabilityScore(id: string, fields: Partial<Omit<ModelCapabilityScoreRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteCapabilityScore(id: string): Promise<void>;
+
   listProviderToolAdapters(): Promise<ProviderToolAdapterRow[]>;
   getProviderToolAdapter(provider: string): Promise<ProviderToolAdapterRow | null>;
+  getProviderToolAdapterById(id: string): Promise<ProviderToolAdapterRow | null>;
+  createProviderToolAdapter(row: Omit<ProviderToolAdapterRow, 'created_at' | 'updated_at'>): Promise<void>;
+  updateProviderToolAdapter(id: string, fields: Partial<Omit<ProviderToolAdapterRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteProviderToolAdapter(id: string): Promise<void>;
+
+  listTaskTypeTenantOverrides(opts?: { tenantId?: string; taskKey?: string }): Promise<TaskTypeTenantOverrideRow[]>;
+  getTaskTypeTenantOverride(id: string): Promise<TaskTypeTenantOverrideRow | null>;
+  createTaskTypeTenantOverride(row: Omit<TaskTypeTenantOverrideRow, 'created_at' | 'updated_at'>): Promise<void>;
+  updateTaskTypeTenantOverride(id: string, fields: Partial<Omit<TaskTypeTenantOverrideRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteTaskTypeTenantOverride(id: string): Promise<void>;
+
   insertRoutingDecisionTrace(row: Omit<RoutingDecisionTraceRow, 'decided_at'> & { decided_at?: string }): Promise<void>;
   listRoutingDecisionTraces(opts?: { tenantId?: string; agentId?: string; taskKey?: string; limit?: number; after?: string }): Promise<RoutingDecisionTraceRow[]>;
+  getRoutingDecisionTrace(id: string): Promise<RoutingDecisionTraceRow | null>;
 
   // ─── Admin: Workflow definitions ───────────────────────────
   createWorkflowDef(w: Omit<WorkflowDefRow, 'created_at' | 'updated_at'>): Promise<void>;

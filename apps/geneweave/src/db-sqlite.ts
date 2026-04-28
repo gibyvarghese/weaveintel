@@ -44,6 +44,7 @@ import type {
   TaskTypeDefinitionRow,
   ModelCapabilityScoreRow,
   RoutingDecisionTraceRow,
+  TaskTypeTenantOverrideRow,
 } from './db-types.js';
 
 import { newUUIDv7 } from './lib/uuid.js';
@@ -1308,6 +1309,180 @@ export class SQLiteAdapter implements DatabaseAdapter {
     const limit = Math.max(1, Math.min(opts?.limit ?? 100, 1000));
     const sql = `SELECT * FROM routing_decision_traces${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY decided_at DESC LIMIT ${limit}`;
     return this.d.prepare(sql).all(...vals) as RoutingDecisionTraceRow[];
+  }
+
+  async getRoutingDecisionTrace(id: string): Promise<RoutingDecisionTraceRow | null> {
+    return (this.d.prepare('SELECT * FROM routing_decision_traces WHERE id = ?').get(id) as RoutingDecisionTraceRow) ?? null;
+  }
+
+  // ─── anyWeave Phase 4: Task-aware routing CRUD ────────────
+
+  async getTaskTypeById(id: string): Promise<TaskTypeDefinitionRow | null> {
+    return (this.d.prepare('SELECT * FROM task_type_definitions WHERE id = ?').get(id) as TaskTypeDefinitionRow) ?? null;
+  }
+
+  async createTaskType(row: Omit<TaskTypeDefinitionRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO task_type_definitions
+        (id, task_key, display_name, category, description, output_modality,
+         default_strategy, default_weights, inference_hints, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      row.id, row.task_key, row.display_name, row.category, row.description ?? '',
+      row.output_modality, row.default_strategy,
+      row.default_weights ?? '{"cost":0.25,"speed":0.25,"quality":0.25,"capability":0.25}',
+      row.inference_hints ?? '{}',
+      row.enabled ?? 1,
+    );
+  }
+
+  async updateTaskType(id: string, fields: Partial<Omit<TaskTypeDefinitionRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE task_type_definitions SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteTaskType(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM task_type_definitions WHERE id = ?').run(id);
+  }
+
+  async getCapabilityScore(id: string): Promise<ModelCapabilityScoreRow | null> {
+    return (this.d.prepare('SELECT * FROM model_capability_scores WHERE id = ?').get(id) as ModelCapabilityScoreRow) ?? null;
+  }
+
+  async upsertCapabilityScore(row: Omit<ModelCapabilityScoreRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO model_capability_scores
+        (id, tenant_id, model_id, provider, task_key, quality_score,
+         supports_tools, supports_streaming, supports_thinking, supports_json_mode, supports_vision,
+         max_output_tokens, benchmark_source, raw_benchmark_score, is_active, last_evaluated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(tenant_id, model_id, provider, task_key) DO UPDATE SET
+         quality_score = excluded.quality_score,
+         supports_tools = excluded.supports_tools,
+         supports_streaming = excluded.supports_streaming,
+         supports_thinking = excluded.supports_thinking,
+         supports_json_mode = excluded.supports_json_mode,
+         supports_vision = excluded.supports_vision,
+         max_output_tokens = excluded.max_output_tokens,
+         benchmark_source = excluded.benchmark_source,
+         raw_benchmark_score = excluded.raw_benchmark_score,
+         is_active = excluded.is_active,
+         last_evaluated_at = excluded.last_evaluated_at,
+         updated_at = datetime('now')`,
+    ).run(
+      row.id, row.tenant_id ?? null, row.model_id, row.provider, row.task_key, row.quality_score,
+      row.supports_tools ?? 1, row.supports_streaming ?? 1, row.supports_thinking ?? 0,
+      row.supports_json_mode ?? 0, row.supports_vision ?? 0,
+      row.max_output_tokens ?? null, row.benchmark_source ?? null, row.raw_benchmark_score ?? null,
+      row.is_active ?? 1, row.last_evaluated_at ?? null,
+    );
+  }
+
+  async updateCapabilityScore(id: string, fields: Partial<Omit<ModelCapabilityScoreRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE model_capability_scores SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteCapabilityScore(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM model_capability_scores WHERE id = ?').run(id);
+  }
+
+  async getProviderToolAdapterById(id: string): Promise<ProviderToolAdapterRow | null> {
+    return (this.d.prepare('SELECT * FROM provider_tool_adapters WHERE id = ?').get(id) as ProviderToolAdapterRow) ?? null;
+  }
+
+  async createProviderToolAdapter(row: Omit<ProviderToolAdapterRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO provider_tool_adapters
+        (id, provider, display_name, adapter_module, tool_format, tool_call_response_format,
+         tool_result_format, system_prompt_location, name_validation_regex, max_tool_count, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      row.id, row.provider, row.display_name, row.adapter_module, row.tool_format,
+      row.tool_call_response_format, row.tool_result_format,
+      row.system_prompt_location ?? 'system_message',
+      row.name_validation_regex ?? '^[a-zA-Z0-9_-]{1,64}$',
+      row.max_tool_count ?? 128,
+      row.enabled ?? 1,
+    );
+  }
+
+  async updateProviderToolAdapter(id: string, fields: Partial<Omit<ProviderToolAdapterRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE provider_tool_adapters SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteProviderToolAdapter(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM provider_tool_adapters WHERE id = ?').run(id);
+  }
+
+  async listTaskTypeTenantOverrides(opts?: { tenantId?: string; taskKey?: string }): Promise<TaskTypeTenantOverrideRow[]> {
+    const where: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.tenantId) { where.push('tenant_id = ?'); vals.push(opts.tenantId); }
+    if (opts?.taskKey) { where.push('task_key = ?'); vals.push(opts.taskKey); }
+    const sql = `SELECT * FROM task_type_tenant_overrides${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY tenant_id, task_key`;
+    return this.d.prepare(sql).all(...vals) as TaskTypeTenantOverrideRow[];
+  }
+
+  async getTaskTypeTenantOverride(id: string): Promise<TaskTypeTenantOverrideRow | null> {
+    return (this.d.prepare('SELECT * FROM task_type_tenant_overrides WHERE id = ?').get(id) as TaskTypeTenantOverrideRow) ?? null;
+  }
+
+  async createTaskTypeTenantOverride(row: Omit<TaskTypeTenantOverrideRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO task_type_tenant_overrides
+        (id, tenant_id, task_key, weights, preferred_model_id, preferred_provider,
+         preferred_boost_pct, cost_ceiling_per_call, optimisation_strategy, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      row.id, row.tenant_id, row.task_key,
+      row.weights ?? null, row.preferred_model_id ?? null, row.preferred_provider ?? null,
+      row.preferred_boost_pct ?? 20,
+      row.cost_ceiling_per_call ?? null, row.optimisation_strategy ?? null,
+      row.enabled ?? 1,
+    );
+  }
+
+  async updateTaskTypeTenantOverride(id: string, fields: Partial<Omit<TaskTypeTenantOverrideRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE task_type_tenant_overrides SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteTaskTypeTenantOverride(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM task_type_tenant_overrides WHERE id = ?').run(id);
   }
 
   // ─── Admin: Workflow definitions ───────────────────────────
