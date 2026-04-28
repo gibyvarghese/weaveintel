@@ -918,4 +918,116 @@ describe('Phase 5 — multi-tenant MCP gateway clients', () => {
       await db.deleteMCPGatewayClient(client.id);
     }
   });
+
+  it("Phase 9 — rejects expired token with 401 and logs 'expired' outcome", async () => {
+    const plaintext = 'phase9-expired-token';
+    const client = {
+      id: 'client-phase9-expired',
+      name: 'phase9-expired',
+      description: null,
+      token_hash: hashGatewayToken(plaintext),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+      rate_limit_per_minute: null,
+      expires_at: new Date(Date.now() - 60_000).toISOString(),
+    };
+    await db.createMCPGatewayClient(client);
+    const handle = await startMultiTenantHttp(db);
+    try {
+      const r = await postJson(
+        `${handle.url}/api/mcp/gateway`,
+        { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+        { Authorization: `Bearer ${plaintext}` },
+      );
+      expect(r.status).toBe(401);
+      await new Promise((res) => setTimeout(res, 30));
+      const logs = await db.listMCPGatewayRequestLog({ clientId: client.id, limit: 50 });
+      const expired = logs.find((l) => l.outcome === 'expired');
+      expect(expired).toBeDefined();
+      expect(expired!.status_code).toBe(401);
+    } finally {
+      await handle.close();
+      await db.deleteMCPGatewayClient(client.id);
+    }
+  });
+
+  it('Phase 9 — rotateMCPGatewayClient stamps rotated_at and updates expires_at', async () => {
+    const client = {
+      id: 'client-phase9-rotate',
+      name: 'phase9-rotate',
+      description: null,
+      token_hash: hashGatewayToken('initial'),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+      rate_limit_per_minute: null,
+    };
+    await db.createMCPGatewayClient(client);
+    try {
+      const newExpiresIso = new Date(Date.now() + 30 * 86_400_000).toISOString();
+      await db.updateMCPGatewayClient(client.id, {
+        token_hash: hashGatewayToken('rotated'),
+        rotated_at: new Date().toISOString(),
+        expires_at: newExpiresIso,
+      });
+      const fresh = await db.getMCPGatewayClient(client.id);
+      expect(fresh).toBeTruthy();
+      expect(fresh!.rotated_at).toBeTruthy();
+      expect(new Date(fresh!.rotated_at!).getTime()).toBeGreaterThan(Date.now() - 60_000);
+      expect(fresh!.expires_at).toBe(newExpiresIso);
+      expect(fresh!.token_hash).toBe(hashGatewayToken('rotated'));
+    } finally {
+      await db.deleteMCPGatewayClient(client.id);
+    }
+  });
+
+  it('Phase 9 — listExpiringMCPGatewayClients returns only clients within window', async () => {
+    const a = {
+      id: 'client-phase9-expnone',
+      name: 'phase9-expnone',
+      description: null,
+      token_hash: hashGatewayToken('a'),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+      rate_limit_per_minute: null,
+    };
+    const b = {
+      id: 'client-phase9-exp1d',
+      name: 'phase9-exp1d',
+      description: null,
+      token_hash: hashGatewayToken('b'),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+      rate_limit_per_minute: null,
+      expires_at: new Date(Date.now() + 1 * 86_400_000).toISOString(),
+    };
+    const c = {
+      id: 'client-phase9-exp30d',
+      name: 'phase9-exp30d',
+      description: null,
+      token_hash: hashGatewayToken('c'),
+      allowed_classes: null,
+      audit_chat_id: null,
+      enabled: 1,
+      rate_limit_per_minute: null,
+      expires_at: new Date(Date.now() + 30 * 86_400_000).toISOString(),
+    };
+    await db.createMCPGatewayClient(a);
+    await db.createMCPGatewayClient(b);
+    await db.createMCPGatewayClient(c);
+    try {
+      const within7 = await db.listExpiringMCPGatewayClients(7 * 86_400);
+      const ids = within7.map((r) => r.id);
+      expect(ids).toContain(b.id);
+      expect(ids).not.toContain(a.id);
+      expect(ids).not.toContain(c.id);
+    } finally {
+      await db.deleteMCPGatewayClient(a.id);
+      await db.deleteMCPGatewayClient(b.id);
+      await db.deleteMCPGatewayClient(c.id);
+    }
+  });
 });

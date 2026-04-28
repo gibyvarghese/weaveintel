@@ -124,7 +124,7 @@ export interface MCPGatewayOptions {
     clientName: string | null;
     method: string | null;
     toolName: string | null;
-    outcome: 'ok' | 'rate_limited' | 'unauthorized' | 'disabled' | 'error';
+    outcome: 'ok' | 'rate_limited' | 'unauthorized' | 'disabled' | 'error' | 'expired';
     statusCode: number;
     durationMs: number;
     errorMessage: string | null;
@@ -270,34 +270,49 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
   /**
    * Resolve the bearer token against either the multi-tenant client store
    * (preferred when configured) or the single-token legacy path.
-   * Returns null when authentication fails for any reason.
+   * Returns `{ ok: false, reason: 'invalid' }` for every authentication
+   * failure mode and `{ ok: false, reason: 'expired' }` when a valid token
+   * is presented but its `expires_at` is in the past — the gateway logs
+   * this as a distinct outcome so operators can spot tokens needing
+   * rotation without confusing it with a forged-token attack.
    */
-  async function authenticate(req: IncomingMessage): Promise<{ client: MCPGatewayClientRow | null } | null> {
+  async function authenticate(req: IncomingMessage): Promise<
+    | { ok: true; client: MCPGatewayClientRow | null }
+    | { ok: false; reason: 'invalid' | 'expired'; client: MCPGatewayClientRow | null }
+  > {
     const presented = extractBearer(req);
-    if (!presented) return null;
+    if (!presented) return { ok: false, reason: 'invalid', client: null };
     if (clientResolver) {
       const hash = createHash('sha256').update(presented).digest('hex');
       let row: MCPGatewayClientRow | null = null;
       try {
         row = await clientResolver(hash);
       } catch {
-        return null;
+        return { ok: false, reason: 'invalid', client: null };
       }
       if (row) {
-        if (row.enabled !== 1) return null;
-        if (row.revoked_at) return null;
-        return { client: row };
+        if (row.enabled !== 1) return { ok: false, reason: 'invalid', client: row };
+        if (row.revoked_at) return { ok: false, reason: 'invalid', client: row };
+        // Phase 9: reject tokens past their expires_at. Comparing ISO 8601
+        // strings lexicographically is monotonic for the same timezone,
+        // and `new Date().toISOString()` always emits UTC so this is safe.
+        if (row.expires_at && row.expires_at <= new Date().toISOString()) {
+          return { ok: false, reason: 'expired', client: row };
+        }
+        return { ok: true, client: row };
       }
       // Resolver miss — fall through to the legacy single-token path so
       // operators upgrading from Phase 4 keep working until at least one
       // client row is registered.
     }
-    if (typeof token !== 'string' || token.length === 0) return null;
+    if (typeof token !== 'string' || token.length === 0) return { ok: false, reason: 'invalid', client: null };
     // Constant-time string compare to deny token-length oracles.
     const a = Buffer.from(presented);
     const b = Buffer.from(token);
-    if (a.length !== b.length) return null;
-    return timingSafeEqual(a, b) ? { client: null } : null;
+    if (a.length !== b.length) return { ok: false, reason: 'invalid', client: null };
+    return timingSafeEqual(a, b)
+      ? { ok: true, client: null }
+      : { ok: false, reason: 'invalid', client: null };
   }
 
   /**
@@ -390,7 +405,7 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
       } catch { /* best-effort */ }
       const log = (
         client: MCPGatewayClientRow | null,
-        outcome: 'ok' | 'rate_limited' | 'unauthorized' | 'disabled' | 'error',
+        outcome: 'ok' | 'rate_limited' | 'unauthorized' | 'disabled' | 'error' | 'expired',
         statusCode: number,
         errorMessage: string | null = null,
       ): void => {
@@ -408,7 +423,15 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
       };
       if (!enabled) { disabledResponse(res); log(null, 'disabled', 503); return; }
       const authResult = await authenticate(req);
-      if (!authResult) { unauthorized(res); log(null, 'unauthorized', 401); return; }
+      if (!authResult.ok) {
+        unauthorized(res);
+        // Distinct outcome for a token that resolved to a real client but
+        // was past its expires_at. The HTTP status remains 401 so clients
+        // do not need to handle a new code, but the audit log captures the
+        // expiry distinction.
+        log(authResult.client, authResult.reason === 'expired' ? 'expired' : 'unauthorized', 401);
+        return;
+      }
       // Phase 7 — per-client rate limit. Only applies to multi-tenant
       // requests where the client carries a non-null cap.
       if (

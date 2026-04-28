@@ -68,6 +68,21 @@ export function registerMCPGatewayClientRoutes(
     if (typeof rlRaw === 'number' && Number.isFinite(rlRaw) && rlRaw > 0) {
       rate_limit_per_minute = Math.floor(rlRaw);
     }
+    // Phase 9: optional expires_at. Accepts either an ISO 8601 timestamp
+    // string or a numeric "days from now" shortcut for ergonomics in the
+    // admin UI's create form.
+    const expRaw = body['expires_at'];
+    let expires_at: string | null = null;
+    if (typeof expRaw === 'string' && expRaw.length > 0) {
+      const parsed = new Date(expRaw);
+      if (Number.isNaN(parsed.getTime())) {
+        json(res, 400, { error: 'expires_at must be a valid ISO 8601 timestamp' });
+        return;
+      }
+      expires_at = parsed.toISOString();
+    } else if (typeof expRaw === 'number' && Number.isFinite(expRaw) && expRaw > 0) {
+      expires_at = new Date(Date.now() + Math.floor(expRaw) * 86_400_000).toISOString();
+    }
     await db.createMCPGatewayClient({
       id,
       name,
@@ -77,6 +92,8 @@ export function registerMCPGatewayClientRoutes(
       audit_chat_id: (body['audit_chat_id'] as string) ?? null,
       enabled: body['enabled'] === false ? 0 : 1,
       rate_limit_per_minute,
+      expires_at,
+      rotated_at: null,
     });
     const client = await db.getMCPGatewayClient(id);
     json(res, 201, { client, token: plaintext });
@@ -116,6 +133,26 @@ export function registerMCPGatewayClientRoutes(
         return;
       }
     }
+    // Phase 9: expires_at update. null clears the expiry, ISO string sets
+    // it, numeric "days from now" is a convenience shortcut for the UI.
+    if (body['expires_at'] !== undefined) {
+      const v = body['expires_at'];
+      if (v === null) {
+        fields['expires_at'] = null;
+      } else if (typeof v === 'string' && v.length > 0) {
+        const parsed = new Date(v);
+        if (Number.isNaN(parsed.getTime())) {
+          json(res, 400, { error: 'expires_at must be a valid ISO 8601 timestamp' });
+          return;
+        }
+        fields['expires_at'] = parsed.toISOString();
+      } else if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+        fields['expires_at'] = new Date(Date.now() + Math.floor(v) * 86_400_000).toISOString();
+      } else {
+        json(res, 400, { error: 'expires_at must be ISO timestamp, days-from-now number, or null' });
+        return;
+      }
+    }
     await db.updateMCPGatewayClient(params['id']!, fields as Parameters<DatabaseAdapter['updateMCPGatewayClient']>[1]);
     const client = await db.getMCPGatewayClient(params['id']!);
     json(res, 200, { client });
@@ -140,18 +177,62 @@ export function registerMCPGatewayClientRoutes(
   }, { auth: true, csrf: true });
 
   // ── Rotate action ──────────────────────────────────────────
-  // Mints a fresh bearer token, replaces the stored hash, and returns the
-  // new plaintext exactly once. The previous token immediately stops
-  // working on the next gateway request.
-  router.post('/api/admin/mcp-gateway-clients/:id/rotate', async (_req, res, params, auth) => {
+  // Mints a fresh bearer token, replaces the stored hash, stamps
+  // rotated_at, and (Phase 9) optionally extends expires_at via the body.
+  // Returns the new plaintext exactly once. The previous token immediately
+  // stops working on the next gateway request.
+  router.post('/api/admin/mcp-gateway-clients/:id/rotate', async (req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const existing = await db.getMCPGatewayClient(params['id']!);
     if (!existing) { json(res, 404, { error: 'MCP gateway client not found' }); return; }
+    // Body is optional. When provided it can carry expires_at to extend
+    // the token's lifetime atomically with the rotation.
+    let expiresAtUpdate: string | null | undefined = undefined;
+    try {
+      const raw = await readBody(req);
+      if (raw && raw.length > 0) {
+        const body = JSON.parse(raw) as Record<string, unknown>;
+        const v = body['expires_at'];
+        if (v === null) {
+          expiresAtUpdate = null;
+        } else if (typeof v === 'string' && v.length > 0) {
+          const parsed = new Date(v);
+          if (Number.isNaN(parsed.getTime())) {
+            json(res, 400, { error: 'expires_at must be a valid ISO 8601 timestamp' });
+            return;
+          }
+          expiresAtUpdate = parsed.toISOString();
+        } else if (typeof v === 'number' && Number.isFinite(v) && v > 0) {
+          expiresAtUpdate = new Date(Date.now() + Math.floor(v) * 86_400_000).toISOString();
+        }
+      }
+    } catch { /* empty body — proceed with rotation only */ }
     const plaintext = mintToken();
-    await db.updateMCPGatewayClient(params['id']!, {
+    const updateFields: Record<string, unknown> = {
       token_hash: hashGatewayToken(plaintext),
-    });
+      rotated_at: new Date().toISOString(),
+    };
+    if (expiresAtUpdate !== undefined) updateFields['expires_at'] = expiresAtUpdate;
+    await db.updateMCPGatewayClient(
+      params['id']!,
+      updateFields as Parameters<DatabaseAdapter['updateMCPGatewayClient']>[1],
+    );
     const client = await db.getMCPGatewayClient(params['id']!);
     json(res, 200, { client, token: plaintext });
   }, { auth: true, csrf: true });
+
+  // ── Phase 9: Expiring-soon listing ────────────────────────
+  // Surfaces enabled clients whose expires_at is within the operator-
+  // supplied window (default 7 days). Powers the admin dashboard nudge
+  // to rotate before traffic starts being rejected.
+  router.get('/api/admin/mcp-gateway-clients/expiring-soon', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const url = new URL(req.url ?? '/', 'http://localhost');
+    const daysParam = url.searchParams.get('days');
+    const days = daysParam !== null && Number.isFinite(Number(daysParam)) && Number(daysParam) > 0
+      ? Math.min(365, Math.floor(Number(daysParam)))
+      : 7;
+    const clients = await db.listExpiringMCPGatewayClients(days * 86_400);
+    json(res, 200, { window_days: days, clients });
+  }, { auth: true });
 }

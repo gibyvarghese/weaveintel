@@ -29,6 +29,9 @@ interface GatewayClient {
   last_used_at: string | null;
   revoked_at: string | null;
   rate_limit_per_minute: number | null;
+  // Phase 9: optional token lifetime + last rotation marker.
+  expires_at: string | null;
+  rotated_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -42,7 +45,7 @@ interface ClientsState {
   // when the operator dismisses the banner.
   revealedToken: { clientId: string; clientName: string; token: string; reason: 'created' | 'rotated' } | null;
   showCreateForm: boolean;
-  createForm: { name: string; description: string; auditChatId: string; allowedClasses: Set<string>; rateLimitPerMinute: string };
+  createForm: { name: string; description: string; auditChatId: string; allowedClasses: Set<string>; rateLimitPerMinute: string; expiresInDays: string };
   createError: string | null;
   acting: Record<string, 'rotating' | 'revoking' | 'deleting' | null>;
   actionError: Record<string, string>;
@@ -60,7 +63,7 @@ const clientsState: ClientsState = {
   initialized: false,
   revealedToken: null,
   showCreateForm: false,
-  createForm: { name: '', description: '', auditChatId: '', allowedClasses: new Set(), rateLimitPerMinute: '' },
+  createForm: { name: '', description: '', auditChatId: '', allowedClasses: new Set(), rateLimitPerMinute: '', expiresInDays: '' },
   createError: null,
   acting: {},
   actionError: {},
@@ -87,7 +90,7 @@ async function loadClients(render: () => void): Promise<void> {
 
 async function createClient(render: () => void): Promise<void> {
   clientsState.createError = null;
-  const { name, description, auditChatId, allowedClasses, rateLimitPerMinute } = clientsState.createForm;
+  const { name, description, auditChatId, allowedClasses, rateLimitPerMinute, expiresInDays } = clientsState.createForm;
   if (!name.trim()) {
     clientsState.createError = 'Name is required';
     render();
@@ -103,12 +106,24 @@ async function createClient(render: () => void): Promise<void> {
     }
     parsedRate = n;
   }
+  let parsedExpiryDays: number | null = null;
+  if (expiresInDays.trim()) {
+    const n = Number(expiresInDays);
+    if (!Number.isFinite(n) || n <= 0) {
+      clientsState.createError = 'Expires in days must be a positive number or empty';
+      render();
+      return;
+    }
+    parsedExpiryDays = n;
+  }
   try {
     const body: Record<string, unknown> = { name: name.trim() };
     if (description.trim()) body['description'] = description.trim();
     if (auditChatId.trim()) body['audit_chat_id'] = auditChatId.trim();
     if (allowedClasses.size > 0) body['allowed_classes'] = [...allowedClasses];
     if (parsedRate !== null) body['rate_limit_per_minute'] = parsedRate;
+    // Server accepts numeric "days from now" as a shortcut for expires_at.
+    if (parsedExpiryDays !== null) body['expires_at'] = parsedExpiryDays;
     const resp = await api.post('/api/admin/mcp-gateway-clients', body);
     if (!resp.ok) {
       const e = await resp.json().catch(() => ({})) as { error?: string };
@@ -122,7 +137,7 @@ async function createClient(render: () => void): Promise<void> {
       reason: 'created',
     };
     clientsState.showCreateForm = false;
-    clientsState.createForm = { name: '', description: '', auditChatId: '', allowedClasses: new Set(), rateLimitPerMinute: '' };
+    clientsState.createForm = { name: '', description: '', auditChatId: '', allowedClasses: new Set(), rateLimitPerMinute: '', expiresInDays: '' };
     await loadClients(render);
   } catch (err) {
     clientsState.createError = (err as Error).message;
@@ -210,6 +225,41 @@ function statusBadge(c: GatewayClient): HTMLElement {
   const fg = isRevoked ? '#c62828' : isEnabled ? '#1e7e34' : '#e65100';
   const bg = isRevoked ? '#fce8e6' : isEnabled ? '#e6f4ea' : '#fff3e0';
   return h('span', {
+    style: `display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:${fg};background:${bg};`,
+  }, text);
+}
+
+/** Phase 9: classify the remaining lifetime of a token's expires_at into
+ *  a coarse bucket the operator can scan at a glance.
+ *    expired (already past) → red
+ *    expiring (<= 7 days)   → orange
+ *    healthy (> 7 days)     → green
+ *    none (no expires_at)   → returns null (no badge rendered) */
+function expiryBadge(c: GatewayClient): HTMLElement | null {
+  if (!c.expires_at) return null;
+  const ms = Date.parse(c.expires_at);
+  if (!Number.isFinite(ms)) return null;
+  const remainingMs = ms - Date.now();
+  const remainingDays = Math.ceil(remainingMs / 86_400_000);
+  let text: string;
+  let fg: string;
+  let bg: string;
+  let testid: string;
+  if (remainingMs <= 0) {
+    text = 'EXPIRED';
+    fg = '#c62828'; bg = '#fce8e6';
+    testid = 'gateway-expiry-badge-expired';
+  } else if (remainingMs <= 7 * 86_400_000) {
+    text = `EXPIRES IN ${remainingDays}D`;
+    fg = '#e65100'; bg = '#fff3e0';
+    testid = 'gateway-expiry-badge-soon';
+  } else {
+    text = `${remainingDays}D LEFT`;
+    fg = '#1e7e34'; bg = '#e6f4ea';
+    testid = 'gateway-expiry-badge-ok';
+  }
+  return h('span', {
+    'data-testid': testid,
     style: `display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:${fg};background:${bg};`,
   }, text);
 }
@@ -327,6 +377,14 @@ function renderCreateForm(render: () => void): HTMLElement {
     onInput: (e: Event) => { f.rateLimitPerMinute = (e.target as HTMLInputElement).value; },
   }), 'Empty = no per-client cap. Tumbling 1-minute windows. Exceeding returns HTTP 429 with Retry-After.'));
 
+  wrap.appendChild(field('Expires in N days (optional)', h('input', {
+    type: 'number', min: '1', step: '1', value: f.expiresInDays,
+    placeholder: 'e.g. 30, 90',
+    'data-testid': 'gateway-client-expires-in-days',
+    style: inputStyle,
+    onInput: (e: Event) => { f.expiresInDays = (e.target as HTMLInputElement).value; },
+  }), 'Empty = no expiry. Tokens past this date are rejected with HTTP 401 and audit outcome "expired". Use Rotate to extend.'));
+
   if (clientsState.createError) {
     wrap.appendChild(h('div', { style: 'padding:8px;margin-bottom:10px;color:#c62828;background:#fce8e6;border-radius:4px;font-size:12px;' }, clientsState.createError));
   }
@@ -361,9 +419,10 @@ function renderClientRow(c: GatewayClient, render: () => void): HTMLElement {
       + (isRevoked ? 'opacity:0.7;' : ''),
   });
 
-  card.appendChild(h('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:6px;' },
+  card.appendChild(h('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;' },
     h('span', { style: 'font-weight:600;font-size:13px;color:var(--fg1);flex:1;' }, c.name),
     statusBadge(c),
+    expiryBadge(c) ?? undefined,
     h('span', { style: 'font-size:11px;color:var(--fg3);' }, `last used: ${formatDate(c.last_used_at)}`),
   ));
 
@@ -377,6 +436,8 @@ function renderClientRow(c: GatewayClient, render: () => void): HTMLElement {
     ['Allowed classes', allowed.length === 0 ? '(inherit defaults)' : allowed.join(', ')],
     ['Rate limit', c.rate_limit_per_minute ? `${c.rate_limit_per_minute}/min` : '—'],
     ['Token hash', c.token_hash.slice(0, 16) + '…'],
+    ['Expires at', c.expires_at ? formatDate(c.expires_at) : '(no expiry)'],
+    ['Last rotated', formatDate(c.rotated_at)],
     ['Created', formatDate(c.created_at)],
   ];
   if (c.revoked_at) metaItems.push(['Revoked', formatDate(c.revoked_at)]);
