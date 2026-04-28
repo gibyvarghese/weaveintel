@@ -1551,4 +1551,30 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   // for operators to compare benchmark vs lived-experience quality.
   safeExec(db, 'ALTER TABLE model_capability_scores ADD COLUMN production_signal_score REAL');
   safeExec(db, 'ALTER TABLE model_capability_scores ADD COLUMN signal_sample_count INTEGER NOT NULL DEFAULT 0');
+
+  // ─── anyWeave Task-Aware Routing — Phase 6: Production hardening ──
+  // Design doc: docs/ANYWEAVE_TASK_AWARE_ROUTING.md §13 Phase 6
+  // A/B routing experiments — route a percentage of traffic for a given
+  // (task_key, tenant_id) tuple from a baseline model to a candidate model.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS routing_experiments (
+      id                    TEXT PRIMARY KEY,
+      name                  TEXT NOT NULL,
+      description           TEXT,
+      tenant_id             TEXT,
+      task_key              TEXT,
+      baseline_provider     TEXT NOT NULL,
+      baseline_model_id     TEXT NOT NULL,
+      candidate_provider    TEXT NOT NULL,
+      candidate_model_id    TEXT NOT NULL,
+      traffic_pct           REAL NOT NULL DEFAULT 10,
+      status                TEXT NOT NULL DEFAULT 'active',
+      metadata              TEXT,
+      started_at            TEXT NOT NULL DEFAULT (datetime('now')),
+      ended_at              TEXT,
+      created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_experiments_lookup ON routing_experiments(status, task_key, tenant_id)');
 }

@@ -47,6 +47,7 @@ import type {
   RoutingCapabilitySignalRow,
   MessageFeedbackRow,
   RoutingSurfaceItemRow,
+  RoutingExperimentRow,
   TaskTypeTenantOverrideRow,
 } from './db-types.js';
 
@@ -1318,6 +1319,45 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return (this.d.prepare('SELECT * FROM routing_decision_traces WHERE id = ?').get(id) as RoutingDecisionTraceRow) ?? null;
   }
 
+  async aggregateCostByTask(opts?: { since?: string; until?: string; tenantId?: string }): Promise<Array<{
+    task_key: string | null;
+    selected_provider: string | null;
+    selected_model_id: string | null;
+    invocation_count: number;
+    total_cost_usd: number;
+    avg_cost_usd: number;
+    last_used: string | null;
+  }>> {
+    const where: string[] = ['estimated_cost_usd IS NOT NULL'];
+    const vals: unknown[] = [];
+    if (opts?.since) { where.push('decided_at >= ?'); vals.push(opts.since); }
+    if (opts?.until) { where.push('decided_at <= ?'); vals.push(opts.until); }
+    if (opts?.tenantId) { where.push('tenant_id = ?'); vals.push(opts.tenantId); }
+    const sql = `
+      SELECT
+        task_key,
+        selected_provider,
+        selected_model_id,
+        COUNT(*)               AS invocation_count,
+        SUM(estimated_cost_usd) AS total_cost_usd,
+        AVG(estimated_cost_usd) AS avg_cost_usd,
+        MAX(decided_at)         AS last_used
+      FROM routing_decision_traces
+      WHERE ${where.join(' AND ')}
+      GROUP BY task_key, selected_provider, selected_model_id
+      ORDER BY total_cost_usd DESC
+      LIMIT 1000`;
+    return this.d.prepare(sql).all(...vals) as Array<{
+      task_key: string | null;
+      selected_provider: string | null;
+      selected_model_id: string | null;
+      invocation_count: number;
+      total_cost_usd: number;
+      avg_cost_usd: number;
+      last_used: string | null;
+    }>;
+  }
+
   // ─── anyWeave Phase 5: Feedback loop CRUD ─────────────────
 
   async insertRoutingCapabilitySignal(row: Omit<RoutingCapabilitySignalRow, 'created_at'> & { created_at?: string }): Promise<void> {
@@ -1431,6 +1471,59 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (sets.length === 0) return;
     vals.push(id);
     this.d.prepare(`UPDATE routing_surface_items SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  // ─── anyWeave Phase 6: A/B Routing Experiments ────────────
+
+  async createRoutingExperiment(r: Omit<RoutingExperimentRow, 'created_at' | 'updated_at' | 'started_at' | 'ended_at'> & { started_at?: string; ended_at?: string | null }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO routing_experiments (
+         id, name, description, tenant_id, task_key,
+         baseline_provider, baseline_model_id,
+         candidate_provider, candidate_model_id,
+         traffic_pct, status, metadata, started_at, ended_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')), ?)`,
+    ).run(
+      r.id, r.name, r.description ?? null, r.tenant_id ?? null, r.task_key ?? null,
+      r.baseline_provider, r.baseline_model_id,
+      r.candidate_provider, r.candidate_model_id,
+      r.traffic_pct, r.status ?? 'active', r.metadata ?? null,
+      r.started_at ?? null, r.ended_at ?? null,
+    );
+  }
+
+  async getRoutingExperiment(id: string): Promise<RoutingExperimentRow | null> {
+    return (this.d.prepare('SELECT * FROM routing_experiments WHERE id = ?').get(id) as RoutingExperimentRow) ?? null;
+  }
+
+  async listRoutingExperiments(opts?: { status?: string; taskKey?: string; tenantId?: string | null }): Promise<RoutingExperimentRow[]> {
+    const where: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.status) { where.push('status = ?'); vals.push(opts.status); }
+    if (opts?.taskKey) { where.push('(task_key = ? OR task_key IS NULL)'); vals.push(opts.taskKey); }
+    if (opts && 'tenantId' in opts) {
+      if (opts.tenantId === null) where.push('tenant_id IS NULL');
+      else if (typeof opts.tenantId === 'string') { where.push('(tenant_id = ? OR tenant_id IS NULL)'); vals.push(opts.tenantId); }
+    }
+    const sql = `SELECT * FROM routing_experiments${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC`;
+    return this.d.prepare(sql).all(...vals) as RoutingExperimentRow[];
+  }
+
+  async updateRoutingExperiment(id: string, fields: Partial<Omit<RoutingExperimentRow, 'id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`);
+    vals.push(id);
+    this.d.prepare(`UPDATE routing_experiments SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteRoutingExperiment(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM routing_experiments WHERE id = ?').run(id);
   }
 
   // ─── anyWeave Phase 4: Task-aware routing CRUD ────────────

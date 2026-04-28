@@ -18,6 +18,9 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
   - New package: [`@weaveintel/live-agents`](packages/live-agents) — Framework core
   - New tools: [`@weaveintel/tools-webhook`](packages/tools-webhook) — External system integration via webhooks; [`@weaveintel/tools-filewatch`](packages/tools-filewatch) — File system monitoring
   - Examples: [examples/52-57-live-agents.ts](examples) (research, workflows, compression, admin) + [examples/58-live-agents-demo-e2e.ts](examples/58-live-agents-demo-e2e.ts)
+- **anyWeave Task-Aware Routing — Phase 6 (Production Hardening)** — Capability matrix in-memory cache (60s TTL, configurable via `GENEWEAVE_ROUTING_CACHE_TTL_MS`, p99 < 2 ms), `safeTranslate` circuit breaker around tool-schema translation (5 failures → 30 s cooldown, fail-open to no tools), A/B routing experiments (route N% of `(task_key, tenant)` traffic to a candidate model via `routing_experiments` table + admin CRUD), and cost telemetry aggregation by `task_key` exposed at `/api/admin/cost-by-task`.
+  - New admin tabs: **A/B Experiments**, **Cost by Task** (Routing group)
+  - New example: [examples/74-routing-phase6-production.ts](examples/74-routing-phase6-production.ts)
 - **Phase 6 Skill→Tool Policy Closure + Approval Workflow** — When a skill is activated in a chat session, its declared `toolPolicyKey` is automatically forwarded to the policy-enforced tool registry so every tool invocation runs under that skill's policy without any per-call wiring. Approval-required tools produce a `tool_approval_requests` DB row; operators resolve pending requests (approve/deny) via the admin API with full audit trail.
   - Admin API: `GET|POST /api/admin/tool-approval-requests[/:id/approve|deny]`
   - New example: [examples/34-skill-tool-policy-approval.ts](examples/34-skill-tool-policy-approval.ts)

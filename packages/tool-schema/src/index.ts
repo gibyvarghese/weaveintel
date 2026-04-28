@@ -9,7 +9,8 @@ export type {
   ValidationIssue,
 } from './types.js';
 
-export { translate, parseToolCall, validate } from './translator.js';
+export { translate, parseToolCall, validate, safeTranslate, resetTranslatorBreaker, getTranslatorBreakerSnapshot } from './translator.js';
+export type { SafeTranslateResult } from './translator.js';
 export { translateConversationHistory } from './history.js';
 export {
   AdapterRegistry,

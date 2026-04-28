@@ -592,6 +592,31 @@ export interface RoutingSurfaceItemRow {
   resolved_at: string | null;
 }
 
+/** Phase 6 — A/B routing experiment definitions. */
+export interface RoutingExperimentRow {
+  id: string;
+  name: string;
+  description: string | null;
+  /** null = applies to all tenants. */
+  tenant_id: string | null;
+  /** null = applies to all task keys. */
+  task_key: string | null;
+  baseline_provider: string;
+  baseline_model_id: string;
+  candidate_provider: string;
+  candidate_model_id: string;
+  /** 0–100. Percentage of matching traffic routed to candidate. */
+  traffic_pct: number;
+  /** 'active' | 'paused' | 'completed'. */
+  status: string;
+  /** JSON object — free-form experiment metadata. */
+  metadata: string | null;
+  started_at: string;
+  ended_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WorkflowDefRow {
   id: string;
   name: string;
@@ -1887,6 +1912,15 @@ export interface DatabaseAdapter {
   insertRoutingDecisionTrace(row: Omit<RoutingDecisionTraceRow, 'decided_at'> & { decided_at?: string }): Promise<void>;
   listRoutingDecisionTraces(opts?: { tenantId?: string; agentId?: string; taskKey?: string; limit?: number; after?: string }): Promise<RoutingDecisionTraceRow[]>;
   getRoutingDecisionTrace(id: string): Promise<RoutingDecisionTraceRow | null>;
+  aggregateCostByTask(opts?: { since?: string; until?: string; tenantId?: string }): Promise<Array<{
+    task_key: string | null;
+    selected_provider: string | null;
+    selected_model_id: string | null;
+    invocation_count: number;
+    total_cost_usd: number;
+    avg_cost_usd: number;
+    last_used: string | null;
+  }>>;
 
   // ─── anyWeave Phase 5: Feedback loop ───────────────────────
   insertRoutingCapabilitySignal(row: Omit<RoutingCapabilitySignalRow, 'created_at'> & { created_at?: string }): Promise<void>;
@@ -1904,6 +1938,13 @@ export interface DatabaseAdapter {
   listRoutingSurfaceItems(opts?: { status?: string; modelId?: string; provider?: string; taskKey?: string; limit?: number }): Promise<RoutingSurfaceItemRow[]>;
   getRoutingSurfaceItem(id: string): Promise<RoutingSurfaceItemRow | null>;
   updateRoutingSurfaceItem(id: string, fields: Partial<Omit<RoutingSurfaceItemRow, 'id' | 'created_at'>>): Promise<void>;
+
+  // ─── Phase 6: A/B Routing Experiments ─────────────────────
+  createRoutingExperiment(r: Omit<RoutingExperimentRow, 'created_at' | 'updated_at' | 'started_at' | 'ended_at'> & { started_at?: string; ended_at?: string | null }): Promise<void>;
+  getRoutingExperiment(id: string): Promise<RoutingExperimentRow | null>;
+  listRoutingExperiments(opts?: { status?: string; taskKey?: string; tenantId?: string | null }): Promise<RoutingExperimentRow[]>;
+  updateRoutingExperiment(id: string, fields: Partial<Omit<RoutingExperimentRow, 'id' | 'created_at'>>): Promise<void>;
+  deleteRoutingExperiment(id: string): Promise<void>;
 
   // ─── Admin: Workflow definitions ───────────────────────────
   createWorkflowDef(w: Omit<WorkflowDefRow, 'created_at' | 'updated_at'>): Promise<void>;

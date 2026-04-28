@@ -1620,5 +1620,28 @@ CREATE TABLE IF NOT EXISTS routing_surface_items (
 );
 CREATE INDEX IF NOT EXISTS idx_surface_status ON routing_surface_items(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_surface_model ON routing_surface_items(model_id, provider, task_key);
+
+-- anyWeave Phase 6: A/B routing experiments.
+-- For (task_key, tenant_id) tuples, route a percentage of traffic from
+-- baseline_model_id → candidate_model_id and compare downstream quality.
+CREATE TABLE IF NOT EXISTS routing_experiments (
+  id                    TEXT PRIMARY KEY,
+  name                  TEXT NOT NULL,
+  description           TEXT,
+  tenant_id             TEXT,
+  task_key              TEXT,
+  baseline_provider     TEXT NOT NULL,
+  baseline_model_id     TEXT NOT NULL,
+  candidate_provider    TEXT NOT NULL,
+  candidate_model_id    TEXT NOT NULL,
+  traffic_pct           REAL NOT NULL DEFAULT 10,
+  status                TEXT NOT NULL DEFAULT 'active',
+  metadata              TEXT,
+  started_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  ended_at              TEXT,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at            TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_experiments_lookup ON routing_experiments(status, task_key, tenant_id);
 `;
 

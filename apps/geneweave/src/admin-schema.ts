@@ -64,6 +64,8 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'routing-capability-signals', label: 'Capability Signals' },
     { key: 'message-feedback', label: 'Message Feedback' },
     { key: 'routing-surface-items', label: 'Surface Items' },
+    { key: 'routing-experiments', label: 'A/B Experiments' },
+    { key: 'cost-by-task', label: 'Cost by Task' },
   ]},
   { label: 'Governance', icon: '\uD83D\uDEE1\uFE0F', tabs: [
     { key: 'guardrails', label: 'Guardrails' },

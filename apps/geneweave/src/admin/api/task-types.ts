@@ -1,6 +1,7 @@
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 import { newUUIDv7 } from '../../lib/uuid.js';
+import { getCapabilityMatrixCache } from '../../capability-matrix-cache.js';
 
 /**
  * Task Type Definitions admin routes (anyWeave Phase 4 / M15).
@@ -57,6 +58,7 @@ export function registerTaskTypeRoutes(
       enabled: body['enabled'] === false ? 0 : 1,
     });
     const taskType = await db.getTaskTypeById(id);
+    getCapabilityMatrixCache().invalidateTaskTypes();
     json(res, 201, { taskType });
   }, { auth: true, csrf: true });
 
@@ -81,6 +83,7 @@ export function registerTaskTypeRoutes(
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
     await db.updateTaskType(existing.id, fields as never);
     const taskType = await db.getTaskTypeById(existing.id);
+    getCapabilityMatrixCache().invalidateTaskTypes();
     json(res, 200, { taskType });
   }, { auth: true, csrf: true });
 
@@ -90,6 +93,7 @@ export function registerTaskTypeRoutes(
     const existing = (await db.getTaskTypeById(id)) ?? (await db.getTaskType(id));
     if (!existing) { json(res, 404, { error: 'Task type not found' }); return; }
     await db.deleteTaskType(existing.id);
+    getCapabilityMatrixCache().invalidateTaskTypes();
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 }

@@ -13,6 +13,8 @@ import { resolvePolicy } from '@weaveintel/cache';
 import { FALLBACK_PRICING } from './chat-runtime.js';
 import type { DatabaseAdapter } from './db.js';
 import { SqliteDecisionStore } from './sqlite-decision-store.js';
+import { getCapabilityMatrixCache } from './capability-matrix-cache.js';
+import { pickExperimentCandidate } from './routing-experiments.js';
 
 // ── Model routing ────────────────────────────────────────────
 
@@ -48,7 +50,7 @@ export async function routeModel(
   candidates: Array<{ id: string; provider: string }>,
   healthList: ModelHealth[],
   opts?: RouteModelOpts,
-): Promise<{ provider: string; modelId: string; taskKey?: string; inferenceSource?: string } | null> {
+): Promise<{ provider: string; modelId: string; taskKey?: string; inferenceSource?: string; experimentId?: string; experimentName?: string } | null> {
   try {
     const policies = await db.listRoutingPolicies();
     const active = policies.find(p => p.enabled);
@@ -61,8 +63,11 @@ export async function routeModel(
 
     if (routerCandidates.length === 0) return null;
 
-    // Load pricing & quality from DB (falls back to hardcoded if DB is empty)
-    const pricingRows = await db.listModelPricing();
+    // Load pricing & quality from DB (falls back to hardcoded if DB is empty).
+    // Phase 6: pricing/task-types/capability-scores all served from a 60 s TTL cache
+    // to keep the per-turn routing path on the cache-hit fast path.
+    const matrixCache = getCapabilityMatrixCache();
+    const pricingRows = await matrixCache.getModelPricing(db);
     const pricingMap = new Map(pricingRows.filter(r => r.enabled).map(r => [`${r.provider}:${r.model_id}`, r]));
 
     // Cost data from DB model_pricing table
@@ -93,7 +98,7 @@ export async function routeModel(
     const modalityMap = new Map<string, OutputModality>();
 
     try {
-      const taskTypes = await db.listTaskTypes();
+      const taskTypes = await matrixCache.getTaskTypes(db);
       for (const t of taskTypes) {
         if (!t.enabled) continue;
         let raw: Record<string, unknown> = {};
@@ -111,7 +116,7 @@ export async function routeModel(
     } catch { /* table missing → graceful no-op */ }
 
     try {
-      const scoreRows = await db.listCapabilityScores({ tenantId: opts?.tenantId ?? null });
+      const scoreRows = await matrixCache.getCapabilityScores(db, opts?.tenantId ?? null);
       capabilityRows = scoreRows.map(r => ({
         modelId: r.model_id,
         providerId: r.provider,
@@ -176,6 +181,31 @@ export async function routeModel(
         enabled: true,
       },
     );
+
+    // Phase 6: A/B experiment override. If an active experiment matches the
+    // resolved task_key + tenant tuple and the random draw lands inside its
+    // traffic_pct window, swap the provider/model to the candidate.
+    const decisionTaskKey = decision.taskMeta?.taskKey ?? opts?.taskType ?? null;
+    const experimentPick = await pickExperimentCandidate(db, {
+      taskKey: decisionTaskKey ?? undefined,
+      tenantId: opts?.tenantId ?? null,
+    });
+
+    if (experimentPick) {
+      // Only swap if the candidate model is in the eligible candidate set
+      // (skipping silently if the candidate isn't actually deployed).
+      const candidateExists = candidates.some(c => c.id === experimentPick.selectedModelId && c.provider === experimentPick.selectedProvider);
+      if (candidateExists) {
+        return {
+          provider: experimentPick.selectedProvider,
+          modelId: experimentPick.selectedModelId,
+          taskKey: decision.taskMeta?.taskKey,
+          inferenceSource: decision.taskMeta?.inferenceSource,
+          experimentId: experimentPick.experimentId,
+          experimentName: experimentPick.experimentName,
+        };
+      }
+    }
 
     return {
       provider: decision.providerId,

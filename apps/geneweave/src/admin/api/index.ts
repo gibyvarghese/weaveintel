@@ -32,3 +32,7 @@ export { registerRoutingSimulatorRoutes } from './routing-simulator.js';
 export { registerRoutingCapabilitySignalRoutes } from './routing-capability-signals.js';
 export { registerMessageFeedbackRoutes } from './message-feedback.js';
 export { registerRoutingSurfaceItemRoutes } from './routing-surface-items.js';
+
+// ── anyWeave Phase 6: Production hardening ──────────────────
+export { registerRoutingExperimentRoutes } from './routing-experiments.js';
+export { registerCostByTaskRoutes } from './cost-by-task.js';

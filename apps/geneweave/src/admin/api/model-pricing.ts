@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 import { syncModelPricing } from '../../pricing-sync.js';
+import { getCapabilityMatrixCache } from '../../capability-matrix-cache.js';
 
 /**
  * Register model pricing admin routes
@@ -50,6 +51,7 @@ export function registerModelPricingRoutes(
       source: 'manual', last_synced_at: null, enabled: body['enabled'] !== false ? 1 : 0,
     });
     const pricing = await db.getModelPricing(id);
+    getCapabilityMatrixCache().invalidateModelPricing();
     json(res, 201, { pricing });
   }, { auth: true, csrf: true });
 
@@ -71,12 +73,14 @@ export function registerModelPricingRoutes(
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
     await db.updateModelPricing(params['id']!, fields as any);
     const pricing = await db.getModelPricing(params['id']!);
+    getCapabilityMatrixCache().invalidateModelPricing();
     json(res, 200, { pricing });
   }, { auth: true, csrf: true });
 
   router.del('/api/admin/model-pricing/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     await db.deleteModelPricing(params['id']!);
+    getCapabilityMatrixCache().invalidateModelPricing();
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 

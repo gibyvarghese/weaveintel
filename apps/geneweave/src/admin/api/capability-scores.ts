@@ -1,6 +1,7 @@
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 import { newUUIDv7 } from '../../lib/uuid.js';
+import { getCapabilityMatrixCache } from '../../capability-matrix-cache.js';
 
 /**
  * Model Capability Scores admin routes (anyWeave Phase 4 / M15).
@@ -107,6 +108,7 @@ export function registerCapabilityScoreRoutes(
       modelId: String(body['model_id']),
       provider: String(body['provider']),
     });
+    getCapabilityMatrixCache().invalidateCapabilityScores();
     json(res, 201, { capabilityScore: matches[0] ?? null });
   }, { auth: true, csrf: true });
 
@@ -129,12 +131,14 @@ export function registerCapabilityScoreRoutes(
     }
     await db.updateCapabilityScore(params['id']!, fields as never);
     const capabilityScore = await db.getCapabilityScore(params['id']!);
+    getCapabilityMatrixCache().invalidateCapabilityScores();
     json(res, 200, { capabilityScore });
   }, { auth: true, csrf: true });
 
   router.del('/api/admin/capability-scores/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     await db.deleteCapabilityScore(params['id']!);
+    getCapabilityMatrixCache().invalidateCapabilityScores();
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 }
