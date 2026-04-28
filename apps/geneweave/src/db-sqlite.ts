@@ -1553,10 +1553,16 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   // ─── Phase 5: MCP Gateway Clients ──────────────────────────
 
-  async createMCPGatewayClient(c: Omit<import('./db-types.js').MCPGatewayClientRow, 'created_at' | 'updated_at' | 'last_used_at' | 'revoked_at'>): Promise<void> {
+  async createMCPGatewayClient(c: Omit<import('./db-types.js').MCPGatewayClientRow, 'created_at' | 'updated_at' | 'last_used_at' | 'revoked_at' | 'expires_at' | 'rotated_at'> & Partial<Pick<import('./db-types.js').MCPGatewayClientRow, 'expires_at' | 'rotated_at'>>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO mcp_gateway_clients (id, name, description, token_hash, allowed_classes, audit_chat_id, enabled, rate_limit_per_minute) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(c.id, c.name, c.description ?? null, c.token_hash, c.allowed_classes ?? null, c.audit_chat_id ?? null, c.enabled, c.rate_limit_per_minute ?? null);
+      `INSERT INTO mcp_gateway_clients (id, name, description, token_hash, allowed_classes, audit_chat_id, enabled, rate_limit_per_minute, expires_at, rotated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      c.id, c.name, c.description ?? null, c.token_hash,
+      c.allowed_classes ?? null, c.audit_chat_id ?? null, c.enabled,
+      c.rate_limit_per_minute ?? null,
+      c.expires_at ?? null,
+      c.rotated_at ?? null,
+    );
   }
 
   async getMCPGatewayClient(id: string): Promise<import('./db-types.js').MCPGatewayClientRow | null> {
@@ -1602,6 +1608,23 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteMCPGatewayClient(id: string): Promise<void> {
     this.d.prepare('DELETE FROM mcp_gateway_clients WHERE id = ?').run(id);
+  }
+
+  /** Phase 9: list enabled, non-revoked clients whose token expires within
+   *  the given window. Uses ISO string comparison which is lexicographically
+   *  monotonic for SQLite's `datetime('now')` format. */
+  async listExpiringMCPGatewayClients(windowSeconds: number): Promise<import('./db-types.js').MCPGatewayClientRow[]> {
+    const nowIso = new Date().toISOString();
+    const cutoffIso = new Date(Date.now() + windowSeconds * 1000).toISOString();
+    return this.d.prepare(`
+      SELECT * FROM mcp_gateway_clients
+      WHERE enabled = 1
+        AND revoked_at IS NULL
+        AND expires_at IS NOT NULL
+        AND expires_at >= ?
+        AND expires_at <= ?
+      ORDER BY expires_at ASC
+    `).all(nowIso, cutoffIso) as import('./db-types.js').MCPGatewayClientRow[];
   }
 
   /** Phase 7: per-client gateway rate-limit. Atomic upsert + check inside
@@ -1694,7 +1717,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO skills (id, name, description, category, trigger_patterns, instructions, tool_names, examples, tags, priority, version, tool_policy_key, enabled, supervisor_agent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO skills (id, name, description, category, trigger_patterns, instructions, tool_names, examples, tags, priority, version, tool_policy_key, enabled, supervisor_agent_id, domain_sections) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       s.id,
       s.name,
@@ -1710,6 +1733,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       s.tool_policy_key ?? null,
       s.enabled,
       s.supervisor_agent_id ?? null,
+      s.domain_sections ?? null,
     );
   }
 
@@ -4134,9 +4158,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
         enabled: dataAnalysisSkill.enabled === false ? 0 : 1,
         tool_policy_key: dataAnalysisSkill.toolPolicyKey ?? null,
       };
-      if (existingSkill) {
-        await this.updateSkill(existingSkill.id, skillFields);
-      } else {
+      // Preserve operator-managed skill customizations; only ensure the built-in
+      // row exists when absent.
+      if (!existingSkill) {
         await this.createSkill({ id: dataAnalysisSkill.id, ...skillFields });
       }
     }

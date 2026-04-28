@@ -64,6 +64,19 @@ export interface SkillOutputContract {
   readonly schemaJson?: string;
 }
 
+/**
+ * A domain-scoped subsection of a skill playbook (e.g. sales/finance/operations).
+ * Each section is treated as an optional, query-scorable PromptSection at render
+ * time so query-aware filtering can pick only the domains relevant to the user
+ * input rather than concatenating the entire playbook into the system prompt.
+ */
+export interface SkillDomainSection {
+  readonly key: string;
+  readonly label?: string;
+  readonly content: string;
+  readonly tags?: readonly string[];
+}
+
 export interface SkillDefinition {
   readonly id: string;
   readonly name: string;
@@ -99,6 +112,14 @@ export interface SkillDefinition {
   readonly priority?: number;
   /** Phase 6: key of the tool_policies row that governs tool calls while this skill is active */
   readonly toolPolicyKey?: string;
+  /**
+   * Optional domain-scoped sub-playbooks. When set, each section is rendered
+   * as an optional PromptSection candidate so query-aware cosine relevance
+   * can keep only the domains matching the user's input (e.g. only the
+   * "sales" section for a sales-data query) instead of merging the entire
+   * playbook into the supervisor system prompt.
+   */
+  readonly domainSections?: readonly SkillDomainSection[];
 }
 
 export interface SkillExtensionOverlay {
@@ -389,25 +410,38 @@ function triggerPatternBoost(query: string, skill: SkillDefinition): number {
   const patterns = skill.triggerPatterns ?? [];
   if (!patterns.length) return 0;
 
-  const normalizedQuery = query.toLowerCase();
-  let matches = 0;
-  for (const pattern of patterns) {
-    const phrase = pattern.trim().toLowerCase();
-    if (!phrase) continue;
-    if (normalizedQuery.includes(phrase)) matches += 1;
-  }
-  if (matches === 0) return 0;
-  // Up to +0.25 for matching trigger phrases declared by the operator.
-  return Math.min(0.25, 0.12 + matches * 0.05);
+  // Treat trigger patterns as a semantic hint corpus (not exact phrase gates).
+  const queryTf = termFrequency(tokenize(query));
+  const patternDoc = patterns.join(' ');
+  const patternTf = termFrequency(tokenize(patternDoc));
+  const similarity = cosineSimilarity(queryTf, patternTf);
+
+  if (similarity <= 0) return 0;
+  return Math.min(0.2, similarity * 0.35);
 }
 
 function semanticScore(query: string, skill: SkillDefinition): number {
   const queryTf = termFrequency(tokenize(query));
   const docTf = termFrequency(tokenize(skillSemanticDocument(skill)));
+  const intentTf = termFrequency(tokenize([
+    skill.name,
+    skill.summary,
+    skill.purpose,
+    skill.whenToUse,
+    skill.whenNotToUse,
+    (skill.tags ?? []).join(' '),
+  ].filter(Boolean).join('\n')));
+  const nameTf = termFrequency(tokenize(skill.name));
+
   const base = cosineSimilarity(queryTf, docTf);
+  const intent = cosineSimilarity(queryTf, intentTf);
+  const name = cosineSimilarity(queryTf, nameTf);
+
+  // Favor high-signal skill metadata (name + intent sections) over raw instruction length.
+  const weighted = (base * 0.5) + (intent * 0.35) + (name * 0.15);
   const priorityBoost = Math.min(0.15, (skill.priority ?? 0) * 0.01);
   const triggerBoost = triggerPatternBoost(query, skill);
-  return Math.min(1, base + priorityBoost + triggerBoost);
+  return Math.min(1, weighted + priorityBoost + triggerBoost);
 }
 
 function semanticRationale(skill: SkillDefinition, query: string): string {
@@ -424,9 +458,50 @@ function sectionLabel(title: string, value: string | undefined): string | undefi
   return `### ${title}\n${text}`;
 }
 
+interface PromptSection {
+  title: string;
+  value: string;
+  mandatory?: boolean;
+}
+
+function sectionRelevanceScore(query: string | undefined, value: string): number {
+  if (!query?.trim()) return 1;
+  const queryTf = termFrequency(tokenize(query));
+  const valueTf = termFrequency(tokenize(value));
+  return cosineSimilarity(queryTf, valueTf);
+}
+
+function selectRelevantSections(
+  sections: PromptSection[],
+  query: string | undefined,
+  mode: SkillInvocationMode,
+): PromptSection[] {
+  if (!query?.trim()) return sections;
+
+  const scored = sections.map((section) => ({
+    section,
+    score: sectionRelevanceScore(query, section.value),
+  }));
+
+  const mandatory = scored
+    .filter((item) => item.section.mandatory)
+    .map((item) => item.section);
+
+  const optionalPool = scored
+    .filter((item) => !item.section.mandatory)
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.section);
+
+  const optionalLimit = mode === 'tool_assisted' || mode === 'side_effect_eligible' ? 4 : 5;
+  const optional = optionalPool.slice(0, optionalLimit);
+
+  return [...mandatory, ...optional];
+}
+
 export function buildSkillInvocationPrompt(
   activation: SkillActivationResult,
   mode: SkillInvocationMode,
+  query?: string,
 ): string {
   if (!activation.selected.length) return '';
 
@@ -434,28 +509,58 @@ export function buildSkillInvocationPrompt(
 
   for (const match of activation.selected) {
     const skill = match.skill;
-    const sections: Array<string | undefined> = [
-      `### ${skill.name}`,
-      sectionLabel('Summary', skill.summary),
-      sectionLabel('Purpose', skill.purpose),
-      sectionLabel('When To Use', skill.whenToUse),
-      sectionLabel('When Not To Use', skill.whenNotToUse),
-    ];
+    const sections: Array<string | undefined> = [`### ${skill.name}`];
+    const candidates: PromptSection[] = [];
+
+    const pushCandidate = (title: string, value: string | undefined, mandatory = false): void => {
+      const text = value?.trim();
+      if (!text) return;
+      candidates.push({ title, value: text, mandatory });
+    };
+
+    pushCandidate('Summary', skill.summary, true);
+    pushCandidate('Purpose', skill.purpose);
+    pushCandidate('When To Use', skill.whenToUse, true);
+    pushCandidate('When Not To Use', skill.whenNotToUse);
 
     if (mode === 'advisory' || mode === 'reasoning_support') {
-      sections.push(sectionLabel('Reasoning Guidance', skill.reasoningGuidance));
-      sections.push(sectionLabel('Execution Guidance', skill.executionGuidance));
+      pushCandidate('Reasoning Guidance', skill.reasoningGuidance, true);
+      pushCandidate('Execution Guidance', skill.executionGuidance, true);
     }
 
     if (mode === 'extraction' || mode === 'structured_output' || mode === 'tool_assisted' || mode === 'side_effect_eligible') {
-      sections.push(sectionLabel('Required Context', skill.requiredContext));
-      sections.push(sectionLabel('Output Guidance', skill.outputGuidance));
-      sections.push(sectionLabel('Completion Guidance', skill.completionGuidance));
-      sections.push(sectionLabel('Ambiguity Guidance', skill.ambiguityGuidance));
-      sections.push(sectionLabel('Failure Guidance', skill.failureGuidance));
+      pushCandidate('Execution Guidance', skill.executionGuidance, true);
+      pushCandidate('Required Context', skill.requiredContext);
+      pushCandidate('Output Guidance', skill.outputGuidance, true);
+      pushCandidate('Completion Guidance', skill.completionGuidance, true);
+      pushCandidate('Ambiguity Guidance', skill.ambiguityGuidance);
+      pushCandidate('Failure Guidance', skill.failureGuidance);
       if (skill.completionContract) {
-        sections.push(sectionLabel('Completion Contract', skill.completionContract.narrative));
+        pushCandidate('Completion Contract', skill.completionContract.narrative);
       }
+    }
+
+    // Domain-scoped sub-playbooks: each becomes an optional, query-scorable
+    // section. Tags + label + key are folded into the scoring text so a
+    // sales-only query reliably surfaces a section tagged ["sales"].
+    if (skill.domainSections?.length) {
+      for (const ds of skill.domainSections) {
+        const text = ds.content?.trim();
+        if (!text) continue;
+        const label = `Domain: ${ds.label ?? ds.key}`;
+        const tagHint = ds.tags?.length ? `\n[tags: ${ds.tags.join(', ')}]` : '';
+        const keyHint = `\n[domain_key: ${ds.key}]`;
+        candidates.push({
+          title: label,
+          // Prefix metadata so cosine relevance picks up the domain key/tags.
+          value: `${tagHint}${keyHint}\n${text}`.trim(),
+          mandatory: false,
+        });
+      }
+    }
+
+    for (const selectedSection of selectRelevantSections(candidates, query, mode)) {
+      sections.push(sectionLabel(selectedSection.title, selectedSection.value));
     }
 
     if (mode === 'tool_assisted' || mode === 'side_effect_eligible') {
@@ -491,6 +596,7 @@ export function applySkillsToPrompt(
   basePrompt: string | undefined,
   matches: SkillMatch[],
   mode: SkillInvocationMode = 'reasoning_support',
+  query?: string,
 ): string | undefined {
   const activation: SkillActivationResult = {
     considered: matches,
@@ -498,7 +604,7 @@ export function applySkillsToPrompt(
     rejected: [],
     mode,
   };
-  const skillBlock = buildSkillInvocationPrompt(activation, mode);
+  const skillBlock = buildSkillInvocationPrompt(activation, mode, query);
   if (!skillBlock && !basePrompt) return undefined;
   if (!skillBlock) return basePrompt;
   if (!basePrompt) return skillBlock;
@@ -941,6 +1047,8 @@ export interface SkillRow {
   version: string;
   /** Phase 6: tool policy key that overrides the global tool policy while this skill is active */
   tool_policy_key: string | null;
+  /** Optional JSON array of {key,label?,content,tags?} domain-scoped sub-playbooks. */
+  domain_sections?: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -978,11 +1086,36 @@ function safeParseExamples(raw: string | null | undefined): SkillExample[] {
   }
 }
 
+function safeParseDomainSections(raw: string | null | undefined): SkillDomainSection[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item) => item && typeof item === 'object')
+      .map((item) => {
+        const rec = item as Record<string, unknown>;
+        const key = typeof rec['key'] === 'string' ? rec['key'].trim() : '';
+        const content = typeof rec['content'] === 'string' ? rec['content'] : '';
+        if (!key || !content.trim()) return null;
+        const label = typeof rec['label'] === 'string' ? rec['label'] : undefined;
+        const tags = Array.isArray(rec['tags'])
+          ? (rec['tags'] as unknown[]).filter((t): t is string => typeof t === 'string')
+          : undefined;
+        return { key, label, content, tags } as SkillDomainSection;
+      })
+      .filter((item): item is SkillDomainSection => item !== null);
+  } catch {
+    return [];
+  }
+}
+
 export function skillFromRow(row: SkillRow): SkillDefinition {
   const examples = safeParseExamples(row.examples);
   const tools = safeParseStringArray(row.tool_names);
   const triggerPatterns = safeParseStringArray(row.trigger_patterns);
   const tags = safeParseStringArray(row.tags);
+  const domainSections = safeParseDomainSections((row as { domain_sections?: string | null }).domain_sections);
 
   return defineSkill({
     id: row.id,
@@ -1007,6 +1140,7 @@ export function skillFromRow(row: SkillRow): SkillDefinition {
       requiredEvidence: ['evidence', 'confidence'],
       ambiguityBehavior: 'Use explicit uncertainty language when context is incomplete.',
     },
+    domainSections: domainSections.length ? domainSections : undefined,
   });
 }
 

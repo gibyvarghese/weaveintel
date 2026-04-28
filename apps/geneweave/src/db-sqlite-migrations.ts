@@ -1279,6 +1279,13 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   // existing databases.
   safeExec(db, `ALTER TABLE mcp_gateway_clients ADD COLUMN rate_limit_per_minute INTEGER`);
 
+  // Phase 9: token expiry + rotation tracking. expires_at NULL = no expiry.
+  // rotated_at NULL = never rotated since creation. Both idempotent via
+  // safeExec.
+  safeExec(db, `ALTER TABLE mcp_gateway_clients ADD COLUMN expires_at TEXT`);
+  safeExec(db, `ALTER TABLE mcp_gateway_clients ADD COLUMN rotated_at TEXT`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gateway_clients_expires ON mcp_gateway_clients(expires_at)`);
+
   // Phase 7: tumbling 1-minute buckets for per-client rate limiting. Mirrors
   // the tool_rate_limit_buckets pattern but scoped to gateway clients only.
   safeExec(db, `
@@ -1314,4 +1321,10 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gw_req_log_created ON mcp_gateway_request_log(created_at DESC)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gw_req_log_client ON mcp_gateway_request_log(client_id, created_at DESC)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mcp_gw_req_log_outcome ON mcp_gateway_request_log(outcome, created_at DESC)`);
+
+  // Domain-scoped sub-playbooks: JSON array of {key,label?,content,tags?}.
+  // Each section becomes an optional, query-scorable PromptSection at render
+  // time so a sales-only query keeps only the sales subsection in the
+  // supervisor system prompt instead of the full multi-domain playbook.
+  safeExec(db, 'ALTER TABLE skills ADD COLUMN domain_sections TEXT');
 }

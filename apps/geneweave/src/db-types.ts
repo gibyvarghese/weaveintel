@@ -577,6 +577,12 @@ export interface MCPGatewayClientRow {
   revoked_at: string | null;
   /** Phase 7: per-client request rate cap (requests per minute). NULL = no cap. */
   rate_limit_per_minute: number | null;
+  /** Phase 9: ISO timestamp at which this token stops being honored.
+   *  NULL = no expiry (token is valid until manually revoked or rotated). */
+  expires_at: string | null;
+  /** Phase 9: ISO timestamp of the last successful token rotation.
+   *  NULL = never rotated since creation. */
+  rotated_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -587,7 +593,8 @@ export type MCPGatewayRequestOutcome =
   | 'rate_limited'
   | 'unauthorized'
   | 'disabled'
-  | 'error';
+  | 'error'
+  | 'expired';
 
 /** Phase 8: Append-only log row capturing one MCP gateway request. */
 export interface MCPGatewayRequestLogRow {
@@ -635,6 +642,13 @@ export interface SkillRow {
   tool_policy_key: string | null;
   /** Phase 1B: optional pin to a specific supervisor agent row in `agents`. */
   supervisor_agent_id?: string | null;
+  /**
+   * Optional JSON array of {key,label?,content,tags?} domain-scoped
+   * sub-playbooks. When set, the skill prompt renderer scores each section
+   * against the user query and includes only the most relevant ones,
+   * instead of merging the whole playbook into the supervisor prompt.
+   */
+  domain_sections?: string | null;
   enabled: number;
   created_at: string;
   updated_at: string;
@@ -1713,7 +1727,7 @@ export interface DatabaseAdapter {
   // ─── Phase 5: MCP Gateway Clients (per-client bearer tokens) ──
   /** Insert a new gateway client row. The token must be hashed by the
    *  caller before being passed in (see `hashGatewayToken()`). */
-  createMCPGatewayClient(c: Omit<MCPGatewayClientRow, 'created_at' | 'updated_at' | 'last_used_at' | 'revoked_at'>): Promise<void>;
+  createMCPGatewayClient(c: Omit<MCPGatewayClientRow, 'created_at' | 'updated_at' | 'last_used_at' | 'revoked_at' | 'expires_at' | 'rotated_at'> & Partial<Pick<MCPGatewayClientRow, 'expires_at' | 'rotated_at'>>): Promise<void>;
   getMCPGatewayClient(id: string): Promise<MCPGatewayClientRow | null>;
   /** Constant-time-ish lookup by token digest. Used on every gateway request
    *  to attribute the call to a specific client and stamp audit events. */
@@ -1753,6 +1767,12 @@ export interface DatabaseAdapter {
   summarizeMCPGatewayActivity(opts: {
     sinceIso: string;
   }): Promise<MCPGatewayActivitySummary[]>;
+
+  /** Phase 9: list clients whose `expires_at` falls between now and
+   *  `now + windowSeconds` and which are still enabled / non-revoked.
+   *  Used by the admin "expiring soon" view to nudge operators to
+   *  rotate before the token starts being rejected. */
+  listExpiringMCPGatewayClients(windowSeconds: number): Promise<MCPGatewayClientRow[]>;
 
   // ─── Admin: Skills ─────────────────────────────────────────
   createSkill(s: Omit<SkillRow, 'created_at' | 'updated_at'>): Promise<void>;

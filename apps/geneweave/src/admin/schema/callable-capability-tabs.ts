@@ -110,6 +110,7 @@ export const CALLABLE_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'description', label: 'Purpose & Summary (model-facing)', textarea: true, rows: 4 },
       { key: 'category', label: 'Category', options: ['retrieval', 'computation', 'communication', 'data-processing', 'planning', 'analysis', 'code', 'web', 'general'], default: 'general' },
       { key: 'instructions', label: 'Skill Playbook (when to use, when not to use, reasoning, execution, completion)', textarea: true, rows: 10 },
+      { key: 'domain_sections', label: 'Domain Sub-Playbooks (JSON array of {key,label?,content,tags?} — e.g. sales / finance / operations; only the sections matching the user query are injected)', textarea: true, rows: 8, save: 'json' },
       { key: 'examples', label: 'Examples (JSON array, optional)', textarea: true, rows: 4, save: 'json' },
       { key: 'tool_names', label: 'Allowed Tool Guidance (JSON array, optional)', textarea: true, rows: 3, save: 'json' },
       { key: 'tags', label: 'Semantic Hints (JSON array, optional)', textarea: true, rows: 2, save: 'json' },
