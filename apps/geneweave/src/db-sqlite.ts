@@ -40,7 +40,13 @@ import type {
   SgapPhase2ConfigRow, SgapContentRevisionRow,
   SgapPhase3ConfigRow, SgapDistributionPlanRow,
   SgapPhase4ConfigRow, SgapPerformanceInsightRow, SgPlatformConfigRow,
+  ProviderToolAdapterRow,
+  TaskTypeDefinitionRow,
+  ModelCapabilityScoreRow,
+  RoutingDecisionTraceRow,
 } from './db-types.js';
+
+import { newUUIDv7 } from './lib/uuid.js';
 
 const SGAP_TABLES = new Set([
   'sg_brands',
@@ -1231,6 +1237,77 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteRoutingPolicy(id: string): Promise<void> {
     this.d.prepare('DELETE FROM routing_policies WHERE id = ?').run(id);
+  }
+
+  // ─── anyWeave routing Phase 2: task-aware routing ─────────
+
+  async listTaskTypes(): Promise<TaskTypeDefinitionRow[]> {
+    return this.d.prepare('SELECT * FROM task_type_definitions ORDER BY task_key ASC').all() as TaskTypeDefinitionRow[];
+  }
+
+  async getTaskType(taskKey: string): Promise<TaskTypeDefinitionRow | null> {
+    return (this.d.prepare('SELECT * FROM task_type_definitions WHERE task_key = ?').get(taskKey) as TaskTypeDefinitionRow) ?? null;
+  }
+
+  async listCapabilityScores(opts?: { taskKey?: string; tenantId?: string | null; modelId?: string; provider?: string }): Promise<ModelCapabilityScoreRow[]> {
+    const where: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.taskKey) { where.push('task_key = ?'); vals.push(opts.taskKey); }
+    if (opts && 'tenantId' in opts) {
+      if (opts.tenantId === null) { where.push('tenant_id IS NULL'); }
+      else if (typeof opts.tenantId === 'string') { where.push('(tenant_id = ? OR tenant_id IS NULL)'); vals.push(opts.tenantId); }
+    }
+    if (opts?.modelId) { where.push('model_id = ?'); vals.push(opts.modelId); }
+    if (opts?.provider) { where.push('provider = ?'); vals.push(opts.provider); }
+    const sql = `SELECT * FROM model_capability_scores${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY task_key, provider, model_id`;
+    return this.d.prepare(sql).all(...vals) as ModelCapabilityScoreRow[];
+  }
+
+  async listProviderToolAdapters(): Promise<ProviderToolAdapterRow[]> {
+    return this.d.prepare('SELECT * FROM provider_tool_adapters ORDER BY provider ASC').all() as ProviderToolAdapterRow[];
+  }
+
+  async getProviderToolAdapter(provider: string): Promise<ProviderToolAdapterRow | null> {
+    return (this.d.prepare('SELECT * FROM provider_tool_adapters WHERE provider = ?').get(provider) as ProviderToolAdapterRow) ?? null;
+  }
+
+  async insertRoutingDecisionTrace(row: Omit<RoutingDecisionTraceRow, 'decided_at'> & { decided_at?: string }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO routing_decision_traces (
+         id, tenant_id, agent_id, workflow_step_id, task_key, inference_source,
+         selected_model_id, selected_provider, selected_capability_score,
+         weights_used, candidate_breakdown, tool_translation_applied,
+         source_provider, estimated_cost_usd, decided_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))`,
+    ).run(
+      row.id,
+      row.tenant_id ?? null,
+      row.agent_id ?? null,
+      row.workflow_step_id ?? null,
+      row.task_key ?? null,
+      row.inference_source ?? null,
+      row.selected_model_id,
+      row.selected_provider,
+      row.selected_capability_score ?? null,
+      row.weights_used,
+      row.candidate_breakdown,
+      row.tool_translation_applied ?? 0,
+      row.source_provider ?? null,
+      row.estimated_cost_usd ?? null,
+      row.decided_at ?? null,
+    );
+  }
+
+  async listRoutingDecisionTraces(opts?: { tenantId?: string; agentId?: string; taskKey?: string; limit?: number; after?: string }): Promise<RoutingDecisionTraceRow[]> {
+    const where: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.tenantId) { where.push('tenant_id = ?'); vals.push(opts.tenantId); }
+    if (opts?.agentId) { where.push('agent_id = ?'); vals.push(opts.agentId); }
+    if (opts?.taskKey) { where.push('task_key = ?'); vals.push(opts.taskKey); }
+    if (opts?.after) { where.push('decided_at > ?'); vals.push(opts.after); }
+    const limit = Math.max(1, Math.min(opts?.limit ?? 100, 1000));
+    const sql = `SELECT * FROM routing_decision_traces${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY decided_at DESC LIMIT ${limit}`;
+    return this.d.prepare(sql).all(...vals) as RoutingDecisionTraceRow[];
   }
 
   // ─── Admin: Workflow definitions ───────────────────────────
@@ -6207,6 +6284,244 @@ Return a JSON object: { "insights": [ { "platform": "...", "content_item_id": ".
         contract_id: null,
       });
     }
+
+    // ─── anyWeave Task-Aware Routing — Phase 1 seeds ───────────
+    // Idempotent: INSERT OR IGNORE on the unique key columns.
+    await this.seedAnyWeaveRoutingPhase1();
+  }
+
+  /**
+   * Phase 1 anyWeave routing seed data.
+   * - 16 task type definitions (text/code/image/audio/video/embedding modalities).
+   * - Capability scores for the 10 currently-priced models across 11 text/code/vision tasks.
+   * - 3 provider tool adapters (openai, anthropic, google).
+   *
+   * All inserts use INSERT OR IGNORE so re-running on a populated DB is a no-op.
+   * Design doc: docs/ANYWEAVE_TASK_AWARE_ROUTING.md (Part C, Phase 1).
+   */
+  private async seedAnyWeaveRoutingPhase1(): Promise<void> {
+    const cnt = (tbl: string) => (this.d.prepare(`SELECT COUNT(*) as cnt FROM ${tbl}`).get() as { cnt: number }).cnt;
+    type TaskSeed = {
+      task_key: string;
+      display_name: string;
+      category: string;
+      description: string;
+      output_modality: string;
+      default_strategy: string;
+      default_weights: { cost: number; speed: number; quality: number; capability: number };
+      inference_hints: Record<string, unknown>;
+    };
+
+    const tasks: TaskSeed[] = [
+      { task_key: 'reasoning', display_name: 'Reasoning', category: 'cognitive', description: 'Multi-step deduction, planning, math word problems.', output_modality: 'text', default_strategy: 'quality', default_weights: { cost: 0.10, speed: 0.10, quality: 0.50, capability: 0.30 }, inference_hints: { keywords: ['why', 'explain', 'prove', 'solve', 'plan', 'derive'] } },
+      { task_key: 'summarization', display_name: 'Summarization', category: 'text-transform', description: 'Condense long input into shorter form.', output_modality: 'text', default_strategy: 'cost', default_weights: { cost: 0.45, speed: 0.30, quality: 0.20, capability: 0.05 }, inference_hints: { keywords: ['summarize', 'tl;dr', 'condense', 'short version'] } },
+      { task_key: 'translation', display_name: 'Translation', category: 'text-transform', description: 'Convert text between natural languages.', output_modality: 'text', default_strategy: 'balanced', default_weights: { cost: 0.30, speed: 0.30, quality: 0.30, capability: 0.10 }, inference_hints: { keywords: ['translate', 'in french', 'in spanish', 'in chinese'] } },
+      { task_key: 'classification', display_name: 'Classification', category: 'text-transform', description: 'Assign labels / categories to input.', output_modality: 'text', default_strategy: 'cost', default_weights: { cost: 0.50, speed: 0.30, quality: 0.15, capability: 0.05 }, inference_hints: { keywords: ['classify', 'categorize', 'label', 'tag'] } },
+      { task_key: 'extraction', display_name: 'Information Extraction', category: 'text-transform', description: 'Pull structured fields from unstructured text.', output_modality: 'text', default_strategy: 'balanced', default_weights: { cost: 0.30, speed: 0.20, quality: 0.40, capability: 0.10 }, inference_hints: { keywords: ['extract', 'parse', 'pull out', 'find all'] } },
+      { task_key: 'qa', display_name: 'Question Answering', category: 'cognitive', description: 'Answer factual / contextual questions.', output_modality: 'text', default_strategy: 'balanced', default_weights: { cost: 0.25, speed: 0.25, quality: 0.40, capability: 0.10 }, inference_hints: { keywords: ['what', 'who', 'when', 'where', 'how many'] } },
+      { task_key: 'code_generation', display_name: 'Code Generation', category: 'code', description: 'Write new code from a natural language spec.', output_modality: 'code', default_strategy: 'quality', default_weights: { cost: 0.15, speed: 0.15, quality: 0.50, capability: 0.20 }, inference_hints: { keywords: ['write a function', 'generate code', 'implement', 'build a'] } },
+      { task_key: 'code_debug', display_name: 'Code Debugging', category: 'code', description: 'Diagnose and fix existing code.', output_modality: 'code', default_strategy: 'quality', default_weights: { cost: 0.10, speed: 0.10, quality: 0.55, capability: 0.25 }, inference_hints: { keywords: ['fix this', 'debug', 'why does this fail', 'error in'] } },
+      { task_key: 'code_review', display_name: 'Code Review', category: 'code', description: 'Critique style, correctness, security of code.', output_modality: 'text', default_strategy: 'quality', default_weights: { cost: 0.15, speed: 0.15, quality: 0.50, capability: 0.20 }, inference_hints: { keywords: ['review', 'audit', 'critique', 'lgtm', 'pr feedback'] } },
+      { task_key: 'creative_writing', display_name: 'Creative Writing', category: 'generative-text', description: 'Stories, poems, marketing copy, ideation.', output_modality: 'text', default_strategy: 'quality', default_weights: { cost: 0.20, speed: 0.10, quality: 0.50, capability: 0.20 }, inference_hints: { keywords: ['write a story', 'poem', 'tagline', 'ad copy', 'creative'] } },
+      { task_key: 'conversation', display_name: 'Conversation', category: 'generative-text', description: 'Open-ended chat / assistant-style dialogue.', output_modality: 'text', default_strategy: 'balanced', default_weights: { cost: 0.30, speed: 0.30, quality: 0.30, capability: 0.10 }, inference_hints: { keywords: ['chat', 'talk', 'tell me', 'help me'] } },
+      { task_key: 'tool_use', display_name: 'Tool / Function Calling', category: 'agentic', description: 'Multi-turn function calling, agent loops.', output_modality: 'text', default_strategy: 'capability', default_weights: { cost: 0.15, speed: 0.20, quality: 0.30, capability: 0.35 }, inference_hints: { keywords: ['call api', 'use tool', 'fetch', 'search the web', 'lookup'] } },
+      { task_key: 'vision_understanding', display_name: 'Vision Understanding', category: 'multimodal-input', description: 'Read / describe images and screenshots.', output_modality: 'text', default_strategy: 'capability', default_weights: { cost: 0.15, speed: 0.15, quality: 0.40, capability: 0.30 }, inference_hints: { requiresVision: true, keywords: ['image', 'screenshot', 'photo', 'describe this picture'] } },
+      { task_key: 'image_generation', display_name: 'Image Generation', category: 'generative-image', description: 'Create images from text prompts.', output_modality: 'image', default_strategy: 'quality', default_weights: { cost: 0.20, speed: 0.15, quality: 0.45, capability: 0.20 }, inference_hints: { keywords: ['draw', 'generate image', 'illustrate', 'render'] } },
+      { task_key: 'speech_to_text', display_name: 'Speech-to-Text', category: 'multimodal-input', description: 'Transcribe audio into text.', output_modality: 'text', default_strategy: 'capability', default_weights: { cost: 0.30, speed: 0.30, quality: 0.30, capability: 0.10 }, inference_hints: { keywords: ['transcribe', 'audio', 'voice', 'recording'] } },
+      { task_key: 'embedding', display_name: 'Embedding', category: 'representation', description: 'Generate fixed-length vector representations.', output_modality: 'embedding', default_strategy: 'cost', default_weights: { cost: 0.50, speed: 0.30, quality: 0.15, capability: 0.05 }, inference_hints: { keywords: ['embed', 'vector', 'semantic search'] } },
+    ];
+
+    if (cnt('task_type_definitions') === 0) {
+      const insert = this.d.prepare(`
+        INSERT OR IGNORE INTO task_type_definitions
+          (id, task_key, display_name, category, description, output_modality, default_strategy, default_weights, inference_hints, enabled)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+      `);
+      const tx = this.d.transaction((rows: TaskSeed[]) => {
+        for (const t of rows) {
+          insert.run(
+            newUUIDv7(),
+            t.task_key,
+            t.display_name,
+            t.category,
+            t.description,
+            t.output_modality,
+            t.default_strategy,
+            JSON.stringify(t.default_weights),
+            JSON.stringify(t.inference_hints),
+          );
+        }
+      });
+      tx(tasks);
+    }
+
+    // Provider tool adapters.
+    if (cnt('provider_tool_adapters') === 0) {
+      const adapters: Array<Omit<ProviderToolAdapterRow, 'id' | 'created_at' | 'updated_at'>> = [
+        {
+          provider: 'openai',
+          display_name: 'OpenAI Chat Completions / Responses',
+          adapter_module: '@weaveintel/tool-schema/openai',
+          tool_format: 'openai_json',
+          tool_call_response_format: 'tool_calls_array',
+          tool_result_format: 'tool_message',
+          system_prompt_location: 'system_message',
+          name_validation_regex: '^[a-zA-Z0-9_-]{1,64}$',
+          max_tool_count: 128,
+          enabled: 1,
+        },
+        {
+          provider: 'anthropic',
+          display_name: 'Anthropic Messages',
+          adapter_module: '@weaveintel/tool-schema/anthropic',
+          tool_format: 'anthropic_xml',
+          tool_call_response_format: 'tool_use_block',
+          tool_result_format: 'tool_result_block',
+          system_prompt_location: 'separate_field',
+          name_validation_regex: '^[a-zA-Z0-9_-]{1,64}$',
+          max_tool_count: 64,
+          enabled: 1,
+        },
+        {
+          provider: 'google',
+          display_name: 'Google Gemini',
+          adapter_module: '@weaveintel/tool-schema/google',
+          tool_format: 'google_function',
+          tool_call_response_format: 'function_call',
+          tool_result_format: 'function_response',
+          system_prompt_location: 'system_message',
+          name_validation_regex: '^[a-zA-Z][a-zA-Z0-9_]{0,63}$',
+          max_tool_count: 64,
+          enabled: 1,
+        },
+      ];
+      const insert = this.d.prepare(`
+        INSERT OR IGNORE INTO provider_tool_adapters
+          (id, provider, display_name, adapter_module, tool_format, tool_call_response_format, tool_result_format, system_prompt_location, name_validation_regex, max_tool_count, enabled)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const a of adapters) {
+        insert.run(
+          newUUIDv7(),
+          a.provider, a.display_name, a.adapter_module,
+          a.tool_format, a.tool_call_response_format, a.tool_result_format,
+          a.system_prompt_location, a.name_validation_regex, a.max_tool_count, a.enabled,
+        );
+      }
+    }
+
+    // Capability scores: 10 currently-priced models × 11 applicable tasks.
+    // Quality scores derived from public benchmarks (MMLU, HumanEval, GPQA, etc.) — see design doc.
+    // Models without a row for a task = excluded from candidate pool for that task (e.g. nano lacks vision).
+    if (cnt('model_capability_scores') === 0) {
+      type CapSeed = {
+        model_id: string;
+        provider: string;
+        task_key: string;
+        quality_score: number;
+        supports_tools?: number;
+        supports_streaming?: number;
+        supports_thinking?: number;
+        supports_json_mode?: number;
+        supports_vision?: number;
+        max_output_tokens?: number | null;
+        benchmark_source?: string | null;
+      };
+
+      // Per-model capability flag baseline. Vision excluded for gpt-4.1-nano. Thinking only Opus + o-series.
+      const flags = (modelId: string): { supports_thinking: number; supports_vision: number; supports_json_mode: number } => {
+        const thinking = modelId === 'claude-opus-4-20250514' || modelId === 'o3' || modelId === 'o4-mini' ? 1 : 0;
+        const vision = modelId === 'gpt-4.1-nano' ? 0 : 1;
+        const jsonMode = modelId.startsWith('gpt-') || modelId === 'o3' || modelId === 'o4-mini' ? 1 : 0;
+        return { supports_thinking: thinking, supports_vision: vision, supports_json_mode: jsonMode };
+      };
+
+      // Scores per (model, task). Tasks not listed for a model = excluded.
+      const scores: CapSeed[] = [
+        // Anthropic family
+        ...['reasoning', 'summarization', 'translation', 'classification', 'extraction', 'qa', 'code_generation', 'code_debug', 'code_review', 'creative_writing', 'conversation', 'tool_use', 'vision_understanding'].map(task => ({
+          model_id: 'claude-opus-4-20250514', provider: 'anthropic', task_key: task,
+          quality_score: ({ reasoning: 95, summarization: 90, translation: 88, classification: 90, extraction: 92, qa: 93, code_generation: 94, code_debug: 95, code_review: 95, creative_writing: 96, conversation: 92, tool_use: 93, vision_understanding: 90 }[task as string] ?? 90),
+          benchmark_source: 'composite-2025q1',
+        })),
+        ...['reasoning', 'summarization', 'translation', 'classification', 'extraction', 'qa', 'code_generation', 'code_debug', 'code_review', 'creative_writing', 'conversation', 'tool_use', 'vision_understanding'].map(task => ({
+          model_id: 'claude-sonnet-4-20250514', provider: 'anthropic', task_key: task,
+          quality_score: ({ reasoning: 88, summarization: 88, translation: 86, classification: 88, extraction: 89, qa: 88, code_generation: 90, code_debug: 89, code_review: 88, creative_writing: 90, conversation: 90, tool_use: 89, vision_understanding: 86 }[task as string] ?? 85),
+          benchmark_source: 'composite-2025q1',
+        })),
+        ...['summarization', 'classification', 'extraction', 'qa', 'translation', 'conversation', 'tool_use'].map(task => ({
+          model_id: 'claude-haiku-4-20250414', provider: 'anthropic', task_key: task,
+          quality_score: ({ summarization: 78, classification: 78, extraction: 76, qa: 75, translation: 74, conversation: 80, tool_use: 75 }[task as string] ?? 70),
+          benchmark_source: 'composite-2025q1',
+        })),
+        // OpenAI family
+        ...['reasoning', 'summarization', 'translation', 'classification', 'extraction', 'qa', 'code_generation', 'code_debug', 'code_review', 'creative_writing', 'conversation', 'tool_use', 'vision_understanding'].map(task => ({
+          model_id: 'gpt-4o', provider: 'openai', task_key: task,
+          quality_score: ({ reasoning: 88, summarization: 90, translation: 92, classification: 89, extraction: 90, qa: 91, code_generation: 89, code_debug: 88, code_review: 87, creative_writing: 88, conversation: 91, tool_use: 92, vision_understanding: 92 }[task as string] ?? 88),
+          benchmark_source: 'composite-2025q1',
+        })),
+        ...['summarization', 'classification', 'extraction', 'qa', 'translation', 'conversation', 'tool_use', 'vision_understanding'].map(task => ({
+          model_id: 'gpt-4o-mini', provider: 'openai', task_key: task,
+          quality_score: ({ summarization: 80, classification: 82, extraction: 80, qa: 78, translation: 82, conversation: 82, tool_use: 80, vision_understanding: 78 }[task as string] ?? 75),
+          benchmark_source: 'composite-2025q1',
+        })),
+        ...['reasoning', 'summarization', 'translation', 'classification', 'extraction', 'qa', 'code_generation', 'code_debug', 'code_review', 'creative_writing', 'conversation', 'tool_use', 'vision_understanding'].map(task => ({
+          model_id: 'gpt-4.1', provider: 'openai', task_key: task,
+          quality_score: ({ reasoning: 89, summarization: 89, translation: 90, classification: 89, extraction: 90, qa: 90, code_generation: 91, code_debug: 90, code_review: 88, creative_writing: 87, conversation: 89, tool_use: 91, vision_understanding: 89 }[task as string] ?? 88),
+          benchmark_source: 'composite-2025q1',
+        })),
+        ...['summarization', 'classification', 'extraction', 'qa', 'translation', 'conversation', 'tool_use', 'vision_understanding'].map(task => ({
+          model_id: 'gpt-4.1-mini', provider: 'openai', task_key: task,
+          quality_score: ({ summarization: 80, classification: 82, extraction: 80, qa: 78, translation: 82, conversation: 81, tool_use: 80, vision_understanding: 76 }[task as string] ?? 75),
+          benchmark_source: 'composite-2025q1',
+        })),
+        ...['summarization', 'classification', 'extraction', 'conversation'].map(task => ({
+          model_id: 'gpt-4.1-nano', provider: 'openai', task_key: task,
+          quality_score: ({ summarization: 70, classification: 72, extraction: 68, conversation: 72 }[task as string] ?? 65),
+          benchmark_source: 'composite-2025q1',
+        })),
+        // Reasoning specialists (o-series): exclude creative/conversation but excel at reasoning/code/math.
+        ...['reasoning', 'qa', 'code_generation', 'code_debug', 'code_review', 'tool_use'].map(task => ({
+          model_id: 'o3', provider: 'openai', task_key: task,
+          quality_score: ({ reasoning: 96, qa: 90, code_generation: 92, code_debug: 94, code_review: 91, tool_use: 88 }[task as string] ?? 88),
+          benchmark_source: 'composite-2025q1',
+        })),
+        ...['reasoning', 'qa', 'code_generation', 'code_debug', 'code_review', 'tool_use'].map(task => ({
+          model_id: 'o4-mini', provider: 'openai', task_key: task,
+          quality_score: ({ reasoning: 88, qa: 82, code_generation: 86, code_debug: 87, code_review: 84, tool_use: 82 }[task as string] ?? 80),
+          benchmark_source: 'composite-2025q1',
+        })),
+      ];
+
+      const insert = this.d.prepare(`
+        INSERT OR IGNORE INTO model_capability_scores
+          (id, tenant_id, model_id, provider, task_key, quality_score,
+           supports_tools, supports_streaming, supports_thinking, supports_json_mode, supports_vision,
+           max_output_tokens, benchmark_source, raw_benchmark_score, is_active, last_evaluated_at)
+        VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, datetime('now'))
+      `);
+      const tx = this.d.transaction((rows: CapSeed[]) => {
+        for (const s of rows) {
+          const f = flags(s.model_id);
+          insert.run(
+            newUUIDv7(),
+            s.model_id, s.provider, s.task_key, s.quality_score,
+            s.supports_tools ?? 1,
+            s.supports_streaming ?? 1,
+            f.supports_thinking,
+            f.supports_json_mode,
+            // Vision capability is meaningful only for vision_understanding; otherwise flag still reflects model native support.
+            f.supports_vision,
+            s.max_output_tokens ?? null,
+            s.benchmark_source ?? null,
+          );
+        }
+      });
+      tx(scores);
+    }
+
+    // Backfill output_modality on model_pricing for the 10 seeded models (all are text producers).
+    this.d.prepare("UPDATE model_pricing SET output_modality = 'text' WHERE output_modality IS NULL OR output_modality = ''").run();
   }
 
   // ─── Hypothesis Validation ──────────────────────────────────

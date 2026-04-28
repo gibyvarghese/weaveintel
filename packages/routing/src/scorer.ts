@@ -27,12 +27,25 @@ export interface ModelQualityInfo {
   qualityScore: number;
 }
 
+// ─── Capability data (Phase 2 task-aware routing) ────────────
+
+export interface ModelCapabilityInfo {
+  modelId: string;
+  providerId: string;
+  /** 0-1 normalised capability score for the active task type. */
+  capabilityScore: number;
+}
+
 // ─── Scorer ──────────────────────────────────────────────────
 
 export class ModelScorer {
   /**
    * Score a set of candidate models according to a routing policy.
    * Returns scores sorted by `overallScore` descending (best first).
+   *
+   * `capabilities` is optional — when omitted (legacy callers), the capability
+   * dimension contributes 0 and the policy weight defaults to 0, preserving the
+   * original 3-dimension behaviour.
    */
   score(
     candidates: Array<{ modelId: string; providerId: string }>,
@@ -40,16 +53,19 @@ export class ModelScorer {
     costs: ModelCostInfo[],
     qualities: ModelQualityInfo[],
     policy: RoutingPolicy,
+    capabilities: ModelCapabilityInfo[] = [],
   ): ModelScore[] {
     const healthMap = new Map(health.map(h => [`${h.providerId}:${h.modelId}`, h]));
     const costMap = new Map(costs.map(c => [`${c.providerId}:${c.modelId}`, c]));
     const qualMap = new Map(qualities.map(q => [`${q.providerId}:${q.modelId}`, q]));
+    const capMap = new Map(capabilities.map(c => [`${c.providerId}:${c.modelId}`, c]));
 
     const w = {
       cost: policy.weights?.cost ?? 0.33,
       latency: policy.weights?.latency ?? 0.33,
       quality: policy.weights?.quality ?? 0.34,
       reliability: policy.weights?.reliability ?? 0,
+      capability: policy.weights?.capability ?? 0,
     };
 
     // Compute raw per-dimension scores
@@ -74,11 +90,15 @@ export class ModelScorer {
 
       const reliabilityScore = h ? 1 - h.errorRate : 0.5;
 
+      const cap = capMap.get(k);
+      const capabilityScore = cap ? cap.capabilityScore : 0;
+
       const overallScore =
         w.cost * costScore +
         w.latency * latencyScore +
         w.quality * qualityScore +
-        w.reliability * reliabilityScore;
+        w.reliability * reliabilityScore +
+        w.capability * capabilityScore;
 
       return {
         modelId: c.modelId,
@@ -87,6 +107,7 @@ export class ModelScorer {
         latencyScore: round(latencyScore),
         qualityScore: round(qualityScore),
         reliabilityScore: round(reliabilityScore),
+        capabilityScore: round(capabilityScore),
         overallScore: round(overallScore),
       };
     });

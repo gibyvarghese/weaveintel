@@ -1461,5 +1461,103 @@ CREATE TABLE IF NOT EXISTS sgap_content_performance (
 );
 CREATE INDEX IF NOT EXISTS idx_sgap_content_performance_item ON sgap_content_performance(content_item_id, platform);
 CREATE INDEX IF NOT EXISTS idx_sgap_content_performance_brand ON sgap_content_performance(brand_id, published_at DESC);
+
+-- ─── anyWeave Task-Aware Routing (Phase 1) ────────────────────
+-- Note: ALTER TABLE additions for agents / model_pricing / routing_policies
+-- live in db-sqlite-migrations.ts. The CREATE TABLEs are mirrored here
+-- so fresh installs get the schema in one shot.
+
+CREATE TABLE IF NOT EXISTS task_type_definitions (
+  id              TEXT PRIMARY KEY,
+  task_key        TEXT NOT NULL UNIQUE,
+  display_name    TEXT NOT NULL,
+  category        TEXT NOT NULL,
+  description     TEXT NOT NULL DEFAULT '',
+  output_modality TEXT NOT NULL,
+  default_strategy TEXT NOT NULL,
+  default_weights TEXT NOT NULL DEFAULT '{"cost":0.25,"speed":0.25,"quality":0.25,"capability":0.25}',
+  inference_hints TEXT NOT NULL DEFAULT '{}',
+  enabled         INTEGER NOT NULL DEFAULT 1,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_task_types_category ON task_type_definitions(category, enabled);
+
+CREATE TABLE IF NOT EXISTS model_capability_scores (
+  id                  TEXT PRIMARY KEY,
+  tenant_id           TEXT,
+  model_id            TEXT NOT NULL,
+  provider            TEXT NOT NULL,
+  task_key            TEXT NOT NULL,
+  quality_score       REAL NOT NULL,
+  supports_tools      INTEGER NOT NULL DEFAULT 1,
+  supports_streaming  INTEGER NOT NULL DEFAULT 1,
+  supports_thinking   INTEGER NOT NULL DEFAULT 0,
+  supports_json_mode  INTEGER NOT NULL DEFAULT 0,
+  supports_vision     INTEGER NOT NULL DEFAULT 0,
+  max_output_tokens   INTEGER,
+  benchmark_source    TEXT,
+  raw_benchmark_score REAL,
+  is_active           INTEGER NOT NULL DEFAULT 1,
+  last_evaluated_at   TEXT,
+  created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(tenant_id, model_id, provider, task_key)
+);
+CREATE INDEX IF NOT EXISTS idx_capability_lookup ON model_capability_scores(task_key, is_active, tenant_id);
+CREATE INDEX IF NOT EXISTS idx_capability_model ON model_capability_scores(model_id, provider);
+
+CREATE TABLE IF NOT EXISTS task_type_tenant_overrides (
+  id                    TEXT PRIMARY KEY,
+  tenant_id             TEXT NOT NULL,
+  task_key              TEXT NOT NULL,
+  weights               TEXT,
+  preferred_model_id    TEXT,
+  preferred_provider    TEXT,
+  preferred_boost_pct   REAL NOT NULL DEFAULT 20,
+  cost_ceiling_per_call REAL,
+  optimisation_strategy TEXT,
+  enabled               INTEGER NOT NULL DEFAULT 1,
+  created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(tenant_id, task_key)
+);
+
+CREATE TABLE IF NOT EXISTS provider_tool_adapters (
+  id                        TEXT PRIMARY KEY,
+  provider                  TEXT NOT NULL UNIQUE,
+  display_name              TEXT NOT NULL,
+  adapter_module            TEXT NOT NULL,
+  tool_format               TEXT NOT NULL,
+  tool_call_response_format TEXT NOT NULL,
+  tool_result_format        TEXT NOT NULL,
+  system_prompt_location    TEXT NOT NULL DEFAULT 'system_message',
+  name_validation_regex     TEXT NOT NULL DEFAULT '^[a-zA-Z0-9_-]{1,64}$',
+  max_tool_count            INTEGER NOT NULL DEFAULT 128,
+  enabled                   INTEGER NOT NULL DEFAULT 1,
+  created_at                TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at                TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS routing_decision_traces (
+  id                        TEXT PRIMARY KEY,
+  tenant_id                 TEXT,
+  agent_id                  TEXT,
+  workflow_step_id          TEXT,
+  task_key                  TEXT,
+  inference_source          TEXT,
+  selected_model_id         TEXT NOT NULL,
+  selected_provider         TEXT NOT NULL,
+  selected_capability_score REAL,
+  weights_used              TEXT NOT NULL,
+  candidate_breakdown       TEXT NOT NULL,
+  tool_translation_applied  INTEGER NOT NULL DEFAULT 0,
+  source_provider           TEXT,
+  estimated_cost_usd        REAL,
+  decided_at                TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_decision_task ON routing_decision_traces(task_key, decided_at);
+CREATE INDEX IF NOT EXISTS idx_decision_tenant ON routing_decision_traces(tenant_id, decided_at);
+CREATE INDEX IF NOT EXISTS idx_decision_agent ON routing_decision_traces(agent_id, decided_at);
 `;
 

@@ -1334,4 +1334,135 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   // and validates the agent result, reporting concrete deltas on failure
   // instead of an opaque "skill plan was selected but not followed" error.
   safeExec(db, 'ALTER TABLE skills ADD COLUMN execution_contract TEXT');
+
+  // ─── anyWeave Task-Aware Routing — Phase 1 ────────────────
+  // Design doc: docs/ANYWEAVE_TASK_AWARE_ROUTING.md
+  // All tables use UUID PKs (TEXT). Idempotent: CREATE IF NOT EXISTS / safeExec ALTERs.
+
+  // M1 — Task type taxonomy. 16 seed rows live in seedDefaultData().
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS task_type_definitions (
+      id              TEXT PRIMARY KEY,
+      task_key        TEXT NOT NULL UNIQUE,
+      display_name    TEXT NOT NULL,
+      category        TEXT NOT NULL,
+      description     TEXT NOT NULL DEFAULT '',
+      output_modality TEXT NOT NULL,
+      default_strategy TEXT NOT NULL,
+      default_weights TEXT NOT NULL DEFAULT '{"cost":0.25,"speed":0.25,"quality":0.25,"capability":0.25}',
+      inference_hints TEXT NOT NULL DEFAULT '{}',
+      enabled         INTEGER NOT NULL DEFAULT 1,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_task_types_category ON task_type_definitions(category, enabled)');
+
+  // M2 — Per-(tenant?, model, provider, task_key) quality + capability flags.
+  // tenant_id NULL = global default. Absence of a row = model excluded from candidate pool for that task.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS model_capability_scores (
+      id                  TEXT PRIMARY KEY,
+      tenant_id           TEXT,
+      model_id            TEXT NOT NULL,
+      provider            TEXT NOT NULL,
+      task_key            TEXT NOT NULL,
+      quality_score       REAL NOT NULL,
+      supports_tools      INTEGER NOT NULL DEFAULT 1,
+      supports_streaming  INTEGER NOT NULL DEFAULT 1,
+      supports_thinking   INTEGER NOT NULL DEFAULT 0,
+      supports_json_mode  INTEGER NOT NULL DEFAULT 0,
+      supports_vision     INTEGER NOT NULL DEFAULT 0,
+      max_output_tokens   INTEGER,
+      benchmark_source    TEXT,
+      raw_benchmark_score REAL,
+      is_active           INTEGER NOT NULL DEFAULT 1,
+      last_evaluated_at   TEXT,
+      created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(tenant_id, model_id, provider, task_key)
+    )
+  `);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_capability_lookup ON model_capability_scores(task_key, is_active, tenant_id)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_capability_model ON model_capability_scores(model_id, provider)');
+
+  // M3 — Per-tenant task-type overrides (weights, preferred model, cost ceiling).
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS task_type_tenant_overrides (
+      id                    TEXT PRIMARY KEY,
+      tenant_id             TEXT NOT NULL,
+      task_key              TEXT NOT NULL,
+      weights               TEXT,
+      preferred_model_id    TEXT,
+      preferred_provider    TEXT,
+      preferred_boost_pct   REAL NOT NULL DEFAULT 20,
+      cost_ceiling_per_call REAL,
+      optimisation_strategy TEXT,
+      enabled               INTEGER NOT NULL DEFAULT 1,
+      created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(tenant_id, task_key)
+    )
+  `);
+
+  // M4 — Provider tool-format adapter configuration. Replaces hardcoded
+  // buildAnthropicTools / buildOpenAITools logic with DB-driven mapping rules
+  // consumed by @weaveintel/tool-schema (Phase 3).
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS provider_tool_adapters (
+      id                        TEXT PRIMARY KEY,
+      provider                  TEXT NOT NULL UNIQUE,
+      display_name              TEXT NOT NULL,
+      adapter_module            TEXT NOT NULL,
+      tool_format               TEXT NOT NULL,
+      tool_call_response_format TEXT NOT NULL,
+      tool_result_format        TEXT NOT NULL,
+      system_prompt_location    TEXT NOT NULL DEFAULT 'system_message',
+      name_validation_regex     TEXT NOT NULL DEFAULT '^[a-zA-Z0-9_-]{1,64}$',
+      max_tool_count            INTEGER NOT NULL DEFAULT 128,
+      enabled                   INTEGER NOT NULL DEFAULT 1,
+      created_at                TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at                TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  // M6 — Persistent routing decision trace (replaces in-memory DecisionStore for prod use).
+  // UUID v7 PK keeps inserts naturally sortable by time.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS routing_decision_traces (
+      id                        TEXT PRIMARY KEY,
+      tenant_id                 TEXT,
+      agent_id                  TEXT,
+      workflow_step_id          TEXT,
+      task_key                  TEXT,
+      inference_source          TEXT,
+      selected_model_id         TEXT NOT NULL,
+      selected_provider         TEXT NOT NULL,
+      selected_capability_score REAL,
+      weights_used              TEXT NOT NULL,
+      candidate_breakdown       TEXT NOT NULL,
+      tool_translation_applied  INTEGER NOT NULL DEFAULT 0,
+      source_provider           TEXT,
+      estimated_cost_usd        REAL,
+      decided_at                TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_decision_task ON routing_decision_traces(task_key, decided_at)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_decision_tenant ON routing_decision_traces(tenant_id, decided_at)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_decision_agent ON routing_decision_traces(agent_id, decided_at)');
+
+  // M7 — Agent routing fields.
+  safeExec(db, 'ALTER TABLE agents ADD COLUMN default_task_type TEXT');
+  safeExec(db, 'ALTER TABLE agents ADD COLUMN allowed_task_types TEXT');     // JSON string[]
+  safeExec(db, 'ALTER TABLE agents ADD COLUMN preferred_models TEXT');       // JSON {[taskKey]: {modelId, provider}}
+  safeExec(db, 'ALTER TABLE agents ADD COLUMN cost_ceiling_per_call REAL');
+
+  // M8 — Output modality on the existing model_pricing table so the routing
+  // filter can exclude text-only LLMs from image/audio/embedding tasks.
+  safeExec(db, "ALTER TABLE model_pricing ADD COLUMN output_modality TEXT NOT NULL DEFAULT 'text'");
+
+  // Multi-hop fallback chain (JSON [{modelId, provider, priority}]).
+  // The single fallback_model/fallback_provider columns remain for
+  // backward compatibility — Phase 2 router prefers the chain when present.
+  safeExec(db, 'ALTER TABLE routing_policies ADD COLUMN fallback_chain TEXT');
 }

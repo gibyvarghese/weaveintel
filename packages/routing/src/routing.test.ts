@@ -323,3 +323,98 @@ describe('SmartModelRouter', () => {
     expect(decision.providerId).toBe('openai');
   });
 });
+
+// ─── Phase 2: Task-aware routing ─────────────────────────────
+
+describe('SmartModelRouter — Phase 2 task-aware', () => {
+  const candidates: ModelCandidate[] = [
+    { modelId: 'gpt-4o', providerId: 'openai' },
+    { modelId: 'gpt-4o-mini', providerId: 'openai' },
+    { modelId: 'claude-haiku', providerId: 'anthropic' },
+    { modelId: 'dalle-3', providerId: 'openai' },
+  ];
+  const costs: ModelCostInfo[] = [
+    { modelId: 'gpt-4o', providerId: 'openai', inputCostPer1M: 5, outputCostPer1M: 15 },
+    { modelId: 'gpt-4o-mini', providerId: 'openai', inputCostPer1M: 0.15, outputCostPer1M: 0.6 },
+    { modelId: 'claude-haiku', providerId: 'anthropic', inputCostPer1M: 0.25, outputCostPer1M: 1.25 },
+    { modelId: 'dalle-3', providerId: 'openai', inputCostPer1M: 40, outputCostPer1M: 40 },
+  ];
+  const qualities: ModelQualityInfo[] = candidates.map(c => ({ modelId: c.modelId, providerId: c.providerId, qualityScore: 0.7 }));
+
+  const capabilityRows = [
+    { modelId: 'gpt-4o', providerId: 'openai', taskKey: 'code_generation', qualityScore: 95, isActive: true },
+    { modelId: 'gpt-4o-mini', providerId: 'openai', taskKey: 'code_generation', qualityScore: 60, isActive: true },
+    { modelId: 'claude-haiku', providerId: 'anthropic', taskKey: 'code_generation', qualityScore: 50, isActive: true },
+    { modelId: 'gpt-4o-mini', providerId: 'openai', taskKey: 'classification', qualityScore: 90, isActive: true },
+    { modelId: 'gpt-4o', providerId: 'openai', taskKey: 'classification', qualityScore: 80, isActive: true },
+    { modelId: 'dalle-3', providerId: 'openai', taskKey: 'image_generation', qualityScore: 95, isActive: true },
+  ];
+
+  const taskInferenceHints = new Map([
+    ['code_generation', { toolPatterns: ['execute_code', 'write_file'], promptKeywords: ['code', 'function', 'refactor'] }],
+    ['classification', { promptKeywords: ['classify', 'categorize', 'label'] }],
+    ['image_generation', { promptKeywords: ['draw', 'image', 'picture'] }],
+  ]);
+
+  const modalityMap = new Map<string, 'text' | 'image' | 'audio' | 'video' | 'embedding'>([
+    ['openai:gpt-4o', 'text'],
+    ['openai:gpt-4o-mini', 'text'],
+    ['anthropic:claude-haiku', 'text'],
+    ['openai:dalle-3', 'image'],
+  ]);
+
+  const taskAwarePolicy: RoutingPolicy = {
+    id: 'p2', name: 'TaskAware', strategy: 'balanced', enabled: true,
+    weights: { capability: 0.7, cost: 0.2, quality: 0.05, latency: 0.025, reliability: 0.025 },
+  };
+
+  it('routes code_generation task to high-capability model via tool inference', async () => {
+    const router = new SmartModelRouter({ candidates, costs, qualities, capabilityRows, taskInferenceHints, modalityMap });
+    const decision = await router.route(
+      { prompt: 'help me write something', context: { tools: [{ name: 'execute_code' }] } },
+      taskAwarePolicy,
+    );
+    expect(decision.taskMeta?.taskKey).toBe('code_generation');
+    expect(decision.taskMeta?.inferenceSource).toBe('tool_inference');
+    expect(decision.modelId).toBe('gpt-4o');
+  });
+
+  it('routes classification task to high-capability cheap model via prompt inference', async () => {
+    const router = new SmartModelRouter({ candidates, costs, qualities, capabilityRows, taskInferenceHints, modalityMap });
+    const decision = await router.route(
+      { prompt: 'classify this email as spam or not' },
+      taskAwarePolicy,
+    );
+    expect(decision.taskMeta?.taskKey).toBe('classification');
+    expect(decision.modelId).toBe('gpt-4o-mini');
+  });
+
+  it('filters to image-modality model when outputModality=image', async () => {
+    const router = new SmartModelRouter({ candidates, costs, qualities, capabilityRows, taskInferenceHints, modalityMap });
+    const decision = await router.route(
+      { prompt: 'draw a picture of a cat', context: { outputModality: 'image' } },
+      taskAwarePolicy,
+    );
+    expect(decision.modelId).toBe('dalle-3');
+  });
+
+  it('excludes candidates above maxCostPerCall ceiling', async () => {
+    const router = new SmartModelRouter({ candidates, costs, qualities, capabilityRows, taskInferenceHints, modalityMap });
+    const decision = await router.route(
+      { prompt: 'classify this', context: { maxCostPerCall: 0.001 } },
+      taskAwarePolicy,
+    );
+    // gpt-4o-mini and claude-haiku should survive; gpt-4o and dalle-3 too expensive
+    expect(['gpt-4o-mini', 'claude-haiku']).toContain(decision.modelId);
+  });
+
+  it('explicit taskType overrides inference', async () => {
+    const router = new SmartModelRouter({ candidates, costs, qualities, capabilityRows, taskInferenceHints, modalityMap });
+    const decision = await router.route(
+      { prompt: 'classify this email', context: { taskType: 'code_generation' } },
+      taskAwarePolicy,
+    );
+    expect(decision.taskMeta?.taskKey).toBe('code_generation');
+    expect(decision.taskMeta?.inferenceSource).toBe('explicit');
+  });
+});

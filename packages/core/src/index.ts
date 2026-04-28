@@ -490,6 +490,12 @@ export {
   type RoutingContext,
   type ModelRouter,
   type FallbackPlan,
+  type OutputModality,
+  type OptimisationStrategy,
+  type TaskTypeInferenceSource,
+  type TaskTypeInferenceHints,
+  type ToolDescriptor as RoutingToolDescriptor,
+  type ModelCapabilityRow,
 } from './routing.js';
 
 // Cache contracts

@@ -190,7 +190,7 @@ export async function streamMessageImpl(
   let modelId = opts?.model ?? deps.config.defaultModel;
   let providerCfg = deps.config.providers[provider];
 
-  const routed = await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), opts);
+  const routed = await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), { ...opts, prompt: content });
   if (routed && deps.config.providers[routed.provider]) {
     provider = routed.provider;
     modelId = routed.modelId;

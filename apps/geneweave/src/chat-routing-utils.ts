@@ -4,14 +4,40 @@
  * Extracted from ChatEngine to keep chat.ts focused on orchestration.
  */
 
-import type { CachePolicy, ModelHealth } from '@weaveintel/core';
+import type { CachePolicy, ModelHealth, OutputModality, RoutingToolDescriptor as ToolDescriptor } from '@weaveintel/core';
 import { SmartModelRouter } from '@weaveintel/routing';
 import type { ModelCostInfo, ModelQualityInfo } from '@weaveintel/routing';
+import type { ModelCapabilityRow, TaskTypeInferenceHints } from '@weaveintel/core';
+import type { TaskInferenceHintsMap } from '@weaveintel/routing';
 import { resolvePolicy } from '@weaveintel/cache';
 import { FALLBACK_PRICING } from './chat-runtime.js';
 import type { DatabaseAdapter } from './db.js';
+import { SqliteDecisionStore } from './sqlite-decision-store.js';
 
 // ── Model routing ────────────────────────────────────────────
+
+export interface RouteModelOpts {
+  provider?: string;
+  model?: string;
+  /** Phase 2: explicit task key override (takes priority over inference). */
+  taskType?: string;
+  /** Phase 2: tools the agent will use (used for tool-pattern inference). */
+  tools?: ToolDescriptor[];
+  /** Phase 2: skill metadata for inference. */
+  skill?: { key?: string; category?: string; tags?: string[] };
+  /** Phase 2: user prompt text (used for keyword-based inference). */
+  prompt?: string;
+  /** Phase 2: agent default task type from agents.default_task_type. */
+  agentDefaultTaskType?: string | null;
+  /** Phase 2: required output modality for filtering. */
+  outputModality?: OutputModality;
+  /** Phase 2: per-call cost ceiling in USD. */
+  maxCostPerCall?: number;
+  /** Phase 2: trace correlation IDs. */
+  tenantId?: string | null;
+  agentId?: string | null;
+  workflowStepId?: string | null;
+}
 
 /**
  * Select model + provider using the active routing policy from the DB.
@@ -21,8 +47,8 @@ export async function routeModel(
   db: DatabaseAdapter,
   candidates: Array<{ id: string; provider: string }>,
   healthList: ModelHealth[],
-  opts?: { provider?: string; model?: string },
-): Promise<{ provider: string; modelId: string } | null> {
+  opts?: RouteModelOpts,
+): Promise<{ provider: string; modelId: string; taskKey?: string; inferenceSource?: string } | null> {
   try {
     const policies = await db.listRoutingPolicies();
     const active = policies.find(p => p.enabled);
@@ -61,31 +87,109 @@ export async function routeModel(
       };
     });
 
+    // ── Phase 2: task-aware data ──────────────────────────────
+    let capabilityRows: ModelCapabilityRow[] = [];
+    const taskInferenceHints: TaskInferenceHintsMap = new Map();
+    const modalityMap = new Map<string, OutputModality>();
+
+    try {
+      const taskTypes = await db.listTaskTypes();
+      for (const t of taskTypes) {
+        if (!t.enabled) continue;
+        let raw: Record<string, unknown> = {};
+        try { raw = JSON.parse(t.inference_hints) as Record<string, unknown>; } catch { /* ignore */ }
+        // Normalize legacy seed shape: accept `keywords`/`tools`/`categories`/`tags`
+        // as aliases for the spec field names.
+        const hints: TaskTypeInferenceHints = {
+          promptKeywords: (raw['promptKeywords'] as string[]) ?? (raw['keywords'] as string[]),
+          toolPatterns: (raw['toolPatterns'] as string[]) ?? (raw['tools'] as string[]),
+          skillCategories: (raw['skillCategories'] as string[]) ?? (raw['categories'] as string[]),
+          skillTags: (raw['skillTags'] as string[]) ?? (raw['tags'] as string[]),
+        };
+        taskInferenceHints.set(t.task_key, hints);
+      }
+    } catch { /* table missing → graceful no-op */ }
+
+    try {
+      const scoreRows = await db.listCapabilityScores({ tenantId: opts?.tenantId ?? null });
+      capabilityRows = scoreRows.map(r => ({
+        modelId: r.model_id,
+        providerId: r.provider,
+        taskKey: r.task_key,
+        qualityScore: r.quality_score,
+        supportsTools: !!r.supports_tools,
+        supportsStreaming: !!r.supports_streaming,
+        supportsThinking: !!r.supports_thinking,
+        supportsJsonMode: !!r.supports_json_mode,
+        supportsVision: !!r.supports_vision,
+        isActive: r.is_active === 1,
+        tenantId: r.tenant_id,
+      }));
+      // Build modality map from model_pricing.output_modality if available
+      for (const r of pricingRows) {
+        const mod = (r as { output_modality?: string }).output_modality;
+        if (mod) modalityMap.set(`${r.provider}:${r.model_id}`, mod as OutputModality);
+      }
+    } catch { /* table missing → graceful no-op */ }
+
+    const decisionStore = new SqliteDecisionStore(db, {
+      tenantId: opts?.tenantId ?? null,
+      agentId: opts?.agentId ?? null,
+      workflowStepId: opts?.workflowStepId ?? null,
+      weights: active.weights ? safeParse(active.weights) : undefined,
+    });
+
     const router = new SmartModelRouter({
       candidates: routerCandidates,
       costs,
       qualities,
       initialHealth: healthList,
+      capabilityRows,
+      taskInferenceHints,
+      modalityMap,
+      decisionStore,
     });
 
     const decision = await router.route(
-      { prompt: '' },
+      {
+        prompt: opts?.prompt ?? '',
+        context: {
+          taskType: opts?.taskType,
+          tools: opts?.tools,
+          skill: opts?.skill,
+          prompt: opts?.prompt,
+          outputModality: opts?.outputModality,
+          maxCostPerCall: opts?.maxCostPerCall,
+          tenantId: opts?.tenantId ?? undefined,
+          agentId: opts?.agentId ?? undefined,
+        },
+      },
       {
         id: active.id,
         name: active.name,
         strategy: active.strategy as any,
-        constraints: active.constraints ? JSON.parse(active.constraints) : undefined,
-        weights: active.weights ? JSON.parse(active.weights) : undefined,
+        constraints: active.constraints ? safeParse(active.constraints) : undefined,
+        weights: active.weights ? safeParse(active.weights) : undefined,
         fallbackModelId: active.fallback_model ?? undefined,
         fallbackProviderId: active.fallback_provider ?? undefined,
+        fallbackChain: (active as { fallback_chain?: string }).fallback_chain ? safeParse((active as { fallback_chain?: string }).fallback_chain!) : undefined,
         enabled: true,
       },
     );
 
-    return { provider: decision.providerId, modelId: decision.modelId };
+    return {
+      provider: decision.providerId,
+      modelId: decision.modelId,
+      taskKey: decision.taskMeta?.taskKey,
+      inferenceSource: decision.taskMeta?.inferenceSource,
+    };
   } catch {
     return null;
   }
+}
+
+function safeParse(s: string): any {
+  try { return JSON.parse(s); } catch { return undefined; }
 }
 
 // ── Cache policy resolution ──────────────────────────────────
