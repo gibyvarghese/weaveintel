@@ -16,6 +16,7 @@ import {
 import type { ModelPricing } from './chat-pricing-utils.js';
 import {
   composeUserInput,
+  hasTabularDataAttachments,
   normalizeAttachments,
   patchLatestUserMessage,
 } from './chat-attachment-utils.js';
@@ -263,11 +264,20 @@ export async function streamMessageImpl(
     }
   }
 
-  const streamSkillContext = await discoverSkillsForInput(deps.db, processedContent, model, ctx, settings.mode, (t) => deps.safeParseJson(t));
+  const streamSkillContext = await discoverSkillsForInput(
+    deps.db,
+    processedContent,
+    model,
+    ctx,
+    settings.mode,
+    (t) => deps.safeParseJson(t),
+    { hasTabularAttachment: hasTabularDataAttachments(attachments) },
+  );
   const streamSkillPrompt = applySkillsToPrompt(
     resolvedPrompt,
     streamSkillContext.matches,
     settings.mode === 'direct' ? 'advisory' : 'tool_assisted',
+    processedContent,
   );
   const streamEnabledTools = Array.from(new Set([...settings.enabledTools, ...streamSkillContext.toolNames]));
   const streamSkillPolicyKey = streamSkillContext.matches[0]?.skill.toolPolicyKey;
@@ -398,14 +408,15 @@ export async function streamMessageImpl(
   let streamContractInfo: PromptContractValidationReport | undefined;
   let streamErrored = false;
   let streamErrorMessage: string | undefined;
+  let streamTelemetry: AgentRunTelemetry | undefined;
 
   try {
     if (settings.mode === 'agent' || settings.mode === 'supervisor') {
-      const telemetry = await deps.streamAgent(res, ctx, model, userId, chatId, userPersona, messages, processedContent, streamMemorySettings, attachments);
-      fullText = telemetry.result.output ?? '';
-      finalUsage = { promptTokens: telemetry.result.usage.totalTokens, completionTokens: 0, totalTokens: telemetry.result.usage.totalTokens };
-      steps = [...telemetry.result.steps];
-      toolCallEvents = telemetry.toolCallEvents;
+      streamTelemetry = await deps.streamAgent(res, ctx, model, userId, chatId, userPersona, messages, processedContent, streamMemorySettings, attachments);
+      fullText = streamTelemetry.result.output ?? '';
+      finalUsage = { promptTokens: streamTelemetry.result.usage.totalTokens, completionTokens: 0, totalTokens: streamTelemetry.result.usage.totalTokens };
+      steps = [...streamTelemetry.result.steps];
+      toolCallEvents = streamTelemetry.toolCallEvents;
     } else {
       const request: ModelRequest = {
         messages: streamAugmentedPrompt
@@ -617,6 +628,7 @@ export async function streamMessageImpl(
       streamActiveSkills,
       streamMemorySettings.enabledTools,
     ),
+    streamTelemetry?.systemPromptSha256,
   );
 
   deps.endSse(res);

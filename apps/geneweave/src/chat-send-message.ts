@@ -18,6 +18,7 @@ import {
 import type { ModelPricing } from './chat-pricing-utils.js';
 import {
   composeUserInput,
+  hasTabularDataAttachments,
   normalizeAttachments,
   patchLatestUserMessage,
 } from './chat-attachment-utils.js';
@@ -181,11 +182,20 @@ export async function sendMessageImpl(
     }
   }
 
-  const skillContext = await discoverSkillsForInput(deps.db, processedContent, model, ctx, settings.mode, (t) => deps.safeParseJson(t));
+  const skillContext = await discoverSkillsForInput(
+    deps.db,
+    processedContent,
+    model,
+    ctx,
+    settings.mode,
+    (t) => deps.safeParseJson(t),
+    { hasTabularAttachment: hasTabularDataAttachments(attachments) },
+  );
   const skillPrompt = applySkillsToPrompt(
     resolvedPrompt,
     skillContext.matches,
     settings.mode === 'direct' ? 'advisory' : 'tool_assisted',
+    processedContent,
   );
   const skillPolicyKey = skillContext.matches[0]?.skill.toolPolicyKey;
 
@@ -291,6 +301,7 @@ export async function sendMessageImpl(
   let toolCallEvents: ToolCallObservableEvent[] | undefined;
   let cacheHit = false;
   let contractInfo: PromptContractValidationReport | undefined;
+  let telemetry: AgentRunTelemetry | undefined;
 
   const allowResponseCache = attachments.length === 0;
   const cachePolicy = allowResponseCache ? await resolveActiveCache(deps.db, settings.mode) : null;
@@ -306,7 +317,7 @@ export async function sendMessageImpl(
 
   if (!cacheHit) {
     if (settings.mode === 'agent' || settings.mode === 'supervisor') {
-      const telemetry = await deps.runAgent(ctx, model, userId, chatId, userPersona, messages, processedContent, memorySettings, attachments);
+      telemetry = await deps.runAgent(ctx, model, userId, chatId, userPersona, messages, processedContent, memorySettings, attachments);
       assistantContent = telemetry.result.output ?? '';
       usage = {
         promptTokens: telemetry.result.usage.totalTokens,
@@ -445,6 +456,7 @@ export async function sendMessageImpl(
       activeSkills,
       memorySettings.enabledTools,
     ),
+    telemetry?.systemPromptSha256,
   );
 
   return {

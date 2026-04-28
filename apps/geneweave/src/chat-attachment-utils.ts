@@ -85,6 +85,32 @@ export function composeUserInput(content: string, attachments: ChatAttachment[])
   return `${content}\n\n[User attachments]\n${attachmentContext}`;
 }
 
+export function hasTabularDataAttachments(attachments: ChatAttachment[]): boolean {
+  if (!attachments.length) return false;
+
+  const tabularMimes = new Set([
+    'text/csv',
+    'application/csv',
+    'text/tab-separated-values',
+    'application/vnd.ms-excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/parquet',
+    'application/x-parquet',
+  ]);
+
+  return attachments.some((attachment) => {
+    const mime = attachment.mimeType.toLowerCase();
+    if (tabularMimes.has(mime)) return true;
+
+    const lowerName = attachment.name.toLowerCase();
+    return lowerName.endsWith('.csv') ||
+      lowerName.endsWith('.tsv') ||
+      lowerName.endsWith('.xlsx') ||
+      lowerName.endsWith('.xls') ||
+      lowerName.endsWith('.parquet');
+  });
+}
+
 export function patchLatestUserMessage(messages: Message[], content: string): void {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];

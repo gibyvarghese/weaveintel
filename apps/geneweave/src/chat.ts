@@ -67,8 +67,10 @@ import {
   POLICY_PROMPT_ENTERPRISE_WORKER_SYSTEM,
   POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
   POLICY_PROMPT_HARD_EXECUTION_GUARD,
+  POLICY_PROMPT_MANDATORY_SKILL_PLAN_GUARD,
   FORCED_WORKER_REQUIREMENT,
   HARD_EXECUTION_GUARD_POLICY,
+  MANDATORY_SKILL_PLAN_GUARD_POLICY,
   ENTERPRISE_WORKER_SYSTEM_PROMPT,
   RESPONSE_CARD_FORMAT_POLICY,
 } from './chat-policies.js';
@@ -95,7 +97,9 @@ import {
   patchLatestUserMessage,
 } from './chat-attachment-utils.js';
 import {
+  countWorkerDelegations,
   hasCodeExecutorDelegation,
+  hasMandatoryBusinessDataPlanConformance,
   hasSuccessfulCseExecution,
 } from './chat-cse-utils.js';
 import { hasRenderableAttachmentAnalysisOutput } from './chat-output-guards.js';
@@ -118,7 +122,7 @@ import { applyTemporalToolPolicy } from './chat-policy-format-utils.js';
 import { shouldForceWorkerDataAnalysis } from './chat-intent-utils.js';
 import { discoverSkillsForInput } from './chat-skills-utils.js';
 import { applyRedaction, runPostEval } from './chat-eval-utils.js';
-import { observeToolCallEvents, recordTraceSpans, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
+import { observeToolCallEvents, recordTraceSpans, computePromptFingerprint, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
 import { evaluateGuardrails, evaluateTaskPolicies } from './chat-guardrail-eval-utils.js';
 import {
   resolveSystemPrompt,
@@ -420,29 +424,43 @@ export class ChatEngine {
     messages: Message[],
     goal: string,
     enforce: boolean,
+    enforceMandatorySkillPlan = false,
   ): Promise<AgentResult> {
     const first = await agent.run(ctx, { messages, goal });
-    if (
-      !enforce
-      || (
-        hasSuccessfulCseExecution(first)
-        && hasCodeExecutorDelegation(first)
-        && hasRenderableAttachmentAnalysisOutput(first, goal)
-      )
-    ) return first;
+    const firstPassesExecutionGuard = !enforce || (
+      hasSuccessfulCseExecution(first)
+      && hasCodeExecutorDelegation(first)
+      && hasRenderableAttachmentAnalysisOutput(first, goal)
+    );
+    const firstPassesMandatoryPlan = !enforceMandatorySkillPlan || hasMandatoryBusinessDataPlanConformance(first);
+    if (firstPassesExecutionGuard && firstPassesMandatoryPlan) return first;
+
+    if (enforceMandatorySkillPlan && !firstPassesMandatoryPlan) {
+      const delegationCount = countWorkerDelegations(first);
+      return {
+        ...first,
+        output: `[Execution guard failure] Mandatory Business Data Analysis skill plan was selected but not followed. Observed worker delegations: ${delegationCount}. Required: ordered multi-pass delegations (Step 1→10 + Final) and final 10-section report with Composite Health Score and Priority-1 actions.`,
+      };
+    }
 
     const guardPolicy = await this.getPolicyPromptTemplate(POLICY_PROMPT_HARD_EXECUTION_GUARD, HARD_EXECUTION_GUARD_POLICY);
-    const retryGoal = `${goal}\n\n${guardPolicy}`;
+    const mandatoryPlanPolicy = enforceMandatorySkillPlan
+      ? await this.getPolicyPromptTemplate(POLICY_PROMPT_MANDATORY_SKILL_PLAN_GUARD, MANDATORY_SKILL_PLAN_GUARD_POLICY)
+      : '';
+    const retryGoal = `${goal}\n\n${guardPolicy}${mandatoryPlanPolicy ? `\n\n${mandatoryPlanPolicy}` : ''}`;
     const second = await agent.run(ctx, { messages, goal: retryGoal });
-    if (
+    const secondPassesExecutionGuard =
       hasSuccessfulCseExecution(second)
       && hasCodeExecutorDelegation(second)
-      && hasRenderableAttachmentAnalysisOutput(second, retryGoal)
-    ) return second;
+      && hasRenderableAttachmentAnalysisOutput(second, retryGoal);
+    const secondPassesMandatoryPlan = !enforceMandatorySkillPlan || hasMandatoryBusinessDataPlanConformance(second);
+    if (secondPassesExecutionGuard && secondPassesMandatoryPlan) return second;
 
     return {
       ...second,
-      output: '[Execution guard failure] The workflow did not satisfy required execution constraints. A successful CSE run (`cse_run_code` or `cse_run_data_analysis`) through delegated worker "code_executor" is required, and the final result must be renderable (no sandbox-local file paths, no incomplete insights). Please retry.',
+      output: enforceMandatorySkillPlan
+        ? '[Execution guard failure] The workflow did not satisfy the mandatory Business Data Analysis skill plan. Required: ordered multi-pass worker delegations (Step 1→10 + Final), plus a 10-section report with Composite Health Score and Priority-1 actions. Please retry.'
+        : '[Execution guard failure] The workflow did not satisfy required execution constraints. A successful CSE run (`cse_run_code` or `cse_run_data_analysis`) through delegated worker "code_executor" is required, and the final result must be renderable (no sandbox-local file paths, no incomplete insights). Please retry.',
     };
   }
 
@@ -572,11 +590,11 @@ export class ChatEngine {
     const toolCallObserver = observeToolCallEvents(agentBus);
 
     try {
-      let agent;
       const forceWorkerDataAnalysis = shouldForceWorkerDataAnalysis(userContent, attachments);
       // When an active skill defines a mandatory multi-step plan, do not inject
       // the generic 2-step "code_executor then analyst" requirement into the goal.
       const hasActiveMandatorySkillPlan = Boolean(settings.systemPrompt?.includes('MANDATORY EXECUTION PLAN'));
+      const enforceMandatorySkillPlan = forceWorkerDataAnalysis && hasActiveMandatorySkillPlan;
       const forceWorkerRequirement = await this.getPolicyPromptTemplate(
         POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
         FORCED_WORKER_REQUIREMENT,
@@ -593,6 +611,9 @@ export class ChatEngine {
       const routedGoal = effectiveGoal;
 
       // Auto-upgrade to supervisor when enterprise tools are available
+      let agent;
+      let systemPromptSha256: string = '';
+      
       if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
         const baseWorkers = settings.workers.length > 0
           ? await Promise.all(settings.workers.map(async (w) => ({
@@ -636,9 +657,13 @@ export class ChatEngine {
         // by skill activation code paths elsewhere.)
 
         const resolvedSupervisor = await this.resolveSupervisorContext('general');
-        const supervisorBasePrompt = resolvedSupervisor?.agent.system_prompt ?? settings.systemPrompt;
+        const supervisorBasePrompt = [
+          resolvedSupervisor?.agent.system_prompt,
+          settings.systemPrompt,
+        ].filter((value): value is string => Boolean(value && value.trim())).join('\n\n');
         const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
         const supervisorAdditionalTools = await this.buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions);
+        systemPromptSha256 = computePromptFingerprint(supervisorInstructions);
 
         agent = weaveAgent({
           model,
@@ -657,6 +682,7 @@ export class ChatEngine {
           toolNames: settings.enabledTools,
           temporalToolPolicy: TEMPORAL_TOOL_POLICY,
         }));
+        systemPromptSha256 = computePromptFingerprint(policyPrompt);
         agent = weaveAgent({
           model,
           tools,
@@ -673,8 +699,9 @@ export class ChatEngine {
         messages,
         routedGoal,
         forceWorkerDataAnalysis,
+        enforceMandatorySkillPlan,
       );
-      return { result, toolCallEvents: toolCallObserver.events };
+      return { result, toolCallEvents: toolCallObserver.events, systemPromptSha256 };
     } finally {
       toolCallObserver.dispose();
     }
@@ -753,6 +780,7 @@ export class ChatEngine {
     try {
       const forceWorkerDataAnalysis = shouldForceWorkerDataAnalysis(userContent, attachments);
       const hasActiveMandatorySkillPlanStream = Boolean(settings.systemPrompt?.includes('MANDATORY EXECUTION PLAN'));
+      const enforceMandatorySkillPlanStream = forceWorkerDataAnalysis && hasActiveMandatorySkillPlanStream;
       const forceWorkerRequirement = await this.getPolicyPromptTemplate(
         POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
         FORCED_WORKER_REQUIREMENT,
@@ -804,7 +832,10 @@ export class ChatEngine {
         // belongs to the `code_executor` worker.
 
         const resolvedSupervisor = await this.resolveSupervisorContext('general');
-        const supervisorBasePrompt = resolvedSupervisor?.agent.system_prompt ?? settings.systemPrompt;
+        const supervisorBasePrompt = [
+          resolvedSupervisor?.agent.system_prompt,
+          settings.systemPrompt,
+        ].filter((value): value is string => Boolean(value && value.trim())).join('\n\n');
         const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
         const supervisorAdditionalTools = await this.buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions);
         agent = weaveAgent({
@@ -835,7 +866,7 @@ export class ChatEngine {
       }
 
     if (forceWorkerDataAnalysis) {
-      const guarded = await this.runWithCseSuccessGuard(agent, ctx, messages, routedGoal, true);
+      const guarded = await this.runWithCseSuccessGuard(agent, ctx, messages, routedGoal, true, enforceMandatorySkillPlanStream);
       await this.writeSseEvent(res, { type: 'text', text: guarded.output });
       for (const step of guarded.steps) {
         await this.writeSseEvent(res, {

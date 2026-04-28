@@ -104,6 +104,48 @@ export function hasCodeExecutorDelegation(result: AgentResult): boolean {
   return false;
 }
 
+export function countWorkerDelegations(result: AgentResult): number {
+  const steps = Array.isArray(result.steps) ? result.steps : [];
+  let count = 0;
+
+  for (const step of steps) {
+    if (!step || typeof step !== 'object') continue;
+
+    const delegationWorker = String(step.delegation?.worker ?? step.delegation?.workerName ?? '').trim();
+    if (delegationWorker) {
+      count += 1;
+      continue;
+    }
+
+    const toolName = String(step.toolCall?.name ?? '').trim();
+    if (toolName !== 'delegate_to_worker') continue;
+
+    const argsRec = asRecord(step.toolCall?.arguments);
+    const argWorker = String(argsRec?.['worker'] ?? '').trim();
+    if (argWorker) count += 1;
+  }
+
+  return count;
+}
+
+function hasBusinessReportStructure(output: string): boolean {
+  const lower = output.toLowerCase();
+  const sectionsPresent = Array.from({ length: 10 }, (_, i) => `section ${i + 1}`).every((section) => lower.includes(section));
+  const hasCompositeScore = lower.includes('composite health score');
+  const hasPriorityOne = lower.includes('priority-1') || lower.includes('priority 1') || lower.includes('\np1');
+
+  return sectionsPresent && hasCompositeScore && hasPriorityOne;
+}
+
+export function hasMandatoryBusinessDataPlanConformance(result: AgentResult): boolean {
+  const output = String(result.output ?? '');
+  const delegations = countWorkerDelegations(result);
+
+  // Mandatory plan requires Step1, Step2, branch Steps3-8, Step9, Step10, and Final synthesis.
+  // Enforce minimum 11 worker delegations plus strict output structure contract.
+  return delegations >= 11 && hasBusinessReportStructure(output);
+}
+
 export function isSuccessfulToolResult(value: unknown): boolean {
   if (value == null) return false;
   if (typeof value === 'string') {

@@ -4,7 +4,7 @@
  * Extracted from ChatEngine to keep chat.ts focused on orchestration.
  */
 
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import type { AgentStep, CapabilityTelemetrySummary, EventBus } from '@weaveintel/core';
 import { EventTypes } from '@weaveintel/core';
 import {
@@ -26,9 +26,19 @@ export interface ToolCallObservableEvent {
 export interface AgentRunTelemetry {
   result: import('@weaveintel/core').AgentResult;
   toolCallEvents: ToolCallObservableEvent[];
+  systemPromptSha256?: string;
 }
 
 // ── Helpers ─────────────────────────────────────────────────
+
+/**
+ * Compute SHA256 fingerprint of a system prompt.
+ * Used for forensic verification that a specific prompt was included in LLM call.
+ */
+export function computePromptFingerprint(prompt?: string): string {
+  if (!prompt) return '';
+  return createHash('sha256').update(prompt).digest('hex');
+}
 
 export function observeToolCallEvents(eventBus: EventBus): { events: ToolCallObservableEvent[]; dispose: () => void } {
   const events: ToolCallObservableEvent[] = [];
@@ -84,21 +94,26 @@ export async function recordTraceSpans(
   steps?: AgentStep[],
   toolCallEvents?: ToolCallObservableEvent[],
   capabilities?: CapabilityTelemetrySummary[],
+  systemPromptSha256?: string,
 ): Promise<void> {
   try {
     // Root span
     const rootSpanId = randomUUID();
+    const rootAttributes: Record<string, unknown> = {
+      mode,
+      capabilityCount: capabilities?.length ?? 0,
+      capabilities: capabilities?.map((entry) => ({ kind: entry.kind, key: entry.key, name: entry.name })),
+    };
+    if (systemPromptSha256) {
+      rootAttributes['systemPromptFingerprint'] = systemPromptSha256;
+    }
     await db.saveTrace({
       id: randomUUID(), userId, chatId, messageId,
       traceId, spanId: rootSpanId,
       name: `chat.${mode}`,
       startTime: startMs, endTime: startMs + latencyMs,
       status: 'ok',
-      attributes: JSON.stringify({
-        mode,
-        capabilityCount: capabilities?.length ?? 0,
-        capabilities: capabilities?.map((entry) => ({ kind: entry.kind, key: entry.key, name: entry.name })),
-      }),
+      attributes: JSON.stringify(rootAttributes),
     });
 
     // Child spans for agent steps
