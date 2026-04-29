@@ -70,13 +70,25 @@
   },
   "peerDependencies": {
     "@weaveintel/provider-anthropic": "*",
-    "@weaveintel/provider-openai": "*"
+    "@weaveintel/provider-openai": "*",
+    "@weaveintel/provider-google": "*",
+    "@weaveintel/provider-ollama": "*",
+    "@weaveintel/provider-llamacpp": "*"
   },
   "peerDependenciesMeta": {
     "@weaveintel/provider-openai": {
       "optional": true
     },
     "@weaveintel/provider-anthropic": {
+      "optional": true
+    },
+    "@weaveintel/provider-google": {
+      "optional": true
+    },
+    "@weaveintel/provider-ollama": {
+      "optional": true
+    },
+    "@weaveintel/provider-llamacpp": {
       "optional": true
     }
   },

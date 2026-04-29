@@ -86,7 +86,7 @@ export function registerAdminRoutes(
   db: DatabaseAdapter,
   json: (res: ServerResponse, status: number, data: unknown) => void,
   readBody: (req: IncomingMessage) => Promise<string>,
-  providers?: Record<string, { apiKey: string }>,
+  providers?: Record<string, { apiKey?: string }>,
   html?: (res: ServerResponse, status: number, body: string) => void,
 ): void {
   // Local html helper fallback

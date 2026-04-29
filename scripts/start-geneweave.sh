@@ -132,7 +132,7 @@ ensure_env DATABASE_PATH "${DATABASE_PATH:-./geneweave.db}"
 
 # Honor inline env overrides for provider keys.
 # Set if the .env value is missing OR still a placeholder.
-for k in OPENAI_API_KEY ANTHROPIC_API_KEY; do
+for k in OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY GOOGLE_API_KEY OLLAMA_BASE_URL OLLAMA_API_KEY LLAMACPP_BASE_URL LLAMACPP_API_KEY; do
   inline="$(eval echo "\${$k:-}")"
   cur="$(get_env_value "$k")"
   if [ -n "$inline" ] && { [ -z "$cur" ] || is_placeholder "$cur"; }; then
@@ -141,21 +141,36 @@ for k in OPENAI_API_KEY ANTHROPIC_API_KEY; do
   fi
 done
 
-# Validate at least one real provider key is present (tolerate surrounding quotes).
+# Validate at least one real provider is present (cloud key OR reachable local endpoint).
 have_provider=0
 openai_val="$(get_env_value OPENAI_API_KEY)"
 anthropic_val="$(get_env_value ANTHROPIC_API_KEY)"
+gemini_val="$(get_env_value GEMINI_API_KEY)"
+[ -z "$gemini_val" ] && gemini_val="$(get_env_value GOOGLE_API_KEY)"
+ollama_url="$(get_env_value OLLAMA_BASE_URL)"
+llamacpp_url="$(get_env_value LLAMACPP_BASE_URL)"
 if [ -n "$openai_val" ] && ! is_placeholder "$openai_val" && [ "${openai_val#sk-}" != "$openai_val" ]; then
   have_provider=1
 fi
 if [ -n "$anthropic_val" ] && ! is_placeholder "$anthropic_val" && [ "${anthropic_val#sk-ant-}" != "$anthropic_val" ]; then
   have_provider=1
 fi
+if [ -n "$gemini_val" ] && ! is_placeholder "$gemini_val"; then
+  have_provider=1
+fi
+if [ -n "$ollama_url" ] && ! is_placeholder "$ollama_url"; then
+  have_provider=1
+fi
+if [ -n "$llamacpp_url" ] && ! is_placeholder "$llamacpp_url"; then
+  have_provider=1
+fi
 if [ "$have_provider" = "0" ]; then
-  warn "No real OPENAI_API_KEY or ANTHROPIC_API_KEY found in .env."
-  warn "Edit .env and set at least one before chat will work."
+  warn "No provider configured. Set one of:"
+  warn "  OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY,"
+  warn "  OLLAMA_BASE_URL (e.g. http://localhost:11434), or"
+  warn "  LLAMACPP_BASE_URL (e.g. http://localhost:8080)"
   if [ "$START" = "1" ]; then
-    fail "Refusing to start without a provider key. Re-run after editing .env, or pass --no-start."
+    fail "Refusing to start without a provider. Re-run after editing .env, or pass --no-start."
   fi
 fi
 

@@ -346,6 +346,9 @@ If you are building a production app today, prefer the tool governance and promp
 | [`@weaveintel/models`](packages/models) | Unified model router with fallback chains, streaming, middleware, capability selection |
 | [`@weaveintel/provider-openai`](packages/provider-openai) | OpenAI adapter — chat, streaming, embeddings, image, audio, structured output, vision |
 | [`@weaveintel/provider-anthropic`](packages/provider-anthropic) | Anthropic adapter — chat, streaming, tool use, extended thinking, vision, token counting, batches, computer use, prompt caching |
+| [`@weaveintel/provider-google`](packages/provider-google) | Google Gemini adapter — chat, streaming, tool use, structured output, vision, multimodal, reasoning (1.5/2.5/3.x) |
+| [`@weaveintel/provider-ollama`](packages/provider-ollama) | Local LLMs via [Ollama](https://ollama.com) — chat, streaming, tools, embeddings, vision (llava), structured output (`format`) |
+| [`@weaveintel/provider-llamacpp`](packages/provider-llamacpp) | Local GGUF models via the [llama.cpp](https://github.com/ggerganov/llama.cpp) HTTP server (OpenAI-compatible API) |
 | [`@weaveintel/testing`](packages/testing) | Fake models, embeddings, vector stores, and MCP transports for deterministic tests |
 
 ### Agent Orchestration

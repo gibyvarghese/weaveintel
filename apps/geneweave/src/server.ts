@@ -392,7 +392,7 @@ export interface ServerConfig {
   chatEngine: ChatEngine;
   jwtSecret: string;
   corsOrigin?: string;
-  providers?: Record<string, { apiKey: string }>;
+  providers?: Record<string, { apiKey?: string }>;
   publicBaseUrl?: string;
   /**
    * Phase 4: snapshot of the gateway's exposure config loaded from the

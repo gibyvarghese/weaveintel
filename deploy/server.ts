@@ -7,7 +7,10 @@
  *   DATABASE_PATH     – SQLite file path (default: ./data/geneweave.db)
  *   ANTHROPIC_API_KEY – Anthropic API key (optional)
  *   OPENAI_API_KEY    – OpenAI API key (optional)
- *   DEFAULT_PROVIDER  – "anthropic" | "openai" (auto-detected if omitted)
+ *   GEMINI_API_KEY    – Google Gemini API key (optional; GOOGLE_API_KEY also accepted)
+ *   OLLAMA_BASE_URL   – Ollama server URL (optional, default http://localhost:11434)
+ *   LLAMACPP_BASE_URL – llama.cpp server URL (optional, default http://localhost:8080)
+ *   DEFAULT_PROVIDER  – "anthropic" | "openai" | "google" | "ollama" | "llamacpp" (auto-detected if omitted)
  *   DEFAULT_MODEL     – Model ID (auto-detected if omitted)
  *   CORS_ORIGIN       – Allowed CORS origin (optional)
  */
@@ -30,16 +33,24 @@ async function main() {
 
   const hasAnthropic = !!process.env['ANTHROPIC_API_KEY'];
   const hasOpenAI = !!process.env['OPENAI_API_KEY'];
-  const useMockProvider = process.env['PLAYWRIGHT_E2E'] === '1' && !hasAnthropic && !hasOpenAI;
+  const googleKey = process.env['GEMINI_API_KEY'] ?? process.env['GOOGLE_API_KEY'] ?? process.env['GOOGLE_GENERATIVE_AI_API_KEY'];
+  const hasGoogle = !!googleKey;
+  const hasOllama = !!process.env['OLLAMA_BASE_URL'] || process.env['ENABLE_OLLAMA'] === '1';
+  const hasLlamaCpp = !!process.env['LLAMACPP_BASE_URL'] || process.env['ENABLE_LLAMACPP'] === '1';
+  const useMockProvider = process.env['PLAYWRIGHT_E2E'] === '1' && !hasAnthropic && !hasOpenAI && !hasGoogle && !hasOllama && !hasLlamaCpp;
 
-  if (!hasAnthropic && !hasOpenAI && !useMockProvider) {
-    console.error('ERROR: At least one of ANTHROPIC_API_KEY or OPENAI_API_KEY is required');
+  if (!hasAnthropic && !hasOpenAI && !hasGoogle && !hasOllama && !hasLlamaCpp && !useMockProvider) {
+    console.error('ERROR: At least one provider must be configured. Set one of:');
+    console.error('  ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, OLLAMA_BASE_URL, or LLAMACPP_BASE_URL');
     process.exit(1);
   }
 
-  const providers: Record<string, { apiKey: string; mockResponses?: string[]; latencyMs?: number }> = {};
+  const providers: Record<string, { apiKey?: string; baseUrl?: string; mockResponses?: string[]; latencyMs?: number }> = {};
   if (hasAnthropic) providers['anthropic'] = { apiKey: process.env['ANTHROPIC_API_KEY']! };
   if (hasOpenAI) providers['openai'] = { apiKey: process.env['OPENAI_API_KEY']! };
+  if (hasGoogle) providers['google'] = { apiKey: googleKey! };
+  if (hasOllama) providers['ollama'] = { baseUrl: process.env['OLLAMA_BASE_URL'], apiKey: process.env['OLLAMA_API_KEY'] };
+  if (hasLlamaCpp) providers['llamacpp'] = { baseUrl: process.env['LLAMACPP_BASE_URL'], apiKey: process.env['LLAMACPP_API_KEY'] };
   if (useMockProvider) {
     providers['mock'] = {
       apiKey: '__mock__',
@@ -51,9 +62,29 @@ async function main() {
   }
 
   const defaultProvider = process.env['DEFAULT_PROVIDER']
-    ?? (useMockProvider ? 'mock' : hasAnthropic ? 'anthropic' : 'openai');
+    ?? (useMockProvider
+      ? 'mock'
+      : hasAnthropic
+        ? 'anthropic'
+        : hasOpenAI
+          ? 'openai'
+          : hasGoogle
+            ? 'google'
+            : hasOllama
+              ? 'ollama'
+              : 'llamacpp');
   const defaultModel = process.env['DEFAULT_MODEL']
-    ?? (defaultProvider === 'anthropic' ? 'claude-sonnet-4-20250514' : defaultProvider === 'mock' ? 'mock-model' : 'gpt-4o-mini');
+    ?? (defaultProvider === 'anthropic'
+      ? 'claude-sonnet-4-20250514'
+      : defaultProvider === 'mock'
+        ? 'mock-model'
+        : defaultProvider === 'google'
+          ? 'gemini-2.5-flash'
+          : defaultProvider === 'ollama'
+            ? 'llama3.1'
+            : defaultProvider === 'llamacpp'
+              ? 'local'
+              : 'gpt-4o-mini');
 
   const app = await createGeneWeave({
     port,

@@ -122,7 +122,7 @@ function matchModels(
 
 export async function syncModelPricing(
   db: DatabaseAdapter,
-  providers: Record<string, { apiKey: string }>,
+  providers: Record<string, { apiKey?: string }>,
 ): Promise<PricingSyncReport> {
   const results: SyncResult[] = [];
   let totalUpserted = 0;
@@ -136,9 +136,19 @@ export async function syncModelPricing(
       let registry: Record<string, KnownModelPricing>;
 
       if (provider === 'openai') {
+        if (!config.apiKey) {
+          result.errors.push('Missing apiKey — skipped');
+          results.push(result);
+          continue;
+        }
         discoveredIds = await fetchOpenAIModels(config.apiKey);
         registry = OPENAI_PRICING_REGISTRY;
       } else if (provider === 'anthropic') {
+        if (!config.apiKey) {
+          result.errors.push('Missing apiKey — skipped');
+          results.push(result);
+          continue;
+        }
         discoveredIds = await fetchAnthropicModels(config.apiKey);
         registry = ANTHROPIC_PRICING_REGISTRY;
       } else {

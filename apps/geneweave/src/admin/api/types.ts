@@ -19,5 +19,5 @@ export interface AdminHelpers {
   json: (res: ServerResponse, status: number, data: unknown) => void;
   readBody: (req: IncomingMessage) => Promise<string>;
   requireDetailedDescription: (description: unknown, kind: 'prompt' | 'tool' | 'skill' | 'agent', res: ServerResponse) => string | null;
-  providers?: Record<string, { apiKey: string }>;
+  providers?: Record<string, { apiKey?: string }>;
 }

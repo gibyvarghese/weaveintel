@@ -97,7 +97,11 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   weaveSetDefaultTracer(weaveConsoleTracer());
 
   const activeProviders = Object.fromEntries(
-    Object.entries(config.providers).filter(([, provider]) => Boolean(provider?.apiKey?.trim())),
+    Object.entries(config.providers).filter(([key, provider]) => {
+      // Local providers (ollama, llamacpp) are valid without an apiKey.
+      if (key === 'ollama' || key === 'llamacpp' || key === 'llama-cpp') return true;
+      return Boolean(provider?.apiKey?.trim());
+    }),
   );
   if (Object.keys(activeProviders).length === 0) {
     throw new Error('At least one provider with a non-empty apiKey is required.');

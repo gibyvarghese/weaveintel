@@ -36,7 +36,10 @@ export function calculateCost(modelId: string, promptTokens: number, completionT
 }
 
 export interface ProviderConfig {
-  apiKey: string;
+  /** API key for cloud providers. Optional for local providers (ollama, llamacpp). */
+  apiKey?: string;
+  /** Base URL override (used by ollama, llamacpp, and any provider that supports it). */
+  baseUrl?: string;
   mockResponses?: string[];
   latencyMs?: number;
 }
@@ -69,6 +72,29 @@ export async function getOrCreateModel(
     case 'openai': {
       const mod = await import('@weaveintel/provider-openai');
       model = (mod as any).weaveOpenAIModel(bareModel, { apiKey: providerConfig.apiKey });
+      break;
+    }
+    case 'google':
+    case 'gemini': {
+      const mod = await import('@weaveintel/provider-google');
+      model = (mod as any).weaveGoogleModel(bareModel, { apiKey: providerConfig.apiKey });
+      break;
+    }
+    case 'ollama': {
+      const mod = await import('@weaveintel/provider-ollama');
+      model = (mod as any).weaveOllamaModel(bareModel, {
+        apiKey: providerConfig.apiKey,
+        baseUrl: providerConfig.baseUrl,
+      });
+      break;
+    }
+    case 'llamacpp':
+    case 'llama-cpp': {
+      const mod = await import('@weaveintel/provider-llamacpp');
+      model = (mod as any).weaveLlamaCppModel(bareModel, {
+        apiKey: providerConfig.apiKey,
+        baseUrl: providerConfig.baseUrl,
+      });
       break;
     }
     case 'mock': {
