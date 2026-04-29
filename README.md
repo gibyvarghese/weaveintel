@@ -67,15 +67,23 @@ If you have Node.js ≥ 20 and at least one provider key handy, the bundled inst
 git clone https://github.com/gibyvarghese/weaveintel.git
 cd weaveintel
 
-# 1. Add your provider key(s) — at least one is required.
+# 1. (If you don't have Node 20+ yet) install it via nvm — no sudo, macOS/Linux.
+#    Skip this step if `node -v` already prints v20.x or higher.
+./scripts/install-node.sh
+# After it finishes, either open a new shell or run:
+#   source "$HOME/.nvm/nvm.sh"
+
+# 2. Add your provider key(s) — at least one is required.
 #    Either export them now (the script will write them into .env on first run):
 export OPENAI_API_KEY=sk-...
 export ANTHROPIC_API_KEY=sk-ant-...
 #    …or skip this and edit .env after the first run, then re-run the script.
 
-# 2. Run the installer.
+# 3. Run the installer.
 ./scripts/start-geneweave.sh
 ```
+
+> 🪟 **Windows users:** install Node 20 via [nvm-windows](https://github.com/coreybutler/nvm-windows) or `winget install OpenJS.NodeJS.LTS`, then run `./scripts/start-geneweave.sh` from WSL or Git Bash.
 
 What the script does (idempotent — safe to re-run):
 
