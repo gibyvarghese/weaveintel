@@ -3,10 +3,14 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Install dependencies
+# Native build toolchain for native modules (better-sqlite3, etc.)
+RUN apk add --no-cache python3 make g++ libc6-compat
+
+# Install dependencies (workspaces include packages/* and apps/*)
 COPY package.json package-lock.json* turbo.json tsconfig.base.json tsconfig.json ./
 COPY packages/ packages/
-RUN npm ci --ignore-scripts
+COPY apps/ apps/
+RUN npm ci
 RUN npx turbo build
 
 # ─── Production stage ─────────────────────────────────────────
@@ -20,9 +24,11 @@ RUN addgroup -S geneweave && adduser -S geneweave -G geneweave
 # Copy built monorepo
 COPY --from=builder /app/package.json /app/package-lock.json* ./
 COPY --from=builder /app/turbo.json ./
+COPY --from=builder /app/tsconfig.base.json /app/tsconfig.json ./
 COPY --from=builder /app/packages/ packages/
+COPY --from=builder /app/apps/ apps/
 COPY --from=builder /app/node_modules/ node_modules/
-COPY deploy/server.ts deploy/server.ts
+COPY deploy/ deploy/
 
 # Create data directory for SQLite
 RUN mkdir -p /app/data && chown -R geneweave:geneweave /app/data

@@ -59,6 +59,46 @@ weaveIntel is a modular monorepo that provides composable building blocks for bu
 
 [`geneWeave`](apps/geneweave) is the reference full-stack app built on weaveIntel: streaming chat with auth, persona RBAC, an admin dashboard, tool/skill governance, observability traces, and the Scientific Validation pipeline. The steps below take you from a fresh `git clone` to a running app at `http://localhost:3500`.
 
+### Quick Start (one command)
+
+If you have Node.js ≥ 20 and at least one provider key handy, the bundled installer does everything (install → build → seed `.env` → start):
+
+```bash
+git clone https://github.com/gibyvarghese/weaveintel.git
+cd weaveintel
+
+# 1. Add your provider key(s) — at least one is required.
+#    Either export them now (the script will write them into .env on first run):
+export OPENAI_API_KEY=sk-...
+export ANTHROPIC_API_KEY=sk-ant-...
+#    …or skip this and edit .env after the first run, then re-run the script.
+
+# 2. Run the installer.
+./scripts/start-geneweave.sh
+```
+
+What the script does (idempotent — safe to re-run):
+
+1. Verifies Node ≥ 20 / npm.
+2. Runs `npm install` (skipped if `node_modules` is current).
+3. Runs `npm run build` (use `--rebuild` to force a clean rebuild).
+4. Creates `.env` from `.env.example` if missing and auto-generates strong `JWT_SECRET` and `VAULT_KEY` values.
+5. Writes any `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` from your shell into `.env` (existing real values are preserved; only placeholders are overwritten).
+6. Refuses to start if no real provider key is set, with a clear message telling you to edit `.env`.
+7. Loads `.env` and starts the dev server at `http://localhost:${PORT:-3500}`.
+
+Script flags:
+
+```bash
+./scripts/start-geneweave.sh --no-start   # install + build + seed .env, do not start
+./scripts/start-geneweave.sh --rebuild    # force clean rebuild
+./scripts/start-geneweave.sh --prod       # start deploy/server.ts instead of the dev entrypoint
+```
+
+If you'd rather run each step by hand, follow sections 1–6 below.
+
+> 💡 **Where to get keys** — OpenAI: <https://platform.openai.com/api-keys> · Anthropic: <https://console.anthropic.com/settings/keys>. You only need one to get started; the model selector in the admin tab will list whichever providers are configured.
+
 ### 1. Prerequisites
 
 Install these first:
@@ -119,6 +159,8 @@ npm run build --workspace @weaveintel/geneweave
 
 ### 5. Configure environment variables
 
+> **If you used `./scripts/start-geneweave.sh` above, this is already done** — the script created `.env`, generated `JWT_SECRET` and `VAULT_KEY`, and ingested any provider keys exported in your shell. You only need this section if you're setting things up manually, or want to add optional integrations (Stats NZ, Semantic Scholar, OAuth, ServiceNow, etc.).
+
 Copy the template and edit it with at least one provider key, a JWT signing secret, and a vault key:
 
 ```bash
@@ -128,7 +170,8 @@ cp .env.example .env
 Minimum required keys in `.env`:
 
 ```bash
-# Pick at least one provider:
+# Pick at least one provider — OpenAI (https://platform.openai.com/api-keys)
+# and/or Anthropic (https://console.anthropic.com/settings/keys):
 OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 
@@ -148,6 +191,8 @@ Generate strong secrets:
 ```bash
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
+
+After editing `.env`, you can either re-run `./scripts/start-geneweave.sh` (it will pick up the new keys and start the server) or continue to step 6 to start it manually.
 
 See [.env.example](.env.example) for the full list of optional variables (Stats NZ, Semantic Scholar, OAuth provider apps, ServiceNow, etc.).
 
@@ -1237,18 +1282,38 @@ docker build -t geneweave .
 # Run
 docker run -d --name geneweave \
   -p 3500:3500 \
-  -e JWT_SECRET=your-secret \
+  -e JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))") \
+  -e VAULT_KEY=$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))") \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   -e OPENAI_API_KEY=sk-... \
   -v geneweave-data:/app/data \
   geneweave
+
+# Open http://localhost:3500
 ```
+
+`JWT_SECRET` and `VAULT_KEY` are required; at least one of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` is required. The SQLite DB lives in the `geneweave-data` volume so it survives container restarts.
 
 ### Docker Compose
 
 ```bash
-# Copy .env.example to .env and fill in your keys, then:
-docker compose up -d
+# 1. Make sure JWT_SECRET, VAULT_KEY and at least one provider key are set
+#    (either in .env or exported in your shell):
+export JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")
+export VAULT_KEY=$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+
+# 2. Build and start (override host port with PORT=… if 3500 is busy)
+docker compose up -d --build
+
+# 3. Tail logs
+docker compose logs -f geneweave
+
+# 4. Open http://localhost:${PORT:-3500}
+
+# 5. Stop and remove (drop -v if you want to keep the SQLite volume)
+docker compose down -v
 ```
 
 ### Fly.io
