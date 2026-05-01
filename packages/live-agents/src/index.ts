@@ -78,6 +78,7 @@ export {
   type ModelAttentionPolicyOptions,
 } from './attention.js';
 export { createActionExecutor } from './action-executor.js';
+export type { TaskHandler, TaskHandlerResult } from './action-executor.js';
 export { createMcpAccountSessionProvider } from './mcp-session-provider.js';
 export {
   InMemoryLiveAgentsRunLogger,

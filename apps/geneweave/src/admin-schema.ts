@@ -16,6 +16,7 @@ import {
   CALLABLE_CAPABILITY_ADMIN_TABS,
   PLATFORM_CAPABILITY_ADMIN_TABS,
   ROUTING_ADMIN_TABS,
+  KAGGLE_ADMIN_TABS,
 } from './admin/schema/index.js';
 
 // ─── Tab groups (sidebar navigation) ─────────────────────────
@@ -99,6 +100,18 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'guardrail-evals', label: 'Evals' },
     { key: 'memory-extraction-events', label: 'Memory Extraction' },
   ]},
+  { label: 'Kaggle', icon: '\uD83C\uDFC6', tabs: [
+    { key: 'kaggle-competitions', label: 'Tracked Competitions' },
+    { key: 'kaggle-approaches', label: 'Approaches' },
+    { key: 'kaggle-runs', label: 'Runs' },
+    { key: 'kaggle-run-artifacts', label: 'Run Artifacts' },
+    { key: 'kaggle-meshes', label: 'Live Meshes' },
+    { key: 'kaggle-mesh-agents', label: 'Live Agents' },
+    { key: 'kaggle-mesh-bindings', label: 'Account Bindings' },
+    { key: 'kaggle-mesh-bridges', label: 'Cross-Mesh Bridges' },
+    { key: 'kaggle-discussion-settings', label: 'Discussion Kill Switch' },
+    { key: 'kaggle-discussion-posts', label: 'Discussion Posts' },
+  ]},
   { label: 'Developer', icon: '\uD83D\uDEE0\uFE0F', tabs: [
     { key: 'scaffold-templates', label: 'Scaffolds' },
     { key: 'recipe-configs', label: 'Recipes' },
@@ -118,4 +131,5 @@ export const ADMIN_TABS = normalizeAdminTabsForModelDiscovery({
   ...CALLABLE_CAPABILITY_ADMIN_TABS,
   ...PLATFORM_CAPABILITY_ADMIN_TABS,
   ...ROUTING_ADMIN_TABS,
+  ...KAGGLE_ADMIN_TABS,
 });

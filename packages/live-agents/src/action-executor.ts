@@ -353,11 +353,39 @@ async function executeSessionTool(
   return session.callTool(ctx, request);
 }
 
+export interface TaskHandlerResult {
+  /** If true, mark backlog item COMPLETED instead of IN_PROGRESS. Defaults to false. */
+  completed?: boolean;
+  /** Optional summary text appended to the action result. */
+  summaryProse?: string;
+  /** Message ids that the handler created (will be merged into result). */
+  createdMessageIds?: string[];
+}
+
+export type TaskHandler = (
+  action: AttentionAction & { type: 'StartTask' | 'ContinueTask' },
+  context: ActionExecutionContext,
+  ctx: ExecutionContext,
+) => Promise<TaskHandlerResult | void>;
+
 export function createActionExecutor(opts?: {
   sessionProvider?: AccountSessionProvider;
   externalActionAdapter?: ExternalActionAdapter;
   observability?: LiveAgentsObservability;
+  /**
+   * Map from agent role (case-insensitive) to a handler that performs the real
+   * work for StartTask / ContinueTask actions. If no handler is registered for
+   * the agent's role, the executor falls back to the legacy behavior of merely
+   * transitioning the backlog item to IN_PROGRESS.
+   */
+  taskHandlers?: Record<string, TaskHandler>;
 }): ActionExecutor {
+  const taskHandlers: Record<string, TaskHandler> = {};
+  if (opts?.taskHandlers) {
+    for (const [role, handler] of Object.entries(opts.taskHandlers)) {
+      taskHandlers[role.toLowerCase()] = handler;
+    }
+  }
   const resolvedObservability = {
     ...opts?.observability,
     runLogger: opts?.observability?.runLogger ?? createLiveAgentsRunLogger(),
@@ -414,7 +442,6 @@ export function createActionExecutor(opts?: {
         {
           actionType: action.type,
           agentId: context.agent.id,
-          tickId: context.tickId,
         },
         async () => {
 
@@ -429,23 +456,64 @@ export function createActionExecutor(opts?: {
             updatedBacklogItemIds,
           };
         }
+        case 'StartTask':
         case 'ContinueTask': {
+          const agentRole = (context.agent.role ?? '').toLowerCase();
+          const handler =
+            taskHandlers[agentRole] ??
+            // Backward-compat: 'kernel author' previously had a hardcoded
+            // import of kaggle/implementer-task. Preserve that fallback so
+            // existing callers keep working.
+            (agentRole === 'kernel author'
+              ? (async (a, c, x) => {
+                  const { implementerHandleTask } = await import('./kaggle/implementer-task.js');
+                  await implementerHandleTask(a, c, x);
+                  return { completed: false };
+                }) as TaskHandler
+              : undefined);
+
+          if (handler) {
+            try {
+              const handlerResult = (await handler(
+                action as AttentionAction & { type: 'StartTask' | 'ContinueTask' },
+                context,
+                ctx,
+              )) ?? {};
+              const nextStatus = handlerResult.completed ? 'COMPLETED' : 'IN_PROGRESS';
+              await context.stateStore.transitionBacklogItemStatus(
+                action.backlogItemId,
+                nextStatus,
+                context.nowIso,
+              );
+              updatedBacklogItemIds.push(action.backlogItemId);
+              if (handlerResult.createdMessageIds) {
+                createdMessageIds.push(...handlerResult.createdMessageIds);
+              }
+              return {
+                status: 'SUCCESS',
+                summaryProse:
+                  handlerResult.summaryProse ??
+                  `${action.type === 'StartTask' ? 'Started' : 'Continued'} backlog item ${action.backlogItemId} (${context.agent.role})`,
+                createdMessageIds,
+                createdOutboundRecordIds,
+                updatedBacklogItemIds,
+              };
+            } catch (err) {
+              return {
+                status: 'FAILED',
+                summaryProse: `Task handler for role '${context.agent.role}' failed: ${err instanceof Error ? err.message : String(err)}`,
+                createdMessageIds,
+                createdOutboundRecordIds,
+                updatedBacklogItemIds,
+              };
+            }
+          }
+
           await context.stateStore.transitionBacklogItemStatus(action.backlogItemId, 'IN_PROGRESS', context.nowIso);
           updatedBacklogItemIds.push(action.backlogItemId);
           return {
             status: 'SUCCESS',
-            summaryProse: `Continued backlog item ${action.backlogItemId}`,
-            createdMessageIds,
-            createdOutboundRecordIds,
-            updatedBacklogItemIds,
-          };
-        }
-        case 'StartTask': {
-          await context.stateStore.transitionBacklogItemStatus(action.backlogItemId, 'IN_PROGRESS', context.nowIso);
-          updatedBacklogItemIds.push(action.backlogItemId);
-          return {
-            status: 'SUCCESS',
-            summaryProse: `Started backlog item ${action.backlogItemId}`,
+            summaryProse: `${action.type === 'StartTask' ? 'Started' : 'Continued'} backlog item ${action.backlogItemId}`,
             createdMessageIds,
             createdOutboundRecordIds,
             updatedBacklogItemIds,

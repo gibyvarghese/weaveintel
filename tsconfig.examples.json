@@ -3,6 +3,7 @@
   "include": [
     "examples/**/*.ts",
     "apps/geneweave/src/cse.ts",
+    "apps/geneweave/src/live-agents/kaggle/**/*.ts",
     "packages/tools-webhook/src/**/*.ts",
     "packages/tools-filewatch/src/**/*.ts"
   ],

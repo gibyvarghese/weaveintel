@@ -1150,18 +1150,39 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
   // ── Hypothesis Validation feature routes ────────────────────
   // Build async model factories from the configured providers (models are cached by chat-runtime).
-  const svProviderCfg = providers?.['openai'] ?? providers?.['anthropic'] ?? { apiKey: '' };
-  const svProviderKey = providers?.['openai'] ? 'openai' : 'anthropic';
+  // Prefer hosted/high-quality providers first, then fall back to local models so SV can
+  // still operate against Ollama/llama.cpp when no cloud key is configured.
+  const SV_PROVIDER_PREFERENCE = ['openai', 'anthropic', 'google', 'gemini', 'ollama', 'llamacpp', 'llama-cpp'] as const;
+  const SV_REASONING_MODEL: Record<string, string> = {
+    openai: 'gpt-4o',
+    anthropic: 'claude-sonnet-4-20250514',
+    google: 'gemini-2.5-pro',
+    gemini: 'gemini-2.5-pro',
+    ollama: process.env['OLLAMA_MODEL'] ?? 'llama3.1',
+    llamacpp: 'local',
+    'llama-cpp': 'local',
+  };
+  const SV_TOOL_MODEL: Record<string, string> = {
+    openai: 'gpt-4o-mini',
+    anthropic: 'claude-haiku-4-20250414',
+    google: 'gemini-2.5-flash',
+    gemini: 'gemini-2.5-flash',
+    ollama: process.env['OLLAMA_MODEL'] ?? 'llama3.1',
+    llamacpp: 'local',
+    'llama-cpp': 'local',
+  };
+  const svProviderKey = SV_PROVIDER_PREFERENCE.find(p => providers?.[p]) ?? 'openai';
+  const svProviderCfg = providers?.[svProviderKey] ?? { apiKey: '' };
   const svRunner = new SVChatBridge({
     db,
     makeReasoningModel: () => getOrCreateModel(
       svProviderKey,
-      svProviderKey === 'openai' ? 'gpt-4o' : 'claude-sonnet-4-20250514',
+      SV_REASONING_MODEL[svProviderKey] ?? 'gpt-4o',
       svProviderCfg,
     ),
     makeToolModel: () => getOrCreateModel(
       svProviderKey,
-      svProviderKey === 'openai' ? 'gpt-4o-mini' : 'claude-haiku-4-20250414',
+      SV_TOOL_MODEL[svProviderKey] ?? 'gpt-4o-mini',
       svProviderCfg,
     ),
     toolMap: { ...BUILTIN_TOOLS, ...createSVToolMap() },

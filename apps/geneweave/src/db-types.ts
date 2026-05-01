@@ -1593,6 +1593,106 @@ export interface SvAgentTurnRow {
   created_at: string;
 }
 
+// ─── Phase K3: Kaggle projection rows ────────────────────────
+// Source of truth for evidence + agent decisions remains
+// @weaveintel/contracts and live-agents StateStore. These three
+// rows back the GeneWeave admin UI and analytics views.
+
+export interface KaggleCompetitionTrackedRow {
+  id: string;
+  tenant_id: string | null;
+  competition_ref: string;
+  title: string | null;
+  category: string | null;
+  deadline: string | null;
+  reward: string | null;
+  url: string | null;
+  status: string;                   // 'watching' | 'active' | 'paused' | 'archived'
+  notes: string | null;
+  last_synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KaggleApproachRow {
+  id: string;
+  tenant_id: string | null;
+  competition_ref: string;
+  summary: string;
+  expected_metric: string | null;
+  model: string | null;
+  source_kernel_refs: string | null; // JSON string[]
+  embedding: Buffer | null;
+  status: string;                   // 'draft' | 'approved' | 'rejected' | 'implemented'
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KaggleRunRow {
+  id: string;
+  tenant_id: string | null;
+  competition_ref: string;
+  approach_id: string | null;
+  contract_id: string | null;
+  replay_trace_id: string | null;
+  mesh_id: string | null;
+  agent_id: string | null;
+  kernel_ref: string | null;
+  submission_id: string | null;
+  public_score: number | null;
+  validator_report: string | null;  // JSON snapshot
+  status: string;                   // 'queued' | 'running' | 'validated' | 'submitted' | 'completed' | 'failed'
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Phase K4 — One artifact per kaggle_run row. Stores the actual
+// @weaveintel/contracts CompletionReport JSON and the @weaveintel/replay
+// RunLog JSON so admin UI + replay endpoint can reconstruct deterministically.
+export interface KaggleRunArtifactRow {
+  id: string;
+  run_id: string;
+  contract_id: string;
+  replay_trace_id: string;
+  contract_report_json: string;     // JSON CompletionReport
+  replay_run_log_json: string;      // JSON RunLog
+  created_at: string;
+}
+
+// Phase K6 — per-tenant kill switch for the Kaggle discussion bot. The
+// runtime checks `discussion_enabled === 1` before invoking
+// `kaggle.discussions.create`. UNIQUE(tenant_id) so each tenant has at
+// most one row; admin UI upserts by tenant_id.
+export interface KaggleDiscussionSettingsRow {
+  id: string;
+  tenant_id: string;
+  discussion_enabled: number;       // 0 = off (default), 1 = enabled
+  notes: string | null;
+  updated_at: string;
+}
+
+// Phase K6 — append-only log of every Kaggle discussion post the platform
+// has executed. Source of truth for "what did the bot say in public" lives
+// here for fast operator review; the underlying contract + replay trace
+// remain in @weaveintel/contracts and @weaveintel/replay.
+export interface KaggleDiscussionPostRow {
+  id: string;
+  tenant_id: string | null;
+  competition_ref: string;
+  topic_id: string;
+  parent_topic_id: string | null;
+  title: string | null;
+  body_preview: string | null;
+  url: string | null;
+  status: string;                   // 'posted' | 'failed' | 'killswitch_blocked'
+  contract_id: string | null;
+  replay_trace_id: string | null;
+  posted_at: string;
+}
+
 // ─── Adapter interface ───────────────────────────────────────
 
 export interface DatabaseAdapter {
@@ -2393,6 +2493,46 @@ export interface DatabaseAdapter {
   createAgentTurn(turn: Omit<SvAgentTurnRow, 'created_at'>): Promise<void>;
   listAgentTurns(hypothesisId: string, afterId?: string, limit?: number): Promise<SvAgentTurnRow[]>;
 
+  // ─── Phase K3: Kaggle projections ───────────────────────────
+  // Tracked competitions
+  upsertKaggleCompetitionTracked(row: Omit<KaggleCompetitionTrackedRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getKaggleCompetitionTracked(id: string): Promise<KaggleCompetitionTrackedRow | null>;
+  listKaggleCompetitionsTracked(opts?: { status?: string; tenantId?: string | null; limit?: number; offset?: number }): Promise<KaggleCompetitionTrackedRow[]>;
+  updateKaggleCompetitionTracked(id: string, patch: Partial<Omit<KaggleCompetitionTrackedRow, 'id' | 'created_at'>>): Promise<void>;
+  deleteKaggleCompetitionTracked(id: string): Promise<void>;
+
+  // Approaches
+  createKaggleApproach(row: Omit<KaggleApproachRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getKaggleApproach(id: string): Promise<KaggleApproachRow | null>;
+  listKaggleApproaches(opts?: { competitionRef?: string; status?: string; tenantId?: string | null; limit?: number; offset?: number }): Promise<KaggleApproachRow[]>;
+  updateKaggleApproach(id: string, patch: Partial<Omit<KaggleApproachRow, 'id' | 'created_at'>>): Promise<void>;
+  deleteKaggleApproach(id: string): Promise<void>;
+
+  // Runs
+  createKaggleRun(row: Omit<KaggleRunRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getKaggleRun(id: string): Promise<KaggleRunRow | null>;
+  listKaggleRuns(opts?: { competitionRef?: string; approachId?: string; status?: string; tenantId?: string | null; limit?: number; offset?: number }): Promise<KaggleRunRow[]>;
+  updateKaggleRun(id: string, patch: Partial<Omit<KaggleRunRow, 'id' | 'created_at'>>): Promise<void>;
+  deleteKaggleRun(id: string): Promise<void>;
+
+  // Phase K4 — Run artifacts (contract + replay payloads)
+  upsertKaggleRunArtifact(row: Omit<KaggleRunArtifactRow, 'created_at'>): Promise<void>;
+  getKaggleRunArtifactByRunId(runId: string): Promise<KaggleRunArtifactRow | null>;
+  listKaggleRunArtifacts(opts?: { limit?: number; offset?: number }): Promise<KaggleRunArtifactRow[]>;
+  deleteKaggleRunArtifact(id: string): Promise<void>;
+
+  // Phase K5 — Live-agents Kaggle mesh index (pointer table to la_entities)
+  upsertKaggleLiveMesh(row: { mesh_id: string; tenant_id: string; kaggle_username: string }): Promise<void>;
+  listKaggleLiveMeshes(opts?: { tenantId?: string }): Promise<Array<{ mesh_id: string; tenant_id: string; kaggle_username: string; created_at: string }>>;
+
+  // Phase K6 — Kaggle discussion bot (kill switch + post log)
+  getKaggleDiscussionSettings(tenantId: string): Promise<KaggleDiscussionSettingsRow | null>;
+  listKaggleDiscussionSettings(): Promise<KaggleDiscussionSettingsRow[]>;
+  upsertKaggleDiscussionSettings(row: { tenant_id: string; discussion_enabled: number; notes?: string | null }): Promise<KaggleDiscussionSettingsRow>;
+  isKaggleDiscussionEnabledForTenant(tenantId: string): Promise<boolean>;
+  recordKaggleDiscussionPost(row: Omit<KaggleDiscussionPostRow, 'posted_at'> & { posted_at?: string }): Promise<void>;
+  listKaggleDiscussionPosts(opts?: { tenantId?: string; competitionRef?: string; limit?: number; offset?: number }): Promise<KaggleDiscussionPostRow[]>;
+  getKaggleDiscussionPost(id: string): Promise<KaggleDiscussionPostRow | null>;
 }
 
 

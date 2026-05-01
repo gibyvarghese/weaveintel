@@ -27,3 +27,11 @@ apps/geneweave/PROCESS_CARD_UX_SPEC.md
 
 # Local Copilot agent instructions (not for public repo).
 .github/copilot-instructions.md
+
+# Live-agents runtime SQLite
+live-agents.db
+live-agents.db-shm
+live-agents.db-wal
+
+# Local scratch
+content.txt

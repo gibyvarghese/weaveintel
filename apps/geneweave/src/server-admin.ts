@@ -34,6 +34,12 @@ import {
   registerWorkerAgentRoutes,
   registerSupervisorAgentRoutes,
   registerToolApprovalRequestRoutes,
+  registerKaggleCompetitionRoutes,
+  registerKaggleApproachRoutes,
+  registerKaggleRunRoutes,
+  registerKaggleRunArtifactRoutes,
+  registerKaggleMeshRoutes,
+  registerKaggleDiscussionRoutes,
   registerGuardrailRoutes,
   registerRoutingRoutes,
   registerModelPricingRoutes,
@@ -1256,6 +1262,18 @@ export function registerAdminRoutes(
   registerWorkerAgentRoutes(router, db, adminHelpers);
   registerSupervisorAgentRoutes(router, db, adminHelpers);
   registerToolApprovalRequestRoutes(router, db, adminHelpers);
+
+  // ── Phase K3: Kaggle projection admin CRUD ───────────────
+  registerKaggleCompetitionRoutes(router, db, adminHelpers);
+  registerKaggleApproachRoutes(router, db, adminHelpers);
+  registerKaggleRunRoutes(router, db, adminHelpers);
+  registerKaggleRunArtifactRoutes(router, db, adminHelpers);
+
+  // ── Phase K5: Kaggle live-agents mesh provisioning + observation ──
+  registerKaggleMeshRoutes(router, db, adminHelpers);
+
+  // ── Phase K6: Kaggle discussion bot kill switch + post log ───────
+  registerKaggleDiscussionRoutes(router, db, adminHelpers);
 
   // ── anyWeave Phase 4: Task-aware routing admin API ───────
   registerTaskTypeRoutes(router, db, adminHelpers);

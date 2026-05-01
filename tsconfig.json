@@ -35,6 +35,7 @@
     { "path": "packages/tools-social" },
     { "path": "packages/tools-enterprise" },
     { "path": "packages/tools-gmail" },
+    { "path": "packages/tools-kaggle" },
     { "path": "packages/tools-outlook" },
     { "path": "packages/tools-imap" },
     { "path": "packages/tools-gdrive" },

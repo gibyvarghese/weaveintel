@@ -2325,3 +2325,248 @@ describeAdmin('Scientific Validation API', () => {
     expect(res.status).toBe(401);
   });
 });
+
+// ─── Phase K4 — Kaggle Run Artifacts + Replay API ───────────
+
+describeAdmin('Kaggle Run Artifacts + Replay API', () => {
+  const fixtureRunLog = (executionId: string) => ({
+    executionId,
+    startTime: 1700000000000,
+    endTime: 1700000001000,
+    status: 'completed',
+    steps: [
+      {
+        index: 0, type: 'tool', name: 'kaggle.kernels_push',
+        startTime: 1700000000000, endTime: 1700000000400,
+        input: { kernelRef: 'demo-user/demo-kernel-test' },
+        output: { ok: true },
+      },
+      {
+        index: 1, type: 'tool', name: 'kaggle.competitions_submit',
+        startTime: 1700000000400, endTime: 1700000001000,
+        input: { competitionRef: 'demo-comp-1' },
+        output: { submissionId: 'sub-test', publicScore: 0.77 },
+      },
+    ],
+    totalTokens: 0,
+  });
+
+  it('rejects materialize when unauthenticated', async () => {
+    const savedCookie = cookie;
+    const savedCsrf = csrfToken;
+    cookie = '';
+    csrfToken = '';
+    const { status } = await api('POST', '/api/admin/kaggle-runs/materialize', {
+      competitionRef: 'demo-comp-1', kernelRef: 'x/y', runLog: fixtureRunLog('e1'),
+    });
+    cookie = savedCookie;
+    csrfToken = savedCsrf;
+    expect(status).toBe(401);
+  });
+
+  it('rejects materialize with missing runLog', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const { status, data } = await api('POST', '/api/admin/kaggle-runs/materialize', {
+      competitionRef: 'demo-comp-1', kernelRef: 'x/y',
+    });
+    expect(status).toBe(400);
+    expect(String(data['error'])).toMatch(/runLog/);
+  });
+
+  it('materialize creates contract + artifact + projection row', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const traceId = `kgl-trace-test-${Date.now()}`;
+    const runId = `kgl-run-test-${Date.now()}`;
+    const { status, data } = await api('POST', '/api/admin/kaggle-runs/materialize', {
+      runId,
+      competitionRef: 'demo-comp-1',
+      kernelRef: 'demo-user/demo-kernel-test',
+      submissionId: 'sub-test',
+      publicScore: 0.77,
+      status: 'submitted',
+      runLog: fixtureRunLog(traceId),
+    });
+    expect(status).toBe(201);
+    expect(data['runId']).toBe(runId);
+    expect(typeof data['contractId']).toBe('string');
+    expect(data['replayTraceId']).toBe(traceId);
+  });
+
+  it('detail endpoint returns joined run + artifact + competition', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const traceId = `kgl-trace-det-${Date.now()}`;
+    const runId = `kgl-run-det-${Date.now()}`;
+    await api('POST', '/api/admin/kaggle-runs/materialize', {
+      runId, competitionRef: 'demo-comp-1', kernelRef: 'x/y',
+      submissionId: 'sub-det', runLog: fixtureRunLog(traceId),
+    });
+    const { status, data } = await api('GET', `/api/admin/kaggle-runs/${runId}/detail`);
+    expect(status).toBe(200);
+    expect((data['run'] as Record<string, unknown>)['id']).toBe(runId);
+    expect((data['artifact'] as Record<string, unknown>)['run_id']).toBe(runId);
+    expect((data['runLogPreview'] as Record<string, unknown>)['stepCount']).toBe(2);
+  });
+
+  it('replay returns matchRate=1 on identical RunLog', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const traceId = `kgl-trace-rep-${Date.now()}`;
+    const runId = `kgl-run-rep-${Date.now()}`;
+    await api('POST', '/api/admin/kaggle-runs/materialize', {
+      runId, competitionRef: 'demo-comp-1', kernelRef: 'x/y',
+      submissionId: 'sub-rep', runLog: fixtureRunLog(traceId),
+    });
+    const { status, data } = await api('POST', `/api/admin/kaggle-runs/${runId}/replay`);
+    expect(status).toBe(200);
+    expect(data['matchRate']).toBe(1);
+    expect(data['status']).toBe('completed');
+    expect((data['steps'] as unknown[]).length).toBe(2);
+  });
+
+  it('list returns artifact previews (size + ids only)', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const { status, data } = await api('GET', '/api/admin/kaggle-run-artifacts?limit=5');
+    expect(status).toBe(200);
+    const items = data['kaggle-run-artifacts'] as Array<Record<string, unknown>>;
+    expect(Array.isArray(items)).toBe(true);
+    if (items.length > 0) {
+      const first = items[0]!;
+      expect(typeof first['contract_report_size']).toBe('number');
+      expect(typeof first['replay_run_log_size']).toBe('number');
+      expect(first['contract_report_json']).toBeUndefined(); // preview only
+    }
+  });
+
+  it('list endpoint returns 401 when unauthenticated', async () => {
+    const savedCookie = cookie;
+    cookie = '';
+    const { status } = await api('GET', '/api/admin/kaggle-run-artifacts');
+    cookie = savedCookie;
+    expect(status).toBe(401);
+  });
+});
+
+describeAdmin('Kaggle Live Mesh API (Phase K5)', () => {
+  it('rejects mesh list when unauthenticated', async () => {
+    const savedCookie = cookie;
+    cookie = '';
+    const { status } = await api('GET', '/api/admin/kaggle-meshes');
+    cookie = savedCookie;
+    expect(status).toBe(401);
+  });
+
+  it('rejects provision when unauthenticated', async () => {
+    const savedCookie = cookie;
+    const savedCsrf = csrfToken;
+    cookie = '';
+    csrfToken = '';
+    const { status } = await api('POST', '/api/admin/kaggle-mesh-provision', {
+      tenantId: 'demo', kaggleUsername: 'demo-user',
+      mcpUrl: 'http://localhost:0/mcp', humanOwnerId: 'human:demo',
+    });
+    cookie = savedCookie;
+    csrfToken = savedCsrf;
+    expect(status).toBe(401);
+  });
+
+  it('rejects provision with missing tenantId', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const { status, data } = await api('POST', '/api/admin/kaggle-mesh-provision', {
+      kaggleUsername: 'demo-user', mcpUrl: 'http://localhost:0/mcp', humanOwnerId: 'human:demo',
+    });
+    expect(status).toBe(400);
+    expect(String(data['error'])).toMatch(/tenantId/);
+  });
+
+  it('lists meshes (shape check)', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const { status, data } = await api('GET', '/api/admin/kaggle-meshes');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['kaggle-meshes'])).toBe(true);
+  });
+
+  it('lists agents (shape check)', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const { status, data } = await api('GET', '/api/admin/kaggle-mesh-agents');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['kaggle-mesh-agents'])).toBe(true);
+  });
+
+  it('returns 404 for unknown mesh detail', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const { status } = await api('GET', '/api/admin/kaggle-meshes/mesh-does-not-exist');
+    expect(status).toBe(404);
+  });
+});
+
+describeAdmin('Kaggle Discussion Bot API (Phase K6)', () => {
+  it('rejects settings list when unauthenticated', async () => {
+    const savedCookie = cookie;
+    cookie = '';
+    const { status } = await api('GET', '/api/admin/kaggle-discussion-settings');
+    cookie = savedCookie;
+    expect(status).toBe(401);
+  });
+
+  it('rejects posts list when unauthenticated', async () => {
+    const savedCookie = cookie;
+    cookie = '';
+    const { status } = await api('GET', '/api/admin/kaggle-discussion-posts');
+    cookie = savedCookie;
+    expect(status).toBe(401);
+  });
+
+  it('lists discussion settings (shape check)', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const { status, data } = await api('GET', '/api/admin/kaggle-discussion-settings');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['kaggle-discussion-settings'])).toBe(true);
+  });
+
+  it('PUT upserts kill switch and round-trips through GET', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const tenantId = `t-k6-${Date.now()}`;
+    // Initial enable
+    const put1 = await api('PUT', `/api/admin/kaggle-discussion-settings/${tenantId}`, {
+      discussion_enabled: true, notes: 'enable for k6 test',
+    });
+    expect(put1.status).toBe(200);
+    expect((put1.data as { discussion_enabled: number }).discussion_enabled).toBe(1);
+    // Read back
+    const get1 = await api('GET', `/api/admin/kaggle-discussion-settings/${tenantId}`);
+    expect(get1.status).toBe(200);
+    expect((get1.data as { discussion_enabled: number; tenant_id: string }).tenant_id).toBe(tenantId);
+    expect((get1.data as { discussion_enabled: number }).discussion_enabled).toBe(1);
+    // Disable (idempotent UPSERT)
+    const put2 = await api('PUT', `/api/admin/kaggle-discussion-settings/${tenantId}`, {
+      discussion_enabled: false,
+    });
+    expect(put2.status).toBe(200);
+    expect((put2.data as { discussion_enabled: number }).discussion_enabled).toBe(0);
+  });
+
+  it('returns 404 for unknown tenant settings', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const { status } = await api('GET', '/api/admin/kaggle-discussion-settings/tenant-does-not-exist');
+    expect(status).toBe(404);
+  });
+
+  it('lists discussion posts (shape check)', async () => {
+    const hasAuth = await ensureAuthenticated();
+    if (!hasAuth) return;
+    const { status, data } = await api('GET', '/api/admin/kaggle-discussion-posts');
+    expect(status).toBe(200);
+    expect(Array.isArray(data['kaggle-discussion-posts'])).toBe(true);
+  });
+});

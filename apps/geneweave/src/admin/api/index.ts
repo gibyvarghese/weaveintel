@@ -19,6 +19,14 @@ export { registerSkillRoutes } from './skills.js';
 export { registerWorkerAgentRoutes } from './worker-agents.js';
 export { registerSupervisorAgentRoutes } from './agents.js';
 export { registerToolApprovalRequestRoutes } from './tool-approval-requests.js';
+export {
+  registerKaggleCompetitionRoutes,
+  registerKaggleApproachRoutes,
+  registerKaggleRunRoutes,
+  registerKaggleRunArtifactRoutes,
+} from './kaggle.js';
+export { registerKaggleMeshRoutes } from './kaggle-mesh.js';
+export { registerKaggleDiscussionRoutes } from './kaggle-discussion.js';
 
 // ── anyWeave Phase 4: Task-aware routing admin API + UI ─────
 export { registerTaskTypeRoutes } from './task-types.js';

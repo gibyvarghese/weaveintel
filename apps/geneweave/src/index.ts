@@ -35,6 +35,8 @@ import { startToolHealthJob } from './tool-health-job.js';
 import { startRoutingRegressionJob } from './routing-feedback.js';
 import { registerMCPGatewayInCatalog, loadGatewayConfigFromCatalog } from './mcp-gateway.js';
 import { seedSVData } from './features/scientific-validation/sv-seed.js';
+import { seedKaggleDemoMesh } from './live-agents/kaggle/seed.js';
+import { seedKaggleArcPlaybook } from './live-agents/kaggle/playbook-seed.js';
 
 export type { PricingSyncReport };
 
@@ -131,6 +133,16 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
   // 3a. Seed Scientific Validation prompts and worker agents
   await seedSVData(db);
+
+  // 3b. Phase K5: seed a demo Kaggle live-agents mesh on first boot so
+  // operators see populated admin tabs. No-op if any meshes exist.
+  await seedKaggleDemoMesh(db);
+
+  // 3c. Seed competition-agnostic Kaggle playbooks (default + ARC-AGI-3) so
+  // the live-agents strategist can resolve a system prompt + Python solver
+  // template per inbound competition slug. Idempotent — only inserts rows
+  // when not already present.
+  await seedKaggleArcPlaybook(db);
 
   // 4. Sync BUILTIN_TOOLS into tool_catalog so operators can manage them
   await syncToolCatalog(db);

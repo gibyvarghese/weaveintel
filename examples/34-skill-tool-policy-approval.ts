@@ -192,15 +192,50 @@ async function main(): Promise<void> {
   // behind requireApproval, no request will be created, and steps 4–6 will
   // demonstrate the empty-queue case which is equally valid.
 
-  console.log('\n── Step 3: Send a chat message (tool may be gated) ──');
+  console.log('\n── Step 3: Create a gated skill, then send a triggering chat ──');
+  // Create a skill that:
+  //   - Has a unique trigger phrase (so activation is deterministic)
+  //   - Binds to the calculator tool
+  //   - Routes through a policy that requires approval
+  // The runtime will: match the trigger → activate the skill → attempt the
+  // tool call → policy gate blocks it → tool_approval_requests row created.
+  const suffix = Date.now();
+  const triggerPhrase = `gated-canary-${suffix}`;
+  const skillKey = `gated-skill-${suffix}`;
+  const skillName = `Gated Tool Skill ${suffix}`;
+  const policyKey = policies.find((p) => p.require_approval)?.key
+    ?? policies.find((p) => p.key === 'destructive_gate')?.key
+    ?? 'destructive_gate';
+
+  const { status: skillStatus } = await apiCall('POST', '/api/admin/skills', {
+    key: skillKey,
+    name: skillName,
+    description: 'Skill bound to an approval-gated policy for example 34.',
+    category: 'analysis',
+    instructions: 'When the user asks for a calculation, use the calculator tool to compute it.',
+    trigger_patterns: JSON.stringify([triggerPhrase]),
+    tool_names: JSON.stringify(['calculator']),
+    tool_policy_key: policyKey,
+    enabled: true,
+    version: '1.0',
+    priority: 100,
+  });
+  console.log(`  Created skill "${skillName}" (key=${skillKey}, policy=${policyKey}) → HTTP ${skillStatus}`);
+
   let sessionId: string | undefined;
   try {
     const chatResult = await sendChatMessage(
-      'What is the current time in UTC?',
+      `${triggerPhrase}: please compute 17 * 23 using the calculator.`,
     );
     sessionId = chatResult.sessionId;
     const reply = chatResult.messages.find(m => m.role === 'assistant');
     console.log('  Chat reply (truncated):', reply?.content?.slice(0, 120) ?? '(none)');
+    if (reply) {
+      const meta = (reply as unknown as { metadata?: Record<string, unknown> }).metadata ?? {};
+      const skills = Array.isArray(meta['activeSkills']) ? meta['activeSkills'] as Array<{ name?: string }> : [];
+      console.log('  activeSkills:', skills.map((s) => s.name).join(', ') || '(none)');
+      console.log('  skillPromptApplied:', meta['skillPromptApplied'] === true);
+    }
   } catch (err) {
     console.log('  Chat skipped (server may require API key):', (err as Error).message);
   }

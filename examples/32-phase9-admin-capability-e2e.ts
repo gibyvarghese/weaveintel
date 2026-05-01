@@ -86,6 +86,9 @@ async function main() {
   const promptId = asString(promptObj, 'id');
 
   // 3) Create skill in DB referencing prompt + strategy metadata.
+  //    Trigger patterns include a unique suffix so we can assert this exact
+  //    skill activated (not just any seed skill that matched 'rollout').
+  const triggerPhrase = `phase9-trigger-${suffix}`;
   await api('/api/admin/skills', {
     method: 'POST',
     body: JSON.stringify({
@@ -93,14 +96,14 @@ async function main() {
       description: 'Model-facing skill that routes reliability requests through a DB-backed prompt strategy.',
       category: 'analysis',
       instructions: 'Use this skill for reliability, rollout, and observability analysis tasks.',
-      trigger_patterns: JSON.stringify(['reliability', 'rollout', 'observability']),
+      trigger_patterns: JSON.stringify([triggerPhrase, 'reliability', 'rollout', 'observability']),
       examples: JSON.stringify(['Assess rollout risk', 'Summarize telemetry anomalies']),
       tool_names: JSON.stringify([]),
       prompt_id: promptId,
       prompt_strategy: strategyKey,
       enabled: true,
       version: '1.0',
-      priority: 10,
+      priority: 100,
     }),
   });
 
@@ -130,7 +133,8 @@ async function main() {
   const msgResp = await api(`/api/chats/${chatId}/messages`, {
     method: 'POST',
     body: JSON.stringify({
-      content: 'Give a rollout safety checklist for introducing shared admin schema modules.',
+      // Include the unique trigger so skill activation is deterministic.
+      content: `${triggerPhrase}: give a rollout safety checklist for introducing shared admin schema modules.`,
     }),
   });
 
@@ -149,6 +153,16 @@ async function main() {
   console.log(JSON.stringify(telemetry['summary'] ?? telemetry, null, 2));
   console.log('\nChat prompt strategy metadata:');
   console.log(JSON.stringify(metadata['promptStrategy'] ?? null, null, 2));
+
+  // Validate the skill we just created actually activated for this turn.
+  const activeSkills = Array.isArray(metadata['activeSkills']) ? (metadata['activeSkills'] as Json[]) : [];
+  const skillPromptApplied = metadata['skillPromptApplied'] === true;
+  const matched = activeSkills.some((s) => (s as Json)['name'] === skillName);
+  console.log('\nSkill activation:');
+  console.log('  skillPromptApplied:', skillPromptApplied);
+  console.log('  activeSkills:', activeSkills.map((s) => (s as Json)['name']).join(', ') || '(none)');
+  console.log(matched ? `  ✓ Skill "${skillName}" activated.` : `  ⚠ Skill "${skillName}" did NOT activate.`);
+
   console.log('\nDashboard traces count:', traces.length);
 }
 

@@ -35,6 +35,8 @@ import type {
   WebsiteCredentialRow,
   SvBudgetEnvelopeRow, SvHypothesisRow, SvHypothesisStatus, SvSubClaimRow, SvVerdictRow,
   SvEvidenceEventRow, SvAgentTurnRow,
+  KaggleCompetitionTrackedRow, KaggleApproachRow, KaggleRunRow, KaggleRunArtifactRow,
+  KaggleDiscussionSettingsRow, KaggleDiscussionPostRow,
   ProviderToolAdapterRow,
   TaskTypeDefinitionRow,
   ModelCapabilityScoreRow,
@@ -4068,6 +4070,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
     // Model pricing
     if (cnt('model_pricing') === 0) {
+    // Seeded with public list prices captured from provider pricing pages.
+    // Operators edit these in the admin Pricing tab; sync button refreshes from APIs.
     const pricing: Omit<ModelPricingRow, 'created_at' | 'updated_at'>[] = [
       { id: '24c261e4-3cd0-48da-aba5-ad65cdc4ba84',    model_id: 'claude-sonnet-4-20250514',    provider: 'anthropic', display_name: 'Claude Sonnet 4',    input_cost_per_1m: 3.00,  output_cost_per_1m: 15.00, quality_score: 0.85, source: 'seed', last_synced_at: null, enabled: 1 },
       { id: '3a01332c-7062-46f4-ac27-23718d0b7e11',      model_id: 'claude-opus-4-20250514',      provider: 'anthropic', display_name: 'Claude Opus 4',      input_cost_per_1m: 15.00, output_cost_per_1m: 75.00, quality_score: 0.95, source: 'seed', last_synced_at: null, enabled: 1 },
@@ -4079,6 +4083,22 @@ export class SQLiteAdapter implements DatabaseAdapter {
       { id: 'bf5734a5-3552-4068-a80d-457c25f927ab',       model_id: 'gpt-4.1-nano',                provider: 'openai',    display_name: 'GPT-4.1 Nano',       input_cost_per_1m: 0.10,  output_cost_per_1m: 0.40,  quality_score: 0.60, source: 'seed', last_synced_at: null, enabled: 1 },
       { id: '5190bfc2-0601-4153-8563-a6f5811bdcae',                 model_id: 'o3',                           provider: 'openai',    display_name: 'o3',                 input_cost_per_1m: 2.00,  output_cost_per_1m: 8.00,  quality_score: 0.85, source: 'seed', last_synced_at: null, enabled: 1 },
       { id: 'f7c3f6b4-f3de-4070-a547-f37359aa0ca4',            model_id: 'o4-mini',                      provider: 'openai',    display_name: 'o4 Mini',            input_cost_per_1m: 1.10,  output_cost_per_1m: 4.40,  quality_score: 0.75, source: 'seed', last_synced_at: null, enabled: 1 },
+      // Google Gemini — public list pricing (ai.google.dev/pricing)
+      { id: 'a1b2c3d4-0001-4000-8000-000000000001', model_id: 'gemini-2.5-pro',         provider: 'google', display_name: 'Gemini 2.5 Pro',        input_cost_per_1m: 1.25,   output_cost_per_1m: 10.00, quality_score: 0.92, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'a1b2c3d4-0001-4000-8000-000000000002', model_id: 'gemini-2.5-flash',       provider: 'google', display_name: 'Gemini 2.5 Flash',      input_cost_per_1m: 0.30,   output_cost_per_1m: 2.50,  quality_score: 0.82, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'a1b2c3d4-0001-4000-8000-000000000003', model_id: 'gemini-2.5-flash-lite',  provider: 'google', display_name: 'Gemini 2.5 Flash Lite', input_cost_per_1m: 0.10,   output_cost_per_1m: 0.40,  quality_score: 0.72, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'a1b2c3d4-0001-4000-8000-000000000004', model_id: 'gemini-1.5-pro',         provider: 'google', display_name: 'Gemini 1.5 Pro',        input_cost_per_1m: 1.25,   output_cost_per_1m: 5.00,  quality_score: 0.85, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'a1b2c3d4-0001-4000-8000-000000000005', model_id: 'gemini-1.5-flash',       provider: 'google', display_name: 'Gemini 1.5 Flash',      input_cost_per_1m: 0.075,  output_cost_per_1m: 0.30,  quality_score: 0.72, source: 'seed', last_synced_at: null, enabled: 1 },
+      // Ollama (local) — zero cost; quality is a heuristic operators can override
+      { id: 'a1b2c3d4-0002-4000-8000-000000000001', model_id: 'llama3.1',     provider: 'ollama', display_name: 'Llama 3.1 (local)',    input_cost_per_1m: 0, output_cost_per_1m: 0, quality_score: 0.72, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'a1b2c3d4-0002-4000-8000-000000000002', model_id: 'llama3',       provider: 'ollama', display_name: 'Llama 3 (local)',      input_cost_per_1m: 0, output_cost_per_1m: 0, quality_score: 0.70, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'a1b2c3d4-0002-4000-8000-000000000003', model_id: 'qwen2.5',      provider: 'ollama', display_name: 'Qwen 2.5 (local)',     input_cost_per_1m: 0, output_cost_per_1m: 0, quality_score: 0.74, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'a1b2c3d4-0002-4000-8000-000000000004', model_id: 'mistral',      provider: 'ollama', display_name: 'Mistral (local)',      input_cost_per_1m: 0, output_cost_per_1m: 0, quality_score: 0.68, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'a1b2c3d4-0002-4000-8000-000000000005', model_id: 'phi3',         provider: 'ollama', display_name: 'Phi 3 (local)',        input_cost_per_1m: 0, output_cost_per_1m: 0, quality_score: 0.65, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'a1b2c3d4-0002-4000-8000-000000000006', model_id: 'gemma2',       provider: 'ollama', display_name: 'Gemma 2 (local)',      input_cost_per_1m: 0, output_cost_per_1m: 0, quality_score: 0.66, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: 'a1b2c3d4-0002-4000-8000-000000000007', model_id: 'deepseek-r1',  provider: 'ollama', display_name: 'DeepSeek R1 (local)',  input_cost_per_1m: 0, output_cost_per_1m: 0, quality_score: 0.80, source: 'seed', last_synced_at: null, enabled: 1 },
+      // llama.cpp (local OpenAI-compatible server) — zero cost
+      { id: 'a1b2c3d4-0003-4000-8000-000000000001', model_id: 'local',        provider: 'llamacpp', display_name: 'llama.cpp local model', input_cost_per_1m: 0, output_cost_per_1m: 0, quality_score: 0.70, source: 'seed', last_synced_at: null, enabled: 1 },
     ];
     for (const p of pricing) await this.createModelPricing(p);
     }
@@ -5914,6 +5934,289 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare(
       `SELECT * FROM hv_agent_turn WHERE hypothesis_id = ? ORDER BY created_at ASC LIMIT ?`,
     ).all(hypothesisId, limit) as SvAgentTurnRow[];
+  }
+
+  // ─── Phase K3: Kaggle projections ────────────────────────────
+
+  async upsertKaggleCompetitionTracked(row: Omit<KaggleCompetitionTrackedRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO kaggle_competitions_tracked
+        (id, tenant_id, competition_ref, title, category, deadline, reward, url, status, notes, last_synced_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(tenant_id, competition_ref) DO UPDATE SET
+        title=excluded.title,
+        category=excluded.category,
+        deadline=excluded.deadline,
+        reward=excluded.reward,
+        url=excluded.url,
+        status=excluded.status,
+        notes=excluded.notes,
+        last_synced_at=excluded.last_synced_at,
+        updated_at=datetime('now')
+    `).run(
+      row.id, row.tenant_id ?? null, row.competition_ref,
+      row.title ?? null, row.category ?? null, row.deadline ?? null,
+      row.reward ?? null, row.url ?? null, row.status,
+      row.notes ?? null, row.last_synced_at ?? null,
+    );
+  }
+
+  async getKaggleCompetitionTracked(id: string): Promise<KaggleCompetitionTrackedRow | null> {
+    return (this.d.prepare(`SELECT * FROM kaggle_competitions_tracked WHERE id = ?`).get(id) as KaggleCompetitionTrackedRow | undefined) ?? null;
+  }
+
+  async listKaggleCompetitionsTracked(opts: { status?: string; tenantId?: string | null; limit?: number; offset?: number } = {}): Promise<KaggleCompetitionTrackedRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.status)   { where.push('status = ?');       params.push(opts.status); }
+    if (opts.tenantId !== undefined) {
+      if (opts.tenantId === null) where.push('tenant_id IS NULL');
+      else { where.push('tenant_id = ?'); params.push(opts.tenantId); }
+    }
+    const sql = `SELECT * FROM kaggle_competitions_tracked${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY updated_at DESC LIMIT ? OFFSET ?`;
+    params.push(opts.limit ?? 100, opts.offset ?? 0);
+    return this.d.prepare(sql).all(...params) as KaggleCompetitionTrackedRow[];
+  }
+
+  async updateKaggleCompetitionTracked(id: string, patch: Partial<Omit<KaggleCompetitionTrackedRow, 'id' | 'created_at'>>): Promise<void> {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (k === 'updated_at') continue;
+      fields.push(`${k} = ?`);
+      params.push(v ?? null);
+    }
+    if (fields.length === 0) return;
+    fields.push(`updated_at = datetime('now')`);
+    params.push(id);
+    this.d.prepare(`UPDATE kaggle_competitions_tracked SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  }
+
+  async deleteKaggleCompetitionTracked(id: string): Promise<void> {
+    this.d.prepare(`DELETE FROM kaggle_competitions_tracked WHERE id = ?`).run(id);
+  }
+
+  async createKaggleApproach(row: Omit<KaggleApproachRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO kaggle_approaches
+        (id, tenant_id, competition_ref, summary, expected_metric, model, source_kernel_refs, embedding, status, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    `).run(
+      row.id, row.tenant_id ?? null, row.competition_ref,
+      row.summary, row.expected_metric ?? null, row.model ?? null,
+      row.source_kernel_refs ?? null, row.embedding ?? null,
+      row.status, row.created_by ?? null,
+    );
+  }
+
+  async getKaggleApproach(id: string): Promise<KaggleApproachRow | null> {
+    return (this.d.prepare(`SELECT * FROM kaggle_approaches WHERE id = ?`).get(id) as KaggleApproachRow | undefined) ?? null;
+  }
+
+  async listKaggleApproaches(opts: { competitionRef?: string; status?: string; tenantId?: string | null; limit?: number; offset?: number } = {}): Promise<KaggleApproachRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.competitionRef) { where.push('competition_ref = ?'); params.push(opts.competitionRef); }
+    if (opts.status)         { where.push('status = ?');           params.push(opts.status); }
+    if (opts.tenantId !== undefined) {
+      if (opts.tenantId === null) where.push('tenant_id IS NULL');
+      else { where.push('tenant_id = ?'); params.push(opts.tenantId); }
+    }
+    const sql = `SELECT * FROM kaggle_approaches${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    params.push(opts.limit ?? 100, opts.offset ?? 0);
+    return this.d.prepare(sql).all(...params) as KaggleApproachRow[];
+  }
+
+  async updateKaggleApproach(id: string, patch: Partial<Omit<KaggleApproachRow, 'id' | 'created_at'>>): Promise<void> {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (k === 'updated_at') continue;
+      fields.push(`${k} = ?`);
+      params.push(v ?? null);
+    }
+    if (fields.length === 0) return;
+    fields.push(`updated_at = datetime('now')`);
+    params.push(id);
+    this.d.prepare(`UPDATE kaggle_approaches SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  }
+
+  async deleteKaggleApproach(id: string): Promise<void> {
+    this.d.prepare(`DELETE FROM kaggle_approaches WHERE id = ?`).run(id);
+  }
+
+  async createKaggleRun(row: Omit<KaggleRunRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO kaggle_runs
+        (id, tenant_id, competition_ref, approach_id, contract_id, replay_trace_id, mesh_id, agent_id,
+         kernel_ref, submission_id, public_score, validator_report, status, started_at, completed_at,
+         created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+    `).run(
+      row.id, row.tenant_id ?? null, row.competition_ref,
+      row.approach_id ?? null, row.contract_id ?? null, row.replay_trace_id ?? null,
+      row.mesh_id ?? null, row.agent_id ?? null,
+      row.kernel_ref ?? null, row.submission_id ?? null, row.public_score ?? null,
+      row.validator_report ?? null, row.status,
+      row.started_at ?? null, row.completed_at ?? null,
+    );
+  }
+
+  async getKaggleRun(id: string): Promise<KaggleRunRow | null> {
+    return (this.d.prepare(`SELECT * FROM kaggle_runs WHERE id = ?`).get(id) as KaggleRunRow | undefined) ?? null;
+  }
+
+  async listKaggleRuns(opts: { competitionRef?: string; approachId?: string; status?: string; tenantId?: string | null; limit?: number; offset?: number } = {}): Promise<KaggleRunRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.competitionRef) { where.push('competition_ref = ?'); params.push(opts.competitionRef); }
+    if (opts.approachId)     { where.push('approach_id = ?');     params.push(opts.approachId); }
+    if (opts.status)         { where.push('status = ?');           params.push(opts.status); }
+    if (opts.tenantId !== undefined) {
+      if (opts.tenantId === null) where.push('tenant_id IS NULL');
+      else { where.push('tenant_id = ?'); params.push(opts.tenantId); }
+    }
+    const sql = `SELECT * FROM kaggle_runs${where.length ? ' WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    params.push(opts.limit ?? 100, opts.offset ?? 0);
+    return this.d.prepare(sql).all(...params) as KaggleRunRow[];
+  }
+
+  async updateKaggleRun(id: string, patch: Partial<Omit<KaggleRunRow, 'id' | 'created_at'>>): Promise<void> {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (k === 'updated_at') continue;
+      fields.push(`${k} = ?`);
+      params.push(v ?? null);
+    }
+    if (fields.length === 0) return;
+    fields.push(`updated_at = datetime('now')`);
+    params.push(id);
+    this.d.prepare(`UPDATE kaggle_runs SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  }
+
+  async deleteKaggleRun(id: string): Promise<void> {
+    this.d.prepare(`DELETE FROM kaggle_runs WHERE id = ?`).run(id);
+  }
+
+  // ─── Phase K4: Kaggle run artifacts ─────────────────────────
+  async upsertKaggleRunArtifact(row: Omit<KaggleRunArtifactRow, 'created_at'>): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO kaggle_run_artifacts
+        (id, run_id, contract_id, replay_trace_id, contract_report_json, replay_run_log_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(run_id) DO UPDATE SET
+        contract_id = excluded.contract_id,
+        replay_trace_id = excluded.replay_trace_id,
+        contract_report_json = excluded.contract_report_json,
+        replay_run_log_json = excluded.replay_run_log_json
+    `).run(
+      row.id, row.run_id, row.contract_id, row.replay_trace_id,
+      row.contract_report_json, row.replay_run_log_json,
+    );
+  }
+
+  async getKaggleRunArtifactByRunId(runId: string): Promise<KaggleRunArtifactRow | null> {
+    return (this.d.prepare(`SELECT * FROM kaggle_run_artifacts WHERE run_id = ?`).get(runId) as KaggleRunArtifactRow | undefined) ?? null;
+  }
+
+  async listKaggleRunArtifacts(opts: { limit?: number; offset?: number } = {}): Promise<KaggleRunArtifactRow[]> {
+    return this.d.prepare(`SELECT * FROM kaggle_run_artifacts ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+      .all(opts.limit ?? 100, opts.offset ?? 0) as KaggleRunArtifactRow[];
+  }
+
+  async deleteKaggleRunArtifact(id: string): Promise<void> {
+    this.d.prepare(`DELETE FROM kaggle_run_artifacts WHERE id = ?`).run(id);
+  }
+
+  // ─── Phase K5: Kaggle live-agents mesh index ─────────────────
+  // Pure pointer table — domain state lives in the live-agents StateStore
+  // (la_entities). Used so admin GETs can enumerate every Kaggle mesh
+  // without first knowing the tenantId.
+  async upsertKaggleLiveMesh(row: { mesh_id: string; tenant_id: string; kaggle_username: string }): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO kaggle_live_mesh_index (mesh_id, tenant_id, kaggle_username, created_at)
+      VALUES (?, ?, ?, datetime('now'))
+      ON CONFLICT(mesh_id) DO UPDATE SET
+        tenant_id = excluded.tenant_id,
+        kaggle_username = excluded.kaggle_username
+    `).run(row.mesh_id, row.tenant_id, row.kaggle_username);
+  }
+
+  async listKaggleLiveMeshes(opts: { tenantId?: string } = {}): Promise<Array<{ mesh_id: string; tenant_id: string; kaggle_username: string; created_at: string }>> {
+    if (opts.tenantId) {
+      return this.d.prepare(`SELECT mesh_id, tenant_id, kaggle_username, created_at FROM kaggle_live_mesh_index WHERE tenant_id = ? ORDER BY created_at DESC`)
+        .all(opts.tenantId) as Array<{ mesh_id: string; tenant_id: string; kaggle_username: string; created_at: string }>;
+    }
+    return this.d.prepare(`SELECT mesh_id, tenant_id, kaggle_username, created_at FROM kaggle_live_mesh_index ORDER BY created_at DESC`)
+      .all() as Array<{ mesh_id: string; tenant_id: string; kaggle_username: string; created_at: string }>;
+  }
+
+  // ─── Phase K6: Kaggle discussion bot (kill switch + log) ─────────────
+  // discussion_enabled is a per-tenant kill switch; the runtime MUST check
+  // isKaggleDiscussionEnabledForTenant before invoking kaggle.discussions.create.
+  async getKaggleDiscussionSettings(tenantId: string): Promise<KaggleDiscussionSettingsRow | null> {
+    const row = this.d.prepare(`SELECT * FROM kaggle_discussion_settings WHERE tenant_id = ?`).get(tenantId) as KaggleDiscussionSettingsRow | undefined;
+    return row ?? null;
+  }
+
+  async listKaggleDiscussionSettings(): Promise<KaggleDiscussionSettingsRow[]> {
+    return this.d.prepare(`SELECT * FROM kaggle_discussion_settings ORDER BY tenant_id`).all() as KaggleDiscussionSettingsRow[];
+  }
+
+  async upsertKaggleDiscussionSettings(row: { tenant_id: string; discussion_enabled: number; notes?: string | null }): Promise<KaggleDiscussionSettingsRow> {
+    const existing = this.d.prepare(`SELECT id FROM kaggle_discussion_settings WHERE tenant_id = ?`).get(row.tenant_id) as { id: string } | undefined;
+    const id = existing?.id ?? randomUUID();
+    this.d.prepare(`
+      INSERT INTO kaggle_discussion_settings (id, tenant_id, discussion_enabled, notes, updated_at)
+      VALUES (?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(tenant_id) DO UPDATE SET
+        discussion_enabled = excluded.discussion_enabled,
+        notes = excluded.notes,
+        updated_at = datetime('now')
+    `).run(id, row.tenant_id, row.discussion_enabled ? 1 : 0, row.notes ?? null);
+    return (this.d.prepare(`SELECT * FROM kaggle_discussion_settings WHERE tenant_id = ?`).get(row.tenant_id) as KaggleDiscussionSettingsRow);
+  }
+
+  async isKaggleDiscussionEnabledForTenant(tenantId: string): Promise<boolean> {
+    const row = this.d.prepare(`SELECT discussion_enabled FROM kaggle_discussion_settings WHERE tenant_id = ?`).get(tenantId) as { discussion_enabled: number } | undefined;
+    return row?.discussion_enabled === 1;
+  }
+
+  async recordKaggleDiscussionPost(row: Omit<KaggleDiscussionPostRow, 'posted_at'> & { posted_at?: string }): Promise<void> {
+    this.d.prepare(`
+      INSERT OR IGNORE INTO kaggle_discussion_posts (
+        id, tenant_id, competition_ref, topic_id, parent_topic_id, title,
+        body_preview, url, status, contract_id, replay_trace_id, posted_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+    `).run(
+      row.id,
+      row.tenant_id,
+      row.competition_ref,
+      row.topic_id,
+      row.parent_topic_id,
+      row.title,
+      row.body_preview,
+      row.url,
+      row.status,
+      row.contract_id,
+      row.replay_trace_id,
+      row.posted_at ?? null,
+    );
+  }
+
+  async listKaggleDiscussionPosts(opts: { tenantId?: string; competitionRef?: string; limit?: number; offset?: number } = {}): Promise<KaggleDiscussionPostRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.tenantId) { where.push('tenant_id = ?'); params.push(opts.tenantId); }
+    if (opts.competitionRef) { where.push('competition_ref = ?'); params.push(opts.competitionRef); }
+    const sql = `SELECT * FROM kaggle_discussion_posts ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY posted_at DESC LIMIT ? OFFSET ?`;
+    params.push(opts.limit ?? 100, opts.offset ?? 0);
+    return this.d.prepare(sql).all(...params) as KaggleDiscussionPostRow[];
+  }
+
+  async getKaggleDiscussionPost(id: string): Promise<KaggleDiscussionPostRow | null> {
+    return (this.d.prepare(`SELECT * FROM kaggle_discussion_posts WHERE id = ?`).get(id) as KaggleDiscussionPostRow | undefined) ?? null;
   }
 }
 

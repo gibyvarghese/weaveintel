@@ -984,6 +984,11 @@ export class ChatEngine {
     const FALLBACK_MODELS: Record<string, string[]> = {
       anthropic: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-20250414'],
       openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'o4-mini'],
+      google: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+      gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+      ollama: ['llama3.1', 'llama3', 'qwen2.5', 'qwen3', 'mistral', 'phi3', 'gemma2', 'deepseek-r1', 'llava'],
+      llamacpp: ['local'],
+      'llama-cpp': ['local'],
       mock: ['mock-model'],
     };
     for (const provider of configuredProviders) {
