@@ -24,6 +24,9 @@ export {
   registerKaggleApproachRoutes,
   registerKaggleRunRoutes,
   registerKaggleRunArtifactRoutes,
+  registerKaggleRubricRoutes,
+  registerKaggleValidationResultRoutes,
+  registerKaggleLeaderboardScoreRoutes,
 } from './kaggle.js';
 export { registerKaggleMeshRoutes } from './kaggle-mesh.js';
 export { registerKaggleDiscussionRoutes } from './kaggle-discussion.js';

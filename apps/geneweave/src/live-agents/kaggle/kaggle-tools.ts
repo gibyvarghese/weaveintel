@@ -16,9 +16,26 @@ import {
 } from '@weaveintel/core';
 import type { KaggleAdapter, KaggleCredentials } from '@weaveintel/tools-kaggle';
 
+export interface KaggleToolDefaults {
+  /** Default `timeoutSeconds` for `kaggle_wait_for_kernel`. Default 300. */
+  defaultWaitTimeoutSec?: number;
+  /** Hard cap on `timeoutSeconds`. Default 600. */
+  maxWaitTimeoutSec?: number;
+  /** Default `pollIntervalSeconds` for `kaggle_wait_for_kernel`. Default 10. */
+  defaultPollIntervalSec?: number;
+  /** Bytes of head retained in `kaggle_get_kernel_output`. Default 4000. */
+  outputHeadBytes?: number;
+  /** Bytes of tail retained in `kaggle_get_kernel_output`. Default 4000. */
+  outputTailBytes?: number;
+}
+
 export interface KaggleToolsOptions {
   adapter: KaggleAdapter;
   credentials: KaggleCredentials;
+  /** Operational defaults sourced from the catch-all (or matched) playbook
+   *  config in DB. All fields fall back to the historical hard-coded values
+   *  when omitted, so test/example call sites can keep ignoring this. */
+  defaults?: KaggleToolDefaults;
 }
 
 /** Strip whatever the LLM passed (slug, ref, URL) down to `<owner>/<slug>` or just `<slug>`. */
@@ -37,6 +54,12 @@ function normalizeKernelRef(value: string): string {
 
 export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
   const { adapter, credentials } = opts;
+  const defaults = opts.defaults ?? {};
+  const defaultWaitTimeoutSec = defaults.defaultWaitTimeoutSec ?? 300;
+  const maxWaitTimeoutSec = defaults.maxWaitTimeoutSec ?? 600;
+  const defaultPollIntervalSec = defaults.defaultPollIntervalSec ?? 10;
+  const outputHeadBytes = defaults.outputHeadBytes ?? 4000;
+  const outputTailBytes = defaults.outputTailBytes ?? 4000;
   const reg = createToolRegistry();
 
   reg.register(
@@ -115,6 +138,41 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
 
   reg.register(
     defineTool({
+      name: 'kaggle_get_competition_file',
+      description:
+        "Download a single small text file (README.md, agents.md, llms.txt, sample_submission.csv/.json/.py, etc.) from a Kaggle competition's data bundle WITHOUT pushing a kernel. Use this in Phase 1 to learn the competition's submission contract — the required filename, format (CSV/JSON/Python script), expected columns, or framework conventions. Returns { fileName, sizeBytes, truncated, binary, content }. Content is truncated at 64 KiB. Binary files return a hex preview only.",
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string', description: 'Competition slug.' },
+          fileName: { type: 'string', description: 'Exact file name as returned by kaggle_list_competition_files (e.g. README.md, agents.md, sample_submission.csv).' },
+          maxBytes: { type: 'number', description: 'Optional truncation cap. Default 65536.' },
+        },
+        required: ['ref', 'fileName'],
+      },
+      tags: ['kaggle', 'read'],
+      riskLevel: 'read-only',
+      execute: async (args) => {
+        const ref = normalizeCompetitionRef(args['ref'] as string);
+        const fileName = String(args['fileName'] ?? '').trim();
+        if (!fileName) return JSON.stringify({ error: 'fileName is required' });
+        const maxBytes = (args['maxBytes'] as number | undefined) ?? 65536;
+        try {
+          const out = await adapter.downloadCompetitionFile(credentials, ref, fileName, { maxBytes });
+          return JSON.stringify(out, null, 2);
+        } catch (err) {
+          return JSON.stringify({
+            error: 'download_failed',
+            fileName,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      },
+    }),
+  );
+
+  reg.register(
+    defineTool({
       name: 'kaggle_push_kernel',
       description:
         "Create or update a private Python kernel on Kaggle and run it. Provide the full Python source as `code`. The kernel will mount the competition data at /kaggle/input/<slug>/. Returns { kernelRef, kernelUrl } — use kernelRef for status and output calls.",
@@ -135,6 +193,21 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
         const title = args['title'] as string;
         const competitionRef = normalizeCompetitionRef(args['competitionRef'] as string);
         const code = args['code'] as string;
+        // Guard: refuse empty / trivially-small kernel pushes. The strategist
+        // sometimes drops the source string under context-window pressure and
+        // ends up pushing zero-byte kernels. Force it to re-emit instead of
+        // silently shipping an empty notebook.
+        const codeBytes = Buffer.byteLength(code ?? '', 'utf8');
+        if (codeBytes < 200) {
+          return JSON.stringify({
+            error: 'empty_or_tiny_source',
+            codeBytes,
+            message:
+              'kaggle_push_kernel rejected: source code is empty or under 200 bytes. ' +
+              'Re-emit the FULL Python script in the `code` argument and call this tool again. ' +
+              'Do NOT retry with the same empty source; do NOT change the slug to bypass this check.',
+          });
+        }
         const username = credentials.username;
         const result = await adapter.pushKernel(credentials, {
           slug: `${username}/${slug}`,
@@ -198,8 +271,9 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
       riskLevel: 'read-only',
       execute: async (args) => {
         const ref = normalizeKernelRef(args['kernelRef'] as string);
-        const timeoutMs = Math.min(((args['timeoutSeconds'] as number | undefined) ?? 300), 600) * 1000;
-        const intervalMs = Math.max(((args['pollIntervalSeconds'] as number | undefined) ?? 10), 5) * 1000;
+        const timeoutMs =
+          Math.min(((args['timeoutSeconds'] as number | undefined) ?? defaultWaitTimeoutSec), maxWaitTimeoutSec) * 1000;
+        const intervalMs = Math.max(((args['pollIntervalSeconds'] as number | undefined) ?? defaultPollIntervalSec), 5) * 1000;
         const deadline = Date.now() + timeoutMs;
         const terminal = new Set(['complete', 'error', 'cancelAcknowledged', 'cancelRequested']);
         let last: unknown = null;
@@ -245,12 +319,42 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
             /* fall back to raw */
           }
         }
-        const HEAD = 4000;
-        const TAIL = 4000;
+        const HEAD = outputHeadBytes;
+        const TAIL = outputTailBytes;
         const display = log.length > HEAD + TAIL + 200
           ? `${log.slice(0, HEAD)}\n\n...[${log.length - HEAD - TAIL} chars truncated]...\n\n${log.slice(-TAIL)}`
           : log;
-        return JSON.stringify({ ...(out as object), log: display }, null, 2);
+        // Inline the contents of small JSON output files (cv_scores.json,
+        // metrics.json, scores.json) so the strategist can read actual CV
+        // numbers between iterations instead of just seeing a signed URL with
+        // size=0 metadata. Without this, "iterate based on CV" is impossible.
+        const outFiles = ((out as { files?: Array<{ fileName?: string; url?: string }> }).files ?? []);
+        const inlinedContents: Record<string, unknown> = {};
+        const SCORE_FILE_RE = /^(cv_scores?|metrics?|scores?|results?)\.json$/i;
+        for (const f of outFiles) {
+          const name = f.fileName ?? '';
+          const url = f.url ?? '';
+          if (!name || !url) continue;
+          if (!SCORE_FILE_RE.test(name)) continue;
+          try {
+            const resp = await fetch(url);
+            if (!resp.ok) continue;
+            const text = await resp.text();
+            if (text.length > 8192) continue;
+            try {
+              inlinedContents[name] = JSON.parse(text);
+            } catch {
+              inlinedContents[name] = text;
+            }
+          } catch {
+            /* best-effort; never block the tool call */
+          }
+        }
+        const enriched: Record<string, unknown> = { ...(out as object), log: display };
+        if (Object.keys(inlinedContents).length > 0) {
+          enriched['inlinedScoreFiles'] = inlinedContents;
+        }
+        return JSON.stringify(enriched, null, 2);
       },
     }),
   );

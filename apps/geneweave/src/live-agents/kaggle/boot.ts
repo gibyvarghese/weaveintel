@@ -26,10 +26,12 @@ import type {
 import { buildKaggleMeshTemplate, type KaggleMeshTemplate } from './mesh-template.js';
 import {
   KAGGLE_CAPABILITY_MATRIX,
-  bindingConstraintsFor,
+  bindingConstraintsForCaps,
+  resolveCapabilitiesFor,
   type KaggleAgentRole,
 } from './account-bindings.js';
 import { buildKaggleBridge } from './bridge.js';
+import type { KagglePlaybookResolver } from './playbook-resolver.js';
 
 export interface BootKaggleMeshOptions {
   store: StateStore;
@@ -46,6 +48,11 @@ export interface BootKaggleMeshOptions {
   userMeshId?: string | null;
   /** Override mesh id. */
   meshId?: string;
+  /** When set, the catch-all (`*`) playbook is resolved once at boot and
+   *  its `bridgeTopics` / `bridgeRateLimitPerHour` / `bridgePurposeProse` /
+   *  `bridgeConstraintsProse` fields override the historical defaults in
+   *  `buildKaggleBridge`. Operators tune these in admin without code edits. */
+  playbookResolver?: KagglePlaybookResolver;
   /** ISO timestamp. */
   nowIso?: string;
 }
@@ -68,9 +75,28 @@ const PIPELINE_EDGES: ReadonlyArray<{ from: KaggleAgentRole; to: KaggleAgentRole
 
 export async function bootKaggleMesh(opts: BootKaggleMeshOptions): Promise<KaggleMeshBootResult> {
   const nowIso = opts.nowIso ?? new Date().toISOString();
+
+  // Resolve the catch-all (`*`) playbook ONCE so every downstream piece
+  // (mesh dual-control gate, per-role capabilities, cross-mesh bridge) sees
+  // a consistent operator-tunable config. Resolver failure is non-fatal —
+  // we fall back to the historical in-code defaults silently.
+  let pbConfig: import('./playbook-resolver.js').KagglePlaybookConfig = {};
+  if (opts.playbookResolver) {
+    try {
+      const pb = await opts.playbookResolver('');
+      pbConfig = pb?.config ?? {};
+    } catch {
+      // Non-fatal — pbConfig stays empty and historical defaults apply.
+    }
+  }
+
   const template = buildKaggleMeshTemplate({
     tenantId: opts.tenantId,
     ...(opts.meshId !== undefined ? { meshId: opts.meshId } : {}),
+    ...(pbConfig.dualControlRequiredFor
+      ? { dualControlRequiredFor: pbConfig.dualControlRequiredFor }
+      : {}),
+    ...(pbConfig.rolePersonas ? { rolePersonas: pbConfig.rolePersonas } : {}),
     nowIso,
   });
   const { mesh, agents, contracts } = template;
@@ -83,9 +109,18 @@ export async function bootKaggleMesh(opts: BootKaggleMeshOptions): Promise<Kaggl
     await opts.store.saveContract(contract);
   }
 
-  // Delegation edges
+  // Delegation edges. Catch-all (`*`) playbook can REPLACE the historical
+  // 5-edge pipeline (e.g. drop the observer, add a new collaborator).
   const delegationEdges: DelegationEdge[] = [];
-  for (const edge of PIPELINE_EDGES) {
+  const edgeSpecs = pbConfig.pipelineEdges && pbConfig.pipelineEdges.length > 0
+    ? pbConfig.pipelineEdges.map((e) => ({
+        from: e.from as KaggleAgentRole,
+        to: e.to as KaggleAgentRole,
+        rel: e.relationship as DelegationEdge['relationship'],
+        prose: e.prose,
+      }))
+    : PIPELINE_EDGES;
+  for (const edge of edgeSpecs) {
     const id = `edge-${mesh.id}-${edge.from}-${edge.to}`;
     const row: DelegationEdge = {
       id,
@@ -124,16 +159,19 @@ export async function bootKaggleMesh(opts: BootKaggleMeshOptions): Promise<Kaggl
   await opts.store.saveAccount(account);
 
   // One AccountBinding per role, encoding capabilities in `constraints`.
+  // Per-role capabilities respect the catch-all (`*`) playbook's
+  // `capabilityMatrix` override; missing roles keep historical defaults.
   const bindings = {} as Record<KaggleAgentRole, AccountBinding>;
   const roles = Object.keys(KAGGLE_CAPABILITY_MATRIX) as KaggleAgentRole[];
   for (const role of roles) {
     const id = `binding-${mesh.id}-${role}`;
+    const caps = resolveCapabilitiesFor(role, pbConfig.capabilityMatrix);
     const binding: AccountBinding = {
       id,
       agentId: agents[role].id,
       accountId: account.id,
       purpose: `Kaggle role: ${role}`,
-      constraints: bindingConstraintsFor(role),
+      constraints: bindingConstraintsForCaps(caps),
       grantedByHumanId: opts.humanOwnerId,
       grantedAt: nowIso,
       expiresAt: null,
@@ -148,11 +186,22 @@ export async function bootKaggleMesh(opts: BootKaggleMeshOptions): Promise<Kaggl
   // Optional cross-mesh bridge to the user's main mesh.
   let bridge: CrossMeshBridge | null = null;
   if (opts.userMeshId) {
+    const bridgeOverrides = {
+      ...(pbConfig.bridgeTopics ? { allowedTopics: pbConfig.bridgeTopics } : {}),
+      ...(pbConfig.bridgeRateLimitPerHour !== undefined
+        ? { rateLimitPerHour: pbConfig.bridgeRateLimitPerHour }
+        : {}),
+      ...(pbConfig.bridgePurposeProse ? { purposeProse: pbConfig.bridgePurposeProse } : {}),
+      ...(pbConfig.bridgeConstraintsProse
+        ? { constraintsProse: pbConfig.bridgeConstraintsProse }
+        : {}),
+    };
     bridge = buildKaggleBridge({
       fromMeshId: mesh.id,
       toMeshId: opts.userMeshId,
       authorisedByHumanId: opts.humanOwnerId,
       nowIso,
+      ...bridgeOverrides,
     });
     await opts.store.saveCrossMeshBridge(bridge);
   }

@@ -40,8 +40,15 @@ import {
   type KagglePlaybook,
   type KagglePlaybookResolver,
 } from './playbook-resolver.js';
+import type { DatabaseAdapter } from '../../db.js';
+import {
+  runSubmissionValidation,
+  observeLeaderboardOnce,
+  type CvScoresArtifact,
+} from '../../lib/kaggle-validator-runner.js';
+import { randomUUID } from 'node:crypto';
 
-const DEFAULT_MAX_ITERATIONS = 3;
+const DEFAULT_MAX_ITERATIONS = 8;
 
 /** Kaggle's pushKernel returns a ref like '/code/<owner>/<slug>' but its
  * status/output endpoints expect '<owner>/<slug>'. Normalize. */
@@ -58,9 +65,11 @@ async function pollKernelUntilTerminal(
   creds: KaggleCredentials,
   kernelRef: string,
   log: (m: string) => void,
+  pollIntervalMs: number,
+  pollTimeoutMs: number,
 ): Promise<{ status: string; failureMessage: string | null; logExcerpt: string; outputFiles: string[] }> {
   const terminal = new Set(['complete', 'error', 'cancelled', 'cancelAcknowledged']);
-  const maxAttempts = 30; // 30 * 10s = 5 min
+  const maxAttempts = Math.max(1, Math.ceil(pollTimeoutMs / pollIntervalMs));
   let status = 'unknown';
   let failureMessage: string | null = null;
   for (let i = 0; i < maxAttempts; i++) {
@@ -73,7 +82,7 @@ async function pollKernelUntilTerminal(
     } catch (err) {
       log(`poll[${i}] error: ${err instanceof Error ? err.message : String(err)}`);
     }
-    await new Promise((r) => setTimeout(r, 10000));
+    await new Promise((r) => setTimeout(r, pollIntervalMs));
   }
   let logExcerpt = '';
   let outputFiles: string[] = [];
@@ -107,6 +116,17 @@ export interface KaggleRoleHandlersOptions {
    * deterministic implementer cannot produce a kernel script.
    */
   playbookResolver?: KagglePlaybookResolver;
+  /**
+   * DB adapter for Phase K7d submission-validation persistence.
+   * When provided, the validator and leaderboard-observer roles persist
+   * kaggle_validation_results / kaggle_leaderboard_scores rows and auto-
+   * infer rubrics on first contact with a competition. Optional: when
+   * unset, both roles fall back to their pre-K7d behavior (passthrough/
+   * no-op) so existing examples keep working.
+   */
+  db?: DatabaseAdapter;
+  /** Tenant id for rubric scoping (Phase K7d). Defaults to null (global). */
+  tenantId?: string | null;
 }
 
 function resolveCreds(opts: KaggleRoleHandlersOptions): KaggleCredentials {
@@ -211,6 +231,16 @@ async function loadInboundTask(context: ActionExecutionContext): Promise<{ subje
   return m ? { subject: m.subject, body: m.body } : null;
 }
 
+/** Best-effort JSON parse for inbound task bodies. Returns {} on parse error. */
+function parseInboundJson(body: string | undefined | null): Record<string, unknown> {
+  if (!body) return {};
+  try {
+    return JSON.parse(body) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
 /** Resolve a playbook for the given slug, returning null when no resolver is
  *  configured or no playbook matches. Logs failures non-fatally. */
 async function tryResolvePlaybook(
@@ -229,11 +259,58 @@ async function tryResolvePlaybook(
   }
 }
 
+/** Resolve the catch-all (`*`) playbook ONCE at handler creation and return
+ *  its operational defaults (top-N picks, kernel poll cadence). Falls back
+ *  to historical hard-coded values when no resolver is wired or no catch-all
+ *  matches — keeps tests/examples that don't seed the DB working. */
+async function loadOperationalDefaults(
+  resolver: KagglePlaybookResolver | undefined,
+  log: (m: string) => void,
+): Promise<{
+  topNAgentic: number;
+  topNDeterministic: number;
+  pollIntervalMs: number;
+  pollTimeoutMs: number;
+}> {
+  const HARD_DEFAULTS = {
+    topNAgentic: 5,
+    topNDeterministic: 3,
+    pollIntervalMs: 10_000,
+    pollTimeoutMs: 300_000,
+  };
+  if (!resolver) return HARD_DEFAULTS;
+  try {
+    const pb = await resolver('');
+    const cfg = pb?.config ?? {};
+    return {
+      topNAgentic: cfg.topNAgentic ?? HARD_DEFAULTS.topNAgentic,
+      topNDeterministic: cfg.topNDeterministic ?? HARD_DEFAULTS.topNDeterministic,
+      pollIntervalMs: (cfg.pollIntervalSec ?? 10) * 1000,
+      pollTimeoutMs: (cfg.pollTimeoutSec ?? 300) * 1000,
+    };
+  } catch (err) {
+    log(`loadOperationalDefaults failed: ${err instanceof Error ? err.message : String(err)}`);
+    return HARD_DEFAULTS;
+  }
+}
+
 export function createKaggleRoleHandlers(
   opts: KaggleRoleHandlersOptions = {},
 ): Record<string, TaskHandler> {
   const adapter = opts.adapter ?? liveKaggleAdapter;
   const log = opts.log ?? ((m: string) => console.log(`[kaggle-handler] ${m}`));
+
+  // Lazy promise so we resolve the catch-all playbook exactly once and reuse.
+  let opDefaultsPromise: Promise<{
+    topNAgentic: number;
+    topNDeterministic: number;
+    pollIntervalMs: number;
+    pollTimeoutMs: number;
+  }> | null = null;
+  const getOpDefaults = () => {
+    if (!opDefaultsPromise) opDefaultsPromise = loadOperationalDefaults(opts.playbookResolver, log);
+    return opDefaultsPromise;
+  };
 
   // ── AGENTIC MODE ──────────────────────────────────────────
   // When a planner model is provided, replace the deterministic pipeline with
@@ -245,15 +322,24 @@ export function createKaggleRoleHandlers(
       model: opts.plannerModel,
       adapter,
       credentials: creds,
-      maxSteps: opts.maxIterations ? Math.max(opts.maxIterations * 8, 20) : 30,
+      maxSteps: opts.maxIterations ? Math.max(opts.maxIterations * 12, 40) : 60,
       log,
       playbookResolver: opts.playbookResolver,
     });
 
     const discovererSeed: TaskHandler = async (_action, context) => {
       log('Discoverer (agentic mode): seeding strategist with top competitions.');
-      const comps = await adapter.listCompetitions(creds, { page: 1 });
-      const top = comps.slice(0, 5);
+      const opDefaults = await getOpDefaults();
+      const pinnedSlug = process.env['KAGGLE_COMPETITION_SLUG']?.trim();
+      let top: KaggleCompetition[];
+      if (pinnedSlug) {
+        log(`Discoverer: pinned to competition slug=${pinnedSlug}`);
+        const comp = await adapter.getCompetition(creds, pinnedSlug);
+        top = [comp];
+      } else {
+        const comps = await adapter.listCompetitions(creds, { page: 1 });
+        top = comps.slice(0, opDefaults.topNAgentic);
+      }
       const summary = top
         .map((c) => `- ${c.id} | ${c.title} | metric=${c.evaluationMetric ?? 'n/a'} | deadline=${c.deadline ?? 'n/a'}`)
         .join('\n');
@@ -293,6 +379,72 @@ export function createKaggleRoleHandlers(
 
     const noop: TaskHandler = async (_a, _c) => ({ completed: true, summaryProse: 'no-op (agentic mode)' });
 
+    // Phase K7d — Submission Validator (agentic mode).
+    // When `opts.db` is supplied, run the rubric-aware validator and persist
+    // a kaggle_validation_results row. Without `opts.db`, falls back to noop.
+    const validatorAgentic: TaskHandler = async (_a, context) => {
+      if (!opts.db) return { completed: true, summaryProse: 'validator: no-op (no db wired)' };
+      const inbound = await loadInboundTask(context);
+      const parsed = parseInboundJson(inbound?.body);
+      const competitionRef = (parsed['competitionId'] as string | undefined) ?? (parsed['competitionRef'] as string | undefined);
+      if (!competitionRef) return { completed: true, summaryProse: 'validator: no competitionRef in inbound — skipping persistence' };
+      const outputFiles = Array.isArray(parsed['outputFiles']) ? (parsed['outputFiles'] as string[]) : [];
+      const kernelRef = (parsed['kernelRef'] as string | null | undefined) ?? null;
+      const cvScores = parsed['cvScores'] as CvScoresArtifact | undefined ?? null;
+      const runId = (parsed['runId'] as string | undefined) ?? `kgl-run-${randomUUID().slice(0, 8)}`;
+      try {
+        const result = await runSubmissionValidation({
+          db: opts.db,
+          adapter,
+          credentials: creds,
+          runId,
+          competitionRef,
+          tenantId: opts.tenantId ?? null,
+          kernelRef,
+          outputFiles,
+          cvScores,
+        });
+        log(`validator: verdict=${result.verdict} rubric=${result.rubric.id} violations=${result.violations.length}`);
+        return { completed: true, summaryProse: `Validator: ${result.summary}` };
+      } catch (err) {
+        log(`validator: persistence failed: ${err instanceof Error ? err.message : String(err)}`);
+        return { completed: true, summaryProse: 'validator: persistence error (non-fatal)' };
+      }
+    };
+
+    // Phase K7d — Leaderboard Observer (agentic mode).
+    const observerAgentic: TaskHandler = async (_a, context) => {
+      if (!opts.db) return { completed: true, summaryProse: 'observer: no-op (no db wired)' };
+      const inbound = await loadInboundTask(context);
+      const parsed = parseInboundJson(inbound?.body);
+      const competitionRef = (parsed['competitionId'] as string | undefined) ?? (parsed['competitionRef'] as string | undefined);
+      if (!competitionRef) return { completed: true, summaryProse: 'observer: no competitionRef in inbound — skipping' };
+      const submissionRef = (parsed['submissionRef'] as string | null | undefined) ?? null;
+      const cvScore = typeof parsed['cvScore'] === 'number' ? (parsed['cvScore'] as number) : null;
+      const runId = (parsed['runId'] as string | undefined) ?? null;
+      try {
+        const result = await observeLeaderboardOnce({
+          db: opts.db,
+          adapter,
+          credentials: creds,
+          runId,
+          competitionRef,
+          submissionRef,
+          cvScore,
+        });
+        log(`observer: observed=${result.observed} public=${result.publicScore} delta=${result.cvLbDelta}`);
+        return {
+          completed: true,
+          summaryProse: result.observed
+            ? `Observer: public_score=${result.publicScore} status=${result.rawStatus} delta=${result.cvLbDelta}`
+            : 'Observer: no submissions yet.',
+        };
+      } catch (err) {
+        log(`observer: persistence failed: ${err instanceof Error ? err.message : String(err)}`);
+        return { completed: true, summaryProse: 'observer: persistence error (non-fatal)' };
+      }
+    };
+
     const submitter: TaskHandler = async (_a, context) => {
       const inbound = await loadInboundTask(context);
       log(
@@ -309,9 +461,9 @@ export function createKaggleRoleHandlers(
       'Competition Discoverer': discovererSeed,
       'Approach Ideator': strategistAgenticWithHandoff,
       'Kernel Author': noop,
-      'Submission Validator': noop,
+      'Submission Validator': opts.db ? validatorAgentic : noop,
       'Competition Submitter': submitter,
-      'Leaderboard Observer': noop,
+      'Leaderboard Observer': opts.db ? observerAgentic : noop,
     };
   }
 
@@ -325,8 +477,9 @@ export function createKaggleRoleHandlers(
   const discoverer: TaskHandler = async (_action, context) => {
     const creds = resolveCreds(opts);
     log(`Discoverer fetching competitions...`);
+    const opDefaults = await getOpDefaults();
     const comps = await adapter.listCompetitions(creds, { page: 1 });
-    const top = comps.slice(0, 3);
+    const top = comps.slice(0, opDefaults.topNDeterministic);
     log(`Discoverer found ${comps.length} competitions; forwarding top ${top.length} to strategist`);
     const summary = top
       .map((c: KaggleCompetition) => `- ${c.id} | ${c.title} | metric=${c.evaluationMetric ?? 'n/a'} | deadline=${c.deadline ?? 'n/a'}`)
@@ -553,7 +706,22 @@ export function createKaggleRoleHandlers(
     let logExcerpt = '';
     let outputFiles: string[] = [];
     if (kernelRef && !pushError) {
-      const polled = await pollKernelUntilTerminal(adapter, creds, kernelRef, (m) => log(m));
+      const opDefaults = await getOpDefaults();
+      // Per-playbook overrides win over catch-all defaults.
+      const pollIntervalMs = (playbook.config.pollIntervalSec ?? 0) > 0
+        ? (playbook.config.pollIntervalSec as number) * 1000
+        : opDefaults.pollIntervalMs;
+      const pollTimeoutMs = (playbook.config.pollTimeoutSec ?? 0) > 0
+        ? (playbook.config.pollTimeoutSec as number) * 1000
+        : opDefaults.pollTimeoutMs;
+      const polled = await pollKernelUntilTerminal(
+        adapter,
+        creds,
+        kernelRef,
+        (m) => log(m),
+        pollIntervalMs,
+        pollTimeoutMs,
+      );
       runStatus = polled.status;
       failureMessage = polled.failureMessage ?? failureMessage;
       logExcerpt = polled.logExcerpt;
@@ -611,6 +779,31 @@ export function createKaggleRoleHandlers(
       Array.isArray(parsed['outputFiles']) &&
       (parsed['outputFiles'] as string[]).some((f) => f === 'submission.json' || f === 'submission.csv');
 
+    // Phase K7d — persist a kaggle_validation_results row when db wired.
+    if (opts.db && competitionId !== 'unknown') {
+      const outputFiles = Array.isArray(parsed['outputFiles']) ? (parsed['outputFiles'] as string[]) : [];
+      const kernelRef = (parsed['kernelRef'] as string | null | undefined) ?? null;
+      const cvScores = parsed['cvScores'] as CvScoresArtifact | undefined ?? null;
+      const runId = (parsed['runId'] as string | undefined) ?? `kgl-run-${randomUUID().slice(0, 8)}`;
+      try {
+        const creds = resolveCreds(opts);
+        const result = await runSubmissionValidation({
+          db: opts.db,
+          adapter,
+          credentials: creds,
+          runId,
+          competitionRef: competitionId,
+          tenantId: opts.tenantId ?? null,
+          kernelRef,
+          outputFiles,
+          cvScores,
+        });
+        log(`validator(persist): verdict=${result.verdict} rubric=${result.rubric.id} violations=${result.violations.length}`);
+      } catch (err) {
+        log(`validator(persist): failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
     if (done || iteration >= maxIterations) {
       const subject = `Validated final payload for ${competitionId} after ${iteration} iteration(s)`;
       await emitToNextAgent(context, 'submitter', subject, inbound.body, 'kaggle.validation.final');
@@ -643,7 +836,35 @@ export function createKaggleRoleHandlers(
   };
 
   // ── Observer ──────────────────────────────────────────────
-  const observer: TaskHandler = async (_a, _c) => {
+  const observer: TaskHandler = async (_a, context) => {
+    if (opts.db) {
+      const inbound = await loadInboundTask(context);
+      const parsed = parseInboundJson(inbound?.body);
+      const competitionRef = (parsed['competitionId'] as string | undefined) ?? (parsed['competitionRef'] as string | undefined);
+      if (competitionRef) {
+        try {
+          const creds = resolveCreds(opts);
+          const result = await observeLeaderboardOnce({
+            db: opts.db,
+            adapter,
+            credentials: creds,
+            runId: (parsed['runId'] as string | undefined) ?? null,
+            competitionRef,
+            submissionRef: (parsed['submissionRef'] as string | null | undefined) ?? null,
+            cvScore: typeof parsed['cvScore'] === 'number' ? (parsed['cvScore'] as number) : null,
+          });
+          log(`observer(persist): observed=${result.observed} public=${result.publicScore} delta=${result.cvLbDelta}`);
+          return {
+            completed: true,
+            summaryProse: result.observed
+              ? `Observer: public_score=${result.publicScore} status=${result.rawStatus} delta=${result.cvLbDelta}`
+              : 'Observer: no submissions yet.',
+          };
+        } catch (err) {
+          log(`observer(persist): failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
     log('Observer tick: nothing to poll yet (no submitted entries).');
     return {
       completed: true,

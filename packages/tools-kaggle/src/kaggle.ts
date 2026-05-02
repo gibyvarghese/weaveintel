@@ -168,6 +168,23 @@ export interface KaggleAdapter {
   }): Promise<KaggleCompetition[]>;
   getCompetition(creds: KaggleCredentials, ref: string): Promise<KaggleCompetition>;
   listCompetitionFiles(creds: KaggleCredentials, ref: string): Promise<KaggleCompetitionFile[]>;
+  /**
+   * Download a single competition data file as text. Used by the Strategist
+   * to introspect README.md, agents.md, llms.txt, sample_submission.* and
+   * similar small text files BEFORE pushing any kernel — this is how the
+   * pipeline learns the per-competition submission contract (filename +
+   * format) without any per-competition code.
+   *
+   * Truncates at `maxBytes` (default 64 KiB). Binary files (best-effort
+   * detected by null-byte presence) are returned with `binary: true` and
+   * a hex-preview of the first 256 bytes.
+   */
+  downloadCompetitionFile(
+    creds: KaggleCredentials,
+    ref: string,
+    fileName: string,
+    opts?: { maxBytes?: number },
+  ): Promise<{ fileName: string; sizeBytes: number; truncated: boolean; binary: boolean; content: string }>;
   getLeaderboard(creds: KaggleCredentials, ref: string): Promise<KaggleLeaderboardEntry[]>;
   listSubmissions(creds: KaggleCredentials, ref: string): Promise<KaggleSubmission[]>;
   listDatasets(creds: KaggleCredentials, args: {
@@ -333,6 +350,37 @@ export const liveKaggleAdapter: KaggleAdapter = {
       : [];
   },
 
+  async downloadCompetitionFile(creds, ref, fileName, opts) {
+    const maxBytes = opts?.maxBytes ?? 64 * 1024;
+    // Kaggle endpoint returns a 302 to a signed CDN URL; fetch follows it.
+    const url = `${KAGGLE_API_BASE}/competitions/data/download/${encodeURIComponent(ref)}/${encodeURIComponent(fileName)}`;
+    const resp = await fetch(url, {
+      headers: { Authorization: authHeader(creds), Accept: 'application/octet-stream' },
+      redirect: 'follow',
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => resp.statusText);
+      throw new Error(`Kaggle file download error ${resp.status} ${resp.statusText}: ${text.slice(0, 200)}`);
+    }
+    const buf = Buffer.from(await resp.arrayBuffer());
+    const sizeBytes = buf.length;
+    const truncated = sizeBytes > maxBytes;
+    const slice = truncated ? buf.subarray(0, maxBytes) : buf;
+    // Heuristic binary detection: any null byte in the first 1 KiB.
+    const sniff = slice.subarray(0, Math.min(slice.length, 1024));
+    const binary = sniff.includes(0);
+    let content: string;
+    if (binary) {
+      content = `[binary file, first 256 bytes hex]\n${slice.subarray(0, 256).toString('hex')}`;
+    } else {
+      content = slice.toString('utf8');
+      if (truncated) {
+        content += `\n\n...[${sizeBytes - maxBytes} bytes truncated]`;
+      }
+    }
+    return { fileName, sizeBytes, truncated, binary, content };
+  },
+
   async getLeaderboard(creds, ref) {
     const data = await kaggleFetch(creds, `/competitions/${encodeURIComponent(ref)}/leaderboard/view`) as Record<string, unknown>;
     const submissions = (data['submissions'] as Array<Record<string, unknown>> | undefined) ?? [];
@@ -409,10 +457,12 @@ export const liveKaggleAdapter: KaggleAdapter = {
 
   async pullKernel(creds, ref) {
     const data = await kaggleFetch(creds, `/kernels/pull?userName=${encodeURIComponent(ref.split('/')[0] ?? '')}&kernelSlug=${encodeURIComponent(ref.split('/')[1] ?? '')}`) as Record<string, unknown>;
+    const blob = (data['blob'] as Record<string, unknown> | undefined) ?? undefined;
+    const source = blob ? (s(blob['source']) ?? s(blob['sourceNullable']) ?? '') : (s(data['source']) ?? '');
     return {
       ref,
-      metadata: (data['metadata'] as Record<string, unknown>) ?? {},
-      source: s(data['blob']) ?? s(data['source']) ?? '',
+      metadata: (data['metadata'] as Record<string, unknown>) ?? (blob ?? {}),
+      source,
     };
   },
 
@@ -440,36 +490,76 @@ export const liveKaggleAdapter: KaggleAdapter = {
   },
 
   async submitToCompetition(creds, input) {
-    // Kaggle submit is a 3-step flow:
-    //   1) POST /competitions/submissions/url/{contentLength}/{lastModifiedEpoch}/{fileName}
-    //      → returns { createUrl, token } (Google upload URL).
-    //   2) PUT createUrl with the file body.
-    //   3) POST /competitions/submissions/submit/{competitionRef} with { blobFileTokens, submissionDescription }.
+    // 3-step flow. Newer competitions (e.g. simulation/agent comps) only
+    // accept the gRPC-style endpoints (CompetitionApiService); older ones
+    // still accept the legacy REST paths. Try gRPC first, fall back to REST.
     const bytes = Buffer.byteLength(input.fileContent, 'utf8');
     const epoch = Math.floor(Date.now() / 1000);
-    const urlInfo = await kaggleFetch(
-      creds,
-      `/competitions/submissions/url/${bytes}/${epoch}/${encodeURIComponent(input.fileName)}`,
-      { method: 'POST' },
-    ) as Record<string, unknown>;
-    const createUrl = s(urlInfo['createUrl']);
-    const token = s(urlInfo['token']);
-    if (!createUrl || !token) {
-      throw new Error(`Kaggle submit: missing createUrl/token in upload response: ${JSON.stringify(urlInfo)}`);
+
+    let createUrl: string | null = null;
+    let token: string | null = null;
+    try {
+      const urlInfo = await kaggleFetch(
+        creds,
+        `/competitions.CompetitionApiService/StartSubmissionUpload`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            competitionName: input.competitionRef,
+            fileName: input.fileName,
+            contentLength: bytes,
+            lastModifiedEpochSeconds: epoch,
+          }),
+          headers: { 'content-type': 'application/json' },
+        },
+      ) as Record<string, unknown>;
+      createUrl = s(urlInfo['createUrl']);
+      token = s(urlInfo['token']);
+    } catch {
+      const urlInfo = await kaggleFetch(
+        creds,
+        `/competitions/submissions/url/${bytes}/${epoch}/${encodeURIComponent(input.fileName)}`,
+        { method: 'POST' },
+      ) as Record<string, unknown>;
+      createUrl = s(urlInfo['createUrl']);
+      token = s(urlInfo['token']);
     }
+    if (!createUrl || !token) {
+      throw new Error('Kaggle submit: missing createUrl/token in upload response');
+    }
+
     const uploadResp = await fetch(createUrl, { method: 'PUT', body: input.fileContent });
     if (!uploadResp.ok) {
       const body = await uploadResp.text().catch(() => uploadResp.statusText);
       throw new Error(`Kaggle submit upload failed (${uploadResp.status}): ${body}`);
     }
-    const params = new URLSearchParams();
-    params.set('blobFileTokens', token);
-    params.set('submissionDescription', input.description);
-    const submit = await kaggleFetch(
-      creds,
-      `/competitions/submissions/submit/${encodeURIComponent(input.competitionRef)}`,
-      { method: 'POST', body: params, headers: { 'content-type': 'application/x-www-form-urlencoded' } },
-    ) as Record<string, unknown>;
+
+    let submit: Record<string, unknown>;
+    try {
+      submit = await kaggleFetch(
+        creds,
+        `/competitions.CompetitionApiService/CreateSubmission`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            competitionName: input.competitionRef,
+            blobFileTokens: token,
+            submissionDescription: input.description,
+          }),
+          headers: { 'content-type': 'application/json' },
+        },
+      ) as Record<string, unknown>;
+    } catch {
+      const params = new URLSearchParams();
+      params.set('blobFileTokens', token);
+      params.set('submissionDescription', input.description);
+      submit = await kaggleFetch(
+        creds,
+        `/competitions/submissions/submit/${encodeURIComponent(input.competitionRef)}`,
+        { method: 'POST', body: params, headers: { 'content-type': 'application/x-www-form-urlencoded' } },
+      ) as Record<string, unknown>;
+    }
+
     return {
       competitionRef: input.competitionRef,
       submissionId: s(submit['id']) ?? s(submit['ref']) ?? s(submit['submissionId']) ?? '',
@@ -581,6 +671,10 @@ export function fixtureKaggleAdapter(): KaggleAdapter {
         { ref: 'train.csv', name: 'train.csv', size: 60000, creationDate: '2018-01-01T00:00:00Z' },
         { ref: 'test.csv', name: 'test.csv', size: 28000, creationDate: '2018-01-01T00:00:00Z' },
       ];
+    },
+    async downloadCompetitionFile(_creds, _ref, fileName) {
+      const body = `# fixture content for ${fileName}`;
+      return { fileName, sizeBytes: body.length, truncated: false, binary: false, content: body };
     },
     async getLeaderboard() {
       return [

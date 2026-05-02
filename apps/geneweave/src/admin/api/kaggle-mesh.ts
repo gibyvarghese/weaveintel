@@ -16,6 +16,7 @@ import type { Account, AccountBinding, AgentContract, CrossMeshBridge, Delegatio
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 import { bootKaggleMesh, revokeKaggleBinding } from '../../live-agents/kaggle/boot.js';
+import { createDbKagglePlaybookResolver } from '../../live-agents/kaggle/playbook-resolver.js';
 import { getKaggleLiveStore } from '../../live-agents/kaggle/store.js';
 
 const provisionIdempotency = createIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000 });
@@ -168,6 +169,7 @@ export function registerKaggleMeshRoutes(
       kaggleUsername,
       mcpUrl,
       humanOwnerId,
+      playbookResolver: createDbKagglePlaybookResolver(db),
       ...(typeof body['userMeshId'] === 'string' ? { userMeshId: body['userMeshId'] as string } : {}),
       ...(typeof body['credentialVaultRef'] === 'string' ? { credentialVaultRef: body['credentialVaultRef'] as string } : {}),
       ...(typeof body['meshId'] === 'string' ? { meshId: body['meshId'] as string } : {}),

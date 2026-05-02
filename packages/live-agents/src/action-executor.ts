@@ -459,18 +459,7 @@ export function createActionExecutor(opts?: {
         case 'StartTask':
         case 'ContinueTask': {
           const agentRole = (context.agent.role ?? '').toLowerCase();
-          const handler =
-            taskHandlers[agentRole] ??
-            // Backward-compat: 'kernel author' previously had a hardcoded
-            // import of kaggle/implementer-task. Preserve that fallback so
-            // existing callers keep working.
-            (agentRole === 'kernel author'
-              ? (async (a, c, x) => {
-                  const { implementerHandleTask } = await import('./kaggle/implementer-task.js');
-                  await implementerHandleTask(a, c, x);
-                  return { completed: false };
-                }) as TaskHandler
-              : undefined);
+          const handler = taskHandlers[agentRole];
 
           if (handler) {
             try {

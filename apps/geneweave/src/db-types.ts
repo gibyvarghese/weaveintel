@@ -1693,6 +1693,79 @@ export interface KaggleDiscussionPostRow {
   posted_at: string;
 }
 
+// Phase K7d — Competition-agnostic submission validation rubric. Defines
+// what "a good submission for this competition" means in machine-checkable
+// terms (metric direction, baseline, expected file shape). One row per
+// competition_ref per tenant. Auto-inferred from Kaggle metadata on first
+// contact, then editable by operators.
+export interface KaggleCompetitionRubricRow {
+  id: string;
+  tenant_id: string | null;
+  competition_ref: string;
+  metric_name: string | null;
+  metric_direction: 'maximize' | 'minimize' | null;
+  baseline_score: number | null;
+  target_score: number | null;
+  expected_row_count: number | null;
+  id_column: string | null;
+  id_range_min: number | null;
+  id_range_max: number | null;
+  target_column: string | null;
+  target_type: string | null;        // 'binary' | 'multiclass' | 'continuous' | 'probability' | 'ranking' | 'other'
+  expected_distribution_json: string | null;
+  sample_submission_sha256: string | null;
+  inference_source: string | null;   // free text describing how the rubric was derived
+  auto_generated: number;             // 1 = auto-inferred, 0 = operator-authored
+  inferred_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Phase K7d — Append-only ledger of every validator pass. One row per
+// kernel run the validator reviews. Holds the structured pass/warn/fail
+// verdict and the per-check booleans + violations so admin UX can show
+// exactly why a submission was held back.
+export interface KaggleValidationResultRow {
+  id: string;
+  run_id: string;
+  competition_ref: string;
+  rubric_id: string | null;
+  kernel_ref: string | null;
+  schema_check_passed: number | null;
+  distribution_check_passed: number | null;
+  baseline_check_passed: number | null;
+  cv_score: number | null;
+  cv_std: number | null;
+  cv_metric: string | null;
+  n_folds: number | null;
+  predicted_distribution_json: string | null;
+  violations_json: string | null;
+  verdict: 'pass' | 'warn' | 'fail' | null;
+  summary: string | null;
+  validated_at: string | null;
+  created_at: string;
+}
+
+// Phase K7d — Append-only ledger of leaderboard readbacks observed by the
+// Leaderboard Observer role after the submitter pushes. cv_lb_delta is the
+// reproducibility-critical signal: large gaps imply CV is mis-calibrated.
+export interface KaggleLeaderboardScoreRow {
+  id: string;
+  run_id: string | null;
+  competition_ref: string;
+  submission_id: string | null;
+  public_score: number | null;
+  private_score: number | null;
+  cv_lb_delta: number | null;
+  percentile_estimate: number | null;
+  rank_estimate: number | null;
+  leaderboard_size: number | null;
+  raw_status: string | null;
+  observed_at: string | null;
+  created_at: string;
+}
+
 // ─── Adapter interface ───────────────────────────────────────
 
 export interface DatabaseAdapter {
@@ -2520,6 +2593,24 @@ export interface DatabaseAdapter {
   getKaggleRunArtifactByRunId(runId: string): Promise<KaggleRunArtifactRow | null>;
   listKaggleRunArtifacts(opts?: { limit?: number; offset?: number }): Promise<KaggleRunArtifactRow[]>;
   deleteKaggleRunArtifact(id: string): Promise<void>;
+
+  // Phase K7d — Competition-agnostic submission validation
+  upsertKaggleCompetitionRubric(row: Omit<KaggleCompetitionRubricRow, 'created_at' | 'updated_at'>): Promise<KaggleCompetitionRubricRow>;
+  getKaggleCompetitionRubric(id: string): Promise<KaggleCompetitionRubricRow | null>;
+  getKaggleCompetitionRubricByRef(competitionRef: string, tenantId?: string | null): Promise<KaggleCompetitionRubricRow | null>;
+  listKaggleCompetitionRubrics(opts?: { competitionRef?: string; tenantId?: string | null; limit?: number; offset?: number }): Promise<KaggleCompetitionRubricRow[]>;
+  updateKaggleCompetitionRubric(id: string, patch: Partial<Omit<KaggleCompetitionRubricRow, 'id' | 'created_at'>>): Promise<void>;
+  deleteKaggleCompetitionRubric(id: string): Promise<void>;
+
+  createKaggleValidationResult(row: Omit<KaggleValidationResultRow, 'created_at'>): Promise<void>;
+  getKaggleValidationResult(id: string): Promise<KaggleValidationResultRow | null>;
+  listKaggleValidationResults(opts?: { runId?: string; competitionRef?: string; verdict?: string; limit?: number; offset?: number }): Promise<KaggleValidationResultRow[]>;
+  deleteKaggleValidationResult(id: string): Promise<void>;
+
+  createKaggleLeaderboardScore(row: Omit<KaggleLeaderboardScoreRow, 'created_at'>): Promise<void>;
+  getKaggleLeaderboardScore(id: string): Promise<KaggleLeaderboardScoreRow | null>;
+  listKaggleLeaderboardScores(opts?: { runId?: string; competitionRef?: string; limit?: number; offset?: number }): Promise<KaggleLeaderboardScoreRow[]>;
+  deleteKaggleLeaderboardScore(id: string): Promise<void>;
 
   // Phase K5 — Live-agents Kaggle mesh index (pointer table to la_entities)
   upsertKaggleLiveMesh(row: { mesh_id: string; tenant_id: string; kaggle_username: string }): Promise<void>;

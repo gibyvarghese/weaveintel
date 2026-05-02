@@ -423,3 +423,157 @@ export function registerKaggleRunArtifactRoutes(
     json(res, 200, { 'kaggle-run-artifact': item });
   }, { auth: true });
 }
+
+// ─── Phase K7d — Validator Rubrics, Validation Results, Leaderboard Scores ──
+
+const RUBRIC_BASE = '/api/admin/kaggle-rubrics';
+const VAL_BASE    = '/api/admin/kaggle-validation-results';
+const LB_BASE     = '/api/admin/kaggle-leaderboard-scores';
+
+export function registerKaggleRubricRoutes(
+  router: RouterLike,
+  db: DatabaseAdapter,
+  helpers: AdminHelpers,
+): void {
+  const { json, readBody } = helpers;
+
+  router.get(RUBRIC_BASE, async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const url = new URL(req.url ?? '', 'http://x');
+    const competitionRef = url.searchParams.get('competition_ref') ?? undefined;
+    const tenantId = url.searchParams.get('tenant_id');
+    const items = await db.listKaggleCompetitionRubrics({
+      ...(competitionRef ? { competitionRef } : {}),
+      ...(tenantId !== null ? { tenantId } : {}),
+      limit: Number(url.searchParams.get('limit') ?? 100),
+      offset: Number(url.searchParams.get('offset') ?? 0),
+    });
+    json(res, 200, { 'kaggle-rubrics': items });
+  }, { auth: true });
+
+  router.get(`${RUBRIC_BASE}/:id`, async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const item = await db.getKaggleCompetitionRubric(params['id']!);
+    if (!item) { json(res, 404, { error: 'Rubric not found' }); return; }
+    json(res, 200, { 'kaggle-rubric': item });
+  }, { auth: true });
+
+  router.post(RUBRIC_BASE, async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    if (!body['competition_ref']) { json(res, 400, { error: 'competition_ref required' }); return; }
+    const id = makeId('kgl-rub');
+    const row = await db.upsertKaggleCompetitionRubric({
+      id,
+      tenant_id: (body['tenant_id'] as string | null) ?? null,
+      competition_ref: body['competition_ref'] as string,
+      metric_name: (body['metric_name'] as string | null) ?? null,
+      metric_direction: (body['metric_direction'] as 'maximize' | 'minimize' | null) ?? null,
+      baseline_score: (body['baseline_score'] as number | null) ?? null,
+      target_score: (body['target_score'] as number | null) ?? null,
+      expected_row_count: (body['expected_row_count'] as number | null) ?? null,
+      id_column: (body['id_column'] as string | null) ?? null,
+      id_range_min: (body['id_range_min'] as number | null) ?? null,
+      id_range_max: (body['id_range_max'] as number | null) ?? null,
+      target_column: (body['target_column'] as string | null) ?? null,
+      target_type: (body['target_type'] as string | null) ?? null,
+      expected_distribution_json: (body['expected_distribution_json'] as string | null) ?? null,
+      sample_submission_sha256: (body['sample_submission_sha256'] as string | null) ?? null,
+      inference_source: (body['inference_source'] as string | null) ?? null,
+      auto_generated: (body['auto_generated'] as number | undefined) ?? 0,
+      inferred_at: (body['inferred_at'] as string | null) ?? null,
+      notes: (body['notes'] as string | null) ?? null,
+    });
+    json(res, 201, { 'kaggle-rubric': row });
+  }, { auth: true, csrf: true });
+
+  router.put(`${RUBRIC_BASE}/:id`, async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getKaggleCompetitionRubric(params['id']!);
+    if (!existing) { json(res, 404, { error: 'Rubric not found' }); return; }
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const fields: Record<string, unknown> = {};
+    for (const k of [
+      'tenant_id','competition_ref','metric_name','metric_direction',
+      'baseline_score','target_score','expected_row_count','id_column',
+      'id_range_min','id_range_max','target_column','target_type',
+      'expected_distribution_json','sample_submission_sha256',
+      'inference_source','auto_generated','inferred_at','notes',
+    ]) {
+      if (body[k] !== undefined) fields[k] = body[k];
+    }
+    await db.updateKaggleCompetitionRubric(params['id']!, fields as never);
+    const item = await db.getKaggleCompetitionRubric(params['id']!);
+    json(res, 200, { 'kaggle-rubric': item });
+  }, { auth: true, csrf: true });
+
+  router.del(`${RUBRIC_BASE}/:id`, async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteKaggleCompetitionRubric(params['id']!);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+}
+
+export function registerKaggleValidationResultRoutes(
+  router: RouterLike,
+  db: DatabaseAdapter,
+  helpers: AdminHelpers,
+): void {
+  const { json } = helpers;
+
+  router.get(VAL_BASE, async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const url = new URL(req.url ?? '', 'http://x');
+    const runId = url.searchParams.get('run_id') ?? undefined;
+    const competitionRef = url.searchParams.get('competition_ref') ?? undefined;
+    const verdict = url.searchParams.get('verdict') ?? undefined;
+    const items = await db.listKaggleValidationResults({
+      ...(runId ? { runId } : {}),
+      ...(competitionRef ? { competitionRef } : {}),
+      ...(verdict ? { verdict } : {}),
+      limit: Number(url.searchParams.get('limit') ?? 100),
+      offset: Number(url.searchParams.get('offset') ?? 0),
+    });
+    json(res, 200, { 'kaggle-validation-results': items });
+  }, { auth: true });
+
+  router.get(`${VAL_BASE}/:id`, async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const item = await db.getKaggleValidationResult(params['id']!);
+    if (!item) { json(res, 404, { error: 'Validation result not found' }); return; }
+    json(res, 200, { 'kaggle-validation-result': item });
+  }, { auth: true });
+}
+
+export function registerKaggleLeaderboardScoreRoutes(
+  router: RouterLike,
+  db: DatabaseAdapter,
+  helpers: AdminHelpers,
+): void {
+  const { json } = helpers;
+
+  router.get(LB_BASE, async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const url = new URL(req.url ?? '', 'http://x');
+    const runId = url.searchParams.get('run_id') ?? undefined;
+    const competitionRef = url.searchParams.get('competition_ref') ?? undefined;
+    const items = await db.listKaggleLeaderboardScores({
+      ...(runId ? { runId } : {}),
+      ...(competitionRef ? { competitionRef } : {}),
+      limit: Number(url.searchParams.get('limit') ?? 100),
+      offset: Number(url.searchParams.get('offset') ?? 0),
+    });
+    json(res, 200, { 'kaggle-leaderboard-scores': items });
+  }, { auth: true });
+
+  router.get(`${LB_BASE}/:id`, async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const item = await db.getKaggleLeaderboardScore(params['id']!);
+    if (!item) { json(res, 404, { error: 'Leaderboard score not found' }); return; }
+    json(res, 200, { 'kaggle-leaderboard-score': item });
+  }, { auth: true });
+}

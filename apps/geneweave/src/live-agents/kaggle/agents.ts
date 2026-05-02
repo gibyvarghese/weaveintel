@@ -13,9 +13,11 @@
 import type { AttentionAction, AttentionContext, AttentionPolicy } from '@weaveintel/live-agents';
 import type { ExecutionContext } from '@weaveintel/core';
 import type { KaggleAgentRole } from './account-bindings.js';
+import type { KagglePlaybookResolver } from './playbook-resolver.js';
 
 export interface KaggleAttentionPolicyOptions {
-  /** Minutes between rest ticks when the inbox is empty. Defaults to 60. */
+  /** Minutes between rest ticks when the inbox is empty. Defaults to 60.
+   *  Explicit values win over any playbook-derived default. */
   restMinutes?: number;
 }
 
@@ -46,4 +48,25 @@ export function createKaggleAttentionPolicy(
       return { type: 'NoopRest', nextTickAt: next };
     },
   };
+}
+
+/** DB-backed convenience wrapper: resolves the catch-all (`*`) playbook to
+ *  pick up `attentionRestMinutes` and returns a policy. Falls back to the
+ *  in-code 60-minute default when the resolver returns no playbook or any
+ *  field is missing. Explicit `opts.restMinutes` always wins. */
+export async function createKaggleAttentionPolicyFromDb(
+  role: KaggleAgentRole,
+  resolver: KagglePlaybookResolver,
+  opts: KaggleAttentionPolicyOptions = {},
+): Promise<AttentionPolicy> {
+  let derived: number | undefined;
+  try {
+    const pb = await resolver('');
+    derived = pb?.config.attentionRestMinutes;
+  } catch {
+    // Non-fatal — fall through to default.
+  }
+  return createKaggleAttentionPolicy(role, {
+    restMinutes: opts.restMinutes ?? derived ?? NEXT_TICK_MINUTES_DEFAULT,
+  });
 }

@@ -111,6 +111,9 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'kaggle-mesh-bridges', label: 'Cross-Mesh Bridges' },
     { key: 'kaggle-discussion-settings', label: 'Discussion Kill Switch' },
     { key: 'kaggle-discussion-posts', label: 'Discussion Posts' },
+    { key: 'kaggle-rubrics', label: 'Validator Rubrics' },
+    { key: 'kaggle-validation-results', label: 'Validation Results' },
+    { key: 'kaggle-leaderboard-scores', label: 'Leaderboard Scores' },
   ]},
   { label: 'Developer', icon: '\uD83D\uDEE0\uFE0F', tabs: [
     { key: 'scaffold-templates', label: 'Scaffolds' },

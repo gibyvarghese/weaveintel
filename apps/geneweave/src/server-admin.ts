@@ -38,6 +38,9 @@ import {
   registerKaggleApproachRoutes,
   registerKaggleRunRoutes,
   registerKaggleRunArtifactRoutes,
+  registerKaggleRubricRoutes,
+  registerKaggleValidationResultRoutes,
+  registerKaggleLeaderboardScoreRoutes,
   registerKaggleMeshRoutes,
   registerKaggleDiscussionRoutes,
   registerGuardrailRoutes,
@@ -1268,6 +1271,11 @@ export function registerAdminRoutes(
   registerKaggleApproachRoutes(router, db, adminHelpers);
   registerKaggleRunRoutes(router, db, adminHelpers);
   registerKaggleRunArtifactRoutes(router, db, adminHelpers);
+
+  // ── Phase K7d: Kaggle validator rubrics + validation results + leaderboard scores ──
+  registerKaggleRubricRoutes(router, db, adminHelpers);
+  registerKaggleValidationResultRoutes(router, db, adminHelpers);
+  registerKaggleLeaderboardScoreRoutes(router, db, adminHelpers);
 
   // ── Phase K5: Kaggle live-agents mesh provisioning + observation ──
   registerKaggleMeshRoutes(router, db, adminHelpers);

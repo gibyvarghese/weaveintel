@@ -13,10 +13,13 @@ export {
   buildKaggleMeshTemplate,
   type KaggleMeshTemplate,
   type KaggleMeshTemplateOptions,
+  type KaggleRolePersona,
 } from './mesh-template.js';
 export {
   KAGGLE_CAPABILITY_MATRIX,
   bindingConstraintsFor,
+  bindingConstraintsForCaps,
+  resolveCapabilitiesFor,
   type KaggleAgentRole,
 } from './account-bindings.js';
 export {
@@ -26,6 +29,7 @@ export {
 } from './bridge.js';
 export {
   createKaggleAttentionPolicy,
+  createKaggleAttentionPolicyFromDb,
   type KaggleAttentionPolicyOptions,
 } from './agents.js';
 export {

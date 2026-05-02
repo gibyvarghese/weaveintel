@@ -9,12 +9,28 @@
 import type { AgentContract, LiveAgent, Mesh } from '@weaveintel/live-agents';
 import type { KaggleAgentRole } from './account-bindings.js';
 
+export interface KaggleRolePersona {
+  name: string;
+  role: string;
+  persona: string;
+  objectives: string;
+  success: string;
+}
+
 export interface KaggleMeshTemplateOptions {
   tenantId: string;
   /** Override mesh id (defaults to `mesh-kaggle-research-${tenantId}`). */
   meshId?: string;
   /** ISO timestamp used for createdAt on every entity. Defaults to `now()`. */
   nowIso?: string;
+  /** Override the mesh-level dual-control gate. When omitted, falls back to
+   *  the historical default `['kaggle.competitions.submit', 'kaggle.kernels.push']`.
+   *  Typically fed from the catch-all (`*`) playbook's `dualControlRequiredFor`. */
+  dualControlRequiredFor?: readonly string[];
+  /** Per-role persona overrides. Each provided field REPLACES the matching
+   *  field in the in-code default (field-level merge). Typically fed from
+   *  the catch-all (`*`) playbook's `rolePersonas`. */
+  rolePersonas?: Partial<Record<KaggleAgentRole, Partial<KaggleRolePersona>>>;
 }
 
 export interface KaggleMeshTemplate {
@@ -23,7 +39,7 @@ export interface KaggleMeshTemplate {
   contracts: Record<KaggleAgentRole, AgentContract>;
 }
 
-const ROLE_PERSONAS: Record<KaggleAgentRole, { name: string; role: string; persona: string; objectives: string; success: string }> = {
+const ROLE_PERSONAS: Record<KaggleAgentRole, KaggleRolePersona> = {
   discoverer: {
     name: 'Kaggle Discoverer',
     role: 'Competition Discoverer',
@@ -74,8 +90,9 @@ function makeContract(args: {
   contractVersionId: string;
   attentionPolicyRef: string;
   nowIso: string;
+  persona: KaggleRolePersona;
 }): AgentContract {
-  const cfg = ROLE_PERSONAS[args.role];
+  const cfg = args.persona;
   return {
     id: args.contractVersionId,
     agentId: args.agentId,
@@ -116,11 +133,20 @@ export function buildKaggleMeshTemplate(opts: KaggleMeshTemplateOptions): Kaggle
     name: 'Kaggle Research Mesh',
     charter: 'Discover, ideate, implement, validate, submit, and observe Kaggle competition entries.',
     status: 'ACTIVE',
-    dualControlRequiredFor: ['kaggle.competitions.submit', 'kaggle.kernels.push'],
+    dualControlRequiredFor: opts.dualControlRequiredFor
+      ? [...opts.dualControlRequiredFor]
+      : ['kaggle.competitions.submit', 'kaggle.kernels.push'],
     createdAt: nowIso,
   };
 
   const roles: KaggleAgentRole[] = ['discoverer', 'strategist', 'implementer', 'validator', 'submitter', 'observer'];
+
+  // Merge per-role overrides field-by-field on top of the historical defaults.
+  const resolvedPersonas = {} as Record<KaggleAgentRole, KaggleRolePersona>;
+  for (const role of roles) {
+    const override = opts.rolePersonas?.[role] ?? {};
+    resolvedPersonas[role] = { ...ROLE_PERSONAS[role], ...override };
+  }
 
   const agents = {} as Record<KaggleAgentRole, LiveAgent>;
   const contracts = {} as Record<KaggleAgentRole, AgentContract>;
@@ -130,8 +156,8 @@ export function buildKaggleMeshTemplate(opts: KaggleMeshTemplateOptions): Kaggle
     agents[role] = {
       id: agentId,
       meshId,
-      name: ROLE_PERSONAS[role].name,
-      role: ROLE_PERSONAS[role].role,
+      name: resolvedPersonas[role].name,
+      role: resolvedPersonas[role].role,
       contractVersionId,
       status: 'ACTIVE',
       createdAt: nowIso,
@@ -143,6 +169,7 @@ export function buildKaggleMeshTemplate(opts: KaggleMeshTemplateOptions): Kaggle
       contractVersionId,
       attentionPolicyRef: `kaggle-${role}`,
       nowIso,
+      persona: resolvedPersonas[role],
     });
   }
 

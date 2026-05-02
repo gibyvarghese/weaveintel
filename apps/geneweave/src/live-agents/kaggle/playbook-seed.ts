@@ -3,24 +3,30 @@
  *
  * Idempotent. Inserts (or skips if present, by stable id):
  *   - prompt_fragments:
- *       kaggle.workflow.arc_agi_3      — verbatim ARC-AGI-3 strategist workflow
- *       kaggle.solver_template.arc_agi_3 — verbatim Python solver template
+ *       kaggle.workflow.default_discovery  — catch-all generic discovery prompt
+ *       kaggle.workflow.arc_agi_3          — verbatim ARC-AGI-3 strategist workflow
+ *       kaggle.solver_template.arc_agi_3   — verbatim Python solver template
  *   - skills (category=kaggle_playbook):
- *       kaggle-playbook-default  — catch-all (`*`), generic discovery prompt
+ *       kaggle-playbook-default  — catch-all (`*`); instructions are a fragment ref
  *       kaggle-playbook-arc-agi-3 — matches `arc-prize-*`, `*arc-agi*`
  *
- * After seeding, all ARC-specific content lives in the DB and can be edited
- * via admin (skills + prompt fragments tabs). The runtime resolver
- * (playbook-resolver.ts) loads the matching playbook per competition slug.
+ * After seeding, ALL playbook content lives in the DB and is editable via
+ * admin (skills + prompt fragments tabs). The runtime resolver
+ * (playbook-resolver.ts) loads the matching playbook per competition slug
+ * and expands `{{>...}}` fragment markers via `@weaveintel/prompts`.
  */
 
 import type { DatabaseAdapter } from '../../db-types.js';
 import {
   KAGGLE_ARC_AGI_3_WORKFLOW,
   KAGGLE_ARC_AGI_3_SOLVER_TEMPLATE,
+  KAGGLE_DEFAULT_DISCOVERY,
+  KAGGLE_ARC_STRATEGY_PRESETS,
 } from './playbook-seed-content.js';
 import { KAGGLE_PLAYBOOK_CATEGORY } from './playbook-resolver.js';
 
+const FRAGMENT_ID_DEFAULT_DISCOVERY = 'frag-kaggle-workflow-default-discovery';
+const FRAGMENT_KEY_DEFAULT_DISCOVERY = 'kaggle.workflow.default_discovery';
 const FRAGMENT_ID_ARC_WORKFLOW = 'frag-kaggle-workflow-arc-agi-3';
 const FRAGMENT_KEY_ARC_WORKFLOW = 'kaggle.workflow.arc_agi_3';
 const FRAGMENT_ID_ARC_SOLVER = 'frag-kaggle-solver-template-arc-agi-3';
@@ -29,61 +35,8 @@ const FRAGMENT_KEY_ARC_SOLVER = 'kaggle.solver_template.arc_agi_3';
 const SKILL_ID_DEFAULT = 'kaggle-playbook-default';
 const SKILL_ID_ARC = 'kaggle-playbook-arc-agi-3';
 
-const GENERIC_DISCOVERY_INSTRUCTIONS = `You are a Kaggle Grandmaster running an autonomous research loop on a competition you have not yet identified.
-
-Mission: figure out which competition this is, what shape it is, then either dispatch to a competition-specific playbook (if the operator has seeded one in the database) or build a minimal-but-valid baseline entry yourself.
-
-Workflow:
-
-  ITERATION 1 — Identify the competition.
-    - List active competitions with kaggle_list_competitions and pick the most tractable.
-    - Push a tiny scout kernel attached to it whose only job is to:
-        * os.walk(/kaggle/input) and print the first 500 paths.
-        * cat any README.md, llms.txt, sample_submission.* (truncate each to 1500 chars).
-        * Print "AGENT_RESULT: status=ok competitionId=<slug> shape=<static_files|live_api|unknown> notes=<short>".
-    - Read the kernel log. Now you KNOW the competition slug and shape.
-
-  ITERATION 2+ — If the operator has registered a competition-specific playbook for this slug, the next strategist tick will be re-prompted with the playbook's specialized instructions. Otherwise:
-    - For shape=static_files: write code that loads /kaggle/input/<slug>/, trains a simple but valid baseline for the evaluation metric, writes the required submission file.
-    - For shape=live_api: identify the framework directory and use its high-level API directly — DO NOT import internal agents/ packages (they pull heavy optional deps not in wheels).
-    - In either case: push under a distinct kernel slug per attempt; read the full log; iterate up to 5 attempts.
-
-Stop when the kernel produces a valid entry (status=complete + expected output file). DO NOT submit to the leaderboard — submission is gated on a separate human approval step.
-
-Constraints:
-  - Standard Kaggle Python image only. No PyPI internet.
-  - Each kernel under 5 minutes.
-  - Distinct kernel slugs per attempt.
-  - DO NOT call any submit-style tool — there isn't one.`;
-
+const DEFAULT_PLAYBOOK_INSTRUCTIONS = `{{>${FRAGMENT_KEY_DEFAULT_DISCOVERY}}}`;
 const ARC_PLAYBOOK_INSTRUCTIONS = `{{>${FRAGMENT_KEY_ARC_WORKFLOW}}}`;
-
-const ARC_STRATEGY_PRESETS = [
-  {
-    label: 'baseline-all-transforms',
-    variables: {
-      STRATEGY_FLAGS_PY: '{\n    "identity": True,\n    "rot90": True,\n    "rot180": True,\n    "rot270": True,\n    "flip_h": True,\n    "flip_v": True,\n    "transpose": True,\n    "color_perm": True,\n}',
-      ITERATION_NUMBER: 1,
-      RUN_LABEL: 'baseline-all-transforms',
-    },
-  },
-  {
-    label: 'rotations-only',
-    variables: {
-      STRATEGY_FLAGS_PY: '{\n    "identity": True,\n    "rot90": True,\n    "rot180": True,\n    "rot270": True,\n    "flip_h": False,\n    "flip_v": False,\n    "transpose": False,\n    "color_perm": False,\n}',
-      ITERATION_NUMBER: 2,
-      RUN_LABEL: 'rotations-only',
-    },
-  },
-  {
-    label: 'identity-plus-color-perm',
-    variables: {
-      STRATEGY_FLAGS_PY: '{\n    "identity": True,\n    "rot90": False,\n    "rot180": False,\n    "rot270": False,\n    "flip_h": False,\n    "flip_v": False,\n    "transpose": False,\n    "color_perm": True,\n}',
-      ITERATION_NUMBER: 3,
-      RUN_LABEL: 'identity-plus-color-perm',
-    },
-  },
-];
 
 /** Quietly insert a fragment if not present. */
 async function ensureFragment(
@@ -94,11 +47,23 @@ async function ensureFragment(
   category: string,
   content: string,
 ): Promise<'inserted' | 'exists'> {
+  const CURRENT_VERSION = '1.3.0';
   const existing = await db.getPromptFragment(id).catch(() => null);
-  if (existing) return 'exists';
-  // Also dedupe by key in case row exists with a different id.
-  const byKey = await db.getPromptFragmentByKey(key).catch(() => null);
-  if (byKey) return 'exists';
+  const byKey = existing ?? (await db.getPromptFragmentByKey(key).catch(() => null));
+  if (byKey) {
+    // Refresh content when the seeded version differs (operator-edited rows
+    // bumped to '1.0.0-edit' or any non-matching version are left alone
+    // ONLY if their content already differs from the bundled seed).
+    if (byKey.version !== CURRENT_VERSION && byKey.content !== content) {
+      try {
+        await db.updatePromptFragment(byKey.id, { content, version: CURRENT_VERSION });
+        return 'inserted';
+      } catch {
+        return 'exists';
+      }
+    }
+    return 'exists';
+  }
   await db.createPromptFragment({
     id,
     key,
@@ -108,7 +73,7 @@ async function ensureFragment(
     content,
     variables: null,
     tags: JSON.stringify(['kaggle', 'live-agents', 'playbook']),
-    version: '1.0.0',
+    version: CURRENT_VERSION,
     enabled: 1,
   });
   return 'inserted';
@@ -159,6 +124,14 @@ export async function seedKaggleArcPlaybook(
   db: DatabaseAdapter,
 ): Promise<SeedKaggleArcPlaybookResult> {
   const fragments: Record<string, 'inserted' | 'exists'> = {};
+  fragments[FRAGMENT_KEY_DEFAULT_DISCOVERY] = await ensureFragment(
+    db,
+    FRAGMENT_ID_DEFAULT_DISCOVERY,
+    FRAGMENT_KEY_DEFAULT_DISCOVERY,
+    'Kaggle default discovery workflow',
+    'kaggle',
+    KAGGLE_DEFAULT_DISCOVERY,
+  );
   fragments[FRAGMENT_KEY_ARC_WORKFLOW] = await ensureFragment(
     db,
     FRAGMENT_ID_ARC_WORKFLOW,
@@ -183,7 +156,7 @@ export async function seedKaggleArcPlaybook(
     description:
       'Catch-all Kaggle playbook used when no competition-specific playbook matches the competition slug. Drives a generic identify-then-baseline workflow.',
     triggerPatterns: ['*'],
-    instructions: GENERIC_DISCOVERY_INSTRUCTIONS,
+    instructions: DEFAULT_PLAYBOOK_INSTRUCTIONS,
     toolNames: [
       'kaggle_list_competitions',
       'kaggle_push_kernel',
@@ -193,6 +166,96 @@ export async function seedKaggleArcPlaybook(
     examples: {
       shape: 'unknown',
       maxIterations: 5,
+      // Operational defaults applied across handlers. The catch-all `*`
+      // playbook acts as the runtime config carrier so operators can edit
+      // these in admin without touching code.
+      topNAgentic: 5,
+      topNDeterministic: 3,
+      pollIntervalSec: 10,
+      pollTimeoutSec: 300,
+      kernelOutputHeadBytes: 4000,
+      kernelOutputTailBytes: 4000,
+      kernelWaitMaxTimeoutSec: 600,
+      // Tier C: bridge + attention defaults. Operators tune these in admin
+      // by editing the catch-all (`*`) skill's examples JSON.
+      attentionRestMinutes: 60,
+      bridgeTopics: [
+        'kaggle.submission_result',
+        'kaggle.rank_change',
+        'kaggle.escalation_request',
+      ],
+      bridgeRateLimitPerHour: 100,
+      bridgePurposeProse:
+        'Surface Kaggle submission results, rank changes, and escalation requests to the user mesh; receive human approvals for dual-control gates.',
+      // Tier D: capability matrix + dual-control gate. Operators tighten /
+      // loosen these in admin without a deploy. Capability revocation takes
+      // effect on the agent's next tick.
+      capabilityMatrix: {
+        discoverer: ['KAGGLE_LIST_COMPETITIONS', 'KAGGLE_READ_DATASETS'],
+        strategist: ['KAGGLE_LIST_KERNELS', 'KAGGLE_READ_KERNELS'],
+        implementer: ['KAGGLE_PUSH_KERNEL', 'KAGGLE_READ_KERNELS'],
+        validator: ['KAGGLE_DOWNLOAD_DATA', 'KAGGLE_LOCAL_COMPUTE'],
+        submitter: ['KAGGLE_SUBMIT'],
+        observer: ['KAGGLE_READ_LEADERBOARD', 'KAGGLE_READ_SUBMISSIONS'],
+      },
+      dualControlRequiredFor: [
+        'kaggle.competitions.submit',
+        'kaggle.kernels.push',
+      ],
+      // Tier E: role personas + pipeline edges. Operators can rename roles,
+      // tighten objectives, or rewire the pipeline (e.g. drop the observer)
+      // entirely from admin without a code change.
+      rolePersonas: {
+        discoverer: {
+          name: 'Kaggle Discoverer',
+          role: 'Competition Discoverer',
+          persona: 'Daily watch on the Kaggle catalog; surfaces high-fit competitions for the team.',
+          objectives: 'Surface 1–3 candidate competitions per day with reward, deadline, and metric.',
+          success: 'Each surfaced competition links to a Kaggle ref and includes deadline + evaluation metric.',
+        },
+        strategist: {
+          name: 'Kaggle Strategist',
+          role: 'Approach Ideator',
+          persona: 'Proposes 2–3 modeling approaches per competition grounded in published kernels.',
+          objectives: 'For each picked competition, propose distinct approaches with expected metric and rationale.',
+          success: 'Each approach cites at least one source kernel and an expected metric range.',
+        },
+        implementer: {
+          name: 'Kaggle Implementer',
+          role: 'Kernel Author',
+          persona: 'Builds notebook source from approved approaches and pushes to Kaggle as private kernels.',
+          objectives: 'Push kernel; poll until status=complete; record kernel ref + output url.',
+          success: 'Kernel pushes succeed at least 90% on first attempt; failures triage within one tick.',
+        },
+        validator: {
+          name: 'Kaggle Validator',
+          role: 'Submission Validator',
+          persona: 'Runs deterministic header/row/id checks on submission CSVs before they reach the submitter.',
+          objectives: 'Block any submission that fails header/row/id parity against the competition sample.',
+          success: 'Zero malformed submissions reach the submitter.',
+        },
+        submitter: {
+          name: 'Kaggle Submitter',
+          role: 'Competition Submitter',
+          persona: 'Final gate: requires dual-control approval before calling kaggle.competitions.submit.',
+          objectives: 'Submit only validated entries; respect 4/day/competition cap.',
+          success: 'No more than 4 submissions per competition per UTC day; every submission has a paired Promotion.',
+        },
+        observer: {
+          name: 'Kaggle Observer',
+          role: 'Leaderboard Observer',
+          persona: 'Hourly poll of leaderboard + own submissions; flags rank drops to the strategist.',
+          objectives: 'Detect rank drops > N positions and surface to strategist within one tick.',
+          success: 'Rank-drop notices reach strategist before the next discoverer tick.',
+        },
+      },
+      pipelineEdges: [
+        { from: 'discoverer', to: 'strategist', relationship: 'DIRECTS', prose: 'Discoverer hands picked competitions to the strategist.' },
+        { from: 'strategist', to: 'implementer', relationship: 'DIRECTS', prose: 'Strategist hands approved approaches to the implementer.' },
+        { from: 'implementer', to: 'validator', relationship: 'DIRECTS', prose: 'Implementer hands kernel outputs to the validator.' },
+        { from: 'validator', to: 'submitter', relationship: 'DIRECTS', prose: 'Validator hands passing submissions to the submitter.' },
+        { from: 'observer', to: 'strategist', relationship: 'COLLABORATES_WITH', prose: 'Observer surfaces leaderboard signal to the strategist.' },
+      ],
     },
     priority: 0,
   });
@@ -213,7 +276,7 @@ export async function seedKaggleArcPlaybook(
     examples: {
       shape: 'live_api',
       solverTemplateFragmentKey: FRAGMENT_KEY_ARC_SOLVER,
-      strategyPresets: ARC_STRATEGY_PRESETS,
+      strategyPresets: KAGGLE_ARC_STRATEGY_PRESETS,
       maxIterations: 8,
     },
     priority: 100,

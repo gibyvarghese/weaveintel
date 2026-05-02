@@ -69,6 +69,37 @@ export interface KaggleStrategistAgentOptions {
  *  DB resolver. */
 const HARDCODED_FALLBACK_GOAL = `You are a Kaggle research agent. The operator has not configured a playbook for this competition. List active competitions, pick a tractable one, push a small scout kernel that explores /kaggle/input and prints AGENT_RESULT, and report back. Do not submit.`;
 
+/** Framework-wide CV-scores requirement appended to every resolved playbook
+ *  prompt. Phase K7d: the validator role compares cv_score against the
+ *  competition's auto-inferred rubric baseline_score. To do this without
+ *  hand-tuning per competition, every kernel must emit a sibling
+ *  `cv_scores.json` alongside `submission.csv`. This addendum is competition-
+ *  agnostic — it never names a metric, fold count, or model — so it works
+ *  for any Kaggle competition the strategist tackles. */
+const CV_SCORES_ADDENDUM = `
+
+## Required: emit cv_scores.json alongside submission.csv
+
+For every kernel that produces a submission, you MUST also write a
+\`cv_scores.json\` file in the kernel working directory with this exact
+schema (use the same evaluation metric Kaggle reports for this competition):
+
+\`\`\`json
+{
+  "cv_metric": "<metric name, e.g. 'accuracy', 'rmse', 'auc'>",
+  "cv_score": <mean cross-validated score on the local training data>,
+  "cv_std": <standard deviation of fold scores>,
+  "n_folds": <integer number of folds used>,
+  "baseline_score": <optional: simple-baseline score (e.g. predict-majority) for sanity>
+}
+\`\`\`
+
+The downstream Submission Validator parses this file to gate submissions
+against the competition's leaderboard baseline. If the file is missing or
+malformed, the validator marks the run as fail and bounces back. Always
+print \`AGENT_RESULT_CV_SCORES=<one-line-json>\` immediately before
+\`AGENT_RESULT\` so log inspection works even when output downloads fail.`;
+
 export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions): TaskHandler {
   const adapter = opts.adapter ?? liveKaggleAdapter;
   const credentials = opts.credentials ?? resolveCredentialsFromEnv();
@@ -91,14 +122,20 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
         `competitionSlug="${competitionSlug || '(none)'}"`,
     );
 
-    // Resolve system prompt from the DB playbook for this competition slug.
+    // Resolve system prompt + tool defaults from the DB playbook for this
+    // competition slug. Tool defaults (poll intervals, output truncation
+    // budgets) are operator-tunable in admin via the playbook's `examples`
+    // JSON; we forward them into createKaggleTools so the agentic ReAct
+    // loop honors operator config without code changes.
     let systemPrompt = opts.fallbackGoalText ?? HARDCODED_FALLBACK_GOAL;
     let playbookSummary = 'fallback (no resolver)';
+    let resolvedConfig: Record<string, unknown> = {};
     if (opts.playbookResolver) {
       try {
         const playbook = await opts.playbookResolver(competitionSlug);
         if (playbook) {
           systemPrompt = playbook.systemPrompt;
+          resolvedConfig = playbook.config as unknown as Record<string, unknown>;
           playbookSummary = `${playbook.name} (matched=${playbook.matchedPattern}, shape=${playbook.config.shape ?? 'unknown'})`;
         } else if (opts.fallbackGoalText) {
           playbookSummary = 'fallback (no playbook matched)';
@@ -109,7 +146,24 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
     }
     log(`playbook=${playbookSummary} promptBytes=${systemPrompt.length}`);
 
-    const tools = createKaggleTools({ adapter, credentials });
+    // Phase K7d: append framework-wide cv_scores.json requirement so every
+    // competition the strategist tackles emits the artifact the validator
+    // needs to gate submissions. Done here (not in playbook content) so the
+    // requirement stays in code and applies to all current + future
+    // playbooks without per-row edits.
+    systemPrompt = systemPrompt + CV_SCORES_ADDENDUM;
+
+    const tools = createKaggleTools({
+      adapter,
+      credentials,
+      defaults: {
+        defaultWaitTimeoutSec: resolvedConfig['pollTimeoutSec'] as number | undefined,
+        maxWaitTimeoutSec: resolvedConfig['kernelWaitMaxTimeoutSec'] as number | undefined,
+        defaultPollIntervalSec: resolvedConfig['pollIntervalSec'] as number | undefined,
+        outputHeadBytes: resolvedConfig['kernelOutputHeadBytes'] as number | undefined,
+        outputTailBytes: resolvedConfig['kernelOutputTailBytes'] as number | undefined,
+      },
+    });
     const agent = weaveAgent({
       name: 'kaggle-strategist',
       model: opts.model,

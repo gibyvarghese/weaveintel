@@ -37,6 +37,7 @@ import type {
   SvEvidenceEventRow, SvAgentTurnRow,
   KaggleCompetitionTrackedRow, KaggleApproachRow, KaggleRunRow, KaggleRunArtifactRow,
   KaggleDiscussionSettingsRow, KaggleDiscussionPostRow,
+  KaggleCompetitionRubricRow, KaggleValidationResultRow, KaggleLeaderboardScoreRow,
   ProviderToolAdapterRow,
   TaskTypeDefinitionRow,
   ModelCapabilityScoreRow,
@@ -6217,6 +6218,155 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async getKaggleDiscussionPost(id: string): Promise<KaggleDiscussionPostRow | null> {
     return (this.d.prepare(`SELECT * FROM kaggle_discussion_posts WHERE id = ?`).get(id) as KaggleDiscussionPostRow | undefined) ?? null;
+  }
+
+  // ─── Phase K7d — Submission validation ─────────────────────────────────
+
+  async upsertKaggleCompetitionRubric(row: Omit<KaggleCompetitionRubricRow, 'created_at' | 'updated_at'>): Promise<KaggleCompetitionRubricRow> {
+    // Upsert by (tenant_id, competition_ref). UNIQUE constraint guarantees one row.
+    const existing = await this.getKaggleCompetitionRubricByRef(row.competition_ref, row.tenant_id ?? null);
+    const now = new Date().toISOString();
+    if (existing) {
+      this.d.prepare(`
+        UPDATE kaggle_competition_rubric SET
+          metric_name = ?, metric_direction = ?, baseline_score = ?, target_score = ?,
+          expected_row_count = ?, id_column = ?, id_range_min = ?, id_range_max = ?,
+          target_column = ?, target_type = ?, expected_distribution_json = ?,
+          sample_submission_sha256 = ?, inference_source = ?, auto_generated = ?,
+          inferred_at = ?, notes = ?, updated_at = ?
+        WHERE id = ?
+      `).run(
+        row.metric_name, row.metric_direction, row.baseline_score, row.target_score,
+        row.expected_row_count, row.id_column, row.id_range_min, row.id_range_max,
+        row.target_column, row.target_type, row.expected_distribution_json,
+        row.sample_submission_sha256, row.inference_source, row.auto_generated,
+        row.inferred_at, row.notes, now,
+        existing.id,
+      );
+      return (await this.getKaggleCompetitionRubric(existing.id))!;
+    }
+    this.d.prepare(`
+      INSERT INTO kaggle_competition_rubric (
+        id, tenant_id, competition_ref, metric_name, metric_direction,
+        baseline_score, target_score, expected_row_count, id_column,
+        id_range_min, id_range_max, target_column, target_type,
+        expected_distribution_json, sample_submission_sha256, inference_source,
+        auto_generated, inferred_at, notes, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.id, row.tenant_id, row.competition_ref, row.metric_name, row.metric_direction,
+      row.baseline_score, row.target_score, row.expected_row_count, row.id_column,
+      row.id_range_min, row.id_range_max, row.target_column, row.target_type,
+      row.expected_distribution_json, row.sample_submission_sha256, row.inference_source,
+      row.auto_generated, row.inferred_at, row.notes, now, now,
+    );
+    return (await this.getKaggleCompetitionRubric(row.id))!;
+  }
+
+  async getKaggleCompetitionRubric(id: string): Promise<KaggleCompetitionRubricRow | null> {
+    return (this.d.prepare(`SELECT * FROM kaggle_competition_rubric WHERE id = ?`).get(id) as KaggleCompetitionRubricRow | undefined) ?? null;
+  }
+
+  async getKaggleCompetitionRubricByRef(competitionRef: string, tenantId: string | null = null): Promise<KaggleCompetitionRubricRow | null> {
+    const sql = tenantId
+      ? `SELECT * FROM kaggle_competition_rubric WHERE competition_ref = ? AND tenant_id = ?`
+      : `SELECT * FROM kaggle_competition_rubric WHERE competition_ref = ? AND tenant_id IS NULL`;
+    const params = tenantId ? [competitionRef, tenantId] : [competitionRef];
+    return (this.d.prepare(sql).get(...params) as KaggleCompetitionRubricRow | undefined) ?? null;
+  }
+
+  async listKaggleCompetitionRubrics(opts: { competitionRef?: string; tenantId?: string | null; limit?: number; offset?: number } = {}): Promise<KaggleCompetitionRubricRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.competitionRef) { where.push('competition_ref = ?'); params.push(opts.competitionRef); }
+    if (opts.tenantId !== undefined) {
+      if (opts.tenantId === null) { where.push('tenant_id IS NULL'); }
+      else { where.push('tenant_id = ?'); params.push(opts.tenantId); }
+    }
+    const sql = `SELECT * FROM kaggle_competition_rubric ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY updated_at DESC LIMIT ? OFFSET ?`;
+    params.push(opts.limit ?? 100, opts.offset ?? 0);
+    return this.d.prepare(sql).all(...params) as KaggleCompetitionRubricRow[];
+  }
+
+  async updateKaggleCompetitionRubric(id: string, patch: Partial<Omit<KaggleCompetitionRubricRow, 'id' | 'created_at'>>): Promise<void> {
+    const cols = Object.keys(patch);
+    if (cols.length === 0) return;
+    const setSql = cols.map((c) => `${c} = ?`).join(', ');
+    const params = cols.map((c) => (patch as Record<string, unknown>)[c]);
+    params.push(new Date().toISOString());
+    params.push(id);
+    this.d.prepare(`UPDATE kaggle_competition_rubric SET ${setSql}, updated_at = ? WHERE id = ?`).run(...params);
+  }
+
+  async deleteKaggleCompetitionRubric(id: string): Promise<void> {
+    this.d.prepare(`DELETE FROM kaggle_competition_rubric WHERE id = ?`).run(id);
+  }
+
+  async createKaggleValidationResult(row: Omit<KaggleValidationResultRow, 'created_at'>): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO kaggle_validation_results (
+        id, run_id, competition_ref, rubric_id, kernel_ref,
+        schema_check_passed, distribution_check_passed, baseline_check_passed,
+        cv_score, cv_std, cv_metric, n_folds,
+        predicted_distribution_json, violations_json, verdict, summary, validated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.id, row.run_id, row.competition_ref, row.rubric_id, row.kernel_ref,
+      row.schema_check_passed, row.distribution_check_passed, row.baseline_check_passed,
+      row.cv_score, row.cv_std, row.cv_metric, row.n_folds,
+      row.predicted_distribution_json, row.violations_json, row.verdict, row.summary, row.validated_at,
+    );
+  }
+
+  async getKaggleValidationResult(id: string): Promise<KaggleValidationResultRow | null> {
+    return (this.d.prepare(`SELECT * FROM kaggle_validation_results WHERE id = ?`).get(id) as KaggleValidationResultRow | undefined) ?? null;
+  }
+
+  async listKaggleValidationResults(opts: { runId?: string; competitionRef?: string; verdict?: string; limit?: number; offset?: number } = {}): Promise<KaggleValidationResultRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.runId) { where.push('run_id = ?'); params.push(opts.runId); }
+    if (opts.competitionRef) { where.push('competition_ref = ?'); params.push(opts.competitionRef); }
+    if (opts.verdict) { where.push('verdict = ?'); params.push(opts.verdict); }
+    const sql = `SELECT * FROM kaggle_validation_results ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    params.push(opts.limit ?? 100, opts.offset ?? 0);
+    return this.d.prepare(sql).all(...params) as KaggleValidationResultRow[];
+  }
+
+  async deleteKaggleValidationResult(id: string): Promise<void> {
+    this.d.prepare(`DELETE FROM kaggle_validation_results WHERE id = ?`).run(id);
+  }
+
+  async createKaggleLeaderboardScore(row: Omit<KaggleLeaderboardScoreRow, 'created_at'>): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO kaggle_leaderboard_scores (
+        id, run_id, competition_ref, submission_id,
+        public_score, private_score, cv_lb_delta, percentile_estimate,
+        rank_estimate, leaderboard_size, raw_status, observed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.id, row.run_id, row.competition_ref, row.submission_id,
+      row.public_score, row.private_score, row.cv_lb_delta, row.percentile_estimate,
+      row.rank_estimate, row.leaderboard_size, row.raw_status, row.observed_at,
+    );
+  }
+
+  async getKaggleLeaderboardScore(id: string): Promise<KaggleLeaderboardScoreRow | null> {
+    return (this.d.prepare(`SELECT * FROM kaggle_leaderboard_scores WHERE id = ?`).get(id) as KaggleLeaderboardScoreRow | undefined) ?? null;
+  }
+
+  async listKaggleLeaderboardScores(opts: { runId?: string; competitionRef?: string; limit?: number; offset?: number } = {}): Promise<KaggleLeaderboardScoreRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.runId) { where.push('run_id = ?'); params.push(opts.runId); }
+    if (opts.competitionRef) { where.push('competition_ref = ?'); params.push(opts.competitionRef); }
+    const sql = `SELECT * FROM kaggle_leaderboard_scores ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    params.push(opts.limit ?? 100, opts.offset ?? 0);
+    return this.d.prepare(sql).all(...params) as KaggleLeaderboardScoreRow[];
+  }
+
+  async deleteKaggleLeaderboardScore(id: string): Promise<void> {
+    this.d.prepare(`DELETE FROM kaggle_leaderboard_scores WHERE id = ?`).run(id);
   }
 }
 

@@ -30,3 +30,22 @@ export function bindingConstraintsFor(role: KaggleAgentRole): string {
   const caps = KAGGLE_CAPABILITY_MATRIX[role];
   return `Capabilities: ${caps.join(', ')}. Capability revocation takes effect on next tick.`;
 }
+
+/** Resolve the effective capabilities for `role` given an optional override
+ *  map (typically the catch-all `*` playbook's `capabilityMatrix` field).
+ *  Override REPLACES the historical default for that role; missing roles
+ *  fall through to `KAGGLE_CAPABILITY_MATRIX`. */
+export function resolveCapabilitiesFor(
+  role: KaggleAgentRole,
+  overrides?: Partial<Record<KaggleAgentRole, readonly string[]>>,
+): readonly string[] {
+  const override = overrides?.[role];
+  if (override && override.length > 0) return override;
+  return KAGGLE_CAPABILITY_MATRIX[role];
+}
+
+/** Like `bindingConstraintsFor` but consumes resolved capabilities so the
+ *  catch-all playbook can rewrite the constraint prose without touching code. */
+export function bindingConstraintsForCaps(caps: readonly string[]): string {
+  return `Capabilities: ${caps.join(', ')}. Capability revocation takes effect on next tick.`;
+}

@@ -51,6 +51,71 @@ export interface KagglePlaybookConfig {
   /** Cap on iterations the deterministic Strategist will rotate through.
    *  Default 3. Agentic strategist ignores this (it uses ReAct maxSteps). */
   maxIterations?: number;
+  /** Top-N competitions the agentic Discoverer seeds the strategist with.
+   *  Read from the catch-all playbook config (slug=''). Default 5. */
+  topNAgentic?: number;
+  /** Top-N competitions the deterministic Discoverer forwards. Default 3. */
+  topNDeterministic?: number;
+  /** Kernel poll interval (seconds) used by the deterministic Implementer
+   *  while waiting for a kernel to reach a terminal state. Default 10. */
+  pollIntervalSec?: number;
+  /** Total kernel poll budget (seconds). Default 300. The Implementer
+   *  stops polling and reports the last-known status after this. */
+  pollTimeoutSec?: number;
+  /** Bytes of kernel log head to keep in the agentic `kaggle_get_kernel_output`
+   *  tool response. Default 4000. Inventory + framework READMEs sit here. */
+  kernelOutputHeadBytes?: number;
+  /** Bytes of kernel log tail to keep in the agentic `kaggle_get_kernel_output`
+   *  tool response. Default 4000. Tracebacks sit here. */
+  kernelOutputTailBytes?: number;
+  /** Hard cap (seconds) on the agentic `kaggle_wait_for_kernel` tool's
+   *  `timeoutSeconds` argument. Default 600. */
+  kernelWaitMaxTimeoutSec?: number;
+  /** Minutes between rest ticks for kaggle role attention policies when the
+   *  inbox is empty. Default 60. Read from the catch-all (`*`) playbook. */
+  attentionRestMinutes?: number;
+  /** Cross-mesh bridge topics surfaced from the kaggle mesh to the user mesh.
+   *  Default: ['kaggle.submission_result', 'kaggle.rank_change',
+   *  'kaggle.escalation_request']. Read from the catch-all (`*`) playbook. */
+  bridgeTopics?: string[];
+  /** Per-hour rate limit on the cross-mesh bridge. Default 100. */
+  bridgeRateLimitPerHour?: number;
+  /** Operator-tunable prose stating why the bridge exists. */
+  bridgePurposeProse?: string;
+  /** Operator-tunable prose stating bridge constraints. Auto-fills topics
+   *  + rate limit when omitted. */
+  bridgeConstraintsProse?: string;
+  /** Per-role capability override. Each role's array REPLACES the historical
+   *  default in `KAGGLE_CAPABILITY_MATRIX` (no merging). Roles missing from
+   *  this map keep their hardcoded defaults. Read from the catch-all (`*`)
+   *  playbook. Capability revocation takes effect on the next tick. */
+  capabilityMatrix?: Partial<Record<
+    'discoverer' | 'strategist' | 'implementer' | 'validator' | 'submitter' | 'observer',
+    string[]
+  >>;
+  /** Mesh-level dual-control gate: list of action keys that require a second
+   *  human approval before execution. REPLACES the historical default
+   *  `['kaggle.competitions.submit', 'kaggle.kernels.push']`. Read from the
+   *  catch-all (`*`) playbook. */
+  dualControlRequiredFor?: string[];
+  /** Per-role persona override. Each provided field REPLACES the matching
+   *  field in the in-code default (field-level merge — unspecified fields
+   *  fall back). Read from the catch-all (`*`) playbook. Drives the agent's
+   *  display name, role label, and contract `persona` / `objectives` /
+   *  `successIndicators`. */
+  rolePersonas?: Partial<Record<
+    'discoverer' | 'strategist' | 'implementer' | 'validator' | 'submitter' | 'observer',
+    Partial<{ name: string; role: string; persona: string; objectives: string; success: string }>
+  >>;
+  /** Pipeline delegation edges. REPLACES the historical 5-edge default
+   *  (discoverer→strategist→implementer→validator→submitter +
+   *  observer↔strategist). Read from the catch-all (`*`) playbook. */
+  pipelineEdges?: Array<{
+    from: 'discoverer' | 'strategist' | 'implementer' | 'validator' | 'submitter' | 'observer';
+    to: 'discoverer' | 'strategist' | 'implementer' | 'validator' | 'submitter' | 'observer';
+    relationship: 'DIRECTS' | 'COLLABORATES_WITH';
+    prose: string;
+  }>;
 }
 
 export interface KagglePlaybook {

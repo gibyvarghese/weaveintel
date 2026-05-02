@@ -25,7 +25,10 @@ import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { bootKaggleMesh, createDbKagglePlaybookResolver } from '../apps/geneweave/src/live-agents/kaggle/index.js';
 import { createKaggleRoleHandlers } from '../apps/geneweave/src/live-agents/kaggle/role-handlers.js';
 import { seedKaggleArcPlaybook } from '../apps/geneweave/src/live-agents/kaggle/playbook-seed.js';
+import { runSubmissionValidation, observeLeaderboardOnce } from '../apps/geneweave/src/lib/kaggle-validator-runner.js';
 import { createDatabaseAdapter } from '@weaveintel/geneweave';
+import { liveKaggleAdapter } from '@weaveintel/tools-kaggle';
+import { randomUUID } from 'node:crypto';
 
 async function main() {
   // Use the correct async factory and path for the live-agents store
@@ -116,7 +119,9 @@ async function main() {
     }
     plannerModel = weaveAnthropicModel(process.env.KAGGLE_PLANNER_MODEL || 'claude-haiku-4-5', { apiKey: anthropicKey });
   }
-  const taskHandlers = createKaggleRoleHandlers({ plannerModel, maxIterations: 5, playbookResolver });
+  // maxIterations=10: gives the strategist room to study top kernels (iter 1-2),
+  // ship a strong v1 (iter 3), and iterate to beat the baseline (iter 4-8+).
+  const taskHandlers = createKaggleRoleHandlers({ plannerModel, maxIterations: 10, playbookResolver });
   const actionExecutor = createActionExecutor({
     observability: { runLogger },
     taskHandlers,
@@ -205,6 +210,79 @@ async function main() {
     console.log('E2E pipeline completed! Check admin UI for full results.');
   } else {
     console.log('E2E pipeline did not complete within max ticks. Check admin UI for progress.');
+  }
+
+  // ── K7d post-pipeline finalization ──
+  // Run the deterministic validator + leaderboard observer against the
+  // strategist's final summary. Competition-agnostic: rubric is auto-inferred
+  // for the targeted competition, CV score is parsed out of the strategist's
+  // final summary message, and the LB observer reads whatever submissions the
+  // user already has against this competition (no new submission is sent).
+  try {
+    const competitionRef =
+      process.env.KAGGLE_COMPETITION_SLUG?.trim() || 'titanic';
+    const submitter = Object.values(result.template.agents).find(
+      (a) => a.role === 'Competition Submitter',
+    );
+    let cvScore: number | null = null;
+    let summaryBody = '';
+    if (submitter) {
+      const inbox = await store.listMessagesForRecipient('AGENT', submitter.id);
+      const last = inbox[inbox.length - 1];
+      summaryBody = last?.body ?? '';
+      // Match patterns like "CV Accuracy (5-fold) | 0.7991" or "CV: 0.81".
+      const m =
+        summaryBody.match(/CV[^|\n]*?[|=:]\s*\*{0,2}([0-9]+\.[0-9]+)/i) ??
+        summaryBody.match(/cv_score["'\s:]+([0-9]+\.[0-9]+)/i);
+      if (m && m[1]) cvScore = Number(m[1]);
+    }
+
+    const creds = {
+      username: process.env.KAGGLE_USERNAME ?? '',
+      key: process.env.KAGGLE_KEY ?? '',
+    };
+    if (!creds.username || !creds.key) {
+      console.log('[K7d] KAGGLE_USERNAME/KAGGLE_KEY not set; skipping validator + observer.');
+    } else {
+      const runId = `kgl-run-${randomUUID().slice(0, 8)}`;
+      console.log(`\n━━━ K7d post-pipeline checks for ${competitionRef} ━━━`);
+      console.log(`runId=${runId} parsedCV=${cvScore ?? 'n/a'}`);
+
+      const validation = await runSubmissionValidation({
+        db,
+        adapter: liveKaggleAdapter,
+        credentials: creds,
+        runId,
+        competitionRef,
+        outputFiles: ['submission.csv', 'cv_scores.json'],
+        cvScores: cvScore != null ? { cv_score: cvScore, n_folds: 5 } : null,
+      });
+      console.log('▸ Validator verdict:', validation.verdict);
+      console.log('  schema_check  :', validation.schemaCheckPassed);
+      console.log('  baseline_check:', validation.baselineCheckPassed);
+      console.log('  cv_score      :', validation.cvScore);
+      console.log('  summary       :', validation.summary);
+      if (validation.violations.length > 0) {
+        console.log('  violations    :', validation.violations);
+      }
+
+      const lb = await observeLeaderboardOnce({
+        db,
+        adapter: liveKaggleAdapter,
+        credentials: creds,
+        runId,
+        competitionRef,
+        cvScore,
+      });
+      console.log('▸ Leaderboard observation:');
+      console.log('  observed     :', lb.observed);
+      console.log('  public_score :', lb.publicScore);
+      console.log('  cv_lb_delta  :', lb.cvLbDelta);
+      console.log('  raw_status   :', lb.rawStatus);
+      console.log('  score_row_id :', lb.scoreRowId);
+    }
+  } catch (err) {
+    console.error('[K7d] post-pipeline checks failed:', err);
   }
 }
 

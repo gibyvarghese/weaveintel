@@ -2139,4 +2139,84 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
       JSON.stringify({ requiredOutputSubstrings: ['weights', 'blendedScore', 'baselineBestSoloScore'] }),
     );
   } catch { /* ignore */ }
+
+  // ─── M18 — Phase K7d: Competition-agnostic submission validation ────────
+  // New tables backing the validator + leaderboard observer roles.
+  // - kaggle_competition_rubric: per-competition acceptance criteria. Auto-
+  //   inferred from Kaggle metadata (evaluationMetric, sample submission
+  //   shape) on first contact, then editable by operators.
+  // - kaggle_validation_results: append-only ledger of validator passes
+  //   (schema/distribution/baseline checks + verdict). One row per kernel run
+  //   the validator reviews.
+  // - kaggle_leaderboard_scores: append-only ledger of leaderboard readbacks
+  //   from kaggle.competitions.submissions/list after the submitter pushes.
+  safeExec(db, `CREATE TABLE IF NOT EXISTS kaggle_competition_rubric (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT,
+    competition_ref TEXT NOT NULL,
+    metric_name TEXT,
+    metric_direction TEXT CHECK(metric_direction IN ('maximize','minimize')),
+    baseline_score REAL,
+    target_score REAL,
+    expected_row_count INTEGER,
+    id_column TEXT,
+    id_range_min INTEGER,
+    id_range_max INTEGER,
+    target_column TEXT,
+    target_type TEXT,
+    expected_distribution_json TEXT,
+    sample_submission_sha256 TEXT,
+    inference_source TEXT,
+    auto_generated INTEGER NOT NULL DEFAULT 1,
+    inferred_at TEXT,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(tenant_id, competition_ref)
+  )`);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_kaggle_rubric_competition_ref ON kaggle_competition_rubric(competition_ref)');
+
+  safeExec(db, `CREATE TABLE IF NOT EXISTS kaggle_validation_results (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    competition_ref TEXT NOT NULL,
+    rubric_id TEXT,
+    kernel_ref TEXT,
+    schema_check_passed INTEGER,
+    distribution_check_passed INTEGER,
+    baseline_check_passed INTEGER,
+    cv_score REAL,
+    cv_std REAL,
+    cv_metric TEXT,
+    n_folds INTEGER,
+    predicted_distribution_json TEXT,
+    violations_json TEXT,
+    verdict TEXT CHECK(verdict IN ('pass','warn','fail')),
+    summary TEXT,
+    validated_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_kaggle_validation_run_id ON kaggle_validation_results(run_id)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_kaggle_validation_rubric_id ON kaggle_validation_results(rubric_id)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_kaggle_validation_verdict ON kaggle_validation_results(verdict)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_kaggle_validation_competition_ref ON kaggle_validation_results(competition_ref)');
+
+  safeExec(db, `CREATE TABLE IF NOT EXISTS kaggle_leaderboard_scores (
+    id TEXT PRIMARY KEY,
+    run_id TEXT,
+    competition_ref TEXT NOT NULL,
+    submission_id TEXT,
+    public_score REAL,
+    private_score REAL,
+    cv_lb_delta REAL,
+    percentile_estimate REAL,
+    rank_estimate INTEGER,
+    leaderboard_size INTEGER,
+    raw_status TEXT,
+    observed_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_kaggle_lb_run_id ON kaggle_leaderboard_scores(run_id)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_kaggle_lb_competition_ref ON kaggle_leaderboard_scores(competition_ref)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_kaggle_lb_submission_id ON kaggle_leaderboard_scores(submission_id)');
 }

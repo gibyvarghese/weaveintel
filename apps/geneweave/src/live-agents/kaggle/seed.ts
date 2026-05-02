@@ -10,6 +10,7 @@
 
 import type { DatabaseAdapter } from '../../db-types.js';
 import { bootKaggleMesh } from './boot.js';
+import { createDbKagglePlaybookResolver } from './playbook-resolver.js';
 import { getKaggleLiveStore } from './store.js';
 
 const DEMO_TENANT = 'demo-tenant';
@@ -34,6 +35,7 @@ export async function seedKaggleDemoMesh(db: DatabaseAdapter): Promise<void> {
       mcpUrl: DEMO_MCP_URL,
       userMeshId: DEMO_USER_MESH,
       credentialVaultRef: 'env:KAGGLE_KEY',
+      playbookResolver: createDbKagglePlaybookResolver(db),
     });
     await db.upsertKaggleLiveMesh({
       mesh_id: result.template.mesh.id,
