@@ -9,6 +9,24 @@ and this project adheres to [Fabric Versioning](VERSIONING.md).
 
 ## [Unreleased]
 
+### Live-Agents — DB-Driven Runtime Phase 3: Tool Binder
+
+- New `@weaveintel/live-agents-runtime` exports `resolveAgentToolCatalog()` —
+  a DB-driven resolver that turns enabled `live_agent_tool_bindings` rows
+  into `ToolCatalogRow`-shaped entries. Inline `mcp_server_url` bindings are
+  synthesised into ad-hoc `source='mcp'` catalog rows so the existing tool
+  factory path is reused.
+- New geneweave bridge `buildToolRegistryForAgent(db, agentId, baseToolOptions)`
+  in `apps/geneweave/src/live-agents/agent-tool-registry.ts` hands the
+  resolved entries to the existing `createToolRegistry()` factory so all
+  policy / credential / audit / rate-limit wiring is preserved end-to-end.
+- Admin tab `live-agent-tool-bindings` field labels refined to mention
+  Phase 3 binder semantics (capability scoping, runtime synthesis of inline
+  MCP rows, soft-disable via `enabled=0`).
+- `examples/84-agent-tool-binding.ts` — seeds two bindings (built-in catalog
+  row + inline MCP url) and demonstrates the resulting per-agent
+  `ToolRegistry`, plus a disabled-binding skip diagnostic.
+
 ### GeneWeave — Scientific Validation (sv:) Phases 7–9: UI, Evals, and Docs
 
 #### Phase 7 — Three-View UI

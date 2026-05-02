@@ -93,16 +93,16 @@ export const LIVE_RUNTIME_ADMIN_TABS: Record<string, AdminTabDef> = {
     listKey: 'live-agent-tool-bindings',
     cols: ['agent_id', 'tool_catalog_id', 'mcp_server_url', 'enabled', 'updated_at'],
     fields: [
-      { key: 'agent_id', label: 'Live Agent ID (FK)' },
-      { key: 'tool_catalog_id', label: 'Tool Catalog ID (set this OR mcp_server_url)' },
-      { key: 'mcp_server_url', label: 'MCP Server URL (set this OR tool_catalog_id)' },
+      { key: 'agent_id', label: 'Live Agent ID (FK live_agents.id)' },
+      { key: 'tool_catalog_id', label: 'Tool Catalog ID (FK tool_catalog.id — set this OR mcp_server_url)' },
+      { key: 'mcp_server_url', label: 'MCP Server URL (set this OR tool_catalog_id; auto-synthesised as inline mcp catalog row at runtime)' },
       {
         key: 'capability_keys',
-        label: 'Allowed Capability Keys (JSON array, [] = all)',
+        label: 'Allowed Capability Keys (JSON array, [] = all caps from the bound tool)',
         textarea: true,
         default: '[]',
       },
-      { key: 'enabled', label: 'Enabled', options: ['true', 'false'], default: 'true' },
+      { key: 'enabled', label: 'Enabled (toggle off to revoke the binding without deleting)', options: ['true', 'false'], default: 'true' },
     ],
   },
 

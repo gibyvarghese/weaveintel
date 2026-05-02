@@ -33,6 +33,15 @@ export {
   type DeterministicForwardContextExtras,
 } from './handlers/deterministic-forward.js';
 
+// Phase 3 — Tool binder. Resolves an agent's tool surface from the DB.
+export {
+  resolveAgentToolCatalog,
+  type AgentToolBindingDb,
+  type AgentToolBindingRowLike,
+  type ToolCatalogRowLike,
+  type ResolvedAgentTools,
+} from './tool-binder.js';
+
 import { HandlerRegistry, createHandlerRegistry } from './handler-registry.js';
 import { agenticReactHandler } from './handlers/agentic-react.js';
 import { deterministicForwardHandler } from './handlers/deterministic-forward.js';
