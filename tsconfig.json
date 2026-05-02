@@ -63,6 +63,7 @@
     { "path": "packages/persistence" },
     { "path": "packages/social-growth" },
     { "path": "packages/live-agents" },
+    { "path": "packages/live-agents-runtime" },
     { "path": "apps/geneweave" },
     { "path": "apps/live-agents-demo" }
   ]

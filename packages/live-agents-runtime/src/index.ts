@@ -1,0 +1,49 @@
+/**
+ * @weaveintel/live-agents-runtime
+ *
+ * Generic, DB-driven runtime layer atop @weaveintel/live-agents.
+ *
+ * - Provides a `HandlerRegistry` so app boot can register named "handler
+ *   kinds" once, then resolve them per-agent from `live_agent_handler_bindings`
+ *   rows at runtime.
+ * - Ships two built-in plugins: `agentic.react` and `deterministic.forward`.
+ *   These cover most patterns (LLM ReAct loop, simple message router) and
+ *   serve as the reference implementations for future kinds (Phase 6+).
+ *
+ * Geneweave is the canonical consumer (see
+ * `apps/geneweave/src/live-agents/handler-registry-boot.ts`), but any app
+ * that uses `@weaveintel/live-agents` can plug this package in.
+ */
+
+export {
+  HandlerRegistry,
+  createHandlerRegistry,
+  type HandlerBinding,
+  type HandlerAgentInfo,
+  type HandlerContext,
+  type HandlerKindFactory,
+  type HandlerKindRegistration,
+} from './handler-registry.js';
+
+export { agenticReactHandler, type AgenticReactConfig } from './handlers/agentic-react.js';
+export {
+  deterministicForwardHandler,
+  type DeterministicForwardConfig,
+  type DeterministicForwardTarget,
+  type DeterministicForwardContextExtras,
+} from './handlers/deterministic-forward.js';
+
+import { HandlerRegistry, createHandlerRegistry } from './handler-registry.js';
+import { agenticReactHandler } from './handlers/agentic-react.js';
+import { deterministicForwardHandler } from './handlers/deterministic-forward.js';
+
+/**
+ * Convenience: create a registry pre-populated with the built-in handler
+ * kinds. Apps can add more after construction.
+ */
+export function createDefaultHandlerRegistry(): HandlerRegistry {
+  const reg = createHandlerRegistry();
+  reg.register(agenticReactHandler);
+  reg.register(deterministicForwardHandler);
+  return reg;
+}

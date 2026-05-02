@@ -28,6 +28,8 @@
     { "path": "../../packages/tools-time" },
     { "path": "../../packages/ui-primitives" },
     { "path": "../../packages/devtools" },
-    { "path": "../../packages/recipes" }
+    { "path": "../../packages/recipes" },
+    { "path": "../../packages/live-agents" },
+    { "path": "../../packages/live-agents-runtime" }
   ]
 }

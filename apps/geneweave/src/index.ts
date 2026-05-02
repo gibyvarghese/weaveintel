@@ -42,6 +42,10 @@ import {
   seedLiveHandlerKinds,
   seedLiveAttentionPolicies,
 } from './live-agents/live-handler-kinds-seed.js';
+import {
+  initHandlerRegistry,
+  syncHandlerKindsToDb,
+} from './live-agents/handler-registry-boot.js';
 import { startKaggleHeartbeat, type KaggleHeartbeatHandle } from './live-agents/kaggle/heartbeat-runner.js';
 
 export type { PricingSyncReport };
@@ -161,6 +165,14 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // behavior without code changes. Per-row idempotent.
   await seedLiveHandlerKinds(db);
   await seedLiveAttentionPolicies(db);
+
+  // 3f. Phase M22 Phase 2: initialise the in-process handler-kind registry
+  // (currently ships `agentic.react` and `deterministic.forward` as built-in
+  // plugins) and sync registered kinds back into `live_handler_kinds` so the
+  // admin UI's description / config schema fields stay in step with code.
+  // Operator toggles such as `enabled` are never overwritten.
+  const handlerRegistry = initHandlerRegistry();
+  await syncHandlerKindsToDb(db, handlerRegistry);
 
   // 4. Sync BUILTIN_TOOLS into tool_catalog so operators can manage them
   await syncToolCatalog(db);

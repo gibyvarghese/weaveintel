@@ -79,8 +79,11 @@ export const LIVE_RUNTIME_ADMIN_TABS: Record<string, AdminTabDef> = {
     cols: ['agent_id', 'handler_kind', 'enabled', 'updated_at'],
     fields: [
       { key: 'agent_id', label: 'Live Agent ID (FK)' },
-      { key: 'handler_kind', label: 'Handler Kind (FK live_handler_kinds.kind)' },
-      { key: 'config_json', label: 'Handler Config (JSON)', textarea: true, default: '{}' },
+      {
+        key: 'handler_kind',
+        label: 'Handler Kind (must match live_handler_kinds.kind — currently implemented: agentic.react, deterministic.forward)',
+      },
+      { key: 'config_json', label: 'Handler Config (JSON — see live-handler-kinds.config_schema_json for shape)', textarea: true, default: '{}' },
       { key: 'enabled', label: 'Enabled', options: ['true', 'false'], default: 'true' },
     ],
   },

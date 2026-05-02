@@ -61,6 +61,8 @@
     "@weaveintel/models": "*",
     "@weaveintel/tools": "*",
     "@weaveintel/collaboration": "*",
+    "@weaveintel/live-agents": "*",
+    "@weaveintel/live-agents-runtime": "*",
     "better-sqlite3": "^11.9.1"
   },
   "devDependencies": {
