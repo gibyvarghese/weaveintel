@@ -37,6 +37,12 @@ import { registerMCPGatewayInCatalog, loadGatewayConfigFromCatalog } from './mcp
 import { seedSVData } from './features/scientific-validation/sv-seed.js';
 import { seedKaggleDemoMesh } from './live-agents/kaggle/seed.js';
 import { seedKaggleArcPlaybook } from './live-agents/kaggle/playbook-seed.js';
+import { seedLiveMeshDefinitions } from './live-agents/live-mesh-defs-seed.js';
+import {
+  seedLiveHandlerKinds,
+  seedLiveAttentionPolicies,
+} from './live-agents/live-handler-kinds-seed.js';
+import { startKaggleHeartbeat, type KaggleHeartbeatHandle } from './live-agents/kaggle/heartbeat-runner.js';
 
 export type { PricingSyncReport };
 
@@ -144,6 +150,18 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // when not already present.
   await seedKaggleArcPlaybook(db);
 
+  // 3d. Phase M21: seed framework-level live mesh definitions (mesh
+  // contracts, agent personas, delegation edges) so the runtime can resolve
+  // them by `mesh_key` instead of using hardcoded constants. Idempotent —
+  // only seeds when no row exists for the mesh_key.
+  await seedLiveMeshDefinitions(db);
+
+  // 3e. Phase M22: seed runtime registries (handler kinds + attention
+  // policies) so admin operators can wire DB-defined personas to executable
+  // behavior without code changes. Per-row idempotent.
+  await seedLiveHandlerKinds(db);
+  await seedLiveAttentionPolicies(db);
+
   // 4. Sync BUILTIN_TOOLS into tool_catalog so operators can manage them
   await syncToolCatalog(db);
 
@@ -161,6 +179,22 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
   // 5b. anyWeave Phase 5: daily regression detection on capability signals
   startRoutingRegressionJob(db);
+
+  // 5c. M21: global Kaggle live-agents heartbeat — drives every active
+  // competition run (concurrency 8 covers ~1 full pipeline of 6 roles per
+  // tick). Failure here is non-fatal: the HTTP server still boots so
+  // operators can inspect runs in the admin UI.
+  let kaggleHeartbeat: KaggleHeartbeatHandle | null = null;
+  try {
+    kaggleHeartbeat = await startKaggleHeartbeat({
+      db,
+      providers: activeProviders,
+      defaultProvider: config.defaultProvider,
+      defaultModel: config.defaultModel,
+    });
+  } catch (err) {
+    console.error('[geneweave] Failed to start Kaggle heartbeat:', err instanceof Error ? err.message : String(err));
+  }
 
   // 5. HTTP server
   const server = createGeneWeaveServer({
@@ -190,6 +224,9 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
       return syncModelPricing(db, activeProviders);
     },
     async stop() {
+      if (kaggleHeartbeat) {
+        try { await kaggleHeartbeat.stop(); } catch { /* non-fatal */ }
+      }
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });

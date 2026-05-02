@@ -13,6 +13,7 @@
 import { randomUUID } from 'node:crypto';
 import { createIdempotencyStore } from '@weaveintel/reliability';
 import type { DatabaseAdapter } from '../../db.js';
+import type { KglCompetitionRunRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 import { materializeKaggleRun, replayKaggleRun, type MaterializeKaggleRunInput } from '../../lib/kaggle.js';
 import type { ExecutionContext, RunLog } from '@weaveintel/core';
@@ -26,6 +27,7 @@ const kaggleRunIdempotency = createIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000
 const COMP_BASE = '/api/admin/kaggle-competitions';
 const APP_BASE  = '/api/admin/kaggle-approaches';
 const RUN_BASE  = '/api/admin/kaggle-runs';
+const KGL_RUN_BASE = '/api/admin/kaggle-competition-runs';
 
 function makeId(prefix: string): string {
   return `${prefix}-${randomUUID().slice(0, 8)}`;
@@ -575,5 +577,44 @@ export function registerKaggleLeaderboardScoreRoutes(
     const item = await db.getKaggleLeaderboardScore(params['id']!);
     if (!item) { json(res, 404, { error: 'Leaderboard score not found' }); return; }
     json(res, 200, { 'kaggle-leaderboard-score': item });
+  }, { auth: true });
+}
+
+// ─── Live Competition Runs (kgl_competition_run) ──────────────────────────
+// Read-only operator surface over rows produced by POST /api/kaggle/competition-runs
+// (the ▶ Start Live Run button on the Tracked Competitions tab). Each row is a
+// top-level live-agents mesh run, distinct from the per-approach kaggle_runs
+// kernel/submission ledger above.
+export function registerKglCompetitionRunAdminRoutes(
+  router: RouterLike,
+  db: DatabaseAdapter,
+  helpers: AdminHelpers,
+): void {
+  const { json } = helpers;
+
+  router.get(KGL_RUN_BASE, async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const tenantId = (auth.tenantId ?? auth.userId) as string;
+    const url = new URL(req.url ?? '', 'http://x');
+    const status = url.searchParams.get('status') as KglCompetitionRunRow['status'] | null;
+    const competitionRef = url.searchParams.get('competition_ref') ?? undefined;
+    const items = await db.listKglCompetitionRuns({
+      tenantId,
+      ...(status ? { status } : {}),
+      ...(competitionRef ? { competitionRef } : {}),
+      limit: Number(url.searchParams.get('limit') ?? 100),
+      offset: Number(url.searchParams.get('offset') ?? 0),
+    });
+    json(res, 200, { 'kaggle-competition-runs': items });
+  }, { auth: true });
+
+  router.get(`${KGL_RUN_BASE}/:id`, async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const tenantId = (auth.tenantId ?? auth.userId) as string;
+    const item = await db.getKglCompetitionRun(params['id']!, tenantId);
+    if (!item) { json(res, 404, { error: 'Competition run not found' }); return; }
+    const steps = await db.listKglRunSteps(item.id);
+    const events = await db.listKglRunEvents(item.id, { limit: 500 });
+    json(res, 200, { 'kaggle-competition-run': item, steps, events });
   }, { auth: true });
 }

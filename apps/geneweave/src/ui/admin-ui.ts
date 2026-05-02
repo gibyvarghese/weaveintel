@@ -4,6 +4,7 @@ import { state } from './state.js';
 import { normalizeAdminPath } from './prompt-wizard-utils.js';
 import { resetPromptWizard } from './prompt-wizard-state.js';
 import { renderToolSimulationView } from './tool-simulation-ui.js';
+import { renderKglCompetitionRunsView } from './kaggle-competition-runs-ui.js';
 import { renderCapabilityMatrixView } from './capability-matrix-ui.js';
 import { renderRoutingSimulatorView } from './routing-simulator-ui.js';
 import { renderToolApprovalView } from './tool-approval-ui.js';
@@ -80,6 +81,47 @@ function showCopiedToast(anchorEl: HTMLElement): void {
 function getRowSelectionId(row: any, schema: any): string {
   const rawId = row?.id ?? row?.key ?? row?.[schema?.cols?.[0]];
   return rawId == null ? '' : String(rawId);
+}
+
+/**
+ * Tracked Kaggle competitions get a "▶ Start Live Run" action that POSTs to
+ * /api/kaggle/competition-runs. The runner provisions a UUIDv7 mesh per click
+ * (see KaggleCompetitionRunner.startRun) so each row can be launched
+ * independently. Kept here (vs a generic schema field) until we generalize
+ * row actions across more tabs.
+ */
+async function startKaggleCompetitionRun(
+  row: { competition_ref?: string; title?: string; objective?: string; notes?: string } | null | undefined,
+  trigger?: HTMLElement,
+): Promise<void> {
+  const competitionRef = (row?.competition_ref || '').trim();
+  if (!competitionRef) {
+    alert('competition_ref is required to start a live agent run.');
+    return;
+  }
+  try {
+    const resp = await api.post('/api/kaggle/competition-runs', {
+      competitionRef,
+      title: row?.title || competitionRef,
+      objective: row?.objective || row?.notes || '',
+    });
+    if (!resp.ok) {
+      const text = await resp.text().catch(() => '');
+      alert(`Failed to start run (HTTP ${resp.status}): ${text || resp.statusText}`);
+      return;
+    }
+    const body = await resp.json().catch(() => ({} as any));
+    const runId = body?.id ? String(body.id) : '';
+    if (trigger) showCopiedToast(trigger);
+    if (runId && confirm(`Live run started.\n\nRun ID: ${runId}\n\nOpen the Kaggle Runs admin tab to track progress?`)) {
+      state.adminTab = 'kaggle-competition-runs';
+      state.adminListSearch = runId;
+      // Trigger a re-render via hash navigation
+      window.location.hash = '#admin/kaggle-competition-runs';
+    }
+  } catch (err) {
+    alert(`Failed to start run: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
   function getVisibleCols(tab: string, schemaCols: string[]): string[] {
@@ -590,6 +632,16 @@ export function renderAdminForm(
       isEdit && !schema.readOnly && onDelete
         ? h('button', { className: 'admin-form-btn admin-form-btn-delete', onClick: onDelete }, 'Delete')
         : null,
+      isEdit && tab === 'kaggle-competitions'
+        ? h('button', {
+            className: 'admin-form-btn admin-form-btn-save',
+            'data-testid': 'kaggle-form-start',
+            title: 'Provision a fresh mesh and start a live agent run for this competition',
+            onClick: (e: MouseEvent) => {
+              void startKaggleCompetitionRun(state.adminForm as any, e.currentTarget as HTMLElement);
+            },
+          }, '▶ Start Live Run')
+        : null,
       h('button', { className: 'admin-form-btn', onClick: () => onCancel(tab) }, 'Cancel'),
       schema.readOnly
         ? null
@@ -732,6 +784,12 @@ export function renderAdminView(options: {
   // Custom views (e.g. Tool Simulation step-through UI)
   if (schema?.customView === 'tool-simulation') {
     right.appendChild(renderToolSimulationView({ render: options.render }));
+    page.appendChild(right);
+    return page;
+  }
+
+  if (schema?.customView === 'kaggle-competition-runs') {
+    right.appendChild(renderKglCompetitionRunsView({ render: options.render }));
     page.appendChild(right);
     return page;
   }
@@ -908,6 +966,44 @@ export function renderAdminView(options: {
     (listPanel.querySelector('.admin-list-toolbar') as HTMLElement).appendChild(colMgrBtn);
   }
 
+  // Kaggle competition discovery — pulls active competitions from the live
+  // Kaggle API into kaggle_competitions_tracked so this list reflects the
+  // real catalog rather than just hand-seeded demo rows.
+  if (currentTab === 'kaggle-competitions') {
+    const discoverBtn = h('button', {
+      className: 'nav-btn',
+      'data-testid': 'kaggle-discover-btn',
+      title: 'Fetch active Kaggle competitions and add them to this table',
+      style: 'background:var(--accent);color:#fff;border-color:var(--accent);',
+      onClick: async (e: MouseEvent) => {
+        const btn = e.currentTarget as HTMLButtonElement;
+        const pagesRaw = window.prompt('How many pages of Kaggle competitions to fetch? (1–10, ~20 per page)', '3');
+        if (pagesRaw === null) return;
+        const pages = Math.max(1, Math.min(10, Number(pagesRaw) || 1));
+        const original = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Discovering…';
+        try {
+          const resp = await api.post('/api/kaggle/competitions/discover', { pages });
+          if (!resp.ok) {
+            const text = await resp.text().catch(() => '');
+            alert(`Discovery failed (HTTP ${resp.status}): ${text || resp.statusText}`);
+            return;
+          }
+          const body = await resp.json().catch(() => ({} as any));
+          alert(`Discovered ${body.inserted ?? 0} competitions across ${body.pages ?? pages} page(s).`);
+          options.render();
+        } catch (err) {
+          alert(`Discovery failed: ${err instanceof Error ? err.message : String(err)}`);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = original;
+        }
+      },
+    }, '🔎 Discover Competitions');
+    (listPanel.querySelector('.admin-list-toolbar') as HTMLElement).appendChild(discoverBtn);
+  }
+
   if (!schema) {
     listPanel.appendChild(h('div', { style: 'padding:16px;color:var(--fg3);' }, 'No schema for selected tab.'));
   } else if (!rows.length) {
@@ -916,6 +1012,7 @@ export function renderAdminView(options: {
     listPanel.appendChild(h('div', { style: 'padding:20px;color:var(--fg3);text-align:center;' }, `No records match "${state.adminListSearch}".`));
   } else {
     // Sortable column header cells — left-click sorts, right-click opens context menu
+    const showStartAction = currentTab === 'kaggle-competitions';
     const headerCells = cols.map((col: string) => {
       const isActive = sortCol === col;
       const isGrouped = groupBy === col;
@@ -944,6 +1041,11 @@ export function renderAdminView(options: {
       );
       return th;
     });
+    if (showStartAction) {
+      headerCells.unshift(
+        h('th', { className: 'admin-action-col', title: 'Start a live agent run', style: 'width:64px;text-align:center;' }, 'Run'),
+      );
+    }
     const tbody = h('tbody', null);
     let rowRenderIndex = 0;
 
@@ -958,7 +1060,7 @@ export function renderAdminView(options: {
               options.render();
             },
           },
-            h('td', { colSpan: String(cols.length) },
+            h('td', { colSpan: String(cols.length + (showStartAction ? 1 : 0)) },
               isCollapsed ? '▶ ' : '▼ ',
               h('strong', null, groupKey),
               h('span', { className: 'admin-group-count' }, `${groupRowList.length} item${groupRowList.length !== 1 ? 's' : ''}`)
@@ -978,7 +1080,6 @@ export function renderAdminView(options: {
         rowRenderIndex++;
       });
     }
-
     listPanel.appendChild(
       h('table', { className: 'eval-table' },
         h('thead', null, h('tr', null, ...headerCells)),
@@ -1571,6 +1672,7 @@ function buildAdminRow(
     onClick: (e: MouseEvent) => {
       // Don't trigger row edit if the click was on a context menu or came from it
       if ((e.target as HTMLElement).closest('.col-ctx-menu')) return;
+      if ((e.target as HTMLElement).closest('.admin-row-action-btn')) return;
       if (e.shiftKey && rowId) {
         const selected = new Set<string>(((state as any)._adminSelectedRowIds || []).map((id: any) => String(id)));
         const anchorRaw = (state as any)._adminSelectionAnchor;
@@ -1598,6 +1700,20 @@ function buildAdminRow(
       adminEditRow(currentTab, row, options.hydrateWizardFromPrompt, options.render);
     },
   },
+    ...(currentTab === 'kaggle-competitions' ? [
+      h('td', { className: 'admin-action-cell', style: 'width:64px;text-align:center;' },
+        h('button', {
+          className: 'admin-row-action-btn',
+          title: `Start a live agent run for ${row?.competition_ref || 'this competition'}`,
+          'data-testid': 'kaggle-row-start',
+          style: 'background:transparent;border:1px solid var(--bg4);border-radius:6px;padding:4px 8px;cursor:pointer;color:var(--accent);font-size:14px;',
+          onClick: (e: MouseEvent) => {
+            e.stopPropagation();
+            void startKaggleCompetitionRun(row, e.currentTarget as HTMLElement);
+          },
+        }, '▶'),
+      ),
+    ] : []),
     ...cols.map((col: string) => {
       const raw = row?.[col];
       const str = raw == null ? '—' : String(raw);

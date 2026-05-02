@@ -125,6 +125,7 @@ import {
   renderSVLiveView,
   renderSVVerdictView,
 } from './features/scientific-validation/ui/index.js';
+import { renderKaggleListView, renderKaggleFlowView } from './features/kaggle-competition/ui/index.js';
 
 
 // ============================================================================
@@ -1268,6 +1269,13 @@ function renderApp() {
     } else {
       main.appendChild(renderSVSubmitView({ render }));
     }
+  } else if (state.view === 'kaggle-competition') {
+    const kv = (state as any).kaggleView as string;
+    if (kv === 'flow') {
+      main.appendChild(renderKaggleFlowView({ render }));
+    } else {
+      main.appendChild(renderKaggleListView({ render }));
+    }
   } else {
     main.appendChild(renderHomeWorkspace());
   }
@@ -1285,7 +1293,7 @@ function restoreUiStateFromStorage() {
     const raw = window.localStorage.getItem(UI_STATE_KEY);
     if (!raw) return;
     const saved = JSON.parse(raw) as any;
-    const allowedViews = new Set(['chat', 'connectors', 'admin', 'dashboard', 'preferences', 'scientific-validation']);
+    const allowedViews = new Set(['chat', 'connectors', 'admin', 'dashboard', 'preferences', 'scientific-validation', 'kaggle-competition']);
 
     if (typeof saved?.view === 'string' && allowedViews.has(saved.view)) {
       state.view = saved.view;
@@ -1310,6 +1318,12 @@ function restoreUiStateFromStorage() {
     }
     if (typeof saved?.svHypothesisId === 'string') {
       (state as any).svHypothesisId = saved.svHypothesisId;
+    }
+    if (typeof saved?.kaggleView === 'string' && ['list', 'flow'].includes(saved.kaggleView)) {
+      (state as any).kaggleView = saved.kaggleView;
+    }
+    if (typeof saved?.kaggleRunId === 'string') {
+      (state as any).kaggleRunId = saved.kaggleRunId;
     }
     if (saved?.adminGroupExpanded && typeof saved.adminGroupExpanded === 'object') {
       const next: Record<string, boolean> = {};
@@ -1336,6 +1350,8 @@ function persistUiStateToStorage() {
       sidebarCollapsed: !!state.sidebarCollapsed,
       svView: (state as any).svView ?? 'submit',
       svHypothesisId: (state as any).svHypothesisId ?? null,
+      kaggleView: (state as any).kaggleView ?? 'list',
+      kaggleRunId: (state as any).kaggleRunId ?? null,
     };
     window.localStorage.setItem(UI_STATE_KEY, JSON.stringify(payload));
   } catch {

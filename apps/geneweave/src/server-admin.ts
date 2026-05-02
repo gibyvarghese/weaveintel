@@ -37,12 +37,25 @@ import {
   registerKaggleCompetitionRoutes,
   registerKaggleApproachRoutes,
   registerKaggleRunRoutes,
+  registerKglCompetitionRunAdminRoutes,
   registerKaggleRunArtifactRoutes,
   registerKaggleRubricRoutes,
   registerKaggleValidationResultRoutes,
   registerKaggleLeaderboardScoreRoutes,
   registerKaggleMeshRoutes,
   registerKaggleDiscussionRoutes,
+  registerLiveMeshDefinitionRoutes,
+  registerLiveAgentDefinitionRoutes,
+  registerLiveMeshDelegationEdgeRoutes,
+  registerLiveMeshRoutes,
+  registerLiveAgentRoutes,
+  registerLiveAgentHandlerBindingRoutes,
+  registerLiveAgentToolBindingRoutes,
+  registerLiveHandlerKindRoutes,
+  registerLiveAttentionPolicyRoutes,
+  registerLiveRunRoutes,
+  registerLiveRunStepRoutes,
+  registerLiveRunEventRoutes,
   registerGuardrailRoutes,
   registerRoutingRoutes,
   registerModelPricingRoutes,
@@ -1271,6 +1284,7 @@ export function registerAdminRoutes(
   registerKaggleApproachRoutes(router, db, adminHelpers);
   registerKaggleRunRoutes(router, db, adminHelpers);
   registerKaggleRunArtifactRoutes(router, db, adminHelpers);
+  registerKglCompetitionRunAdminRoutes(router, db, adminHelpers);
 
   // ── Phase K7d: Kaggle validator rubrics + validation results + leaderboard scores ──
   registerKaggleRubricRoutes(router, db, adminHelpers);
@@ -1282,6 +1296,26 @@ export function registerAdminRoutes(
 
   // ── Phase K6: Kaggle discussion bot kill switch + post log ───────
   registerKaggleDiscussionRoutes(router, db, adminHelpers);
+
+  // ── Phase M21: framework-level live mesh definitions (DB-driven
+  // mesh contracts, agent personas, delegation edges) ───────────────
+  registerLiveMeshDefinitionRoutes(router, db, adminHelpers);
+  registerLiveAgentDefinitionRoutes(router, db, adminHelpers);
+  registerLiveMeshDelegationEdgeRoutes(router, db, adminHelpers);
+
+  // ── Phase M22: DB-driven live-agents runtime ────────────────────
+  // Catalog of handler kinds + attention policies (registries)
+  registerLiveHandlerKindRoutes(router, db, adminHelpers);
+  registerLiveAttentionPolicyRoutes(router, db, adminHelpers);
+  // Provisioned meshes/agents + their handler & tool bindings
+  registerLiveMeshRoutes(router, db, adminHelpers);
+  registerLiveAgentRoutes(router, db, adminHelpers);
+  registerLiveAgentHandlerBindingRoutes(router, db, adminHelpers);
+  registerLiveAgentToolBindingRoutes(router, db, adminHelpers);
+  // Per-mesh runs ledger (header / steps / append-only events)
+  registerLiveRunRoutes(router, db, adminHelpers);
+  registerLiveRunStepRoutes(router, db, adminHelpers);
+  registerLiveRunEventRoutes(router, db, adminHelpers);
 
   // ── anyWeave Phase 4: Task-aware routing admin API ───────
   registerTaskTypeRoutes(router, db, adminHelpers);

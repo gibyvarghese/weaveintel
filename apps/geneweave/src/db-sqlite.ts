@@ -38,6 +38,11 @@ import type {
   KaggleCompetitionTrackedRow, KaggleApproachRow, KaggleRunRow, KaggleRunArtifactRow,
   KaggleDiscussionSettingsRow, KaggleDiscussionPostRow,
   KaggleCompetitionRubricRow, KaggleValidationResultRow, KaggleLeaderboardScoreRow,
+  KglCompetitionRunRow, KglRunStepRow, KglRunEventRow,
+  LiveMeshDefinitionRow, LiveAgentDefinitionRow, LiveMeshDelegationEdgeRow,
+  LiveHandlerKindRow, LiveAttentionPolicyRow, LiveMeshRow, LiveAgentRow,
+  LiveAgentHandlerBindingRow, LiveAgentToolBindingRow,
+  LiveRunRow, LiveRunStepRow, LiveRunEventRow,
   ProviderToolAdapterRow,
   TaskTypeDefinitionRow,
   ModelCapabilityScoreRow,
@@ -6367,6 +6372,480 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteKaggleLeaderboardScore(id: string): Promise<void> {
     this.d.prepare(`DELETE FROM kaggle_leaderboard_scores WHERE id = ?`).run(id);
+  }
+
+  // ─── Phase K8 — Kaggle competition run ledger ──────────────────────────
+  async createKglCompetitionRun(row: Omit<KglCompetitionRunRow, 'created_at' | 'updated_at' | 'step_count' | 'event_count'>): Promise<KglCompetitionRunRow> {
+    const now = new Date().toISOString();
+    this.d.prepare(`
+      INSERT INTO kgl_competition_run (
+        id, tenant_id, submitted_by, competition_ref, title, objective,
+        mesh_id, status, step_count, event_count, summary,
+        started_at, completed_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?)
+    `).run(
+      row.id, row.tenant_id, row.submitted_by, row.competition_ref,
+      row.title ?? null, row.objective ?? null, row.mesh_id ?? null,
+      row.status, row.summary ?? null,
+      row.started_at ?? null, row.completed_at ?? null, now, now,
+    );
+    return (await this.getKglCompetitionRun(row.id))!;
+  }
+
+  async getKglCompetitionRun(id: string, tenantId?: string | null): Promise<KglCompetitionRunRow | null> {
+    const sql = tenantId
+      ? `SELECT * FROM kgl_competition_run WHERE id = ? AND tenant_id = ?`
+      : `SELECT * FROM kgl_competition_run WHERE id = ?`;
+    const params: unknown[] = tenantId ? [id, tenantId] : [id];
+    return (this.d.prepare(sql).get(...params) as KglCompetitionRunRow | undefined) ?? null;
+  }
+
+  async listKglCompetitionRuns(opts: { tenantId?: string | null; status?: KglCompetitionRunRow['status']; competitionRef?: string; limit?: number; offset?: number } = {}): Promise<KglCompetitionRunRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.tenantId) { where.push('tenant_id = ?'); params.push(opts.tenantId); }
+    if (opts.status) { where.push('status = ?'); params.push(opts.status); }
+    if (opts.competitionRef) { where.push('competition_ref = ?'); params.push(opts.competitionRef); }
+    const sql = `SELECT * FROM kgl_competition_run ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
+    params.push(opts.limit ?? 50, opts.offset ?? 0);
+    return this.d.prepare(sql).all(...params) as KglCompetitionRunRow[];
+  }
+
+  async updateKglCompetitionRun(id: string, patch: Partial<Omit<KglCompetitionRunRow, 'id' | 'created_at'>>): Promise<void> {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      fields.push(`${k} = ?`);
+      params.push(v as unknown);
+    }
+    if (!fields.length) return;
+    fields.push(`updated_at = ?`);
+    params.push(new Date().toISOString());
+    params.push(id);
+    this.d.prepare(`UPDATE kgl_competition_run SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  }
+
+  async appendKglRunStep(row: Omit<KglRunStepRow, 'created_at' | 'updated_at'>): Promise<KglRunStepRow> {
+    const now = new Date().toISOString();
+    this.d.prepare(`
+      INSERT INTO kgl_run_step (
+        id, run_id, step_index, role, title, description, agent_id,
+        status, started_at, completed_at, summary, input_preview, output_preview,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.id, row.run_id, row.step_index, row.role, row.title, row.description ?? null,
+      row.agent_id ?? null, row.status, row.started_at ?? null, row.completed_at ?? null,
+      row.summary ?? null, row.input_preview ?? null, row.output_preview ?? null, now, now,
+    );
+    this.d.prepare(`UPDATE kgl_competition_run SET step_count = step_count + 1, updated_at = ? WHERE id = ?`).run(now, row.run_id);
+    return (this.d.prepare(`SELECT * FROM kgl_run_step WHERE id = ?`).get(row.id) as KglRunStepRow);
+  }
+
+  async updateKglRunStep(id: string, patch: Partial<Omit<KglRunStepRow, 'id' | 'run_id' | 'created_at'>>): Promise<void> {
+    const fields: string[] = [];
+    const params: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      fields.push(`${k} = ?`);
+      params.push(v as unknown);
+    }
+    if (!fields.length) return;
+    fields.push(`updated_at = ?`);
+    params.push(new Date().toISOString());
+    params.push(id);
+    this.d.prepare(`UPDATE kgl_run_step SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  }
+
+  async listKglRunSteps(runId: string): Promise<KglRunStepRow[]> {
+    return this.d.prepare(`SELECT * FROM kgl_run_step WHERE run_id = ? ORDER BY step_index ASC, created_at ASC`).all(runId) as KglRunStepRow[];
+  }
+
+  async appendKglRunEvent(row: Omit<KglRunEventRow, 'created_at'>): Promise<KglRunEventRow> {
+    const now = new Date().toISOString();
+    this.d.prepare(`
+      INSERT INTO kgl_run_event (
+        id, run_id, step_id, kind, agent_id, tool_key, summary, payload_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.id, row.run_id, row.step_id ?? null, row.kind, row.agent_id ?? null,
+      row.tool_key ?? null, row.summary, row.payload_json ?? null, now,
+    );
+    this.d.prepare(`UPDATE kgl_competition_run SET event_count = event_count + 1, updated_at = ? WHERE id = ?`).run(now, row.run_id);
+    return (this.d.prepare(`SELECT * FROM kgl_run_event WHERE id = ?`).get(row.id) as KglRunEventRow);
+  }
+
+  async listKglRunEvents(runId: string, opts: { afterId?: string; limit?: number } = {}): Promise<KglRunEventRow[]> {
+    const where: string[] = ['run_id = ?'];
+    const params: unknown[] = [runId];
+    if (opts.afterId) { where.push('id > ?'); params.push(opts.afterId); }
+    const sql = `SELECT * FROM kgl_run_event WHERE ${where.join(' AND ')} ORDER BY id ASC LIMIT ?`;
+    params.push(opts.limit ?? 200);
+    return this.d.prepare(sql).all(...params) as KglRunEventRow[];
+  }
+
+  // ─── Live mesh / agent definitions (M21) ─────────────────────
+
+  async listLiveMeshDefinitions(opts: { enabledOnly?: boolean } = {}): Promise<LiveMeshDefinitionRow[]> {
+    const where = opts.enabledOnly ? 'WHERE enabled = 1' : '';
+    return this.d.prepare(`SELECT * FROM live_mesh_definitions ${where} ORDER BY mesh_key ASC`).all() as LiveMeshDefinitionRow[];
+  }
+
+  async getLiveMeshDefinition(id: string): Promise<LiveMeshDefinitionRow | null> {
+    return (this.d.prepare('SELECT * FROM live_mesh_definitions WHERE id = ?').get(id) as LiveMeshDefinitionRow | undefined) ?? null;
+  }
+
+  async getLiveMeshDefinitionByKey(meshKey: string): Promise<LiveMeshDefinitionRow | null> {
+    return (this.d.prepare('SELECT * FROM live_mesh_definitions WHERE mesh_key = ?').get(meshKey) as LiveMeshDefinitionRow | undefined) ?? null;
+  }
+
+  async createLiveMeshDefinition(row: Omit<LiveMeshDefinitionRow, 'created_at' | 'updated_at'>): Promise<LiveMeshDefinitionRow> {
+    this.d.prepare(
+      `INSERT INTO live_mesh_definitions (id, mesh_key, name, charter_prose, dual_control_required_for, enabled, description) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.mesh_key, row.name, row.charter_prose, row.dual_control_required_for, row.enabled, row.description);
+    return (this.d.prepare('SELECT * FROM live_mesh_definitions WHERE id = ?').get(row.id) as LiveMeshDefinitionRow);
+  }
+
+  async updateLiveMeshDefinition(id: string, patch: Partial<Omit<LiveMeshDefinitionRow, 'id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      sets.push(`${k} = ?`); vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`);
+    vals.push(id);
+    this.d.prepare(`UPDATE live_mesh_definitions SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteLiveMeshDefinition(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM live_mesh_definitions WHERE id = ?').run(id);
+  }
+
+  async listLiveAgentDefinitions(opts: { meshDefId?: string; enabledOnly?: boolean } = {}): Promise<LiveAgentDefinitionRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.meshDefId) { where.push('mesh_def_id = ?'); params.push(opts.meshDefId); }
+    if (opts.enabledOnly) where.push('enabled = 1');
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return this.d.prepare(`SELECT * FROM live_agent_definitions ${whereSql} ORDER BY mesh_def_id, ordering ASC, role_key ASC`).all(...params) as LiveAgentDefinitionRow[];
+  }
+
+  async getLiveAgentDefinition(id: string): Promise<LiveAgentDefinitionRow | null> {
+    return (this.d.prepare('SELECT * FROM live_agent_definitions WHERE id = ?').get(id) as LiveAgentDefinitionRow | undefined) ?? null;
+  }
+
+  async createLiveAgentDefinition(row: Omit<LiveAgentDefinitionRow, 'created_at' | 'updated_at'>): Promise<LiveAgentDefinitionRow> {
+    this.d.prepare(
+      `INSERT INTO live_agent_definitions (id, mesh_def_id, role_key, name, role_label, persona, objectives, success_indicators, ordering, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.mesh_def_id, row.role_key, row.name, row.role_label, row.persona, row.objectives, row.success_indicators, row.ordering, row.enabled);
+    return (this.d.prepare('SELECT * FROM live_agent_definitions WHERE id = ?').get(row.id) as LiveAgentDefinitionRow);
+  }
+
+  async updateLiveAgentDefinition(id: string, patch: Partial<Omit<LiveAgentDefinitionRow, 'id' | 'mesh_def_id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      sets.push(`${k} = ?`); vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`);
+    vals.push(id);
+    this.d.prepare(`UPDATE live_agent_definitions SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteLiveAgentDefinition(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM live_agent_definitions WHERE id = ?').run(id);
+  }
+
+  async listLiveMeshDelegationEdges(opts: { meshDefId?: string; enabledOnly?: boolean } = {}): Promise<LiveMeshDelegationEdgeRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.meshDefId) { where.push('mesh_def_id = ?'); params.push(opts.meshDefId); }
+    if (opts.enabledOnly) where.push('enabled = 1');
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return this.d.prepare(`SELECT * FROM live_mesh_delegation_edges ${whereSql} ORDER BY mesh_def_id, ordering ASC`).all(...params) as LiveMeshDelegationEdgeRow[];
+  }
+
+  async getLiveMeshDelegationEdge(id: string): Promise<LiveMeshDelegationEdgeRow | null> {
+    return (this.d.prepare('SELECT * FROM live_mesh_delegation_edges WHERE id = ?').get(id) as LiveMeshDelegationEdgeRow | undefined) ?? null;
+  }
+
+  async createLiveMeshDelegationEdge(row: Omit<LiveMeshDelegationEdgeRow, 'created_at' | 'updated_at'>): Promise<LiveMeshDelegationEdgeRow> {
+    this.d.prepare(
+      `INSERT INTO live_mesh_delegation_edges (id, mesh_def_id, from_role_key, to_role_key, relationship, prose, ordering, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.mesh_def_id, row.from_role_key, row.to_role_key, row.relationship, row.prose, row.ordering, row.enabled);
+    return (this.d.prepare('SELECT * FROM live_mesh_delegation_edges WHERE id = ?').get(row.id) as LiveMeshDelegationEdgeRow);
+  }
+
+  async updateLiveMeshDelegationEdge(id: string, patch: Partial<Omit<LiveMeshDelegationEdgeRow, 'id' | 'mesh_def_id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      sets.push(`${k} = ?`); vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`);
+    vals.push(id);
+    this.d.prepare(`UPDATE live_mesh_delegation_edges SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteLiveMeshDelegationEdge(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM live_mesh_delegation_edges WHERE id = ?').run(id);
+  }
+
+  // ─── DB-Driven Live-Agents Runtime CRUD (M22, Phase 1) ───────
+  // All methods below mirror the table layout in db-sqlite-migrations.ts §M22.
+  // Pattern: list / get(byId|byKey) / create / update (dynamic SET) / delete.
+  // Inserts return the freshly-fetched row so the API can return it verbatim.
+
+  // ── live_handler_kinds ──
+  async listLiveHandlerKinds(opts: { enabledOnly?: boolean } = {}): Promise<LiveHandlerKindRow[]> {
+    const where = opts.enabledOnly ? 'WHERE enabled = 1' : '';
+    return this.d.prepare(`SELECT * FROM live_handler_kinds ${where} ORDER BY kind ASC`).all() as LiveHandlerKindRow[];
+  }
+  async getLiveHandlerKind(id: string): Promise<LiveHandlerKindRow | null> {
+    return (this.d.prepare('SELECT * FROM live_handler_kinds WHERE id = ?').get(id) as LiveHandlerKindRow | undefined) ?? null;
+  }
+  async getLiveHandlerKindByKind(kind: string): Promise<LiveHandlerKindRow | null> {
+    return (this.d.prepare('SELECT * FROM live_handler_kinds WHERE kind = ?').get(kind) as LiveHandlerKindRow | undefined) ?? null;
+  }
+  async createLiveHandlerKind(row: Omit<LiveHandlerKindRow, 'created_at' | 'updated_at'>): Promise<LiveHandlerKindRow> {
+    this.d.prepare(
+      `INSERT INTO live_handler_kinds (id, kind, description, config_schema_json, source, enabled) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.kind, row.description, row.config_schema_json, row.source, row.enabled);
+    return this.d.prepare('SELECT * FROM live_handler_kinds WHERE id = ?').get(row.id) as LiveHandlerKindRow;
+  }
+  async updateLiveHandlerKind(id: string, patch: Partial<Omit<LiveHandlerKindRow, 'id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) { if (v === undefined) continue; sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`); vals.push(id);
+    this.d.prepare(`UPDATE live_handler_kinds SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async deleteLiveHandlerKind(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM live_handler_kinds WHERE id = ?').run(id);
+  }
+
+  // ── live_attention_policies ──
+  async listLiveAttentionPolicies(opts: { enabledOnly?: boolean } = {}): Promise<LiveAttentionPolicyRow[]> {
+    const where = opts.enabledOnly ? 'WHERE enabled = 1' : '';
+    return this.d.prepare(`SELECT * FROM live_attention_policies ${where} ORDER BY key ASC`).all() as LiveAttentionPolicyRow[];
+  }
+  async getLiveAttentionPolicy(id: string): Promise<LiveAttentionPolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM live_attention_policies WHERE id = ?').get(id) as LiveAttentionPolicyRow | undefined) ?? null;
+  }
+  async getLiveAttentionPolicyByKey(key: string): Promise<LiveAttentionPolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM live_attention_policies WHERE key = ?').get(key) as LiveAttentionPolicyRow | undefined) ?? null;
+  }
+  async createLiveAttentionPolicy(row: Omit<LiveAttentionPolicyRow, 'created_at' | 'updated_at'>): Promise<LiveAttentionPolicyRow> {
+    this.d.prepare(
+      `INSERT INTO live_attention_policies (id, key, kind, description, config_json, enabled) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.key, row.kind, row.description, row.config_json, row.enabled);
+    return this.d.prepare('SELECT * FROM live_attention_policies WHERE id = ?').get(row.id) as LiveAttentionPolicyRow;
+  }
+  async updateLiveAttentionPolicy(id: string, patch: Partial<Omit<LiveAttentionPolicyRow, 'id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) { if (v === undefined) continue; sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`); vals.push(id);
+    this.d.prepare(`UPDATE live_attention_policies SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async deleteLiveAttentionPolicy(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM live_attention_policies WHERE id = ?').run(id);
+  }
+
+  // ── live_meshes (provisioned) ──
+  async listLiveMeshes(opts: { tenantId?: string; meshDefId?: string; status?: string } = {}): Promise<LiveMeshRow[]> {
+    const where: string[] = []; const params: unknown[] = [];
+    if (opts.tenantId)  { where.push('tenant_id = ?');   params.push(opts.tenantId); }
+    if (opts.meshDefId) { where.push('mesh_def_id = ?'); params.push(opts.meshDefId); }
+    if (opts.status)    { where.push('status = ?');      params.push(opts.status); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return this.d.prepare(`SELECT * FROM live_meshes ${whereSql} ORDER BY created_at DESC`).all(...params) as LiveMeshRow[];
+  }
+  async getLiveMesh(id: string): Promise<LiveMeshRow | null> {
+    return (this.d.prepare('SELECT * FROM live_meshes WHERE id = ?').get(id) as LiveMeshRow | undefined) ?? null;
+  }
+  async createLiveMesh(row: Omit<LiveMeshRow, 'created_at' | 'updated_at'>): Promise<LiveMeshRow> {
+    this.d.prepare(
+      `INSERT INTO live_meshes (id, tenant_id, mesh_def_id, name, status, domain, dual_control_required_for, owner_human_id, mcp_server_ref, account_id, context_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.tenant_id, row.mesh_def_id, row.name, row.status, row.domain, row.dual_control_required_for, row.owner_human_id, row.mcp_server_ref, row.account_id, row.context_json);
+    return this.d.prepare('SELECT * FROM live_meshes WHERE id = ?').get(row.id) as LiveMeshRow;
+  }
+  async updateLiveMesh(id: string, patch: Partial<Omit<LiveMeshRow, 'id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) { if (v === undefined) continue; sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`); vals.push(id);
+    this.d.prepare(`UPDATE live_meshes SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async deleteLiveMesh(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM live_meshes WHERE id = ?').run(id);
+  }
+
+  // ── live_agents (provisioned) ──
+  async listLiveAgents(opts: { meshId?: string; status?: string } = {}): Promise<LiveAgentRow[]> {
+    const where: string[] = []; const params: unknown[] = [];
+    if (opts.meshId) { where.push('mesh_id = ?'); params.push(opts.meshId); }
+    if (opts.status) { where.push('status = ?'); params.push(opts.status); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return this.d.prepare(`SELECT * FROM live_agents ${whereSql} ORDER BY mesh_id, ordering ASC, role_key ASC`).all(...params) as LiveAgentRow[];
+  }
+  async getLiveAgent(id: string): Promise<LiveAgentRow | null> {
+    return (this.d.prepare('SELECT * FROM live_agents WHERE id = ?').get(id) as LiveAgentRow | undefined) ?? null;
+  }
+  async createLiveAgent(row: Omit<LiveAgentRow, 'created_at' | 'updated_at'>): Promise<LiveAgentRow> {
+    this.d.prepare(
+      `INSERT INTO live_agents (id, mesh_id, agent_def_id, role_key, name, role_label, persona, objectives, success_indicators, attention_policy_key, contract_version_id, status, ordering, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.mesh_id, row.agent_def_id, row.role_key, row.name, row.role_label, row.persona, row.objectives, row.success_indicators, row.attention_policy_key, row.contract_version_id, row.status, row.ordering, row.archived_at);
+    return this.d.prepare('SELECT * FROM live_agents WHERE id = ?').get(row.id) as LiveAgentRow;
+  }
+  async updateLiveAgent(id: string, patch: Partial<Omit<LiveAgentRow, 'id' | 'mesh_id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) { if (v === undefined) continue; sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`); vals.push(id);
+    this.d.prepare(`UPDATE live_agents SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async deleteLiveAgent(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM live_agents WHERE id = ?').run(id);
+  }
+
+  // ── live_agent_handler_bindings ──
+  async listLiveAgentHandlerBindings(opts: { agentId?: string; enabledOnly?: boolean } = {}): Promise<LiveAgentHandlerBindingRow[]> {
+    const where: string[] = []; const params: unknown[] = [];
+    if (opts.agentId)     { where.push('agent_id = ?'); params.push(opts.agentId); }
+    if (opts.enabledOnly) { where.push('enabled = 1'); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return this.d.prepare(`SELECT * FROM live_agent_handler_bindings ${whereSql} ORDER BY agent_id, handler_kind`).all(...params) as LiveAgentHandlerBindingRow[];
+  }
+  async getLiveAgentHandlerBinding(id: string): Promise<LiveAgentHandlerBindingRow | null> {
+    return (this.d.prepare('SELECT * FROM live_agent_handler_bindings WHERE id = ?').get(id) as LiveAgentHandlerBindingRow | undefined) ?? null;
+  }
+  async createLiveAgentHandlerBinding(row: Omit<LiveAgentHandlerBindingRow, 'created_at' | 'updated_at'>): Promise<LiveAgentHandlerBindingRow> {
+    this.d.prepare(
+      `INSERT INTO live_agent_handler_bindings (id, agent_id, handler_kind, config_json, enabled) VALUES (?, ?, ?, ?, ?)`
+    ).run(row.id, row.agent_id, row.handler_kind, row.config_json, row.enabled);
+    return this.d.prepare('SELECT * FROM live_agent_handler_bindings WHERE id = ?').get(row.id) as LiveAgentHandlerBindingRow;
+  }
+  async updateLiveAgentHandlerBinding(id: string, patch: Partial<Omit<LiveAgentHandlerBindingRow, 'id' | 'agent_id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) { if (v === undefined) continue; sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`); vals.push(id);
+    this.d.prepare(`UPDATE live_agent_handler_bindings SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async deleteLiveAgentHandlerBinding(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM live_agent_handler_bindings WHERE id = ?').run(id);
+  }
+
+  // ── live_agent_tool_bindings ──
+  async listLiveAgentToolBindings(opts: { agentId?: string; enabledOnly?: boolean } = {}): Promise<LiveAgentToolBindingRow[]> {
+    const where: string[] = []; const params: unknown[] = [];
+    if (opts.agentId)     { where.push('agent_id = ?'); params.push(opts.agentId); }
+    if (opts.enabledOnly) { where.push('enabled = 1'); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return this.d.prepare(`SELECT * FROM live_agent_tool_bindings ${whereSql} ORDER BY agent_id`).all(...params) as LiveAgentToolBindingRow[];
+  }
+  async getLiveAgentToolBinding(id: string): Promise<LiveAgentToolBindingRow | null> {
+    return (this.d.prepare('SELECT * FROM live_agent_tool_bindings WHERE id = ?').get(id) as LiveAgentToolBindingRow | undefined) ?? null;
+  }
+  async createLiveAgentToolBinding(row: Omit<LiveAgentToolBindingRow, 'created_at' | 'updated_at'>): Promise<LiveAgentToolBindingRow> {
+    this.d.prepare(
+      `INSERT INTO live_agent_tool_bindings (id, agent_id, tool_catalog_id, mcp_server_url, capability_keys, enabled) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.agent_id, row.tool_catalog_id, row.mcp_server_url, row.capability_keys, row.enabled);
+    return this.d.prepare('SELECT * FROM live_agent_tool_bindings WHERE id = ?').get(row.id) as LiveAgentToolBindingRow;
+  }
+  async updateLiveAgentToolBinding(id: string, patch: Partial<Omit<LiveAgentToolBindingRow, 'id' | 'agent_id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) { if (v === undefined) continue; sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`); vals.push(id);
+    this.d.prepare(`UPDATE live_agent_tool_bindings SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async deleteLiveAgentToolBinding(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM live_agent_tool_bindings WHERE id = ?').run(id);
+  }
+
+  // ── live_runs ──
+  async listLiveRuns(opts: { meshId?: string; tenantId?: string; status?: string; limit?: number } = {}): Promise<LiveRunRow[]> {
+    const where: string[] = []; const params: unknown[] = [];
+    if (opts.meshId)   { where.push('mesh_id = ?');   params.push(opts.meshId); }
+    if (opts.tenantId) { where.push('tenant_id = ?'); params.push(opts.tenantId); }
+    if (opts.status)   { where.push('status = ?');    params.push(opts.status); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const limitSql  = opts.limit ? `LIMIT ${Number(opts.limit)}` : '';
+    return this.d.prepare(`SELECT * FROM live_runs ${whereSql} ORDER BY started_at DESC ${limitSql}`).all(...params) as LiveRunRow[];
+  }
+  async getLiveRun(id: string): Promise<LiveRunRow | null> {
+    return (this.d.prepare('SELECT * FROM live_runs WHERE id = ?').get(id) as LiveRunRow | undefined) ?? null;
+  }
+  async createLiveRun(row: Omit<LiveRunRow, 'created_at' | 'updated_at'>): Promise<LiveRunRow> {
+    this.d.prepare(
+      `INSERT INTO live_runs (id, mesh_id, tenant_id, run_key, label, status, started_at, completed_at, summary, context_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.mesh_id, row.tenant_id, row.run_key, row.label, row.status, row.started_at, row.completed_at, row.summary, row.context_json);
+    return this.d.prepare('SELECT * FROM live_runs WHERE id = ?').get(row.id) as LiveRunRow;
+  }
+  async updateLiveRun(id: string, patch: Partial<Omit<LiveRunRow, 'id' | 'mesh_id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) { if (v === undefined) continue; sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`); vals.push(id);
+    this.d.prepare(`UPDATE live_runs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async deleteLiveRun(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM live_runs WHERE id = ?').run(id);
+  }
+
+  // ── live_run_steps ──
+  async listLiveRunSteps(opts: { runId?: string; meshId?: string; agentId?: string } = {}): Promise<LiveRunStepRow[]> {
+    const where: string[] = []; const params: unknown[] = [];
+    if (opts.runId)   { where.push('run_id = ?');   params.push(opts.runId); }
+    if (opts.meshId)  { where.push('mesh_id = ?');  params.push(opts.meshId); }
+    if (opts.agentId) { where.push('agent_id = ?'); params.push(opts.agentId); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    return this.d.prepare(`SELECT * FROM live_run_steps ${whereSql} ORDER BY created_at ASC`).all(...params) as LiveRunStepRow[];
+  }
+  async getLiveRunStep(id: string): Promise<LiveRunStepRow | null> {
+    return (this.d.prepare('SELECT * FROM live_run_steps WHERE id = ?').get(id) as LiveRunStepRow | undefined) ?? null;
+  }
+  async createLiveRunStep(row: Omit<LiveRunStepRow, 'created_at' | 'updated_at'>): Promise<LiveRunStepRow> {
+    this.d.prepare(
+      `INSERT INTO live_run_steps (id, run_id, mesh_id, agent_id, role_key, status, started_at, completed_at, summary, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.run_id, row.mesh_id, row.agent_id, row.role_key, row.status, row.started_at, row.completed_at, row.summary, row.payload_json);
+    return this.d.prepare('SELECT * FROM live_run_steps WHERE id = ?').get(row.id) as LiveRunStepRow;
+  }
+  async updateLiveRunStep(id: string, patch: Partial<Omit<LiveRunStepRow, 'id' | 'run_id' | 'mesh_id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) { if (v === undefined) continue; sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`); vals.push(id);
+    this.d.prepare(`UPDATE live_run_steps SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async deleteLiveRunStep(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM live_run_steps WHERE id = ?').run(id);
+  }
+
+  // ── live_run_events (append-only) ──
+  async listLiveRunEvents(opts: { runId?: string; afterId?: string; limit?: number } = {}): Promise<LiveRunEventRow[]> {
+    const where: string[] = []; const params: unknown[] = [];
+    if (opts.runId)   { where.push('run_id = ?');     params.push(opts.runId); }
+    if (opts.afterId) { where.push('id > ?');         params.push(opts.afterId); }
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const limitSql  = opts.limit ? `LIMIT ${Number(opts.limit)}` : 'LIMIT 500';
+    return this.d.prepare(`SELECT * FROM live_run_events ${whereSql} ORDER BY id ASC ${limitSql}`).all(...params) as LiveRunEventRow[];
+  }
+  async getLiveRunEvent(id: string): Promise<LiveRunEventRow | null> {
+    return (this.d.prepare('SELECT * FROM live_run_events WHERE id = ?').get(id) as LiveRunEventRow | undefined) ?? null;
+  }
+  async appendLiveRunEvent(row: Omit<LiveRunEventRow, 'created_at'>): Promise<LiveRunEventRow> {
+    this.d.prepare(
+      `INSERT INTO live_run_events (id, run_id, step_id, kind, agent_id, tool_key, summary, payload_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.run_id, row.step_id, row.kind, row.agent_id, row.tool_key, row.summary, row.payload_json);
+    return this.d.prepare('SELECT * FROM live_run_events WHERE id = ?').get(row.id) as LiveRunEventRow;
   }
 }
 

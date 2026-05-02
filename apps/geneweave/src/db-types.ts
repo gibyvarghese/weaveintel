@@ -1766,6 +1766,236 @@ export interface KaggleLeaderboardScoreRow {
   created_at: string;
 }
 
+// ─── Kaggle competition run ledger (per-run UUIDv7 isolation) ──
+export type KglRunStatus = 'queued' | 'running' | 'completed' | 'abandoned' | 'failed';
+export interface KglCompetitionRunRow {
+  id: string;                      // UUIDv7
+  tenant_id: string;
+  submitted_by: string;
+  competition_ref: string;
+  title: string | null;
+  objective: string | null;
+  mesh_id: string | null;
+  status: KglRunStatus;
+  step_count: number;
+  event_count: number;
+  summary: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type KglRunStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+export interface KglRunStepRow {
+  id: string;                      // UUIDv7
+  run_id: string;
+  step_index: number;
+  role: string;                    // e.g. 'kaggle_discoverer'
+  title: string;                   // human-readable label
+  description: string | null;
+  agent_id: string | null;
+  status: KglRunStepStatus;
+  started_at: string | null;
+  completed_at: string | null;
+  summary: string | null;
+  input_preview: string | null;
+  output_preview: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KglRunEventRow {
+  id: string;                      // UUIDv7
+  run_id: string;
+  step_id: string | null;
+  kind: string;                    // 'tool_call' | 'agent_message' | 'evidence' | 'log' | ...
+  agent_id: string | null;
+  tool_key: string | null;
+  summary: string;
+  payload_json: string | null;
+  created_at: string;
+}
+
+// ─── Live mesh / agent definitions (DB-driven blueprints, M21) ──
+// Mesh blueprint stored in `live_mesh_definitions`; per-role agent persona
+// in `live_agent_definitions`; pipeline graph in `live_mesh_delegation_edges`.
+// Runtime boot loads a snapshot at provision time; per-competition playbook
+// overlays still apply on top via the `kaggle_playbook` skill resolver.
+export interface LiveMeshDefinitionRow {
+  id: string;                                  // UUIDv7
+  mesh_key: string;                            // unique slug (e.g. 'kaggle')
+  name: string;
+  charter_prose: string;
+  dual_control_required_for: string;           // JSON array of tool keys
+  enabled: number;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LiveAgentDefinitionRow {
+  id: string;                                  // UUIDv7
+  mesh_def_id: string;
+  role_key: string;                            // e.g. 'discoverer'
+  name: string;                                // e.g. 'Kaggle Discoverer'
+  role_label: string;                          // e.g. 'Competition Discoverer'
+  persona: string;
+  objectives: string;
+  success_indicators: string;
+  ordering: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LiveMeshDelegationEdgeRow {
+  id: string;                                  // UUIDv7
+  mesh_def_id: string;
+  from_role_key: string;
+  to_role_key: string;
+  relationship: string;                        // 'DIRECTS' | 'COLLABORATES_WITH' | ...
+  prose: string;
+  ordering: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── DB-Driven Live-Agents Runtime (M22, Phase 1) ────────────
+// Provisioned runtime entities (vs blueprint definitions above). Splits the
+// "what an operator designed" from "what is actually live for a tenant" so
+// tenants can spin up N runtime meshes from one blueprint.
+
+/** Catalog of runtime handler kinds (e.g. agentic.react). Plugins implement these. */
+export interface LiveHandlerKindRow {
+  id: string;
+  kind: string;                                // unique key, e.g. 'agentic.react'
+  description: string;
+  config_schema_json: string;                  // JSON schema for handler config
+  source: string;                              // 'builtin' | 'plugin'
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** DB-managed attention policies (when should an agent take a tick). */
+export interface LiveAttentionPolicyRow {
+  id: string;
+  key: string;                                 // e.g. 'heuristic.inbox-first'
+  kind: string;                                // 'heuristic' | 'cron' | 'model'
+  description: string;
+  config_json: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A provisioned runtime mesh (one per tenant per blueprint). */
+export interface LiveMeshRow {
+  id: string;
+  tenant_id: string | null;
+  mesh_def_id: string;
+  name: string;
+  status: string;                              // 'ACTIVE' | 'PAUSED' | 'ARCHIVED'
+  domain: string | null;
+  dual_control_required_for: string;           // JSON array of tool keys
+  owner_human_id: string | null;
+  mcp_server_ref: string | null;
+  account_id: string | null;
+  context_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A provisioned agent inside a runtime mesh. */
+export interface LiveAgentRow {
+  id: string;
+  mesh_id: string;
+  agent_def_id: string | null;
+  role_key: string;
+  name: string;
+  role_label: string;
+  persona: string;
+  objectives: string;
+  success_indicators: string;
+  attention_policy_key: string | null;
+  contract_version_id: string | null;
+  status: string;                              // 'ACTIVE' | 'PAUSED' | 'ARCHIVED'
+  ordering: number;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Which handler kind dispatches this agent's ticks plus opaque config. */
+export interface LiveAgentHandlerBindingRow {
+  id: string;
+  agent_id: string;
+  handler_kind: string;
+  config_json: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** M2M: agent → tool_catalog row OR external MCP endpoint. */
+export interface LiveAgentToolBindingRow {
+  id: string;
+  agent_id: string;
+  tool_catalog_id: string | null;
+  mcp_server_url: string | null;
+  capability_keys: string;                     // JSON array
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** A "campaign" inside a mesh — generic replacement for kgl_competition_runs. */
+export interface LiveRunRow {
+  id: string;
+  mesh_id: string;
+  tenant_id: string | null;
+  run_key: string;
+  label: string | null;
+  status: string;                              // 'RUNNING' | 'COMPLETED' | 'FAILED' | 'ABANDONED'
+  started_at: string;
+  completed_at: string | null;
+  summary: string | null;
+  context_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Per-agent progress ledger inside a run. Generic replacement for kgl_run_step. */
+export interface LiveRunStepRow {
+  id: string;
+  run_id: string;
+  mesh_id: string;
+  agent_id: string | null;
+  role_key: string;
+  status: string;                              // 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED'
+  started_at: string | null;
+  completed_at: string | null;
+  summary: string | null;
+  payload_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Append-only event log. Generic replacement for kgl_run_event. */
+export interface LiveRunEventRow {
+  id: string;
+  run_id: string;
+  step_id: string | null;
+  kind: string;                                // e.g. 'tool_call', 'handoff', 'error'
+  agent_id: string | null;
+  tool_key: string | null;
+  summary: string | null;
+  payload_json: string | null;
+  created_at: string;
+}
+
 // ─── Adapter interface ───────────────────────────────────────
 
 export interface DatabaseAdapter {
@@ -2624,6 +2854,105 @@ export interface DatabaseAdapter {
   recordKaggleDiscussionPost(row: Omit<KaggleDiscussionPostRow, 'posted_at'> & { posted_at?: string }): Promise<void>;
   listKaggleDiscussionPosts(opts?: { tenantId?: string; competitionRef?: string; limit?: number; offset?: number }): Promise<KaggleDiscussionPostRow[]>;
   getKaggleDiscussionPost(id: string): Promise<KaggleDiscussionPostRow | null>;
+
+  // Phase K8 — Kaggle competition run ledger (per-run UUIDv7 isolation).
+  // Each "Start Competition" click writes a fresh run row; steps and events
+  // are scoped to that run id so successive runs produce independent flows.
+  createKglCompetitionRun(row: Omit<KglCompetitionRunRow, 'created_at' | 'updated_at' | 'step_count' | 'event_count'>): Promise<KglCompetitionRunRow>;
+  getKglCompetitionRun(id: string, tenantId?: string | null): Promise<KglCompetitionRunRow | null>;
+  listKglCompetitionRuns(opts?: { tenantId?: string | null; status?: KglRunStatus; competitionRef?: string; limit?: number; offset?: number }): Promise<KglCompetitionRunRow[]>;
+  updateKglCompetitionRun(id: string, patch: Partial<Omit<KglCompetitionRunRow, 'id' | 'created_at'>>): Promise<void>;
+
+  appendKglRunStep(row: Omit<KglRunStepRow, 'created_at' | 'updated_at'>): Promise<KglRunStepRow>;
+  updateKglRunStep(id: string, patch: Partial<Omit<KglRunStepRow, 'id' | 'run_id' | 'created_at'>>): Promise<void>;
+  listKglRunSteps(runId: string): Promise<KglRunStepRow[]>;
+
+  appendKglRunEvent(row: Omit<KglRunEventRow, 'created_at'>): Promise<KglRunEventRow>;
+  listKglRunEvents(runId: string, opts?: { afterId?: string; limit?: number }): Promise<KglRunEventRow[]>;
+
+  // ─── Live mesh / agent definitions (M21) ─────────────────────
+  listLiveMeshDefinitions(opts?: { enabledOnly?: boolean }): Promise<LiveMeshDefinitionRow[]>;
+  getLiveMeshDefinition(id: string): Promise<LiveMeshDefinitionRow | null>;
+  getLiveMeshDefinitionByKey(meshKey: string): Promise<LiveMeshDefinitionRow | null>;
+  createLiveMeshDefinition(row: Omit<LiveMeshDefinitionRow, 'created_at' | 'updated_at'>): Promise<LiveMeshDefinitionRow>;
+  updateLiveMeshDefinition(id: string, patch: Partial<Omit<LiveMeshDefinitionRow, 'id' | 'created_at'>>): Promise<void>;
+  deleteLiveMeshDefinition(id: string): Promise<void>;
+
+  listLiveAgentDefinitions(opts?: { meshDefId?: string; enabledOnly?: boolean }): Promise<LiveAgentDefinitionRow[]>;
+  getLiveAgentDefinition(id: string): Promise<LiveAgentDefinitionRow | null>;
+  createLiveAgentDefinition(row: Omit<LiveAgentDefinitionRow, 'created_at' | 'updated_at'>): Promise<LiveAgentDefinitionRow>;
+  updateLiveAgentDefinition(id: string, patch: Partial<Omit<LiveAgentDefinitionRow, 'id' | 'mesh_def_id' | 'created_at'>>): Promise<void>;
+  deleteLiveAgentDefinition(id: string): Promise<void>;
+
+  listLiveMeshDelegationEdges(opts?: { meshDefId?: string; enabledOnly?: boolean }): Promise<LiveMeshDelegationEdgeRow[]>;
+  getLiveMeshDelegationEdge(id: string): Promise<LiveMeshDelegationEdgeRow | null>;
+  createLiveMeshDelegationEdge(row: Omit<LiveMeshDelegationEdgeRow, 'created_at' | 'updated_at'>): Promise<LiveMeshDelegationEdgeRow>;
+  updateLiveMeshDelegationEdge(id: string, patch: Partial<Omit<LiveMeshDelegationEdgeRow, 'id' | 'mesh_def_id' | 'created_at'>>): Promise<void>;
+  deleteLiveMeshDelegationEdge(id: string): Promise<void>;
+
+  // ─── DB-Driven Live-Agents Runtime (M22, Phase 1) ─────────
+  // Handler kinds (framework registry)
+  listLiveHandlerKinds(opts?: { enabledOnly?: boolean }): Promise<LiveHandlerKindRow[]>;
+  getLiveHandlerKind(id: string): Promise<LiveHandlerKindRow | null>;
+  getLiveHandlerKindByKind(kind: string): Promise<LiveHandlerKindRow | null>;
+  createLiveHandlerKind(row: Omit<LiveHandlerKindRow, 'created_at' | 'updated_at'>): Promise<LiveHandlerKindRow>;
+  updateLiveHandlerKind(id: string, patch: Partial<Omit<LiveHandlerKindRow, 'id' | 'created_at'>>): Promise<void>;
+  deleteLiveHandlerKind(id: string): Promise<void>;
+
+  // Attention policies
+  listLiveAttentionPolicies(opts?: { enabledOnly?: boolean }): Promise<LiveAttentionPolicyRow[]>;
+  getLiveAttentionPolicy(id: string): Promise<LiveAttentionPolicyRow | null>;
+  getLiveAttentionPolicyByKey(key: string): Promise<LiveAttentionPolicyRow | null>;
+  createLiveAttentionPolicy(row: Omit<LiveAttentionPolicyRow, 'created_at' | 'updated_at'>): Promise<LiveAttentionPolicyRow>;
+  updateLiveAttentionPolicy(id: string, patch: Partial<Omit<LiveAttentionPolicyRow, 'id' | 'created_at'>>): Promise<void>;
+  deleteLiveAttentionPolicy(id: string): Promise<void>;
+
+  // Provisioned meshes
+  listLiveMeshes(opts?: { tenantId?: string; meshDefId?: string; status?: string }): Promise<LiveMeshRow[]>;
+  getLiveMesh(id: string): Promise<LiveMeshRow | null>;
+  createLiveMesh(row: Omit<LiveMeshRow, 'created_at' | 'updated_at'>): Promise<LiveMeshRow>;
+  updateLiveMesh(id: string, patch: Partial<Omit<LiveMeshRow, 'id' | 'created_at'>>): Promise<void>;
+  deleteLiveMesh(id: string): Promise<void>;
+
+  // Provisioned agents
+  listLiveAgents(opts?: { meshId?: string; status?: string }): Promise<LiveAgentRow[]>;
+  getLiveAgent(id: string): Promise<LiveAgentRow | null>;
+  createLiveAgent(row: Omit<LiveAgentRow, 'created_at' | 'updated_at'>): Promise<LiveAgentRow>;
+  updateLiveAgent(id: string, patch: Partial<Omit<LiveAgentRow, 'id' | 'mesh_id' | 'created_at'>>): Promise<void>;
+  deleteLiveAgent(id: string): Promise<void>;
+
+  // Handler bindings
+  listLiveAgentHandlerBindings(opts?: { agentId?: string; enabledOnly?: boolean }): Promise<LiveAgentHandlerBindingRow[]>;
+  getLiveAgentHandlerBinding(id: string): Promise<LiveAgentHandlerBindingRow | null>;
+  createLiveAgentHandlerBinding(row: Omit<LiveAgentHandlerBindingRow, 'created_at' | 'updated_at'>): Promise<LiveAgentHandlerBindingRow>;
+  updateLiveAgentHandlerBinding(id: string, patch: Partial<Omit<LiveAgentHandlerBindingRow, 'id' | 'agent_id' | 'created_at'>>): Promise<void>;
+  deleteLiveAgentHandlerBinding(id: string): Promise<void>;
+
+  // Tool bindings
+  listLiveAgentToolBindings(opts?: { agentId?: string; enabledOnly?: boolean }): Promise<LiveAgentToolBindingRow[]>;
+  getLiveAgentToolBinding(id: string): Promise<LiveAgentToolBindingRow | null>;
+  createLiveAgentToolBinding(row: Omit<LiveAgentToolBindingRow, 'created_at' | 'updated_at'>): Promise<LiveAgentToolBindingRow>;
+  updateLiveAgentToolBinding(id: string, patch: Partial<Omit<LiveAgentToolBindingRow, 'id' | 'agent_id' | 'created_at'>>): Promise<void>;
+  deleteLiveAgentToolBinding(id: string): Promise<void>;
+
+  // Runs
+  listLiveRuns(opts?: { meshId?: string; tenantId?: string; status?: string; limit?: number }): Promise<LiveRunRow[]>;
+  getLiveRun(id: string): Promise<LiveRunRow | null>;
+  createLiveRun(row: Omit<LiveRunRow, 'created_at' | 'updated_at'>): Promise<LiveRunRow>;
+  updateLiveRun(id: string, patch: Partial<Omit<LiveRunRow, 'id' | 'mesh_id' | 'created_at'>>): Promise<void>;
+  deleteLiveRun(id: string): Promise<void>;
+
+  // Run steps
+  listLiveRunSteps(opts?: { runId?: string; meshId?: string; agentId?: string }): Promise<LiveRunStepRow[]>;
+  getLiveRunStep(id: string): Promise<LiveRunStepRow | null>;
+  createLiveRunStep(row: Omit<LiveRunStepRow, 'created_at' | 'updated_at'>): Promise<LiveRunStepRow>;
+  updateLiveRunStep(id: string, patch: Partial<Omit<LiveRunStepRow, 'id' | 'run_id' | 'mesh_id' | 'created_at'>>): Promise<void>;
+  deleteLiveRunStep(id: string): Promise<void>;
+
+  // Run events (append-only — no update)
+  listLiveRunEvents(opts?: { runId?: string; afterId?: string; limit?: number }): Promise<LiveRunEventRow[]>;
+  getLiveRunEvent(id: string): Promise<LiveRunEventRow | null>;
+  appendLiveRunEvent(row: Omit<LiveRunEventRow, 'created_at'>): Promise<LiveRunEventRow>;
 }
 
 

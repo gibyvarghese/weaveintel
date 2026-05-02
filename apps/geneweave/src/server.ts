@@ -31,6 +31,7 @@ import {
 import { getHTML } from './ui-server.js';
 import { registerAdminRoutes } from './server-admin.js';
 import { registerSVRoutes } from './features/scientific-validation/index.js';
+import { registerKaggleCompetitionRoutes, KaggleCompetitionRunner } from './features/kaggle-competition/index.js';
 import { SVChatBridge } from './features/scientific-validation/chat-bridge.js';
 import { createSVToolMap } from './features/scientific-validation/tools/index.js';
 import { DbToolPolicyResolver, DbToolRateLimiter } from './tool-policy-resolver.js';
@@ -1190,6 +1191,9 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     auditEmitter: new DbToolAuditEmitter(db),
   });
   registerSVRoutes(router, db, json, readBody, svRunner);
+
+  const kaggleRunner = new KaggleCompetitionRunner(db);
+  registerKaggleCompetitionRoutes(router, db, json, readBody, kaggleRunner);
 
   router.get('/api/admin/rbac/personas', async (_req, res, _params, auth) => {
     const gate = ensurePermission(auth, 'admin:platform:write');

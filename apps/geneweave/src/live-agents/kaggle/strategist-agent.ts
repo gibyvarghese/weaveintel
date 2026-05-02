@@ -1,33 +1,27 @@
 /**
- * Kaggle Strategist agent — long-running, LLM-driven, ReAct loop.
+ * Kaggle Strategist agent — Kaggle-specific glue around the platform's
+ * generic `createAgenticTaskHandler` (from `@weaveintel/live-agents`).
  *
- * Built on top of `@weaveintel/agents` `weaveAgent` (the same ReAct/tool-calling
- * loop used elsewhere in the platform), but wrapped in a live-agents
- * `TaskHandler` so that:
+ * This file is now a thin adapter that resolves Kaggle credentials, builds
+ * Kaggle tools, and looks up a DB-backed playbook for the system prompt.
+ * The reusable ReAct loop, inbound-task loading, and `weaveAgent` invocation
+ * all live in the package.
  *
- *   - state is persisted in `la_entities` between ticks (mesh, agent, backlog
- *     items, messages, contracts, run logs)
- *   - the heartbeat scheduler decides when the agent runs
- *   - human-in-the-loop gates and audit trails apply uniformly
+ * --- LLM CALL SITE ---
+ * The actual `agent.run(...)` invocation happens inside the package's
+ * `createAgenticTaskHandler` (see
+ * packages/live-agents/src/agentic-task-handler.ts). This file never calls
+ * the model directly — it just configures the handler.
  *
- * THIS FILE INTENTIONALLY CONTAINS NO COMPETITION-SPECIFIC TEXT.
- * The strategist's system prompt is loaded at runtime from a GeneWeave DB
- * playbook (resolved by `playbookResolver`) keyed off the inbound competition
- * slug. ARC-AGI-3 facts, ladders, solver templates, and so on are seeded into
- * the DB (see `playbook-seed.ts`) and editable via the admin UI.
- *
- * Submission to Kaggle is intentionally NOT exposed as a tool — submission is
- * a human-approved Promotion in the live-agents framework.
+ * Submission to Kaggle is intentionally NOT exposed as a tool — submission
+ * is a human-approved Promotion in the live-agents framework.
  */
 
-import { weaveAgent } from '@weaveintel/agents';
-import { weaveContext } from '@weaveintel/core';
-import type { ExecutionContext, Model } from '@weaveintel/core';
-import type {
-  ActionExecutionContext,
-  AttentionAction,
-  TaskHandler,
-  TaskHandlerResult,
+import type { Model } from '@weaveintel/core';
+import {
+  createAgenticTaskHandler,
+  type AgenticRunResult,
+  type TaskHandler,
 } from '@weaveintel/live-agents';
 import {
   liveKaggleAdapter,
@@ -106,86 +100,13 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
   const log = opts.log ?? ((m: string) => console.log(`[kaggle-strategist] ${m}`));
   const maxSteps = opts.maxSteps ?? 90;
 
-  return async (
-    _action: AttentionAction & { type: 'StartTask' | 'ContinueTask' },
-    context: ActionExecutionContext,
-    execCtx: ExecutionContext,
-  ): Promise<TaskHandlerResult> => {
-    log(`agent ${context.agent.id} starting ReAct loop (maxSteps=${maxSteps})`);
-
-    // Pull any inbound context (e.g. seed message specifying which competition to focus on).
-    const inbound = await loadLatestInboundTask(context);
-    const inboundBody = inbound?.body?.trim() ?? '';
-    const competitionSlug = extractCompetitionSlugFromText(inboundBody);
-    log(
-      `inbound subject="${inbound?.subject ?? '(none)'}" bodyLen=${inboundBody.length} ` +
-        `competitionSlug="${competitionSlug || '(none)'}"`,
-    );
-
-    // Resolve system prompt + tool defaults from the DB playbook for this
-    // competition slug. Tool defaults (poll intervals, output truncation
-    // budgets) are operator-tunable in admin via the playbook's `examples`
-    // JSON; we forward them into createKaggleTools so the agentic ReAct
-    // loop honors operator config without code changes.
-    let systemPrompt = opts.fallbackGoalText ?? HARDCODED_FALLBACK_GOAL;
-    let playbookSummary = 'fallback (no resolver)';
-    let resolvedConfig: Record<string, unknown> = {};
-    if (opts.playbookResolver) {
-      try {
-        const playbook = await opts.playbookResolver(competitionSlug);
-        if (playbook) {
-          systemPrompt = playbook.systemPrompt;
-          resolvedConfig = playbook.config as unknown as Record<string, unknown>;
-          playbookSummary = `${playbook.name} (matched=${playbook.matchedPattern}, shape=${playbook.config.shape ?? 'unknown'})`;
-        } else if (opts.fallbackGoalText) {
-          playbookSummary = 'fallback (no playbook matched)';
-        }
-      } catch (err) {
-        log(`!! playbookResolver threw: ${err instanceof Error ? err.message : String(err)} — using fallback prompt`);
-      }
-    }
-    log(`playbook=${playbookSummary} promptBytes=${systemPrompt.length}`);
-
-    // Phase K7d: append framework-wide cv_scores.json requirement so every
-    // competition the strategist tackles emits the artifact the validator
-    // needs to gate submissions. Done here (not in playbook content) so the
-    // requirement stays in code and applies to all current + future
-    // playbooks without per-row edits.
-    systemPrompt = systemPrompt + CV_SCORES_ADDENDUM;
-
-    const tools = createKaggleTools({
-      adapter,
-      credentials,
-      defaults: {
-        defaultWaitTimeoutSec: resolvedConfig['pollTimeoutSec'] as number | undefined,
-        maxWaitTimeoutSec: resolvedConfig['kernelWaitMaxTimeoutSec'] as number | undefined,
-        defaultPollIntervalSec: resolvedConfig['pollIntervalSec'] as number | undefined,
-        outputHeadBytes: resolvedConfig['kernelOutputHeadBytes'] as number | undefined,
-        outputTailBytes: resolvedConfig['kernelOutputTailBytes'] as number | undefined,
-      },
-    });
-    const agent = weaveAgent({
-      name: 'kaggle-strategist',
-      model: opts.model,
-      tools,
-      systemPrompt,
-      maxSteps,
-    });
-
-    const userGoal = inboundBody
-      ? `Seed message from operator:\n${inboundBody}\n\nProceed per the workflow.`
-      : `No specific competition was named. Pick the most tractable active competition and proceed.`;
-
-    const ctx = execCtx ?? weaveContext({ userId: `live-agent:${context.agent.id}` });
-    let result: { status: string; steps: ReadonlyArray<{ type: string; content?: string }> };
-    try {
-      result = await agent.run(ctx, {
-        goal: 'Run one Kaggle research iteration cycle',
-        messages: [{ role: 'user', content: userGoal }],
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
-      log(`!! agent.run threw: ${msg}`);
+  return createAgenticTaskHandler({
+    name: 'kaggle-strategist',
+    model: opts.model,
+    maxSteps,
+    log,
+    summarize: summarizeKaggleRun,
+    onError: async (err) => {
       // Detect Anthropic rate-limit and back off long enough for the per-minute
       // window to drain. Without this, the heartbeat re-dispatches every tick
       // and we burn the entire TPM budget on retries before any tool call lands.
@@ -194,18 +115,59 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
         log('rate-limit detected; sleeping 65s before next attempt');
         await new Promise((resolve) => setTimeout(resolve, 65_000));
       }
-      throw err;
-    }
+    },
+    prepare: async ({ inbound }) => {
+      const inboundBody = inbound?.body?.trim() ?? '';
+      const competitionSlug = extractCompetitionSlugFromText(inboundBody);
+      log(
+        `inbound subject="${inbound?.subject ?? '(none)'}" bodyLen=${inboundBody.length} ` +
+          `competitionSlug="${competitionSlug || '(none)'}"`,
+      );
 
-    const summary = summarizeRun(result);
-    log(`agent finished: status=${result.status} steps=${result.steps.length}`);
-    log(summary);
+      // Resolve system prompt + tool defaults from the DB playbook.
+      let systemPrompt = opts.fallbackGoalText ?? HARDCODED_FALLBACK_GOAL;
+      let playbookSummary = 'fallback (no resolver)';
+      let resolvedConfig: Record<string, unknown> = {};
+      if (opts.playbookResolver) {
+        try {
+          const playbook = await opts.playbookResolver(competitionSlug);
+          if (playbook) {
+            systemPrompt = playbook.systemPrompt;
+            resolvedConfig = playbook.config as unknown as Record<string, unknown>;
+            playbookSummary = `${playbook.name} (matched=${playbook.matchedPattern}, shape=${playbook.config.shape ?? 'unknown'})`;
+          } else if (opts.fallbackGoalText) {
+            playbookSummary = 'fallback (no playbook matched)';
+          }
+        } catch (err) {
+          log(`!! playbookResolver threw: ${err instanceof Error ? err.message : String(err)} — using fallback prompt`);
+        }
+      }
+      log(`playbook=${playbookSummary} promptBytes=${systemPrompt.length}`);
 
-    return {
-      completed: true,
-      summaryProse: summary,
-    };
-  };
+      // Phase K7d: append framework-wide cv_scores.json requirement so every
+      // competition the strategist tackles emits the artifact the validator
+      // needs to gate submissions.
+      systemPrompt = systemPrompt + CV_SCORES_ADDENDUM;
+
+      const tools = createKaggleTools({
+        adapter,
+        credentials,
+        defaults: {
+          defaultWaitTimeoutSec: resolvedConfig['pollTimeoutSec'] as number | undefined,
+          maxWaitTimeoutSec: resolvedConfig['kernelWaitMaxTimeoutSec'] as number | undefined,
+          defaultPollIntervalSec: resolvedConfig['pollIntervalSec'] as number | undefined,
+          outputHeadBytes: resolvedConfig['kernelOutputHeadBytes'] as number | undefined,
+          outputTailBytes: resolvedConfig['kernelOutputTailBytes'] as number | undefined,
+        },
+      });
+
+      const userGoal = inboundBody
+        ? `Seed message from operator:\n${inboundBody}\n\nProceed per the workflow.`
+        : `No specific competition was named. Pick the most tractable active competition and proceed.`;
+
+      return { systemPrompt, tools, userGoal };
+    },
+  });
 }
 
 function resolveCredentialsFromEnv(): KaggleCredentials {
@@ -217,27 +179,18 @@ function resolveCredentialsFromEnv(): KaggleCredentials {
   return { username, key };
 }
 
-async function loadLatestInboundTask(
-  context: ActionExecutionContext,
-): Promise<{ subject: string; body: string } | null> {
-  const inbox = await context.stateStore.listMessagesForRecipient('AGENT', context.agent.id);
-  const tasks = inbox
-    .filter((m) => m.kind === 'TASK')
-    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-  const m = tasks[0];
-  return m ? { subject: m.subject, body: m.body } : null;
-}
-
 interface ToolCallStep {
   type: string;
   content?: string;
   toolCall?: { name: string; arguments?: Record<string, unknown>; result?: string };
 }
 
-function summarizeRun(result: { status: string; steps: ReadonlyArray<ToolCallStep> }): string {
-  const last = [...result.steps].reverse().find((s) => s.type === 'response');
+/** Kaggle-specific summary that highlights kernel pushes and preserves URLs. */
+function summarizeKaggleRun(result: AgenticRunResult): string {
+  const steps = result.steps as ReadonlyArray<ToolCallStep>;
+  const last = [...steps].reverse().find((s) => s.type === 'response');
   const finalText = last?.content ?? '(no final response)';
-  const toolSteps = result.steps.filter((s) => s.type === 'tool_call' && s.toolCall);
+  const toolSteps = steps.filter((s) => s.type === 'tool_call' && s.toolCall);
   const trace: string[] = [];
   for (const s of toolSteps) {
     const tc = s.toolCall!;

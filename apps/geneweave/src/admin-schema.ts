@@ -17,6 +17,8 @@ import {
   PLATFORM_CAPABILITY_ADMIN_TABS,
   ROUTING_ADMIN_TABS,
   KAGGLE_ADMIN_TABS,
+  LIVE_MESH_ADMIN_TABS,
+  LIVE_RUNTIME_ADMIN_TABS,
 } from './admin/schema/index.js';
 
 // ─── Tab groups (sidebar navigation) ─────────────────────────
@@ -100,8 +102,23 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'guardrail-evals', label: 'Evals' },
     { key: 'memory-extraction-events', label: 'Memory Extraction' },
   ]},
+  { label: 'Live Agents', icon: '\uD83E\uDDEC', tabs: [
+    { key: 'live-mesh-definitions', label: 'Mesh Definitions' },
+    { key: 'live-agent-definitions', label: 'Agent Roles' },
+    { key: 'live-mesh-delegation-edges', label: 'Delegation Edges' },
+    { key: 'live-handler-kinds', label: 'Handler Kinds' },
+    { key: 'live-attention-policies', label: 'Attention Policies' },
+    { key: 'live-meshes', label: 'Live Meshes' },
+    { key: 'live-agents', label: 'Live Agents' },
+    { key: 'live-agent-handler-bindings', label: 'Agent Handler Bindings' },
+    { key: 'live-agent-tool-bindings', label: 'Agent Tool Bindings' },
+    { key: 'live-runs', label: 'Runs' },
+    { key: 'live-run-steps', label: 'Run Steps' },
+    { key: 'live-run-events', label: 'Run Events' },
+  ]},
   { label: 'Kaggle', icon: '\uD83C\uDFC6', tabs: [
     { key: 'kaggle-competitions', label: 'Tracked Competitions' },
+    { key: 'kaggle-competition-runs', label: 'Live Competition Runs' },
     { key: 'kaggle-approaches', label: 'Approaches' },
     { key: 'kaggle-runs', label: 'Runs' },
     { key: 'kaggle-run-artifacts', label: 'Run Artifacts' },
@@ -135,4 +152,6 @@ export const ADMIN_TABS = normalizeAdminTabsForModelDiscovery({
   ...PLATFORM_CAPABILITY_ADMIN_TABS,
   ...ROUTING_ADMIN_TABS,
   ...KAGGLE_ADMIN_TABS,
+  ...LIVE_MESH_ADMIN_TABS,
+  ...LIVE_RUNTIME_ADMIN_TABS,
 });

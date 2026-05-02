@@ -23,7 +23,7 @@ import type {
   Mesh,
   StateStore,
 } from '@weaveintel/live-agents';
-import { buildKaggleMeshTemplate, type KaggleMeshTemplate } from './mesh-template.js';
+import { buildKaggleMeshTemplate, type KaggleMeshTemplate, type KaggleRolePersona } from './mesh-template.js';
 import {
   KAGGLE_CAPABILITY_MATRIX,
   bindingConstraintsForCaps,
@@ -32,6 +32,7 @@ import {
 } from './account-bindings.js';
 import { buildKaggleBridge } from './bridge.js';
 import type { KagglePlaybookResolver } from './playbook-resolver.js';
+import type { DatabaseAdapter } from '../../db.js';
 
 export interface BootKaggleMeshOptions {
   store: StateStore;
@@ -53,6 +54,14 @@ export interface BootKaggleMeshOptions {
    *  `bridgeConstraintsProse` fields override the historical defaults in
    *  `buildKaggleBridge`. Operators tune these in admin without code edits. */
   playbookResolver?: KagglePlaybookResolver;
+  /** When set, the framework-level live mesh definition (`live_mesh_definitions`
+   *  + `live_agent_definitions` + `live_mesh_delegation_edges`) is loaded for
+   *  `meshKey` and used as the base personas/edges/dual-control snapshot.
+   *  Playbook overlay still wins on top. Failure is non-fatal — falls back to
+   *  the in-code defaults shipped in `mesh-template.ts`. */
+  db?: DatabaseAdapter;
+  /** Mesh blueprint key in `live_mesh_definitions`. Defaults to `'kaggle'`. */
+  meshKey?: string;
   /** ISO timestamp. */
   nowIso?: string;
 }
@@ -90,13 +99,20 @@ export async function bootKaggleMesh(opts: BootKaggleMeshOptions): Promise<Kaggl
     }
   }
 
+  // Framework-level mesh definition snapshot (DB-driven). Merges UNDER the
+  // playbook overlay: DB rows form the base personas + edges + dual-control,
+  // and playbook fields override them per competition slug.
+  const dbDef = await loadMeshDefinitionSnapshot(opts.db, opts.meshKey ?? 'kaggle');
+
+  const dualControlOverride =
+    pbConfig.dualControlRequiredFor ?? dbDef?.dualControlRequiredFor;
+  const rolePersonasOverride = mergeRolePersonas(dbDef?.rolePersonas, pbConfig.rolePersonas);
+
   const template = buildKaggleMeshTemplate({
     tenantId: opts.tenantId,
     ...(opts.meshId !== undefined ? { meshId: opts.meshId } : {}),
-    ...(pbConfig.dualControlRequiredFor
-      ? { dualControlRequiredFor: pbConfig.dualControlRequiredFor }
-      : {}),
-    ...(pbConfig.rolePersonas ? { rolePersonas: pbConfig.rolePersonas } : {}),
+    ...(dualControlOverride ? { dualControlRequiredFor: dualControlOverride } : {}),
+    ...(rolePersonasOverride ? { rolePersonas: rolePersonasOverride } : {}),
     nowIso,
   });
   const { mesh, agents, contracts } = template;
@@ -119,7 +135,9 @@ export async function bootKaggleMesh(opts: BootKaggleMeshOptions): Promise<Kaggl
         rel: e.relationship as DelegationEdge['relationship'],
         prose: e.prose,
       }))
-    : PIPELINE_EDGES;
+    : (dbDef?.pipelineEdges && dbDef.pipelineEdges.length > 0
+        ? dbDef.pipelineEdges
+        : PIPELINE_EDGES);
   for (const edge of edgeSpecs) {
     const id = `edge-${mesh.id}-${edge.from}-${edge.to}`;
     const row: DelegationEdge = {
@@ -217,4 +235,83 @@ export async function revokeKaggleBinding(
   reason: string,
 ): Promise<AccountBinding | null> {
   return store.revokeAccountBinding(bindingId, revokedByHumanId, reason, new Date().toISOString());
+}
+
+// ─── DB-driven mesh definition snapshot helpers ──────────────
+
+interface MeshDefinitionSnapshot {
+  dualControlRequiredFor?: string[];
+  rolePersonas?: Partial<Record<KaggleAgentRole, Partial<KaggleRolePersona>>>;
+  pipelineEdges?: Array<{
+    from: KaggleAgentRole;
+    to: KaggleAgentRole;
+    rel: DelegationEdge['relationship'];
+    prose: string;
+  }>;
+}
+
+async function loadMeshDefinitionSnapshot(
+  db: DatabaseAdapter | undefined,
+  meshKey: string,
+): Promise<MeshDefinitionSnapshot | null> {
+  if (!db) return null;
+  try {
+    const def = await db.getLiveMeshDefinitionByKey(meshKey);
+    if (!def || !def.enabled) return null;
+    const [agents, edges] = await Promise.all([
+      db.listLiveAgentDefinitions({ meshDefId: def.id, enabledOnly: true }),
+      db.listLiveMeshDelegationEdges({ meshDefId: def.id, enabledOnly: true }),
+    ]);
+
+    let dualControl: string[] | undefined;
+    try {
+      const parsed = JSON.parse(def.dual_control_required_for);
+      if (Array.isArray(parsed) && parsed.every((x) => typeof x === 'string')) dualControl = parsed;
+    } catch {
+      // Bad JSON in operator-edited row — ignore and let in-code default win.
+    }
+
+    const rolePersonas: Partial<Record<KaggleAgentRole, Partial<KaggleRolePersona>>> = {};
+    for (const a of agents) {
+      rolePersonas[a.role_key as KaggleAgentRole] = {
+        name: a.name,
+        role: a.role_label,
+        persona: a.persona,
+        objectives: a.objectives,
+        success: a.success_indicators,
+      };
+    }
+
+    const pipelineEdges = edges.map((e) => ({
+      from: e.from_role_key as KaggleAgentRole,
+      to: e.to_role_key as KaggleAgentRole,
+      rel: e.relationship as DelegationEdge['relationship'],
+      prose: e.prose,
+    }));
+
+    return {
+      ...(dualControl ? { dualControlRequiredFor: dualControl } : {}),
+      ...(Object.keys(rolePersonas).length > 0 ? { rolePersonas } : {}),
+      ...(pipelineEdges.length > 0 ? { pipelineEdges } : {}),
+    };
+  } catch {
+    // Non-fatal — fall back to in-code defaults.
+    return null;
+  }
+}
+
+function mergeRolePersonas(
+  base: Partial<Record<KaggleAgentRole, Partial<KaggleRolePersona>>> | undefined,
+  overlay: Partial<Record<KaggleAgentRole, Partial<KaggleRolePersona>>> | undefined,
+): Partial<Record<KaggleAgentRole, Partial<KaggleRolePersona>>> | undefined {
+  if (!base && !overlay) return undefined;
+  const out: Partial<Record<KaggleAgentRole, Partial<KaggleRolePersona>>> = {};
+  const roles = new Set<KaggleAgentRole>([
+    ...(Object.keys(base ?? {}) as KaggleAgentRole[]),
+    ...(Object.keys(overlay ?? {}) as KaggleAgentRole[]),
+  ]);
+  for (const role of roles) {
+    out[role] = { ...(base?.[role] ?? {}), ...(overlay?.[role] ?? {}) };
+  }
+  return out;
 }

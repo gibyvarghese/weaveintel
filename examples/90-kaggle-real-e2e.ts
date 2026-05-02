@@ -31,13 +31,11 @@ import { liveKaggleAdapter } from '@weaveintel/tools-kaggle';
 import { randomUUID } from 'node:crypto';
 
 async function main() {
-  // Use the correct async factory and path for the live-agents store
-  const store = await weaveSqliteStateStore({ path: './live-agents.db' });
-
-  // Open GeneWeave DB and seed (idempotent) the Kaggle playbooks. The
-  // strategist's system prompt and the deterministic implementer's solver
-  // template are loaded from this DB at runtime per competition slug.
+  // Live-agents state and GeneWeave runtime data live in the same consolidated
+  // SQLite database. Honor DATABASE_PATH so this example runs against the same
+  // file as the geneweave server (./geneweave.db by default).
   const geneweaveDbPath = process.env.DATABASE_PATH || './geneweave.db';
+  const store = await weaveSqliteStateStore({ path: geneweaveDbPath });
   const db = await createDatabaseAdapter({ type: 'sqlite', path: geneweaveDbPath });
   const seedResult = await seedKaggleArcPlaybook(db);
   console.log('Kaggle playbook seed:', seedResult);

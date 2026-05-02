@@ -209,17 +209,35 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
           });
         }
         const username = credentials.username;
-        const result = await adapter.pushKernel(credentials, {
-          slug: `${username}/${slug}`,
-          title,
-          language: 'python',
-          kernelType: 'script',
-          isPrivate: true,
-          enableGpu: false,
-          enableInternet: false,
-          competitionSource: competitionRef,
-          source: code,
-        });
+        // Kaggle returns 409 Conflict when a notebook title (or slug) already
+        // exists on the account. The strategist often re-uses titles like
+        // "ARC-AGI-3 Scout - Iteration 1" across runs, so first try the
+        // requested title/slug; if that 409s, retry once with a short
+        // timestamp suffix that guarantees uniqueness without losing the
+        // operator-facing label.
+        const tryPush = async (s: string, t: string) =>
+          adapter.pushKernel(credentials, {
+            slug: `${username}/${s}`,
+            title: t,
+            language: 'python',
+            kernelType: 'script',
+            isPrivate: true,
+            enableGpu: false,
+            enableInternet: false,
+            competitionSource: competitionRef,
+            source: code,
+          });
+        let result;
+        try {
+          result = await tryPush(slug, title);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (!/\b409\b/.test(msg)) throw err;
+          const suffix = `-${Date.now().toString(36).slice(-5)}`;
+          const slug2 = `${slug.slice(0, 40 - suffix.length)}${suffix}`;
+          const title2 = `${title.slice(0, 50 - suffix.length)}${suffix}`;
+          result = await tryPush(slug2, title2);
+        }
         return JSON.stringify(
           {
             kernelRef: normalizeKernelRef(result.ref),

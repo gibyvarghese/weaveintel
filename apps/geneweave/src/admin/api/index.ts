@@ -27,9 +27,33 @@ export {
   registerKaggleRubricRoutes,
   registerKaggleValidationResultRoutes,
   registerKaggleLeaderboardScoreRoutes,
+  registerKglCompetitionRunAdminRoutes,
 } from './kaggle.js';
 export { registerKaggleMeshRoutes } from './kaggle-mesh.js';
 export { registerKaggleDiscussionRoutes } from './kaggle-discussion.js';
+export {
+  registerLiveMeshDefinitionRoutes,
+  registerLiveAgentDefinitionRoutes,
+  registerLiveMeshDelegationEdgeRoutes,
+} from './live-mesh-definitions.js';
+
+// ── Phase M22: DB-driven live-agents runtime (provisioned
+// meshes, agents, handler/tool bindings, runs ledger) ───────
+export {
+  registerLiveMeshRoutes,
+  registerLiveAgentRoutes,
+  registerLiveAgentHandlerBindingRoutes,
+  registerLiveAgentToolBindingRoutes,
+} from './live-runtime-meshes.js';
+export {
+  registerLiveHandlerKindRoutes,
+  registerLiveAttentionPolicyRoutes,
+} from './live-runtime-registries.js';
+export {
+  registerLiveRunRoutes,
+  registerLiveRunStepRoutes,
+  registerLiveRunEventRoutes,
+} from './live-runtime-runs.js';
 
 // ── anyWeave Phase 4: Task-aware routing admin API + UI ─────
 export { registerTaskTypeRoutes } from './task-types.js';

@@ -79,6 +79,14 @@ export {
 } from './attention.js';
 export { createActionExecutor } from './action-executor.js';
 export type { TaskHandler, TaskHandlerResult } from './action-executor.js';
+export { createAgenticTaskHandler, loadLatestInboundTask } from './agentic-task-handler.js';
+export type {
+  AgenticInboundTask,
+  AgenticPreparation,
+  AgenticPrepareInput,
+  AgenticRunResult,
+  AgenticTaskHandlerOptions,
+} from './agentic-task-handler.js';
 export { createMcpAccountSessionProvider } from './mcp-session-provider.js';
 export {
   InMemoryLiveAgentsRunLogger,
