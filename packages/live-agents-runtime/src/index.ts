@@ -42,6 +42,15 @@ export {
   type ResolvedAgentTools,
 } from './tool-binder.js';
 
+// Phase 3.5 — Model resolver. Reads model_capability_json /
+// model_routing_policy_key / model_pinned_id from a live agent row.
+export {
+  resolveAgentModelSpec,
+  type AgentModelFieldsRowLike,
+  type AgentModelSource,
+  type ResolvedAgentModelSpec,
+} from './model-resolver.js';
+
 import { HandlerRegistry, createHandlerRegistry } from './handler-registry.js';
 import { agenticReactHandler } from './handlers/agentic-react.js';
 import { deterministicForwardHandler } from './handlers/deterministic-forward.js';

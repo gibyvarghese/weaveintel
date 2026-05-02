@@ -9,6 +9,48 @@ and this project adheres to [Fabric Versioning](VERSIONING.md).
 
 ## [Unreleased]
 
+### Live-Agents — DB-Driven Runtime Phase 3.5: Per-Agent Model Routing
+
+- New `model_capability_json`, `model_routing_policy_key`, and
+  `model_pinned_id` columns on `live_agents` and `live_agent_definitions`
+  (additive M22 ALTERs + inline `CREATE TABLE` mirrors so fresh DBs and
+  upgraded DBs converge). `LiveAgentRow` and `LiveAgentDefinitionRow`
+  carry the new fields end-to-end through `createLiveAgent` /
+  `createLiveAgentDefinition`.
+- New runtime helper `resolveAgentModelSpec()` in
+  `@weaveintel/live-agents-runtime` — pure-data, no `@weaveintel/routing`
+  dependency. Returns `{ capabilitySpec, routingPolicyKey, pinnedId, source }`
+  with the documented precedence (`pinned > capability > default`).
+- New geneweave bridge `resolveLiveAgentModel(db, row, factory, opts)` in
+  `apps/geneweave/src/live-agents/agent-model-resolver.ts` — turns the spec
+  into a concrete `Model` via a pluggable `AgentModelFactory` so callers can
+  delegate to `@weaveintel/routing` (or any other strategy) without coupling
+  the bridge. Caches per `(agentId, runId)`. Best-effort audit:
+  every successful resolution appends a `live_run_events` row of kind
+  `model.resolved` with the full payload for replay/reproducibility.
+- Admin tabs `live-agents` and `live-agent-definitions` gained the three
+  new fields with model-facing labels (capability spec textarea hints at
+  `@weaveintel/routing` resolution).
+- New example `examples/85-agent-model-routing.ts` demonstrates all three
+  resolution paths against the inbox-triage demo mesh and prints the
+  resulting `live_run_events` audit trail.
+
+### Live-Agents — DB-Driven Runtime Phase 2.5: LLM Loop Scaffold
+
+- New `packages/live-agents/src/llm/` directory establishes the seam between
+  the live-agents runtime and the underlying ReAct/tool-calling engine.
+  Exports `runLiveReactLoop()`, `BudgetExhausted`, and the
+  `LiveAgentBudget` / `LiveAgentRunStatus` / `ModelCapabilitySpec` types.
+- `runLiveReactLoop()` is now the single LLM call site for live-agents.
+  It enforces a per-run budget envelope (`maxSteps`, `maxToolCalls`,
+  `maxTokens`, `maxWallMs`), normalises terminal status, and never throws
+  under normal operation — error paths surface as `status: 'errored'` with
+  a populated `error` field.
+- `agentic-task-handler.ts` no longer imports from `@weaveintel/agents`
+  directly; it delegates to the new scaffold so future phases can swap
+  the engine, plug Phase 3.5 model resolution in front of the loop, or
+  add streaming/pause/resume without touching handler code.
+
 ### Live-Agents — DB-Driven Runtime Phase 3: Tool Binder
 
 - New `@weaveintel/live-agents-runtime` exports `resolveAgentToolCatalog()` —

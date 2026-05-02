@@ -6537,8 +6537,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createLiveAgentDefinition(row: Omit<LiveAgentDefinitionRow, 'created_at' | 'updated_at'>): Promise<LiveAgentDefinitionRow> {
     this.d.prepare(
-      `INSERT INTO live_agent_definitions (id, mesh_def_id, role_key, name, role_label, persona, objectives, success_indicators, ordering, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(row.id, row.mesh_def_id, row.role_key, row.name, row.role_label, row.persona, row.objectives, row.success_indicators, row.ordering, row.enabled);
+      `INSERT INTO live_agent_definitions (id, mesh_def_id, role_key, name, role_label, persona, objectives, success_indicators, ordering, enabled, model_capability_json, model_routing_policy_key, model_pinned_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.mesh_def_id, row.role_key, row.name, row.role_label, row.persona, row.objectives, row.success_indicators, row.ordering, row.enabled, row.model_capability_json ?? null, row.model_routing_policy_key ?? null, row.model_pinned_id ?? null);
     return (this.d.prepare('SELECT * FROM live_agent_definitions WHERE id = ?').get(row.id) as LiveAgentDefinitionRow);
   }
 
@@ -6699,8 +6699,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
   async createLiveAgent(row: Omit<LiveAgentRow, 'created_at' | 'updated_at'>): Promise<LiveAgentRow> {
     this.d.prepare(
-      `INSERT INTO live_agents (id, mesh_id, agent_def_id, role_key, name, role_label, persona, objectives, success_indicators, attention_policy_key, contract_version_id, status, ordering, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(row.id, row.mesh_id, row.agent_def_id, row.role_key, row.name, row.role_label, row.persona, row.objectives, row.success_indicators, row.attention_policy_key, row.contract_version_id, row.status, row.ordering, row.archived_at);
+      `INSERT INTO live_agents (id, mesh_id, agent_def_id, role_key, name, role_label, persona, objectives, success_indicators, attention_policy_key, contract_version_id, status, ordering, archived_at, model_capability_json, model_routing_policy_key, model_pinned_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.mesh_id, row.agent_def_id, row.role_key, row.name, row.role_label, row.persona, row.objectives, row.success_indicators, row.attention_policy_key, row.contract_version_id, row.status, row.ordering, row.archived_at, row.model_capability_json ?? null, row.model_routing_policy_key ?? null, row.model_pinned_id ?? null);
     return this.d.prepare('SELECT * FROM live_agents WHERE id = ?').get(row.id) as LiveAgentRow;
   }
   async updateLiveAgent(id: string, patch: Partial<Omit<LiveAgentRow, 'id' | 'mesh_id' | 'created_at'>>): Promise<void> {

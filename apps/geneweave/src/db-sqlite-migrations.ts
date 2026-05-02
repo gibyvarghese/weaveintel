@@ -2406,6 +2406,12 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
     `ALTER TABLE live_agent_definitions ADD COLUMN model_capability_json TEXT`,
     `ALTER TABLE live_agent_definitions ADD COLUMN model_routing_policy_key TEXT`,
     `ALTER TABLE live_agent_definitions ADD COLUMN model_pinned_id TEXT`,
+    // Phase 3.5 — mirror the model routing columns onto the *runtime*
+    // `live_agents` row so per-tenant overrides do not require touching the
+    // blueprint. Plan: docs/live-agents/DB_DRIVEN_RUNTIME_PLAN.md §5b.4.
+    `ALTER TABLE live_agents ADD COLUMN model_capability_json TEXT`,
+    `ALTER TABLE live_agents ADD COLUMN model_routing_policy_key TEXT`,
+    `ALTER TABLE live_agents ADD COLUMN model_pinned_id TEXT`,
     `ALTER TABLE tool_catalog ADD COLUMN domain_tags TEXT`,
   ];
   for (const sql of m22DefAlters) {
@@ -2486,6 +2492,11 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
       status TEXT NOT NULL DEFAULT 'ACTIVE',
       ordering INTEGER NOT NULL DEFAULT 0,
       archived_at TEXT,
+      -- Phase 3.5 — model routing columns (mirror of live_agent_definitions
+      -- defaults; per-tenant runtime overrides land here).
+      model_capability_json TEXT,
+      model_routing_policy_key TEXT,
+      model_pinned_id TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(mesh_id, role_key)

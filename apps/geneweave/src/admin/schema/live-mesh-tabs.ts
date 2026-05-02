@@ -47,6 +47,16 @@ export const LIVE_MESH_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'success_indicators', label: 'Success Indicators', textarea: true },
       { key: 'ordering', label: 'Ordering (number)', default: '0' },
       { key: 'enabled', label: 'Enabled', options: ['true', 'false'], default: 'true' },
+      // ─── Phase 3.5 — DB-driven model routing defaults (blueprint level) ───
+      // These flow into `live_agents` rows when a mesh is provisioned but
+      // can be overridden per runtime agent.
+      {
+        key: 'model_capability_json',
+        label: 'Default Model Capability Spec (JSON, e.g. {"task":"reasoning","toolUse":true,"minContextTokens":32000}). Resolved via @weaveintel/routing.',
+        textarea: true,
+      },
+      { key: 'model_routing_policy_key', label: 'Default Routing Policy Key (optional override)' },
+      { key: 'model_pinned_id', label: 'Default Pinned Model ID (escape hatch — bypasses routing for reproducibility)' },
     ],
   },
   'live-mesh-delegation-edges': {

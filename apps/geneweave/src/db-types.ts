@@ -1845,6 +1845,15 @@ export interface LiveAgentDefinitionRow {
   success_indicators: string;
   ordering: number;
   enabled: number;
+  // ─── Phase 3.5 — DB-driven model routing defaults ────────────
+  // JSON capability spec (e.g. {task:'reasoning', toolUse:true}). Consumed by
+  // resolveLiveAgentModel() in @weaveintel/live-agents. Null = inherit
+  // platform default.
+  model_capability_json?: string | null;
+  // Optional override key into the routing policy registry.
+  model_routing_policy_key?: string | null;
+  // Escape hatch: pin a specific model id for reproducibility runs.
+  model_pinned_id?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -1924,6 +1933,12 @@ export interface LiveAgentRow {
   status: string;                              // 'ACTIVE' | 'PAUSED' | 'ARCHIVED'
   ordering: number;
   archived_at: string | null;
+  // ─── Phase 3.5 — model routing (mirror of definition defaults) ──
+  // Resolution order at runtime: pinned id → capability spec via routing
+  // policy → inherited from agent_def → platform default.
+  model_capability_json?: string | null;
+  model_routing_policy_key?: string | null;
+  model_pinned_id?: string | null;
   created_at: string;
   updated_at: string;
 }

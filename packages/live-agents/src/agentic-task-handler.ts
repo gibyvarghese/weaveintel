@@ -1,24 +1,24 @@
 /**
  * Generic agentic TaskHandler factory for live-agents.
  *
- * Wraps `@weaveintel/agents`' `weaveAgent` (the platform's standard ReAct /
- * tool-calling loop) inside a live-agents `TaskHandler`, so any role that
- * needs an LLM-driven inner loop — Kaggle strategist, research analyst,
+ * Wraps the package-internal `runLiveReactLoop` (Phase 2.5 scaffold in
+ * `./llm/`) inside a live-agents `TaskHandler`, so any role that needs
+ * an LLM-driven inner loop — Kaggle strategist, research analyst,
  * support triage, etc. — can be assembled domain-side without re-writing
- * the inbound-message → run-agent → emit-summary plumbing.
+ * the inbound-message → run-loop → emit-summary plumbing.
  *
  * --- LLM CALL SITE ---
- * `agent.run(...)` inside this factory IS the only LLM invocation in the
- * live-agents runtime path. Everything else (heartbeat scheduling, attention
- * policy, action execution, message dispatch) is deterministic. Domain code
- * controls which LLM is invoked by passing the `Model` instance.
+ * `runLiveReactLoop(...)` inside this factory IS the only LLM invocation
+ * in the live-agents runtime path. Everything else (heartbeat scheduling,
+ * attention policy, action execution, message dispatch) is deterministic.
+ * Domain code controls which LLM is invoked by passing the `Model` instance.
  */
 
-import { weaveAgent } from '@weaveintel/agents';
 import { weaveContext } from '@weaveintel/core';
 import type { ExecutionContext, Model, ToolRegistry } from '@weaveintel/core';
 import type { ActionExecutionContext, AttentionAction } from './types.js';
 import type { TaskHandler, TaskHandlerResult } from './action-executor.js';
+import { runLiveReactLoop, type LiveReactLoopResult } from './llm/index.js';
 
 /** The most-recent inbound TASK message for an agent, or `null` when the
  *  agent has no pending TASK in its inbox. */
@@ -42,8 +42,9 @@ export interface AgenticPrepareInput {
   context: ActionExecutionContext;
 }
 
-/** Loose shape that matches `@weaveintel/agents` `Agent.run` return value
- *  without forcing the package to re-export the deep type. */
+/** Loose shape that matches the live-agents `LiveReactLoopResult` without
+ *  re-exporting the runner's deep type. Kept for backwards compatibility
+ *  with handlers that destructure `{ status, steps }` directly. */
 export interface AgenticRunResult {
   status: string;
   steps: ReadonlyArray<{ type: string; content?: string }>;
@@ -121,33 +122,45 @@ export function createAgenticTaskHandler(opts: AgenticTaskHandlerOptions): TaskH
     const prepInput: AgenticPrepareInput = { inbound, context };
     const prep = await opts.prepare(prepInput);
 
-    const agent = weaveAgent({
-      name: opts.name,
-      model: opts.model,
-      tools: prep.tools,
-      systemPrompt: prep.systemPrompt,
-      maxSteps,
-    });
-
     const ctx = execCtx ?? weaveContext({ userId: `live-agent:${context.agent.id}` });
-    let result: AgenticRunResult;
+    let loop: LiveReactLoopResult;
     try {
       // *** LLM CALL SITE — the only model.generate() in the live-agents flow ***
-      result = await agent.run(ctx, {
-        goal: `Run one ${opts.name} iteration cycle`,
-        messages: [{ role: 'user', content: prep.userGoal }],
+      loop = await runLiveReactLoop({
+        name: opts.name,
+        model: opts.model,
+        ...(prep.tools ? { tools: prep.tools } : {}),
+        systemPrompt: prep.systemPrompt,
+        userGoal: prep.userGoal,
+        maxSteps,
+        execContext: ctx,
+        agentId: context.agent.id,
       });
     } catch (err) {
+      // runLiveReactLoop catches its own errors, but we keep this guard
+      // for any future implementation that re-introduces a throw path.
       const msg = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
-      log(`!! agent.run threw: ${msg}`);
+      log(`!! runLiveReactLoop threw: ${msg}`);
       if (opts.onError) {
         await opts.onError(err, prepInput);
       }
       throw err;
     }
 
+    // Surface error-path runs as exceptions so the action executor can
+    // record the failure rather than silently completing the backlog item.
+    if (loop.status === 'errored' && loop.error) {
+      const err = new Error(loop.error);
+      log(`!! agent loop errored: ${loop.error}`);
+      if (opts.onError) {
+        await opts.onError(err, prepInput);
+      }
+      throw err;
+    }
+
+    const result: AgenticRunResult = { status: loop.rawStatus, steps: loop.steps };
     const summary = summarize(result);
-    log(`agent finished: status=${result.status} steps=${result.steps.length}`);
+    log(`agent finished: status=${loop.status} steps=${loop.steps.length}`);
     log(summary);
 
     return {

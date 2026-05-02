@@ -87,6 +87,18 @@ export type {
   AgenticRunResult,
   AgenticTaskHandlerOptions,
 } from './agentic-task-handler.js';
+// Phase 2.5 — live-agents-owned LLM loop scaffold. New consumers should
+// prefer these primitives over importing from `@weaveintel/agents`.
+export {
+  runLiveReactLoop,
+  BudgetExhausted,
+  type LiveReactLoopInput,
+  type LiveReactLoopResult,
+  type LiveReactLoopStep,
+  type LiveAgentBudget,
+  type LiveAgentRunStatus,
+  type ModelCapabilitySpec,
+} from './llm/index.js';
 export { createMcpAccountSessionProvider } from './mcp-session-provider.js';
 export {
   InMemoryLiveAgentsRunLogger,

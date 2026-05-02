@@ -70,6 +70,14 @@ export const LIVE_RUNTIME_ADMIN_TABS: Record<string, AdminTabDef> = {
         default: 'ACTIVE',
       },
       { key: 'ordering', label: 'Ordering (number)', default: '0' },
+      // ─── Phase 3.5 — DB-driven model routing per runtime agent ───
+      {
+        key: 'model_capability_json',
+        label: 'Model Capability Spec (JSON, e.g. {"task":"reasoning","toolUse":true,"minContextTokens":32000}). Resolved via @weaveintel/routing.',
+        textarea: true,
+      },
+      { key: 'model_routing_policy_key', label: 'Routing Policy Key (optional override; defaults to system policy)' },
+      { key: 'model_pinned_id', label: 'Pinned Model ID (escape hatch for reproducibility — bypasses routing)' },
     ],
   },
   'live-agent-handler-bindings': {
