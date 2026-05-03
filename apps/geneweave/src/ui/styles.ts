@@ -335,6 +335,13 @@ input{font-family:inherit;outline:none}
 .tool-btn{width:42px;height:42px;border-radius:12px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg2);font-size:16px;display:flex;align-items:center;justify-content:center;transition:all .18s ease}
 .tool-btn:hover{background:var(--bg2);border-color:var(--fg3);color:var(--fg)}
 .tool-btn.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+.mic-btn{background:transparent;border-color:var(--bg4);color:var(--fg3);filter:grayscale(1)}
+.mic-btn svg{display:block;opacity:.75}
+.mic-btn:hover{background:transparent;border-color:var(--fg3);color:var(--fg2)}
+.mic-btn:hover svg{opacity:1}
+.mic-btn.active{background:transparent;border-color:var(--fg2);color:var(--fg);filter:none;animation:mic-pulse 1.4s ease-in-out infinite}
+.mic-btn.active svg{opacity:1}
+@keyframes mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,255,255,0)}50%{box-shadow:0 0 0 4px rgba(255,255,255,.08)}}
 .composer-wrap{flex:1;display:flex;flex-direction:column;gap:8px}
 .attach-strip{display:flex;flex-wrap:wrap;gap:8px}
 .attach-chip{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg3);border:1px solid var(--bg4);border-radius:999px;font-size:12px;color:var(--fg2);max-width:340px}

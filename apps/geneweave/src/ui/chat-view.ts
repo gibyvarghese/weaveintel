@@ -122,7 +122,20 @@ export function renderChatView(options: {
     fileInput,
     h('div', { className: 'input-tools' },
       h('button', { className: 'tool-btn', title: 'Attach files', onClick: () => fileInput.click() }, '📎'),
-      h('button', { className: 'tool-btn' + (state.audioRecording ? ' active' : ''), title: state.audioRecording ? 'Stop recording' : 'Record audio', onClick: () => toggleAudioRecording() }, state.audioRecording ? '⏹' : '🎤')
+      h('button', {
+        className: 'tool-btn mic-btn' + (state.audioRecording ? ' active' : ''),
+        title: state.audioRecording ? 'Stop voice input' : 'Voice input (transcribed to text)',
+        'aria-label': state.audioRecording ? 'Stop voice input' : 'Start voice input',
+        'aria-pressed': state.audioRecording ? 'true' : 'false',
+        innerHTML:
+          '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<rect x="9" y="3" width="6" height="12" rx="3"></rect>' +
+            '<path d="M5 11a7 7 0 0 0 14 0"></path>' +
+            '<line x1="12" y1="18" x2="12" y2="22"></line>' +
+            '<line x1="8" y1="22" x2="16" y2="22"></line>' +
+          '</svg>',
+        onClick: () => toggleAudioRecording(),
+      })
     ),
     h('div', { className: 'composer-wrap' },
       state.pendingAttachments?.length

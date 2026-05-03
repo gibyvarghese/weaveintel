@@ -203,67 +203,101 @@ export function removePendingAttachment(index: number) {
   state.pendingAttachments.splice(index, 1);
 }
 
-/* Audio recording */
-let mediaRecorder: MediaRecorder | null = null;
-let audioChunks: Blob[] = [];
+/* Audio capture → live transcription via the Web Speech API.
+ *
+ * The mic button no longer attaches an audio file to the message. Instead, it
+ * streams the user's speech through `SpeechRecognition` and appends the
+ * transcript directly into the chat composer, so the chat receives plain text
+ * (consistent with all other input paths). If the browser cannot transcribe,
+ * we surface a clear error and never fall back to attaching a raw audio blob.
+ */
+let speechRecognizer: any = null;
+
+function rerenderUi() {
+  const rerender = (globalThis as any).render;
+  if (typeof rerender === 'function') rerender();
+}
+
+function findComposerTextarea(): HTMLTextAreaElement | null {
+  return document.querySelector<HTMLTextAreaElement>('.input-bar textarea');
+}
+
+function appendTranscript(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  const ta = findComposerTextarea();
+  if (!ta) return;
+  const sep = ta.value && !/\s$/.test(ta.value) ? ' ' : '';
+  ta.value = ta.value + sep + trimmed;
+  // Notify the composer's input listener so autosize / state stays in sync.
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+  ta.focus();
+}
 
 export async function toggleAudioRecording() {
   if (state.audioRecording) {
     stopAudioRecognition();
-  } else {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaRecorder = new MediaRecorder(stream);
-      audioChunks = [];
+    return;
+  }
 
-      mediaRecorder.ondataavailable = (e: BlobEvent) => {
-        audioChunks.push(e.data);
-      };
+  const SpeechRecognitionCtor: any =
+    (globalThis as any).SpeechRecognition || (globalThis as any).webkitSpeechRecognition;
+  if (!SpeechRecognitionCtor) {
+    console.error('Speech recognition is not supported in this browser.');
+    alert('Voice input is not supported in this browser. Try Chrome or Edge.');
+    return;
+  }
 
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-        const base64 = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const result = (reader.result as string).split(',')[1];
-            // @ts-ignore - result is guaranteed to be a string
-            resolve(result);
-          };
-          reader.readAsDataURL(audioBlob);
-        });
+  try {
+    const recognizer = new SpeechRecognitionCtor();
+    recognizer.continuous = true;
+    recognizer.interimResults = false;
+    recognizer.lang = (navigator.language || 'en-US');
 
-        state.pendingAttachments.push({
-          name: 'audio-' + Date.now() + '.webm',
-          mimeType: 'audio/webm',
-          size: audioBlob.size,
-          dataBase64: base64,
-        });
+    recognizer.onresult = (event: any) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          appendTranscript(result[0].transcript);
+        }
+      }
+    };
 
-        state.audioRecording = false;
-        mediaRecorder = null;
-        const rerender = (globalThis as any).render;
-        if (typeof rerender === 'function') rerender();
+    recognizer.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error || event);
+      state.audioRecording = false;
+      speechRecognizer = null;
+      rerenderUi();
+    };
 
-        stream.getTracks().forEach((track) => track.stop());
-      };
+    recognizer.onend = () => {
+      state.audioRecording = false;
+      speechRecognizer = null;
+      rerenderUi();
+    };
 
-      mediaRecorder.start();
-      state.audioRecording = true;
-      const rerender = (globalThis as any).render;
-      if (typeof rerender === 'function') rerender();
-    } catch (err) {
-      console.error('Audio recording failed:', err);
-    }
+    recognizer.start();
+    speechRecognizer = recognizer;
+    state.audioRecording = true;
+    rerenderUi();
+  } catch (err) {
+    console.error('Failed to start speech recognition:', err);
+    state.audioRecording = false;
+    speechRecognizer = null;
+    rerenderUi();
   }
 }
 
 export function stopAudioRecognition() {
-  if (mediaRecorder) {
-    mediaRecorder.stop();
-    state.audioRecording = false;
-    const rerender = (globalThis as any).render;
-    if (typeof rerender === 'function') rerender();
+  if (speechRecognizer) {
+    try {
+      speechRecognizer.stop();
+    } catch {
+      /* no-op — recognizer may already be stopping */
+    }
   }
+  state.audioRecording = false;
+  rerenderUi();
 }
 
 /* Clipboard & export */
