@@ -74,7 +74,9 @@ export {
 
 export {
   createStandardAttentionPolicy,
+  createCronAttentionPolicy,
   createModelAttentionPolicy,
+  type CronAttentionPolicyOptions,
   type ModelAttentionPolicyOptions,
 } from './attention.js';
 export { createActionExecutor } from './action-executor.js';

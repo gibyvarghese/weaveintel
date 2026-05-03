@@ -432,6 +432,146 @@ export function createModelAttentionPolicy(opts: ModelAttentionPolicyOptions): A
   };
 }
 
+// ---------------------------------------------------------------------------
+// Cron-based attention policy
+// ---------------------------------------------------------------------------
+
+/**
+ * Derives rest minutes from a simple cron expression.
+ *
+ * Supported patterns (covering 95 % of real scheduling needs):
+ *   '* /N * * * *'  — every N minutes  (minute field = * /N)
+ *   '0 * /N * * *'  — every N hours    (hour field = * /N)
+ *   '0 0 * * *'     — daily (once a day at midnight)
+ *
+ * Any unrecognised pattern falls back to `fallbackMinutes`.
+ */
+function parseCronExpression(cron: string, fallbackMinutes: number): number {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length < 2) return fallbackMinutes;
+
+  // '* /N * * * *' — every N minutes
+  const minutePart = parts[0] ?? '';
+  const minuteMatch = minutePart.match(/^\*\/(\d+)$/);
+  if (minuteMatch) {
+    const n = parseInt(minuteMatch[1] ?? '0', 10);
+    return n > 0 ? n : fallbackMinutes;
+  }
+
+  // '0 * /N * * *' — every N hours
+  const hourPart = parts[1] ?? '';
+  const hourMatch = hourPart.match(/^\*\/(\d+)$/);
+  if (hourMatch) {
+    const n = parseInt(hourMatch[1] ?? '0', 10);
+    return n > 0 ? n * 60 : fallbackMinutes;
+  }
+
+  // '0 0 * * *' — daily
+  if (minutePart === '0' && hourPart === '0') {
+    return 24 * 60;
+  }
+
+  return fallbackMinutes;
+}
+
+/**
+ * Computes the next cron-aligned tick boundary.
+ *
+ * Rather than snapping to a wall-clock grid we simply add `restMinutes` from
+ * the current time. This keeps behaviour deterministic in tests and avoids
+ * a dependency on a cron-scheduling library.
+ */
+function nextCronTickIso(nowIso: string, restMinutes: number): string {
+  return new Date(Date.parse(nowIso) + restMinutes * 60_000).toISOString();
+}
+
+export interface CronAttentionPolicyOptions {
+  /**
+   * Unique policy key surfaced in traces. Defaults to `'cron-v1'`.
+   */
+  key?: string;
+  /**
+   * Standard cron expression (5-field: minute hour dom month dow).
+   * Used to derive `restMinutes` when that field is not set explicitly.
+   * Supported patterns: `'* /N * * *'` (every N minutes),
+   * `'0 * /N * *'` (every N hours), `'0 0 * * *'` (daily).
+   */
+  cronExpression?: string;
+  /**
+   * Explicit rest duration in minutes. Takes precedence over `cronExpression`.
+   * Defaults to 60 (hourly) when neither is set.
+   */
+  restMinutes?: number;
+  /**
+   * When `true`, the policy processes inbox and backlog items normally
+   * (standard heuristic priority order) and only rests for the cron interval
+   * when there is no pending work.
+   *
+   * When `false` (default), the policy **always** returns `CheckpointAndRest`
+   * regardless of inbox state — useful for pure sweep/discovery agents that
+   * should wake only on schedule, not on demand.
+   */
+  processInbox?: boolean;
+}
+
+/**
+ * Creates an attention policy driven by a cron-style rest interval.
+ *
+ * Behaviour matrix:
+ *   processInbox=false (default) — always rests until next scheduled tick.
+ *   processInbox=true — mirrors `createStandardAttentionPolicy()` but rests
+ *     for the configured cron interval instead of the fixed 15-minute default.
+ *
+ * @example
+ * // Hourly sweep agent — never woken by inbox, only by the scheduler.
+ * const policy = createCronAttentionPolicy({ cronExpression: '0 * /1 * *' });
+ *
+ * @example
+ * // Process inbox when available, rest for 30-minute intervals otherwise.
+ * const policy = createCronAttentionPolicy({ restMinutes: 30, processInbox: true });
+ */
+export function createCronAttentionPolicy(opts: CronAttentionPolicyOptions = {}): AttentionPolicy {
+  const restMinutes =
+    opts.restMinutes ??
+    (opts.cronExpression ? parseCronExpression(opts.cronExpression, 60) : 60);
+
+  const shouldProcessInbox = opts.processInbox ?? false;
+  const key = opts.key ?? 'cron-v1';
+
+  return {
+    key,
+    async decide(context: AttentionContext, _ctx: ExecutionContext): Promise<AttentionAction> {
+      if (shouldProcessInbox) {
+        // --- Heuristic priority order (same as standard policy) ---
+        const pendingMessage = context.inbox.find(
+          (m) => m.status === 'PENDING' || m.status === 'DELIVERED',
+        );
+        if (pendingMessage) {
+          return { type: 'ProcessMessage', messageId: pendingMessage.id };
+        }
+
+        const inProgress = context.backlog.find((b) => b.status === 'IN_PROGRESS');
+        if (inProgress) {
+          return { type: 'ContinueTask', backlogItemId: inProgress.id };
+        }
+
+        const accepted = context.backlog.find(
+          (b) => b.status === 'ACCEPTED' || b.status === 'PROPOSED',
+        );
+        if (accepted) {
+          return { type: 'StartTask', backlogItemId: accepted.id };
+        }
+      }
+
+      // Rest until the next cron boundary.
+      return {
+        type: 'CheckpointAndRest',
+        nextTickAt: nextCronTickIso(context.nowIso, restMinutes),
+      };
+    },
+  };
+}
+
 export function createStandardAttentionPolicy(): AttentionPolicy {
   return {
     key: 'standard-v1',

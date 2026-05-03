@@ -51,6 +51,17 @@ export {
   type ResolvedAgentModelSpec,
 } from './model-resolver.js';
 
+// Phase 4 — Attention policy factory. Converts a live_attention_policies DB
+// row into a live AttentionPolicy instance. Delegates to the shared policy
+// constructors in @weaveintel/live-agents (heuristic, cron, model kinds).
+export {
+  resolveAttentionPolicy,
+  resolveAttentionPolicyFromDb,
+  type AttentionPolicyDb,
+  type AttentionPolicyRowLike,
+  type AttentionFactoryOptions,
+} from './attention-factory.js';
+
 import { HandlerRegistry, createHandlerRegistry } from './handler-registry.js';
 import { agenticReactHandler } from './handlers/agentic-react.js';
 import { deterministicForwardHandler } from './handlers/deterministic-forward.js';

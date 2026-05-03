@@ -25,6 +25,7 @@ import { getKaggleLiveStore } from './store.js';
 import { createDbKagglePlaybookResolver } from './playbook-resolver.js';
 import { createKaggleRoleHandlers } from './role-handlers.js';
 import { createKaggleAttentionPolicy } from './agents.js';
+import { resolveAttentionPolicyFromDb } from '@weaveintel/live-agents-runtime';
 
 export interface StartKaggleHeartbeatOptions {
   db: DatabaseAdapter;
@@ -41,6 +42,13 @@ export interface StartKaggleHeartbeatOptions {
    */
   workers?: number;
   workerIdPrefix?: string;
+  /**
+   * Phase 4: Optional DB key from `live_attention_policies.key`.
+   * When set the heartbeat uses the DB-driven factory to resolve the
+   * attention policy. When omitted (default) falls back to the Kaggle-
+   * specific `createKaggleAttentionPolicy('discoverer')` heuristic.
+   */
+  attentionPolicyKey?: string;
 }
 
 export interface KaggleHeartbeatHandle {
@@ -237,7 +245,17 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
     log: (msg) => console.log('[kaggle-heartbeat]', msg),
   });
   const actionExecutor = createActionExecutor({ taskHandlers });
-  const attentionPolicy: AttentionPolicy = createKaggleAttentionPolicy('discoverer');
+
+  // Phase 4: Resolve attention policy from DB when a key is configured;
+  // otherwise fall back to the Kaggle-specific discoverer heuristic for
+  // full backward compatibility. This lets operators switch to any DB-driven
+  // policy (e.g. 'heuristic.inbox-first', 'cron.hourly') via the admin UI
+  // without touching code.
+  const attentionPolicy: AttentionPolicy = opts.attentionPolicyKey
+    ? await resolveAttentionPolicyFromDb(opts.db, opts.attentionPolicyKey, {
+        logger: (msg) => console.log('[kaggle-heartbeat][attention-factory]', msg),
+      })
+    : createKaggleAttentionPolicy('discoverer');
 
   // Build N independent heartbeat workers. Each has its own workerId so the
   // claimNextTicks lease isolates them — a long-running ReAct loop in worker
