@@ -36,26 +36,17 @@ export interface KaggleRoleHandlersOptions {
   /** LLM used by the strategist to plan each iteration. If absent, deterministic mode is used. */
   plannerModel?: Model;
   /**
-   * Phase 1 (live-agents capability parity) — first-class per-tick model
-   * resolver. Preferred over the legacy `resolveModelForRole` callback.
-   * When both are set, `modelResolver` wins; the callback is ignored.
-   * Falls back to `plannerModel` when the resolver returns `undefined`
-   * or throws.
+   * Phase 5 (live-agents capability parity) — first-class per-tick model
+   * resolver. The strategist rebuilds its inner ReAct handler on every tick
+   * with whatever model the resolver picks (typically backed by
+   * `weaveDbModelResolver` from `@weaveintel/live-agents-runtime`). Falls
+   * back to `plannerModel` when the resolver returns `undefined` or throws.
+   *
+   * The Phase 1 alias `resolveModelForRole?: (role, hint) => Promise<Model>`
+   * was removed in Phase 5 — pass a `ModelResolver` directly. To wrap an
+   * existing per-role callback, lift it via `weaveModelResolverFromFn(...)`.
    */
   modelResolver?: ModelResolver;
-  /**
-   * @deprecated since live-agents Phase 1 — prefer `modelResolver` instead.
-   * Optional per-role per-tick model resolver. When provided, agentic role
-   * handlers call this on every invocation to pick the best model for the
-   * current task (via `@weaveintel/routing`'s SmartModelRouter). Falls back
-   * to `plannerModel` when this returns `undefined` or throws. The `hint`
-   * carries an optional task type the router uses for capability scoring
-   * (e.g. `'reasoning'`, `'coding'`, `'analysis'`).
-   */
-  resolveModelForRole?: (
-    role: 'strategist' | 'validator' | 'observer' | 'discoverer',
-    hint?: { task?: string },
-  ) => Promise<Model | undefined>;
   /**
    * Default iteration cap when no playbook matches (deterministic mode only).
    * The matched playbook's `examples.maxIterations` overrides this when present.

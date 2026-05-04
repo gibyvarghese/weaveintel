@@ -22,6 +22,9 @@ import {
   type Heartbeat,
   type AttentionPolicy,
 } from '@weaveintel/live-agents';
+// Phase 5 — model routing flows exclusively through `weaveDbModelResolver`
+// from `@weaveintel/live-agents-runtime`. The legacy `buildPlannerModel`
+// helper and `resolveModelForRole` callback have been removed.
 import type { DatabaseAdapter } from '../../db.js';
 import type { ProviderConfig } from '../../chat.js';
 import { getOrCreateModel } from '../../chat-runtime.js';
@@ -129,71 +132,6 @@ async function listAvailableModelsForRouting(
   return out;
 }
 
-/**
- * Build (best-effort) the planner LLM the strategist's ReAct loop uses.
- *
- * Resolution order:
- *   1. If an enabled `routing_policies` row exists, call `@weaveintel/routing`'s
- *      SmartModelRouter via `routeModel(...)` (the same helper chat.ts uses
- *      per request). This honors the active policy's strategy, weights,
- *      cost ceilings, capability constraints, and fallback chain — so the
- *      heartbeat respects auto routing identically to the chat path.
- *   2. Otherwise, fall back to `(defaultProvider, defaultModel)` from the
- *      ChatEngine config (legacy behaviour).
- *   3. If no provider is configured at all, returns `undefined` and the
- *      role handlers run in deterministic mode.
- *
- * Routing happens once at heartbeat startup. Every Kaggle role agent
- * (strategist, validator, observer) shares the resolved model. Per-tick
- * re-routing for per-agent `model_capability_json` overrides is handled
- * separately by `resolveLiveAgentModel()` in `../agent-model-resolver.ts`.
- */
-async function buildPlannerModel(opts: StartKaggleHeartbeatOptions): Promise<Model | undefined> {
-  // Try auto routing first. Falls through to the legacy default on any
-  // failure — routing is best-effort and never blocks heartbeat startup.
-  try {
-    const candidates = await listAvailableModelsForRouting(opts.db, opts.providers);
-    if (candidates.length > 0) {
-      const routed = await routeModel(opts.db, candidates, [], {
-        // The strategist plans multi-step ReAct sequences with tool calls.
-        // Tag the routing request so capability-aware policies can pick a
-        // tool-capable model from the active candidate set.
-        taskType: 'reasoning',
-        prompt: 'kaggle-strategist-planner',
-      });
-      if (routed) {
-        const cfg = opts.providers[routed.provider];
-        if (cfg) {
-          const model = await getOrCreateModel(routed.provider, routed.modelId, cfg);
-          console.log(
-            `[kaggle-heartbeat] planner routed via SmartModelRouter → ${routed.provider}/${routed.modelId}` +
-              (routed.taskKey ? ` (task=${routed.taskKey})` : '') +
-              (routed.experimentName ? ` (experiment=${routed.experimentName})` : ''),
-          );
-          return model;
-        }
-      }
-    }
-  } catch (err) {
-    console.warn(
-      '[kaggle-heartbeat] auto-routing failed, falling back to default provider/model:',
-      err instanceof Error ? err.message : String(err),
-    );
-  }
-
-  // Legacy fallback: pinned (defaultProvider, defaultModel) — used only when
-  // no active routing policy exists or routing fails.
-  const provider = opts.defaultProvider;
-  const cfg = opts.providers[provider];
-  if (!cfg) return undefined;
-  try {
-    const model = await getOrCreateModel(provider, opts.defaultModel, cfg);
-    console.log(`[kaggle-heartbeat] planner using default ${provider}/${opts.defaultModel} (no routing policy active)`);
-    return model;
-  } catch {
-    return undefined;
-  }
-}
 
 /**
  * Scan every kaggle agent across active runs and ensure a SCHEDULED tick
@@ -344,23 +282,21 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
 
   const store = await getKaggleLiveStore();
   const playbookResolver = createDbKagglePlaybookResolver(opts.db);
-  const plannerModel = await buildPlannerModel(opts);
 
   // ---------------------------------------------------------------------
-  // Per-tick model routing.
+  // Per-tick model routing — Phase 5 (live-agents capability parity).
   //
-  // Phase 2 (live-agents capability parity) — switched from a hand-rolled
-  // closure to `weaveDbModelResolver` from `@weaveintel/live-agents-runtime`.
-  // The runtime resolver owns the listCandidates → routeModel → getModel
-  // pipeline and the per-tick fallback contract. We just inject geneweave's
-  // routing brain (`routeModel`), candidate enumerator
-  // (`listAvailableModelsForRouting`), and model factory
-  // (`getOrCreateModel`) so no DB types leak into the package.
+  // All routing flows through `weaveDbModelResolver` from
+  // `@weaveintel/live-agents-runtime`. The runtime resolver owns the
+  // listCandidates → routeModel → getModel pipeline; we inject geneweave's:
+  //   • candidate enumerator (`listAvailableModelsForRouting`)
+  //   • routing brain (`routeModel`)
+  //   • model factory (`getOrCreateModel`)
+  // so no DB types leak into the package.
   //
-  // The legacy `resolveModelForRole(role, hint)` callback is preserved
-  // below for back-compat (kaggle role-handlers' strategist.ts still
-  // accepts it). Phase 5 of the plan will remove it once the role-handlers
-  // are migrated to consume `modelResolver` exclusively.
+  // The legacy `buildPlannerModel()` and `resolveModelForRole(role, hint)`
+  // shim were removed in Phase 5 — `createKaggleRoleHandlers` now consumes
+  // `modelResolver` exclusively.
   // ---------------------------------------------------------------------
   const dbModelResolver = weaveDbModelResolver({
     listCandidates: () => listAvailableModelsForRouting(opts.db, opts.providers),
@@ -391,26 +327,8 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
     log: (msg) => console.log('[kaggle-heartbeat]', msg),
   });
 
-  // Legacy back-compat shim: kaggle role-handlers still accept a per-role
-  // callback. Delegate through the new resolver so behaviour is identical
-  // and there is exactly one routing path. Returns `undefined` on any
-  // failure → handler falls back to the startup-resolved `plannerModel`.
-  const resolveModelForRole = async (
-    role: 'strategist' | 'validator' | 'observer' | 'discoverer',
-    hint?: { task?: string },
-  ): Promise<Model | undefined> => {
-    return dbModelResolver.resolve({
-      role,
-      capability: hint?.task ? { task: hint.task } : undefined,
-    });
-  };
-
   const taskHandlers = createKaggleRoleHandlers({
-    plannerModel,
-    // Phase 2 — pass the resolver directly. strategist.ts prefers
-    // `modelResolver` over `resolveModelForRole` when both are present.
     modelResolver: dbModelResolver,
-    resolveModelForRole,
     playbookResolver,
     db: opts.db,
     log: (msg) => console.log('[kaggle-heartbeat]', msg),
@@ -489,7 +407,7 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
   ticker.unref();
 
   console.log(
-    `[kaggle-heartbeat] started (workers=${workerCount} intervalMs=${intervalMs} planner=${plannerModel ? 'agentic' : 'deterministic'})`,
+    `[kaggle-heartbeat] started (workers=${workerCount} intervalMs=${intervalMs} planner=agentic[modelResolver])`,
   );
 
   return {

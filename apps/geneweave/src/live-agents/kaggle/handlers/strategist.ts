@@ -15,18 +15,18 @@ import {
 /** Agentic strategist — wraps the package-level agentic handler and emits
  *  its final summary to the submitter so the pipeline-completion check still fires.
  *
- *  Per-tick model routing: when `opts.resolveModelForRole` is configured,
- *  the inner ReAct handler is rebuilt on every invocation with the model
- *  the router picks for the strategist's reasoning task. This lets the
- *  framework rotate models based on health/cost on every tick — e.g. when
- *  one provider rate-limits or runs out of credit, the next tick picks a
- *  different one. When no resolver is configured, falls back to the
- *  startup-time `plannerModel`. */
+ *  Per-tick model routing (Phase 5): the inner ReAct handler is rebuilt on
+ *  every invocation with the model `opts.modelResolver` picks for the
+ *  strategist's reasoning task. This lets the framework rotate models based
+ *  on health/cost on every tick — when one provider rate-limits or runs out
+ *  of credit, the next tick picks a different one. When `opts.plannerModel`
+ *  is set (e.g. tests, single-model deployments) it is used as a static
+ *  fallback whenever the resolver returns `undefined` or throws. */
 export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): TaskHandler {
   const { opts, adapter, log } = ctx;
-  if (!opts.plannerModel && !opts.resolveModelForRole && !opts.modelResolver) {
+  if (!opts.plannerModel && !opts.modelResolver) {
     throw new Error(
-      'createStrategistAgenticWithHandoff requires opts.plannerModel, opts.modelResolver, or opts.resolveModelForRole',
+      'createStrategistAgenticWithHandoff requires opts.plannerModel or opts.modelResolver',
     );
   }
   const creds = resolveCreds(opts);
@@ -50,8 +50,6 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
 
   return async (action, context, execCtx) => {
     let inner = staticInner;
-    // Prefer the Phase 1 ModelResolver slot when present; fall back to the
-    // legacy `resolveModelForRole` callback for backwards compatibility.
     if (opts.modelResolver) {
       try {
         const routed = await opts.modelResolver.resolve({
@@ -62,22 +60,6 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
         });
         if (routed) {
           inner = buildInner(routed);
-          const routedId =
-            (routed as unknown as { id?: string }).id ??
-            (routed as unknown as { modelId?: string }).modelId ??
-            'unknown';
-          log(`per-tick model resolved (modelResolver) → ${routedId}`);
-        }
-      } catch (err) {
-        log(
-          `!! per-tick modelResolver failed; using static planner: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    } else if (opts.resolveModelForRole) {
-      try {
-        const routed = await opts.resolveModelForRole('strategist', { task: 'reasoning' });
-        if (routed) {
-          inner = buildInner(routed);
           // Log the per-tick selection so operators can see SmartModelRouter
           // rotating models across ticks (especially useful when a provider
           // rate-limits and routing skips it on the next tick).
@@ -85,10 +67,12 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
             (routed as unknown as { id?: string }).id ??
             (routed as unknown as { modelId?: string }).modelId ??
             'unknown';
-          log(`per-tick model routed → ${routedId}`);
+          log(`per-tick model resolved → ${routedId}`);
         }
       } catch (err) {
-        log(`!! per-tick model routing failed; using static planner: ${err instanceof Error ? err.message : String(err)}`);
+        log(
+          `!! per-tick modelResolver failed; using static planner: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
     if (!inner) {

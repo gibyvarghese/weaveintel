@@ -53,12 +53,12 @@ export function createKaggleRoleHandlers(opts: KaggleRoleHandlersOptions = {}): 
   const ctx: SharedHandlerContext = { opts, adapter, log, getOpDefaults };
 
   // ── AGENTIC MODE ──────────────────────────────────────────
-  // Agentic mode is enabled when any of the following is configured:
-  //   - `plannerModel` (startup-resolved pinned model)
-  //   - `modelResolver` (Phase 1 first-class per-tick resolver)
-  //   - `resolveModelForRole` (legacy callback, deprecated alias)
-  // The strategist's wrapper picks between them per call.
-  if (opts.plannerModel || opts.modelResolver || opts.resolveModelForRole) {
+  // Agentic mode is enabled when either of the following is configured:
+  //   - `plannerModel` (startup-resolved pinned model — parity with `weaveAgent`)
+  //   - `modelResolver` (Phase 5 first-class per-tick resolver, preferred)
+  // The strategist's wrapper picks the resolver per call and falls back to
+  // the pinned `plannerModel` when the resolver returns `undefined`.
+  if (opts.plannerModel || opts.modelResolver) {
     return {
       'Competition Discoverer': createDiscovererAgentic(ctx),
       'Approach Ideator': createStrategistAgenticWithHandoff(ctx),
