@@ -6537,8 +6537,15 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createLiveAgentDefinition(row: Omit<LiveAgentDefinitionRow, 'created_at' | 'updated_at'>): Promise<LiveAgentDefinitionRow> {
     this.d.prepare(
-      `INSERT INTO live_agent_definitions (id, mesh_def_id, role_key, name, role_label, persona, objectives, success_indicators, ordering, enabled, model_capability_json, model_routing_policy_key, model_pinned_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(row.id, row.mesh_def_id, row.role_key, row.name, row.role_label, row.persona, row.objectives, row.success_indicators, row.ordering, row.enabled, row.model_capability_json ?? null, row.model_routing_policy_key ?? null, row.model_pinned_id ?? null);
+      `INSERT INTO live_agent_definitions (id, mesh_def_id, role_key, name, role_label, persona, objectives, success_indicators, ordering, enabled, model_capability_json, model_routing_policy_key, model_pinned_id, default_handler_kind, default_handler_config_json, default_tool_catalog_keys, default_attention_policy_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      row.id, row.mesh_def_id, row.role_key, row.name, row.role_label, row.persona,
+      row.objectives, row.success_indicators, row.ordering, row.enabled,
+      row.model_capability_json ?? null, row.model_routing_policy_key ?? null,
+      row.model_pinned_id ?? null,
+      row.default_handler_kind ?? null, row.default_handler_config_json ?? null,
+      row.default_tool_catalog_keys ?? null, row.default_attention_policy_key ?? null,
+    );
     return (this.d.prepare('SELECT * FROM live_agent_definitions WHERE id = ?').get(row.id) as LiveAgentDefinitionRow);
   }
 

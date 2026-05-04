@@ -142,6 +142,14 @@ export function registerLiveAgentDefinitionRoutes(
       success_indicators: String(body['success_indicators'] ?? ''),
       ordering: Number(body['ordering'] ?? 0),
       enabled: asBool(body['enabled'], 1),
+      // Phase 3.5 + Phase 5 routing/provisioner defaults (all optional).
+      model_capability_json:        body['model_capability_json']        != null ? String(body['model_capability_json'])        : null,
+      model_routing_policy_key:     body['model_routing_policy_key']     != null ? String(body['model_routing_policy_key'])     : null,
+      model_pinned_id:              body['model_pinned_id']              != null ? String(body['model_pinned_id'])              : null,
+      default_handler_kind:         body['default_handler_kind']         != null ? String(body['default_handler_kind'])         : null,
+      default_handler_config_json:  body['default_handler_config_json']  != null ? String(body['default_handler_config_json'])  : null,
+      default_tool_catalog_keys:    body['default_tool_catalog_keys']    != null ? String(body['default_tool_catalog_keys'])    : null,
+      default_attention_policy_key: body['default_attention_policy_key'] != null ? String(body['default_attention_policy_key']) : null,
     };
     const created = await db.createLiveAgentDefinition(row);
     json(res, 201, { 'live-agent-definition': created });
@@ -163,6 +171,16 @@ export function registerLiveAgentDefinitionRoutes(
     if (body['success_indicators'] !== undefined) patch.success_indicators = String(body['success_indicators']);
     if (body['ordering'] !== undefined) patch.ordering = Number(body['ordering']);
     if (body['enabled'] !== undefined) patch.enabled = asBool(body['enabled']);
+    // Phase 3.5 + Phase 5 default fields
+    for (const k of [
+      'model_capability_json','model_routing_policy_key','model_pinned_id',
+      'default_handler_kind','default_handler_config_json',
+      'default_tool_catalog_keys','default_attention_policy_key',
+    ] as const) {
+      if (body[k] !== undefined) {
+        (patch as Record<string, unknown>)[k] = body[k] === null || body[k] === '' ? null : String(body[k]);
+      }
+    }
     await db.updateLiveAgentDefinition(params['id']!, patch);
     const item = await db.getLiveAgentDefinition(params['id']!);
     json(res, 200, { 'live-agent-definition': item });

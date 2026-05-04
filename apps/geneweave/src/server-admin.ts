@@ -48,6 +48,7 @@ import {
   registerLiveAgentDefinitionRoutes,
   registerLiveMeshDelegationEdgeRoutes,
   registerLiveMeshRoutes,
+  registerLiveMeshProvisionerRoutes,
   registerLiveAgentRoutes,
   registerLiveAgentHandlerBindingRoutes,
   registerLiveAgentToolBindingRoutes,
@@ -1309,6 +1310,10 @@ export function registerAdminRoutes(
   registerLiveAttentionPolicyRoutes(router, db, adminHelpers);
   // Provisioned meshes/agents + their handler & tool bindings
   registerLiveMeshRoutes(router, db, adminHelpers);
+  // Phase 5: generic provisioner endpoint (POST /api/admin/live-meshes/provision).
+  // Mounted on the same router so the path lives under the existing live-meshes
+  // admin surface area without colliding with the CRUD routes (CRUD uses :id).
+  registerLiveMeshProvisionerRoutes(router, db, adminHelpers);
   registerLiveAgentRoutes(router, db, adminHelpers);
   registerLiveAgentHandlerBindingRoutes(router, db, adminHelpers);
   registerLiveAgentToolBindingRoutes(router, db, adminHelpers);

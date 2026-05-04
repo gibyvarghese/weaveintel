@@ -76,3 +76,43 @@ export function createDefaultHandlerRegistry(): HandlerRegistry {
   reg.register(deterministicForwardHandler);
   return reg;
 }
+
+// Phase 5 — Generic mesh provisioner + supervisor + run-state bridge.
+// Replaces bespoke per-domain `bootXxxMesh()` and `startXxxHeartbeat()`
+// with mesh-agnostic equivalents driven entirely by DB blueprints.
+export {
+  provisionMesh,
+  type ProvisionMeshDb,
+  type ProvisionMeshOptions,
+  type ProvisionMeshResult,
+  type ProvisionAccountSpec,
+  type IdGenerator,
+  type MeshDefinitionRowLike,
+  type AgentDefinitionRowLike,
+  type MeshDelegationEdgeRowLike,
+  type ToolCatalogRowLike as ProvisionToolCatalogRowLike,
+  type LiveMeshRowLike,
+  type LiveAgentRowLike,
+  type LiveAgentHandlerBindingRowLike,
+  type LiveAgentToolBindingRowLike,
+} from './mesh-provisioner.js';
+
+export {
+  bridgeRunState,
+  type RunBridgeDb,
+  type BridgeRunStateOptions,
+  type LiveRunRowLike,
+  type LiveAgentRowLike as RunBridgeAgentRowLike,
+  type LiveRunStepRowLike,
+  type LiveRunEventRowLike,
+} from './run-bridge.js';
+
+export {
+  createHeartbeatSupervisor,
+  type HeartbeatSupervisorOptions,
+  type HeartbeatSupervisorHandle,
+  type SupervisorDb,
+  type SupervisorAgentRowLike,
+  type SupervisorMeshRowLike,
+  type SupervisorHandlerBindingRowLike,
+} from './heartbeat-supervisor.js';

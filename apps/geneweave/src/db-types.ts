@@ -1854,6 +1854,14 @@ export interface LiveAgentDefinitionRow {
   model_routing_policy_key?: string | null;
   // Escape hatch: pin a specific model id for reproducibility runs.
   model_pinned_id?: string | null;
+  // ─── Phase 5 — Generic provisioner defaults ─────────────────
+  // Used by `provisionMesh()` to seed `live_agent_handler_bindings`,
+  // `live_agent_tool_bindings`, and the runtime `attention_policy_key`
+  // when an operator instantiates this blueprint.
+  default_handler_kind?: string | null;        // e.g. 'agentic.react'
+  default_handler_config_json?: string | null; // JSON config for that kind
+  default_tool_catalog_keys?: string | null;   // JSON array of tool_key strings
+  default_attention_policy_key?: string | null;// e.g. 'heuristic.inbox-first'
   created_at: string;
   updated_at: string;
 }

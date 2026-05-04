@@ -45,6 +45,8 @@ export {
   registerLiveAgentHandlerBindingRoutes,
   registerLiveAgentToolBindingRoutes,
 } from './live-runtime-meshes.js';
+// Phase 5: generic mesh provisioner (POST /api/admin/live-meshes/provision)
+export { registerLiveMeshProvisionerRoutes } from './live-mesh-provisioner.js';
 export {
   registerLiveHandlerKindRoutes,
   registerLiveAttentionPolicyRoutes,

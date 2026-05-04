@@ -47,6 +47,8 @@ import {
   syncHandlerKindsToDb,
 } from './live-agents/handler-registry-boot.js';
 import { startKaggleHeartbeat, type KaggleHeartbeatHandle } from './live-agents/kaggle/heartbeat-runner.js';
+import { startGenericSupervisorIfEnabled } from './live-agents/generic-supervisor-boot.js';
+import type { HeartbeatSupervisorHandle } from '@weaveintel/live-agents-runtime';
 
 export type { PricingSyncReport };
 
@@ -208,6 +210,21 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     console.error('[geneweave] Failed to start Kaggle heartbeat:', err instanceof Error ? err.message : String(err));
   }
 
+  // 5d. Phase 5: optional generic supervisor (mesh-agnostic). Off by default;
+  // enable with LIVE_AGENTS_GENERIC_RUNTIME=1. Coexists with the Kaggle
+  // heartbeat; safe to leave off if no generic mesh has been provisioned.
+  let genericSupervisor: HeartbeatSupervisorHandle | null = null;
+  try {
+    genericSupervisor = await startGenericSupervisorIfEnabled({
+      db,
+      providers: activeProviders,
+      defaultProvider: config.defaultProvider,
+      defaultModel: config.defaultModel,
+    });
+  } catch (err) {
+    console.error('[geneweave] Failed to start generic supervisor:', err instanceof Error ? err.message : String(err));
+  }
+
   // 5. HTTP server
   const server = createGeneWeaveServer({
     db,
@@ -238,6 +255,9 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     async stop() {
       if (kaggleHeartbeat) {
         try { await kaggleHeartbeat.stop(); } catch { /* non-fatal */ }
+      }
+      if (genericSupervisor) {
+        try { await genericSupervisor.stop(); } catch { /* non-fatal */ }
       }
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
