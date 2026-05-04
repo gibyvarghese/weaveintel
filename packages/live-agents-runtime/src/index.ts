@@ -164,3 +164,19 @@ export {
   type SupervisorMeshRowLike,
   type SupervisorHandlerBindingRowLike,
 } from './heartbeat-supervisor.js';
+
+// Phase 6 — One-call DB hydration entry points. These compose every
+// Phase 1-5 primitive into a single user-facing constructor mirroring
+// the `weave*` naming convention from `@weaveintel/live-agents`.
+export {
+  weaveLiveMeshFromDb,
+  type WeaveLiveMeshFromDbOptions,
+  type WeaveLiveMeshFromDbResult,
+  type WeaveLiveMeshProvisionOptions,
+} from './weave-live-mesh-from-db.js';
+export {
+  weaveLiveAgentFromDb,
+  type WeaveLiveAgentFromDbOptions,
+  type WeaveLiveAgentFromDbResult,
+} from './weave-live-agent-from-db.js';
+export type { LiveAgentsDb, SingleAgentReaderDb } from './db-types.js';

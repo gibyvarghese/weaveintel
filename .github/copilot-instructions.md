@@ -463,3 +463,18 @@ These rules govern any change inside `@weaveintel/live-agents`, `@weaveintel/liv
 - The strategist handler (`handlers/strategist.ts`) has a single per-tick model resolution path: `opts.modelResolver.resolve({ role: 'strategist', agentId, meshId, capability: { task: 'reasoning' } })` → on success, rebuild inner ReAct handler with the routed model; on `undefined`/throw, fall back to the static `plannerModel` inner handler.
 - Net ~140 LOC removed from the kaggle folder; behavior unchanged. Verified via `npx tsc -b apps/geneweave` (clean) and `vitest run` against `@weaveintel/live-agents` (69 tests) and `@weaveintel/live-agents-runtime` (20 tests).
 
+### Phase 6 — `weaveLiveMeshFromDb` / `weaveLiveAgentFromDb` (complete)
+- `weaveLiveMeshFromDb(db, opts)` and `weaveLiveAgentFromDb(db, agentId, opts)` (in `@weaveintel/live-agents-runtime`) are the **canonical user-facing entry points** for booting a DB-driven mesh or hydrating a single agent. They compose every Phase 1–5 primitive (provisioner + handler registry + model resolver + attention policy + heartbeat supervisor + run-state bridge) into one call. New apps MUST use these — do not write bespoke `bootXxxMesh()` wrappers.
+- `LiveAgentsDb` (in `db-types.ts`) is the **single aggregated structural interface** these entry points consume. It is the intersection of `ProvisionMeshDb & SupervisorDb & AttentionPolicyDb & AgentToolBindingDb`. The runtime package never imports geneweave types — geneweave's `DatabaseAdapter` satisfies the contract structurally.
+- `SingleAgentReaderDb` is the narrow read-only slice for `weaveLiveAgentFromDb` — only `listLiveAgents` + `listLiveAgentHandlerBindings` + the two tool-binding methods are required. Use this for tests and ad-hoc invocation.
+- `weaveLiveMeshFromDb` has two operating modes:
+  - **Boot existing meshes** (default): supervisor starts and ticks every active mesh in the DB. The common case for long-running services where operators manage meshes via the admin UI.
+  - **Provision then boot**: pass `provision: { meshDefId | meshDefKey, tenantId, ownerHumanId, ... }` and the function calls `provisionMesh()` first, then boots. Returns the `ProvisionMeshResult` on `result.provisioned`.
+- Composition order inside `weaveLiveMeshFromDb`: (1) optional `provisionMesh` → (2) build/extend `HandlerRegistry` (caller-supplied wins; otherwise `createDefaultHandlerRegistry()` + `extraHandlerKinds`) → (3) `createHeartbeatSupervisor` with `modelResolver`, `policy`, `attentionPolicyKey`, `extraContextFor`, etc. forwarded as-is. Returns `{ provisioned, handlerRegistry, supervisor, stop }` with idempotent `stop()`.
+- `weaveLiveAgentFromDb` returns `{ agent, binding, context, handler }` — the handler is fully runnable. Throws on unknown agent id, no enabled binding, or unknown handler kind.
+- Conditional spreads (`...(opt ? { opt } : {})`) are mandatory in both files because the runtime package uses `exactOptionalPropertyTypes`. Never assign `undefined` to an optional field.
+- Tests: `packages/live-agents-runtime/src/weave-live-mesh-from-db.test.ts` (6 tests — boot, custom registry, single-agent hydration, three error paths). All 26 runtime-package tests pass.
+- Example: `examples/96-live-agents-phase6-mesh-from-db.ts` runs end-to-end with an in-memory stub DB and `weaveInMemoryStateStore` — no SQLite, no LLM, no external services.
+- GeneWeave migration is **incremental**: the existing `apps/geneweave/src/live-agents/generic-supervisor-boot.ts` continues to compose primitives directly (still works). New consumers (kaggle's next refactor, future domain meshes) MUST adopt `weaveLiveMeshFromDb`.
+
+
