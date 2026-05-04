@@ -24,7 +24,7 @@
  */
 
 import {
-  createHeartbeatSupervisor,
+  weaveLiveMeshFromDb,
   weaveDbLiveAgentPolicy,
   weaveDbModelResolver,
   type HeartbeatSupervisorHandle,
@@ -156,8 +156,12 @@ export async function startGenericSupervisorIfEnabled(
     return null;
   };
 
-  const handle = await createHeartbeatSupervisor({
-    db: opts.db,
+  // ─── Phase 7 (live-agents capability parity) ────────────────
+  // Single-call mesh hydration via `weaveLiveMeshFromDb` — replaces the
+  // direct `createHeartbeatSupervisor` call. Same primitives, one entry
+  // point. The runtime package owns composition order; this app only
+  // injects geneweave-specific resolvers/factories.
+  const meshHandle = await weaveLiveMeshFromDb(opts.db, {
     store,
     handlerRegistry: registry,
     modelFactory,
@@ -198,5 +202,5 @@ export async function startGenericSupervisorIfEnabled(
   });
 
   console.log('[live-supervisor] generic runtime enabled (LIVE_AGENTS_GENERIC_RUNTIME=1)');
-  return handle;
+  return meshHandle.supervisor;
 }
