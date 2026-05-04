@@ -571,18 +571,48 @@ export const liveKaggleAdapter: KaggleAdapter = {
 
   async pushKernel(creds, input) {
     const lang = input.language ?? 'python';
+    // Kaggle's /kernels/push REST endpoint expects:
+    //   - `id` is a numeric kernel id (0 for new)
+    //   - `slug` is the bare kernel slug (e.g. "my-kernel")
+    //   - owner is inferred from the authenticated user; pass `userName` to override
+    const slugParts = input.slug.includes('/') ? input.slug.split('/') : [creds.username, input.slug];
+    const ownerSlug = slugParts[0] ?? creds.username;
+    const bareSlug = slugParts[1] ?? input.slug;
+    // Kaggle's protobuf-backed kernels API expects snake_case field names.
+    // We also include the legacy camelCase aliases for backwards compatibility
+    // with older REST endpoints that still accept them.
+    const datasetSources = input.datasetSources ?? [];
+    const competitionSources = input.competitionSource ? [input.competitionSource] : [];
+    const kernelSources = input.kernelSources ?? [];
+    const modelSources = input.modelSources ?? [];
     const body = {
-      slug: input.slug,
-      newTitle: input.title,
+      id: 0,
+      slug: bareSlug,
+      // snake_case (current API)
+      user_name: ownerSlug,
+      new_title: input.title,
       text: input.source,
       language: lang,
+      kernel_type: input.kernelType,
+      is_private: input.isPrivate ?? true,
+      enable_gpu: input.enableGpu ?? false,
+      enable_internet: input.enableInternet ?? false,
+      dataset_data_sources: datasetSources,
+      competition_data_sources: competitionSources,
+      kernel_data_sources: kernelSources,
+      model_data_sources: modelSources,
+      category_ids: [],
+      // camelCase aliases (legacy REST endpoint compatibility)
+      userName: ownerSlug,
+      newTitle: input.title,
       kernelType: input.kernelType,
       isPrivate: input.isPrivate ?? true,
       enableGpu: input.enableGpu ?? false,
       enableInternet: input.enableInternet ?? false,
-      datasetDataSources: input.datasetSources ?? [],
-      competitionDataSources: input.competitionSource ? [input.competitionSource] : [],
-      kernelDataSources: input.kernelSources ?? [],
+      datasetDataSources: datasetSources,
+      competitionDataSources: competitionSources,
+      kernelDataSources: kernelSources,
+      modelDataSources: modelSources,
       categoryIds: [],
     };
     const data = await kaggleFetch(creds, `/kernels/push`, {

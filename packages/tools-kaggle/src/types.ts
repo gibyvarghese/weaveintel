@@ -121,6 +121,8 @@ export interface KaggleKernelPushInput {
   competitionSource?: string;
   /** Optional kernel refs to attach as "kernel sources". */
   kernelSources?: string[];
+  /** Optional Kaggle Models refs to attach (owner/model/framework/variation/version). */
+  modelSources?: string[];
   /** Whether to enable internet inside the kernel. Default false. */
   enableInternet?: boolean;
   /** Whether to enable a GPU. Default false. */

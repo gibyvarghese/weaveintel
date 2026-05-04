@@ -35,3 +35,9 @@ live-agents.db-wal
 
 # Local scratch
 content.txt
+
+# ARC-AGI-3 local artifacts
+.arc-venv/
+data/arc-prize-2026/
+examples/arc-agi-3/runs/
+__pycache__/
