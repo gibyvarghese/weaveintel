@@ -22,7 +22,8 @@
   "dependencies": {
     "@weaveintel/agents": "*",
     "@weaveintel/core": "*",
-    "@weaveintel/live-agents": "*"
+    "@weaveintel/live-agents": "*",
+    "@weaveintel/tools": "*"
   },
   "license": "MIT"
 }

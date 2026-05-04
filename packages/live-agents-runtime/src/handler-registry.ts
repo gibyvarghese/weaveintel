@@ -32,7 +32,11 @@
  */
 
 import type { Model, ToolRegistry } from '@weaveintel/core';
-import type { ModelResolver, TaskHandler } from '@weaveintel/live-agents';
+import type {
+  LiveAgentPolicy,
+  ModelResolver,
+  TaskHandler,
+} from '@weaveintel/live-agents';
 
 /**
  * The DB row data needed to construct a handler instance for a single agent.
@@ -88,6 +92,15 @@ export interface HandlerContext {
   modelResolver?: ModelResolver;
   /** Optional resolved tool registry for the agent. */
   tools?: ToolRegistry;
+  /**
+   * Phase 3 (live-agents capability parity) — first-class per-tick policy
+   * bundle. When supplied, LLM-driven handler kinds (`agentic.react`) wrap
+   * the per-tick `tools` registry with policy enforcement before calling
+   * the ReAct loop. Build with `weaveLiveAgentPolicy({ ... })` from
+   * `@weaveintel/live-agents`, or `weaveDbLiveAgentPolicy({ ... })` from
+   * this package for DB-backed enforcement.
+   */
+  policy?: LiveAgentPolicy;
   /** Resolve a DB-stored prompt body by key (skill key / fragment key). */
   resolveSystemPrompt?: (key: string) => Promise<string | null>;
 }

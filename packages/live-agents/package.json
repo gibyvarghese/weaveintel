@@ -29,6 +29,7 @@
     "@weaveintel/memory": "*",
     "@weaveintel/mcp-client": "*",
     "@weaveintel/identity": "*",
+    "@weaveintel/tools": "*",
     "better-sqlite3": "^11.10.0",
     "mongodb": "^6.16.0",
     "pg": "^8.13.1",

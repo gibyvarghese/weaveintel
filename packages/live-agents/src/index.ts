@@ -103,6 +103,13 @@ export type {
   ModelResolverContext,
   ResolvedModel,
 } from './model-resolver.js';
+// Phase 3 — first-class capability slot for tool-policy enforcement.
+// Mirrors `weaveAgent`'s `policy: AgentPolicy` slot. Composes the four
+// tool primitives from `@weaveintel/tools` (resolver, approval, rate-limit,
+// audit). The DB-backed `weaveDbLiveAgentPolicy` lives in
+// `@weaveintel/live-agents-runtime`.
+export { weaveLiveAgentPolicy, hasAnyPolicyCapability } from './policy.js';
+export type { LiveAgentPolicy } from './policy.js';
 // Phase 2.5 — live-agents-owned LLM loop scaffold. New consumers should
 // prefer these primitives over importing from `@weaveintel/agents`.
 export {

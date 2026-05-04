@@ -25,6 +25,7 @@
 
 import {
   createHeartbeatSupervisor,
+  weaveDbLiveAgentPolicy,
   weaveDbModelResolver,
   type HeartbeatSupervisorHandle,
 } from '@weaveintel/live-agents-runtime';
@@ -36,6 +37,9 @@ import { routeModel } from '../chat-routing-utils.js';
 import { getGenericLiveStore } from './generic-store.js';
 import { getHandlerRegistry } from './handler-registry-boot.js';
 import { newUUIDv7 } from '../lib/uuid.js';
+import { DbToolPolicyResolver, DbToolRateLimiter } from '../tool-policy-resolver.js';
+import { DbToolAuditEmitter } from '../tool-audit-emitter.js';
+import { DbToolApprovalGate } from '../tool-approval-gate.js';
 
 export interface StartGenericSupervisorOptions {
   db: DatabaseAdapter;
@@ -158,6 +162,20 @@ export async function startGenericSupervisorIfEnabled(
     handlerRegistry: registry,
     modelFactory,
     modelResolver,
+    // ─── Phase 3 (live-agents capability parity) ────────────────
+    // First-class per-tick policy bundle. Mirrors the DB-backed
+    // primitives already wired into ChatEngine.toolOptions so every
+    // live-agent tool call (via `agentic.react`) is gated by the same
+    // resolver/approval/rate-limit/audit pipeline operators administer
+    // through the admin tabs. Adapter instances are stateless w.r.t.
+    // each other (each holds only the DB ref), so reusing them across
+    // chat + live-agents is safe.
+    policy: weaveDbLiveAgentPolicy({
+      policyResolver: new DbToolPolicyResolver(opts.db),
+      approvalGate: new DbToolApprovalGate(opts.db),
+      rateLimiter: new DbToolRateLimiter(opts.db),
+      auditEmitter: new DbToolAuditEmitter(opts.db),
+    }),
     resolveSystemPrompt,
     // Inject per-tick context extras for handlers that need DB access:
     //   - human.approval needs `approvalDb` + `newApprovalId`.

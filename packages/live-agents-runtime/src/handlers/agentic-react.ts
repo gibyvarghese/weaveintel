@@ -72,6 +72,7 @@ function buildAgenticReact(ctx: HandlerContext): TaskHandler {
     name: ctx.agent.name || ctx.agent.roleKey,
     ...(ctx.model ? { model: ctx.model } : {}),
     ...(ctx.modelResolver ? { modelResolver: ctx.modelResolver } : {}),
+    ...(ctx.policy ? { policy: ctx.policy } : {}),
     role: ctx.agent.roleKey,
     maxSteps: cfg.maxSteps ?? 60,
     log: ctx.log,

@@ -25,6 +25,13 @@ import {
   type ModelResolver,
   type ModelResolverContext,
 } from './model-resolver.js';
+import { hasAnyPolicyCapability, type LiveAgentPolicy } from './policy.js';
+import {
+  createPolicyEnforcedRegistry,
+  DEFAULT_TOOL_POLICY,
+  type PolicyResolutionContext,
+  type ToolPolicyResolver,
+} from '@weaveintel/tools';
 
 /** The most-recent inbound TASK message for an agent, or `null` when the
  *  agent has no pending TASK in its inbox. */
@@ -89,6 +96,26 @@ export interface AgenticTaskHandlerOptions {
    *  Lets the handler tell routing what kind of task this tick is
    *  (e.g. `{ task: 'reasoning', toolUse: true }`). */
   modelCapability?: ModelCapabilitySpec;
+  /**
+   * Per-tick policy bundle — first-class capability slot mirroring how
+   * `weaveAgent` accepts an `AgentPolicy`, but rebuilt fresh on every tick.
+   *
+   * When set, the handler wraps the per-tick `tools` registry returned
+   * from `prepare()` with `createPolicyEnforcedRegistry(...)` using the
+   * four primitives in {@link LiveAgentPolicy}:
+   *   - `policyResolver` — gates `enabled`, `riskLevel`, `requiresApproval`
+   *   - `approvalGate`   — blocks tools pending human approval
+   *   - `rateLimiter`    — bounds calls per (tool, scope) per minute
+   *   - `auditEmitter`   — persists every invocation outcome
+   *
+   * Build with `weaveLiveAgentPolicy({ ... })` from `@weaveintel/live-agents`,
+   * or for DB-backed enforcement use `weaveDbLiveAgentPolicy(...)` from
+   * `@weaveintel/live-agents-runtime`.
+   *
+   * Omit to skip policy enforcement (the registry is passed straight
+   * through to the ReAct loop).
+   */
+  policy?: LiveAgentPolicy;
   /** Maximum tool-call loops in a single tick. Defaults to 60. */
   maxSteps?: number;
   /** Called once per tick to resolve prompt + tools + user goal. */
@@ -116,8 +143,16 @@ export async function loadLatestInboundTask(
   return m ? { subject: m.subject, body: m.body } : null;
 }
 
-function defaultSummarize(result: AgenticRunResult): string {
-  const last = [...result.steps].reverse().find((s) => s.type === 'response');
+/** Permissive resolver used when a `LiveAgentPolicy` ships rate-limit /
+ *  approval / audit primitives without supplying a `policyResolver` of its
+ *  own. Returns the package default policy verbatim. */
+const permissivePolicyResolver: ToolPolicyResolver = {
+  async resolve() {
+    return DEFAULT_TOOL_POLICY;
+  },
+};
+
+function defaultSummarize(result: AgenticRunResult): string {  const last = [...result.steps].reverse().find((s) => s.type === 'response');
   const finalText = last?.content ?? '(no final response)';
   return [
     `status=${result.status} steps=${result.steps.length}`,
@@ -166,6 +201,43 @@ export function createAgenticTaskHandler(opts: AgenticTaskHandlerOptions): TaskH
     const prepInput: AgenticPrepareInput = { inbound, context };
     const prep = await opts.prepare(prepInput);
 
+    // Phase 3 — wrap the per-tick tool registry with policy enforcement.
+    // The wrap happens AFTER prepare() so domain code can choose its tools
+    // freely; enforcement runs on whatever it returned.
+    let effectiveTools = prep.tools;
+    if (effectiveTools && hasAnyPolicyCapability(opts.policy)) {
+      const policy = opts.policy as LiveAgentPolicy;
+      // The per-call resolution context is the default plus chat/persona
+      // scoping derived from the live-agents runtime so DbToolRateLimiter
+      // and DbToolPolicyResolver bucket correctly.
+      const resolutionContext: PolicyResolutionContext = {
+        ...(policy.defaultResolutionContext ?? {}),
+        chatId: context.agent.id,
+        agentPersona: opts.role ?? opts.name,
+      };
+      try {
+        effectiveTools = createPolicyEnforcedRegistry(effectiveTools, {
+          // policyResolver MUST be present for createPolicyEnforcedRegistry,
+          // but the runtime contract here is that any of the four primitives
+          // is independently optional. We synthesize a permissive default
+          // resolver only when the caller did not supply one — that way
+          // audit-only / rate-limit-only policies still work.
+          resolver:
+            policy.policyResolver ?? permissivePolicyResolver,
+          ...(policy.approvalGate ? { approvalGate: policy.approvalGate } : {}),
+          ...(policy.rateLimiter ? { rateLimiter: policy.rateLimiter } : {}),
+          ...(policy.auditEmitter ? { auditEmitter: policy.auditEmitter } : {}),
+          resolutionContext,
+        });
+        log(
+          `policy enforcement active (resolver=${!!policy.policyResolver} approval=${!!policy.approvalGate} rateLimit=${!!policy.rateLimiter} audit=${!!policy.auditEmitter})`,
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log(`!! failed to wrap tools with policy: ${msg}; continuing without enforcement`);
+      }
+    }
+
     // Phase 1 — resolve the model fresh per tick. The resolver runs first
     // (when configured); the pinned `opts.model` is the fallback when the
     // resolver returns `undefined` or throws.
@@ -197,7 +269,7 @@ export function createAgenticTaskHandler(opts: AgenticTaskHandlerOptions): TaskH
       loop = await runLiveReactLoop({
         name: opts.name,
         model: resolved.model,
-        ...(prep.tools ? { tools: prep.tools } : {}),
+        ...(effectiveTools ? { tools: effectiveTools } : {}),
         systemPrompt: prep.systemPrompt,
         userGoal: prep.userGoal,
         maxSteps,

@@ -5,6 +5,7 @@
   "references": [
     { "path": "../core" },
     { "path": "../agents" },
-    { "path": "../live-agents" }
+    { "path": "../live-agents" },
+    { "path": "../tools" }
   ]
 }

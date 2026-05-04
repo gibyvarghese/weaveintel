@@ -6,6 +6,7 @@
     { "path": "../core" },
     { "path": "../memory" },
     { "path": "../mcp-client" },
-    { "path": "../identity" }
+    { "path": "../identity" },
+    { "path": "../tools" }
   ]
 }

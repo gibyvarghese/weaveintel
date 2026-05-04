@@ -29,6 +29,7 @@ import {
   createHeartbeat,
   type AttentionPolicy,
   type Heartbeat,
+  type LiveAgentPolicy,
   type ModelResolver,
   type StateStore,
   type TaskHandler,
@@ -114,6 +115,16 @@ export interface HeartbeatSupervisorOptions {
    * fall back to the pinned model.
    */
   modelResolver?: ModelResolver;
+  /**
+   * Phase 3 (live-agents capability parity) — first-class policy bundle.
+   * Threaded into `HandlerContext.policy` so every `agentic.react`
+   * invocation wraps its per-tick tools registry with the four
+   * primitives (resolver, approval, rate-limit, audit) before calling
+   * the ReAct loop. Build with `weaveLiveAgentPolicy(...)` from
+   * `@weaveintel/live-agents`, or `weaveDbLiveAgentPolicy(...)` from this
+   * package for DB-backed enforcement.
+   */
+  policy?: LiveAgentPolicy;
   /** DB-backed prompt resolver, passed through to handlers. */
   resolveSystemPrompt?: (key: string) => Promise<string | null>;
   /** Optional default attention policy DB key. */
@@ -214,6 +225,7 @@ export async function createHeartbeatSupervisor(
       log: (m) => log(`[${agent.role}/${agentId.slice(0, 8)}] ${m}`),
       ...(model ? { model } : {}),
       ...(opts.modelResolver ? { modelResolver: opts.modelResolver } : {}),
+      ...(opts.policy ? { policy: opts.policy } : {}),
       ...(opts.resolveSystemPrompt ? { resolveSystemPrompt: opts.resolveSystemPrompt } : {}),
       ...(extras ?? {}),
     };

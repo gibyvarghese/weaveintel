@@ -80,6 +80,15 @@ export {
   type ModelResolvedAuditEvent,
 } from './agent-overlay-resolver.js';
 
+// Phase 3 (live-agents capability parity) — DB-backed `LiveAgentPolicy`
+// composer. Bundles geneweave's `DbToolPolicyResolver`, `DbToolApprovalGate`,
+// `DbToolRateLimiter`, `DbToolAuditEmitter` into a single policy slot
+// passed to `createHeartbeatSupervisor` (or any consumer of `HandlerContext`).
+export {
+  weaveDbLiveAgentPolicy,
+  type WeaveDbLiveAgentPolicyOptions,
+} from './db-policy.js';
+
 // Phase 4 — Attention policy factory. Converts a live_attention_policies DB
 // row into a live AttentionPolicy instance. Delegates to the shared policy
 // constructors in @weaveintel/live-agents (heuristic, cron, model kinds).
