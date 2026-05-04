@@ -19,7 +19,6 @@ import { weaveContext, type Model } from '@weaveintel/core';
 import {
   createHeartbeat,
   createActionExecutor,
-  weaveModelResolverFromFn,
   type Heartbeat,
   type AttentionPolicy,
 } from '@weaveintel/live-agents';
@@ -32,7 +31,10 @@ import { getKaggleLiveStore } from './store.js';
 import { createDbKagglePlaybookResolver } from './playbook-resolver.js';
 import { createKaggleRoleHandlers } from './role-handlers.js';
 import { createKaggleAttentionPolicy } from './agents.js';
-import { resolveAttentionPolicyFromDb } from '@weaveintel/live-agents-runtime';
+import {
+  resolveAttentionPolicyFromDb,
+  weaveDbModelResolver,
+} from '@weaveintel/live-agents-runtime';
 
 export interface StartKaggleHeartbeatOptions {
   db: DatabaseAdapter;
@@ -344,72 +346,70 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
   const playbookResolver = createDbKagglePlaybookResolver(opts.db);
   const plannerModel = await buildPlannerModel(opts);
 
-  // Per-tick per-role model resolver. Lets every agentic role pick the best
-  // model for its current task on every invocation, so when one provider
-  // rate-limits or runs out of credit the next tick automatically rotates
-  // to a different one. Mirrors the chat path's per-request `routeModel(...)`
-  // call. Returns `undefined` on any failure → handler falls back to the
-  // startup-resolved `plannerModel`.
+  // ---------------------------------------------------------------------
+  // Per-tick model routing.
+  //
+  // Phase 2 (live-agents capability parity) — switched from a hand-rolled
+  // closure to `weaveDbModelResolver` from `@weaveintel/live-agents-runtime`.
+  // The runtime resolver owns the listCandidates → routeModel → getModel
+  // pipeline and the per-tick fallback contract. We just inject geneweave's
+  // routing brain (`routeModel`), candidate enumerator
+  // (`listAvailableModelsForRouting`), and model factory
+  // (`getOrCreateModel`) so no DB types leak into the package.
+  //
+  // The legacy `resolveModelForRole(role, hint)` callback is preserved
+  // below for back-compat (kaggle role-handlers' strategist.ts still
+  // accepts it). Phase 5 of the plan will remove it once the role-handlers
+  // are migrated to consume `modelResolver` exclusively.
+  // ---------------------------------------------------------------------
+  const dbModelResolver = weaveDbModelResolver({
+    listCandidates: () => listAvailableModelsForRouting(opts.db, opts.providers),
+    routeModel: async (cands, hints) => {
+      const routed = await routeModel(opts.db, cands, [], {
+        taskType: hints.taskType,
+        prompt: hints.prompt,
+      });
+      if (!routed) return null;
+      return {
+        provider: routed.provider,
+        modelId: routed.modelId,
+        taskKey: routed.taskKey,
+        experimentName: routed.experimentName,
+      };
+    },
+    getOrCreateModel: async (provider, modelId) => {
+      const cfg = opts.providers[provider];
+      if (!cfg) throw new Error(`no provider config for ${provider}`);
+      return getOrCreateModel(provider, modelId, cfg);
+    },
+    roleTaskMap: {
+      strategist: 'reasoning',
+      validator: 'analysis',
+      observer: 'analysis',
+      discoverer: 'reasoning',
+    },
+    log: (msg) => console.log('[kaggle-heartbeat]', msg),
+  });
+
+  // Legacy back-compat shim: kaggle role-handlers still accept a per-role
+  // callback. Delegate through the new resolver so behaviour is identical
+  // and there is exactly one routing path. Returns `undefined` on any
+  // failure → handler falls back to the startup-resolved `plannerModel`.
   const resolveModelForRole = async (
     role: 'strategist' | 'validator' | 'observer' | 'discoverer',
     hint?: { task?: string },
   ): Promise<Model | undefined> => {
-    try {
-      const candidates = await listAvailableModelsForRouting(opts.db, opts.providers);
-      if (candidates.length === 0) return undefined;
-      // Map each role to a sensible default task type the router uses for
-      // capability scoring. The hint can override per call.
-      const defaultTaskByRole: Record<string, string> = {
-        strategist: 'reasoning',
-        validator: 'analysis',
-        observer: 'analysis',
-        discoverer: 'reasoning',
-      };
-      const taskType = hint?.task ?? defaultTaskByRole[role] ?? 'reasoning';
-      const routed = await routeModel(opts.db, candidates, [], {
-        taskType,
-        prompt: `kaggle-${role}`,
-      });
-      if (!routed) return undefined;
-      const cfg = opts.providers[routed.provider];
-      if (!cfg) return undefined;
-      const model = await getOrCreateModel(routed.provider, routed.modelId, cfg);
-      // Tag the model with its routing identity so per-tick handler logs can
-      // show which provider/model the router picked on each invocation.
-      try {
-        Object.defineProperty(model, 'id', {
-          value: `${routed.provider}/${routed.modelId}`,
-          configurable: true,
-          writable: true,
-        });
-      } catch {
-        /* non-fatal — log just shows 'unknown' */
-      }
-      return model;
-    } catch (err) {
-      console.warn(
-        `[kaggle-heartbeat] per-tick routing for role=${role} failed:`,
-        err instanceof Error ? err.message : String(err),
-      );
-      return undefined;
-    }
+    return dbModelResolver.resolve({
+      role,
+      capability: hint?.task ? { task: hint.task } : undefined,
+    });
   };
 
   const taskHandlers = createKaggleRoleHandlers({
     plannerModel,
-    // Phase 1 — lift the legacy callback into a first-class ModelResolver so
-    // the live-agents handler treats it as a per-tick capability slot.
-    // The legacy callback is still passed (back-compat); strategist.ts
-    // prefers `modelResolver` when both are present.
-    modelResolver: weaveModelResolverFromFn(async (ctx) => {
-      const role = (ctx.role ?? 'strategist') as
-        | 'strategist'
-        | 'validator'
-        | 'observer'
-        | 'discoverer';
-      const hint = ctx.capability?.task ? { task: ctx.capability.task } : undefined;
-      return resolveModelForRole(role, hint);
-    }),
+    // Phase 2 — pass the resolver directly. strategist.ts prefers
+    // `modelResolver` over `resolveModelForRole` when both are present.
+    modelResolver: dbModelResolver,
     resolveModelForRole,
     playbookResolver,
     db: opts.db,

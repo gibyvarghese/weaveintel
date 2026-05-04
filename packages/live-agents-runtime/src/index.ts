@@ -63,6 +63,23 @@ export {
   type ResolvedAgentModelSpec,
 } from './model-resolver.js';
 
+// Phase 2 (live-agents capability parity) — DB-backed ModelResolver and
+// per-agent overlay. Together these lift the per-tick routing pattern
+// previously hand-written in geneweave's kaggle heartbeat into the
+// reusable runtime layer.
+export {
+  weaveDbModelResolver,
+  type WeaveDbModelResolverOptions,
+  type ModelCandidate,
+  type DbModelRoutingHints,
+  type DbRoutingDecision,
+} from './db-model-resolver.js';
+export {
+  weaveAgentOverlayResolver,
+  type WeaveAgentOverlayResolverOptions,
+  type ModelResolvedAuditEvent,
+} from './agent-overlay-resolver.js';
+
 // Phase 4 — Attention policy factory. Converts a live_attention_policies DB
 // row into a live AttentionPolicy instance. Delegates to the shared policy
 // constructors in @weaveintel/live-agents (heuristic, cron, model kinds).

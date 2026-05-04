@@ -29,6 +29,7 @@ import {
   createHeartbeat,
   type AttentionPolicy,
   type Heartbeat,
+  type ModelResolver,
   type StateStore,
   type TaskHandler,
 } from '@weaveintel/live-agents';
@@ -100,8 +101,19 @@ export interface HeartbeatSupervisorOptions {
    * Lazy model factory invoked on demand by `agentic.react` handlers via the
    * shared `HandlerContext`. Returns `undefined` when no usable provider
    * is configured (handlers fall back to deterministic mode).
+   *
+   * Pinned-only path. Prefer `modelResolver` for per-tick routing.
    */
   modelFactory?: () => Promise<Model | undefined>;
+  /**
+   * Phase 2 (live-agents capability parity) — first-class per-tick model
+   * resolver. When provided it is passed through to
+   * `HandlerContext.modelResolver` so every `agentic.react` invocation
+   * routes via the resolver instead of (or in addition to) the pinned
+   * `modelFactory`. Both may be set; handlers prefer the resolver and
+   * fall back to the pinned model.
+   */
+  modelResolver?: ModelResolver;
   /** DB-backed prompt resolver, passed through to handlers. */
   resolveSystemPrompt?: (key: string) => Promise<string | null>;
   /** Optional default attention policy DB key. */
@@ -201,6 +213,7 @@ export async function createHeartbeatSupervisor(
       agent: baseAgent,
       log: (m) => log(`[${agent.role}/${agentId.slice(0, 8)}] ${m}`),
       ...(model ? { model } : {}),
+      ...(opts.modelResolver ? { modelResolver: opts.modelResolver } : {}),
       ...(opts.resolveSystemPrompt ? { resolveSystemPrompt: opts.resolveSystemPrompt } : {}),
       ...(extras ?? {}),
     };

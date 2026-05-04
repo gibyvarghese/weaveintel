@@ -1,6 +1,12 @@
 /**
  * Per-Agent Model Resolver — Phase 3.5 bridge.
  *
+ * **Phase 2 (live-agents capability parity) update:** the canonical overlay
+ * is now `weaveAgentOverlayResolver` from `@weaveintel/live-agents-runtime`.
+ * This file re-exports it and keeps the legacy `resolveLiveAgentModel`
+ * imperative helper for back-compat (no current callers; safe to delete in
+ * Phase 5 of the plan).
+ *
  * Geneweave bridge that takes the pure `resolveAgentModelSpec()` output
  * from `@weaveintel/live-agents-runtime` and turns it into a concrete
  * `Model` instance that a `HandlerContext` can carry.
@@ -32,6 +38,15 @@ import {
 import type { Model } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../db-types.js';
 import { newUUIDv7 } from '../lib/uuid.js';
+
+// Re-export the Phase 2 canonical overlay constructor so new callers can
+// `import { weaveAgentOverlayResolver } from '../live-agents/agent-model-resolver.js'`
+// without reaching across packages.
+export {
+  weaveAgentOverlayResolver,
+  type WeaveAgentOverlayResolverOptions,
+  type ModelResolvedAuditEvent,
+} from '@weaveintel/live-agents-runtime';
 
 /**
  * Pluggable hooks the host app provides. Keeping the bridge agnostic about

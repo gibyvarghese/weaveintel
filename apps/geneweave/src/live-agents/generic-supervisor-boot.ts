@@ -25,12 +25,14 @@
 
 import {
   createHeartbeatSupervisor,
+  weaveDbModelResolver,
   type HeartbeatSupervisorHandle,
 } from '@weaveintel/live-agents-runtime';
 import type { Model } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../db.js';
 import type { ProviderConfig } from '../chat.js';
 import { getOrCreateModel } from '../chat-runtime.js';
+import { routeModel } from '../chat-routing-utils.js';
 import { getGenericLiveStore } from './generic-store.js';
 import { getHandlerRegistry } from './handler-registry-boot.js';
 import { newUUIDv7 } from '../lib/uuid.js';
@@ -62,9 +64,65 @@ export async function startGenericSupervisorIfEnabled(
   const store = await getGenericLiveStore();
   const registry = getHandlerRegistry();
 
-  // Lazy model factory so we only build the LLM when an agentic.react
-  // handler actually requests it. Failure → undefined → handlers fall
-  // back to deterministic mode.
+  // ─── Phase 2 (live-agents capability parity) ────────────────────────
+  // Per-tick model selection runs through `weaveDbModelResolver` from
+  // `@weaveintel/live-agents-runtime`. The runtime resolver owns the
+  // listCandidates → routeModel → getModel pipeline and emits per-tick
+  // routing context; we only inject geneweave's:
+  //   • `listAvailableModelsForRouting`-equivalent (model_pricing rows
+  //     filtered to configured providers, with the default included).
+  //   • `routeModel(...)` — the live SmartModelRouter brain.
+  //   • `getOrCreateModel(...)` — the singleton-aware model factory.
+  // The runtime layer never sees a DB type — only the injected functions.
+  const modelResolver = weaveDbModelResolver({
+    listCandidates: async () => {
+      const out: Array<{ id: string; provider: string }> = [];
+      const seen = new Set<string>();
+      const configured = new Set(Object.keys(opts.providers));
+      try {
+        const rows = await opts.db.listModelPricing();
+        for (const row of rows) {
+          if (!row.enabled || !configured.has(row.provider)) continue;
+          const k = `${row.provider}:${row.model_id}`;
+          if (seen.has(k)) continue;
+          seen.add(k);
+          out.push({ id: row.model_id, provider: row.provider });
+        }
+      } catch {
+        /* best-effort */
+      }
+      const defKey = `${opts.defaultProvider}:${opts.defaultModel}`;
+      if (!seen.has(defKey) && configured.has(opts.defaultProvider)) {
+        out.push({ id: opts.defaultModel, provider: opts.defaultProvider });
+      }
+      return out;
+    },
+    routeModel: async (cands, hints) => {
+      const r = await routeModel(opts.db, cands, [], {
+        taskType: hints.taskType ?? 'reasoning',
+        prompt: hints.prompt ?? 'generic-supervisor-planner',
+      });
+      if (!r) return null;
+      return {
+        provider: r.provider,
+        modelId: r.modelId,
+        taskKey: r.taskKey,
+        experimentName: r.experimentName,
+      };
+    },
+    getOrCreateModel: async (provider, modelId) => {
+      const cfg = opts.providers[provider];
+      if (!cfg) throw new Error(`no provider config for ${provider}`);
+      return getOrCreateModel(provider, modelId, cfg);
+    },
+    defaultTaskType: 'reasoning',
+    log: (msg) => console.log('[generic-supervisor]', msg),
+  });
+
+  // Pinned fallback so handlers that read `ctx.model` (instead of
+  // `ctx.modelResolver`) still work. Returns the configured default
+  // model on best-effort basis; `undefined` puts handlers in
+  // deterministic mode.
   const modelFactory = async (): Promise<Model | undefined> => {
     const cfg = opts.providers[opts.defaultProvider];
     if (!cfg) return undefined;
@@ -99,6 +157,7 @@ export async function startGenericSupervisorIfEnabled(
     store,
     handlerRegistry: registry,
     modelFactory,
+    modelResolver,
     resolveSystemPrompt,
     // Inject per-tick context extras for handlers that need DB access:
     //   - human.approval needs `approvalDb` + `newApprovalId`.
