@@ -89,6 +89,20 @@ export type {
   AgenticRunResult,
   AgenticTaskHandlerOptions,
 } from './agentic-task-handler.js';
+// Phase 1 — first-class capability slot for per-tick model resolution.
+// `weaveModelResolver` is the canonical in-memory factory. The DB-backed
+// `weaveDbModelResolver` lives in `@weaveintel/live-agents-runtime`.
+export {
+  weaveModelResolver,
+  weaveModelResolverFromFn,
+  composeModelResolvers,
+  resolveModelForTick,
+} from './model-resolver.js';
+export type {
+  ModelResolver,
+  ModelResolverContext,
+  ResolvedModel,
+} from './model-resolver.js';
 // Phase 2.5 — live-agents-owned LLM loop scaffold. New consumers should
 // prefer these primitives over importing from `@weaveintel/agents`.
 export {

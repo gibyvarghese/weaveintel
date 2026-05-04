@@ -9,6 +9,7 @@
 
 import type {
   ActionExecutionContext,
+  ModelResolver,
   TaskHandler,
 } from '@weaveintel/live-agents';
 import {
@@ -34,6 +35,27 @@ export interface KaggleRoleHandlersOptions {
   log?: (msg: string) => void;
   /** LLM used by the strategist to plan each iteration. If absent, deterministic mode is used. */
   plannerModel?: Model;
+  /**
+   * Phase 1 (live-agents capability parity) — first-class per-tick model
+   * resolver. Preferred over the legacy `resolveModelForRole` callback.
+   * When both are set, `modelResolver` wins; the callback is ignored.
+   * Falls back to `plannerModel` when the resolver returns `undefined`
+   * or throws.
+   */
+  modelResolver?: ModelResolver;
+  /**
+   * @deprecated since live-agents Phase 1 — prefer `modelResolver` instead.
+   * Optional per-role per-tick model resolver. When provided, agentic role
+   * handlers call this on every invocation to pick the best model for the
+   * current task (via `@weaveintel/routing`'s SmartModelRouter). Falls back
+   * to `plannerModel` when this returns `undefined` or throws. The `hint`
+   * carries an optional task type the router uses for capability scoring
+   * (e.g. `'reasoning'`, `'coding'`, `'analysis'`).
+   */
+  resolveModelForRole?: (
+    role: 'strategist' | 'validator' | 'observer' | 'discoverer',
+    hint?: { task?: string },
+  ) => Promise<Model | undefined>;
   /**
    * Default iteration cap when no playbook matches (deterministic mode only).
    * The matched playbook's `examples.maxIterations` overrides this when present.

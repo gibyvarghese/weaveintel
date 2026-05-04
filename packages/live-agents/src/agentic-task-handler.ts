@@ -19,6 +19,12 @@ import type { ExecutionContext, Model, ToolRegistry } from '@weaveintel/core';
 import type { ActionExecutionContext, AttentionAction } from './types.js';
 import type { TaskHandler, TaskHandlerResult } from './action-executor.js';
 import { runLiveReactLoop, type LiveReactLoopResult } from './llm/index.js';
+import type { ModelCapabilitySpec } from './llm/types.js';
+import {
+  resolveModelForTick,
+  type ModelResolver,
+  type ModelResolverContext,
+} from './model-resolver.js';
 
 /** The most-recent inbound TASK message for an agent, or `null` when the
  *  agent has no pending TASK in its inbox. */
@@ -53,8 +59,36 @@ export interface AgenticRunResult {
 export interface AgenticTaskHandlerOptions {
   /** Display name used in agent and logs (e.g. 'kaggle-strategist'). */
   name: string;
-  /** Model used by the ReAct loop. Domain-side decides provider/model id. */
-  model: Model;
+  /**
+   * Pinned model used by the ReAct loop. Domain-side decides provider/model id.
+   *
+   * Either `model` OR `modelResolver` (or both) MUST be provided. When both
+   * are present the resolver runs first per tick; the pinned `model` is the
+   * fallback when the resolver returns `undefined` or throws.
+   *
+   * (Was required prior to Phase 1 of the live-agents capability-parity work.)
+   */
+  model?: Model;
+  /**
+   * Per-tick model resolver — first-class capability slot mirroring how
+   * `weaveAgent` accepts a pinned `model`, but called freshly on every tick
+   * so domain code can rotate models based on provider health, cost ceilings,
+   * capability hints, or A/B routing.
+   *
+   * Use `weaveModelResolver({ model })` for a pinned wrapper, or
+   * `weaveModelResolverFromFn(fn)` to lift an existing routing callback.
+   * For DB-backed routing, use `weaveDbModelResolver` from
+   * `@weaveintel/live-agents-runtime` (Phase 2).
+   */
+  modelResolver?: ModelResolver;
+  /** Optional logical role hint passed to `modelResolver.resolve(ctx)`.
+   *  Defaults to `name`. Used by routing implementations for capability
+   *  scoring. */
+  role?: string;
+  /** Optional capability hint passed to `modelResolver.resolve(ctx)`.
+   *  Lets the handler tell routing what kind of task this tick is
+   *  (e.g. `{ task: 'reasoning', toolUse: true }`). */
+  modelCapability?: ModelCapabilitySpec;
   /** Maximum tool-call loops in a single tick. Defaults to 60. */
   maxSteps?: number;
   /** Called once per tick to resolve prompt + tools + user goal. */
@@ -109,6 +143,16 @@ export function createAgenticTaskHandler(opts: AgenticTaskHandlerOptions): TaskH
   const maxSteps = opts.maxSteps ?? 60;
   const summarize = opts.summarize ?? defaultSummarize;
 
+  // Eager validation so misconfigured handlers fail at registration time
+  // rather than on the first tick. Either pinned `model` or `modelResolver`
+  // (or both) is required.
+  if (!opts.model && !opts.modelResolver) {
+    throw new TypeError(
+      `createAgenticTaskHandler('${opts.name}'): one of \`model\` (pinned) or ` +
+        '`modelResolver` (per-tick) is required.',
+    );
+  }
+
   return async (
     _action: AttentionAction & { type: 'StartTask' | 'ContinueTask' },
     context: ActionExecutionContext,
@@ -122,13 +166,37 @@ export function createAgenticTaskHandler(opts: AgenticTaskHandlerOptions): TaskH
     const prepInput: AgenticPrepareInput = { inbound, context };
     const prep = await opts.prepare(prepInput);
 
+    // Phase 1 — resolve the model fresh per tick. The resolver runs first
+    // (when configured); the pinned `opts.model` is the fallback when the
+    // resolver returns `undefined` or throws.
+    const resolverCtx: ModelResolverContext = {
+      role: opts.role ?? opts.name,
+      agentId: context.agent.id,
+      meshId: context.agent.meshId,
+      ...(opts.modelCapability ? { capability: opts.modelCapability } : {}),
+    };
+    const resolved = await resolveModelForTick(
+      opts.modelResolver,
+      opts.model,
+      resolverCtx,
+    );
+    if (resolved.source === 'resolver') {
+      const id =
+        (resolved.model as unknown as { id?: string }).id ??
+        (resolved.model as unknown as { modelId?: string }).modelId ??
+        'unknown';
+      log(`per-tick model resolved → ${id}`);
+    } else if (resolved.error) {
+      log(`per-tick model resolver failed (${resolved.error}); using pinned model`);
+    }
+
     const ctx = execCtx ?? weaveContext({ userId: `live-agent:${context.agent.id}` });
     let loop: LiveReactLoopResult;
     try {
       // *** LLM CALL SITE — the only model.generate() in the live-agents flow ***
       loop = await runLiveReactLoop({
         name: opts.name,
-        model: opts.model,
+        model: resolved.model,
         ...(prep.tools ? { tools: prep.tools } : {}),
         systemPrompt: prep.systemPrompt,
         userGoal: prep.userGoal,

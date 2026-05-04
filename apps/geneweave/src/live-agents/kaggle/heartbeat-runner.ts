@@ -16,10 +16,17 @@
  */
 
 import { weaveContext, type Model } from '@weaveintel/core';
-import { createHeartbeat, createActionExecutor, type Heartbeat, type AttentionPolicy } from '@weaveintel/live-agents';
+import {
+  createHeartbeat,
+  createActionExecutor,
+  weaveModelResolverFromFn,
+  type Heartbeat,
+  type AttentionPolicy,
+} from '@weaveintel/live-agents';
 import type { DatabaseAdapter } from '../../db.js';
 import type { ProviderConfig } from '../../chat.js';
 import { getOrCreateModel } from '../../chat-runtime.js';
+import { routeModel } from '../../chat-routing-utils.js';
 import { newUUIDv7 } from '../../lib/uuid.js';
 import { getKaggleLiveStore } from './store.js';
 import { createDbKagglePlaybookResolver } from './playbook-resolver.js';
@@ -70,18 +77,117 @@ const NOOP_MODEL: Model = {
 } as unknown as Model;
 
 /**
+ * Build the candidate model list the SmartModelRouter chooses from. Mirrors
+ * `ChatEngine.getAvailableModels()` in `chat.ts` so the live-agents heartbeat
+ * picks among the same enabled `model_pricing` rows + configured-provider
+ * fallbacks the chat path uses. Keeping the logic here local avoids pulling
+ * the whole ChatEngine into the heartbeat boot path.
+ */
+async function listAvailableModelsForRouting(
+  db: DatabaseAdapter,
+  providers: Record<string, ProviderConfig>,
+): Promise<Array<{ id: string; provider: string }>> {
+  const seen = new Set<string>();
+  const out: Array<{ id: string; provider: string }> = [];
+  const configured = new Set(Object.keys(providers));
+  try {
+    const rows = await db.listModelPricing();
+    for (const row of rows) {
+      if (!row.enabled || !configured.has(row.provider)) continue;
+      const key = `${row.provider}:${row.model_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ id: row.model_id, provider: row.provider });
+    }
+  } catch {
+    /* DB lookup is best-effort */
+  }
+  // Same fallback list as ChatEngine — ensures routing has candidates even
+  // when the operator hasn't seeded model_pricing yet.
+  const FALLBACK_MODELS: Record<string, string[]> = {
+    anthropic: ['claude-sonnet-4-20250514', 'claude-opus-4-20250514', 'claude-haiku-4-20250414'],
+    openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'o4-mini'],
+    google: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
+    gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'],
+    ollama: ['llama3.1', 'qwen2.5', 'mistral'],
+    llamacpp: ['local'],
+    'llama-cpp': ['local'],
+    mock: ['mock-model'],
+  };
+  for (const provider of configured) {
+    const fb = FALLBACK_MODELS[provider];
+    if (!fb) continue;
+    for (const id of fb) {
+      const key = `${provider}:${id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ id, provider });
+    }
+  }
+  return out;
+}
+
+/**
  * Build (best-effort) the planner LLM the strategist's ReAct loop uses.
- * Returns `undefined` when no usable provider/key is configured — handlers
- * then fall back to deterministic mode and the pipeline still ticks through.
+ *
+ * Resolution order:
+ *   1. If an enabled `routing_policies` row exists, call `@weaveintel/routing`'s
+ *      SmartModelRouter via `routeModel(...)` (the same helper chat.ts uses
+ *      per request). This honors the active policy's strategy, weights,
+ *      cost ceilings, capability constraints, and fallback chain — so the
+ *      heartbeat respects auto routing identically to the chat path.
+ *   2. Otherwise, fall back to `(defaultProvider, defaultModel)` from the
+ *      ChatEngine config (legacy behaviour).
+ *   3. If no provider is configured at all, returns `undefined` and the
+ *      role handlers run in deterministic mode.
+ *
+ * Routing happens once at heartbeat startup. Every Kaggle role agent
+ * (strategist, validator, observer) shares the resolved model. Per-tick
+ * re-routing for per-agent `model_capability_json` overrides is handled
+ * separately by `resolveLiveAgentModel()` in `../agent-model-resolver.ts`.
  */
 async function buildPlannerModel(opts: StartKaggleHeartbeatOptions): Promise<Model | undefined> {
+  // Try auto routing first. Falls through to the legacy default on any
+  // failure — routing is best-effort and never blocks heartbeat startup.
+  try {
+    const candidates = await listAvailableModelsForRouting(opts.db, opts.providers);
+    if (candidates.length > 0) {
+      const routed = await routeModel(opts.db, candidates, [], {
+        // The strategist plans multi-step ReAct sequences with tool calls.
+        // Tag the routing request so capability-aware policies can pick a
+        // tool-capable model from the active candidate set.
+        taskType: 'reasoning',
+        prompt: 'kaggle-strategist-planner',
+      });
+      if (routed) {
+        const cfg = opts.providers[routed.provider];
+        if (cfg) {
+          const model = await getOrCreateModel(routed.provider, routed.modelId, cfg);
+          console.log(
+            `[kaggle-heartbeat] planner routed via SmartModelRouter → ${routed.provider}/${routed.modelId}` +
+              (routed.taskKey ? ` (task=${routed.taskKey})` : '') +
+              (routed.experimentName ? ` (experiment=${routed.experimentName})` : ''),
+          );
+          return model;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(
+      '[kaggle-heartbeat] auto-routing failed, falling back to default provider/model:',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
+  // Legacy fallback: pinned (defaultProvider, defaultModel) — used only when
+  // no active routing policy exists or routing fails.
   const provider = opts.defaultProvider;
   const cfg = opts.providers[provider];
   if (!cfg) return undefined;
-  // Only certain providers can act as the strategist planner. Local providers
-  // (ollama/llamacpp) work too via the same factory.
   try {
-    return await getOrCreateModel(provider, opts.defaultModel, cfg);
+    const model = await getOrCreateModel(provider, opts.defaultModel, cfg);
+    console.log(`[kaggle-heartbeat] planner using default ${provider}/${opts.defaultModel} (no routing policy active)`);
+    return model;
   } catch {
     return undefined;
   }
@@ -238,8 +344,73 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
   const playbookResolver = createDbKagglePlaybookResolver(opts.db);
   const plannerModel = await buildPlannerModel(opts);
 
+  // Per-tick per-role model resolver. Lets every agentic role pick the best
+  // model for its current task on every invocation, so when one provider
+  // rate-limits or runs out of credit the next tick automatically rotates
+  // to a different one. Mirrors the chat path's per-request `routeModel(...)`
+  // call. Returns `undefined` on any failure → handler falls back to the
+  // startup-resolved `plannerModel`.
+  const resolveModelForRole = async (
+    role: 'strategist' | 'validator' | 'observer' | 'discoverer',
+    hint?: { task?: string },
+  ): Promise<Model | undefined> => {
+    try {
+      const candidates = await listAvailableModelsForRouting(opts.db, opts.providers);
+      if (candidates.length === 0) return undefined;
+      // Map each role to a sensible default task type the router uses for
+      // capability scoring. The hint can override per call.
+      const defaultTaskByRole: Record<string, string> = {
+        strategist: 'reasoning',
+        validator: 'analysis',
+        observer: 'analysis',
+        discoverer: 'reasoning',
+      };
+      const taskType = hint?.task ?? defaultTaskByRole[role] ?? 'reasoning';
+      const routed = await routeModel(opts.db, candidates, [], {
+        taskType,
+        prompt: `kaggle-${role}`,
+      });
+      if (!routed) return undefined;
+      const cfg = opts.providers[routed.provider];
+      if (!cfg) return undefined;
+      const model = await getOrCreateModel(routed.provider, routed.modelId, cfg);
+      // Tag the model with its routing identity so per-tick handler logs can
+      // show which provider/model the router picked on each invocation.
+      try {
+        Object.defineProperty(model, 'id', {
+          value: `${routed.provider}/${routed.modelId}`,
+          configurable: true,
+          writable: true,
+        });
+      } catch {
+        /* non-fatal — log just shows 'unknown' */
+      }
+      return model;
+    } catch (err) {
+      console.warn(
+        `[kaggle-heartbeat] per-tick routing for role=${role} failed:`,
+        err instanceof Error ? err.message : String(err),
+      );
+      return undefined;
+    }
+  };
+
   const taskHandlers = createKaggleRoleHandlers({
     plannerModel,
+    // Phase 1 — lift the legacy callback into a first-class ModelResolver so
+    // the live-agents handler treats it as a per-tick capability slot.
+    // The legacy callback is still passed (back-compat); strategist.ts
+    // prefers `modelResolver` when both are present.
+    modelResolver: weaveModelResolverFromFn(async (ctx) => {
+      const role = (ctx.role ?? 'strategist') as
+        | 'strategist'
+        | 'validator'
+        | 'observer'
+        | 'discoverer';
+      const hint = ctx.capability?.task ? { task: ctx.capability.task } : undefined;
+      return resolveModelForRole(role, hint);
+    }),
+    resolveModelForRole,
     playbookResolver,
     db: opts.db,
     log: (msg) => console.log('[kaggle-heartbeat]', msg),

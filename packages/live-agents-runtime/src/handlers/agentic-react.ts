@@ -60,16 +60,19 @@ function interpolate(tmpl: string, vars: Record<string, string>): string {
 function buildAgenticReact(ctx: HandlerContext): TaskHandler {
   const cfg = readConfig(ctx.binding.config);
 
-  if (!ctx.model) {
+  if (!ctx.model && !ctx.modelResolver) {
     throw new Error(
-      `agentic.react: HandlerContext.model is required for agent ${ctx.agent.id} ` +
-        `(binding ${ctx.binding.id}). Geneweave must resolve a Model before binding this kind.`,
+      `agentic.react: HandlerContext.model OR HandlerContext.modelResolver is required ` +
+        `for agent ${ctx.agent.id} (binding ${ctx.binding.id}). Geneweave must resolve a ` +
+        `Model (pinned) or supply a ModelResolver (per-tick) before binding this kind.`,
     );
   }
 
   const handlerOpts = {
     name: ctx.agent.name || ctx.agent.roleKey,
-    model: ctx.model,
+    ...(ctx.model ? { model: ctx.model } : {}),
+    ...(ctx.modelResolver ? { modelResolver: ctx.modelResolver } : {}),
+    role: ctx.agent.roleKey,
     maxSteps: cfg.maxSteps ?? 60,
     log: ctx.log,
     prepare: async ({ inbound }: { inbound: { subject: string; body: string } | null }) => {

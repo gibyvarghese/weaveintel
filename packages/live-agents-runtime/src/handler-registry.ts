@@ -32,7 +32,7 @@
  */
 
 import type { Model, ToolRegistry } from '@weaveintel/core';
-import type { TaskHandler } from '@weaveintel/live-agents';
+import type { ModelResolver, TaskHandler } from '@weaveintel/live-agents';
 
 /**
  * The DB row data needed to construct a handler instance for a single agent.
@@ -78,6 +78,14 @@ export interface HandlerContext {
   log: (msg: string) => void;
   /** Required only for handler kinds that perform LLM calls. */
   model?: Model;
+  /**
+   * Phase 1 (live-agents capability parity) — first-class per-tick model
+   * resolver. Preferred over `model` when both are set; `model` is the
+   * fallback when the resolver returns `undefined` or throws. Either
+   * `model` OR `modelResolver` MUST be present for LLM-driven kinds
+   * (e.g. `agentic.react`).
+   */
+  modelResolver?: ModelResolver;
   /** Optional resolved tool registry for the agent. */
   tools?: ToolRegistry;
   /** Resolve a DB-stored prompt body by key (skill key / fragment key). */

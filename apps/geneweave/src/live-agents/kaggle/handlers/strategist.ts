@@ -13,22 +13,87 @@ import {
 } from './_shared.js';
 
 /** Agentic strategist — wraps the package-level agentic handler and emits
- *  its final summary to the submitter so the pipeline-completion check still fires. */
+ *  its final summary to the submitter so the pipeline-completion check still fires.
+ *
+ *  Per-tick model routing: when `opts.resolveModelForRole` is configured,
+ *  the inner ReAct handler is rebuilt on every invocation with the model
+ *  the router picks for the strategist's reasoning task. This lets the
+ *  framework rotate models based on health/cost on every tick — e.g. when
+ *  one provider rate-limits or runs out of credit, the next tick picks a
+ *  different one. When no resolver is configured, falls back to the
+ *  startup-time `plannerModel`. */
 export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): TaskHandler {
   const { opts, adapter, log } = ctx;
-  if (!opts.plannerModel) {
-    throw new Error('createStrategistAgenticWithHandoff requires opts.plannerModel');
+  if (!opts.plannerModel && !opts.resolveModelForRole && !opts.modelResolver) {
+    throw new Error(
+      'createStrategistAgenticWithHandoff requires opts.plannerModel, opts.modelResolver, or opts.resolveModelForRole',
+    );
   }
   const creds = resolveCreds(opts);
-  const inner = createKaggleStrategistHandler({
-    model: opts.plannerModel,
-    adapter,
-    credentials: creds,
-    maxSteps: opts.maxIterations ? Math.max(opts.maxIterations * 12, 40) : 60,
-    log,
-    playbookResolver: opts.playbookResolver,
-  });
+  const maxSteps = opts.maxIterations ? Math.max(opts.maxIterations * 12, 40) : 60;
+
+  // Build the inner handler factory once; the per-call wrapper resolves the
+  // model fresh each tick so SmartModelRouter can rotate based on current
+  // provider health.
+  const buildInner = (model: import('@weaveintel/core').Model) =>
+    createKaggleStrategistHandler({
+      model,
+      adapter,
+      credentials: creds,
+      maxSteps,
+      log,
+      playbookResolver: opts.playbookResolver,
+    });
+
+  // Pre-built fallback inner handler (used when no per-tick resolver).
+  const staticInner = opts.plannerModel ? buildInner(opts.plannerModel) : null;
+
   return async (action, context, execCtx) => {
+    let inner = staticInner;
+    // Prefer the Phase 1 ModelResolver slot when present; fall back to the
+    // legacy `resolveModelForRole` callback for backwards compatibility.
+    if (opts.modelResolver) {
+      try {
+        const routed = await opts.modelResolver.resolve({
+          role: 'strategist',
+          agentId: context.agent.id,
+          meshId: context.agent.meshId,
+          capability: { task: 'reasoning' },
+        });
+        if (routed) {
+          inner = buildInner(routed);
+          const routedId =
+            (routed as unknown as { id?: string }).id ??
+            (routed as unknown as { modelId?: string }).modelId ??
+            'unknown';
+          log(`per-tick model resolved (modelResolver) → ${routedId}`);
+        }
+      } catch (err) {
+        log(
+          `!! per-tick modelResolver failed; using static planner: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    } else if (opts.resolveModelForRole) {
+      try {
+        const routed = await opts.resolveModelForRole('strategist', { task: 'reasoning' });
+        if (routed) {
+          inner = buildInner(routed);
+          // Log the per-tick selection so operators can see SmartModelRouter
+          // rotating models across ticks (especially useful when a provider
+          // rate-limits and routing skips it on the next tick).
+          const routedId =
+            (routed as unknown as { id?: string }).id ??
+            (routed as unknown as { modelId?: string }).modelId ??
+            'unknown';
+          log(`per-tick model routed → ${routedId}`);
+        }
+      } catch (err) {
+        log(`!! per-tick model routing failed; using static planner: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (!inner) {
+      return { completed: true, summaryProse: 'Strategist had no model available; skipped.' };
+    }
     const result = await inner(action, context, execCtx);
     const summary = (result && 'summaryProse' in result && result.summaryProse) || 'Strategist agent finished.';
     await emitToNextAgent(
