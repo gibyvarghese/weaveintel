@@ -42,6 +42,7 @@ import type {
 import { loadLatestInboundTask } from '@weaveintel/live-agents';
 import type { ExecutionContext } from '@weaveintel/core';
 import type { HandlerContext, HandlerKindRegistration } from '../handler-registry.js';
+import { enqueueDownstreamTask } from './enqueue-downstream.js';
 
 /** Routing target for a forwarded message. */
 export type DeterministicForwardTarget =
@@ -202,7 +203,7 @@ function buildDeterministicForward(
     }
 
     const outbound = buildOutboundMessage(ctx, { toType, toId }, cfg.outboundSubject, body, execCtx);
-    await execCtx.stateStore.saveMessage(outbound);
+    await enqueueDownstreamTask({ execCtx, message: outbound });
     ctx.log(
       `deterministic.forward: emitted "${cfg.outboundSubject}" → ` +
         `${toType}${toId ? `:${toId}` : ''} (msg=${outbound.id})`,

@@ -33,6 +33,7 @@ import type { ProviderConfig } from '../chat.js';
 import { getOrCreateModel } from '../chat-runtime.js';
 import { getGenericLiveStore } from './generic-store.js';
 import { getHandlerRegistry } from './handler-registry-boot.js';
+import { newUUIDv7 } from '../lib/uuid.js';
 
 export interface StartGenericSupervisorOptions {
   db: DatabaseAdapter;
@@ -99,6 +100,22 @@ export async function startGenericSupervisorIfEnabled(
     handlerRegistry: registry,
     modelFactory,
     resolveSystemPrompt,
+    // Inject per-tick context extras for handlers that need DB access:
+    //   - human.approval needs `approvalDb` + `newApprovalId`.
+    //   - deterministic.* needs `resolveAgentByRole` (looks up the live
+    //     agent uuid for a role inside the same mesh).
+    extraContextFor: async (_binding, agent) => ({
+      approvalDb: opts.db,
+      newApprovalId: () => newUUIDv7(),
+      resolveAgentByRole: async (roleKey: string) => {
+        const peers = await opts.db.listLiveAgents({
+          meshId: agent.meshId,
+          status: 'ACTIVE',
+        });
+        const found = peers.find((p) => p.role_key === roleKey);
+        return found ? found.id : null;
+      },
+    }),
     ...(opts.attentionPolicyKey ? { attentionPolicyKey: opts.attentionPolicyKey } : {}),
     logger: (msg) => console.log('[live-supervisor]', msg),
   });

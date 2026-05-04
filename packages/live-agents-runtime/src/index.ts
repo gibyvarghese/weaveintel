@@ -32,6 +32,18 @@ export {
   type DeterministicForwardTarget,
   type DeterministicForwardContextExtras,
 } from './handlers/deterministic-forward.js';
+export {
+  deterministicTemplateHandler,
+  type DeterministicTemplateConfig,
+} from './handlers/deterministic-template.js';
+export {
+  humanApprovalHandler,
+  type HumanApprovalConfig,
+  type HumanApprovalContextExtras,
+  type ApprovalDb,
+  type ApprovalRequestRowLike,
+  type ApprovalIdGenerator,
+} from './handlers/human-approval.js';
 
 // Phase 3 — Tool binder. Resolves an agent's tool surface from the DB.
 export {
@@ -65,15 +77,25 @@ export {
 import { HandlerRegistry, createHandlerRegistry } from './handler-registry.js';
 import { agenticReactHandler } from './handlers/agentic-react.js';
 import { deterministicForwardHandler } from './handlers/deterministic-forward.js';
+import { deterministicTemplateHandler } from './handlers/deterministic-template.js';
+import { humanApprovalHandler } from './handlers/human-approval.js';
 
 /**
  * Convenience: create a registry pre-populated with the built-in handler
  * kinds. Apps can add more after construction.
+ *
+ * Built-ins (Phase 6):
+ *   - agentic.react           — LLM ReAct loop over inbox
+ *   - deterministic.forward   — pure router / fan-out
+ *   - deterministic.template  — render DB fragment + emit
+ *   - human.approval          — dual-control gate via tool_approval_requests
  */
 export function createDefaultHandlerRegistry(): HandlerRegistry {
   const reg = createHandlerRegistry();
   reg.register(agenticReactHandler);
   reg.register(deterministicForwardHandler);
+  reg.register(deterministicTemplateHandler);
+  reg.register(humanApprovalHandler);
   return reg;
 }
 

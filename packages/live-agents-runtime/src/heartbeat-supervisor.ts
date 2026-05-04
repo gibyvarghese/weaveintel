@@ -106,6 +106,15 @@ export interface HeartbeatSupervisorOptions {
   resolveSystemPrompt?: (key: string) => Promise<string | null>;
   /** Optional default attention policy DB key. */
   attentionPolicyKey?: string;
+  /**
+   * Optional hook to inject extra context fields per binding (e.g.
+   * `approvalDb`, `resolveAgentByRole`, custom tool wiring). Returned
+   * fields are spread into `HandlerContext` before the handler is built.
+   * Returning `null` is equivalent to no extras.
+   */
+  extraContextFor?: (binding: HandlerBinding, agent: {
+    id: string; meshId: string; roleKey: string; name: string;
+  }) => Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
   /** Logger (defaults to console.log with a tag). */
   logger?: (msg: string) => void;
 }
@@ -180,17 +189,20 @@ export async function createHeartbeatSupervisor(
       config,
     };
     const model = opts.modelFactory ? await opts.modelFactory() : undefined;
+    const baseAgent = {
+      id: agent.id,
+      meshId: agent.meshId,
+      roleKey: agent.role,
+      name: agent.name,
+    };
+    const extras = opts.extraContextFor ? await opts.extraContextFor(binding, baseAgent) : null;
     const hctx: HandlerContext = {
       binding,
-      agent: {
-        id: agent.id,
-        meshId: agent.meshId,
-        roleKey: agent.role,
-        name: agent.name,
-      },
+      agent: baseAgent,
       log: (m) => log(`[${agent.role}/${agentId.slice(0, 8)}] ${m}`),
       ...(model ? { model } : {}),
       ...(opts.resolveSystemPrompt ? { resolveSystemPrompt: opts.resolveSystemPrompt } : {}),
+      ...(extras ?? {}),
     };
     const handler = opts.handlerRegistry.build(hctx);
     return handler(action, execCtx, ctx);
@@ -365,14 +377,16 @@ async function scheduleTickIfWorkPending(
   if (!hasWork) return;
 
   const nowIso = new Date().toISOString();
-  // 30-second bucket → repeated calls within the bucket upsert the same
-  // PK row instead of piling up duplicates.
-  const bucket = Math.floor(Date.now() / 30_000);
+  // Use a tight (500ms) bucket so as soon as the previous tick has
+  // completed and there is still work pending, we schedule a fresh one.
+  // The schedule loop runs every `intervalMs` (default 1s) so worst-case
+  // latency between two ticks for the same agent is one bucket window.
+  const bucket = Math.floor(Date.now() / 500);
   const tickId = `tick:${agentId}:${bucket}`;
   const existing = await store.loadHeartbeatTick(tickId);
-  // If a worker has already claimed the tick (status moved past SCHEDULED),
-  // don't clobber its lease.
-  if (existing && existing.status !== 'SCHEDULED') return;
+  // Only one SCHEDULED tick per bucket — if it has already been claimed
+  // (any non-SCHEDULED status) we let the next bucket schedule a new one.
+  if (existing) return;
   await store.saveHeartbeatTick({
     id: tickId,
     agentId,
