@@ -172,6 +172,11 @@ function defaultSummarize(result: AgenticRunResult): string {  const last = [...
  * The handler does NOT emit downstream messages — domain glue (e.g. Kaggle
  * `strategistAgenticWithHandoff`) wraps this handler when it needs to pass
  * the summary on to the next agent in the pipeline.
+ *
+ * @deprecated Phase 4 — prefer `weaveLiveAgent({ ... })` from
+ *   `@weaveintel/live-agents` for parity with `weaveAgent` from
+ *   `@weaveintel/agents`. This factory is kept for backwards compatibility
+ *   and is the underlying implementation `weaveLiveAgent` delegates to.
  */
 export function createAgenticTaskHandler(opts: AgenticTaskHandlerOptions): TaskHandler {
   const log = opts.log ?? ((m: string) => console.log(`[${opts.name}] ${m}`));

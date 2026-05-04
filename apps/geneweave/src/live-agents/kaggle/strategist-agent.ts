@@ -19,7 +19,7 @@
 
 import type { Model } from '@weaveintel/core';
 import {
-  createAgenticTaskHandler,
+  weaveLiveAgent,
   type AgenticRunResult,
   type TaskHandler,
 } from '@weaveintel/live-agents';
@@ -100,7 +100,7 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
   const log = opts.log ?? ((m: string) => console.log(`[kaggle-strategist] ${m}`));
   const maxSteps = opts.maxSteps ?? 90;
 
-  return createAgenticTaskHandler({
+  const { handler } = weaveLiveAgent({
     name: 'kaggle-strategist',
     model: opts.model,
     maxSteps,
@@ -168,6 +168,7 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
       return { systemPrompt, tools, userGoal };
     },
   });
+  return handler;
 }
 
 function resolveCredentialsFromEnv(): KaggleCredentials {

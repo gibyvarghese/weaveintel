@@ -28,7 +28,7 @@
  * - `resolveSystemPrompt`  — required only when `systemPromptSkillKey` is set.
  */
 
-import { createAgenticTaskHandler, type TaskHandler } from '@weaveintel/live-agents';
+import { weaveLiveAgent, type TaskHandler } from '@weaveintel/live-agents';
 import type { HandlerContext, HandlerKindRegistration } from '../handler-registry.js';
 
 export interface AgenticReactConfig {
@@ -105,7 +105,8 @@ function buildAgenticReact(ctx: HandlerContext): TaskHandler {
     },
   };
 
-  return createAgenticTaskHandler(handlerOpts);
+  const { handler } = weaveLiveAgent(handlerOpts);
+  return handler;
 }
 
 /** Registry entry. Pass to `HandlerRegistry.register(...)`. */

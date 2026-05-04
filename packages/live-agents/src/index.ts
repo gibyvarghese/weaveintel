@@ -89,6 +89,15 @@ export type {
   AgenticRunResult,
   AgenticTaskHandlerOptions,
 } from './agentic-task-handler.js';
+// Phase 4 — canonical user-facing constructor mirroring `weaveAgent`.
+// Prefer `weaveLiveAgent` over `createAgenticTaskHandler` in new code.
+export { weaveLiveAgent } from './weave-live-agent.js';
+export type {
+  WeaveLiveAgentOptions,
+  WeaveLiveAgentResult,
+  LiveAgentDefinition,
+  LiveAgentBus,
+} from './weave-live-agent.js';
 // Phase 1 — first-class capability slot for per-tick model resolution.
 // `weaveModelResolver` is the canonical in-memory factory. The DB-backed
 // `weaveDbModelResolver` lives in `@weaveintel/live-agents-runtime`.
