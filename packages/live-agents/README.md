@@ -492,6 +492,85 @@ All operations are **asynchronous**. There are no synchronous ask-and-wait primi
 - Examples run in CI with fake models
 - Fixture and live-sandbox tests for MCP tools
 
+## First-class capabilities (Phases 1–7)
+
+`@weaveintel/live-agents` is a **temporal extension** of `weaveAgent` from `@weaveintel/agents`, not a parallel implementation. Every capability that `weaveAgent` exposes as an injected slot is also injected into a live-agent — either reusing the same implementation, or extending it with a per-tick variant.
+
+### Model resolution: pinned or per-tick
+
+```typescript
+import { weaveLiveAgent, weaveModelResolver } from '@weaveintel/live-agents';
+
+// Option A — pinned model (parity with weaveAgent)
+const { handler } = weaveLiveAgent({
+  name: 'support',
+  model: openaiModel,
+  systemPrompt: 'You are a helpful support agent.',
+});
+
+// Option B — per-tick resolver (live-agents extension)
+const resolver = weaveModelResolver({ model: openaiModel });
+const { handler } = weaveLiveAgent({
+  name: 'support',
+  modelResolver: resolver,
+  systemPrompt: 'You are a helpful support agent.',
+});
+```
+
+For DB-backed routing (model_pricing → SmartRouter → cached Model factory), use `weaveDbModelResolver` from `@weaveintel/live-agents-runtime`. See `examples/91`, `92`, `95`.
+
+### Policy: tool approval, rate limit, audit, break-glass
+
+```typescript
+import { weaveLiveAgent, weaveLiveAgentPolicy } from '@weaveintel/live-agents';
+
+const policy = weaveLiveAgentPolicy({
+  policyResolver,    // ToolPolicyResolver — risk gating
+  approvalGate,      // ToolApprovalGate — requireApproval=true blocks tools
+  rateLimiter,       // ToolRateLimiter — per-window quotas
+  auditEmitter,      // ToolAuditEmitter — every call persisted
+});
+
+const { handler } = weaveLiveAgent({ name: 'ops', model, tools, policy });
+```
+
+When any of the four primitives is set, every tool call inside the agent's ReAct loop is wrapped via `createPolicyEnforcedRegistry` from `@weaveintel/tools`. See `examples/93`.
+
+### DB-driven mesh hydration: one call
+
+```typescript
+import { weaveLiveMeshFromDb } from '@weaveintel/live-agents-runtime';
+
+const handle = await weaveLiveMeshFromDb(db, {
+  store,
+  modelResolver,        // optional — per-tick model selection
+  policy,               // optional — first-class policy bundle
+  handlerRegistry,      // optional — defaults to createDefaultHandlerRegistry()
+  attentionPolicyKey,   // optional — DB key from live_attention_policies
+});
+
+await handle.stop();
+```
+
+`weaveLiveMeshFromDb` composes `provisionMesh` (optional) → handler registry → heartbeat supervisor → `bridgeRunState`. New apps should use this; never wire the primitives by hand. See `examples/96`.
+
+### Naming convention
+
+- `weave*` — user-facing constructor that returns a runnable thing (agent, mesh, store, resolver, policy). Use `weaveLiveAgent`, `weaveLiveMeshFromDb`, `weaveLiveAgentFromDb`, `weaveModelResolver`, `weaveDbModelResolver`, `weaveLiveAgentPolicy`, `weaveAgentOverlayResolver`.
+- `create*` — internal infrastructure factory (registry, dispatcher, scheduler). Use `createDefaultHandlerRegistry`, `createHeartbeat`, `createActionExecutor`, `createHeartbeatSupervisor`, `createCompressionMaintainer`.
+- Types use `PascalCase` nouns (`LiveAgent`, `Mesh`, `ModelResolver`, `LiveAgentPolicy`).
+
+`createAgenticTaskHandler` is `@deprecated` — use `weaveLiveAgent`. The alias will be removed one minor cycle after Phase 4.
+
+### Migration cheatsheet
+
+| Was | Now |
+| --- | --- |
+| `createAgenticTaskHandler({ model, prepare })` | `weaveLiveAgent({ model, prepare })` |
+| Hand-wired `createHeartbeatSupervisor + provisionMesh + ...` | `weaveLiveMeshFromDb(db, { ... })` |
+| App-local model routing closure | `weaveDbModelResolver({ listCandidates, routeModel, getOrCreateModel })` |
+| App-local tool policy plumbing | `weaveLiveAgentPolicy({ policyResolver, approvalGate, rateLimiter, auditEmitter })` |
+
 ## Related packages
 
 - `@weaveintel/memory` — Working memory and context compression
@@ -499,6 +578,7 @@ All operations are **asynchronous**. There are no synchronous ask-and-wait primi
 - `@weaveintel/tools-*` — MCP servers for external systems
 - `@weaveintel/a2a` — Agent-to-agent communication
 - `@weaveintel/replay` — Replay and deterministic replay
+- `@weaveintel/live-agents-runtime` — DB hydration, model resolver, policy bundle
 - `apps/live-agents-demo` — Reference application with Postgres persistence, REST API, worker containers
 
 ## License
