@@ -254,10 +254,18 @@ async function bridgeOneRun(
   const meshId = run.mesh_id;
   const steps = await db.listKglRunSteps(run.id);
   const stepByRole = new Map(steps.map((s) => [s.role, s] as const));
+  // Provisioned meshes give every agent a UUID id, not a synthetic
+  // `${meshId}::${role}` id. Resolve by role from the StateStore so the
+  // bridge actually finds the correct agent. Legacy template-based meshes
+  // (now removed) used the synthetic id; we keep the lookup robust either way.
+  const meshAgents = await store.listAgents(meshId);
+  const agentByRole = new Map(meshAgents.map((a) => [a.role, a] as const));
   for (const [roleSlug, stepRole] of Object.entries(KAGGLE_ROLE_TO_STEP)) {
     const step = stepByRole.get(stepRole);
     if (!step) continue;
-    const agentId = `${meshId}::${roleSlug}`;
+    const liveAgent = agentByRole.get(roleSlug);
+    if (!liveAgent) continue;
+    const agentId = liveAgent.id;
     const [backlog, inbox] = await Promise.all([
       store.listBacklogForAgent(agentId),
       store.listMessagesForRecipient('AGENT', agentId),
