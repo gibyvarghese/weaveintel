@@ -153,11 +153,25 @@ export function resolveCreds(opts: KaggleRoleHandlersOptions): KaggleCredentials
   return { username, key };
 }
 
-function nextAgentId(currentAgentId: string, nextRole: KaggleAgentRole): string {
-  // Agent ids are `${meshId}::${role}` per mesh-template.ts
+async function nextAgentId(
+  context: ActionExecutionContext,
+  nextRole: KaggleAgentRole,
+): Promise<string> {
+  // Legacy mesh-template.ts agents used `${meshId}::${role}` ids. Provisioned
+  // meshes (provisionMesh) issue plain UUIDs, so look the sibling up by role
+  // in the StateStore. Fall back to the legacy shape only when the current
+  // agent id matches it.
+  const currentAgentId = context.agent.id;
   const idx = currentAgentId.lastIndexOf('::');
-  if (idx < 0) throw new Error(`Unexpected agent id shape: ${currentAgentId}`);
-  return `${currentAgentId.slice(0, idx)}::${nextRole}`;
+  if (idx >= 0) return `${currentAgentId.slice(0, idx)}::${nextRole}`;
+  const siblings = await context.stateStore.listAgents(context.agent.meshId);
+  const target = siblings.find((a) => a.role === nextRole);
+  if (!target) {
+    throw new Error(
+      `No sibling agent with role '${nextRole}' in mesh ${context.agent.meshId} (current=${currentAgentId})`,
+    );
+  }
+  return target.id;
 }
 
 function makeId(prefix: string): string {
@@ -180,7 +194,7 @@ export async function emitToNextAgent(
   body: string,
   topic: string,
 ): Promise<{ messageId: string; backlogId: string; nextAgentId: string }> {
-  const toId = nextAgentId(context.agent.id, nextRole);
+  const toId = await nextAgentId(context, nextRole);
   const messageId = makeId('msg');
   const backlogId = makeId('backlog');
   const nowIso = context.nowIso;

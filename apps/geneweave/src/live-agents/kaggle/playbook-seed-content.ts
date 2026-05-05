@@ -34,6 +34,55 @@ Use ONLY read-only tools in this phase:
 
 If \`kaggle_get_competition_file\` fails for a file (404, permission, etc.) move on — do not retry the same file twice.
 
+## Phase 0.5 — USE the pre-fetched intel + verify any env name BEFORE running it
+The Discoverer that seeded you has already enumerated the competition's files
+and downloaded the common metadata files (README, agents.md, sample_submission.*,
+main.py, requirements.txt, etc). Look for a block in the inbound message that
+starts with \`### DISCOVERED COMPETITION INTEL (<slug>)\` — when present:
+
+  * USE the \`shape\`, \`submissionFormat\`, \`submissionFilename\`, \`libraries\`
+    and the per-file snippets from that block as your Phase 0 SUBMISSION
+    CONTRACT inputs. Do NOT re-call \`kaggle_list_competition_files\` /
+    \`kaggle_get_competition_file\` for files already shown — the contents
+    will be byte-identical.
+  * \`envHints\` (when present) lists candidate env names extracted from
+    \`make("xxx", ...)\` / \`kaggle_environments.envs.xxx\` literals found in
+    the competition's own files. These are CANDIDATES, not facts. They may
+    be partially-implemented, renamed, or removed in the version of
+    \`kaggle_environments\` that ships with the Kaggle base image.
+  * If your competition needs \`kaggle_environments.make(...)\`, \`gym.make(...)\`,
+    or any other registry-style env constructor, your VERY FIRST kernel
+    push MUST be a 5-10 line probe kernel that prints, in this order:
+
+        import kaggle_environments
+        print("envs=", sorted(getattr(kaggle_environments.envs, "__all__", []) or list(kaggle_environments.envs.__dict__.keys())))
+        import os
+        for r, _, fs in os.walk("/kaggle/input"):
+            for f in fs[:50]: print("file=", os.path.join(r, f))
+        try:
+            import pkg_resources; print("pkgs=", sorted(p.project_name for p in pkg_resources.working_set))
+        except Exception as e: print("pkgs_err=", e)
+        print("AGENT_PROBE_DONE")
+
+    Wait for the kernel, read the full log. ONLY AFTER seeing the log may
+    you call \`make(<verified-name>, ...)\` in a subsequent kernel.
+    Guessing the env name from the competition title or evaluation metric
+    (e.g. \`make("crawl", ...)\` because the competition is "Maze Crawler")
+    is the #1 cause of wasted iterations on this platform — DO NOT do it.
+
+## Anti-thrash rules (HARD — saves your tool budget)
+  * \`kaggle_list_competitions\` — call AT MOST ONCE per session. Cached.
+  * \`kaggle_list_competition_files\` — call AT MOST ONCE per (slug). The
+    file list does not change while a kernel is running.
+  * \`kaggle_get_competition\` — call AT MOST ONCE per (slug).
+  * \`kaggle_get_competition_file\` — call AT MOST ONCE per (slug, fileName).
+    If you need to re-read a file you already fetched, scroll up in your
+    own scratchpad — the prior tool result is verbatim what you'd get
+    from a re-call.
+  * If you find yourself about to issue the same tool with the same
+    arguments twice in one tick: STOP. The answer is in your context
+    already. Move to the next phase.
+
 ## Phase 1 — Study top public work (1 iteration, MANDATORY)
 Before writing your own solution, learn from people who solved similar problems. Use \`kaggle_list_kernels\` (sortBy=\"voteCount\" or \"scoreDescending\") for the top 3-5 public kernels. For each, call \`kaggle_get_kernel_source\` and extract:
   * Features / representations

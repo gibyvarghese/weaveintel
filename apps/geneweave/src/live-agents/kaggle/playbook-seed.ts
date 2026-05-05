@@ -47,14 +47,15 @@ async function ensureFragment(
   category: string,
   content: string,
 ): Promise<'inserted' | 'exists'> {
-  const CURRENT_VERSION = '1.3.0';
+  const CURRENT_VERSION = '1.4.0';
   const existing = await db.getPromptFragment(id).catch(() => null);
   const byKey = existing ?? (await db.getPromptFragmentByKey(key).catch(() => null));
   if (byKey) {
-    // Refresh content when the seeded version differs (operator-edited rows
-    // bumped to '1.0.0-edit' or any non-matching version are left alone
-    // ONLY if their content already differs from the bundled seed).
-    if (byKey.version !== CURRENT_VERSION && byKey.content !== content) {
+    // Refresh content when the seeded version differs OR the bundled seed
+    // content has changed under us. Operator-edited rows whose content has
+    // already drifted from the seed are left alone (version stamp lets the
+    // operator opt back in by resetting it to the bundled CURRENT_VERSION).
+    if (byKey.version !== CURRENT_VERSION || byKey.content !== content) {
       try {
         await db.updatePromptFragment(byKey.id, { content, version: CURRENT_VERSION });
         return 'inserted';

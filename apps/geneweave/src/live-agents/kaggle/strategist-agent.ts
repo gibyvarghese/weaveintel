@@ -30,6 +30,7 @@ import {
   type KaggleCredentials,
 } from '@weaveintel/tools-kaggle';
 import { createKaggleTools } from './kaggle-tools.js';
+import { withPerTickReadCache } from './adapter-cache.js';
 import {
   extractCompetitionSlugFromText,
   type KagglePlaybookResolver,
@@ -161,7 +162,7 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
       systemPrompt = systemPrompt + CV_SCORES_ADDENDUM;
 
       const tools = createKaggleTools({
-        adapter,
+        adapter: withPerTickReadCache(adapter),
         credentials,
         defaults: {
           defaultWaitTimeoutSec: resolvedConfig['pollTimeoutSec'] as number | undefined,

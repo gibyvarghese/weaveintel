@@ -2,6 +2,37 @@
 import type { TaskHandler } from '@weaveintel/live-agents';
 import type { KaggleCompetition } from '@weaveintel/tools-kaggle';
 import { competitionSlugFrom, emitToNextAgent, resolveCreds, type SharedHandlerContext } from './_shared.js';
+import { probeCompetitionFiles, renderIntelHeader, type CompetitionIntel } from '../competition-probe.js';
+
+/**
+ * Run the file-level probe against every competition we are about to forward.
+ * Best-effort: any failure produces an `unknown`-shape intel record without
+ * blocking the handoff.
+ */
+async function probeAll(
+  ctx: SharedHandlerContext,
+  comps: KaggleCompetition[],
+): Promise<Map<string, CompetitionIntel>> {
+  const { adapter, log, opts } = ctx;
+  const creds = resolveCreds(opts);
+  const out = new Map<string, CompetitionIntel>();
+  for (const c of comps) {
+    const slug = competitionSlugFrom(c.id);
+    if (!slug) continue;
+    try {
+      const intel = await probeCompetitionFiles(adapter, creds, slug, { log });
+      out.set(slug, intel);
+      log(
+        `Discoverer probe ${slug}: shape=${intel.shape} format=${intel.submissionFormat} files=${intel.files.length} libs=${intel.libraries.length} envHints=[${intel.envHints.join(',')}]`,
+      );
+    } catch (err) {
+      log(
+        `Discoverer probe ${slug} failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  return out;
+}
 
 /**
  * Resolve the competition slug to pin this discoverer tick to. Resolution
@@ -66,12 +97,26 @@ export function createDiscovererAgentic(ctx: SharedHandlerContext): TaskHandler 
     if (pinnedSlug && top.length === 1 && top[0]) {
       headerLines.push(`competitionId: ${competitionSlugFrom(top[0].id)}`);
     }
+    // Run the per-competition probe so the strategist starts already
+    // knowing the file inventory, candidate libraries, and any env hints.
+    // Without this the strategist guesses (e.g. `make("crawl", ...)` for
+    // maze-crawler) and burns tool budget on rediscovery every tick.
+    const intelMap = await probeAll(ctx, top);
+    const intelHeaders = top
+      .map((c) => {
+        const slug = competitionSlugFrom(c.id);
+        const intel = slug ? intelMap.get(slug) : undefined;
+        return slug && intel ? renderIntelHeader(slug, intel) : '';
+      })
+      .filter((s) => s.length > 0)
+      .join('\n');
     const body = [
       ...headerLines,
       'Active competitions you may choose from (pick the most tractable one):',
       summary,
       '',
-      'Proceed with the workflow described in your system prompt.',
+      intelHeaders,
+      'Proceed with the workflow described in your system prompt. The DISCOVERED COMPETITION INTEL above was pre-fetched for you — do NOT re-call kaggle_list_competition_files / kaggle_get_competition_file for files already shown above.',
     ].join('\n');
     await emitToNextAgent(
       context,
@@ -114,7 +159,15 @@ export function createDiscovererDeterministic(ctx: SharedHandlerContext): TaskHa
     const summary = top
       .map((c) => `- ${c.id} | ${c.title} | metric=${c.evaluationMetric ?? 'n/a'} | deadline=${c.deadline ?? 'n/a'}`)
       .join('\n');
-    const body = JSON.stringify({ competitions: top }, null, 2);
+    // Probe each competition so the strategist receives a structured
+    // intel block alongside the raw competition list.
+    const intelMap = await probeAll(ctx, top);
+    const competitionsWithIntel = top.map((c) => {
+      const slug = competitionSlugFrom(c.id);
+      const intel = slug ? intelMap.get(slug) : undefined;
+      return { competition: c, intel: intel ?? null };
+    });
+    const body = JSON.stringify({ competitions: competitionsWithIntel }, null, 2);
     await emitToNextAgent(
       context,
       'strategist',

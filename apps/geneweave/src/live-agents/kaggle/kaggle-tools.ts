@@ -15,7 +15,12 @@ import {
   type Tool,
   type ToolRegistry,
 } from '@weaveintel/core';
-import { liveKaggleAdapter, type KaggleAdapter, type KaggleCredentials } from '@weaveintel/tools-kaggle';
+import {
+  liveKaggleAdapter,
+  validateSubmissionCsv,
+  type KaggleAdapter,
+  type KaggleCredentials,
+} from '@weaveintel/tools-kaggle';
 
 /**
  * Resolve Kaggle credentials from KAGGLE_USERNAME / KAGGLE_KEY env vars.
@@ -372,35 +377,138 @@ export function createKaggleTools(opts: KaggleToolsOptions = {}): ToolRegistry {
         // size=0 metadata. Without this, "iterate based on CV" is impossible.
         const outFiles = ((out as { files?: Array<{ fileName?: string; url?: string }> }).files ?? []);
         const inlinedContents: Record<string, unknown> = {};
+        const inlinedCsvFiles: Record<string, string> = {};
         const SCORE_FILE_RE = /^(cv_scores?|metrics?|scores?|results?)\.json$/i;
+        // Skill-driven validator needs to read the actual submission.csv bytes
+        // (header line + row count + IDs) without operator handholding. Inline
+        // any small submission*.csv so kaggle_validate_submission can consume
+        // it directly from this tool's output. 4 MiB is generous enough for
+        // ~250k-row Kaggle submissions and small enough to keep tool returns
+        // in the model's context budget.
+        const CSV_FILE_RE = /^submission([_-].*)?\.csv$/i;
+        const MAX_CSV_INLINE = 4 * 1024 * 1024;
         for (const f of outFiles) {
           const name = f.fileName ?? '';
           const url = f.url ?? '';
           if (!name || !url) continue;
-          if (!SCORE_FILE_RE.test(name)) continue;
-          try {
-            const resp = await fetch(url);
-            if (!resp.ok) continue;
-            const text = await resp.text();
-            if (text.length > 8192) continue;
+          if (SCORE_FILE_RE.test(name)) {
             try {
-              inlinedContents[name] = JSON.parse(text);
+              const resp = await fetch(url);
+              if (!resp.ok) continue;
+              const text = await resp.text();
+              if (text.length > 8192) continue;
+              try {
+                inlinedContents[name] = JSON.parse(text);
+              } catch {
+                inlinedContents[name] = text;
+              }
             } catch {
-              inlinedContents[name] = text;
+              /* best-effort; never block the tool call */
             }
-          } catch {
-            /* best-effort; never block the tool call */
+          } else if (CSV_FILE_RE.test(name)) {
+            try {
+              const resp = await fetch(url);
+              if (!resp.ok) continue;
+              const text = await resp.text();
+              if (text.length > MAX_CSV_INLINE) continue;
+              inlinedCsvFiles[name] = text;
+            } catch {
+              /* best-effort */
+            }
           }
         }
         const enriched: Record<string, unknown> = { ...(out as object), log: display };
         if (Object.keys(inlinedContents).length > 0) {
           enriched['inlinedScoreFiles'] = inlinedContents;
         }
+        if (Object.keys(inlinedCsvFiles).length > 0) {
+          enriched['inlinedCsvFiles'] = inlinedCsvFiles;
+        }
         return JSON.stringify(enriched, null, 2);
       },
     }),
   );
-
+  // Skill-driven submission validator. The kaggle_validator skill drives the
+  // workflow:
+  //   1. kaggle_list_competition_files → find sample_submission.* (or
+  //      gender_submission.csv for Titanic)
+  //   2. kaggle_get_competition_file → read the sample's header + row count
+  //   3. kaggle_get_kernel_output → pull the kernel's submission.csv via
+  //      `inlinedCsvFiles`
+  //   4. kaggle_validate_submission → deterministic header / row / id parity
+  //      checks against the sample
+  // Pure compute, no network, no credentials.
+  reg.register(
+    defineTool({
+      name: 'kaggle_validate_submission',
+      description:
+        'Deterministically validate a Kaggle submission CSV against the competition sample. Performs header-order match, row-count parity, ID uniqueness and ID coverage checks (when expectedIds supplied). Returns { valid, rows, headers, errors, warnings }. Pure TypeScript — no network, no credentials. Call BEFORE handing off to the submitter.',
+      parameters: {
+        type: 'object',
+        properties: {
+          csvContent: {
+            type: 'string',
+            description: 'Full submission CSV bytes as a string (typically taken from kaggle_get_kernel_output.inlinedCsvFiles["submission.csv"]).',
+          },
+          expectedHeaders: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Expected column headers in the exact order Kaggle requires. Read from the first line of the competition sample submission.',
+          },
+          expectedRowCount: {
+            type: 'number',
+            description: 'Expected number of data rows (total lines in sample_submission - 1). Optional but strongly recommended.',
+          },
+          idColumn: {
+            type: 'string',
+            description: 'Name of the ID column (typically the first column in expectedHeaders). When set, ID uniqueness is enforced.',
+          },
+          expectedIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'When supplied, enforces that the submission ID set equals this set (no missing, no extra). Read from sample_submission column.',
+          },
+          maxBytes: {
+            type: 'number',
+            description: 'Maximum CSV size in bytes (default 100 MiB).',
+          },
+        },
+        required: ['csvContent', 'expectedHeaders'],
+      },
+      tags: ['kaggle', 'read', 'local'],
+      riskLevel: 'read-only',
+      execute: async (args) => {
+        const csvContent = String(args['csvContent'] ?? '');
+        const expectedHeaders = (args['expectedHeaders'] as string[] | undefined) ?? [];
+        if (!csvContent) {
+          return JSON.stringify({ valid: false, rows: 0, headers: [], errors: ['csvContent is empty'], warnings: [] });
+        }
+        if (!Array.isArray(expectedHeaders) || expectedHeaders.length === 0) {
+          return JSON.stringify({ valid: false, rows: 0, headers: [], errors: ['expectedHeaders is required and must be non-empty'], warnings: [] });
+        }
+        const input: Parameters<typeof validateSubmissionCsv>[0] = {
+          csvContent,
+          expectedHeaders,
+        };
+        if (typeof args['expectedRowCount'] === 'number') input.expectedRowCount = args['expectedRowCount'] as number;
+        if (typeof args['idColumn'] === 'string') input.idColumn = args['idColumn'] as string;
+        if (Array.isArray(args['expectedIds'])) input.expectedIds = args['expectedIds'] as string[];
+        if (typeof args['maxBytes'] === 'number') input.maxBytes = args['maxBytes'] as number;
+        try {
+          const result = validateSubmissionCsv(input);
+          return JSON.stringify(result, null, 2);
+        } catch (err) {
+          return JSON.stringify({
+            valid: false,
+            rows: 0,
+            headers: [],
+            errors: [`validator_threw: ${err instanceof Error ? err.message : String(err)}`],
+            warnings: [],
+          });
+        }
+      },
+    }),
+  );
   return reg;
 }
 

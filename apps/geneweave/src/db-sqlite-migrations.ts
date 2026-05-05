@@ -1747,16 +1747,47 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
     {
       id: 'kgl00000-0000-4000-8002-000000000004',
       name: 'kaggle_validator',
-      description: 'Pre-flight checks a Kaggle submission CSV (header, row count, ID coverage) and optionally runs cross-validation in a sandboxed container. Read-only and side-effect-free.',
-      triggers: ['validate submission', 'check submission', 'pre-flight kaggle', 'score cv', 'cross validate kaggle'],
+      description: 'Skill-driven Kaggle submission validator. Handles BOTH static-file (CSV/JSON) competitions and live-API / kernel-as-submission competitions. Fetches the competition\'s expected submission contract OR (for kernel-as-submission) confirms the kernel ran cleanly and printed a valid scoring line.',
+      triggers: ['validate submission', 'check submission', 'pre-flight kaggle', 'score cv', 'cross validate kaggle', 'kaggle.validation.iteration'],
       instructions: [
-        'When to use: before any kaggle.competitions.submit call, or when the user wants to score an approach offline.',
-        'When NOT to use: the user has not produced a submission CSV yet.',
-        'Reasoning: cheap fail-fast first (validate_submission), then optionally cross-validate (score_cv) only if the user asked for it. score_cv runs in a sandboxed container; it requires the kaggle-runner image to be registered in the host ImagePolicy.',
-        'Execution: call kaggle.local.validate_submission first; report any errors verbatim. If the user asked for CV, call kaggle.local.score_cv with the requested model and folds.',
-        'Completion: state explicitly whether the submission is valid (use the phrase "valid submission") and report the row count (use "rows=").',
+        'You are the Kaggle Submission Validator. You ALWAYS run BEFORE any kaggle.competitions.submit call.',
+        '',
+        'INPUTS in the inbound message: a competitionRef (slug like "titanic") and a kernelRef (owner/slug). Optionally `submissionWriter` is one of `kernel_emits_file` (default) or `kernel_is_submission` (live-API / agent comps). They appear either as a JSON payload {competitionId, kernelRef, submissionWriter, ...} or in free text — extract them.',
+        '',
+        'BRANCH on submissionWriter (or, if missing, infer from the competition file list).',
+        '',
+        'PATH A — STATIC FILE (submissionWriter=kernel_emits_file, the default; competition has sample_submission.csv / .json):',
+        '  1. kaggle_list_competition_files(ref=<competitionRef>) — locate the sample submission file. Priority order: gender_submission.csv, sample_submission.csv, sample_submission.json, submission_format.csv. If NONE of these exist, switch to PATH B.',
+        '  2. kaggle_get_competition_file(ref=<competitionRef>, fileName=<sample-file-name>, maxBytes=2097152) — read the sample. Parse it:',
+        '       - The first non-empty line is the header. Split on commas → expectedHeaders (in order).',
+        '       - Count remaining non-empty lines → expectedRowCount.',
+        '       - The first column name is the idColumn.',
+        '       - Collect the first-column values across all data rows → expectedIds (only when total < 30000 to keep the tool call small).',
+        '  3. kaggle_get_kernel_output(kernelRef=<kernelRef>) — read the kernel\'s output. The validator-friendly field is `inlinedCsvFiles["submission.csv"]` (or the closest matching submission*.csv name). If `inlinedCsvFiles` is empty/absent, the kernel did not produce a submission CSV — verdict fail.',
+        '  4. kaggle_validate_submission({csvContent: <inlined CSV>, expectedHeaders, expectedRowCount, idColumn, expectedIds (when collected)}) — run the deterministic parity check.',
+        '  Pass on valid=true with zero errors. Fail on any errors[] / row mismatch / missing inlinedCsvFiles.',
+        '',
+        'PATH B — KERNEL-AS-SUBMISSION (submissionWriter=kernel_is_submission; live-API / agent / interactive competitions where the kernel script ITSELF is the submission and there is no submission.csv to diff):',
+        '  1. kaggle_get_kernel_output(kernelRef=<kernelRef>) — read the full kernel output.',
+        '  2. Verify ALL THREE of:',
+        '       (a) status == "complete" (the kernel ran to completion, not failed/cancelled/timeout).',
+        '       (b) the log tail contains a recognisable scoring line. Accept ANY of these patterns (case-insensitive): `AGENT_RESULT`, `AGENT_RESULT_SCORE=`, `total_score=`, `total_score:`, `final_score=`, `levels_completed=`, `arc.get_scorecard()` output dict, or any line starting with `SCORE:` / `SCORECARD:`.',
+        '       (c) NO unhandled Python traceback in the last ~100 lines (a `Traceback (most recent call last):` block followed by an exception line with no later recovery is a fail).',
+        '  Pass when all three hold. Fail otherwise.',
+        '',
+        'COMPLETION (mandatory final line, exact format):',
+        '  PATH A pass:  VALIDATION_VERDICT=pass rows=<N>',
+        '  PATH B pass:  VALIDATION_VERDICT=pass rows=0 simulation=true',
+        '  Either fail:  VALIDATION_VERDICT=fail reason=<short reason: e.g. "header_mismatch", "row_count 891 vs expected 418", "missing_submission_csv", "kernel_failed", "no_score_line", "traceback_in_log">',
+        '',
+        'Always state explicitly whether this is a "valid submission" and report the row count using the literal phrase "rows=" in your final answer (use rows=0 for PATH B).',
       ].join('\n'),
-      tools: ['kaggle.local.validate_submission', 'kaggle.local.score_cv'],
+      tools: [
+        'kaggle_list_competition_files',
+        'kaggle_get_competition_file',
+        'kaggle_get_kernel_output',
+        'kaggle_validate_submission',
+      ],
       policy: 'kaggle_read_only',
       priority: 80,
       requiredEvidence: ['valid submission', 'rows='],
@@ -1813,6 +1844,35 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
       );
     } catch { /* ignore */ }
   }
+
+  // INSERT OR IGNORE above won't refresh skills that were previously seeded
+  // with stale instructions/tool lists. Force-update the kaggle_validator
+  // skill so the new skill-driven workflow lands on every restart without
+  // an operator manually editing the DB row.
+  try {
+    db.prepare(
+      `UPDATE skills
+         SET description = ?,
+             instructions = ?,
+             tool_names = ?,
+             trigger_patterns = ?,
+             tool_policy_key = ?,
+             execution_contract = ?,
+             updated_at = datetime('now')
+       WHERE id = 'kgl00000-0000-4000-8002-000000000004'`,
+    ).run(
+      KAGGLE_SKILLS.find((s) => s.id === 'kgl00000-0000-4000-8002-000000000004')!.description,
+      KAGGLE_SKILLS.find((s) => s.id === 'kgl00000-0000-4000-8002-000000000004')!.instructions,
+      JSON.stringify(KAGGLE_SKILLS.find((s) => s.id === 'kgl00000-0000-4000-8002-000000000004')!.tools),
+      JSON.stringify(KAGGLE_SKILLS.find((s) => s.id === 'kgl00000-0000-4000-8002-000000000004')!.triggers),
+      KAGGLE_SKILLS.find((s) => s.id === 'kgl00000-0000-4000-8002-000000000004')!.policy,
+      JSON.stringify({
+        requiredOutputSubstrings: KAGGLE_SKILLS.find(
+          (s) => s.id === 'kgl00000-0000-4000-8002-000000000004',
+        )!.requiredEvidence,
+      }),
+    );
+  } catch { /* non-fatal */ }
 
   // 3. Projection tables (3 tables, all UUID PKs, all using INSERT OR IGNORE
   //    for idempotency on later upserts).

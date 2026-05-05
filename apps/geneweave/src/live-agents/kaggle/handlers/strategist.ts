@@ -83,8 +83,8 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
     const summary = (result && 'summaryProse' in result && result.summaryProse) || 'Strategist agent finished.';
     await emitToNextAgent(
       context,
-      'submitter',
-      'Agentic strategist final summary',
+      'validator',
+      'Agentic strategist final approach for validation',
       String(summary),
       'kaggle.strategy.final',
     );
