@@ -56,8 +56,15 @@ export interface StartKaggleHeartbeatOptions {
   /**
    * Number of parallel tick() workers. Each worker runs an independent
    * `heartbeat.tick()` loop with its own workerId so a long-running ReAct
-   * loop on one agent doesn't block ticks for other runs. Default 4 — at
-   * concurrency=1 per worker that means up to 4 parallel agent ticks.
+   * loop on one agent doesn't block ticks for other runs.
+   *
+   * There is no cap on the number of concurrent competitions — workers
+   * round-robin through all SCHEDULED ticks across all active runs. The
+   * worker count only controls how many ticks execute in parallel per
+   * interval; queued ticks pick up on subsequent intervals. Scale via the
+   * `KAGGLE_HEARTBEAT_WORKERS` env var (default 32) for high-density
+   * deployments — set to e.g. 64 or 128 if competitions arrive faster than
+   * they drain.
    */
   workers?: number;
   workerIdPrefix?: string;
@@ -144,53 +151,87 @@ async function listAvailableModelsForRouting(
  * Scan every kaggle agent across active runs and ensure a SCHEDULED tick
  * row exists for any agent with pending inbox or open backlog. Without this
  * the heartbeat would have nothing to claim. Idempotent per-agent.
+ *
+ * Filters out paused/archived meshes and non-ACTIVE agents so operator pause
+ * actions stop new work immediately (in-flight ticks still drain naturally).
+ *
+ * No cap on concurrent competitions — runs are paged in batches of
+ * RUN_PAGE_SIZE and every page is processed in parallel. Scheduling cost
+ * scales linearly with the active-run count; SQLite + Promise.all keep this
+ * sub-second well into the thousands of agents.
  */
+const RUN_PAGE_SIZE = 200;
+
+async function listAllRunningRuns(db: DatabaseAdapter): Promise<Array<Awaited<ReturnType<DatabaseAdapter['listKglCompetitionRuns']>>[number]>> {
+  const out: Array<Awaited<ReturnType<DatabaseAdapter['listKglCompetitionRuns']>>[number]> = [];
+  let offset = 0;
+  for (;;) {
+    const page = await db.listKglCompetitionRuns({ status: 'running', limit: RUN_PAGE_SIZE, offset });
+    out.push(...page);
+    if (page.length < RUN_PAGE_SIZE) break;
+    offset += RUN_PAGE_SIZE;
+  }
+  return out;
+}
+
 async function scheduleDueTicks(db: DatabaseAdapter, workerId: string): Promise<number> {
   const store = await getKaggleLiveStore();
-  const runs = await db.listKglCompetitionRuns({ status: 'running', limit: 100 });
+  const runs = await listAllRunningRuns(db);
+  if (runs.length === 0) return 0;
   const nowIso = new Date().toISOString();
-  let scheduled = 0;
-  for (const run of runs) {
-    if (!run.mesh_id) continue;
-    const agents = await store.listAgents(run.mesh_id);
-    for (const agent of agents) {
-      const [inbox, backlog] = await Promise.all([
-        store.listMessagesForRecipient('AGENT', agent.id),
-        store.listBacklogForAgent(agent.id),
-      ]);
-      const hasPendingMsg = inbox.some((m) => m.status === 'PENDING' || m.status === 'DELIVERED' || m.status === 'READ');
-      const hasOpenBacklog = backlog.some(
-        (b) => b.status === 'PROPOSED' || b.status === 'ACCEPTED' || b.status === 'IN_PROGRESS',
-      );
-      if (!hasPendingMsg && !hasOpenBacklog) continue;
-      // Deterministic tick id per agent per interval bucket — saveHeartbeatTick
-      // upserts on PK (entity_type, id), so repeated scheduling within the
-      // same bucket replaces the same row instead of piling up duplicates.
-      // Once a worker claims+leases the tick, its workerId/leaseExpiresAt are
-      // set so the next bucket's SCHEDULED upsert won't override an in-flight
-      // claim (claimNextTicks filters status=SCHEDULED only).
-      const bucket = Math.floor(Date.now() / 30_000); // 30s window
-      const tickId = `tick:${agent.id}:${bucket}`;
-      const existing = await store.loadHeartbeatTick(tickId);
-      if (existing && existing.status !== 'SCHEDULED') continue;
-      await store.saveHeartbeatTick({
-        id: tickId,
-        agentId: agent.id,
-        scheduledFor: nowIso,
-        pickedUpAt: null,
-        completedAt: null,
-        workerId: '',
-        leaseExpiresAt: null,
-        actionChosen: null,
-        actionOutcomeProse: null,
-        actionOutcomeStatus: null,
-        status: 'SCHEDULED',
-      });
-      scheduled++;
-      void workerId; // captured for logging callers
-    }
-  }
-  return scheduled;
+  const bucket = Math.floor(Date.now() / 30_000); // 30s dedupe window
+
+  const scheduleAgent = async (agentId: string): Promise<number> => {
+    const [inbox, backlog] = await Promise.all([
+      store.listMessagesForRecipient('AGENT', agentId),
+      store.listBacklogForAgent(agentId),
+    ]);
+    const hasPendingMsg = inbox.some(
+      (m) => m.status === 'PENDING' || m.status === 'DELIVERED' || m.status === 'READ',
+    );
+    const hasOpenBacklog = backlog.some(
+      (b) => b.status === 'PROPOSED' || b.status === 'ACCEPTED' || b.status === 'IN_PROGRESS',
+    );
+    if (!hasPendingMsg && !hasOpenBacklog) return 0;
+    // Deterministic tick id per agent per bucket — upserts on PK so repeated
+    // scheduling within the same bucket replaces the same row. Once a worker
+    // claims it, the next bucket's SCHEDULED upsert won't override an
+    // in-flight claim (claimNextTicks filters status=SCHEDULED only).
+    const tickId = `tick:${agentId}:${bucket}`;
+    const existing = await store.loadHeartbeatTick(tickId);
+    if (existing && existing.status !== 'SCHEDULED') return 0;
+    await store.saveHeartbeatTick({
+      id: tickId,
+      agentId,
+      scheduledFor: nowIso,
+      pickedUpAt: null,
+      completedAt: null,
+      workerId: '',
+      leaseExpiresAt: null,
+      actionChosen: null,
+      actionOutcomeProse: null,
+      actionOutcomeStatus: null,
+      status: 'SCHEDULED',
+    });
+    return 1;
+  };
+
+  const scheduleRun = async (meshId: string): Promise<number> => {
+    // Skip meshes operator has paused/archived. Defense-in-depth: even if a
+    // kgl_competition_run row is still 'running', a paused mesh means
+    // "operator wants no new work" — honor that here so ticks don't pile up.
+    const mesh = await store.loadMesh(meshId);
+    if (!mesh || mesh.status !== 'ACTIVE') return 0;
+    const agents = await store.listAgents(meshId);
+    const activeAgents = agents.filter((a) => a.status === 'ACTIVE');
+    if (activeAgents.length === 0) return 0;
+    const counts = await Promise.all(activeAgents.map((a) => scheduleAgent(a.id)));
+    return counts.reduce((s, n) => s + n, 0);
+  };
+
+  const perRun = await Promise.all(runs.map((r) => (r.mesh_id ? scheduleRun(r.mesh_id) : Promise.resolve(0))));
+  void workerId;
+  return perRun.reduce((s, n) => s + n, 0);
 }
 
 /**
@@ -200,79 +241,85 @@ async function scheduleDueTicks(db: DatabaseAdapter, workerId: string): Promise<
  */
 async function bridgeRunState(db: DatabaseAdapter): Promise<void> {
   const store = await getKaggleLiveStore();
-  const runs = await db.listKglCompetitionRuns({ status: 'running', limit: 100 });
-  for (const run of runs) {
-    if (!run.mesh_id) continue;
-    const meshId = run.mesh_id;
-    const steps = await db.listKglRunSteps(run.id);
-    const stepByRole = new Map(steps.map((s) => [s.role, s] as const));
-    for (const [roleSlug, stepRole] of Object.entries(KAGGLE_ROLE_TO_STEP)) {
-      const step = stepByRole.get(stepRole);
-      if (!step) continue;
-      const agentId = `${meshId}::${roleSlug}`;
-      const [backlog, inbox] = await Promise.all([
-        store.listBacklogForAgent(agentId),
-        store.listMessagesForRecipient('AGENT', agentId),
-      ]);
-      const inProgress = backlog.find((b) => b.status === 'IN_PROGRESS');
-      const completed = backlog.filter((b) => b.status === 'COMPLETED').sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))[0];
-      const open = backlog.find((b) => b.status === 'PROPOSED' || b.status === 'ACCEPTED');
-      // Inbox-driven activity: roles after the discoverer (strategist,
-      // implementer, validator, submitter, observer) typically receive
-      // TASK messages from upstream agents and may execute via ReAct loops
-      // without ever creating a backlog item. Treat any pending/delivered
-      // inbox or any handled inbox message as evidence the step is active.
-      const hasOpenInbox = inbox.some((m) => m.status === 'PENDING' || m.status === 'DELIVERED' || m.status === 'READ');
-      const hasHandledInbox = inbox.some((m) => m.status === 'PROCESSED');
-      // running: in-progress backlog OR open backlog OR open inbox OR
-      // already-handled inbox (means the agent has at least started work).
-      if (step.status === 'pending' && (inProgress || open || hasOpenInbox || hasHandledInbox)) {
-        await db.updateKglRunStep(step.id, {
-          status: 'running',
-          started_at: new Date().toISOString(),
-          agent_id: agentId,
-        });
-        await db.appendKglRunEvent({
-          id: newUUIDv7(),
-          run_id: run.id,
-          step_id: step.id,
-          kind: 'step_started',
-          agent_id: agentId,
-          tool_key: null,
-          summary: `${roleSlug} agent picked up work.`,
-          payload_json: null,
-        });
-      }
-      // completed: latest backlog item is COMPLETED and no remaining open work
-      if ((step.status === 'pending' || step.status === 'running') && completed && !inProgress && !open && !hasOpenInbox) {
-        const summary = (completed.title || completed.description || `${roleSlug} step complete`).slice(0, 240);
-        await db.updateKglRunStep(step.id, {
-          status: 'completed',
-          completed_at: new Date().toISOString(),
-          summary,
-          agent_id: agentId,
-        });
-        await db.appendKglRunEvent({
-          id: newUUIDv7(),
-          run_id: run.id,
-          step_id: step.id,
-          kind: 'step_completed',
-          agent_id: agentId,
-          tool_key: null,
-          summary,
-          payload_json: null,
-        });
-      }
-    }
-    // If the submitter step is completed, mark the whole run completed.
-    const submitterStep = stepByRole.get('kaggle_submitter');
-    if (submitterStep && submitterStep.status === 'completed' && run.status === 'running') {
-      await db.updateKglCompetitionRun(run.id, {
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-        summary: submitterStep.summary ?? 'Pipeline reached submitter step.',
+  const runs = await listAllRunningRuns(db);
+  await Promise.all(runs.map((run) => bridgeOneRun(db, store, run)));
+}
+
+async function bridgeOneRun(
+  db: DatabaseAdapter,
+  store: Awaited<ReturnType<typeof getKaggleLiveStore>>,
+  run: { id: string; mesh_id: string | null; status: string; summary?: string | null },
+): Promise<void> {
+  if (!run.mesh_id) return;
+  const meshId = run.mesh_id;
+  const steps = await db.listKglRunSteps(run.id);
+  const stepByRole = new Map(steps.map((s) => [s.role, s] as const));
+  for (const [roleSlug, stepRole] of Object.entries(KAGGLE_ROLE_TO_STEP)) {
+    const step = stepByRole.get(stepRole);
+    if (!step) continue;
+    const agentId = `${meshId}::${roleSlug}`;
+    const [backlog, inbox] = await Promise.all([
+      store.listBacklogForAgent(agentId),
+      store.listMessagesForRecipient('AGENT', agentId),
+    ]);
+    const inProgress = backlog.find((b) => b.status === 'IN_PROGRESS');
+    const completed = backlog.filter((b) => b.status === 'COMPLETED').sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''))[0];
+    const open = backlog.find((b) => b.status === 'PROPOSED' || b.status === 'ACCEPTED');
+    // Inbox-driven activity: roles after the discoverer (strategist,
+    // implementer, validator, submitter, observer) typically receive
+    // TASK messages from upstream agents and may execute via ReAct loops
+    // without ever creating a backlog item. Treat any pending/delivered
+    // inbox or any handled inbox message as evidence the step is active.
+    const hasOpenInbox = inbox.some((m) => m.status === 'PENDING' || m.status === 'DELIVERED' || m.status === 'READ');
+    const hasHandledInbox = inbox.some((m) => m.status === 'PROCESSED');
+    // running: in-progress backlog OR open backlog OR open inbox OR
+    // already-handled inbox (means the agent has at least started work).
+    if (step.status === 'pending' && (inProgress || open || hasOpenInbox || hasHandledInbox)) {
+      await db.updateKglRunStep(step.id, {
+        status: 'running',
+        started_at: new Date().toISOString(),
+        agent_id: agentId,
+      });
+      await db.appendKglRunEvent({
+        id: newUUIDv7(),
+        run_id: run.id,
+        step_id: step.id,
+        kind: 'step_started',
+        agent_id: agentId,
+        tool_key: null,
+        summary: `${roleSlug} agent picked up work.`,
+        payload_json: null,
       });
     }
+    // completed: latest backlog item is COMPLETED and no remaining open work
+    if ((step.status === 'pending' || step.status === 'running') && completed && !inProgress && !open && !hasOpenInbox) {
+      const summary = (completed.title || completed.description || `${roleSlug} step complete`).slice(0, 240);
+      await db.updateKglRunStep(step.id, {
+        status: 'completed',
+        completed_at: new Date().toISOString(),
+        summary,
+        agent_id: agentId,
+      });
+      await db.appendKglRunEvent({
+        id: newUUIDv7(),
+        run_id: run.id,
+        step_id: step.id,
+        kind: 'step_completed',
+        agent_id: agentId,
+        tool_key: null,
+        summary,
+        payload_json: null,
+      });
+    }
+  }
+  // If the submitter step is completed, mark the whole run completed.
+  const submitterStep = stepByRole.get('kaggle_submitter');
+  if (submitterStep && submitterStep.status === 'completed' && run.status === 'running') {
+    await db.updateKglCompetitionRun(run.id, {
+      status: 'completed',
+      completed_at: new Date().toISOString(),
+      summary: submitterStep.summary ?? 'Pipeline reached submitter step.',
+    });
   }
 }
 
@@ -284,7 +331,16 @@ async function bridgeRunState(db: DatabaseAdapter): Promise<void> {
  */
 export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): Promise<KaggleHeartbeatHandle> {
   const intervalMs = opts.intervalMs ?? 5_000;
-  const workerCount = Math.max(1, opts.workers ?? 4);
+  // No cap on concurrent competitions — workers process the global queue
+  // of SCHEDULED ticks round-robin. Worker count only controls per-interval
+  // parallelism; pending ticks naturally roll forward. Default 32 is a sane
+  // out-of-the-box value; operators set `KAGGLE_HEARTBEAT_WORKERS` to scale
+  // arbitrarily (e.g. 128 or 256) when many competitions run simultaneously.
+  const envWorkers = Number(process.env['KAGGLE_HEARTBEAT_WORKERS'] ?? '');
+  const workerCount = Math.max(
+    1,
+    opts.workers ?? (Number.isFinite(envWorkers) && envWorkers > 0 ? envWorkers : 32),
+  );
   const workerIdPrefix = opts.workerIdPrefix ?? 'geneweave-kaggle-worker';
 
   const store = await getKaggleLiveStore();
@@ -381,6 +437,21 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
   // routes every kaggle agent to it.
   const dbDrivenHandler: TaskHandler = async (action, execCtx, ctx) => {
     const agentId = execCtx.agent.id;
+    // Defense-in-depth: the scheduler already filters PAUSED meshes/agents
+    // when emitting NEW ticks, but stale SCHEDULED ticks can persist across
+    // server restarts (the la_entities table outlives the in-process loop)
+    // and operator pause actions can land between claim and execute. Re-check
+    // status here so a paused agent or paused mesh drops the tick instantly
+    // without invoking the model — critical for not burning paid quota on
+    // abandoned/paused work.
+    const liveAgent = await store.loadAgent(agentId);
+    if (!liveAgent || liveAgent.status !== 'ACTIVE') {
+      return { completed: false, summaryProse: `Agent status=${liveAgent?.status ?? 'missing'} — skipping tick.` };
+    }
+    const mesh = await store.loadMesh(liveAgent.meshId);
+    if (!mesh || mesh.status !== 'ACTIVE') {
+      return { completed: false, summaryProse: `Mesh status=${mesh?.status ?? 'missing'} — skipping tick.` };
+    }
     const { handler } = await weaveLiveAgentFromDb(opts.db, agentId, {
       modelResolver: dbModelResolver,
       policy: liveAgentPolicy,
