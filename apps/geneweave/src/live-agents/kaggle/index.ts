@@ -1,20 +1,17 @@
 /**
  * Phase K5 — Kaggle live-agents module barrel.
  *
- * Provides mesh templating, attention policies, account-binding capability
- * matrix, cross-mesh bridge wiring, and a single `bootKaggleMesh` entry point
- * that provisions the entire topology against any `StateStore`.
+ * Phase D — bespoke mesh templating (`bootKaggleMesh`, `buildKaggleMeshTemplate`)
+ * was removed. Mesh provisioning now goes through the generic
+ * `provisionMesh` from `@weaveintel/live-agents-runtime` driven by the
+ * `live_mesh_definitions` row keyed `'kaggle'`. This barrel still re-exports
+ * the kaggle-specific capability matrix, attention policy, store, and
+ * playbook resolver because those remain kaggle-domain concerns.
  *
  * See `docs/live-agents/kaggle.md` for the topology diagram and capability
  * matrix.
  */
 
-export {
-  buildKaggleMeshTemplate,
-  type KaggleMeshTemplate,
-  type KaggleMeshTemplateOptions,
-  type KaggleRolePersona,
-} from './mesh-template.js';
 export {
   KAGGLE_CAPABILITY_MATRIX,
   bindingConstraintsFor,
@@ -32,12 +29,6 @@ export {
   createKaggleAttentionPolicyFromDb,
   type KaggleAttentionPolicyOptions,
 } from './agents.js';
-export {
-  bootKaggleMesh,
-  revokeKaggleBinding,
-  type BootKaggleMeshOptions,
-  type KaggleMeshBootResult,
-} from './boot.js';
 export { getKaggleLiveStore, _resetKaggleLiveStoreForTests } from './store.js';
 export {
   KAGGLE_PLAYBOOK_CATEGORY,

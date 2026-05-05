@@ -6,17 +6,21 @@
  * to browse in the admin UI. Skipped on subsequent boots.
  *
  * Production deployments set KAGGLE_DEMO_SEED=false to disable.
+ *
+ * Phase D — switched from the bespoke `bootKaggleMesh` to the generic
+ * `provisionMesh` so the demo mesh is provisioned from the same DB
+ * blueprint (`live_mesh_definitions` key 'kaggle') used by per-run
+ * provisioning in `runner.ts` and the admin provisioning route.
  */
 
+import { provisionMesh } from '@weaveintel/live-agents-runtime';
 import type { DatabaseAdapter } from '../../db-types.js';
-import { bootKaggleMesh } from './boot.js';
-import { createDbKagglePlaybookResolver } from './playbook-resolver.js';
+import { newUUIDv7 } from '../../lib/uuid.js';
 import { getKaggleLiveStore } from './store.js';
 
 const DEMO_TENANT = 'demo-tenant';
 const DEMO_USER = 'demo-user';
 const DEMO_HUMAN = 'human:demo-owner';
-const DEMO_USER_MESH = 'mesh-user-demo';
 const DEMO_MCP_URL = 'http://localhost:8788/mcp';
 
 export async function seedKaggleDemoMesh(db: DatabaseAdapter): Promise<void> {
@@ -27,23 +31,35 @@ export async function seedKaggleDemoMesh(db: DatabaseAdapter): Promise<void> {
 
   try {
     const store = await getKaggleLiveStore();
-    const result = await bootKaggleMesh({
-      store,
-      tenantId: DEMO_TENANT,
-      kaggleUsername: DEMO_USER,
-      humanOwnerId: DEMO_HUMAN,
-      mcpUrl: DEMO_MCP_URL,
-      userMeshId: DEMO_USER_MESH,
-      credentialVaultRef: 'env:KAGGLE_KEY',
-      playbookResolver: createDbKagglePlaybookResolver(db),
-    });
+    const result = await provisionMesh(
+      db,
+      {
+        meshDefKey: 'kaggle',
+        tenantId: DEMO_TENANT,
+        ownerHumanId: DEMO_HUMAN,
+        name: `mesh-kaggle-demo-${newUUIDv7()}`,
+        status: 'ACTIVE',
+        store,
+        account: {
+          provider: 'kaggle.com',
+          accountIdentifier: DEMO_USER,
+          mcpServerUrl: DEMO_MCP_URL,
+          credentialVaultRef: 'env:KAGGLE_KEY',
+          upstreamScopesDescription:
+            'Kaggle REST API: list competitions/datasets/kernels, push kernels, submit to competitions.',
+          description: `Demo Kaggle credentials for ${DEMO_USER}`,
+        },
+        logger: (msg) => console.log('[kaggle-seed]', msg),
+      },
+      newUUIDv7,
+    );
     await db.upsertKaggleLiveMesh({
-      mesh_id: result.template.mesh.id,
+      mesh_id: result.meshId,
       tenant_id: DEMO_TENANT,
       kaggle_username: DEMO_USER,
     });
     // eslint-disable-next-line no-console
-    console.log(`[kaggle-seed] provisioned demo mesh ${result.template.mesh.id}`);
+    console.log(`[kaggle-seed] provisioned demo mesh ${result.meshId}`);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn('[kaggle-seed] demo mesh seed skipped:', (err as Error).message);

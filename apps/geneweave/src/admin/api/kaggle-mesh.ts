@@ -13,10 +13,10 @@
 
 import { createIdempotencyStore } from '@weaveintel/reliability';
 import type { Account, AccountBinding, AgentContract, CrossMeshBridge, DelegationEdge, LiveAgent, Mesh, StateStore } from '@weaveintel/live-agents';
+import { provisionMesh } from '@weaveintel/live-agents-runtime';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
-import { bootKaggleMesh, revokeKaggleBinding } from '../../live-agents/kaggle/boot.js';
-import { createDbKagglePlaybookResolver } from '../../live-agents/kaggle/playbook-resolver.js';
+import { newUUIDv7 } from '../../lib/uuid.js';
 import { getKaggleLiveStore } from '../../live-agents/kaggle/store.js';
 
 const provisionIdempotency = createIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000 });
@@ -163,30 +163,46 @@ export function registerKaggleMeshRoutes(
       return;
     }
     const store = await resolveStore(helpers);
-    const result = await bootKaggleMesh({
-      store,
-      tenantId,
-      kaggleUsername,
-      mcpUrl,
-      humanOwnerId,
-      playbookResolver: createDbKagglePlaybookResolver(db),
-      ...(typeof body['userMeshId'] === 'string' ? { userMeshId: body['userMeshId'] as string } : {}),
-      ...(typeof body['credentialVaultRef'] === 'string' ? { credentialVaultRef: body['credentialVaultRef'] as string } : {}),
-      ...(typeof body['meshId'] === 'string' ? { meshId: body['meshId'] as string } : {}),
-    });
+    const credentialVaultRef = (typeof body['credentialVaultRef'] === 'string' ? body['credentialVaultRef'] as string : 'env:KAGGLE_KEY');
+    const desiredMeshId = (typeof body['meshId'] === 'string' && body['meshId']) ? body['meshId'] as string : `mesh-kaggle-${newUUIDv7()}`;
+    // Phase D — provision via the generic blueprint-driven provisioner
+    // (DB key 'kaggle' in `live_mesh_definitions`). Replaces the bespoke
+    // `bootKaggleMesh` so admin / runner / seed all share one path.
+    const result = await provisionMesh(
+      db,
+      {
+        meshDefKey: 'kaggle',
+        tenantId,
+        ownerHumanId: humanOwnerId,
+        name: desiredMeshId,
+        status: 'ACTIVE',
+        store,
+        account: {
+          provider: 'kaggle.com',
+          accountIdentifier: kaggleUsername,
+          mcpServerUrl: mcpUrl,
+          credentialVaultRef,
+          upstreamScopesDescription:
+            'Kaggle REST API: list competitions/datasets/kernels, push kernels, submit to competitions.',
+          description: `Kaggle credentials for ${kaggleUsername}`,
+        },
+        logger: (msg) => console.log('[kaggle-mesh-admin]', msg),
+      },
+      newUUIDv7,
+    );
     // Record in geneweave's pointer index so admin GETs can enumerate.
     await db.upsertKaggleLiveMesh({
-      mesh_id: result.template.mesh.id,
+      mesh_id: result.meshId,
       tenant_id: tenantId,
       kaggle_username: kaggleUsername,
     });
     const summary = {
-      meshId: result.template.mesh.id,
-      agentIds: Object.values(result.template.agents).map((a) => a.id),
-      bindingIds: Object.values(result.bindings).map((b) => b.id),
-      accountId: result.account.id,
-      bridgeId: result.bridge?.id ?? null,
-      delegationEdgeCount: result.delegationEdges.length,
+      meshId: result.meshId,
+      agentIds: result.agentIds,
+      bindingIds: result.accountBindingIds,
+      accountId: result.accountId,
+      bridgeId: null,
+      delegationEdgeCount: result.delegationEdgeIds.length,
     };
     if (idemKey) {
       provisionIdempotency.record(`kaggle-mesh:${idemKey}`, summary);
@@ -203,7 +219,14 @@ export function registerKaggleMeshRoutes(
     const reason = (body['reason'] as string | null) ?? 'Operator revocation';
     const humanId = (body['revokedByHumanId'] as string | null) ?? `human:${auth.userId ?? 'admin'}`;
     const store = await resolveStore(helpers);
-    const updated = await revokeKaggleBinding(store, params['id']!, humanId, reason);
+    // Phase D — `revokeKaggleBinding` was a thin wrapper around
+    // `store.revokeAccountBinding`; inline it here to drop boot.ts.
+    const updated = await store.revokeAccountBinding(
+      params['id']!,
+      humanId,
+      reason,
+      new Date().toISOString(),
+    );
     if (!updated) { json(res, 404, { error: 'Binding not found' }); return; }
     json(res, 200, { 'kaggle-mesh-binding': updated });
   }, { auth: true, csrf: true });
