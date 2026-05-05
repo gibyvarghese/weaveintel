@@ -233,6 +233,19 @@ export function createAgenticTaskHandler(opts: AgenticTaskHandlerOptions): TaskH
           ...(policy.rateLimiter ? { rateLimiter: policy.rateLimiter } : {}),
           ...(policy.auditEmitter ? { auditEmitter: policy.auditEmitter } : {}),
           resolutionContext,
+          // Live-agent ticks share endpoint state with chat — same shared
+          // signal bus, so a 429 surfaced by an MCP tool here also throttles
+          // a chat caller invoking the same tool name.
+          // Live-agent ticks fail fast: when the resilience pipeline is
+          // rate-limited or the circuit is open we want the supervisor to
+          // defer the next tick (via preScheduleGate) rather than have a
+          // worker block on a long retry. Interactive callers (chat, SV)
+          // use the default wait/retry posture.
+          resilience: {
+            enabled: true,
+            endpointPrefix: 'tool',
+            callOverrides: { rateLimitMode: 'fail-fast', maxRetries: 0 },
+          },
         });
         log(
           `policy enforcement active (resolver=${!!policy.policyResolver} approval=${!!policy.approvalGate} rateLimit=${!!policy.rateLimiter} audit=${!!policy.auditEmitter})`,

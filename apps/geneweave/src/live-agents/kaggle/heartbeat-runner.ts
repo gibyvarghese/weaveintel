@@ -45,6 +45,13 @@ import {
 import { DbToolPolicyResolver, DbToolRateLimiter } from '../../tool-policy-resolver.js';
 import { DbToolAuditEmitter } from '../../tool-audit-emitter.js';
 import { DbToolApprovalGate } from '../../tool-approval-gate.js';
+import {
+  getLlmEndpointPressure,
+  isPressureBlocking,
+  pressureStateKey,
+  formatPressureReason,
+  type EndpointPressure,
+} from '../endpoint-pressure.js';
 
 export interface StartKaggleHeartbeatOptions {
   db: DatabaseAdapter;
@@ -162,6 +169,182 @@ async function listAvailableModelsForRouting(
  */
 const RUN_PAGE_SIZE = 200;
 
+// ─── Backoff / circuit-breaker on consecutive tick failures ──────────────
+//
+// When an agent tick keeps failing (e.g. OpenAI returns 429 quota-exceeded
+// on every model call), the scheduler used to keep emitting a fresh tick
+// every 30s forever. That burns rate-limit budget and floods the logs.
+//
+// Now: count trailing FAILED ticks since the last SUCCESS, and push the
+// next attempt out exponentially. After CIRCUIT_OPEN_AT consecutive
+// failures the agent is "circuit open" — no new ticks scheduled until an
+// operator pauses/resumes the mesh or fixes the upstream and at least one
+// tick succeeds. The current state is mirrored to `kgl_run_event` so the
+// run-detail UI shows _why_ a step looks frozen.
+//
+// Backoff schedule indexed by trailing failure count (ms):
+//   1  → 1 min       2  → 5 min       3  → 15 min
+//   4  → 30 min      5+ → 60 min      10+ → circuit open
+const FAILURE_BACKOFF_MS = [
+  0,            // 0 failures — schedule normally
+  60_000,       // 1 failure  — wait 1 min
+  5 * 60_000,   // 2 failures — wait 5 min
+  15 * 60_000,  // 3 failures — wait 15 min
+  30 * 60_000,  // 4 failures — wait 30 min
+];
+const STEADY_STATE_BACKOFF_MS = 60 * 60_000; // 5+ failures — wait 1 h
+const CIRCUIT_OPEN_AT = 10;
+
+function pickBackoffMs(consec: number): number {
+  if (consec <= 0) return 0;
+  if (consec < FAILURE_BACKOFF_MS.length) return FAILURE_BACKOFF_MS[consec] ?? 0;
+  return STEADY_STATE_BACKOFF_MS;
+}
+
+interface AgentBackoffState {
+  consecutiveFailures: number;
+  lastFailedAt: Date | null;
+  lastError: string | null;
+  circuitOpen: boolean;
+}
+
+async function getAgentBackoffState(
+  db: DatabaseAdapter,
+  agentId: string,
+): Promise<AgentBackoffState> {
+  const recent = await db.listRecentHeartbeatTicksForAgent(agentId, 20);
+  let consec = 0;
+  let lastFailedAt: Date | null = null;
+  let lastError: string | null = null;
+  for (const t of recent) {
+    if (t.status !== 'COMPLETED') continue; // ignore SCHEDULED / IN_PROGRESS
+    if (t.actionOutcomeStatus === 'FAILED') {
+      if (consec === 0) {
+        if (t.completedAt) lastFailedAt = new Date(t.completedAt);
+        lastError = t.actionOutcomeProse;
+      }
+      consec++;
+    } else {
+      // First non-FAILED COMPLETED tick — chain ends.
+      break;
+    }
+  }
+  return {
+    consecutiveFailures: consec,
+    lastFailedAt,
+    lastError,
+    circuitOpen: consec >= CIRCUIT_OPEN_AT,
+  };
+}
+
+// Module-level dedupe so we only emit one `agent_backoff` / `agent_circuit_open`
+// run-event per escalation step (when the trailing failure count crosses to a
+// higher value), not on every 5 s schedule pass.
+const lastNotifiedFailureCount = new Map<string, number>();
+
+// ─── Phase 5: Cross-process endpoint-health gate ─────────────────────────
+//
+// The per-agent trailing-FAILED counter (above) only sees this process'
+// tick history. The shared resilience pipeline (Phase 2-4) records every
+// LLM/HTTP call's success/429/5xx/circuit state into the global
+// `endpoint_health` table — that's the cross-cutting "is upstream healthy?"
+// view. If `openai:rest` has its circuit open, every Kaggle agent on the
+// box should pause, not just the ones whose recent ticks happened to fail.
+//
+// The provider endpoint id list and the read+classify logic now live in the
+// shared `endpoint-pressure.ts` so the kaggle heartbeat and the generic
+// supervisor stay in sync.
+
+// Module-level dedupe for endpoint-pressure events (one per state crossing,
+// not per 5 s schedule pass).
+const lastNotifiedEndpointState = new Map<string, string>();
+
+async function getEndpointPressure(db: DatabaseAdapter): Promise<EndpointPressure> {
+  return getLlmEndpointPressure(db);
+}
+
+async function maybeEmitEndpointPressureEvent(
+  db: DatabaseAdapter,
+  runId: string,
+  agentId: string,
+  roleSlug: string,
+  pressure: EndpointPressure,
+): Promise<void> {
+  const stateKey = pressureStateKey(pressure);
+  if (!stateKey) return;
+  if (lastNotifiedEndpointState.get(agentId) === stateKey) return;
+  lastNotifiedEndpointState.set(agentId, stateKey);
+  const summary = formatPressureReason(roleSlug, pressure);
+  try {
+    const steps = await db.listKglRunSteps(runId);
+    const stepRole = KAGGLE_ROLE_TO_STEP[roleSlug];
+    const step = steps.find((s) => s.role === stepRole);
+    await db.appendKglRunEvent({
+      id: newUUIDv7(),
+      run_id: runId,
+      step_id: step?.id ?? null,
+      kind: pressure.openEndpoints.length > 0 ? 'endpoint_circuit_open' : 'endpoint_rate_limited',
+      agent_id: agentId,
+      tool_key: null,
+      summary,
+      payload_json: JSON.stringify({
+        openEndpoints: pressure.openEndpoints,
+        rateLimitedEndpoint: pressure.rateLimitedEndpoint,
+        rateLimitedUntil: pressure.rateLimitedUntil?.toISOString() ?? null,
+      }),
+    });
+  } catch (err) {
+    console.warn(
+      '[kaggle-heartbeat] failed to emit endpoint-pressure event:',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+async function maybeEmitBackoffEvent(
+  db: DatabaseAdapter,
+  runId: string,
+  agentId: string,
+  roleSlug: string,
+  state: AgentBackoffState,
+  nextAttemptAt: Date | null,
+): Promise<void> {
+  const last = lastNotifiedFailureCount.get(agentId) ?? 0;
+  if (state.consecutiveFailures <= last) return;
+  lastNotifiedFailureCount.set(agentId, state.consecutiveFailures);
+  const errSnippet = (state.lastError ?? 'unknown error').replace(/\s+/g, ' ').slice(0, 180);
+  const nextStr = nextAttemptAt ? nextAttemptAt.toISOString() : 'manual resume';
+  const summary = state.circuitOpen
+    ? `${roleSlug} circuit open: ${state.consecutiveFailures} consecutive failures. No further ticks scheduled until mesh paused/resumed or upstream fixed. Last error: ${errSnippet}`
+    : `${roleSlug} backing off: ${state.consecutiveFailures} consecutive failures. Next attempt: ${nextStr}. Last error: ${errSnippet}`;
+  try {
+    const steps = await db.listKglRunSteps(runId);
+    const stepRole = KAGGLE_ROLE_TO_STEP[roleSlug];
+    const step = steps.find((s) => s.role === stepRole);
+    await db.appendKglRunEvent({
+      id: newUUIDv7(),
+      run_id: runId,
+      step_id: step?.id ?? null,
+      kind: state.circuitOpen ? 'agent_circuit_open' : 'agent_backoff',
+      agent_id: agentId,
+      tool_key: null,
+      summary,
+      payload_json: JSON.stringify({
+        consecutiveFailures: state.consecutiveFailures,
+        lastFailedAt: state.lastFailedAt?.toISOString() ?? null,
+        nextAttemptAt: nextAttemptAt?.toISOString() ?? null,
+        lastError: state.lastError,
+        circuitOpen: state.circuitOpen,
+      }),
+    });
+  } catch (err) {
+    console.warn(
+      '[kaggle-heartbeat] failed to emit backoff event:',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
 async function listAllRunningRuns(db: DatabaseAdapter): Promise<Array<Awaited<ReturnType<DatabaseAdapter['listKglCompetitionRuns']>>[number]>> {
   const out: Array<Awaited<ReturnType<DatabaseAdapter['listKglCompetitionRuns']>>[number]> = [];
   let offset = 0;
@@ -180,6 +363,14 @@ async function scheduleDueTicks(db: DatabaseAdapter, workerId: string): Promise<
   if (runs.length === 0) return 0;
   const nowIso = new Date().toISOString();
   const bucket = Math.floor(Date.now() / 30_000); // 30s dedupe window
+
+  // Phase 5 — one global endpoint-health snapshot per scheduling pass.
+  // If any LLM provider's circuit is open, no kaggle agent should be
+  // ticked regardless of its own recent history. Computed once and
+  // shared across every scheduleRun call below.
+  const endpointPressure = await getEndpointPressure(db);
+  const endpointBlocked = endpointPressure.openEndpoints.length > 0
+    || (endpointPressure.rateLimitedUntil !== null && endpointPressure.rateLimitedUntil.getTime() > Date.now());
 
   const scheduleAgent = async (agentId: string): Promise<number> => {
     const [inbox, backlog] = await Promise.all([
@@ -216,7 +407,9 @@ async function scheduleDueTicks(db: DatabaseAdapter, workerId: string): Promise<
     return 1;
   };
 
-  const scheduleRun = async (meshId: string): Promise<number> => {
+  const scheduleRun = async (run: { id: string; mesh_id: string | null }): Promise<number> => {
+    if (!run.mesh_id) return 0;
+    const meshId = run.mesh_id;
     // Skip meshes operator has paused/archived. Defense-in-depth: even if a
     // kgl_competition_run row is still 'running', a paused mesh means
     // "operator wants no new work" — honor that here so ticks don't pile up.
@@ -225,11 +418,49 @@ async function scheduleDueTicks(db: DatabaseAdapter, workerId: string): Promise<
     const agents = await store.listAgents(meshId);
     const activeAgents = agents.filter((a) => a.status === 'ACTIVE');
     if (activeAgents.length === 0) return 0;
-    const counts = await Promise.all(activeAgents.map((a) => scheduleAgent(a.id)));
+    const counts = await Promise.all(
+      activeAgents.map(async (a) => {
+        // Phase 5 — cross-process endpoint-health gate. Honored before the
+        // local trailing-FAILED check so a global provider outage skips
+        // every agent in one pass without polluting their per-agent backoff
+        // chains.
+        if (endpointBlocked) {
+          await maybeEmitEndpointPressureEvent(db, run.id, a.id, a.role, endpointPressure);
+          return 0;
+        } else {
+          // Healthy provider — clear the dedupe so the next pressure event
+          // re-emits at the first crossing.
+          lastNotifiedEndpointState.delete(a.id);
+        }
+        // Backoff / circuit-breaker — skip ticks for agents whose recent
+        // history is all failures. Without this a permanently-broken upstream
+        // (OpenAI 429, network outage, etc.) gets retried every 30s forever.
+        const backoff = await getAgentBackoffState(db, a.id);
+        if (backoff.consecutiveFailures > 0) {
+          if (backoff.circuitOpen) {
+            await maybeEmitBackoffEvent(db, run.id, a.id, a.role, backoff, null);
+            return 0;
+          }
+          const backoffMs = pickBackoffMs(backoff.consecutiveFailures);
+          if (backoff.lastFailedAt) {
+            const nextAttemptAt = new Date(backoff.lastFailedAt.getTime() + backoffMs);
+            if (Date.now() < nextAttemptAt.getTime()) {
+              await maybeEmitBackoffEvent(db, run.id, a.id, a.role, backoff, nextAttemptAt);
+              return 0;
+            }
+          }
+        } else {
+          // Healthy tick chain — reset notification dedupe so the next time
+          // failures recur we re-emit the first backoff event.
+          lastNotifiedFailureCount.delete(a.id);
+        }
+        return scheduleAgent(a.id);
+      }),
+    );
     return counts.reduce((s, n) => s + n, 0);
   };
 
-  const perRun = await Promise.all(runs.map((r) => (r.mesh_id ? scheduleRun(r.mesh_id) : Promise.resolve(0))));
+  const perRun = await Promise.all(runs.map((r) => scheduleRun(r)));
   void workerId;
   return perRun.reduce((s, n) => s + n, 0);
 }

@@ -29,8 +29,10 @@ import {
   WeaveIntelError,
   normalizeError,
   deadlineSignal,
+  parseRetryAfterMs,
 } from '@weaveintel/core';
 import { weaveRegisterModel } from '@weaveintel/models';
+import { createResilientCallable, type ResilientCallable } from '@weaveintel/resilience';
 import { googleAdapter, translate } from '@weaveintel/tool-schema';
 
 // ─── Configuration ───────────────────────────────────────────
@@ -44,7 +46,6 @@ export interface GoogleProviderOptions {
 
 const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
-const MAX_RETRY_AFTER_MS = 30_000;
 
 function resolveApiKey(options?: GoogleProviderOptions): string {
   const key =
@@ -68,19 +69,6 @@ function makeHeaders(options: GoogleProviderOptions): Record<string, string> {
     'Content-Type': 'application/json',
     ...options.defaultHeaders,
   };
-}
-
-function parseRetryAfterMs(retryAfterHeader: string | null | undefined, fallbackMs = 60_000): number {
-  if (!retryAfterHeader) return fallbackMs;
-  const asNumber = Number.parseInt(retryAfterHeader, 10);
-  if (!Number.isNaN(asNumber) && Number.isFinite(asNumber)) {
-    return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, asNumber * 1000));
-  }
-  const asDate = Date.parse(retryAfterHeader);
-  if (!Number.isNaN(asDate)) {
-    return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, asDate - Date.now()));
-  }
-  return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, fallbackMs));
 }
 
 function composeRequestSignal(signal?: AbortSignal): AbortSignal {
@@ -133,6 +121,15 @@ async function googleRequest(
   headers: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<unknown> {
+  return getRequestCallable(DEFAULT_ENDPOINT_ID)(url, body, headers, signal);
+}
+
+async function googleRequestRaw(
+  url: string,
+  body: unknown,
+  headers: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<unknown> {
   const res = await fetch(url, {
     method: 'POST',
     headers,
@@ -149,6 +146,18 @@ async function* googleStreamRequest(
   headers: Record<string, string>,
   signal?: AbortSignal,
 ): AsyncIterable<Record<string, unknown>> {
+  // Initial fetch wrapped by resilience pipeline; iteration runs outside the
+  // pipeline so streaming reads aren't bound by the per-call timeout.
+  const reader = await getStreamFetchCallable(DEFAULT_ENDPOINT_ID)(url, body, headers, signal);
+  yield* iterateGoogleStream(reader);
+}
+
+async function googleStreamFetchRaw(
+  url: string,
+  body: unknown,
+  headers: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<ReadableStreamDefaultReader<Uint8Array>> {
   const res = await fetch(url, {
     method: 'POST',
     headers,
@@ -161,7 +170,12 @@ async function* googleStreamRequest(
   if (!reader) {
     throw new WeaveIntelError({ code: 'PROVIDER_ERROR', message: 'No response body', provider: 'google' });
   }
+  return reader;
+}
 
+async function* iterateGoogleStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): AsyncIterable<Record<string, unknown>> {
   const decoder = new TextDecoder();
   let buffer = '';
 
@@ -196,6 +210,59 @@ async function* googleStreamRequest(
     }
     reader.releaseLock();
   }
+}
+
+// ─── Resilience pipeline (process-wide, endpoint-scoped) ────
+
+const DEFAULT_ENDPOINT_ID = 'google:rest';
+
+const RESILIENCE_DEFAULTS = {
+  retry: { maxAttempts: 2, baseDelayMs: 500, maxDelayMs: 30_000, jitter: true },
+  circuit: { failureThreshold: 8, cooldownMs: 30_000 },
+} as const;
+
+type RequestArgs = [
+  url: string,
+  body: unknown,
+  headers: Record<string, string>,
+  signal: AbortSignal | undefined,
+];
+
+const requestCallables = new Map<string, ResilientCallable<RequestArgs, unknown>>();
+const streamFetchCallables = new Map<
+  string,
+  ResilientCallable<RequestArgs, ReadableStreamDefaultReader<Uint8Array>>
+>();
+
+function getRequestCallable(endpoint: string): ResilientCallable<RequestArgs, unknown> {
+  let c = requestCallables.get(endpoint);
+  if (!c) {
+    c = createResilientCallable<RequestArgs, unknown>(googleRequestRaw, {
+      endpoint,
+      retry: RESILIENCE_DEFAULTS.retry,
+      circuit: RESILIENCE_DEFAULTS.circuit,
+    });
+    requestCallables.set(endpoint, c);
+  }
+  return c;
+}
+
+function getStreamFetchCallable(
+  endpoint: string,
+): ResilientCallable<RequestArgs, ReadableStreamDefaultReader<Uint8Array>> {
+  let c = streamFetchCallables.get(endpoint);
+  if (!c) {
+    c = createResilientCallable<RequestArgs, ReadableStreamDefaultReader<Uint8Array>>(
+      googleStreamFetchRaw,
+      {
+        endpoint,
+        retry: RESILIENCE_DEFAULTS.retry,
+        circuit: RESILIENCE_DEFAULTS.circuit,
+      },
+    );
+    streamFetchCallables.set(endpoint, c);
+  }
+  return c;
 }
 
 // ─── Message construction ────────────────────────────────────

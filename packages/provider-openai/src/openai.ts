@@ -26,6 +26,7 @@ import {
   WeaveIntelError,
   normalizeError,
   deadlineSignal,
+  parseRetryAfterMs,
 } from '@weaveintel/core';
 import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/models';
 import { openaiAdapter, translate } from '@weaveintel/tool-schema';
@@ -41,7 +42,6 @@ export interface OpenAIProviderOptions {
 
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
-const MAX_RETRY_AFTER_MS = 30_000;
 
 function resolveApiKey(options?: OpenAIProviderOptions): string {
   const key = options?.apiKey ?? process.env['OPENAI_API_KEY'];
@@ -65,19 +65,6 @@ function makeHeaders(options: OpenAIProviderOptions, apiKey: string): Record<str
     headers['OpenAI-Organization'] = options.organization;
   }
   return headers;
-}
-
-function parseRetryAfterMs(retryAfterHeader: string | null | undefined, fallbackMs = 60_000): number {
-  if (!retryAfterHeader) return fallbackMs;
-  const asNumber = Number.parseInt(retryAfterHeader, 10);
-  if (!Number.isNaN(asNumber) && Number.isFinite(asNumber)) {
-    return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, asNumber * 1000));
-  }
-  const asDate = Date.parse(retryAfterHeader);
-  if (!Number.isNaN(asDate)) {
-    return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, asDate - Date.now()));
-  }
-  return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, fallbackMs));
 }
 
 function composeRequestSignal(signal?: AbortSignal): AbortSignal {

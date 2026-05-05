@@ -932,6 +932,11 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         userId: opts.currentUserId,
         skillPolicyKey: opts.skillPolicyKey,
       },
+      // Phase 3 of RESILIENCE_PLAN — every tool invocation flows through
+      // the shared resilience pipeline so MCP/A2A/HTTP tool failures emit
+      // normalized signals on the same bus the providers do. The DB
+      // observer batches these into endpoint_health alongside LLM endpoints.
+      resilience: { enabled: true, endpointPrefix: 'tool' },
     });
   }
 

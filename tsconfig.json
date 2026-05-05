@@ -53,6 +53,7 @@
     { "path": "packages/extraction" },
     { "path": "packages/artifacts" },
     { "path": "packages/reliability" },
+    { "path": "packages/resilience" },
     { "path": "packages/collaboration" },
     { "path": "packages/compliance" },
     { "path": "packages/graph" },

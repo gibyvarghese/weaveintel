@@ -32,6 +32,7 @@ import { createGeneWeaveServer } from './server.js';
 import { syncModelPricing, type PricingSyncReport } from './pricing-sync.js';
 import { syncToolCatalog } from './tools.js';
 import { startToolHealthJob } from './tool-health-job.js';
+import { applyDbResilienceObserver } from './db-resilience-observer.js';
 import { startRoutingRegressionJob } from './routing-feedback.js';
 import { registerMCPGatewayInCatalog, loadGatewayConfigFromCatalog } from './mcp-gateway.js';
 import { seedSVData } from './features/scientific-validation/sv-seed.js';
@@ -190,6 +191,10 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
   // 5. Start background tool health snapshot job (writes every 15 min)
   startToolHealthJob(db);
+
+  // 5a. Resilience Phase 4: subscribe to the process-wide signal bus and
+  // batch-write per-endpoint counters into `endpoint_health` every ~1s.
+  applyDbResilienceObserver(db);
 
   // 5b. anyWeave Phase 5: daily regression detection on capability signals
   startRoutingRegressionJob(db);

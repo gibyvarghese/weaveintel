@@ -40,6 +40,16 @@ import { newUUIDv7 } from '../lib/uuid.js';
 import { DbToolPolicyResolver, DbToolRateLimiter } from '../tool-policy-resolver.js';
 import { DbToolAuditEmitter } from '../tool-audit-emitter.js';
 import { DbToolApprovalGate } from '../tool-approval-gate.js';
+import {
+  getLlmEndpointPressure,
+  isPressureBlocking,
+  pressureStateKey,
+  formatPressureReason,
+} from './endpoint-pressure.js';
+
+// Module-level dedupe: emit one deferral event per agent per state
+// crossing, not on every 5 s schedule pass.
+const lastDeferredKey = new Map<string, string>();
 
 export interface StartGenericSupervisorOptions {
   db: DatabaseAdapter;
@@ -198,6 +208,58 @@ export async function startGenericSupervisorIfEnabled(
       },
     }),
     ...(opts.attentionPolicyKey ? { attentionPolicyKey: opts.attentionPolicyKey } : {}),
+    // Pre-schedule gate — consult `endpoint_health` once per pass and
+    // skip scheduling when an LLM provider is circuit-open or 429
+    // cooling-down. Mirrors the kaggle heartbeat behaviour so chat,
+    // SV, and live-agents all back off in unison when upstream is
+    // under pressure (see RESILIENCE_PLAN gap #2).
+    preScheduleGate: async () => {
+      const pressure = await getLlmEndpointPressure(opts.db);
+      if (!isPressureBlocking(pressure)) {
+        // Clear dedupe so the next deferral re-emits.
+        lastDeferredKey.clear();
+        return { defer: false };
+      }
+      const key = pressureStateKey(pressure);
+      return {
+        defer: true,
+        reason: formatPressureReason('agent', pressure),
+        emitForAgent: async (mesh, agent) => {
+          if (lastDeferredKey.get(agent.id) === key) return;
+          lastDeferredKey.set(agent.id, key);
+          try {
+            // live_run_events requires a run_id — best-effort find the
+            // latest RUNNING run for this mesh. If none exists, skip
+            // emission (the supervisor logger still records the defer).
+            const runs = await opts.db.listLiveRuns({
+              meshId: mesh.id,
+              status: 'RUNNING',
+              limit: 1,
+            });
+            const runId = runs[0]?.id;
+            if (!runId) return;
+            await opts.db.appendLiveRunEvent({
+              id: newUUIDv7(),
+              run_id: runId,
+              step_id: null,
+              kind: pressure.openEndpoints.length > 0
+                ? 'endpoint_circuit_open'
+                : 'endpoint_rate_limited',
+              agent_id: agent.id,
+              tool_key: null,
+              summary: formatPressureReason(agent.role_key, pressure),
+              payload_json: JSON.stringify({
+                openEndpoints: pressure.openEndpoints,
+                rateLimitedEndpoint: pressure.rateLimitedEndpoint,
+                rateLimitedUntil: pressure.rateLimitedUntil?.toISOString() ?? null,
+              }),
+            });
+          } catch {
+            /* best-effort */
+          }
+        },
+      };
+    },
     logger: (msg) => console.log('[live-supervisor]', msg),
   });
 

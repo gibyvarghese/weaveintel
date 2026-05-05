@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@weaveintel/core": "*",
+    "@weaveintel/resilience": "*",
     "@weaveintel/tools": "*"
   },
   "devDependencies": {

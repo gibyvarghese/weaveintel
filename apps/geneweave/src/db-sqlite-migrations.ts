@@ -2656,4 +2656,33 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
     )
   `);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_live_run_events_run ON live_run_events(run_id, created_at, id)`);
+
+  // ─── Resilience Phase 4: Endpoint Health ────────────────
+  // One row per logical resilience endpoint (e.g. 'openai:rest',
+  // 'anthropic:rest', 'tools-http:<name>'). The DbResilienceObserver
+  // batches signals from @weaveintel/resilience's signal bus and upserts
+  // running counters here. Used by the admin UI and by live-agent
+  // schedulers to defer work when an endpoint is degraded.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS endpoint_health (
+      endpoint TEXT PRIMARY KEY,
+      circuit_state TEXT,
+      consecutive_failures INTEGER NOT NULL DEFAULT 0,
+      last_signal_at TEXT,
+      last_429_at TEXT,
+      last_retry_after_ms INTEGER,
+      last_circuit_opened_at TEXT,
+      last_circuit_closed_at TEXT,
+      total_success INTEGER NOT NULL DEFAULT 0,
+      total_failed INTEGER NOT NULL DEFAULT 0,
+      total_rate_limited INTEGER NOT NULL DEFAULT 0,
+      total_retries INTEGER NOT NULL DEFAULT 0,
+      total_shed INTEGER NOT NULL DEFAULT 0,
+      total_circuit_opens INTEGER NOT NULL DEFAULT 0,
+      avg_latency_ms REAL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_endpoint_health_updated_at ON endpoint_health(updated_at)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_endpoint_health_circuit_state ON endpoint_health(circuit_state)`);
 }

@@ -30,6 +30,15 @@ export {
   normalizeError,
 } from './errors.js';
 
+// Error classification (Phase 1 of shared resilience pipeline)
+export {
+  type ErrorClass,
+  type ClassifiedError,
+  parseRetryAfterMs,
+  httpStatusToErrorCode,
+  classifyError,
+} from './error-classifier.js';
+
 // Event system
 export {
   type WeaveEvent,

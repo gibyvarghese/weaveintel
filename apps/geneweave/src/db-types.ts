@@ -720,6 +720,62 @@ export interface ToolHealthSnapshotRow {
   created_at: string;
 }
 
+/**
+ * Resilience Phase 4: Endpoint Health row.
+ *
+ * One row per logical resilience endpoint id (e.g. `'openai:rest'`,
+ * `'anthropic:rest'`, `'google:rest'`, `'tools-http:<config.name>'`).
+ * Updated by the in-process `DbResilienceObserver` which subscribes to
+ * `getDefaultSignalBus()` from `@weaveintel/resilience` and batches
+ * upserts every ~1s.
+ */
+export interface EndpointHealthRow {
+  endpoint: string;
+  /** Last known circuit state: 'closed' | 'open' | 'half_open' | null. */
+  circuit_state: string | null;
+  consecutive_failures: number;
+  last_signal_at: string | null;
+  last_429_at: string | null;
+  last_retry_after_ms: number | null;
+  last_circuit_opened_at: string | null;
+  last_circuit_closed_at: string | null;
+  total_success: number;
+  total_failed: number;
+  total_rate_limited: number;
+  total_retries: number;
+  total_shed: number;
+  total_circuit_opens: number;
+  /** Exponentially-smoothed mean of success-call durationMs (alpha=0.2). */
+  avg_latency_ms: number | null;
+  updated_at: string;
+}
+
+/** Aggregated, batched delta written by `DbResilienceObserver`. All counter
+ *  fields are *increments*, all `last_*` fields are *replacements*. Any
+ *  field left undefined is left untouched on the existing row. */
+export interface EndpointHealthDelta {
+  endpoint: string;
+  /** Replace circuit_state if defined. */
+  circuit_state?: string | null;
+  /** Replace consecutive_failures if defined (the resilience layer is the source of truth). */
+  consecutive_failures?: number;
+  /** Replace if defined. */
+  last_signal_at?: string;
+  last_429_at?: string;
+  last_retry_after_ms?: number;
+  last_circuit_opened_at?: string;
+  last_circuit_closed_at?: string;
+  /** Increments. Default 0. */
+  inc_success?: number;
+  inc_failed?: number;
+  inc_rate_limited?: number;
+  inc_retries?: number;
+  inc_shed?: number;
+  inc_circuit_opens?: number;
+  /** Latency samples to fold into the EMA (alpha=0.2). */
+  latency_samples_ms?: number[];
+}
+
 export interface ToolHealthSummary {
   tool_name: string;
   total_invocations: number;
@@ -2445,6 +2501,16 @@ export interface DatabaseAdapter {
   /** Get live health summary per tool aggregated from audit events (last 24 h). */
   getToolHealthSummary(sinceIso?: string): Promise<ToolHealthSummary[]>;
 
+  // ─── Resilience Phase 4: Endpoint Health ───────────────────
+  /** Apply a delta from the in-process resilience observer. Increments the
+   *  *_total counters, sets circuit_state / last_*_at fields, smooths
+   *  avg_latency_ms. Atomic upsert. Best-effort — never throws. */
+  applyEndpointHealthDelta(delta: EndpointHealthDelta): Promise<void>;
+  /** Read all known endpoints (newest first by updated_at). */
+  listEndpointHealth(filters?: { circuitState?: string; limit?: number; offset?: number }): Promise<EndpointHealthRow[]>;
+  /** Read a single endpoint by id. */
+  getEndpointHealth(endpoint: string): Promise<EndpointHealthRow | null>;
+
   // ─── Phase 4: Tool Credentials ──────────────────────────────
   createToolCredential(c: Omit<ToolCredentialRow, 'created_at' | 'updated_at'>): Promise<void>;
   getToolCredential(id: string): Promise<ToolCredentialRow | null>;
@@ -2915,6 +2981,21 @@ export interface DatabaseAdapter {
 
   appendKglRunEvent(row: Omit<KglRunEventRow, 'created_at'>): Promise<KglRunEventRow>;
   listKglRunEvents(runId: string, opts?: { afterId?: string; limit?: number }): Promise<KglRunEventRow[]>;
+
+  /**
+   * Read recent heartbeat_tick rows for a single agent out of the live-agents
+   * StateStore (la_entities). Used by the kaggle heartbeat scheduler for
+   * backoff-on-failure and circuit-breaker logic so a permanently broken
+   * upstream (e.g. OpenAI 429) doesn't get retried every 30s forever.
+   */
+  listRecentHeartbeatTicksForAgent(agentId: string, limit?: number): Promise<Array<{
+    id: string;
+    status: string;
+    actionOutcomeStatus: string | null;
+    actionOutcomeProse: string | null;
+    scheduledFor: string;
+    completedAt: string | null;
+  }>>;
 
   /** Inter-agent messages for a live mesh, derived from la_entities (StateStore). */
   listLiveMeshMessages(meshId: string, opts?: { limit?: number }): Promise<LiveMeshMessageView[]>;

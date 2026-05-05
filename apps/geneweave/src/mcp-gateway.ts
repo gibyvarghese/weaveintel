@@ -204,6 +204,7 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
           ...(auditEmitter ? { auditEmitter } : {}),
           ...(rateLimiter ? { rateLimiter } : {}),
           resolutionContext,
+          resilience: { enabled: true, endpointPrefix: 'tool' },
         });
         return { key: e.key, tool: wrapped, allocationClass: e.allocationClass };
       })
@@ -232,6 +233,7 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
         ...(auditEmitter ? { auditEmitter } : {}),
         ...(rateLimiter ? { rateLimiter } : {}),
         resolutionContext,
+        resilience: { enabled: true, endpointPrefix: 'tool' },
       });
       return { key: e.key, tool: wrapped, allocationClass: e.allocationClass };
     });

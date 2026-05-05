@@ -97,6 +97,9 @@ function registryFromKeys(
         skillPolicyKey: opts.skillPolicyKey ?? 'hypothesis_validation',
         userId: opts.userId,
       },
+      // Resilience pipeline — SV tool calls participate in the same shared
+      // endpoint state as chat tools (see RESILIENCE_PLAN Phase 3).
+      resilience: { enabled: true, endpointPrefix: 'tool' },
     });
   }
   return registry;

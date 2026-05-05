@@ -57,6 +57,7 @@
     "@weaveintel/replay": "*",
     "@weaveintel/tenancy": "*",
     "@weaveintel/reliability": "*",
+    "@weaveintel/resilience": "*",
     "@weaveintel/triggers": "*",
     "@weaveintel/models": "*",
     "@weaveintel/tools": "*",

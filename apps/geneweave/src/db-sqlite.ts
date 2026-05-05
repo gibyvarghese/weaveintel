@@ -1930,6 +1930,75 @@ export class SQLiteAdapter implements DatabaseAdapter {
     `).all(since) as import('./db-types.js').ToolHealthSummary[];
   }
 
+  // ─── Resilience Phase 4: Endpoint Health ─────────────────────
+
+  async applyEndpointHealthDelta(delta: import('./db-types.js').EndpointHealthDelta): Promise<void> {
+    const nowIso = new Date().toISOString();
+    // Atomic upsert. We INSERT a fresh zero-row first (ON CONFLICT DO NOTHING)
+    // then UPDATE counters/state in a single statement. better-sqlite3 is
+    // synchronous so this is effectively atomic from the JS side.
+    this.d.prepare(
+      `INSERT INTO endpoint_health (endpoint, updated_at) VALUES (?, ?) ON CONFLICT(endpoint) DO NOTHING`,
+    ).run(delta.endpoint, nowIso);
+
+    // Build dynamic UPDATE. Each field is conditionally appended.
+    const sets: string[] = [];
+    const params: unknown[] = [];
+
+    if (delta.circuit_state !== undefined) { sets.push('circuit_state = ?'); params.push(delta.circuit_state); }
+    if (delta.consecutive_failures !== undefined) { sets.push('consecutive_failures = ?'); params.push(delta.consecutive_failures); }
+    if (delta.last_signal_at !== undefined) { sets.push('last_signal_at = ?'); params.push(delta.last_signal_at); }
+    if (delta.last_429_at !== undefined) { sets.push('last_429_at = ?'); params.push(delta.last_429_at); }
+    if (delta.last_retry_after_ms !== undefined) { sets.push('last_retry_after_ms = ?'); params.push(delta.last_retry_after_ms); }
+    if (delta.last_circuit_opened_at !== undefined) { sets.push('last_circuit_opened_at = ?'); params.push(delta.last_circuit_opened_at); }
+    if (delta.last_circuit_closed_at !== undefined) { sets.push('last_circuit_closed_at = ?'); params.push(delta.last_circuit_closed_at); }
+
+    if (delta.inc_success)        { sets.push('total_success = total_success + ?');             params.push(delta.inc_success); }
+    if (delta.inc_failed)         { sets.push('total_failed = total_failed + ?');               params.push(delta.inc_failed); }
+    if (delta.inc_rate_limited)   { sets.push('total_rate_limited = total_rate_limited + ?');   params.push(delta.inc_rate_limited); }
+    if (delta.inc_retries)        { sets.push('total_retries = total_retries + ?');             params.push(delta.inc_retries); }
+    if (delta.inc_shed)           { sets.push('total_shed = total_shed + ?');                   params.push(delta.inc_shed); }
+    if (delta.inc_circuit_opens)  { sets.push('total_circuit_opens = total_circuit_opens + ?'); params.push(delta.inc_circuit_opens); }
+
+    // Latency EMA (alpha=0.2): fold each sample sequentially against the
+    // current avg_latency_ms (or seed with the first sample when null).
+    if (delta.latency_samples_ms && delta.latency_samples_ms.length > 0) {
+      const row = this.d.prepare('SELECT avg_latency_ms FROM endpoint_health WHERE endpoint = ?')
+        .get(delta.endpoint) as { avg_latency_ms: number | null } | undefined;
+      let avg = row?.avg_latency_ms ?? null;
+      const alpha = 0.2;
+      for (const sample of delta.latency_samples_ms) {
+        avg = avg === null ? sample : avg * (1 - alpha) + sample * alpha;
+      }
+      sets.push('avg_latency_ms = ?');
+      params.push(avg);
+    }
+
+    sets.push('updated_at = ?');
+    params.push(nowIso);
+    params.push(delta.endpoint);
+
+    this.d.prepare(`UPDATE endpoint_health SET ${sets.join(', ')} WHERE endpoint = ?`).run(...params);
+  }
+
+  async listEndpointHealth(filters?: { circuitState?: string; limit?: number; offset?: number }): Promise<import('./db-types.js').EndpointHealthRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (filters?.circuitState) { where.push('circuit_state = ?'); params.push(filters.circuitState); }
+    const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    const limit  = filters?.limit  ?? 200;
+    const offset = filters?.offset ?? 0;
+    params.push(limit, offset);
+    return this.d.prepare(
+      `SELECT * FROM endpoint_health ${clause} ORDER BY updated_at DESC LIMIT ? OFFSET ?`,
+    ).all(...params) as import('./db-types.js').EndpointHealthRow[];
+  }
+
+  async getEndpointHealth(endpoint: string): Promise<import('./db-types.js').EndpointHealthRow | null> {
+    return (this.d.prepare('SELECT * FROM endpoint_health WHERE endpoint = ?').get(endpoint) as
+      import('./db-types.js').EndpointHealthRow | undefined) ?? null;
+  }
+
   // ─── Phase 4: Tool Credentials ───────────────────────────────
 
   async createToolCredential(c: Omit<import('./db-types.js').ToolCredentialRow, 'created_at' | 'updated_at'>): Promise<void> {
@@ -6481,6 +6550,54 @@ export class SQLiteAdapter implements DatabaseAdapter {
     const sql = `SELECT * FROM kgl_run_event WHERE ${where.join(' AND ')} ORDER BY id ASC LIMIT ?`;
     params.push(opts.limit ?? 200);
     return this.d.prepare(sql).all(...params) as KglRunEventRow[];
+  }
+
+  /**
+   * Read recent heartbeat_tick rows for a single agent out of the live-agents
+   * StateStore (la_entities, entity_type='heartbeat_tick'), ordered by
+   * scheduledFor desc. Used by the kaggle heartbeat scheduler for
+   * backoff-on-failure / circuit-breaker logic so a permanently broken
+   * upstream (e.g. OpenAI 429) doesn't get retried every 30s forever.
+   */
+  async listRecentHeartbeatTicksForAgent(agentId: string, limit: number = 20): Promise<Array<{
+    id: string;
+    status: string;
+    actionOutcomeStatus: string | null;
+    actionOutcomeProse: string | null;
+    scheduledFor: string;
+    completedAt: string | null;
+  }>> {
+    // Filter and order in SQL via json_extract — much cheaper than scanning
+    // every tick payload in JS for high-volume meshes.
+    const rows = this.d.prepare(`
+      SELECT payload_json FROM la_entities
+      WHERE entity_type = 'heartbeat_tick'
+        AND json_extract(payload_json, '$.agentId') = ?
+      ORDER BY json_extract(payload_json, '$.scheduledFor') DESC
+      LIMIT ?
+    `).all(agentId, limit) as Array<{ payload_json: string }>;
+    const out: Array<{
+      id: string;
+      status: string;
+      actionOutcomeStatus: string | null;
+      actionOutcomeProse: string | null;
+      scheduledFor: string;
+      completedAt: string | null;
+    }> = [];
+    for (const r of rows) {
+      try {
+        const p = JSON.parse(r.payload_json) as Record<string, unknown>;
+        out.push({
+          id: String(p['id'] ?? ''),
+          status: String(p['status'] ?? ''),
+          actionOutcomeStatus: (p['actionOutcomeStatus'] as string | null) ?? null,
+          actionOutcomeProse: (p['actionOutcomeProse'] as string | null) ?? null,
+          scheduledFor: String(p['scheduledFor'] ?? ''),
+          completedAt: (p['completedAt'] as string | null) ?? null,
+        });
+      } catch { /* skip malformed */ }
+    }
+    return out;
   }
 
   /**

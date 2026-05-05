@@ -22,7 +22,8 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@weaveintel/core": "*"
+    "@weaveintel/core": "*",
+    "@weaveintel/resilience": "*"
   },
   "license": "MIT"
 }

@@ -132,6 +132,9 @@ export interface WeaveLiveMeshFromDbOptions {
   /** Optional hook for per-binding context fields (e.g. `approvalDb`,
    *  `resolveAgentByRole`). */
   extraContextFor?: HeartbeatSupervisorOptions['extraContextFor'];
+  /** Optional global pre-schedule gate (e.g. defer when upstream
+   *  endpoints are circuit-open or rate-limited). */
+  preScheduleGate?: HeartbeatSupervisorOptions['preScheduleGate'];
 
   /** Number of parallel heartbeat workers. Default 4. */
   workers?: number;
@@ -247,6 +250,7 @@ export async function weaveLiveMeshFromDb(
       ? { attentionPolicyKey: opts.attentionPolicyKey }
       : {}),
     ...(opts.extraContextFor ? { extraContextFor: opts.extraContextFor } : {}),
+    ...(opts.preScheduleGate ? { preScheduleGate: opts.preScheduleGate } : {}),
     ...(opts.workers !== undefined ? { workers: opts.workers } : {}),
     ...(opts.intervalMs !== undefined ? { intervalMs: opts.intervalMs } : {}),
     ...(opts.refreshMs !== undefined ? { refreshMs: opts.refreshMs } : {}),

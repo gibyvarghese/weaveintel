@@ -11,6 +11,7 @@ export { registerToolRoutes } from './tools.js';
 export { registerToolPolicyRoutes } from './tool-policies.js';
 export { registerToolAuditRoutes } from './tool-audit.js';
 export { registerToolHealthRoutes } from './tool-health.js';
+export { registerEndpointHealthRoutes } from './endpoint-health.js';
 export { registerToolCredentialRoutes } from './tool-credentials.js';
 export { registerToolSimulationRoutes } from './tool-simulation.js';
 export { registerMCPGatewayClientRoutes } from './mcp-gateway-clients.js';

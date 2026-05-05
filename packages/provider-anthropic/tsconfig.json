@@ -8,6 +8,7 @@
   "references": [
     { "path": "../core" },
     { "path": "../models" },
+    { "path": "../resilience" },
     { "path": "../tool-schema" }
   ]
 }

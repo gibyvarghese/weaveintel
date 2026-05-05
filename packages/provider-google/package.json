@@ -22,6 +22,7 @@
   "dependencies": {
     "@weaveintel/core": "*",
     "@weaveintel/models": "*",
+    "@weaveintel/resilience": "*",
     "@weaveintel/tool-schema": "*"
   },
   "license": "MIT"

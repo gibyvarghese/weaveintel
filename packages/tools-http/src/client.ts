@@ -1,7 +1,13 @@
 /**
  * HTTP client with auth, retry, rate limiting, and response transforms
+ *
+ * Retry / circuit / signal-bus is delegated to `@weaveintel/resilience` so
+ * tools-http endpoints share their resilience state with the rest of the
+ * platform (one circuit breaker per endpoint name, process-wide).
  */
 import { readResponseTextLimited, validateOutboundUrl } from '@weaveintel/tools';
+import { runResilient } from '@weaveintel/resilience';
+import { WeaveIntelError, parseRetryAfterMs } from '@weaveintel/core';
 import type { HttpEndpointConfig, HttpRequestOptions, HttpResponse } from './types.js';
 
 /* ---------- Auth helpers ---------- */
@@ -33,46 +39,8 @@ function applyAuth(headers: Record<string, string>, config: HttpEndpointConfig):
 
 /* ---------- Retry wrapper ---------- */
 
-class HttpStatusError extends Error {
-  constructor(public readonly response: HttpResponse) {
-    super(`HTTP ${response.status} ${response.statusText}`);
-    this.name = 'HttpStatusError';
-  }
-}
-
 function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 429 || (status >= 500 && status <= 599);
-}
-
-function isRetryableError(err: unknown): boolean {
-  if (err instanceof HttpStatusError) return true;
-  if (err instanceof Error && /rate limit exceeded/i.test(err.message)) return false;
-  if (err instanceof Error && err.name === 'AbortError') return true;
-  return err instanceof TypeError;
-}
-
-function computeRetryDelayMs(baseDelayMs: number, attemptIndex: number): number {
-  const exponential = baseDelayMs * (2 ** attemptIndex);
-  const jitterFactor = 0.7 + Math.random() * 0.6;
-  return Math.min(30_000, Math.round(exponential * jitterFactor));
-}
-
-async function withRetry<T>(fn: () => Promise<T>, retries: number, delayMs: number): Promise<T> {
-  let lastErr: unknown;
-  for (let i = 0; i <= retries; i++) {
-    try {
-      return await fn();
-    } catch (err) {
-      lastErr = err;
-      if (!isRetryableError(err) || i >= retries) {
-        if (err instanceof HttpStatusError) return err.response as T;
-        throw err;
-      }
-      const backoffMs = computeRetryDelayMs(delayMs, i);
-      await new Promise((resolve) => setTimeout(resolve, backoffMs));
-    }
-  }
-  throw lastErr;
 }
 
 /* ---------- Rate limiter ---------- */
@@ -194,14 +162,48 @@ export async function executeEndpoint(
       maxResponseBytes: config.maxResponseBytes,
     });
     if (isRetryableStatus(response.status)) {
-      throw new HttpStatusError(response);
+      // Throw a retryable WeaveIntelError so the resilience pipeline retries.
+      // Carry the response in `details` so the terminal-failure unwrap below
+      // can recover the last response (preserves prior contract).
+      const retryAfterHeader = response.headers['retry-after'];
+      const retryAfterMs = retryAfterHeader ? parseRetryAfterMs(retryAfterHeader) : undefined;
+      throw new WeaveIntelError({
+        code: response.status === 429 ? 'RATE_LIMITED' : 'PROVIDER_ERROR',
+        message: `HTTP ${response.status} ${response.statusText}`,
+        retryable: true,
+        ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+        details: { httpResponse: response },
+      });
     }
     return response;
   };
   const retries = config.retryCount ?? 0;
   const delay = config.retryDelayMs ?? 1000;
 
-  const response = await withRetry(fn, retries, delay);
+  // Delegate retry / circuit / signal-bus to the shared resilience pipeline.
+  // Endpoint key is `tools-http:<config.name>` so each configured endpoint
+  // gets its own process-wide circuit breaker. On terminal failure with an
+  // HttpStatusError, we unwrap the response (preserves prior contract that
+  // exhausted retries return the last response rather than throwing).
+  let response: HttpResponse;
+  try {
+    response = await runResilient(fn, {
+      endpoint: `tools-http:${config.name}`,
+      retry: {
+        maxAttempts: retries + 1,
+        baseDelayMs: delay,
+        maxDelayMs: 30_000,
+        jitter: true,
+      },
+    });
+  } catch (err) {
+    const httpResponse = (err as WeaveIntelError)?.details?.['httpResponse'] as HttpResponse | undefined;
+    if (httpResponse) {
+      response = httpResponse;
+    } else {
+      throw err;
+    }
+  }
   response.body = applyTransform(response.body, config.responseTransform);
   return response;
 }

@@ -138,6 +138,26 @@ export interface HeartbeatSupervisorOptions {
   extraContextFor?: (binding: HandlerBinding, agent: {
     id: string; meshId: string; roleKey: string; name: string;
   }) => Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
+  /**
+   * Optional global gate consulted once per schedule pass. Returning
+   * `defer: true` skips tick scheduling for the entire pass — useful when
+   * upstream provider endpoints are circuit-open or rate-limited and there
+   * is no point queuing more work that will only fail. The optional
+   * `emitForAgent` callback is invoked once per active agent so apps can
+   * persist a deferral event (e.g. into `live_run_events`) for visibility.
+   * Errors thrown inside the gate or its emitter are swallowed.
+   */
+  preScheduleGate?: () => Promise<
+    | {
+        defer: boolean;
+        reason?: string;
+        emitForAgent?: (
+          mesh: { id: string },
+          agent: { id: string; role_key: string },
+        ) => Promise<void>;
+      }
+    | null
+  >;
   /** Logger (defaults to console.log with a tag). */
   logger?: (msg: string) => void;
 }
@@ -291,10 +311,33 @@ export async function createHeartbeatSupervisor(
 
   /** Schedule SCHEDULED ticks for any agent with open work. Idempotent. */
   const scheduleDueTicks = async (): Promise<void> => {
+    // Consult the optional global gate first — when upstream is under
+    // pressure (circuit-open or recent 429) skip the entire pass and let
+    // the resilience pipeline drain. We still emit one deferral event per
+    // agent so the timeline shows _why_ progress paused.
+    let gate: Awaited<ReturnType<NonNullable<HeartbeatSupervisorOptions['preScheduleGate']>>> = null;
+    if (opts.preScheduleGate) {
+      try {
+        gate = await opts.preScheduleGate();
+      } catch (err) {
+        log(`preScheduleGate threw: ${err instanceof Error ? err.message : String(err)}`);
+        gate = null;
+      }
+    }
     const meshes = await opts.db.listLiveMeshes({ status: 'ACTIVE' });
     for (const m of meshes) {
       const agents = await opts.db.listLiveAgents({ meshId: m.id, status: 'ACTIVE' });
       for (const a of agents) {
+        if (gate?.defer) {
+          if (gate.emitForAgent) {
+            try {
+              await gate.emitForAgent({ id: m.id }, { id: a.id, role_key: a.role_key });
+            } catch {
+              /* best-effort */
+            }
+          }
+          continue;
+        }
         try {
           await scheduleTickIfWorkPending(opts.store, a.id);
         } catch (err) {

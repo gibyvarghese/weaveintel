@@ -46,6 +46,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'tool-policies', label: 'Tool Policies' },
     { key: 'tool-audit', label: 'Tool Audit' },
     { key: 'tool-health', label: 'Tool Health' },
+    { key: 'endpoint-health', label: 'Endpoint Health' },
     { key: 'tool-credentials', label: 'Tool Credentials' },
     { key: 'tool-simulation', label: 'Tool Simulation' },
     { key: 'tool-approval-requests', label: 'Tool Approvals' },

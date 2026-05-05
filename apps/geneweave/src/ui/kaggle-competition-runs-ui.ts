@@ -242,11 +242,17 @@ async function loadDetail(runId: string, render: () => void): Promise<void> {
 function renderEventLine(ev: KglRunEventRow, agentMap: Map<string, string>): HTMLElement {
   const agentLabel = ev.agent_id ? (agentMap.get(ev.agent_id) ?? ev.agent_id.slice(0, 8)) : '';
   const hasPayload = !!ev.payload_json && ev.payload_json.length > 0;
+  // Highlight backoff / circuit-open events so operators can immediately see
+  // why a step looks frozen (instead of confusing them with the same blue
+  // styling as ordinary step transitions).
+  const kindColor = ev.kind === 'agent_circuit_open' ? '#dc2626'
+    : ev.kind === 'agent_backoff' ? '#d97706'
+    : '#2563eb';
   return h('div', { style: 'font-size:11px;padding:4px 0;border-bottom:1px dashed var(--bg4);' },
     h('div', { style: 'display:flex;gap:8px;align-items:flex-start;' },
       h('span', { style: 'color:var(--fg3);font-family:var(--mono,monospace);min-width:88px;' },
         fmtTime(ev.created_at)),
-      h('span', { style: 'color:#2563eb;font-weight:600;min-width:140px;' }, ev.kind),
+      h('span', { style: `color:${kindColor};font-weight:600;min-width:140px;` }, ev.kind),
       agentLabel ? h('span', { style: 'color:var(--fg2);min-width:100px;font-style:italic;' }, agentLabel) : null,
       ev.tool_key ? h('span', { style: 'color:#7c3aed;min-width:100px;font-family:var(--mono,monospace);' }, ev.tool_key) : null,
       h('span', { style: 'color:var(--fg);flex:1;word-break:break-word;' }, ev.summary),
@@ -265,9 +271,34 @@ function renderStepCard(step: KglRunStepRow, events: KglRunEventRow[], agentMap:
   const stepEvents = events.filter(e => e.step_id === step.id);
   const color = STATUS_COLOR[step.status] ?? '#6b7280';
   const agentLabel = step.agent_id ? (agentMap.get(step.agent_id) ?? step.agent_id) : null;
+  // Surface the latest backoff/circuit-open event as a banner at the top of
+  // the step card so operators see "step is paused because…" without having
+  // to scroll through the event log. We pick the most recent backoff-class
+  // event AFTER any later step_started/step_completed (so a recovered step
+  // doesn't keep showing a stale warning).
+  let pauseBanner: HTMLElement | null = null;
+  for (let i = stepEvents.length - 1; i >= 0; i--) {
+    const ev = stepEvents[i];
+    if (!ev) continue;
+    if (ev.kind === 'step_completed' || ev.kind === 'step_started') break;
+    if (ev.kind === 'agent_backoff' || ev.kind === 'agent_circuit_open') {
+      const isCircuit = ev.kind === 'agent_circuit_open';
+      pauseBanner = h('div', {
+        style: `margin-bottom:8px;padding:8px 10px;border-radius:4px;font-size:12px;`
+          + `background:${isCircuit ? '#fee2e2' : '#fef3c7'};`
+          + `border:1px solid ${isCircuit ? '#dc2626' : '#d97706'};`
+          + `color:${isCircuit ? '#991b1b' : '#92400e'};`,
+      },
+        h('strong', {}, isCircuit ? '⛔ Circuit open — ' : '⏸ Paused — '),
+        ev.summary,
+      );
+      break;
+    }
+  }
   return h('div', {
     style: `border-left:3px solid ${color};padding:10px 12px;margin-bottom:10px;background:var(--bg2);border-radius:4px;`,
   },
+    pauseBanner,
     h('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px;' },
       h('div', { style: 'flex:1;' },
         h('span', { style: 'font-size:11px;color:var(--fg3);margin-right:8px;' }, `Step ${step.step_index + 1}`),

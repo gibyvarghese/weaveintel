@@ -26,6 +26,12 @@ import type {
   ToolPolicyViolationReason,
 } from '@weaveintel/core';
 import type { ToolHealthTracker } from './registry.js';
+import {
+  createResilientCallable,
+  type ResilientCallable,
+  type ResilienceOptions,
+  type CallOverrides,
+} from '@weaveintel/resilience';
 
 // ─── Resolution Context ──────────────────────────────────────
 
@@ -172,6 +178,34 @@ export interface PolicyEnforcedToolOptions {
   rateLimiter?: ToolRateLimiter;
   approvalGate?: ToolApprovalGate;
   resolutionContext?: PolicyResolutionContext;
+  /**
+   * When set, every tool invocation flows through `@weaveintel/resilience`
+   * so 429/5xx/timeout/circuit signals are emitted on the shared signal bus
+   * (and persisted to `endpoint_health` by any registered observer). The
+   * resilience pipeline slots between the policy rate-limit step and the
+   * underlying `tool.invoke` so per-tool, per-endpoint upstream pressure is
+   * visible cross-process.
+   *
+   * Defaults to disabled to preserve the existing per-tool health tracker
+   * semantics for callers that haven't opted in. GeneWeave enables this in
+   * its `createToolRegistry()` wiring so MCP/A2A/HTTP tools share the same
+   * circuit/limit view as direct LLM calls.
+   */
+  resilience?: PolicyResilienceOptions;
+}
+
+export interface PolicyResilienceOptions {
+  enabled: boolean;
+  /** Endpoint id prefix; defaults to `'tool'`. Final id is `<prefix>:<toolName>`. */
+  endpointPrefix?: string;
+  /** Override the per-tool resilience options (rate limit, circuit, etc.). */
+  optionsForTool?: (toolName: string) => Partial<ResilienceOptions> | undefined;
+  /**
+   * Per-call overrides applied to every invocation (e.g. `rateLimitMode:
+   * 'fail-fast'` and `maxRetries: 0` for live-agent ticks so the supervisor
+   * defers instead of blocking on a stuck retry).
+   */
+  callOverrides?: CallOverrides;
 }
 
 function truncate(s: string, max = 500): string {
@@ -195,6 +229,19 @@ export function createPolicyEnforcedTool(
   opts: PolicyEnforcedToolOptions,
 ): Tool {
   const emitter = opts.auditEmitter ?? noopAuditEmitter;
+
+  // Build the resilient callable once per tool so every invocation shares
+  // the same endpoint state (circuit, token bucket, concurrency).
+  let resilientInvoke: ResilientCallable<[ExecutionContext, ToolInput], ToolOutput> | undefined;
+  if (opts.resilience?.enabled) {
+    const prefix = opts.resilience.endpointPrefix ?? 'tool';
+    const endpoint = `${prefix}:${tool.schema.name}`;
+    const extra = opts.resilience.optionsForTool?.(tool.schema.name) ?? {};
+    resilientInvoke = createResilientCallable<[ExecutionContext, ToolInput], ToolOutput>(
+      (ctx, input) => tool.invoke(ctx, input),
+      { endpoint, ...extra },
+    );
+  }
 
   async function buildAuditEvent(
     outcome: ToolAuditOutcome,
@@ -285,12 +332,24 @@ export function createPolicyEnforcedTool(
     const startMs = Date.now();
     let timedOut = false;
 
+    // When resilience is enabled, route through the per-tool resilient
+    // callable so circuit/rate-limit/retry state and signals are shared
+    // across every caller of this tool name. Per-call overrides
+    // (e.g. fail-fast for live-agent ticks) are applied via
+    // `withOverrides` so each callsite can choose its retry posture.
+    const callOverrides = opts.resilience?.callOverrides;
+    const baseInvoke = (): Promise<ToolOutput> => {
+      if (!resilientInvoke) return tool.invoke(ctx, input);
+      if (callOverrides) return resilientInvoke.withOverrides(callOverrides)(ctx, input);
+      return resilientInvoke(ctx, input);
+    };
+
     const tracer = weaveResolveTracer(ctx);
     const invokePromise = tracer
       ? tracer.withSpan(
         ctx,
         'tools.policy.invoke',
-        () => tool.invoke(ctx, input),
+        () => baseInvoke(),
         { toolName: tool.schema.name },
       )
       : tool.invoke(ctx, input);

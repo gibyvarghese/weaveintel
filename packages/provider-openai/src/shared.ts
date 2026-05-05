@@ -2,9 +2,15 @@
  * @weaveintel/provider-openai — Shared HTTP helpers and configuration
  *
  * Reusable fetch utilities for all OpenAI API adapters.
+ *
+ * Resilience: every outbound request is routed through a process-wide
+ * `@weaveintel/resilience` callable keyed by endpoint id. This means a single
+ * 429 from OpenAI will pause the token bucket for *every* in-process caller
+ * — chats, agents, tools, evals — instead of each one independently retrying.
  */
 
-import { WeaveIntelError } from '@weaveintel/core';
+import { WeaveIntelError, parseRetryAfterMs as coreParseRetryAfterMs } from '@weaveintel/core';
+import { createResilientCallable, type ResilientCallable } from '@weaveintel/resilience';
 
 export interface OpenAIProviderOptions {
   apiKey?: string;
@@ -15,7 +21,6 @@ export interface OpenAIProviderOptions {
 
 export const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
-const MAX_RETRY_AFTER_MS = 30_000;
 
 export function resolveApiKey(options?: OpenAIProviderOptions): string {
   const key = options?.apiKey ?? process.env['OPENAI_API_KEY'];
@@ -52,18 +57,8 @@ export function makeMultipartHeaders(options: OpenAIProviderOptions, apiKey: str
   return headers;
 }
 
-export function parseRetryAfterMs(retryAfterHeader: string | null | undefined, fallbackMs = 60_000): number {
-  if (!retryAfterHeader) return fallbackMs;
-  const asNumber = Number.parseInt(retryAfterHeader, 10);
-  if (!Number.isNaN(asNumber) && Number.isFinite(asNumber)) {
-    return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, asNumber * 1000));
-  }
-  const asDate = Date.parse(retryAfterHeader);
-  if (!Number.isNaN(asDate)) {
-    return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, asDate - Date.now()));
-  }
-  return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, fallbackMs));
-}
+/** @deprecated re-exported from `@weaveintel/core`. Import from there directly. */
+export const parseRetryAfterMs = coreParseRetryAfterMs;
 
 function composeRequestSignal(signal?: AbortSignal): AbortSignal {
   const timeoutSignal = AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS);
@@ -71,7 +66,90 @@ function composeRequestSignal(signal?: AbortSignal): AbortSignal {
   return AbortSignal.any([signal, timeoutSignal]);
 }
 
+/**
+ * Process-wide resilience grouping for OpenAI HTTP. All in-process callers
+ * share one circuit breaker + token bucket here, so a single 429 backs off
+ * the whole process instead of each caller hammering independently.
+ *
+ * Phase 2 uses a single endpoint id; Phase 3 will route per model so different
+ * model quotas don't share state.
+ */
+const DEFAULT_ENDPOINT_ID = 'openai:rest';
+
+const RESILIENCE_DEFAULTS = {
+  // 1 auto-retry on transient/429. Heavy lifting comes from the shared token
+  // bucket pause (so other in-process callers also back off on 429) and the
+  // circuit breaker. Callers wanting more retries should wrap explicitly.
+  retry: { maxAttempts: 2, baseDelayMs: 500, maxDelayMs: 30_000, jitter: true },
+  circuit: { failureThreshold: 8, cooldownMs: 30_000 },
+} as const;
+
+type RequestArgs = [
+  baseUrl: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string>,
+  signal: AbortSignal | undefined,
+  method: 'POST' | 'GET' | 'DELETE' | 'PATCH',
+];
+type StreamFetchArgs = [
+  baseUrl: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string>,
+  signal: AbortSignal | undefined,
+];
+
+const requestCallables = new Map<string, ResilientCallable<RequestArgs, unknown>>();
+const streamFetchCallables = new Map<
+  string,
+  ResilientCallable<StreamFetchArgs, ReadableStreamDefaultReader<Uint8Array>>
+>();
+
+function getRequestCallable(endpoint: string): ResilientCallable<RequestArgs, unknown> {
+  let c = requestCallables.get(endpoint);
+  if (!c) {
+    c = createResilientCallable<RequestArgs, unknown>(openaiRequestRaw, {
+      endpoint,
+      retry: RESILIENCE_DEFAULTS.retry,
+      circuit: RESILIENCE_DEFAULTS.circuit,
+    });
+    requestCallables.set(endpoint, c);
+  }
+  return c;
+}
+
+function getStreamFetchCallable(
+  endpoint: string,
+): ResilientCallable<StreamFetchArgs, ReadableStreamDefaultReader<Uint8Array>> {
+  let c = streamFetchCallables.get(endpoint);
+  if (!c) {
+    c = createResilientCallable<StreamFetchArgs, ReadableStreamDefaultReader<Uint8Array>>(
+      openaiStreamFetchRaw,
+      {
+        endpoint,
+        retry: RESILIENCE_DEFAULTS.retry,
+        circuit: RESILIENCE_DEFAULTS.circuit,
+      },
+    );
+    streamFetchCallables.set(endpoint, c);
+  }
+  return c;
+}
+
 export async function openaiRequest(
+  baseUrl: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string>,
+  signal?: AbortSignal,
+  method: 'POST' | 'GET' | 'DELETE' | 'PATCH' = 'POST',
+): Promise<unknown> {
+  const callable = getRequestCallable(DEFAULT_ENDPOINT_ID);
+  return callable(baseUrl, path, body, headers, signal, method);
+}
+
+async function openaiRequestRaw(
   baseUrl: string,
   path: string,
   body: unknown,
@@ -163,6 +241,21 @@ export async function* openaiStreamRequest(
   headers: Record<string, string>,
   signal?: AbortSignal,
 ): AsyncIterable<unknown> {
+  // The initial fetch (which can return 429 / 5xx / auth) is wrapped by the
+  // resilience pipeline. Once we have a body, iteration runs outside the
+  // pipeline so streaming reads aren't subject to the per-call timeout.
+  const callable = getStreamFetchCallable(DEFAULT_ENDPOINT_ID);
+  const reader = await callable(baseUrl, path, body, headers, signal);
+  yield* iterateOpenAIStream(reader);
+}
+
+async function openaiStreamFetchRaw(
+  baseUrl: string,
+  path: string,
+  body: unknown,
+  headers: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<ReadableStreamDefaultReader<Uint8Array>> {
   const url = `${baseUrl}${path}`;
   const res = await fetch(url, {
     method: 'POST',
@@ -213,7 +306,12 @@ export async function* openaiStreamRequest(
 
   const reader = res.body?.getReader();
   if (!reader) throw new WeaveIntelError({ code: 'PROVIDER_ERROR', message: 'No response body', provider: 'openai' });
+  return reader;
+}
 
+async function* iterateOpenAIStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): AsyncIterable<unknown> {
   const decoder = new TextDecoder();
   let buffer = '';
 

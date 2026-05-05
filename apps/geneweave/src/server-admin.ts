@@ -26,6 +26,7 @@ import {
   registerToolPolicyRoutes,
   registerToolAuditRoutes,
   registerToolHealthRoutes,
+  registerEndpointHealthRoutes,
   registerToolCredentialRoutes,
   registerToolSimulationRoutes,
   registerMCPGatewayClientRoutes,
@@ -1271,6 +1272,7 @@ export function registerAdminRoutes(
   registerToolPolicyRoutes(router, db, adminHelpers);
   registerToolAuditRoutes(router, db, adminHelpers);
   registerToolHealthRoutes(router, db, adminHelpers);
+  registerEndpointHealthRoutes(router, db, adminHelpers);
   registerToolCredentialRoutes(router, db, adminHelpers);
   registerToolSimulationRoutes(router, db, adminHelpers);
   registerMCPGatewayClientRoutes(router, db, adminHelpers);
