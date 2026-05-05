@@ -43,6 +43,7 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
       maxSteps,
       log,
       playbookResolver: opts.playbookResolver,
+      ...(opts.policy ? { policy: opts.policy } : {}),
     });
 
   // Pre-built fallback inner handler (used when no per-tick resolver).

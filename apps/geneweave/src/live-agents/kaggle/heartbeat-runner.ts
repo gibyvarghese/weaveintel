@@ -36,8 +36,12 @@ import { createKaggleRoleHandlers } from './role-handlers.js';
 import { createKaggleAttentionPolicy } from './agents.js';
 import {
   resolveAttentionPolicyFromDb,
+  weaveDbLiveAgentPolicy,
   weaveDbModelResolver,
 } from '@weaveintel/live-agents-runtime';
+import { DbToolPolicyResolver, DbToolRateLimiter } from '../../tool-policy-resolver.js';
+import { DbToolAuditEmitter } from '../../tool-audit-emitter.js';
+import { DbToolApprovalGate } from '../../tool-approval-gate.js';
 
 export interface StartKaggleHeartbeatOptions {
   db: DatabaseAdapter;
@@ -332,6 +336,16 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
     playbookResolver,
     db: opts.db,
     log: (msg) => console.log('[kaggle-heartbeat]', msg),
+    // Phase 3 (live-agents capability parity) — share the same DB-backed
+    // policy bundle the chat path and the generic supervisor use, so kaggle
+    // strategist tool calls are gated/audited identically. Adapter instances
+    // are stateless w.r.t. each other (each holds only the DB ref).
+    policy: weaveDbLiveAgentPolicy({
+      policyResolver: new DbToolPolicyResolver(opts.db),
+      approvalGate: new DbToolApprovalGate(opts.db),
+      rateLimiter: new DbToolRateLimiter(opts.db),
+      auditEmitter: new DbToolAuditEmitter(opts.db),
+    }),
   });
   const actionExecutor = createActionExecutor({ taskHandlers });
 

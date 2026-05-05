@@ -9,6 +9,7 @@
 
 import type {
   ActionExecutionContext,
+  LiveAgentPolicy,
   ModelResolver,
   TaskHandler,
 } from '@weaveintel/live-agents';
@@ -58,6 +59,15 @@ export interface KaggleRoleHandlersOptions {
   db?: DatabaseAdapter;
   /** Tenant id for rubric scoping (Phase K7d). Defaults to null (global). */
   tenantId?: string | null;
+  /**
+   * Phase 3 (live-agents capability parity) — first-class per-tick policy
+   * bundle forwarded to every agentic role handler that wraps `weaveLiveAgent`
+   * (currently the strategist). Typically supplied as
+   * `weaveDbLiveAgentPolicy({ policyResolver, approvalGate, rateLimiter, auditEmitter })`
+   * from the heartbeat boot path so kaggle tool calls share the same DB-backed
+   * gating pipeline operators administer for chat + the generic supervisor.
+   */
+  policy?: LiveAgentPolicy;
 }
 
 export interface OperationalDefaults {

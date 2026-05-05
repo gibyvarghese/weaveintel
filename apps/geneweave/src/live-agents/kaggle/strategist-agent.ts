@@ -21,6 +21,7 @@ import type { Model } from '@weaveintel/core';
 import {
   weaveLiveAgent,
   type AgenticRunResult,
+  type LiveAgentPolicy,
   type TaskHandler,
 } from '@weaveintel/live-agents';
 import {
@@ -56,6 +57,15 @@ export interface KaggleStrategistAgentOptions {
    * DB-driven.
    */
   fallbackGoalText?: string;
+  /**
+   * Phase 3 (live-agents capability parity) — first-class per-tick policy
+   * bundle (resolver / approval gate / rate limiter / audit emitter).
+   * Forwarded to `weaveLiveAgent` so every kaggle tool call inside the
+   * strategist's ReAct loop is gated by the same DB-backed pipeline
+   * operators administer for chat. When omitted, tool calls run
+   * unenforced (legacy behavior).
+   */
+  policy?: LiveAgentPolicy;
 }
 
 /** Last-resort prompt — used only when neither playbookResolver nor
@@ -106,6 +116,7 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
     maxSteps,
     log,
     summarize: summarizeKaggleRun,
+    ...(opts.policy ? { policy: opts.policy } : {}),
     onError: async (err) => {
       // Detect Anthropic rate-limit and back off long enough for the per-minute
       // window to drain. Without this, the heartbeat re-dispatches every tick
