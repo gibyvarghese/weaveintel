@@ -100,7 +100,7 @@ export function registerKaggleHandlerKinds(
   const sharedCtx = buildSharedCtx(opts);
   const safeRegister = (reg: HandlerKindRegistration): void => {
     if (registry.resolve(reg.kind)) return;
-    safeRegister(reg);
+    registry.register(reg);
   };
 
   // Discoverer ----------------------------------------------------------

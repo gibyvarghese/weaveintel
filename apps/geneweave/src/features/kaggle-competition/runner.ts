@@ -1,11 +1,12 @@
 /**
  * Kaggle Competition Runner — per-run mesh + step-ledger orchestrator.
  *
- * Each run gets its own UUIDv7 mesh provisioned via `bootKaggleMesh`. The
- * standard Kaggle pipeline (discoverer → strategist → implementer →
- * validator → submitter, with observer in parallel) is seeded as ordered
- * `kgl_run_step` rows so the UI can render a readable flow timeline before
- * any agent has actually executed.
+ * Each run gets its own UUIDv7 mesh provisioned via the generic
+ * `provisionMesh` from `@weaveintel/live-agents-runtime` (Phase C of the
+ * kaggle DB-driven migration). The standard Kaggle pipeline (discoverer →
+ * strategist → implementer → validator → submitter, with observer in
+ * parallel) is seeded as ordered `kgl_run_step` rows so the UI can render a
+ * readable flow timeline before any agent has actually executed.
  *
  * Real agent execution (agents reading the contracts, calling tools,
  * emitting evidence) flows through the existing chat surface and live-agents
@@ -15,7 +16,7 @@
 
 import { newUUIDv7 } from '../../lib/uuid.js';
 import type { DatabaseAdapter } from '../../db.js';
-import { bootKaggleMesh } from '../../live-agents/kaggle/boot.js';
+import { provisionMesh } from '@weaveintel/live-agents-runtime';
 import { getKaggleLiveStore } from '../../live-agents/kaggle/store.js';
 
 export interface KaggleRunInput {
@@ -104,30 +105,44 @@ export class KaggleCompetitionRunner {
     let meshId: string | null = null;
     try {
       const store = await getKaggleLiveStore();
-      const meshUuid = newUUIDv7();
+      const desiredMeshId = `mesh-kaggle-${newUUIDv7()}`;
       // Live-agents requires the principal id granting bindings to start with
       // `human:`, `user:`, or `admin:`. The auth.userId is a raw UUID, so
       // namespace it as a user principal here.
       const humanOwnerId = userId.startsWith('human:') || userId.startsWith('user:') || userId.startsWith('admin:')
         ? userId
         : `user:${userId}`;
-      const result = await bootKaggleMesh({
-        store,
-        tenantId,
-        humanOwnerId,
-        kaggleUsername: process.env['KAGGLE_USERNAME'] ?? 'unknown',
-        mcpUrl: process.env['KAGGLE_MCP_URL'] ?? 'http://localhost:7400',
-        credentialVaultRef: 'env:KAGGLE_KEY',
-        meshId: `mesh-kaggle-${meshUuid}`,
-        // Pull personas, edges, and dual-control gates from the
-        // framework-level live mesh definition tables (DB-driven). Operators
-        // edit them via the Live Mesh Definitions admin tabs; runtime loads
-        // the snapshot here. Falls back to in-code defaults if the mesh row
-        // is missing.
-        db: this.db,
-        meshKey: 'kaggle',
-      });
-      meshId = result.template.mesh.id;
+
+      // Phase C — provision the per-run mesh from the DB blueprint
+      // (`live_mesh_definitions` key 'kaggle' seeded by
+      // `seedLiveMeshDefinitions`). The generic provisioner writes
+      // `live_meshes` + `live_agents` + `live_agent_handler_bindings` +
+      // `live_agent_tool_bindings` + the StateStore mirror (Mesh, Agents,
+      // Contracts, DelegationEdges, Account, AccountBindings) in one call,
+      // replacing the bespoke `bootKaggleMesh` + `mesh-template.ts` path.
+      const result = await provisionMesh(
+        this.db,
+        {
+          meshDefKey: 'kaggle',
+          tenantId,
+          ownerHumanId: humanOwnerId,
+          name: desiredMeshId,
+          status: 'ACTIVE',
+          store,
+          account: {
+            provider: 'kaggle.com',
+            accountIdentifier: process.env['KAGGLE_USERNAME'] ?? 'unknown',
+            mcpServerUrl: process.env['KAGGLE_MCP_URL'] ?? 'http://localhost:7400',
+            credentialVaultRef: 'env:KAGGLE_KEY',
+            upstreamScopesDescription:
+              'Kaggle REST API: list competitions/datasets/kernels, push kernels, submit to competitions. Counts against per-account 4/day submit cap.',
+            description: `Kaggle credentials for ${process.env['KAGGLE_USERNAME'] ?? 'unknown'}`,
+          },
+          logger: (msg) => console.log('[kaggle-runner]', msg),
+        },
+        newUUIDv7,
+      );
+      meshId = result.meshId;
       await this.db.updateKglCompetitionRun(runId, { mesh_id: meshId });
       // Register the mesh in the admin index so the operator's
       // "Kaggle Live Meshes / Agents / Bindings / Bridges" tabs can list it.
@@ -140,18 +155,28 @@ export class KaggleCompetitionRunner {
       });
       await this.appendEvent(
         runId, null, 'mesh_provisioned', null, null,
-        `Provisioned mesh ${meshId} with ${Object.keys(result.bindings).length} role bindings.`,
-        { meshId, bindings: Object.keys(result.bindings) },
+        `Provisioned mesh ${meshId} with ${result.agentIds.length} agents and ${result.toolBindingIds.length} tool bindings.`,
+        {
+          meshId,
+          agentIds: result.agentIds,
+          handlerBindingIds: result.handlerBindingIds,
+          toolBindingIds: result.toolBindingIds,
+          accountId: result.accountId,
+        },
       );
 
       // Seed the initial discoverer backlog item so the global Kaggle
       // heartbeat (`startKaggleHeartbeat` in index.ts) has work to claim
       // and starts ticking the pipeline. Without this, the discoverer's
       // attention policy would always return NoopRest and nothing would
-      // run. Step status is intentionally left as 'pending' here \u2014 the
+      // run. Step status is intentionally left as 'pending' here — the
       // heartbeat's bridge transitions it to 'running' / 'completed' as
       // the agent actually executes.
-      const discovererAgent = result.template.agents.discoverer;
+      const meshAgents = await store.listAgents(meshId);
+      const discovererAgent = meshAgents.find((a) => a.role === 'discoverer');
+      if (!discovererAgent) {
+        throw new Error(`provisioned mesh ${meshId} has no discoverer agent (blueprint missing role)`);
+      }
       const seedNowIso = new Date().toISOString();
       await store.saveBacklogItem({
         id: `backlog-${discovererAgent.id}-initial-${Date.now()}`,

@@ -21,6 +21,7 @@ import {
   createActionExecutor,
   type Heartbeat,
   type AttentionPolicy,
+  type TaskHandler,
 } from '@weaveintel/live-agents';
 // Phase 5 — model routing flows exclusively through `weaveDbModelResolver`
 // from `@weaveintel/live-agents-runtime`. The legacy `buildPlannerModel`
@@ -32,7 +33,6 @@ import { routeModel } from '../../chat-routing-utils.js';
 import { newUUIDv7 } from '../../lib/uuid.js';
 import { getKaggleLiveStore } from './store.js';
 import { createDbKagglePlaybookResolver } from './playbook-resolver.js';
-import { createKaggleRoleHandlers } from './role-handlers.js';
 import { registerKaggleHandlerKinds } from './handler-kinds.js';
 import { getHandlerRegistry, syncHandlerKindsToDb } from '../handler-registry-boot.js';
 import { createKaggleAttentionPolicy } from './agents.js';
@@ -40,6 +40,7 @@ import {
   resolveAttentionPolicyFromDb,
   weaveDbLiveAgentPolicy,
   weaveDbModelResolver,
+  weaveLiveAgentFromDb,
 } from '@weaveintel/live-agents-runtime';
 import { DbToolPolicyResolver, DbToolRateLimiter } from '../../tool-policy-resolver.js';
 import { DbToolAuditEmitter } from '../../tool-audit-emitter.js';
@@ -333,53 +334,69 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
     log: (msg) => console.log('[kaggle-heartbeat]', msg),
   });
 
-  const taskHandlers = createKaggleRoleHandlers({
-    modelResolver: dbModelResolver,
-    playbookResolver,
-    db: opts.db,
-    log: (msg) => console.log('[kaggle-heartbeat]', msg),
-    // Phase 3 (live-agents capability parity) — share the same DB-backed
-    // policy bundle the chat path and the generic supervisor use, so kaggle
-    // strategist tool calls are gated/audited identically. Adapter instances
-    // are stateless w.r.t. each other (each holds only the DB ref).
-    policy: weaveDbLiveAgentPolicy({
-      policyResolver: new DbToolPolicyResolver(opts.db),
-      approvalGate: new DbToolApprovalGate(opts.db),
-      rateLimiter: new DbToolRateLimiter(opts.db),
-      auditEmitter: new DbToolAuditEmitter(opts.db),
-    }),
+  // Build the shared DB-backed policy bundle once. Both the handler-kind
+  // registration (Phase A) and the per-tick handler resolution (Phase C)
+  // reuse it so chat / generic-supervisor / kaggle paths share identical
+  // gating and audit semantics.
+  const liveAgentPolicy = weaveDbLiveAgentPolicy({
+    policyResolver: new DbToolPolicyResolver(opts.db),
+    approvalGate: new DbToolApprovalGate(opts.db),
+    rateLimiter: new DbToolRateLimiter(opts.db),
+    auditEmitter: new DbToolAuditEmitter(opts.db),
   });
 
-  // Phase A of the kaggle DB-driven migration — register the 10 kaggle
-  // handler kinds against the shared registry so a future
-  // `weaveLiveMeshFromDb` boot can resolve a `TaskHandler` purely from a
-  // `live_agent_handler_bindings` row. Wrappers close over the same
-  // KaggleRoleHandlersOptions used for the legacy `taskHandlers` map above,
-  // so behavior between the two paths is identical for the strategist /
-  // discoverer / validator / observer / submitter / implementer roles.
-  // Idempotent: silently skips kinds already registered (e.g. on hot reload).
-  // Re-runs syncHandlerKindsToDb so the new rows reach `live_handler_kinds`.
+  // Phase A — register the 10 kaggle handler kinds against the shared
+  // registry so the action executor can resolve a `TaskHandler` purely from
+  // a `live_agent_handler_bindings` row. Idempotent: silently skips kinds
+  // already registered. Re-runs syncHandlerKindsToDb so the rows reach
+  // `live_handler_kinds` for admin visibility.
+  const handlerRegistry = getHandlerRegistry();
   try {
-    const registry = getHandlerRegistry();
-    registerKaggleHandlerKinds(registry, {
+    registerKaggleHandlerKinds(handlerRegistry, {
       modelResolver: dbModelResolver,
       playbookResolver,
       db: opts.db,
       log: (msg) => console.log('[kaggle-handler-kinds]', msg),
-      policy: weaveDbLiveAgentPolicy({
-        policyResolver: new DbToolPolicyResolver(opts.db),
-        approvalGate: new DbToolApprovalGate(opts.db),
-        rateLimiter: new DbToolRateLimiter(opts.db),
-        auditEmitter: new DbToolAuditEmitter(opts.db),
-      }),
+      policy: liveAgentPolicy,
     });
-    await syncHandlerKindsToDb(opts.db, registry);
+    await syncHandlerKindsToDb(opts.db, handlerRegistry);
   } catch (err) {
     console.error(
-      '[kaggle-heartbeat] handler-kind registration failed (legacy path still works):',
+      '[kaggle-heartbeat] handler-kind registration failed:',
       err instanceof Error ? err.message : String(err),
     );
   }
+
+  // Phase C — per-tick handler resolution from DB bindings.
+  //
+  // For each StartTask/ContinueTask action the action executor dispatches by
+  // `agent.role` to a TaskHandler. The shim below ignores in-code role
+  // tables and instead resolves the agent's enabled `live_agent_handler_bindings`
+  // row, looks up the handler kind in the shared registry, and invokes it.
+  // This makes the kaggle pipeline behavior fully DB-driven: operators can
+  // swap an agent between e.g. `kaggle.strategist.agentic` and
+  // `kaggle.strategist.deterministic` purely via the admin UI.
+  //
+  // The shim is registered under all 6 kaggle role keys so the dispatcher
+  // routes every kaggle agent to it.
+  const dbDrivenHandler: TaskHandler = async (action, execCtx, ctx) => {
+    const agentId = execCtx.agent.id;
+    const { handler } = await weaveLiveAgentFromDb(opts.db, agentId, {
+      modelResolver: dbModelResolver,
+      policy: liveAgentPolicy,
+      handlerRegistry,
+      logger: (msg) => console.log('[kaggle-heartbeat][db-handler]', msg),
+    });
+    return handler(action, execCtx, ctx);
+  };
+  const taskHandlers: Record<string, TaskHandler> = {
+    discoverer: dbDrivenHandler,
+    strategist: dbDrivenHandler,
+    implementer: dbDrivenHandler,
+    validator: dbDrivenHandler,
+    submitter: dbDrivenHandler,
+    observer: dbDrivenHandler,
+  };
   const actionExecutor = createActionExecutor({ taskHandlers });
 
   // Phase 4: Resolve attention policy from DB when a key is configured;
