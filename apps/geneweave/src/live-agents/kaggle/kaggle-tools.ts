@@ -12,9 +12,28 @@
 import {
   weaveToolRegistry as createToolRegistry,
   weaveTool as defineTool,
+  type Tool,
   type ToolRegistry,
 } from '@weaveintel/core';
-import type { KaggleAdapter, KaggleCredentials } from '@weaveintel/tools-kaggle';
+import { liveKaggleAdapter, type KaggleAdapter, type KaggleCredentials } from '@weaveintel/tools-kaggle';
+
+/**
+ * Resolve Kaggle credentials from KAGGLE_USERNAME / KAGGLE_KEY env vars.
+ * Throws a clear error if either is missing. Called lazily at tool-execute
+ * time so the kaggle tools can be registered in `tool_catalog` at boot even
+ * when the host process has no kaggle creds (e.g. local dev without
+ * `.env`). Tools that aren't invoked won't crash.
+ */
+export function resolveKaggleCredsFromEnv(): KaggleCredentials {
+  const username = process.env['KAGGLE_USERNAME'];
+  const key = process.env['KAGGLE_KEY'];
+  if (!username || !key) {
+    throw new Error(
+      'Kaggle credentials missing: set KAGGLE_USERNAME and KAGGLE_KEY in env to invoke kaggle_* tools.',
+    );
+  }
+  return { username, key };
+}
 
 export interface KaggleToolDefaults {
   /** Default `timeoutSeconds` for `kaggle_wait_for_kernel`. Default 300. */
@@ -30,8 +49,11 @@ export interface KaggleToolDefaults {
 }
 
 export interface KaggleToolsOptions {
-  adapter: KaggleAdapter;
-  credentials: KaggleCredentials;
+  /** Override the Kaggle HTTP adapter. Defaults to `liveKaggleAdapter`. */
+  adapter?: KaggleAdapter;
+  /** Pin credentials. When omitted they are resolved lazily from env on each
+   *  tool execution via `resolveKaggleCredsFromEnv()`. */
+  credentials?: KaggleCredentials;
   /** Operational defaults sourced from the catch-all (or matched) playbook
    *  config in DB. All fields fall back to the historical hard-coded values
    *  when omitted, so test/example call sites can keep ignoring this. */
@@ -52,8 +74,9 @@ function normalizeKernelRef(value: string): string {
   return value.replace(/^\/+(code\/)?/, '').replace(/\/+$/, '');
 }
 
-export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
-  const { adapter, credentials } = opts;
+export function createKaggleTools(opts: KaggleToolsOptions = {}): ToolRegistry {
+  const adapter: KaggleAdapter = opts.adapter ?? liveKaggleAdapter;
+  const getCreds = (): KaggleCredentials => opts.credentials ?? resolveKaggleCredsFromEnv();
   const defaults = opts.defaults ?? {};
   const defaultWaitTimeoutSec = defaults.defaultWaitTimeoutSec ?? 300;
   const maxWaitTimeoutSec = defaults.maxWaitTimeoutSec ?? 600;
@@ -79,7 +102,7 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
       execute: async (args) => {
         const page = (args['page'] as number | undefined) ?? 1;
         const search = args['search'] as string | undefined;
-        const list = await adapter.listCompetitions(credentials, { page, search });
+        const list = await adapter.listCompetitions(getCreds(), { page, search });
         return JSON.stringify(
           list.slice(0, 20).map((c) => ({
             id: c.id,
@@ -110,7 +133,7 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
       riskLevel: 'read-only',
       execute: async (args) => {
         const ref = normalizeCompetitionRef(args['ref'] as string);
-        const c = await adapter.getCompetition(credentials, ref);
+        const c = await adapter.getCompetition(getCreds(), ref);
         return JSON.stringify(c, null, 2);
       },
     }),
@@ -130,7 +153,7 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
       riskLevel: 'read-only',
       execute: async (args) => {
         const ref = normalizeCompetitionRef(args['ref'] as string);
-        const files = await adapter.listCompetitionFiles(credentials, ref);
+        const files = await adapter.listCompetitionFiles(getCreds(), ref);
         return JSON.stringify(files, null, 2);
       },
     }),
@@ -158,7 +181,7 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
         if (!fileName) return JSON.stringify({ error: 'fileName is required' });
         const maxBytes = (args['maxBytes'] as number | undefined) ?? 65536;
         try {
-          const out = await adapter.downloadCompetitionFile(credentials, ref, fileName, { maxBytes });
+          const out = await adapter.downloadCompetitionFile(getCreds(), ref, fileName, { maxBytes });
           return JSON.stringify(out, null, 2);
         } catch (err) {
           return JSON.stringify({
@@ -208,7 +231,8 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
               'Do NOT retry with the same empty source; do NOT change the slug to bypass this check.',
           });
         }
-        const username = credentials.username;
+        const creds = getCreds();
+        const username = creds.username;
         // Kaggle returns 409 Conflict when a notebook title (or slug) already
         // exists on the account. The strategist often re-uses titles like
         // "ARC-AGI-3 Scout - Iteration 1" across runs, so first try the
@@ -216,7 +240,7 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
         // timestamp suffix that guarantees uniqueness without losing the
         // operator-facing label.
         const tryPush = async (s: string, t: string) =>
-          adapter.pushKernel(credentials, {
+          adapter.pushKernel(creds, {
             slug: `${username}/${s}`,
             title: t,
             language: 'python',
@@ -265,7 +289,7 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
       riskLevel: 'read-only',
       execute: async (args) => {
         const ref = normalizeKernelRef(args['kernelRef'] as string);
-        const status = await adapter.getKernelStatus(credentials, ref);
+        const status = await adapter.getKernelStatus(getCreds(), ref);
         return JSON.stringify(status, null, 2);
       },
     }),
@@ -296,7 +320,7 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
         const terminal = new Set(['complete', 'error', 'cancelAcknowledged', 'cancelRequested']);
         let last: unknown = null;
         while (Date.now() < deadline) {
-          const status = await adapter.getKernelStatus(credentials, ref);
+          const status = await adapter.getKernelStatus(getCreds(), ref);
           last = status;
           const s = (status as { status?: string }).status ?? '';
           if (terminal.has(s)) return JSON.stringify({ ...status, terminal: true }, null, 2);
@@ -321,7 +345,7 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
       riskLevel: 'read-only',
       execute: async (args) => {
         const ref = normalizeKernelRef(args['kernelRef'] as string);
-        const out = await adapter.getKernelOutput(credentials, ref);
+        const out = await adapter.getKernelOutput(getCreds(), ref);
         // Many kernels print critical info (file inventory, framework READMEs)
         // EARLY in the log and the failure trace LATE. Naive trailing-only
         // truncation drops the inventory. Keep both ends.
@@ -378,4 +402,22 @@ export function createKaggleTools(opts: KaggleToolsOptions): ToolRegistry {
   );
 
   return reg;
+}
+
+/**
+ * Build a map of kaggle tools keyed by tool name (`kaggle_*`).
+ *
+ * Used by `BUILTIN_TOOLS` so kaggle tools are visible in `tool_catalog` and
+ * can be bound to live-agent definitions via `live_agent_tool_bindings`.
+ *
+ * Credentials are resolved lazily from `KAGGLE_USERNAME` / `KAGGLE_KEY` at
+ * the moment a tool is invoked, so this map can be constructed at startup
+ * even if no kaggle creds are configured. Operators can still see the tools
+ * in the admin panel and gate them through `tool_policies`.
+ */
+export function createKaggleToolMap(opts: KaggleToolsOptions = {}): Record<string, Tool> {
+  const reg = createKaggleTools(opts);
+  const map: Record<string, Tool> = {};
+  for (const tool of reg.list()) map[tool.schema.name] = tool;
+  return map;
 }
