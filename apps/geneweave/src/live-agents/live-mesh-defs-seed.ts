@@ -22,6 +22,14 @@ interface SeedAgent {
   objectives: string;
   success_indicators: string;
   ordering: number;
+  /** Phase B: handler kind (key in HandlerRegistry) that drives this role. */
+  default_handler_kind?: string;
+  /** Phase B: opaque per-role handler config JSON. */
+  default_handler_config_json?: string;
+  /** Phase B: tool_catalog tool_keys this role may invoke at runtime. */
+  default_tool_catalog_keys?: string[];
+  /** Phase B: attention policy key (kaggle uses runtime `createKaggleAttentionPolicy` for now). */
+  default_attention_policy_key?: string;
 }
 
 interface SeedEdge {
@@ -57,6 +65,8 @@ const KAGGLE_SEED: SeedMesh = {
       objectives: 'Surface 1–3 candidate competitions per day with reward, deadline, and metric.',
       success_indicators: 'Each surfaced competition links to a Kaggle ref and includes deadline + evaluation metric.',
       ordering: 10,
+      default_handler_kind: 'kaggle.discoverer.deterministic',
+      default_tool_catalog_keys: ['kaggle_list_competitions', 'kaggle_search_competitions', 'kaggle_get_competition'],
     },
     {
       role_key: 'strategist',
@@ -66,6 +76,18 @@ const KAGGLE_SEED: SeedMesh = {
       objectives: 'For each picked competition, propose distinct approaches with expected metric and rationale.',
       success_indicators: 'Each approach cites at least one source kernel and an expected metric range.',
       ordering: 20,
+      // Agentic strategist drives the ReAct loop and consumes kaggle_* tools.
+      default_handler_kind: 'kaggle.strategist.agentic',
+      default_tool_catalog_keys: [
+        'kaggle_list_competitions',
+        'kaggle_search_competitions',
+        'kaggle_get_competition',
+        'kaggle_download_competition_data',
+        'kaggle_list_kernels',
+        'kaggle_push_kernel',
+        'kaggle_get_kernel_status',
+        'kaggle_get_kernel_output',
+      ],
     },
     {
       role_key: 'implementer',
@@ -75,6 +97,8 @@ const KAGGLE_SEED: SeedMesh = {
       objectives: 'Push kernel; poll until status=complete; record kernel ref + output url.',
       success_indicators: 'Kernel pushes succeed at least 90% on first attempt; failures triage within one tick.',
       ordering: 30,
+      default_handler_kind: 'kaggle.implementer.deterministic',
+      default_tool_catalog_keys: ['kaggle_push_kernel', 'kaggle_get_kernel_status', 'kaggle_get_kernel_output'],
     },
     {
       role_key: 'validator',
@@ -84,6 +108,8 @@ const KAGGLE_SEED: SeedMesh = {
       objectives: 'Block any submission that fails header/row/id parity against the competition sample.',
       success_indicators: 'Zero malformed submissions reach the submitter.',
       ordering: 40,
+      default_handler_kind: 'kaggle.validator.agentic',
+      default_tool_catalog_keys: ['kaggle_get_kernel_output'],
     },
     {
       role_key: 'submitter',
@@ -93,6 +119,10 @@ const KAGGLE_SEED: SeedMesh = {
       objectives: 'Submit only validated entries; respect 4/day/competition cap.',
       success_indicators: 'No more than 4 submissions per competition per UTC day; every submission has a paired Promotion.',
       ordering: 50,
+      default_handler_kind: 'kaggle.submitter',
+      // Submitter operates through the kernel-push path today; once a
+      // kaggle_competitions_submit tool ships, add it here.
+      default_tool_catalog_keys: ['kaggle_get_kernel_output'],
     },
     {
       role_key: 'observer',
@@ -102,6 +132,8 @@ const KAGGLE_SEED: SeedMesh = {
       objectives: 'Detect rank drops > N positions and surface to strategist within one tick.',
       success_indicators: 'Rank-drop notices reach strategist before the next discoverer tick.',
       ordering: 60,
+      default_handler_kind: 'kaggle.observer.agentic',
+      default_tool_catalog_keys: ['kaggle_get_competition'],
     },
   ],
   edges: [
@@ -123,7 +155,15 @@ export async function seedLiveMeshDefinitions(db: DatabaseAdapter): Promise<void
 
 async function seedOneMesh(db: DatabaseAdapter, seed: SeedMesh): Promise<void> {
   const existing = await db.getLiveMeshDefinitionByKey(seed.mesh_key);
-  if (existing) return;
+  if (existing) {
+    // Phase B backfill: existing pre-Phase-B rows have NULL handler kinds
+    // and NULL tool catalog keys. Patch them in once so weaveLiveMeshFromDb
+    // provisioning can pick up the right runtime wiring without operator
+    // intervention. We only fill NULLs — operator edits (non-null values)
+    // are preserved.
+    await backfillAgentDefaults(db, existing.id, seed.agents);
+    return;
+  }
 
   const mesh = await db.createLiveMeshDefinition({
     id: newUUIDv7(),
@@ -147,6 +187,16 @@ async function seedOneMesh(db: DatabaseAdapter, seed: SeedMesh): Promise<void> {
       success_indicators: a.success_indicators,
       ordering: a.ordering,
       enabled: 1,
+      ...(a.default_handler_kind ? { default_handler_kind: a.default_handler_kind } : {}),
+      ...(a.default_handler_config_json
+        ? { default_handler_config_json: a.default_handler_config_json }
+        : {}),
+      ...(a.default_tool_catalog_keys && a.default_tool_catalog_keys.length > 0
+        ? { default_tool_catalog_keys: JSON.stringify(a.default_tool_catalog_keys) }
+        : {}),
+      ...(a.default_attention_policy_key
+        ? { default_attention_policy_key: a.default_attention_policy_key }
+        : {}),
     });
   }
 
@@ -161,5 +211,45 @@ async function seedOneMesh(db: DatabaseAdapter, seed: SeedMesh): Promise<void> {
       ordering: e.ordering,
       enabled: 1,
     });
+  }
+}
+
+/**
+ * Phase B backfill: for an already-seeded mesh, fill in any NULL handler
+ * kind / handler config / tool catalog keys / attention policy key fields
+ * on existing agent definition rows. Operator edits (non-NULL values) are
+ * never overwritten. Unknown role_keys in the DB are ignored.
+ */
+async function backfillAgentDefaults(
+  db: DatabaseAdapter,
+  meshDefId: string,
+  seedAgents: SeedAgent[],
+): Promise<void> {
+  const existingAgents = await db.listLiveAgentDefinitions({ meshDefId });
+  const seedByRole = new Map(seedAgents.map((a) => [a.role_key, a] as const));
+
+  for (const row of existingAgents) {
+    const seed = seedByRole.get(row.role_key);
+    if (!seed) continue;
+    const patch: Record<string, string> = {};
+    if (!row.default_handler_kind && seed.default_handler_kind) {
+      patch['default_handler_kind'] = seed.default_handler_kind;
+    }
+    if (!row.default_handler_config_json && seed.default_handler_config_json) {
+      patch['default_handler_config_json'] = seed.default_handler_config_json;
+    }
+    if (
+      !row.default_tool_catalog_keys &&
+      seed.default_tool_catalog_keys &&
+      seed.default_tool_catalog_keys.length > 0
+    ) {
+      patch['default_tool_catalog_keys'] = JSON.stringify(seed.default_tool_catalog_keys);
+    }
+    if (!row.default_attention_policy_key && seed.default_attention_policy_key) {
+      patch['default_attention_policy_key'] = seed.default_attention_policy_key;
+    }
+    if (Object.keys(patch).length > 0) {
+      await db.updateLiveAgentDefinition(row.id, patch);
+    }
   }
 }
