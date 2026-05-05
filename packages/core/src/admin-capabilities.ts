@@ -37,6 +37,13 @@ export interface AdminTabDef {
   readOnly?: boolean;
   /** When set, the admin UI renders a custom view component instead of standard CRUD. */
   customView?: string;
+  /**
+   * When set, the admin UI keeps the standard CRUD list view but renders a
+   * custom record/detail view (instead of the auto-generated form) when a
+   * row is opened. Use this to add bespoke detail UIs while preserving the
+   * shared list look (sort, filter, search, pagination, context menu).
+   */
+  customRecordView?: string;
 }
 
 export interface AdminTabGroup {

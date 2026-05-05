@@ -76,8 +76,8 @@ export const KAGGLE_ADMIN_TABS: Record<string, AdminTabDef> = {
     apiPath: 'admin/kaggle-competition-runs',
     listKey: 'kaggle-competition-runs',
     readOnly: true,
-    customView: 'kaggle-competition-runs',
-    cols: ['competition_ref', 'title', 'status', 'mesh_id', 'step_count', 'event_count', 'started_at', 'completed_at'],
+    customRecordView: 'kaggle-competition-runs',
+    cols: ['title', 'status', 'competition_ref', 'step_count', 'event_count', 'started_at', 'completed_at'],
     fields: [
       { key: 'id', label: 'Run ID', readonly: true },
       { key: 'competition_ref', label: 'Competition Ref', readonly: true },

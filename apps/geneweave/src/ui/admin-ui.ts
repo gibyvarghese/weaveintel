@@ -4,7 +4,7 @@ import { state } from './state.js';
 import { normalizeAdminPath } from './prompt-wizard-utils.js';
 import { resetPromptWizard } from './prompt-wizard-state.js';
 import { renderToolSimulationView } from './tool-simulation-ui.js';
-import { renderKglCompetitionRunsView } from './kaggle-competition-runs-ui.js';
+import { renderKglCompetitionRunDetail, renderKglRunRowActions } from './kaggle-competition-runs-ui.js';
 import { renderCapabilityMatrixView } from './capability-matrix-ui.js';
 import { renderRoutingSimulatorView } from './routing-simulator-ui.js';
 import { renderToolApprovalView } from './tool-approval-ui.js';
@@ -742,7 +742,10 @@ export function renderAdminView(options: {
   const schema = getAdminSchema(currentTab);
   const rows = (state.adminData?.[currentTab] || []) as any[];
   const promptDetailOpen = currentTab === 'prompts' && !!((state.adminForm || {}) as any)['__promptWizard'];
-  const showEditor = !schema?.readOnly && (promptDetailOpen || state.adminEditing !== null || Object.keys(state.adminForm || {}).length > 0);
+  // Allow editor open for read-only tabs that supply a customRecordView (no
+  // form, just a custom detail panel like the Live Competition Runs UI).
+  const editorAllowed = !schema?.readOnly || !!schema?.customRecordView;
+  const showEditor = editorAllowed && (promptDetailOpen || state.adminEditing !== null || Object.keys(state.adminForm || {}).length > 0);
 
   // Reset list controls when the active tab changes
   if (state.adminListCurrentTab !== currentTab) {
@@ -769,6 +772,15 @@ export function renderAdminView(options: {
     right.appendChild(renderAdminBreadcrumbs(currentTab, schema, (tab) => adminBackToList(tab, options.render)));
     if (currentTab === 'prompts') {
       right.appendChild(options.renderPromptSetupWizard());
+    } else if (schema?.customRecordView === 'kaggle-competition-runs') {
+      const runId = state.adminEditing != null ? String(state.adminEditing) : null;
+      if (runId) {
+        right.appendChild(h('div', { className: 'admin-detail-panel' },
+          renderKglCompetitionRunDetail({ runId, render: options.render })));
+      } else {
+        right.appendChild(h('div', { className: 'admin-detail-panel', style: 'padding:16px;color:var(--fg3);' },
+          'No run selected.'));
+      }
     } else {
       right.appendChild(h('div', { className: 'admin-detail-panel' }, renderAdminForm(
         currentTab,
@@ -784,12 +796,6 @@ export function renderAdminView(options: {
   // Custom views (e.g. Tool Simulation step-through UI)
   if (schema?.customView === 'tool-simulation') {
     right.appendChild(renderToolSimulationView({ render: options.render }));
-    page.appendChild(right);
-    return page;
-  }
-
-  if (schema?.customView === 'kaggle-competition-runs') {
-    right.appendChild(renderKglCompetitionRunsView({ render: options.render }));
     page.appendChild(right);
     return page;
   }
@@ -1713,6 +1719,9 @@ function buildAdminRow(
           },
         }, '▶'),
       ),
+    ] : []),
+    ...(currentTab === 'kaggle-competition-runs' ? [
+      renderKglRunRowActions(row, options.render),
     ] : []),
     ...cols.map((col: string) => {
       const raw = row?.[col];

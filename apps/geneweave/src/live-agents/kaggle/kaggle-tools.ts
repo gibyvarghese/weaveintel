@@ -9,6 +9,8 @@
  * dual-control human approval and is not exposed here.
  */
 
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join, resolve as pathResolve } from 'node:path';
 import {
   weaveToolRegistry as createToolRegistry,
   weaveTool as defineTool,
@@ -63,6 +65,12 @@ export interface KaggleToolsOptions {
    *  config in DB. All fields fall back to the historical hard-coded values
    *  when omitted, so test/example call sites can keep ignoring this. */
   defaults?: KaggleToolDefaults;
+  /** Local directory where every successful `kaggle_push_kernel` writes a
+   *  `.py` copy of the kernel source plus a sibling `.json` with the kernel
+   *  ref + URL + competition. Lets the operator grab the raw script for
+   *  manual submission inspection without round-tripping through Kaggle.
+   *  Defaults to `KAGGLE_ARTIFACT_DIR` env var, then `./kaggle-artifacts`. */
+  artifactDir?: string;
 }
 
 /** Strip whatever the LLM passed (slug, ref, URL) down to `<owner>/<slug>` or just `<slug>`. */
@@ -88,6 +96,9 @@ export function createKaggleTools(opts: KaggleToolsOptions = {}): ToolRegistry {
   const defaultPollIntervalSec = defaults.defaultPollIntervalSec ?? 10;
   const outputHeadBytes = defaults.outputHeadBytes ?? 4000;
   const outputTailBytes = defaults.outputTailBytes ?? 4000;
+  const artifactDir = pathResolve(
+    opts.artifactDir ?? process.env['KAGGLE_ARTIFACT_DIR'] ?? './kaggle-artifacts',
+  );
   const reg = createToolRegistry();
 
   reg.register(
@@ -267,11 +278,53 @@ export function createKaggleTools(opts: KaggleToolsOptions = {}): ToolRegistry {
           const title2 = `${title.slice(0, 50 - suffix.length)}${suffix}`;
           result = await tryPush(slug2, title2);
         }
+        const kernelRef = normalizeKernelRef(result.ref);
+        // Persist the source as a local .py so the operator has a single
+        // file to download/inspect/upload manually for SHAPE B competitions
+        // (where the kernel itself IS the submission). Best-effort — never
+        // blocks the push response.
+        let artifactPath: string | undefined;
+        let artifactError: string | undefined;
+        try {
+          mkdirSync(artifactDir, { recursive: true });
+          const compDir = join(artifactDir, competitionRef || 'unknown');
+          mkdirSync(compDir, { recursive: true });
+          const safeRef = kernelRef.replace(/[^a-zA-Z0-9._-]/g, '__');
+          const verSuffix = result.versionNumber ? `__v${result.versionNumber}` : '';
+          const baseName = `${safeRef}${verSuffix}__${Date.now().toString(36)}`;
+          const pyPath = join(compDir, `${baseName}.py`);
+          const metaPath = join(compDir, `${baseName}.json`);
+          writeFileSync(pyPath, code, 'utf8');
+          writeFileSync(
+            metaPath,
+            JSON.stringify(
+              {
+                kernelRef,
+                kernelUrl: result.url,
+                versionNumber: result.versionNumber,
+                competitionRef,
+                title,
+                slug,
+                pushedAt: new Date().toISOString(),
+                codeBytes,
+                pyPath,
+              },
+              null,
+              2,
+            ),
+            'utf8',
+          );
+          artifactPath = pyPath;
+        } catch (err) {
+          artifactError = err instanceof Error ? err.message : String(err);
+        }
         return JSON.stringify(
           {
-            kernelRef: normalizeKernelRef(result.ref),
+            kernelRef,
             kernelUrl: result.url,
             versionNumber: result.versionNumber,
+            ...(artifactPath ? { localArtifactPath: artifactPath } : {}),
+            ...(artifactError ? { localArtifactError: artifactError } : {}),
           },
           null,
           2,

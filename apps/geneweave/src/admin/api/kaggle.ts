@@ -615,6 +615,83 @@ export function registerKglCompetitionRunAdminRoutes(
     if (!item) { json(res, 404, { error: 'Competition run not found' }); return; }
     const steps = await db.listKglRunSteps(item.id);
     const events = await db.listKglRunEvents(item.id, { limit: 500 });
-    json(res, 200, { 'kaggle-competition-run': item, steps, events });
+    // Best-effort enrich with agent roster + inter-agent dialogue. The mesh
+    // may have been provisioned (live_meshes + live_agents rows) or just
+    // raw StateStore (la_entities only) — handle both.
+    const messages = item.mesh_id ? await db.listLiveMeshMessages(item.mesh_id, { limit: 500 }) : [];
+    const agents = item.mesh_id ? await db.listLiveAgents({ meshId: item.mesh_id }) : [];
+    const mesh = item.mesh_id ? await db.getLiveMesh(item.mesh_id) : null;
+    json(res, 200, { 'kaggle-competition-run': item, steps, events, messages, agents, mesh });
   }, { auth: true });
+
+  // ── Operator actions: cancel / pause / restart ───────────────────────
+  // These are intentionally idempotent — repeat calls return the current
+  // state without erroring. Pause/restart flip the owning live_mesh + each
+  // live_agent so the heartbeat scheduler stops/resumes ticking the run.
+
+  router.post(`${KGL_RUN_BASE}/:id/cancel`, async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const tenantId = (auth.tenantId ?? auth.userId) as string;
+    const run = await db.getKglCompetitionRun(params['id']!, tenantId);
+    if (!run) { json(res, 404, { error: 'Competition run not found' }); return; }
+    const nowIso = new Date().toISOString();
+    if (run.status !== 'abandoned' && run.status !== 'completed' && run.status !== 'failed') {
+      await db.updateKglCompetitionRun(run.id, {
+        status: 'abandoned',
+        completed_at: nowIso,
+        summary: run.summary ?? 'Cancelled by operator',
+      });
+    }
+    if (run.mesh_id) {
+      try { await db.updateLiveMesh(run.mesh_id, { status: 'PAUSED' }); } catch { /* ignore */ }
+      try {
+        const agents = await db.listLiveAgents({ meshId: run.mesh_id });
+        for (const a of agents) {
+          if (a.status === 'ACTIVE') await db.updateLiveAgent(a.id, { status: 'PAUSED' });
+        }
+      } catch { /* ignore */ }
+    }
+    const updated = await db.getKglCompetitionRun(run.id, tenantId);
+    json(res, 200, { 'kaggle-competition-run': updated });
+  }, { auth: true, csrf: true });
+
+  router.post(`${KGL_RUN_BASE}/:id/pause`, async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const tenantId = (auth.tenantId ?? auth.userId) as string;
+    const run = await db.getKglCompetitionRun(params['id']!, tenantId);
+    if (!run) { json(res, 404, { error: 'Competition run not found' }); return; }
+    if (!run.mesh_id) { json(res, 409, { error: 'Run has no mesh to pause' }); return; }
+    try { await db.updateLiveMesh(run.mesh_id, { status: 'PAUSED' }); } catch { /* ignore */ }
+    try {
+      const agents = await db.listLiveAgents({ meshId: run.mesh_id });
+      for (const a of agents) {
+        if (a.status === 'ACTIVE') await db.updateLiveAgent(a.id, { status: 'PAUSED' });
+      }
+    } catch { /* ignore */ }
+    const updated = await db.getKglCompetitionRun(run.id, tenantId);
+    json(res, 200, { 'kaggle-competition-run': updated, paused: true });
+  }, { auth: true, csrf: true });
+
+  router.post(`${KGL_RUN_BASE}/:id/restart`, async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const tenantId = (auth.tenantId ?? auth.userId) as string;
+    const run = await db.getKglCompetitionRun(params['id']!, tenantId);
+    if (!run) { json(res, 404, { error: 'Competition run not found' }); return; }
+    if (!run.mesh_id) { json(res, 409, { error: 'Run has no mesh to restart' }); return; }
+    // Move terminal status back to running so the heartbeat picks it up.
+    if (run.status !== 'running' && run.status !== 'queued') {
+      await db.updateKglCompetitionRun(run.id, { status: 'running', completed_at: null });
+    }
+    try { await db.updateLiveMesh(run.mesh_id, { status: 'ACTIVE' }); } catch { /* ignore */ }
+    try {
+      const agents = await db.listLiveAgents({ meshId: run.mesh_id });
+      for (const a of agents) {
+        if (a.status !== 'ACTIVE' && a.status !== 'ARCHIVED') {
+          await db.updateLiveAgent(a.id, { status: 'ACTIVE' });
+        }
+      }
+    } catch { /* ignore */ }
+    const updated = await db.getKglCompetitionRun(run.id, tenantId);
+    json(res, 200, { 'kaggle-competition-run': updated, restarted: true });
+  }, { auth: true, csrf: true });
 }

@@ -38,7 +38,7 @@ import type {
   KaggleCompetitionTrackedRow, KaggleApproachRow, KaggleRunRow, KaggleRunArtifactRow,
   KaggleDiscussionSettingsRow, KaggleDiscussionPostRow,
   KaggleCompetitionRubricRow, KaggleValidationResultRow, KaggleLeaderboardScoreRow,
-  KglCompetitionRunRow, KglRunStepRow, KglRunEventRow,
+  KglCompetitionRunRow, KglRunStepRow, KglRunEventRow, LiveMeshMessageView,
   LiveMeshDefinitionRow, LiveAgentDefinitionRow, LiveMeshDelegationEdgeRow,
   LiveHandlerKindRow, LiveAttentionPolicyRow, LiveMeshRow, LiveAgentRow,
   LiveAgentHandlerBindingRow, LiveAgentToolBindingRow,
@@ -6481,6 +6481,48 @@ export class SQLiteAdapter implements DatabaseAdapter {
     const sql = `SELECT * FROM kgl_run_event WHERE ${where.join(' AND ')} ORDER BY id ASC LIMIT ?`;
     params.push(opts.limit ?? 200);
     return this.d.prepare(sql).all(...params) as KglRunEventRow[];
+  }
+
+  /**
+   * Read inter-agent messages for a mesh out of the live-agents StateStore
+   * (la_entities, entity_type='message'). Used by the admin Run record view
+   * to surface what each agent said to the next. Best-effort — returns []
+   * when la_entities is empty or payload_json is malformed.
+   */
+  async listLiveMeshMessages(meshId: string, opts: { limit?: number } = {}): Promise<LiveMeshMessageView[]> {
+    const limit = opts.limit ?? 500;
+    const rows = this.d.prepare(`
+      SELECT id, payload_json FROM la_entities
+      WHERE entity_type = 'message'
+      ORDER BY updated_at DESC
+      LIMIT ?
+    `).all(limit) as Array<{ id: string; payload_json: string }>;
+    const out: LiveMeshMessageView[] = [];
+    for (const r of rows) {
+      try {
+        const p = JSON.parse(r.payload_json) as Record<string, unknown>;
+        if (p['meshId'] !== meshId && p['fromMeshId'] !== meshId) continue;
+        out.push({
+          id: r.id,
+          meshId: (p['meshId'] as string | null) ?? null,
+          fromType: (p['fromType'] as string | null) ?? null,
+          fromId: (p['fromId'] as string | null) ?? null,
+          toType: (p['toType'] as string | null) ?? null,
+          toId: (p['toId'] as string | null) ?? null,
+          topic: (p['topic'] as string | null) ?? null,
+          kind: (p['kind'] as string | null) ?? null,
+          subject: (p['subject'] as string | null) ?? null,
+          body: (p['body'] as string | null) ?? null,
+          status: (p['status'] as string | null) ?? null,
+          createdAt: (p['createdAt'] as string | null) ?? null,
+          deliveredAt: (p['deliveredAt'] as string | null) ?? null,
+          readAt: (p['readAt'] as string | null) ?? null,
+          processedAt: (p['processedAt'] as string | null) ?? null,
+        });
+      } catch { /* ignore malformed row */ }
+    }
+    out.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
+    return out;
   }
 
   // ─── Live mesh / agent definitions (M21) ─────────────────────

@@ -1817,7 +1817,30 @@ export interface KglRunEventRow {
   created_at: string;
 }
 
-// ─── Live mesh / agent definitions (DB-driven blueprints, M21) ──
+/**
+ * Projection of a single inter-agent message stored in the live-agents
+ * StateStore (`la_entities` where `entity_type='message'`). Surfaced to the
+ * Run record view so operators can inspect the dialogue between agents.
+ */
+export interface LiveMeshMessageView {
+  id: string;
+  meshId: string | null;
+  fromType: string | null;
+  fromId: string | null;
+  toType: string | null;
+  toId: string | null;
+  topic: string | null;
+  kind: string | null;
+  subject: string | null;
+  body: string | null;
+  status: string | null;
+  createdAt: string | null;
+  deliveredAt: string | null;
+  readAt: string | null;
+  processedAt: string | null;
+}
+
+
 // Mesh blueprint stored in `live_mesh_definitions`; per-role agent persona
 // in `live_agent_definitions`; pipeline graph in `live_mesh_delegation_edges`.
 // Runtime boot loads a snapshot at provision time; per-competition playbook
@@ -2892,6 +2915,9 @@ export interface DatabaseAdapter {
 
   appendKglRunEvent(row: Omit<KglRunEventRow, 'created_at'>): Promise<KglRunEventRow>;
   listKglRunEvents(runId: string, opts?: { afterId?: string; limit?: number }): Promise<KglRunEventRow[]>;
+
+  /** Inter-agent messages for a live mesh, derived from la_entities (StateStore). */
+  listLiveMeshMessages(meshId: string, opts?: { limit?: number }): Promise<LiveMeshMessageView[]>;
 
   // ─── Live mesh / agent definitions (M21) ─────────────────────
   listLiveMeshDefinitions(opts?: { enabledOnly?: boolean }): Promise<LiveMeshDefinitionRow[]>;
