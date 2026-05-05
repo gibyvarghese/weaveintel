@@ -33,6 +33,8 @@ import { newUUIDv7 } from '../../lib/uuid.js';
 import { getKaggleLiveStore } from './store.js';
 import { createDbKagglePlaybookResolver } from './playbook-resolver.js';
 import { createKaggleRoleHandlers } from './role-handlers.js';
+import { registerKaggleHandlerKinds } from './handler-kinds.js';
+import { getHandlerRegistry, syncHandlerKindsToDb } from '../handler-registry-boot.js';
 import { createKaggleAttentionPolicy } from './agents.js';
 import {
   resolveAttentionPolicyFromDb,
@@ -347,6 +349,37 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
       auditEmitter: new DbToolAuditEmitter(opts.db),
     }),
   });
+
+  // Phase A of the kaggle DB-driven migration — register the 10 kaggle
+  // handler kinds against the shared registry so a future
+  // `weaveLiveMeshFromDb` boot can resolve a `TaskHandler` purely from a
+  // `live_agent_handler_bindings` row. Wrappers close over the same
+  // KaggleRoleHandlersOptions used for the legacy `taskHandlers` map above,
+  // so behavior between the two paths is identical for the strategist /
+  // discoverer / validator / observer / submitter / implementer roles.
+  // Idempotent: silently skips kinds already registered (e.g. on hot reload).
+  // Re-runs syncHandlerKindsToDb so the new rows reach `live_handler_kinds`.
+  try {
+    const registry = getHandlerRegistry();
+    registerKaggleHandlerKinds(registry, {
+      modelResolver: dbModelResolver,
+      playbookResolver,
+      db: opts.db,
+      log: (msg) => console.log('[kaggle-handler-kinds]', msg),
+      policy: weaveDbLiveAgentPolicy({
+        policyResolver: new DbToolPolicyResolver(opts.db),
+        approvalGate: new DbToolApprovalGate(opts.db),
+        rateLimiter: new DbToolRateLimiter(opts.db),
+        auditEmitter: new DbToolAuditEmitter(opts.db),
+      }),
+    });
+    await syncHandlerKindsToDb(opts.db, registry);
+  } catch (err) {
+    console.error(
+      '[kaggle-heartbeat] handler-kind registration failed (legacy path still works):',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
   const actionExecutor = createActionExecutor({ taskHandlers });
 
   // Phase 4: Resolve attention policy from DB when a key is configured;
