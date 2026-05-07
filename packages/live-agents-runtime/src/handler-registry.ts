@@ -37,6 +37,7 @@ import type {
   ModelResolver,
   TaskHandler,
 } from '@weaveintel/live-agents';
+import type { PrepareConfig, PrepareResolutionDeps } from './db-prepare-resolver.js';
 
 /**
  * The DB row data needed to construct a handler instance for a single agent.
@@ -103,6 +104,20 @@ export interface HandlerContext {
   policy?: LiveAgentPolicy;
   /** Resolve a DB-stored prompt body by key (skill key / fragment key). */
   resolveSystemPrompt?: (key: string) => Promise<string | null>;
+  /**
+   * Phase 2 (DB-driven capability plan) — declarative `prepare()` recipe
+   * loaded from `live_agents.prepare_config_json`. When present, LLM
+   * handler kinds (`agentic.react`) build their `prepare()` from this
+   * recipe instead of the inline config defaults. See
+   * {@link ./db-prepare-resolver.ts} for the recipe schema.
+   */
+  prepareConfig?: PrepareConfig;
+  /**
+   * Phase 2 — dependencies the recipe runtime needs (prompt-text resolver,
+   * default system prompt). Apps inject these once at supervisor build
+   * time. Required when any `prepareConfig.systemPrompt.promptKey` is set.
+   */
+  prepareDeps?: PrepareResolutionDeps;
 }
 
 /** Factory signature: pure function from `HandlerContext` to `TaskHandler`. */

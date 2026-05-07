@@ -11,6 +11,15 @@ export interface WorkflowStep {
   name: string;
   type: WorkflowStepType;
   description?: string;
+  /**
+   * Handler reference. Three accepted forms:
+   *   1. Bare key (e.g. `'echo'`) — looked up in the engine's registered handler map.
+   *   2. Resolver-prefixed (e.g. `'tool:foo'`, `'prompt:bar'`, `'agent:baz'`,
+   *      `'mcp:server:method'`, `'script:slug'`, `'subworkflow:wf-key'`,
+   *      `'noop'`) — built into a runnable StepHandler at run-start time
+   *      by the matching `HandlerResolver`.
+   *   3. Omitted — falls back to the step `id` as the handler key.
+   */
   handler?: string;
   config?: Record<string, unknown>;
   next?: string | string[];
@@ -19,6 +28,41 @@ export interface WorkflowStep {
   retries?: number;
   /** Milliseconds to wait between retry attempts. */
   retryDelayMs?: number;
+  /**
+   * Phase 1 — Declarative input mapping.
+   * Keys are paths into the *handler input object* (the `variables` arg
+   * the handler receives). Values are dotted paths into the live
+   * `WorkflowState.variables`. When set, the engine builds a fresh input
+   * object from these mappings instead of passing the entire `variables`
+   * object through. Example:
+   *   { "competitionId": "kaggle.activeCompetition.id",
+   *     "topic":         "input.topic" }
+   */
+  inputMap?: Record<string, string>;
+  /**
+   * Phase 1 — Declarative output mapping.
+   * Keys are dotted paths into `WorkflowState.variables` to write into.
+   * Values are dotted paths into the handler's *return value*.
+   * Example: { "kaggle.lastRunId": "id", "kaggle.lastStatus": "status" }
+   */
+  outputMap?: Record<string, string>;
+}
+
+/**
+ * Phase 4 — Mesh ↔ workflow binding.
+ * Declarative output contract: when a run reaches `completed`, the engine
+ * emits a typed contract via the configured `ContractEmitter`. The body is
+ * built from `bodyMap` (keys = dotted paths into the contract body, values
+ * = dotted paths into `WorkflowState.variables` — same semantics as
+ * `outputMap` on a step). When `evidence.fromHistory` is true, the
+ * full step history is attached as evidence.
+ */
+export interface WorkflowOutputContract {
+  kind: string;
+  bodyMap?: Record<string, string>;
+  evidence?: { fromHistory?: boolean };
+  meshId?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface WorkflowDefinition {
@@ -29,6 +73,17 @@ export interface WorkflowDefinition {
   steps: WorkflowStep[];
   entryStepId: string;
   metadata?: Record<string, unknown>;
+  /** Phase 4 — emit a typed mesh contract on successful completion. */
+  outputContract?: WorkflowOutputContract;
+  /**
+   * Phase 5 — Optional JSON-Schema-lite shape describing the expected
+   * `input` for `engine.startRun(workflowId, input)`. When set, the
+   * engine validates the input before creating a run and rejects
+   * malformed inputs with a structured error. Supports a deliberately
+   * narrow subset: `type` (string/number/boolean/object/array/null),
+   * `required`, `properties`, `enum`. See input-validator.ts.
+   */
+  inputSchema?: Record<string, unknown>;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -61,6 +116,12 @@ export interface WorkflowRun {
   startedAt: string;
   completedAt?: string;
   error?: string;
+  /**
+   * Phase 5 — Cumulative cost (USD) attributed to this run by the engine's
+   * `CostMeter`. Updated at every step boundary. Persisted by repositories
+   * that support a `cost_total` column.
+   */
+  costTotal?: number;
 }
 
 export interface WorkflowCheckpoint {
@@ -114,6 +175,8 @@ export type WorkflowEventType =
   | 'workflow:completed'
   | 'workflow:failed'
   | 'workflow:paused'
+  | 'workflow:contract_emitted'
+  | 'workflow:cost_exceeded'
   | 'step:started'
   | 'step:completed'
   | 'step:failed'

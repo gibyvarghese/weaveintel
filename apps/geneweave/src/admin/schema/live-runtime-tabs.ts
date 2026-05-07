@@ -78,6 +78,14 @@ export const LIVE_RUNTIME_ADMIN_TABS: Record<string, AdminTabDef> = {
       },
       { key: 'model_routing_policy_key', label: 'Routing Policy Key (optional override; defaults to system policy)' },
       { key: 'model_pinned_id', label: 'Pinned Model ID (escape hatch for reproducibility — bypasses routing)' },
+      // Phase 2 (DB-driven capability plan) — declarative `prepare()` recipe.
+      // The runtime synthesises the agent's prepare function from this JSON
+      // instead of hard-coding it inside a handler.
+      {
+        key: 'prepare_config_json',
+        label: 'Prepare Config (JSON recipe). Example: {"systemPrompt":{"promptKey":"live-agent.observer"},"tools":"$auto","userGoal":{"from":"inbound.body"}}',
+        textarea: true,
+      },
     ],
   },
   'live-agent-handler-bindings': {

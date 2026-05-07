@@ -176,6 +176,10 @@ export function registerLiveAgentRoutes(
       status: String(body['status'] ?? 'ACTIVE'),
       ordering: Number(body['ordering'] ?? 0),
       archived_at: strOrNull(body['archived_at']),
+      model_pinned_id: strOrNull(body['model_pinned_id']),
+      model_capability_json: strOrNull(body['model_capability_json']),
+      model_routing_policy_key: strOrNull(body['model_routing_policy_key']),
+      prepare_config_json: strOrNull(body['prepare_config_json']),
     };
     const created = await db.createLiveAgent(row);
     json(res, 201, { 'live-agent': created });
@@ -201,6 +205,10 @@ export function registerLiveAgentRoutes(
     if (body['status']               !== undefined) patch.status               = String(body['status']);
     if (body['ordering']             !== undefined) patch.ordering             = Number(body['ordering']);
     if (body['archived_at']          !== undefined) patch.archived_at          = strOrNull(body['archived_at']);
+    if (body['model_pinned_id']           !== undefined) patch.model_pinned_id           = strOrNull(body['model_pinned_id']);
+    if (body['model_capability_json']     !== undefined) patch.model_capability_json     = strOrNull(body['model_capability_json']);
+    if (body['model_routing_policy_key']  !== undefined) patch.model_routing_policy_key  = strOrNull(body['model_routing_policy_key']);
+    if (body['prepare_config_json']       !== undefined) patch.prepare_config_json       = strOrNull(body['prepare_config_json']);
     await db.updateLiveAgent(params['id']!, patch);
     const item = await db.getLiveAgent(params['id']!);
     json(res, 200, { 'live-agent': item });

@@ -493,4 +493,274 @@ These rules govern any change inside `@weaveintel/live-agents`, `@weaveintel/liv
 - **Net deliverable:** ~120 LOC docs added, ~280 LOC ADRs added, no LOC removed. The naming convention is now enforceable in code review; the model-resolver contract is now citable in PRs.
 - Verified via `npx tsc -b packages/live-agents packages/live-agents-runtime apps/geneweave apps/live-agents-demo` (clean) and `npx vitest run packages/live-agents packages/live-agents-runtime` (95 passed, 4 skipped — Redis/Mongo/DynamoDB integration tests). Smoke-tested `examples/96-live-agents-phase6-mesh-from-db.ts` end-to-end.
 
+### Phase 9 — Declarative `prepare()` (DB-Driven Capability Plan Phase 2 — complete)
+- Live agents can now declare their per-tick `prepare()` as a JSON **recipe** stored in `live_agents.prepare_config_json` (TEXT, nullable; added in migration `m22DefAlters`). The runtime synthesises an async `prepare()` from the recipe so operators no longer need to write JS to add a long-running agent.
+- Recipe shape (`PrepareConfig` in `@weaveintel/live-agents-runtime/src/db-prepare-resolver.ts`): `{ systemPrompt: string | { promptKey, variables? }, tools?: "$auto", userGoal?: string | { from: 'inbound.body' | 'inbound.subject' | 'inbound' } | { template: string }, memory?: { windowMessages?, summarizer? } }`.
+- Two package primitives:
+  - `parsePrepareConfig(json)` — returns `null` for `null` / empty / `'{}'`, throws on malformed JSON or invalid shape, otherwise returns a typed `PrepareConfig`.
+  - `dbPrepareFromConfig(config, deps)` — synthesises an async `prepare(input) => PrepareOutput`. `deps: PrepareResolutionDeps = { resolvePromptText?: (key) => Promise<string> }`. Returns `null` when `config` is `null`.
+- Synthesis rules (single source of truth in `dbPrepareFromConfig`):
+  - `systemPrompt` literal → used as-is. `{ promptKey }` → calls `deps.resolvePromptText(promptKey)`; throws if resolver is missing. Falls back to `defaultSystemPrompt` option if recipe has no `systemPrompt` set.
+  - `userGoal` literal → used as-is. `{ from: 'inbound.body' }` → `inbound?.body ?? inbound?.subject ?? ''` (note: empty string `''` is NOT nullish, so `body: ''` does NOT fall back to subject — tests must use `body: undefined`). `{ template }` → interpolates `{{subject}}` / `{{body}}` from the inbound message.
+  - `tools: "$auto"` → forwards `ctx.tools` to the handler so policy gating still applies. Omitted → no tools field on the output.
+  - `memory` → parsed and exposed on `PrepareConfig` but **not enforced today** (forward-compat for Phase 6+ window/summarizer wiring).
+- Caller-supplied `prepare` ALWAYS wins (back-compat invariant). The `agentic.react` handler in `@weaveintel/live-agents-runtime` only consults the recipe when `prepare` is unset on the agent definition.
+- DB column wiring in `apps/geneweave`:
+  - `LiveAgentRow.prepare_config_json?: string | null` (in `db-types.ts`).
+  - `createLiveAgent` INSERT writes 18 columns ending with `prepare_config_json`. `listLiveAgents` / `getLiveAgent` use `SELECT *`. `updateLiveAgent` uses dynamic patch loop.
+  - Migration `m22DefAlters` adds the column. **Do not put backticks in the SQL comment** — the migration file is a TS template literal and `\`prepare()\`` breaks parsing. Use plain text.
+- Admin API surface (`apps/geneweave/src/admin/api/live-runtime-meshes.ts`):
+  - `POST /api/admin/live-agents` accepts `prepare_config_json` (and `model_pinned_id`, `model_capability_json`, `model_routing_policy_key`).
+  - `PUT /api/admin/live-agents/:id` accepts the same four fields for partial patch.
+  - Admin tab `live-agents` exposes `prepare_config_json` as a textarea with a JSON example in its label.
+- Generic supervisor (`apps/geneweave/src/live-agents/generic-supervisor-boot.ts`) wires `prepareDeps.resolvePromptText` automatically by adapting the existing `resolveSystemPrompt(promptKey)` lambda. Kaggle heartbeat is **NOT** migrated — it stays bespoke for now (kaggle owns its own per-tick scheduling tied to `kgl_competition_runs`).
+- Tests: `packages/live-agents-runtime/src/db-prepare-resolver.test.ts` (21 tests covering parse + synthesis branches). All 47 runtime-package tests pass after this phase.
+- Example: `examples/98-live-agent-db-prepare.ts` demonstrates literal, prompt-key (with injected `resolvePromptText`), template interpolation, and null-parse cases — runs cleanly with no DB or external services.
+- E2E verified against local server: `POST /api/admin/live-agents` and `PUT /api/admin/live-agents/:id` accept `prepare_config_json`, `GET` returns it intact in the row payload.
 
+
+
+## Workflow Platform (Phase 1 complete — Composable DB-driven Steps)
+
+The workflow platform makes step composition DB-driven via `@weaveintel/workflows`. Operators define workflows as rows in `workflow_defs`; the engine resolves each step's `handler` string to a runnable via a registry of `HandlerResolver`s. No JS handler registration is needed at runtime.
+
+### Package contract (`@weaveintel/workflows`)
+- `DefaultWorkflowEngine` — engine implementation (`startRun`, `tickRun`, etc.). `startRun` drives the run synchronously to a terminal state; `tickRun` is for paused/checkpointed continuations.
+- `HandlerResolverRegistry` — maps a `kind` (e.g. `'noop' | 'script' | 'tool' | 'prompt' | 'agent' | 'mcp' | 'subworkflow'`) to a `HandlerResolver` that returns a runnable `(variables, config) => Promise<unknown>`.
+- `WorkflowDefinitionStore` interface — pluggable persistence (`save`, `get`, `list`, `delete`). `InMemoryWorkflowDefinitionStore` ships in-package; geneweave provides a DB-backed store over `workflow_defs`.
+- Built-in resolvers shipped: `createNoopResolver()`, `createScriptResolver()`, `createToolResolver({ getTool })`. Other kinds (`prompt`, `agent`, `mcp`, `subworkflow`) are reserved for Phase 2 and intentionally NOT wired in geneweave yet.
+- `describeHandlerKinds(registry)` returns a serializable list `[{ kind, description }]` used to seed the operator-facing `workflow_handler_kinds` catalog.
+
+### Step schema (`WorkflowStep` in `@weaveintel/core/workflows`)
+- Required: `id`, `name`, `type` (`'deterministic' | 'agentic' | 'branch' | 'loop' | 'condition' | 'wait' | 'parallel' | 'sub-workflow' | 'human-task'`).
+- `handler` — three forms accepted: bare key (`'echo'`), prefixed (`'tool:upper'`, `'script:slug'`, `'noop'`), or omitted (falls back to step `id`).
+- `next` — `string | string[]` for explicit step ordering. **There is no `nextSteps` field** — it is silently ignored. When `next` is omitted, the engine falls through to declaration order (this is intentional but easy to misread; prefer explicit `next`).
+- `inputMap` — projects run-state into the handler's input. Keys are dotted paths into the *handler input*; values are dotted paths into `state.variables`. Paths are read directly (no `variables.` prefix). Example: `{ "json": "payload", "indent": "indent" }` reads `state.variables.payload` and `state.variables.indent`.
+- `outputMap` — projects handler return value back into `state.variables`. Keys are dotted paths into `variables`; values are dotted paths into the result. Use `"$"` (or `""`) to write the entire result. Example: `{ "pretty": "content", "length": "$" }`.
+- `script:` resolver: body has access to `variables` and `config` and **must `return`** a value (it is wrapped in `new Function('variables', 'config', body)`).
+
+### Tool adapter shape
+The `tool:` resolver in geneweave wraps tools registered in `BUILTIN_TOOLS`. It accepts BOTH common tool shapes:
+- `weaveTool()/defineTool()` shape: `{ schema, invoke(ctx, { arguments }) }` — wrapped as `async (vars) => invoke({}, { arguments: vars })`.
+- Plain shape: `{ execute(args) }` — invoked directly with the projected input.
+- Unknown keys cause the run to fail with `"no tool registered for key 'X'"`. This is intentional — graceful degradation belongs in the workflow definition (use `condition` steps), not the resolver.
+
+### GeneWeave wiring
+- `workflow_handler_kinds` table — operator-visible catalog of available handler kinds. Columns: `kind` (PK), `description`, `source` (`'builtin' | 'custom'`), `enabled` (1/0). Synced at startup via `syncWorkflowHandlerKindsToDb(db, registry)` using `INSERT … ON CONFLICT(kind) DO UPDATE` that **preserves operator-edited `enabled`**.
+- `workflow_defs` table — existing table reused for definition persistence (no schema change for Phase 1).
+- Engine construction in `apps/geneweave/src/index.ts` after `startToolHealthJob(db)`:
+  ```ts
+  const workflowEngineHandle = createGeneweaveWorkflowEngine({
+    db,
+    toolGetter: (key) => BUILTIN_TOOLS[key],
+  });
+  await syncWorkflowHandlerKindsToDb(db, workflowEngineHandle.registry);
+  ```
+  The handle (`{ engine, store, registry }`) is passed to `createGeneWeaveServer` as `workflowEngine`.
+- Admin routes (in `apps/geneweave/src/admin/api/workflow-platform.ts`):
+  - `GET /api/admin/workflow-handler-kinds` (auth: true) → `{ kinds: [...] }`
+  - `POST /api/admin/workflows/:id/run` (auth: true, csrf: true) → body `{ variables?, runOnce? }`. Returns 503 if engine not wired, 400 on bad JSON, 201 with `{ runId, run }` on success. `runOnce` is rarely needed because `startRun` is synchronous.
+- Phase 2 deferred: `prompt:`, `agent:`, `mcp:`, `subworkflow:` resolvers (require routing into `@weaveintel/prompts`, `@weaveintel/agents`, MCP gateway, and recursive engine respectively). The `workflow_handler_kinds` catalog is the single source of truth — adding a kind means: (1) implement resolver, (2) register in `buildWorkflowResolverRegistry`, (3) `describeHandlerKinds` will pick it up automatically.
+
+### Reference
+- Canonical example: `examples/97-db-driven-workflow.ts` (in-memory store + tool/script/noop pipeline).
+- Tests: `packages/workflows/src/phase1.test.ts` (21) + `packages/workflows/src/workflows.test.ts` (37) + `apps/geneweave/src/workflow-engine.db.test.ts` (3, end-to-end with SQLite + handler-kinds sync + tool resolver shapes).
+
+## Trigger Platform (Phase 3 of DB-Driven Capability Plan — complete)
+
+The trigger platform connects external events to runtime targets via DB-driven rows. Package: `@weaveintel/triggers`. Reference impl: `apps/geneweave`. Plan: `docs/DB_DRIVEN_CAPABILITY_PLAN.md` lines 340-490.
+
+### Package boundary (`@weaveintel/triggers`)
+- The package ships **only**: interfaces (`Trigger`, `TriggerEvent`, `SourceAdapter`, `TargetAdapter`, `TriggerStore`, `TriggerInvocation`), the dispatcher (`createTriggerDispatcher`), the JSONLogic-lite filter evaluator (`evaluateFilter`), the rate limiter, and three built-in pieces: `ManualSourceAdapter`, `CronSourceAdapter` (used **internally** by the dispatcher per cron trigger), `SignalBusSourceAdapter`, `WebhookOutTargetAdapter`, `CallbackTargetAdapter`, `InMemoryTriggerStore`.
+- The package never imports DB types. Persistence is wired by the host via a `TriggerStore` implementation.
+- Exports surface in `packages/triggers/src/index.ts` re-exports `./dispatcher.js` (canonical) plus legacy modules (`trigger.js`, `cron.js`, `webhook.js`, `queue.js`, `change.js`, `binding.js`) kept for back-compat.
+
+### `TriggerStore` contract
+- `list(): Promise<Trigger[]>` — read all triggers (dispatcher calls this on `reload()`).
+- `save(trigger: Trigger): Promise<void>` — upsert.
+- `recordInvocation(inv: TriggerInvocation): Promise<void>` — receives the **full** invocation object (id pre-assigned by dispatcher), returns void. Failures must be swallowed by the store (logged, not thrown) so dispatch is never blocked.
+
+### Trigger row shape (model-facing)
+- `Trigger` uses **nested refs**: `source: { kind, config }`, `target: { kind, config }`, `filter?: { expression }`, `rateLimit?: { perMinute }`. Do NOT use the flat snake_case shape (`sourceKind`, `sourceConfig`, …) inside the package.
+- `TriggerSourceKind` = `cron | webhook | filewatch | mcp_event | db_change | contract_emitted | workflow_event | signal_bus | manual`.
+- `TriggerTargetKind` = `workflow | agent_tick | mesh_message | contract | webhook_out`. Today only `workflow` and `webhook_out` have built-in/wired adapters in geneweave; the others record `no_target_adapter` until wired.
+- `TriggerInvocationStatus` = `dispatched | filtered | rate_limited | disabled | no_target_adapter | error`.
+
+### Dispatch path
+- `dispatcher.dispatch(event, opts?: { onlyTriggerId?: string })` filters candidates by **both** `t.source.kind === event.sourceKind` AND `(!onlyTriggerId || t.id === onlyTriggerId)`. Per-trigger steps: enabled check → filter eval (`filtered` on miss, fail-closed on unknown ops) → rate limit (`rate_limited`) → `inputMap` projection → target lookup (`no_target_adapter`) → `target.dispatch()` (`dispatched` on success with optional `targetRef`, `error` on throw). Every outcome emits one `TriggerInvocation`.
+- After every CRUD write the host MUST call `dispatcher.reload()` so the in-memory triggers cache stays current.
+- `dispatcher.start()` spins up one `CronSourceAdapter` per enabled cron trigger; `dispatcher.stop()` clears them.
+
+### GeneWeave wiring (reference impl)
+- DB tables: `triggers` (id PK, key UNIQUE, enabled, source_kind, source_config, filter_expr, target_kind, target_config, input_map, rate_limit_per_minute, metadata, timestamps) and `trigger_invocations` (id PK, trigger_id FK CASCADE, fired_at, source_kind, status, target_ref, error_message, source_event, created_at). Both UUID PKs.
+- 8 `DatabaseAdapter` methods: `listTriggers`, `getTrigger`, `getTriggerByKey`, `createTrigger`, `updateTrigger`, `deleteTrigger`, `insertTriggerInvocation`, `listTriggerInvocations`.
+- `apps/geneweave/src/triggers/db-trigger-store.ts` wraps the adapter — translates DB row ⇆ nested `Trigger` shape.
+- `apps/geneweave/src/triggers/target-adapters.ts` provides `createWorkflowTargetAdapter(handle)` over `WorkflowEngineHandle.engine.startRun(workflowDefId, variables)`. Other target kinds (`agent_tick`, `mesh_message`, `contract`) are **deferred** — they currently record `no_target_adapter`.
+- Boot wiring (Block 5-TR in `apps/geneweave/src/index.ts`) constructs the store, manual source, and dispatcher with `[manualSource]` + `[WebhookOutTargetAdapter, createWorkflowTargetAdapter(workflowEngineHandle)]`. `await dispatcher.start()` is wrapped in try/catch; `stop()` awaits `dispatcher.stop()`.
+- Admin API (in `apps/geneweave/src/admin/api/triggers.ts`):
+  - `GET/POST/PUT/DELETE /api/admin/triggers` and `POST /api/admin/triggers/:id/fire` — auth + CSRF gated.
+  - `GET /api/admin/trigger-invocations` — readonly audit ledger with `trigger_id`, `status`, `source_kind`, `after`, `before`, `limit`, `offset` filters.
+  - **API body shape is snake_case** (`source_kind`, `source_config`, `target_kind`, `target_config`, `filter_expr`, `input_map`, `rate_limit_per_minute`, `metadata`). The route translates between snake_case JSON ⇆ nested `Trigger`.
+  - **Every CRUD write calls `dispatcher.reload()`**.
+  - Manual fire: `dispatcher.dispatch({ sourceKind: 'manual', payload, observedAt: Date.now() }, { onlyTriggerId: id })`. Today this only fires triggers with `source.kind === 'manual'`.
+
+### Implementation gotchas (verified during Phase 3 build)
+- The router exposes `del` not `delete`. Bind it locally: `const delMethod = router.del.bind(router); delMethod('/path', ...)`. There is no fallback to `router.delete`.
+- `exactOptionalPropertyTypes` is on — every JSON-serialized optional field (`filter_expr`, `input_map`, `metadata`, `target_ref`, `error_message`, `source_event`) MUST use a conditional spread (`...(x !== undefined ? { x } : {})`) when constructing rows.
+- Invocation IDs are minted by the dispatcher (not the store). Use `crypto.randomUUID()`.
+- SQL migrations live in TS template literals — never put backticks in the SQL comments inside the migration string.
+- Manual admin fire only matches triggers whose `source.kind === 'manual'`. To force-run a cron/webhook trigger from the admin UI, either temporarily flip its source kind, or extend the dispatcher to bypass the source filter when `onlyTriggerId` is set.
+
+### Reference
+- Canonical example: `examples/99-db-driven-triggers.ts` (deterministic, no DB, no LLM).
+- Package README: `packages/triggers/README.md`.
+- Tests: `packages/triggers/src/dispatcher.test.ts` (20 unit tests).
+- E2E verified against `http://localhost:3500`: register → promote to tenant_admin → login + CSRF → create trigger → fire → invocation row persisted with `status=dispatched, target_ref=http:200` → delete.
+
+## Mesh ↔ Workflow Binding (Phase 4 of DB-Driven Capability Plan — complete)
+
+The binding closes the loop between workflow output and downstream workflow / agent / webhook input. A workflow declares an `outputContract`; the engine emits it via `ContractEmitter` on successful completion; geneweave persists the contract to `mesh_contracts` and re-publishes it on a Node `EventEmitter` bus; `MeshContractSourceAdapter` (in `@weaveintel/triggers`) consumes the bus and fires triggers whose `source.kind === 'contract_emitted'`; the trigger target dispatches the next runtime unit. End-to-end DB-driven, zero hardcoded wiring per cascade.
+
+### Package surface
+- `WorkflowOutputContract` (in `@weaveintel/core/workflows`): `{ kind: string, bodyMap?: Record<string, string>, evidence?: { fromHistory?: boolean }, meshId?: string, metadata?: Record<string, unknown> }`. `bodyMap` projects final `state.variables` (values are dotted paths into variables) into the contract body.
+- `ContractEmitter` interface (in `@weaveintel/workflows`): `emit(contract: { kind, body, evidence?, meshId?, metadata?, sourceWorkflowDefinitionId, sourceWorkflowRunId }): Promise<void>`.
+- `DefaultWorkflowEngine` accepts `contractEmitter?: ContractEmitter` in constructor opts. Emission happens **after** the run reaches a successful terminal state. Emission is **best-effort**: failures are caught, logged as `workflow:contract_emit_failed`, and the run still completes successfully.
+- `MeshContractSourceAdapter` (in `@weaveintel/triggers`): wraps a Node `EventEmitter`; emits `{ sourceKind: 'contract_emitted', payload: <bus-payload>, observedAt }` on every `mesh.contract` event. Filter expressions can match `payload.kind`, `payload.body.*`, `payload.meta.*`.
+
+### GeneWeave wiring (reference impl)
+- `mesh_contracts` table (UUID PK): `id, kind, body_json, evidence_json, mesh_id, source_workflow_definition_id, source_workflow_run_id, source_agent_id, metadata, emitted_at, created_at`.
+- `DbContractEmitter` (in `apps/geneweave/src/contracts/db-contract-emitter.ts`): `(db, bus, opts?: { eventName? })`. `emit()` mints `randomUUID()`, calls `db.insertMeshContract(...)`, then **best-effort** `bus.emit(eventName ?? 'mesh.contract', { id, kind, body, ...(evidence ? { evidence } : {}), meta })`. Bus failures are swallowed.
+- App boot (`apps/geneweave/src/index.ts`): constructs **one** `EventEmitter` per process, hands it to **both** `DbContractEmitter` (publisher) and `MeshContractSourceAdapter` (consumer). Never use module-level state for the bus.
+- Engine wiring: `createGeneweaveWorkflowEngine({ db, toolGetter, contractEmitter })` plumbs the emitter into the engine; runs that complete successfully publish their contract automatically.
+- Admin readonly audit at `/api/admin/mesh-contracts` (auth: true): GET list with `kind`, `mesh_id`, `limit`, `offset` filters; GET by id. Append-only — no mutations.
+
+### Reserved-key convention for `outputContract` round-trip
+- `WorkflowDefinition` carries `outputContract` at the top level, but `workflow_defs` has no dedicated column for it. **The convention is to pack/unpack via the reserved key `metadata.__outputContract`.** No schema migration was needed.
+- Both code paths must agree:
+  - `apps/geneweave/src/workflow-engine.ts` `save()`: `mergedMetadata = { ...def.metadata, ...(def.outputContract ? { __outputContract: def.outputContract } : {}) }` → write to `metadata` column.
+  - `apps/geneweave/src/workflow-engine.ts` `rowToWorkflow()`: parses `metadata` JSON; if `__outputContract` is present, lifts it back out (`const { __outputContract: oc, ..._drop } = parsed`; with the `_drop` rest-destructure to satisfy `noUnusedLocals`) and returns `{ ...rest, ...(oc ? { outputContract: oc } : {}) }`.
+  - `apps/geneweave/src/admin/api/workflows.ts` POST/PUT: accepts `body['output_contract']` (snake_case in REST), merges into `metadata.__outputContract`, persists. PUT only writes `fields['metadata']` when `metadata` OR `output_contract` is present in the patch.
+- **Collision risk:** if user metadata sets `__outputContract` directly, the explicit `output_contract` field silently overwrites it. Acceptable for now — document as known.
+
+### Critical gotcha: dist staleness
+- `apps/geneweave/package.json` declares `"main": "./dist/index.js"`. Examples that import `@weaveintel/geneweave` via `tsx` (e.g. `examples/12-geneweave.ts`, `examples/100-mesh-workflow-binding.ts`) load the **compiled dist**, not the TypeScript source. **After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the example, or the change has zero runtime effect.** This burned multiple debug cycles during Phase 4 build — debug `console.log` statements added to source code did not appear in server output until the dist was rebuilt.
+
+### Other contract gotchas verified during Phase 4 build
+- Admin workflow API uses **flat snake_case** body shape; full nested `WorkflowDefinition` is rejected. POST auto-generates id as `'wf-' + randomUUID().slice(0, 8)` — never accept caller-supplied id. POST returns `{ workflow }` (single-field wrapper).
+- Triggers admin POST returns the row directly (no `{ trigger }` wrapper). Inconsistent with workflows but stable contract.
+- `ContractEmitter.emit` MUST be async and MUST swallow its own internal errors when publishing to the bus (the engine catches outer throws too, but the emitter should not rely on that).
+- The single canonical filter language for `contract_emitted` triggers is JSONLogic-lite (already implemented). Common pattern: `{ "==": [ { "var": "payload.kind" }, "order.fulfilled" ] }`.
+
+### Reference
+- Canonical example: `examples/100-mesh-workflow-binding.ts` (~140 lines, custom in-process bus + emitter, two workflows, trigger filtered by kind, runs cleanly).
+- Package READMEs: `packages/workflows/README.md` (`outputContract` + `ContractEmitter`), `packages/triggers/README.md` (`MeshContractSourceAdapter`).
+- Tests: `packages/workflows/src/contract-emitter.test.ts` (8), `apps/geneweave/src/contracts/db-contract-emitter.test.ts` (2).
+- E2E verified against `http://localhost:3500`: register → tenant_admin promote → login + CSRF → create downstream workflow B → create source workflow A with `output_contract` → create trigger filtered by `payload.kind` → run A → `mesh_contracts` row persisted → trigger invocation `status=dispatched` with `target_ref` pointing to downstream workflow B run id.
+
+### Known non-Phase-4 issues (do not fix unless asked)
+- Pre-existing tsc errors in `examples/86, 92, 95, 97, comprehensive-live-agents-workflow.ts` use older live-agents/workflow API surfaces. Unrelated to Phase 4. Building `apps/geneweave packages/workflows packages/triggers` is clean.
+
+## Workflow Governance / Durability / Replay (Phase 5 of DB-Driven Capability Plan — complete)
+
+Adds four primitives that make workflows safe to run unattended: input-shape governance, cost ceilings, deterministic replay, durable persistence — plus capability policy bindings that let operators attach tool/rate/approval policies to any workflow / mesh / agent without code changes. Plan: `docs/DB_DRIVEN_CAPABILITY_PLAN.md` line 510.
+
+### Package surface (`@weaveintel/workflows` + `@weaveintel/core`)
+- `validateWorkflowInput(input, schema)` + `WorkflowInputValidationError` — **ajv-free** JSON-schema-lite (`type`, `required`, `properties`, `enum`, `minLength`/`maxLength`, `minimum`/`maximum`). Anything outside that scope is silently ignored — apps that need full JSON Schema wire their own validator and leave `WorkflowDefinition.inputSchema` unset.
+- `engine.startRun(workflowId, input)` rejects with `WorkflowInputValidationError` **before any step executes** when `inputSchema` is set and input fails. Step caches and run rows are never created on rejection.
+- `CostMeter` interface + `InMemoryCostMeter`. Steps/tools/sub-workflows call `meter.record(runId, { costUsd, source })`. The engine reads `meter.total(runId)` at every step boundary.
+- `WorkflowPolicy.costCeiling: number` (USD). Exceed → run sets `status: 'failed'`, `error: 'Cost ceiling exceeded: $X > $Y'`, **emits `workflow:cost_exceeded` event on the bus**, persists `run.costTotal`. Without `costCeiling` the meter is purely observational.
+- `WorkflowReplayRecorder` records `(runId, step) => void` with monotonic ordinals. `recorder.trace(runId, workflowId)` returns `WorkflowReplayTrace`. Helper `wrapRegistryWithRecorder(registry, recorder, runIdGetter)` is the canonical wrapping pattern.
+- `createReplayRegistry(trace)` — replay is **ordinal-strict**: each step's output is keyed by the ordinal in the trace, NOT by stepId. Replay overrun (workflow has more steps than trace) → run fails with `Replay overrun`. No resolver is invoked, no LLM call, no clock read.
+- `CheckpointStore` + `InMemoryCheckpointStore` — store `WorkflowCheckpoint` snapshots. `WorkflowRunRepository` + `InMemoryWorkflowRunRepository` + `JsonFileWorkflowRunRepository` — persist `WorkflowRun` rows.
+- `CapabilityPolicyBinding` (in `@weaveintel/core`) — `{ id, bindingKind: 'agent'|'mesh'|'workflow', bindingRef, policyKind: 'tool_policy'|'rate_limit'|'approval', policyRef, precedence, enabled }`. `resolveCapabilityBinding(bindings, kind, ref, policyKind)` returns the highest-precedence match. **Convention: agent=100 > mesh=50 > workflow=10**.
+
+### GeneWeave wiring (reference impl)
+- DB tables added in Phase 5 block of `db-sqlite-migrations.ts`: `workflow_runs.cost_total` column added; `workflow_checkpoints` (UUID PK, FK CASCADE to workflow_runs); `capability_policy_bindings` (UUID PK, columns: `binding_kind, binding_ref, policy_kind, policy_ref, precedence, enabled, created_at, updated_at`).
+- `DbWorkflowRunRepository` (in `apps/geneweave/src/workflows/db-workflow-run-repository.ts`) and `DbCheckpointStore` (in `apps/geneweave/src/workflows/db-checkpoint-store.ts`) implement the package interfaces over SQLite.
+- **SQLite `created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` has 1-second precision.** ORDER BY clauses on `created_at` MUST add `, rowid ASC` (or matching `DESC`) for deterministic tie-breaking — without it `latest()` is non-deterministic for rows inserted in the same second. Bug fixed in `listWorkflowCheckpoints` SQL.
+- 5 DB adapter methods on `CapabilityPolicyBindingRow`: `createCapabilityPolicyBinding`, `getCapabilityPolicyBinding`, `listCapabilityPolicyBindings({ bindingKind?, bindingRef?, policyKind?, enabledOnly? })`, `updateCapabilityPolicyBinding`, `deleteCapabilityPolicyBinding`.
+- Admin API: `/api/admin/capability-policy-bindings` (in `apps/geneweave/src/admin/api/capability-policy-bindings.ts`) — full CRUD, all routes auth-gated, mutations CSRF-gated. Sidebar entry under Orchestration. Tab schema in `platform-capability-tabs.ts` (apiPath `admin/capability-policy-bindings`, listKey `bindings`).
+- Workflow-runs admin tab gained `cost_total` (readonly) for visibility.
+
+### Patterns and gotchas (verified during Phase 5 build)
+- **`DefaultWorkflowEngine` caches resolved handlers by `handlerRef` for the duration of a run** — replay must be ordinal-strict, not stepId-strict, because the same handlerRef may be reused across multiple steps.
+- **`RunIdCapturingRepo` pattern**: when a resolver needs the runId at call time but the runId isn't known until `engine.startRun()` returns, wrap the repository so the first `save()` captures the runId for the resolver to read. Used in cost-meter recording and replay-recorder wiring (see `examples/101-workflow-governance.ts`).
+- **`HandlerResolveContext` does NOT have `handlerRef`** — use `ctx.step.handler ?? ctx.step.id` to recover the canonical reference for recorder entries.
+- `createScriptResolver()` reads the script body from `step.config.script` (NOT `body`) or from `ctx.ref` after the `script:` prefix.
+- `EventBus` stubs in tests/examples: cast as `as unknown as EventBus`. Provide `{ emit, on, onAll, onMatch }` no-ops if you only care about emit.
+- **Dist staleness**: `apps/geneweave/package.json` has `"main": "./dist/index.js"`. Examples that import `@weaveintel/geneweave` via `tsx` (e.g. `examples/12-geneweave.ts`) load the compiled dist. **After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the example/server.** This is the same gotcha as Phase 4.
+
+### E2E auth pattern (validated this phase)
+- Users table column for admin role is **`persona`** (NOT `role`). Promote: `sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='X';"`.
+- CSRF token is returned in the **login response body** as `csrfToken` (NOT a separate `/api/csrf` endpoint — there is none). Send as header `X-CSRF-Token` on all mutations.
+- zsh: `set +H` (or avoid `!`) when test passwords contain `!` to prevent history expansion.
+- Working pattern is preserved in `scripts/e2e-phase4-mesh-workflow-binding.mjs`.
+
+### Reference
+- Canonical example: `examples/101-workflow-governance.ts` — pure in-process, demonstrates all four primitives + capability precedence in ~190 lines. No DB, no LLM, no external services.
+- Tests: `packages/workflows/src/phase5.test.ts` (12), `apps/geneweave/src/workflow-phase5.db.test.ts` (4).
+- Package READMEs: `packages/workflows/README.md` Phase 5 section.
+
+### Known non-Phase-5 issues (do not fix unless asked)
+- Pre-existing tsc errors in `examples/86, 92, 95, 97, comprehensive-live-agents-workflow.ts` use older live-agents/workflow API surfaces. Unrelated to Phase 5. Building `apps/geneweave packages/workflows packages/core` is clean.
+
+## Capability Packs (Phase 6 of DB-Driven Capability Plan — complete)
+
+Versioned, exportable bundles of DB rows that can be installed/uninstalled atomically. Package: `@weaveintel/capability-packs`. Reference impl: `apps/geneweave`. Plan: `docs/DB_DRIVEN_CAPABILITY_PLAN.md` line 597.
+
+### Package surface (`@weaveintel/capability-packs`)
+- `validateManifest(manifest) → { ok, issues }`. KEY_RE = `/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/` (no hyphens, lower.dotted.snake_case). SEMVER_RE = `/^\d+\.\d+\.\d+(?:-[\w.]+)?$/`.
+- `installPack(manifest, adapter, opts?) → { ledger, unmetPreconditions }`. If `unmetPreconditions.length > 0`, NO rows are written. `opts.skipPreconditions: true` bypasses; `opts.installOrder?: string[]` overrides bucket iteration order.
+- `uninstallPack(ledger, adapter)` — deletes exactly the rows recorded in the ledger.
+- `resolveActivePackVersion(candidates)` — returns highest published version (semver compare).
+- `PackInstallAdapter` interface: `checkPreconditions(pre) → string[]` (unmet keys), `upsertRows(kind, rows) → string[]` (persisted ids), `deleteRows(kind, ids)`, optional `withTransaction<T>(fn)`.
+- 18 package tests in `packages/capability-packs/src/capability-packs.test.ts`.
+
+### Manifest shape
+```ts
+{
+  manifestVersion: '1',
+  key: string,                // lower.dotted.snake_case
+  version: string,            // semver MAJOR.MINOR.PATCH
+  name: string,
+  description: string,
+  authoredBy?: string,
+  dependencies?: PackDependency[],
+  preconditions?: { requiredHandlerKinds?, requiredToolKeys?, requiredMcpServers?, requiredTriggerSourceKinds? },
+  contents: Record<string, ReadonlyArray<Record<string, unknown>>>,
+  metadata?: Record<string, unknown>
+}
+```
+
+### GeneWeave wiring (reference impl)
+- 3 DB tables (UUID PKs): `capability_packs` (UNIQUE(pack_key, version), status: draft|published|retired), `capability_pack_installations` (FK CASCADE, ledger TEXT JSON, uninstalled_at nullable), `capability_pack_experiments` (variants JSON).
+- 14 `DatabaseAdapter` methods on `CapabilityPackRow` / `CapabilityPackInstallationRow` / `CapabilityPackExperimentRow`.
+- `apps/geneweave/src/capability-packs/install-adapter.ts` — `createGeneweavePackInstallAdapter(db, opts?)`. **6 supported buckets**: `workflow_defs`, `triggers`, `prompts`, `prompt_fragments`, `tool_policies`, `capability_policy_bindings`. Unknown buckets cause install to throw at `upsertRows`.
+- 11 admin routes in `apps/geneweave/src/admin/api/capability-packs.ts`:
+  - `GET/POST/PUT/DELETE /api/admin/capability-packs` + `GET /:id/export` + `POST /:id/install`
+  - `GET /api/admin/capability-pack-installations` + `GET /:id` + `POST /:id/uninstall`
+  - All routes auth-gated; mutations CSRF-gated.
+- Two admin tabs under Orchestration: `capability-packs` (full CRUD) and `capability-pack-installations` (readonly).
+
+### Critical gotchas (verified during Phase 6 build)
+- **Pack key disallows hyphens** — `e2e-1234` is rejected; use `e2e_1234`. Burned a debug cycle on `tag = e2e-${Date.now()}` in the E2E script.
+- **`workflow_defs` bucket row shape MUST match the actual `WorkflowDefRow` columns**: `{ id, name, description, version, steps, entry_step_id, metadata, enabled }`. Do NOT use fictional fields like `key`, `definition`, `created_by` — they will fail tsc and at runtime. Fixed install-adapter to use real columns.
+- Install endpoint persists `JSON.stringify(result.ledger)` into `capability_pack_installations.ledger` and updates pack `installed_at` / `installed_by` on success.
+- Install returns 412 (not 400) when preconditions are unmet.
+- Re-uninstall returns 409 (already uninstalled).
+- Manifest `authoredBy` (camelCase) at the top level vs `authored_by` column on the row — the route handler maps explicitly.
+- Same dist-staleness rule applies: after editing `apps/geneweave/src/**` MUST run `npx tsc -b apps/geneweave` before restarting the server.
+
+### E2E auth pattern (reused from Phase 5)
+- `set +H` to disable zsh history expansion.
+- Promote test user with `sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='X';"` (column is `persona`, NOT `role`).
+- CSRF token comes from login response body as `csrfToken`; send as `X-CSRF-Token` on all mutations.
+- See `scripts/e2e-phase6-capability-packs.mjs` (27 assertions, all pass).
+
+### Reference
+- Canonical example: `examples/102-capability-packs.ts` — in-process StubAdapter demo of validate → install → uninstall → version resolution. ~120 lines, no DB, no LLM, no external services.
+- Package README: `packages/capability-packs/README.md`.
+- E2E script: `scripts/e2e-phase6-capability-packs.mjs`.
+
+### Known non-Phase-6 issues (do not fix unless asked)
+- Same pre-existing tsc errors in `examples/86, 92, 95, 97, comprehensive-live-agents-workflow.ts` as Phase 5. Unrelated. Building `apps/geneweave packages/capability-packs` is clean.

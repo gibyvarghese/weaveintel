@@ -74,3 +74,9 @@ export { registerRoutingSurfaceItemRoutes } from './routing-surface-items.js';
 // ── anyWeave Phase 6: Production hardening ──────────────────
 export { registerRoutingExperimentRoutes } from './routing-experiments.js';
 export { registerCostByTaskRoutes } from './cost-by-task.js';
+
+// ── Phase 5 of DB-Driven Capability Plan: Capability policy bindings ──
+export { registerCapabilityPolicyBindingRoutes } from "./capability-policy-bindings.js";
+
+// ── Phase 6 of DB-Driven Capability Plan: Capability packs ──
+export { registerCapabilityPackRoutes } from "./capability-packs.js";

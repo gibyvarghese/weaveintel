@@ -33,6 +33,8 @@
     "@weaveintel/observability": "*",
     "@weaveintel/redaction": "*",
     "@weaveintel/workflows": "*",
+    "@weaveintel/triggers": "*",
+    "@weaveintel/capability-packs": "*",
     "@weaveintel/human-tasks": "*",
     "@weaveintel/contracts": "*",
     "@weaveintel/prompts": "*",

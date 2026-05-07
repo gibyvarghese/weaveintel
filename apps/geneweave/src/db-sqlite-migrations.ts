@@ -2472,6 +2472,11 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
     `ALTER TABLE live_agents ADD COLUMN model_capability_json TEXT`,
     `ALTER TABLE live_agents ADD COLUMN model_routing_policy_key TEXT`,
     `ALTER TABLE live_agents ADD COLUMN model_pinned_id TEXT`,
+    // Phase 2 (DB-driven capability plan) — declarative `prepare()` recipe
+    // JSON. When set, the runtime synthesises the agent's `prepare()`
+    // function from this recipe instead of relying on inline binding
+    // config. See packages/live-agents-runtime/src/db-prepare-resolver.ts.
+    `ALTER TABLE live_agents ADD COLUMN prepare_config_json TEXT`,
     `ALTER TABLE tool_catalog ADD COLUMN domain_tags TEXT`,
   ];
   for (const sql of m22DefAlters) {
@@ -2557,6 +2562,8 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
       model_capability_json TEXT,
       model_routing_policy_key TEXT,
       model_pinned_id TEXT,
+      -- Phase 2 (DB-driven capability plan) — declarative prepare() recipe.
+      prepare_config_json TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(mesh_id, role_key)
@@ -2685,4 +2692,183 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   `);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_endpoint_health_updated_at ON endpoint_health(updated_at)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_endpoint_health_circuit_state ON endpoint_health(circuit_state)`);
+
+  // ─── Workflow Platform Phase 1: Handler Kinds Catalog ─────
+  // One row per registered HandlerResolver kind (e.g. 'tool', 'prompt',
+  // 'agent', 'mcp', 'script', 'subworkflow', 'noop'). Synced at startup
+  // from @weaveintel/workflows' HandlerResolverRegistry via
+  // syncWorkflowHandlerKindsToDb(). Powers admin UI dropdowns so step
+  // handler kinds are not hardcoded. UUID PK; `kind` is the unique key.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS workflow_handler_kinds (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL UNIQUE,
+      description TEXT,
+      config_schema TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      source TEXT NOT NULL DEFAULT 'builtin',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_workflow_handler_kinds_kind ON workflow_handler_kinds(kind)`);
+
+  // ─── Phase 3 (DB-driven capability plan) — Unified Triggers ───
+  // One row per operator-defined trigger. The dispatcher in
+  // @weaveintel/triggers loads these at startup and subscribes the
+  // appropriate source adapters; matching events route through filter
+  // -> rate-limit -> target dispatch. UUID PK; `key` is the operator
+  // alias (also used as a filter handle by the cron source adapter).
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS triggers (
+      id TEXT PRIMARY KEY,
+      key TEXT NOT NULL UNIQUE,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      source_kind TEXT NOT NULL,
+      source_config TEXT NOT NULL DEFAULT '{}',
+      filter_expr TEXT,
+      target_kind TEXT NOT NULL,
+      target_config TEXT NOT NULL DEFAULT '{}',
+      input_map TEXT,
+      rate_limit_per_minute INTEGER,
+      metadata TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_triggers_source_kind ON triggers(source_kind, enabled)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_triggers_target_kind ON triggers(target_kind)`);
+
+  // Append-only audit log. Every dispatch attempt (including filtered,
+  // rate_limited, disabled, no_target_adapter, error) writes one row so
+  // operators can inspect the live trigger fabric in the admin UI.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS trigger_invocations (
+      id TEXT PRIMARY KEY,
+      trigger_id TEXT NOT NULL REFERENCES triggers(id) ON DELETE CASCADE,
+      fired_at TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      status TEXT NOT NULL,
+      target_ref TEXT,
+      error_message TEXT,
+      source_event TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_trigger_invocations_trigger ON trigger_invocations(trigger_id, fired_at DESC)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_trigger_invocations_status ON trigger_invocations(status, fired_at DESC)`);
+
+  // ─── Phase 4 (DB-driven capability plan) — Mesh contracts ───
+  // Append-only ledger of typed contracts emitted by workflow runs (or
+  // any other ContractEmitter consumer). The triggers dispatcher reads
+  // these via its in-process bus (MeshContractSourceAdapter) so a row
+  // here doubles as the audit trail and the source event.
+  // UUID PK; body and evidence are JSON-serialized. mesh_id and
+  // source_agent_id are nullable for workflow-only emissions.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS mesh_contracts (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL,
+      body_json TEXT NOT NULL DEFAULT '{}',
+      evidence_json TEXT,
+      mesh_id TEXT,
+      source_workflow_definition_id TEXT,
+      source_workflow_run_id TEXT,
+      source_agent_id TEXT,
+      metadata TEXT,
+      emitted_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mesh_contracts_kind ON mesh_contracts(kind, emitted_at DESC)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mesh_contracts_run ON mesh_contracts(source_workflow_run_id)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_mesh_contracts_mesh ON mesh_contracts(mesh_id, emitted_at DESC)`);
+
+  // ─── Phase 5 — Workflow Governance / Durability / Replay ────────────────
+  // Adds cost tracking + metadata to workflow_runs, durable checkpoint store,
+  // and the capability-policy bindings table for binding policies to agents,
+  // meshes, or workflows. UUID PKs everywhere.
+  safeExec(db, 'ALTER TABLE workflow_runs ADD COLUMN cost_total REAL NOT NULL DEFAULT 0');
+  safeExec(db, 'ALTER TABLE workflow_runs ADD COLUMN metadata TEXT');
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS workflow_checkpoints (
+      id TEXT PRIMARY KEY,
+      run_id TEXT NOT NULL,
+      workflow_id TEXT NOT NULL,
+      step_id TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (run_id) REFERENCES workflow_runs(id) ON DELETE CASCADE
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_workflow_checkpoints_run ON workflow_checkpoints(run_id, created_at DESC)`);
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS capability_policy_bindings (
+      id TEXT PRIMARY KEY,
+      binding_kind TEXT NOT NULL,
+      binding_ref TEXT NOT NULL,
+      policy_kind TEXT NOT NULL,
+      policy_ref TEXT NOT NULL,
+      precedence INTEGER NOT NULL DEFAULT 0,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(binding_kind, binding_ref, policy_kind)
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_capability_policy_bindings_lookup ON capability_policy_bindings(binding_kind, binding_ref, policy_kind, enabled)`);
+
+  // ─── Phase 6 — Capability Packs ────────────────────────────
+  // Operator-shippable, versioned bundles of DB rows. The pack manifest is
+  // stored as JSON; the installation ledger records exactly which child rows
+  // each pack version wrote (so uninstall is precise). Experiments add
+  // weighted version rollouts.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS capability_packs (
+      id TEXT PRIMARY KEY,
+      pack_key TEXT NOT NULL,
+      version TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'draft',
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      authored_by TEXT,
+      manifest TEXT NOT NULL,
+      installed_at TEXT,
+      installed_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(pack_key, version)
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_capability_packs_key ON capability_packs(pack_key, status)`);
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS capability_pack_installations (
+      id TEXT PRIMARY KEY,
+      pack_id TEXT NOT NULL,
+      pack_key TEXT NOT NULL,
+      pack_version TEXT NOT NULL,
+      ledger TEXT NOT NULL,
+      installed_by TEXT,
+      installed_at TEXT NOT NULL DEFAULT (datetime('now')),
+      uninstalled_at TEXT,
+      FOREIGN KEY (pack_id) REFERENCES capability_packs(id) ON DELETE CASCADE
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_capability_pack_installations_pack ON capability_pack_installations(pack_id, installed_at DESC)`);
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS capability_pack_experiments (
+      id TEXT PRIMARY KEY,
+      pack_key TEXT NOT NULL,
+      name TEXT NOT NULL,
+      variants TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_capability_pack_experiments_key ON capability_pack_experiments(pack_key, enabled)`);
 }

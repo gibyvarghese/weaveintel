@@ -30,6 +30,9 @@ import {
 } from './auth.js';
 import { getHTML } from './ui-server.js';
 import { registerAdminRoutes } from './server-admin.js';
+import { registerWorkflowPlatformRoutes } from './admin/api/workflow-platform.js';
+import { registerTriggerRoutes, type TriggerDispatcherHandle } from './admin/api/triggers.js';
+import { registerMeshContractRoutes } from './admin/api/mesh-contracts.js';
 import { registerSVRoutes } from './features/scientific-validation/index.js';
 import { registerKaggleCompetitionRoutes, KaggleCompetitionRunner } from './features/kaggle-competition/index.js';
 import { SVChatBridge } from './features/scientific-validation/chat-bridge.js';
@@ -401,10 +404,26 @@ export interface ServerConfig {
    * used (for tests or embedded callers that have not seeded the catalog).
    */
   gatewayConfig?: LoadedGatewayConfig;
+  /**
+   * Workflow Platform Phase 1: optional handle to the singleton
+   * `DefaultWorkflowEngine` constructed at startup. When supplied, the
+   * `POST /api/admin/workflows/:id/run` route uses it to start runs
+   * against `workflow_defs`. When omitted (e.g. test boot) that route
+   * returns 503 to make the missing wiring obvious.
+   */
+  workflowEngine?: import('./workflow-engine.js').WorkflowEngineHandle;
+  /**
+   * Phase 3 Unified Triggers: optional handle to the singleton
+   * `TriggerDispatcher` plus its in-process `ManualSourceAdapter`.
+   * When omitted, the trigger admin routes still serve CRUD against
+   * `triggers`/`trigger_invocations` but the manual-fire route returns
+   * 503 because there is no live dispatcher to route through.
+   */
+  triggerDispatcher?: TriggerDispatcherHandle;
 }
 
 export function createGeneWeaveServer(config: ServerConfig): Server {
-  const { db, chatEngine, jwtSecret, corsOrigin, providers, publicBaseUrl, gatewayConfig } = config;
+  const { db, chatEngine, jwtSecret, corsOrigin, providers, publicBaseUrl, gatewayConfig, workflowEngine, triggerDispatcher } = config;
   const dashboard = new DashboardService(db);
   const router = new Router();
   const uiHtml = getHTML();
@@ -1148,6 +1167,13 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   };
 
   registerAdminRoutes(adminRouter, db, json, readBody, providers, html);
+
+  // Workflow Platform Phase 1 routes — registered on the direct router so
+  // they can return 503 when the engine isn't wired (test boots), without
+  // tripping the admin permission gate.
+  registerWorkflowPlatformRoutes(router, db, { json, readBody }, workflowEngine);
+  registerTriggerRoutes(router, db, { json, readBody }, triggerDispatcher);
+  registerMeshContractRoutes(router, db, { json });
 
   // ── Hypothesis Validation feature routes ────────────────────
   // Build async model factories from the configured providers (models are cached by chat-runtime).

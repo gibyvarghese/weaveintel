@@ -31,7 +31,24 @@ import { ChatEngine, type ProviderConfig } from './chat.js';
 import { createGeneWeaveServer } from './server.js';
 import { syncModelPricing, type PricingSyncReport } from './pricing-sync.js';
 import { syncToolCatalog } from './tools.js';
+import { BUILTIN_TOOLS } from './tools.js';
+import {
+  createGeneweaveWorkflowEngine,
+  syncWorkflowHandlerKindsToDb,
+  type WorkflowEngineHandle,
+} from './workflow-engine.js';
 import { startToolHealthJob } from './tool-health-job.js';
+import {
+  createTriggerDispatcher,
+  ManualSourceAdapter,
+  MeshContractSourceAdapter,
+  WebhookOutTargetAdapter,
+  type TriggerDispatcher,
+} from '@weaveintel/triggers';
+import { createDbTriggerStore } from './triggers/db-trigger-store.js';
+import { createWorkflowTargetAdapter, createContractTargetAdapter } from './triggers/target-adapters.js';
+import { DbContractEmitter } from './contracts/db-contract-emitter.js';
+import { EventEmitter } from 'node:events';
 import { applyDbResilienceObserver } from './db-resilience-observer.js';
 import { startRoutingRegressionJob } from './routing-feedback.js';
 import { registerMCPGatewayInCatalog, loadGatewayConfigFromCatalog } from './mcp-gateway.js';
@@ -192,6 +209,58 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // 5. Start background tool health snapshot job (writes every 15 min)
   startToolHealthJob(db);
 
+  // 5-WF. Workflow Platform Phase 1: construct the singleton DB-driven
+  // workflow engine and sync the resolver registry into the
+  // `workflow_handler_kinds` catalog. The engine is reused by admin
+  // routes (POST /api/admin/workflows/:id/run) and by other geneweave
+  // subsystems that need to start runs from `workflow_defs` rows.
+  // The `tool:` resolver is wired to BUILTIN_TOOLS so workflow steps
+  // can call any in-process tool by key. Resolver registry sync is
+  // best-effort and never blocks startup.
+  // Phase 4 (DB-driven capability plan): build the in-process contract
+  // bus + DB-backed emitter BEFORE the workflow engine so the engine
+  // can publish typed completion contracts (`outputContract`) on every
+  // run. The same bus feeds `MeshContractSourceAdapter` below so a
+  // contract row in `mesh_contracts` doubles as a trigger source event.
+  const contractBus = new EventEmitter();
+  contractBus.setMaxListeners(0);
+  const contractEmitter = new DbContractEmitter(db, contractBus);
+  const workflowEngineHandle: WorkflowEngineHandle = createGeneweaveWorkflowEngine({
+    db,
+    toolGetter: (key: string) => BUILTIN_TOOLS[key],
+    contractEmitter,
+  });
+  try {
+    await syncWorkflowHandlerKindsToDb(db, workflowEngineHandle.registry);
+  } catch (err) {
+    console.warn('[workflow-engine] failed to sync handler kinds:', err);
+  }
+
+  // 5-TR. Phase 3 Unified Triggers: build the singleton dispatcher with
+  // a DB-backed store, in-process manual + cron sources (cron sources
+  // are spun up per-trigger by the dispatcher itself based on rows in
+  // `triggers`), and target adapters for `webhook_out` and `workflow`.
+  // The dispatcher reloads on every CRUD write (admin route handlers
+  // call `dispatcher.reload()`), so cron schedules reflect DB state
+  // without a server restart.
+  const triggerStore = createDbTriggerStore(db);
+  const manualSource = new ManualSourceAdapter();
+  const meshContractSource = new MeshContractSourceAdapter(contractBus);
+  const triggerDispatcher: TriggerDispatcher = createTriggerDispatcher({
+    store: triggerStore,
+    sourceAdapters: [manualSource, meshContractSource],
+    targetAdapters: [
+      new WebhookOutTargetAdapter(),
+      createWorkflowTargetAdapter(workflowEngineHandle),
+      createContractTargetAdapter(contractEmitter),
+    ],
+  });
+  try {
+    await triggerDispatcher.start();
+  } catch (err) {
+    console.warn('[triggers] failed to start dispatcher:', err);
+  }
+
   // 5a. Resilience Phase 4: subscribe to the process-wide signal bus and
   // batch-write per-endpoint counters into `endpoint_health` every ~1s.
   applyDbResilienceObserver(db);
@@ -239,6 +308,8 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     providers: activeProviders,
     publicBaseUrl: config.publicBaseUrl,
     gatewayConfig,
+    workflowEngine: workflowEngineHandle,
+    triggerDispatcher: { dispatcher: triggerDispatcher, manualSource },
   });
 
   // 5. Listen
@@ -264,6 +335,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
       if (genericSupervisor) {
         try { await genericSupervisor.stop(); } catch { /* non-fatal */ }
       }
+      try { await triggerDispatcher.stop(); } catch { /* non-fatal */ }
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });

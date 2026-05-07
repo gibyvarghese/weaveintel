@@ -378,6 +378,7 @@ export {
   type WorkflowStepType,
   type WorkflowStep,
   type WorkflowDefinition,
+  type WorkflowOutputContract,
   type WorkflowRunStatus,
   type WorkflowState,
   type WorkflowStepResult,
@@ -394,6 +395,14 @@ export {
   type WorkflowApprovalTask,
   type WorkflowEngine,
 } from './workflows.js';
+
+// Phase 5 — Capability Policy Bindings
+export {
+  type CapabilityBindingKind,
+  type CapabilityPolicyKind,
+  type CapabilityPolicyBinding,
+  resolveCapabilityBinding,
+} from './capability-policy.js';
 
 // Guardrail & governance contracts
 export {

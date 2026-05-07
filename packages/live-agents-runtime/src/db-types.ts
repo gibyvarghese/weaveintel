@@ -61,6 +61,8 @@ export interface SingleAgentReaderDb extends AgentToolBindingDb {
       name: string;
       status: string;
       attention_policy_key: string | null;
+      /** Phase 2 — declarative `prepare()` recipe JSON (optional). */
+      prepare_config_json?: string | null;
     }>
   >;
   listLiveAgentHandlerBindings(opts: {

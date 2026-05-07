@@ -223,11 +223,131 @@ function summarizeKaggleRun(result: AgenticRunResult): string {
     }
     trace.push(`  • ${name}(${argSummary}) -> ${resultSummary}`);
   }
+
+  // Machine-readable kernel-result block — consumed by the agentic strategist
+  // handoff (handlers/strategist.ts) so the kernel(s) the LLM actually pushed
+  // this tick reach the validator instead of being dropped at the deterministic
+  // implementer (which bails when no playbook.solverTemplate matches).
+  const kernel = extractLatestKernelFromSteps(toolSteps);
+  const kernelBlock = kernel
+    ? `\n---KERNEL_HANDOFF_JSON---\n${JSON.stringify(kernel)}\n---END_KERNEL_HANDOFF_JSON---`
+    : '';
+
   return [
     `status=${result.status} toolCalls=${toolSteps.length} totalSteps=${result.steps.length}`,
     `--- tool trace ---`,
     trace.length > 0 ? trace.join('\n') : '(no tool calls)',
     `--- final response ---`,
     finalText.length > 1500 ? finalText.slice(0, 1500) + '... [truncated]' : finalText,
+    kernelBlock,
   ].join('\n');
+}
+
+/** Walk tool_call steps and reconstruct the latest kernel push + its
+ *  poll/output results. Returns null when no `kaggle_push_kernel` landed
+ *  this tick. Tool result strings come back as `{"content":"<json>"}`. */
+function extractLatestKernelFromSteps(toolSteps: ReadonlyArray<ToolCallStep>): {
+  kernelRef: string;
+  kernelUrl: string;
+  kernelStatus: string;
+  failureMessage: string | null;
+  outputFiles: string[];
+  logExcerpt: string;
+} | null {
+  const unwrap = (raw: string | undefined): Record<string, unknown> | null => {
+    if (!raw) return null;
+    try {
+      const outer = JSON.parse(raw) as { content?: string } | Record<string, unknown>;
+      const inner = (outer as { content?: string }).content;
+      if (typeof inner === 'string') {
+        try {
+          return JSON.parse(inner) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      }
+      return outer as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  };
+
+  let kernelRef = '';
+  let kernelUrl = '';
+  let pushedSource = '';
+  for (let i = toolSteps.length - 1; i >= 0; i--) {
+    const tc = toolSteps[i]?.toolCall;
+    if (tc?.name !== 'kaggle_push_kernel') continue;
+    const parsed = unwrap(tc.result);
+    if (parsed && typeof parsed['kernelRef'] === 'string' && parsed['kernelRef']) {
+      kernelRef = parsed['kernelRef'] as string;
+      kernelUrl = (parsed['kernelUrl'] as string | undefined) ?? '';
+      const args = tc.arguments ?? {};
+      const src =
+        (args['source'] as string | undefined) ??
+        (args['code'] as string | undefined) ??
+        (args['script'] as string | undefined) ??
+        '';
+      pushedSource = typeof src === 'string' ? src : '';
+      break;
+    }
+  }
+  if (!kernelRef) return null;
+
+  // Probe-only detection: the strategist's playbook (Phase 0.5) tells it to
+  // push a tiny diagnostic probe kernel to verify env names BEFORE pushing
+  // the real solver. The probe is NEVER a submission. If the latest push
+  // contains the AGENT_PROBE_DONE marker and no obvious solver scaffolding,
+  // tag this kernel so the validator's bounce-back gives the LLM concrete
+  // corrective guidance instead of a generic "no submission file" message.
+  const looksLikeProbeOnly =
+    pushedSource.includes('AGENT_PROBE_DONE') &&
+    !/submission\.(csv|json|py)|class\s+\w+Agent\b|def\s+act\b|\.to_csv\(/i.test(pushedSource);
+
+  const refMatches = (args?: Record<string, unknown>): boolean => {
+    if (!args) return false;
+    const r = (args['ref'] as string | undefined) ?? (args['kernelRef'] as string | undefined) ?? '';
+    if (r === kernelRef) return true;
+    const tail = kernelRef.split('/').pop() ?? '';
+    return tail.length > 0 && r.endsWith('/' + tail);
+  };
+
+  let kernelStatus = 'pushed';
+  let failureMessage: string | null = null;
+  for (let i = toolSteps.length - 1; i >= 0; i--) {
+    const tc = toolSteps[i]?.toolCall;
+    if (tc?.name !== 'kaggle_wait_for_kernel') continue;
+    if (!refMatches(tc.arguments)) continue;
+    const parsed = unwrap(tc.result);
+    if (parsed) {
+      kernelStatus = (parsed['status'] as string | undefined) ?? kernelStatus;
+      const fm = parsed['failureMessage'];
+      failureMessage = typeof fm === 'string' && fm.length > 0 ? fm : failureMessage;
+      break;
+    }
+  }
+
+  let outputFiles: string[] = [];
+  let logExcerpt = '';
+  for (let i = toolSteps.length - 1; i >= 0; i--) {
+    const tc = toolSteps[i]?.toolCall;
+    if (tc?.name !== 'kaggle_get_kernel_output') continue;
+    if (!refMatches(tc.arguments)) continue;
+    const parsed = unwrap(tc.result);
+    if (parsed) {
+      const files = parsed['files'];
+      if (Array.isArray(files)) outputFiles = files.map((f) => String(f));
+      const logVal = parsed['log'];
+      if (typeof logVal === 'string') logExcerpt = logVal.slice(0, 4000);
+      break;
+    }
+  }
+
+  if (looksLikeProbeOnly) {
+    kernelStatus = 'probe_only';
+    failureMessage =
+      'Strategist pushed only the Phase 0.5 diagnostic probe kernel (contains AGENT_PROBE_DONE marker, no solver / submission code detected). Per the playbook, the probe is NEVER a submission — after reading the probe log you must push another kernel that contains the actual solver/agent code that writes the required submission file (or IS the submission for kernel_is_submission competitions). Bouncing back so the strategist can push the real solver next iteration.';
+  }
+
+  return { kernelRef, kernelUrl, kernelStatus, failureMessage, outputFiles, logExcerpt };
 }

@@ -24,6 +24,13 @@ import { createInitialState, advanceState, resolveNextStep, isTerminal } from '.
 import { type CheckpointStore, InMemoryCheckpointStore } from './checkpoint-store.js';
 import { type CompensationRegistry, DefaultCompensationRegistry, runCompensations, type CompensationHandler } from './compensation.js';
 import { type WorkflowRunRepository, InMemoryWorkflowRunRepository } from './run-repository.js';
+import type { HandlerResolverRegistry } from './handler-resolver.js';
+import type { WorkflowDefinitionStore } from './definition-store.js';
+import { applyInputMap, applyOutputMap } from './path.js';
+import { evaluateBoolean, hasExpression } from './expressions.js';
+import { type ContractEmitter, buildEmittedContract } from './contract-emitter.js';
+import { validateWorkflowInput, WorkflowInputValidationError } from './input-validator.js';
+import { type CostMeter, InMemoryCostMeter } from './cost-meter.js';
 
 export interface WorkflowEngineOptions {
   checkpointStore?: CheckpointStore;
@@ -33,6 +40,40 @@ export interface WorkflowEngineOptions {
   humanTaskQueue?: HumanTaskQueue;
   /** Optional durable repository for workflow run state. */
   runRepository?: WorkflowRunRepository;
+  /**
+   * Phase 1 — Optional resolver registry. When set, any `step.handler`
+   * containing a `:` (or matching a registered bare-kind resolver such as
+   * `'noop'`) is resolved at run-start by the matching `HandlerResolver`.
+   * Pre-registered handlers via `engine.registerHandler(...)` always win.
+   */
+  resolverRegistry?: HandlerResolverRegistry;
+  /**
+   * Phase 1 — Dependency bag forwarded to every resolver invocation.
+   * Apps populate this with registries the resolvers need (tool registry,
+   * prompt store, agent registry, MCP client, etc.).
+   */
+  resolverDeps?: Record<string, unknown>;
+  /**
+   * Phase 1 — Optional durable definition store. When set, `startRun` falls
+   * back to the store if the requested workflowId is not in the in-memory
+   * definition map, and `getDefinition` / `listDefinitions` consult both.
+   */
+  definitionStore?: WorkflowDefinitionStore;
+  /**
+   * Phase 4 — Optional contract emitter. When set and a workflow definition
+   * declares an `outputContract`, the engine builds and emits the contract
+   * after the run reaches `completed`. Emitter failures are swallowed (logged
+   * via `bus`) so workflow runs never fail because of emission errors.
+   */
+  contractEmitter?: ContractEmitter;
+  /**
+   * Phase 5 — Optional cost meter. When set, the engine queries the meter
+   * after each step. If the workflow's `WorkflowPolicy.costCeiling` is set
+   * and the cumulative cost exceeds it, the run is failed with
+   * `Cost ceiling exceeded` and a `workflow:cost_exceeded` event is emitted.
+   * Callers (LLM adapters, tool wrappers) report deltas via `costMeter.record(runId, ...)`.
+   */
+  costMeter?: CostMeter;
 }
 
 function now(): string { return new Date().toISOString(); }
@@ -77,6 +118,11 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   private bus?: EventBus;
   private defaultPolicy?: WorkflowPolicy;
   private humanTaskQueue?: HumanTaskQueue;
+  private resolverRegistry?: HandlerResolverRegistry;
+  private resolverDeps?: Record<string, unknown>;
+  private definitionStore?: WorkflowDefinitionStore;
+  private contractEmitter?: ContractEmitter;
+  private costMeter: CostMeter;
 
   constructor(opts?: WorkflowEngineOptions) {
     this.checkpointStore = opts?.checkpointStore ?? new InMemoryCheckpointStore();
@@ -85,6 +131,17 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     this.defaultPolicy = opts?.defaultPolicy;
     this.compensationRegistry = new DefaultCompensationRegistry();
     this.humanTaskQueue = opts?.humanTaskQueue;
+    this.resolverRegistry = opts?.resolverRegistry;
+    this.resolverDeps = opts?.resolverDeps;
+    this.definitionStore = opts?.definitionStore;
+    this.contractEmitter = opts?.contractEmitter;
+    this.costMeter = opts?.costMeter ?? new InMemoryCostMeter();
+  }
+
+  /** Phase 5 — Public access to the cost meter so callers (LLM adapters,
+   * tool wrappers, sub-workflows) can report cost deltas keyed by runId. */
+  getCostMeter(): CostMeter {
+    return this.costMeter;
   }
 
   // ─── Handler Registration ──────────────────────────────────
@@ -106,18 +163,50 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   }
 
   async getDefinition(id: string): Promise<WorkflowDefinition | null> {
-    return this.definitions.get(id) ?? null;
+    const cached = this.definitions.get(id);
+    if (cached) return cached;
+    if (this.definitionStore) {
+      const fromStore = await this.definitionStore.get(id);
+      if (fromStore) {
+        this.definitions.set(fromStore.id, fromStore);
+        return fromStore;
+      }
+    }
+    return null;
   }
 
   async listDefinitions(): Promise<WorkflowDefinition[]> {
-    return [...this.definitions.values()];
+    if (!this.definitionStore) return [...this.definitions.values()];
+    const stored = await this.definitionStore.list();
+    // Merge in-memory + store; in-memory wins on id collision.
+    const out = new Map<string, WorkflowDefinition>();
+    for (const d of stored) out.set(d.id, d);
+    for (const d of this.definitions.values()) out.set(d.id, d);
+    return [...out.values()];
   }
 
   // ─── Run Management ────────────────────────────────────────
 
   async startRun(workflowId: string, input?: Record<string, unknown>): Promise<WorkflowRun> {
-    const def = this.definitions.get(workflowId);
+    let def = this.definitions.get(workflowId);
+    if (!def && this.definitionStore) {
+      const fromStore = await this.definitionStore.get(workflowId);
+      if (fromStore) {
+        this.definitions.set(fromStore.id, fromStore);
+        def = fromStore;
+      }
+    }
     if (!def) throw new Error(`Workflow definition not found: ${workflowId}`);
+
+    // Phase 5 — input schema gate. Reject malformed inputs BEFORE creating
+    // a run row, so callers get a synchronous validation error rather than
+    // a half-created failed run.
+    if (def.inputSchema) {
+      const result = validateWorkflowInput(input ?? {}, def.inputSchema);
+      if (!result.valid) {
+        throw new WorkflowInputValidationError(workflowId, result.errors);
+      }
+    }
 
     const run: WorkflowRun = {
       id: randomUUID(),
@@ -125,6 +214,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       status: 'running',
       state: createInitialState(def, input),
       startedAt: now(),
+      costTotal: 0,
     };
     await this.runRepository.save(run);
     this.runCache.set(run.id, run);
@@ -185,10 +275,99 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
 
   // ─── Core Loop ─────────────────────────────────────────────
 
-  private async executeRun(run: WorkflowRun, def: WorkflowDefinition): Promise<WorkflowRun> {
+  /**
+   * Build a per-run handler map by merging the engine's globally registered
+   * handlers with handlers produced on-demand by the resolver registry for
+   * any step whose `handler` references a kind:ref pair (or matches a bare-
+   * kind resolver such as `'noop'`). Pre-registered handlers always win.
+   */
+  private async resolveHandlersForRun(def: WorkflowDefinition): Promise<StepHandlerMap> {
+    const map: StepHandlerMap = new Map(this.handlers);
+    if (!this.resolverRegistry) return map;
+    for (const step of def.steps) {
+      const handlerRef = step.handler ?? step.id;
+      if (map.has(handlerRef)) continue;
+      const match = this.resolverRegistry.forHandler(handlerRef);
+      if (!match) continue;
+      try {
+        const fn = await match.resolver.resolve({
+          workflowId: def.id,
+          stepId: step.id,
+          ref: match.ref,
+          config: step.config ?? {},
+          deps: this.resolverDeps,
+          step,
+        });
+        map.set(handlerRef, fn);
+      } catch (err) {
+        // Make the failure visible at run-time rather than aborting startRun;
+        // the step will fail with the error captured here.
+        const error = err instanceof Error ? err.message : String(err);
+        map.set(handlerRef, async () => {
+          throw new Error(`HandlerResolver failed for step "${step.id}" (${handlerRef}): ${error}`);
+        });
+      }
+    }
+    return map;
+  }
+
+  /** Apply inputMap before calling the resolved handler and outputMap after. */
+  private wrapHandlerWithIO(step: WorkflowStep, fn: StepHandler): StepHandler {
+    if (!step.inputMap && !step.outputMap) return fn;
+    const inputMap = step.inputMap;
+    const outputMap = step.outputMap;
+    return async (variables, config) => {
+      const args = inputMap ? applyInputMap(inputMap, variables) : variables;
+      const out = await fn(args, config);
+      if (outputMap) applyOutputMap(outputMap, out, variables);
+      return out;
+    };
+  }
+
+  /**
+   * Wrap any handler (including pre-registered ones) with IO mapping if the
+   * step declares it. We rebuild the per-step entry inside the run-scoped
+   * map so global handlers are not mutated.
+   */
+  private applyIOMappingForRun(def: WorkflowDefinition, runHandlers: StepHandlerMap): void {
+    for (const step of def.steps) {
+      if (!step.inputMap && !step.outputMap) continue;
+      const handlerRef = step.handler ?? step.id;
+      const fn = runHandlers.get(handlerRef);
+      if (!fn) continue;
+      runHandlers.set(handlerRef, this.wrapHandlerWithIO(step, fn));
+    }
+  }
+
+  /**
+   * Phase 1 \u2014 Run a single iteration of an existing run. Useful for
+   * scheduler-driven tick loops. Returns the run after one step (or after
+   * the run reaches a terminal/paused state).
+   */
+  async tickRun(runId: string): Promise<WorkflowRun> {
+    const run = await this.getRun(runId);
+    if (!run) throw new Error(`Workflow run not found: ${runId}`);
+    if (run.status !== 'running') return run;
+    const def = await this.getDefinition(run.workflowId);
+    if (!def) throw new Error(`Workflow definition not found: ${run.workflowId}`);
+    const handlers = await this.resolveHandlersForRun(def);
+    this.applyIOMappingForRun(def, handlers);
+    return this.executeRun(run, def, { handlers, maxStepsOverride: 1 });
+  }
+
+  private async executeRun(
+    run: WorkflowRun,
+    def: WorkflowDefinition,
+    opts?: { handlers?: StepHandlerMap; maxStepsOverride?: number },
+  ): Promise<WorkflowRun> {
     const policy = this.defaultPolicy ?? (def.metadata?.['policy'] as WorkflowPolicy | undefined);
     let stepsExecuted = 0;
-    const maxSteps = policy?.maxSteps ?? 100;
+    const maxSteps = opts?.maxStepsOverride ?? policy?.maxSteps ?? 100;
+    let runHandlers = opts?.handlers;
+    if (!runHandlers) {
+      runHandlers = await this.resolveHandlersForRun(def);
+      this.applyIOMappingForRun(def, runHandlers);
+    }
 
     while (run.status === 'running') {
       const step = def.steps.find(s => s.id === run.state.currentStepId);
@@ -199,13 +378,14 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
 
       stepsExecuted++;
       if (stepsExecuted > maxSteps) {
+        if (opts?.maxStepsOverride !== undefined) break; // tickRun: stop without failure
         this.failRun(run, `Exceeded max steps (${maxSteps})`);
         break;
       }
 
       this.emit({ type: 'step:started', runId: run.id, stepId: step.id, timestamp: now() });
 
-      const stepResult = await executeStep(step, run.state, this.handlers);
+      const stepResult = await this.executeStepWithExpressionFallback(step, run.state, runHandlers);
 
       if (stepResult.status === 'failed') {
         this.emit({ type: 'step:failed', runId: run.id, stepId: step.id, timestamp: now(), data: { error: stepResult.error } });
@@ -218,14 +398,14 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
             retries--;
             const delayMs = step.retryDelayMs ?? (step.config?.['retryDelayMs'] as number | undefined) ?? 0;
             if (delayMs > 0) await sleep(delayMs);
-            retryResult = await executeStep(step, run.state, this.handlers);
+            retryResult = await this.executeStepWithExpressionFallback(step, run.state, runHandlers);
           }
           if (retryResult.status === 'completed') {
             (run as { state: WorkflowState }).state = advanceState(run.state, retryResult, resolveNextStep(def, step.id, retryResult));
             this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
             await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
             if (isTerminal(def, run.state)) {
-              this.completeRun(run);
+              await this.completeRun(run, def);
             }
             continue;
           }
@@ -247,6 +427,25 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       }
 
       this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
+
+      // Phase 5 — cost ceiling check at step boundary (after success, before
+      // advancing). Callers report deltas via this.costMeter.record(runId, …);
+      // we read the cumulative total and compare against policy.costCeiling.
+      if (policy?.costCeiling !== undefined && policy.costCeiling > 0) {
+        const total = await Promise.resolve(this.costMeter.total(run.id));
+        run.costTotal = total;
+        if (total > policy.costCeiling) {
+          this.emit({
+            type: 'workflow:cost_exceeded',
+            runId: run.id,
+            stepId: step.id,
+            timestamp: now(),
+            data: { costTotal: total, ceiling: policy.costCeiling },
+          });
+          this.failRun(run, `Cost ceiling exceeded: $${total.toFixed(4)} > $${policy.costCeiling.toFixed(4)}`);
+          break;
+        }
+      }
 
       // human-task step => create task in queue and pause
       if (step.type === 'human-task' &&
@@ -294,7 +493,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
 
       if (!nextStepId || isTerminal(def, run.state)) {
-        this.completeRun(run);
+        await this.completeRun(run, def);
       }
     }
 
@@ -372,10 +571,76 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     return this.resumeRun(task.workflowRunId, { decision: 'rejected', data: decision.data });
   }
 
-  private completeRun(run: WorkflowRun): void {
+  /**
+   * Phase 1 — For `condition` and `branch` steps, if the step's
+   * `config.expression` is set, evaluate it directly against
+   * `state.variables` and return the boolean/value as the step output.
+   * Otherwise fall back to the registered handler executor. This keeps
+   * apps from having to register one tiny handler per branching decision.
+   */
+  private async executeStepWithExpressionFallback(
+    step: WorkflowStep,
+    state: WorkflowState,
+    handlers: StepHandlerMap,
+  ): Promise<WorkflowStepResult> {
+    if ((step.type === 'condition' || step.type === 'branch') && hasExpression(step.config)) {
+      const start = now();
+      try {
+        const expr = (step.config as Record<string, unknown>)['expression'];
+        const value =
+          step.type === 'condition'
+            ? evaluateBoolean(expr, state.variables)
+            : (await import('./expressions.js')).evaluateExpression(expr, state.variables);
+        return {
+          stepId: step.id,
+          status: 'completed',
+          output: value,
+          startedAt: start,
+          completedAt: now(),
+        };
+      } catch (err) {
+        return {
+          stepId: step.id,
+          status: 'failed',
+          error: String(err),
+          startedAt: start,
+          completedAt: now(),
+        };
+      }
+    }
+    return executeStep(step, state, handlers);
+  }
+
+  private async completeRun(run: WorkflowRun, def: WorkflowDefinition): Promise<void> {
     (run as { status: WorkflowRunStatus }).status = 'completed';
     run.completedAt = now();
+    // Phase 5 — capture final cost total before persisting.
+    run.costTotal = await Promise.resolve(this.costMeter.total(run.id));
     this.emit({ type: 'workflow:completed', runId: run.id, timestamp: now() });
+    // Phase 4 — emit typed mesh contract if declared. Failures are swallowed.
+    if (this.contractEmitter && def.outputContract) {
+      try {
+        const contract = buildEmittedContract(def, run);
+        if (contract) {
+          await this.contractEmitter.emit(contract);
+          this.emit({
+            type: 'workflow:contract_emitted',
+            runId: run.id,
+            timestamp: now(),
+            data: { kind: contract.kind, meshId: contract.meta.meshId },
+          });
+        }
+      } catch (err) {
+        // Best-effort: log via bus, never fail the run.
+        if (this.bus) {
+          this.bus.emit({
+            type: 'workflow:contract_emit_failed',
+            timestamp: Date.now(),
+            data: { runId: run.id, error: err instanceof Error ? err.message : String(err) },
+          });
+        }
+      }
+    }
   }
 
   private failRun(run: WorkflowRun, error: string): void {

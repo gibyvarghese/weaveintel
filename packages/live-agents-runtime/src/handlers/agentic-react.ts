@@ -30,6 +30,7 @@
 
 import { weaveLiveAgent, type TaskHandler } from '@weaveintel/live-agents';
 import type { HandlerContext, HandlerKindRegistration } from '../handler-registry.js';
+import { dbPrepareFromConfig } from '../db-prepare-resolver.js';
 
 export interface AgenticReactConfig {
   systemPromptSkillKey?: string;
@@ -76,7 +77,22 @@ function buildAgenticReact(ctx: HandlerContext): TaskHandler {
     role: ctx.agent.roleKey,
     maxSteps: cfg.maxSteps ?? 60,
     log: ctx.log,
-    prepare: async ({ inbound }: { inbound: { subject: string; body: string } | null }) => {
+    prepare: ctx.prepareConfig
+      ? // Phase 2 — DB-driven declarative recipe takes precedence over the
+        //         inline binding-config prepare. Caller-supplied prepare on
+        //         weaveLiveAgent ALWAYS wins, but we are inside the recipe
+        //         path so neither layer is bypassed.
+        dbPrepareFromConfig(ctx.prepareConfig, {
+          ...(ctx.tools ? { tools: ctx.tools } : {}),
+          ...(ctx.prepareDeps ?? {}),
+          defaultSystemPrompt:
+            ctx.prepareDeps?.defaultSystemPrompt ??
+            cfg.fallbackPrompt ??
+            interpolate(DEFAULT_FALLBACK_PROMPT_TEMPLATE, {
+              name: ctx.agent.name || ctx.agent.roleKey,
+            }),
+        }).prepare
+      : async ({ inbound }: { inbound: { subject: string; body: string } | null }) => {
       // 1. Resolve the system prompt — DB-driven first, fallback to config text.
       let systemPrompt = '';
       if (cfg.systemPromptSkillKey && ctx.resolveSystemPrompt) {

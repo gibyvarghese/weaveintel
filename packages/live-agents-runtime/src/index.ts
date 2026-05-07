@@ -89,6 +89,24 @@ export {
   type WeaveDbLiveAgentPolicyOptions,
 } from './db-policy.js';
 
+// Phase 2 (DB-driven capability plan) — declarative `prepare()` recipes.
+// Parse `live_agents.prepare_config_json` into a typed config and synthesise
+// a `prepare()` function with the same shape a handler author would write
+// by hand. See `db-prepare-resolver.ts` for the recipe schema.
+export {
+  parsePrepareConfig,
+  dbPrepareFromConfig,
+  type PrepareConfig,
+  type PrepareSystemPromptRecipe,
+  type PrepareUserGoalRecipe,
+  type PrepareMemoryRecipe,
+  type PrepareInbound,
+  type PrepareInput,
+  type PrepareOutput,
+  type PrepareResolutionDeps,
+  type PreparedRecipe,
+} from './db-prepare-resolver.js';
+
 // Phase 4 — Attention policy factory. Converts a live_attention_policies DB
 // row into a live AttentionPolicy instance. Delegates to the shared policy
 // constructors in @weaveintel/live-agents (heuristic, cron, model kinds).

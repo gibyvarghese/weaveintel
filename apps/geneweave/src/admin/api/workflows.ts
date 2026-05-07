@@ -38,13 +38,22 @@ export function registerWorkflowRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['steps'] || !body['entry_step_id']) { json(res, 400, { error: 'name, steps, and entry_step_id required' }); return; }
+    // Pack `output_contract` into metadata JSON under a reserved key so
+    // workflow runs can emit typed completion contracts (Phase 4 of the
+    // DB-Driven Capability Plan). `rowToWorkflow` in workflow-engine.ts
+    // unpacks it on read.
+    const baseMetadata = (body['metadata'] && typeof body['metadata'] === 'object') ? (body['metadata'] as Record<string, unknown>) : {};
+    const merged = body['output_contract']
+      ? { ...baseMetadata, __outputContract: body['output_contract'] }
+      : baseMetadata;
+    const metadataJson = (Object.keys(merged).length > 0) ? JSON.stringify(merged) : null;
     const id = 'wf-' + randomUUID().slice(0, 8);
     await db.createWorkflowDef({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       version: (body['version'] as string) ?? '1.0',
       steps: JSON.stringify(body['steps']),
       entry_step_id: body['entry_step_id'] as string,
-      metadata: body['metadata'] ? JSON.stringify(body['metadata']) : null,
+      metadata: metadataJson,
       enabled: body['enabled'] !== false ? 1 : 0,
     });
     const workflow = await db.getWorkflowDef(id);
@@ -64,7 +73,13 @@ export function registerWorkflowRoutes(
     if (body['version'] !== undefined) fields['version'] = body['version'];
     if (body['steps'] !== undefined) fields['steps'] = JSON.stringify(body['steps']);
     if (body['entry_step_id'] !== undefined) fields['entry_step_id'] = body['entry_step_id'];
-    if (body['metadata'] !== undefined) fields['metadata'] = JSON.stringify(body['metadata']);
+    if (body['metadata'] !== undefined || body['output_contract'] !== undefined) {
+      const baseMetadata = (body['metadata'] && typeof body['metadata'] === 'object') ? (body['metadata'] as Record<string, unknown>) : {};
+      const merged = body['output_contract']
+        ? { ...baseMetadata, __outputContract: body['output_contract'] }
+        : baseMetadata;
+      fields['metadata'] = (Object.keys(merged).length > 0) ? JSON.stringify(merged) : null;
+    }
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
     await db.updateWorkflowDef(params['id']!, fields as any);
     const workflow = await db.getWorkflowDef(params['id']!);

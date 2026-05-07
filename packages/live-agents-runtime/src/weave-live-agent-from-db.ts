@@ -32,6 +32,10 @@ import {
 } from './handler-registry.js';
 import { createDefaultHandlerRegistry } from './index.js';
 import type { SingleAgentReaderDb } from './db-types.js';
+import {
+  parsePrepareConfig,
+  type PrepareResolutionDeps,
+} from './db-prepare-resolver.js';
 
 export interface WeaveLiveAgentFromDbOptions {
   /** Optional StateStore. Required only if the handler kind reads from
@@ -53,6 +57,12 @@ export interface WeaveLiveAgentFromDbOptions {
 
   // ── Per-tick context extras (forwarded to the handler) ──
   resolveSystemPrompt?: (key: string) => Promise<string | null>;
+  /**
+   * Phase 2 — dependencies for the declarative `prepare()` recipe runtime.
+   * Required when the agent's `prepare_config_json` references
+   * `systemPrompt: { promptKey }`.
+   */
+  prepareDeps?: PrepareResolutionDeps;
   /** Free-form context fields the handler kind expects. Spread into the
    *  built `HandlerContext` (e.g. `approvalDb`, `resolveAgentByRole`). */
   extraContext?: Record<string, unknown>;
@@ -156,6 +166,17 @@ export async function weaveLiveAgentFromDb(
 
   // 5. Build the per-tick HandlerContext. Conditional spreads keep
   //    exactOptionalPropertyTypes-safe.
+  // Phase 2 — load the declarative recipe from the agent row, if any.
+  let prepareConfig: ReturnType<typeof parsePrepareConfig> = null;
+  if (row.prepare_config_json) {
+    try {
+      prepareConfig = parsePrepareConfig(row.prepare_config_json);
+    } catch (err) {
+      log(
+        `agent ${agentId} prepare_config parse failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
   const context: HandlerContext = {
     binding,
     agent,
@@ -166,6 +187,8 @@ export async function weaveLiveAgentFromDb(
     ...(opts.resolveSystemPrompt
       ? { resolveSystemPrompt: opts.resolveSystemPrompt }
       : {}),
+    ...(prepareConfig ? { prepareConfig } : {}),
+    ...(opts.prepareDeps ? { prepareDeps: opts.prepareDeps } : {}),
     ...(opts.extraContext ?? {}),
   };
 

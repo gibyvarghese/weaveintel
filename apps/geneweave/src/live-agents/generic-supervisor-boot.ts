@@ -191,6 +191,19 @@ export async function startGenericSupervisorIfEnabled(
       auditEmitter: new DbToolAuditEmitter(opts.db),
     }),
     resolveSystemPrompt,
+    // Phase 2 (DB-driven capability plan) — declarative `prepare()`
+    // recipes loaded from `live_agents.prepare_config_json`. We delegate
+    // prompt-text resolution to the same `resolveSystemPrompt` helper
+    // above so a recipe `systemPrompt: { promptKey }` reaches the live
+    // prompt registry exactly as a hand-written prepare() would. Missing
+    // keys collapse to empty string; the recipe synthesiser then falls
+    // back to its `defaultSystemPrompt` (per-handler default).
+    prepareDeps: {
+      resolvePromptText: async (promptKey: string) => {
+        const text = await resolveSystemPrompt(promptKey);
+        return text ?? '';
+      },
+    },
     // Inject per-tick context extras for handlers that need DB access:
     //   - human.approval needs `approvalDb` + `newApprovalId`.
     //   - deterministic.* needs `resolveAgentByRole` (looks up the live

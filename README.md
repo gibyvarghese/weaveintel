@@ -586,6 +586,10 @@ The full local DB is `./geneweave.db`. Reset with `rm geneweave.db` and restart 
 | 94 | [`weaveAgent` ↔ `weaveLiveAgent` parity](examples/94-weave-live-agent-parity.ts) | Side-by-side capability parity | none |
 | 95 | [Phase 5 Kaggle-style routing](examples/95-live-agents-phase5-kaggle-style-routing.ts) | Production routing pattern | none |
 | 96 | [`weaveLiveMeshFromDb`](examples/96-live-agents-phase6-mesh-from-db.ts) | One-call DB mesh hydration | none |
+| 99 | [DB-driven triggers](examples/99-db-driven-triggers.ts) | Unified trigger dispatcher (manual / cron / webhook → workflow / webhook_out) | none |
+| 100 | [Mesh ↔ workflow binding](examples/100-mesh-workflow-binding.ts) | Workflow `outputContract` → contract bus → trigger → downstream workflow cascade | none |
+| 101 | [Workflow governance](examples/101-workflow-governance.ts) | Input validation + cost ceiling + replay determinism + capability policy precedence | none |
+| 102 | [Capability packs](examples/102-capability-packs.ts) | Versioned, exportable bundles of DB rows — manifest validation, install/uninstall via ledger | none |
 
 > **All examples runnable from a fresh clone** after `npm install && npm run build`. Examples that need an API key say so in the table.
 
@@ -686,7 +690,7 @@ The full local DB is `./geneweave.db`. Reset with `rm geneweave.db` and restart 
 | [`@weaveintel/recipes`](packages/recipes) | Pre-built agent factories |
 | [`@weaveintel/devtools`](packages/devtools) | Scaffolding, inspection, mocks |
 | [`@weaveintel/ui-primitives`](packages/ui-primitives) | Streaming events + widgets (table, chart, form, code, timeline) |
-| [`@weaveintel/triggers`](packages/triggers) | Cron, webhook, queue triggers |
+| [`@weaveintel/triggers`](packages/triggers) | Unified DB-driven triggers (manual, cron, webhook, signal-bus → workflow / agent / webhook_out) — see [README](packages/triggers/README.md) |
 | [`@weaveintel/collaboration`](packages/collaboration) | Multi-user session handoff |
 | [`@weaveintel/social-growth`](packages/social-growth) | Social growth automations |
 | [`@weaveintel/geneweave`](apps/geneweave) | Reference full-stack app |

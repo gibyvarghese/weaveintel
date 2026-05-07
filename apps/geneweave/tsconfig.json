@@ -13,6 +13,8 @@
     { "path": "../../packages/redaction" },
     { "path": "../../packages/evals" },
     { "path": "../../packages/workflows" },
+    { "path": "../../packages/triggers" },
+    { "path": "../../packages/capability-packs" },
     { "path": "../../packages/guardrails" },
     { "path": "../../packages/human-tasks" },
     { "path": "../../packages/contracts" },

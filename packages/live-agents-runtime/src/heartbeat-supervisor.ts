@@ -42,6 +42,10 @@ import {
 } from './handler-registry.js';
 import { resolveAttentionPolicyFromDb } from './attention-factory.js';
 import { bridgeRunState, type RunBridgeDb } from './run-bridge.js';
+import {
+  parsePrepareConfig,
+  type PrepareResolutionDeps,
+} from './db-prepare-resolver.js';
 
 // ─── Lightweight DB row shapes the supervisor needs ──────────
 
@@ -52,6 +56,9 @@ export interface SupervisorAgentRowLike {
   name: string;
   status: string;
   attention_policy_key: string | null;
+  /** Phase 2 — declarative `prepare()` recipe JSON. Optional; when null
+   *  the dispatcher falls back to the inline binding-config prepare. */
+  prepare_config_json?: string | null;
 }
 
 export interface SupervisorMeshRowLike {
@@ -127,6 +134,14 @@ export interface HeartbeatSupervisorOptions {
   policy?: LiveAgentPolicy;
   /** DB-backed prompt resolver, passed through to handlers. */
   resolveSystemPrompt?: (key: string) => Promise<string | null>;
+  /**
+   * Phase 2 (DB-driven capability plan) — dependencies injected into
+   * every `HandlerContext` for the declarative `prepare()` recipe runtime.
+   * Required when any active agent has a `prepare_config_json` referencing
+   * `systemPrompt: { promptKey }`. Apps wire `resolvePromptText` to their
+   * prompt-record runtime (e.g. `@weaveintel/prompts`).
+   */
+  prepareDeps?: PrepareResolutionDeps;
   /** Optional default attention policy DB key. */
   attentionPolicyKey?: string;
   /**
@@ -231,6 +246,22 @@ export async function createHeartbeatSupervisor(
       handlerKind: row.handler_kind,
       config,
     };
+    // Phase 2 — load the declarative `prepare()` recipe, if any. We pull
+    // the agent row from the same `listLiveAgents` slice the scheduler
+    // already exercises so no new DB method is required. Errors during
+    // recipe parsing surface loudly so operators see misconfigurations.
+    let prepareConfig: ReturnType<typeof parsePrepareConfig> = null;
+    try {
+      const agentRows = await opts.db.listLiveAgents({ meshId: agent.meshId });
+      const agentRow = agentRows.find((a) => a.id === agentId);
+      if (agentRow?.prepare_config_json) {
+        prepareConfig = parsePrepareConfig(agentRow.prepare_config_json);
+      }
+    } catch (err) {
+      log(
+        `dispatcher: agent ${agentId} prepare_config parse failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     const model = opts.modelFactory ? await opts.modelFactory() : undefined;
     const baseAgent = {
       id: agent.id,
@@ -247,6 +278,8 @@ export async function createHeartbeatSupervisor(
       ...(opts.modelResolver ? { modelResolver: opts.modelResolver } : {}),
       ...(opts.policy ? { policy: opts.policy } : {}),
       ...(opts.resolveSystemPrompt ? { resolveSystemPrompt: opts.resolveSystemPrompt } : {}),
+      ...(prepareConfig ? { prepareConfig } : {}),
+      ...(opts.prepareDeps ? { prepareDeps: opts.prepareDeps } : {}),
       ...(extras ?? {}),
     };
     const handler = opts.handlerRegistry.build(hctx);

@@ -22,6 +22,7 @@ import {
   KAGGLE_ARC_AGI_3_SOLVER_TEMPLATE,
   KAGGLE_DEFAULT_DISCOVERY,
   KAGGLE_ARC_STRATEGY_PRESETS,
+  KAGGLE_GENERIC_ML_SOLVER,
 } from './playbook-seed-content.js';
 import { KAGGLE_PLAYBOOK_CATEGORY } from './playbook-resolver.js';
 
@@ -31,6 +32,8 @@ const FRAGMENT_ID_ARC_WORKFLOW = 'frag-kaggle-workflow-arc-agi-3';
 const FRAGMENT_KEY_ARC_WORKFLOW = 'kaggle.workflow.arc_agi_3';
 const FRAGMENT_ID_ARC_SOLVER = 'frag-kaggle-solver-template-arc-agi-3';
 const FRAGMENT_KEY_ARC_SOLVER = 'kaggle.solver_template.arc_agi_3';
+const FRAGMENT_ID_GENERIC_ML_SOLVER = 'frag-kaggle-solver-template-generic-ml';
+const FRAGMENT_KEY_GENERIC_ML_SOLVER = 'kaggle.solver_template.generic_ml';
 
 const SKILL_ID_DEFAULT = 'kaggle-playbook-default';
 const SKILL_ID_ARC = 'kaggle-playbook-arc-agi-3';
@@ -47,7 +50,7 @@ async function ensureFragment(
   category: string,
   content: string,
 ): Promise<'inserted' | 'exists'> {
-  const CURRENT_VERSION = '1.4.0';
+  const CURRENT_VERSION = '1.6.0';
   const existing = await db.getPromptFragment(id).catch(() => null);
   const byKey = existing ?? (await db.getPromptFragmentByKey(key).catch(() => null));
   if (byKey) {
@@ -93,8 +96,28 @@ async function ensureSkill(
     priority: number;
   },
 ): Promise<'inserted' | 'exists'> {
+  const CURRENT_SKILL_VERSION = '1.1.0';
   const existing = await db.getSkill(row.id).catch(() => null);
-  if (existing) return 'exists';
+  if (existing) {
+    // Refresh examples + instructions when the bundled seed has bumped its
+    // version. Operators who edit the row in admin should bump the row's
+    // version too if they want to opt back into seed updates.
+    if (existing.version !== CURRENT_SKILL_VERSION) {
+      try {
+        await db.updateSkill(row.id, {
+          examples: JSON.stringify(row.examples),
+          instructions: row.instructions,
+          tool_names: JSON.stringify(row.toolNames),
+          trigger_patterns: JSON.stringify(row.triggerPatterns),
+          version: CURRENT_SKILL_VERSION,
+        });
+        return 'inserted';
+      } catch {
+        return 'exists';
+      }
+    }
+    return 'exists';
+  }
   await db.createSkill({
     id: row.id,
     name: row.name,
@@ -106,7 +129,7 @@ async function ensureSkill(
     examples: JSON.stringify(row.examples),
     tags: JSON.stringify(['kaggle', 'live-agents', 'playbook']),
     priority: row.priority,
-    version: '1.0.0',
+    version: CURRENT_SKILL_VERSION,
     tool_policy_key: null,
     supervisor_agent_id: null,
     domain_sections: null,
@@ -149,6 +172,14 @@ export async function seedKaggleArcPlaybook(
     'kaggle',
     KAGGLE_ARC_AGI_3_SOLVER_TEMPLATE,
   );
+  fragments[FRAGMENT_KEY_GENERIC_ML_SOLVER] = await ensureFragment(
+    db,
+    FRAGMENT_ID_GENERIC_ML_SOLVER,
+    FRAGMENT_KEY_GENERIC_ML_SOLVER,
+    'Kaggle generic ML baseline solver template (catch-all default)',
+    'kaggle',
+    KAGGLE_GENERIC_ML_SOLVER,
+  );
 
   const skills: Record<string, 'inserted' | 'exists'> = {};
   skills[SKILL_ID_DEFAULT] = await ensureSkill(db, {
@@ -166,6 +197,13 @@ export async function seedKaggleArcPlaybook(
     ],
     examples: {
       shape: 'unknown',
+      // Generic ML scaffold (not a heuristic): tries to detect the most-likely
+      // tabular layout under /kaggle/input/, trains a quick HistGradientBoosting
+      // baseline, and writes submission.csv. The agentic strategist can — and
+      // should — push smarter kernels per competition; this template is only
+      // the deterministic fallback for the catch-all playbook so a run never
+      // silently no-ops with "no solverTemplate".
+      solverTemplateFragmentKey: FRAGMENT_KEY_GENERIC_ML_SOLVER,
       maxIterations: 5,
       // Operational defaults applied across handlers. The catch-all `*`
       // playbook acts as the runtime config carrier so operators can edit

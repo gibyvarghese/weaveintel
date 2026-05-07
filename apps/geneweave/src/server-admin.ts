@@ -78,6 +78,8 @@ import {
   registerRoutingSurfaceItemRoutes,
   registerRoutingExperimentRoutes,
   registerCostByTaskRoutes,
+  registerCapabilityPolicyBindingRoutes,
+  registerCapabilityPackRoutes,
 } from './admin/api/index.js';
 import {
   normalizePromptVariables,
@@ -1281,6 +1283,8 @@ export function registerAdminRoutes(
   registerWorkerAgentRoutes(router, db, adminHelpers);
   registerSupervisorAgentRoutes(router, db, adminHelpers);
   registerToolApprovalRequestRoutes(router, db, adminHelpers);
+  registerCapabilityPolicyBindingRoutes(router, db, adminHelpers);
+  registerCapabilityPackRoutes(router, db, adminHelpers);
 
   // ── Phase K3: Kaggle projection admin CRUD ───────────────
   registerKaggleCompetitionRoutes(router, db, adminHelpers);

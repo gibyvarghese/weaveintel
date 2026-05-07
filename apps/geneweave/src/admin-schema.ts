@@ -57,6 +57,9 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'task-policies', label: 'Task Policies' },
     { key: 'trigger-definitions', label: 'Triggers' },
     { key: 'replay-scenarios', label: 'Replay' },
+    { key: 'capability-policy-bindings', label: 'Capability Bindings' },
+    { key: 'capability-packs', label: 'Capability Packs' },
+    { key: 'capability-pack-installations', label: 'Pack Installations' },
   ]},
   { label: 'Routing', icon: '\uD83D\uDDFA\uFE0F', tabs: [
     { key: 'task-types', label: 'Task Types' },

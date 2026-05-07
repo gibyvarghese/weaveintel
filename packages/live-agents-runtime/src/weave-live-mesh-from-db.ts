@@ -127,6 +127,13 @@ export interface WeaveLiveMeshFromDbOptions {
   // ── Supervisor knobs (forwarded as-is) ──
   /** DB-backed prompt resolver. Forwarded to handlers via context. */
   resolveSystemPrompt?: HeartbeatSupervisorOptions['resolveSystemPrompt'];
+  /**
+   * Phase 2 — dependencies for the declarative `prepare()` recipe runtime.
+   * Required when any agent's `prepare_config_json` references
+   * `systemPrompt: { promptKey }`. Wire to your prompt-record runtime
+   * (e.g. `@weaveintel/prompts`).
+   */
+  prepareDeps?: HeartbeatSupervisorOptions['prepareDeps'];
   /** Default attention policy DB key. */
   attentionPolicyKey?: string;
   /** Optional hook for per-binding context fields (e.g. `approvalDb`,
@@ -246,6 +253,7 @@ export async function weaveLiveMeshFromDb(
     ...(opts.resolveSystemPrompt
       ? { resolveSystemPrompt: opts.resolveSystemPrompt }
       : {}),
+    ...(opts.prepareDeps ? { prepareDeps: opts.prepareDeps } : {}),
     ...(opts.attentionPolicyKey
       ? { attentionPolicyKey: opts.attentionPolicyKey }
       : {}),

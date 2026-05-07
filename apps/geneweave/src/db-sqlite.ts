@@ -17,7 +17,8 @@ import type {
   TemporalTimerRow, TemporalStopwatchRow, TemporalReminderRow,
   PromptRow, PromptFrameworkRow, PromptFragmentRow, PromptContractRow, PromptStrategyRow,
   PromptVersionRow, PromptExperimentRow, PromptEvalDatasetRow, PromptEvalRunRow, PromptOptimizerRow, PromptOptimizationRunRow,
-  GuardrailRow, RoutingPolicyRow, WorkflowDefRow,
+  GuardrailRow, RoutingPolicyRow, WorkflowDefRow, WorkflowHandlerKindRow,
+  TriggerRow, TriggerInvocationRow, MeshContractRow,
   ToolConfigRow, ToolCatalogRow, ToolPolicyRow, SkillRow, WorkerAgentRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
   SupervisorAgentRow, AgentToolRow, ResolvedSupervisorAgent,
   IdentityRuleRow, MemoryGovernanceRow, SearchProviderRow, HttpEndpointRow,
@@ -31,7 +32,8 @@ import type {
   IdempotencyRecordRow,
   OAuthFlowStateRow,
   MemoryExtractionEventRow,
-  MetricsSummary, WorkflowRunRow, GuardrailEvalRow, ModelPricingRow,
+  MetricsSummary, WorkflowRunRow, WorkflowCheckpointRow, CapabilityPolicyBindingRow, GuardrailEvalRow, ModelPricingRow,
+  CapabilityPackRow, CapabilityPackInstallationRow, CapabilityPackExperimentRow, CapabilityPackStatus,
   WebsiteCredentialRow,
   SvBudgetEnvelopeRow, SvHypothesisRow, SvHypothesisStatus, SvSubClaimRow, SvVerdictRow,
   SvEvidenceEventRow, SvAgentTurnRow,
@@ -1703,6 +1705,147 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM workflow_defs WHERE id = ?').run(id);
   }
 
+  // ─── Workflow Platform Phase 1: Handler Kinds Catalog ─────
+
+  async listWorkflowHandlerKinds(): Promise<WorkflowHandlerKindRow[]> {
+    return this.d.prepare('SELECT * FROM workflow_handler_kinds ORDER BY kind ASC').all() as WorkflowHandlerKindRow[];
+  }
+
+  async getWorkflowHandlerKind(kind: string): Promise<WorkflowHandlerKindRow | null> {
+    return (this.d.prepare('SELECT * FROM workflow_handler_kinds WHERE kind = ?').get(kind) as WorkflowHandlerKindRow) ?? null;
+  }
+
+  async upsertWorkflowHandlerKind(row: Omit<WorkflowHandlerKindRow, 'created_at' | 'updated_at'>): Promise<void> {
+    // INSERT … ON CONFLICT(kind) DO UPDATE — preserves operator-edited
+    // `enabled` flag and overwrites description/config_schema/source from
+    // the in-process registry on every startup.
+    this.d.prepare(
+      `INSERT INTO workflow_handler_kinds (id, kind, description, config_schema, enabled, source)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(kind) DO UPDATE SET
+         description = excluded.description,
+         config_schema = excluded.config_schema,
+         source = excluded.source,
+         updated_at = datetime('now')`,
+    ).run(row.id, row.kind, row.description ?? null, row.config_schema ?? null, row.enabled, row.source);
+  }
+
+  // ─── Phase 3: Unified Triggers ─────────────────────────────
+
+  async listTriggers(opts?: { enabled?: boolean; sourceKind?: string; targetKind?: string }): Promise<TriggerRow[]> {
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (opts?.enabled !== undefined) { where.push('enabled = ?'); args.push(opts.enabled ? 1 : 0); }
+    if (opts?.sourceKind) { where.push('source_kind = ?'); args.push(opts.sourceKind); }
+    if (opts?.targetKind) { where.push('target_kind = ?'); args.push(opts.targetKind); }
+    const sql = `SELECT * FROM triggers ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY key ASC`;
+    return this.d.prepare(sql).all(...args) as TriggerRow[];
+  }
+
+  async getTrigger(id: string): Promise<TriggerRow | null> {
+    return (this.d.prepare('SELECT * FROM triggers WHERE id = ?').get(id) as TriggerRow) ?? null;
+  }
+
+  async getTriggerByKey(key: string): Promise<TriggerRow | null> {
+    return (this.d.prepare('SELECT * FROM triggers WHERE key = ?').get(key) as TriggerRow) ?? null;
+  }
+
+  async createTrigger(row: Omit<TriggerRow, 'created_at' | 'updated_at'>): Promise<TriggerRow> {
+    this.d.prepare(
+      `INSERT INTO triggers (id, key, enabled, source_kind, source_config, filter_expr, target_kind, target_config, input_map, rate_limit_per_minute, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      row.id, row.key, row.enabled, row.source_kind, row.source_config,
+      row.filter_expr ?? null, row.target_kind, row.target_config,
+      row.input_map ?? null, row.rate_limit_per_minute ?? null, row.metadata ?? null,
+    );
+    const created = await this.getTrigger(row.id);
+    if (!created) throw new Error(`createTrigger: row ${row.id} not found after insert`);
+    return created;
+  }
+
+  async updateTrigger(id: string, patch: Partial<Omit<TriggerRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const args: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      sets.push(`${k} = ?`);
+      args.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`);
+    args.push(id);
+    this.d.prepare(`UPDATE triggers SET ${sets.join(', ')} WHERE id = ?`).run(...args);
+  }
+
+  async deleteTrigger(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM triggers WHERE id = ?').run(id);
+  }
+
+  async insertTriggerInvocation(row: Omit<TriggerInvocationRow, 'created_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO trigger_invocations (id, trigger_id, fired_at, source_kind, status, target_ref, error_message, source_event)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      row.id, row.trigger_id, row.fired_at, row.source_kind, row.status,
+      row.target_ref ?? null, row.error_message ?? null, row.source_event ?? null,
+    );
+  }
+
+  async listTriggerInvocations(opts?: { triggerId?: string; status?: string; limit?: number; offset?: number }): Promise<TriggerInvocationRow[]> {
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (opts?.triggerId) { where.push('trigger_id = ?'); args.push(opts.triggerId); }
+    if (opts?.status) { where.push('status = ?'); args.push(opts.status); }
+    const limit = opts?.limit ?? 100;
+    const offset = opts?.offset ?? 0;
+    const sql = `SELECT * FROM trigger_invocations ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY fired_at DESC LIMIT ? OFFSET ?`;
+    return this.d.prepare(sql).all(...args, limit, offset) as TriggerInvocationRow[];
+  }
+
+  // ─── Phase 4: Mesh contracts ───────────────────────────────
+
+  async insertMeshContract(row: Omit<MeshContractRow, 'created_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO mesh_contracts (
+         id, kind, body_json, evidence_json, mesh_id,
+         source_workflow_definition_id, source_workflow_run_id, source_agent_id,
+         metadata, emitted_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      row.id, row.kind, row.body_json, row.evidence_json ?? null, row.mesh_id ?? null,
+      row.source_workflow_definition_id ?? null, row.source_workflow_run_id ?? null, row.source_agent_id ?? null,
+      row.metadata ?? null, row.emitted_at,
+    );
+  }
+
+  async getMeshContract(id: string): Promise<MeshContractRow | null> {
+    const r = this.d.prepare('SELECT * FROM mesh_contracts WHERE id = ?').get(id) as MeshContractRow | undefined;
+    return r ?? null;
+  }
+
+  async listMeshContracts(opts?: {
+    kind?: string;
+    meshId?: string;
+    workflowRunId?: string;
+    after?: string;
+    before?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<MeshContractRow[]> {
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (opts?.kind) { where.push('kind = ?'); args.push(opts.kind); }
+    if (opts?.meshId) { where.push('mesh_id = ?'); args.push(opts.meshId); }
+    if (opts?.workflowRunId) { where.push('source_workflow_run_id = ?'); args.push(opts.workflowRunId); }
+    if (opts?.after) { where.push('emitted_at >= ?'); args.push(opts.after); }
+    if (opts?.before) { where.push('emitted_at <= ?'); args.push(opts.before); }
+    const limit = opts?.limit ?? 100;
+    const offset = opts?.offset ?? 0;
+    const sql = `SELECT * FROM mesh_contracts ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY emitted_at DESC LIMIT ? OFFSET ?`;
+    return this.d.prepare(sql).all(...args, limit, offset) as MeshContractRow[];
+  }
+
   // ─── Admin: Tool catalog ───────────────────────────────────
 
   async createToolConfig(t: Omit<ToolCatalogRow, 'created_at' | 'updated_at'>): Promise<void> {
@@ -2500,8 +2643,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createWorkflowRun(r: Omit<WorkflowRunRow, 'completed_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO workflow_runs (id, workflow_id, status, state, input, error, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(r.id, r.workflow_id, r.status, r.state, r.input, r.error, r.started_at);
+      `INSERT INTO workflow_runs (id, workflow_id, status, state, input, error, started_at, cost_total, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(r.id, r.workflow_id, r.status, r.state, r.input, r.error, r.started_at, r.cost_total ?? 0, r.metadata ?? null);
   }
 
   async getWorkflowRun(id: string): Promise<WorkflowRunRow | null> {
@@ -2525,6 +2668,179 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (sets.length === 0) return;
     vals.push(id);
     this.d.prepare(`UPDATE workflow_runs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteWorkflowRun(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM workflow_runs WHERE id = ?').run(id);
+  }
+
+  // ─── Phase 5: Workflow Checkpoints ─────────────────────────
+
+  async createWorkflowCheckpoint(c: Omit<WorkflowCheckpointRow, 'created_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO workflow_checkpoints (id, run_id, workflow_id, step_id, state) VALUES (?, ?, ?, ?, ?)`,
+    ).run(c.id, c.run_id, c.workflow_id, c.step_id, c.state);
+  }
+
+  async listWorkflowCheckpoints(runId: string): Promise<WorkflowCheckpointRow[]> {
+    return this.d.prepare(
+      'SELECT * FROM workflow_checkpoints WHERE run_id = ? ORDER BY created_at ASC, rowid ASC',
+    ).all(runId) as WorkflowCheckpointRow[];
+  }
+
+  async deleteWorkflowCheckpoints(runId: string): Promise<void> {
+    this.d.prepare('DELETE FROM workflow_checkpoints WHERE run_id = ?').run(runId);
+  }
+
+  // ─── Phase 5: Capability Policy Bindings ───────────────────
+
+  async createCapabilityPolicyBinding(b: Omit<CapabilityPolicyBindingRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO capability_policy_bindings (id, binding_kind, binding_ref, policy_kind, policy_ref, precedence, enabled) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(b.id, b.binding_kind, b.binding_ref, b.policy_kind, b.policy_ref, b.precedence, b.enabled);
+  }
+
+  async getCapabilityPolicyBinding(id: string): Promise<CapabilityPolicyBindingRow | null> {
+    return (this.d.prepare('SELECT * FROM capability_policy_bindings WHERE id = ?').get(id) as CapabilityPolicyBindingRow | undefined) ?? null;
+  }
+
+  async listCapabilityPolicyBindings(opts?: { bindingKind?: string; bindingRef?: string; policyKind?: string; enabledOnly?: boolean }): Promise<CapabilityPolicyBindingRow[]> {
+    const wheres: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.bindingKind) { wheres.push('binding_kind = ?'); vals.push(opts.bindingKind); }
+    if (opts?.bindingRef) { wheres.push('binding_ref = ?'); vals.push(opts.bindingRef); }
+    if (opts?.policyKind) { wheres.push('policy_kind = ?'); vals.push(opts.policyKind); }
+    if (opts?.enabledOnly) { wheres.push('enabled = 1'); }
+    const sql = `SELECT * FROM capability_policy_bindings ${wheres.length ? 'WHERE ' + wheres.join(' AND ') : ''} ORDER BY precedence DESC, created_at ASC`;
+    return this.d.prepare(sql).all(...vals) as CapabilityPolicyBindingRow[];
+  }
+
+  async updateCapabilityPolicyBinding(id: string, fields: Partial<Omit<CapabilityPolicyBindingRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE capability_policy_bindings SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteCapabilityPolicyBinding(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM capability_policy_bindings WHERE id = ?').run(id);
+  }
+
+  // ─── Phase 6: Capability Packs ─────────────────────────────
+
+  async createCapabilityPack(p: Omit<CapabilityPackRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO capability_packs (id, pack_key, version, status, name, description, authored_by, manifest, installed_at, installed_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.pack_key, p.version, p.status, p.name, p.description, p.authored_by, p.manifest, p.installed_at, p.installed_by);
+  }
+
+  async getCapabilityPack(id: string): Promise<CapabilityPackRow | null> {
+    return (this.d.prepare('SELECT * FROM capability_packs WHERE id = ?').get(id) as CapabilityPackRow | undefined) ?? null;
+  }
+
+  async getCapabilityPackByKeyVersion(packKey: string, version: string): Promise<CapabilityPackRow | null> {
+    return (this.d.prepare('SELECT * FROM capability_packs WHERE pack_key = ? AND version = ?').get(packKey, version) as CapabilityPackRow | undefined) ?? null;
+  }
+
+  async listCapabilityPacks(opts?: { packKey?: string; status?: CapabilityPackStatus; limit?: number; offset?: number }): Promise<CapabilityPackRow[]> {
+    const wheres: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.packKey) { wheres.push('pack_key = ?'); vals.push(opts.packKey); }
+    if (opts?.status) { wheres.push('status = ?'); vals.push(opts.status); }
+    const sql = `SELECT * FROM capability_packs ${wheres.length ? 'WHERE ' + wheres.join(' AND ') : ''} ORDER BY pack_key ASC, created_at DESC, rowid DESC LIMIT ? OFFSET ?`;
+    vals.push(opts?.limit ?? 200, opts?.offset ?? 0);
+    return this.d.prepare(sql).all(...vals) as CapabilityPackRow[];
+  }
+
+  async updateCapabilityPack(id: string, fields: Partial<Omit<CapabilityPackRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE capability_packs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteCapabilityPack(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM capability_packs WHERE id = ?').run(id);
+  }
+
+  async createCapabilityPackInstallation(i: Omit<CapabilityPackInstallationRow, 'installed_at' | 'uninstalled_at'> & { installed_at?: string }): Promise<void> {
+    if (i.installed_at) {
+      this.d.prepare(
+        `INSERT INTO capability_pack_installations (id, pack_id, pack_key, pack_version, ledger, installed_by, installed_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(i.id, i.pack_id, i.pack_key, i.pack_version, i.ledger, i.installed_by, i.installed_at);
+    } else {
+      this.d.prepare(
+        `INSERT INTO capability_pack_installations (id, pack_id, pack_key, pack_version, ledger, installed_by) VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(i.id, i.pack_id, i.pack_key, i.pack_version, i.ledger, i.installed_by);
+    }
+  }
+
+  async getCapabilityPackInstallation(id: string): Promise<CapabilityPackInstallationRow | null> {
+    return (this.d.prepare('SELECT * FROM capability_pack_installations WHERE id = ?').get(id) as CapabilityPackInstallationRow | undefined) ?? null;
+  }
+
+  async listCapabilityPackInstallations(opts?: { packId?: string; activeOnly?: boolean; limit?: number; offset?: number }): Promise<CapabilityPackInstallationRow[]> {
+    const wheres: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.packId) { wheres.push('pack_id = ?'); vals.push(opts.packId); }
+    if (opts?.activeOnly) { wheres.push('uninstalled_at IS NULL'); }
+    const sql = `SELECT * FROM capability_pack_installations ${wheres.length ? 'WHERE ' + wheres.join(' AND ') : ''} ORDER BY installed_at DESC, rowid DESC LIMIT ? OFFSET ?`;
+    vals.push(opts?.limit ?? 200, opts?.offset ?? 0);
+    return this.d.prepare(sql).all(...vals) as CapabilityPackInstallationRow[];
+  }
+
+  async markCapabilityPackInstallationUninstalled(id: string, uninstalledAt?: string): Promise<void> {
+    this.d.prepare(
+      `UPDATE capability_pack_installations SET uninstalled_at = ? WHERE id = ?`,
+    ).run(uninstalledAt ?? new Date().toISOString(), id);
+  }
+
+  async createCapabilityPackExperiment(e: Omit<CapabilityPackExperimentRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO capability_pack_experiments (id, pack_key, name, variants, enabled) VALUES (?, ?, ?, ?, ?)`,
+    ).run(e.id, e.pack_key, e.name, e.variants, e.enabled);
+  }
+
+  async getCapabilityPackExperiment(id: string): Promise<CapabilityPackExperimentRow | null> {
+    return (this.d.prepare('SELECT * FROM capability_pack_experiments WHERE id = ?').get(id) as CapabilityPackExperimentRow | undefined) ?? null;
+  }
+
+  async listCapabilityPackExperiments(opts?: { packKey?: string; enabledOnly?: boolean }): Promise<CapabilityPackExperimentRow[]> {
+    const wheres: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.packKey) { wheres.push('pack_key = ?'); vals.push(opts.packKey); }
+    if (opts?.enabledOnly) { wheres.push('enabled = 1'); }
+    const sql = `SELECT * FROM capability_pack_experiments ${wheres.length ? 'WHERE ' + wheres.join(' AND ') : ''} ORDER BY created_at DESC, rowid DESC`;
+    return this.d.prepare(sql).all(...vals) as CapabilityPackExperimentRow[];
+  }
+
+  async updateCapabilityPackExperiment(id: string, fields: Partial<Omit<CapabilityPackExperimentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE capability_pack_experiments SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteCapabilityPackExperiment(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM capability_pack_experiments WHERE id = ?').run(id);
   }
 
   // ─── Guardrail Evaluations ─────────────────────────────────
@@ -6865,8 +7181,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
   async createLiveAgent(row: Omit<LiveAgentRow, 'created_at' | 'updated_at'>): Promise<LiveAgentRow> {
     this.d.prepare(
-      `INSERT INTO live_agents (id, mesh_id, agent_def_id, role_key, name, role_label, persona, objectives, success_indicators, attention_policy_key, contract_version_id, status, ordering, archived_at, model_capability_json, model_routing_policy_key, model_pinned_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(row.id, row.mesh_id, row.agent_def_id, row.role_key, row.name, row.role_label, row.persona, row.objectives, row.success_indicators, row.attention_policy_key, row.contract_version_id, row.status, row.ordering, row.archived_at, row.model_capability_json ?? null, row.model_routing_policy_key ?? null, row.model_pinned_id ?? null);
+      `INSERT INTO live_agents (id, mesh_id, agent_def_id, role_key, name, role_label, persona, objectives, success_indicators, attention_policy_key, contract_version_id, status, ordering, archived_at, model_capability_json, model_routing_policy_key, model_pinned_id, prepare_config_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.mesh_id, row.agent_def_id, row.role_key, row.name, row.role_label, row.persona, row.objectives, row.success_indicators, row.attention_policy_key, row.contract_version_id, row.status, row.ordering, row.archived_at, row.model_capability_json ?? null, row.model_routing_policy_key ?? null, row.model_pinned_id ?? null, row.prepare_config_json ?? null);
     return this.d.prepare('SELECT * FROM live_agents WHERE id = ?').get(row.id) as LiveAgentRow;
   }
   async updateLiveAgent(id: string, patch: Partial<Omit<LiveAgentRow, 'id' | 'mesh_id' | 'created_at'>>): Promise<void> {

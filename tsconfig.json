@@ -48,6 +48,7 @@
     { "path": "packages/tools-filewatch" },
     { "path": "packages/replay" },
     { "path": "packages/triggers" },
+    { "path": "packages/capability-packs" },
     { "path": "packages/tenancy" },
     { "path": "packages/sandbox" },
     { "path": "packages/extraction" },

@@ -6,6 +6,7 @@ import {
   competitionSlugFrom,
   emitToNextAgent,
   loadInboundTask,
+  parseInboundJson,
   resolveCreds,
   tryResolvePlaybook,
   DEFAULT_MAX_ITERATIONS,
@@ -50,6 +51,7 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
   const staticInner = opts.plannerModel ? buildInner(opts.plannerModel) : null;
 
   return async (action, context, execCtx) => {
+    console.log(`[STRATEGIST-AGENTIC-ENTRY] mesh=${context.agent.meshId} agent=${context.agent.id}`);
     let inner = staticInner;
     if (opts.modelResolver) {
       try {
@@ -81,15 +83,161 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
     }
     const result = await inner(action, context, execCtx);
     const summary = (result && 'summaryProse' in result && result.summaryProse) || 'Strategist agent finished.';
+    // Phase-fix: hand off to implementer (not validator) so the kernel actually
+    // gets authored before validation. Implementer parses the body as JSON
+    // ({ competitionId, iteration, strategyLabel, history, ... }), so we must
+    // produce that shape here — emitting only the LLM summary leaves implementer
+    // with no competitionId and the run stalls. We extract competition context
+    // from the same inbound the inner handler just consumed (either the
+    // discoverer's `{ competitions: [...] }` or validator feedback that already
+    // carries `competitionId`).
+    const inbound = await loadInboundTask(context);
+    const inboundJson = parseInboundJson(inbound?.body);
+    let competitionId = (inboundJson['competitionId'] as string) ?? '';
+    let title = (inboundJson['title'] as string) ?? '';
+    let metric = (inboundJson['metric'] as string) ?? 'unknown';
+    let lastIteration = Number(inboundJson['iteration'] ?? 0);
+    const history =
+      (inboundJson['history'] as Array<{ iteration: number; label: string; status: string }>) ?? [];
+    if (!competitionId && Array.isArray((inboundJson as { competitions?: unknown }).competitions)) {
+      const comps = (inboundJson as { competitions: Array<Record<string, unknown>> }).competitions;
+      const first = comps[0];
+      // Discoverer wraps each entry as { competition: {...}, intel: {...} }
+      // but legacy/deterministic paths may emit a flat KaggleCompetition. Accept both.
+      const comp = (first?.['competition'] as KaggleCompetition | undefined) ?? (first as KaggleCompetition | undefined);
+      if (comp) {
+        competitionId = comp.id;
+        title = comp.title ?? title;
+        metric = comp.evaluationMetric ?? metric;
+        lastIteration = 0;
+      }
+    }
+    // Agentic discoverer emits a free-text body whose first line is
+    // `competitionId: <slug>` rather than JSON. Fall through to a regex
+    // probe of the raw body so we still hand off cleanly in that mode.
+    if (!competitionId && inbound?.body) {
+      const m = inbound.body.match(/competitionId\s*:\s*([^\s\n]+)/i);
+      if (m && m[1]) competitionId = m[1].trim();
+    }
+    // As a last resort, try to lift a slug out of the agentic summary itself
+    // (the LLM frequently says "I will work on <slug>"). Match a `kaggle.com/competitions/<slug>` URL too.
+    if (!competitionId) {
+      const summaryStr = String(summary);
+      const url = summaryStr.match(/competitions\/([a-z0-9-]+)/i);
+      if (url && url[1]) competitionId = url[1];
+    }
+    if (!competitionId) {
+      log('agentic strategist: no competitionId in inbound; cannot hand off to implementer.');
+      return result ?? { completed: true };
+    }
+    const slug = competitionSlugFrom(competitionId);
+    const playbook = await tryResolvePlaybook(opts.playbookResolver, slug, 0, {}, log);
+    const maxIterations =
+      Number(inboundJson['maxIterations']) ||
+      playbook?.config.maxIterations ||
+      opts.maxIterations ||
+      DEFAULT_MAX_ITERATIONS;
+    const iteration = lastIteration + 1;
+
+    // Phase-fix (handoff data preservation): when the agentic strategist has
+    // already pushed kernels via its own ReAct tool loop, the deterministic
+    // implementer would skip (no playbook.solverTemplate for unknown comps)
+    // and the kernels the strategist actually pushed would be lost. Parse the
+    // machine-readable kernel block embedded by `summarizeKaggleRun` and route
+    // it directly to the validator in the validator's expected shape.
+    const kernel = parseKernelHandoffBlock(String(summary));
+    if (kernel) {
+      const validatorPayload = {
+        competitionId,
+        title,
+        metric,
+        iteration,
+        maxIterations,
+        playbookId: playbook?.skillId ?? null,
+        playbookName: playbook?.name ?? null,
+        strategyLabel: 'agentic',
+        kernelRef: kernel.kernelRef,
+        kernelUrl: kernel.kernelUrl,
+        kernelStatus: kernel.kernelStatus,
+        failureMessage: kernel.failureMessage,
+        outputFiles: kernel.outputFiles,
+        logExcerpt: kernel.logExcerpt,
+        agenticSummary: String(summary),
+        history: [...history, { iteration, label: 'agentic', status: kernel.kernelStatus }],
+      };
+      await emitToNextAgent(
+        context,
+        'validator',
+        `Iteration ${iteration} kernel result for ${competitionId} (agentic)`,
+        JSON.stringify(validatorPayload, null, 2),
+        'kaggle.implementer.kernel-result',
+      );
+      log(
+        `agentic strategist: routed kernel ${kernel.kernelRef} (status=${kernel.kernelStatus}) ` +
+          `directly to validator, bypassing implementer (no solverTemplate path).`,
+      );
+      return result ?? { completed: true };
+    }
+
+    // No kernel pushed by the strategist this tick — fall back to deterministic
+    // implementer handoff so a playbook-driven solverTemplate (if any) can run.
+    const approach = {
+      competitionId,
+      title,
+      metric,
+      iteration,
+      maxIterations,
+      playbookId: playbook?.skillId ?? null,
+      playbookName: playbook?.name ?? null,
+      strategyLabel: 'agentic',
+      agenticSummary: String(summary),
+      history,
+    };
     await emitToNextAgent(
       context,
-      'validator',
-      'Agentic strategist final approach for validation',
-      String(summary),
-      'kaggle.strategy.final',
+      'implementer',
+      `Approach plan iteration ${iteration} for ${competitionId} (agentic)`,
+      JSON.stringify(approach, null, 2),
+      'kaggle.strategy.approach',
     );
     return result ?? { completed: true };
   };
+}
+
+/** Parse the `---KERNEL_HANDOFF_JSON---` block embedded by
+ *  `summarizeKaggleRun` (in strategist-agent.ts). Returns null when the
+ *  marker is absent (no kernel pushed this tick) or the JSON is malformed. */
+interface ExtractedKernelResult {
+  kernelRef: string;
+  kernelUrl: string;
+  kernelStatus: string;
+  failureMessage: string | null;
+  outputFiles: string[];
+  logExcerpt: string;
+}
+
+function parseKernelHandoffBlock(summary: string): ExtractedKernelResult | null {
+  const m = summary.match(
+    /---KERNEL_HANDOFF_JSON---\s*([\s\S]*?)\s*---END_KERNEL_HANDOFF_JSON---/,
+  );
+  if (!m || !m[1]) return null;
+  try {
+    const parsed = JSON.parse(m[1]) as Partial<ExtractedKernelResult>;
+    if (!parsed || typeof parsed.kernelRef !== 'string' || !parsed.kernelRef) return null;
+    return {
+      kernelRef: parsed.kernelRef,
+      kernelUrl: typeof parsed.kernelUrl === 'string' ? parsed.kernelUrl : '',
+      kernelStatus: typeof parsed.kernelStatus === 'string' ? parsed.kernelStatus : 'pushed',
+      failureMessage:
+        typeof parsed.failureMessage === 'string' && parsed.failureMessage.length > 0
+          ? parsed.failureMessage
+          : null,
+      outputFiles: Array.isArray(parsed.outputFiles) ? parsed.outputFiles.map(String) : [],
+      logExcerpt: typeof parsed.logExcerpt === 'string' ? parsed.logExcerpt : '',
+    };
+  } catch {
+    return null;
+  }
 }
 
 /** Deterministic strategist — branches on inbound shape:
@@ -110,9 +258,12 @@ export function createStrategistDeterministic(ctx: SharedHandlerContext): TaskHa
 
     // Branch 1: discovery payload → start iteration 1.
     if (Array.isArray((parsed as { competitions?: unknown }).competitions)) {
-      const comps = (parsed as { competitions: KaggleCompetition[] }).competitions;
-      const comp = comps[0];
-      if (!comp) return { completed: true, summaryProse: 'Strategist: empty competition list.' };
+      const comps = (parsed as { competitions: Array<Record<string, unknown>> }).competitions;
+      const first = comps[0];
+      // Deterministic discoverer wraps each entry as { competition, intel }.
+      // Legacy callers may pass a flat KaggleCompetition. Accept both.
+      const comp = (first?.['competition'] as KaggleCompetition | undefined) ?? (first as KaggleCompetition | undefined);
+      if (!comp || !comp.id) return { completed: true, summaryProse: 'Strategist: empty competition list.' };
       const slug = competitionSlugFrom(comp.id);
       const playbook = await tryResolvePlaybook(opts.playbookResolver, slug, 0, {}, log);
       const maxIterations = playbook?.config.maxIterations ?? opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;

@@ -630,6 +630,84 @@ export interface WorkflowDefRow {
   updated_at: string;
 }
 
+/**
+ * Workflow Platform Phase 1 — Catalog of registered HandlerResolver kinds.
+ * One row per kind a host process registers (e.g. 'tool', 'prompt',
+ * 'agent', 'mcp', 'script', 'subworkflow', 'noop'). Synced from the
+ * @weaveintel/workflows resolver registry at startup so admin UIs can
+ * render handler-kind pickers without hardcoded enums.
+ */
+export interface WorkflowHandlerKindRow {
+  id: string;
+  kind: string;
+  description: string | null;
+  config_schema: string | null;   // JSON schema
+  enabled: number;
+  source: string;                 // 'builtin' | 'plugin'
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Phase 3 — Unified Triggers (DB-driven dispatch fabric).
+ * One row per operator-defined trigger. The `@weaveintel/triggers`
+ * dispatcher hydrates these at startup and routes events through
+ * filter -> rate-limit -> target dispatch. UUID PK; `key` is the
+ * unique operator-facing alias.
+ */
+export interface TriggerRow {
+  id: string;
+  key: string;
+  enabled: number;                       // 0 | 1
+  source_kind: string;                   // TriggerSourceKind
+  source_config: string;                 // JSON
+  filter_expr: string | null;            // JSON (JSONLogic-lite)
+  target_kind: string;                   // TriggerTargetKind
+  target_config: string;                 // JSON
+  input_map: string | null;              // JSON: { 'targetPath': 'sourcePath' }
+  rate_limit_per_minute: number | null;
+  metadata: string | null;               // JSON
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Append-only audit row for every dispatch attempt. `status` mirrors
+ * the dispatcher's `TriggerInvocationStatus` enum.
+ */
+export interface TriggerInvocationRow {
+  id: string;
+  trigger_id: string;
+  fired_at: string;                      // ISO datetime
+  source_kind: string;                   // TriggerSourceKind
+  status: string;                        // TriggerInvocationStatus
+  target_ref: string | null;
+  error_message: string | null;
+  source_event: string | null;           // JSON preview (truncated by dispatcher)
+  created_at: string;
+}
+
+/**
+ * Phase 4 (DB-driven capability plan) — Mesh contract ledger.
+ * One row per emission via `ContractEmitter`. The triggers dispatcher
+ * subscribes to a Node EventEmitter the writer also notifies, so each
+ * row doubles as audit trail and the source event for
+ * `sourceKind: 'contract_emitted'` triggers.
+ */
+export interface MeshContractRow {
+  id: string;
+  kind: string;
+  body_json: string;                     // JSON-encoded body
+  evidence_json: string | null;          // JSON-encoded evidence (optional)
+  mesh_id: string | null;
+  source_workflow_definition_id: string | null;
+  source_workflow_run_id: string | null;
+  source_agent_id: string | null;
+  metadata: string | null;               // JSON-encoded metadata
+  emitted_at: string;
+  created_at: string;
+}
+
 export interface ToolCatalogRow {
   id: string;
   name: string;
@@ -1529,6 +1607,71 @@ export interface WorkflowRunRow {
   error: string | null;
   started_at: string;
   completed_at: string | null;
+  cost_total?: number | null;
+  metadata?: string | null;
+}
+
+export interface WorkflowCheckpointRow {
+  id: string;
+  run_id: string;
+  workflow_id: string;
+  step_id: string;
+  state: string;
+  created_at: string;
+}
+
+export interface CapabilityPolicyBindingRow {
+  id: string;
+  binding_kind: string;
+  binding_ref: string;
+  policy_kind: string;
+  policy_ref: string;
+  precedence: number;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── Phase 6: Capability Packs ─────────────────────────────
+export type CapabilityPackStatus = 'draft' | 'published' | 'retired';
+
+export interface CapabilityPackRow {
+  id: string;
+  pack_key: string;
+  version: string;
+  status: CapabilityPackStatus;
+  name: string;
+  description: string;
+  authored_by: string | null;
+  /** JSON-serialized `CapabilityPack` manifest from `@weaveintel/capability-packs`. */
+  manifest: string;
+  installed_at: string | null;
+  installed_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CapabilityPackInstallationRow {
+  id: string;
+  pack_id: string;
+  pack_key: string;
+  pack_version: string;
+  /** JSON-serialized `PackInstallationLedger`. */
+  ledger: string;
+  installed_by: string | null;
+  installed_at: string;
+  uninstalled_at: string | null;
+}
+
+export interface CapabilityPackExperimentRow {
+  id: string;
+  pack_key: string;
+  name: string;
+  /** JSON: `Array<{ version: string; weight: number }>`. */
+  variants: string;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface GuardrailEvalRow {
@@ -2026,6 +2169,13 @@ export interface LiveAgentRow {
   model_capability_json?: string | null;
   model_routing_policy_key?: string | null;
   model_pinned_id?: string | null;
+  /**
+   * Phase 2 (DB-driven capability plan) — declarative `prepare()` recipe
+   * JSON. When set, the runtime synthesises the agent's `prepare()`
+   * function from this recipe. See
+   * `packages/live-agents-runtime/src/db-prepare-resolver.ts`.
+   */
+  prepare_config_json?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -2458,6 +2608,34 @@ export interface DatabaseAdapter {
   updateWorkflowDef(id: string, fields: Partial<Omit<WorkflowDefRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteWorkflowDef(id: string): Promise<void>;
 
+  // ─── Workflow Platform Phase 1: Handler Kinds Catalog ─────
+  listWorkflowHandlerKinds(): Promise<WorkflowHandlerKindRow[]>;
+  getWorkflowHandlerKind(kind: string): Promise<WorkflowHandlerKindRow | null>;
+  upsertWorkflowHandlerKind(row: Omit<WorkflowHandlerKindRow, 'created_at' | 'updated_at'>): Promise<void>;
+
+  // ─── Phase 3: Unified Triggers ─────────────────────────────
+  listTriggers(opts?: { enabled?: boolean; sourceKind?: string; targetKind?: string }): Promise<TriggerRow[]>;
+  getTrigger(id: string): Promise<TriggerRow | null>;
+  getTriggerByKey(key: string): Promise<TriggerRow | null>;
+  createTrigger(row: Omit<TriggerRow, 'created_at' | 'updated_at'>): Promise<TriggerRow>;
+  updateTrigger(id: string, patch: Partial<Omit<TriggerRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteTrigger(id: string): Promise<void>;
+  insertTriggerInvocation(row: Omit<TriggerInvocationRow, 'created_at'>): Promise<void>;
+  listTriggerInvocations(opts?: { triggerId?: string; status?: string; limit?: number; offset?: number }): Promise<TriggerInvocationRow[]>;
+
+  // ─── Phase 4: Mesh contracts ───────────────────────────────
+  insertMeshContract(row: Omit<MeshContractRow, 'created_at'>): Promise<void>;
+  getMeshContract(id: string): Promise<MeshContractRow | null>;
+  listMeshContracts(opts?: {
+    kind?: string;
+    meshId?: string;
+    workflowRunId?: string;
+    after?: string;
+    before?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<MeshContractRow[]>;
+
   // ─── Admin: Tool catalog ───────────────────────────────────
   createToolConfig(t: Omit<ToolCatalogRow, 'created_at' | 'updated_at'>): Promise<void>;
   getToolConfig(id: string): Promise<ToolCatalogRow | null>;
@@ -2621,6 +2799,38 @@ export interface DatabaseAdapter {
   getWorkflowRun(id: string): Promise<WorkflowRunRow | null>;
   listWorkflowRuns(workflowId?: string): Promise<WorkflowRunRow[]>;
   updateWorkflowRun(id: string, fields: Partial<Omit<WorkflowRunRow, 'id' | 'started_at'>>): Promise<void>;
+  deleteWorkflowRun(id: string): Promise<void>;
+
+  // ─── Phase 5: Workflow Checkpoints ─────────────────────────
+  createWorkflowCheckpoint(c: Omit<WorkflowCheckpointRow, 'created_at'>): Promise<void>;
+  listWorkflowCheckpoints(runId: string): Promise<WorkflowCheckpointRow[]>;
+  deleteWorkflowCheckpoints(runId: string): Promise<void>;
+
+  // ─── Phase 5: Capability Policy Bindings ───────────────────
+  createCapabilityPolicyBinding(b: Omit<CapabilityPolicyBindingRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getCapabilityPolicyBinding(id: string): Promise<CapabilityPolicyBindingRow | null>;
+  listCapabilityPolicyBindings(opts?: { bindingKind?: string; bindingRef?: string; policyKind?: string; enabledOnly?: boolean }): Promise<CapabilityPolicyBindingRow[]>;
+  updateCapabilityPolicyBinding(id: string, fields: Partial<Omit<CapabilityPolicyBindingRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteCapabilityPolicyBinding(id: string): Promise<void>;
+
+  // ─── Phase 6: Capability Packs ─────────────────────────────
+  createCapabilityPack(p: Omit<CapabilityPackRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getCapabilityPack(id: string): Promise<CapabilityPackRow | null>;
+  getCapabilityPackByKeyVersion(packKey: string, version: string): Promise<CapabilityPackRow | null>;
+  listCapabilityPacks(opts?: { packKey?: string; status?: CapabilityPackStatus; limit?: number; offset?: number }): Promise<CapabilityPackRow[]>;
+  updateCapabilityPack(id: string, fields: Partial<Omit<CapabilityPackRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteCapabilityPack(id: string): Promise<void>;
+
+  createCapabilityPackInstallation(i: Omit<CapabilityPackInstallationRow, 'installed_at' | 'uninstalled_at'> & { installed_at?: string }): Promise<void>;
+  getCapabilityPackInstallation(id: string): Promise<CapabilityPackInstallationRow | null>;
+  listCapabilityPackInstallations(opts?: { packId?: string; activeOnly?: boolean; limit?: number; offset?: number }): Promise<CapabilityPackInstallationRow[]>;
+  markCapabilityPackInstallationUninstalled(id: string, uninstalledAt?: string): Promise<void>;
+
+  createCapabilityPackExperiment(e: Omit<CapabilityPackExperimentRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getCapabilityPackExperiment(id: string): Promise<CapabilityPackExperimentRow | null>;
+  listCapabilityPackExperiments(opts?: { packKey?: string; enabledOnly?: boolean }): Promise<CapabilityPackExperimentRow[]>;
+  updateCapabilityPackExperiment(id: string, fields: Partial<Omit<CapabilityPackExperimentRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteCapabilityPackExperiment(id: string): Promise<void>;
 
   // ─── Guardrail Evaluations ─────────────────────────────────
   createGuardrailEval(e: Omit<GuardrailEvalRow, 'created_at'>): Promise<void>;

@@ -554,6 +554,45 @@ await handle.stop();
 
 `weaveLiveMeshFromDb` composes `provisionMesh` (optional) → handler registry → heartbeat supervisor → `bridgeRunState`. New apps should use this; never wire the primitives by hand. See `examples/96`.
 
+### Declarative `prepare()`: DB-driven recipe (Phase 2 of the DB-Driven Capability Plan)
+
+Instead of writing a `prepare()` callback in code, you can store a JSON **recipe** on the agent row (`live_agents.prepare_config_json`) and let the runtime synthesise the prepare per tick.
+
+Recipe shape:
+
+```jsonc
+{
+  "systemPrompt": "You are a helpful agent."           // literal string
+  // OR: { "promptKey": "live-agent.observer", "variables": { ... } }
+  "tools": "$auto",                                     // forwards ctx.tools
+  "userGoal": { "from": "inbound.body" }                // or "inbound.subject" | "inbound"
+  // OR: { "template": "Subject: {{subject}}\nBody: {{body}}" }
+  // OR: literal string
+  "memory": { "windowMessages": 50, "summarizer": "..." }   // parsed; enforced in a later phase
+}
+```
+
+Runtime API (in `@weaveintel/live-agents-runtime`):
+
+```typescript
+import { parsePrepareConfig, dbPrepareFromConfig } from '@weaveintel/live-agents-runtime';
+
+const recipe = parsePrepareConfig(agentRow.prepare_config_json);   // null | PrepareConfig | throws on malformed
+const prepare = dbPrepareFromConfig(recipe, {
+  resolvePromptText: async (promptKey) => db.getPromptText(promptKey),
+});
+```
+
+Resolution rules:
+- **Caller-supplied `prepare` always wins.** If `weaveLiveAgent({ prepare })` is set, the recipe is ignored. This preserves back-compat.
+- `systemPrompt.promptKey` requires `prepareDeps.resolvePromptText`; missing → throws at synthesis time.
+- `userGoal.from` defaults to `inbound.body`, falling back to `inbound.subject` when body is nullish.
+- `userGoal.template` interpolates `{{subject}}` and `{{body}}` from the inbound message.
+- `tools: "$auto"` forwards the per-tick tools registry from `ctx.tools` (so policy gating still applies).
+- `memory` is parsed but not enforced today — forward-compatible for Phase 6+.
+
+Admin: set `prepare_config_json` on a `live_agents` row via `PUT /api/admin/live-agents/:id` (or POST on create). The generic supervisor (`generic-supervisor-boot.ts` in geneweave) injects `prepareDeps.resolvePromptText` automatically. See `examples/98`.
+
 ### Naming convention
 
 - `weave*` — user-facing constructor that returns a runnable thing (agent, mesh, store, resolver, policy). Use `weaveLiveAgent`, `weaveLiveMeshFromDb`, `weaveLiveAgentFromDb`, `weaveModelResolver`, `weaveDbModelResolver`, `weaveLiveAgentPolicy`, `weaveAgentOverlayResolver`.
