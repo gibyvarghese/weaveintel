@@ -163,16 +163,26 @@ export function createValidatorAgentic(ctx: SharedHandlerContext): TaskHandler {
     const iteration = Number(parsed['iteration'] ?? 0);
     const maxIterations = Number(parsed['maxIterations'] ?? opts.maxIterations ?? DEFAULT_MAX_ITERATIONS);
 
+    // Build a JSON-valid forward body so the next handler (strategist or
+    // submitter) can JSON.parse it cleanly. Previously we appended a
+    // "--- VALIDATOR VERDICT ---" trailer which broke parseInboundJson and
+    // caused the strategist's `lastIteration` to silently default to 0,
+    // freezing the run at iteration=1 forever. Embed the verdict as a field
+    // and preserve every key from the inbound payload (so iteration,
+    // maxIterations, kernelRef, history, etc. round-trip).
+    const forwardJson = {
+      ...parsed,
+      validatorVerdict: verdict,
+      validatorVerdictLine: summaryStr.match(/VALIDATION_VERDICT=[^\n]*/i)?.[0] ?? null,
+      validatorSummary: summaryStr,
+    };
+
     if (verdict === 'pass') {
-      // Hand the original inbound body forward so the submitter still has
-      // the structured kernel/competition payload (when present) plus the
-      // agent's verdict line for context.
-      const forwardBody = `${inboundBody}\n\n--- VALIDATOR VERDICT ---\n${summaryStr}`;
       await emitToNextAgent(
         context,
         'submitter',
         `Validated submission for ${competitionRef ?? 'unknown'} (iteration ${iteration})`,
-        forwardBody,
+        JSON.stringify(forwardJson, null, 2),
         'kaggle.validation.final',
       );
       return {
@@ -194,7 +204,7 @@ export function createValidatorAgentic(ctx: SharedHandlerContext): TaskHandler {
       context,
       'strategist',
       `Validation failed for ${competitionRef ?? 'unknown'} iteration ${iteration}`,
-      `${inboundBody}\n\n--- VALIDATOR VERDICT ---\n${summaryStr}`,
+      JSON.stringify(forwardJson, null, 2),
       'kaggle.validation.iteration',
     );
     return {

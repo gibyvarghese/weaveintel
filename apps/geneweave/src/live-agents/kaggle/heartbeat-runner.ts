@@ -640,6 +640,96 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
     auditEmitter: new DbToolAuditEmitter(opts.db),
   });
 
+  // Best-effort observer: every successful `kaggle_push_kernel` from the
+  // strategist's ReAct loop persists a structured `kgl_run_event` row
+  // (kind=`kernel_pushed`) capturing the canonical Kaggle-returned
+  // `kernelRef`, version, requested slug/title, codeBytes, pushedAt — so
+  // operators have a queryable ledger of which kernels were pushed for
+  // each run instead of having to scrape `tool_audit_events.output_preview`
+  // JSON. Strategist's prepare() decorates each record with meshId/agentId
+  // before we see it. Throws are swallowed by the underlying tool.
+  const onKernelPushed = async (
+    record: import('./kaggle-tools.js').KernelPushRecord,
+  ): Promise<void> => {
+    try {
+      const meshId = record.meshId;
+      if (!meshId) return;
+      const runs = await opts.db.listKglCompetitionRuns({ status: 'running' });
+      const run = runs.find((r) => r.mesh_id === meshId);
+      if (!run) return;
+      await opts.db.appendKglRunEvent({
+        id: newUUIDv7(),
+        run_id: run.id,
+        step_id: null,
+        kind: 'kernel_pushed',
+        agent_id: record.agentId ?? null,
+        tool_key: 'kaggle_push_kernel',
+        summary: `Pushed ${record.kernelRef} v${record.versionNumber ?? '?'}`,
+        payload_json: JSON.stringify({
+          kernelRef: record.kernelRef,
+          kernelUrl: record.kernelUrl,
+          versionNumber: record.versionNumber,
+          competitionRef: record.competitionRef,
+          requestedSlug: record.requestedSlug,
+          requestedTitle: record.requestedTitle,
+          codeBytes: record.codeBytes,
+          pushedAt: record.pushedAt,
+          ...(record.localArtifactPath ? { localArtifactPath: record.localArtifactPath } : {}),
+          ...(record.localArtifactError ? { localArtifactError: record.localArtifactError } : {}),
+        }),
+      });
+    } catch (err) {
+      console.error(
+        '[kaggle-heartbeat] onKernelPushed persistence failed:',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  };
+
+  // Best-effort observer: every kaggle_* tool that throws KaggleRateLimitError
+  // (per-account 429 or open circuit breaker) fires this once per tick. We
+  // persist a `kgl_run_event` (kind=`tool_blocked`) so operator-facing
+  // run-detail surfaces the Kaggle account-pressure pause as a first-class
+  // signal — separate from generic `tool_audit_events` rows. Subsequent
+  // tools in the same tick short-circuit with `tick_blocked` and do NOT
+  // re-fire this observer (single-shot per tick is enforced upstream).
+  const onToolBlocked = async (
+    record: import('./kaggle-tools.js').ToolBlockedRecord,
+  ): Promise<void> => {
+    try {
+      const meshId = record.meshId;
+      if (!meshId) return;
+      const runs = await opts.db.listKglCompetitionRuns({ status: 'running' });
+      const run = runs.find((r) => r.mesh_id === meshId);
+      if (!run) return;
+      await opts.db.appendKglRunEvent({
+        id: newUUIDv7(),
+        run_id: run.id,
+        step_id: null,
+        kind: 'tool_blocked',
+        agent_id: record.agentId ?? null,
+        tool_key: record.toolName,
+        summary:
+          `Kaggle tool ${record.toolName} blocked: account "${record.account}" rate-limited ` +
+          `(retryAfter=${record.retryAfterSeconds}s, breakerOpen=${record.breakerOpen})`,
+        payload_json: JSON.stringify({
+          toolName: record.toolName,
+          reason: record.reason,
+          account: record.account,
+          retryAfterSeconds: record.retryAfterSeconds,
+          breakerOpen: record.breakerOpen,
+          message: record.message,
+          blockedAt: record.blockedAt,
+        }),
+      });
+    } catch (err) {
+      console.error(
+        '[kaggle-heartbeat] onToolBlocked persistence failed:',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  };
+
   // Phase A — register the 10 kaggle handler kinds against the shared
   // registry so the action executor can resolve a `TaskHandler` purely from
   // a `live_agent_handler_bindings` row. Idempotent: silently skips kinds
@@ -653,6 +743,8 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
       db: opts.db,
       log: (msg) => console.log('[kaggle-handler-kinds]', msg),
       policy: liveAgentPolicy,
+      onKernelPushed,
+      onToolBlocked,
     });
     await syncHandlerKindsToDb(opts.db, handlerRegistry);
   } catch (err) {

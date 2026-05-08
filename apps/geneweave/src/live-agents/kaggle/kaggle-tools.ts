@@ -20,6 +20,8 @@ import {
 import {
   liveKaggleAdapter,
   validateSubmissionCsv,
+  wrapAdapterWithResilience,
+  KaggleRateLimitError,
   type KaggleAdapter,
   type KaggleCredentials,
 } from '@weaveintel/tools-kaggle';
@@ -71,6 +73,71 @@ export interface KaggleToolsOptions {
    *  manual submission inspection without round-tripping through Kaggle.
    *  Defaults to `KAGGLE_ARTIFACT_DIR` env var, then `./kaggle-artifacts`. */
   artifactDir?: string;
+  /** Hard cap on `kaggle_push_kernel` invocations within a single tick. The
+   *  counter is scoped to this `createKaggleTools` instance, and because
+   *  `prepare()` (in strategist-agent.ts) builds a fresh registry every tick,
+   *  the cap is naturally per-tick per-agent. Concurrent runs each get their
+   *  own counter. When omitted the cap is unbounded (back-compat for tests).
+   *  When the cap is exceeded the tool returns a structured JSON rejection
+   *  (NOT a throw) so the ReAct loop can react gracefully and pivot to
+   *  `kaggle_wait_for_kernel` / `kaggle_get_kernel_output`.
+   *
+   *  Default in production is 1 (set by the strategist `prepare()`); raise
+   *  per playbook only when an exploratory phase legitimately needs >1 push
+   *  per tick (rare — Kaggle queues kernels serially and the agentic
+   *  handoff only forwards the LAST kernel to the validator). */
+  maxKernelPushesPerTick?: number;
+  /** Best-effort observer invoked after every successful `kaggle_push_kernel`
+   *  with the canonical Kaggle-returned `kernelRef` plus the metadata the
+   *  strategist needs to keep straight (versionNumber, requestedSlug/title,
+   *  codeBytes, pushedAt). The strategist wires this to persist a row into
+   *  `kgl_run_event` (kind=`kernel_pushed`) so we have a queryable ledger of
+   *  exactly which kernels were pushed for each run — instead of relying on
+   *  unstructured tool_audit_events.output_preview JSON. Throws are swallowed
+   *  by the tool; a failing observer never blocks the push response. */
+  onKernelPushed?: (record: KernelPushRecord) => Promise<void> | void;
+  /** Best-effort observer invoked the FIRST time any kaggle_* tool returns a
+   *  structured `rate_limited` rejection within a tick. Wired by the
+   *  heartbeat boot path to insert a `kgl_run_event` (kind=`tool_blocked`)
+   *  so the operator can see in the run-detail UI that the tick was deferred
+   *  by Kaggle account pressure (not by an LLM bug). Throws are swallowed —
+   *  a failing observer never blocks the response. Subsequent rejections in
+   *  the same tick are silenced to keep the ledger readable; the deduper is
+   *  reset per `createKaggleTools` instance (i.e. once per tick per agent). */
+  onToolBlocked?: (record: ToolBlockedRecord) => Promise<void> | void;
+}
+
+/** Structured record passed to `KaggleToolsOptions.onToolBlocked` the first
+ *  time a kaggle_* tool returns a `rate_limited` rejection within a tick. */
+export interface ToolBlockedRecord {
+  toolName: string;
+  reason: 'rate_limited';
+  account: string;
+  retryAfterSeconds: number;
+  breakerOpen: boolean;
+  message: string;
+  blockedAt: string;
+  meshId?: string;
+  agentId?: string;
+}
+
+/** Structured record passed to `KaggleToolsOptions.onKernelPushed` after a
+ *  successful `kaggle_push_kernel`. The `kernelRef` field is the EXACT,
+ *  canonical Kaggle-returned ref (already normalized) — never a fabricated
+ *  or LLM-derived value. */
+export interface KernelPushRecord {
+  kernelRef: string;
+  kernelUrl: string;
+  versionNumber: number | null | undefined;
+  competitionRef: string;
+  requestedSlug: string;
+  requestedTitle: string;
+  codeBytes: number;
+  pushedAt: string;
+  meshId?: string;
+  agentId?: string;
+  localArtifactPath?: string;
+  localArtifactError?: string;
 }
 
 /** Strip whatever the LLM passed (slug, ref, URL) down to `<owner>/<slug>` or just `<slug>`. */
@@ -88,7 +155,7 @@ function normalizeKernelRef(value: string): string {
 }
 
 export function createKaggleTools(opts: KaggleToolsOptions = {}): ToolRegistry {
-  const adapter: KaggleAdapter = opts.adapter ?? liveKaggleAdapter;
+  const adapter: KaggleAdapter = wrapAdapterWithResilience(opts.adapter ?? liveKaggleAdapter);
   const getCreds = (): KaggleCredentials => opts.credentials ?? resolveKaggleCredsFromEnv();
   const defaults = opts.defaults ?? {};
   const defaultWaitTimeoutSec = defaults.defaultWaitTimeoutSec ?? 300;
@@ -99,7 +166,148 @@ export function createKaggleTools(opts: KaggleToolsOptions = {}): ToolRegistry {
   const artifactDir = pathResolve(
     opts.artifactDir ?? process.env['KAGGLE_ARTIFACT_DIR'] ?? './kaggle-artifacts',
   );
-  const reg = createToolRegistry();
+  // Per-tick push counter. Closure-scoped to this createKaggleTools call
+  // (one instance per prepare() per tick), so concurrent runs are isolated.
+  const maxPushesPerTick = opts.maxKernelPushesPerTick;
+  let pushesThisTick = 0;
+  const lastPushedKernels: Array<{ kernelRef: string; slug: string }> = [];
+
+  // Per-tick rate-limit state (Gap #1/#3). When any kaggle_* tool surfaces
+  // a structured `KaggleRateLimitError`, we (a) flip `tickBlocked=true` so
+  // every subsequent kaggle_* call this tick short-circuits with the same
+  // structured "yield this turn" JSON, and (b) emit ONE `tool_blocked`
+  // observer call so the operator-facing kgl_run_event ledger gets a single
+  // row per tick (not one per repeated tool call). The LLM, seeing the same
+  // deterministic JSON twice, terminates the ReAct loop with its final
+  // summary instead of thrashing on the same 429 — which lets the heartbeat
+  // scheduler's existing per-agent backoff machinery defer subsequent ticks
+  // (`agent_backoff` event) until the per-account quota window drains.
+  let tickBlocked = false;
+  let tickBlockedDetail:
+    | { account: string; retryAfterSeconds: number; breakerOpen: boolean; message: string }
+    | null = null;
+  let blockedObserverFired = false;
+  const perToolErrorCounts = new Map<string, number>();
+  const PER_TOOL_REPEAT_THRESHOLD = 2;
+
+  function rateLimitedEnvelope(toolName: string, err: KaggleRateLimitError): string {
+    return JSON.stringify({
+      error: 'rate_limited',
+      tool: toolName,
+      account: err.username,
+      retryAfterSeconds: err.retryAfterSeconds,
+      breakerOpen: err.breakerOpen,
+      message:
+        `Kaggle account "${err.username}" is rate-limited (retryAfter=${err.retryAfterSeconds}s, ` +
+        `circuitBreakerOpen=${err.breakerOpen}). STOP calling kaggle_* tools this turn. ` +
+        `Return your final summary now — the supervisor will retry on the next scheduled tick ` +
+        `after the per-account quota window drains. Do not change the slug or retry; the ` +
+        `breaker is account-scoped and the next call will hit the same rejection.`,
+    });
+  }
+
+  function tickBlockedEnvelope(toolName: string): string {
+    const d = tickBlockedDetail;
+    return JSON.stringify({
+      error: 'tick_blocked',
+      tool: toolName,
+      account: d?.account ?? '<unknown>',
+      retryAfterSeconds: d?.retryAfterSeconds ?? 0,
+      message:
+        `Kaggle tools are disabled for the rest of this turn — account "${d?.account ?? '?'}" ` +
+        `was rate-limited earlier this tick. Stop calling kaggle_* tools and return your final ` +
+        `summary now. The supervisor will retry on the next scheduled tick.`,
+    });
+  }
+
+  function repeatedErrorEnvelope(toolName: string, count: number): string {
+    return JSON.stringify({
+      error: 'tool_circuit_local',
+      tool: toolName,
+      consecutiveErrorsThisTick: count,
+      message:
+        `Tool ${toolName} has failed ${count} times this turn with the same error. ` +
+        `Stop retrying — return your final summary now and the supervisor will reschedule.`,
+    });
+  }
+
+  async function fireToolBlockedObserver(toolName: string, err: KaggleRateLimitError): Promise<void> {
+    if (blockedObserverFired || !opts.onToolBlocked) return;
+    blockedObserverFired = true;
+    try {
+      await opts.onToolBlocked({
+        toolName,
+        reason: 'rate_limited',
+        account: err.username,
+        retryAfterSeconds: err.retryAfterSeconds,
+        breakerOpen: err.breakerOpen,
+        message: err.message,
+        blockedAt: new Date().toISOString(),
+      });
+    } catch {
+      // intentionally swallowed
+    }
+  }
+
+  /**
+   * Wrap a tool's `invoke()` so that:
+   *   1. If the tick is already blocked → return tick_blocked envelope immediately.
+   *   2. If the inner call throws KaggleRateLimitError → record block, fire
+   *      observer (once per tick), return rate_limited envelope.
+   *   3. Track per-tool repeat-error count; after PER_TOOL_REPEAT_THRESHOLD
+   *      identical rate_limited responses, return tool_circuit_local envelope.
+   *   4. Other errors propagate unchanged (back-compat with existing
+   *      handler-side error paths).
+   */
+  function wrapInvokeWithRateLimitGuard(tool: Tool): Tool {
+    const toolName = tool.schema.name;
+    const originalInvoke = tool.invoke.bind(tool);
+    return {
+      schema: tool.schema,
+      async invoke(ctx, input) {
+        if (tickBlocked) {
+          const count = (perToolErrorCounts.get(toolName) ?? 0) + 1;
+          perToolErrorCounts.set(toolName, count);
+          if (count >= PER_TOOL_REPEAT_THRESHOLD) {
+            return { content: repeatedErrorEnvelope(toolName, count) };
+          }
+          return { content: tickBlockedEnvelope(toolName) };
+        }
+        try {
+          return await originalInvoke(ctx, input);
+        } catch (err) {
+          if (err instanceof KaggleRateLimitError) {
+            tickBlocked = true;
+            tickBlockedDetail = {
+              account: err.username,
+              retryAfterSeconds: err.retryAfterSeconds,
+              breakerOpen: err.breakerOpen,
+              message: err.message,
+            };
+            await fireToolBlockedObserver(toolName, err);
+            return { content: rateLimitedEnvelope(toolName, err) };
+          }
+          throw err;
+        }
+      },
+    };
+  }
+
+  const innerReg = createToolRegistry();
+  // Public registry — every register() call wraps the tool's invoke() with
+  // the rate-limit guard before delegating to the inner registry. This
+  // keeps every tool definition below unchanged while ensuring there is a
+  // single, mandatory choke point for KaggleRateLimitError handling.
+  const reg: ToolRegistry = {
+    register(tool: Tool) {
+      innerReg.register(wrapInvokeWithRateLimitGuard(tool));
+    },
+    unregister: innerReg.unregister.bind(innerReg),
+    get: innerReg.get.bind(innerReg),
+    list: innerReg.list.bind(innerReg),
+    listByTag: innerReg.listByTag.bind(innerReg),
+    toDefinitions: innerReg.toDefinitions.bind(innerReg),
+  };
 
   reg.register(
     defineTool({
@@ -247,6 +455,25 @@ export function createKaggleTools(opts: KaggleToolsOptions = {}): ToolRegistry {
               'Do NOT retry with the same empty source; do NOT change the slug to bypass this check.',
           });
         }
+        // Per-tick push budget (set by strategist prepare() from playbook
+        // config; default 1 in production). Hard cap — the LLM repeatedly
+        // ignored prompt-level "AT MOST ONE push" rules and burned both
+        // OpenAI tokens and Kaggle compute pushing 20+ near-identical
+        // kernels per tick. The agentic handoff only forwards the LAST
+        // kernel to the validator anyway, so extra pushes are pure waste.
+        if (maxPushesPerTick !== undefined && pushesThisTick >= maxPushesPerTick) {
+          return JSON.stringify({
+            error: 'push_budget_exhausted',
+            pushesThisTick,
+            maxKernelPushesPerTick: maxPushesPerTick,
+            previousKernels: lastPushedKernels,
+            message:
+              `kaggle_push_kernel rejected: already pushed ${pushesThisTick} kernel(s) this turn ` +
+              `(cap=${maxPushesPerTick}). Call kaggle_wait_for_kernel and kaggle_get_kernel_output ` +
+              `for the previous kernel(s) listed above, then return your final response. The ` +
+              `validator will bounce back and you can push the next kernel on the next tick.`,
+          });
+        }
         const creds = getCreds();
         const username = creds.username;
         // Kaggle returns 409 Conflict when a notebook title (or slug) already
@@ -317,6 +544,37 @@ export function createKaggleTools(opts: KaggleToolsOptions = {}): ToolRegistry {
           artifactPath = pyPath;
         } catch (err) {
           artifactError = err instanceof Error ? err.message : String(err);
+        }
+        // Best-effort: notify the strategist-supplied observer so it can
+        // persist a structured row into the run-event ledger. Swallow
+        // throws — a failing observer must never block the push response.
+        // Guard: only fire when we have a non-empty kernelRef AND the
+        // adapter returned a non-empty `result.ref`. This prevents the
+        // observer from persisting empty/zero rows when a push 4xx-failed
+        // partway through (e.g. Kaggle returned a body without a slug).
+        if (opts.onKernelPushed && kernelRef && result.ref) {
+          try {
+            await opts.onKernelPushed({
+              kernelRef,
+              kernelUrl: result.url,
+              versionNumber: result.versionNumber,
+              competitionRef,
+              requestedSlug: slug,
+              requestedTitle: title,
+              codeBytes,
+              pushedAt: new Date().toISOString(),
+              ...(artifactPath ? { localArtifactPath: artifactPath } : {}),
+              ...(artifactError ? { localArtifactError: artifactError } : {}),
+            });
+          } catch {
+            // intentionally swallowed
+          }
+        }
+        // Successful push — increment the per-tick counter and remember
+        // the ref so the next over-budget rejection can name it explicitly.
+        if (kernelRef && result.ref) {
+          pushesThisTick += 1;
+          lastPushedKernels.push({ kernelRef, slug });
         }
         return JSON.stringify(
           {

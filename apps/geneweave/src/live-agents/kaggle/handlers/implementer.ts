@@ -156,6 +156,11 @@ export function createImplementerDeterministic(ctx: SharedHandlerContext): TaskH
       playbookId: playbook.skillId,
       playbookName: playbook.name,
       strategyLabel,
+      // Forward the submission contract so the validator picks the right
+      // branch (PATH A kernel_emits_file vs PATH B kernel_is_submission).
+      submissionWriter: playbook.config.submissionWriter ?? null,
+      submissionFormat: playbook.config.submissionFormat ?? null,
+      submissionFilename: playbook.config.submissionFilename ?? null,
       kernelRef,
       kernelUrl,
       kernelStatus: runStatus,

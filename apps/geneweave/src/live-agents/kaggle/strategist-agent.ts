@@ -26,10 +26,11 @@ import {
 } from '@weaveintel/live-agents';
 import {
   liveKaggleAdapter,
+  wrapAdapterWithResilience,
   type KaggleAdapter,
   type KaggleCredentials,
 } from '@weaveintel/tools-kaggle';
-import { createKaggleTools } from './kaggle-tools.js';
+import { createKaggleTools, type KernelPushRecord, type ToolBlockedRecord } from './kaggle-tools.js';
 import { withPerTickReadCache } from './adapter-cache.js';
 import {
   extractCompetitionSlugFromText,
@@ -67,6 +68,25 @@ export interface KaggleStrategistAgentOptions {
    * unenforced (legacy behavior).
    */
   policy?: LiveAgentPolicy;
+  /**
+   * Best-effort observer for every successful `kaggle_push_kernel`. Wired by
+   * the heartbeat boot path to a closure that resolves the active
+   * `kgl_competition_run` row by mesh id and writes a structured
+   * `kgl_run_event` (kind=`kernel_pushed`) capturing the canonical Kaggle-
+   * returned `kernelRef`, version, requested slug/title, codeBytes, and
+   * pushedAt — so the operator can query "which kernels were pushed for
+   * run X" without scraping `tool_audit_events.output_preview` JSON.
+   * Throws are swallowed by the underlying tool — never blocks the push.
+   */
+  onKernelPushed?: (record: KernelPushRecord) => Promise<void> | void;
+  /**
+   * Best-effort observer invoked the FIRST time any kaggle_* tool returns a
+   * structured `rate_limited` rejection within a tick. The boot path wires
+   * this to insert a `kgl_run_event` (kind=`tool_blocked`) so the operator
+   * can see in run-detail that the tick yielded due to Kaggle account
+   * pressure. Throws are swallowed by the underlying tool — never blocks.
+   */
+  onToolBlocked?: (record: ToolBlockedRecord) => Promise<void> | void;
 }
 
 /** Last-resort prompt — used only when neither playbookResolver nor
@@ -106,7 +126,7 @@ print \`AGENT_RESULT_CV_SCORES=<one-line-json>\` immediately before
 \`AGENT_RESULT\` so log inspection works even when output downloads fail.`;
 
 export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions): TaskHandler {
-  const adapter = opts.adapter ?? liveKaggleAdapter;
+  const adapter = wrapAdapterWithResilience(opts.adapter ?? liveKaggleAdapter);
   const credentials = opts.credentials ?? resolveCredentialsFromEnv();
   const log = opts.log ?? ((m: string) => console.log(`[kaggle-strategist] ${m}`));
   const maxSteps = opts.maxSteps ?? 90;
@@ -128,12 +148,14 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
         await new Promise((resolve) => setTimeout(resolve, 65_000));
       }
     },
-    prepare: async ({ inbound }) => {
+    prepare: async ({ inbound, context }) => {
       const inboundBody = inbound?.body?.trim() ?? '';
       const competitionSlug = extractCompetitionSlugFromText(inboundBody);
+      const meshId = context?.agent?.meshId ?? undefined;
+      const agentId = context?.agent?.id ?? undefined;
       log(
         `inbound subject="${inbound?.subject ?? '(none)'}" bodyLen=${inboundBody.length} ` +
-          `competitionSlug="${competitionSlug || '(none)'}"`,
+          `competitionSlug="${competitionSlug || '(none)'}" meshId="${meshId ?? '(none)'}"`,
       );
 
       // Resolve system prompt + tool defaults from the DB playbook.
@@ -161,9 +183,19 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
       // needs to gate submissions.
       systemPrompt = systemPrompt + CV_SCORES_ADDENDUM;
 
+      // Per-tick push cap. Default 1 in production: the LLM observably
+      // ignored prompt-level "AT MOST ONE push" rules, and the agentic
+      // handoff only forwards the LAST kernel to the validator anyway.
+      // Playbooks may raise it (e.g. an exploratory probe phase) by setting
+      // `maxKernelPushesPerTick` in the playbook config JSON.
+      const maxKernelPushesPerTick =
+        typeof resolvedConfig['maxKernelPushesPerTick'] === 'number'
+          ? (resolvedConfig['maxKernelPushesPerTick'] as number)
+          : 1;
       const tools = createKaggleTools({
         adapter: withPerTickReadCache(adapter),
         credentials,
+        maxKernelPushesPerTick,
         defaults: {
           defaultWaitTimeoutSec: resolvedConfig['pollTimeoutSec'] as number | undefined,
           maxWaitTimeoutSec: resolvedConfig['kernelWaitMaxTimeoutSec'] as number | undefined,
@@ -171,11 +203,98 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
           outputHeadBytes: resolvedConfig['kernelOutputHeadBytes'] as number | undefined,
           outputTailBytes: resolvedConfig['kernelOutputTailBytes'] as number | undefined,
         },
+        ...(opts.onKernelPushed
+          ? {
+              onKernelPushed: async (record: KernelPushRecord) => {
+                // Per-tick decoration: stamp meshId/agentId so the boot-path
+                // closure can resolve the active kgl_competition_run row by
+                // mesh without an extra query parameter.
+                await opts.onKernelPushed?.({
+                  ...record,
+                  ...(meshId ? { meshId } : {}),
+                  ...(agentId ? { agentId } : {}),
+                });
+              },
+            }
+          : {}),
+        ...(opts.onToolBlocked
+          ? {
+              onToolBlocked: async (record: ToolBlockedRecord) => {
+                await opts.onToolBlocked?.({
+                  ...record,
+                  ...(meshId ? { meshId } : {}),
+                  ...(agentId ? { agentId } : {}),
+                });
+              },
+            }
+          : {}),
       });
 
+      // Phase-progression override on validator bounce-back. Without it the
+      // LLM re-reads the playbook from the top each tick (which marks
+      // Phase 0 probe and Phase 1 teacher as MANDATORY) and re-pushes the
+      // same early-phase kernels forever — observed behavior is 5+
+      // teacher-data-generation pushes inside a single ReAct tick.
+      // Trigger: inbound subject "Validation failed for <comp> iteration N"
+      // (set by handlers/validator.ts L196). The override (a) tells the
+      // LLM exactly which phase to execute this turn based on N, and
+      // (b) caps tool spam at one push per turn.
+      const inboundSubject = inbound?.subject ?? '';
+      const iterationMatch = inboundSubject.match(/Validation failed for [^\s]+ iteration (\d+)/i);
+      const failedIteration = iterationMatch ? Number(iterationMatch[1]) : 0;
+      const isBounceBack =
+        failedIteration > 0 ||
+        /"kernelStatus"\s*:\s*"probe_only"/.test(inboundBody) ||
+        /Phase 0\.5 diagnostic probe kernel/.test(inboundBody) ||
+        /AGENT_PROBE_DONE/.test(inboundBody);
+
+      // Phase mapping derived from the playbook's iteration budget:
+      //   failedIter 1 → Phase 2 (BC + final main.py with def agent())
+      //   failedIter 2 → Phase 3 attempt 1 (one ML knob improvement)
+      //   failedIter 3 → Phase 3 attempt 2
+      //   failedIter ≥ 4 → Phase 3 attempt N (or stop on win_rate ≥ 0.85)
+      const phaseDirective = (() => {
+        if (failedIteration <= 1) {
+          return `NEXT PHASE = Phase 2 (Behavior Cloning + FINAL submission kernel).
+Required actions THIS TURN, in order:
+  1. ONE kaggle_push_kernel call. Title pattern: <competition>-it2-bc-v1.
+  2. The kernel MUST contain ALL of: feature builder, sklearn classifier fit on the teacher pickle from iteration 1, pickle dump of policy.pkl, AND a top-level def agent(observation, configuration) that loads policy.pkl and returns int(model.predict(features(observation))[0]).
+  3. The kernel MUST also self-evaluate by running env.run([agent, "random"]) for ≥20 matches and printing "AGENT_RESULT_CV_SCORES={\"win_rate_vs_random\": <x>}".
+  4. Then ONE kaggle_wait_for_kernel + ONE kaggle_get_kernel_output on the EXACT kernelRef returned by step 1.
+  5. Update BEST scratchpad with the result and STOP. Do NOT push variants this turn.`;
+        }
+        if (failedIteration === 2) {
+          return `NEXT PHASE = Phase 3 attempt 1 (one ML improvement on the BC baseline).
+Required actions THIS TURN, in order:
+  1. ONE kaggle_push_kernel call. Pick exactly ONE knob to change vs the BEST kernel: more teacher episodes (200→1000), OR larger MLP / GradientBoosting hyperparams, OR added action-mask features. Title pattern: <competition>-it3-<knob>.
+  2. ONE kaggle_wait_for_kernel + ONE kaggle_get_kernel_output on the returned kernelRef.
+  3. Compare win_rate vs BEST. Update BEST only if STRICTLY higher. STOP. Do NOT push variants.`;
+        }
+        return `NEXT PHASE = Phase 3 attempt ${failedIteration - 1} (one further ML improvement on BEST).
+Required actions THIS TURN, in order:
+  1. ONE kaggle_push_kernel call. Pick exactly ONE different ML knob vs prior attempts (e.g. self-play vs frozen BEST, RL fine-tune from BC warm-start, LightGBM if available). Title pattern: <competition>-it${failedIteration + 1}-<knob>.
+  2. ONE kaggle_wait_for_kernel + ONE kaggle_get_kernel_output.
+  3. If win_rate ≥ 0.85 OR you have made 8 total push attempts, emit final response with FINAL block referencing BEST.kernelRef. Otherwise update BEST and STOP. Do NOT push variants.`;
+      })();
+
+      const probeOverride = isBounceBack
+        ? `⚠️ STRATEGIST RE-ENTRY (failed iteration=${failedIteration || '?'}).
+Phase 0 (probe) and Phase 1 (teacher data generation) are ALREADY COMPLETE for this competition. DO NOT push another probe / environment-listing / teacher-data-generation kernel — those phases are DONE.
+
+${phaseDirective}
+
+HARD RULE THIS TURN: AT MOST ONE kaggle_push_kernel call. After that one push, your only allowed tool calls are kaggle_wait_for_kernel and kaggle_get_kernel_output for the kernelRef just returned. Pushing two or more kernels in one turn wastes Kaggle API budget and blocks progress.
+
+The validator's prior verdict is in the inbound body below — read it, then execute the phase above.
+
+`
+        : '';
       const userGoal = inboundBody
-        ? `Seed message from operator:\n${inboundBody}\n\nProceed per the workflow.`
+        ? `${probeOverride}Seed message from operator:\n${inboundBody}\n\nProceed per the workflow.`
         : `No specific competition was named. Pick the most tractable active competition and proceed.`;
+      if (isBounceBack) {
+        log(`inbound is bounce-back (failedIter=${failedIteration}) — prepended phase-progression override to userGoal.`);
+      }
 
       return { systemPrompt, tools, userGoal };
     },

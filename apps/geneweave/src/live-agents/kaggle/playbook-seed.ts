@@ -23,6 +23,8 @@ import {
   KAGGLE_DEFAULT_DISCOVERY,
   KAGGLE_ARC_STRATEGY_PRESETS,
   KAGGLE_GENERIC_ML_SOLVER,
+  KAGGLE_ORBIT_WARS_WORKFLOW,
+  KAGGLE_ORBIT_WARS_SOLVER_TEMPLATE,
 } from './playbook-seed-content.js';
 import { KAGGLE_PLAYBOOK_CATEGORY } from './playbook-resolver.js';
 
@@ -34,9 +36,14 @@ const FRAGMENT_ID_ARC_SOLVER = 'frag-kaggle-solver-template-arc-agi-3';
 const FRAGMENT_KEY_ARC_SOLVER = 'kaggle.solver_template.arc_agi_3';
 const FRAGMENT_ID_GENERIC_ML_SOLVER = 'frag-kaggle-solver-template-generic-ml';
 const FRAGMENT_KEY_GENERIC_ML_SOLVER = 'kaggle.solver_template.generic_ml';
+const FRAGMENT_ID_ORBIT_WARS_WORKFLOW = 'frag-kaggle-workflow-orbit-wars';
+const FRAGMENT_KEY_ORBIT_WARS_WORKFLOW = 'kaggle.workflow.orbit_wars';
+const FRAGMENT_ID_ORBIT_WARS_SOLVER = 'frag-kaggle-solver-template-orbit-wars';
+const FRAGMENT_KEY_ORBIT_WARS_SOLVER = 'kaggle.solver_template.orbit_wars';
 
 const SKILL_ID_DEFAULT = 'kaggle-playbook-default';
 const SKILL_ID_ARC = 'kaggle-playbook-arc-agi-3';
+const SKILL_ID_ORBIT_WARS = 'kaggle-playbook-orbit-wars';
 
 const DEFAULT_PLAYBOOK_INSTRUCTIONS = `{{>${FRAGMENT_KEY_DEFAULT_DISCOVERY}}}`;
 const ARC_PLAYBOOK_INSTRUCTIONS = `{{>${FRAGMENT_KEY_ARC_WORKFLOW}}}`;
@@ -50,7 +57,7 @@ async function ensureFragment(
   category: string,
   content: string,
 ): Promise<'inserted' | 'exists'> {
-  const CURRENT_VERSION = '1.6.0';
+  const CURRENT_VERSION = '1.7.0';
   const existing = await db.getPromptFragment(id).catch(() => null);
   const byKey = existing ?? (await db.getPromptFragmentByKey(key).catch(() => null));
   if (byKey) {
@@ -96,7 +103,7 @@ async function ensureSkill(
     priority: number;
   },
 ): Promise<'inserted' | 'exists'> {
-  const CURRENT_SKILL_VERSION = '1.1.0';
+  const CURRENT_SKILL_VERSION = '1.2.0';
   const existing = await db.getSkill(row.id).catch(() => null);
   if (existing) {
     // Refresh examples + instructions when the bundled seed has bumped its
@@ -179,6 +186,22 @@ export async function seedKaggleArcPlaybook(
     'Kaggle generic ML baseline solver template (catch-all default)',
     'kaggle',
     KAGGLE_GENERIC_ML_SOLVER,
+  );
+  fragments[FRAGMENT_KEY_ORBIT_WARS_WORKFLOW] = await ensureFragment(
+    db,
+    FRAGMENT_ID_ORBIT_WARS_WORKFLOW,
+    FRAGMENT_KEY_ORBIT_WARS_WORKFLOW,
+    'Kaggle Orbit Wars ML strategist workflow',
+    'kaggle',
+    KAGGLE_ORBIT_WARS_WORKFLOW,
+  );
+  fragments[FRAGMENT_KEY_ORBIT_WARS_SOLVER] = await ensureFragment(
+    db,
+    FRAGMENT_ID_ORBIT_WARS_SOLVER,
+    FRAGMENT_KEY_ORBIT_WARS_SOLVER,
+    'Kaggle Orbit Wars learned-policy (BC) solver template',
+    'kaggle',
+    KAGGLE_ORBIT_WARS_SOLVER_TEMPLATE,
   );
 
   const skills: Record<string, 'inserted' | 'exists'> = {};
@@ -319,6 +342,42 @@ export async function seedKaggleArcPlaybook(
       maxIterations: 8,
     },
     priority: 100,
+  });
+
+  skills[SKILL_ID_ORBIT_WARS] = await ensureSkill(db, {
+    id: SKILL_ID_ORBIT_WARS,
+    name: 'Kaggle Playbook — Orbit Wars (ML)',
+    description:
+      'Orbit Wars (kaggle_environments interactive-agent competition, SHAPE=B kernel_is_submission). Drives an ML-based agent: behavior-cloned scikit-learn classifier or RL policy. Hand-coded heuristics are ONLY allowed as the supervised teacher — never as the final entry.',
+    triggerPatterns: ['orbit-wars', 'orbit_wars', '*orbit-wars*', '*orbit_wars*'],
+    instructions: `{{>${FRAGMENT_KEY_ORBIT_WARS_WORKFLOW}}}`,
+    toolNames: [
+      'kaggle_get_competition',
+      'kaggle_list_competition_files',
+      'kaggle_get_competition_file',
+      'kaggle_list_kernels',
+      'kaggle_get_kernel_source',
+      'kaggle_push_kernel',
+      'kaggle_get_kernel_status',
+      'kaggle_get_kernel_output',
+    ],
+    examples: {
+      shape: 'live_api',
+      submissionFormat: 'python_script',
+      submissionFilename: 'main.py',
+      submissionWriter: 'kernel_is_submission',
+      solverTemplateFragmentKey: FRAGMENT_KEY_ORBIT_WARS_SOLVER,
+      maxIterations: 8,
+      pollIntervalSec: 15,
+      pollTimeoutSec: 600,
+      kernelWaitMaxTimeoutSec: 900,
+      kernelOutputHeadBytes: 6000,
+      kernelOutputTailBytes: 6000,
+      mlBaselineRequired: true,
+      mlBaselineNote:
+        'Final agent MUST be a learned policy (BC over a teacher, RL fine-tune, or self-play). Heuristic-only submissions are rejected at validation time.',
+    },
+    priority: 200,
   });
 
   return { fragments, skills };

@@ -7,6 +7,13 @@ export {
   type KaggleMCPServerOptions,
 } from './kaggle.js';
 
+export {
+  wrapAdapterWithResilience,
+  __resetBreakerStateForTests,
+  KaggleRateLimitError,
+  getKaggleBreakerState,
+} from './resilience.js';
+
 export type {
   KaggleCompetition,
   KaggleCompetitionFile,

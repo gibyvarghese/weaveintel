@@ -45,6 +45,8 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
       log,
       playbookResolver: opts.playbookResolver,
       ...(opts.policy ? { policy: opts.policy } : {}),
+      ...(opts.onKernelPushed ? { onKernelPushed: opts.onKernelPushed } : {}),
+      ...(opts.onToolBlocked ? { onToolBlocked: opts.onToolBlocked } : {}),
     });
 
   // Pre-built fallback inner handler (used when no per-tick resolver).
@@ -156,6 +158,13 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
         playbookId: playbook?.skillId ?? null,
         playbookName: playbook?.name ?? null,
         strategyLabel: 'agentic',
+        // Forward the submission contract from the playbook so the validator
+        // picks the right branch (PATH A kernel_emits_file vs PATH B
+        // kernel_is_submission). Without this, the validator defaults to
+        // PATH A and rejects every kernel for live-API competitions.
+        submissionWriter: playbook?.config.submissionWriter ?? null,
+        submissionFormat: playbook?.config.submissionFormat ?? null,
+        submissionFilename: playbook?.config.submissionFilename ?? null,
         kernelRef: kernel.kernelRef,
         kernelUrl: kernel.kernelUrl,
         kernelStatus: kernel.kernelStatus,

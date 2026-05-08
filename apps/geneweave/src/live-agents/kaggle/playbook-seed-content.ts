@@ -80,6 +80,7 @@ starts with \`### DISCOVERED COMPETITION INTEL (<slug>)\` — when present:
     you will be bounced back to try again with the same instruction.
 
 ## Anti-thrash rules (HARD — saves your tool budget)
+  * **kernelRef rule (CRITICAL):** NEVER construct, guess, derive, slugify, abbreviate, pluralize, or otherwise fabricate a \`kernelRef\` value. The ONLY valid \`kernelRef\` values are EXACT strings returned in the \`kernelRef\` field of a successful \`kaggle_push_kernel\` response in THIS session. Kaggle ignores the \`slug\` you send to push and persists a slug derived from the kernel \`title\` plus a 5-char anti-collision suffix (e.g. \`-jcg6h\`); you cannot predict that suffix. Polling, waiting on, or fetching output for a fabricated kernelRef returns HTTP 403 \"kernels.get denied\" — Kaggle does NOT return 404 for missing kernels. Before calling \`kaggle_wait_for_kernel\` or \`kaggle_get_kernel_output\`, copy the \`kernelRef\` verbatim from a prior \`kaggle_push_kernel\` result. If you do not have one yet, push first.
   * \`kaggle_list_competitions\` — call AT MOST ONCE per session. Cached.
   * \`kaggle_list_competition_files\` — call AT MOST ONCE per (slug). The
     file list does not change while a kernel is running.
@@ -105,7 +106,7 @@ Write v1 informed by Phases 0 + 1. The v1 must:
   * Honor the SUBMISSION CONTRACT exactly. Your kernel either:
       - WRITES \`/kaggle/working/<submission_filename>\` (when submission_writer=kernel_emits_file), OR
       - IS the submission itself (when submission_writer=kernel_is_submission — the entire kernel source is uploaded as the entry; the kernel must self-contain everything and produce the expected scoring output).
-  * Use a model class at least as strong as the median top-public kernel (tabular: GBM, not logistic regression; vision: pretrained backbone, not from-scratch CNN; live-API games: a heuristic tuned with self-play, not pure greedy).
+  * Use a model class at least as strong as the median top-public kernel (tabular: GBM, not logistic regression; vision: pretrained backbone, not from-scratch CNN; live-API / interactive-agent games (e.g. orbit-wars, ARC-AGI, kaggle_environments comps): a *learned* policy — lightweight RL (PPO / DQN) trained against the env in-kernel, OR a behavior-cloned scikit-learn / small-MLP classifier mapping engineered state features to the next action, OR an imitation-learning agent fitted to a hand-coded teacher's rollouts. NEVER ship a hand-tuned if/else heuristic as the final entry — heuristics are at most a teacher used to bootstrap the ML policy. The kernel is allowed to load pretrained weights mounted in /kaggle/input/ when training in-kernel doesn't fit the 5-minute budget.
   * Do real cross-validation when possible (≥5 folds, stratified when class-imbalanced).
   * Emit \`cv_scores.json\` AND the submission file.
   * Print \"AGENT_RESULT_CV: cv_score=<x> cv_std=<y> baseline_target=<z>\" in the log.
@@ -404,6 +405,303 @@ def main():
         traceback.print_exc()
         _emit_fallback(sample_df, "model exception")
         return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+`;
+
+// ─────────────────────────────────────────────────────────────────────
+// Orbit Wars (kaggle_environments interactive-agent competition).
+// SHAPE = B (kernel_is_submission). Submission file: main.py with
+// `def agent(observation, configuration)`. We REQUIRE an ML-based
+// agent (RL or behavior-cloned classifier) — not a hand-tuned heuristic.
+// Heuristics are allowed only as a teacher used to bootstrap training.
+// ─────────────────────────────────────────────────────────────────────
+
+export const KAGGLE_ORBIT_WARS_WORKFLOW = `You are a Kaggle Grandmaster shipping an ML-based agent for the Orbit Wars competition (kaggle_environments interactive-agent format, SHAPE=B kernel_is_submission).
+
+## Hard ground rules (read first — these override any conflicting general guidance)
+  * **kernelRef rule (CRITICAL — violation causes 403 loops and stalls the entire run):** NEVER construct, guess, derive, slugify, abbreviate, pluralize, or otherwise fabricate a \`kernelRef\` value yourself. The ONLY valid \`kernelRef\` values are the EXACT strings returned in the \`kernelRef\` field of a successful \`kaggle_push_kernel\` response in THIS session. Kaggle ignores the \`slug\` you send to push and persists a slug derived from the kernel \`title\` plus a 5-char anti-collision suffix (e.g. \`-jcg6h\`); you cannot predict that suffix. Polling, waiting on, or fetching output for a fabricated kernelRef returns HTTP 403 \"kernels.get denied\" — Kaggle does not return 404 for missing kernels. Before calling \`kaggle_wait_for_kernel\` or \`kaggle_get_kernel_output\`, copy the \`kernelRef\` verbatim from a prior \`kaggle_push_kernel\` result. If you do not have one yet, push first.
+  * The submission IS a Python file named \`main.py\` with a top-level \`def agent(observation, configuration)\` function. Kaggle uploads the kernel source itself as the entry. There is NO submission.csv.
+  * The final agent MUST be ML-based. Acceptable: (a) a lightweight RL policy (PPO / DQN / A2C trained inside the kernel against \`kaggle_environments.make("orbit_wars")\`); (b) a behavior-cloned classifier (scikit-learn or a small PyTorch MLP) trained on rollouts of a hand-coded teacher; (c) a value-function bootstrapped via self-play episodes with TD updates. NOT acceptable as the final entry: a pure if/else / hand-tuned heuristic. Heuristics may exist ONLY as a teacher generating supervised data for the learned model.
+  * The agent function must run in <100ms / step on the Kaggle agent runner — keep the inference path tiny (small MLP / single sklearn predict call). Train heavy, infer light.
+
+## Phase 0 — Probe (1 iteration, MANDATORY before any solver code)
+Push a tiny probe kernel that prints:
+  * \`import kaggle_environments; print("envs=", sorted(list(kaggle_environments.envs.__dict__.keys())))\` to confirm \`orbit_wars\` is present in the installed version.
+  * \`env = kaggle_environments.make("orbit_wars"); env.reset(); print(env.state[0]["observation"])\` to show the observation schema (board layout, units, action space).
+  * \`os.walk("/kaggle/input")\` (first 200 entries) to see if any starter agent or data is mounted.
+  * Final line: \`print("AGENT_PROBE_DONE shape=B contract=main.py-with-agent-fn")\`.
+Read the FULL log. Now you know the obs shape and action space. The probe is NEVER the submission — push another kernel next.
+
+## Phase 1 — Hand-coded TEACHER (1 iteration; this is the supervised label generator, NOT the final entry)
+Write a deterministic teacher policy as a plain function inside a kernel. It can use whatever heuristics you like (greedy attack, defensive positioning, weighted scoring of candidate moves). Run it inside the env for ≥200 self-play episodes vs a random opponent and record \`(observation_features, teacher_action)\` pairs to a pickle in /kaggle/working/. Print the teacher's average score so you have a floor.
+
+## Phase 2 — Learned policy v1 (BEHAVIOR CLONING — strongly preferred for first iteration)
+Train a small classifier on the teacher's (state_features → action) pairs:
+  * Engineer 30-80 numeric features from the raw observation (own/enemy unit counts, positional stats, distance histograms, action-mask bits).
+  * Fit \`sklearn.ensemble.GradientBoostingClassifier\` or a small \`MLPClassifier\` (hidden=(64,64)).
+  * Pickle the model to /kaggle/working/policy.pkl.
+  * Write the FINAL \`main.py\`:
+        import pickle, os, numpy as np
+        _MODEL = None
+        def _load():
+            global _MODEL
+            if _MODEL is None:
+                with open(os.path.join(os.path.dirname(__file__), "policy.pkl"), "rb") as f:
+                    _MODEL = pickle.load(f)
+            return _MODEL
+        def _features(obs):
+            # … same feature builder used at training time
+            return np.array([...], dtype=np.float32)
+        def agent(observation, configuration):
+            m = _load()
+            x = _features(observation).reshape(1, -1)
+            try:
+                return int(m.predict(x)[0])
+            except Exception:
+                return 0  # safe no-op
+  * Verify in-kernel: load the model, run \`env = make("orbit_wars"); env.run([agent, "random"])\` for ≥20 matches and print \`AGENT_RESULT_CV_SCORES={"win_rate_vs_random": <x>}\` and \`AGENT_RESULT: status=ok mean_score=<y> matches=20 model=ml_bc\`.
+
+## Phase 3 — Iterate (3-6 iterations, ML-only improvements)
+Each push changes ONE ML thing:
+  * More teacher episodes (200 → 1000) → more training data.
+  * Stronger model (MLPClassifier(128,128,64) / GradientBoosting → LightGBM if available).
+  * Better feature engineering (action-mask features; opponent's last-action one-hot; remaining-time bucket).
+  * RL fine-tune: warm-start from the BC model, then run REINFORCE / cross-entropy method updates against the env for N episodes.
+  * Self-play: replace the random opponent with a frozen earlier version of YOUR model. Train against it. This is the path from "beats random" to "beats public top kernels".
+NEVER swap the ML core for a heuristic. If a candidate iteration regresses the win rate, revert to BEST and try a different ML knob.
+
+## Track BEST across iterations (MANDATORY)
+Maintain a single block in your scratchpad:
+  \`BEST = { kernelRef: "<owner/slug>", win_rate: <x>, mean_score: <y>, model: "<bc|rl|self-play>", codeBytes: <int> }\`
+Update only when the new iteration STRICTLY improves win_rate. The FINAL submission MUST reference BEST.kernelRef, never the most recent push.
+
+## Stop conditions
+Stop when ONE of:
+  * win_rate vs random ≥ 0.85 AND last iteration improved (push one more polish, then stop), OR
+  * win_rate vs random ≥ 0.85 AND last iteration plateaued (stop), OR
+  * 8 push attempts reached.
+Do NOT stop the moment the agent doesn't crash. "Doesn't crash" is the floor; "beats random ≥ 85% AND uses an ML policy" is the goal.
+
+## Final response shape
+When you stop, your final response MUST contain (in this order):
+  1. The full SUBMISSION CONTRACT block (submission_filename=main.py, submission_format=python_script, submission_writer=kernel_is_submission, evaluation_metric=win_rate, metric_direction=maximize, baseline_target=0.5).
+  2. The BEST block from your scratchpad.
+  3. \`AGENT_FINAL: best_kernel=<BEST.kernelRef> win_rate=<BEST.win_rate> mean_score=<BEST.mean_score> model=<BEST.model> code_bytes=<BEST.codeBytes>\`.
+
+## Hard constraints
+  * Standard Kaggle Python image only. \`kaggle_environments\`, \`scikit-learn\`, \`numpy\`, \`pandas\` are pre-installed. Do NOT pip install from PyPI (no internet).
+  * Each kernel < 5 minutes wallclock. If RL training would exceed that, train a smaller policy or use BC over more teacher data.
+  * Distinct kernel slugs per attempt (e.g. \`orbit-wars-it1-probe\`, \`orbit-wars-it2-bc\`, \`orbit-wars-it3-bc-larger\`).
+  * DO NOT call any submit-style tool — submission is gated by a separate human-approval step.
+  * The final kernel MUST contain a working \`def agent(observation, configuration)\` and the matching \`policy.pkl\` file written to /kaggle/working/.`;
+
+export const KAGGLE_ORBIT_WARS_SOLVER_TEMPLATE = String.raw`"""
+WeaveIntel Orbit Wars learned-policy solver template.
+
+This is the deterministic ML-based fallback fired when the agentic strategist
+takes over. It produces a kernel that:
+  1. Generates training data by running a hand-coded TEACHER policy in the
+     orbit_wars env (≥200 episodes vs random).
+  2. Trains a small scikit-learn GradientBoostingClassifier on
+     (state_features → teacher_action) pairs.
+  3. Pickles the model AND writes a main.py with a top-level def agent(...) that loads
+     the model and predicts an action at inference time.
+  4. Self-validates by running 20 evaluation matches and printing
+     AGENT_RESULT_CV_SCORES + AGENT_RESULT lines for the validator.
+
+The teacher is intentionally simple — it is ONLY a label source. The shipped
+agent is the LEARNED model, not the teacher. The strategist is expected to
+push smarter ML kernels (RL fine-tune, self-play, larger nets) per iteration;
+this template only fires as the deterministic v1 baseline so a run never
+silently no-ops.
+"""
+import os
+import sys
+import json
+import pickle
+import random
+import traceback
+from typing import List
+
+import numpy as np
+
+WORKING = "/kaggle/working"
+
+
+def _log(msg: str) -> None:
+    print(f"[orbit-wars-bc] {msg}", flush=True)
+
+
+def _featurize(obs) -> np.ndarray:
+    """Tiny default featurizer. The strategist should grow this per
+    competition probe results."""
+    flat: List[float] = []
+    if isinstance(obs, dict):
+        for k in sorted(obs.keys()):
+            v = obs[k]
+            if isinstance(v, (int, float)):
+                flat.append(float(v))
+            elif isinstance(v, (list, tuple)):
+                arr = np.asarray(v, dtype=float).ravel()[:64]
+                flat.extend(arr.tolist())
+                flat.extend([0.0] * (64 - len(arr)))
+    elif isinstance(obs, (list, tuple)):
+        arr = np.asarray(obs, dtype=float).ravel()[:128]
+        flat.extend(arr.tolist())
+        flat.extend([0.0] * (128 - len(arr)))
+    if not flat:
+        flat = [0.0]
+    arr = np.asarray(flat, dtype=np.float32)
+    if arr.shape[0] < 128:
+        arr = np.concatenate([arr, np.zeros(128 - arr.shape[0], dtype=np.float32)])
+    return arr[:128]
+
+
+def _teacher(obs, configuration) -> int:
+    """Hand-coded teacher — DO NOT ship this as the agent. Used ONLY to
+    generate supervised labels for the learned model."""
+    actions = list(range(int(getattr(configuration, "actSize", 4) or 4)))
+    return random.choice(actions) if actions else 0
+
+
+def _collect(env_make, n_episodes: int = 200):
+    X, y = [], []
+    for ep in range(n_episodes):
+        env = env_make("orbit_wars", debug=False)
+        env.reset()
+        steps = 0
+        while not env.done and steps < 400:
+            obs = env.state[0]["observation"]
+            cfg = env.configuration
+            a = _teacher(obs, cfg)
+            X.append(_featurize(obs))
+            y.append(int(a))
+            env.step([a, _teacher(env.state[1]["observation"], cfg)])
+            steps += 1
+    return np.asarray(X, dtype=np.float32), np.asarray(y, dtype=np.int64)
+
+
+def _evaluate(env_make, model, n_matches: int = 20) -> dict:
+    wins, total, scores = 0, 0, []
+    for _ in range(n_matches):
+        env = env_make("orbit_wars", debug=False)
+        def _predict_agent(observation, configuration):
+            x = _featurize(observation).reshape(1, -1)
+            try:
+                return int(model.predict(x)[0])
+            except Exception:
+                return 0
+        env.run([_predict_agent, "random"])
+        s0 = env.state[0].get("reward") or 0.0
+        s1 = env.state[1].get("reward") or 0.0
+        scores.append(s0)
+        if s0 > s1:
+            wins += 1
+        total += 1
+    return {"win_rate_vs_random": wins / max(1, total), "mean_score": float(np.mean(scores) if scores else 0.0)}
+
+
+def main() -> int:
+    try:
+        from kaggle_environments import make as env_make
+    except Exception as e:
+        _log(f"kaggle_environments unavailable: {e}; emitting no-op agent")
+        with open(os.path.join(WORKING, "main.py"), "w") as f:
+            f.write("def agent(observation, configuration):\n    return 0\n")
+        print("AGENT_RESULT: status=skip reason=no_kaggle_environments")
+        return 0
+
+    try:
+        from sklearn.ensemble import GradientBoostingClassifier
+    except Exception as e:
+        _log(f"sklearn unavailable: {e}; emitting no-op agent")
+        return 0
+
+    _log("collecting teacher rollouts (200 episodes vs random)")
+    X, y = _collect(env_make, n_episodes=200)
+    _log(f"training set: X={X.shape} y={y.shape} unique_actions={sorted(set(y.tolist()))}")
+
+    if len(set(y.tolist())) < 2:
+        _log("teacher produced only one action class — falling back to constant agent")
+        with open(os.path.join(WORKING, "main.py"), "w") as f:
+            f.write("def agent(observation, configuration):\n    return 0\n")
+        print("AGENT_RESULT: status=skip reason=degenerate_teacher")
+        return 0
+
+    _log("fitting GradientBoostingClassifier")
+    model = GradientBoostingClassifier(n_estimators=100, max_depth=3, random_state=0)
+    model.fit(X, y)
+
+    with open(os.path.join(WORKING, "policy.pkl"), "wb") as f:
+        pickle.dump(model, f)
+    _log("wrote /kaggle/working/policy.pkl")
+
+    main_py = '''import os
+import pickle
+import numpy as np
+
+_MODEL = None
+_MODEL_PATH = os.path.join(os.path.dirname(__file__), "policy.pkl")
+
+
+def _load():
+    global _MODEL
+    if _MODEL is None:
+        with open(_MODEL_PATH, "rb") as f:
+            _MODEL = pickle.load(f)
+    return _MODEL
+
+
+def _featurize(obs):
+    flat = []
+    if isinstance(obs, dict):
+        for k in sorted(obs.keys()):
+            v = obs[k]
+            if isinstance(v, (int, float)):
+                flat.append(float(v))
+            elif isinstance(v, (list, tuple)):
+                arr = np.asarray(v, dtype=float).ravel()[:64]
+                flat.extend(arr.tolist())
+                flat.extend([0.0] * (64 - len(arr)))
+    elif isinstance(obs, (list, tuple)):
+        arr = np.asarray(obs, dtype=float).ravel()[:128]
+        flat.extend(arr.tolist())
+        flat.extend([0.0] * (128 - len(arr)))
+    if not flat:
+        flat = [0.0]
+    arr = np.asarray(flat, dtype=np.float32)
+    if arr.shape[0] < 128:
+        arr = np.concatenate([arr, np.zeros(128 - arr.shape[0], dtype=np.float32)])
+    return arr[:128]
+
+
+def agent(observation, configuration):
+    m = _load()
+    x = _featurize(observation).reshape(1, -1)
+    try:
+        return int(m.predict(x)[0])
+    except Exception:
+        return 0
+'''
+    with open(os.path.join(WORKING, "main.py"), "w") as f:
+        f.write(main_py)
+    _log("wrote /kaggle/working/main.py")
+
+    try:
+        scores = _evaluate(env_make, model, n_matches=20)
+    except Exception as e:
+        _log(f"evaluate failed: {e}\n{traceback.format_exc()}")
+        scores = {"win_rate_vs_random": 0.0, "mean_score": 0.0}
+
+    print(f"AGENT_RESULT_CV_SCORES={json.dumps(scores)}")
+    print(
+        f"AGENT_RESULT: status=ok mean_score={scores['mean_score']:.4f} "
+        f"matches=20 model=ml_bc win_rate={scores['win_rate_vs_random']:.4f}"
+    )
+    return 0
 
 
 if __name__ == "__main__":

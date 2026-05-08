@@ -21,6 +21,7 @@
   "dependencies": {
     "@weaveintel/core": "*",
     "@weaveintel/mcp-server": "*",
+    "@weaveintel/reliability": "*",
     "@weaveintel/sandbox": "*",
     "@weaveintel/tools": "*"
   },

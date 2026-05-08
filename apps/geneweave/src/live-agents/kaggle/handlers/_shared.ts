@@ -68,6 +68,24 @@ export interface KaggleRoleHandlersOptions {
    * gating pipeline operators administer for chat + the generic supervisor.
    */
   policy?: LiveAgentPolicy;
+  /**
+   * Best-effort observer for every successful `kaggle_push_kernel` performed
+   * by the strategist's ReAct loop. Wired by the heartbeat boot path to
+   * persist a structured `kgl_run_event` (kind=`kernel_pushed`) so we have
+   * a queryable ledger of canonical Kaggle-returned kernelRefs per run —
+   * instead of relying on unstructured `tool_audit_events.output_preview`
+   * JSON. Throws are swallowed by the underlying tool; a failing observer
+   * never blocks the push.
+   */
+  onKernelPushed?: (record: import('../kaggle-tools.js').KernelPushRecord) => Promise<void> | void;
+  /**
+   * Best-effort observer fired the FIRST time any kaggle_* tool returns a
+   * structured `rate_limited` rejection within a tick. Boot path wires this
+   * to insert a `kgl_run_event` (kind=`tool_blocked`) so the operator-facing
+   * run-detail surfaces Kaggle account pressure as a first-class signal
+   * (separate from generic `tool_audit_events`). Throws are swallowed.
+   */
+  onToolBlocked?: (record: import('../kaggle-tools.js').ToolBlockedRecord) => Promise<void> | void;
 }
 
 export interface OperationalDefaults {

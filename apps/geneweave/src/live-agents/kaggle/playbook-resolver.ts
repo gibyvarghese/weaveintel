@@ -38,6 +38,20 @@ export interface KagglePlaybookConfig {
   /** Human-readable competition shape. Common values: 'static_files',
    *  'live_api', 'unknown'. Used by handlers for branching, never to gate. */
   shape?: string;
+  /** Submission contract — drives the validator's PATH A vs PATH B branch.
+   *  - `kernel_emits_file` (default): kernel writes /kaggle/working/<filename>
+   *    and validator parity-checks against sample_submission.csv (PATH A).
+   *  - `kernel_is_submission`: the kernel script itself IS the submission
+   *    (live-API / interactive-agent comps with no sample_submission.csv);
+   *    validator runs PATH B (status=complete + score line + no traceback).
+   *  When omitted, the validator falls back to PATH A. */
+  submissionWriter?: 'kernel_emits_file' | 'kernel_is_submission';
+  /** Submission file format hint (e.g. 'csv', 'python_script',
+   *  'python_agent_class'). Forwarded to the validator for context. */
+  submissionFormat?: string;
+  /** Submission filename hint (e.g. 'submission.csv', 'main.py').
+   *  Forwarded to the validator for context. */
+  submissionFilename?: string;
   /** Key into `prompt_fragments` whose body is the Python solver template
    *  the deterministic Implementer should push when no LLM strategist is
    *  driving. Optional — when absent, deterministic mode logs a notice

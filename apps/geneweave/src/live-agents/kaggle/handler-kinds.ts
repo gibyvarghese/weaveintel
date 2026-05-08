@@ -26,7 +26,7 @@
  *      each agent at provisioning time.
  */
 
-import { liveKaggleAdapter } from '@weaveintel/tools-kaggle';
+import { liveKaggleAdapter, wrapAdapterWithResilience } from '@weaveintel/tools-kaggle';
 import type {
   HandlerContext,
   HandlerKindRegistration,
@@ -51,7 +51,7 @@ import { createObserverAgentic, createObserverDeterministic } from './handlers/o
 
 /** Build the process-singleton SharedHandlerContext from boot options. */
 function buildSharedCtx(opts: KaggleRoleHandlersOptions): SharedHandlerContext {
-  const adapter = opts.adapter ?? liveKaggleAdapter;
+  const adapter = wrapAdapterWithResilience(opts.adapter ?? liveKaggleAdapter);
   const log = opts.log ?? ((m: string) => console.log(`[kaggle-handler] ${m}`));
   let opDefaultsPromise: Promise<OperationalDefaults> | null = null;
   const getOpDefaults = () => {
