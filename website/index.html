@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>weaveIntel Documentation</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero">
+    <h1>weaveIntel</h1>
+    <p class="subtitle">Composable, production-grade AI application framework</p>
+    <nav>
+      <a href="#quickstart">Quick Start</a>
+      <a href="#core-concepts">Core Concepts</a>
+      <a href="#capabilities">Capabilities</a>
+      <a href="#live-agents">Live-Agents</a>
+      <a href="#geneweave">geneWeave App</a>
+      <a href="#examples">Examples</a>
+      <a href="#deployment">Deployment</a>
+    </nav>
+  </header>
+  <main>
+    <section id="overview">
+      <h2>What is weaveIntel?</h2>
+      <p><strong>weaveIntel</strong> is a TypeScript framework for building production-grade AI applications. It provides composable, vendor-neutral building blocks for everything from a single chat completion to a fleet of long-running multi-agent meshes — with tool calling, governance, observability, and resilience built in.</p>
+    </section>
+    <section id="quickstart">
+      <h2>Quick Start</h2>
+      <ol>
+        <li>Clone the repo: <code>git clone https://github.com/gibyvarghese/weaveintel.git</code></li>
+        <li>Install dependencies: <code>npm install</code></li>
+        <li>Set your provider key(s): <code>export OPENAI_API_KEY=sk-... </code></li>
+        <li>Start the reference app: <code>./scripts/start-geneweave.sh</code></li>
+        <li>Open <a href="http://localhost:3500">http://localhost:3500</a> and sign up.</li>
+      </ol>
+    </section>
+    <section id="core-concepts">
+      <h2>Core Concepts</h2>
+      <ul>
+        <li><strong>Model</strong>: Adapter to an LLM (chat, stream, embed, vision, structured output).</li>
+        <li><strong>Tool</strong>: Typed function an agent can call, with risk class, policy, and audit.</li>
+        <li><strong>Agent</strong>: LLM-driven loop that picks tools to satisfy a goal. <code>weaveAgent</code> (one-shot) and <code>weaveLiveAgent</code> (long-running).</li>
+        <li><strong>Mesh</strong>: Group of live agents sharing state, schedule, and event bus.</li>
+        <li><strong>Policy / Contract</strong>: Declarative rules for tool use, approval, and evidence.</li>
+      </ul>
+    </section>
+    <section id="capabilities">
+      <h2>Capability Walkthroughs</h2>
+      <ul>
+        <li>Talk to a model</li>
+        <li>Add tools (<code>weaveAgent</code>)</li>
+        <li>Long-running agents (<code>weaveLiveAgent</code>)</li>
+        <li>Connect to external systems (MCP)</li>
+        <li>Multi-agent communication (A2A)</li>
+        <li>Governance: policy, approval, audit</li>
+        <li>Resilience: rate limits, circuit breakers, retries</li>
+        <li>Memory, RAG, and knowledge graphs</li>
+        <li>Observability and replay</li>
+        <li>Evaluation</li>
+      </ul>
+    </section>
+    <section id="live-agents">
+      <h2>Live-Agents Use Cases</h2>
+      <ul>
+        <li>Long-lived research assistant</li>
+        <li>Promotional workflow automation</li>
+        <li>Cross-mesh collaboration and handoff</li>
+        <li>Compression for long-running agents</li>
+        <li>Account binding and credential scoping</li>
+        <li>Mesh administration and telemetry</li>
+      </ul>
+    </section>
+    <section id="geneweave">
+      <h2>The geneWeave Reference App</h2>
+      <p>geneWeave is a full-stack chat app and admin dashboard built only from <code>@weaveintel/*</code> packages. It demonstrates all core and advanced capabilities in a real-world, extensible application.</p>
+    </section>
+    <section id="examples">
+      <h2>Examples Catalog</h2>
+      <p>Browse 90+ runnable demos in the <code>examples/</code> directory, each demonstrating a specific capability or integration.</p>
+    </section>
+    <section id="deployment">
+      <h2>Deployment & Development</h2>
+      <ul>
+        <li>Deploy with Docker, Kubernetes, Azure, AWS, GCP, or DigitalOcean using manifests in <code>deploy/</code>.</li>
+        <li>Monorepo managed with Turborepo, TypeScript, and ESM.</li>
+        <li>Extensible via modular packages in <code>packages/</code>.</li>
+      </ul>
+    </section>
+  </main>
+  <footer>
+    <p>© 2026 weaveIntel. Styled with servonomics.com branding.</p>
+  </footer>
+</body>
+</html>

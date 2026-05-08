@@ -1,0 +1,86 @@
+/* servonomics.com inspired branding */
+:root {
+  --primary: #1a3c6b;
+  --secondary: #f7b32b;
+  --accent: #e4572e;
+  --background: #f4f4f9;
+  --text: #222;
+  --header-bg: #fff;
+  --nav-link: #1a3c6b;
+  --nav-link-hover: #e4572e;
+  --card-bg: #fff;
+  --border-radius: 10px;
+  --font-main: 'Inter', 'Segoe UI', Arial, sans-serif;
+  --font-heading: 'Montserrat', 'Segoe UI', Arial, sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--text);
+  font-family: var(--font-main);
+  margin: 0;
+  padding: 0;
+}
+
+header.hero {
+  background: var(--header-bg);
+  padding: 2rem 1rem 1rem 1rem;
+  text-align: center;
+  border-bottom: 2px solid var(--primary);
+}
+
+header.hero h1 {
+  font-family: var(--font-heading);
+  color: var(--primary);
+  font-size: 2.5rem;
+  margin: 0 0 0.5rem 0;
+}
+
+header.hero .subtitle {
+  color: var(--accent);
+  font-size: 1.2rem;
+  margin-bottom: 1rem;
+}
+
+header.hero nav {
+  margin-top: 1rem;
+}
+
+header.hero nav a {
+  color: var(--nav-link);
+  text-decoration: none;
+  margin: 0 1rem;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+
+header.hero nav a:hover {
+  color: var(--nav-link-hover);
+}
+
+main {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+section {
+  background: var(--card-bg);
+  border-radius: var(--border-radius);
+  box-shadow: 0 2px 8px rgba(26,60,107,0.06);
+  margin-bottom: 2rem;
+  padding: 2rem;
+}
+
+h2 {
+  font-family: var(--font-heading);
+  color: var(--primary);
+  margin-top: 0;
+}
+
+footer {
+  text-align: center;
+  color: #888;
+  padding: 2rem 1rem 1rem 1rem;
+  font-size: 0.95rem;
+}

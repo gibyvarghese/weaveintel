@@ -31,6 +31,8 @@ import { weaveToolDescriptor as describeT } from '@weaveintel/tools';
 import type {
   KaggleCompetition,
   KaggleCompetitionFile,
+  KaggleCompetitionOverview,
+  KaggleCompetitionPage,
   KaggleLeaderboardEntry,
   KaggleSubmission,
   KaggleDataset,
@@ -185,6 +187,25 @@ export interface KaggleAdapter {
     fileName: string,
     opts?: { maxBytes?: number },
   ): Promise<{ fileName: string; sizeBytes: number; truncated: boolean; binary: boolean; content: string }>;
+  /**
+   * Fetch the competition's public narrative pages — Overview, Evaluation,
+   * Rules, Data, Timeline. For simulation/agent competitions (e.g. orbit-wars),
+   * the actual rules, scoring math, observation/action specs, and submission
+   * contract live HERE rather than in the data bundle. The Strategist needs
+   * this in Phase 0 alongside README.md/agents.md to fully understand what to
+   * build.
+   *
+   * Implementation fetches `https://www.kaggle.com/competitions/<ref>/<page>`
+   * for each requested page and extracts the visible text from the page's
+   * embedded `__NEXT_DATA__` blob. Falls back to HTML tag-stripping when the
+   * blob is unparseable. Auth header is sent for consistency but most pages
+   * are publicly readable.
+   */
+  getCompetitionOverview(
+    creds: KaggleCredentials,
+    ref: string,
+    opts?: { pageSlugs?: string[]; maxBytesPerPage?: number; combinedMaxBytes?: number },
+  ): Promise<KaggleCompetitionOverview>;
   getLeaderboard(creds: KaggleCredentials, ref: string): Promise<KaggleLeaderboardEntry[]>;
   listSubmissions(creds: KaggleCredentials, ref: string): Promise<KaggleSubmission[]>;
   listDatasets(creds: KaggleCredentials, args: {
@@ -318,6 +339,179 @@ function parseKernel(raw: Record<string, unknown>): KaggleKernel {
   };
 }
 
+// ─── Competition overview narrative (Overview / Evaluation / Rules / …) ─────
+//
+// Kaggle's REST API does not expose the full markdown narrative for a
+// competition's public pages. The HTML pages are server-rendered Next.js
+// documents that embed the raw page payload in a <script id="__NEXT_DATA__">
+// JSON blob. We extract the largest markdown-ish strings from that blob and
+// fall back to a best-effort HTML→text strip if the blob is missing or the
+// markdown can't be located.
+//
+// This is intentionally a single self-contained helper rather than a
+// fully-typed Next.js page model because Kaggle's internal payload schema
+// changes without notice. Robustness comes from the layered fallback, not
+// from precise schema knowledge.
+
+const DEFAULT_PAGE_SLUGS: ReadonlyArray<string> = ['overview', 'evaluation', 'rules', 'data', 'timeline'];
+const DEFAULT_MAX_BYTES_PER_PAGE = 8 * 1024;
+const DEFAULT_COMBINED_MAX_BYTES = 24 * 1024;
+
+function buildCompetitionPageUrl(ref: string, slug: string): string {
+  // `evaluation` lives under `/overview/evaluation`; the others are top-level.
+  const path = slug === 'evaluation' ? 'overview/evaluation' : slug;
+  return `https://www.kaggle.com/competitions/${encodeURIComponent(ref)}/${path}`;
+}
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&nbsp;/g, ' ');
+}
+
+function stripHtmlToText(html: string): string {
+  // Drop scripts/styles entirely.
+  const noScripts = html
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<noscript\b[^>]*>[\s\S]*?<\/noscript>/gi, '');
+  const text = noScripts.replace(/<[^>]+>/g, ' ');
+  return decodeEntities(text).replace(/\s+\n/g, '\n').replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function extractNextDataMarkdown(html: string): string | null {
+  const m = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+  if (!m || !m[1]) return null;
+  let data: unknown;
+  try {
+    data = JSON.parse(m[1]);
+  } catch {
+    return null;
+  }
+  // Walk the tree, collect long string values that look like markdown/prose.
+  const candidates: string[] = [];
+  const seen = new Set<unknown>();
+  const stack: unknown[] = [data];
+  while (stack.length) {
+    const cur = stack.pop();
+    if (cur === null || cur === undefined) continue;
+    if (typeof cur === 'string') {
+      // Only consider substantial strings that look like body text.
+      if (cur.length >= 200 && /\s/.test(cur)) {
+        candidates.push(cur);
+      }
+      continue;
+    }
+    if (typeof cur !== 'object') continue;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    if (Array.isArray(cur)) {
+      for (const v of cur) stack.push(v);
+    } else {
+      for (const v of Object.values(cur as Record<string, unknown>)) stack.push(v);
+    }
+  }
+  if (candidates.length === 0) return null;
+  // Prefer the longest unique candidate; concatenate the top few for safety.
+  candidates.sort((a, b) => b.length - a.length);
+  const top = candidates.slice(0, 3);
+  // De-duplicate substrings: drop any candidate fully contained in a longer one.
+  const kept: string[] = [];
+  for (const c of top) {
+    if (!kept.some((k) => k.includes(c))) kept.push(c);
+  }
+  return kept.join('\n\n').trim();
+}
+
+function extractTitle(html: string): string | null {
+  const m = html.match(/<title>([^<]+)<\/title>/i);
+  return m && m[1] ? decodeEntities(m[1]).trim() : null;
+}
+
+async function fetchCompetitionPage(
+  creds: KaggleCredentials,
+  ref: string,
+  slug: string,
+  maxBytes: number,
+): Promise<KaggleCompetitionPage> {
+  const url = buildCompetitionPageUrl(ref, slug);
+  const resp = await fetch(url, {
+    headers: {
+      // Auth is sent for consistency with other adapter calls; most overview
+      // pages are public but private/closed competitions require it.
+      Authorization: authHeader(creds),
+      Accept: 'text/html,application/xhtml+xml',
+      'User-Agent': 'weaveintel-tools-kaggle/0.1 (+https://github.com/)',
+    },
+    redirect: 'follow',
+  });
+  if (!resp.ok) {
+    throw new Error(`Kaggle page fetch error ${resp.status} ${resp.statusText} for ${url}`);
+  }
+  const html = await resp.text();
+  const title = extractTitle(html);
+  let content = extractNextDataMarkdown(html);
+  let source: KaggleCompetitionPage['source'] = 'next-data';
+  if (!content) {
+    content = stripHtmlToText(html);
+    source = 'html-strip';
+  }
+  let truncated = false;
+  if (Buffer.byteLength(content, 'utf8') > maxBytes) {
+    content = Buffer.from(content, 'utf8').subarray(0, maxBytes).toString('utf8');
+    content += `\n\n...[truncated to ${maxBytes} bytes]`;
+    truncated = true;
+  }
+  return {
+    slug,
+    title,
+    content,
+    source,
+    bytes: Buffer.byteLength(content, 'utf8'),
+    truncated,
+  };
+}
+
+async function fetchCompetitionOverview(
+  creds: KaggleCredentials,
+  ref: string,
+  opts?: { pageSlugs?: string[]; maxBytesPerPage?: number; combinedMaxBytes?: number },
+): Promise<KaggleCompetitionOverview> {
+  const slugs = opts?.pageSlugs ?? DEFAULT_PAGE_SLUGS;
+  const maxBytesPerPage = opts?.maxBytesPerPage ?? DEFAULT_MAX_BYTES_PER_PAGE;
+  const combinedMaxBytes = opts?.combinedMaxBytes ?? DEFAULT_COMBINED_MAX_BYTES;
+  const pages: KaggleCompetitionPage[] = [];
+  const missing: string[] = [];
+  // Sequential to keep auth headers under one socket and to avoid Kaggle 429s.
+  for (const slug of slugs) {
+    try {
+      const page = await fetchCompetitionPage(creds, ref, slug, maxBytesPerPage);
+      pages.push(page);
+    } catch {
+      missing.push(slug);
+    }
+  }
+  let combined = pages.map((p) => `### ${p.slug}\n${p.content}`).join('\n\n');
+  let truncated = false;
+  if (Buffer.byteLength(combined, 'utf8') > combinedMaxBytes) {
+    combined = Buffer.from(combined, 'utf8').subarray(0, combinedMaxBytes).toString('utf8');
+    combined += `\n\n...[combined truncated to ${combinedMaxBytes} bytes]`;
+    truncated = true;
+  }
+  return {
+    competitionRef: ref,
+    pages,
+    combinedText: combined,
+    truncated,
+    missing,
+  };
+}
+
 export const liveKaggleAdapter: KaggleAdapter = {
   async listCompetitions(creds, args) {
     const params = new URLSearchParams();
@@ -379,6 +573,10 @@ export const liveKaggleAdapter: KaggleAdapter = {
       }
     }
     return { fileName, sizeBytes, truncated, binary, content };
+  },
+
+  async getCompetitionOverview(creds, ref, opts) {
+    return fetchCompetitionOverview(creds, ref, opts);
   },
 
   async getLeaderboard(creds, ref) {
@@ -706,6 +904,16 @@ export function fixtureKaggleAdapter(): KaggleAdapter {
       const body = `# fixture content for ${fileName}`;
       return { fileName, sizeBytes: body.length, truncated: false, binary: false, content: body };
     },
+    async getCompetitionOverview(_creds, ref) {
+      const overviewBody = `Fixture overview narrative for competition ${ref}.\nGoal: predict X.\nMetric: Y.`;
+      const evalBody = `Fixture evaluation page for ${ref}.\nMetric definition and submission file format described here.`;
+      const pages: KaggleCompetitionPage[] = [
+        { slug: 'overview', title: 'Overview', content: overviewBody, source: 'next-data', bytes: overviewBody.length, truncated: false },
+        { slug: 'evaluation', title: 'Evaluation', content: evalBody, source: 'next-data', bytes: evalBody.length, truncated: false },
+      ];
+      const combined = pages.map((p) => `### ${p.slug}\n${p.content}`).join('\n\n');
+      return { competitionRef: ref, pages, combinedText: combined, truncated: false, missing: [] };
+    },
     async getLeaderboard() {
       return [
         { teamId: 't1', teamName: 'Top Team', rank: 1, score: 0.85, submissionDate: '2024-05-01T00:00:00Z' },
@@ -815,6 +1023,7 @@ export function createKaggleMCPServer(opts: KaggleMCPServerOptions = {}) {
     ['kaggle.competitions.list', 'List Kaggle competitions with optional filters'],
     ['kaggle.competitions.get', 'Get a single Kaggle competition by ref/slug'],
     ['kaggle.competitions.files.list', 'List the data files attached to a competition'],
+    ['kaggle.competitions.overview.get', "Fetch the competition's public narrative pages (overview/evaluation/rules) as text"],
     ['kaggle.competitions.leaderboard.get', 'Fetch the public leaderboard for a competition'],
     ['kaggle.competitions.submissions.list', "List the caller's prior submissions for a competition"],
     ['kaggle.datasets.list', 'Search the Kaggle dataset catalog'],
@@ -885,6 +1094,39 @@ export function createKaggleMCPServer(opts: KaggleMCPServerOptions = {}) {
       },
     },
     async (ctx, args) => asText(await adapter.listCompetitionFiles(extractCredentials(ctx), String(args['ref']))),
+  );
+
+  server.addTool(
+    {
+      name: 'kaggle.competitions.overview.get',
+      description:
+        "Fetch the competition's public narrative pages (Overview, Evaluation, Rules, Data, Timeline) as text. " +
+        'For simulation/agent competitions (e.g. orbit-wars) this is where the actual rules, scoring math, and ' +
+        'submission contract live — NOT in the data bundle. Use in Phase 0 alongside README.md/agents.md.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string', description: 'Competition ref/slug (e.g. "orbit-wars")' },
+          pageSlugs: {
+            type: 'array',
+            description: 'Optional subset of page slugs to fetch. Default: overview, evaluation, rules, data, timeline.',
+            items: { type: 'string' },
+          },
+          maxBytesPerPage: { type: 'number', description: 'Per-page truncation cap. Default 8192.' },
+          combinedMaxBytes: { type: 'number', description: 'Combined text truncation cap. Default 24576.' },
+        },
+        required: ['ref'],
+      },
+    },
+    async (ctx, args) => asText(await adapter.getCompetitionOverview(
+      extractCredentials(ctx),
+      String(args['ref']),
+      {
+        ...(Array.isArray(args['pageSlugs']) ? { pageSlugs: (args['pageSlugs'] as unknown[]).map(String) } : {}),
+        ...(typeof args['maxBytesPerPage'] === 'number' ? { maxBytesPerPage: args['maxBytesPerPage'] } : {}),
+        ...(typeof args['combinedMaxBytes'] === 'number' ? { combinedMaxBytes: args['combinedMaxBytes'] } : {}),
+      },
+    )),
   );
 
   server.addTool(

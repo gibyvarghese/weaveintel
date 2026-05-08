@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>weaveIntel Live-Agents</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero">
+    <h1>Live-Agents</h1>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="#use-cases">Use Cases</a>
+      <a href="#patterns">Patterns</a>
+    </nav>
+  </header>
+  <main>
+    <section id="overview">
+      <h2>What are Live-Agents?</h2>
+      <p>Live-agents are long-running, stateful agents that operate on a schedule, accumulate learnings, and coordinate across a mesh. They are ideal for research, automation, compliance, and event-driven workflows.</p>
+    </section>
+    <section id="use-cases">
+      <h2>Key Use Cases</h2>
+      <ol>
+        <li><strong>Long-lived research assistant</strong>: Iterative analysis, persistent findings, and context retention. (<code>examples/52-live-agents-basic.ts</code>)</li>
+        <li><strong>Promotional workflow automation</strong>: Multi-channel monitoring, action triggers, and optimization. (<code>examples/53-live-agents-cross-mesh-account-binding.ts</code>)</li>
+        <li><strong>Cross-mesh collaboration and handoff</strong>: Evidence contracts, bridges, and async review. (<code>examples/54-live-agents-cross-mesh-bridges.ts</code>)</li>
+        <li><strong>Compression for long-running agents</strong>: Daily summaries, token budgeting, and scalable memory. (<code>examples/55-live-agents-compression.ts</code>)</li>
+        <li><strong>Account binding and credential scoping</strong>: Human-controlled permissions and runtime validation. (<code>examples/56-live-agents-account-binding-guardrail.ts</code>)</li>
+        <li><strong>Mesh administration and telemetry</strong>: Real-time status, heartbeat, and observability. (<code>examples/57-live-agents-mesh-administration.ts</code>)</li>
+      </ol>
+    </section>
+    <section id="patterns">
+      <h2>Core Patterns</h2>
+      <ul>
+        <li><strong>StateStore</strong>: Persists agent state across restarts and failures.</li>
+        <li><strong>Heartbeat</strong>: Schedules and resumes work automatically.</li>
+        <li><strong>Account Binding</strong>: Human-controlled, fine-grained capability grants.</li>
+        <li><strong>Bridge</strong>: Cross-mesh messaging and contract handoff.</li>
+        <li><strong>CompressionStrategy</strong>: Summarizes and prunes long histories for scalable inference.</li>
+        <li><strong>Mesh API</strong>: HTTP endpoints for mesh, agent, and heartbeat status.</li>
+      </ul>
+    </section>
+    <section id="code">
+      <h2>Minimal Live-Agent Example</h2>
+      <pre><code>import { weaveLiveAgent, weaveInMemoryStateStore } from '@weaveintel/live-agents';
+
+const store = weaveInMemoryStateStore();
+const agent = weaveLiveAgent({
+  name: 'analyst',
+  model: myModel,
+  tools: myTools,
+  systemPrompt: 'Research and summarize findings.'
+});
+
+await agent.runTick({ inbound: { body: 'Start research' } }, store);
+</code></pre>
+      <p>See <code>examples/52-live-agents-basic.ts</code> for a full runnable demo.</p>
+    </section>
+  </main>
+  <footer>
+    <p>© 2026 weaveIntel. Styled with servonomics.com branding.</p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>weaveIntel Examples Catalog</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero">
+    <h1>Examples Catalog</h1>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="live-agents.html">Live-Agents</a>
+    </nav>
+  </header>
+  <main>
+    <section id="intro">
+      <h2>Browse 90+ Runnable Demos</h2>
+      <p>Each example in the <code>examples/</code> directory demonstrates a specific capability, integration, or advanced pattern. Run them with <code>npx tsx examples/XX-example-name.ts</code>.</p>
+    </section>
+    <section id="table">
+      <h2>Examples Table</h2>
+      <table style="width:100%;border-collapse:collapse;">
+        <thead>
+          <tr style="background:#f7b32b;color:#1a3c6b;">
+            <th style="padding:8px 4px;">File</th>
+            <th style="padding:8px 4px;">Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>01-simple-chat.ts</td><td>Minimal chat with an LLM (OpenAI, Anthropic, etc.)</td></tr>
+          <tr><td>02-tool-calling-agent.ts</td><td>Agent with tool calling (ReAct loop)</td></tr>
+          <tr><td>03-rag-pipeline.ts</td><td>Retrieval-augmented generation (RAG) pipeline</td></tr>
+          <tr><td>04-hierarchical-agents.ts</td><td>Supervisor + worker agent orchestration</td></tr>
+          <tr><td>05-mcp-integration.ts</td><td>Connect to external systems via MCP</td></tr>
+          <tr><td>07-memory-augmented-agent.ts</td><td>Agent with memory and context window</td></tr>
+          <tr><td>09-eval-suite.ts</td><td>Prompt/agent evaluation suite</td></tr>
+          <tr><td>12-geneweave.ts</td><td>Run the geneWeave reference app locally</td></tr>
+          <tr><td>14-smart-routing.ts</td><td>Model routing with fallback and health scoring</td></tr>
+          <tr><td>16-human-in-the-loop.ts</td><td>Human approval and intervention in agent workflow</td></tr>
+          <tr><td>18-knowledge-graph.ts</td><td>Knowledge graph construction and querying</td></tr>
+          <tr><td>21-scientific-validation.ts</td><td>Scientific validation pipeline (multi-agent)</td></tr>
+          <tr><td>34-skill-tool-policy-approval.ts</td><td>Skill-based tool policy and approval workflow</td></tr>
+          <tr><td>52-live-agents-basic.ts</td><td>Minimal live-agent mesh with persistent state</td></tr>
+          <tr><td>53-live-agents-cross-mesh-account-binding.ts</td><td>Account binding and cross-mesh handoff</td></tr>
+          <tr><td>54-live-agents-cross-mesh-bridges.ts</td><td>Bridge contracts between meshes</td></tr>
+          <tr><td>55-live-agents-compression.ts</td><td>Compression and summarization for long-running agents</td></tr>
+          <tr><td>56-live-agents-account-binding-guardrail.ts</td><td>Account binding and permission guardrails</td></tr>
+          <tr><td>57-live-agents-mesh-administration.ts</td><td>Mesh and agent observability, heartbeat API</td></tr>
+          <tr><td>70-task-aware-routing.ts</td><td>Task-aware model routing</td></tr>
+          <tr><td>75-local-and-gemini-providers.ts</td><td>Local and Google Gemini model providers</td></tr>
+          <tr><td>91-live-agents-model-resolver.ts</td><td>Model resolver and routing for live-agents</td></tr>
+          <tr><td>94-weave-live-agent-parity.ts</td><td>Parity between weaveAgent and weaveLiveAgent</td></tr>
+          <tr><td>100-mesh-workflow-binding.ts</td><td>Workflow output contract triggers downstream workflow/agent</td></tr>
+          <!-- Add more as needed -->
+        </tbody>
+      </table>
+      <p style="color:#888;font-size:0.95em;">See the <code>examples/</code> directory for the full list and source code.</p>
+    </section>
+  </main>
+  <footer>
+    <p>© 2026 weaveIntel. Styled with servonomics.com branding.</p>
+  </footer>
+</body>
+</html>

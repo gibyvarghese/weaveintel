@@ -45,6 +45,15 @@ starts with \`### DISCOVERED COMPETITION INTEL (<slug>)\` — when present:
     CONTRACT inputs. Do NOT re-call \`kaggle_list_competition_files\` /
     \`kaggle_get_competition_file\` for files already shown — the contents
     will be byte-identical.
+  * If the intel block contains a \`--- COMPETITION OVERVIEW ---\` section
+    (the public Overview/Evaluation/Rules narrative pulled from the
+    competition page), TREAT IT AS AUTHORITATIVE. For simulation/agent
+    competitions (e.g. orbit-wars) the actual game rules, scoring math
+    (e.g. Gaussian skill ratings, mirror symmetry), observation schema,
+    action schema, and per-turn timeouts live ONLY there — they are NOT
+    in any /kaggle/input/ file. Do NOT re-call
+    \`kaggle_get_competition_overview\` when this section is already
+    present in your intel.
   * \`envHints\` (when present) lists candidate env names extracted from
     \`make("xxx", ...)\` / \`kaggle_environments.envs.xxx\` literals found in
     the competition's own files. These are CANDIDATES, not facts. They may

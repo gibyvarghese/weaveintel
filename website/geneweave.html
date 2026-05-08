@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>geneWeave Reference App</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero">
+    <h1>geneWeave Reference App</h1>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="live-agents.html">Live-Agents</a>
+      <a href="examples.html">Examples</a>
+    </nav>
+  </header>
+  <main>
+    <section id="overview">
+      <h2>What is geneWeave?</h2>
+      <p><strong>geneWeave</strong> is a full-stack chat and admin dashboard app built entirely from <code>@weaveintel/*</code> packages. It demonstrates all core and advanced capabilities in a real-world, extensible application.</p>
+    </section>
+    <section id="features">
+      <h2>Key Features</h2>
+      <ul>
+        <li>Chat engine with tool calling, policy, and audit</li>
+        <li>Admin dashboard for tools, skills, policies, workflows, triggers, and more</li>
+        <li>Scientific validation pipeline (multi-agent, evidence, verdicts)</li>
+        <li>Live-agent mesh orchestration and observability</li>
+        <li>DB-driven configuration and extensibility</li>
+      </ul>
+    </section>
+    <section id="admin">
+      <h2>Admin Dashboard</h2>
+      <ul>
+        <li>Manage tools, skills, policies, workflows, triggers, and capability packs</li>
+        <li>View audit logs, health snapshots, and approval requests</li>
+        <li>Configure prompt versions, experiments, and fragments</li>
+        <li>Monitor live-agent mesh status and contracts</li>
+      </ul>
+    </section>
+    <section id="scientific-validation">
+      <h2>Scientific Validation Pipeline</h2>
+      <p>geneWeave includes a multi-agent scientific validation workflow, where hypotheses are decomposed, tested, and reviewed by specialist agents. Evidence and verdicts are tracked in an immutable ledger for auditability and reproducibility.</p>
+    </section>
+    <section id="extensibility">
+      <h2>Extensibility</h2>
+      <ul>
+        <li>Add new tools, skills, and policies via the admin UI or DB</li>
+        <li>Integrate external systems via MCP, A2A, or custom packages</li>
+        <li>Extend workflows, triggers, and live-agent meshes for new domains</li>
+      </ul>
+    </section>
+    <section id="run">
+      <h2>How to Run geneWeave</h2>
+      <ol>
+        <li>Clone the repo and install dependencies</li>
+        <li>Set your provider key(s): <code>export OPENAI_API_KEY=sk-... </code></li>
+        <li>Run <code>./scripts/start-geneweave.sh</code></li>
+        <li>Open <a href="http://localhost:3500">http://localhost:3500</a> and sign up</li>
+      </ol>
+    </section>
+  </main>
+  <footer>
+    <p>© 2026 weaveIntel. Styled with servonomics.com branding.</p>
+  </footer>
+</body>
+</html>

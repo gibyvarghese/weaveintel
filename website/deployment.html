@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>weaveIntel Deployment & Development</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="hero">
+    <h1>Deployment & Development</h1>
+    <nav>
+      <a href="index.html">Home</a>
+      <a href="architecture.html">Architecture</a>
+      <a href="geneweave.html">geneWeave</a>
+    </nav>
+  </header>
+  <main>
+    <section id="deployment">
+      <h2>Deployment Options</h2>
+      <ul>
+        <li><strong>Docker Compose</strong>: <code>docker-compose.yml</code> for local or single-node deployment</li>
+        <li><strong>Kubernetes</strong>: <code>deploy/kubernetes.yaml</code> for scalable, production-grade clusters</li>
+        <li><strong>Azure Container App</strong>: <code>deploy/azure-container-app.yaml</code></li>
+        <li><strong>AWS ECS & AppRunner</strong>: <code>deploy/aws-ecs-task.json</code>, <code>deploy/aws-apprunner.yaml</code></li>
+        <li><strong>GCP Cloud Run</strong>: <code>deploy/gcp-cloudrun.yaml</code></li>
+        <li><strong>DigitalOcean App Platform</strong>: <code>deploy/digitalocean-app.yaml</code></li>
+        <li><strong>Vercel, Railway, Fly.io</strong>: Supported via <code>vercel.json</code>, <code>railway.toml</code>, <code>fly.toml</code></li>
+      </ul>
+    </section>
+    <section id="dev">
+      <h2>Development Workflow</h2>
+      <ul>
+        <li>Monorepo managed with <strong>Turborepo</strong> and <strong>TypeScript</strong></li>
+        <li>All packages are ESM and composable</li>
+        <li>Run <code>npm run build</code> to build all packages</li>
+        <li>Run <code>npx tsx examples/XX-example.ts</code> to execute any example</li>
+        <li>Tests: <code>npx vitest run</code> for all packages and apps</li>
+        <li>Extensible via <code>packages/</code> and <code>apps/</code> directories</li>
+      </ul>
+    </section>
+    <section id="config">
+      <h2>Configuration</h2>
+      <ul>
+        <li>Provider keys via environment variables (e.g., <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>)</li>
+        <li>App config via <code>.env</code> and <code>app.json</code></li>
+        <li>Database: SQLite by default (<code>./geneweave.db</code>), Postgres/Redis/Mongo/Dynamo supported for live-agents</li>
+      </ul>
+    </section>
+    <section id="contribute">
+      <h2>Contributing</h2>
+      <ul>
+        <li>Fork the repo and create a feature branch</li>
+        <li>Follow the code style (<code>.prettierrc</code>) and commit guidelines</li>
+        <li>Open a pull request with a clear description</li>
+        <li>See <code>README.md</code> and <code>CONTRIBUTING.md</code> for more</li>
+      </ul>
+    </section>
+  </main>
+  <footer>
+    <p>© 2026 weaveIntel. Styled with servonomics.com branding.</p>
+  </footer>
+</body>
+</html>

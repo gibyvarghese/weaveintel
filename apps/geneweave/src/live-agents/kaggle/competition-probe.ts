@@ -35,6 +35,15 @@ export interface CompetitionIntel {
   envHints: string[];
   /** Per-file content snippets actually fetched (truncated to ~2000 chars each). */
   snippets: { fileName: string; content: string }[];
+  /**
+   * Combined text of the competition's public narrative pages (Overview /
+   * Evaluation / Rules / Data / Timeline) fetched via
+   * `adapter.getCompetitionOverview`. Truncated to ~6 KiB. For
+   * simulation/agent competitions this carries the actual game rules,
+   * scoring math, and per-turn timeouts that DO NOT appear in /kaggle/input/
+   * files. Best-effort — null when the fetch failed or returned nothing.
+   */
+  overview: string | null;
   /** Files we tried to fetch but got an error (404 etc). Informational. */
   missing: string[];
 }
@@ -60,6 +69,7 @@ const CANDIDATE_FILES = [
 const PER_FILE_TRUNCATE = 2000;
 const MAX_LIBRARIES = 30;
 const MAX_ENV_HINTS = 8;
+const OVERVIEW_TRUNCATE_BYTES = 6 * 1024;
 
 /** Pull `import X` / `from X import` top-level module names. */
 function extractImports(text: string): string[] {
@@ -193,6 +203,7 @@ export async function probeCompetitionFiles(
       libraries: [],
       envHints: [],
       snippets: [],
+      overview: null,
       missing: ['__list_failed__'],
     };
   }
@@ -254,6 +265,29 @@ export async function probeCompetitionFiles(
 
   const detected = detectShape(files, snippets);
 
+  // Best-effort: fetch the public competition narrative (overview / evaluation
+  // / rules / data / timeline). For simulation/agent competitions this is
+  // where the rules, scoring math, and submission contract actually live.
+  // Failures are non-fatal: overview stays null and the strategist can still
+  // call kaggle_get_competition_overview manually.
+  let overview: string | null = null;
+  try {
+    const ov = await adapter.getCompetitionOverview(creds, slug, {
+      maxBytesPerPage: 4 * 1024,
+      combinedMaxBytes: OVERVIEW_TRUNCATE_BYTES,
+    });
+    if (ov.combinedText && ov.combinedText.trim().length > 0) {
+      overview = ov.combinedText;
+    }
+    if (ov.missing.length > 0) {
+      log(`competition-probe: overview missing pages for ${slug}: ${ov.missing.join(', ')}`);
+    }
+  } catch (err) {
+    log(
+      `competition-probe: getCompetitionOverview failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   return {
     files: files.map((f) => ({ name: f.name, sizeBytes: f.size })),
     shape: detected.shape,
@@ -262,6 +296,7 @@ export async function probeCompetitionFiles(
     libraries,
     envHints,
     snippets,
+    overview,
     missing,
   };
 }
@@ -300,6 +335,12 @@ export function renderIntelHeader(slug: string, intel: CompetitionIntel): string
       lines.push(s.content);
       lines.push('```');
     }
+  }
+  if (intel.overview) {
+    lines.push('');
+    lines.push('--- COMPETITION OVERVIEW (truncated, fetched from public competition pages) ---');
+    lines.push(intel.overview);
+    lines.push('--- END OVERVIEW ---');
   }
   if (intel.missing.length > 0) {
     lines.push('');

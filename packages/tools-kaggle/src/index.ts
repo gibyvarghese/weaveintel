@@ -17,6 +17,8 @@ export {
 export type {
   KaggleCompetition,
   KaggleCompetitionFile,
+  KaggleCompetitionPage,
+  KaggleCompetitionOverview,
   KaggleLeaderboardEntry,
   KaggleSubmission,
   KaggleDataset,

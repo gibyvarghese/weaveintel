@@ -420,6 +420,57 @@ export function createKaggleTools(opts: KaggleToolsOptions = {}): ToolRegistry {
 
   reg.register(
     defineTool({
+      name: 'kaggle_get_competition_overview',
+      description:
+        "Fetch the competition's full public narrative — Overview, Evaluation, Rules, Data, Timeline — as plain text. " +
+        'Use in Phase 0 alongside README.md/agents.md to build the SUBMISSION CONTRACT. For simulation/agent ' +
+        'competitions (e.g. orbit-wars) the actual game rules, scoring math (e.g. Gaussian skill ratings, mirror ' +
+        'symmetry), observation schema, action schema, and per-turn timeouts live HERE — not in /kaggle/input/ files. ' +
+        'Returns { competitionRef, pages: [{ slug, title, content, source, bytes, truncated }], combinedText, ' +
+        'truncated, missing }. Per-page content is capped at ~8 KiB and combined text at ~24 KiB by default.',
+      parameters: {
+        type: 'object',
+        properties: {
+          ref: { type: 'string', description: 'Competition slug, e.g. orbit-wars.' },
+          pageSlugs: {
+            type: 'array',
+            description: 'Optional subset of page slugs. Default: overview, evaluation, rules, data, timeline.',
+            items: { type: 'string' },
+          },
+          maxBytesPerPage: { type: 'number', description: 'Per-page truncation cap. Default 8192.' },
+          combinedMaxBytes: { type: 'number', description: 'Combined text truncation cap. Default 24576.' },
+        },
+        required: ['ref'],
+      },
+      tags: ['kaggle', 'read'],
+      riskLevel: 'read-only',
+      execute: async (args) => {
+        const ref = normalizeCompetitionRef(args['ref'] as string);
+        const pageSlugs = Array.isArray(args['pageSlugs'])
+          ? (args['pageSlugs'] as unknown[]).map(String)
+          : undefined;
+        const maxBytesPerPage = typeof args['maxBytesPerPage'] === 'number' ? (args['maxBytesPerPage'] as number) : undefined;
+        const combinedMaxBytes = typeof args['combinedMaxBytes'] === 'number' ? (args['combinedMaxBytes'] as number) : undefined;
+        try {
+          const out = await adapter.getCompetitionOverview(getCreds(), ref, {
+            ...(pageSlugs ? { pageSlugs } : {}),
+            ...(maxBytesPerPage !== undefined ? { maxBytesPerPage } : {}),
+            ...(combinedMaxBytes !== undefined ? { combinedMaxBytes } : {}),
+          });
+          return JSON.stringify(out, null, 2);
+        } catch (err) {
+          return JSON.stringify({
+            error: 'overview_fetch_failed',
+            ref,
+            message: err instanceof Error ? err.message : String(err),
+          });
+        }
+      },
+    }),
+  );
+
+  reg.register(
+    defineTool({
       name: 'kaggle_push_kernel',
       description:
         "Create or update a private Python kernel on Kaggle and run it. Provide the full Python source as `code`. The kernel will mount the competition data at /kaggle/input/<slug>/. Returns { kernelRef, kernelUrl } — use kernelRef for status and output calls.",

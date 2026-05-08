@@ -23,6 +23,38 @@ export interface KaggleCompetitionFile {
   creationDate: string | null;
 }
 
+/**
+ * One section of a Kaggle competition's public narrative (Overview /
+ * Evaluation / Rules / Data / Timeline). The bulk of competition rules,
+ * scoring math, observation/action specs, and submission contracts for
+ * simulation/agent competitions live here — NOT in the data bundle files.
+ */
+export interface KaggleCompetitionPage {
+  /** Page slug as appearing in the URL: `overview`, `evaluation`, `rules`, `data`, `timeline`. */
+  slug: string;
+  /** Best-effort page title (from <title> or __NEXT_DATA__). May be null. */
+  title: string | null;
+  /** Visible text content of the page. Markdown-ish when extractable, otherwise plain text. */
+  content: string;
+  /** How the content was extracted: `next-data` (parsed Next.js JSON blob) or `html-strip` (tag-stripped fallback). */
+  source: 'next-data' | 'html-strip';
+  /** Byte length of `content` after truncation. */
+  bytes: number;
+  /** True when the original page text exceeded the per-page cap. */
+  truncated: boolean;
+}
+
+export interface KaggleCompetitionOverview {
+  competitionRef: string;
+  pages: KaggleCompetitionPage[];
+  /** All page contents concatenated with `### <slug>` headers, then truncated to `combinedMaxBytes`. */
+  combinedText: string;
+  /** True when `combinedText` was truncated. */
+  truncated: boolean;
+  /** Page slugs we attempted to fetch but failed (404, network, parse error). */
+  missing: string[];
+}
+
 export interface KaggleLeaderboardEntry {
   teamId: string;
   teamName: string;
