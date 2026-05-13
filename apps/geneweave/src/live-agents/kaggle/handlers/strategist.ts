@@ -35,9 +35,22 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
 
   // Build the inner handler factory once; the per-call wrapper resolves the
   // model fresh each tick so SmartModelRouter can rotate based on current
-  // provider health.
-  const buildInner = (model: import('@weaveintel/core').Model) =>
-    createKaggleStrategistHandler({
+  // provider health. Per-tick overrides for L6-L9 (maxStepsCap,
+  // reasoningEffortHint, toolOutputTruncator, budgetGate) are merged into
+  // `phase7` and forwarded to the inner factory; when the resolver is
+  // unset the boot-time scalar `opts.*` fields are used as-is.
+  type Phase7Levers = {
+    maxStepsCap?: number;
+    reasoningEffortHint?: import('@weaveintel/cost-governor').ReasoningEffort;
+    toolOutputTruncator?: import('@weaveintel/cost-governor').ToolOutputTruncator;
+    budgetGate?: import('@weaveintel/cost-governor').CostBudgetGate;
+  };
+  const buildInner = (model: import('@weaveintel/core').Model, phase7: Phase7Levers = {}) => {
+    const maxStepsCap = phase7.maxStepsCap ?? opts.maxStepsCap;
+    const reasoningEffortHint = phase7.reasoningEffortHint ?? opts.reasoningEffortHint;
+    const toolOutputTruncator = phase7.toolOutputTruncator ?? opts.toolOutputTruncator;
+    const budgetGate = phase7.budgetGate ?? opts.budgetGate;
+    return createKaggleStrategistHandler({
       model,
       adapter,
       credentials: creds,
@@ -47,14 +60,39 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
       ...(opts.policy ? { policy: opts.policy } : {}),
       ...(opts.onKernelPushed ? { onKernelPushed: opts.onKernelPushed } : {}),
       ...(opts.onToolBlocked ? { onToolBlocked: opts.onToolBlocked } : {}),
+      ...(opts.traceToolsFactory ? { traceToolsFactory: opts.traceToolsFactory } : {}),
+      ...(opts.costToolFilter ? { costToolFilter: opts.costToolFilter } : {}),
+      ...(opts.intelGate ? { intelGate: opts.intelGate } : {}),
+      ...(maxStepsCap !== undefined ? { maxStepsCap } : {}),
+      ...(reasoningEffortHint ? { reasoningEffortHint } : {}),
+      ...(toolOutputTruncator ? { toolOutputTruncator } : {}),
+      ...(budgetGate ? { budgetGate } : {}),
     });
+  };
 
-  // Pre-built fallback inner handler (used when no per-tick resolver).
-  const staticInner = opts.plannerModel ? buildInner(opts.plannerModel) : null;
+  // (Inner handler is built per-tick to merge any per-tick L6-L9 overrides
+  // returned by `opts.phase7Resolver`.)
 
   return async (action, context, execCtx) => {
     console.log(`[STRATEGIST-AGENTIC-ENTRY] mesh=${context.agent.meshId} agent=${context.agent.id}`);
-    let inner = staticInner;
+    // Per-tick L6-L9 resolution. Bound to live (meshId, agentId) so an
+    // operator-supplied mesh- or agent-scoped capability_policy_bindings row
+    // overrides the workflow- or tenant-default policy on every tick. Falls
+    // back to boot-time scalars on throw / unset.
+    let phase7Levers: Phase7Levers = {};
+    if (opts.phase7Resolver) {
+      try {
+        phase7Levers = await opts.phase7Resolver({
+          meshId: context.agent.meshId,
+          agentId: context.agent.id,
+        });
+      } catch (err) {
+        log(
+          `!! per-tick phase7Resolver failed; using boot-time scalars: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+    let inner = opts.plannerModel ? buildInner(opts.plannerModel, phase7Levers) : null;
     if (opts.modelResolver) {
       try {
         const routed = await opts.modelResolver.resolve({
@@ -64,7 +102,7 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
           capability: { task: 'reasoning' },
         });
         if (routed) {
-          inner = buildInner(routed);
+          inner = buildInner(routed, phase7Levers);
           // Log the per-tick selection so operators can see SmartModelRouter
           // rotating models across ticks (especially useful when a provider
           // rate-limits and routing skips it on the next tick).

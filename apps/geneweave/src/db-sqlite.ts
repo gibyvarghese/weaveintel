@@ -4,7 +4,7 @@
  * Concrete DatabaseAdapter backed by better-sqlite3.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { SCHEMA_SQL } from './db-schema.js';
 import { applySQLiteBootstrapMigrations } from './db-sqlite-migrations.js';
 import { stringifyPromptVariables } from '@weaveintel/prompts';
@@ -34,6 +34,9 @@ import type {
   MemoryExtractionEventRow,
   MetricsSummary, WorkflowRunRow, WorkflowCheckpointRow, CapabilityPolicyBindingRow, GuardrailEvalRow, ModelPricingRow,
   CapabilityPackRow, CapabilityPackInstallationRow, CapabilityPackExperimentRow, CapabilityPackStatus,
+  CostPolicyRow,
+  ToolEmbeddingRow,
+  TenantEncryptionPolicyRow, TenantKekRow, TenantDekRow, TenantBikRow, EncryptionAuditRow, TenantDeletionRequestRow,
   WebsiteCredentialRow,
   SvBudgetEnvelopeRow, SvHypothesisRow, SvHypothesisStatus, SvSubClaimRow, SvVerdictRow,
   SvEvidenceEventRow, SvAgentTurnRow,
@@ -55,8 +58,6 @@ import type {
   RoutingExperimentRow,
   TaskTypeTenantOverrideRow,
 } from './db-types.js';
-
-import { newUUIDv7 } from './lib/uuid.js';
 
 
 export class SQLiteAdapter implements DatabaseAdapter {
@@ -287,6 +288,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async getChat(id: string, userId: string): Promise<ChatRow | null> {
     return (this.d.prepare('SELECT * FROM chats WHERE id = ? AND user_id = ?').get(id, userId) as ChatRow | undefined) ?? null;
+  }
+
+  async getChatById(id: string): Promise<ChatRow | null> {
+    return (this.d.prepare('SELECT * FROM chats WHERE id = ?').get(id) as ChatRow | undefined) ?? null;
   }
 
   async getUserChats(userId: string): Promise<ChatRow[]> {
@@ -1943,13 +1948,12 @@ export class SQLiteAdapter implements DatabaseAdapter {
     windowStartIso: string,
     limitPerMinute: number,
   ): Promise<boolean> {
-    const { randomUUID } = await import('node:crypto');
     // Upsert the bucket for this (toolName, scopeKey, windowStart) combination.
     this.d.prepare(`
       INSERT INTO tool_rate_limit_buckets (id, tool_name, scope_key, window_start, count)
       VALUES (?, ?, ?, ?, 0)
       ON CONFLICT(tool_name, scope_key, window_start) DO NOTHING
-    `).run(randomUUID(), toolName, scopeKey, windowStartIso);
+    `).run(newUUIDv7(), toolName, scopeKey, windowStartIso);
 
     const row = this.d.prepare(
       'SELECT count FROM tool_rate_limit_buckets WHERE tool_name = ? AND scope_key = ? AND window_start = ?',
@@ -2284,12 +2288,11 @@ export class SQLiteAdapter implements DatabaseAdapter {
     windowStartIso: string,
     limitPerMinute: number,
   ): Promise<boolean> {
-    const { randomUUID } = await import('node:crypto');
     this.d.prepare(`
       INSERT INTO mcp_gateway_rate_buckets (id, client_id, window_start, count)
       VALUES (?, ?, ?, 0)
       ON CONFLICT(client_id, window_start) DO NOTHING
-    `).run(randomUUID(), clientId, windowStartIso);
+    `).run(newUUIDv7(), clientId, windowStartIso);
     const row = this.d.prepare(
       'SELECT count FROM mcp_gateway_rate_buckets WHERE client_id = ? AND window_start = ?',
     ).get(clientId, windowStartIso) as { count: number } | undefined;
@@ -2730,6 +2733,232 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteCapabilityPolicyBinding(id: string): Promise<void> {
     this.d.prepare('DELETE FROM capability_policy_bindings WHERE id = ?').run(id);
+  }
+
+  // ─── Cost Governor Phase 2: Cost Policies ──────────────────
+
+  async createCostPolicy(p: Omit<CostPolicyRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO cost_policies (id, key, tier, levers_json, description, enabled) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.key, p.tier, p.levers_json, p.description, p.enabled);
+  }
+
+  async getCostPolicy(id: string): Promise<CostPolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM cost_policies WHERE id = ?').get(id) as CostPolicyRow | undefined) ?? null;
+  }
+
+  async getCostPolicyByKey(key: string): Promise<CostPolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM cost_policies WHERE key = ?').get(key) as CostPolicyRow | undefined) ?? null;
+  }
+
+  async listCostPolicies(opts?: { enabledOnly?: boolean }): Promise<CostPolicyRow[]> {
+    const sql = `SELECT * FROM cost_policies ${opts?.enabledOnly ? 'WHERE enabled = 1' : ''} ORDER BY key ASC`;
+    return this.d.prepare(sql).all() as CostPolicyRow[];
+  }
+
+  async updateCostPolicy(id: string, fields: Partial<Omit<CostPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE cost_policies SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteCostPolicy(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM cost_policies WHERE id = ?').run(id);
+  }
+
+  // ─── Cost Governor Phase 8: Tool Embeddings (Intent-RAG) ──────────────────
+
+  async upsertToolEmbedding(e: Omit<ToolEmbeddingRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tool_embeddings (id, tool_key, model_id, dimension, embedding, description_hash)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(tool_key) DO UPDATE SET
+         model_id = excluded.model_id,
+         dimension = excluded.dimension,
+         embedding = excluded.embedding,
+         description_hash = excluded.description_hash,
+         updated_at = datetime('now')`,
+    ).run(e.id, e.tool_key, e.model_id, e.dimension, e.embedding, e.description_hash);
+  }
+
+  async getToolEmbedding(toolKey: string): Promise<ToolEmbeddingRow | null> {
+    return (this.d.prepare('SELECT * FROM tool_embeddings WHERE tool_key = ?').get(toolKey) as ToolEmbeddingRow | undefined) ?? null;
+  }
+
+  async listToolEmbeddings(opts?: { modelId?: string }): Promise<ToolEmbeddingRow[]> {
+    if (opts?.modelId) {
+      return this.d.prepare('SELECT * FROM tool_embeddings WHERE model_id = ? ORDER BY tool_key ASC').all(opts.modelId) as ToolEmbeddingRow[];
+    }
+    return this.d.prepare('SELECT * FROM tool_embeddings ORDER BY tool_key ASC').all() as ToolEmbeddingRow[];
+  }
+
+  async deleteToolEmbedding(toolKey: string): Promise<void> {
+    this.d.prepare('DELETE FROM tool_embeddings WHERE tool_key = ?').run(toolKey);
+  }
+
+  // ─── Encryption Phase 1: Tenant-scoped Envelope Encryption ──────────────
+
+  async getTenantEncryptionPolicy(tenantId: string): Promise<TenantEncryptionPolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_encryption_policy WHERE tenant_id = ?').get(tenantId) as TenantEncryptionPolicyRow | undefined) ?? null;
+  }
+
+  async listTenantEncryptionPolicies(opts?: { enabledOnly?: boolean }): Promise<TenantEncryptionPolicyRow[]> {
+    if (opts?.enabledOnly) {
+      return this.d.prepare('SELECT * FROM tenant_encryption_policy WHERE enabled = 1 ORDER BY tenant_id ASC').all() as TenantEncryptionPolicyRow[];
+    }
+    return this.d.prepare('SELECT * FROM tenant_encryption_policy ORDER BY tenant_id ASC').all() as TenantEncryptionPolicyRow[];
+  }
+
+  async deleteTenantEncryptionPolicy(tenantId: string): Promise<void> {
+    this.d.prepare('DELETE FROM tenant_encryption_policy WHERE tenant_id = ?').run(tenantId);
+  }
+
+  async upsertTenantEncryptionPolicy(p: Omit<TenantEncryptionPolicyRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_encryption_policy (tenant_id, enabled, kms_provider_id, kms_config, active_kek_id, active_dek_id, active_bik_id, rotation_schedule, blind_index_enabled, field_policy, shred_requested_at, shred_completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(tenant_id) DO UPDATE SET
+         enabled = excluded.enabled,
+         kms_provider_id = excluded.kms_provider_id,
+         kms_config = excluded.kms_config,
+         active_kek_id = excluded.active_kek_id,
+         active_dek_id = excluded.active_dek_id,
+         active_bik_id = excluded.active_bik_id,
+         rotation_schedule = excluded.rotation_schedule,
+         blind_index_enabled = excluded.blind_index_enabled,
+         field_policy = excluded.field_policy,
+         shred_requested_at = excluded.shred_requested_at,
+         shred_completed_at = excluded.shred_completed_at,
+         updated_at = datetime('now')`,
+    ).run(p.tenant_id, p.enabled, p.kms_provider_id, p.kms_config, p.active_kek_id, p.active_dek_id, p.active_bik_id, p.rotation_schedule, p.blind_index_enabled, p.field_policy, p.shred_requested_at, p.shred_completed_at);
+  }
+
+  async insertTenantKek(k: TenantKekRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_keks (id, tenant_id, version, status, wrapped, created_at, rotated_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(k.id, k.tenant_id, k.version, k.status, k.wrapped, k.created_at, k.rotated_at, k.revoked_at);
+  }
+
+  async listTenantKeks(tenantId: string): Promise<TenantKekRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_keks WHERE tenant_id = ? ORDER BY version ASC').all(tenantId) as TenantKekRow[];
+  }
+
+  async updateTenantKekStatus(id: string, status: string, ts: number): Promise<void> {
+    const col = status === 'rotated' ? 'rotated_at' : status === 'revoked' ? 'revoked_at' : null;
+    if (col) {
+      this.d.prepare(`UPDATE tenant_keks SET status = ?, ${col} = ? WHERE id = ?`).run(status, ts, id);
+    } else {
+      this.d.prepare('UPDATE tenant_keks SET status = ? WHERE id = ?').run(status, id);
+    }
+  }
+
+  async insertTenantDek(d: TenantDekRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_deks (id, tenant_id, kek_id, epoch, status, wrapped, created_at, rotated_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(d.id, d.tenant_id, d.kek_id, d.epoch, d.status, d.wrapped, d.created_at, d.rotated_at, d.revoked_at);
+  }
+
+  async listTenantDeks(tenantId: string): Promise<TenantDekRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_deks WHERE tenant_id = ? ORDER BY epoch ASC').all(tenantId) as TenantDekRow[];
+  }
+
+  async updateTenantDekStatus(id: string, status: string, ts: number): Promise<void> {
+    const col = status === 'rotated' ? 'rotated_at' : status === 'revoked' ? 'revoked_at' : null;
+    if (col) {
+      this.d.prepare(`UPDATE tenant_deks SET status = ?, ${col} = ? WHERE id = ?`).run(status, ts, id);
+    } else {
+      this.d.prepare('UPDATE tenant_deks SET status = ? WHERE id = ?').run(status, id);
+    }
+  }
+
+  async insertTenantBik(b: TenantBikRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_biks (id, tenant_id, epoch, status, wrapped, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(b.id, b.tenant_id, b.epoch, b.status, b.wrapped, b.created_at, b.revoked_at);
+  }
+
+  async listTenantBiks(tenantId: string): Promise<TenantBikRow[]> {
+    return this.d.prepare('SELECT * FROM tenant_biks WHERE tenant_id = ? ORDER BY epoch ASC').all(tenantId) as TenantBikRow[];
+  }
+
+  async updateTenantBikStatus(id: string, status: string, ts: number): Promise<void> {
+    if (status === 'revoked') {
+      this.d.prepare('UPDATE tenant_biks SET status = ?, revoked_at = ? WHERE id = ?').run(status, ts, id);
+    } else {
+      this.d.prepare('UPDATE tenant_biks SET status = ? WHERE id = ?').run(status, id);
+    }
+  }
+
+  async insertEncryptionAudit(e: EncryptionAuditRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO encryption_audit (id, tenant_id, event_kind, actor, details, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(e.id, e.tenant_id, e.event_kind, e.actor, e.details, e.created_at);
+  }
+
+  async listEncryptionAudit(tenantId: string, opts?: { limit?: number; offset?: number }): Promise<EncryptionAuditRow[]> {
+    const limit = opts?.limit ?? 100;
+    const offset = opts?.offset ?? 0;
+    return this.d.prepare(
+      'SELECT * FROM encryption_audit WHERE tenant_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?',
+    ).all(tenantId, limit, offset) as EncryptionAuditRow[];
+  }
+
+  // ─── Phase 6 (Tenant Encryption): Hard-shred + GDPR deletion lifecycle ──
+
+  async deleteAllTenantWrappedMaterial(tenantId: string): Promise<{ keks: number; deks: number; biks: number }> {
+    const txn = this.d.transaction((tid: string) => {
+      const k = this.d.prepare('DELETE FROM tenant_keks WHERE tenant_id = ?').run(tid).changes;
+      const d = this.d.prepare('DELETE FROM tenant_deks WHERE tenant_id = ?').run(tid).changes;
+      const b = this.d.prepare('DELETE FROM tenant_biks WHERE tenant_id = ?').run(tid).changes;
+      return { keks: k, deks: d, biks: b };
+    });
+    return txn(tenantId);
+  }
+
+  async createTenantDeletionRequest(r: Omit<TenantDeletionRequestRow, 'purged_at' | 'cancelled_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_deletion_requests (id, tenant_id, requested_at, retention_until, requested_by, status, reason) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(r.id, r.tenant_id, r.requested_at, r.retention_until, r.requested_by, r.status, r.reason);
+  }
+
+  async getTenantDeletionRequest(id: string): Promise<TenantDeletionRequestRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_deletion_requests WHERE id = ?').get(id) as TenantDeletionRequestRow | undefined) ?? null;
+  }
+
+  async listTenantDeletionRequests(opts?: { tenantId?: string; status?: TenantDeletionRequestRow['status']; limit?: number; offset?: number }): Promise<TenantDeletionRequestRow[]> {
+    const wheres: string[] = [];
+    const vals: unknown[] = [];
+    if (opts?.tenantId) { wheres.push('tenant_id = ?'); vals.push(opts.tenantId); }
+    if (opts?.status) { wheres.push('status = ?'); vals.push(opts.status); }
+    const sql = `SELECT * FROM tenant_deletion_requests ${wheres.length ? 'WHERE ' + wheres.join(' AND ') : ''} ORDER BY requested_at DESC, rowid DESC LIMIT ? OFFSET ?`;
+    vals.push(opts?.limit ?? 200, opts?.offset ?? 0);
+    return this.d.prepare(sql).all(...vals) as TenantDeletionRequestRow[];
+  }
+
+  async listDueTenantPurges(nowMs: number): Promise<TenantDeletionRequestRow[]> {
+    return this.d.prepare(
+      `SELECT * FROM tenant_deletion_requests WHERE status = 'pending' AND retention_until <= ? ORDER BY retention_until ASC, rowid ASC`,
+    ).all(nowMs) as TenantDeletionRequestRow[];
+  }
+
+  async markTenantPurged(id: string, purgedAtMs: number): Promise<void> {
+    this.d.prepare(
+      `UPDATE tenant_deletion_requests SET status = 'purged', purged_at = ? WHERE id = ? AND status = 'pending'`,
+    ).run(purgedAtMs, id);
+  }
+
+  async cancelTenantDeletionRequest(id: string, cancelledAtMs: number): Promise<boolean> {
+    const r = this.d.prepare(
+      `UPDATE tenant_deletion_requests SET status = 'cancelled', cancelled_at = ? WHERE id = ? AND status = 'pending'`,
+    ).run(cancelledAtMs, id);
+    return r.changes > 0;
   }
 
   // ─── Phase 6: Capability Packs ─────────────────────────────
@@ -3812,7 +4041,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
          chat_id = COALESCE(excluded.chat_id, chat_id),
          updated_at = datetime('now')`,
     ).run(
-      randomUUID(), e.userId, e.chatId ?? null, e.tenantId ?? null,
+      newUUIDv7(), e.userId, e.chatId ?? null, e.tenantId ?? null,
       e.entityName, e.entityType ?? 'general', JSON.stringify(merged), chosenConfidence, chosenSource,
       JSON.stringify(merged),
       chosenConfidence,
@@ -5903,6 +6132,135 @@ export class SQLiteAdapter implements DatabaseAdapter {
     // ─── anyWeave Task-Aware Routing — Phase 1 seeds ───────────
     // Idempotent: INSERT OR IGNORE on the unique key columns.
     await this.seedAnyWeaveRoutingPhase1();
+
+    // ─── Cost Governor — default cost policies (4 tiers) ───────
+    // Phase 2 ships the table; Phase 3 ships the seed data so operators
+    // and runtime resolvers always have at least one binding target per
+    // tier. Idempotent via INSERT OR IGNORE on `cost_policies.key`.
+    await this.seedDefaultCostPolicies();
+
+    // ─── Tenant Encryption Phase 1 — default disabled-policy row ───
+    // Operators see one example tenant in admin (`demo-encrypted-tenant`)
+    // with encryption disabled. Flipping `enabled = 1` and calling
+    // `bootstrapTenant(...)` materializes a KEK + DEK + BIK on first use.
+    // Idempotent via INSERT OR IGNORE.
+    await this.seedDefaultEncryptionPolicies();
+  }
+
+  /**
+   * Phase 3 — seed the four built-in cost-policy tier rows. Idempotent.
+   * `levers_json = '{}'` means "use the tier preset defaults from
+   * `@weaveintel/cost-governor`" — no per-policy overrides. Operators
+   * can edit `levers_json` later to override individual levers.
+   */
+  private async seedDefaultCostPolicies(): Promise<void> {
+    const stmt = this.d.prepare(
+      `INSERT OR IGNORE INTO cost_policies (id, key, tier, levers_json, description, enabled)
+       VALUES (?, ?, ?, ?, ?, 1)`,
+    );
+    const rows: Array<{ id: string; key: string; tier: string; levers: string; description: string }> = [
+      { id: '019700000-c057-7000-8000-000000000001', key: 'economy',     tier: 'economy',     levers: '{}', description: 'Cheapest tier: small models, aggressive caching, history compaction, minimal tools.' },
+      { id: '019700000-c057-7000-8000-000000000002', key: 'balanced',    tier: 'balanced',    levers: '{}', description: 'Default tier: balanced quality/cost. Caching enabled, moderate tool subset.' },
+      { id: '019700000-c057-7000-8000-000000000003', key: 'performance', tier: 'performance', levers: '{}', description: 'Higher quality tier: prefers stronger models, looser tool subset, caching still on.' },
+      { id: '019700000-c057-7000-8000-000000000004', key: 'max',         tier: 'max',         levers: '{}', description: 'Maximum quality tier: best models, all tools, full history, caching for prefix reuse only.' },
+      // Phase 5 (L3 — dynamic tool subset) example. Demonstrates phase-driven
+      // tool narrowing for the kaggle strategist. Operators can edit the
+      // `levers_json.toolSubset.phases` map via /api/admin/cost-policies to
+      // expose different tool keys per logical phase. The kaggle heartbeat
+      // derives the phase from the active kgl_competition_run state:
+      // 0 kernel pushes → 'discovery'; 1 → 'kernel'; 2+ → 'improvement'.
+      {
+        id: '019700000-c057-7000-8000-000000000005',
+        key: 'kaggle_phase_subset',
+        tier: 'balanced',
+        levers: JSON.stringify({
+          toolSubset: {
+            strategy: 'phase',
+            phases: {
+              discovery: ['kaggle_list_competitions', 'kaggle_get_competition', 'web_search'],
+              kernel: ['kaggle_push_kernel', 'kaggle_wait_for_kernel', 'kaggle_get_kernel_output'],
+              improvement: ['kaggle_push_kernel', 'kaggle_wait_for_kernel', 'kaggle_get_kernel_output', 'kaggle_list_kernels'],
+            },
+          },
+        }),
+        description: 'Phase 5 example: kaggle strategist tool subset varies by run phase (discovery/kernel/improvement). Bind via capability_policy_bindings (policy_kind=cost_policy) to a kaggle mesh or agent.',
+      },
+      // Phase 6 (L4 — intel-gated prompt sections + L5 — history compaction).
+      // Drops the intel-header + intel-snippets sections from prepare() once
+      // the live mesh has accumulated enough signals (default thresholds:
+      // ≥0.7 → drop both, ≥0.4 → drop snippets only). Keeps the last 12
+      // history items (sliding window) so long runs stay cheap. Bind via
+      // capability_policy_bindings (policy_kind=cost_policy).
+      {
+        id: '019700000-c057-7000-8000-000000000006',
+        key: 'kaggle_intel_aware',
+        tier: 'balanced',
+        levers: JSON.stringify({
+          intelGating: { enabled: true, thresholds: { low: 0.4, high: 0.7 } },
+          historyCompaction: { strategy: 'sliding', windowTurns: 12 },
+        }),
+        description: 'Phase 6 example: gates intel header/snippets when score ≥ 0.7; sliding-12 history. Bind to a kaggle mesh or agent via capability_policy_bindings (policy_kind=cost_policy).',
+      },
+      // Phase 7 (L6 maxSteps + L7 reasoningEffort + L8 toolOutputTruncation
+      // + L9 budgetGate). Full cost-governor envelope: clamps the strategist's
+      // ReAct iteration budget to 30, hints the model toward 'low' reasoning
+      // effort (OpenAI passes this as `reasoning_effort` body field), caps
+      // each tool result at 2 KiB while preserving the last 3 turns
+      // verbatim, and halts the run with a CostCeilingExceededError once
+      // cumulative spend exceeds $2.50. Bind via capability_policy_bindings
+      // (policy_kind=cost_policy).
+      {
+        id: '019700000-c057-7000-8000-000000000007',
+        key: 'kaggle_full_governor',
+        tier: 'balanced',
+        levers: JSON.stringify({
+          maxStepsCap: 30,
+          reasoningEffort: 'low',
+          toolOutputTruncation: { maxBytesPerTurn: 2048, keepLastN: 3 },
+          budgetCeilingUsd: 2.5,
+        }),
+        description: 'Phase 7 example: full cost envelope (maxSteps=30, reasoning=low, tool-output cap 2KiB×keepLast 3, ceiling $2.50). Bind via capability_policy_bindings (policy_kind=cost_policy).',
+      },
+      // Phase 8 (L3 strategy upgrade — Intent-RAG tool retrieval).
+      // Switches the toolSubset lever from the deterministic 'phase' map
+      // to per-step cosine-similarity ranking against pre-computed tool
+      // description embeddings. topK=6, minSimilarity=0.15. The
+      // `kaggle_submit` tool is always kept regardless of similarity so
+      // the strategist can finalize. Requires the embedding warmer to
+      // populate `tool_embeddings` at startup (no-op without OPENAI_API_KEY).
+      {
+        id: '019700000-c057-7000-8000-000000000008',
+        key: 'kaggle_intent_rag',
+        tier: 'balanced',
+        levers: JSON.stringify({
+          toolSubset: {
+            strategy: 'intent-rag',
+            topK: 6,
+            minSimilarity: 0.15,
+            includeAlways: ['kaggle_submit'],
+          },
+        }),
+        description: 'Phase 8 example: kaggle strategist tool subset ranked per-step via intent-RAG (cosine sim against tool description embeddings). topK=6, minSim=0.15, kaggle_submit always kept. Bind via capability_policy_bindings (policy_kind=cost_policy).',
+      },
+    ];
+    for (const r of rows) stmt.run(r.id, r.key, r.tier, r.levers, r.description);
+  }
+
+  /**
+   * Tenant Encryption Phase 1 — seed a single demo policy row so admin
+   * tabs are populated and operators have a template to copy. Encryption
+   * stays disabled (`enabled = 0`) until an operator opts in. Idempotent
+   * via INSERT OR IGNORE on `tenant_id`.
+   */
+  private async seedDefaultEncryptionPolicies(): Promise<void> {
+    this.d
+      .prepare(
+        `INSERT OR IGNORE INTO tenant_encryption_policy
+         (tenant_id, enabled, kms_provider_id, kms_config, active_kek_id, active_dek_id, active_bik_id,
+          rotation_schedule, blind_index_enabled, field_policy, shred_requested_at, shred_completed_at)
+         VALUES (?, 0, 'local', NULL, NULL, NULL, NULL, 'manual', 0, '{"messages":{"columns":["content","metadata"]},"chats":{"columns":["title"]}}', NULL, NULL)`,
+      )
+      .run('demo-encrypted-tenant');
   }
 
   /**
@@ -6557,7 +6915,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async upsertKaggleDiscussionSettings(row: { tenant_id: string; discussion_enabled: number; notes?: string | null }): Promise<KaggleDiscussionSettingsRow> {
     const existing = this.d.prepare(`SELECT id FROM kaggle_discussion_settings WHERE tenant_id = ?`).get(row.tenant_id) as { id: string } | undefined;
-    const id = existing?.id ?? randomUUID();
+    const id = existing?.id ?? newUUIDv7();
     this.d.prepare(`
       INSERT INTO kaggle_discussion_settings (id, tenant_id, discussion_enabled, notes, updated_at)
       VALUES (?, ?, ?, ?, datetime('now'))

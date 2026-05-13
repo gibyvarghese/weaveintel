@@ -5,7 +5,7 @@
  */
 
 import type { TaskContract, AcceptanceCriteria } from '@weaveintel/core';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 
 export interface CreateContractInput {
   name: string;
@@ -19,7 +19,7 @@ export interface CreateContractInput {
 
 export function createContract(input: CreateContractInput): TaskContract {
   return {
-    id: randomUUID(),
+    id: newUUIDv7(),
     name: input.name,
     description: input.description,
     inputSchema: input.inputSchema ?? {},
@@ -51,7 +51,7 @@ export class ContractBuilder {
   setTimeout(ms: number): this { this.timeoutMs = ms; return this; }
 
   addCriteria(criteria: Omit<AcceptanceCriteria, 'id'>): this {
-    this.criteria.push({ ...criteria, id: randomUUID() });
+    this.criteria.push({ ...criteria, id: newUUIDv7() });
     return this;
   }
 

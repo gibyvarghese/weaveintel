@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
@@ -38,7 +38,7 @@ export function registerGuardrailRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['type']) { json(res, 400, { error: 'name and type required' }); return; }
-    const id = 'guard-' + randomUUID().slice(0, 8);
+    const id = 'guard-' + newUUIDv7().slice(-8);
     await db.createGuardrail({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       type: body['type'] as string, stage: (body['stage'] as string) ?? 'pre',

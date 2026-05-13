@@ -4,9 +4,9 @@
  * Extracted from ChatEngine to keep chat.ts focused on orchestration.
  */
 
-import { randomUUID, createHash } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import type { AgentStep, CapabilityTelemetrySummary, EventBus } from '@weaveintel/core';
-import { EventTypes } from '@weaveintel/core';
+import { EventTypes, newUUIDv7 } from '@weaveintel/core';
 import {
   capabilityTelemetryToEvent,
   capabilityTelemetryToSpanAttributes,
@@ -98,7 +98,7 @@ export async function recordTraceSpans(
 ): Promise<void> {
   try {
     // Root span
-    const rootSpanId = randomUUID();
+    const rootSpanId = newUUIDv7();
     const rootAttributes: Record<string, unknown> = {
       mode,
       capabilityCount: capabilities?.length ?? 0,
@@ -108,7 +108,7 @@ export async function recordTraceSpans(
       rootAttributes['systemPromptFingerprint'] = systemPromptSha256;
     }
     await db.saveTrace({
-      id: randomUUID(), userId, chatId, messageId,
+      id: newUUIDv7(), userId, chatId, messageId,
       traceId, spanId: rootSpanId,
       name: `chat.${mode}`,
       startTime: startMs, endTime: startMs + latencyMs,
@@ -121,8 +121,8 @@ export async function recordTraceSpans(
       let offset = startMs;
       for (const step of steps) {
         await db.saveTrace({
-          id: randomUUID(), userId, chatId, messageId,
-          traceId, spanId: randomUUID(), parentSpanId: rootSpanId,
+          id: newUUIDv7(), userId, chatId, messageId,
+          traceId, spanId: newUUIDv7(), parentSpanId: rootSpanId,
           name: `step.${step.type}${step.toolCall ? `.${step.toolCall.name}` : ''}`,
           startTime: offset, endTime: offset + step.durationMs,
           status: 'ok',
@@ -189,9 +189,9 @@ export async function recordTraceSpans(
         delete (attributes as Record<string, unknown>)['_startTime'];
 
         await db.saveTrace({
-          id: randomUUID(), userId, chatId, messageId,
+          id: newUUIDv7(), userId, chatId, messageId,
           traceId,
-          spanId: event.spanId ?? randomUUID(),
+          spanId: event.spanId ?? newUUIDv7(),
           parentSpanId: rootSpanId,
           name: `tool_call.${toolName}`,
           startTime: spanStart,
@@ -212,9 +212,9 @@ export async function recordTraceSpans(
         const attributes = capabilityTelemetryToSpanAttributes(capability);
         const event = capabilityTelemetryToEvent(capability, 'success');
         await db.saveTrace({
-          id: randomUUID(), userId, chatId, messageId,
+          id: newUUIDv7(), userId, chatId, messageId,
           traceId,
-          spanId: randomUUID(),
+          spanId: newUUIDv7(),
           parentSpanId: rootSpanId,
           name: `capability.${capability.kind}.${capability.key}`,
           startTime: startMs,

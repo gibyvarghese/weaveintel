@@ -35,6 +35,8 @@
     "@weaveintel/workflows": "*",
     "@weaveintel/triggers": "*",
     "@weaveintel/capability-packs": "*",
+    "@weaveintel/cost-governor": "*",
+    "@weaveintel/encryption": "*",
     "@weaveintel/human-tasks": "*",
     "@weaveintel/contracts": "*",
     "@weaveintel/prompts": "*",
@@ -66,6 +68,7 @@
     "@weaveintel/collaboration": "*",
     "@weaveintel/live-agents": "*",
     "@weaveintel/live-agents-runtime": "*",
+    "@weaveintel/live-agents-trace-tools": "*",
     "better-sqlite3": "^11.9.1"
   },
   "devDependencies": {

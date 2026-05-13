@@ -16,7 +16,7 @@
  *     skipped, not failed).
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { KaggleAdapter, KaggleCredentials } from '@weaveintel/tools-kaggle';
 import type { DatabaseAdapter } from '../db.js';
 import type {
@@ -170,7 +170,7 @@ export async function runSubmissionValidation(input: ValidationCheckInput): Prom
   else if (baselineCheckPassed === false || distributionCheckPassed === false) verdict = 'warn';
   else verdict = 'pass';
 
-  const validationResultId = `kgl-val-${randomUUID().slice(0, 8)}`;
+  const validationResultId = `kgl-val-${newUUIDv7().slice(-8)}`;
   const summaryParts: string[] = [`verdict=${verdict}`];
   if (cvScore != null) summaryParts.push(`cv=${cvScore}`);
   if (rubric.baseline_score != null) summaryParts.push(`baseline=${rubric.baseline_score}`);
@@ -282,7 +282,7 @@ export async function observeLeaderboardOnce(
     // best-effort
   }
 
-  const scoreRowId = `kgl-lb-${randomUUID().slice(0, 8)}`;
+  const scoreRowId = `kgl-lb-${newUUIDv7().slice(-8)}`;
   const row: Omit<KaggleLeaderboardScoreRow, 'created_at'> = {
     id: scoreRowId,
     run_id: input.runId,

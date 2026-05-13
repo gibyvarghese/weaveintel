@@ -24,7 +24,7 @@
  * first contact without operator intervention.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type {
   KaggleAdapter,
   KaggleCompetition,
@@ -202,7 +202,7 @@ export async function inferRubricFromCompetition(input: InferRubricInput): Promi
   if (target !== null) inferenceSourceParts.push(`target=top_lb`);
 
   const rubric: Omit<KaggleCompetitionRubricRow, 'created_at' | 'updated_at'> = {
-    id: `kgl-rub-${randomUUID().slice(0, 8)}`,
+    id: `kgl-rub-${newUUIDv7().slice(-8)}`,
     tenant_id: tenantId ?? null,
     competition_ref: competitionRef,
     metric_name: metricName,

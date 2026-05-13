@@ -20,7 +20,7 @@ import { spawn } from 'node:child_process';
 import { writeFile, mkdir, rm, readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ContainerProvider } from './base.js';
 import { buildRunCommand, languageExt, tryParseOutput } from './base.js';
 import type {
@@ -139,7 +139,7 @@ function sanitizeWorkspaceFileName(name: string): string {
     .filter((segment) => segment && segment !== '.' && segment !== '..')
     .map((segment) => segment.replace(/[^a-zA-Z0-9._-]/g, '_'))
     .join('/');
-  return cleaned || `file_${randomUUID().slice(0, 8)}`;
+  return cleaned || `file_${newUUIDv7().slice(0, 8)}`;
 }
 
 // ─── Provider ────────────────────────────────────────────────
@@ -173,7 +173,7 @@ export class LocalDockerProvider implements ContainerProvider {
   }
 
   async execute(request: ExecutionRequest, config: CSEConfig): Promise<ExecutionResult> {
-    const executionId = randomUUID();
+    const executionId = newUUIDv7();
     const workDir = join(tmpdir(), `cse_${executionId}`);
     const outputDir = join(workDir, 'output');
     const lang = request.language ?? 'python';
@@ -258,7 +258,7 @@ export class LocalDockerProvider implements ContainerProvider {
   }
 
   async createSession(chatId: string, config: CSEConfig, withBrowser: boolean): Promise<CSESession> {
-    const sessionId = randomUUID();
+    const sessionId = newUUIDv7();
     const containerName = `cse_session_${sessionId.slice(0, 8)}`;
     const image = withBrowser
       ? (config.browserImage ?? DEFAULT_BROWSER_IMAGE)
@@ -334,7 +334,7 @@ export class LocalDockerProvider implements ContainerProvider {
     request: ExecutionRequest,
     config: CSEConfig,
   ): Promise<ExecutionResult> {
-    const executionId = randomUUID();
+    const executionId = newUUIDv7();
     const lang = request.language ?? 'python';
     const ext = languageExt(lang);
     const remoteCode = `/workspace/code_${executionId}.${ext}`;

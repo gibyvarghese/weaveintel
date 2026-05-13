@@ -86,6 +86,114 @@ export interface KaggleRoleHandlersOptions {
    * (separate from generic `tool_audit_events`). Throws are swallowed.
    */
   onToolBlocked?: (record: import('../kaggle-tools.js').ToolBlockedRecord) => Promise<void> | void;
+  /**
+   * Per-tick factory that returns a registry of read-only trace-retrieval
+   * tools scoped to the strategist's CURRENT competition run only. Boot
+   * path wires this so the LLM can introspect its own prior steps,
+   * failed tool calls, and pushed kernels via cheap DB reads instead of
+   * relying on full ReAct history. The factory's closure binds one
+   * runId; tools never accept a runId argument.
+   */
+  traceToolsFactory?: (ctx: {
+    meshId: string;
+    agentId?: string;
+  }) => Promise<import('@weaveintel/core').ToolRegistry | null>;
+  /**
+   * Cost Governor Phase 5 (lever L3 — dynamic tool subset). Boot path wires
+   * a per-tick async closure that resolves the effective `CostPolicy` via
+   * `DbCostPolicyResolver`, derives a logical `phase` from the active kgl
+   * run state, and calls `bundle.toolFilter(toolKeys, ctx)` from
+   * `@weaveintel/cost-governor`. Returning `null` means pass-through (keep
+   * everything). NEVER load-bearing — throws and zero-overlap return the
+   * full kaggle registry so the agent always has tools to call.
+   */
+  costToolFilter?: (ctx: {
+    meshId: string;
+    agentId?: string;
+    toolKeys: readonly string[];
+    /** Phase 8: per-step user/agent goal text used by the intent-RAG ranker. */
+    goal?: string;
+  }) => Promise<readonly string[] | null>;
+  /**
+   * Cost Governor Phase 6 (lever L4 — intel-gated prompt sections). Boot
+   * path wires a per-tick closure that resolves the effective `CostPolicy`
+   * via `DbCostPolicyResolver`, computes the mesh's intel-maturity score
+   * via `DbIntelScoreProvider`, and returns an `IntelGatingDecision`
+   * describing which prepare() sections (`intel_header`, `intel_snippets`)
+   * the strategist may drop. Returning `null` means "no shape change"
+   * (keep everything). NEVER load-bearing — throws return null and the
+   * strategist keeps the full prepare(). When omitted entirely, the
+   * strategist behaves as if the gate always returned null.
+   */
+  intelGate?: (ctx: {
+    meshId: string;
+    agentId?: string;
+  }) => Promise<import('@weaveintel/cost-governor').PromptShape | null>;
+  /**
+   * Cost Governor Phase 6 (lever L5 — history compaction). Boot path wires
+   * a per-tick closure that delegates to `bundle.historyCompactor` from
+   * `@weaveintel/cost-governor`. Strategist applies it to the conversation
+   * history fed to the model. NEVER load-bearing — throws return the
+   * original history unchanged.
+   */
+  historyCompactor?: (
+    history: ReadonlyArray<import('@weaveintel/cost-governor').HistoryItem>,
+    ctx: { meshId: string; agentId?: string },
+  ) => Promise<ReadonlyArray<import('@weaveintel/cost-governor').HistoryItem>>;
+  /**
+   * Cost Governor Phase 7 (lever L6 — max-steps cap). Effective cap on the
+   * strategist's per-tick ReAct iteration count. Sourced per-tick by the
+   * boot path from `bundle.maxStepsCap` and clamped against the operator's
+   * `opts.maxIterations`. NEVER load-bearing — when omitted the strategist
+   * falls back to the playbook / default.
+   */
+  maxStepsCap?: number;
+  /**
+   * Cost Governor Phase 7 (lever L7 — reasoning effort hint). When set,
+   * the strategist wraps its inner model with
+   * `wrapModelWithStaticReasoningEffort` so OpenAI o-series / Anthropic
+   * extended-thinking calls receive the hint. Sourced from
+   * `bundle.reasoningEffort`. Provider-agnostic — providers that ignore
+   * the metadata field see no behaviour change.
+   */
+  reasoningEffortHint?: import('@weaveintel/cost-governor').ReasoningEffort;
+  /**
+   * Cost Governor Phase 7 (lever L8 — tool output truncation). When
+   * provided, the boot path wraps the kaggle ToolRegistry with
+   * `wrapToolRegistryWithOutputTruncation` so each tool's
+   * `ToolOutput.content` is capped to the configured byte budget. Sourced
+   * from `bundle.toolOutputTruncator`. NEVER load-bearing — pass-through
+   * when the bundle's truncator is the no-op.
+   */
+  toolOutputTruncator?: import('@weaveintel/cost-governor').ToolOutputTruncator;
+  /**
+   * Cost Governor Phase 7 (lever L9 — budget gate). Per-tick check that
+   * raises `CostCeilingExceededError` when the run's total USD exceeds
+   * the policy's `budgetCeilingUsd`. Strategist invokes between ReAct
+   * iterations; on breach it injects a final-submit notice and emits
+   * a `live_run_events.kind='cost.exceeded'` audit row. Sourced from
+   * `bundle.budgetGate`. NEVER load-bearing — when omitted the strategist
+   * skips the check entirely.
+   */
+  budgetGate?: import('@weaveintel/cost-governor').CostBudgetGate;
+  /**
+   * Cost Governor — per-tick L6/L7/L8/L9 resolver. When provided, the
+   * strategist invokes this on every tick with the live `(meshId, agentId)`
+   * to get a fresh `{ maxStepsCap, reasoningEffortHint, toolOutputTruncator,
+   * budgetGate }` bundle. Resolver output OVERRIDES the boot-time scalar
+   * fields above (which remain valid fallbacks for tests / single-tier
+   * deployments). NEVER load-bearing — throws are logged and the strategist
+   * falls back to the boot-time scalars (or no-op when those are also
+   * unset). Keeps the cost-governor `agent → mesh → workflow → tenant`
+   * binding chain authoritative for L6-L9 the same way `costToolFilter`
+   * and `intelGate` are for L3 and L4.
+   */
+  phase7Resolver?: (ctx: { meshId: string; agentId?: string }) => Promise<{
+    maxStepsCap?: number;
+    reasoningEffortHint?: import('@weaveintel/cost-governor').ReasoningEffort;
+    toolOutputTruncator?: import('@weaveintel/cost-governor').ToolOutputTruncator;
+    budgetGate?: import('@weaveintel/cost-governor').CostBudgetGate;
+  }>;
 }
 
 export interface OperationalDefaults {

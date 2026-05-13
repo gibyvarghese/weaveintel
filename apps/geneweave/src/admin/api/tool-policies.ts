@@ -6,7 +6,7 @@
  * tool invocations with rate limits, approval gates, and risk level checks.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
@@ -38,7 +38,7 @@ export function registerToolPolicyRoutes(
     if (!body['key']) { json(res, 400, { error: 'key required' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
 
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createToolPolicy({
       id,
       key: body['key'] as string,

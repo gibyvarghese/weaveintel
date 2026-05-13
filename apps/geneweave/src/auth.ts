@@ -5,7 +5,7 @@
  * cookie-based session management. Zero external dependencies.
  */
 
-import { createHmac, scrypt, randomBytes, timingSafeEqual, randomUUID } from 'node:crypto';
+import { createHmac, scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DatabaseAdapter, SessionRow } from './db.js';
 

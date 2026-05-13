@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 import { syncModelPricing } from '../../pricing-sync.js';
@@ -41,7 +41,7 @@ export function registerModelPricingRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['model_id'] || !body['provider']) { json(res, 400, { error: 'model_id and provider required' }); return; }
-    const id = 'mp-' + randomUUID().slice(0, 8);
+    const id = 'mp-' + newUUIDv7().slice(-8);
     await db.createModelPricing({
       id, model_id: body['model_id'] as string, provider: body['provider'] as string,
       display_name: (body['display_name'] as string) ?? null,

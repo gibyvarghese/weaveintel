@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 
 export interface DeadLetterRecord {
   readonly id: string;
@@ -26,7 +26,7 @@ export function createDeadLetterQueue(): DeadLetterQueue {
     enqueue(input): DeadLetterRecord {
       const now = new Date().toISOString();
       const record: DeadLetterRecord = {
-        id: randomUUID(),
+        id: newUUIDv7(),
         type: input.type,
         payload: input.payload,
         error: input.error,

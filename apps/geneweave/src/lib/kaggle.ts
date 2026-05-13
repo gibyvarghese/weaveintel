@@ -19,7 +19,7 @@
  * `replayKaggleRun()` loads the stored RunLog and runs the deterministic
  * @weaveintel/replay engine. CI uses this for round-trip testing.
  */
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { createContract, createCompletionReport, createEvidenceBundle, evidence } from '@weaveintel/contracts';
 import { ReplayEngine, type ReplayResult, type ReplayOptions } from '@weaveintel/replay';
 import type { ExecutionContext, RunLog, EvidenceBundle, CompletionReport } from '@weaveintel/core';
@@ -97,7 +97,7 @@ export async function materializeKaggleRun(input: MaterializeKaggleRunInput): Pr
   const { db, evidenceInput, runLog, competitionRef } = input;
   const { contractId, report } = buildKaggleCompletionReport(competitionRef, evidenceInput);
   const replayTraceId = runLog.executionId;
-  const runId = input.runId ?? `kgl-run-${randomUUID().slice(0, 8)}`;
+  const runId = input.runId ?? `kgl-run-${newUUIDv7().slice(-8)}`;
 
   // Upsert the projection row. If a row already exists with this id we update;
   // otherwise we insert. This keeps the chat hook idempotent across retries.
@@ -138,7 +138,7 @@ export async function materializeKaggleRun(input: MaterializeKaggleRunInput): Pr
 
   // Always upsert the artifact (one per run_id, replaces on re-materialize).
   const artifact: Omit<KaggleRunArtifactRow, 'created_at'> = {
-    id: `kgl-art-${randomUUID().slice(0, 8)}`,
+    id: `kgl-art-${newUUIDv7().slice(-8)}`,
     run_id: runId,
     contract_id: contractId,
     replay_trace_id: replayTraceId,

@@ -6,7 +6,7 @@
  * via `@weaveintel/capability-packs` before save.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import {
   validateManifest,
   installPack,
@@ -74,7 +74,7 @@ export function registerCapabilityPackRoutes(
       json(res, 409, { error: `Pack ${manifest.key}@${manifest.version} already exists` });
       return;
     }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createCapabilityPack({
       id,
       pack_key: manifest.key,
@@ -160,7 +160,7 @@ export function registerCapabilityPackRoutes(
       json(res, 412, { error: 'Unmet preconditions', unmet: result.unmetPreconditions });
       return;
     }
-    const installationId = randomUUID();
+    const installationId = newUUIDv7();
     await db.createCapabilityPackInstallation({
       id: installationId,
       pack_id: pack.id,

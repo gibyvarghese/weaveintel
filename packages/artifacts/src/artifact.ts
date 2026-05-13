@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { Artifact, ArtifactType, ArtifactVersion } from '@weaveintel/core';
 
 /**
@@ -21,7 +21,7 @@ export interface CreateArtifactOptions {
  */
 export function createArtifact(opts: CreateArtifactOptions): Artifact {
   return {
-    id: randomUUID(),
+    id: newUUIDv7(),
     name: opts.name,
     type: opts.type,
     mimeType: opts.mimeType,
@@ -46,7 +46,7 @@ export function createArtifactVersion(
   changelog?: string,
 ): ArtifactVersion {
   return {
-    id: randomUUID(),
+    id: newUUIDv7(),
     artifactId,
     version,
     data,

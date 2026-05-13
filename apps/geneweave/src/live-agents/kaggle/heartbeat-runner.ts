@@ -45,6 +45,28 @@ import {
 import { DbToolPolicyResolver, DbToolRateLimiter } from '../../tool-policy-resolver.js';
 import { DbToolAuditEmitter } from '../../tool-audit-emitter.js';
 import { DbToolApprovalGate } from '../../tool-approval-gate.js';
+import { DbCostLedgerSink, DbPricingResolver, readCostBreakdown } from '../../cost/db-cost-ledger.js';
+import { wrapKaggleResolversWithCostLedger } from '../../cost/kaggle-cost-wiring.js';
+import { DbCostPolicyResolver } from '../../cost/db-cost-policy-resolver.js';
+import { createDbIntelScoreProvider } from '../../cost/db-intel-score-provider.js';
+import {
+  resolveCostGovernorBundle,
+  wrapModelWithCacheHints,
+  RunCostStateTracker,
+  weaveModelCascadeResolver,
+  wrapAuditEmitterWithCascadeTracker,
+  weaveIntelGate,
+  weaveBudgetGate,
+  weaveCostLedgerFromBreakdown,
+  weaveToolOutputTruncator,
+  weaveIntentRagToolSubsetFilter,
+  type ReasoningEffort,
+  type ToolOutputTruncator,
+  type CostBudgetGate,
+} from '@weaveintel/cost-governor';
+import type { ModelResolver } from '@weaveintel/live-agents';
+import { createOpenAIEmbedder } from '../../cost/openai-embedder.js';
+import { createDbToolEmbeddingStore } from '../../cost/db-tool-embedding-store.js';
 import {
   getLlmEndpointPressure,
   isPressureBlocking,
@@ -633,11 +655,119 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
   // registration (Phase A) and the per-tick handler resolution (Phase C)
   // reuse it so chat / generic-supervisor / kaggle paths share identical
   // gating and audit semantics.
+  //
+  // Phase 1 (COST_CONTROL_PLAN.md): wrap the model resolver and audit
+  // emitter with the cost ledger so every model call and tool invocation
+  // emits a `cost.tick` row keyed by the active kaggle competition run.
+  // Behaviour is unchanged — only telemetry is added.
+  const costLedgerSink = new DbCostLedgerSink(opts.db);
+  const pricingResolver = new DbPricingResolver(opts.db);
+  const innerAuditEmitter = new DbToolAuditEmitter(opts.db);
+  const wrapped = wrapKaggleResolversWithCostLedger({
+    db: opts.db,
+    baseResolver: dbModelResolver,
+    auditInner: innerAuditEmitter,
+    sink: costLedgerSink,
+    pricing: pricingResolver,
+  });
+  const costAwareModelResolver = wrapped.modelResolver;
+
+  // Phase 4 (COST_CONTROL_PLAN.md §5.1): wire model cascade between the
+  // cost-ledger resolver and the prompt-caching wrapper. Resolver chain:
+  //   caching -> cascade -> cost-ledger -> base (DB routing)
+  // Per-supervisor in-memory tracker; per-agent state keyed by `agent.id`
+  // (synthesized as runId). 1-hour TTL evicts stale agent state.
+  const cascadeTracker = new RunCostStateTracker({ ttlMs: 60 * 60 * 1000 });
+  const cascadeModelResolver = weaveModelCascadeResolver({
+    base: costAwareModelResolver,
+    resolveConfig: async (ctx) => {
+      try {
+        const { bundle } = await resolveCostGovernorBundle(
+          new DbCostPolicyResolver(opts.db),
+          {
+            ...(ctx?.tenantId ? { tenantId: ctx.tenantId } : {}),
+            ...(ctx?.meshId ? { meshId: ctx.meshId } : {}),
+            ...(ctx?.agentId ? { agentId: ctx.agentId } : {}),
+          },
+        );
+        return bundle.policy.modelCascade ?? null;
+      } catch {
+        return null;
+      }
+    },
+    loadModel: async (ref) => {
+      const provider = ref.provider ?? opts.defaultProvider;
+      const cfg = opts.providers[provider];
+      if (!cfg) return undefined;
+      try {
+        return await getOrCreateModel(provider, ref.modelId, cfg);
+      } catch {
+        return undefined;
+      }
+    },
+    tracker: cascadeTracker,
+    log: (msg) => console.log('[kaggle-heartbeat]', msg),
+  });
+
+  // Phase 3 (COST_CONTROL_PLAN.md §5.3): layer prompt-caching cache-key
+  // hints on top of the cost-ledger-wrapped resolver. Each tick resolves
+  // the effective `CostPolicy` via `DbCostPolicyResolver` and, when
+  // `promptCaching.enabled`, wraps the returned Model with
+  // `wrapModelWithCacheHints` so providers receive a stable
+  // `prompt_cache_key` (OpenAI) or system-prompt cache_control block
+  // (Anthropic). Falls through to the unwrapped model on any error.
+  const cachedCostPolicyResolver = new DbCostPolicyResolver(opts.db);
+  const cachingModelResolver: ModelResolver = {
+    async resolve(ctx) {
+      // Synthesize runId for the cascade tracker when not present.
+      const runId = ctx?.runId ?? ctx?.agentId;
+      const m = await cascadeModelResolver.resolve({
+        ...(ctx ?? {}),
+        ...(runId ? { runId } : {}),
+      });
+      if (!m) return undefined;
+      try {
+        const tenantId = ctx?.tenantId;
+        const meshId = ctx?.meshId;
+        const agentId = ctx?.agentId;
+        const { bundle } = await resolveCostGovernorBundle(cachedCostPolicyResolver, {
+          ...(tenantId ? { tenantId } : {}),
+          ...(meshId ? { meshId } : {}),
+          ...(agentId ? { agentId } : {}),
+        });
+        if (!bundle.policy.promptCaching.enabled) return m;
+        const role = ctx?.role;
+        const modelId = m.info?.modelId;
+        return wrapModelWithCacheHints(m, bundle.cacheShaper, {
+          resolveContext: () => ({
+            provider: m.info.provider,
+            ...(role ? { role } : {}),
+            ...(modelId ? { modelId } : {}),
+            ...(meshId ? { meshId } : {}),
+            ...(agentId ? { agentId } : {}),
+            ...(tenantId ? { tenantId } : {}),
+          }),
+        });
+      } catch {
+        return m;
+      }
+    },
+  };
+
   const liveAgentPolicy = weaveDbLiveAgentPolicy({
     policyResolver: new DbToolPolicyResolver(opts.db),
     approvalGate: new DbToolApprovalGate(opts.db),
     rateLimiter: new DbToolRateLimiter(opts.db),
-    auditEmitter: new DbToolAuditEmitter(opts.db),
+    // Phase 4 — wrap the ledger-decorated audit emitter so every failed
+    // tool call increments the cascade tracker. Forwarding to the inner
+    // emitter is best-effort and unaffected by tracker updates.
+    auditEmitter: wrapAuditEmitterWithCascadeTracker(
+      wrapped.auditEmitter,
+      cascadeTracker,
+      // chatId === agent.id for live-agent tool calls (set by
+      // weaveDbLiveAgentPolicy default resolution context).
+      { resolveRunId: (e) => e.chatId ?? null },
+    ),
   });
 
   // Best-effort observer: every successful `kaggle_push_kernel` from the
@@ -730,6 +860,193 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
     }
   };
 
+  // Per-tick factory for read-only run-scoped trace tools. Resolves the
+  // strategist's CURRENT competition run from its mesh id (same pattern
+  // as the two observers above) and constructs a fresh ToolRegistry
+  // bound to that single runId. The LLM cannot pass a runId argument to
+  // any of the tools — every read is structurally scoped to the current
+  // run only, so parallel competition runs on other meshes are never
+  // visible.
+  const traceToolsFactory = async ({
+    meshId,
+  }: {
+    meshId: string;
+    agentId?: string;
+  }): Promise<import('@weaveintel/core').ToolRegistry | null> => {
+    try {
+      const runs = await opts.db.listKglCompetitionRuns({ status: 'running' });
+      const run = runs.find((r) => r.mesh_id === meshId);
+      if (!run) return null;
+      const { createKaggleTraceTools } = await import('./trace-tools.js');
+      return createKaggleTraceTools({
+        runId: run.id,
+        db: opts.db,
+        log: (m) => console.log('[kaggle-trace-tools]', m),
+      });
+    } catch (err) {
+      console.error(
+        '[kaggle-heartbeat] traceToolsFactory failed:',
+        err instanceof Error ? err.message : String(err),
+      );
+      return null;
+    }
+  };
+
+  // Cost Governor Phase 5 (lever L3 — dynamic tool subset). Per-tick async
+  // closure invoked by the strategist `prepare()` AFTER the full kaggle +
+  // trace tool registry is assembled. Resolves the effective `CostPolicy`
+  // via the cached resolver, derives a logical `phase` from the active
+  // `kgl_competition_run` row (no kernel pushed yet → 'discovery'; one
+  // kernel pushed → 'kernel'; two or more pushes → 'improvement'), then
+  // calls `bundle.toolFilter(toolKeys, ctx)` which reads operator-edited
+  // `cost_policies.levers_json.toolSubset.phases` to decide which tool keys
+  // to keep this tick. NEVER load-bearing — every error path returns null
+  // (pass-through) so the kaggle agent always has its full tool registry.
+  const costToolFilter = async (ctx: {
+    meshId: string;
+    agentId?: string;
+    toolKeys: readonly string[];
+    goal?: string;
+  }): Promise<readonly string[] | null> => {
+    try {
+      const { bundle } = await resolveCostGovernorBundle(cachedCostPolicyResolver, {
+        meshId: ctx.meshId,
+        ...(ctx.agentId ? { agentId: ctx.agentId } : {}),
+      });
+
+      // Phase 8: intent-RAG branch. When the resolved policy selects the
+      // 'intent-rag' tool-subset strategy, swap the deterministic phase
+      // map for cosine-similarity ranking against pre-warmed embeddings.
+      // No embedder (e.g. missing OPENAI_API_KEY) → graceful pass-through.
+      if (bundle.policy.toolSubset.strategy === 'intent-rag') {
+        const embedder = createOpenAIEmbedder();
+        if (!embedder) return null;
+        const store = createDbToolEmbeddingStore({ db: opts.db, modelId: embedder.modelId });
+        const irFilter = weaveIntentRagToolSubsetFilter({
+          config: bundle.policy.toolSubset,
+          embedder,
+          embeddingStore: store,
+          goalResolver: (c) => (typeof (c as { goal?: unknown }).goal === 'string' ? ((c as { goal: string }).goal) : null),
+        });
+        return await irFilter(ctx.toolKeys, {
+          ...(ctx.goal ? { goal: ctx.goal } : {}),
+          ...(ctx.agentId ? { agentId: ctx.agentId } : {}),
+          meshId: ctx.meshId,
+          agentRole: 'strategist',
+        });
+      }
+
+      // Default (Phase 5) path: deterministic phase map.
+      let phase: string | undefined;
+      try {
+        const runs = await opts.db.listKglCompetitionRuns({ status: 'running' });
+        const run = runs.find((r) => r.mesh_id === ctx.meshId);
+        if (run) {
+          const events = await opts.db.listKglRunEvents(run.id, { limit: 500 });
+          const pushCount = events.filter((e) => e.kind === 'kernel_pushed').length;
+          phase = pushCount === 0 ? 'discovery' : pushCount === 1 ? 'kernel' : 'improvement';
+        }
+      } catch {
+        /* phase undefined — filter will treat as missing-phase pass-through */
+      }
+      return await bundle.toolFilter(ctx.toolKeys, {
+        ...(phase ? { phase } : {}),
+        ...(ctx.agentId ? { agentId: ctx.agentId } : {}),
+        meshId: ctx.meshId,
+        agentRole: 'strategist',
+      });
+    } catch (err) {
+      console.warn(
+        '[kaggle-heartbeat] costToolFilter failed; pass-through:',
+        err instanceof Error ? err.message : String(err),
+      );
+      return null;
+    }
+  };
+
+  // Cost Governor Phase 6 (lever L4 — intel-gated prompt sections). Per-tick
+  // closure invoked by the strategist `prepare()` to decide whether to drop
+  // the CV_SCORES addendum (`intel_header` section key) or truncate the
+  // verbatim operator-seed body (`intel_snippets` section key). Resolves
+  // the effective `CostPolicy` via the cached resolver, gets the run-state
+  // intel score from `DbIntelScoreProvider` (signals: objective set, title
+  // set, step_completed events, kernel_pushed events, step_count >= 3),
+  // and translates the score into a `PromptShape` via `weaveIntelGate`.
+  // NEVER load-bearing — every error path returns null (keep all sections).
+  const dbIntelScoreProvider = createDbIntelScoreProvider({ db: opts.db });
+  const intelGate = async (ctx: {
+    meshId: string;
+    agentId?: string;
+  }): Promise<import('@weaveintel/cost-governor').PromptShape | null> => {
+    try {
+      const { bundle } = await resolveCostGovernorBundle(cachedCostPolicyResolver, {
+        meshId: ctx.meshId,
+        ...(ctx.agentId ? { agentId: ctx.agentId } : {}),
+      });
+      if (!bundle.policy.intelGating.enabled) return null;
+      const shaper = weaveIntelGate(bundle.policy.intelGating, dbIntelScoreProvider);
+      return await shaper({
+        meshId: ctx.meshId,
+        ...(ctx.agentId ? { agentId: ctx.agentId } : {}),
+      });
+    } catch (err) {
+      console.warn(
+        '[kaggle-heartbeat] intelGate failed; pass-through:',
+        err instanceof Error ? err.message : String(err),
+      );
+      return null;
+    }
+  };
+
+  // Cost Governor — per-tick L6/L7/L8/L9 resolver. Replaces the prior
+  // boot-time bundle resolution so that mesh- and agent-scoped
+  // `capability_policy_bindings` rows (the same chain used by per-tick
+  // L1/L2/L3/L4 levers) authoritatively override workflow / tenant defaults
+  // for max-steps, reasoning-effort, tool-output truncation, and the
+  // budget gate. Strategist invokes this on every tick with the live
+  // `(meshId, agentId)`. Throws fall back to no overrides — never
+  // load-bearing.
+  const phase7Resolver = async (
+    ctx: { meshId: string; agentId?: string },
+  ): Promise<{
+    maxStepsCap?: number;
+    reasoningEffortHint?: ReasoningEffort;
+    toolOutputTruncator?: ToolOutputTruncator;
+    budgetGate?: CostBudgetGate;
+  }> => {
+    const { bundle } = await resolveCostGovernorBundle(cachedCostPolicyResolver, {
+      meshId: ctx.meshId,
+      ...(ctx.agentId ? { agentId: ctx.agentId } : {}),
+      workflowId: 'kaggle',
+    });
+    const out: {
+      maxStepsCap?: number;
+      reasoningEffortHint?: ReasoningEffort;
+      toolOutputTruncator?: ToolOutputTruncator;
+      budgetGate?: CostBudgetGate;
+    } = {};
+    if (bundle.policy.maxStepsCap !== undefined) out.maxStepsCap = bundle.policy.maxStepsCap;
+    if (bundle.policy.reasoningEffort) out.reasoningEffortHint = bundle.policy.reasoningEffort;
+    if (bundle.policy.toolOutputTruncation) {
+      out.toolOutputTruncator = weaveToolOutputTruncator(bundle.policy.toolOutputTruncation);
+    }
+    const ceiling = bundle.policy.budgetCeilingUsd;
+    if (ceiling && Number.isFinite(ceiling) && ceiling > 0) {
+      const ledger = weaveCostLedgerFromBreakdown({
+        readBreakdown: (runId) => readCostBreakdown(opts.db, runId),
+      });
+      out.budgetGate = weaveBudgetGate({
+        ledger,
+        ceilingUsd: ceiling,
+        // Same convention as Phase 4 cascade tracker — strategist
+        // synthesizes runId=agentId before invoking the gate.
+        runIdResolver: (gctx) => gctx.runId ?? null,
+        log: (m) => console.warn('[kaggle-heartbeat:budget-gate]', m),
+      });
+    }
+    return out;
+  };
+
   // Phase A — register the 10 kaggle handler kinds against the shared
   // registry so the action executor can resolve a `TaskHandler` purely from
   // a `live_agent_handler_bindings` row. Idempotent: silently skips kinds
@@ -738,13 +1055,17 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
   const handlerRegistry = getHandlerRegistry();
   try {
     registerKaggleHandlerKinds(handlerRegistry, {
-      modelResolver: dbModelResolver,
+      modelResolver: cachingModelResolver,
       playbookResolver,
       db: opts.db,
       log: (msg) => console.log('[kaggle-handler-kinds]', msg),
       policy: liveAgentPolicy,
       onKernelPushed,
       onToolBlocked,
+      traceToolsFactory,
+      costToolFilter,
+      intelGate,
+      phase7Resolver,
     });
     await syncHandlerKindsToDb(opts.db, handlerRegistry);
   } catch (err) {
@@ -784,7 +1105,7 @@ export async function startKaggleHeartbeat(opts: StartKaggleHeartbeatOptions): P
       return { completed: false, summaryProse: `Mesh status=${mesh?.status ?? 'missing'} — skipping tick.` };
     }
     const { handler } = await weaveLiveAgentFromDb(opts.db, agentId, {
-      modelResolver: dbModelResolver,
+      modelResolver: cachingModelResolver,
       policy: liveAgentPolicy,
       handlerRegistry,
       logger: (msg) => console.log('[kaggle-heartbeat][db-handler]', msg),

@@ -12,7 +12,7 @@ import type {
   ReviewTask,
   EscalationTask,
 } from '@weaveintel/core';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 
 // ─── Task factory ────────────────────────────────────────────
 
@@ -30,7 +30,7 @@ export interface CreateTaskInput {
 
 export function createHumanTask(input: CreateTaskInput): HumanTask {
   return {
-    id: randomUUID(),
+    id: newUUIDv7(),
     type: input.type,
     title: input.title,
     description: input.description,

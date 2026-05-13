@@ -15,7 +15,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { createDurableIdempotencyStore, type DurableIdempotencyEntry } from '@weaveintel/reliability';
 import type { DatabaseAdapter } from '../../../db.js';
 import type { SVChatBridge, SVRunInput } from '../chat-bridge.js';
@@ -51,7 +51,7 @@ function createDbBackedIdempotencyStore(db: DatabaseAdapter) {
       },
       async set(key: string, entry: DurableIdempotencyEntry) {
         await db.createIdempotencyRecord({
-          id: randomUUID(),
+          id: newUUIDv7(),
           key,
           result_json: JSON.stringify(entry.result),
           expires_at: new Date(entry.expiresAt).toISOString(),
@@ -162,7 +162,7 @@ export function registerSVRoutes(
     if (!title || typeof title !== 'string') { json(res, 400, { error: 'title is required' }); return; }
     if (!statement || typeof statement !== 'string') { json(res, 400, { error: 'statement is required' }); return; }
 
-    const id = randomUUID();
+    const id = newUUIDv7();
     const tenantId = (auth.tenantId ?? auth.userId) as string;
 
     // Resolve budget envelope: use caller-supplied id, or fall back to first available.
@@ -173,8 +173,8 @@ export function registerSVRoutes(
       if (!fallback) { json(res, 422, { error: 'No budget envelope available. Seed default data first.' }); return; }
       budgetId = fallback.id;
     }
-    const traceId = randomUUID();
-    const contractId = randomUUID();
+    const traceId = newUUIDv7();
+    const contractId = newUUIDv7();
 
     await db.createHypothesis({
       id,
@@ -396,9 +396,9 @@ export function registerSVRoutes(
     const original = await db.getHypothesis(id, tenantId);
     if (!original) { json(res, 404, { error: 'Hypothesis not found' }); return; }
 
-    const newId = randomUUID();
-    const newTraceId = randomUUID();
-    const newContractId = randomUUID();
+    const newId = newUUIDv7();
+    const newTraceId = newUUIDv7();
+    const newContractId = newUUIDv7();
 
     await db.createHypothesis({
       id: newId,

@@ -4,7 +4,7 @@
  * Modular CRUD endpoints for worker agents.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
@@ -40,7 +40,7 @@ export function registerWorkerAgentRoutes(
     const validatedDescription = requireDetailedDescription(body['description'], 'agent', res);
     if (!validatedDescription) return;
 
-    const id = 'wa-' + randomUUID().slice(0, 8);
+    const id = 'wa-' + newUUIDv7().slice(-8);
     await db.createWorkerAgent({
       id,
       name: body['name'] as string,

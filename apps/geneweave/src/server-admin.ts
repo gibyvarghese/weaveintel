@@ -5,7 +5,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import {
   renderPromptRecord,
   resolvePromptRecordForExecution,
@@ -196,7 +196,7 @@ export function registerAdminRoutes(
       return;
     }
 
-    const id = randomUUID();
+    const id = newUUIDv7();
     const passwordHash = await hashPassword(password);
     await db.createUser({
       id,
@@ -297,7 +297,7 @@ export function registerAdminRoutes(
     if (!body['name'] || !body['template']) { json(res, 400, { error: 'name and template required' }); return; }
     const validatedDescription = requireDetailedDescription(body['description'], 'prompt', res);
     if (!validatedDescription) return;
-    const id = randomUUID();
+    const id = newUUIDv7();
     const isDefault = body['is_default'] ? 1 : 0;
     await db.createPrompt({
       id, key: (body['key'] as string) ?? id, name: body['name'] as string, description: validatedDescription,
@@ -372,7 +372,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['key'] || !body['name']) { json(res, 400, { error: 'key and name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createPromptFramework({
       id, key: body['key'] as string, name: body['name'] as string,
       description: (body['description'] as string) ?? null,
@@ -432,7 +432,7 @@ export function registerAdminRoutes(
     if (!body['key'] || !body['name'] || !body['content']) {
       json(res, 400, { error: 'key, name, and content required' }); return;
     }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createPromptFragment({
       id, key: body['key'] as string, name: body['name'] as string,
       description: (body['description'] as string) ?? null,
@@ -498,7 +498,7 @@ export function registerAdminRoutes(
     if (!body['key'] || !body['name'] || !body['contract_type'] || !body['config']) {
       json(res, 400, { error: 'key, name, contract_type, and config required' }); return;
     }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createPromptContract({
       id, key: body['key'] as string, name: body['name'] as string,
       description: (body['description'] as string) ?? null,
@@ -563,7 +563,7 @@ export function registerAdminRoutes(
     const validatedDescription = requireDetailedDescription(body['description'], 'prompt', res);
     if (!validatedDescription) return;
 
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createPromptStrategy({
       id,
       key: body['key'] as string,
@@ -635,7 +635,7 @@ export function registerAdminRoutes(
     if (!body['prompt_id'] || !body['version'] || !body['template']) {
       json(res, 400, { error: 'prompt_id, version, and template required' }); return;
     }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createPromptVersion({
       id,
       prompt_id: body['prompt_id'] as string,
@@ -708,7 +708,7 @@ export function registerAdminRoutes(
     if (!body['prompt_id'] || !body['name'] || !body['variants_json']) {
       json(res, 400, { error: 'prompt_id, name, and variants_json required' }); return;
     }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createPromptExperiment({
       id,
       prompt_id: body['prompt_id'] as string,
@@ -773,7 +773,7 @@ export function registerAdminRoutes(
     if (!body['prompt_id'] || !body['name'] || !body['cases_json']) {
       json(res, 400, { error: 'prompt_id, name, and cases_json required' }); return;
     }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createPromptEvalDataset({
       id,
       prompt_id: body['prompt_id'] as string,
@@ -846,7 +846,7 @@ export function registerAdminRoutes(
     if (!body['dataset_id'] || !body['prompt_id'] || !body['prompt_version'] || body['results_json'] === undefined) {
       json(res, 400, { error: 'dataset_id, prompt_id, prompt_version, and results_json required' }); return;
     }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createPromptEvalRun({
       id,
       dataset_id: body['dataset_id'] as string,
@@ -898,7 +898,7 @@ export function registerAdminRoutes(
     const validatedDescription = requireDetailedDescription(body['description'], 'prompt', res);
     if (!validatedDescription) return;
 
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createPromptOptimizer({
       id,
       key: body['key'] as string,
@@ -968,7 +968,7 @@ export function registerAdminRoutes(
     if (!body['prompt_id'] || !body['source_version'] || !body['candidate_version'] || !body['objective'] || !body['source_template'] || !body['candidate_template'] || body['diff_json'] === undefined) {
       json(res, 400, { error: 'prompt_id, source_version, candidate_version, objective, source_template, candidate_template, and diff_json required' }); return;
     }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createPromptOptimizationRun({
       id,
       prompt_id: body['prompt_id'] as string,
@@ -1042,7 +1042,7 @@ export function registerAdminRoutes(
         : dataset.pass_threshold,
     });
 
-    const runId = randomUUID();
+    const runId = newUUIDv7();
     await db.createPromptEvalRun({
       id: runId,
       dataset_id: dataset.id,
@@ -1144,7 +1144,7 @@ export function registerAdminRoutes(
       }
     }
 
-    const runId = randomUUID();
+    const runId = newUUIDv7();
     await db.createPromptOptimizationRun({
       id: runId,
       prompt_id: prompt.id,
@@ -1203,11 +1203,11 @@ export function registerAdminRoutes(
         },
       });
 
-      const traceId = randomUUID();
-      const rootSpanId = randomUUID();
+      const traceId = newUUIDv7();
+      const rootSpanId = newUUIDv7();
       const capability = telemetry ?? createPromptCapabilityTelemetry(renderedResult, { source: 'db' });
       await db.saveTrace({
-        id: randomUUID(),
+        id: newUUIDv7(),
         userId: auth.userId,
         traceId,
         spanId: rootSpanId,
@@ -1222,10 +1222,10 @@ export function registerAdminRoutes(
         }),
       });
       await db.saveTrace({
-        id: randomUUID(),
+        id: newUUIDv7(),
         userId: auth.userId,
         traceId,
-        spanId: randomUUID(),
+        spanId: newUUIDv7(),
         parentSpanId: rootSpanId,
         name: `capability.prompt.${capability.key}`,
         startTime: Date.now() - renderedResult.durationMs,
@@ -1366,7 +1366,7 @@ export function registerAdminRoutes(
     const workflow_id = body['workflow_id'] as string | undefined;
     const input = body['input'] as Record<string, unknown> | undefined;
     if (!workflow_id) { json(res, 400, { error: 'workflow_id is required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createWorkflowRun({
       id,
       workflow_id,
@@ -1437,7 +1437,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createCachePolicy({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       scope: (body['scope'] as string) ?? 'global',
@@ -1504,7 +1504,7 @@ export function registerAdminRoutes(
       json(res, 400, { error: 'name, rule_type and pattern required' });
       return;
     }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createMemoryExtractionRule({
       id,
       name: body['name'] as string,
@@ -1574,7 +1574,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['provider_type']) { json(res, 400, { error: 'name and provider_type required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createSearchProvider({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       provider_type: body['provider_type'] as string,
@@ -1636,7 +1636,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['url']) { json(res, 400, { error: 'name and url required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createHttpEndpoint({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       url: body['url'] as string, method: (body['method'] as string) ?? 'GET',
@@ -1705,7 +1705,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['platform']) { json(res, 400, { error: 'name and platform required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createSocialAccount({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       platform: body['platform'] as string,
@@ -1768,7 +1768,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['connector_type']) { json(res, 400, { error: 'name and connector_type required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createEnterpriseConnector({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       connector_type: body['connector_type'] as string,
@@ -1835,7 +1835,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['package_name']) { json(res, 400, { error: 'name and package_name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createToolRegistryEntry({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       package_name: body['package_name'] as string, version: (body['version'] as string) ?? '1.0.0',
@@ -1903,7 +1903,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['golden_prompt'] || !body['golden_response']) { json(res, 400, { error: 'name, golden_prompt and golden_response required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createReplayScenario({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       golden_prompt: body['golden_prompt'] as string, golden_response: body['golden_response'] as string,
@@ -1965,7 +1965,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['trigger_type']) { json(res, 400, { error: 'name and trigger_type required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createTriggerDefinition({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       trigger_type: body['trigger_type'] as string,
@@ -2028,7 +2028,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['tenant_id']) { json(res, 400, { error: 'name and tenant_id required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createTenantConfig({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       tenant_id: body['tenant_id'] as string,
@@ -2102,7 +2102,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createSandboxPolicy({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       max_cpu_ms: (body['max_cpu_ms'] as number) ?? null,
@@ -2170,7 +2170,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createExtractionPipeline({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       stages: body['stages'] ? (typeof body['stages'] === 'string' ? body['stages'] as string : JSON.stringify(body['stages'])) : '[]',
@@ -2228,7 +2228,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createArtifactPolicy({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       max_size_bytes: (body['max_size_bytes'] as number) ?? null,
@@ -2288,7 +2288,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createReliabilityPolicy({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       policy_type: (body['policy_type'] as string) ?? 'retry',
@@ -2358,7 +2358,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createCollaborationSession({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       session_type: (body['session_type'] as string) ?? 'team',
@@ -2420,7 +2420,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createGraphConfig({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       graph_type: (body['graph_type'] as string) ?? 'entity',
@@ -2484,7 +2484,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createPluginConfig({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       plugin_type: (body['plugin_type'] as string) ?? 'community',
@@ -2550,7 +2550,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createScaffoldTemplate({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       template_type: (body['template_type'] as string) ?? 'basic-agent',
@@ -2614,7 +2614,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createRecipeConfig({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       recipe_type: (body['recipe_type'] as string) ?? 'workflow',
@@ -2682,7 +2682,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createWidgetConfig({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       widget_type: (body['widget_type'] as string) ?? 'table',
@@ -2744,7 +2744,7 @@ export function registerAdminRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createValidationRule({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       rule_type: (body['rule_type'] as string) ?? 'required',
@@ -2924,7 +2924,7 @@ export function registerAdminRoutes(
     if (!clientId) { json(res, 400, { error: `${envPrefix}_CLIENT_ID not configured in environment` }); return; }
 
     // Generate CSRF state
-    const oauthState = randomUUID();
+    const oauthState = newUUIDv7();
 
     // Store state in connector record (if connector_id provided) for callback validation
     if (connectorId) {

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ExecutionContext, Message, AgentStep, ModelRequest } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import type { GuardrailCategorySummary } from '@weaveintel/guardrails';
@@ -143,7 +143,7 @@ export async function sendMessageImpl(
   const settings = settingsFromRow(await deps.db.getChatSettings(chatId));
   const resolvedSystemPrompt = await resolveSystemPrompt(deps.db, settings);
   const resolvedPrompt = await deps.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
-  const traceId = randomUUID();
+  const traceId = newUUIDv7();
   const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
   const startMs = Date.now();
 
@@ -156,7 +156,7 @@ export async function sendMessageImpl(
     const rd = await applyRedaction(ctx, contentWithAttachments, settings.redactionPatterns);
     if (rd.error) {
       const denyContent = 'Your message could not be processed safely because redaction failed before execution.';
-      const assistMsgId = randomUUID();
+      const assistMsgId = newUUIDv7();
       await deps.db.addMessage({
         id: assistMsgId,
         chatId,
@@ -210,7 +210,7 @@ export async function sendMessageImpl(
     tools: [...(m.skill.toolNames ?? [])],
   }));
 
-  const userMsgId = randomUUID();
+  const userMsgId = newUUIDv7();
   const userMetadata = redactionInfo || attachments.length > 0
     ? JSON.stringify({
         redaction: redactionInfo,
@@ -222,7 +222,7 @@ export async function sendMessageImpl(
   const preGuardrail = await evaluateGuardrails(deps.db, chatId, userMsgId, processedContent, 'pre-execution');
   if (preGuardrail.decision === 'deny') {
     const denyContent = preGuardrail.reason || 'Your message was blocked by a guardrail policy.';
-    const assistMsgId = randomUUID();
+    const assistMsgId = newUUIDv7();
     await deps.db.addMessage({
       id: assistMsgId,
       chatId,
@@ -247,7 +247,7 @@ export async function sendMessageImpl(
   const identityRecall = await resolveIdentityRecallFromMemory(deps.db, userId, processedContent);
   if (identityRecall) {
     const latencyMs = Date.now() - startMs;
-    const assistMsgId = randomUUID();
+    const assistMsgId = newUUIDv7();
     await deps.db.addMessage({
       id: assistMsgId,
       chatId,
@@ -266,7 +266,7 @@ export async function sendMessageImpl(
     });
 
     await deps.db.recordMetric({
-      id: randomUUID(), userId, chatId, type: 'generation', provider: 'local', model: 'memory-recall',
+      id: newUUIDv7(), userId, chatId, type: 'generation', provider: 'local', model: 'memory-recall',
       promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0, latencyMs,
     });
 
@@ -394,7 +394,7 @@ export async function sendMessageImpl(
     evalInfo = evalResult;
   }
 
-  const assistMsgId = randomUUID();
+  const assistMsgId = newUUIDv7();
   await deps.db.addMessage({
     id: assistMsgId,
     chatId,
@@ -434,7 +434,7 @@ export async function sendMessageImpl(
   }
 
   await deps.db.recordMetric({
-    id: randomUUID(), userId, chatId, type: 'generation', provider, model: modelId,
+    id: newUUIDv7(), userId, chatId, type: 'generation', provider, model: modelId,
     promptTokens: usage.promptTokens, completionTokens: usage.completionTokens,
     totalTokens: usage.totalTokens, cost, latencyMs,
   });

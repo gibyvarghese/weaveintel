@@ -18,7 +18,7 @@
  * and proceed without blocking.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ToolApprovalGate, ApprovalDecision } from '@weaveintel/tools';
 import type { ToolInput } from '@weaveintel/core';
 import type { DatabaseAdapter } from './db.js';
@@ -46,7 +46,7 @@ export class DbToolApprovalGate implements ToolApprovalGate {
       }
 
       // 3. No existing request — create a new one.
-      const id = randomUUID();
+      const id = newUUIDv7();
       let inputJson = '{}';
       try {
         inputJson = JSON.stringify(input ?? {});

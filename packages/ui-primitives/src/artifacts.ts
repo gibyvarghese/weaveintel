@@ -2,7 +2,7 @@
  * @weaveintel/ui-primitives — Artifact payload builder
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ArtifactPayload } from '@weaveintel/core';
 
 export interface CreateArtifactPayloadOptions {
@@ -19,7 +19,7 @@ export interface CreateArtifactPayloadOptions {
  */
 export function createArtifactPayload(opts: CreateArtifactPayloadOptions): ArtifactPayload {
   return {
-    id: randomUUID(),
+    id: newUUIDv7(),
     type: opts.type,
     title: opts.title,
     mimeType: opts.mimeType,

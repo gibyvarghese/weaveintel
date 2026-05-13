@@ -49,6 +49,8 @@
     { "path": "packages/replay" },
     { "path": "packages/triggers" },
     { "path": "packages/capability-packs" },
+    { "path": "packages/cost-governor" },
+    { "path": "packages/encryption" },
     { "path": "packages/tenancy" },
     { "path": "packages/sandbox" },
     { "path": "packages/extraction" },
@@ -66,6 +68,7 @@
     { "path": "packages/social-growth" },
     { "path": "packages/live-agents" },
     { "path": "packages/live-agents-runtime" },
+    { "path": "packages/live-agents-trace-tools" },
     { "path": "apps/geneweave" },
     { "path": "apps/live-agents-demo" }
   ]

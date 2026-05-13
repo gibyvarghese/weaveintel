@@ -16,7 +16,7 @@
  * Sessions are not supported — each execution is ephemeral.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { readFile } from 'node:fs/promises';
 import { createSign } from 'node:crypto';
 import type { ContainerProvider } from './base.js';
@@ -151,7 +151,7 @@ export class CloudRunJobsProvider implements ContainerProvider {
   }
 
   async execute(request: ExecutionRequest, config: CSEConfig): Promise<ExecutionResult> {
-    const executionId = randomUUID();
+    const executionId = newUUIDv7();
     const jobId = `cse-${executionId.slice(0, 16)}`;
 
     const projectId = config.googleProjectId

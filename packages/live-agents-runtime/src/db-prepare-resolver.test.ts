@@ -190,3 +190,154 @@ describe('dbPrepareFromConfig', () => {
     expect('tools' in out).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 9 — tools recipe object form + traceTools merge
+// ---------------------------------------------------------------------------
+
+describe('parsePrepareConfig: tools object form', () => {
+  it('parses { auto: true }', () => {
+    expect(parsePrepareConfig('{"tools":{"auto":true}}')).toEqual({
+      tools: { auto: true },
+    });
+  });
+
+  it('parses { traceTools: "$auto" }', () => {
+    expect(parsePrepareConfig('{"tools":{"traceTools":"$auto"}}')).toEqual({
+      tools: { traceTools: '$auto' },
+    });
+  });
+
+  it('parses { auto: true, traceTools: "$auto" }', () => {
+    expect(
+      parsePrepareConfig('{"tools":{"auto":true,"traceTools":"$auto"}}'),
+    ).toEqual({ tools: { auto: true, traceTools: '$auto' } });
+  });
+
+  it('throws on unknown key inside tools object', () => {
+    expect(() => parsePrepareConfig('{"tools":{"weird":true}}')).toThrow(
+      /unknown tools key/,
+    );
+  });
+
+  it('throws on non-boolean tools.auto', () => {
+    expect(() => parsePrepareConfig('{"tools":{"auto":"yes"}}')).toThrow(
+      /tools\.auto must be boolean/,
+    );
+  });
+
+  it('throws on traceTools other than "$auto"', () => {
+    expect(() => parsePrepareConfig('{"tools":{"traceTools":true}}')).toThrow(
+      /traceTools/,
+    );
+  });
+});
+
+describe('dbPrepareFromConfig: tools object form + traceTools merge', () => {
+  const inbound = { subject: 's', body: 'b' };
+
+  function makeRegistry(names: string[]) {
+    const tools = names.map((n) => ({
+      schema: {
+        name: n,
+        description: `desc ${n}`,
+        parameters: { type: 'object' as const, properties: {}, required: [] },
+      },
+      invoke: async () => ({ content: 'ok' }),
+    }));
+    return {
+      register: () => {},
+      unregister: () => {},
+      get: (name: string) => tools.find((t) => t.schema.name === name),
+      list: () => tools,
+      listByTag: () => [],
+      toDefinitions: () => [],
+    } as never;
+  }
+
+  it('{ auto: true } forwards ctx.tools as-is when no trace tools', async () => {
+    const fakeTools = makeRegistry(['a', 'b']);
+    const { prepare } = dbPrepareFromConfig(
+      { systemPrompt: 'X', tools: { auto: true } },
+      { tools: fakeTools },
+    );
+    const out = await prepare({ inbound });
+    expect(out.tools).toBe(fakeTools);
+  });
+
+  it('{ traceTools: "$auto" } calls factory and uses returned registry', async () => {
+    const traceReg = makeRegistry(['live_get_run_timeline']);
+    const factory = vi.fn().mockResolvedValue(traceReg);
+    const { prepare } = dbPrepareFromConfig(
+      { systemPrompt: 'X', tools: { traceTools: '$auto' } },
+      {
+        traceToolsFactory: factory,
+        runId: 'run-1',
+        agentId: 'agent-1',
+        meshId: 'mesh-1',
+      },
+    );
+    const out = await prepare({ inbound });
+    expect(factory).toHaveBeenCalledWith({
+      runId: 'run-1',
+      agentId: 'agent-1',
+      meshId: 'mesh-1',
+    });
+    expect(out.tools).toBe(traceReg);
+  });
+
+  it('merges base + trace registries when both present', async () => {
+    const baseReg = makeRegistry(['a', 'b']);
+    const traceReg = makeRegistry(['live_get_run_timeline']);
+    const { prepare } = dbPrepareFromConfig(
+      { systemPrompt: 'X', tools: { auto: true, traceTools: '$auto' } },
+      {
+        tools: baseReg,
+        traceToolsFactory: () => traceReg,
+        runId: 'run-1',
+      },
+    );
+    const out = await prepare({ inbound });
+    expect(out.tools).not.toBe(baseReg);
+    expect(out.tools).not.toBe(traceReg);
+    const names = (out.tools as never as { list: () => { schema: { name: string } }[] })
+      .list()
+      .map((t) => t.schema.name)
+      .sort();
+    expect(names).toEqual(['a', 'b', 'live_get_run_timeline']);
+  });
+
+  it('factory returning null is graceful (no tools when only source)', async () => {
+    const { prepare } = dbPrepareFromConfig(
+      { systemPrompt: 'X', tools: { traceTools: '$auto' } },
+      { traceToolsFactory: () => null, runId: 'run-1' },
+    );
+    const out = await prepare({ inbound });
+    expect('tools' in out).toBe(false);
+  });
+
+  it('factory throwing is swallowed (trace tools never load-bearing)', async () => {
+    const baseReg = makeRegistry(['a']);
+    const { prepare } = dbPrepareFromConfig(
+      { systemPrompt: 'X', tools: { auto: true, traceTools: '$auto' } },
+      {
+        tools: baseReg,
+        traceToolsFactory: () => {
+          throw new Error('boom');
+        },
+        runId: 'run-1',
+      },
+    );
+    const out = await prepare({ inbound });
+    expect(out.tools).toBe(baseReg);
+  });
+
+  it('{ traceTools: "$auto" } without factory dep is a no-op', async () => {
+    const { prepare } = dbPrepareFromConfig(
+      { systemPrompt: 'X', tools: { traceTools: '$auto' } },
+      {},
+    );
+    const out = await prepare({ inbound });
+    expect('tools' in out).toBe(false);
+  });
+});

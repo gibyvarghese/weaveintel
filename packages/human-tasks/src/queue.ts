@@ -24,7 +24,8 @@ export class RepositoryBackedTaskQueue implements HumanTaskQueue {
   constructor(private readonly repository: HumanTaskRepository) {}
 
   async enqueue(task: Omit<HumanTask, 'id' | 'createdAt'>): Promise<HumanTask> {
-    const id = (await import('node:crypto')).randomUUID();
+    const { newUUIDv7 } = await import('@weaveintel/core');
+    const id = newUUIDv7();
     const full: HumanTask = {
       ...task,
       id,

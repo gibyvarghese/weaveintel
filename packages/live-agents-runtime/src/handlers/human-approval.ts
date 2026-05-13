@@ -46,6 +46,7 @@ import type {
 } from '@weaveintel/live-agents';
 import { loadLatestInboundTask } from '@weaveintel/live-agents';
 import type { ExecutionContext } from '@weaveintel/core';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { HandlerContext, HandlerKindRegistration } from '../handler-registry.js';
 import type {
   DeterministicForwardTarget,
@@ -75,7 +76,7 @@ export interface ApprovalDb {
   getPendingToolRequest(toolName: string, chatId: string): Promise<ApprovalRequestRowLike | null>;
 }
 
-/** ID generator (geneweave injects `newUUIDv7`). Defaults to `crypto.randomUUID`. */
+/** ID generator (geneweave injects `newUUIDv7`). Defaults to `newUUIDv7` from @weaveintel/core. */
 export type ApprovalIdGenerator = () => string;
 
 /** Optional extension to `HandlerContext` for `human.approval` only. */
@@ -126,7 +127,7 @@ function buildHumanApproval(
         'Geneweave must wire DatabaseAdapter into the handler context.',
     );
   }
-  const newId = ctx.newApprovalId ?? (() => crypto.randomUUID());
+  const newId = ctx.newApprovalId ?? (() => newUUIDv7());
   const toolKey = cfg.dualControlActions[0]!;
 
   return async (

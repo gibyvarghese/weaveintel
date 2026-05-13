@@ -15,7 +15,7 @@
  * the requested trigger via `onlyTriggerId`.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter, TriggerRow } from '../../db-types.js';
 import type { TriggerDispatcher, ManualSourceAdapter } from '@weaveintel/triggers';
 
@@ -84,7 +84,7 @@ export function registerTriggerRoutes(
     if (!body.key || typeof body.key !== 'string') { json(res, 400, { error: 'key required' }); return; }
     if (!body.source_kind || typeof body.source_kind !== 'string') { json(res, 400, { error: 'source_kind required' }); return; }
     if (!body.target_kind || typeof body.target_kind !== 'string') { json(res, 400, { error: 'target_kind required' }); return; }
-    const id = body.id ?? randomUUID();
+    const id = body.id ?? newUUIDv7();
     try {
       const created = await db.createTrigger({
         id,

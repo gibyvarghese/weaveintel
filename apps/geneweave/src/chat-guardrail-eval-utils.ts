@@ -4,7 +4,7 @@
  * Extracted from ChatEngine to keep chat.ts focused on orchestration.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { AgentStep, Guardrail, GuardrailResult, GuardrailStage } from '@weaveintel/core';
 import { createGuardrailPipeline, hasDeny, hasWarning, getDenyReason, summarizeGuardrailResults, type GuardrailCategorySummary } from '@weaveintel/guardrails';
 import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
@@ -42,7 +42,7 @@ export async function evaluateGuardrails(
 
     // Persist evaluation
     await db.createGuardrailEval({
-      id: randomUUID(),
+      id: newUUIDv7(),
       chat_id: chatId,
       message_id: messageId,
       stage,

@@ -30,6 +30,13 @@ import {
   type HeartbeatSupervisorHandle,
 } from '@weaveintel/live-agents-runtime';
 import type { Model } from '@weaveintel/core';
+import {
+  resolveCostGovernorBundle,
+  wrapModelWithCacheHints,
+  RunCostStateTracker,
+  weaveModelCascadeResolver,
+  wrapAuditEmitterWithCascadeTracker,
+} from '@weaveintel/cost-governor';
 import type { DatabaseAdapter } from '../db.js';
 import type { ProviderConfig } from '../chat.js';
 import { getOrCreateModel } from '../chat-runtime.js';
@@ -40,6 +47,12 @@ import { newUUIDv7 } from '../lib/uuid.js';
 import { DbToolPolicyResolver, DbToolRateLimiter } from '../tool-policy-resolver.js';
 import { DbToolAuditEmitter } from '../tool-audit-emitter.js';
 import { DbToolApprovalGate } from '../tool-approval-gate.js';
+import { DbCostPolicyResolver } from '../cost/db-cost-policy-resolver.js';
+import {
+  createDbLiveRunEventReader,
+  createDbLiveRunStepReader,
+} from '../cost/db-live-trace-tools.js';
+import { createLiveTraceTools } from '@weaveintel/live-agents-trace-tools';
 import {
   getLlmEndpointPressure,
   isPressureBlocking,
@@ -166,6 +179,115 @@ export async function startGenericSupervisorIfEnabled(
     return null;
   };
 
+  // ─── Cost Governor Phase 2 — single shared resolver ────────────
+  // Reusable across every tick of every agent in this supervisor.
+  // The resolver is pure read-side (no internal state), so a single
+  // instance is safe.
+  const cachedCostPolicyResolver = new DbCostPolicyResolver(opts.db);
+
+  // ─── Cost Governor Phase 4 — cascade tracker (per-supervisor) ──
+  // One in-memory tracker shared across all ticks of all agents in
+  // this supervisor. Per-agent state is keyed by `agent.id` (used as
+  // the synthetic runId for the cascade decision). 1-hour TTL evicts
+  // stale agent state without ever growing unbounded.
+  const cascadeTracker = new RunCostStateTracker({ ttlMs: 60 * 60 * 1000 });
+
+  // ─── Cost Governor Phase 4 — model cascade wiring ──────────────
+  // Reads `cost_policies.levers_json -> modelCascade` for the active
+  // (mesh, agent) pair. When `modelCascade.cheap` is set we route
+  // every tick through the cheap model by default; when an escalation
+  // rule fires (tool failures, JSON parse failures, expensive step
+  // kinds, low intel score) we promote to `expensive` for that tick.
+  // Decision is best-effort — any failure falls through to the inner
+  // DB-routed resolver so caching/base layers always see a Model when
+  // one is available.
+  const cascadeModelResolver = weaveModelCascadeResolver({
+    base: modelResolver,
+    resolveConfig: async (ctx) => {
+      try {
+        const { bundle } = await resolveCostGovernorBundle(
+          cachedCostPolicyResolver,
+          {
+            ...(ctx?.tenantId ? { tenantId: ctx.tenantId } : {}),
+            ...(ctx?.meshId ? { meshId: ctx.meshId } : {}),
+            ...(ctx?.agentId ? { agentId: ctx.agentId } : {}),
+          },
+        );
+        return bundle.policy.modelCascade ?? null;
+      } catch {
+        return null;
+      }
+    },
+    loadModel: async (ref) => {
+      const provider = ref.provider ?? opts.defaultProvider;
+      const cfg = opts.providers[provider];
+      if (!cfg) return undefined;
+      try {
+        return await getOrCreateModel(provider, ref.modelId, cfg);
+      } catch {
+        return undefined;
+      }
+    },
+    tracker: cascadeTracker,
+    log: (msg) => console.log('[generic-supervisor]', msg),
+  });
+
+  // ─── Cost Governor Phase 3 — prompt-cache hint wiring ──────────
+  // Wrap the per-tick model resolver so every Model returned to a
+  // handler is decorated with prompt-caching hints derived from the
+  // active CostPolicy for this (mesh, agent) pair. The wrapping is:
+  //   1. Inner resolver returns a routed Model (or undefined).
+  //   2. We resolve the cost bundle for the same (mesh, agent).
+  //   3. If `bundle.cacheShaper` is non-noop, we wrap the Model with
+  //      `wrapModelWithCacheHints` so subsequent `.generate`/`.stream`
+  //      calls inject `prompt_cache_key` (OpenAI) or system content-
+  //      block `cache_control` markers (Anthropic).
+  // Provider-aware behaviour lives entirely in the cost-governor
+  // wrapper. This file only plumbs the per-tick context.
+  // Resolver chain: caching -> cascade -> base (DB routing).
+  const innerResolver = {
+    async resolve(ctx: Parameters<typeof modelResolver.resolve>[0]): Promise<Model | undefined> {
+      // Synthesize runId from agentId so the cascade tracker has a
+      // stable key per agent (the live-agents runtime does not stamp
+      // a per-tick runId by default).
+      const runId = ctx?.runId ?? ctx?.agentId;
+      return cascadeModelResolver.resolve({
+        ...(ctx ?? {}),
+        ...(runId ? { runId } : {}),
+      });
+    },
+  };
+  const cachingModelResolver = {
+    async resolve(ctx: Parameters<typeof innerResolver.resolve>[0]): Promise<Model | undefined> {
+      const m = await innerResolver.resolve(ctx);
+      if (!m) return undefined;
+      let bundle;
+      try {
+        const resolved = await resolveCostGovernorBundle(cachedCostPolicyResolver, {
+          ...(ctx?.tenantId ? { tenantId: ctx.tenantId } : {}),
+          ...(ctx?.meshId ? { meshId: ctx.meshId } : {}),
+          ...(ctx?.agentId ? { agentId: ctx.agentId } : {}),
+        });
+        bundle = resolved.bundle;
+      } catch {
+        return m;
+      }
+      if (!bundle.policy.promptCaching.enabled) return m;
+      const role = ctx?.role;
+      const modelId = m.info?.modelId;
+      return wrapModelWithCacheHints(m, bundle.cacheShaper, {
+        resolveContext: () => ({
+          provider: m.info.provider,
+          ...(role ? { role } : {}),
+          ...(modelId ? { modelId } : {}),
+          ...(ctx?.meshId ? { meshId: ctx.meshId } : {}),
+          ...(ctx?.agentId ? { agentId: ctx.agentId } : {}),
+          ...(ctx?.tenantId ? { tenantId: ctx.tenantId } : {}),
+        }),
+      });
+    },
+  };
+
   // ─── Phase 7 (live-agents capability parity) ────────────────
   // Single-call mesh hydration via `weaveLiveMeshFromDb` — replaces the
   // direct `createHeartbeatSupervisor` call. Same primitives, one entry
@@ -175,7 +297,7 @@ export async function startGenericSupervisorIfEnabled(
     store,
     handlerRegistry: registry,
     modelFactory,
-    modelResolver,
+    modelResolver: cachingModelResolver,
     // ─── Phase 3 (live-agents capability parity) ────────────────
     // First-class per-tick policy bundle. Mirrors the DB-backed
     // primitives already wired into ChatEngine.toolOptions so every
@@ -188,7 +310,17 @@ export async function startGenericSupervisorIfEnabled(
       policyResolver: new DbToolPolicyResolver(opts.db),
       approvalGate: new DbToolApprovalGate(opts.db),
       rateLimiter: new DbToolRateLimiter(opts.db),
-      auditEmitter: new DbToolAuditEmitter(opts.db),
+      // Phase 4 — wrap the persistent audit emitter so every failed
+      // tool call increments the cascade tracker. The emitter still
+      // forwards every event to the DB first; tracker update is
+      // best-effort and never blocks audit persistence.
+      auditEmitter: wrapAuditEmitterWithCascadeTracker(
+        new DbToolAuditEmitter(opts.db),
+        cascadeTracker,
+        // chatId === agent.id for live-agent tool calls (set by
+        // weaveDbLiveAgentPolicy default resolution context).
+        { resolveRunId: (e) => e.chatId ?? null },
+      ),
     }),
     resolveSystemPrompt,
     // Phase 2 (DB-driven capability plan) — declarative `prepare()`
@@ -203,6 +335,34 @@ export async function startGenericSupervisorIfEnabled(
         const text = await resolveSystemPrompt(promptKey);
         return text ?? '';
       },
+      // ─── Phase 9 (cost control) — Lazy trace-tool retrieval ────
+      // When a live agent's `prepare_config_json.tools` recipe contains
+      // `traceTools: '$auto'`, this factory builds a fresh ToolRegistry
+      // closure-bound to the active live_run for the agent's mesh. The
+      // LLM never passes runId — the closure scope is the only source.
+      // Returns null when no active run is found; the resolver treats
+      // null as graceful pass-through (trace tools never load-bearing).
+      traceToolsFactory: async ({ meshId, agentId }) => {
+        if (!meshId) return null;
+        try {
+          const runs = await opts.db.listLiveRuns({
+            meshId,
+            status: 'RUNNING',
+            limit: 1,
+          });
+          const run = runs[0];
+          if (!run) return null;
+          return createLiveTraceTools({
+            runId: run.id,
+            ...(agentId ? { agentId } : {}),
+            eventReader: createDbLiveRunEventReader(opts.db),
+            stepReader: createDbLiveRunStepReader(opts.db),
+          });
+        } catch (err) {
+          console.warn('[live-agents] traceToolsFactory failed:', err);
+          return null;
+        }
+      },
     },
     // Inject per-tick context extras for handlers that need DB access:
     //   - human.approval needs `approvalDb` + `newApprovalId`.
@@ -211,6 +371,13 @@ export async function startGenericSupervisorIfEnabled(
     extraContextFor: async (_binding, agent) => ({
       approvalDb: opts.db,
       newApprovalId: () => newUUIDv7(),
+      // ─── Cost Governor Phase 2 — DB-driven cost policy resolver ────
+      // Single resolver instance per supervisor; per-tick callers do
+      // `await resolveCostGovernorBundle(ctx.costPolicyResolver, { meshId, agentId })`
+      // to get the effective CostPolicy + bundle for this agent. Phase
+      // 2 lever resolvers are no-op stubs so behavior is unchanged;
+      // the wiring is in place for Phases 3-7 to hang real levers off.
+      costPolicyResolver: cachedCostPolicyResolver,
       resolveAgentByRole: async (roleKey: string) => {
         const peers = await opts.db.listLiveAgents({
           meshId: agent.meshId,

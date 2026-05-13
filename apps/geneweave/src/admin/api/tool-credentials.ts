@@ -7,7 +7,7 @@
  * env var is present and updates validation_status accordingly.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
@@ -45,7 +45,7 @@ export function registerToolCredentialRoutes(
     if (!body['name'] || !body['credential_type']) {
       json(res, 400, { error: 'name and credential_type required' }); return;
     }
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createToolCredential({
       id,
       name: body['name'] as string,

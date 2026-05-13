@@ -16,7 +16,7 @@
  * Optional: CSE_EXECUTION_IMAGE, CSE_TIMEOUT_MS, CSE_MEMORY_MB
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ContainerProvider } from './base.js';
 import { buildRunCommand, languageExt, tryParseOutput } from './base.js';
 import type {
@@ -113,7 +113,7 @@ export class ACIProvider implements ContainerProvider {
   }
 
   async execute(request: ExecutionRequest, config: CSEConfig): Promise<ExecutionResult> {
-    const executionId = randomUUID();
+    const executionId = newUUIDv7();
     const containerGroupName = `cse-${executionId.slice(0, 16)}`;
 
     const subscriptionId = config.azureSubscriptionId ?? process.env['AZURE_SUBSCRIPTION_ID'];

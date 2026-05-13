@@ -3,7 +3,7 @@
  */
 
 import type { SandboxPolicy, ExecutionLimits } from '@weaveintel/core';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { createDefaultLimits } from './limits.js';
 
 export interface CreatePolicyOptions {
@@ -27,7 +27,7 @@ export function createSandboxPolicy(opts: CreatePolicyOptions = {}): SandboxPoli
   };
 
   return {
-    id: randomUUID(),
+    id: newUUIDv7(),
     name: opts.name ?? 'default',
     limits,
     allowedModules: opts.allowedModules,

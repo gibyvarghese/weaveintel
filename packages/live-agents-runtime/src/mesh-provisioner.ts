@@ -34,6 +34,7 @@
  *   without re-creating duplicate runtime rows.
  */
 
+import { newUUIDv7 } from '@weaveintel/core';
 import type {
   Account,
   AccountBinding,
@@ -239,10 +240,8 @@ export type IdGenerator = () => string;
 /** Default id generator: RFC 9562 v4 fallback. Geneweave passes its v7 fn
  *  for sortability. */
 const defaultIdGen: IdGenerator = () => {
-  // Crypto.randomUUID is available in Node 19+ and modern browsers.
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
+  // newUUIDv7 from @weaveintel/core — time-ordered UUID v7.
+  return newUUIDv7();
   // Last-resort fallback (non-crypto): timestamp + random. Good enough for
   // local dev when crypto is unavailable.
   return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;

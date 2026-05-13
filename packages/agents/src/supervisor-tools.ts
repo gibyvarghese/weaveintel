@@ -21,7 +21,7 @@ import { weaveTool } from '@weaveintel/core';
 
 // ── datetime ────────────────────────────────────────────────
 
-const DATETIME_FORMATS = ['iso', 'unix', 'unix_ms', 'date', 'time', 'weekday', 'rfc2822'] as const;
+const DATETIME_FORMATS = ['iso', 'unix', 'unix_ms', 'date', 'human', 'time', 'weekday', 'rfc2822'] as const;
 type DatetimeFormat = (typeof DATETIME_FORMATS)[number];
 
 function formatDate(now: Date, format: DatetimeFormat, timezone?: string): string {
@@ -40,8 +40,14 @@ function formatDate(now: Date, format: DatetimeFormat, timezone?: string): strin
       return String(Math.floor(now.getTime() / 1000));
     case 'unix_ms':
       return String(now.getTime());
-    case 'date':
-      return useIntl({ year: 'numeric', month: '2-digit', day: '2-digit' });
+    case 'date': {
+      // ISO 8601 YYYY-MM-DD — unambiguous for LLM consumption (avoids MM/DD vs DD/MM confusion).
+      const parts = useIntl({ year: 'numeric', month: '2-digit', day: '2-digit' }).split('/');
+      return `${parts[2]}-${parts[0]}-${parts[1]}`;
+    }
+    case 'human':
+      // Long form with weekday and month name — unambiguous for natural-language responses.
+      return useIntl({ weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     case 'time':
       return useIntl({ hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
     case 'weekday':
@@ -55,7 +61,7 @@ export function buildDatetimeTool(defaultTimezone?: string): Tool {
   return weaveTool<{ format?: DatetimeFormat; timezone?: string }>({
     name: 'datetime',
     description:
-      'Return the current date/time in a chosen format. Pure, side-effect-free utility for the supervisor. Formats: iso, unix, unix_ms, date, time, weekday, rfc2822. Optional timezone (IANA, e.g. "Pacific/Auckland").',
+      'Return the current date/time in a chosen format. Pure, side-effect-free utility for the supervisor. Formats: iso (ISO 8601 timestamp), unix (seconds), unix_ms (milliseconds), date (YYYY-MM-DD), human (e.g. "Tuesday, May 12, 2026"), time (HH:MM:SS), weekday (e.g. "Tuesday"), rfc2822. Optional timezone (IANA, e.g. "Pacific/Auckland").',
     parameters: {
       type: 'object',
       properties: {

@@ -2,7 +2,7 @@
  * @weaveintel/ui-primitives — Progress update builder
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ProgressUpdate } from '@weaveintel/core';
 
 export interface CreateProgressOptions {
@@ -19,7 +19,7 @@ export function createProgress(opts: CreateProgressOptions): ProgressUpdate {
   const current = opts.current ?? 0;
   const percentage = opts.total > 0 ? Math.round((current / opts.total) * 100) : 0;
   return {
-    taskId: randomUUID(),
+    taskId: newUUIDv7(),
     label: opts.label,
     current,
     total: opts.total,
@@ -33,7 +33,7 @@ export function createProgress(opts: CreateProgressOptions): ProgressUpdate {
  * Stateful progress tracker that increments and emits updates.
  */
 export function createProgressTracker(label: string, total: number): ProgressTracker {
-  const taskId = randomUUID();
+  const taskId = newUUIDv7();
   let current = 0;
   return {
     get taskId() { return taskId; },

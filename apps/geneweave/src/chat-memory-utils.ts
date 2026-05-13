@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ExecutionContext, Model, ModelRequest } from '@weaveintel/core';
 import { runHybridMemoryExtraction, type ExtractedEntity, type MemoryExtractionRule } from '@weaveintel/memory';
 import type { DatabaseAdapter } from './db.js';
@@ -283,7 +283,7 @@ export async function saveToMemory(
 
   if (extraction.selfDisclosure && userContent.length > 5) {
     await db.saveSemanticMemory({
-      id: randomUUID(),
+      id: newUUIDv7(),
       userId,
       chatId,
       content: userContent.slice(0, 600),
@@ -293,7 +293,7 @@ export async function saveToMemory(
   }
   if (assistantContent.length > 100) {
     await db.saveSemanticMemory({
-      id: randomUUID(),
+      id: newUUIDv7(),
       userId,
       chatId,
       content: assistantContent.slice(0, 600),
@@ -317,7 +317,7 @@ export async function saveToMemory(
   const regexEntitiesCount = extraction.entities.filter((e) => e.source === 'regex').length;
   const llmEntitiesCount = extraction.entities.filter((e) => e.source === 'llm').length;
   await db.recordMemoryExtractionEvent({
-    id: randomUUID(),
+    id: newUUIDv7(),
     userId,
     chatId,
     selfDisclosure: extraction.selfDisclosure,

@@ -2,7 +2,7 @@
  * @weaveintel/ui-primitives — Approval UI payload builder
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ApprovalUiPayload } from '@weaveintel/core';
 
 export interface ApprovalAction {
@@ -31,7 +31,7 @@ export function createApprovalPayload(opts: CreateApprovalOptions): ApprovalUiPa
   ];
 
   return {
-    taskId: randomUUID(),
+    taskId: newUUIDv7(),
     title: opts.title,
     description: opts.description,
     riskLevel: opts.riskLevel,

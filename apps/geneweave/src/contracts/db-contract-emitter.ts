@@ -14,7 +14,7 @@
  *     so downstream consumers can join back to the row if needed.
  */
 import type { EventEmitter } from 'node:events';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ContractEmitter, EmittedContract } from '@weaveintel/workflows';
 import type { DatabaseAdapter } from '../db-types.js';
 
@@ -35,7 +35,7 @@ export class DbContractEmitter implements ContractEmitter {
   }
 
   async emit(contract: EmittedContract): Promise<void> {
-    const id = randomUUID();
+    const id = newUUIDv7();
     const bodyJson = JSON.stringify(contract.body ?? {});
     const evidenceJson = contract.evidence !== undefined
       ? JSON.stringify(contract.evidence)

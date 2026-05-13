@@ -3,7 +3,7 @@
  * Fluent builder API for creating WorkflowDefinition objects
  */
 import type { WorkflowDefinition, WorkflowStep, WorkflowStepType, WorkflowPolicy, WorkflowCompensation } from '@weaveintel/core';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 
 export class WorkflowBuilder {
   private id: string;
@@ -17,7 +17,7 @@ export class WorkflowBuilder {
   private compensations: WorkflowCompensation[] = [];
 
   constructor(name?: string) {
-    this.id = randomUUID();
+    this.id = newUUIDv7();
     if (name) this.name = name;
   }
 

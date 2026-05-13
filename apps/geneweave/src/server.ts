@@ -6,7 +6,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { readFile as fsReadFile } from 'node:fs/promises';
 import { join, dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,6 +33,13 @@ import { registerAdminRoutes } from './server-admin.js';
 import { registerWorkflowPlatformRoutes } from './admin/api/workflow-platform.js';
 import { registerTriggerRoutes, type TriggerDispatcherHandle } from './admin/api/triggers.js';
 import { registerMeshContractRoutes } from './admin/api/mesh-contracts.js';
+import { registerCostLedgerRoutes } from './admin/api/cost-ledger.js';
+import { registerCostPolicyRoutes } from './admin/api/cost-policies.js';
+import { registerTenantEncryptionPolicyRoutes } from './admin/api/tenant-encryption-policies.js';
+// Live-binding getter for `geneweaveEncryptionManager` (declared `export let` in
+// `./index.ts`). Importing the namespace defers field access to call time so
+// the route observes the post-boot value despite the circular module shape.
+import * as indexModule from './index.js';
 import { registerSVRoutes } from './features/scientific-validation/index.js';
 import { registerKaggleCompetitionRoutes, KaggleCompetitionRunner } from './features/kaggle-competition/index.js';
 import { SVChatBridge } from './features/scientific-validation/chat-bridge.js';
@@ -430,7 +437,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
   async function setOAuthState(state: string, value: { userId: string | null; provider: OAuthProviderName; expiresAt: number }): Promise<void> {
     await db.createOAuthFlowState({
-      id: randomUUID(),
+      id: newUUIDv7(),
       state_key: state,
       user_id: value.userId,
       provider: value.provider,
@@ -485,7 +492,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     const users = await db.listUsers();
     const assignedPersona = users.length === 0 ? 'tenant_admin' : 'tenant_user';
 
-    const userId = randomUUID();
+    const userId = newUUIDv7();
     const passwordHash = await hashPassword(password);
     try {
       await db.createUser({ id: userId, email, name, passwordHash, persona: assignedPersona });
@@ -499,7 +506,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     }
     await ensureAtLeastOneTenantAdmin(db, userId);
 
-    const sessionId = randomUUID();
+    const sessionId = newUUIDv7();
     const csrfToken = generateCSRFToken();
     const expiresAt = new Date(Date.now() + 86400_000).toISOString();
     await db.createSession({ id: sessionId, userId, csrfToken, expiresAt });
@@ -555,7 +562,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     await ensureAtLeastOneTenantAdmin(db, user.id);
     const effectiveUser = (await db.getUserById(user.id)) ?? user;
 
-    const sessionId = randomUUID();
+    const sessionId = newUUIDv7();
     const csrfToken = generateCSRFToken();
     const expiresAt = new Date(Date.now() + 86400_000).toISOString();
     await db.createSession({ id: sessionId, userId: effectiveUser.id, csrfToken, expiresAt });
@@ -662,7 +669,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     }
 
     try {
-      const state = randomUUID();
+      const state = newUUIDv7();
       const oauthProvider = buildOAuthProviderFromRequest(provider, req);
       const { authUrl } = await oauthClient.generateAuthorizationUrl(oauthProvider, state);
       await setOAuthState(state, { userId: auth?.userId ?? null, provider, expiresAt: Date.now() + 600_000 });
@@ -706,7 +713,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       }
 
       if (!resolvedUserId) {
-        resolvedUserId = randomUUID();
+        resolvedUserId = newUUIDv7();
         const fallbackEmail = (oauthProfile.email && oauthProfile.email.includes('@'))
           ? oauthProfile.email
           : `${provider}-${oauthProfile.id}@oauth.local`;
@@ -715,12 +722,12 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
           id: resolvedUserId,
           email: fallbackEmail,
           name: fallbackName,
-          passwordHash: await hashPassword(randomUUID()),
+          passwordHash: await hashPassword(newUUIDv7()),
         });
       }
 
       await db.createOAuthLinkedAccount({
-        id: randomUUID(),
+        id: newUUIDv7(),
         user_id: resolvedUserId,
         provider,
         provider_user_id: oauthProfile.id,
@@ -734,7 +741,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       if (!stateUserId) {
         const user = await db.getUserById(resolvedUserId);
         if (!user) throw new Error('User not found after OAuth sign-in');
-        const sessionId = randomUUID();
+        const sessionId = newUUIDv7();
         const csrfToken = generateCSRFToken();
         const expiresAt = new Date(Date.now() + 86400_000).toISOString();
         await db.createSession({ id: sessionId, userId: resolvedUserId, csrfToken, expiresAt });
@@ -945,7 +952,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     let body: { title?: string; model?: string; provider?: string };
     try { body = JSON.parse(raw); } catch { body = {}; }
 
-    const chatId = randomUUID();
+    const chatId = newUUIDv7();
     const chat = {
       id: chatId,
       userId: auth.userId,
@@ -1174,6 +1181,19 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerWorkflowPlatformRoutes(router, db, { json, readBody }, workflowEngine);
   registerTriggerRoutes(router, db, { json, readBody }, triggerDispatcher);
   registerMeshContractRoutes(router, db, { json });
+  registerCostLedgerRoutes(router, db, { json });
+  registerCostPolicyRoutes(router, db, { json, readBody });
+  // Tenant Encryption Phase 2 — admin CRUD + lifecycle (bootstrap, rotate-dek,
+  // rotate-kek, shred). The route uses an ESM live-binding via a getter so it
+  // always observes the current value of the process-wide
+  // `geneweaveEncryptionManager` (filled in post-boot by `bootstrapEncryption`,
+  // may stay null when WEAVE_ENCRYPTION_MASTER_KEY is unset).
+  registerTenantEncryptionPolicyRoutes(
+    router,
+    db,
+    { json, readBody },
+    () => indexModule.geneweaveEncryptionManager,
+  );
 
   // ── Hypothesis Validation feature routes ────────────────────
   // Build async model factories from the configured providers (models are cached by chat-runtime).
@@ -1299,7 +1319,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     if (!body.siteName || !body.siteUrlPattern || !body.authMethod || !body.config) {
       json(res, 400, { error: 'siteName, siteUrlPattern, authMethod, and config are required' }); return;
     }
-    const id = `wc-${randomUUID().slice(0, 8)}`;
+    const id = `wc-${newUUIDv7().slice(-8)}`;
     const { encrypted, iv } = encryptCredential(body.config);
     await db.createWebsiteCredential({
       id,
@@ -1384,7 +1404,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     let imported = 0;
     for (const cred of credentials) {
       if (!cred.username && !cred.password) continue;
-      const id = `wc-${randomUUID().slice(0, 8)}`;
+      const id = `wc-${newUUIDv7().slice(-8)}`;
       const config: Record<string, unknown> = {
         type: 'form_fill',
         username: cred.username,
@@ -1436,7 +1456,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     };
 
     const { encrypted, iv } = encryptCredential(ssoSession);
-    const id = `sso-${randomUUID().slice(0, 8)}`;
+    const id = `sso-${newUUIDv7().slice(-8)}`;
     
     try {
       await db.createSSOLinkedAccount({
@@ -1498,7 +1518,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       if (!userId) return;
       const { encrypted, iv } = encryptCredential(session);
       await db.createSSOLinkedAccount({
-        id: `sso-${randomUUID().slice(0, 8)}`,
+        id: `sso-${newUUIDv7().slice(-8)}`,
         user_id: userId,
         identity_provider: session.identityProvider,
         email: session.email,
@@ -1659,9 +1679,8 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
           requestLogger: async (entry) => {
             // Phase 8: persist every terminal outcome to mcp_gateway_request_log.
             // Best-effort: errors are swallowed by the gateway hook caller.
-            const { randomUUID } = await import('node:crypto');
             await db.insertMCPGatewayRequestLog({
-              id: randomUUID(),
+              id: newUUIDv7(),
               client_id: entry.clientId,
               client_name: entry.clientName,
               method: entry.method,
@@ -1820,7 +1839,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
         await matched.route.handler(req, res, matched.params, auth);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Internal server error';
-        const correlationId = randomUUID();
+        const correlationId = newUUIDv7();
         console.error(`[geneWeave][${correlationId}] Error handling ${method} ${pathname}:`, err);
         if (!res.headersSent) {
           if (msg === 'Request body too large') {

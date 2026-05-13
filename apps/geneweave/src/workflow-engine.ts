@@ -16,7 +16,7 @@
  * workflow runs from DB definitions.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import {
   DefaultWorkflowEngine,
   HandlerResolverRegistry,
@@ -216,7 +216,7 @@ export async function syncWorkflowHandlerKindsToDb(
     try {
       const existing = await db.getWorkflowHandlerKind(k.kind);
       await db.upsertWorkflowHandlerKind({
-        id: existing?.id ?? randomUUID(),
+        id: existing?.id ?? newUUIDv7(),
         kind: k.kind,
         description: k.description ?? null,
         config_schema: k.configSchema ? JSON.stringify(k.configSchema) : null,

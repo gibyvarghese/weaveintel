@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { Artifact, ArtifactPolicy, ArtifactType } from '@weaveintel/core';
 import { estimateSize } from './artifact.js';
 
@@ -22,7 +22,7 @@ export interface CreateArtifactPolicyOptions {
  */
 export function createArtifactPolicy(opts: CreateArtifactPolicyOptions): ArtifactPolicy {
   return {
-    id: randomUUID(),
+    id: newUUIDv7(),
     name: opts.name,
     maxSizeBytes: opts.maxSizeBytes ?? DEFAULT_MAX_SIZE_BYTES,
     allowedTypes: opts.allowedTypes, // undefined ⇒ all types allowed

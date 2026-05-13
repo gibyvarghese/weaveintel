@@ -39,7 +39,8 @@ import {
 } from '@weaveintel/tools';
 import { BUILTIN_TOOLS, inferAllocationClass } from './tools.js';
 import type { DatabaseAdapter, MCPGatewayClientRow } from './db-types.js';
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 
 /** Allocation classes considered "external" — these are exposed by default. */
 export const DEFAULT_EXPOSED_ALLOCATION_CLASSES: ReadonlySet<string> = new Set([
@@ -581,7 +582,7 @@ export async function registerMCPGatewayInCatalog(
     credentialId = existingCred.id;
     await db.updateToolCredential(credentialId, credentialFields);
   } else {
-    credentialId = randomUUID();
+    credentialId = newUUIDv7();
     await db.createToolCredential({ id: credentialId, ...credentialFields });
   }
 
@@ -640,7 +641,7 @@ export async function registerMCPGatewayInCatalog(
       allocation_class: 'gateway',
     });
   } else {
-    catalogId = randomUUID();
+    catalogId = newUUIDv7();
     await db.createToolConfig({
       id: catalogId,
       name: 'GeneWeave MCP Gateway',

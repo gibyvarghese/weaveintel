@@ -7,7 +7,7 @@
  * that the runtime resolver uses to pick the strongest applicable policy.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
@@ -42,7 +42,7 @@ export function registerCapabilityPolicyBindingRoutes(
     if (!body['policy_kind']) { json(res, 400, { error: 'policy_kind required' }); return; }
     if (!body['policy_ref']) { json(res, 400, { error: 'policy_ref required' }); return; }
 
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createCapabilityPolicyBinding({
       id,
       binding_kind: body['binding_kind'] as string,

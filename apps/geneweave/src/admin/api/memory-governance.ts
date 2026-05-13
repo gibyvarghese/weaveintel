@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
@@ -31,7 +31,7 @@ export function registerMemoryGovernanceRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = 'mgov-' + randomUUID().slice(0, 8);
+    const id = 'mgov-' + newUUIDv7().slice(-8);
     await db.createMemoryGovernance({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       memory_types: body['memory_types'] ? (typeof body['memory_types'] === 'string' ? body['memory_types'] as string : JSON.stringify(body['memory_types'])) : '["*"]',

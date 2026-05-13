@@ -9,7 +9,7 @@
  *   POST /api/admin/tool-simulation          — run a simulation (dryRun or full exec)
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import { weaveRunToolTests } from '@weaveintel/tools';
 import type { ToolRiskLevel } from '@weaveintel/core';
@@ -252,8 +252,8 @@ export function registerToolSimulationRoutes(
       json(res, 400, { error: 'inputJson must be valid JSON' }); return;
     }
 
-    const simulationId = randomUUID();
-    const auditEventId = randomUUID();
+    const simulationId = newUUIDv7();
+    const auditEventId = newUUIDv7();
     const startMs = Date.now();
 
     const resolutionContext = {

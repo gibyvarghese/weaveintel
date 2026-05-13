@@ -26,7 +26,7 @@
  */
 
 // ─── Core kinds ──────────────────────────────────────────────────────────
-
+import { newUUIDv7 } from '@weaveintel/core';
 export type TriggerSourceKind =
   | 'cron'
   | 'webhook'
@@ -470,7 +470,7 @@ export interface TriggerDispatcherOptions {
   sourceAdapters?: SourceAdapter[];
   /** Target adapters wired by target kind. */
   targetAdapters: TargetAdapter[];
-  /** Optional id generator for invocation rows. Defaults to crypto.randomUUID. */
+  /** Optional id generator for invocation rows. Defaults to newUUIDv7 from @weaveintel/core. */
   newId?: () => string;
   /** Optional logger; defaults to console.warn for failures. */
   logger?: { warn: (...args: unknown[]) => void; debug?: (...args: unknown[]) => void };
@@ -493,7 +493,7 @@ export function createTriggerDispatcher(opts: TriggerDispatcherOptions): Trigger
   const targetAdapters = new Map<TriggerTargetKind, TargetAdapter>();
   for (const a of opts.targetAdapters) targetAdapters.set(a.kind, a);
   const newId = opts.newId ?? ((): string => {
-    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+    return newUUIDv7();
     return `trg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   });
   const logger = opts.logger ?? { warn: (...a: unknown[]) => console.warn('[triggers]', ...a) };

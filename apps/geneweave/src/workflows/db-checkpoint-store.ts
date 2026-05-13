@@ -6,7 +6,7 @@
  */
 import type { WorkflowCheckpoint, WorkflowState } from '@weaveintel/core';
 import type { CheckpointStore } from '@weaveintel/workflows';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter, WorkflowCheckpointRow } from '../db-types.js';
 
 function rowToCheckpoint(row: WorkflowCheckpointRow): WorkflowCheckpoint {
@@ -25,7 +25,7 @@ export class DbCheckpointStore implements CheckpointStore {
 
   async save(runId: string, stepId: string, state: WorkflowState, workflowId?: string): Promise<WorkflowCheckpoint> {
     const cp: WorkflowCheckpoint = {
-      id: randomUUID(),
+      id: newUUIDv7(),
       runId,
       ...(workflowId ? { workflowId } : {}),
       stepId,

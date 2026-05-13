@@ -15,6 +15,8 @@
     { "path": "../../packages/workflows" },
     { "path": "../../packages/triggers" },
     { "path": "../../packages/capability-packs" },
+    { "path": "../../packages/cost-governor" },
+    { "path": "../../packages/encryption" },
     { "path": "../../packages/guardrails" },
     { "path": "../../packages/human-tasks" },
     { "path": "../../packages/contracts" },
@@ -33,6 +35,7 @@
     { "path": "../../packages/recipes" },
     { "path": "../../packages/resilience" },
     { "path": "../../packages/live-agents" },
-    { "path": "../../packages/live-agents-runtime" }
+    { "path": "../../packages/live-agents-runtime" },
+    { "path": "../../packages/live-agents-trace-tools" }
   ]
 }

@@ -428,6 +428,22 @@ export function weaveOpenAIModel(
       if (request.topP != null) body['top_p'] = request.topP;
       if (request.stop) body['stop'] = request.stop;
 
+      // Phase 3 — prompt caching (lever L2). Read provider-agnostic hint
+      // injected by `wrapModelWithCacheHints` in @weaveintel/cost-governor.
+      // OpenAI uses this to route subsequent calls to the same cache lane.
+      const promptCacheKey = (request.metadata as Record<string, unknown> | undefined)?.['promptCacheKey'];
+      if (typeof promptCacheKey === 'string' && promptCacheKey.length > 0) {
+        body['prompt_cache_key'] = promptCacheKey;
+      }
+
+      // Phase 7 — reasoning effort (lever L7). Forward provider-agnostic
+      // hint stamped by `wrapModelWithReasoningEffort` from
+      // @weaveintel/cost-governor onto OpenAI's `reasoning_effort` field.
+      const reasoningEffort = (request.metadata as Record<string, unknown> | undefined)?.['reasoningEffort'];
+      if (typeof reasoningEffort === 'string' && reasoningEffort.length > 0) {
+        body['reasoning_effort'] = reasoningEffort;
+      }
+
       const signal = deadlineSignal(ctx);
 
       try {
@@ -470,6 +486,19 @@ export function weaveOpenAIModel(
       if (request.tools) body['tools'] = buildOpenAITools(request.tools);
       if (request.temperature != null) body['temperature'] = request.temperature;
       if (request.maxTokens != null) body['max_tokens'] = request.maxTokens;
+
+      // Phase 3 — prompt caching (lever L2). Forward `prompt_cache_key`
+      // for streaming requests too.
+      const promptCacheKey = (request.metadata as Record<string, unknown> | undefined)?.['promptCacheKey'];
+      if (typeof promptCacheKey === 'string' && promptCacheKey.length > 0) {
+        body['prompt_cache_key'] = promptCacheKey;
+      }
+
+      // Phase 7 — reasoning effort (lever L7). Forward to streaming too.
+      const reasoningEffort = (request.metadata as Record<string, unknown> | undefined)?.['reasoningEffort'];
+      if (typeof reasoningEffort === 'string' && reasoningEffort.length > 0) {
+        body['reasoning_effort'] = reasoningEffort;
+      }
 
       const signal = deadlineSignal(ctx);
 

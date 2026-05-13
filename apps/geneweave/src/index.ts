@@ -113,6 +113,16 @@ export interface GeneWeaveApp {
 // ─── Factory ─────────────────────────────────────────────────
 
 /**
+ * Module-level handle to the per-tenant encryption key manager. Set during
+ * `createGeneWeave()` boot when `WEAVE_ENCRYPTION_MASTER_KEY` is available;
+ * stays `null` otherwise. Phase 3 consumer integration (chat/sv encrypted
+ * columns) reads this lazily so encryption is opt-in per deployment.
+ */
+import type { TenantKeyManager } from '@weaveintel/encryption';
+import { withTenantEncryptedMessages } from './encryption/db-encrypted-adapter.js';
+export let geneweaveEncryptionManager: TenantKeyManager | null = null;
+
+/**
  * createGeneWeave() is the single entry-point for the entire application.
  * It wires together all WeaveIntel subsystems in order:
  *
@@ -146,7 +156,13 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   const host = config.host ?? '0.0.0.0';
 
   // 1. Database
-  const db = await createDatabaseAdapter(config.database ?? { type: 'sqlite', path: './geneweave.db' });
+  const rawDb = await createDatabaseAdapter(config.database ?? { type: 'sqlite', path: './geneweave.db' });
+
+  // 1a. Wrap the adapter with the tenant-scoped message encryption layer.
+  //     Reads `geneweaveEncryptionManager` lazily through a getter so it
+  //     picks up the post-bootstrap live binding (assigned below).
+  //     When encryption is not configured the wrapper is a pass-through.
+  const db = withTenantEncryptedMessages(rawDb, () => geneweaveEncryptionManager);
 
   // 2. Chat engine
   const chatEngine = new ChatEngine(
@@ -208,6 +224,82 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
   // 5. Start background tool health snapshot job (writes every 15 min)
   startToolHealthJob(db);
+
+  // 5-EN. Phase 1 (Tenant Encryption): bootstrap the per-tenant key
+  // manager wired to SQLite-backed EncryptionStore + audit emitter.
+  // Returns null and logs a single warning when WEAVE_ENCRYPTION_MASTER_KEY
+  // is missing — encryption stays disabled but the server keeps booting.
+  // The manager is exposed as `geneweaveEncryptionManager` for Phase 3
+  // consumer integration (chat/sv encrypted columns).
+  try {
+    const { bootstrapEncryption } = await import('./encryption/bootstrap.js');
+    const result = bootstrapEncryption(db);
+    if (result) {
+      geneweaveEncryptionManager = result.manager;
+    }
+  } catch (err) {
+    console.error('[encryption] bootstrap failed (non-fatal)', err);
+  }
+
+  // 5-EN-RS. Phase 5 (Tenant Encryption): start automated DEK rotation
+  // scheduler. Honors `tenant_encryption_policy.rotation_schedule`
+  // (monthly | quarterly | annual). Skipped silently when manager is
+  // null. Default tick interval is 1 hour; uses `.unref()` so process
+  // exit is unaffected.
+  try {
+    const { startEncryptionRotationScheduler } = await import(
+      './encryption/rotation-scheduler.js'
+    );
+    startEncryptionRotationScheduler({
+      db,
+      getManager: () => geneweaveEncryptionManager,
+    });
+  } catch (err) {
+    console.error('[encryption] rotation scheduler startup failed (non-fatal)', err);
+  }
+
+  // 5-EN-PS. Phase 6 (Tenant Encryption): start the GDPR purge scheduler.
+  // Polls `tenant_deletion_requests` for rows whose retention window has
+  // expired and calls `manager.hardShred(tenantId)` for each. Per-tenant
+  // errors are isolated. Skipped silently when manager is null.
+  try {
+    const { weavePurgeScheduler } = await import('@weaveintel/encryption');
+    weavePurgeScheduler({
+      getManager: () => geneweaveEncryptionManager,
+      listDuePurges: async (nowMs: number) => {
+        const rows = await db.listDueTenantPurges(nowMs);
+        return rows.map((r) => ({
+          id: r.id,
+          tenantId: r.tenant_id,
+          requestedAt: r.requested_at,
+          retentionUntil: r.retention_until,
+        }));
+      },
+      markPurged: async (requestId: string, nowMs: number) => {
+        await db.markTenantPurged(requestId, nowMs);
+      },
+    });
+  } catch (err) {
+    console.error('[encryption] purge scheduler startup failed (non-fatal)', err);
+  }
+
+  // 5-IR. Phase 8 (Cost Governor — Intent-RAG): warm tool description
+  // embeddings so the per-step retrieval ranker has up-to-date vectors.
+  // Best-effort + idempotent. No-op without OPENAI_API_KEY.
+  try {
+    const { createOpenAIEmbedder } = await import('./cost/openai-embedder.js');
+    const { createDbToolEmbeddingStore } = await import('./cost/db-tool-embedding-store.js');
+    const { warmToolEmbeddings } = await import('./cost/warm-tool-embeddings.js');
+    const embedder = createOpenAIEmbedder();
+    const store = createDbToolEmbeddingStore({ db, modelId: 'text-embedding-3-small' });
+    await warmToolEmbeddings({
+      embedder,
+      store,
+      log: (msg, meta) => console.log(msg, meta ?? ''),
+    });
+  } catch (err) {
+    console.warn('cost.intent-rag: warmer hook failed (non-fatal)', String(err));
+  }
 
   // 5-WF. Workflow Platform Phase 1: construct the singleton DB-driven
   // workflow engine and sync the resolver registry into the

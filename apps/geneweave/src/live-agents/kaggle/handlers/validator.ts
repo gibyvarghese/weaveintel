@@ -1,7 +1,7 @@
 /** Kaggle Submission Validator — agentic (skill-driven ReAct) + deterministic. */
 import { weaveLiveAgent, type TaskHandler } from '@weaveintel/live-agents';
 import type { Model } from '@weaveintel/core';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import {
   runSubmissionValidation,
   type CvScoresArtifact,
@@ -136,7 +136,7 @@ export function createValidatorAgentic(ctx: SharedHandlerContext): TaskHandler {
       const outputFiles = Array.isArray(parsed['outputFiles']) ? (parsed['outputFiles'] as string[]) : [];
       const kernelRef = (parsed['kernelRef'] as string | null | undefined) ?? null;
       const cvScores = (parsed['cvScores'] as CvScoresArtifact | undefined) ?? null;
-      const runId = (parsed['runId'] as string | undefined) ?? `kgl-run-${randomUUID().slice(0, 8)}`;
+      const runId = (parsed['runId'] as string | undefined) ?? `kgl-run-${newUUIDv7().slice(-8)}`;
       try {
         const result = await runSubmissionValidation({
           db,
@@ -248,7 +248,7 @@ export function createValidatorDeterministic(ctx: SharedHandlerContext): TaskHan
       const outputFiles = Array.isArray(parsed['outputFiles']) ? (parsed['outputFiles'] as string[]) : [];
       const kernelRef = (parsed['kernelRef'] as string | null | undefined) ?? null;
       const cvScores = (parsed['cvScores'] as CvScoresArtifact | undefined) ?? null;
-      const runId = (parsed['runId'] as string | undefined) ?? `kgl-run-${randomUUID().slice(0, 8)}`;
+      const runId = (parsed['runId'] as string | undefined) ?? `kgl-run-${newUUIDv7().slice(-8)}`;
       try {
         const creds = resolveCreds(opts);
         const result = await runSubmissionValidation({

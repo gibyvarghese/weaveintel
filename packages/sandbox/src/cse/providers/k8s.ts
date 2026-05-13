@@ -17,7 +17,7 @@
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { spawn } from 'node:child_process';
 import type { ContainerProvider } from './base.js';
 import { buildRunCommand, languageExt, tryParseOutput } from './base.js';
@@ -341,7 +341,7 @@ export abstract class K8sContainerProvider implements ContainerProvider {
   }
 
   async execute(request: ExecutionRequest, config: CSEConfig): Promise<ExecutionResult> {
-    const executionId = randomUUID();
+    const executionId = newUUIDv7();
     const jobName = `cse-${executionId.slice(0, 16)}`;
     const cmName = `cse-code-${executionId.slice(0, 16)}`;
     const lang = request.language ?? 'python';
@@ -419,7 +419,7 @@ export abstract class K8sContainerProvider implements ContainerProvider {
   }
 
   async createSession(chatId: string, config: CSEConfig, withBrowser: boolean): Promise<CSESession> {
-    const sessionId = randomUUID();
+    const sessionId = newUUIDv7();
     const podName = `cse-session-${sessionId.slice(0, 12)}`;
     const namespace = this.ctx.namespace;
     const runtimeClass = config.runtimeClass ?? this.runtimeClassName;
@@ -467,7 +467,7 @@ export abstract class K8sContainerProvider implements ContainerProvider {
     request: ExecutionRequest,
     config: CSEConfig,
   ): Promise<ExecutionResult> {
-    const executionId = randomUUID();
+    const executionId = newUUIDv7();
     const lang = request.language ?? 'python';
     const ext = languageExt(lang);
     const remoteFile = `/workspace/code_${executionId}.${ext}`;

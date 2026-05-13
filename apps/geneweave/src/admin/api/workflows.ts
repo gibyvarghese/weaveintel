@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
@@ -47,7 +47,7 @@ export function registerWorkflowRoutes(
       ? { ...baseMetadata, __outputContract: body['output_contract'] }
       : baseMetadata;
     const metadataJson = (Object.keys(merged).length > 0) ? JSON.stringify(merged) : null;
-    const id = 'wf-' + randomUUID().slice(0, 8);
+    const id = 'wf-' + newUUIDv7().slice(-8);
     await db.createWorkflowDef({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       version: (body['version'] as string) ?? '1.0',

@@ -5,6 +5,7 @@
  * A single global pool is shared across all tool invocations.
  */
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
+import { newUUIDv7 } from '@weaveintel/core';
 import { existsSync } from 'node:fs';
 import { captureSnapshot, type PageSnapshot } from './snapshot.js';
 import type { BrowserAuthConfig, HandoffState, CookieAuth, HeaderAuth } from './auth-types.js';
@@ -181,7 +182,7 @@ export class BrowserPool {
       if (oldest) await this.close(oldest.id);
     }
 
-    const id = crypto.randomUUID();
+    const id = newUUIDv7();
     const browser = await chromium.launch({
       headless: this.opts.headless,
       ...(this.opts.executablePath ? { executablePath: this.opts.executablePath } : {}),

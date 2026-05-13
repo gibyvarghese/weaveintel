@@ -2871,4 +2871,166 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
     )
   `);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_capability_pack_experiments_key ON capability_pack_experiments(pack_key, enabled)`);
+
+  // ─── Cost Governor Phase 2 — Cost Policies ───────────────────────────────
+  // Operator-defined cost tiers and lever overrides. Bound to agents / meshes
+  // / workflows via capability_policy_bindings (policy_kind = 'cost_policy').
+  // levers_json stores the optional CostPolicy fields (modelCascade,
+  // promptCaching, toolSubset, intelGating, historyCompaction, maxStepsCap,
+  // reasoningEffort, toolOutputTruncation, budgetCeilingUsd). UUID PK.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS cost_policies (
+      id TEXT PRIMARY KEY,
+      key TEXT NOT NULL UNIQUE,
+      tier TEXT NOT NULL DEFAULT 'balanced',
+      levers_json TEXT,
+      description TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_cost_policies_enabled ON cost_policies(enabled)`);
+
+  // ─── Cost Governor Phase 8 — Tool Embeddings (Intent-RAG) ────────────────
+  // Pre-computed embeddings for every tool description, used by the
+  // intent-RAG strategy of the L3 (toolSubset) lever. Keyed by tool_key
+  // (matches BUILTIN_TOOLS / tool_catalog.tool_key). description_hash
+  // detects when a tool description changes and the embedding needs to
+  // be recomputed. The embedding warmer at startup walks every BUILTIN
+  // tool, hashes its description, and re-embeds on mismatch. UUID PK.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tool_embeddings (
+      id TEXT PRIMARY KEY,
+      tool_key TEXT NOT NULL UNIQUE,
+      model_id TEXT NOT NULL,
+      dimension INTEGER NOT NULL,
+      embedding TEXT NOT NULL,
+      description_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tool_embeddings_model ON tool_embeddings(model_id)`);
+
+  // ─── Encryption Phase 1 — Tenant-scoped Envelope Encryption ──────────────
+  // Per-tenant policy + key hierarchy (KEK -> DEK, optional BIK) + audit ledger.
+  // KEKs are wrapped under a root key managed by a KMS provider (LocalKmsProvider
+  // in dev; cloud KMS providers in production). DEKs are wrapped under their KEK.
+  // All wrapped key material is JSON-serialized via SerializedWrappedKey.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tenant_encryption_policy (
+      tenant_id TEXT PRIMARY KEY,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      kms_provider_id TEXT NOT NULL DEFAULT 'local',
+      kms_config TEXT,
+      active_kek_id TEXT,
+      active_dek_id TEXT,
+      active_bik_id TEXT,
+      rotation_schedule TEXT NOT NULL DEFAULT 'manual',
+      blind_index_enabled INTEGER NOT NULL DEFAULT 0,
+      field_policy TEXT NOT NULL DEFAULT '{}',
+      shred_requested_at INTEGER,
+      shred_completed_at INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tenant_keks (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      wrapped TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      rotated_at INTEGER,
+      revoked_at INTEGER
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tenant_keks_tenant ON tenant_keks(tenant_id, status)`);
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tenant_deks (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      kek_id TEXT NOT NULL,
+      epoch INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      wrapped TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      rotated_at INTEGER,
+      revoked_at INTEGER
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tenant_deks_tenant ON tenant_deks(tenant_id, status)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tenant_deks_epoch ON tenant_deks(tenant_id, epoch)`);
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tenant_biks (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      epoch INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      wrapped TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      revoked_at INTEGER
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tenant_biks_tenant ON tenant_biks(tenant_id, status)`);
+
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS encryption_audit (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      event_kind TEXT NOT NULL,
+      actor TEXT,
+      details TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_encryption_audit_tenant ON encryption_audit(tenant_id, created_at)`);
+
+  // Forward-compat: row-level rewrite progress for background re-encryption
+  // jobs after rotation. Phase 1 inserts no rows; Phase 2+ background job
+  // claims a (table, column) and walks rows.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS encryption_rewrite_progress (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      table_name TEXT NOT NULL,
+      column_name TEXT NOT NULL,
+      from_epoch INTEGER NOT NULL,
+      to_epoch INTEGER NOT NULL,
+      last_row_id TEXT,
+      rows_rewritten INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      completed_at INTEGER
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_encryption_rewrite_tenant ON encryption_rewrite_progress(tenant_id, status)`);
+
+  // ─── Encryption Phase 6 — GDPR Tenant Deletion Lifecycle ─────────────────
+  // Operator-initiated tenant deletion requests with retention window. After
+  // request, policy keeps decryption working until retention_until elapses;
+  // background purge scheduler then calls hardShred(). Status transitions:
+  // pending -> cancelled OR pending -> purged. UUID PK.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tenant_deletion_requests (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      requested_at INTEGER NOT NULL,
+      retention_until INTEGER NOT NULL,
+      requested_by TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      purged_at INTEGER,
+      cancelled_at INTEGER,
+      reason TEXT
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tenant_deletion_requests_tenant ON tenant_deletion_requests(tenant_id, status)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tenant_deletion_requests_due ON tenant_deletion_requests(status, retention_until)`);
 }

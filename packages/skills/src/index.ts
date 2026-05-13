@@ -1342,7 +1342,16 @@ export const BUILT_IN_SKILLS: SkillDefinition[] = [
       narrative: 'Produce evidence-backed analysis from executed code and include explicit limitations when the data does not support a stronger conclusion.',
       requiredEvidence: ['evidence', 'confidence'],
     },
-    tags: ['analysis', 'data', 'charting', 'sandbox'],
+    // This skill executes data analysis directly via `cse_run_data_analysis`
+    // (it does NOT require delegating to the `code_executor` worker). Declaring
+    // an executionContract — even an empty one — is what signals to
+    // `buildSupervisorInstructions` to suppress the generic
+    // FORCED_WORKER_REQUIREMENT (2-step code_executor→analyst flow), which
+    // otherwise conflicts with this skill's direct-execution plan.
+    executionContract: {
+      minDelegations: 0,
+    },
+    tags: ['analysis', 'data', 'charting', 'sandbox', 'auto-on-tabular'],
     triggerPatterns: ['analyze this csv', 'analyze this xlsx', 'analyze this spreadsheet', 'plot this data', 'chart this data', 'dataframe analysis', 'exploratory data analysis'],
   }),
   defineSkill({

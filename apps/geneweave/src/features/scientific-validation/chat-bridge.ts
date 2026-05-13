@@ -23,7 +23,7 @@
  * swap.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 import {
   weaveContext,
@@ -115,7 +115,7 @@ async function persistTurn(
 ): Promise<void> {
   try {
     await db.createAgentTurn({
-      id: randomUUID(),
+      id: newUUIDv7(),
       hypothesis_id: hypothesisId,
       round_index: opts.roundIndex ?? 0,
       from_agent: fromAgent,
@@ -140,11 +140,11 @@ async function persistEvidence(
 ): Promise<void> {
   try {
     await db.createEvidenceEvent({
-      id: randomUUID(),
+      id: newUUIDv7(),
       hypothesis_id: hypothesisId,
       step_id: opts.stepId ?? agentId,
       agent_id: agentId,
-      evidence_id: randomUUID(),
+      evidence_id: newUUIDv7(),
       kind,
       summary: summary.slice(0, 500),
       source_type: opts.toolKey ? 'sandbox_tool_run' : 'model_inference',
@@ -187,7 +187,7 @@ export class SVChatBridge {
 
   /** Async-launch a deliberation. Returns a synthetic run id immediately. */
   async startRun(input: SVRunInput): Promise<string> {
-    const runId = randomUUID();
+    const runId = newUUIDv7();
     await this.db.updateHypothesisStatus(input.hypothesisId, 'running', new Date().toISOString());
     // Fire-and-forget — caller already has the hypothesis row to poll.
     void this._executeDeliberation(input).catch(async (err: unknown) => {
@@ -371,7 +371,7 @@ export class SVChatBridge {
       };
       for (const sc of parsed.subClaims ?? []) {
         await this.db.createSubClaim({
-          id: randomUUID(),
+          id: newUUIDv7(),
           tenant_id: input.tenantId,
           hypothesis_id: input.hypothesisId,
           parent_sub_claim_id: null,
@@ -394,7 +394,7 @@ export class SVChatBridge {
       const mapped = VERDICT_MAP[verdictJson.verdict] ?? 'inconclusive';
       const conf = verdictJson.confidence ?? 0.5;
       await this.db.createVerdict({
-        id: randomUUID(),
+        id: newUUIDv7(),
         tenant_id: input.tenantId,
         hypothesis_id: input.hypothesisId,
         verdict: mapped,
@@ -403,8 +403,8 @@ export class SVChatBridge {
         key_evidence_ids: '[]',
         falsifiers: '[]',
         limitations: verdictJson.summary ?? '',
-        contract_id: randomUUID(),
-        replay_trace_id: randomUUID(),
+        contract_id: newUUIDv7(),
+        replay_trace_id: newUUIDv7(),
         emitted_by: 'supervisor',
       });
       await this.db.updateHypothesisStatus(input.hypothesisId, 'verdict', new Date().toISOString());
@@ -416,7 +416,7 @@ export class SVChatBridge {
   private async _emitInconclusiveVerdict(input: SVRunInput, limitations: string): Promise<void> {
     try {
       await this.db.createVerdict({
-        id: randomUUID(),
+        id: newUUIDv7(),
         tenant_id: input.tenantId,
         hypothesis_id: input.hypothesisId,
         verdict: 'inconclusive',
@@ -425,8 +425,8 @@ export class SVChatBridge {
         key_evidence_ids: '[]',
         falsifiers: '[]',
         limitations,
-        contract_id: randomUUID(),
-        replay_trace_id: randomUUID(),
+        contract_id: newUUIDv7(),
+        replay_trace_id: newUUIDv7(),
         emitted_by: 'supervisor',
       });
     } catch { /* non-fatal */ }

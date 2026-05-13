@@ -6,7 +6,7 @@
  */
 
 import type { Tool, ToolRegistry } from '@weaveintel/core';
-import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import { weaveTool, weaveToolRegistry, newUUIDv7 } from '@weaveintel/core';
 import { createPolicyEnforcedRegistry, type ToolPolicyResolver, type ToolAuditEmitter, type ToolRateLimiter, noopAuditEmitter } from '@weaveintel/tools';
 import { Buffer } from 'node:buffer';
 import { createSearchRouter, type SearchProviderConfig } from '@weaveintel/tools-search';
@@ -650,7 +650,6 @@ export const BUILTIN_TOOLS: Record<string, Tool> = {
  * Uses upsert-by-tool_key so re-runs are safe and idempotent.
  */
 export async function syncToolCatalog(db: DatabaseAdapter): Promise<void> {
-  const { randomUUID } = await import('node:crypto');
   for (const [key, tool] of Object.entries(BUILTIN_TOOLS)) {
     const existing = await db.getToolCatalogByKey(key);
     const riskLevel = tool.schema.riskLevel ?? 'read-only';
@@ -658,7 +657,7 @@ export async function syncToolCatalog(db: DatabaseAdapter): Promise<void> {
     const allocationClass = inferAllocationClass(key, tool.schema.tags);
     if (!existing) {
       await db.createToolConfig({
-        id: randomUUID(),
+        id: newUUIDv7(),
         name: tool.schema.name,
         description: tool.schema.description,
         category: (tool.schema.tags?.[0] ?? null) as string | null,
@@ -803,9 +802,9 @@ function buildA2ATool(toolKey: string, description: string, agentUrl: string): i
     execute: async (args: { task: string; context?: Record<string, unknown> }) => {
       const client = weaveA2AClient();
       const result = await client.sendTask(
-        { executionId: crypto.randomUUID(), metadata: args.context ?? {} },
+        { executionId: newUUIDv7(), metadata: args.context ?? {} },
         agentUrl,
-        { id: crypto.randomUUID(), input: { role: 'user', parts: [{ type: 'text', text: args.task }] } },
+        { id: newUUIDv7(), input: { role: 'user', parts: [{ type: 'text', text: args.task }] } },
       );
       if (result.error) return { content: `A2A error: ${result.error}`, isError: true };
       const textParts = (result.output?.parts ?? [])

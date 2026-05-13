@@ -4,7 +4,7 @@
  * Modular CRUD endpoints for skills.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
@@ -40,7 +40,7 @@ export function registerSkillRoutes(
     const validatedDescription = requireDetailedDescription(body['description'], 'skill', res);
     if (!validatedDescription) return;
 
-    const id = 'skill-' + randomUUID().slice(0, 8);
+    const id = 'skill-' + newUUIDv7().slice(-8);
     await db.createSkill({
       id,
       name: body['name'] as string,

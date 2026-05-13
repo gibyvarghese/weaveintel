@@ -11,7 +11,7 @@
  */
 
 import type { Sandbox, SandboxPolicy, SandboxResult } from '@weaveintel/core';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { validatePolicy } from './policy.js';
 import { enforceLimits } from './limits.js';
 import { createSuccessResult, createErrorResult } from './result.js';
@@ -31,7 +31,7 @@ import { createSuccessResult, createErrorResult } from './result.js';
 export function createSandbox(): Sandbox {
   return {
     async execute(code: string, policy: SandboxPolicy): Promise<SandboxResult> {
-      const executionId = randomUUID();
+      const executionId = newUUIDv7();
       void code;
       void policy;
       return {
@@ -72,7 +72,7 @@ export function createSimulatedSandbox(): Sandbox {
   const executions = new Map<string, ExecutionEntry>();
 
   async function execute(code: string, policy: SandboxPolicy): Promise<SandboxResult> {
-    const executionId = randomUUID();
+    const executionId = newUUIDv7();
     const startedAt = Date.now();
 
     if (!policy.enabled) {

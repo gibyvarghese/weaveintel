@@ -2,7 +2,7 @@
  * @weaveintel/ui-primitives — Widget payload builder
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { WidgetPayload, WidgetType } from '@weaveintel/core';
 
 export interface CreateWidgetOptions {
@@ -18,7 +18,7 @@ export interface CreateWidgetOptions {
  */
 export function createWidget(opts: CreateWidgetOptions): WidgetPayload {
   return {
-    id: randomUUID(),
+    id: newUUIDv7(),
     type: opts.type,
     title: opts.title,
     data: opts.data,

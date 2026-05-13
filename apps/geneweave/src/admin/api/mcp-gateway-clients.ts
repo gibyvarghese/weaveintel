@@ -11,7 +11,8 @@
  * scope, the audit chatId, and the timestamps.
  */
 
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 import { hashGatewayToken } from '../../mcp-gateway.js';
@@ -61,7 +62,7 @@ export function registerMCPGatewayClientRoutes(
     if (allowedRaw !== undefined && allowedRaw !== null) {
       allowed_classes = typeof allowedRaw === 'string' ? allowedRaw : JSON.stringify(allowedRaw);
     }
-    const id = randomUUID();
+    const id = newUUIDv7();
     const plaintext = mintToken();
     const rlRaw = body['rate_limit_per_minute'];
     let rate_limit_per_minute: number | null = null;

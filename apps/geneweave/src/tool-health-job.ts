@@ -8,7 +8,7 @@
  * retrieved for the window (SQLite has no built-in PERCENTILE_CONT).
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from './db-types.js';
 
 const INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
@@ -50,7 +50,7 @@ async function takeSnapshots(db: DatabaseAdapter, windowStart: string, windowEnd
     const availability = invocationCount > 0 ? successCount / invocationCount : 1;
 
     await db.insertToolHealthSnapshot({
-      id: randomUUID(),
+      id: newUUIDv7(),
       tool_name: toolName,
       snapshot_at: windowEnd,
       invocation_count: invocationCount,

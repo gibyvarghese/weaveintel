@@ -24,6 +24,7 @@
  */
 
 import type { StateStore } from '@weaveintel/live-agents';
+import { newUUIDv7 } from '@weaveintel/core';
 
 // ─── Lightweight DB row shapes (mirror geneweave) ────────────
 
@@ -89,9 +90,7 @@ export interface BridgeRunStateOptions {
 }
 
 const defaultIdGen = (): string => {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
+  return newUUIDv7();
   return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2, 10)}`;
 };
 

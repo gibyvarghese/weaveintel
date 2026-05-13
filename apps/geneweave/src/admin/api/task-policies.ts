@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
@@ -31,7 +31,7 @@ export function registerTaskPolicyRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['trigger']) { json(res, 400, { error: 'name and trigger required' }); return; }
-    const id = 'htp-' + randomUUID().slice(0, 8);
+    const id = 'htp-' + newUUIDv7().slice(-8);
     await db.createHumanTaskPolicy({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       trigger: body['trigger'] as string, task_type: (body['task_type'] as string) ?? 'approval',

@@ -4,7 +4,7 @@
  * Modular CRUD endpoints for the operator-managed tool catalog.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { normalizeCallableDescription } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
@@ -37,7 +37,7 @@ export function registerToolRoutes(
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
     const validatedDescription = requireDetailedDescription(body['description'], 'tool', res);
     if (!validatedDescription) return;
-    const id = randomUUID();
+    const id = newUUIDv7();
     await db.createToolConfig({
       id, name: body['name'] as string, description: validatedDescription,
       category: (body['category'] as string) ?? null, risk_level: (body['risk_level'] as string) ?? 'read-only',

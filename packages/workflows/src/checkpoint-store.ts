@@ -3,7 +3,7 @@
  * Durable state persistence for workflow runs
  */
 import type { WorkflowCheckpoint, WorkflowState } from '@weaveintel/core';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 
 export interface CheckpointStore {
   save(runId: string, stepId: string, state: WorkflowState, workflowId?: string): Promise<WorkflowCheckpoint>;
@@ -21,7 +21,7 @@ export class InMemoryCheckpointStore implements CheckpointStore {
 
   async save(runId: string, stepId: string, state: WorkflowState, workflowId?: string): Promise<WorkflowCheckpoint> {
     const cp: WorkflowCheckpoint = {
-      id: randomUUID(),
+      id: newUUIDv7(),
       runId,
       workflowId,
       stepId,

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ServerResponse } from 'node:http';
 import type { ExecutionContext, Message, AgentStep, ModelRequest, ModelHealth } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
@@ -215,7 +215,7 @@ export async function streamMessageImpl(
   const settings = settingsFromRow(await deps.db.getChatSettings(chatId));
   const resolvedSystemPrompt = await resolveSystemPrompt(deps.db, settings);
   const resolvedPrompt = await deps.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
-  const traceId = randomUUID();
+  const traceId = newUUIDv7();
   const abortController = new AbortController();
   let clientDisconnected = false;
   const onClientClose = () => {
@@ -246,7 +246,7 @@ export async function streamMessageImpl(
       await deps.writeSseEvent(res, { type: 'done', usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, cost: 0, latencyMs: 0 });
       deps.endSse(res);
       await deps.db.addMessage({
-        id: randomUUID(),
+        id: newUUIDv7(),
         chatId,
         role: 'assistant',
         content: denyContent,
@@ -291,7 +291,7 @@ export async function streamMessageImpl(
     tools: [...(m.skill.toolNames ?? [])],
   }));
 
-  const userMsgId = randomUUID();
+  const userMsgId = newUUIDv7();
   const userMetadata = redactionInfo || attachments.length > 0
     ? JSON.stringify({
         redaction: redactionInfo,
@@ -312,7 +312,7 @@ export async function streamMessageImpl(
     await deps.writeSseEvent(res, { type: 'done', usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, cost: 0, latencyMs: 0 });
     deps.endSse(res);
     await deps.db.addMessage({
-      id: randomUUID(),
+      id: newUUIDv7(),
       chatId,
       role: 'assistant',
       content: denyContent,
@@ -347,7 +347,7 @@ export async function streamMessageImpl(
     });
 
     await deps.db.addMessage({
-      id: randomUUID(),
+      id: newUUIDv7(),
       chatId,
       role: 'assistant',
       content: identityRecall,
@@ -365,7 +365,7 @@ export async function streamMessageImpl(
     });
 
     await deps.db.recordMetric({
-      id: randomUUID(), userId, chatId, type: 'generation', provider: 'local', model: 'memory-recall',
+      id: newUUIDv7(), userId, chatId, type: 'generation', provider: 'local', model: 'memory-recall',
       promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0, latencyMs,
     });
 
@@ -477,6 +477,8 @@ export async function streamMessageImpl(
   }
 
   if (streamErrored && !fullText.trim()) {
+    const errorContent = `[Stream interrupted] ${streamErrorMessage || 'The model did not return a response.'} Please retry; if this persists, the request may exceed the model's context window or per-request timeout.`;
+    await deps.writeSseEvent(res, { type: 'text', text: errorContent });
     await deps.writeSseEvent(res, {
       type: 'done',
       usage: finalUsage,
@@ -490,6 +492,31 @@ export async function streamMessageImpl(
       traceId,
     });
     deps.endSse(res);
+    // Persist a fallback assistant message so the user sees the failure in chat history
+    // instead of a blank UI on reload. Without this, model timeouts and other stream
+    // exceptions silently drop the turn.
+    try {
+      await deps.db.addMessage({
+        id: newUUIDv7(),
+        chatId,
+        role: 'assistant',
+        content: errorContent,
+        metadata: JSON.stringify({
+          model: modelId,
+          provider,
+          streamed: true,
+          mode: settings.mode,
+          streamInterrupted: true,
+          error: streamErrorMessage,
+          traceId,
+        }),
+        tokensUsed: finalUsage.totalTokens,
+        cost,
+        latencyMs,
+      });
+    } catch {
+      // Best-effort persistence; never block the early return on a write failure.
+    }
     return;
   }
 
@@ -571,7 +598,7 @@ export async function streamMessageImpl(
     traceId,
   });
 
-  const assistMsgId = randomUUID();
+  const assistMsgId = newUUIDv7();
   await deps.db.addMessage({
     id: assistMsgId, chatId, role: 'assistant', content: fullText,
     metadata: JSON.stringify({
@@ -606,7 +633,7 @@ export async function streamMessageImpl(
   }
 
   await deps.db.recordMetric({
-    id: randomUUID(), userId, chatId, type: 'generation', provider, model: modelId,
+    id: newUUIDv7(), userId, chatId, type: 'generation', provider, model: modelId,
     promptTokens: finalUsage.promptTokens, completionTokens: finalUsage.completionTokens,
     totalTokens: finalUsage.totalTokens, cost, latencyMs,
   });

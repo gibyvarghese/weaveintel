@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { Artifact, ArtifactStore, ArtifactType, ArtifactVersion } from '@weaveintel/core';
 import { createArtifactVersion, estimateSize } from './artifact.js';
 
@@ -11,7 +11,7 @@ export function createInMemoryArtifactStore(): ArtifactStore {
 
   const store: ArtifactStore = {
     async save(input) {
-      const id = randomUUID();
+      const id = newUUIDv7();
       const now = new Date().toISOString();
       const artifact: Artifact = {
         ...input,

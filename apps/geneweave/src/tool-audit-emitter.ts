@@ -8,7 +8,7 @@
  * so every tool invocation produces a durable, queryable audit record.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ToolAuditEmitter } from '@weaveintel/tools';
 import type { ToolAuditEvent } from '@weaveintel/core';
 import type { DatabaseAdapter } from './db-types.js';
@@ -19,7 +19,7 @@ export class DbToolAuditEmitter implements ToolAuditEmitter {
   async emit(event: ToolAuditEvent): Promise<void> {
     try {
       await this.db.insertToolAuditEvent({
-        id: randomUUID(),
+        id: newUUIDv7(),
         tool_name: event.toolName,
         chat_id: event.chatId ?? null,
         user_id: event.userId ?? null,

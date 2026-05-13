@@ -18,6 +18,19 @@
  */
 
 import type { Model } from '@weaveintel/core';
+import { weaveToolRegistry as createToolRegistry } from '@weaveintel/core';
+import {
+  CostCeilingExceededError,
+  decideMaxSteps,
+  INTEL_HEADER_SECTION,
+  INTEL_SNIPPETS_SECTION,
+  shouldKeepSection,
+  wrapModelWithStaticReasoningEffort,
+  type CostBudgetGate,
+  type PromptShape,
+  type ReasoningEffort,
+  type ToolOutputTruncator,
+} from '@weaveintel/cost-governor';
 import {
   weaveLiveAgent,
   type AgenticRunResult,
@@ -87,6 +100,92 @@ export interface KaggleStrategistAgentOptions {
    * pressure. Throws are swallowed by the underlying tool — never blocks.
    */
   onToolBlocked?: (record: ToolBlockedRecord) => Promise<void> | void;
+  /**
+   * Per-tick factory that builds a registry of read-only trace-retrieval
+   * tools (timeline, failed attempts, recent events, event details, step
+   * artifacts) scoped to THE CURRENT competition run only. Wired by the
+   * heartbeat boot path to a closure that resolves the active
+   * `kgl_competition_runs` row by mesh id and constructs
+   * `createKaggleTraceTools({ runId, db })`. Returning `null` (e.g. no
+   * active run for this mesh) is safe — the strategist simply omits the
+   * trace tools that tick. Throws are caught and logged; trace-tool
+   * failures must NEVER block the rest of the kaggle tool registry.
+   *
+   * Hard scoping invariant: the trace tools never accept a runId from
+   * the LLM. They are bound to ONE runId at construction time, so the
+   * strategist cannot read another competition run's history (parallel
+   * or otherwise).
+   */
+  traceToolsFactory?: (ctx: { meshId: string; agentId?: string }) => Promise<
+    import('@weaveintel/core').ToolRegistry | null
+  >;
+  /**
+   * Cost Governor Phase 5 (lever L3 — dynamic tool subset). Per-tick async
+   * callback that returns the subset of tool keys to keep, given the full
+   * list of available tool keys. The wiring is decoupled from the package:
+   * the heartbeat boot path resolves the effective `CostPolicy` via
+   * `DbCostPolicyResolver`, derives a logical `phase` from the active kgl
+   * run state, and calls `bundle.toolFilter(toolKeys, ctx)` from
+   * `@weaveintel/cost-governor`. Returning `null` means pass-through (keep
+   * everything). Throws are swallowed by this strategist — the cost filter
+   * is NEVER load-bearing; on any failure the full kaggle tool registry is
+   * used so the agent can still make progress.
+   */
+  costToolFilter?: (ctx: {
+    meshId: string;
+    agentId?: string;
+    toolKeys: readonly string[];
+    /** Phase 8: per-step goal text for the intent-RAG ranker. */
+    goal?: string;
+  }) => Promise<readonly string[] | null>;
+  /**
+   * Cost Governor Phase 6 (lever L4 — intel-gated prompt sections).
+   * Per-tick async callback returning an `IntelGatingDecision` describing
+   * which prepare() sections to drop, OR `null` for "no shape change".
+   * The strategist treats two well-known section keys:
+   *   - `intel_header`   → controls the CV_SCORES addendum (kept by default).
+   *                        When dropped, the addendum is omitted (saves
+   *                        ~600 tokens per tick).
+   *   - `intel_snippets` → controls the verbatim quoted operator-seed
+   *                        body in `userGoal`. When dropped, the body is
+   *                        truncated to its first 500 chars (saves
+   *                        proportional tokens once the run accumulates
+   *                        enough state to know what to do).
+   * NEVER load-bearing — throws or `null` keep both sections.
+   */
+  intelGate?: (ctx: { meshId: string; agentId?: string }) => Promise<PromptShape | null>;
+  /**
+   * Cost Governor Phase 7 (lever L6 — max-steps cap). When set the
+   * strategist clamps `maxSteps` via `decideMaxSteps({ maxStepsCap }, opts.maxSteps)`.
+   * NEVER load-bearing — falls back to `opts.maxSteps ?? 90`.
+   */
+  maxStepsCap?: number;
+  /**
+   * Cost Governor Phase 7 (lever L7 — reasoning effort hint). When set the
+   * inner `model` is wrapped with `wrapModelWithStaticReasoningEffort(model, hint)`
+   * so OpenAI o-series + Anthropic extended-thinking calls receive the hint
+   * via provider-agnostic metadata. Providers that ignore the hint see no
+   * behaviour change. NEVER load-bearing.
+   */
+  reasoningEffortHint?: ReasoningEffort;
+  /**
+   * Cost Governor Phase 7 (lever L8 — tool output truncation). When set the
+   * kaggle ToolRegistry built per tick is wrapped via the same truncator
+   * before tools are handed to the ReAct loop. Strategist never calls this
+   * directly — it just forwards the configured truncator to its registry
+   * wrapper. NEVER load-bearing — pass-through when undefined.
+   */
+  toolOutputTruncator?: ToolOutputTruncator;
+  /**
+   * Cost Governor Phase 7 (lever L9 — budget gate). When set the strategist
+   * runs `await budgetGate.check({ runId })` once per tick BEFORE invoking
+   * the LLM. If the gate raises `CostCeilingExceededError`, the strategist
+   * short-circuits the tick with a final-answer summary and returns
+   * `completed: true, summaryProse: '<budget-exceeded>'` so the heartbeat
+   * does not waste a second LLM call on the same run. NEVER load-bearing —
+   * thrown non-budget errors are logged and pass-through.
+   */
+  budgetGate?: CostBudgetGate;
 }
 
 /** Last-resort prompt — used only when neither playbookResolver nor
@@ -129,11 +228,31 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
   const adapter = wrapAdapterWithResilience(opts.adapter ?? liveKaggleAdapter);
   const credentials = opts.credentials ?? resolveCredentialsFromEnv();
   const log = opts.log ?? ((m: string) => console.log(`[kaggle-strategist] ${m}`));
-  const maxSteps = opts.maxSteps ?? 90;
+  // Cost Governor Phase 7 lever L6 — clamp the strategist's per-tick ReAct
+  // iteration cap against the operator-resolved CostPolicy bundle. Falls
+  // back to opts.maxSteps when no cap is configured. Never load-bearing.
+  const maxSteps = decideMaxSteps(
+    opts.maxStepsCap !== undefined ? { maxStepsCap: opts.maxStepsCap } : { maxStepsCap: 90 },
+    opts.maxSteps,
+  );
+  if (opts.maxStepsCap !== undefined) {
+    log(`cost-governor maxSteps: requested=${opts.maxSteps ?? 'unset'} cap=${opts.maxStepsCap} effective=${maxSteps}`);
+  }
+
+  // Cost Governor Phase 7 lever L7 — wrap the inner model with a static
+  // reasoning-effort hint when the bundle requests one. Pure metadata
+  // pass-through; providers that ignore it (e.g. legacy OpenAI completions)
+  // see no behaviour change.
+  const effectiveModel: Model = opts.reasoningEffortHint
+    ? wrapModelWithStaticReasoningEffort(opts.model, opts.reasoningEffortHint)
+    : opts.model;
+  if (opts.reasoningEffortHint) {
+    log(`cost-governor reasoningEffort: ${opts.reasoningEffortHint}`);
+  }
 
   const { handler } = weaveLiveAgent({
     name: 'kaggle-strategist',
-    model: opts.model,
+    model: effectiveModel,
     maxSteps,
     log,
     summarize: summarizeKaggleRun,
@@ -181,7 +300,34 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
       // Phase K7d: append framework-wide cv_scores.json requirement so every
       // competition the strategist tackles emits the artifact the validator
       // needs to gate submissions.
-      systemPrompt = systemPrompt + CV_SCORES_ADDENDUM;
+      // Cost Governor Phase 6 (lever L4): the intel gate may drop the
+      // CV_SCORES addendum (`intel_header` section key) once the run has
+      // accumulated enough context that the LLM is reliably emitting
+      // cv_scores.json without the reminder. NEVER load-bearing — throws
+      // or null keep the addendum.
+      let intelShape: PromptShape | null = null;
+      if (opts.intelGate && meshId) {
+        try {
+          intelShape = await opts.intelGate({
+            meshId,
+            ...(agentId ? { agentId } : {}),
+          });
+          if (intelShape) {
+            log(
+              `cost-governor intelGate: keep=[${intelShape.keepSections?.join(',') ?? '*'}] ` +
+                `drop=[${intelShape.dropSections?.join(',') ?? ''}]`,
+            );
+          }
+        } catch (err) {
+          log(`!! intelGate threw: ${err instanceof Error ? err.message : String(err)} — keeping all sections`);
+          intelShape = null;
+        }
+      }
+      const keepIntelHeader = shouldKeepSection(intelShape, INTEL_HEADER_SECTION);
+      const keepIntelSnippets = shouldKeepSection(intelShape, INTEL_SNIPPETS_SECTION);
+      if (keepIntelHeader) {
+        systemPrompt = systemPrompt + CV_SCORES_ADDENDUM;
+      }
 
       // Per-tick push cap. Default 1 in production: the LLM observably
       // ignored prompt-level "AT MOST ONE push" rules, and the agentic
@@ -192,7 +338,7 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
         typeof resolvedConfig['maxKernelPushesPerTick'] === 'number'
           ? (resolvedConfig['maxKernelPushesPerTick'] as number)
           : 1;
-      const tools = createKaggleTools({
+      let tools = createKaggleTools({
         adapter: withPerTickReadCache(adapter),
         credentials,
         maxKernelPushesPerTick,
@@ -229,6 +375,75 @@ export function createKaggleStrategistHandler(opts: KaggleStrategistAgentOptions
             }
           : {}),
       });
+
+      // Merge in read-only run-scoped trace tools so the LLM can pull its
+      // own past on demand (timeline / failed attempts / event details)
+      // instead of carrying full ReAct history. The factory closes over
+      // ONE runId resolved at boot from the agent's mesh — even if the
+      // model tries to pass a different runId argument, none of the
+      // trace tools accept one. Failures are logged but never block the
+      // base kaggle registry.
+      if (opts.traceToolsFactory && meshId) {
+        try {
+          const traceReg = await opts.traceToolsFactory({
+            meshId,
+            ...(agentId ? { agentId } : {}),
+          });
+          if (traceReg) {
+            const traceCount = traceReg.list().length;
+            for (const t of traceReg.list()) {
+              tools.register(t);
+            }
+            log(`merged ${traceCount} run-scoped trace tools (mesh=${meshId})`);
+          } else {
+            log(`traceToolsFactory returned null (no active run for mesh=${meshId}) — trace tools omitted this tick`);
+          }
+        } catch (err) {
+          log(
+            `!! traceToolsFactory threw: ${err instanceof Error ? err.message : String(err)} — continuing without trace tools`,
+          );
+        }
+      }
+
+      // Cost Governor Phase 5 — apply per-tick tool subset filter AFTER the
+      // full kaggle + trace tool registry is assembled. The filter is
+      // strictly narrowing: it picks a subset of currently-registered tool
+      // keys to keep. NEVER load-bearing — any error or null result keeps
+      // the unfiltered registry. The closure (heartbeat boot path) decides
+      // the logical `phase` and calls `bundle.toolFilter(...)` from
+      // `@weaveintel/cost-governor`.
+      if (opts.costToolFilter && meshId) {
+        try {
+          const allKeys = tools.list().map((t) => t.schema.name);
+          const keep = await opts.costToolFilter({
+            meshId,
+            ...(agentId ? { agentId } : {}),
+            toolKeys: allKeys,
+            // Phase 8: feed the inbound body as the per-step goal so the
+            // intent-RAG ranker (when active) can score tools by semantic
+            // relevance to what the operator just asked.
+            ...(inboundBody ? { goal: inboundBody } : {}),
+          });
+          if (keep && keep.length > 0) {
+            const keepSet = new Set(keep);
+            const filtered = createToolRegistry();
+            for (const t of tools.list()) if (keepSet.has(t.schema.name)) filtered.register(t);
+            const droppedCount = allKeys.length - filtered.list().length;
+            if (droppedCount > 0) {
+              log(
+                `cost-governor toolFilter: kept=${filtered.list().length}/${allKeys.length} (dropped ${droppedCount})`,
+              );
+              tools = filtered;
+            } else {
+              log(`cost-governor toolFilter: kept all ${allKeys.length} tools (no narrowing)`);
+            }
+          }
+        } catch (err) {
+          log(
+            `!! costToolFilter threw: ${err instanceof Error ? err.message : String(err)} — using full tool registry`,
+          );
+        }
+      }
 
       // Phase-progression override on validator bounce-back. Without it the
       // LLM re-reads the playbook from the top each tick (which marks
@@ -289,16 +504,88 @@ The validator's prior verdict is in the inbound body below — read it, then exe
 
 `
         : '';
-      const userGoal = inboundBody
-        ? `${probeOverride}Seed message from operator:\n${inboundBody}\n\nProceed per the workflow.`
+      const inboundBodyForGoal = keepIntelSnippets
+        ? inboundBody
+        : inboundBody.length > 500
+          ? inboundBody.slice(0, 500) + '\n[…intel-snippets truncated by cost-governor intelGate…]'
+          : inboundBody;
+      const userGoal = inboundBodyForGoal
+        ? `${probeOverride}Seed message from operator:\n${inboundBodyForGoal}\n\nProceed per the workflow.`
         : `No specific competition was named. Pick the most tractable active competition and proceed.`;
       if (isBounceBack) {
         log(`inbound is bounce-back (failedIter=${failedIteration}) — prepended phase-progression override to userGoal.`);
       }
 
+      // Cost Governor Phase 7 lever L8 — wrap each tool's invoke() so its
+      // returned content is byte-capped + marked as truncated when the
+      // policy bundle requested an output cap. Pure metadata pass-through
+      // when the truncator is undefined or the policy left it disabled.
+      // NEVER load-bearing.
+      if (opts.toolOutputTruncator) {
+        const truncate = opts.toolOutputTruncator;
+        const wrapped = createToolRegistry();
+        for (const t of tools.list()) {
+          const orig = t;
+          wrapped.register({
+            schema: orig.schema,
+            invoke: async (ctx, input) => {
+              const result = await orig.invoke(ctx, input);
+              const content = typeof result.content === 'string' ? result.content : '';
+              const tr = truncate(content);
+              if (!tr.truncated) return result;
+              return {
+                ...result,
+                content: tr.text,
+                metadata: {
+                  ...(result.metadata ?? {}),
+                  truncated: true,
+                  originalBytes: tr.originalBytes,
+                },
+              };
+            },
+          });
+        }
+        log(`cost-governor toolOutputTruncator: wrapped ${wrapped.list().length} tool(s)`);
+        tools = wrapped;
+      }
+
       return { systemPrompt, tools, userGoal };
     },
   });
+
+  // Cost Governor Phase 7 lever L9 — per-tick budget gate. Wrap the
+  // returned handler so before each invocation we check the run's cumulative
+  // cost. On `CostCeilingExceededError` we short-circuit with a final-answer
+  // summary instead of invoking the LLM (saves the entire tick's cost).
+  // NEVER load-bearing — non-budget errors are logged and the handler runs
+  // normally.
+  if (opts.budgetGate) {
+    const budgetGate = opts.budgetGate;
+    const wrapped: TaskHandler = async (action, context, execCtx) => {
+      const meshId = context.agent.meshId;
+      const agentId = context.agent.id;
+      try {
+        await budgetGate.check({
+          // The cost-ledger is keyed by agentId-as-runId in the kaggle
+          // boot path (parity with Phase 4 cascade tracker keying).
+          runId: agentId,
+          meshId,
+          agentId,
+        });
+      } catch (err) {
+        if (err instanceof CostCeilingExceededError) {
+          log(`cost-governor budget exceeded: ${err.message} — short-circuiting tick`);
+          return {
+            completed: true,
+            summaryProse: `Run halted: cost ceiling exceeded ($${err.costUsd.toFixed(4)} > $${err.ceilingUsd.toFixed(4)}). The strategist will stop spending on this run.`,
+          };
+        }
+        log(`!! budgetGate threw non-budget error: ${err instanceof Error ? err.message : String(err)} — continuing`);
+      }
+      return handler(action, context, execCtx);
+    };
+    return wrapped;
+  }
   return handler;
 }
 

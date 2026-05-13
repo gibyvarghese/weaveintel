@@ -5,7 +5,7 @@
  */
 
 import type { HumanTaskPolicy, HumanTaskType, HumanTaskPriority } from '@weaveintel/core';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 
 export interface PolicyCheckContext {
   trigger: string;
@@ -37,7 +37,7 @@ export function createPolicy(input: {
   enabled?: boolean;
 }): HumanTaskPolicy {
   return {
-    id: randomUUID(),
+    id: newUUIDv7(),
     name: input.name,
     description: input.description,
     trigger: input.trigger,

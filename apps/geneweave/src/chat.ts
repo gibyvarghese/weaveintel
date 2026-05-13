@@ -22,7 +22,7 @@
  *   @weaveintel/cache         — weaveInMemoryCacheStore, semantic cache for responses
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ServerResponse } from 'node:http';
 import type {
   Model, ModelRequest, ModelResponse, StreamChunk, ExecutionContext, Message,
@@ -425,10 +425,16 @@ export class ChatEngine {
     skillExecutionContracts: readonly ResolvedSkillExecutionContract[] = [],
   ): Promise<AgentResult> {
     const enforceContracts = skillExecutionContracts.length > 0;
+    // When an active skill defines its own executionContract, that contract is
+    // the source of truth for delegation requirements. The legacy
+    // `hasCodeExecutorDelegation` check is bypassed because some skills (e.g.
+    // skill-data-analysis-execution) intentionally execute CSE tools directly
+    // without going through the code_executor worker. We still enforce
+    // hasSuccessfulCseExecution + hasRenderableAttachmentAnalysisOutput.
     const first = await agent.run(ctx, { messages, goal });
     const firstPassesExecutionGuard = !enforce || (
       hasSuccessfulCseExecution(first)
-      && hasCodeExecutorDelegation(first)
+      && (enforceContracts || hasCodeExecutorDelegation(first))
       && hasRenderableAttachmentAnalysisOutput(first, goal)
     );
     const firstContractEval = enforceContracts
@@ -444,7 +450,7 @@ export class ChatEngine {
     const second = await agent.run(ctx, { messages, goal: retryGoal });
     const secondPassesExecutionGuard =
       hasSuccessfulCseExecution(second)
-      && hasCodeExecutorDelegation(second)
+      && (enforceContracts || hasCodeExecutorDelegation(second))
       && hasRenderableAttachmentAnalysisOutput(second, retryGoal);
     const secondContractEval = enforceContracts
       ? evaluateSkillExecutionContracts(second, skillExecutionContracts)

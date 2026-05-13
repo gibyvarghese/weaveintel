@@ -1632,7 +1632,124 @@ export interface CapabilityPolicyBindingRow {
   updated_at: string;
 }
 
-// ─── Phase 6: Capability Packs ─────────────────────────────
+// ─── Cost Governor Phase 2: Cost Policies ──────────────────
+// Operator-defined cost tiers + lever overrides. Bound to agents/meshes/
+// workflows via capability_policy_bindings (policy_kind = 'cost_policy').
+export interface CostPolicyRow {
+  id: string;
+  key: string;
+  /** One of 'economy' | 'balanced' | 'performance' | 'max' | 'custom'. */
+  tier: string;
+  /** JSON-encoded subset of CostPolicy lever fields. Optional. */
+  levers_json: string | null;
+  description: string | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── Cost Governor Phase 8: Tool Embeddings (Intent-RAG) ──────────────────
+// Pre-computed embeddings for every tool's model-facing description.
+// Used by the intent-rag strategy of the L3 toolSubset lever. UUID PK.
+// `embedding` is JSON-encoded `number[]` — kept as TEXT for SQLite portability.
+// `description_hash` is FNV-1a 64-bit hex (16 chars) used to detect when a
+// tool description has changed since the cached embedding was computed.
+export interface ToolEmbeddingRow {
+  id: string;
+  tool_key: string;
+  model_id: string;
+  dimension: number;
+  embedding: string;
+  description_hash: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ─── Encryption Phase 1: Tenant-scoped Envelope Encryption ────────────────
+// Per-tenant policy + key hierarchy. KEK -> DEK -> ciphertext. BIK reserved
+// for blind-index lookups in a future phase. All key material persisted as
+// `SerializedWrappedKey` JSON via @weaveintel/encryption.
+export interface TenantEncryptionPolicyRow {
+  tenant_id: string;
+  enabled: number;
+  kms_provider_id: string;
+  /** JSON object passed to KMS provider. Optional. */
+  kms_config: string | null;
+  active_kek_id: string | null;
+  active_dek_id: string | null;
+  active_bik_id: string | null;
+  rotation_schedule: string;
+  blind_index_enabled: number;
+  /** JSON-encoded FieldPolicy: which (table,column) pairs to encrypt. */
+  field_policy: string;
+  shred_requested_at: number | null;
+  shred_completed_at: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TenantKekRow {
+  id: string;
+  tenant_id: string;
+  version: number;
+  status: string;
+  /** JSON-serialized SerializedWrappedKey wrapped under root KMS key. */
+  wrapped: string;
+  created_at: number;
+  rotated_at: number | null;
+  revoked_at: number | null;
+}
+
+export interface TenantDekRow {
+  id: string;
+  tenant_id: string;
+  kek_id: string;
+  epoch: number;
+  status: string;
+  /** JSON-serialized SerializedWrappedKey wrapped under tenant KEK. */
+  wrapped: string;
+  created_at: number;
+  rotated_at: number | null;
+  revoked_at: number | null;
+}
+
+export interface TenantBikRow {
+  id: string;
+  tenant_id: string;
+  epoch: number;
+  status: string;
+  wrapped: string;
+  created_at: number;
+  revoked_at: number | null;
+}
+
+export interface EncryptionAuditRow {
+  id: string;
+  tenant_id: string;
+  event_kind: string;
+  actor: string | null;
+  /** JSON-encoded `Record<string, unknown>` or null. */
+  details: string | null;
+  created_at: number;
+}
+
+/**
+ * Phase 6 — Tenant deletion request lifecycle. Operator-initiated GDPR
+ * right-to-be-forgotten with retention window. Status flow:
+ *   pending → cancelled  (operator changed mind before retention_until)
+ *   pending → purged     (background scheduler hard-shreds after retention_until)
+ */
+export interface TenantDeletionRequestRow {
+  id: string;
+  tenant_id: string;
+  requested_at: number;
+  retention_until: number;
+  requested_by: string | null;
+  status: 'pending' | 'cancelled' | 'purged';
+  purged_at: number | null;
+  cancelled_at: number | null;
+  reason: string | null;
+}
 export type CapabilityPackStatus = 'draft' | 'published' | 'retired';
 
 export interface CapabilityPackRow {
@@ -2299,6 +2416,8 @@ export interface DatabaseAdapter {
   // Chats
   createChat(chat: { id: string; userId: string; title: string; model: string; provider: string }): Promise<void>;
   getChat(id: string, userId: string): Promise<ChatRow | null>;
+  /** Look up a chat by id alone (no userId scoping). Used by infrastructure code that needs to resolve tenancy from a message context. */
+  getChatById(id: string): Promise<ChatRow | null>;
   getUserChats(userId: string): Promise<ChatRow[]>;
   updateChatTitle(id: string, userId: string, title: string): Promise<void>;
   deleteChat(id: string, userId: string): Promise<void>;
@@ -2812,6 +2931,52 @@ export interface DatabaseAdapter {
   listCapabilityPolicyBindings(opts?: { bindingKind?: string; bindingRef?: string; policyKind?: string; enabledOnly?: boolean }): Promise<CapabilityPolicyBindingRow[]>;
   updateCapabilityPolicyBinding(id: string, fields: Partial<Omit<CapabilityPolicyBindingRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteCapabilityPolicyBinding(id: string): Promise<void>;
+
+  // ─── Cost Governor Phase 2: Cost Policies ──────────────────
+  createCostPolicy(p: Omit<CostPolicyRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getCostPolicy(id: string): Promise<CostPolicyRow | null>;
+  getCostPolicyByKey(key: string): Promise<CostPolicyRow | null>;
+  listCostPolicies(opts?: { enabledOnly?: boolean }): Promise<CostPolicyRow[]>;
+  updateCostPolicy(id: string, fields: Partial<Omit<CostPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteCostPolicy(id: string): Promise<void>;
+
+  // ─── Cost Governor Phase 8: Tool Embeddings (Intent-RAG) ────
+  upsertToolEmbedding(e: Omit<ToolEmbeddingRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getToolEmbedding(toolKey: string): Promise<ToolEmbeddingRow | null>;
+  listToolEmbeddings(opts?: { modelId?: string }): Promise<ToolEmbeddingRow[]>;
+  deleteToolEmbedding(toolKey: string): Promise<void>;
+
+  // ─── Encryption Phase 1: Tenant-scoped Envelope Encryption ──
+  getTenantEncryptionPolicy(tenantId: string): Promise<TenantEncryptionPolicyRow | null>;
+  /** Phase 2 — admin enumeration. Returns all configured policy rows. */
+  listTenantEncryptionPolicies(opts?: { enabledOnly?: boolean }): Promise<TenantEncryptionPolicyRow[]>;
+  upsertTenantEncryptionPolicy(p: Omit<TenantEncryptionPolicyRow, 'created_at' | 'updated_at'>): Promise<void>;
+  /** Phase 2 — admin removal. Deletes the policy row only; key material in tenant_keks/deks/biks/audit must be cleaned via shred() first. */
+  deleteTenantEncryptionPolicy(tenantId: string): Promise<void>;
+  insertTenantKek(k: Omit<TenantKekRow, never>): Promise<void>;
+  listTenantKeks(tenantId: string): Promise<TenantKekRow[]>;
+  updateTenantKekStatus(id: string, status: string, ts: number): Promise<void>;
+  insertTenantDek(d: Omit<TenantDekRow, never>): Promise<void>;
+  listTenantDeks(tenantId: string): Promise<TenantDekRow[]>;
+  updateTenantDekStatus(id: string, status: string, ts: number): Promise<void>;
+  insertTenantBik(b: Omit<TenantBikRow, never>): Promise<void>;
+  listTenantBiks(tenantId: string): Promise<TenantBikRow[]>;
+  updateTenantBikStatus(id: string, status: string, ts: number): Promise<void>;
+  insertEncryptionAudit(e: Omit<EncryptionAuditRow, never>): Promise<void>;
+  listEncryptionAudit(tenantId: string, opts?: { limit?: number; offset?: number }): Promise<EncryptionAuditRow[]>;
+
+  // ─── Phase 6 (Tenant Encryption): Hard-shred + GDPR deletion lifecycle ──
+  /** Atomically deletes all wrapped key material (KEKs/DEKs/BIKs) for a tenant. Used by hardShred(). */
+  deleteAllTenantWrappedMaterial(tenantId: string): Promise<{ keks: number; deks: number; biks: number }>;
+  createTenantDeletionRequest(r: Omit<TenantDeletionRequestRow, 'purged_at' | 'cancelled_at'>): Promise<void>;
+  getTenantDeletionRequest(id: string): Promise<TenantDeletionRequestRow | null>;
+  listTenantDeletionRequests(opts?: { tenantId?: string; status?: TenantDeletionRequestRow['status']; limit?: number; offset?: number }): Promise<TenantDeletionRequestRow[]>;
+  /** Returns pending deletion requests whose retention_until <= nowMs. Used by the purge scheduler. */
+  listDueTenantPurges(nowMs: number): Promise<TenantDeletionRequestRow[]>;
+  /** Marks the request row purged; called by the scheduler AFTER hardShred succeeds. */
+  markTenantPurged(id: string, purgedAtMs: number): Promise<void>;
+  /** Operator action: flip pending → cancelled. Returns true iff a row transitioned. */
+  cancelTenantDeletionRequest(id: string, cancelledAtMs: number): Promise<boolean>;
 
   // ─── Phase 6: Capability Packs ─────────────────────────────
   createCapabilityPack(p: Omit<CapabilityPackRow, 'created_at' | 'updated_at'>): Promise<void>;

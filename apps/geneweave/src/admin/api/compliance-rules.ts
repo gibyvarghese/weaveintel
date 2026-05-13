@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
@@ -31,7 +31,7 @@ export function registerComplianceRuleRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name']) { json(res, 400, { error: 'name required' }); return; }
-    const id = 'comp-' + randomUUID().slice(0, 8);
+    const id = 'comp-' + newUUIDv7().slice(-8);
     await db.createComplianceRule({
       id, name: body['name'] as string, description: (body['description'] as string) ?? null,
       rule_type: (body['rule_type'] as string) ?? 'retention',

@@ -5,7 +5,7 @@
  * target/metadata at the boundary so the package stays DB-agnostic.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type {
   Trigger,
   TriggerInvocation,

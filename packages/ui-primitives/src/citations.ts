@@ -2,7 +2,7 @@
  * @weaveintel/ui-primitives — Citation payload builder
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { CitationPayload } from '@weaveintel/core';
 
 export interface CreateCitationOptions {
@@ -19,7 +19,7 @@ export interface CreateCitationOptions {
  */
 export function createCitation(opts: CreateCitationOptions): CitationPayload {
   return {
-    id: randomUUID(),
+    id: newUUIDv7(),
     text: opts.text,
     source: opts.source,
     url: opts.url,

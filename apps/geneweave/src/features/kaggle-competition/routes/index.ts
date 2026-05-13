@@ -14,12 +14,11 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { createDurableIdempotencyStore, type DurableIdempotencyEntry } from '@weaveintel/reliability';
 import { liveKaggleAdapter, type KaggleAdapter, type KaggleCredentials } from '@weaveintel/tools-kaggle';
 import type { DatabaseAdapter } from '../../../db.js';
 import type { KaggleCompetitionRunner } from '../runner.js';
-import { newUUIDv7 } from '../../../lib/uuid.js';
 
 type RouteHandler = (
   req: IncomingMessage,
@@ -52,7 +51,7 @@ function createDbBackedIdempotencyStore(db: DatabaseAdapter) {
       },
       async set(key: string, entry: DurableIdempotencyEntry) {
         await db.createIdempotencyRecord({
-          id: randomUUID(),
+          id: newUUIDv7(),
           key,
           result_json: JSON.stringify(entry.result),
           expires_at: new Date(entry.expiresAt).toISOString(),

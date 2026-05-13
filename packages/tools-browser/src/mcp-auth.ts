@@ -10,6 +10,7 @@
  *   • browser_handoff_resume  — resume after human completes their action
  */
 import type { Tool, ToolInput, ToolOutput, ExecutionContext } from '@weaveintel/core';
+import { newUUIDv7 } from '@weaveintel/core';
 import { BrowserPool } from './automation.js';
 import { detectLoginForm } from './snapshot.js';
 import type { BrowserAuthConfig, FormFillAuth, HandoffRequest, SSOPassThroughAuth } from './auth-types.js';
@@ -314,7 +315,7 @@ export function createBrowserAuthTools(): Tool[] {
 
           // Take screenshot for user context
           const screenshot = await session.screenshot();
-          const taskId = crypto.randomUUID();
+          const taskId = newUUIDv7();
 
           session.handoffState = 'pending';
 

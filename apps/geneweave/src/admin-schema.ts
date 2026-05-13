@@ -58,6 +58,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'trigger-definitions', label: 'Triggers' },
     { key: 'replay-scenarios', label: 'Replay' },
     { key: 'capability-policy-bindings', label: 'Capability Bindings' },
+    { key: 'cost-policies', label: 'Cost Policies' },
     { key: 'capability-packs', label: 'Capability Packs' },
     { key: 'capability-pack-installations', label: 'Pack Installations' },
   ]},
@@ -81,6 +82,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'memory-governance', label: 'Memory Policy' },
     { key: 'memory-extraction-rules', label: 'Memory Rules' },
     { key: 'compliance-rules', label: 'Compliance' },
+    { key: 'tenant-encryption-policies', label: 'Tenant Encryption' },
   ]},
   { label: 'Integrations', icon: '\uD83D\uDD0C', tabs: [
     { key: 'enterprise-connectors', label: 'Enterprise' },

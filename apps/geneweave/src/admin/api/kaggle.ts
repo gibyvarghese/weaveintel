@@ -10,7 +10,7 @@
  * and live-agents StateStore. These admin routes are the operator window into
  * what GeneWeave has materialized.
  */
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { createIdempotencyStore } from '@weaveintel/reliability';
 import type { DatabaseAdapter } from '../../db.js';
 import type { KglCompetitionRunRow } from '../../db-types.js';
@@ -30,7 +30,7 @@ const RUN_BASE  = '/api/admin/kaggle-runs';
 const KGL_RUN_BASE = '/api/admin/kaggle-competition-runs';
 
 function makeId(prefix: string): string {
-  return `${prefix}-${randomUUID().slice(0, 8)}`;
+  return `${prefix}-${newUUIDv7().slice(-8)}`;
 }
 
 // ─── Competitions Tracked ──────────────────────────────────────────────────
@@ -369,7 +369,7 @@ export function registerKaggleRunRoutes(
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const run = await db.getKaggleRun(params['id']!);
     if (!run) { json(res, 404, { error: 'Run not found' }); return; }
-    const ctx: ExecutionContext = { executionId: `replay-${randomUUID().slice(0, 8)}`, metadata: { source: 'admin-replay' } };
+    const ctx: ExecutionContext = { executionId: `replay-${newUUIDv7().slice(-8)}`, metadata: { source: 'admin-replay' } };
     try {
       const result = await replayKaggleRun({ db, runId: run.id, ctx });
       json(res, 200, {

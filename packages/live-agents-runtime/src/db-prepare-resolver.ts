@@ -32,7 +32,7 @@
  * on the returned definition so downstream code can read it.
  */
 
-import type { ToolRegistry } from '@weaveintel/core';
+import { weaveToolRegistry, type ToolRegistry } from '@weaveintel/core';
 
 // ─── Public types ────────────────────────────────────────────
 
@@ -50,9 +50,23 @@ export interface PrepareMemoryRecipe {
   summarizer?: string;
 }
 
+/**
+ * Tools recipe.
+ *
+ * - `'$auto'` (legacy shorthand) — equivalent to `{ auto: true }`. The
+ *   handler-context tool registry is forwarded as-is.
+ * - Object form — fine-grained control. `auto: true` forwards the
+ *   ctx.tools registry; `traceTools: '$auto'` additionally injects the
+ *   lazy trace-retrieval tools (Phase 9) when a `traceToolsFactory` dep
+ *   is wired and an active run is available.
+ */
+export type PrepareToolsRecipe =
+  | '$auto'
+  | { auto?: boolean; traceTools?: '$auto' };
+
 export interface PrepareConfig {
   systemPrompt?: PrepareSystemPromptRecipe;
-  tools?: '$auto';
+  tools?: PrepareToolsRecipe;
   userGoal?: PrepareUserGoalRecipe;
   memory?: PrepareMemoryRecipe;
 }
@@ -88,6 +102,18 @@ export interface PrepareResolutionDeps {
    *  recipe AND no inline `fallbackPrompt` is supplied. Defaults to a
    *  generic "You are <name>." at handler-build time. */
   defaultSystemPrompt?: string;
+  /**
+   * Build the lazy trace-retrieval tool registry for THE CURRENT run
+   * (Phase 9). Required ONLY when the recipe sets
+   * `tools: { traceTools: '$auto' }`. Returning `null` is graceful and
+   * means "no active run, omit trace tools this tick". Errors are
+   * swallowed and treated as null — trace tools are never load-bearing.
+   */
+  traceToolsFactory?: (ctx: {
+    runId?: string;
+    agentId?: string;
+    meshId?: string;
+  }) => Promise<ToolRegistry | null> | ToolRegistry | null;
 }
 
 /** What `dbPrepareFromConfig` returns. */
@@ -141,10 +167,33 @@ export function parsePrepareConfig(raw: string | null | undefined): PrepareConfi
   }
 
   if ('tools' in obj) {
-    if (obj['tools'] !== '$auto') {
-      throw new Error('parsePrepareConfig: tools currently supports only "$auto"');
+    const t = obj['tools'];
+    if (t === '$auto') {
+      out.tools = '$auto';
+    } else if (t && typeof t === 'object' && !Array.isArray(t)) {
+      const tt = t as Record<string, unknown>;
+      const toolsOut: { auto?: boolean; traceTools?: '$auto' } = {};
+      for (const k of Object.keys(tt)) {
+        if (k !== 'auto' && k !== 'traceTools') {
+          throw new Error(`parsePrepareConfig: unknown tools key "${k}" (expected auto|traceTools)`);
+        }
+      }
+      if ('auto' in tt) {
+        if (typeof tt['auto'] !== 'boolean') {
+          throw new Error('parsePrepareConfig: tools.auto must be boolean');
+        }
+        toolsOut.auto = tt['auto'];
+      }
+      if ('traceTools' in tt) {
+        if (tt['traceTools'] !== '$auto') {
+          throw new Error('parsePrepareConfig: tools.traceTools currently supports only "$auto"');
+        }
+        toolsOut.traceTools = '$auto';
+      }
+      out.tools = toolsOut;
+    } else {
+      throw new Error('parsePrepareConfig: tools must be "$auto" or { auto?, traceTools? }');
     }
-    out.tools = '$auto';
   }
 
   if ('userGoal' in obj) {
@@ -206,7 +255,12 @@ function interpolate(tmpl: string, vars: Record<string, string>): string {
  */
 export function dbPrepareFromConfig(
   config: PrepareConfig,
-  ctx: { tools?: ToolRegistry } & PrepareResolutionDeps,
+  ctx: {
+    tools?: ToolRegistry;
+    runId?: string;
+    agentId?: string;
+    meshId?: string;
+  } & PrepareResolutionDeps,
 ): PreparedRecipe {
   const prepare = async ({ inbound }: PrepareInput): Promise<PrepareOutput> => {
     // --- system prompt ---
@@ -249,7 +303,39 @@ export function dbPrepareFromConfig(
     }
 
     // --- tools ---
-    const useTools = config.tools === '$auto' && ctx.tools ? ctx.tools : undefined;
+    // Recipe shapes:
+    //   undefined          → no tools forwarded
+    //   '$auto'            → forward ctx.tools as-is
+    //   { auto, traceTools } → build merged registry from selected sources
+    const toolsRecipe = config.tools;
+    let useTools: ToolRegistry | undefined;
+    if (toolsRecipe === '$auto') {
+      useTools = ctx.tools;
+    } else if (toolsRecipe && typeof toolsRecipe === 'object') {
+      const sources: ToolRegistry[] = [];
+      if (toolsRecipe.auto && ctx.tools) sources.push(ctx.tools);
+      if (toolsRecipe.traceTools === '$auto' && ctx.traceToolsFactory) {
+        try {
+          const traceReg = await ctx.traceToolsFactory({
+            ...(ctx.runId !== undefined ? { runId: ctx.runId } : {}),
+            ...(ctx.agentId !== undefined ? { agentId: ctx.agentId } : {}),
+            ...(ctx.meshId !== undefined ? { meshId: ctx.meshId } : {}),
+          });
+          if (traceReg) sources.push(traceReg);
+        } catch {
+          // Trace tools are never load-bearing — swallow factory errors.
+        }
+      }
+      if (sources.length === 1) {
+        useTools = sources[0];
+      } else if (sources.length > 1) {
+        const merged = weaveToolRegistry();
+        for (const src of sources) {
+          for (const t of src.list()) merged.register(t);
+        }
+        useTools = merged;
+      }
+    }
 
     return useTools
       ? { systemPrompt, userGoal, tools: useTools }

@@ -13,9 +13,9 @@
  * can produce or consume bindings without a circular dependency.
  */
 
-export type CapabilityBindingKind = 'workflow' | 'mesh' | 'agent';
+export type CapabilityBindingKind = 'tenant' | 'workflow' | 'mesh' | 'agent';
 
-export type CapabilityPolicyKind = 'tool_policy' | 'rate_limit' | 'approval';
+export type CapabilityPolicyKind = 'tool_policy' | 'rate_limit' | 'approval' | 'cost_policy';
 
 export interface CapabilityPolicyBinding {
   id: string;
@@ -30,7 +30,7 @@ export interface CapabilityPolicyBinding {
   /**
    * When multiple bindings apply (e.g. agent + mesh), higher precedence
    * wins. Defaults to 0; agent-level bindings should generally use 100,
-   * mesh-level 50, workflow-level 10.
+   * mesh-level 50, workflow-level 10, tenant-level 5.
    */
   precedence: number;
   createdAt?: string;

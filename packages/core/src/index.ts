@@ -2,6 +2,11 @@
 // The core package exports all contracts, types, and runtime utilities.
 // It has ZERO vendor dependencies. Provider packages depend on core, never the reverse.
 
+// UUID v7 — time-ordered UUID generator. Use for every persisted DB row id and
+// every in-memory record id that may be persisted later. Never use crypto.randomUUID
+// for new ID minting in package-level code.
+export { newUUIDv7 } from './uuid.js';
+
 // Capability system
 export {
   type CapabilityId,

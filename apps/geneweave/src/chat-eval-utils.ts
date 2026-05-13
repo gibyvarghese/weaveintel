@@ -4,7 +4,7 @@
  * Extracted from ChatEngine to keep chat.ts focused on orchestration.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ExecutionContext } from '@weaveintel/core';
 import { weaveRedactor } from '@weaveintel/redaction';
 import { weaveEvalRunner } from '@weaveintel/evals';
@@ -83,7 +83,7 @@ export async function runPostEval(
 
     // Persist
     await db.recordEval({
-      id: randomUUID(), userId, chatId,
+      id: newUUIDv7(), userId, chatId,
       evalName: 'chat_response_quality',
       score: info.score, passed: info.passed, failed: info.failed, total: info.total,
       details: JSON.stringify(result.results[0]?.assertions),

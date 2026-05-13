@@ -5,7 +5,7 @@
  * sequenced stream envelopes.
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { UiEvent, UiEventType, StreamEnvelope } from '@weaveintel/core';
 
 // ─── UiEvent builders ────────────────────────────────────────
@@ -13,7 +13,7 @@ import type { UiEvent, UiEventType, StreamEnvelope } from '@weaveintel/core';
 export function createUiEvent(type: UiEventType, data: unknown): UiEvent {
   return {
     type,
-    id: randomUUID(),
+    id: newUUIDv7(),
     timestamp: new Date().toISOString(),
     data,
   };

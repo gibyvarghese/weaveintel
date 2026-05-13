@@ -41,12 +41,13 @@
  *   getAgentRow: (agentId) => db.getLiveAgent(agentId),
  *   loadPinnedModel: (id) => myModelFactory.fromPinnedId(id),
  *   appendAuditEvent: (ev) => db.appendLiveRunEvent(ev),
- *   newId: () => crypto.randomUUID(),
+ *   newId: () => newUUIDv7(),
  * });
  * ```
  */
 
 import type { Model } from '@weaveintel/core';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { ModelResolver, ModelResolverContext } from '@weaveintel/live-agents';
 import {
   resolveAgentModelSpec,
@@ -99,7 +100,7 @@ export interface WeaveAgentOverlayResolverOptions {
   loadPinnedModel?: (modelId: string) => Promise<Model>;
   /** Optional best-effort audit writer. Failures are swallowed. */
   appendAuditEvent?: (ev: ModelResolvedAuditEvent) => Promise<void>;
-  /** UUID generator for audit event ids. Defaults to `crypto.randomUUID`. */
+  /** UUID generator for audit event ids. Defaults to `newUUIDv7` from @weaveintel/core. */
   newId?: () => string;
   /** Optional logger. */
   log?: (msg: string) => void;
@@ -118,7 +119,7 @@ export function weaveAgentOverlayResolver(
   opts: WeaveAgentOverlayResolverOptions,
 ): ModelResolver {
   const log = opts.log ?? (() => {});
-  const newId = opts.newId ?? (() => cryptoRandomUUID());
+  const newId = opts.newId ?? (() => newUUIDv7());
 
   return {
     async resolve(ctx: ModelResolverContext): Promise<Model | undefined> {
@@ -230,12 +231,4 @@ function describeCapability(spec: Record<string, unknown>): string {
 
 function describeErr(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-function cryptoRandomUUID(): string {
-  // Node 14+ exposes crypto.randomUUID via globalThis.crypto.
-  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-  if (c?.randomUUID) return c.randomUUID();
-  // Fallback: cheap timestamp+random. Audit ids don't need to be cryptographic.
-  return `evt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }

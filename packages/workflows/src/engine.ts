@@ -18,7 +18,7 @@ import type {
   HumanTaskPriority,
   HumanDecision,
 } from '@weaveintel/core';
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import { executeStep, type StepHandler, type StepHandlerMap } from './steps.js';
 import { createInitialState, advanceState, resolveNextStep, isTerminal } from './state.js';
 import { type CheckpointStore, InMemoryCheckpointStore } from './checkpoint-store.js';
@@ -209,7 +209,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     }
 
     const run: WorkflowRun = {
-      id: randomUUID(),
+      id: newUUIDv7(),
       workflowId,
       status: 'running',
       state: createInitialState(def, input),

@@ -17,7 +17,7 @@
  * (chat's own supervisor performs that role for SV runs).
  */
 
-import { randomUUID } from 'node:crypto';
+import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { PromptRow, WorkerAgentRow } from '../../db-types.js';
 
@@ -833,7 +833,7 @@ async function _seedSVToolCatalog(db: DatabaseAdapter): Promise<void> {
       const existing = await db.getToolCatalogByKey(t.toolKey);
       if (existing) continue;
       await db.createToolConfig({
-        id: randomUUID(),
+        id: newUUIDv7(),
         name: t.name,
         description: t.description,
         category: t.category,
