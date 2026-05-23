@@ -3033,4 +3033,135 @@ export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void
   `);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tenant_deletion_requests_tenant ON tenant_deletion_requests(tenant_id, status)`);
   safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tenant_deletion_requests_due ON tenant_deletion_requests(status, retention_until)`);
+
+  // ─── Encryption Phase 8 — Blind-index companion columns ─────────────────
+  // For every (table, column) listed in DEFAULT_BLIND_INDEX_SPECS we add a
+  // `<column>_bidx TEXT` companion to enable equality lookups against
+  // encrypted values. Currently shipped: users.email_bidx. Apps that ship
+  // additional specs add their ALTERs alongside this block.
+  //
+  // Lookup pattern (geneweave login): SELECT ... WHERE email_bidx = ?
+  // The bidx is computed client-side via `km.computeBlindIndex(...)`.
+  // Backfill on enable / on BIK rotation runs through the admin
+  // `/rebuild-bidx` endpoint (audit kind: bidx_rebuild).
+  safeExec(db, `ALTER TABLE users ADD COLUMN email_bidx TEXT`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_users_email_bidx ON users(email_bidx)`);
+
+  // ─── Encryption Phase 9 — Operator-configurable alert rules ──────────────
+  // Per-tenant (or fleet-wide when tenant_id IS NULL) alert thresholds. The
+  // alert evaluator (@weaveintel/encryption.evaluateAlerts) consumes these
+  // rows + the in-memory metrics snapshot + per-tenant rotation status to
+  // decide which rules fire right now. Defaults are seeded for the
+  // SYSTEM tenant on first boot in `bootstrapEncryptionAlerts`.
+  //
+  // tenant_id NULL  → fleet-wide rule (applies across all tenants).
+  // window_ms NULL  → kind-specific default (see DEFAULT_ALERT_RULES).
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tenant_encryption_alert_config (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT,
+      kind TEXT NOT NULL,
+      threshold REAL NOT NULL,
+      window_ms INTEGER,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      description TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+  safeExec(
+    db,
+    `CREATE INDEX IF NOT EXISTS idx_tenant_encryption_alert_tenant ON tenant_encryption_alert_config(tenant_id)`,
+  );
+  safeExec(
+    db,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_encryption_alert_tenant_kind ON tenant_encryption_alert_config(IFNULL(tenant_id,'__fleet__'), kind)`,
+  );
+
+  // ─── Encryption Phase 10 — BYOK / HYOK / break-glass / attestation ──────
+  // Per-tenant customer-managed key registration. When a row exists for a
+  // tenant the resolver hands out a `byok-pem` provider that wraps with the
+  // customer's RSA-4096 public key and unwraps via the configured delegate
+  // (HYOK proxy in prod, local key for dev only). `mode` is informational —
+  // the actual unwrap path is decided by which fields are populated.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tenant_byok_config (
+      tenant_id TEXT PRIMARY KEY,
+      mode TEXT NOT NULL DEFAULT 'byok',
+      public_key_pem TEXT NOT NULL,
+      public_key_fingerprint TEXT NOT NULL,
+      hyok_endpoint TEXT,
+      hyok_bearer_secret_id TEXT,
+      hyok_timeout_ms INTEGER,
+      private_key_pem_dev TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_by TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      revoked_at INTEGER
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tenant_byok_status ON tenant_byok_config(status)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_tenant_byok_fp ON tenant_byok_config(public_key_fingerprint)`);
+
+  // Break-glass grants. A pending request requires a different customer
+  // approver to flip it to `approved`; the window is capped server-side
+  // (see `break-glass.ts MAX_GRANT_WINDOW_MS`). `consume_count` is bumped
+  // every time the unwrap delegate redeems the grant — useful for audit
+  // forensics. Status flow: pending → approved | denied | expired; the
+  // reaper transitions stale `approved` rows to `expired` once they pass
+  // their `expires_at`.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tenant_break_glass_request (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      requested_by TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      customer_approver TEXT,
+      approved_at INTEGER,
+      expires_at INTEGER NOT NULL,
+      consume_count INTEGER NOT NULL DEFAULT 0,
+      denial_reason TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_break_glass_tenant ON tenant_break_glass_request(tenant_id, status)`);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_break_glass_due ON tenant_break_glass_request(status, expires_at)`);
+
+  // Compliance attestation export log. Each row is the signed JSON the
+  // customer's auditor can verify with the platform's published Ed25519
+  // public key. `payload_hash` is the SHA-256 of the canonical payload —
+  // safe to share without exposing the per-event audit content.
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS tenant_attestation_log (
+      id TEXT PRIMARY KEY,
+      tenant_id TEXT NOT NULL,
+      generated_at INTEGER NOT NULL,
+      signature_alg TEXT NOT NULL,
+      signature TEXT NOT NULL,
+      signing_key_fingerprint TEXT NOT NULL,
+      payload_hash TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      requested_by TEXT,
+      created_at INTEGER NOT NULL
+    )
+  `);
+  safeExec(db, `CREATE INDEX IF NOT EXISTS idx_attestation_tenant ON tenant_attestation_log(tenant_id, generated_at DESC)`);
+
+  // Platform-level signing key for compliance attestations. Single-row table
+  // (key='default') so we can later support key rotation by adding more rows
+  // and a `is_active` flag without schema churn. The Ed25519 private key is
+  // stored as PEM. Customers verify with the published public key (returned
+  // by the admin /attestation/public-key route).
+  safeExec(db, `
+    CREATE TABLE IF NOT EXISTS system_attestation_signing_key (
+      key TEXT PRIMARY KEY,
+      private_key_pem TEXT NOT NULL,
+      public_key_pem TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
 }

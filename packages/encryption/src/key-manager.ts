@@ -12,11 +12,18 @@
  * per value.
  */
 
-import { randomBytes } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { newUUIDv7 } from '@weaveintel/core';
 import type { AuditEmitter, EncryptionAuditEvent, EncryptionAuditKind } from './audit.js';
 import { decryptValue, encryptValue, isEncrypted, parseSentinel } from './envelope.js';
 import { KeyNotFoundError } from './errors.js';
+import {
+  noopMetricsEmitter,
+  startTimer,
+  type MetricsEmitter,
+  type MetricLabels,
+  type MetricName,
+} from './metrics.js';
 import { deserializeWrappedKey, serializeWrappedKey } from './kms.js';
 import type { KmsProvider } from './kms.js';
 import type {
@@ -30,10 +37,36 @@ import { mergeFieldPolicy } from './field-policy.js';
 
 const DEFAULT_CACHE_TTL_MS = 5 * 60 * 1000;
 
+/**
+ * Per-tenant KMS resolver. Returns the `KmsProvider` instance to use for the
+ * given tenant. Phase 7 enables a different KMS backend per tenant by reading
+ * `tenant_encryption_policy.kms_provider_id` + `kms_config` and constructing
+ * the matching provider via the registry. Implementations should cache the
+ * built provider — the manager calls this on every wrap/unwrap path.
+ */
+export type KmsResolver = (tenantId: string) => Promise<KmsProvider>;
+
 export interface TenantKeyManagerOptions {
   readonly store: EncryptionStore;
-  readonly kms: KmsProvider;
+  /**
+   * Default KmsProvider used when `kmsResolver` is not supplied OR when a
+   * resolver returns null/undefined. Backwards compatible with pre-Phase 7
+   * single-provider deployments.
+   */
+  readonly kms?: KmsProvider;
+  /**
+   * Phase 7: per-tenant KMS resolver. When supplied, takes precedence over
+   * `kms` for every wrap/unwrap. Falls back to `kms` if the resolver throws
+   * `KmsUnavailableError` and a default is provided.
+   */
+  readonly kmsResolver?: KmsResolver;
   readonly audit?: AuditEmitter;
+  /**
+   * Phase 9 — fire-and-forget metrics sink. Hosts plug an aggregator (e.g.
+   * `InMemoryMetricsEmitter`) for the admin dashboard. Defaults to a no-op
+   * so existing callers don't change behaviour.
+   */
+  readonly metrics?: MetricsEmitter;
   /** Unwrapped-key cache TTL. Default 5 minutes. */
   readonly cacheTtlMs?: number;
   /** Clock injection for tests. */
@@ -70,31 +103,61 @@ interface CachedKey {
 
 export class TenantKeyManager {
   readonly #store: EncryptionStore;
-  readonly #kms: KmsProvider;
+  readonly #defaultKms: KmsProvider | null;
+  readonly #resolver: KmsResolver | null;
   readonly #audit: AuditEmitter;
+  readonly #metrics: MetricsEmitter;
   readonly #ttl: number;
   readonly #now: () => number;
   readonly #dekCache = new Map<string, CachedKey>();
   readonly #kekCache = new Map<string, CachedKey>();
+  readonly #bikCache = new Map<string, CachedKey>();
 
   constructor(opts: TenantKeyManagerOptions) {
+    if (!opts.kms && !opts.kmsResolver) {
+      throw new Error('TenantKeyManager requires either `kms` (default provider) or `kmsResolver`');
+    }
     this.#store = opts.store;
-    this.#kms = opts.kms;
+    this.#defaultKms = opts.kms ?? null;
+    this.#resolver = opts.kmsResolver ?? null;
     this.#audit = opts.audit ?? { async emit() {} };
+    this.#metrics = opts.metrics ?? noopMetricsEmitter;
     this.#ttl = opts.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
     this.#now = opts.now ?? (() => Date.now());
+  }
+
+  /**
+   * Resolve the KMS provider for `tenantId`. Resolver wins; falls back to
+   * the default provider if the resolver is missing OR returns null.
+   * The resolver is responsible for its own caching — `TenantKeyManager`
+   * caches plaintext KEK/DEK material, not provider instances.
+   */
+  async #resolveKms(tenantId: string): Promise<KmsProvider> {
+    if (this.#resolver) {
+      try {
+        const p = await this.#resolver(tenantId);
+        if (p) return p;
+      } catch (err) {
+        if (!this.#defaultKms) throw err;
+      }
+    }
+    if (!this.#defaultKms) {
+      throw new KeyNotFoundError(`no KMS provider available for tenant ${tenantId}`);
+    }
+    return this.#defaultKms;
   }
 
   // ---- public API -------------------------------------------------------
 
   async encrypt(opts: EncryptOptions): Promise<string> {
+    const stop = startTimer();
     const policy = await this.#requirePolicy(opts.tenantId);
     const dekId = policy.activeDekId;
     if (!dekId) throw new KeyNotFoundError(`no active DEK for tenant ${opts.tenantId}`);
     const dekRow = await this.#getDekRow(opts.tenantId, dekId);
     const dek = await this.#unwrapDek(opts.tenantId, dekRow);
     const pt = typeof opts.plaintext === 'string' ? Buffer.from(opts.plaintext, 'utf8') : opts.plaintext;
-    return encryptValue({
+    const ct = encryptValue({
       plaintext: pt,
       dek,
       aad: {
@@ -105,24 +168,46 @@ export class TenantKeyManager {
         epoch: dekRow.epoch,
       },
     });
+    this.#histogram('encryption.encrypt.duration_ms', stop(), {
+      tenantId: opts.tenantId,
+      table: opts.table,
+      column: opts.column,
+    });
+    return ct;
   }
 
   async decrypt(opts: DecryptOptions): Promise<string> {
     if (!isEncrypted(opts.value)) return opts.value;
+    const stop = startTimer();
     const parsed = parseSentinel(opts.value);
-    const dekRow = await this.#findDekByEpoch(opts.tenantId, parsed.epoch);
-    const dek = await this.#unwrapDek(opts.tenantId, dekRow);
-    const buf = decryptValue({
-      ciphertext: opts.value,
-      dek,
-      aad: {
+    try {
+      const dekRow = await this.#findDekByEpoch(opts.tenantId, parsed.epoch);
+      const dek = await this.#unwrapDek(opts.tenantId, dekRow);
+      const buf = decryptValue({
+        ciphertext: opts.value,
+        dek,
+        aad: {
+          tenantId: opts.tenantId,
+          table: opts.table,
+          column: opts.column,
+          rowId: opts.rowId,
+        },
+      });
+      this.#histogram('encryption.decrypt.duration_ms', stop(), {
         tenantId: opts.tenantId,
         table: opts.table,
         column: opts.column,
-        rowId: opts.rowId,
-      },
-    });
-    return buf.toString('utf8');
+      });
+      return buf.toString('utf8');
+    } catch (err) {
+      this.#counter('encryption.aead.error', {
+        tenantId: opts.tenantId,
+        table: opts.table,
+        column: opts.column,
+        kind: (err as Error).name ?? 'Error',
+      });
+      throw err;
+    }
   }
 
   /**
@@ -145,9 +230,10 @@ export class TenantKeyManager {
     }
 
     // Create KEK.
-    const rootKeyId = await this.#kms.rootKeyId(opts.tenantId);
+    const kms = await this.#resolveKms(opts.tenantId);
+    const rootKeyId = await kms.rootKeyId(opts.tenantId);
     const kekPlain = randomBytes(32);
-    const wrappedKek = await this.#kms.wrap(rootKeyId, kekPlain);
+    const wrappedKek = await kms.wrap(rootKeyId, kekPlain);
     const kekId = newUUIDv7();
     const now = this.#now();
     const kek: KekRecord = {
@@ -204,7 +290,7 @@ export class TenantKeyManager {
     const policy: TenantPolicyRecord = {
       tenantId: opts.tenantId,
       enabled: enable,
-      kmsProviderId: this.#kms.id,
+      kmsProviderId: existing?.kmsProviderId ?? kms.id,
       kmsConfig: existing?.kmsConfig ?? null,
       activeKekId: kekId,
       activeDekId: dekId,
@@ -258,9 +344,10 @@ export class TenantKeyManager {
     const policy = await this.#requirePolicy(tenantId);
     const keks = await this.#store.listKeks(tenantId);
     const maxVer = keks.reduce((m, k) => (k.version > m ? k.version : m), 0);
-    const rootKeyId = await this.#kms.rootKeyId(tenantId);
+    const kms = await this.#resolveKms(tenantId);
+    const rootKeyId = await kms.rootKeyId(tenantId);
     const newKekPlain = randomBytes(32);
-    const wrapped = await this.#kms.wrap(rootKeyId, newKekPlain);
+    const wrapped = await kms.wrap(rootKeyId, newKekPlain);
     const id = newUUIDv7();
     const now = this.#now();
     const newKek: KekRecord = {
@@ -308,6 +395,88 @@ export class TenantKeyManager {
   }
 
   /**
+   * Phase 8 — compute a deterministic, tenant-scoped blind index for an
+   * equality-lookup column. Returns 24 hex chars (96 bits) of HMAC-SHA-256
+   * keyed by the tenant's active BIK. Inputs to the HMAC are domain-separated
+   * by `${table}|${column}|${value}` so the same value in different columns
+   * never collides.
+   *
+   * Throws when the tenant has no policy / no active BIK / blind-index toggle
+   * is disabled. Callers should use `policy.blindIndexEnabled` to gate writes
+   * AND use `maybeBlindIndex` (adapter helper) to short-circuit cleanly.
+   */
+  async computeBlindIndex(opts: {
+    readonly tenantId: string;
+    readonly table: string;
+    readonly column: string;
+    readonly value: string;
+  }): Promise<string> {
+    const stop = startTimer();
+    const policy = await this.#requirePolicy(opts.tenantId);
+    if (!policy.blindIndexEnabled) {
+      throw new KeyNotFoundError(
+        `blind-index disabled for tenant ${opts.tenantId} (policy.blindIndexEnabled=false)`,
+      );
+    }
+    const bikId = policy.activeBikId;
+    if (!bikId) throw new KeyNotFoundError(`no active BIK for tenant ${opts.tenantId}`);
+    const bikRow = await this.#getBikRow(opts.tenantId, bikId);
+    const bik = await this.#unwrapBik(opts.tenantId, bikRow);
+    const mac = createHmac('sha256', bik)
+      .update(`${opts.table}|${opts.column}|${opts.value}`)
+      .digest('hex')
+      .slice(0, 24);
+    // Audit is fire-and-forget and rate-limited at the host level — cheap path
+    // emits per-call. Hosts that want sampling wrap the manager.
+    await this.#emit(opts.tenantId, 'bidx_compute', null, {
+      table: opts.table,
+      column: opts.column,
+      bikId,
+    });
+    this.#histogram('encryption.blind_index.duration_ms', stop(), {
+      tenantId: opts.tenantId,
+      table: opts.table,
+      column: opts.column,
+    });
+    return mac;
+  }
+
+  /**
+   * Phase 8 — mint a new BIK (epoch+1), mark previous as `previous`. Existing
+   * blind-index columns become STALE — operators MUST run a bidx rebuild after
+   * this call (the admin endpoint records the rebuild progress in audit).
+   */
+  async rotateBik(tenantId: string, actor: string | null = null): Promise<BikRecord> {
+    const policy = await this.#requirePolicy(tenantId);
+    if (!policy.activeKekId) throw new KeyNotFoundError(`no active KEK for tenant ${tenantId}`);
+    const kekRow = await this.#getKekRow(tenantId, policy.activeKekId);
+    const kekPlain = await this.#unwrapKek(kekRow);
+    const biks = await this.#store.listBiks(tenantId);
+    const maxEpoch = biks.reduce((m, b) => (b.epoch > m ? b.epoch : m), 0);
+    const newPlain = randomBytes(32);
+    const wrapped = await this.#wrapUnderKek(kekPlain, newPlain, tenantId);
+    const id = newUUIDv7();
+    const now = this.#now();
+    const newBik: BikRecord = {
+      id,
+      tenantId,
+      epoch: maxEpoch + 1,
+      status: 'active',
+      wrapped,
+      createdAt: now,
+      revokedAt: null,
+    };
+    await this.#store.insertBik(newBik);
+    if (policy.activeBikId) {
+      await this.#store.updateBikStatus(policy.activeBikId, 'previous', now);
+    }
+    await this.#store.upsertPolicy({ ...policy, activeBikId: id });
+    this.#bikCache.set(id, { key: newPlain, expiresAt: now + this.#ttl });
+    await this.#emit(tenantId, 'bik_rotate', actor, { bikId: id, epoch: newBik.epoch });
+    return newBik;
+  }
+
+  /**
    * Crypto-shred: revoke all KEKs/DEKs/BIKs and clear caches. Existing
    * ciphertext becomes permanently undecryptable. Phase 5 will add the
    * deeper rewrite-and-purge job; this Phase 1 entry point performs the
@@ -337,6 +506,7 @@ export class TenantKeyManager {
     }
     this.#dekCache.clear();
     this.#kekCache.clear();
+    this.#bikCache.clear();
     await this.#emit(tenantId, 'shred', actor, {
       keks: keks.length,
       deks: deks.length,
@@ -348,6 +518,7 @@ export class TenantKeyManager {
   clearCaches(): void {
     this.#dekCache.clear();
     this.#kekCache.clear();
+    this.#bikCache.clear();
   }
 
   /**
@@ -446,8 +617,28 @@ export class TenantKeyManager {
   async #unwrapKek(row: KekRecord): Promise<Buffer> {
     const cached = this.#kekCache.get(row.id);
     const now = this.#now();
-    if (cached && cached.expiresAt > now) return cached.key;
-    const key = await this.#kms.unwrap(deserializeWrappedKey(row.wrapped));
+    if (cached && cached.expiresAt > now) {
+      this.#counter('encryption.cache.hit', { tenantId: row.tenantId, cache: 'kek' });
+      return cached.key;
+    }
+    this.#counter('encryption.cache.miss', { tenantId: row.tenantId, cache: 'kek' });
+    const kms = await this.#resolveKms(row.tenantId);
+    const stop = startTimer();
+    let key: Buffer;
+    try {
+      key = await kms.unwrap(deserializeWrappedKey(row.wrapped));
+    } catch (err) {
+      this.#counter('encryption.kms.error', {
+        tenantId: row.tenantId,
+        provider: kms.id,
+        kind: (err as Error).name ?? 'Error',
+      });
+      throw err;
+    }
+    this.#histogram('encryption.kms.unwrap.duration_ms', stop(), {
+      tenantId: row.tenantId,
+      provider: kms.id,
+    });
     this.#kekCache.set(row.id, { key, expiresAt: now + this.#ttl });
     return key;
   }
@@ -455,12 +646,45 @@ export class TenantKeyManager {
   async #unwrapDek(tenantId: string, row: DekRecord): Promise<Buffer> {
     const cached = this.#dekCache.get(row.id);
     const now = this.#now();
-    if (cached && cached.expiresAt > now) return cached.key;
+    if (cached && cached.expiresAt > now) {
+      this.#counter('encryption.cache.hit', { tenantId, cache: 'dek' });
+      return cached.key;
+    }
+    this.#counter('encryption.cache.miss', { tenantId, cache: 'dek' });
     const kekRow = await this.#getKekRow(tenantId, row.kekId);
     const kekPlain = await this.#unwrapKek(kekRow);
     const dek = await this.#unwrapWithKek(kekPlain, row.wrapped, tenantId);
     this.#dekCache.set(row.id, { key: dek, expiresAt: now + this.#ttl });
     return dek;
+  }
+
+  async #getBikRow(tenantId: string, bikId: string): Promise<BikRecord> {
+    const all = await this.#store.listBiks(tenantId);
+    const row = all.find((b) => b.id === bikId);
+    if (!row) throw new KeyNotFoundError(`BIK ${bikId} not found for tenant ${tenantId}`);
+    return row;
+  }
+
+  async #unwrapBik(tenantId: string, row: BikRecord): Promise<Buffer> {
+    const cached = this.#bikCache.get(row.id);
+    const now = this.#now();
+    if (cached && cached.expiresAt > now) {
+      this.#counter('encryption.cache.hit', { tenantId, cache: 'bik' });
+      return cached.key;
+    }
+    this.#counter('encryption.cache.miss', { tenantId, cache: 'bik' });
+    const policy = await this.#requirePolicy(tenantId);
+    if (!policy.activeKekId) {
+      throw new KeyNotFoundError(`no active KEK for tenant ${tenantId} (cannot unwrap BIK)`);
+    }
+    // BIKs are wrapped under whichever KEK was active at creation time. Until
+    // we track per-BIK kekId, we assume rotateKek re-wraps BIKs (Phase 8 TODO)
+    // — for now BIK is single-KEK lifetime so this works.
+    const kekRow = await this.#getKekRow(tenantId, policy.activeKekId);
+    const kekPlain = await this.#unwrapKek(kekRow);
+    const bik = await this.#unwrapWithKek(kekPlain, row.wrapped, tenantId);
+    this.#bikCache.set(row.id, { key: bik, expiresAt: now + this.#ttl });
+    return bik;
   }
 
   async #wrapUnderKek(kekPlain: Buffer, plain: Buffer, tenantId: string) {
@@ -498,6 +722,22 @@ export class TenantKeyManager {
       await this.#audit.emit(ev);
     } catch {
       // Best-effort: never block crypto on audit failure.
+    }
+  }
+
+  #histogram(name: MetricName, value: number, labels: MetricLabels): void {
+    try {
+      this.#metrics.record({ name, kind: 'histogram', value, labels, at: this.#now() });
+    } catch {
+      // metrics are fire-and-forget
+    }
+  }
+
+  #counter(name: MetricName, labels: MetricLabels, value = 1): void {
+    try {
+      this.#metrics.record({ name, kind: 'counter', value, labels, at: this.#now() });
+    } catch {
+      // metrics are fire-and-forget
     }
   }
 }

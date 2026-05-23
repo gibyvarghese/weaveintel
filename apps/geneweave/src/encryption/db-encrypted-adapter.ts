@@ -28,6 +28,7 @@ import {
   isFieldEncrypted,
   isEncrypted,
 } from '@weaveintel/encryption';
+import { SYSTEM_TENANT_ID } from './system-tenant.js';
 
 type GetManager = () => TenantKeyManager | null;
 
@@ -200,6 +201,38 @@ export function withTenantEncryptedDb(
   // can't be intercepted that way, so we wrap that one method directly using
   // the same guard chain (manager null / tenant null / policy disabled /
   // column not in policy / already-sentinel → pass-through).
+  //
+  // Phase 8 additions: createUser / updateUser / getUserByEmail are wrapped
+  // here too, but for blind-index (not field encryption). They use the
+  // SYSTEM_TENANT_ID scope because login lookup happens before any per-user
+  // tenant context exists. Failures fall back to plaintext-equality so login
+  // never breaks during the rollout window.
+  async function systemBidxEnabled(): Promise<boolean> {
+    try {
+      const snap = await loadTenantPolicy(rawDb, SYSTEM_TENANT_ID);
+      if (!snap?.enabled) return false;
+      const row = await rawDb.getTenantEncryptionPolicy(SYSTEM_TENANT_ID);
+      return row?.blind_index_enabled === 1;
+    } catch {
+      return false;
+    }
+  }
+  async function computeEmailBidx(email: string | null | undefined): Promise<string | null> {
+    const manager = getManager();
+    if (!manager || !email) return null;
+    if (!(await systemBidxEnabled())) return null;
+    try {
+      return await manager.computeBlindIndex({
+        tenantId: SYSTEM_TENANT_ID,
+        table: 'users',
+        column: 'email',
+        value: email,
+      });
+    } catch {
+      return null;
+    }
+  }
+
   return new Proxy(baseProxy, {
     get(target, prop, receiver) {
       if (prop === 'updateChatTitle') {
@@ -233,6 +266,43 @@ export function withTenantEncryptedDb(
           return rawDb.updateChatTitle(id, userId, toWrite);
         };
       }
+
+      if (prop === 'createUser') {
+        return async (u: Parameters<DatabaseAdapter['createUser']>[0]): Promise<void> => {
+          const bidx = u.emailBidx ?? (await computeEmailBidx(u.email));
+          return rawDb.createUser(bidx === null ? u : { ...u, emailBidx: bidx });
+        };
+      }
+
+      if (prop === 'updateUser') {
+        return async (
+          userId: string,
+          updates: Parameters<DatabaseAdapter['updateUser']>[1],
+        ): Promise<void> => {
+          // Only recompute bidx if the email actually changed AND caller
+          // didn't supply an explicit override.
+          if (updates.email !== undefined && updates.emailBidx === undefined) {
+            const bidx = await computeEmailBidx(updates.email);
+            if (bidx !== null) {
+              return rawDb.updateUser(userId, { ...updates, emailBidx: bidx });
+            }
+          }
+          return rawDb.updateUser(userId, updates);
+        };
+      }
+
+      if (prop === 'getUserByEmail') {
+        return async (email: string): Promise<ReturnType<DatabaseAdapter['getUserByEmail']>> => {
+          const bidx = await computeEmailBidx(email);
+          if (bidx) {
+            const hit = await rawDb.getUserByEmailBidx(bidx);
+            if (hit) return hit;
+            // Fall through — row may predate bidx backfill (lazy-upgrade window).
+          }
+          return rawDb.getUserByEmail(email);
+        };
+      }
+
       return Reflect.get(target, prop, receiver);
     },
   }) as DatabaseAdapter;

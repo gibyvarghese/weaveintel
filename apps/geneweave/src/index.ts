@@ -118,9 +118,23 @@ export interface GeneWeaveApp {
  * stays `null` otherwise. Phase 3 consumer integration (chat/sv encrypted
  * columns) reads this lazily so encryption is opt-in per deployment.
  */
-import type { TenantKeyManager } from '@weaveintel/encryption';
+import type {
+  CachedKmsResolver,
+  InMemoryMetricsEmitter,
+  KmsProviderRegistry,
+  MetricsEmitter,
+  TenantKeyManager,
+} from '@weaveintel/encryption';
 import { withTenantEncryptedMessages } from './encryption/db-encrypted-adapter.js';
 export let geneweaveEncryptionManager: TenantKeyManager | null = null;
+/** Phase 7: KMS provider registry exposed for admin endpoints (list/health-check). */
+export let geneweaveKmsRegistry: KmsProviderRegistry | null = null;
+/** Phase 7: per-tenant KMS resolver exposed so admin code can invalidate cache on policy edits. */
+export let geneweaveKmsResolver: CachedKmsResolver | null = null;
+/** Phase 9: metrics emitter wired into the manager + resolver. Exposed so admin
+ * observability endpoints can read its `snapshot()` (when it's the in-memory
+ * default) without coupling to a singleton. */
+export let geneweaveEncryptionMetrics: (MetricsEmitter & { snapshot?: InMemoryMetricsEmitter['snapshot'] }) | null = null;
 
 /**
  * createGeneWeave() is the single entry-point for the entire application.
@@ -236,6 +250,26 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     const result = bootstrapEncryption(db);
     if (result) {
       geneweaveEncryptionManager = result.manager;
+      geneweaveKmsRegistry = result.registry;
+      geneweaveKmsResolver = result.resolver;
+      geneweaveEncryptionMetrics = result.metrics as typeof geneweaveEncryptionMetrics;
+      // Phase 8: bootstrap the SYSTEM tenant whose BIK powers cross-tenant
+      // equality lookups (login by users.email_bidx). Idempotent.
+      try {
+        const { bootstrapSystemTenant } = await import('./encryption/system-tenant.js');
+        await bootstrapSystemTenant(db, result.manager);
+      } catch (err) {
+        console.error('[encryption] system-tenant bootstrap failed (non-fatal)', err);
+      }
+      // Phase 9: seed default fleet-wide alert rules so the operator dashboard
+      // has data on first boot. Idempotent — preserves operator edits.
+      try {
+        const { seedDefaultAlertRules } = await import('./encryption/alert-store.js');
+        const seeded = await seedDefaultAlertRules(db, { tenantId: null });
+        console.log('[encryption] alert rules seeded', seeded);
+      } catch (err) {
+        console.error('[encryption] alert seed failed (non-fatal)', err);
+      }
     }
   } catch (err) {
     console.error('[encryption] bootstrap failed (non-fatal)', err);

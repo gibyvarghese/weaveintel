@@ -15,6 +15,8 @@ export type EncryptionAuditKind =
   | 'bik_create'
   | 'bik_rotate'
   | 'bik_revoke'
+  | 'bidx_compute'
+  | 'bidx_rebuild'
   | 'wrap'
   | 'unwrap'
   | 'shred'
@@ -25,7 +27,19 @@ export type EncryptionAuditKind =
   | 'tenant_deletion_cancelled'
   | 'tenant_restored'
   | 'tenant_purged'
-  | 'compliance_report_generated';
+  | 'kms_health_check'
+  | 'compliance_report_generated'
+  | 'byok_register'
+  | 'byok_rotate_pubkey'
+  | 'byok_revoke'
+  | 'hyok_unwrap'
+  | 'break_glass_requested'
+  | 'break_glass_approved'
+  | 'break_glass_denied'
+  | 'break_glass_consumed'
+  | 'break_glass_expired'
+  | 'attestation_generated'
+  | 'attestation_verified';
 
 export interface EncryptionAuditEvent {
   readonly id: string;

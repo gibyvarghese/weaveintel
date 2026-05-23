@@ -36,6 +36,8 @@ import { registerMeshContractRoutes } from './admin/api/mesh-contracts.js';
 import { registerCostLedgerRoutes } from './admin/api/cost-ledger.js';
 import { registerCostPolicyRoutes } from './admin/api/cost-policies.js';
 import { registerTenantEncryptionPolicyRoutes } from './admin/api/tenant-encryption-policies.js';
+import { registerEncryptionObservabilityRoutes } from './admin/api/encryption-observability.js';
+import { registerTenantByokRoutes } from './admin/api/tenant-byok.js';
 // Live-binding getter for `geneweaveEncryptionManager` (declared `export let` in
 // `./index.ts`). Importing the namespace defers field access to call time so
 // the route observes the post-boot value despite the circular module shape.
@@ -244,17 +246,60 @@ function cleanupAuthRateState(now: number): void {
   }
 }
 
+function normalizeIpAddress(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (trimmed === '::1') return '127.0.0.1';
+  return trimmed.startsWith('::ffff:') ? trimmed.slice(7) : trimmed;
+}
+
+function loadTrustedProxySet(): Set<string> {
+  const raw = process.env['TRUSTED_PROXY_IPS'] ?? '';
+  const values = raw
+    .split(',')
+    .map((part) => normalizeIpAddress(part))
+    .filter(Boolean);
+  return new Set(values);
+}
+
+function isTrustedProxy(ip: string, trusted: Set<string>): boolean {
+  if (!ip) return false;
+  if (trusted.has(ip)) return true;
+  // Local proxy hops are trusted in development for local reverse-proxy setups.
+  if (process.env['NODE_ENV'] !== 'production') {
+    return ip === '127.0.0.1';
+  }
+  return false;
+}
+
 function readClientIp(req: IncomingMessage): string {
+  const trustedProxies = loadTrustedProxySet();
+  const remote = normalizeIpAddress(req.socket.remoteAddress ?? '');
+  if (!isTrustedProxy(remote, trustedProxies)) {
+    return remote || 'unknown';
+  }
+
   const forwardedFor = req.headers['x-forwarded-for'];
   if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
-    const first = forwardedFor.split(',')[0]?.trim();
-    if (first) return first;
+    const hops = forwardedFor
+      .split(',')
+      .map((part) => normalizeIpAddress(part))
+      .filter(Boolean);
+    // Walk from nearest -> furthest and choose first untrusted hop.
+    for (let i = hops.length - 1; i >= 0; i -= 1) {
+      if (!isTrustedProxy(hops[i]!, trustedProxies)) {
+        return hops[i]!;
+      }
+    }
+    return (hops[0] ?? remote) || 'unknown';
   }
+
   const realIp = req.headers['x-real-ip'];
   if (typeof realIp === 'string' && realIp.trim()) {
-    return realIp.trim();
+    return normalizeIpAddress(realIp) || remote || 'unknown';
   }
-  return req.socket.remoteAddress ?? 'unknown';
+
+  return remote || 'unknown';
 }
 
 function checkRateLimit(key: string, limit: number, windowMs: number): { limited: boolean; retryAfterMs: number } {
@@ -380,8 +425,36 @@ function resolveRequestOrigin(req: IncomingMessage): string {
   return normalizePublicOrigin(`${protocol}://${host}`);
 }
 
+function resolveAllowedOAuthOrigins(publicBaseUrl: string): Set<string> {
+  const configured = normalizePublicOrigin(publicBaseUrl);
+  const extras = (process.env['OAUTH_ALLOWED_ORIGINS'] ?? '')
+    .split(',')
+    .map((raw) => raw.trim())
+    .filter(Boolean)
+    .map((raw) => normalizePublicOrigin(raw));
+  return new Set([configured, ...extras]);
+}
+
 function buildOAuthProviderFromRequest(provider: OAuthProviderName, req: IncomingMessage, publicBaseUrl?: string) {
-  const baseUrl = publicBaseUrl ? normalizePublicOrigin(publicBaseUrl) : resolveRequestOrigin(req);
+  const isProduction = process.env['NODE_ENV'] === 'production';
+  if (isProduction && !publicBaseUrl) {
+    throw new Error('publicBaseUrl must be configured in production for OAuth routes');
+  }
+
+  let baseUrl: string;
+  if (publicBaseUrl) {
+    baseUrl = normalizePublicOrigin(publicBaseUrl);
+    if (isProduction) {
+      const requestOrigin = resolveRequestOrigin(req);
+      const allowed = resolveAllowedOAuthOrigins(publicBaseUrl);
+      if (!allowed.has(requestOrigin)) {
+        throw new Error(`OAuth request origin not allowed: ${requestOrigin}`);
+      }
+    }
+  } else {
+    baseUrl = resolveRequestOrigin(req);
+  }
+
   const redirectUri = `${baseUrl}/api/oauth/callback`;
   const clientId = process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_ID`];
   const clientSecret = process.env[`OAUTH_${provider.toUpperCase()}_CLIENT_SECRET`];
@@ -670,7 +743,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
     try {
       const state = newUUIDv7();
-      const oauthProvider = buildOAuthProviderFromRequest(provider, req);
+      const oauthProvider = buildOAuthProviderFromRequest(provider, req, publicBaseUrl);
       const { authUrl } = await oauthClient.generateAuthorizationUrl(oauthProvider, state);
       await setOAuthState(state, { userId: auth?.userId ?? null, provider, expiresAt: Date.now() + 600_000 });
       json(res, 200, { authUrl });
@@ -694,7 +767,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     const { userId: stateUserId, provider } = stateData;
 
     try {
-      const oauthProvider = buildOAuthProviderFromRequest(provider, req);
+      const oauthProvider = buildOAuthProviderFromRequest(provider, req, publicBaseUrl);
       const { token } = await oauthClient.exchangeCodeForToken(oauthProvider, code, state);
       const oauthProfile = await oauthClient.getUserProfile(oauthProvider, token.access_token, token);
 
@@ -1175,25 +1248,39 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
 
   registerAdminRoutes(adminRouter, db, json, readBody, providers, html);
 
-  // Workflow Platform Phase 1 routes — registered on the direct router so
-  // they can return 503 when the engine isn't wired (test boots), without
-  // tripping the admin permission gate.
-  registerWorkflowPlatformRoutes(router, db, { json, readBody }, workflowEngine);
-  registerTriggerRoutes(router, db, { json, readBody }, triggerDispatcher);
-  registerMeshContractRoutes(router, db, { json });
-  registerCostLedgerRoutes(router, db, { json });
-  registerCostPolicyRoutes(router, db, { json, readBody });
+  // These modules expose `/api/admin/*` endpoints and must pass through
+  // the same RBAC gate as other admin routes.
+  registerWorkflowPlatformRoutes(adminRouter, db, { json, readBody }, workflowEngine);
+  registerTriggerRoutes(adminRouter, db, { json, readBody }, triggerDispatcher);
+  registerMeshContractRoutes(adminRouter, db, { json });
+  registerCostLedgerRoutes(adminRouter, db, { json });
+  registerCostPolicyRoutes(adminRouter, db, { json, readBody });
   // Tenant Encryption Phase 2 — admin CRUD + lifecycle (bootstrap, rotate-dek,
   // rotate-kek, shred). The route uses an ESM live-binding via a getter so it
   // always observes the current value of the process-wide
   // `geneweaveEncryptionManager` (filled in post-boot by `bootstrapEncryption`,
   // may stay null when WEAVE_ENCRYPTION_MASTER_KEY is unset).
   registerTenantEncryptionPolicyRoutes(
-    router,
+    adminRouter,
     db,
     { json, readBody },
     () => indexModule.geneweaveEncryptionManager,
+    () => indexModule.geneweaveKmsRegistry,
+    () => indexModule.geneweaveKmsResolver,
   );
+  // Phase 9 — Encryption observability (health dashboard + alert rule CRUD).
+  // Reads metrics from the in-memory emitter wired during bootstrapEncryption.
+  registerEncryptionObservabilityRoutes(
+    adminRouter,
+    db,
+    { json, readBody },
+    () => indexModule.geneweaveEncryptionMetrics,
+    () => indexModule.geneweaveKmsRegistry,
+    () => indexModule.geneweaveKmsResolver,
+  );
+  // Phase 10 — BYOK / HYOK / break-glass / signed attestations.
+  // All state DB-driven; no process-wide mutable wiring required.
+  registerTenantByokRoutes(adminRouter, db, { json, readBody });
 
   // ── Hypothesis Validation feature routes ────────────────────
   // Build async model factories from the configured providers (models are cached by chat-runtime).

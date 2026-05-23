@@ -1477,3 +1477,184 @@ Phase 6 ships the operator-facing GDPR right-to-erasure pipeline: per-tenant del
 - E2E script: `scripts/e2e-phase6-tenant-deletion.mjs` — **33 assertions, all pass** against `http://localhost:3500`. Covers: register → promote + tenant_id assign → login (csrf from body) → manager_available → POST policy with auto-bootstrap → POST /request-deletion (default 30d retention) → GET /tenant-deletion-requests list → POST /cancel-deletion → 409 on cancel-again → second request with `retentionDays: 1` → SQL `UPDATE retention_until = strftime('%s','now')*1000 - 1000` → execSync helper → assert `{checked>=1, purged>=1, errors:0}` → request status=purged → wrapped key material count == 0 → audit ≥1 `tenant_purged` from `system:purge-scheduler` → DELETE policy succeeds (no live keys) → 404.
 - Same zsh launcher gotcha as Phase 5: use `/tmp/start-phase6.sh` script file pattern with `set -a; source .env; set +a` and explicit `WEAVE_ENCRYPTION_MASTER_KEY` export.
 
+
+## Tenant Encryption — Phase 7: Cloud KMS Provider Registry
+
+Phase 7 makes the encryption layer multi-cloud: each tenant selects a KMS at the policy level (`tenant_encryption_policy.kms_provider_id` + `kms_config`). Five providers ship in `@weaveintel/encryption` — `local`, `aws-kms`, `azure-kv`, `gcp-kms`, `vault` — and operators can register custom providers (HSM, in-house REST KMS) without forking the package.
+
+### Package surface (`@weaveintel/encryption`)
+- `KmsProviderRegistry` (in `provider-registry.ts`) — `register({ id, build, healthCheck })`, `list()`, `build(id, config)`, `healthCheck(provider)`. The `build` factory is responsible for validating per-tenant config shape and throwing on bad input.
+- `defaultWrapUnwrapHealthCheck(provider)` — exercises a real wrap+unwrap roundtrip, returns `{ ok, latencyMs, error? }`. Used by every built-in provider; safe default for custom providers.
+- `createCachedKmsResolver({ registry, store, defaultProviderId, defaultConfig? })` (in `kms-resolver.ts`) — returns `{ resolve, invalidate(tenantId), invalidateAll(), size() }`. Cache key is `(tenantId, providerId, sha256(JSON.stringify(config, sortedKeys)).slice(0,16))` so config edits naturally invalidate. Falls back to `defaultProviderId` when the tenant has no policy row.
+- `createBuiltinKmsRegistry()` and `registerBuiltinKmsProviders(registry)` (in `register-builtins.ts`) — register all 5 built-ins. `BUILTIN_KMS_PROVIDER_IDS` is the canonical list.
+- `weaveTenantKeyManager({ store, kms?, kmsResolver, audit })` — the resolver is the per-tenant routing path; `kms` stays optional for legacy single-provider deployments. Manager calls `await this.#resolveKms(tenantId)` on every wrap/unwrap.
+- New audit kind: `'kms_health_check'` (added to `AuditEvent.kind`). Payload: `{ providerId, ok, latencyMs, error? }`.
+- All exports re-routed via `packages/encryption/src/index.ts` — including provider classes (`AwsKmsProvider`, `AzureKeyVaultProvider`, `GcpKmsProvider`, `VaultTransitProvider`) and option types. **Reusability invariant preserved**: package depends only on `@weaveintel/core` + `node:crypto`. Cloud SDKs are dynamically imported inside provider classes — they remain optional installs.
+
+### GeneWeave wiring (reference impl)
+- `apps/geneweave/src/encryption/bootstrap.ts` returns `{ manager, registry, resolver, source }` (source is `'env' | 'dev-generated' | 'no-default'`). Always uses `createBuiltinKmsRegistry()`. Optional `registerExtra(registry)` hook lets callers add custom providers BEFORE the resolver wraps it. Returns `null` only when no local master key AND `defaultProviderId === 'local'` — cloud-only deployments can boot with `defaultProviderId: 'aws-kms'` and no env key.
+- `apps/geneweave/src/index.ts` exports three module-level singletons: `geneweaveEncryptionManager`, `geneweaveKmsRegistry`, `geneweaveKmsResolver`. The bootstrap result populates all three; admin routes read them via getter pattern (live binding).
+- 2 new admin REST endpoints in `apps/geneweave/src/admin/api/tenant-encryption-policies.ts`:
+  - `GET /api/admin/encryption/kms-providers` (auth) → `{ providers: string[] }`. Lists registered ids from the live registry — never hardcoded.
+  - `POST /api/admin/tenant-encryption-policies/:tenantId/kms/health-check` (csrf, auth) → 200 `{ ok: true, providerId, latencyMs }` or 502 `{ ok: false, providerId, error }`. Resolves provider via `resolver.resolve(tenantId)`, runs `registry.healthCheck(provider)`, persists `kms_health_check` audit row before returning.
+- POST/PUT policy endpoints validate `kms_provider_id` against `registry.list()` and return 400 on unknown ids. Both call `getKmsResolver()?.invalidate(tenantId)` after upsert so the next health-check / wrap / unwrap rebuilds the provider with the new config.
+- `registerTenantEncryptionPolicyRoutes(...)` signature gained two optional getter args: `getKmsRegistry: () => KmsProviderRegistry | null` and `getKmsResolver: () => CachedKmsResolver | null`. Both default to `() => null` so the existing call sites without registry support keep compiling.
+
+### CRITICAL invariants (verified)
+- **Cache invalidation is config-driven, not policy-id-driven.** The cache key includes a config hash so changing `kms_config` (e.g. rotating `rootKeyId`, switching `keyVersion`) automatically produces a new cache entry on the next call. Admin routes also call `resolver.invalidate(tenantId)` defensively after every upsert.
+- **Provider validation runs at write time, not read time.** Saving a policy with an unknown `kms_provider_id` is rejected with 400. The resolver still throws `KmsUnavailableError` at runtime if the registry was rebuilt without a previously-saved provider — defence in depth.
+- **Cloud SDKs stay lazy.** `register-builtins.ts` references provider classes directly, but the cloud SDK `import('@aws-sdk/client-kms')` etc. happens INSIDE each provider's wrap/unwrap call. A geneweave deployment that only uses `local` never installs cloud SDKs.
+- **Health-check is the only operation that can write `kms_health_check` audit rows.** Admin route MUST persist the row regardless of `ok` value (failure observability). `wrap`/`unwrap` audit events stay at the `dek_*` / `kek_*` level — don't add another health audit kind.
+- **Default fallback is intentional.** When a tenant has no policy row, the resolver builds the `defaultProviderId` (typically `'local'`) with `defaultConfig`. New tenants don't need an explicit policy to encrypt; they can opt into a cloud KMS later by upserting one.
+- Same dist-staleness rule as every prior phase: `npx tsc -b apps/geneweave` after every edit under `apps/geneweave/src/**` before restarting the server.
+
+### Reference
+- E2E script: `scripts/e2e-phase7-kms-providers.mjs` — registers tenant_admin → `GET /kms-providers` asserts all 5 builtin ids → POST 2 policies with `local` provider but distinct configs → POST unknown-id rejected with 400 → POST `/kms/health-check` per tenant → assert `kms_health_check` audit row → PUT alters config → next health-check still passes (cache invalidated).
+- Operator docs: `docs/ENCRYPTION_KMS_PROVIDERS.md` — per-provider config schemas, IAM templates (AWS, GCP), RBAC roles (Azure), Vault Transit policy, custom-provider registration example, operational checklist.
+- Phase 7 of `docs/TENANT_ENCRYPTION_DESIGN.md` — design rationale + exit criteria.
+
+## Tenant Encryption — Phase 8: Blind Indexes
+
+Phase 8 lets equality lookups (login by email, dedup, join keys) work against AEAD-encrypted columns without exposing plaintext to the database. A companion column `<column>_bidx` stores `HMAC-SHA-256(BIK, "table|column|value")` truncated to 24 hex chars (96 bits). The BIK ("blind index key") is a third per-tenant per-epoch key alongside KEK + DEK, wrapped under the same KEK.
+
+### Package surface (`@weaveintel/encryption`)
+- `TenantKeyManager.computeBlindIndex({ tenantId, table, column, value })` → 24-hex MAC under the active BIK. Throws if `blindIndexEnabled=false`.
+- `TenantKeyManager.rotateBik(tenantId, actor)` → new BIK with `epoch+1`, prior BIK marked `previous`, emits `bik_rotate`. **Caller MUST follow with a bidx rebuild** — without it, lookups miss until lazy-upgrade refills.
+- `BlindIndexSpec` + `DEFAULT_BLIND_INDEX_SPECS` (ships `[{ table: 'users', column: 'email' }]`) + `mergeBlindIndexSpecs(...)` for app-side merging.
+- `bidxColumnName(spec)` — defaults to `${column}_bidx`; overridable via `spec.bidxColumn`.
+- `maybeBlindIndex(state, table, column, value)` — returns MAC or `null` when manager missing / tenant disabled / column not in spec / value empty / value already a sentinel ciphertext.
+- `computeRowBlindIndices(state, table, row)` — returns `{ <bidxColumn>: mac }` for spec'd columns present in row. **Skips ciphertext** rather than emitting null — partial rewrites can't silently break a stored bidx.
+- New audit kinds: `bik_create`, `bik_rotate`, `bik_revoke`, `bidx_compute`, `bidx_rebuild`.
+- `EncryptionStore` gained `listBiks / insertBik / updateBikStatus`; `TenantPolicyRecord` gained `blindIndexEnabled: boolean`. **Reusability invariant preserved**: still only `@weaveintel/core` + `node:crypto`.
+
+### GeneWeave wiring (reference impl)
+- **Migration** (`apps/geneweave/src/db-sqlite-migrations.ts`) — adds `users.email_bidx TEXT` + `idx_users_email_bidx` via `safeExec` (idempotent).
+- **SYSTEM tenant** (`apps/geneweave/src/encryption/system-tenant.ts`) — reserved tenant id `__system__`. Login by email runs before any user-tenant context exists, so per-tenant BIK can't help; instead, **every** `users.email_bidx` is computed under the SYSTEM tenant's BIK. `bootstrapSystemTenant(db, manager)` is idempotent and is called from `index.ts` after `bootstrapEncryption`. It force-flips `blind_index_enabled=1` and `enabled=1` if a stale policy row exists.
+- **Adapter wiring** (`apps/geneweave/src/encryption/db-encrypted-adapter.ts`) — outer Proxy intercepts `createUser`, `updateUser`, and `getUserByEmail`. Writes compute and persist `email_bidx`; reads compute the MAC and try `getUserByEmailBidx(bidx)` first, falling through to legacy plaintext-equality (`getUserByEmail`) on miss. **Lazy-upgrade is intentional** — rows that predate backfill still authenticate.
+- **Adapter methods** (`db-sqlite.ts` + `db-types.ts`):
+  - `getUserByEmailBidx(bidx)` — indexed equality lookup.
+  - `setUserEmailBidx(userId, bidx | null)` — used by rebuild.
+  - `listUsersForBidxRebuild(limit, afterId)` — id-cursor paging (stable, no offset drift).
+  - `createUser` / `updateUser` accept `emailBidx?: string | null`.
+- **Admin endpoints** (`apps/geneweave/src/admin/api/tenant-encryption-policies.ts`):
+  - `POST /:tenantId/rotate-bik` → mints next BIK; returns `{ ok, bik: sanitized }`.
+  - `POST /:tenantId/rebuild-bidx` → id-cursor pages 500 rows at a time, recomputes MAC per row, writes via `setUserEmailBidx`. Returns `{ scanned, written, skipped, scope }`. **No-op (`scope: 'noop'`) for any tenantId other than `__system__`** until apps register additional bidx scopes.
+
+### CRITICAL invariants (verified)
+- **SYSTEM tenant is the ONLY scope that can serve cross-tenant equality.** Per-user-tenant BIKs cannot help with login because the user's tenant is unknown until after lookup. Apps that need per-tenant equality (e.g. `orders.customer_email` within an authenticated tenant context) should add their own spec via `mergeBlindIndexSpecs` and use `tenantId = userTenantId`, NOT `__system__`.
+- **Bidx column writes are package-mediated.** Apps NEVER call HMAC themselves. `computeBlindIndex` / `maybeBlindIndex` / `computeRowBlindIndices` are the only sanctioned entry points — that keeps the domain-separation prefix `table|column|` and truncation rule consistent across consumers.
+- **Sentinel-safe by construction.** `maybeBlindIndex` returns `null` for already-encrypted values, and `computeRowBlindIndices` skips ciphertext columns. Round-tripping a row through the proxy can never overwrite a real bidx with a MAC of the ciphertext.
+- **Rotate without rebuild is supported but degraded.** After `rotateBik`, the previous BIK is kept (status `previous`) so reads can still match old MACs during the cutover window — but the bidx fast-path will miss for new lookups. The proxy falls through to plaintext-equality so login never breaks; **always** call `/rebuild-bidx` immediately after `/rotate-bik` to restore the fast path.
+- **No range / prefix / `LIKE`.** Equality only — supporting prefix would be a different primitive (e.g. tokenized n-grams) and isn't in scope.
+- **`rotateKek` does not re-wrap BIKs.** Cutover requires `rotateBik` + `/rebuild-bidx` on top. KEK lifetime is independent.
+- Same dist-staleness rule: `npx tsc -b apps/geneweave` after every edit under `apps/geneweave/src/**` before restarting the server.
+
+### Operator runbook (one-liner)
+1. `PUT /api/admin/tenant-encryption-policies/__system__` with `blind_index_enabled: true` (already on if SYSTEM auto-bootstrapped at server start).
+2. `POST /…/__system__/rebuild-bidx` to backfill existing rows.
+3. To rotate: `POST /…/__system__/rotate-bik` → **immediately** `POST /…/__system__/rebuild-bidx`.
+4. `GET /…/__system__/audit` shows every `bidx_compute` / `bidx_rebuild` / `bik_rotate` event with actor + timestamp.
+
+### Reusability — adopting in another app
+```ts
+import { DEFAULT_BLIND_INDEX_SPECS, mergeBlindIndexSpecs, computeRowBlindIndices } from '@weaveintel/encryption';
+const SPECS = mergeBlindIndexSpecs(DEFAULT_BLIND_INDEX_SPECS, [{ table: 'orders', column: 'customer_email' }]);
+const bidxes = await computeRowBlindIndices({ manager, tenantId, enabled: true, specs: SPECS }, 'orders', row);
+db.insertOrder({ ...row, ...bidxes });
+```
+Then add `<column>_bidx TEXT` + index in the app's migration and intercept the lookup method (or expose `getOrderByCustomerEmailBidx`).
+
+### Reference
+- E2E script: `scripts/e2e-phase8-blind-indexes.mjs` — register → bidx populated → login via bidx → promote to tenant_admin → SYSTEM policy `blind_index_enabled=1` → rotate-bik → login still works (lazy fallback) → rebuild-bidx → bidx changed → final login OK.
+- Operator docs: `docs/ENCRYPTION_BLIND_INDEXES.md` — wire diagram, package surface, runbook, reuse example, security properties, known gaps.
+- Phase 8 of `docs/TENANT_ENCRYPTION_DESIGN.md` — design rationale + exit criteria.
+
+## Tenant Encryption — Phase 9: Observability + Alert Evaluator
+
+Phase 9 makes the encryption stack observable from the inside without coupling it to any specific metrics backend or host app. The package ships a fire-and-forget `MetricsEmitter` interface, an `InMemoryMetricsEmitter` (bounded cardinality), a pure `evaluateAlerts()` function, and a default rule set (`DEFAULT_ALERT_RULES`). GeneWeave wires it into the bootstrap, persists operator overrides in `tenant_encryption_alert_config`, and exposes a read-only Encryption Health dashboard surface.
+
+### Package surface (`@weaveintel/encryption`)
+- `MetricsEmitter` — single-method `record(rec: MetricRecord): void`. **Synchronous on purpose** — crypto hot paths must never await observability work. Emits MUST be wrapped in `try/catch` at the call site only if the implementation can throw (the in-memory one is no-op-on-error).
+- `InMemoryMetricsEmitter({ maxSeries=256, maxSamples=1024 })` — bounded by series cardinality (FIFO eviction once cap hit) and per-series ring buffer for histogram samples. `snapshot(now?)` returns a `MetricsSnapshot { takenAt, series[] }` with counter sums and histogram p50/p95/p99 estimates.
+- `noopMetricsEmitter` — process-wide singleton for hosts that opt out.
+- `startTimer()` — returns a `() => elapsedMs` closure for histogram observations.
+- `evaluateAlerts({ rules, snapshot, rotationStatus?, now? }): AlertFiring[]` — pure. Supports five rule kinds: `rotation_overdue`, `kms_error_rate` / `aead_error_rate` (counter rate over `windowMs`), `decrypt_latency_p95` (histogram p95 vs threshold), `cache_hit_rate` (lower-is-worse).
+- `DEFAULT_ALERT_RULES` — fleet-scoped rule template (5 entries). Hosts seed these once; operators tune via DB.
+- **Reusability invariant preserved**: still only `@weaveintel/core` + `node:crypto`. No host imports.
+
+### Instrumentation already in place
+- `key-manager.ts` records `encryption.encrypt.duration_ms`, `encryption.decrypt.duration_ms` (histograms, labeled `tenantId/table/column`), `encryption.aead.error` (counter), `encryption.kms.error` (counter, labeled `provider/kind`), `encryption.cache.hit` / `.miss` (counters, labeled `cache: 'kek'|'dek'|'bik'`).
+- `kms-resolver.ts` records `encryption.cache.hit` / `.miss` for the KMS resolver layer (`cache: 'kms'`) and `encryption.kms.duration_ms`.
+
+### GeneWeave wiring (reference impl)
+- **Schema** (`db-sqlite-migrations.ts`) — `tenant_encryption_alert_config` table + unique index `(IFNULL(tenant_id,'__fleet__'), kind)` so a fleet rule and a per-tenant override can coexist for the same `kind`.
+- **Adapter** (`db-sqlite.ts`) — `upsertEncryptionAlertConfig` uses transaction-wrapped manual select-then-insert/update (NOT `ON CONFLICT` — SQLite's expression-index conflict-target matching is brittle here). `listEncryptionAlertConfig({ tenantId? })` filters fleet-only when `tenantId === null`. `deleteEncryptionAlertConfig(id)`.
+- **Bootstrap** (`encryption/bootstrap.ts`) — when caller omits `metrics`, defaults to `new InMemoryMetricsEmitter()` so the dashboard works out of the box. The same emitter is wired into BOTH `createCachedKmsResolver` and `weaveTenantKeyManager`.
+- **Singleton + live-binding** (`index.ts`) — `export let geneweaveEncryptionMetrics = null` is captured from `bootstrapTenantEncryption({ metrics })` result. Other modules access via `() => indexModule.geneweaveEncryptionMetrics` getters so post-boot wiring isn't frozen at module-init time.
+- **Seed** (`encryption/alert-store.ts → seedDefaultAlertRules`) — idempotent: lists existing fleet rows first, skips by `kind`. Operator edits survive reboot. Called from `index.ts` after `bootstrapSystemTenant`.
+- **Admin routes** (`admin/api/encryption-observability.ts`):
+  - `GET /api/admin/encryption/health` — aggregated dashboard payload (per-tenant rotation age, per-cache-layer hit rates, latency p50/p95/p99 by metric, KMS/AEAD error counters over 5min window, alert rule counts, firing alerts list, registered KMS providers).
+  - `GET /api/admin/encryption/metrics?tenantId=&name=` — raw `MetricsSnapshot` with optional label/prefix filters.
+  - `POST /api/admin/encryption/alerts/evaluate` — evaluate now, return firings (does NOT persist).
+  - `GET / POST / PUT / DELETE /api/admin/encryption/alerts[/:id]` — CRUD with CSRF + auth on writes.
+
+### CRITICAL invariants (verified)
+- **Metrics emit is fire-and-forget.** Never `await` `record()`, never throw out of it. The bounded in-memory emitter is the floor — hosts can swap to OTLP / Prometheus / Datadog by implementing `MetricsEmitter` and passing it to `bootstrapTenantEncryption({ metrics })`.
+- **Series cardinality is bounded by construction.** The in-memory emitter caps at 256 distinct label-tuples per name and FIFO-evicts older series. High-cardinality labels (e.g. raw user IDs) MUST NOT be added — keep labels to `tenantId / table / column / provider / kind / cache`.
+- **Alert config is DB-driven, not code-hardcoded.** `DEFAULT_ALERT_RULES` is a *seed*, not a runtime source of truth. Evaluators always read live rows via `listEncryptionAlertConfig`. Operators tune thresholds without redeploys.
+- **Fleet vs per-tenant rules coexist.** Rule with `tenant_id IS NULL` applies fleet-wide; a row with the same `kind` but a real `tenant_id` is the per-tenant override. Both are evaluated independently by `evaluateAlerts`.
+- **Read-only dashboard.** The `/health` endpoint never mutates state — it's safe to scrape from external monitoring as long as the caller is authenticated.
+- Same dist-staleness rule: `npx tsc -b apps/geneweave` after every edit under `apps/geneweave/src/**` before restarting.
+
+### Operator runbook (one-liner)
+1. Boot with `WEAVE_ENCRYPTION_MASTER_KEY` set → bootstrap auto-creates the in-memory emitter and seeds 5 fleet alert rules.
+2. `GET /api/admin/encryption/health` from any tenant_admin session for the dashboard payload.
+3. Tune a rule: `POST /api/admin/encryption/alerts` with `{ tenant_id, kind, threshold, window_ms?, enabled?, description? }`.
+4. Test current state: `POST /api/admin/encryption/alerts/evaluate` returns firings without persisting anything.
+
+### Reusability — adopting in another app
+```ts
+import { bootstrapTenantEncryption, InMemoryMetricsEmitter } from '@weaveintel/encryption';
+const metrics = new InMemoryMetricsEmitter();
+const enc = await bootstrapTenantEncryption({ store, providers, metrics });
+// later, in admin route:
+import { evaluateAlerts, DEFAULT_ALERT_RULES } from '@weaveintel/encryption';
+const firings = evaluateAlerts({ rules: DEFAULT_ALERT_RULES, snapshot: metrics.snapshot() });
+```
+Hosts can also swap in their own `MetricsEmitter` (OTLP, Prometheus, etc.) — the package only depends on the interface shape.
+
+### Reference
+- E2E script: `scripts/e2e-phase9-observability.mjs` — health endpoint payload shape, default rules seeded, raw metrics snapshot, custom rule create/evaluate-fires/disable/delete.
+- Operator docs: `docs/ENCRYPTION_OBSERVABILITY.md` — metric catalog, dashboard payload schema, alert rule kinds, runbook, reuse example.
+- Phase 9 of `docs/TENANT_ENCRYPTION_DESIGN.md` — design rationale + exit criteria.
+
+## Phase 10 — BYOK / HYOK / break-glass / attestation
+
+Customer-managed key escalation. Default `local` provider serves most tenants; this phase exists when customers must hold the private key (RSA-4096) and operators must never see plaintext key material. Full design: `docs/ENCRYPTION_BYOK_HYOK.md`.
+
+### Layering (do not violate)
+- **`packages/encryption/src/byok/`** — pure crypto, only depends on `node:crypto` + `@weaveintel/core`. Exports: `ByokPemKmsProvider`, `loadByokPublicKey`, `fingerprintPublicKey`, `makeLocalUnwrapDelegate` (DEV), `LocalByokKeystore`, `createHttpHyokProxyDelegate`, `composeDelegates`, `createBreakGlassUnwrapDelegate`, `approveBreakGlass`/`denyBreakGlass`/`reapExpiredBreakGlass`/`findActiveGrant`/`validateNewBreakGlassRequest`, `buildAuditChain`/`canonicalize`, `buildAndSignAttestation`/`verifyAttestation`/`generateAttestationSigningKey`/`loadAttestationSigningKey`/`fingerprintEd25519PublicKey`.
+- **`apps/geneweave/src/encryption/byok-service.ts`** — host glue: persists `tenant_byok_config` and **mirrors** the equivalent shape into `tenant_encryption_policy.kms_config` so the existing `CachedKmsResolver` routes through `byok-pem` automatically. Lazy-seeds the platform Ed25519 signing key into `system_attestation_signing_key` (race-safe via `INSERT OR IGNORE` + re-read).
+- **`apps/geneweave/src/admin/api/tenant-byok.ts`** — thin HTTP surface. No crypto here.
+
+### CRITICAL invariants
+- **RSA-4096 minimum.** `loadByokPublicKey` rejects smaller keys at the package boundary; the admin route surfaces this as 400.
+- **HYOK secrets never live in DB.** Store `hyok_bearer_secret_id` (the `process.env` *name*) only; the actual token is resolved at config-time and embedded in `kms_config` in-memory only.
+- **Dual approval is non-bypassable.** `approveBreakGlass` throws if `customerApprover === request.requestedBy`. The window is capped at 24h regardless of requested `windowMs`.
+- **Attestation payloads use canonical JSON.** `canonicalize()` recursively sorts keys; this is what gets hashed (`payload_hash` = SHA-256 of canonical JSON) and signed (Ed25519). Cross-runtime verifiers MUST canonicalize the same way before verifying.
+- **`payload_hash` is recomputable.** Any client can re-canonicalize the returned payload, SHA-256 it, and assert it matches `att.payloadHash` — protects against in-transit tampering even before signature checks.
+- **Audit chain is append-only and tip-anchored.** `buildAuditChain(events).tip` is a SHA-256 of `(prev_tip || sha256(canonical(event)))` per row. Inclusion in attestation makes operator-side audit deletion detectable.
+- **Mirror, don't duplicate config.** `upsertByokConfig` reads existing `tenant_encryption_policy` first to preserve `active_kek_id`/`active_dek_id`/`active_bik_id`/`rotation_schedule`/`blind_index_enabled`/`field_policy`/`shred_*`. Never write a partial row.
+- **Audit `actor` is required.** All `insertEncryptionAudit` calls in `byok-service.ts` populate `actor` (request principal, denier, approver, or `null` for system sweeps).
+
+### Reusability — adopting in another app
+1. Build encryption package; import `byok` symbols from `@weaveintel/encryption`.
+2. Add 4 tables: `tenant_byok_config`, `tenant_break_glass_request`, `tenant_attestation_log`, `system_attestation_signing_key` (see `apps/geneweave/src/db-sqlite-migrations.ts:3088-3151`).
+3. Add ~12 adapter methods (mirror `apps/geneweave/src/db-sqlite.ts` Phase 10 block).
+4. Copy `byok-service.ts` (~440 lines) and swap the `DatabaseAdapter` import for your adapter type. No crypto edits required.
+5. Register the admin routes via `registerTenantByokRoutes(router, db, helpers)`.
+
+### Reference
+- E2E: `scripts/e2e-phase10-byok.mjs` — RSA-4096 enforcement, mirroring, dual-approval block, 24h cap, attestation Ed25519 round-trip + tamper detection + payload_hash recomputation.
+- Tests: `packages/encryption/src/byok/byok.test.ts` — 28 unit tests covering provider, keystore, HYOK proxy, delegate composition, break-glass evaluator, attestation sign/verify.
+- Phase 10 of `docs/TENANT_ENCRYPTION_DESIGN.md` — exit criteria.

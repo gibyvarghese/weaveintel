@@ -20,7 +20,11 @@
 
 import type { ServerResponse, IncomingMessage } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import type { TenantKeyManager } from '@weaveintel/encryption';
+import type {
+  CachedKmsResolver,
+  KmsProviderRegistry,
+  TenantKeyManager,
+} from '@weaveintel/encryption';
 import type { DatabaseAdapter } from '../../db.js';
 import { createDbEncryptionStore } from '../../encryption/db-encryption-store.js';
 import type { RouterLike } from './types.js';
@@ -32,6 +36,10 @@ export interface TenantEncryptionRouteHelpers {
 
 /** Getter so the route captures the current value of a process-wide mutable manager (post-boot wiring). */
 export type GetEncryptionManager = () => TenantKeyManager | null;
+/** Phase 7: getter for the KMS provider registry (for validation + health-check). */
+export type GetKmsRegistry = () => KmsProviderRegistry | null;
+/** Phase 7: getter for the cached resolver (used to invalidate after policy edits). */
+export type GetKmsResolver = () => CachedKmsResolver | null;
 
 const VALID_ROTATION_SCHEDULES = new Set(['manual', 'monthly', 'quarterly', 'annual']);
 
@@ -66,10 +74,72 @@ export function registerTenantEncryptionPolicyRoutes(
   db: DatabaseAdapter,
   helpers: TenantEncryptionRouteHelpers,
   getEncryptionManager: GetEncryptionManager,
+  getKmsRegistry: GetKmsRegistry = () => null,
+  getKmsResolver: GetKmsResolver = () => null,
 ): void {
   const { json, readBody } = helpers;
   const delMethod = router.del.bind(router);
   const store = createDbEncryptionStore(db);
+
+  /**
+   * Validates a `kms_provider_id` against the live registry. Returns null on
+   * success, or an error message string. When the registry is not wired
+   * (legacy bootstrap), validation is skipped.
+   */
+  function validateProviderId(id: string): string | null {
+    const registry = getKmsRegistry();
+    if (!registry) return null;
+    if (!registry.has(id)) {
+      return `Unknown kms_provider_id '${id}'. Registered: [${registry.list().join(', ')}]`;
+    }
+    return null;
+  }
+
+  // ── Phase 7: KMS provider catalog + health-check ──────────
+
+  router.get('/api/admin/encryption/kms-providers', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const registry = getKmsRegistry();
+    if (!registry) { json(res, 503, { error: 'KMS registry not initialized' }); return; }
+    json(res, 200, { providers: registry.list() });
+  }, { auth: true });
+
+  router.post('/api/admin/tenant-encryption-policies/:tenantId/kms/health-check', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const registry = getKmsRegistry();
+    const resolver = getKmsResolver();
+    if (!registry || !resolver) { json(res, 503, { error: 'KMS registry/resolver not initialized' }); return; }
+    const tenantId = params['tenantId']!;
+    const policy = await db.getTenantEncryptionPolicy(tenantId);
+    if (!policy) { json(res, 404, { error: 'Tenant encryption policy not found' }); return; }
+    let provider;
+    try {
+      provider = await resolver.resolve(tenantId);
+    } catch (err) {
+      json(res, 502, { ok: false, error: (err as Error).message });
+      return;
+    }
+    const status = await registry.healthCheck(policy.kms_provider_id, provider);
+    // Persist a single audit row so operators can see when checks ran.
+    try {
+      await db.insertEncryptionAudit({
+        id: randomUUID(),
+        tenant_id: tenantId,
+        event_kind: 'kms_health_check',
+        actor: (auth.userId) ?? null,
+        details: JSON.stringify({
+          providerId: status.providerId,
+          ok: status.ok,
+          ...(status.latencyMs !== undefined ? { latencyMs: status.latencyMs } : {}),
+          ...(status.error ? { error: status.error } : {}),
+        }),
+        created_at: Date.now(),
+      });
+    } catch {
+      /* audit best-effort */
+    }
+    json(res, status.ok ? 200 : 502, status);
+  }, { auth: true, csrf: true });
 
   // ── List + read ────────────────────────────────────────────
 
@@ -121,10 +191,13 @@ export function registerTenantEncryptionPolicyRoutes(
     if (!kmsConfig.ok) { json(res, 400, { error: kmsConfig.error }); return; }
 
     const enabled = asBoolFlag(body['enabled'], 0);
+    const providerId = typeof body['kms_provider_id'] === 'string' ? (body['kms_provider_id'] as string) : 'local';
+    const providerErr = validateProviderId(providerId);
+    if (providerErr) { json(res, 400, { error: providerErr }); return; }
     await db.upsertTenantEncryptionPolicy({
       tenant_id: tenantId,
       enabled,
-      kms_provider_id: typeof body['kms_provider_id'] === 'string' ? (body['kms_provider_id'] as string) : 'local',
+      kms_provider_id: providerId,
       kms_config: kmsConfig.value,
       active_kek_id: null,
       active_dek_id: null,
@@ -135,6 +208,7 @@ export function registerTenantEncryptionPolicyRoutes(
       shred_requested_at: null,
       shred_completed_at: null,
     });
+    getKmsResolver()?.invalidate(tenantId);
 
     let bootstrapped = false;
     let bootstrapReason: string | undefined;
@@ -181,11 +255,16 @@ export function registerTenantEncryptionPolicyRoutes(
 
     const wasEnabled = existing.enabled === 1;
     const nextEnabled = body['enabled'] !== undefined ? asBoolFlag(body['enabled'], existing.enabled) : existing.enabled;
+    const nextProviderId = typeof body['kms_provider_id'] === 'string' ? (body['kms_provider_id'] as string) : existing.kms_provider_id;
+    if (nextProviderId !== existing.kms_provider_id) {
+      const providerErr = validateProviderId(nextProviderId);
+      if (providerErr) { json(res, 400, { error: providerErr }); return; }
+    }
 
     await db.upsertTenantEncryptionPolicy({
       tenant_id: tenantId,
       enabled: nextEnabled,
-      kms_provider_id: typeof body['kms_provider_id'] === 'string' ? (body['kms_provider_id'] as string) : existing.kms_provider_id,
+      kms_provider_id: nextProviderId,
       kms_config: kmsConfigValue !== undefined ? kmsConfigValue : existing.kms_config,
       active_kek_id: existing.active_kek_id,
       active_dek_id: existing.active_dek_id,
@@ -196,6 +275,7 @@ export function registerTenantEncryptionPolicyRoutes(
       shred_requested_at: existing.shred_requested_at,
       shred_completed_at: existing.shred_completed_at,
     });
+    getKmsResolver()?.invalidate(tenantId);
 
     let bootstrapped = false;
     let bootstrapReason: string | undefined;
@@ -273,6 +353,71 @@ export function registerTenantEncryptionPolicyRoutes(
       json(res, 200, { ok: true, kek: sanitize(kek) });
     } catch (err) {
       json(res, 500, { error: (err as Error).message });
+    }
+  }, { auth: true, csrf: true });
+
+  // Phase 8: rotate the BIK (blind-index key). Marks the prior BIK 'previous'
+  // so existing bidx values still reverse-match for read queries that fall back
+  // to the previous-epoch MAC. Operators MUST follow up with /rebuild-bidx
+  // before the previous BIK is revoked, otherwise login lookups will miss.
+  router.post('/api/admin/tenant-encryption-policies/:tenantId/rotate-bik', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const km = getEncryptionManager();
+    if (!km) { json(res, 503, { error: 'Encryption manager unavailable' }); return; }
+    const tenantId = params['tenantId']!;
+    if (!(await db.getTenantEncryptionPolicy(tenantId))) { json(res, 404, { error: 'Tenant encryption policy not found' }); return; }
+    try {
+      const bik = await km.rotateBik(tenantId, (auth.userId) ?? null);
+      json(res, 200, { ok: true, bik: sanitize(bik) });
+    } catch (err) {
+      json(res, 500, { error: (err as Error).message });
+    }
+  }, { auth: true, csrf: true });
+
+  // Phase 8: rebuild every blind-index column for a tenant under the active BIK.
+  // Currently rebuilds users.email_bidx (for the SYSTEM tenant scope). Returns
+  // counts so operators can verify completeness. Idempotent — safe to re-run.
+  router.post('/api/admin/tenant-encryption-policies/:tenantId/rebuild-bidx', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const km = getEncryptionManager();
+    if (!km) { json(res, 503, { error: 'Encryption manager unavailable' }); return; }
+    const tenantId = params['tenantId']!;
+    const policy = await db.getTenantEncryptionPolicy(tenantId);
+    if (!policy) { json(res, 404, { error: 'Tenant encryption policy not found' }); return; }
+    if (policy.blind_index_enabled !== 1) {
+      json(res, 400, { error: 'blind_index_enabled is false for this tenant' }); return;
+    }
+    const PAGE = 500;
+    let cursor: string | null = null;
+    let scanned = 0, written = 0, skipped = 0;
+    try {
+      // Loop pages — id-asc cursor avoids OFFSET drift.
+      // Only the SYSTEM tenant is responsible for users.email_bidx today; for
+      // any other tenantId we emit an empty result rather than silently
+      // touching another tenant's user rows.
+      const isSystem = tenantId === '__system__';
+      while (isSystem) {
+        const rows = await db.listUsersForBidxRebuild(PAGE, cursor);
+        if (rows.length === 0) break;
+        for (const r of rows) {
+          scanned++;
+          if (!r.email) { skipped++; continue; }
+          try {
+            const mac = await km.computeBlindIndex({
+              tenantId, table: 'users', column: 'email', value: r.email,
+            });
+            await db.setUserEmailBidx(r.id, mac);
+            written++;
+          } catch {
+            skipped++;
+          }
+        }
+        cursor = rows[rows.length - 1]!.id;
+        if (rows.length < PAGE) break;
+      }
+      json(res, 200, { ok: true, tenantId, scanned, written, skipped, scope: isSystem ? 'users.email' : 'noop' });
+    } catch (err) {
+      json(res, 500, { error: (err as Error).message, scanned, written, skipped });
     }
   }, { auth: true, csrf: true });
 

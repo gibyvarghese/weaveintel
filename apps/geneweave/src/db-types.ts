@@ -14,6 +14,12 @@ export interface UserRow {
   tenant_id: string | null;
   password_hash: string;
   created_at: string;
+  /**
+   * Phase 8 blind index — `HMAC-SHA-256(BIK, "users|email|<email>")` truncated
+   * to 24 hex chars. Tenant-scoped, populated only when the resolved tenant
+   * has `blind_index_enabled=true`. Lookup path: `WHERE email_bidx = ?`.
+   */
+  email_bidx?: string | null;
 }
 
 export interface SessionRow {
@@ -1734,6 +1740,23 @@ export interface EncryptionAuditRow {
 }
 
 /**
+ * Phase 9 — Operator-configurable alert rule. `tenant_id` NULL means
+ * fleet-wide; `window_ms` NULL falls back to the kind-specific default in
+ * `@weaveintel/encryption.evaluateAlerts`.
+ */
+export interface TenantEncryptionAlertConfigRow {
+  id: string;
+  tenant_id: string | null;
+  kind: string;
+  threshold: number;
+  window_ms: number | null;
+  enabled: number;
+  description: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+/**
  * Phase 6 — Tenant deletion request lifecycle. Operator-initiated GDPR
  * right-to-be-forgotten with retention window. Status flow:
  *   pending → cancelled  (operator changed mind before retention_until)
@@ -1749,6 +1772,82 @@ export interface TenantDeletionRequestRow {
   purged_at: number | null;
   cancelled_at: number | null;
   reason: string | null;
+}
+
+/**
+ * Phase 10 — Customer-managed key (BYOK) / hold-your-own-key (HYOK) config.
+ * One row per tenant; presence flips the resolver onto the `byok-pem`
+ * provider. `private_key_pem_dev` is DEV ONLY (never populated in prod) —
+ * production deployments populate `hyok_endpoint` so unwrap is a customer
+ * round-trip.
+ */
+export interface TenantByokConfigRow {
+  tenant_id: string;
+  mode: 'byok' | 'hyok';
+  public_key_pem: string;
+  public_key_fingerprint: string;
+  hyok_endpoint: string | null;
+  hyok_bearer_secret_id: string | null;
+  hyok_timeout_ms: number | null;
+  /** DEV ONLY — never set in production. Server logs a warning if present. */
+  private_key_pem_dev: string | null;
+  status: 'active' | 'revoked';
+  created_by: string | null;
+  created_at: number;
+  updated_at: number;
+  revoked_at: number | null;
+}
+
+/**
+ * Phase 10 — Break-glass grant request. Pending → approved (dual-approval) |
+ * denied; approved → expired (reaper) once `expires_at` passes. The
+ * encryption package's break-glass evaluator owns all status transitions —
+ * routes only persist the result.
+ */
+export interface TenantBreakGlassRequestRow {
+  id: string;
+  tenant_id: string;
+  requested_by: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'denied' | 'expired' | 'consumed';
+  customer_approver: string | null;
+  approved_at: number | null;
+  expires_at: number;
+  consume_count: number;
+  denial_reason: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
+/**
+ * Phase 10 — Compliance attestation export. Each row is a signed JSON
+ * snapshot the customer's auditor can independently verify with the
+ * platform's published Ed25519 public key.
+ */
+export interface TenantAttestationLogRow {
+  id: string;
+  tenant_id: string;
+  generated_at: number;
+  signature_alg: string;
+  signature: string;
+  signing_key_fingerprint: string;
+  payload_hash: string;
+  payload_json: string;
+  requested_by: string | null;
+  created_at: number;
+}
+
+/**
+ * Phase 10 — Platform-level Ed25519 signing key used for attestations.
+ * Single-row table keyed by `key` (currently always `'default'`); leave room
+ * to add a rotation flag if multiple active keys are needed later.
+ */
+export interface SystemAttestationSigningKeyRow {
+  key: string;
+  private_key_pem: string;
+  public_key_pem: string;
+  fingerprint: string;
+  created_at: number;
 }
 export type CapabilityPackStatus = 'draft' | 'published' | 'retired';
 
@@ -2372,16 +2471,23 @@ export interface DatabaseAdapter {
   close(): Promise<void>;
 
   // Users
-  createUser(user: { id: string; email: string; name: string; passwordHash: string; persona?: string; tenantId?: string | null }): Promise<void>;
+  createUser(user: { id: string; email: string; name: string; passwordHash: string; persona?: string; tenantId?: string | null; emailBidx?: string | null }): Promise<void>;
   getUserByEmail(email: string): Promise<UserRow | null>;
+  /** Phase 8: lookup by precomputed blind-index MAC of the email column. */
+  getUserByEmailBidx(bidx: string): Promise<UserRow | null>;
   getUserById(id: string): Promise<UserRow | null>;
   listUsers(): Promise<UserRow[]>;
+  /** Phase 8: paginated id-after cursor for bidx rebuild jobs. */
+  listUsersForBidxRebuild(limit: number, afterId: string | null): Promise<Array<{ id: string; email: string }>>;
+  /** Phase 8: write or clear users.email_bidx for a single row. */
+  setUserEmailBidx(userId: string, bidx: string | null): Promise<void>;
   updateUser(userId: string, updates: {
     email?: string;
     name?: string;
     persona?: string;
     tenantId?: string | null;
     passwordHash?: string;
+    emailBidx?: string | null;
   }): Promise<void>;
   deleteUser(userId: string): Promise<void>;
   updateUserPersona(userId: string, persona: string): Promise<void>;
@@ -2965,6 +3071,14 @@ export interface DatabaseAdapter {
   insertEncryptionAudit(e: Omit<EncryptionAuditRow, never>): Promise<void>;
   listEncryptionAudit(tenantId: string, opts?: { limit?: number; offset?: number }): Promise<EncryptionAuditRow[]>;
 
+  // ─── Encryption Phase 9: Operator-configurable alert rules ──
+  /** Insert or replace an alert rule. Idempotent on `(tenant_id, kind)`. */
+  upsertEncryptionAlertConfig(r: Omit<TenantEncryptionAlertConfigRow, 'created_at' | 'updated_at'>): Promise<void>;
+  /** List rules. `tenantId` undefined returns ALL rules; null returns fleet-wide; string returns the tenant's. */
+  listEncryptionAlertConfig(opts?: { tenantId?: string | null }): Promise<TenantEncryptionAlertConfigRow[]>;
+  /** Delete a single rule by id. Returns true iff a row was removed. */
+  deleteEncryptionAlertConfig(id: string): Promise<boolean>;
+
   // ─── Phase 6 (Tenant Encryption): Hard-shred + GDPR deletion lifecycle ──
   /** Atomically deletes all wrapped key material (KEKs/DEKs/BIKs) for a tenant. Used by hardShred(). */
   deleteAllTenantWrappedMaterial(tenantId: string): Promise<{ keks: number; deks: number; biks: number }>;
@@ -2977,6 +3091,34 @@ export interface DatabaseAdapter {
   markTenantPurged(id: string, purgedAtMs: number): Promise<void>;
   /** Operator action: flip pending → cancelled. Returns true iff a row transitioned. */
   cancelTenantDeletionRequest(id: string, cancelledAtMs: number): Promise<boolean>;
+
+  // ─── Encryption Phase 10: BYOK / HYOK / break-glass / attestation ──
+  /** Insert or replace the BYOK/HYOK config for a tenant. Idempotent on `tenant_id`. */
+  upsertTenantByokConfig(c: Omit<TenantByokConfigRow, 'created_at' | 'updated_at' | 'revoked_at'>): Promise<void>;
+  getTenantByokConfig(tenantId: string): Promise<TenantByokConfigRow | null>;
+  /** `activeOnly` returns only `status='active'`. */
+  listTenantByokConfigs(opts?: { activeOnly?: boolean }): Promise<TenantByokConfigRow[]>;
+  /** Soft-revoke (status='revoked', stamps revoked_at). Subsequent resolves should fall through. */
+  revokeTenantByokConfig(tenantId: string, revokedAtMs: number): Promise<boolean>;
+  /** Hard-delete the row (admin removal — used after rotation only). */
+  deleteTenantByokConfig(tenantId: string): Promise<boolean>;
+
+  insertBreakGlassRequest(r: Omit<TenantBreakGlassRequestRow, 'updated_at'>): Promise<void>;
+  getBreakGlassRequest(id: string): Promise<TenantBreakGlassRequestRow | null>;
+  listBreakGlassRequests(opts?: { tenantId?: string; status?: TenantBreakGlassRequestRow['status']; limit?: number; offset?: number }): Promise<TenantBreakGlassRequestRow[]>;
+  /** Patch fields (status, customer_approver, approved_at, expires_at, denial_reason, consume_count). */
+  updateBreakGlassRequest(id: string, patch: Partial<Omit<TenantBreakGlassRequestRow, 'id' | 'tenant_id' | 'created_at'>>): Promise<boolean>;
+  /** Sweep candidate set for the reaper: `status='approved' AND expires_at <= nowMs`. */
+  listExpiredApprovedBreakGlassRequests(nowMs: number): Promise<TenantBreakGlassRequestRow[]>;
+
+  insertAttestationLog(a: Omit<TenantAttestationLogRow, 'created_at'>): Promise<void>;
+  listAttestationLogs(opts?: { tenantId?: string; limit?: number; offset?: number }): Promise<TenantAttestationLogRow[]>;
+  getAttestationLog(id: string): Promise<TenantAttestationLogRow | null>;
+
+  /** Returns the platform attestation signing key (key='default'), or null if not yet seeded. */
+  getSystemAttestationSigningKey(): Promise<SystemAttestationSigningKeyRow | null>;
+  /** Idempotent insert (no-op if a row with same key exists) — used by bootstrap to seed once. */
+  insertSystemAttestationSigningKeyIfMissing(r: Omit<SystemAttestationSigningKeyRow, 'created_at'>): Promise<boolean>;
 
   // ─── Phase 6: Capability Packs ─────────────────────────────
   createCapabilityPack(p: Omit<CapabilityPackRow, 'created_at' | 'updated_at'>): Promise<void>;

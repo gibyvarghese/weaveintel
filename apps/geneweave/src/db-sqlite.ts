@@ -36,7 +36,8 @@ import type {
   CapabilityPackRow, CapabilityPackInstallationRow, CapabilityPackExperimentRow, CapabilityPackStatus,
   CostPolicyRow,
   ToolEmbeddingRow,
-  TenantEncryptionPolicyRow, TenantKekRow, TenantDekRow, TenantBikRow, EncryptionAuditRow, TenantDeletionRequestRow,
+  TenantEncryptionPolicyRow, TenantKekRow, TenantDekRow, TenantBikRow, EncryptionAuditRow, TenantEncryptionAlertConfigRow, TenantDeletionRequestRow,
+  TenantByokConfigRow, TenantBreakGlassRequestRow, TenantAttestationLogRow, SystemAttestationSigningKeyRow,
   WebsiteCredentialRow,
   SvBudgetEnvelopeRow, SvHypothesisRow, SvHypothesisStatus, SvSubClaimRow, SvVerdictRow,
   SvEvidenceEventRow, SvAgentTurnRow,
@@ -86,19 +87,24 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   // ── Users ──────────────────────────────────────────────────
 
-  async createUser(u: { id: string; email: string; name: string; passwordHash: string; persona?: string; tenantId?: string | null }): Promise<void> {
-    this.d.prepare('INSERT INTO users (id, email, name, persona, tenant_id, password_hash) VALUES (?, ?, ?, ?, ?, ?)').run(
+  async createUser(u: { id: string; email: string; name: string; passwordHash: string; persona?: string; tenantId?: string | null; emailBidx?: string | null }): Promise<void> {
+    this.d.prepare('INSERT INTO users (id, email, name, persona, tenant_id, password_hash, email_bidx) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
       u.id,
       u.email,
       u.name,
       u.persona ?? 'tenant_user',
       u.tenantId ?? null,
       u.passwordHash,
+      u.emailBidx ?? null,
     );
   }
 
   async getUserByEmail(email: string): Promise<UserRow | null> {
     return (this.d.prepare('SELECT * FROM users WHERE email = ?').get(email) as UserRow | undefined) ?? null;
+  }
+
+  async getUserByEmailBidx(bidx: string): Promise<UserRow | null> {
+    return (this.d.prepare('SELECT * FROM users WHERE email_bidx = ?').get(bidx) as UserRow | undefined) ?? null;
   }
 
   async getUserById(id: string): Promise<UserRow | null> {
@@ -109,12 +115,24 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare('SELECT * FROM users ORDER BY created_at ASC').all() as UserRow[];
   }
 
+  async listUsersForBidxRebuild(limit: number, afterId: string | null): Promise<Array<{ id: string; email: string }>> {
+    const rows = afterId
+      ? (this.d.prepare('SELECT id, email FROM users WHERE id > ? ORDER BY id ASC LIMIT ?').all(afterId, limit) as Array<{ id: string; email: string }>)
+      : (this.d.prepare('SELECT id, email FROM users ORDER BY id ASC LIMIT ?').all(limit) as Array<{ id: string; email: string }>);
+    return rows;
+  }
+
+  async setUserEmailBidx(userId: string, bidx: string | null): Promise<void> {
+    this.d.prepare('UPDATE users SET email_bidx = ? WHERE id = ?').run(bidx, userId);
+  }
+
   async updateUser(userId: string, updates: {
     email?: string;
     name?: string;
     persona?: string;
     tenantId?: string | null;
     passwordHash?: string;
+    emailBidx?: string | null;
   }): Promise<void> {
     const fields: string[] = [];
     const values: unknown[] = [];
@@ -137,6 +155,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
     if (updates.passwordHash !== undefined) {
       fields.push('password_hash = ?');
       values.push(updates.passwordHash);
+    }
+    if (updates.emailBidx !== undefined) {
+      fields.push('email_bidx = ?');
+      values.push(updates.emailBidx);
     }
     if (fields.length === 0) return;
     values.push(userId);
@@ -2910,6 +2932,46 @@ export class SQLiteAdapter implements DatabaseAdapter {
     ).all(tenantId, limit, offset) as EncryptionAuditRow[];
   }
 
+  // ─── Phase 9 (Tenant Encryption): Operator-configurable alert rules ─────
+
+  async upsertEncryptionAlertConfig(r: Omit<TenantEncryptionAlertConfigRow, 'created_at' | 'updated_at'>): Promise<void> {
+    const now = Date.now();
+    const txn = this.d.transaction(() => {
+      const existing = (
+        r.tenant_id === null
+          ? this.d.prepare('SELECT id, created_at FROM tenant_encryption_alert_config WHERE tenant_id IS NULL AND kind = ?').get(r.kind)
+          : this.d.prepare('SELECT id, created_at FROM tenant_encryption_alert_config WHERE tenant_id = ? AND kind = ?').get(r.tenant_id, r.kind)
+      ) as { id: string; created_at: number } | undefined;
+      if (existing) {
+        this.d.prepare(
+          `UPDATE tenant_encryption_alert_config SET threshold = ?, window_ms = ?, enabled = ?, description = ?, updated_at = ? WHERE id = ?`,
+        ).run(r.threshold, r.window_ms, r.enabled, r.description, now, existing.id);
+      } else {
+        this.d.prepare(
+          `INSERT INTO tenant_encryption_alert_config (id, tenant_id, kind, threshold, window_ms, enabled, description, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(r.id, r.tenant_id, r.kind, r.threshold, r.window_ms, r.enabled, r.description, now, now);
+      }
+    });
+    txn();
+  }
+
+  async listEncryptionAlertConfig(opts?: { tenantId?: string | null }): Promise<TenantEncryptionAlertConfigRow[]> {
+    if (opts && 'tenantId' in opts) {
+      const t = opts.tenantId;
+      if (t === null) {
+        return this.d.prepare('SELECT * FROM tenant_encryption_alert_config WHERE tenant_id IS NULL ORDER BY kind ASC').all() as TenantEncryptionAlertConfigRow[];
+      }
+      return this.d.prepare('SELECT * FROM tenant_encryption_alert_config WHERE tenant_id = ? ORDER BY kind ASC').all(t) as TenantEncryptionAlertConfigRow[];
+    }
+    return this.d.prepare('SELECT * FROM tenant_encryption_alert_config ORDER BY tenant_id IS NOT NULL, tenant_id, kind').all() as TenantEncryptionAlertConfigRow[];
+  }
+
+  async deleteEncryptionAlertConfig(id: string): Promise<boolean> {
+    const r = this.d.prepare('DELETE FROM tenant_encryption_alert_config WHERE id = ?').run(id);
+    return r.changes > 0;
+  }
+
   // ─── Phase 6 (Tenant Encryption): Hard-shred + GDPR deletion lifecycle ──
 
   async deleteAllTenantWrappedMaterial(tenantId: string): Promise<{ keks: number; deks: number; biks: number }> {
@@ -2959,6 +3021,124 @@ export class SQLiteAdapter implements DatabaseAdapter {
       `UPDATE tenant_deletion_requests SET status = 'cancelled', cancelled_at = ? WHERE id = ? AND status = 'pending'`,
     ).run(cancelledAtMs, id);
     return r.changes > 0;
+  }
+
+  // ─── Encryption Phase 10: BYOK / HYOK / break-glass / attestation ──
+
+  async upsertTenantByokConfig(c: Omit<TenantByokConfigRow, 'created_at' | 'updated_at' | 'revoked_at'>): Promise<void> {
+    const now = Date.now();
+    const txn = this.d.transaction(() => {
+      const existing = this.d.prepare('SELECT tenant_id FROM tenant_byok_config WHERE tenant_id = ?').get(c.tenant_id) as { tenant_id: string } | undefined;
+      if (existing) {
+        this.d.prepare(
+          `UPDATE tenant_byok_config SET mode = ?, public_key_pem = ?, public_key_fingerprint = ?, hyok_endpoint = ?, hyok_bearer_secret_id = ?, hyok_timeout_ms = ?, private_key_pem_dev = ?, status = ?, created_by = ?, updated_at = ?, revoked_at = NULL WHERE tenant_id = ?`,
+        ).run(c.mode, c.public_key_pem, c.public_key_fingerprint, c.hyok_endpoint, c.hyok_bearer_secret_id, c.hyok_timeout_ms, c.private_key_pem_dev, c.status, c.created_by, now, c.tenant_id);
+      } else {
+        this.d.prepare(
+          `INSERT INTO tenant_byok_config (tenant_id, mode, public_key_pem, public_key_fingerprint, hyok_endpoint, hyok_bearer_secret_id, hyok_timeout_ms, private_key_pem_dev, status, created_by, created_at, updated_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        ).run(c.tenant_id, c.mode, c.public_key_pem, c.public_key_fingerprint, c.hyok_endpoint, c.hyok_bearer_secret_id, c.hyok_timeout_ms, c.private_key_pem_dev, c.status, c.created_by, now, now);
+      }
+    });
+    txn();
+  }
+
+  async getTenantByokConfig(tenantId: string): Promise<TenantByokConfigRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_byok_config WHERE tenant_id = ?').get(tenantId) as TenantByokConfigRow | undefined) ?? null;
+  }
+
+  async listTenantByokConfigs(opts: { activeOnly?: boolean } = {}): Promise<TenantByokConfigRow[]> {
+    const sql = opts.activeOnly
+      ? `SELECT * FROM tenant_byok_config WHERE status = 'active' ORDER BY tenant_id`
+      : `SELECT * FROM tenant_byok_config ORDER BY tenant_id`;
+    return this.d.prepare(sql).all() as TenantByokConfigRow[];
+  }
+
+  async revokeTenantByokConfig(tenantId: string, revokedAtMs: number): Promise<boolean> {
+    const r = this.d.prepare(
+      `UPDATE tenant_byok_config SET status = 'revoked', revoked_at = ?, updated_at = ? WHERE tenant_id = ? AND status = 'active'`,
+    ).run(revokedAtMs, revokedAtMs, tenantId);
+    return r.changes > 0;
+  }
+
+  async deleteTenantByokConfig(tenantId: string): Promise<boolean> {
+    const r = this.d.prepare(`DELETE FROM tenant_byok_config WHERE tenant_id = ?`).run(tenantId);
+    return r.changes > 0;
+  }
+
+  async insertBreakGlassRequest(r: Omit<TenantBreakGlassRequestRow, 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_break_glass_request (id, tenant_id, requested_by, reason, status, customer_approver, approved_at, expires_at, consume_count, denial_reason, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(r.id, r.tenant_id, r.requested_by, r.reason, r.status, r.customer_approver, r.approved_at, r.expires_at, r.consume_count, r.denial_reason, r.created_at, r.created_at);
+  }
+
+  async getBreakGlassRequest(id: string): Promise<TenantBreakGlassRequestRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_break_glass_request WHERE id = ?').get(id) as TenantBreakGlassRequestRow | undefined) ?? null;
+  }
+
+  async listBreakGlassRequests(opts: { tenantId?: string; status?: TenantBreakGlassRequestRow['status']; limit?: number; offset?: number } = {}): Promise<TenantBreakGlassRequestRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.tenantId) { where.push('tenant_id = ?'); params.push(opts.tenantId); }
+    if (opts.status) { where.push('status = ?'); params.push(opts.status); }
+    const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    const limit = Math.max(1, Math.min(opts.limit ?? 100, 1000));
+    const offset = Math.max(0, opts.offset ?? 0);
+    return this.d.prepare(`SELECT * FROM tenant_break_glass_request ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as TenantBreakGlassRequestRow[];
+  }
+
+  async updateBreakGlassRequest(id: string, patch: Partial<Omit<TenantBreakGlassRequestRow, 'id' | 'tenant_id' | 'created_at'>>): Promise<boolean> {
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    const allowed: (keyof typeof patch)[] = ['status', 'customer_approver', 'approved_at', 'expires_at', 'consume_count', 'denial_reason', 'requested_by', 'reason'];
+    for (const k of allowed) {
+      if (k in patch && patch[k] !== undefined) {
+        sets.push(`${k} = ?`);
+        params.push(patch[k] as unknown);
+      }
+    }
+    if (sets.length === 0) return false;
+    sets.push('updated_at = ?');
+    params.push(Date.now());
+    params.push(id);
+    const r = this.d.prepare(`UPDATE tenant_break_glass_request SET ${sets.join(', ')} WHERE id = ?`).run(...params);
+    return r.changes > 0;
+  }
+
+  async listExpiredApprovedBreakGlassRequests(nowMs: number): Promise<TenantBreakGlassRequestRow[]> {
+    return this.d.prepare(
+      `SELECT * FROM tenant_break_glass_request WHERE status = 'approved' AND expires_at <= ? ORDER BY expires_at ASC`,
+    ).all(nowMs) as TenantBreakGlassRequestRow[];
+  }
+
+  async insertAttestationLog(a: Omit<TenantAttestationLogRow, 'created_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tenant_attestation_log (id, tenant_id, generated_at, signature_alg, signature, signing_key_fingerprint, payload_hash, payload_json, requested_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(a.id, a.tenant_id, a.generated_at, a.signature_alg, a.signature, a.signing_key_fingerprint, a.payload_hash, a.payload_json, a.requested_by, Date.now());
+  }
+
+  async listAttestationLogs(opts: { tenantId?: string; limit?: number; offset?: number } = {}): Promise<TenantAttestationLogRow[]> {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.tenantId) { where.push('tenant_id = ?'); params.push(opts.tenantId); }
+    const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    const limit = Math.max(1, Math.min(opts.limit ?? 100, 1000));
+    const offset = Math.max(0, opts.offset ?? 0);
+    return this.d.prepare(`SELECT * FROM tenant_attestation_log ${whereSql} ORDER BY generated_at DESC LIMIT ? OFFSET ?`).all(...params, limit, offset) as TenantAttestationLogRow[];
+  }
+
+  async getAttestationLog(id: string): Promise<TenantAttestationLogRow | null> {
+    return (this.d.prepare('SELECT * FROM tenant_attestation_log WHERE id = ?').get(id) as TenantAttestationLogRow | undefined) ?? null;
+  }
+
+  async getSystemAttestationSigningKey(): Promise<SystemAttestationSigningKeyRow | null> {
+    return (this.d.prepare(`SELECT * FROM system_attestation_signing_key WHERE key = 'default'`).get() as SystemAttestationSigningKeyRow | undefined) ?? null;
+  }
+
+  async insertSystemAttestationSigningKeyIfMissing(r: Omit<SystemAttestationSigningKeyRow, 'created_at'>): Promise<boolean> {
+    const result = this.d.prepare(
+      `INSERT OR IGNORE INTO system_attestation_signing_key (key, private_key_pem, public_key_pem, fingerprint, created_at) VALUES (?, ?, ?, ?, ?)`,
+    ).run(r.key, r.private_key_pem, r.public_key_pem, r.fingerprint, Date.now());
+    return result.changes > 0;
   }
 
   // ─── Phase 6: Capability Packs ─────────────────────────────
