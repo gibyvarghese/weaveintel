@@ -1,5 +1,6 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { HumanTaskPolicyRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 /**
@@ -63,7 +64,7 @@ export function registerTaskPolicyRoutes(
     if (body['assignment_strategy'] !== undefined) fields['assignment_strategy'] = body['assignment_strategy'];
     if (body['assign_to'] !== undefined) fields['assign_to'] = body['assign_to'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateHumanTaskPolicy(params['id']!, fields as any);
+    await db.updateHumanTaskPolicy(params['id']!, fields as Partial<Omit<HumanTaskPolicyRow, 'id' | 'created_at' | 'updated_at'>>);
     const taskPolicy = await db.getHumanTaskPolicy(params['id']!);
     json(res, 200, { taskPolicy });
   }, { auth: true, csrf: true });

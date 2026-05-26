@@ -155,7 +155,10 @@ export function buildAuditChain(events: readonly AuditEventLike[]): {
   const entries: AttestationAuditChainEntry[] = [];
   const sorted = [...events].sort((a, b) => a.createdAt - b.createdAt);
   for (const ev of sorted) {
-    const eventBytes = Buffer.from(canonicalize(ev), 'utf8');
+    // Hash only the fields stored in AttestationAuditChainEntry so the chain
+    // can be re-derived and verified by an auditor from the compact payload
+    // alone — without needing the original raw event objects (id, details).
+    const eventBytes = Buffer.from(canonicalize({ eventKind: ev.eventKind, at: ev.createdAt }), 'utf8');
     const next = createHash('sha256').update(prev).update(eventBytes).digest();
     entries.push({ eventKind: ev.eventKind, at: ev.createdAt, hash: next.toString('hex') });
     prev = next;
@@ -234,12 +237,22 @@ export function verifyAttestation(input: VerifyAttestationInput): VerifyAttestat
   if (!sigOk) {
     return { ok: false, signingKeyFingerprintOk: true, reason: 'Ed25519 signature verification failed' };
   }
-  // Re-derive chain tip from the per-event entries to catch tampering of
-  // hashes (entries[*].hash). We can't re-derive from the originals here —
-  // payload only carries hashes — but we can verify chain *internal*
-  // consistency: hash[i] = SHA256(hash[i-1] || canonical({eventKind,at})).
-  // (Re-canonicalising the original event object requires the auditor to
-  // also receive raw events; we keep the surface small and trust the chain
-  // tip + signature.)
+  // Re-derive each chain link: SHA256(prev_digest || canonical({eventKind,at})).
+  const chain = input.attestation.payload.auditChain;
+  let prevHash = Buffer.alloc(0);
+  for (let i = 0; i < chain.length; i++) {
+    const entry = chain[i]!;
+    const eventBytes = Buffer.from(canonicalize({ eventKind: entry.eventKind, at: entry.at }), 'utf8');
+    const derived = createHash('sha256').update(prevHash).update(eventBytes).digest();
+    if (derived.toString('hex') !== entry.hash) {
+      return { ok: false, signingKeyFingerprintOk: true, auditChainOk: false, reason: `audit chain link ${i} hash mismatch` };
+    }
+    prevHash = derived;
+  }
+  const expectedTip =
+    chain.length === 0 ? createHash('sha256').digest('hex') : prevHash.toString('hex');
+  if (expectedTip !== input.attestation.payload.auditChainTip) {
+    return { ok: false, signingKeyFingerprintOk: true, auditChainOk: false, reason: 'audit chain tip mismatch' };
+  }
   return { ok: true, signingKeyFingerprintOk: true, auditChainOk: true };
 }

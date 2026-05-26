@@ -40,6 +40,17 @@ function optionalString(config: Record<string, unknown>, key: string): string | 
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
+const AZURE_ALGORITHMS = new Set<string>(['RSA-OAEP', 'RSA-OAEP-256', 'RSA1_5', 'A256KW']);
+
+function optionalAzureAlg(config: Record<string, unknown>): AzureWrapAlgorithm | undefined {
+  const v = optionalString(config, 'algorithm');
+  if (v === undefined) return undefined;
+  if (!AZURE_ALGORITHMS.has(v)) {
+    throw new KmsUnavailableError(`azure-kv: config.algorithm must be one of ${[...AZURE_ALGORITHMS].join(' | ')}, got '${v}'`);
+  }
+  return v as AzureWrapAlgorithm;
+}
+
 /**
  * Local provider config:
  *   `{ masterKeyB64?: string, masterKeyHex?: string, masterKeyEnv?: string,
@@ -102,7 +113,7 @@ const azureKvRegistration: KmsProviderRegistration = {
     const vaultUrl = requireString(config, 'vaultUrl', 'azure-kv');
     const keyName = requireString(config, 'keyName', 'azure-kv');
     const keyVersion = optionalString(config, 'keyVersion');
-    const alg = optionalString(config, 'algorithm') as AzureWrapAlgorithm | undefined;
+    const alg = optionalAzureAlg(config);
     return new AzureKeyVaultProvider({
       vaultUrl,
       keyName,
@@ -179,7 +190,7 @@ const byokRegistration: KmsProviderRegistration = {
     const mode = (optionalString(config, 'mode') ?? 'byok') as 'byok' | 'hyok';
     const hyokEndpoint = optionalString(config, 'hyokEndpoint');
     const hyokBearerToken = optionalString(config, 'hyokBearerToken');
-    const hyokTimeoutMs = typeof config['hyokTimeoutMs'] === 'number' ? (config['hyokTimeoutMs'] as number) : undefined;
+    const hyokTimeoutMs = typeof config['hyokTimeoutMs'] === 'number' ? config['hyokTimeoutMs'] : undefined;
     const localPrivPem = optionalString(config, 'privateKeyPemForLocalDev');
     let unwrap: ByokUnwrapDelegate;
     if (hyokEndpoint) {

@@ -65,7 +65,7 @@ export function registerTenantByokRoutes(
       });
       json(res, 200, out);
     } catch (err) {
-      json(res, 400, { error: (err as Error).message });
+      json(res, 400, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 
@@ -106,7 +106,7 @@ export function registerTenantByokRoutes(
       });
       json(res, 200, row);
     } catch (err) {
-      json(res, 400, { error: (err as Error).message });
+      json(res, 400, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 
@@ -121,7 +121,7 @@ export function registerTenantByokRoutes(
       if (!row) { json(res, 404, { error: 'Not found' }); return; }
       json(res, 200, row);
     } catch (err) {
-      json(res, 400, { error: (err as Error).message });
+      json(res, 400, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 
@@ -136,7 +136,7 @@ export function registerTenantByokRoutes(
       if (!row) { json(res, 404, { error: 'Not found' }); return; }
       json(res, 200, row);
     } catch (err) {
-      json(res, 400, { error: (err as Error).message });
+      json(res, 400, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 
@@ -177,7 +177,7 @@ export function registerTenantByokRoutes(
       });
       json(res, 200, out);
     } catch (err) {
-      json(res, 400, { error: (err as Error).message });
+      json(res, 400, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 

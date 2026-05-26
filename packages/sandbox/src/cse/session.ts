@@ -25,6 +25,7 @@ export class SessionManager {
     this.sweepTimer = setInterval(() => {
       void this.evictExpired(provider, config);
     }, 60_000);
+    this.sweepTimer.unref?.();
   }
 
   stopSweep(): void {

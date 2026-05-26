@@ -244,7 +244,7 @@ export function registerEncryptionObservabilityRoutes(
       });
       json(res, 201, { rule });
     } catch (err) {
-      json(res, 500, { error: (err as Error).message });
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 
@@ -272,7 +272,7 @@ export function registerEncryptionObservabilityRoutes(
       const rule = await upsertAlertRule(db, next);
       json(res, 200, { rule });
     } catch (err) {
-      json(res, 500, { error: (err as Error).message });
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 

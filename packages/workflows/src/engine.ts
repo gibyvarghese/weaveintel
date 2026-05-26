@@ -31,82 +31,11 @@ import { evaluateBoolean, hasExpression } from './expressions.js';
 import { type ContractEmitter, buildEmittedContract } from './contract-emitter.js';
 import { validateWorkflowInput, WorkflowInputValidationError } from './input-validator.js';
 import { type CostMeter, InMemoryCostMeter } from './cost-meter.js';
+import { type WorkflowEngineOptions } from './engine-types.js';
+import { now, sleep } from './engine-sleep.js';
+import { resolveResumeNextId } from './engine-runner.js';
 
-export interface WorkflowEngineOptions {
-  checkpointStore?: CheckpointStore;
-  bus?: EventBus;
-  defaultPolicy?: WorkflowPolicy;
-  /** Optional human task queue for human-task step integration. */
-  humanTaskQueue?: HumanTaskQueue;
-  /** Optional durable repository for workflow run state. */
-  runRepository?: WorkflowRunRepository;
-  /**
-   * Phase 1 — Optional resolver registry. When set, any `step.handler`
-   * containing a `:` (or matching a registered bare-kind resolver such as
-   * `'noop'`) is resolved at run-start by the matching `HandlerResolver`.
-   * Pre-registered handlers via `engine.registerHandler(...)` always win.
-   */
-  resolverRegistry?: HandlerResolverRegistry;
-  /**
-   * Phase 1 — Dependency bag forwarded to every resolver invocation.
-   * Apps populate this with registries the resolvers need (tool registry,
-   * prompt store, agent registry, MCP client, etc.).
-   */
-  resolverDeps?: Record<string, unknown>;
-  /**
-   * Phase 1 — Optional durable definition store. When set, `startRun` falls
-   * back to the store if the requested workflowId is not in the in-memory
-   * definition map, and `getDefinition` / `listDefinitions` consult both.
-   */
-  definitionStore?: WorkflowDefinitionStore;
-  /**
-   * Phase 4 — Optional contract emitter. When set and a workflow definition
-   * declares an `outputContract`, the engine builds and emits the contract
-   * after the run reaches `completed`. Emitter failures are swallowed (logged
-   * via `bus`) so workflow runs never fail because of emission errors.
-   */
-  contractEmitter?: ContractEmitter;
-  /**
-   * Phase 5 — Optional cost meter. When set, the engine queries the meter
-   * after each step. If the workflow's `WorkflowPolicy.costCeiling` is set
-   * and the cumulative cost exceeds it, the run is failed with
-   * `Cost ceiling exceeded` and a `workflow:cost_exceeded` event is emitted.
-   * Callers (LLM adapters, tool wrappers) report deltas via `costMeter.record(runId, ...)`.
-   */
-  costMeter?: CostMeter;
-}
-
-function now(): string { return new Date().toISOString(); }
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-/**
- * Resolve the next step ID when resuming from a paused state.
- * Respects branch/condition selectors carried in resume data.
- */
-function resolveResumeNextId(step: WorkflowStep, resumeData: unknown): string | undefined {
-  if (typeof step.next === 'string') return step.next;
-  if (!Array.isArray(step.next)) return undefined;
-
-  // Resume data may carry a branch selector
-  if (resumeData !== null && resumeData !== undefined && typeof resumeData === 'object') {
-    const d = resumeData as Record<string, unknown>;
-    // Explicit branch name
-    if (typeof d['branch'] === 'string') {
-      const found = step.next.find(n => n === d['branch']);
-      if (found) return found;
-    }
-    // Explicit branch index
-    if (typeof d['branchIndex'] === 'number') {
-      return step.next[d['branchIndex']];
-    }
-  }
-
-  // Default: first listed branch (backward-compatible)
-  return step.next[0];
-}
+export type { WorkflowEngineOptions } from './engine-types.js';
 
 export class DefaultWorkflowEngine implements IWorkflowEngine {
   private definitions = new Map<string, WorkflowDefinition>();
@@ -655,7 +584,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       this.bus.emit({
         type: event.type,
         timestamp: Date.now(),
-        data: event as unknown as Record<string, unknown>,
+        data: { type: event.type, runId: event.runId, stepId: event.stepId, timestamp: event.timestamp, data: event.data },
       });
     }
   }

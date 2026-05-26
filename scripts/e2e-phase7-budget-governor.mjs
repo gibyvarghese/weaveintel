@@ -10,30 +10,12 @@
 //
 // Requires server running at http://localhost:3500 (examples/12-geneweave.ts).
 
-import assert from 'node:assert/strict';
+import { BASE, DB_PATH, makeOk, jfetch } from './e2e-helpers.mjs';
 
-const BASE = process.env.BASE_URL ?? 'http://localhost:3500';
+const ok = makeOk();
 const ts = Date.now();
 const email = `e2e_phase7_${ts}@example.com`;
 const password = 'P@ssw0rd123';
-
-let assertions = 0;
-const ok = (cond, msg) => { assertions++; assert(cond, msg); console.log(`  ✓ ${msg}`); };
-
-async function jfetch(method, path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(opts.cookie ? { cookie: opts.cookie } : {}),
-      ...(opts.csrf ? { 'x-csrf-token': opts.csrf } : {}),
-    },
-    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
-  });
-  const text = await res.text();
-  let body = null; try { body = JSON.parse(text); } catch { body = text; }
-  return { status: res.status, body, headers: res.headers };
-}
 
 console.log(`\n=== Phase 7 E2E (maxSteps + reasoning + truncation + budget) — ${BASE} ===\n`);
 
@@ -45,7 +27,7 @@ ok(reg.status === 201 || reg.status === 200, `register status=${reg.status}`);
 // 2. Promote
 console.log('2. Promote to tenant_admin');
 const { execSync } = await import('node:child_process');
-execSync(`sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='${email}';"`);
+execSync(`sqlite3 ${DB_PATH} "UPDATE users SET persona='tenant_admin' WHERE email='${email}';"`);
 ok(true, 'promoted via sqlite');
 
 // 3. Login
@@ -138,4 +120,4 @@ ok(del.status === 200 || del.status === 204, `delete status=${del.status}`);
 const got3 = await jfetch('GET', `/api/admin/cost-policies/${id}`, { cookie });
 ok(got3.status === 404, `404 after delete: ${got3.status}`);
 
-console.log(`\n✓ Phase 7 E2E passed: ${assertions} assertions.\n`);
+console.log(`\n✓ Phase 7 E2E passed: ${ok.count()} assertions.\n`);

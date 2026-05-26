@@ -1,5 +1,6 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { MemoryGovernanceRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 /**
@@ -63,7 +64,7 @@ export function registerMemoryGovernanceRoutes(
     if (body['max_age'] !== undefined) fields['max_age'] = body['max_age'];
     if (body['max_entries'] !== undefined) fields['max_entries'] = body['max_entries'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateMemoryGovernance(params['id']!, fields as any);
+    await db.updateMemoryGovernance(params['id']!, fields as Partial<Omit<MemoryGovernanceRow, 'id' | 'created_at' | 'updated_at'>>);
     const item = await db.getMemoryGovernance(params['id']!);
     json(res, 200, { 'memory-governance-rule': item });
   }, { auth: true, csrf: true });

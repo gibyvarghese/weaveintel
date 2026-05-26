@@ -21,32 +21,14 @@
 //   npx tsx examples/12-geneweave.ts &
 //   set +H && node scripts/e2e-phase5-rotation-scheduler.mjs
 
-import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
+import { BASE, DB_PATH, makeOk, jfetch } from './e2e-helpers.mjs';
 
-const BASE = process.env.BASE_URL ?? 'http://localhost:3500';
+const ok = makeOk();
 const ts = Date.now();
 const email = `e2e_phase5_sched_${ts}@example.com`;
 const password = 'P@ssw0rd123';
 const tenantId = `e2e_sched_tenant_${ts}`;
-
-let assertions = 0;
-const ok = (cond, msg) => { assertions++; assert(cond, msg); console.log(`  ✓ ${msg}`); };
-
-async function jfetch(method, path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(opts.cookie ? { cookie: opts.cookie } : {}),
-      ...(opts.csrf ? { 'x-csrf-token': opts.csrf } : {}),
-    },
-    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
-  });
-  const text = await res.text();
-  let body = null; try { body = JSON.parse(text); } catch { body = text; }
-  return { status: res.status, body, headers: res.headers };
-}
 
 console.log(`\n=== Phase 5 E2E (rotation scheduler) — ${BASE} ===\n`);
 
@@ -57,7 +39,7 @@ ok(reg.status === 201 || reg.status === 200, `register status=${reg.status}`);
 
 // 2. Promote to tenant_admin
 console.log('2. Promote to tenant_admin');
-execSync(`sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='${email}';"`);
+execSync(`sqlite3 ${DB_PATH} "UPDATE users SET persona='tenant_admin' WHERE email='${email}';"`);
 ok(true, 'promoted via sqlite');
 
 // 3. Login + capture csrf
@@ -110,7 +92,7 @@ const initialDekId = initialDek.id;
 // 7. Age the DEK by 31 days via raw SQL
 console.log('7. Age active DEK by 31 days via raw SQL');
 const agedAt = Date.now() - (31 * 24 * 3600 * 1000);
-execSync(`sqlite3 ./geneweave.db "UPDATE tenant_deks SET created_at=${agedAt} WHERE id='${initialDekId}';"`);
+execSync(`sqlite3 ${DB_PATH} "UPDATE tenant_deks SET created_at=${agedAt} WHERE id='${initialDekId}';"`);
 ok(true, `set created_at=${agedAt} on dek ${initialDekId.slice(0, 8)}…`);
 
 // 8. Spawn helper to tick scheduler once
@@ -165,4 +147,4 @@ ok(del.status === 200 || del.status === 204, `delete status=${del.status}`);
 const after = await jfetch('GET', `/api/admin/tenant-encryption-policies/${tenantId}`, { cookie });
 ok(after.status === 404, 'GET after delete = 404');
 
-console.log(`\n✅ All ${assertions} assertions passed.\n`);
+console.log(`\n✅ All ${ok.count()} assertions passed.\n`);

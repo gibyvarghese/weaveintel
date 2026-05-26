@@ -46,11 +46,19 @@ interface CacheEntry {
   readonly provider: KmsProvider;
 }
 
+function sortKeysDeep(value: unknown): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  const obj = value as Record<string, unknown>;
+  return Object.fromEntries(Object.keys(obj).sort().map((k) => [k, sortKeysDeep(obj[k])]));
+}
+
 function hashConfig(config: Record<string, unknown> | null | undefined): string {
   if (!config || Object.keys(config).length === 0) return '0';
-  // Deterministic JSON: sort keys recursively so two equal configs hash equal.
-  const sorted = JSON.stringify(config, Object.keys(config).sort());
-  return createHash('sha256').update(sorted).digest('hex').slice(0, 16);
+  // Deep key sort before stringify so nested objects with different insertion order
+  // hash identically (the replacer approach only sorts top-level keys).
+  const canonical = JSON.stringify(sortKeysDeep(config));
+  return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 
 export function createCachedKmsResolver(opts: CachedKmsResolverOptions): CachedKmsResolver {

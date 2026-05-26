@@ -26,13 +26,9 @@ export async function refreshTokenIfNeeded(
   const clientSecret = authConfig['clientSecret'] ?? authConfig['client_secret'];
   if (!clientId || !clientSecret || !row.base_url) return;
 
-  console.log(`[chat] OAuth token for ${row.connector_type}/${row.name} expires soon — refreshing...`);
   const provider = new ServiceNowProvider();
   const result = await provider.refreshOAuthToken(row.base_url, clientId, clientSecret, row.refresh_token);
-  if (!result) {
-    console.error(`[chat] Token refresh failed for connector ${row.id}`);
-    return;
-  }
+  if (!result) return;
 
   const newExpiresAt = new Date(now + result.expiresIn * 1000).toISOString();
   await db.updateEnterpriseConnector(row.id, {
@@ -44,7 +40,6 @@ export async function refreshTokenIfNeeded(
   row.access_token = result.accessToken;
   row.refresh_token = result.refreshToken;
   row.token_expires_at = newExpiresAt;
-  console.log(`[chat] Token refreshed for ${row.connector_type}/${row.name}, expires ${newExpiresAt}`);
 }
 
 function buildConnectorConfigs(enabled: EnterpriseConnectorRow[]): EnterpriseConnectorConfig[] {

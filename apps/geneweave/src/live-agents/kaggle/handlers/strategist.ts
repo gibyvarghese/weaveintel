@@ -74,7 +74,7 @@ export function createStrategistAgenticWithHandoff(ctx: SharedHandlerContext): T
   // returned by `opts.phase7Resolver`.)
 
   return async (action, context, execCtx) => {
-    console.log(`[STRATEGIST-AGENTIC-ENTRY] mesh=${context.agent.meshId} agent=${context.agent.id}`);
+    log(`[STRATEGIST-AGENTIC-ENTRY] mesh=${context.agent.meshId} agent=${context.agent.id}`);
     // Per-tick L6-L9 resolution. Bound to live (meshId, agentId) so an
     // operator-supplied mesh- or agent-scoped capability_policy_bindings row
     // overrides the workflow- or tenant-default policy on every tick. Falls

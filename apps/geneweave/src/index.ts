@@ -149,6 +149,13 @@ export let geneweaveEncryptionMetrics: (MetricsEmitter & { snapshot?: InMemoryMe
  *  5. Returns a GeneWeaveApp handle with stop() for graceful shutdown
  */
 export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeaveApp> {
+  // Validate critical env vars at boot; throws on fatal misconfigurations.
+  const { validateEnv } = await import('./env-validation.js');
+  const envResult = validateEnv({ jwtSecret: config.jwtSecret });
+  for (const warning of envResult.warnings) {
+    console.warn(warning);
+  }
+
   // Ensure cross-package runtime tracing is enabled by default for all execution paths.
   weaveSetDefaultTracer(weaveConsoleTracer());
 
@@ -473,7 +480,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
 // ─── Re-exports for advanced usage ───────────────────────────
 
-export type { DatabaseAdapter, DatabaseConfig, UserRow, SessionRow, ChatRow, MessageRow, MetricRow, EvalRow, MetricsSummary, ChatSettingsRow, TraceRow, PromptRow, GuardrailRow, RoutingPolicyRow, WorkflowDefRow, ToolConfigRow, ToolCatalogRow, WorkflowRunRow, GuardrailEvalRow, ToolPolicyRow, ToolRateLimitBucketRow, ToolAuditEventRow, ToolHealthSnapshotRow, ToolCredentialRow } from './db.js';
+export type { DatabaseAdapter, DatabaseConfig, UserRow, SessionRow, ChatRow, MessageRow, MetricRow, EvalRow, MetricsSummary, ChatSettingsRow, TraceRow, PromptRow, GuardrailRow, RoutingPolicyRow, WorkflowDefRow, ToolCatalogRow, WorkflowRunRow, GuardrailEvalRow, ToolPolicyRow, ToolRateLimitBucketRow, ToolAuditEventRow, ToolHealthSnapshotRow, ToolCredentialRow } from './db.js';
 export { SQLiteAdapter, createDatabaseAdapter } from './db.js';
 export type { ProviderConfig, ChatEngineConfig, ChatSettings } from './chat.js';
 export { ChatEngine, calculateCost } from './chat.js';

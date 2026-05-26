@@ -30,7 +30,7 @@ export class ChangeTrigger extends EventTriggerBase {
 
   constructor(definition: TriggerDefinition, handler: TriggerHandler) {
     super(definition, handler);
-    this.config = definition.config as unknown as ChangeConfig;
+    this.config = parseChangeConfig(definition.config);
   }
 
   get resourceType(): string { return this.config.resourceType; }
@@ -63,6 +63,21 @@ export class ChangeTrigger extends EventTriggerBase {
     if (this.debounceTimer) { clearTimeout(this.debounceTimer); this.debounceTimer = null; }
     this.pendingChanges.length = 0;
   }
+}
+
+function parseChangeConfig(raw: Record<string, unknown>): ChangeConfig {
+  if (typeof raw['resourceType'] !== 'string') {
+    throw new TypeError(`ChangeTrigger: config.resourceType must be a string`);
+  }
+  const changeTypes = Array.isArray(raw['changeTypes'])
+    ? (raw['changeTypes'] as ChangeType[])
+    : undefined;
+  return {
+    resourceType: raw['resourceType'],
+    filter: raw['filter'] !== undefined ? (raw['filter'] as Record<string, unknown>) : undefined,
+    changeTypes,
+    debounceMs: typeof raw['debounceMs'] === 'number' ? raw['debounceMs'] : undefined,
+  };
 }
 
 export function createChangeTrigger(definition: TriggerDefinition, handler: TriggerHandler): ChangeTrigger {

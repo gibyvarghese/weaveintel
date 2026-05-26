@@ -1,5 +1,6 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { TaskContractRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 /**
@@ -67,7 +68,7 @@ export function registerTaskContractRoutes(
     if (body['min_confidence'] !== undefined) fields['min_confidence'] = body['min_confidence'];
     if (body['require_human_review'] !== undefined) fields['require_human_review'] = body['require_human_review'] ? 1 : 0;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateTaskContract(params['id']!, fields as any);
+    await db.updateTaskContract(params['id']!, fields as Partial<Omit<TaskContractRow, 'id' | 'created_at' | 'updated_at'>>);
     const contract = await db.getTaskContract(params['id']!);
     json(res, 200, { contract });
   }, { auth: true, csrf: true });

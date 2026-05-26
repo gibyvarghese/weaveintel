@@ -1,5 +1,6 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { IdentityRuleRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 /**
@@ -63,7 +64,7 @@ export function registerIdentityRuleRoutes(
     if (body['result'] !== undefined) fields['result'] = body['result'];
     if (body['priority'] !== undefined) fields['priority'] = body['priority'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateIdentityRule(params['id']!, fields as any);
+    await db.updateIdentityRule(params['id']!, fields as Partial<Omit<IdentityRuleRow, 'id' | 'created_at' | 'updated_at'>>);
     const item = await db.getIdentityRule(params['id']!);
     json(res, 200, { 'identity-rule': item });
   }, { auth: true, csrf: true });

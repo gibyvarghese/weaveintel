@@ -21,9 +21,7 @@ export function parseDelimitedTable(text: string, delim: string = ','): { header
   const lines = text.split('\n').filter((l) => l.trim());
   if (lines.length === 0) return { headers: [], rows: [] };
 
-  // @ts-ignore - lines[0] is guaranteed to exist due to check above
-  const headers = parseDelimitedLine(lines[0], delim);
-  // @ts-ignore - lines.slice(1) is safe
+  const headers = parseDelimitedLine(lines[0]!, delim);
   const rows = lines.slice(1).map((line) => parseDelimitedLine(line, delim));
 
   return { headers, rows };

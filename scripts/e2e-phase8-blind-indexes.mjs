@@ -19,36 +19,17 @@
 //
 // Usage:  node scripts/e2e-phase8-blind-indexes.mjs
 
-import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
+import { BASE, DB_PATH, makeOk, jfetch } from './e2e-helpers.mjs';
 
-const BASE = process.env.BASE_URL ?? 'http://localhost:3500';
-const DB = process.env.GENEWEAVE_DB ?? './geneweave.db';
+const ok = makeOk();
 const SYSTEM = '__system__';
 const ts = Date.now();
 const email = `e2e_phase8_bidx_${ts}@example.com`;
 const password = 'P@ssw0rd123';
 
-let assertions = 0;
-const ok = (cond, msg) => { assertions++; assert(cond, msg); console.log(`  ✓ ${msg}`); };
-
-async function jfetch(method, path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(opts.cookie ? { cookie: opts.cookie } : {}),
-      ...(opts.csrf ? { 'x-csrf-token': opts.csrf } : {}),
-    },
-    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
-  });
-  const text = await res.text();
-  let body = null; try { body = JSON.parse(text); } catch { body = text; }
-  return { status: res.status, body, headers: res.headers };
-}
-
 function sql(q) {
-  return execSync(`sqlite3 ${DB} ${JSON.stringify(q)}`).toString().trim();
+  return execSync(`sqlite3 ${DB_PATH} ${JSON.stringify(q)}`).toString().trim();
 }
 
 console.log(`\n=== Phase 8 E2E (blind indexes / users.email_bidx) — ${BASE} ===\n`);
@@ -73,7 +54,7 @@ ok(typeof csrf === 'string' && csrf.length > 0, 'csrf token present');
 
 // 4. Promote to tenant_admin so we can hit the admin surface
 console.log('4. Promote to tenant_admin');
-execSync(`sqlite3 ${DB} "UPDATE users SET persona='tenant_admin' WHERE email='${email}';"`);
+execSync(`sqlite3 ${DB_PATH} "UPDATE users SET persona='tenant_admin' WHERE email='${email}';"`);
 const login2 = await jfetch('POST', '/api/auth/login', { body: { email, password } });
 const cookie2 = (login2.headers.get('set-cookie') ?? '').split(',').map(c => c.trim().split(';')[0]).join('; ');
 const csrf2 = login2.body?.csrfToken;
@@ -118,4 +99,4 @@ console.log('10. Login succeeds against rebuilt bidx');
 const loginFinal = await jfetch('POST', '/api/auth/login', { body: { email, password } });
 ok(loginFinal.status === 200, `final login status=${loginFinal.status}`);
 
-console.log(`\n✅ Phase 8 E2E passed — ${assertions} assertions.\n`);
+console.log(`\n✅ Phase 8 E2E passed — ${ok.count()} assertions.\n`);

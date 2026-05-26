@@ -312,16 +312,18 @@ async function sendMessage(text: string) {
 
     // Flush trailing event if stream ended without a trailing blank line.
     flushEvent();
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const errorMsg = error instanceof Error ? error.message : 'Request failed';
     if (assistantMsg) {
       assistantMsg.processState = 'error';
-      assistantMsg.content = assistantMsg.content || `Error: ${error?.message || 'Request failed'}`;
+      assistantMsg.content = assistantMsg.content || `Error: ${errorMsg}`;
     } else {
-      state.messages.push({
+      const errMessage: Message = {
         role: 'assistant',
-        content: `Error: ${error?.message || 'Request failed'}`,
+        content: `Error: ${errorMsg}`,
         created_at: new Date().toISOString(),
-      } as any);
+      };
+      state.messages.push(errMessage);
     }
   } finally {
     if (assistantMsg && assistantMsg.processState === 'running') {

@@ -20,35 +20,17 @@
 //
 // REQUIRES the server to be started with WEAVE_ENCRYPTION_MASTER_KEY set.
 
-import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
+import { BASE, DB_PATH, makeOk, jfetch } from './e2e-helpers.mjs';
 
-const BASE = process.env.BASE_URL ?? 'http://localhost:3500';
+const ok = makeOk();
 const ts = Date.now();
 const email = `e2e_phase6_purge_${ts}@example.com`;
 const password = 'P@ssw0rd123';
 const tenantId = `e2e_purge_tenant_${ts}`;
 
-let assertions = 0;
-const ok = (cond, msg) => { assertions++; assert(cond, msg); console.log(`  ✓ ${msg}`); };
-
-async function jfetch(method, path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(opts.cookie ? { cookie: opts.cookie } : {}),
-      ...(opts.csrf ? { 'x-csrf-token': opts.csrf } : {}),
-    },
-    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
-  });
-  const text = await res.text();
-  let body = null; try { body = JSON.parse(text); } catch { body = text; }
-  return { status: res.status, body, headers: res.headers };
-}
-
 function sql(q) {
-  return execSync(`sqlite3 ./geneweave.db "${q.replace(/"/g, '\\"')}"`, { encoding: 'utf8' }).trim();
+  return execSync(`sqlite3 ${DB_PATH} "${q.replace(/"/g, '\\"')}"`, { encoding: 'utf8' }).trim();
 }
 
 console.log(`\n=== Phase 6 E2E (tenant deletion lifecycle) — ${BASE} ===\n`);
@@ -198,4 +180,4 @@ ok(del.status === 200 || del.status === 204, `delete status=${del.status}`);
 const after = await jfetch('GET', `/api/admin/tenant-encryption-policies/${tenantId}`, { cookie });
 ok(after.status === 404, 'GET after delete = 404');
 
-console.log(`\n✅ All ${assertions} assertions passed.\n`);
+console.log(`\n✅ All ${ok.count()} assertions passed.\n`);

@@ -9,6 +9,7 @@
 
 import { newUUIDv7 } from '../../lib/uuid.js';
 import type { DatabaseAdapter } from '../../db.js';
+import type { SupervisorAgentRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 interface ToolAllocBody {
@@ -127,7 +128,7 @@ export function registerSupervisorAgentRoutes(
     if (body['is_default'] !== undefined) fields['is_default'] = body['is_default'] ? 1 : 0;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
 
-    await db.updateSupervisorAgent(id, fields as any);
+    await db.updateSupervisorAgent(id, fields as Partial<Omit<SupervisorAgentRow, 'id' | 'created_at' | 'updated_at'>>);
 
     if (body['tools'] !== undefined) {
       await db.setAgentTools(id, normalizeTools(body['tools']));

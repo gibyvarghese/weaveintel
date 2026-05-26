@@ -1,5 +1,6 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { ComplianceRuleRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 /**
@@ -65,7 +66,7 @@ export function registerComplianceRuleRoutes(
     if (body['action'] !== undefined) fields['action'] = body['action'];
     if (body['config'] !== undefined) fields['config'] = body['config'] != null ? (typeof body['config'] === 'string' ? body['config'] : JSON.stringify(body['config'])) : null;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateComplianceRule(params['id']!, fields as any);
+    await db.updateComplianceRule(params['id']!, fields as Partial<Omit<ComplianceRuleRow, 'id' | 'created_at' | 'updated_at'>>);
     const item = await db.getComplianceRule(params['id']!);
     json(res, 200, { 'compliance-rule': item });
   }, { auth: true, csrf: true });

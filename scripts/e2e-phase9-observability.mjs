@@ -24,32 +24,13 @@
 // WEAVE_ENCRYPTION_MASTER_KEY set so the InMemoryMetricsEmitter is wired
 // in via bootstrap. If the manager is unavailable the script exits 2.
 
-import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
+import { BASE, DB_PATH, makeOk, jfetch } from './e2e-helpers.mjs';
 
-const BASE = process.env.BASE_URL ?? 'http://localhost:3500';
-const DB = process.env.GENEWEAVE_DB ?? './geneweave.db';
+const ok = makeOk();
 const ts = Date.now();
 const email = `e2e_phase9_obs_${ts}@example.com`;
 const password = 'P@ssw0rd123';
-
-let assertions = 0;
-const ok = (cond, msg) => { assertions++; assert(cond, msg); console.log(`  ✓ ${msg}`); };
-
-async function jfetch(method, path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(opts.cookie ? { cookie: opts.cookie } : {}),
-      ...(opts.csrf ? { 'x-csrf-token': opts.csrf } : {}),
-    },
-    ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
-  });
-  const text = await res.text();
-  let body = null; try { body = JSON.parse(text); } catch { body = text; }
-  return { status: res.status, body, headers: res.headers };
-}
 
 console.log(`\n=== Phase 9 E2E (encryption observability + alerts) — ${BASE} ===\n`);
 
@@ -57,7 +38,7 @@ console.log(`\n=== Phase 9 E2E (encryption observability + alerts) — ${BASE} =
 console.log('1. Register + promote to tenant_admin');
 const reg = await jfetch('POST', '/api/auth/register', { body: { email, password, name: 'phase9' } });
 ok(reg.status === 201 || reg.status === 200, `register status=${reg.status}`);
-execSync(`sqlite3 ${DB} "UPDATE users SET persona='tenant_admin' WHERE email='${email}';"`);
+execSync(`sqlite3 ${DB_PATH} "UPDATE users SET persona='tenant_admin' WHERE email='${email}';"`);
 
 const login = await jfetch('POST', '/api/auth/login', { body: { email, password } });
 ok(login.status === 200, `login status=${login.status}`);
@@ -144,4 +125,4 @@ const after = await jfetch('GET', '/api/admin/encryption/alerts?tenantId=fleet',
 const stillThere = (after.body?.rules ?? []).some((r) => r.id === ruleId);
 ok(!stillThere, 'rule removed from listing');
 
-console.log(`\n✅ Phase 9 E2E passed — ${assertions} assertions.\n`);
+console.log(`\n✅ Phase 9 E2E passed — ${ok.count()} assertions.\n`);

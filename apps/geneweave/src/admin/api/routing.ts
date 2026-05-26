@@ -1,5 +1,6 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { RoutingPolicyRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 /**
@@ -68,7 +69,7 @@ export function registerRoutingRoutes(
     if (body['fallback_model'] !== undefined) fields['fallback_model'] = body['fallback_model'];
     if (body['fallback_provider'] !== undefined) fields['fallback_provider'] = body['fallback_provider'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateRoutingPolicy(params['id']!, fields as any);
+    await db.updateRoutingPolicy(params['id']!, fields as Partial<Omit<RoutingPolicyRow, 'id' | 'created_at' | 'updated_at'>>);
     const policy = await db.getRoutingPolicy(params['id']!);
     json(res, 200, { policy });
   }, { auth: true, csrf: true });

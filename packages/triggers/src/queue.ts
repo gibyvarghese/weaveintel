@@ -26,7 +26,7 @@ export class QueueTrigger extends EventTriggerBase {
 
   constructor(definition: TriggerDefinition, handler: TriggerHandler) {
     super(definition, handler);
-    this.config = definition.config as unknown as QueueConfig;
+    this.config = parseQueueConfig(definition.config);
   }
 
   get queueName(): string { return this.config.queueName; }
@@ -40,6 +40,7 @@ export class QueueTrigger extends EventTriggerBase {
     super.start();
     const pollMs = this.config.pollIntervalMs ?? 1000;
     this.timer = setInterval(() => { void this.processPending(); }, pollMs);
+    this.timer.unref?.();
   }
 
   override stop(): void {
@@ -62,6 +63,18 @@ export class QueueTrigger extends EventTriggerBase {
       }
     }
   }
+}
+
+function parseQueueConfig(raw: Record<string, unknown>): QueueConfig {
+  if (typeof raw['queueName'] !== 'string') {
+    throw new TypeError(`QueueTrigger: config.queueName must be a string`);
+  }
+  return {
+    queueName: raw['queueName'],
+    concurrency: typeof raw['concurrency'] === 'number' ? raw['concurrency'] : undefined,
+    visibilityTimeoutMs: typeof raw['visibilityTimeoutMs'] === 'number' ? raw['visibilityTimeoutMs'] : undefined,
+    pollIntervalMs: typeof raw['pollIntervalMs'] === 'number' ? raw['pollIntervalMs'] : undefined,
+  };
 }
 
 export function createQueueTrigger(definition: TriggerDefinition, handler: TriggerHandler): QueueTrigger {

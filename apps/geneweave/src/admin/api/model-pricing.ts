@@ -1,5 +1,6 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { ModelPricingRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 import { syncModelPricing } from '../../pricing-sync.js';
 import { getCapabilityMatrixCache } from '../../capability-matrix-cache.js';
@@ -71,7 +72,7 @@ export function registerModelPricingRoutes(
     if (body['quality_score'] !== undefined) fields['quality_score'] = body['quality_score'];
     if (body['source'] !== undefined) fields['source'] = body['source'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateModelPricing(params['id']!, fields as any);
+    await db.updateModelPricing(params['id']!, fields as Partial<Omit<ModelPricingRow, 'id' | 'created_at' | 'updated_at'>>);
     const pricing = await db.getModelPricing(params['id']!);
     getCapabilityMatrixCache().invalidateModelPricing();
     json(res, 200, { pricing });

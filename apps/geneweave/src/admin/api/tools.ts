@@ -7,6 +7,7 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import { normalizeCallableDescription } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { ToolCatalogRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 export function registerToolRoutes(
@@ -80,7 +81,7 @@ export function registerToolRoutes(
     if (body['side_effects'] !== undefined) fields['side_effects'] = body['side_effects'] ? 1 : 0;
     if (body['tags'] !== undefined) fields['tags'] = Array.isArray(body['tags']) ? JSON.stringify(body['tags']) : body['tags'];
     if (body['credential_id'] !== undefined) fields['credential_id'] = body['credential_id'];
-    await db.updateToolConfig(params['id']!, fields as any);
+    await db.updateToolConfig(params['id']!, fields as Partial<Omit<ToolCatalogRow, 'id' | 'created_at' | 'updated_at'>>);
     const tool = await db.getToolConfig(params['id']!);
     json(res, 200, { tool });
   }, { auth: true, csrf: true });

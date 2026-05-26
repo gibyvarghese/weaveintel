@@ -8,6 +8,7 @@
 
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { ToolPolicyRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 export function registerToolPolicyRoutes(
@@ -88,7 +89,7 @@ export function registerToolPolicyRoutes(
     if (body['expires_at'] !== undefined) fields['expires_at'] = body['expires_at'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
 
-    await db.updateToolPolicy(params['id']!, fields as any);
+    await db.updateToolPolicy(params['id']!, fields as Partial<Omit<ToolPolicyRow, 'id' | 'created_at' | 'updated_at'>>);
     const policy = await db.getToolPolicy(params['id']!);
     json(res, 200, { policy });
   }, { auth: true, csrf: true });

@@ -84,9 +84,22 @@ export async function kernelOptimizeHyperparams(
 ): Promise<KernelOptimizeHyperparamsResult> {
   // 1. Load notebook template and parameterize
   const templatePath = path.resolve(__dirname, '../runner/templates/hyperparam_search_optuna.ipynb');
-  let nb = JSON.parse(await fs.readFile(templatePath, 'utf8'));
-  // TODO: Parameterize dataset path, target column, n_trials, timeout
-  // (for now, just use the template as-is)
+  const nb = JSON.parse(await fs.readFile(templatePath, 'utf8')) as {
+    cells: Array<{ cell_type: string; source: string | string[] }>;
+  };
+  const nTrials = input.nTrials ?? 30;
+  const timeout = input.timeoutSeconds ?? 60;
+  for (const cell of nb.cells) {
+    if (cell.cell_type !== 'code') continue;
+    const src = Array.isArray(cell.source) ? cell.source.join('') : cell.source;
+    const patched = src
+      .replace(/pd\.read_csv\(['"][^'"]*['"]\)/, `pd.read_csv('${input.datasetPath}')`)
+      .replace(/train\[['"]target['"]\]/, `train['${input.targetColumn}']`)
+      .replace(/drop\(\[['"]target['"]\],/, `drop(['${input.targetColumn}'],`)
+      .replace(/n_trials=\d+/, `n_trials=${nTrials}`)
+      .replace(/timeout=\d+/, `timeout=${timeout}`);
+    cell.source = patched.split('\n').map((line, i, arr) => i < arr.length - 1 ? line + '\n' : line);
+  }
 
   // 2. Write notebook to a temp file
   const tmpNbPath = path.join('/tmp', `optuna_search_${Date.now()}.ipynb`);

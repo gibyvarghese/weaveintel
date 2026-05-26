@@ -84,6 +84,7 @@ function rowToBik(r: TenantBikRow): BikRecord {
     wrapped: JSON.parse(r.wrapped) as SerializedWrappedKey,
     createdAt: r.created_at,
     revokedAt: r.revoked_at,
+    kekId: r.kek_id,
   };
 }
 
@@ -158,6 +159,7 @@ export function createDbEncryptionStore(db: DatabaseAdapter): EncryptionStore {
         wrapped: JSON.stringify(b.wrapped),
         created_at: b.createdAt,
         revoked_at: b.revokedAt,
+        kek_id: b.kekId,
       });
     },
     async updateBikStatus(id, status, ts) {

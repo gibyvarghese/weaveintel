@@ -6,6 +6,7 @@
 
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { WorkerAgentRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 export function registerWorkerAgentRoutes(
@@ -88,7 +89,7 @@ export function registerWorkerAgentRoutes(
     if (body['priority'] !== undefined) fields['priority'] = Number(body['priority']);
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
 
-    await db.updateWorkerAgent(params['id']!, fields as any);
+    await db.updateWorkerAgent(params['id']!, fields as Partial<Omit<WorkerAgentRow, 'id' | 'created_at' | 'updated_at'>>);
     const workerAgent = await db.getWorkerAgent(params['id']!);
     json(res, 200, { workerAgent });
   }, { auth: true, csrf: true });

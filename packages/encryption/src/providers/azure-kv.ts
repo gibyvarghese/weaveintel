@@ -44,16 +44,19 @@ interface AzureIdentitySdk {
 let cachedKeysSdk: AzureKeyVaultSdk | null = null;
 let cachedIdentitySdk: AzureIdentitySdk | null = null;
 
+// Indirect specifier bypasses TS2307 so optional-dep packages don't need to be
+// installed at typecheck time. The cast is intentional; T is defined locally.
+function castSdk<T>(mod: unknown): T { return mod as T; }
+
 async function loadAzureSdks(): Promise<{ keys: AzureKeyVaultSdk; identity: AzureIdentitySdk }> {
   if (cachedKeysSdk && cachedIdentitySdk) {
     return { keys: cachedKeysSdk, identity: cachedIdentitySdk };
   }
   try {
-    // Indirect specifiers bypass TS2307 so apps that don't use Azure KV don't need the SDK installed at typecheck time.
     const keysSpecifier = '@azure/keyvault-keys';
     const identitySpecifier = '@azure/identity';
-    const keys = (await import(keysSpecifier)) as unknown as AzureKeyVaultSdk;
-    const identity = (await import(identitySpecifier)) as unknown as AzureIdentitySdk;
+    const keys = castSdk<AzureKeyVaultSdk>(await import(keysSpecifier));
+    const identity = castSdk<AzureIdentitySdk>(await import(identitySpecifier));
     cachedKeysSdk = keys;
     cachedIdentitySdk = identity;
     return { keys, identity };

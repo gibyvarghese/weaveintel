@@ -6,6 +6,7 @@
 
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { SkillRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 export function registerSkillRoutes(
@@ -90,7 +91,7 @@ export function registerSkillRoutes(
     if (body['domain_sections'] !== undefined) fields['domain_sections'] = body['domain_sections'] ? JSON.stringify(body['domain_sections']) : null;
     if (body['execution_contract'] !== undefined) fields['execution_contract'] = body['execution_contract'] ? JSON.stringify(body['execution_contract']) : null;
 
-    await db.updateSkill(params['id']!, fields as any);
+    await db.updateSkill(params['id']!, fields as Partial<Omit<SkillRow, 'id' | 'created_at' | 'updated_at'>>);
     const skill = await db.getSkill(params['id']!);
     json(res, 200, { skill });
   }, { auth: true, csrf: true });

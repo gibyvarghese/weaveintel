@@ -56,6 +56,8 @@ export interface BikRecord {
   readonly wrapped: SerializedWrappedKey;
   readonly createdAt: number;
   readonly revokedAt: number | null;
+  /** ID of the KEK that wraps this BIK — required for correct per-BIK unwrap during KEK rotation. */
+  readonly kekId: string;
 }
 
 export interface EncryptionStore {

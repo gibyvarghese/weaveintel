@@ -279,6 +279,7 @@ export class TenantKeyManager {
       wrapped: wrappedBik,
       createdAt: now,
       revokedAt: null,
+      kekId,
     };
     await this.#store.insertBik(bik);
     await this.#emit(opts.tenantId, 'bik_create', opts.actor ?? null, { bikId });
@@ -465,6 +466,7 @@ export class TenantKeyManager {
       wrapped,
       createdAt: now,
       revokedAt: null,
+      kekId: policy.activeKekId,
     };
     await this.#store.insertBik(newBik);
     if (policy.activeBikId) {
@@ -673,14 +675,8 @@ export class TenantKeyManager {
       return cached.key;
     }
     this.#counter('encryption.cache.miss', { tenantId, cache: 'bik' });
-    const policy = await this.#requirePolicy(tenantId);
-    if (!policy.activeKekId) {
-      throw new KeyNotFoundError(`no active KEK for tenant ${tenantId} (cannot unwrap BIK)`);
-    }
-    // BIKs are wrapped under whichever KEK was active at creation time. Until
-    // we track per-BIK kekId, we assume rotateKek re-wraps BIKs (Phase 8 TODO)
-    // — for now BIK is single-KEK lifetime so this works.
-    const kekRow = await this.#getKekRow(tenantId, policy.activeKekId);
+    // Each BIK records the KEK that wrapped it, enabling correct unwrap across KEK rotations.
+    const kekRow = await this.#getKekRow(tenantId, row.kekId);
     const kekPlain = await this.#unwrapKek(kekRow);
     const bik = await this.#unwrapWithKek(kekPlain, row.wrapped, tenantId);
     this.#bikCache.set(row.id, { key: bik, expiresAt: now + this.#ttl });

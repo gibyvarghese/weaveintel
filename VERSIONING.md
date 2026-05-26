@@ -113,4 +113,19 @@ Title:  v1.1.0 — Aertex
 
 | Version | Codename | Status |
 |---------|----------|--------|
-| 1.0.0   | Aertex   | Current |
+| 1.0.0   | Aertex   | Planned — not yet released |
+
+### Package Version State (as of audit 2026-05-15)
+
+The codebase is pre-release. Individual packages have not yet been bumped to v1.0.0:
+
+| Package count | Version | Notes |
+|--------------|---------|-------|
+| 53 packages  | 0.0.1   | Initial scaffolding |
+| 18 packages  | 0.1.0   | Feature-complete drafts |
+| 2 apps       | —       | geneweave, live-agents-demo |
+
+The v1.0.0 "Aertex" release requires all packages to be bumped in concert via
+`npm run release:bump -- major`. Until then, treat all package versions as
+unstable pre-release. See the refactor roadmap in `CODEBASE_AUDIT_2026.md` for
+the work items blocking the first stable release.

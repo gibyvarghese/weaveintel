@@ -18,33 +18,15 @@
 //
 // Cleanly degrades when the server is unreachable: prints instructions, exit 2.
 
-import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
 import { generateKeyPairSync, createPublicKey, verify, createHash } from 'node:crypto';
+import { BASE, DB_PATH, makeOk, jfetch } from './e2e-helpers.mjs';
 
-const BASE = process.env.BASE_URL ?? 'http://localhost:3500';
+const ok = makeOk();
 const ts = Date.now();
 const email = `e2e_phase10_byok_${ts}@example.com`;
 const password = 'P@ssw0rd123';
 const tenantId = `e2e_byok_tenant_${ts}`;
-
-let assertions = 0;
-const ok = (cond, msg) => { assertions++; assert(cond, msg); console.log(`  ✓ ${msg}`); };
-
-async function jfetch(method, path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(opts.cookie ? { cookie: opts.cookie } : {}),
-      ...(opts.csrf ? { 'x-csrf-token': opts.csrf } : {}),
-    },
-    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
-  });
-  const text = await res.text();
-  let body = null; try { body = JSON.parse(text); } catch { body = text; }
-  return { status: res.status, body, headers: res.headers };
-}
 
 function canonicalize(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalize).join(',')}]`;
@@ -70,7 +52,7 @@ const reg1 = await jfetch('POST', '/api/auth/register', { body: { email: opEmail
 ok(reg1.status === 201 || reg1.status === 200, `op register status=${reg1.status}`);
 const reg2 = await jfetch('POST', '/api/auth/register', { body: { email: apprEmail, password, name: 'appr' } });
 ok(reg2.status === 201 || reg2.status === 200, `approver register status=${reg2.status}`);
-execSync(`sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email IN ('${opEmail}','${apprEmail}');"`);
+execSync(`sqlite3 ${DB_PATH} "UPDATE users SET persona='tenant_admin' WHERE email IN ('${opEmail}','${apprEmail}');"`);
 
 // 2. Login as operator
 console.log('2. Login operator');
@@ -197,4 +179,4 @@ ok(!verify(null, tamperedBytes, pubKey, sigBytes), 'tampered payload fails verif
 const log = await jfetch('GET', `/api/admin/byok/attestation/log/${tenantId}`, { cookie });
 ok(log.status === 200 && Array.isArray(log.body?.attestations) && log.body.attestations.length >= 1, 'attestation log row present');
 
-console.log(`\n✅  Phase 10 E2E passed — ${assertions} assertions.\n`);
+console.log(`\n✅  Phase 10 E2E passed — ${ok.count()} assertions.\n`);

@@ -25,7 +25,7 @@ export class WebhookTrigger extends EventTriggerBase {
 
   constructor(definition: TriggerDefinition, handler: TriggerHandler) {
     super(definition, handler);
-    this.config = definition.config as unknown as WebhookConfig;
+    this.config = parseWebhookConfig(definition.config);
   }
 
   get path(): string { return this.config.path; }
@@ -61,6 +61,22 @@ export class WebhookTrigger extends EventTriggerBase {
       return { status: 500, body: { error: 'Trigger execution failed' } };
     }
   }
+}
+
+function parseWebhookConfig(raw: Record<string, unknown>): WebhookConfig {
+  if (typeof raw['path'] !== 'string') {
+    throw new TypeError(`WebhookTrigger: config.path must be a string`);
+  }
+  const method = raw['method'];
+  const requiredHeaders = Array.isArray(raw['requiredHeaders'])
+    ? (raw['requiredHeaders'] as string[])
+    : undefined;
+  return {
+    path: raw['path'],
+    method: method === 'GET' || method === 'POST' || method === 'PUT' ? method : undefined,
+    secret: typeof raw['secret'] === 'string' ? raw['secret'] : undefined,
+    requiredHeaders,
+  };
 }
 
 export function createWebhookTrigger(definition: TriggerDefinition, handler: TriggerHandler): WebhookTrigger {

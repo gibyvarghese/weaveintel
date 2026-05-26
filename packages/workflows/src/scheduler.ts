@@ -15,7 +15,7 @@ export type TriggerCallback = (trigger: WorkflowTrigger) => Promise<void>;
  */
 export class InMemoryScheduler implements WorkflowScheduler {
   private triggers = new Map<string, WorkflowTrigger>();
-  private timers = new Map<string, ReturnType<typeof setTimeout>>();
+  private timers = new Map<string, ReturnType<typeof setInterval>>();
   private callback: TriggerCallback;
 
   constructor(callback: TriggerCallback) {
@@ -30,7 +30,8 @@ export class InMemoryScheduler implements WorkflowScheduler {
         const t = this.triggers.get(trigger.id);
         if (t?.enabled) void this.callback(t);
       }, intervalMs);
-      this.timers.set(trigger.id, timer as unknown as ReturnType<typeof setTimeout>);
+      timer.unref?.();
+      this.timers.set(trigger.id, timer);
     }
   }
 

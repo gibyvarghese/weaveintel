@@ -11,30 +11,12 @@
 //
 // Requires server running at http://localhost:3500 (examples/12-geneweave.ts).
 
-import assert from 'node:assert/strict';
+import { BASE, DB_PATH, makeOk, jfetch } from './e2e-helpers.mjs';
 
-const BASE = process.env.BASE_URL ?? 'http://localhost:3500';
+const ok = makeOk();
 const ts = Date.now();
 const email = `e2e_phase9_${ts}@example.com`;
 const password = 'P@ssw0rd123';
-
-let assertions = 0;
-const ok = (cond, msg) => { assertions++; assert(cond, msg); console.log(`  ✓ ${msg}`); };
-
-async function jfetch(method, path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(opts.cookie ? { cookie: opts.cookie } : {}),
-      ...(opts.csrf ? { 'x-csrf-token': opts.csrf } : {}),
-    },
-    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
-  });
-  const text = await res.text();
-  let body = null; try { body = JSON.parse(text); } catch { body = text; }
-  return { status: res.status, body, headers: res.headers };
-}
 
 console.log(`\n=== Phase 9 E2E (live-agents trace tools) — ${BASE} ===\n`);
 
@@ -46,7 +28,7 @@ ok(reg.status === 201 || reg.status === 200, `register status=${reg.status}`);
 // 2. Promote
 console.log('2. Promote to tenant_admin');
 const { execSync } = await import('node:child_process');
-execSync(`sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='${email}';"`);
+execSync(`sqlite3 ${DB_PATH} "UPDATE users SET persona='tenant_admin' WHERE email='${email}';"`);
 ok(true, 'promoted via sqlite');
 
 // 3. Login
@@ -76,7 +58,7 @@ if (!meshId) {
     `INSERT OR IGNORE INTO live_meshes (id, tenant_id, mesh_def_id, name, status, domain, dual_control_required_for, owner_human_id, mcp_server_ref, account_id, context_json, created_at, updated_at)
        VALUES ('${meshId}', NULL, '${meshDefId}', 'E2E P9 Mesh', 'ACTIVE', NULL, '[]', NULL, NULL, NULL, NULL, datetime('now'), datetime('now'));`,
   ].join('\n');
-  execSync(`sqlite3 ./geneweave.db "${sql.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`);
+  execSync(`sqlite3 ${DB_PATH} "${sql.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`);
   ok(true, `seeded live_mesh ${meshId}`);
 }
 ok(typeof meshId === 'string' && meshId.length > 0, `meshId resolved (${meshId})`);
@@ -157,4 +139,4 @@ ok(del.status === 200 || del.status === 204, `delete status=${del.status}`);
 const after = await jfetch('GET', `/api/admin/live-agents/${agentId}`, { cookie });
 ok(after.status === 404, `after delete status=${after.status}`);
 
-console.log(`\n✅ Phase 9 E2E passed — ${assertions} assertions\n`);
+console.log(`\n✅ Phase 9 E2E passed — ${ok.count()} assertions\n`);

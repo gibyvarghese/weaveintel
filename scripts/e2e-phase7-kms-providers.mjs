@@ -18,33 +18,15 @@
 //
 // Usage:  node scripts/e2e-phase7-kms-providers.mjs
 
-import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
+import { BASE, DB_PATH, makeOk, jfetch } from './e2e-helpers.mjs';
 
-const BASE = process.env.BASE_URL ?? 'http://localhost:3500';
+const ok = makeOk();
 const ts = Date.now();
 const email = `e2e_phase7_kms_${ts}@example.com`;
 const password = 'P@ssw0rd123';
 const tenantA = `e2e_kms_local_a_${ts}`;
 const tenantB = `e2e_kms_local_b_${ts}`;
-
-let assertions = 0;
-const ok = (cond, msg) => { assertions++; assert(cond, msg); console.log(`  ✓ ${msg}`); };
-
-async function jfetch(method, path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(opts.cookie ? { cookie: opts.cookie } : {}),
-      ...(opts.csrf ? { 'x-csrf-token': opts.csrf } : {}),
-    },
-    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
-  });
-  const text = await res.text();
-  let body = null; try { body = JSON.parse(text); } catch { body = text; }
-  return { status: res.status, body, headers: res.headers };
-}
 
 console.log(`\n=== Phase 7 E2E (KMS provider registry + health-check) — ${BASE} ===\n`);
 
@@ -52,7 +34,7 @@ console.log(`\n=== Phase 7 E2E (KMS provider registry + health-check) — ${BASE
 console.log('1. Register + promote + login');
 const reg = await jfetch('POST', '/api/auth/register', { body: { email, password, name: 'kms-phase7' } });
 ok(reg.status === 201 || reg.status === 200, `register status=${reg.status}`);
-execSync(`sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='${email}';"`);
+execSync(`sqlite3 ${DB_PATH} "UPDATE users SET persona='tenant_admin' WHERE email='${email}';"`);
 const login = await jfetch('POST', '/api/auth/login', { body: { email, password } });
 ok(login.status === 200, `login status=${login.status}`);
 const setCookie = login.headers.get('set-cookie') ?? '';
@@ -73,7 +55,7 @@ for (const expected of ['local', 'aws-kms', 'azure-kv', 'gcp-kms', 'vault']) {
 const list = await jfetch('GET', '/api/admin/tenant-encryption-policies', { cookie });
 if (list.body?.manager_available !== true) {
   console.log('\n⚠️  Encryption manager not bootstrapped. Set WEAVE_ENCRYPTION_MASTER_KEY to exercise local-provider health-check.\n');
-  console.log(`Partial run: ${assertions} assertions passed (registry-only path).`);
+  console.log(`Partial run: ${ok.count()} assertions passed (registry-only path).`);
   process.exit(2);
 }
 ok(true, 'encryption manager available');
@@ -173,4 +155,4 @@ await jfetch('DELETE', `/api/admin/tenant-encryption-policies/${tenantA}`, { coo
 await jfetch('DELETE', `/api/admin/tenant-encryption-policies/${tenantB}`, { cookie, csrf });
 ok(true, 'tenants deleted');
 
-console.log(`\n✅ All ${assertions} assertions passed.\n`);
+console.log(`\n✅ All ${ok.count()} assertions passed.\n`);

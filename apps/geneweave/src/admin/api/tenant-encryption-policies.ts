@@ -116,7 +116,7 @@ export function registerTenantEncryptionPolicyRoutes(
     try {
       provider = await resolver.resolve(tenantId);
     } catch (err) {
-      json(res, 502, { ok: false, error: (err as Error).message });
+      json(res, 502, { ok: false, error: err instanceof Error ? err.message : String(err) });
       return;
     }
     const status = await registry.healthCheck(policy.kms_provider_id, provider);
@@ -218,7 +218,7 @@ export function registerTenantEncryptionPolicyRoutes(
         await km.bootstrapTenant({ tenantId, enable: true, ...(auth.userId ? { actor: auth.userId } : {}) });
         bootstrapped = true;
       } catch (err) {
-        bootstrapReason = `bootstrap_failed: ${(err as Error).message}`;
+        bootstrapReason = `bootstrap_failed: ${err instanceof Error ? err.message : String(err)}`;
       }
     } else if (enabled === 1 && !km) {
       bootstrapReason = 'manager_unavailable: WEAVE_ENCRYPTION_MASTER_KEY not configured';
@@ -286,7 +286,7 @@ export function registerTenantEncryptionPolicyRoutes(
         await km.bootstrapTenant({ tenantId, enable: true, ...(auth.userId ? { actor: auth.userId } : {}) });
         bootstrapped = true;
       } catch (err) {
-        bootstrapReason = `bootstrap_failed: ${(err as Error).message}`;
+        bootstrapReason = `bootstrap_failed: ${err instanceof Error ? err.message : String(err)}`;
       }
     } else if (!wasEnabled && nextEnabled === 1 && !km) {
       bootstrapReason = 'manager_unavailable: WEAVE_ENCRYPTION_MASTER_KEY not configured';
@@ -324,7 +324,7 @@ export function registerTenantEncryptionPolicyRoutes(
       const policy = await km.bootstrapTenant({ tenantId, enable: true, ...(auth.userId ? { actor: auth.userId } : {}) });
       json(res, 200, { ok: true, policy });
     } catch (err) {
-      json(res, 500, { error: (err as Error).message });
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 
@@ -338,7 +338,7 @@ export function registerTenantEncryptionPolicyRoutes(
       const dek = await km.rotateDek(tenantId, (auth.userId) ?? null);
       json(res, 200, { ok: true, dek: sanitize(dek) });
     } catch (err) {
-      json(res, 500, { error: (err as Error).message });
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 
@@ -352,7 +352,7 @@ export function registerTenantEncryptionPolicyRoutes(
       const kek = await km.rotateKek(tenantId, (auth.userId) ?? null);
       json(res, 200, { ok: true, kek: sanitize(kek) });
     } catch (err) {
-      json(res, 500, { error: (err as Error).message });
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 
@@ -370,7 +370,7 @@ export function registerTenantEncryptionPolicyRoutes(
       const bik = await km.rotateBik(tenantId, (auth.userId) ?? null);
       json(res, 200, { ok: true, bik: sanitize(bik) });
     } catch (err) {
-      json(res, 500, { error: (err as Error).message });
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 
@@ -417,7 +417,7 @@ export function registerTenantEncryptionPolicyRoutes(
       }
       json(res, 200, { ok: true, tenantId, scanned, written, skipped, scope: isSystem ? 'users.email' : 'noop' });
     } catch (err) {
-      json(res, 500, { error: (err as Error).message, scanned, written, skipped });
+      json(res, 500, { error: err instanceof Error ? err.message : String(err), scanned, written, skipped });
     }
   }, { auth: true, csrf: true });
 
@@ -437,7 +437,7 @@ export function registerTenantEncryptionPolicyRoutes(
       await km.shred(tenantId, (auth.userId) ?? null);
       json(res, 200, { ok: true, shredded: true });
     } catch (err) {
-      json(res, 500, { error: (err as Error).message });
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 
@@ -497,7 +497,7 @@ export function registerTenantEncryptionPolicyRoutes(
       const row = await db.getTenantDeletionRequest(id);
       json(res, 201, { request: row });
     } catch (err) {
-      json(res, 500, { error: (err as Error).message });
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 
@@ -536,7 +536,7 @@ export function registerTenantEncryptionPolicyRoutes(
       const result = await km.restoreFromShred(tenantId, (auth.userId) ?? null);
       json(res, 200, { ok: true, restored: result });
     } catch (err) {
-      json(res, 500, { error: (err as Error).message });
+      json(res, 500, { error: err instanceof Error ? err.message : String(err) });
     }
   }, { auth: true, csrf: true });
 

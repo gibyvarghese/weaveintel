@@ -27,32 +27,13 @@
 //
 // Usage: zsh> set +H && node scripts/e2e-phase3-chat-encryption.mjs
 
-import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
+import { BASE, DB_PATH, makeOk, jfetch } from './e2e-helpers.mjs';
 
-const BASE = process.env.BASE_URL ?? 'http://localhost:3500';
-const DB_PATH = process.env.DATABASE_PATH ?? './geneweave.db';
+const ok = makeOk();
 const ts = Date.now();
 const email = `e2e_phase3_enc_${ts}@example.com`;
 const password = 'P@ssw0rd123';
-
-let assertions = 0;
-const ok = (cond, msg) => { assertions++; assert(cond, msg); console.log(`  ✓ ${msg}`); };
-
-async function jfetch(method, path, opts = {}) {
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(opts.cookie ? { cookie: opts.cookie } : {}),
-      ...(opts.csrf ? { 'x-csrf-token': opts.csrf } : {}),
-    },
-    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
-  });
-  const text = await res.text();
-  let body = null; try { body = JSON.parse(text); } catch { body = text; }
-  return { status: res.status, body, headers: res.headers };
-}
 
 function sql(query) {
   // Returns rows as pipe-separated lines. Use -separator '|' (default) and -noheader.
@@ -223,4 +204,4 @@ ok(shred.status === 200, `shred status=${shred.status}`);
 const delPolicy = await jfetch('DELETE', `/api/admin/tenant-encryption-policies/${tenantId}`, { cookie, csrf });
 ok(delPolicy.status === 200 || delPolicy.status === 204, `delete-policy status=${delPolicy.status}`);
 
-console.log(`\n✅ All ${assertions} assertions passed.\n`);
+console.log(`\n✅ All ${ok.count()} assertions passed.\n`);

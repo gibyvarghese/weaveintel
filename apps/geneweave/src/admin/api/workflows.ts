@@ -1,5 +1,6 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { WorkflowDefRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 /**
@@ -81,7 +82,7 @@ export function registerWorkflowRoutes(
       fields['metadata'] = (Object.keys(merged).length > 0) ? JSON.stringify(merged) : null;
     }
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateWorkflowDef(params['id']!, fields as any);
+    await db.updateWorkflowDef(params['id']!, fields as Partial<Omit<WorkflowDefRow, 'id' | 'created_at' | 'updated_at'>>);
     const workflow = await db.getWorkflowDef(params['id']!);
     json(res, 200, { workflow });
   }, { auth: true, csrf: true });

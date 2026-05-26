@@ -1,5 +1,6 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { GuardrailRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 /**
@@ -64,7 +65,7 @@ export function registerGuardrailRoutes(
     if (body['config'] !== undefined) fields['config'] = JSON.stringify(body['config']);
     if (body['priority'] !== undefined) fields['priority'] = body['priority'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateGuardrail(params['id']!, fields as any);
+    await db.updateGuardrail(params['id']!, fields as Partial<Omit<GuardrailRow, 'id' | 'created_at' | 'updated_at'>>);
     const guardrail = await db.getGuardrail(params['id']!);
     json(res, 200, { guardrail });
   }, { auth: true, csrf: true });

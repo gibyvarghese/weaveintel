@@ -18,28 +18,41 @@ export class CronTrigger extends EventTriggerBase {
 
   constructor(definition: TriggerDefinition, handler: TriggerHandler) {
     super(definition, handler);
-    const config = definition.config as unknown as CronConfig;
+    const config = parseCronConfig(definition.config);
     this.intervalMs = parseCronToMs(config.expression);
     this.skipIfRunning = config.skipIfRunning ?? false;
   }
 
   override start(): void {
     super.start();
+    const expression = parseCronConfig(this.definition.config).expression;
     this.timer = setInterval(async () => {
       if (this.skipIfRunning && this.running) return;
       this.running = true;
       try {
-        await this.fire({ cronExpression: (this.definition.config as unknown as CronConfig).expression, scheduledAt: Date.now() });
+        await this.fire({ cronExpression: expression, scheduledAt: Date.now() });
       } finally {
         this.running = false;
       }
     }, this.intervalMs);
+    this.timer.unref?.();
   }
 
   override stop(): void {
     super.stop();
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
   }
+}
+
+function parseCronConfig(raw: Record<string, unknown>): CronConfig {
+  if (typeof raw['expression'] !== 'string') {
+    throw new TypeError(`CronTrigger: config.expression must be a string`);
+  }
+  return {
+    expression: raw['expression'],
+    timezone: typeof raw['timezone'] === 'string' ? raw['timezone'] : undefined,
+    skipIfRunning: typeof raw['skipIfRunning'] === 'boolean' ? raw['skipIfRunning'] : undefined,
+  };
 }
 
 function parseCronToMs(expr: string): number {

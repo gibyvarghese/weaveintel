@@ -554,7 +554,7 @@ export function createTriggerDispatcher(opts: TriggerDispatcherOptions): Trigger
   }
 
   async function record(inv: TriggerInvocation): Promise<TriggerInvocation> {
-    try { await store.recordInvocation(inv); } catch (err) { logger.warn('failed to record invocation:', err); }
+    await store.recordInvocation(inv);
     return inv;
   }
 

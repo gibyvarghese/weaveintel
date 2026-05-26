@@ -39,12 +39,15 @@ interface AwsKmsSdk {
 
 let cachedSdk: AwsKmsSdk | null = null;
 
+// Indirect specifier bypasses TS2307 so optional-dep packages don't need to be
+// installed at typecheck time. The cast is intentional; T is defined locally.
+function castSdk<T>(mod: unknown): T { return mod as T; }
+
 async function loadAwsSdk(): Promise<AwsKmsSdk> {
   if (cachedSdk) return cachedSdk;
   try {
-    // Indirect specifier bypasses TS2307 so apps that don't use AWS KMS don't need the SDK installed at typecheck time.
     const specifier = '@aws-sdk/client-kms';
-    const mod = (await import(specifier)) as unknown as AwsKmsSdk;
+    const mod = castSdk<AwsKmsSdk>(await import(specifier));
     cachedSdk = mod;
     return mod;
   } catch (err) {

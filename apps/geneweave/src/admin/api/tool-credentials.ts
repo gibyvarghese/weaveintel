@@ -9,6 +9,7 @@
 
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { ToolCredentialRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 export function registerToolCredentialRoutes(
@@ -94,7 +95,7 @@ export function registerToolCredentialRoutes(
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
     // Reset validation_status to 'unknown' whenever env_var_name changes
     if (body['env_var_name'] !== undefined) fields['validation_status'] = 'unknown';
-    await db.updateToolCredential(params['id']!, fields as any);
+    await db.updateToolCredential(params['id']!, fields as Partial<Omit<ToolCredentialRow, 'id' | 'created_at' | 'updated_at'>>);
     const credential = await db.getToolCredential(params['id']!);
     json(res, 200, { credential });
   }, { auth: true, csrf: true });

@@ -8,7 +8,7 @@ import {
   parsePrepareConfig,
   dbPrepareFromConfig,
   type PrepareConfig,
-} from './db-prepare-resolver.js';
+} from './adapters/db-prepare-resolver.js';
 
 describe('parsePrepareConfig', () => {
   it('returns null for null/undefined/empty/{}', () => {

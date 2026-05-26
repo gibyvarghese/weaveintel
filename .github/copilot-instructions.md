@@ -62,7 +62,7 @@ These principles emerged from the Scientific Validation feature (sv:) but apply 
 - **Multi-agent dialogue flows through `@weaveintel/a2a`** — In-process bus for local; HTTP transport for distributed. Never pass messages between agents by shared module state.
 - **Model selection flows through `@weaveintel/routing`** — Agents never hard-code a model id. They declare a capability requirement; routing decides.
 - **Redaction happens before the model call, not after** — `@weaveintel/redaction` with reversible tokenisation sits as middleware on the model client. LLMs never see raw PII.
-- **Every workflow step is observable** — `@weaveintel/observability` tracer wraps every step. Every cost item is attributed. Budget envelopes are enforced at step boundaries.
+- **Observability is wired at the entrypoint, not yet end-to-end** — `@weaveintel/observability` tracer is initialised in `createGeneWeave()` via `weaveSetDefaultTracer`; individual workflow steps, cost attribution, and budget enforcement at step boundaries are aspirational targets (in progress).
 - **Idempotency on writes** — `@weaveintel/reliability` provides the idempotency key mechanism. Every POST route that creates or modifies state uses an `Idempotency-Key` header.
 
 ## Grounding Reality Guardrails

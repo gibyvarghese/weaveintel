@@ -12,8 +12,9 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import { weaveRunToolTests } from '@weaveintel/tools';
-import type { ToolRiskLevel } from '@weaveintel/core';
+import type { ToolRiskLevel, ToolAuditOutcome, ToolPolicyViolationReason } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import type { ToolCatalogRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 import { DbToolPolicyResolver } from '../../tool-policy-resolver.js';
 import { DbToolAuditEmitter } from '../../tool-audit-emitter.js';
@@ -275,7 +276,8 @@ export function registerToolSimulationRoutes(
     // 2. Build policy trace — step through each enforcement check without side effects
     const policyTrace: Array<{ step: string; passed: boolean; detail: string }> = [];
     let allowed = true;
-    let violationReason: string | undefined;
+    let violationReason: ToolPolicyViolationReason | undefined;
+    let catalogEntry: ToolCatalogRow | null | undefined;
 
     // Step 1: Enabled check
     const enabledPassed = !!policy.enabled;
@@ -293,7 +295,7 @@ export function registerToolSimulationRoutes(
 
     // Step 2: Risk level gate
     if (allowed) {
-      const catalogEntry = await db.getToolCatalogByKey(toolName);
+      catalogEntry = await db.getToolCatalogByKey(toolName);
       const toolRiskLevel = (catalogEntry?.risk_level ?? 'read-only') as ToolRiskLevel;
       const allowedRisks = policy.allowedRiskLevels ?? [];
       const riskPassed = allowedRisks.length === 0 || allowedRisks.includes(toolRiskLevel);
@@ -355,6 +357,13 @@ export function registerToolSimulationRoutes(
     let errorMessage: string | undefined;
 
     if (allowed && !dryRun) {
+      // Defense-in-depth: re-verify catalog-enabled state before execution.
+      // policy.enabled (step 1) may reflect a cached or stale read; catalogEntry
+      // is always a fresh DB fetch performed above during the risk-level check.
+      if (!catalogEntry?.enabled) {
+        json(res, 403, { error: `Tool '${toolName}' is not enabled in the tool catalog.` });
+        return;
+      }
       const tool = BUILTIN_TOOLS[toolName];
       if (!tool) {
         // Custom/MCP/A2A tools: not executable in sandbox simulation mode
@@ -392,7 +401,7 @@ export function registerToolSimulationRoutes(
     }
 
     const durationMs = Date.now() - startMs;
-    const outcome: string = !allowed ? 'denied_policy' : result?.isError ? 'error' : 'simulation';
+    const outcome: ToolAuditOutcome = !allowed ? 'denied_policy' : result?.isError ? 'error' : 'simulation';
 
     // 4. Emit audit event — best-effort, non-blocking
     const auditEmitter = new DbToolAuditEmitter(db);
@@ -403,8 +412,8 @@ export function registerToolSimulationRoutes(
       agentPersona: resolutionContext.agentPersona,
       skillKey: resolutionContext.skillPolicyKey,
       policyId: policy.policyId,
-      outcome: outcome as any, // 'simulation' is a valid ToolAuditOutcome
-      violationReason: violationReason as any,
+      outcome,
+      violationReason,
       durationMs,
       inputPreview: truncatePreview(JSON.stringify(parsedInput)),
       outputPreview: result ? truncatePreview(result.content) : undefined,

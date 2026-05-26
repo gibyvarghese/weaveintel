@@ -44,11 +44,15 @@ interface GcpKmsSdk {
 
 let cachedSdk: GcpKmsSdk | null = null;
 
+// Indirect specifier bypasses TS2307 so optional-dep packages don't need to be
+// installed at typecheck time. The cast is intentional; T is defined locally.
+function castSdk<T>(mod: unknown): T { return mod as T; }
+
 async function loadGcpSdk(): Promise<GcpKmsSdk> {
   if (cachedSdk) return cachedSdk;
   try {
     const specifier = '@google-cloud/kms';
-    const mod = (await import(specifier)) as unknown as GcpKmsSdk;
+    const mod = castSdk<GcpKmsSdk>(await import(specifier));
     cachedSdk = mod;
     return mod;
   } catch (err) {

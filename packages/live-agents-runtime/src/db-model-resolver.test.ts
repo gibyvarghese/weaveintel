@@ -11,7 +11,7 @@ import type { Model } from '@weaveintel/core';
 import {
   weaveDbModelResolver,
   type ModelCandidate,
-} from './db-model-resolver.js';
+} from './adapters/db-model-resolver.js';
 import {
   weaveAgentOverlayResolver,
   type ModelResolvedAuditEvent,
