@@ -44,6 +44,35 @@ export class WorkflowBuilder {
     return this;
   }
 
+  /** Shared retry options across step shortcuts — W2 reliability fields. */
+  private static retryFields(opts: {
+    timeout?: number;
+    retries?: number;
+    retryDelayMs?: number;
+    retryBackoffMultiplier?: number;
+    retryMaxDelayMs?: number;
+    retryJitter?: boolean;
+    globalTimeoutMs?: number;
+    idempotencyKey?: unknown;
+    fallbackHandler?: string;
+    onError?: string;
+    skipIf?: unknown;
+  }) {
+    return {
+      timeout: opts.timeout,
+      retries: opts.retries,
+      retryDelayMs: opts.retryDelayMs,
+      retryBackoffMultiplier: opts.retryBackoffMultiplier,
+      retryMaxDelayMs: opts.retryMaxDelayMs,
+      retryJitter: opts.retryJitter,
+      globalTimeoutMs: opts.globalTimeoutMs,
+      idempotencyKey: opts.idempotencyKey,
+      fallbackHandler: opts.fallbackHandler,
+      onError: opts.onError,
+      skipIf: opts.skipIf,
+    };
+  }
+
   /** Shortcut: add a deterministic step. */
   deterministic(
     id: string,
@@ -55,6 +84,14 @@ export class WorkflowBuilder {
       timeout?: number;
       retries?: number;
       retryDelayMs?: number;
+      retryBackoffMultiplier?: number;
+      retryMaxDelayMs?: number;
+      retryJitter?: boolean;
+      globalTimeoutMs?: number;
+      idempotencyKey?: unknown;
+      fallbackHandler?: string;
+      onError?: string;
+      skipIf?: unknown;
     },
   ): this {
     return this.addStep({
@@ -64,9 +101,7 @@ export class WorkflowBuilder {
       handler: opts?.handler,
       next: opts?.next,
       config: opts?.config,
-      timeout: opts?.timeout,
-      retries: opts?.retries,
-      retryDelayMs: opts?.retryDelayMs,
+      ...WorkflowBuilder.retryFields(opts ?? {}),
     });
   }
 
@@ -81,6 +116,14 @@ export class WorkflowBuilder {
       timeout?: number;
       retries?: number;
       retryDelayMs?: number;
+      retryBackoffMultiplier?: number;
+      retryMaxDelayMs?: number;
+      retryJitter?: boolean;
+      globalTimeoutMs?: number;
+      idempotencyKey?: unknown;
+      fallbackHandler?: string;
+      onError?: string;
+      skipIf?: unknown;
     },
   ): this {
     return this.addStep({
@@ -90,9 +133,7 @@ export class WorkflowBuilder {
       handler: opts?.handler,
       next: opts?.next,
       config: opts?.config,
-      timeout: opts?.timeout,
-      retries: opts?.retries,
-      retryDelayMs: opts?.retryDelayMs,
+      ...WorkflowBuilder.retryFields(opts ?? {}),
     });
   }
 

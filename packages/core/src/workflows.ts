@@ -54,6 +54,36 @@ export interface WorkflowStep {
    * `next` without running the handler.
    */
   skipIf?: unknown;
+  // ─── Phase W2 — Step Reliability ──────────────────────────────
+  /**
+   * Exponential backoff multiplier applied to `retryDelayMs` per attempt.
+   * delay = min(retryDelayMs × multiplier^attempt, retryMaxDelayMs). Default 2.
+   */
+  retryBackoffMultiplier?: number;
+  /** Cap on the computed exponential delay (ms). Default 30 000. */
+  retryMaxDelayMs?: number;
+  /** Add ±25 % random jitter to each retry delay to prevent thundering herd. Default false. */
+  retryJitter?: boolean;
+  /**
+   * Total time budget (ms) across ALL retry attempts combined. When the
+   * elapsed time since the first failure reaches this value, no further
+   * retries are attempted.
+   */
+  globalTimeoutMs?: number;
+  /**
+   * Idempotency key expression (same JSONLogic syntax as skipIf). Evaluated
+   * against `state.variables`. If a cached output exists for `stepId:keyValue`,
+   * the handler is skipped and the cached output is replayed. Cache is
+   * populated on successful handler completion.
+   */
+  idempotencyKey?: unknown;
+  /**
+   * Fallback handler key. When all retries are exhausted, this handler is
+   * invoked instead of triggering onError/compensation. Its output is treated
+   * as the step's successful output. If the fallback also throws, onError /
+   * compensation logic takes over.
+   */
+  fallbackHandler?: string;
   /**
    * Phase W1 — Declarative output mapping.
    * Keys are dotted paths into `WorkflowState.variables` to write into.

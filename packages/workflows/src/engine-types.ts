@@ -5,6 +5,9 @@ import type { HandlerResolverRegistry } from './handler-resolver.js';
 import type { WorkflowDefinitionStore } from './definition-store.js';
 import type { ContractEmitter } from './contract-emitter.js';
 import type { CostMeter } from './cost-meter.js';
+import type { StepIdempotencyStore } from './idempotency-store.js';
+import type { CircuitBreakerRegistry } from './circuit-breaker.js';
+import type { BulkheadRegistry } from './bulkhead.js';
 
 export interface WorkflowEngineOptions {
   checkpointStore?: CheckpointStore;
@@ -48,4 +51,26 @@ export interface WorkflowEngineOptions {
    * Callers (LLM adapters, tool wrappers) report deltas via `costMeter.record(runId, ...)`.
    */
   costMeter?: CostMeter;
+  // ─── Phase W2 — Step Reliability ──────────────────────────────────────────
+  /**
+   * Phase W2 — Idempotency store. When set and a step declares
+   * `step.idempotencyKey`, the engine checks the store before executing.
+   * Cached output is replayed without calling the handler. Cache is written
+   * after each successful handler completion. Key format: `${stepId}:${keyValue}`.
+   */
+  idempotencyStore?: StepIdempotencyStore;
+  /**
+   * Phase W2 — Circuit breaker registry. Maps handler kind → CircuitBreaker.
+   * When a resolver-based step's handler kind has a registered circuit breaker,
+   * the handler is wrapped: failures are counted, and when the threshold is
+   * reached the circuit opens and subsequent calls fail fast.
+   */
+  circuitBreakerRegistry?: CircuitBreakerRegistry;
+  /**
+   * Phase W2 — Bulkhead registry. Maps handler kind → Bulkhead.
+   * When a resolver-based step's handler kind has a registered bulkhead,
+   * the handler is wrapped to enforce per-kind concurrency limits.
+   * Excess calls queue locally and run as capacity frees.
+   */
+  bulkheadRegistry?: BulkheadRegistry;
 }

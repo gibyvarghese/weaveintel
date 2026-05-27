@@ -27,13 +27,16 @@ import { type WorkflowRunRepository, InMemoryWorkflowRunRepository } from './run
 import type { HandlerResolverRegistry } from './handler-resolver.js';
 import type { WorkflowDefinitionStore } from './definition-store.js';
 import { applyInputMap, applyOutputMap } from './path.js';
-import { evaluateBoolean, hasExpression } from './expressions.js';
+import { evaluateBoolean, evaluateExpression, hasExpression } from './expressions.js';
 import { type ContractEmitter, buildEmittedContract } from './contract-emitter.js';
 import { validateWorkflowInput, WorkflowInputValidationError } from './input-validator.js';
 import { type CostMeter, InMemoryCostMeter } from './cost-meter.js';
 import { type WorkflowEngineOptions } from './engine-types.js';
-import { now, sleep } from './engine-sleep.js';
+import { now, sleep, computeRetryDelay } from './engine-sleep.js';
 import { resolveResumeNextId } from './engine-runner.js';
+import { type StepIdempotencyStore } from './idempotency-store.js';
+import { type CircuitBreakerRegistry } from './circuit-breaker.js';
+import { type BulkheadRegistry } from './bulkhead.js';
 
 export type { WorkflowEngineOptions } from './engine-types.js';
 
@@ -52,6 +55,10 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   private definitionStore?: WorkflowDefinitionStore;
   private contractEmitter?: ContractEmitter;
   private costMeter: CostMeter;
+  // Phase W2
+  private idempotencyStore?: StepIdempotencyStore;
+  private circuitBreakerRegistry?: CircuitBreakerRegistry;
+  private bulkheadRegistry?: BulkheadRegistry;
 
   constructor(opts?: WorkflowEngineOptions) {
     this.checkpointStore = opts?.checkpointStore ?? new InMemoryCheckpointStore();
@@ -65,13 +72,20 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     this.definitionStore = opts?.definitionStore;
     this.contractEmitter = opts?.contractEmitter;
     this.costMeter = opts?.costMeter ?? new InMemoryCostMeter();
+    this.idempotencyStore = opts?.idempotencyStore;
+    this.circuitBreakerRegistry = opts?.circuitBreakerRegistry;
+    this.bulkheadRegistry = opts?.bulkheadRegistry;
   }
 
   /** Phase 5 — Public access to the cost meter so callers (LLM adapters,
    * tool wrappers, sub-workflows) can report cost deltas keyed by runId. */
-  getCostMeter(): CostMeter {
-    return this.costMeter;
-  }
+  getCostMeter(): CostMeter { return this.costMeter; }
+  /** Phase W2 — Access the idempotency store (if configured). */
+  getIdempotencyStore(): StepIdempotencyStore | undefined { return this.idempotencyStore; }
+  /** Phase W2 — Access the circuit breaker registry (if configured). */
+  getCircuitBreakerRegistry(): CircuitBreakerRegistry | undefined { return this.circuitBreakerRegistry; }
+  /** Phase W2 — Access the bulkhead registry (if configured). */
+  getBulkheadRegistry(): BulkheadRegistry | undefined { return this.bulkheadRegistry; }
 
   // ─── Handler Registration ──────────────────────────────────
 
@@ -209,31 +223,97 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
    * handlers with handlers produced on-demand by the resolver registry for
    * any step whose `handler` references a kind:ref pair (or matches a bare-
    * kind resolver such as `'noop'`). Pre-registered handlers always win.
+   *
+   * Also resolves embedded handler refs from composite step configs:
+   *   fork     — config.branches values
+   *   parallel — config.lanes values + config.parallelHandlers items
+   *   forEach  — config.bodyHandler
    */
   private async resolveHandlersForRun(def: WorkflowDefinition): Promise<StepHandlerMap> {
     const map: StepHandlerMap = new Map(this.handlers);
     if (!this.resolverRegistry) return map;
+
+    // Collect all handler refs to resolve, including embedded refs inside config.
+    const toResolve: Array<{ handlerRef: string; stepId: string; step: WorkflowStep }> = [];
     for (const step of def.steps) {
-      const handlerRef = step.handler ?? step.id;
+      toResolve.push({ handlerRef: step.handler ?? step.id, stepId: step.id, step });
+      if (step.type === 'fork') {
+        const branches = step.config?.['branches'] as Record<string, string> | undefined;
+        if (branches) {
+          for (const hRef of Object.values(branches)) {
+            toResolve.push({ handlerRef: hRef, stepId: step.id, step });
+          }
+        }
+      } else if (step.type === 'parallel') {
+        const lanes = step.config?.['lanes'] as Record<string, string> | undefined;
+        if (lanes) {
+          for (const hRef of Object.values(lanes)) {
+            toResolve.push({ handlerRef: hRef, stepId: step.id, step });
+          }
+        }
+        const phList = step.config?.['parallelHandlers'] as string[] | undefined;
+        if (phList) {
+          for (const hRef of phList) toResolve.push({ handlerRef: hRef, stepId: step.id, step });
+        }
+      } else if (step.type === 'forEach') {
+        const bh = step.config?.['bodyHandler'] as string | undefined;
+        if (bh) toResolve.push({ handlerRef: bh, stepId: step.id, step });
+      }
+    }
+
+    const seen = new Set<string>();
+    for (const { handlerRef, stepId, step } of toResolve) {
+      if (seen.has(handlerRef)) continue;
+      seen.add(handlerRef);
       if (map.has(handlerRef)) continue;
       const match = this.resolverRegistry.forHandler(handlerRef);
       if (!match) continue;
       try {
-        const fn = await match.resolver.resolve({
+        let fn = await match.resolver.resolve({
           workflowId: def.id,
-          stepId: step.id,
+          stepId,
           ref: match.ref,
           config: step.config ?? {},
           deps: this.resolverDeps,
           step,
         });
+
+        // Phase W2 — wrap with circuit breaker (per resolver kind)
+        const cb = this.circuitBreakerRegistry?.get(match.resolver.kind);
+        if (cb) {
+          const inner = fn;
+          fn = async (vars, config) => {
+            if (!cb.canExecute()) {
+              const stats = cb.getStats();
+              throw new Error(
+                `Circuit breaker OPEN for handler kind "${match.resolver.kind}"` +
+                ` (failures: ${stats.failures}, opened: ${stats.openedAt ? new Date(stats.openedAt).toISOString() : 'unknown'})`,
+              );
+            }
+            try {
+              const result = await inner(vars, config);
+              cb.recordSuccess();
+              return result;
+            } catch (err) {
+              cb.recordFailure();
+              throw err;
+            }
+          };
+        }
+
+        // Phase W2 — wrap with bulkhead (per resolver kind)
+        const bulkhead = this.bulkheadRegistry?.get(match.resolver.kind);
+        if (bulkhead) {
+          const wrapped = fn;
+          fn = (vars, config) => bulkhead.execute(() => wrapped(vars, config));
+        }
+
         map.set(handlerRef, fn);
       } catch (err) {
-        // Make the failure visible at run-time rather than aborting startRun;
-        // the step will fail with the error captured here.
+        // Make the failure visible at run-time rather than aborting startRun.
         const error = err instanceof Error ? err.message : String(err);
         map.set(handlerRef, async () => {
-          throw new Error(`HandlerResolver failed for step "${step.id}" (${handlerRef}): ${error}`);
+          throw new Error(`HandlerResolver failed for step "${stepId}" (${handlerRef}): ${error}`);
         });
       }
     }
@@ -329,6 +409,25 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         }
       }
 
+      // Phase W2 — idempotency: check cache before executing; replay if hit.
+      if (step.idempotencyKey !== undefined && this.idempotencyStore) {
+        const keyVal = String(evaluateExpression(step.idempotencyKey, run.state.variables) ?? '');
+        const iKey = `${step.id}:${keyVal}`;
+        const cached = await this.idempotencyStore.get(iKey);
+        if (cached !== undefined) {
+          const cachedResult: WorkflowStepResult = {
+            stepId: step.id, status: 'completed', output: cached,
+            startedAt: now(), completedAt: now(),
+          };
+          this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
+          const nextId = resolveNextStep(def, step.id, cachedResult);
+          (run as { state: WorkflowState }).state = advanceState(run.state, cachedResult, nextId);
+          await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
+          if (!nextId || isTerminal(def, run.state)) await this.completeRun(run, def);
+          continue;
+        }
+      }
+
       this.emit({ type: 'step:started', runId: run.id, stepId: step.id, timestamp: now() });
 
       const stepResult = await this.executeStepWithExpressionFallback(step, run.state, runHandlers);
@@ -336,29 +435,101 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       if (stepResult.status === 'failed') {
         this.emit({ type: 'step:failed', runId: run.id, stepId: step.id, timestamp: now(), data: { error: stepResult.error } });
 
-        // Track the last failed result across retries so onError gets the final error.
+        // Track the last failed result so onError / fallback receives the terminal error.
         let finalFailedResult = stepResult;
 
-        // Retry logic with optional delay between attempts
+        // Phase W2 — retry with exponential backoff + global timeout budget
         if (step.retries && step.retries > 0) {
+          const globalDeadline = step.globalTimeoutMs ? Date.now() + step.globalTimeoutMs : undefined;
+          const multiplier  = step.retryBackoffMultiplier ?? 2;
+          const maxDelay    = step.retryMaxDelayMs ?? 30_000;
+          const jitter      = step.retryJitter ?? false;
+
           let retries = step.retries;
           let retryResult: WorkflowStepResult = stepResult;
+          let retryAttempt = 0;
+
           while (retries > 0 && retryResult.status === 'failed') {
+            // Check global timeout budget before sleeping or retrying
+            if (globalDeadline !== undefined && Date.now() >= globalDeadline) {
+              retryResult = {
+                stepId: step.id,
+                status: 'failed',
+                error: `Retry budget exhausted: ${step.globalTimeoutMs}ms global timeout exceeded after ${retryAttempt} retries`,
+                startedAt: now(),
+                completedAt: now(),
+              };
+              break;
+            }
+
             retries--;
-            const delayMs = step.retryDelayMs ?? (step.config?.['retryDelayMs'] as number | undefined) ?? 0;
-            if (delayMs > 0) await sleep(delayMs);
+            retryAttempt++;
+
+            const baseDelay = step.retryDelayMs ?? 0;
+            if (baseDelay > 0) {
+              const delay = computeRetryDelay(retryAttempt, baseDelay, multiplier, maxDelay, jitter);
+              const sleepMs = globalDeadline
+                ? Math.min(delay, Math.max(0, globalDeadline - Date.now()))
+                : delay;
+              if (sleepMs > 0) await sleep(sleepMs);
+            }
+
+            // Re-check deadline after sleeping
+            if (globalDeadline !== undefined && Date.now() >= globalDeadline) {
+              retryResult = {
+                stepId: step.id,
+                status: 'failed',
+                error: `Retry budget exhausted: ${step.globalTimeoutMs}ms global timeout exceeded after ${retryAttempt} retries`,
+                startedAt: now(),
+                completedAt: now(),
+              };
+              break;
+            }
+
             retryResult = await this.executeStepWithExpressionFallback(step, run.state, runHandlers);
           }
+
           if (retryResult.status === 'completed') {
+            // Cache idempotency key for retry-succeeded result
+            if (step.idempotencyKey !== undefined && this.idempotencyStore) {
+              const kv = String(evaluateExpression(step.idempotencyKey, run.state.variables) ?? '');
+              try { await this.idempotencyStore.set(`${step.id}:${kv}`, retryResult.output); } catch { /* best-effort */ }
+            }
             (run as { state: WorkflowState }).state = advanceState(run.state, retryResult, resolveNextStep(def, step.id, retryResult));
             this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
             await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-            if (isTerminal(def, run.state)) {
-              await this.completeRun(run, def);
-            }
+            if (isTerminal(def, run.state)) await this.completeRun(run, def);
             continue;
           }
           finalFailedResult = retryResult;
+        }
+
+        // Phase W2 — fallback handler: run alternative instead of compensation.
+        if (step.fallbackHandler) {
+          const fallbackFn = runHandlers.get(step.fallbackHandler);
+          if (fallbackFn) {
+            try {
+              const fbStart = now();
+              const fbOutput = await fallbackFn(
+                { ...run.state.variables, __failedError: finalFailedResult.error ?? 'Step failed' },
+                step.config,
+              );
+              const fallbackResult: WorkflowStepResult = {
+                stepId: step.id, status: 'completed', output: fbOutput,
+                startedAt: fbStart, completedAt: now(),
+              };
+              if (step.idempotencyKey !== undefined && this.idempotencyStore) {
+                const kv = String(evaluateExpression(step.idempotencyKey, run.state.variables) ?? '');
+                try { await this.idempotencyStore.set(`${step.id}:${kv}`, fbOutput); } catch { /* best-effort */ }
+              }
+              this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
+              const nextId = resolveNextStep(def, step.id, fallbackResult);
+              (run as { state: WorkflowState }).state = advanceState(run.state, fallbackResult, nextId);
+              await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
+              if (isTerminal(def, run.state)) await this.completeRun(run, def);
+              continue;
+            } catch { /* fallback also failed — fall through to onError/compensation */ }
+          }
         }
 
         // Phase W1 — onError: error boundary — jump to handler step instead of compensation.
@@ -389,6 +560,12 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       }
 
       this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
+
+      // Phase W2 — idempotency: cache successful output (first-time execution path)
+      if (step.idempotencyKey !== undefined && this.idempotencyStore) {
+        const kv = String(evaluateExpression(step.idempotencyKey, run.state.variables) ?? '');
+        try { await this.idempotencyStore.set(`${step.id}:${kv}`, stepResult.output); } catch { /* best-effort */ }
+      }
 
       // Phase 5 — cost ceiling check at step boundary (after success, before
       // advancing). Callers report deltas via this.costMeter.record(runId, …);

@@ -100,6 +100,32 @@ export {
   type CostDelta,
 } from './cost-meter.js';
 
+// Phase W2 — Idempotency store
+export {
+  InMemoryIdempotencyStore,
+  JsonFileIdempotencyStore,
+  type StepIdempotencyStore,
+} from './idempotency-store.js';
+
+// Phase W2 — Circuit breaker
+export {
+  CircuitBreaker,
+  CircuitBreakerRegistry,
+  type CircuitBreakerConfig,
+  type CircuitBreakerState,
+  type CircuitBreakerStats,
+} from './circuit-breaker.js';
+
+// Phase W2 — Bulkhead
+export {
+  Bulkhead,
+  BulkheadRegistry,
+  type BulkheadStats,
+} from './bulkhead.js';
+
+// Phase W2 — Retry delay utility (useful for tests and custom retry logic)
+export { computeRetryDelay } from './engine-sleep.js';
+
 // Phase 5 — Workflow replay primitives
 export {
   WorkflowReplayRecorder,
