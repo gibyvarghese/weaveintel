@@ -10,6 +10,8 @@ export interface WorkflowRunRepository {
   save(run: WorkflowRun): Promise<void>;
   get(runId: string): Promise<WorkflowRun | null>;
   list(workflowId?: string): Promise<WorkflowRun[]>;
+  /** Phase W4 — return all direct child runs spawned by the given parent run. */
+  listByParent(parentRunId: string): Promise<WorkflowRun[]>;
   delete(runId: string): Promise<void>;
 }
 
@@ -29,6 +31,12 @@ export class InMemoryWorkflowRunRepository implements WorkflowRunRepository {
     const rows = [...this.runs.values()];
     const filtered = workflowId ? rows.filter(r => r.workflowId === workflowId) : rows;
     return filtered.map(r => structuredClone(r));
+  }
+
+  async listByParent(parentRunId: string): Promise<WorkflowRun[]> {
+    return [...this.runs.values()]
+      .filter(r => r.parentRunId === parentRunId)
+      .map(r => structuredClone(r));
   }
 
   async delete(runId: string): Promise<void> {
@@ -68,6 +76,11 @@ export class JsonFileWorkflowRunRepository implements WorkflowRunRepository {
     const runs = await this.readAll();
     const filtered = workflowId ? runs.filter(r => r.workflowId === workflowId) : runs;
     return filtered.map(r => structuredClone(r));
+  }
+
+  async listByParent(parentRunId: string): Promise<WorkflowRun[]> {
+    const runs = await this.readAll();
+    return runs.filter(r => r.parentRunId === parentRunId).map(r => structuredClone(r));
   }
 
   async delete(runId: string): Promise<void> {

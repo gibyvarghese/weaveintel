@@ -22,6 +22,8 @@ function rowToRun(row: WorkflowRunRow): WorkflowRun {
     ...(row.cost_total !== undefined && row.cost_total !== null ? { costTotal: row.cost_total } : {}),
     ...(row.trace_id ? { traceId: row.trace_id } : {}),
     ...(row.tenant_id ? { tenantId: row.tenant_id } : {}),
+    ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
+    ...(row.child_run_ids ? { childRunIds: JSON.parse(row.child_run_ids) as string[] } : {}),
   };
 }
 
@@ -56,6 +58,9 @@ export class DbWorkflowRunRepository implements WorkflowRunRepository {
       error: run.error ?? null,
       ...(run.completedAt ? { completed_at: run.completedAt } : {}),
       ...(run.costTotal !== undefined ? { cost_total: run.costTotal } : {}),
+      // Phase W4 — persist parent/child linkage on every save so updates propagate.
+      ...(run.parentRunId !== undefined ? { parent_run_id: run.parentRunId } : {}),
+      ...(run.childRunIds !== undefined ? { child_run_ids: JSON.stringify(run.childRunIds) } : {}),
     });
   }
 
@@ -66,6 +71,14 @@ export class DbWorkflowRunRepository implements WorkflowRunRepository {
 
   async list(workflowId?: string): Promise<WorkflowRun[]> {
     const rows = await this.db.listWorkflowRuns(workflowId);
+    return rows.map(rowToRun);
+  }
+
+  async listByParent(parentRunId: string): Promise<WorkflowRun[]> {
+    const db = (this.db as unknown as { d: { prepare(s: string): { all(...args: unknown[]): unknown[] } } }).d;
+    const rows = db.prepare(
+      'SELECT * FROM workflow_runs WHERE parent_run_id = ?',
+    ).all(parentRunId) as WorkflowRunRow[];
     return rows.map(rowToRun);
   }
 

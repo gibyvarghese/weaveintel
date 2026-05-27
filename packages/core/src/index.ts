@@ -396,9 +396,15 @@ export {
   type WorkflowCompensation,
   type WorkflowEventType,
   type WorkflowEvent,
+  type StepContext,
   type ApprovalStatus,
   type WorkflowApprovalTask,
   type WorkflowEngine,
+  // Phase W4 — Durability and Recovery
+  type WorkflowAuditEvent,
+  type WorkflowAuditLog,
+  type SleepRecord,
+  type DurableSleepStore,
 } from './workflows.js';
 
 // Phase 5 — Capability Policy Bindings

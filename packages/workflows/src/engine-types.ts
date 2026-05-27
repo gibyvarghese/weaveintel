@@ -1,4 +1,4 @@
-import type { EventBus, HumanTaskQueue, WorkflowPolicy } from '@weaveintel/core';
+import type { EventBus, HumanTaskQueue, WorkflowPolicy, WorkflowAuditLog, DurableSleepStore } from '@weaveintel/core';
 import type { CheckpointStore } from './checkpoint-store.js';
 import type { WorkflowRunRepository } from './run-repository.js';
 import type { HandlerResolverRegistry } from './handler-resolver.js';
@@ -9,6 +9,7 @@ import type { StepIdempotencyStore } from './idempotency-store.js';
 import type { CircuitBreakerRegistry } from './circuit-breaker.js';
 import type { BulkheadRegistry } from './bulkhead.js';
 import type { PayloadStore } from './payload-store.js';
+import type { StepLockStore } from './step-lock-store.js';
 
 export interface WorkflowEngineOptions {
   checkpointStore?: CheckpointStore;
@@ -88,4 +89,26 @@ export interface WorkflowEngineOptions {
    * span IDs).
    */
   traceIdGenerator?: () => string;
+  // ─── Phase W4 — Durability and Recovery ───────────────────────────────────
+  /**
+   * Phase W4 — Exactly-once step execution store. When set, the engine
+   * writes a `locked` record before each handler execution and upgrades to
+   * `done` (with cached output) after success. On recovery, done steps are
+   * replayed from cache instead of re-executing the handler.
+   */
+  stepLockStore?: StepLockStore;
+  /**
+   * Phase W4 — Durable sleep store. When set, `wait` steps that declare
+   * `wakeAfterMs` schedule an automatic `resumeRun()` after that many
+   * milliseconds. The wakeAt timestamp is persisted so it survives process
+   * restarts. Pair with `DurableSleepScheduler` to poll for due records.
+   */
+  sleepStore?: DurableSleepStore;
+  /**
+   * Phase W4 — Immutable audit event log. When set, the engine appends a
+   * `WorkflowAuditEvent` on every state transition: run started/completed/
+   * failed, step started/locked/replayed/completed/failed, sleep scheduled/
+   * resumed, child run cancelled. Query with `engine.listWorkflowEvents(runId)`.
+   */
+  auditLog?: WorkflowAuditLog;
 }

@@ -149,3 +149,23 @@ export {
   PAYLOAD_REF_PROP,
   type PayloadStore,
 } from './payload-store.js';
+
+// Phase W4 — Durability and Recovery
+export {
+  InMemoryStepLockStore,
+  JsonFileStepLockStore,
+  newStepLockId,
+  type StepLockStore,
+  type StepLockEntry,
+} from './step-lock-store.js';
+export {
+  InMemorySleepStore,
+  JsonFileSleepStore,
+  DurableSleepScheduler,
+  type SleepResumeTarget,
+} from './sleep-store.js';
+export {
+  InMemoryAuditLog,
+  JsonFileAuditLog,
+  makeAuditEvent,
+} from './audit-log.js';

@@ -12,6 +12,9 @@ import type {
   WorkflowEvent,
   WorkflowPolicy,
   WorkflowEngine as IWorkflowEngine,
+  WorkflowAuditEvent,
+  WorkflowAuditLog,
+  DurableSleepStore,
   EventBus,
   HumanTaskQueue,
   HumanTaskType,
@@ -40,6 +43,8 @@ import { type BulkheadRegistry } from './bulkhead.js';
 import { type PayloadStore, PAYLOAD_REF_PROP } from './payload-store.js';
 import { maskStepOutput } from './secret-masker.js';
 import { validateStepOutput } from './output-schema-validator.js';
+import { type StepLockStore } from './step-lock-store.js';
+import { makeAuditEvent } from './audit-log.js';
 
 export type { WorkflowEngineOptions } from './engine-types.js';
 
@@ -65,6 +70,10 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   // Phase W3
   private payloadStore?: PayloadStore;
   private traceIdGenerator: () => string;
+  // Phase W4
+  private stepLockStore?: StepLockStore;
+  private sleepStore?: DurableSleepStore;
+  private auditLog?: WorkflowAuditLog;
 
   constructor(opts?: WorkflowEngineOptions) {
     this.checkpointStore = opts?.checkpointStore ?? new InMemoryCheckpointStore();
@@ -83,6 +92,9 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     this.bulkheadRegistry = opts?.bulkheadRegistry;
     this.payloadStore = opts?.payloadStore;
     this.traceIdGenerator = opts?.traceIdGenerator ?? (() => newUUIDv7());
+    this.stepLockStore = opts?.stepLockStore;
+    this.sleepStore = opts?.sleepStore;
+    this.auditLog = opts?.auditLog;
   }
 
   /** Phase 5 — Public access to the cost meter so callers (LLM adapters,
@@ -96,6 +108,15 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   getBulkheadRegistry(): BulkheadRegistry | undefined { return this.bulkheadRegistry; }
   /** Phase W3 — Access the payload store (if configured). */
   getPayloadStore(): PayloadStore | undefined { return this.payloadStore; }
+  /** Phase W4 — Access the step lock store (if configured). */
+  getStepLockStore(): StepLockStore | undefined { return this.stepLockStore; }
+  /** Phase W4 — Access the durable sleep store (if configured). */
+  getSleepStore(): DurableSleepStore | undefined { return this.sleepStore; }
+  /** Phase W4 — Return the full immutable audit event history for a run. */
+  async listWorkflowEvents(runId: string): Promise<WorkflowAuditEvent[]> {
+    if (!this.auditLog) return [];
+    return this.auditLog.list(runId);
+  }
 
   /** Subscribe to a specific workflow event type. Lazily creates an internal bus. */
   on(type: string, handler: (event: unknown) => void): () => void {
@@ -146,7 +167,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
 
   // ─── Run Management ────────────────────────────────────────
 
-  async startRun(workflowId: string, input?: Record<string, unknown>, opts?: { traceId?: string; tenantId?: string }): Promise<WorkflowRun> {
+  async startRun(workflowId: string, input?: Record<string, unknown>, opts?: { traceId?: string; tenantId?: string; parentRunId?: string }): Promise<WorkflowRun> {
     let def = this.definitions.get(workflowId);
     if (!def && this.definitionStore) {
       const fromStore = await this.definitionStore.get(workflowId);
@@ -176,10 +197,26 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       costTotal: 0,
       traceId: opts?.traceId ?? this.traceIdGenerator(),
       tenantId: opts?.tenantId,
+      ...(opts?.parentRunId ? { parentRunId: opts.parentRunId } : {}),
     };
     await this.runRepository.save(run);
     this.runCache.set(run.id, run);
+
+    // Phase W4 — link child run into parent's childRunIds list.
+    if (opts?.parentRunId) {
+      const parent = await this.runRepository.get(opts.parentRunId);
+      if (parent) {
+        const ids = parent.childRunIds ?? [];
+        if (!ids.includes(run.id)) {
+          (parent as { childRunIds: string[] }).childRunIds = [...ids, run.id];
+          await this.runRepository.save(parent);
+          this.runCache.set(parent.id, parent);
+        }
+      }
+    }
+
     this.emit({ type: 'workflow:started', runId: run.id, timestamp: now() });
+    void this.appendAudit(run, 'workflow:started');
 
     return this.executeRun(run, def);
   }
@@ -207,6 +244,12 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     await this.runRepository.save(run);
     this.runCache.set(run.id, run);
 
+    // Phase W4 — if resumed by the sleep scheduler, emit sleep-resumed audit event.
+    if (data !== null && typeof data === 'object' && (data as Record<string, unknown>)['__sleepExpired']) {
+      this.emit({ type: 'run:sleep_resumed', runId: run.id, timestamp: now(), data });
+      void this.appendAudit(run, 'run:sleep_resumed', { data: data as Record<string, unknown> });
+    }
+
     // Advance to the correct next step, respecting branch selectors in resume data.
     const currentStep = def.steps.find(s => s.id === run.state.currentStepId);
     if (currentStep) {
@@ -222,11 +265,23 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   async cancelRun(runId: string): Promise<void> {
     const run = await this.runRepository.get(runId);
     if (!run) throw new Error(`Workflow run not found: ${runId}`);
+
+    // Phase W4 — depth-first cancellation propagation to all child sub-workflow runs.
+    const childIds = run.childRunIds ?? [];
+    for (const childId of childIds) {
+      try {
+        await this.cancelRun(childId);
+        this.emit({ type: 'run:cancelled_child', runId, timestamp: now(), data: { childRunId: childId } });
+        void this.appendAudit(run, 'run:cancelled_child', { data: { childRunId: childId } });
+      } catch { /* child may already be terminal — best-effort */ }
+    }
+
     (run as { status: WorkflowRunStatus }).status = 'cancelled';
     run.completedAt = now();
     await this.runRepository.save(run);
     this.runCache.set(run.id, run);
     this.emit({ type: 'workflow:failed', runId, timestamp: now(), data: { reason: 'cancelled' } });
+    void this.appendAudit(run, 'workflow:failed', { data: { reason: 'cancelled' } });
   }
 
   listRuns(workflowId?: string): WorkflowRun[] {
@@ -464,12 +519,36 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         attempt: 1,
       };
 
+      // Phase W4 — exactly-once step execution: check if step already succeeded.
+      if (this.stepLockStore) {
+        const { done, output } = await this.stepLockStore.isDone(run.id, step.id);
+        if (done) {
+          const replayedResult: WorkflowStepResult = {
+            stepId: step.id, status: 'completed', output,
+            startedAt: now(), completedAt: now(),
+          };
+          this.emit({ type: 'step:replayed', runId: run.id, stepId: step.id, timestamp: now() });
+          void this.appendAudit(run, 'step:replayed', { stepId: step.id });
+          const nextId = resolveNextStep(def, step.id, replayedResult);
+          (run as { state: WorkflowState }).state = advanceState(run.state, replayedResult, nextId);
+          for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
+          await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
+          if (!nextId || isTerminal(def, run.state)) await this.completeRun(run, def);
+          continue;
+        }
+        await this.stepLockStore.lock(run.id, step.id);
+        this.emit({ type: 'step:locked', runId: run.id, stepId: step.id, timestamp: now() });
+        void this.appendAudit(run, 'step:locked', { stepId: step.id });
+      }
+
       this.emit({ type: 'step:started', runId: run.id, stepId: step.id, timestamp: now() });
+      void this.appendAudit(run, 'step:started', { stepId: step.id });
 
       let stepResult = await this.executeStepWithExpressionFallback(step, run.state, runHandlers);
 
       if (stepResult.status === 'failed') {
         this.emit({ type: 'step:failed', runId: run.id, stepId: step.id, timestamp: now(), data: { error: stepResult.error } });
+        void this.appendAudit(run, 'step:failed', { stepId: step.id, data: { error: stepResult.error } });
 
         // Track the last failed result so onError / fallback receives the terminal error.
         let finalFailedResult = stepResult;
@@ -540,10 +619,14 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
                 const kv = String(evaluateExpression(step.idempotencyKey, run.state.variables) ?? '');
                 try { await this.idempotencyStore.set(`${step.id}:${kv}`, retryProcessed.output); } catch { /* best-effort */ }
               }
+              if (this.stepLockStore) {
+                try { await this.stepLockStore.markDone(run.id, step.id, retryProcessed.output); } catch { /* best-effort */ }
+              }
               const ephemeral = step.outputScope === 'step';
               (run as { state: WorkflowState }).state = advanceState(run.state, retryProcessed, resolveNextStep(def, step.id, retryProcessed), ephemeral);
               for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
               this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
+              void this.appendAudit(run, 'step:completed', { stepId: step.id });
               await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
               if (isTerminal(def, run.state)) await this.completeRun(run, def);
               continue;
@@ -573,7 +656,11 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
                   const kv = String(evaluateExpression(step.idempotencyKey, run.state.variables) ?? '');
                   try { await this.idempotencyStore.set(`${step.id}:${kv}`, fbProcessed.output); } catch { /* best-effort */ }
                 }
+                if (this.stepLockStore) {
+                  try { await this.stepLockStore.markDone(run.id, step.id, fbProcessed.output); } catch { /* best-effort */ }
+                }
                 this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
+                void this.appendAudit(run, 'step:completed', { stepId: step.id });
                 const nextId = resolveNextStep(def, step.id, fbProcessed);
                 const fbEphemeral = step.outputScope === 'step';
                 (run as { state: WorkflowState }).state = advanceState(run.state, fbProcessed, nextId, fbEphemeral);
@@ -633,7 +720,13 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       // Use processed result from here on
       stepResult = processedResult;
 
+      // Phase W4 — mark step done for exactly-once replay on recovery.
+      if (this.stepLockStore) {
+        try { await this.stepLockStore.markDone(run.id, step.id, stepResult.output); } catch { /* best-effort */ }
+      }
+
       this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
+      void this.appendAudit(run, 'step:completed', { stepId: step.id });
 
       // Phase W2 — idempotency: cache successful output (first-time execution path)
       if (step.idempotencyKey !== undefined && this.idempotencyStore) {
@@ -689,7 +782,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         return run;
       }
 
-      // wait step => pause
+      // wait step => pause (with optional durable sleep auto-resume)
       if (step.type === 'wait') {
         (run.state as { currentStepId: string }).currentStepId = step.id;
         run.state.history.push(stepResult);
@@ -698,6 +791,15 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         this.runCache.set(run.id, run);
         this.emit({ type: 'workflow:paused', runId: run.id, timestamp: now() });
         await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
+        // Phase W4 — durable sleep: schedule auto-resume if wakeAfterMs is set.
+        if (step.wakeAfterMs && this.sleepStore) {
+          const wakeAt = Date.now() + step.wakeAfterMs;
+          try {
+            await this.sleepStore.schedule(run.id, wakeAt);
+            this.emit({ type: 'run:sleep_scheduled', runId: run.id, stepId: step.id, timestamp: now(), data: { wakeAt } });
+            void this.appendAudit(run, 'run:sleep_scheduled', { stepId: step.id, data: { wakeAt } });
+          } catch { /* best-effort: sleep store errors don't fail the run */ }
+        }
         return run;
       }
 
@@ -903,6 +1005,11 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     // Phase 5 — capture final cost total before persisting.
     run.costTotal = await Promise.resolve(this.costMeter.total(run.id));
     this.emit({ type: 'workflow:completed', runId: run.id, timestamp: now() });
+    void this.appendAudit(run, 'workflow:completed');
+    // Phase W4 — clear step lock records now that the run is terminal.
+    if (this.stepLockStore) {
+      try { await this.stepLockStore.clear(run.id); } catch { /* best-effort */ }
+    }
     // Phase 4 — emit typed mesh contract if declared. Failures are swallowed.
     if (this.contractEmitter && def.outputContract) {
       try {
@@ -934,6 +1041,11 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     (run as { error?: string }).error = error;
     run.completedAt = now();
     this.emit({ type: 'workflow:failed', runId: run.id, timestamp: now(), data: { error } });
+    void this.appendAudit(run, 'workflow:failed', { data: { error } });
+    // Phase W4 — clear step lock records now that the run is terminal.
+    if (this.stepLockStore) {
+      void this.stepLockStore.clear(run.id).catch(() => { /* best-effort */ });
+    }
   }
 
   private emit(event: WorkflowEvent): void {
@@ -944,6 +1056,26 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         data: { type: event.type, runId: event.runId, stepId: event.stepId, timestamp: event.timestamp, data: event.data },
       });
     }
+  }
+
+  /** Phase W4 — append an immutable audit event. Fire-and-forget; never throws. */
+  private async appendAudit(
+    run: WorkflowRun,
+    type: string,
+    extra?: { stepId?: string; data?: Record<string, unknown> },
+  ): Promise<void> {
+    if (!this.auditLog) return;
+    try {
+      await this.auditLog.append(makeAuditEvent({
+        runId: run.id,
+        workflowId: run.workflowId,
+        type,
+        stepId: extra?.stepId,
+        traceId: run.traceId,
+        tenantId: run.tenantId,
+        data: extra?.data,
+      }));
+    } catch { /* audit failures must never affect run execution */ }
   }
 }
 

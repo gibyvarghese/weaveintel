@@ -119,6 +119,13 @@ export interface WorkflowStep {
    *                      written to the durable run record.
    */
   outputScope?: 'global' | 'step';
+  /**
+   * Phase W4 — Durable sleep duration for `wait` steps (milliseconds).
+   * When set on a `wait` step the engine schedules an automatic `resumeRun()`
+   * after this many milliseconds instead of requiring an external call.
+   * The wakeAt timestamp is persisted so it survives process restarts.
+   */
+  wakeAfterMs?: number;
 }
 
 /**
@@ -212,6 +219,17 @@ export interface WorkflowRun {
    * Forwarded into `__ctx` on every step handler invocation.
    */
   tenantId?: string;
+  /**
+   * Phase W4 — ID of the parent run that spawned this run as a sub-workflow.
+   * Set automatically when the engine starts a child run via the subworkflow
+   * resolver; used for depth-first cancellation propagation.
+   */
+  parentRunId?: string;
+  /**
+   * Phase W4 — IDs of all direct child sub-workflow runs spawned by this run.
+   * Used by `cancelRun()` to cascade cancellation depth-first.
+   */
+  childRunIds?: string[];
 }
 
 /**
@@ -294,7 +312,13 @@ export type WorkflowEventType =
   | 'step:output_schema_warn'
   | 'step:payload_offloaded'
   | 'approval:requested'
-  | 'approval:received';
+  | 'approval:received'
+  // Phase W4 — Durability and Recovery
+  | 'step:locked'
+  | 'step:replayed'
+  | 'run:sleep_scheduled'
+  | 'run:sleep_resumed'
+  | 'run:cancelled_child';
 
 export interface WorkflowEvent {
   type: WorkflowEventType;
@@ -302,6 +326,48 @@ export interface WorkflowEvent {
   stepId?: string;
   timestamp: string;
   data?: unknown;
+}
+
+// ─── Phase W4 — Audit Log ────────────────────────────────────
+
+/**
+ * Immutable append-only record of a single workflow engine state transition.
+ * Written by the engine on every step start/complete/fail, run start/complete/fail,
+ * sleep, resume, and cancellation. Forms a causal history of the run.
+ */
+export interface WorkflowAuditEvent {
+  id: string;
+  runId: string;
+  workflowId: string;
+  type: string;            // WorkflowEventType or custom extension
+  stepId?: string;
+  timestamp: string;       // ISO-8601
+  traceId?: string;
+  tenantId?: string;
+  /** ID of the event that directly triggered this one (e.g. step:locked → step:replayed). */
+  causedBy?: string;
+  data?: Record<string, unknown>;
+}
+
+export interface WorkflowAuditLog {
+  append(event: Omit<WorkflowAuditEvent, 'id'>): Promise<void>;
+  list(runId: string): Promise<WorkflowAuditEvent[]>;
+  listAll(opts?: { workflowId?: string; limit?: number }): Promise<WorkflowAuditEvent[]>;
+}
+
+// ─── Phase W4 — Durable Sleep ────────────────────────────────
+
+export interface SleepRecord {
+  runId: string;
+  wakeAt: number;         // epoch ms
+  createdAt: string;      // ISO-8601
+}
+
+export interface DurableSleepStore {
+  schedule(runId: string, wakeAt: number): Promise<void>;
+  cancel(runId: string): Promise<void>;
+  getDue(now?: number): Promise<SleepRecord[]>;
+  list(): Promise<SleepRecord[]>;
 }
 
 // ─── Approval Tasks ──────────────────────────────────────────
@@ -327,7 +393,7 @@ export interface WorkflowEngine {
   createDefinition(def: WorkflowDefinition): Promise<WorkflowDefinition>;
   getDefinition(id: string): Promise<WorkflowDefinition | null>;
   listDefinitions(): Promise<WorkflowDefinition[]>;
-  startRun(workflowId: string, input?: Record<string, unknown>, opts?: { traceId?: string; tenantId?: string }): Promise<WorkflowRun>;
+  startRun(workflowId: string, input?: Record<string, unknown>, opts?: { traceId?: string; tenantId?: string; parentRunId?: string }): Promise<WorkflowRun>;
   getRun(runId: string): Promise<WorkflowRun | null>;
   resumeRun(runId: string, data?: unknown): Promise<WorkflowRun>;
   cancelRun(runId: string): Promise<void>;
@@ -337,4 +403,9 @@ export interface WorkflowEngine {
    * Returns null if no checkpoint exists for the given runId.
    */
   recoverRun(runId: string): Promise<WorkflowRun | null>;
+  /**
+   * Phase W4 — Return the full immutable audit event history for a run.
+   * Returns an empty array when no audit log is configured.
+   */
+  listWorkflowEvents(runId: string): Promise<WorkflowAuditEvent[]>;
 }

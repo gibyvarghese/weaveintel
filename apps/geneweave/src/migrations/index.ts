@@ -4,6 +4,7 @@ import { applyM11_M18 } from './m11-m18.js';
 import { applyM19_M22 } from './m19-m22.js';
 import { applyM23 } from './m23.js';
 import { applyM24WorkflowW3 } from './m24-workflow-w3.js';
+import { applyM25WorkflowW4 } from './m25-workflow-w4.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -16,6 +17,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'encryption', description: 'Encryption phases 1–10', run: applyEncryption },
   { id: 'm23', description: 'Fix stale Claude model IDs in model_pricing, capability scores, routing policies, tenant configs', run: applyM23 },
   { id: 'm24-workflow-w3', description: 'Workflow W3: trace_id/tenant_id on runs, workflow_payloads table', run: applyM24WorkflowW3 },
+  { id: 'm25-workflow-w4', description: 'Workflow W4: parent/child runs, audit events, durable sleeps, step locks', run: applyM25WorkflowW4 },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

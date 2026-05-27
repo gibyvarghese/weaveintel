@@ -165,8 +165,11 @@ export class WorkflowBuilder {
   }
 
   /** Shortcut: add a wait step (pauses for approval or external input). */
-  wait(id: string, name: string, opts?: { next?: string }): this {
-    return this.addStep({ id, name, type: 'wait', next: opts?.next });
+  wait(id: string, name: string, opts?: { next?: string; wakeAfterMs?: number }): this {
+    return this.addStep({
+      id, name, type: 'wait', next: opts?.next,
+      ...(opts?.wakeAfterMs ? { wakeAfterMs: opts.wakeAfterMs } : {}),
+    });
   }
 
   /** Shortcut: add a parallel step that executes named handlers concurrently. */

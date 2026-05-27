@@ -106,6 +106,42 @@ export interface WorkflowRunRow {
   trace_id?: string | null;
   /** Phase W3 — tenant identifier for multi-tenant deployments. */
   tenant_id?: string | null;
+  /** Phase W4 — ID of the parent run that spawned this as a sub-workflow. */
+  parent_run_id?: string | null;
+  /** Phase W4 — JSON array of direct child sub-workflow run IDs. */
+  child_run_ids?: string | null;
+}
+
+/** Phase W4 — single immutable audit event row. */
+export interface WorkflowEventRow {
+  id: string;
+  run_id: string;
+  workflow_id: string;
+  type: string;
+  step_id: string | null;
+  timestamp: string;
+  trace_id: string | null;
+  tenant_id: string | null;
+  caused_by: string | null;
+  data: string | null;  // JSON
+  created_at: string;
+}
+
+/** Phase W4 — durable sleep record row. */
+export interface WorkflowSleepRow {
+  run_id: string;
+  wake_at: number;
+  created_at: string;
+}
+
+/** Phase W4 — step lock row (exactly-once execution guard). */
+export interface WorkflowStepLockRow {
+  run_id: string;
+  step_id: string;
+  state: 'locked' | 'done';
+  locked_at: string;
+  done_at: string | null;
+  output: string | null;  // JSON
 }
 
 /** Phase W3 — large payload offload store row. */
