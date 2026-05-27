@@ -23,7 +23,7 @@ export interface ModelCapabilityFlags {
  * Claude Opus 4 and OpenAI o-series reasoning models.
  */
 const THINKING_MODELS = new Set([
-  'claude-opus-4-20250514',
+  'claude-opus-4-7',
   'o3',
   'o4-mini',
 ]);

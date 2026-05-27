@@ -4587,7 +4587,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       {
         id: 'eea58ad8-5c94-4aba-98ce-850c4a567e31', name: 'Quality First', description: 'Always route to the highest quality model available',
         strategy: 'quality', constraints: null, weights: JSON.stringify({ cost: 0.1, quality: 0.8, latency: 0.1 }),
-        fallback_model: 'claude-sonnet-4-20250514', fallback_provider: 'anthropic', enabled: 1,
+        fallback_model: 'claude-sonnet-4-6', fallback_provider: 'anthropic', enabled: 1,
       },
       {
         id: 'b6bcb4e8-16e2-4c40-b5a6-50bc15912c23', name: 'Balanced', description: 'Balance between cost, quality and speed',
@@ -4603,9 +4603,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
     // Seeded with public list prices captured from provider pricing pages.
     // Operators edit these in the admin Pricing tab; sync button refreshes from APIs.
     const pricing: Omit<ModelPricingRow, 'created_at' | 'updated_at'>[] = [
-      { id: '24c261e4-3cd0-48da-aba5-ad65cdc4ba84',    model_id: 'claude-sonnet-4-20250514',    provider: 'anthropic', display_name: 'Claude Sonnet 4',    input_cost_per_1m: 3.00,  output_cost_per_1m: 15.00, quality_score: 0.85, source: 'seed', last_synced_at: null, enabled: 1 },
-      { id: '3a01332c-7062-46f4-ac27-23718d0b7e11',      model_id: 'claude-opus-4-20250514',      provider: 'anthropic', display_name: 'Claude Opus 4',      input_cost_per_1m: 15.00, output_cost_per_1m: 75.00, quality_score: 0.95, source: 'seed', last_synced_at: null, enabled: 1 },
-      { id: '7a159bca-cd4a-4008-9adf-537d3f9087a5',     model_id: 'claude-haiku-4-20250414',     provider: 'anthropic', display_name: 'Claude Haiku 4',     input_cost_per_1m: 1.00,  output_cost_per_1m: 5.00,  quality_score: 0.70, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: '24c261e4-3cd0-48da-aba5-ad65cdc4ba84', model_id: 'claude-sonnet-4-6',          provider: 'anthropic', display_name: 'Claude Sonnet 4.6',          input_cost_per_1m: 3.00,  output_cost_per_1m: 15.00, quality_score: 0.87, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: '3a01332c-7062-46f4-ac27-23718d0b7e11', model_id: 'claude-opus-4-7',            provider: 'anthropic', display_name: 'Claude Opus 4.7',            input_cost_per_1m: 15.00, output_cost_per_1m: 75.00, quality_score: 0.95, source: 'seed', last_synced_at: null, enabled: 1 },
+      { id: '7a159bca-cd4a-4008-9adf-537d3f9087a5', model_id: 'claude-haiku-4-5-20251001',  provider: 'anthropic', display_name: 'Claude Haiku 4.5',  input_cost_per_1m: 0.80,  output_cost_per_1m: 4.00,  quality_score: 0.72, source: 'seed', last_synced_at: null, enabled: 1 },
       { id: 'd544e807-dd8b-45fc-8d7c-4c35b00fe34c',             model_id: 'gpt-4o',                      provider: 'openai',    display_name: 'GPT-4o',             input_cost_per_1m: 2.50,  output_cost_per_1m: 10.00, quality_score: 0.90, source: 'seed', last_synced_at: null, enabled: 1 },
       { id: '453e9a1e-b374-436b-bbed-58ba0a0db737',        model_id: 'gpt-4o-mini',                 provider: 'openai',    display_name: 'GPT-4o Mini',        input_cost_per_1m: 0.15,  output_cost_per_1m: 0.60,  quality_score: 0.75, source: 'seed', last_synced_at: null, enabled: 1 },
       { id: '5a851707-9a6f-434f-9c8f-e6bc02647e90',            model_id: 'gpt-4.1',                     provider: 'openai',    display_name: 'GPT-4.1',            input_cost_per_1m: 2.00,  output_cost_per_1m: 8.00,  quality_score: 0.90, source: 'seed', last_synced_at: null, enabled: 1 },
@@ -5033,55 +5033,6 @@ export class SQLiteAdapter implements DatabaseAdapter {
       await this.updatePrompt(hardExecutionGuardPrompt.id, { template: HARD_EXECUTION_GUARD_POLICY });
     }
 
-    // Workflow runs (sample completed and in-progress runs)
-    if (cnt('workflow_runs') === 0) {
-    const runs: Omit<WorkflowRunRow, 'completed_at'>[] = [
-      {
-        id: '38e1d25e-75e8-470c-ae80-f8464c666026', workflow_id: '3aedac32-ef1a-429f-89d7-23d481ccd8ad', status: 'completed',
-        state: JSON.stringify({ currentStepId: 'report', variables: { repository: 'acme/api' }, history: [
-          { stepId: 'analyze', status: 'completed', output: '3 issues found', startedAt: '2025-01-15T10:00:00Z', completedAt: '2025-01-15T10:00:05Z' },
-          { stepId: 'review', status: 'completed', output: 'LGTM with minor notes', startedAt: '2025-01-15T10:00:05Z', completedAt: '2025-01-15T10:00:12Z' },
-        ] }),
-        input: JSON.stringify({ repository: 'acme/api', branch: 'feature/auth' }),
-        error: null, started_at: '2025-01-15T10:00:00Z',
-      },
-      {
-        id: 'b718e2c0-6049-4d67-8d87-3706d13ea97c', workflow_id: 'f47a3a38-a090-4956-8998-3e2bf6327304', status: 'paused',
-        state: JSON.stringify({ currentStepId: 'approve', variables: { topic: 'AI Safety' }, history: [
-          { stepId: 'draft', status: 'completed', output: 'Draft generated (1200 words)', startedAt: '2025-01-16T09:00:00Z', completedAt: '2025-01-16T09:00:30Z' },
-          { stepId: 'edit', status: 'completed', output: 'Edited and polished', startedAt: '2025-01-16T09:00:30Z', completedAt: '2025-01-16T09:01:00Z' },
-        ] }),
-        input: JSON.stringify({ topic: 'AI Safety', audience: 'technical' }),
-        error: null, started_at: '2025-01-16T09:00:00Z',
-      },
-    ];
-    for (const r of runs) await this.createWorkflowRun(r);
-    }
-
-    // Guardrail evaluations (sample evaluations)
-    if (cnt('guardrail_evals') === 0) {
-    const evals: Omit<GuardrailEvalRow, 'created_at'>[] = [
-      {
-        id: 'bdb005ec-c192-4404-ab44-bf4e23ab7aee', chat_id: null, message_id: null, stage: 'pre-execution',
-        input_preview: 'Tell me about machine learning...',
-        results: JSON.stringify([
-          { decision: 'allow', guardrailId: '0370fa22-5fc8-49a4-bd4c-3e39863da61d', explanation: 'No PII detected' },
-          { decision: 'allow', guardrailId: '1a6b5225-07c6-41cc-878f-c0d08930c1de', explanation: 'Within token limit' },
-        ]),
-        overall_decision: 'allow',
-      },
-      {
-        id: '25f7e39a-5990-467c-8ae2-6114c3511190', chat_id: null, message_id: null, stage: 'pre-execution',
-        input_preview: 'My SSN is 123-45-6789...',
-        results: JSON.stringify([
-          { decision: 'deny', guardrailId: '0370fa22-5fc8-49a4-bd4c-3e39863da61d', explanation: 'SSN pattern detected' },
-        ]),
-        overall_decision: 'deny',
-      },
-    ];
-    for (const e of evals) await this.createGuardrailEval(e);
-    }
-
     // Human Task Policies
     if (cnt('human_task_policies') === 0) {
     const taskPolicies: Omit<HumanTaskPolicyRow, 'created_at' | 'updated_at'>[] = [
@@ -5334,88 +5285,6 @@ export class SQLiteAdapter implements DatabaseAdapter {
     for (const sp of searchProviders) await this.createSearchProvider(sp);
     }
 
-    // HTTP Endpoints
-    if (cnt('http_endpoints') === 0) {
-    const httpEndpoints: Omit<HttpEndpointRow, 'created_at' | 'updated_at'>[] = [
-      {
-        id: '49f5b2f0-cff1-4446-b318-5598a6b2eab5', name: 'JSONPlaceholder Posts', description: 'Sample REST endpoint for testing — free JSON API',
-        url: 'https://jsonplaceholder.typicode.com/posts', method: 'GET',
-        auth_type: null, auth_config: null, headers: null,
-        body_template: null, response_transform: '$[0:5]', retry_count: 2, rate_limit_rpm: 60, enabled: 1,
-      },
-      {
-        id: 'ff913bd9-717d-412a-b67f-7b176faad8f3', name: 'Open-Meteo Weather', description: 'Free weather API — no key needed. Returns current weather for a location.',
-        url: 'https://api.open-meteo.com/v1/forecast?latitude={{lat}}&longitude={{lon}}&current_weather=true', method: 'GET',
-        auth_type: null, auth_config: null, headers: null,
-        body_template: null, response_transform: '$.current_weather', retry_count: 2, rate_limit_rpm: 30, enabled: 1,
-      },
-      {
-        id: 'fca3c3cd-d8a0-46ec-b448-3e12fd466d2f', name: 'IP Info', description: 'Get geolocation data from an IP address',
-        url: 'https://ipapi.co/{{ip}}/json/', method: 'GET',
-        auth_type: null, auth_config: null, headers: null,
-        body_template: null, response_transform: null, retry_count: 1, rate_limit_rpm: 30, enabled: 1,
-      },
-    ];
-    for (const he of httpEndpoints) await this.createHttpEndpoint(he);
-    }
-
-    // Social Accounts
-    if (cnt('social_accounts') === 0) {
-    const socialAccounts: Omit<SocialAccountRow, 'created_at' | 'updated_at'>[] = [
-      {
-        id: '82e7b3d3-7794-4cab-878f-9dfc73ed94dc', name: 'Slack Workspace', description: 'Default Slack workspace integration for team messaging',
-        platform: 'slack', api_key: '', api_secret: null, access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected', base_url: null,
-        options: JSON.stringify({ default_channel: '#general' }), enabled: 0,
-      },
-      {
-        id: 'd1f54eaa-fdf8-4039-aacc-1cfb84e0fe8b', name: 'Discord Server', description: 'Discord server bot integration',
-        platform: 'discord', api_key: '', api_secret: null, access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected', base_url: null,
-        options: JSON.stringify({ guild_id: '' }), enabled: 0,
-      },
-      {
-        id: '81de7d85-e393-475b-aee9-c67363eaeda8', name: 'GitHub', description: 'GitHub integration for repository and issue management',
-        platform: 'github', api_key: '', api_secret: null, access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected', base_url: null,
-        options: JSON.stringify({ default_owner: '', default_repo: '' }), enabled: 0,
-      },
-    ];
-    for (const sa of socialAccounts) await this.createSocialAccount(sa);
-    }
-
-    // Enterprise Connectors
-    if (cnt('enterprise_connectors') === 0) {
-    const connectors: Omit<EnterpriseConnectorRow, 'created_at' | 'updated_at'>[] = [
-      {
-        id: '43c533a0-3f2e-40ec-bacb-9a9f8a3815ba', name: 'Jira', description: 'Atlassian Jira for issue tracking and project management',
-        connector_type: 'jira', base_url: '', auth_type: 'basic',
-        auth_config: JSON.stringify({ username: '', token: '' }),
-        access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected',
-        options: JSON.stringify({ default_project: '' }), enabled: 0,
-      },
-      {
-        id: '1f9f0fcd-f190-4e0e-8b84-4dc4142554f0', name: 'Confluence', description: 'Atlassian Confluence for team documentation and knowledge base',
-        connector_type: 'confluence', base_url: '', auth_type: 'basic',
-        auth_config: JSON.stringify({ username: '', token: '' }),
-        access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected',
-        options: JSON.stringify({ default_space: '' }), enabled: 0,
-      },
-      {
-        id: '3ed738ad-f493-49e7-835f-a2fb4cf159a8', name: 'Salesforce', description: 'Salesforce CRM integration for customer data and opportunities',
-        connector_type: 'salesforce', base_url: '', auth_type: 'oauth2',
-        auth_config: JSON.stringify({ client_id: '', client_secret: '', token_url: '' }),
-        access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected',
-        options: null, enabled: 0,
-      },
-      {
-        id: '04833867-7e14-43e5-a64a-188f5b004382', name: 'Notion', description: 'Notion workspace integration for docs and databases',
-        connector_type: 'notion', base_url: null, auth_type: 'bearer',
-        auth_config: JSON.stringify({ token: '' }),
-        access_token: null, refresh_token: null, token_expires_at: null, oauth_state: null, status: 'disconnected',
-        options: null, enabled: 0,
-      },
-    ];
-    for (const ec of connectors) await this.createEnterpriseConnector(ec);
-    }
-
     // Tool Registry
     if (cnt('tool_registry') === 0) {
     const toolReg: Omit<ToolRegistryRow, 'created_at' | 'updated_at'>[] = [
@@ -5529,7 +5398,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       {
         id: '9ce41ecd-202f-49bf-8042-1ff7a296e537', name: 'Default Tenant', description: 'Default tenant configuration with standard limits',
         tenant_id: 'default', scope: 'global',
-        allowed_models: JSON.stringify(['gpt-4o', 'gpt-4o-mini', 'claude-sonnet-4-20250514']),
+        allowed_models: JSON.stringify(['gpt-4o', 'gpt-4o-mini', 'claude-sonnet-4-6']),
         denied_models: null,
         allowed_tools: JSON.stringify(['web-search', 'file-reader', 'api-caller']),
         max_tokens_daily: 100000, max_cost_daily: 5.0,
@@ -5540,7 +5409,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       {
         id: '0291280f-f15f-44dc-ac95-bc2a61e88cbd', name: 'Enterprise Tenant', description: 'Enterprise tier with expanded limits and all features',
         tenant_id: 'enterprise', scope: 'organization',
-        allowed_models: JSON.stringify(['gpt-4o', 'gpt-4o-mini', 'claude-sonnet-4-20250514', 'claude-opus-4-20250514']),
+        allowed_models: JSON.stringify(['gpt-4o', 'gpt-4o-mini', 'claude-sonnet-4-6', 'claude-opus-4-7']),
         denied_models: null,
         allowed_tools: JSON.stringify(['web-search', 'file-reader', 'api-caller', 'code-exec', 'db-query']),
         max_tokens_daily: 500000, max_cost_daily: 25.0,
@@ -5552,7 +5421,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         id: 'b061bbe6-2ded-4c77-afad-33473b4cb4fa', name: 'Trial Tenant', description: 'Free trial with limited access',
         tenant_id: 'trial', scope: 'tenant',
         allowed_models: JSON.stringify(['gpt-4o-mini']),
-        denied_models: JSON.stringify(['claude-opus-4-20250514']),
+        denied_models: JSON.stringify(['claude-opus-4-7']),
         allowed_tools: JSON.stringify(['web-search']),
         max_tokens_daily: 10000, max_cost_daily: 0.5,
         max_tokens_monthly: 100000, max_cost_monthly: 5.0,
@@ -6318,17 +6187,17 @@ export class SQLiteAdapter implements DatabaseAdapter {
       const scores: CapSeed[] = [
         // Anthropic family
         ...['reasoning', 'summarization', 'translation', 'classification', 'extraction', 'qa', 'code_generation', 'code_debug', 'code_review', 'creative_writing', 'conversation', 'tool_use', 'vision_understanding'].map(task => ({
-          model_id: 'claude-opus-4-20250514', provider: 'anthropic', task_key: task,
+          model_id: 'claude-opus-4-7', provider: 'anthropic', task_key: task,
           quality_score: ({ reasoning: 95, summarization: 90, translation: 88, classification: 90, extraction: 92, qa: 93, code_generation: 94, code_debug: 95, code_review: 95, creative_writing: 96, conversation: 92, tool_use: 93, vision_understanding: 90 }[task as string] ?? 90),
           benchmark_source: 'composite-2025q1',
         })),
         ...['reasoning', 'summarization', 'translation', 'classification', 'extraction', 'qa', 'code_generation', 'code_debug', 'code_review', 'creative_writing', 'conversation', 'tool_use', 'vision_understanding'].map(task => ({
-          model_id: 'claude-sonnet-4-20250514', provider: 'anthropic', task_key: task,
+          model_id: 'claude-sonnet-4-6', provider: 'anthropic', task_key: task,
           quality_score: ({ reasoning: 88, summarization: 88, translation: 86, classification: 88, extraction: 89, qa: 88, code_generation: 90, code_debug: 89, code_review: 88, creative_writing: 90, conversation: 90, tool_use: 89, vision_understanding: 86 }[task as string] ?? 85),
           benchmark_source: 'composite-2025q1',
         })),
         ...['summarization', 'classification', 'extraction', 'qa', 'translation', 'conversation', 'tool_use'].map(task => ({
-          model_id: 'claude-haiku-4-20250414', provider: 'anthropic', task_key: task,
+          model_id: 'claude-haiku-4-5-20251001', provider: 'anthropic', task_key: task,
           quality_score: ({ summarization: 78, classification: 78, extraction: 76, qa: 75, translation: 74, conversation: 80, tool_use: 75 }[task as string] ?? 70),
           benchmark_source: 'composite-2025q1',
         })),

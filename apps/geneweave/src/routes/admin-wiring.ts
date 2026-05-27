@@ -133,7 +133,7 @@ export function registerAdminWiringRoutes(
   const SV_PROVIDER_PREFERENCE = ['openai', 'anthropic', 'google', 'gemini', 'ollama', 'llamacpp', 'llama-cpp'] as const;
   const SV_REASONING_MODEL: Record<string, string> = {
     openai: 'gpt-4o',
-    anthropic: 'claude-sonnet-4-20250514',
+    anthropic: 'claude-sonnet-4-6',
     google: 'gemini-2.5-pro',
     gemini: 'gemini-2.5-pro',
     ollama: process.env['OLLAMA_MODEL'] ?? 'llama3.1',
@@ -142,7 +142,7 @@ export function registerAdminWiringRoutes(
   };
   const SV_TOOL_MODEL: Record<string, string> = {
     openai: 'gpt-4o-mini',
-    anthropic: 'claude-haiku-4-20250414',
+    anthropic: 'claude-haiku-4-5-20251001',
     google: 'gemini-2.5-flash',
     gemini: 'gemini-2.5-flash',
     ollama: process.env['OLLAMA_MODEL'] ?? 'llama3.1',

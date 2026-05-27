@@ -49,3 +49,6 @@ export {
   type CostGuardConfig,
   type CostTracker,
 } from './cost-guard.js';
+
+// Seed utilities
+export { DEFAULT_GUARDRAILS, type GuardrailSeedRow } from './seed.js';

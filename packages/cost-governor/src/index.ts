@@ -193,3 +193,6 @@ export type {
   DecideIntentRagInput,
   WeaveIntentRagToolSubsetFilterOptions,
 } from './intent-rag.js';
+
+// Seed utilities
+export { DEFAULT_COST_POLICIES, type CostPolicySeedRow } from './seed.js';

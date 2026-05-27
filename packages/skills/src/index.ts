@@ -12,3 +12,6 @@ export * from './builtin.js';
 export { buildSkillInvocationPrompt, buildSkillSystemPrompt, applySkillsToPrompt } from './prompt-builder.js';
 export { collectSkillTools, createSkillTelemetry, activateSkills, evaluateSkillCompletion } from './activation.js';
 export { createSkillRegistry } from './registry.js';
+
+// Seed utilities
+export { mapSkillToRow, type SkillSeedRow } from './seed.js';

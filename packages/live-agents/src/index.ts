@@ -162,3 +162,9 @@ export {
   SelfPromotionForbiddenError,
   SelfGrantForbiddenError,
 } from './errors.js';
+
+// Seed utilities
+export {
+  DEFAULT_HANDLER_KINDS,      type HandlerKindSeedRow,
+  DEFAULT_ATTENTION_POLICIES, type AttentionPolicySeedRow,
+} from './seed.js';

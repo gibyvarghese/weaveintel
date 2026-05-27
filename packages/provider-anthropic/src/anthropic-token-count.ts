@@ -41,7 +41,7 @@ export interface TokenCountResponse {
  * @example
  * ```ts
  * const count = await weaveAnthropicCountTokens({
- *   model: 'claude-sonnet-4-20250514',
+ *   model: 'claude-sonnet-4-6',
  *   messages: [
  *     { role: 'user', content: 'What is the meaning of life?' },
  *   ],

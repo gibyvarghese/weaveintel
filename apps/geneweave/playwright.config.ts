@@ -44,7 +44,7 @@ export default defineConfig({
       DEFAULT_PROVIDER: process.env['DEFAULT_PROVIDER']
         ?? (process.env['ANTHROPIC_API_KEY'] ? 'anthropic' : process.env['OPENAI_API_KEY'] ? 'openai' : 'mock'),
       DEFAULT_MODEL: process.env['DEFAULT_MODEL']
-        ?? (process.env['ANTHROPIC_API_KEY'] ? 'claude-sonnet-4-20250514' : process.env['OPENAI_API_KEY'] ? 'gpt-4o-mini' : 'mock-model'),
+        ?? (process.env['ANTHROPIC_API_KEY'] ? 'claude-sonnet-4-6' : process.env['OPENAI_API_KEY'] ? 'gpt-4o-mini' : 'mock-model'),
     },
   } : undefined,
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],

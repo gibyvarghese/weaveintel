@@ -15,7 +15,7 @@
  *   providers: {
  *     anthropic: { apiKey: process.env.ANTHROPIC_API_KEY! },
  *   },
- *   defaultModel: 'claude-sonnet-4-20250514',
+ *   defaultModel: 'claude-sonnet-4-6',
  *   defaultProvider: 'anthropic',
  * });
  *
@@ -52,14 +52,7 @@ import { EventEmitter } from 'node:events';
 import { applyDbResilienceObserver } from './db-resilience-observer.js';
 import { startRoutingRegressionJob } from './routing-feedback.js';
 import { registerMCPGatewayInCatalog, loadGatewayConfigFromCatalog } from './mcp-gateway.js';
-import { seedSVData } from './features/scientific-validation/sv-seed.js';
-import { seedKaggleDemoMesh } from './live-agents/kaggle/seed.js';
-import { seedKaggleArcPlaybook } from './live-agents/kaggle/playbook-seed.js';
-import { seedLiveMeshDefinitions } from './live-agents/live-mesh-defs-seed.js';
-import {
-  seedLiveHandlerKinds,
-  seedLiveAttentionPolicies,
-} from './live-agents/live-handler-kinds-seed.js';
+import { applySeed } from './seed/index.js';
 import {
   initHandlerRegistry,
   syncHandlerKindsToDb,
@@ -195,33 +188,8 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     db,
   );
 
-  // 3. Seed default admin data (no-op if already seeded)
-  await db.seedDefaultData();
-
-  // 3a. Seed Scientific Validation prompts and worker agents
-  await seedSVData(db);
-
-  // 3b. Phase K5: seed a demo Kaggle live-agents mesh on first boot so
-  // operators see populated admin tabs. No-op if any meshes exist.
-  await seedKaggleDemoMesh(db);
-
-  // 3c. Seed competition-agnostic Kaggle playbooks (default + ARC-AGI-3) so
-  // the live-agents strategist can resolve a system prompt + Python solver
-  // template per inbound competition slug. Idempotent — only inserts rows
-  // when not already present.
-  await seedKaggleArcPlaybook(db);
-
-  // 3d. Phase M21: seed framework-level live mesh definitions (mesh
-  // contracts, agent personas, delegation edges) so the runtime can resolve
-  // them by `mesh_key` instead of using hardcoded constants. Idempotent —
-  // only seeds when no row exists for the mesh_key.
-  await seedLiveMeshDefinitions(db);
-
-  // 3e. Phase M22: seed runtime registries (handler kinds + attention
-  // policies) so admin operators can wire DB-defined personas to executable
-  // behavior without code changes. Per-row idempotent.
-  await seedLiveHandlerKinds(db);
-  await seedLiveAttentionPolicies(db);
+  // 3. Seed all default configuration data (no-op if already seeded).
+  await applySeed(db);
 
   // 3f. Phase M22 Phase 2: initialise the in-process handler-kind registry
   // (currently ships `agentic.react` and `deterministic.forward` as built-in

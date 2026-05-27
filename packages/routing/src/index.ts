@@ -36,3 +36,11 @@ export type { InferTaskTypeInput, InferTaskTypeResult, TaskInferenceHintsMap } f
 // Model capability flags
 export { getModelCapabilityFlags } from './model-capability-flags.js';
 export type { ModelCapabilityFlags } from './model-capability-flags.js';
+
+// Seed utilities
+export {
+  DEFAULT_ROUTING_POLICIES, type RoutingPolicySeedRow,
+  DEFAULT_MODEL_PRICING,    type ModelPricingSeedRow,
+  DEFAULT_TASK_TYPES,       type TaskTypeSeedRow,
+  DEFAULT_PROVIDER_ADAPTERS, type ProviderAdapterSeedRow,
+} from './seed.js';

@@ -41,9 +41,9 @@ const OPENAI_PRICING_REGISTRY: Record<string, KnownModelPricing> = {
 };
 
 const ANTHROPIC_PRICING_REGISTRY: Record<string, KnownModelPricing> = {
-  'claude-opus-4-20250514':      { displayName: 'Claude Opus 4',        input: 15.00, output: 75.00, quality: 0.95 },
-  'claude-sonnet-4-20250514':    { displayName: 'Claude Sonnet 4',      input: 3.00,  output: 15.00, quality: 0.85 },
-  'claude-haiku-4-20250414':     { displayName: 'Claude Haiku 4',       input: 1.00,  output: 5.00,  quality: 0.70 },
+  'claude-opus-4-7':             { displayName: 'Claude Opus 4.7',      input: 15.00, output: 75.00, quality: 0.95 },
+  'claude-sonnet-4-6':           { displayName: 'Claude Sonnet 4.6',    input: 3.00,  output: 15.00, quality: 0.87 },
+  'claude-haiku-4-5-20251001':   { displayName: 'Claude Haiku 4.5',     input: 0.80,  output: 4.00,  quality: 0.72 },
   'claude-3-5-sonnet-20241022':  { displayName: 'Claude 3.5 Sonnet',    input: 3.00,  output: 15.00, quality: 0.85 },
   'claude-3-5-haiku-20241022':   { displayName: 'Claude 3.5 Haiku',     input: 1.00,  output: 5.00,  quality: 0.70 },
   'claude-3-opus-20240229':      { displayName: 'Claude 3 Opus',        input: 15.00, output: 75.00, quality: 0.92 },
