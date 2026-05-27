@@ -25,8 +25,11 @@ weaveIntel gives you composable, vendor-neutral building blocks for everything f
   - [8. Memory, RAG, and knowledge graphs](#8-memory-rag-and-knowledge-graphs)
   - [9. Observability and replay](#9-observability-and-replay)
   - [10. Evaluation](#10-evaluation)
+  - [11. Skills — reusable capability bundles](#11-skills--reusable-capability-bundles)
+  - [12. Multi-tenancy and cost governance](#12-multi-tenancy-and-cost-governance)
+  - [13. Per-tenant data encryption](#13-per-tenant-data-encryption)
 - [The geneWeave Reference App](#the-geneweave-reference-app)
-- [Examples](#examples) — full catalog of 90+ runnable demos
+- [Examples](#examples) — full catalog of 110+ runnable demos
 - [Package Map](#package-map)
 - [Deployment](#deployment)
 - [Development](#development)
@@ -473,6 +476,125 @@ Six assertion kinds: `exact`, `contains`, `regex`, `schema`, `latency_threshold`
 
 ---
 
+### 11. Skills — reusable capability bundles
+
+A **skill** is a pre-configured behavior pack: a name, a set of tool-policy keys, and a prompt injection. When a skill is activated in a session every tool call automatically runs under the correct policy — no per-call wiring needed.
+
+```typescript
+import { createSkillRegistry, activateSkills, collectSkillTools } from '@weaveintel/skills';
+
+const registry = createSkillRegistry();
+registry.register({
+  id: 'web-researcher',
+  name: 'Web Researcher',
+  toolPolicyKeys: ['web_search', 'browser_fetch'],
+  promptInjection: 'You have access to web search and browser tools.',
+  version: '1.0.0',
+});
+
+// Activate for a session — returns the bound tool-policy keys
+const active = activateSkills(registry, ['web-researcher']);
+// Collect the tool definitions the skill exposes (ready for weaveAgent)
+const tools = collectSkillTools(active);
+```
+
+Skills compose: activate multiple skills to union their tool sets. Skills can also be loaded from the DB so product managers define capabilities without code deploys.
+
+> **Run it:** [`examples/36-skills-in-memory-e2e.ts`](examples/36-skills-in-memory-e2e.ts), [`examples/35-skill-activation-e2e.ts`](examples/35-skill-activation-e2e.ts), [`examples/34-skill-tool-policy-approval.ts`](examples/34-skill-tool-policy-approval.ts), [`examples/37-skills-with-real-llm.ts`](examples/37-skills-with-real-llm.ts), [`examples/119-sqlite-e2e.ts`](examples/119-sqlite-e2e.ts) (SQLite-backed skills), [`examples/packages/`](examples/packages/) → `sqlite-e2e.ts`
+
+---
+
+### 12. Multi-tenancy and cost governance
+
+`@weaveintel/tenancy` provides a four-layer config stack, feature entitlements, and budget enforcement. `@weaveintel/cost-governor` tracks every token and dollar at the lever level (model, tool, RAG, reasoning, cache).
+
+```typescript
+import {
+  createConfigResolver, createOverrideLayer,
+  createGlobalScope, createTenantScope,
+  createEntitlementStore, createEntitlementPolicy,
+  createBudgetEnforcer,
+} from '@weaveintel/tenancy';
+import { createInMemoryCostLedger, computeUsd } from '@weaveintel/cost-governor';
+
+// 4-layer config: global defaults → org → tenant → user (later layers win)
+const config = createConfigResolver();
+config.addLayer(createOverrideLayer(createGlobalScope(), { model: 'claude-haiku-4-5-20251001' }));
+config.addLayer(createOverrideLayer(createTenantScope('enterprise-corp'), { model: 'claude-opus-4-7' }));
+
+const effectiveModel = config.resolve('model', createTenantScope('enterprise-corp'));
+// → 'claude-opus-4-7'
+
+// Feature gating — which tier can use which capabilities
+const ents = createEntitlementStore();
+ents.set({ tenantId: 'starter-corp', features: new Set(['chat']), allowedModels: ['claude-haiku-4-5-20251001'] });
+
+// Budget enforcement — daily/monthly ceilings per tenant
+const budgets = createBudgetEnforcer();
+budgets.setBudget({
+  tenantId: 'starter-corp',
+  daily:   { maxTokens: 100_000, maxCostUsd: 1.00, maxSteps: 1000, maxRuns: 100 },
+  monthly: { maxTokens: 3_000_000, maxCostUsd: 30.00, maxSteps: 30_000, maxRuns: 3_000 },
+});
+
+const check = budgets.checkBudget('starter-corp');  // { allowed: true, ... }
+budgets.recordUsage('starter-corp', tokens, costUsd, steps);
+
+// Cost ledger — per-run spend breakdown
+const ledger = createInMemoryCostLedger();
+await ledger.record({ runId: 'run-001', source: 'model', lever: 'model', subject: 'claude-opus-4-7', costUsd, ... });
+const breakdown = await ledger.breakdown('run-001');
+// → { totalUsd, byLever: { model, tool, rag, … }, byModel, tokens }
+```
+
+> **Run it:** [`examples/112-tenancy.ts`](examples/112-tenancy.ts), [`examples/103-cost-policy-binding.ts`](examples/103-cost-policy-binding.ts), [`examples/108-budget-governor.ts`](examples/108-budget-governor.ts), [`examples/use-cases/multi-tenant-saas.ts`](examples/use-cases/multi-tenant-saas.ts) (end-to-end tenancy + encryption + cost pipeline)
+
+---
+
+### 13. Per-tenant data encryption
+
+`@weaveintel/encryption` gives every tenant its own AES-256-GCM key hierarchy. A compromised database dump is unreadable without the master key.
+
+```
+Root master key (env / KMS)
+  └─ KEK per tenant   (Key Encryption Key, wrapped under master)
+       └─ DEK per tenant  (Data Encryption Key, wrapped under KEK)
+              └─ Encrypts individual field values
+```
+
+```typescript
+import { LocalKmsProvider, weaveTenantKeyManager, DEFAULT_FIELD_POLICY,
+         maybeEncryptField, maybeDecryptField } from '@weaveintel/encryption';
+
+// LocalKmsProvider uses a 32-byte in-process key.
+// Swap for AwsKmsProvider / GcpKmsProvider / AzureKeyVaultProvider in production.
+const kms = new LocalKmsProvider({ masterKey: Buffer.from(process.env.WEAVE_ENCRYPTION_MASTER_KEY!, 'hex') });
+
+const km = weaveTenantKeyManager({ kms, store: encryptionStore, audit: auditEmitter });
+await km.bootstrapTenant({ tenantId: 'acme-corp', enable: true });
+
+// Encrypt on write — only columns in the field policy are encrypted
+const encrypted = await maybeEncryptField(
+  { manager: km, tenantId: 'acme-corp', enabled: true, policy: DEFAULT_FIELD_POLICY },
+  { table: 'messages', column: 'content', rowId: 'msg-001' },
+  'Hello Alice, your SSN is 123-45-6789',
+);
+// → 'enc:v1:1:<iv>:<ciphertext>'
+
+// Decrypt on read — plaintext rows pass through unchanged (lazy migration)
+const plaintext = await maybeDecryptField(state, { table: 'messages', column: 'content', rowId: 'msg-001' }, encrypted);
+```
+
+Key features: DEK rotation (old ciphertext stays readable), blind indexes for exact-match lookups on encrypted columns, GDPR hard-shred via key deletion, audit log for every key lifecycle event, and `createDatabaseProxy()` for transparent adapter-level encryption without changing query code.
+
+In geneWeave, field-level encryption is activated when `WEAVE_ENCRYPTION_MASTER_KEY` is set. All `messages.content`, `users.email`, and a dozen other PII columns are encrypted transparently. Existing deployments migrate lazily — plaintext rows are re-encrypted on next write.
+
+> **Run it:** [`examples/packages/encryption.ts`](examples/packages/encryption.ts) (complete package walkthrough), [`examples/use-cases/multi-tenant-saas.ts`](examples/use-cases/multi-tenant-saas.ts) (encryption wired into tenant request pipeline)
+
+> **Legacy phase-by-phase examples:** [`examples/13-encryption-phase1.ts`](examples/13-encryption-phase1.ts) → [`examples/16-encryption-phase6.ts`](examples/16-encryption-phase6.ts)
+
+---
+
 ## The geneWeave Reference App
 
 [`apps/geneweave`](apps/geneweave) is the full reference implementation — a multi-tenant chat app + admin dashboard built only from `@weaveintel/*` packages. It demonstrates every capability above wired together against a SQLite database.
@@ -496,7 +618,41 @@ The full local DB is `./geneweave.db`. Reset with `rm geneweave.db` and restart 
 
 ## Examples
 
-90+ runnable demos under [`examples/`](examples). Run any one with `npx tsx examples/<file>.ts`.
+110+ runnable demos under [`examples/`](examples). See [`examples/README.md`](examples/README.md) for the full index organized by tier.
+
+### Example tiers
+
+| Folder | Purpose | API key |
+|---|---|---|
+| [`examples/packages/`](examples/packages/) | One file per `@weaveintel/*` package — in-memory, no LLM | none |
+| [`examples/use-cases/`](examples/use-cases/) | Multi-package scenarios wired around a realistic problem | none |
+| [`examples/with-llm/`](examples/with-llm/) | Full-stack with a real LLM provider | required |
+| `examples/*.ts` (flat) | Legacy numbered files — all still runnable | varies |
+
+Run any file with `npx tsx examples/<path>/<file>.ts`.
+
+### Package showcase (`examples/packages/`)
+
+| File | Package | What it demonstrates |
+|---|---|---|
+| [`encryption.ts`](examples/packages/encryption.ts) | `@weaveintel/encryption` | LocalKmsProvider, key hierarchy, AEAD envelope, field-level encryption, blind index, DEK rotation, hard shred |
+| `resilience.ts` | `@weaveintel/resilience` | Token bucket, circuit breaker, retry, concurrency limiter, endpoint registry |
+| `tenancy.ts` | `@weaveintel/tenancy` | Config override layers, entitlement gating, budget enforcement |
+| `extraction.ts` | `@weaveintel/extraction` | Document transform pipeline, metadata/entity/code/task stages |
+| `artifacts.ts` | `@weaveintel/artifacts` | Artifact CRUD, versioning, policy validation, reference resolution |
+| `collaboration.ts` | `@weaveintel/collaboration` | Shared sessions, collaboration events, handoff lifecycle |
+| `plugins.ts` | `@weaveintel/plugins` | Manifest validation, registry, lifecycle hooks, installer |
+| `tools-time.ts` | `@weaveintel/tools-time` | Time snapshot, formatting, timer/stopwatch, tool schemas |
+| `sqlite-e2e.ts` | `@weaveintel/skills` + `@weaveintel/memory` | SQLite-backed skills + memory (custom adapter pattern) |
+
+### Use-case examples (`examples/use-cases/`)
+
+| File | Scenario | Packages |
+|---|---|---|
+| [`multi-tenant-saas.ts`](examples/use-cases/multi-tenant-saas.ts) | Feature gating, budget enforcement, PII encryption, cost tracking | tenancy · encryption · cost-governor |
+| [`research-assistant.ts`](examples/use-cases/research-assistant.ts) | Task-aware routing, resilient LLM calls, artifact storage | routing · resilience · artifacts |
+
+### Numbered flat examples
 
 | # | File | Capability | API key |
 |---|---|---|---|
@@ -590,6 +746,22 @@ The full local DB is `./geneweave.db`. Reset with `rm geneweave.db` and restart 
 | 100 | [Mesh ↔ workflow binding](examples/100-mesh-workflow-binding.ts) | Workflow `outputContract` → contract bus → trigger → downstream workflow cascade | none |
 | 101 | [Workflow governance](examples/101-workflow-governance.ts) | Input validation + cost ceiling + replay determinism + capability policy precedence | none |
 | 102 | [Capability packs](examples/102-capability-packs.ts) | Versioned, exportable bundles of DB rows — manifest validation, install/uninstall via ledger | none |
+| 103 | [Cost policy binding](examples/103-cost-policy-binding.ts) | `@weaveintel/cost-governor` Phase 2 — DB-driven cost policy resolution | none |
+| 104 | [Prompt caching](examples/104-prompt-caching.ts) | Cost governor Phase 3 — prompt-caching lever (OpenAI + Anthropic stub models) | none |
+| 105 | [Model cascade](examples/105-model-cascade.ts) | Cost governor Phase 4 — L1 lever: cascade to cheaper model on failure / budget pressure | none |
+| 106 | [Tool subset](examples/106-tool-subset.ts) | Cost governor Phase 5 — L3 lever: dynamic tool subset based on run context | none |
+| 107 | [Intel-gated prompt sections](examples/107-intel-history.ts) | Cost governor Phase 6 — L4 lever: include/exclude prompt sections by intel score | none |
+| 108 | [Budget governor](examples/108-budget-governor.ts) | Cost governor Phase 7 — max steps, reasoning effort, tool-output truncation, budget gate | none |
+| 109 | [Intent-RAG tool retrieval](examples/109-intent-rag-tool-retrieval.ts) | Cost governor Phase 8 — semantic intent-RAG to auto-select the right tool subset | none |
+| 110 | [Live-agents trace tools](examples/110-live-agents-trace-tools.ts) | `@weaveintel/live-agents-trace-tools` — lazy trace retrieval and injection into agent context | none |
+| 111 | [Resilience patterns](examples/111-resilience.ts) | `@weaveintel/resilience` — token bucket, circuit breaker, retry, concurrency, endpoint registry, signal bus | none |
+| 112 | [Tenancy](examples/112-tenancy.ts) | `@weaveintel/tenancy` — 4-layer config override, entitlement gating, capability maps, budget enforcement | none |
+| 113 | [Document extraction](examples/113-extraction-pipeline.ts) | `@weaveintel/extraction` — transform pipeline with metadata / entity / code / task stages | none |
+| 114 | [Artifact lifecycle](examples/114-artifacts.ts) | `@weaveintel/artifacts` — create, version, store, policy validate, reference resolve | none |
+| 115 | [Collaboration](examples/115-collaboration.ts) | `@weaveintel/collaboration` — shared sessions, events, run subscriptions, handoff lifecycle | none |
+| 116 | [Plugins](examples/116-plugins.ts) | `@weaveintel/plugins` — manifest validation, registry, lifecycle hooks, compatibility, installer | none |
+| 117 | [Tools-time](examples/117-tools-time.ts) | `@weaveintel/tools-time` — time snapshot, formatting, timer/stopwatch state machines, tool schemas | none |
+| 119 | [SQLite E2E](examples/119-sqlite-e2e.ts) | SQLite-backed conversation persistence + `@weaveintel/skills` + `@weaveintel/memory` | none |
 
 > **All examples runnable from a fresh clone** after `npm install && npm run build`. Examples that need an API key say so in the table.
 
@@ -624,6 +796,8 @@ The full local DB is `./geneweave.db`. Reset with `rm geneweave.db` and restart 
 | [`@weaveintel/contracts`](packages/contracts) | Completion contracts + evidence ledger |
 | [`@weaveintel/prompts`](packages/prompts) | Versioned templates, fragments, frameworks, lint, strategies, output contracts |
 | [`@weaveintel/routing`](packages/routing) | Capability-based smart routing with health, scoring, A/B |
+| [`@weaveintel/skills`](packages/skills) | Reusable capability bundles: registry, activation, tool collection |
+| [`@weaveintel/capability-packs`](packages/capability-packs) | Pre-built skill bundles (web-research, data-analysis, etc.) |
 | [`@weaveintel/tool-schema`](packages/tool-schema) | Cross-provider tool-schema translation |
 
 ### Tools & Connectivity
@@ -670,7 +844,8 @@ The full local DB is `./geneweave.db`. Reset with `rm geneweave.db` and restart 
 | [`@weaveintel/compliance`](packages/compliance) | Retention, GDPR/CCPA deletion, legal holds, consent, audit export |
 | [`@weaveintel/sandbox`](packages/sandbox) | Sandboxed execution + container executor |
 | [`@weaveintel/identity`](packages/identity) | Personas, ACL, deny-by-default |
-| [`@weaveintel/tenancy`](packages/tenancy) | Multi-tenant isolation, budgets |
+| [`@weaveintel/tenancy`](packages/tenancy) | Multi-tenant isolation, budgets, 4-layer config resolver, entitlement policies |
+| [`@weaveintel/encryption`](packages/encryption) | Per-tenant AES-256-GCM field encryption: KMS, DEK rotation, blind indexes, hard shred |
 | [`@weaveintel/reliability`](packages/reliability) | Idempotency, retry budgets, DLQ, health, backpressure |
 | [`@weaveintel/resilience`](packages/resilience) | Shared pipeline: rate-limit + circuit + retry-with-backoff + signals |
 
@@ -679,6 +854,8 @@ The full local DB is `./geneweave.db`. Reset with `rm geneweave.db` and restart 
 | Package | Role |
 |---|---|
 | [`@weaveintel/observability`](packages/observability) | Tracer, spans, event bus, cost/usage tracking |
+| [`@weaveintel/cost-governor`](packages/cost-governor) | Cost ledger, budget enforcement, lever-based spend breakdown (model, cache, prompt, tool, RAG) |
+| [`@weaveintel/live-agents-trace-tools`](packages/live-agents-trace-tools) | Trace tools for live-agent mesh inspection and debugging |
 | [`@weaveintel/evals`](packages/evals) | Evaluation runner + 6 assertion types |
 | [`@weaveintel/replay`](packages/replay) | Trace replay |
 
@@ -711,6 +888,7 @@ geneWeave runs anywhere Node.js 20+ or Docker runs. All deployment configs live 
 | `OPENAI_API_KEY` *or* `ANTHROPIC_API_KEY` | one | At least one provider |
 | `PORT` | no | HTTP port (default `3500`) |
 | `DATABASE_PATH` | no | SQLite path (default `./geneweave.db`) |
+| `WEAVE_ENCRYPTION_MASTER_KEY` | no | 64-char hex master key — enables per-tenant PII field encryption (AES-256-GCM) |
 | `STATSNZ_API_KEY` | no | Stats NZ MCP server |
 
 Generate a strong secret: `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`.
