@@ -26,6 +26,8 @@ import {
   ModelHealthTracker,
   ModelScorer,
   InMemoryDecisionStore,
+  DEFAULT_MODEL_PRICING,
+  DEFAULT_ROUTING_POLICIES,
 } from '@weaveintel/routing';
 
 /* ── Helpers ──────────────────────────────────────────── */
@@ -42,26 +44,35 @@ async function main() {
 
 header('1. Model Candidates & Cost/Quality Info');
 
-const candidates = [
-  { modelId: 'gpt-4o', providerId: 'openai', capabilities: ['chat', 'code', 'reasoning'] },
-  { modelId: 'gpt-4o-mini', providerId: 'openai', capabilities: ['chat', 'code'] },
-  { modelId: 'claude-sonnet-4-20250514', providerId: 'anthropic', capabilities: ['chat', 'code', 'reasoning'] },
-  { modelId: 'gemini-pro', providerId: 'google', capabilities: ['chat'] },
-];
+// Pull a representative subset from DEFAULT_MODEL_PRICING — the same values
+// the DB seed inserts into model_pricing. Keeps example IDs and costs in sync.
+const DEMO_MODELS = ['gpt-4o', 'gpt-4o-mini', 'claude-sonnet-4-6', 'gemini-2.5-flash'];
+const pricingSubset = DEFAULT_MODEL_PRICING.filter(p => DEMO_MODELS.includes(p.model_id));
 
-const costs = [
-  { modelId: 'gpt-4o', providerId: 'openai', inputCostPer1M: 2.50, outputCostPer1M: 10.00 },
-  { modelId: 'gpt-4o-mini', providerId: 'openai', inputCostPer1M: 0.15, outputCostPer1M: 0.60 },
-  { modelId: 'claude-sonnet-4-20250514', providerId: 'anthropic', inputCostPer1M: 3.00, outputCostPer1M: 15.00 },
-  { modelId: 'gemini-pro', providerId: 'google', inputCostPer1M: 0.50, outputCostPer1M: 1.50 },
-];
+const CAPABILITY_MAP: Record<string, string[]> = {
+  openai:    ['chat', 'code', 'reasoning'],
+  anthropic: ['chat', 'code', 'reasoning'],
+  google:    ['chat', 'vision'],
+};
 
-const qualities = [
-  { modelId: 'gpt-4o', providerId: 'openai', qualityScore: 0.95 },
-  { modelId: 'gpt-4o-mini', providerId: 'openai', qualityScore: 0.75 },
-  { modelId: 'claude-sonnet-4-20250514', providerId: 'anthropic', qualityScore: 0.93 },
-  { modelId: 'gemini-pro', providerId: 'google', qualityScore: 0.80 },
-];
+const candidates = pricingSubset.map(p => ({
+  modelId: p.model_id,
+  providerId: p.provider,
+  capabilities: CAPABILITY_MAP[p.provider] ?? ['chat'],
+}));
+
+const costs = pricingSubset.map(p => ({
+  modelId: p.model_id,
+  providerId: p.provider,
+  inputCostPer1M: p.input_cost_per_1m,
+  outputCostPer1M: p.output_cost_per_1m,
+}));
+
+const qualities = pricingSubset.map(p => ({
+  modelId: p.model_id,
+  providerId: p.provider,
+  qualityScore: p.quality_score,
+}));
 
 for (const c of candidates) {
   const cost = costs.find(x => x.modelId === c.modelId);
@@ -78,12 +89,12 @@ header('2. Health Tracking');
 // with their error rate, average latency, and availability flag.
 const healthTracker = new ModelHealthTracker({ windowSize: 100 });
 
-// Simulate historical health data
+// Simulate historical health data — model IDs match the seed / candidates above
 const healthData = [
-  { modelId: 'gpt-4o', providerId: 'openai', successes: 95, failures: 5, avgLatency: 800 },
-  { modelId: 'gpt-4o-mini', providerId: 'openai', successes: 99, failures: 1, avgLatency: 200 },
-  { modelId: 'claude-sonnet-4-20250514', providerId: 'anthropic', successes: 90, failures: 10, avgLatency: 1200 },
-  { modelId: 'gemini-pro', providerId: 'google', successes: 85, failures: 15, avgLatency: 600 },
+  { modelId: 'gpt-4o',           providerId: 'openai',    successes: 95, failures: 5,  avgLatency: 800 },
+  { modelId: 'gpt-4o-mini',      providerId: 'openai',    successes: 99, failures: 1,  avgLatency: 200 },
+  { modelId: 'claude-sonnet-4-6', providerId: 'anthropic', successes: 90, failures: 10, avgLatency: 1200 },
+  { modelId: 'gemini-2.5-flash', providerId: 'google',    successes: 85, failures: 15, avgLatency: 600 },
 ];
 
 for (const h of healthData) {
@@ -120,20 +131,21 @@ const router = new SmartModelRouter({
   decisionStore,
 });
 
-const policies = [
-  {
-    id: 'cost-opt', name: 'Cost Optimized', strategy: 'cost-optimized' as const, enabled: true,
-    weights: { cost: 0.7, latency: 0.1, quality: 0.1, reliability: 0.1 },
-  },
-  {
-    id: 'quality-first', name: 'Quality First', strategy: 'quality-optimized' as const, enabled: true,
-    weights: { cost: 0.1, latency: 0.1, quality: 0.7, reliability: 0.1 },
-  },
-  {
-    id: 'balanced', name: 'Balanced', strategy: 'balanced' as const, enabled: true,
-    weights: { cost: 0.25, latency: 0.25, quality: 0.25, reliability: 0.25 },
-  },
-];
+// Map DEFAULT_ROUTING_POLICIES (DB seed shape) to the SmartModelRouter runtime shape.
+// strategy: seed uses 'cost' | 'quality' | 'balanced'; router expects 'cost-optimized' | 'quality-optimized' | 'balanced'.
+const STRATEGY_MAP: Record<string, 'cost-optimized' | 'quality-optimized' | 'balanced'> = {
+  cost: 'cost-optimized',
+  quality: 'quality-optimized',
+  balanced: 'balanced',
+};
+
+const policies = DEFAULT_ROUTING_POLICIES.map(p => ({
+  id: p.id,
+  name: p.name,
+  strategy: STRATEGY_MAP[p.strategy] ?? 'balanced',
+  enabled: p.enabled === 1,
+  weights: { reliability: 0.05, ...JSON.parse(p.weights) },
+}));
 
 for (const policy of policies) {
   const decision = await router.route(

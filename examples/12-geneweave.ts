@@ -110,7 +110,7 @@ async function main() {
       ...(process.env['OPENAI_API_KEY'] ? { openai: { apiKey: process.env['OPENAI_API_KEY'] } } : {}),
     },
     defaultProvider: process.env['ANTHROPIC_API_KEY'] ? 'anthropic' : 'openai',
-    defaultModel: process.env['ANTHROPIC_API_KEY'] ? 'claude-sonnet-4-20250514' : 'gpt-4o-mini',
+    defaultModel: process.env['ANTHROPIC_API_KEY'] ? 'claude-sonnet-4-6' : 'gpt-4o-mini',
 
     // Google OAuth 2.0 — optional: enables "Sign in with Google" on the login screen.
     // The callback URL must be registered in your Google Cloud Console:

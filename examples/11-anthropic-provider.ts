@@ -92,7 +92,7 @@ async function section(name: string, fn: () => Promise<void>) {
 
 async function main() {
   const ctx = weaveContext({ deadline: Date.now() + 60_000 });
-  const model = weaveAnthropicModel('claude-sonnet-4-20250514');
+  const model = weaveAnthropicModel('claude-sonnet-4-6');
 
   // ─── 1. Basic Chat ───────────────────────────────────────
   await section('1. Basic Chat Completion', async () => {
@@ -239,7 +239,7 @@ async function main() {
 
   // ─── 8. Extended Thinking — streaming ────────────────────
   await section('8. Extended Thinking (streaming)', async () => {
-    const thinkingModel = weaveAnthropicModel('claude-sonnet-4-20250514');
+    const thinkingModel = weaveAnthropicModel('claude-sonnet-4-6');
     const stream = thinkingModel.stream!(ctx, {
       messages: [{ role: 'user', content: 'What is the square root of 144? Think carefully.' }],
       maxTokens: 16000,
@@ -263,7 +263,7 @@ async function main() {
   // ─── 9. Token Counting ──────────────────────────────────
   await section('9. Token Counting', async () => {
     const count = await weaveAnthropicCountTokens({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       messages: [
         { role: 'user', content: 'Hello, how are you doing today? This is a test message.' },
       ],
@@ -274,7 +274,7 @@ async function main() {
 
     // Count with tools (Anthropic-native format)
     const countWithTools = await weaveAnthropicCountTokens({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       messages: [{ role: 'user', content: 'What is the weather?' }],
       tools: [
         {
@@ -434,9 +434,9 @@ async function main() {
   // ─── 15. Convenience API & Config ────────────────────────
   await section('15. Convenience API & Config', async () => {
     // weaveAnthropic()
-    const m = weaveAnthropic('claude-sonnet-4-20250514');
+    const m = weaveAnthropic('claude-sonnet-4-6');
     assert('weaveAnthropic returns model', !!m.info);
-    assert('Model id correct', m.info.modelId === 'claude-sonnet-4-20250514');
+    assert('Model id correct', m.info.modelId === 'claude-sonnet-4-6');
     assert('Provider is anthropic', m.info.provider === 'anthropic');
 
     // Model capabilities
