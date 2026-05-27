@@ -20,6 +20,8 @@ function rowToRun(row: WorkflowRunRow): WorkflowRun {
     ...(row.completed_at ? { completedAt: row.completed_at } : {}),
     ...(row.error ? { error: row.error } : {}),
     ...(row.cost_total !== undefined && row.cost_total !== null ? { costTotal: row.cost_total } : {}),
+    ...(row.trace_id ? { traceId: row.trace_id } : {}),
+    ...(row.tenant_id ? { tenantId: row.tenant_id } : {}),
   };
 }
 
@@ -39,6 +41,8 @@ export class DbWorkflowRunRepository implements WorkflowRunRepository {
         error: run.error ?? null,
         started_at: run.startedAt,
         ...(run.costTotal !== undefined ? { cost_total: run.costTotal } : {}),
+        ...(run.traceId ? { trace_id: run.traceId } : {}),
+        ...(run.tenantId ? { tenant_id: run.tenantId } : {}),
       });
       // Set completed_at on initial save if already terminal
       if (run.completedAt) {

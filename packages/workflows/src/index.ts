@@ -134,3 +134,18 @@ export {
   type WorkflowReplayStep,
   type WorkflowReplayTrace,
 } from './replay-recorder.js';
+
+// Phase W3 — State and Data Layer
+export { maskStepOutput, maskValue } from './secret-masker.js';
+export {
+  validateStepOutput,
+  type OutputValidationResult,
+  type OutputValidationError,
+} from './output-schema-validator.js';
+export {
+  InMemoryPayloadStore,
+  JsonFilePayloadStore,
+  isPayloadRef,
+  PAYLOAD_REF_PROP,
+  type PayloadStore,
+} from './payload-store.js';

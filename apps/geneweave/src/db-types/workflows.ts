@@ -102,6 +102,19 @@ export interface WorkflowRunRow {
   completed_at: string | null;
   cost_total?: number | null;
   metadata?: string | null;
+  /** Phase W3 — distributed trace ID for context propagation. */
+  trace_id?: string | null;
+  /** Phase W3 — tenant identifier for multi-tenant deployments. */
+  tenant_id?: string | null;
+}
+
+/** Phase W3 — large payload offload store row. */
+export interface WorkflowPayloadRow {
+  key: string;
+  run_id: string;
+  step_id: string;
+  data: string;   // JSON-serialised payload
+  created_at: string;
 }
 
 export interface WorkflowCheckpointRow {

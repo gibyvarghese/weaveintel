@@ -8,6 +8,7 @@ import type { CostMeter } from './cost-meter.js';
 import type { StepIdempotencyStore } from './idempotency-store.js';
 import type { CircuitBreakerRegistry } from './circuit-breaker.js';
 import type { BulkheadRegistry } from './bulkhead.js';
+import type { PayloadStore } from './payload-store.js';
 
 export interface WorkflowEngineOptions {
   checkpointStore?: CheckpointStore;
@@ -73,4 +74,18 @@ export interface WorkflowEngineOptions {
    * Excess calls queue locally and run as capacity frees.
    */
   bulkheadRegistry?: BulkheadRegistry;
+  // ─── Phase W3 — State and Data Layer ──────────────────────────────────────
+  /**
+   * Phase W3 — Large payload store. When set and a step output exceeds
+   * `policy.maxInlineBytes` (JSON length), the engine offloads the output to
+   * this store and writes `{ __payloadRef: key }` into `state.variables`
+   * instead. Retrieve the full payload with `store.get(key)`.
+   */
+  payloadStore?: PayloadStore;
+  /**
+   * Phase W3 — Custom trace ID generator. Defaults to `newUUIDv7()`.
+   * Override to integrate with an external tracing system (e.g. OpenTelemetry
+   * span IDs).
+   */
+  traceIdGenerator?: () => string;
 }

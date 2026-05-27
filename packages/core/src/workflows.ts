@@ -91,6 +91,34 @@ export interface WorkflowStep {
    * Example: { "kaggle.lastRunId": "id", "kaggle.lastStatus": "status" }
    */
   outputMap?: Record<string, string>;
+  // ─── Phase W3 — State and Data Layer ──────────────────────────────────────
+  /**
+   * JSON-Schema-lite object to validate the step's output after completion.
+   * Supports the same narrow subset as inputSchema: type, required,
+   * properties, enum.
+   */
+  outputSchema?: Record<string, unknown>;
+  /**
+   * Action taken when `outputSchema` validation fails.
+   * 'warn'   — emit `step:output_schema_warn` event, continue (default).
+   * 'fail'   — mark step as failed with a schema error message.
+   * 'coerce' — attempt type coercion on mismatched fields, then continue.
+   */
+  outputSchemaAction?: 'warn' | 'fail' | 'coerce';
+  /**
+   * Top-level field names in the step output to redact before the output is
+   * written to run state, checkpoints, or event payloads.
+   * Supports dot-notation for nested paths (e.g. `"auth.token"`).
+   */
+  maskFields?: string[];
+  /**
+   * Controls where the step output is stored after completion.
+   * 'global' (default) — written to `state.variables.__step_{id}` and persisted.
+   * 'step'             — written to `state.ephemeralVariables.__step_{id}` only;
+   *                      available to the next step but NOT checkpointed or
+   *                      written to the durable run record.
+   */
+  outputScope?: 'global' | 'step';
 }
 
 /**
@@ -142,6 +170,13 @@ export interface WorkflowState {
   variables: Record<string, unknown>;
   history: WorkflowStepResult[];
   checkpointId?: string;
+  /**
+   * Phase W3 — Ephemeral step-local variables.
+   * Populated when a step runs with `outputScope: 'step'`. Available to the
+   * immediately following step handler but NOT persisted to checkpoints or
+   * the run repository. Cleared at the start of every step.
+   */
+  ephemeralVariables?: Record<string, unknown>;
 }
 
 export interface WorkflowStepResult {
@@ -167,6 +202,30 @@ export interface WorkflowRun {
    * that support a `cost_total` column.
    */
   costTotal?: number;
+  /**
+   * Phase W3 — Distributed trace ID propagated through all steps.
+   * Generated at run start if not supplied by the caller.
+   */
+  traceId?: string;
+  /**
+   * Phase W3 — Tenant identifier for multi-tenant deployments.
+   * Forwarded into `__ctx` on every step handler invocation.
+   */
+  tenantId?: string;
+}
+
+/**
+ * Phase W3 — Execution context injected as `__ctx` into every step's
+ * variables map. Enables handlers to forward correlation IDs to downstream
+ * services without manually threading them through workflow input.
+ */
+export interface StepContext {
+  traceId: string;
+  tenantId?: string;
+  runId: string;
+  stepId: string;
+  /** 1-based attempt number; > 1 on retries. */
+  attempt: number;
 }
 
 export interface WorkflowCheckpoint {
@@ -205,6 +264,13 @@ export interface WorkflowPolicy {
   maxRetries?: number;
   requireApprovalForSteps?: string[];
   costCeiling?: number;
+  /**
+   * Phase W3 — Maximum number of bytes (JSON-serialised) a step output may
+   * occupy inline in `state.variables`. Outputs exceeding this threshold are
+   * offloaded to the configured `PayloadStore` and replaced by a reference
+   * object `{ __payloadRef: key }`.  Default: unlimited (no offload).
+   */
+  maxInlineBytes?: number;
 }
 
 export interface WorkflowCompensation {
@@ -225,6 +291,8 @@ export type WorkflowEventType =
   | 'step:started'
   | 'step:completed'
   | 'step:failed'
+  | 'step:output_schema_warn'
+  | 'step:payload_offloaded'
   | 'approval:requested'
   | 'approval:received';
 
@@ -259,7 +327,7 @@ export interface WorkflowEngine {
   createDefinition(def: WorkflowDefinition): Promise<WorkflowDefinition>;
   getDefinition(id: string): Promise<WorkflowDefinition | null>;
   listDefinitions(): Promise<WorkflowDefinition[]>;
-  startRun(workflowId: string, input?: Record<string, unknown>): Promise<WorkflowRun>;
+  startRun(workflowId: string, input?: Record<string, unknown>, opts?: { traceId?: string; tenantId?: string }): Promise<WorkflowRun>;
   getRun(runId: string): Promise<WorkflowRun | null>;
   resumeRun(runId: string, data?: unknown): Promise<WorkflowRun>;
   cancelRun(runId: string): Promise<void>;

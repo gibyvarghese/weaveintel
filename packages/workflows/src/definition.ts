@@ -44,7 +44,7 @@ export class WorkflowBuilder {
     return this;
   }
 
-  /** Shared retry options across step shortcuts — W2 reliability fields. */
+  /** Shared retry + W3 data options across step shortcuts. */
   private static retryFields(opts: {
     timeout?: number;
     retries?: number;
@@ -57,6 +57,11 @@ export class WorkflowBuilder {
     fallbackHandler?: string;
     onError?: string;
     skipIf?: unknown;
+    // Phase W3
+    outputSchema?: Record<string, unknown>;
+    outputSchemaAction?: 'warn' | 'fail' | 'coerce';
+    maskFields?: string[];
+    outputScope?: 'global' | 'step';
   }) {
     return {
       timeout: opts.timeout,
@@ -70,6 +75,10 @@ export class WorkflowBuilder {
       fallbackHandler: opts.fallbackHandler,
       onError: opts.onError,
       skipIf: opts.skipIf,
+      outputSchema: opts.outputSchema,
+      outputSchemaAction: opts.outputSchemaAction,
+      maskFields: opts.maskFields,
+      outputScope: opts.outputScope,
     };
   }
 
@@ -92,6 +101,10 @@ export class WorkflowBuilder {
       fallbackHandler?: string;
       onError?: string;
       skipIf?: unknown;
+      outputSchema?: Record<string, unknown>;
+      outputSchemaAction?: 'warn' | 'fail' | 'coerce';
+      maskFields?: string[];
+      outputScope?: 'global' | 'step';
     },
   ): this {
     return this.addStep({
@@ -124,6 +137,10 @@ export class WorkflowBuilder {
       fallbackHandler?: string;
       onError?: string;
       skipIf?: unknown;
+      outputSchema?: Record<string, unknown>;
+      outputSchemaAction?: 'warn' | 'fail' | 'coerce';
+      maskFields?: string[];
+      outputScope?: 'global' | 'step';
     },
   ): this {
     return this.addStep({

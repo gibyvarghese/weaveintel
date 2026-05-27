@@ -16,13 +16,37 @@ export function createInitialState(
   };
 }
 
-/** Advance state to the next step after a result. */
+/**
+ * Advance state to the next step after a result.
+ *
+ * Phase W3 extensions:
+ *  - `ephemeral`: when true the step output is written to
+ *    `state.ephemeralVariables` instead of `state.variables`.  Ephemeral
+ *    variables are NOT checkpointed or persisted; they are cleared at the
+ *    start of every step (see engine.ts).
+ *  - The previous step's `ephemeralVariables` are always cleared so they
+ *    do not accumulate across steps.
+ */
 export function advanceState(
   state: WorkflowState,
   stepResult: WorkflowStepResult,
   nextStepId: string | undefined,
+  ephemeral = false,
 ): WorkflowState {
   const newHistory = [...state.history, stepResult];
+
+  if (ephemeral) {
+    return {
+      currentStepId: nextStepId ?? state.currentStepId,
+      variables: { ...state.variables },
+      ephemeralVariables: stepResult.output !== undefined
+        ? { [`__step_${stepResult.stepId}`]: stepResult.output }
+        : {},
+      history: newHistory,
+      checkpointId: state.checkpointId,
+    };
+  }
+
   const newVars = { ...state.variables };
   if (stepResult.output !== undefined) {
     newVars[`__step_${stepResult.stepId}`] = stepResult.output;
@@ -30,6 +54,7 @@ export function advanceState(
   return {
     currentStepId: nextStepId ?? state.currentStepId,
     variables: newVars,
+    ephemeralVariables: {},   // clear previous step's ephemeral data
     history: newHistory,
     checkpointId: state.checkpointId,
   };

@@ -18,7 +18,7 @@ import type {
   HumanTaskPriority,
   HumanDecision,
 } from '@weaveintel/core';
-import { newUUIDv7 } from '@weaveintel/core';
+import { newUUIDv7, weaveEventBus } from '@weaveintel/core';
 import { executeStep, type StepHandler, type StepHandlerMap } from './steps.js';
 import { createInitialState, advanceState, resolveNextStep, isTerminal } from './state.js';
 import { type CheckpointStore, InMemoryCheckpointStore } from './checkpoint-store.js';
@@ -37,6 +37,9 @@ import { resolveResumeNextId } from './engine-runner.js';
 import { type StepIdempotencyStore } from './idempotency-store.js';
 import { type CircuitBreakerRegistry } from './circuit-breaker.js';
 import { type BulkheadRegistry } from './bulkhead.js';
+import { type PayloadStore, PAYLOAD_REF_PROP } from './payload-store.js';
+import { maskStepOutput } from './secret-masker.js';
+import { validateStepOutput } from './output-schema-validator.js';
 
 export type { WorkflowEngineOptions } from './engine-types.js';
 
@@ -59,6 +62,9 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   private idempotencyStore?: StepIdempotencyStore;
   private circuitBreakerRegistry?: CircuitBreakerRegistry;
   private bulkheadRegistry?: BulkheadRegistry;
+  // Phase W3
+  private payloadStore?: PayloadStore;
+  private traceIdGenerator: () => string;
 
   constructor(opts?: WorkflowEngineOptions) {
     this.checkpointStore = opts?.checkpointStore ?? new InMemoryCheckpointStore();
@@ -75,6 +81,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     this.idempotencyStore = opts?.idempotencyStore;
     this.circuitBreakerRegistry = opts?.circuitBreakerRegistry;
     this.bulkheadRegistry = opts?.bulkheadRegistry;
+    this.payloadStore = opts?.payloadStore;
+    this.traceIdGenerator = opts?.traceIdGenerator ?? (() => newUUIDv7());
   }
 
   /** Phase 5 — Public access to the cost meter so callers (LLM adapters,
@@ -86,6 +94,14 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   getCircuitBreakerRegistry(): CircuitBreakerRegistry | undefined { return this.circuitBreakerRegistry; }
   /** Phase W2 — Access the bulkhead registry (if configured). */
   getBulkheadRegistry(): BulkheadRegistry | undefined { return this.bulkheadRegistry; }
+  /** Phase W3 — Access the payload store (if configured). */
+  getPayloadStore(): PayloadStore | undefined { return this.payloadStore; }
+
+  /** Subscribe to a specific workflow event type. Lazily creates an internal bus. */
+  on(type: string, handler: (event: unknown) => void): () => void {
+    if (!this.bus) this.bus = weaveEventBus();
+    return this.bus.on(type, handler as (event: import('@weaveintel/core').WeaveEvent) => void | Promise<void>);
+  }
 
   // ─── Handler Registration ──────────────────────────────────
 
@@ -130,7 +146,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
 
   // ─── Run Management ────────────────────────────────────────
 
-  async startRun(workflowId: string, input?: Record<string, unknown>): Promise<WorkflowRun> {
+  async startRun(workflowId: string, input?: Record<string, unknown>, opts?: { traceId?: string; tenantId?: string }): Promise<WorkflowRun> {
     let def = this.definitions.get(workflowId);
     if (!def && this.definitionStore) {
       const fromStore = await this.definitionStore.get(workflowId);
@@ -158,6 +174,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       state: createInitialState(def, input),
       startedAt: now(),
       costTotal: 0,
+      traceId: opts?.traceId ?? this.traceIdGenerator(),
+      tenantId: opts?.tenantId,
     };
     await this.runRepository.save(run);
     this.runCache.set(run.id, run);
@@ -428,9 +446,27 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         }
       }
 
+      // Phase W3 — promote ephemeral variables from the previous step into
+      // the working variable set for THIS step, then remove them after advanceState
+      // so they don't leak into the permanent state.
+      const promotedEphemeralKeys: string[] = [];
+      if (run.state.ephemeralVariables && Object.keys(run.state.ephemeralVariables).length > 0) {
+        promotedEphemeralKeys.push(...Object.keys(run.state.ephemeralVariables));
+        Object.assign(run.state.variables, run.state.ephemeralVariables);
+        (run.state as { ephemeralVariables: Record<string, unknown> }).ephemeralVariables = {};
+      }
+      // Phase W3 — inject per-step execution context (__ctx) into variables.
+      run.state.variables['__ctx'] = {
+        traceId: run.traceId ?? 'unknown',
+        tenantId: run.tenantId,
+        runId: run.id,
+        stepId: step.id,
+        attempt: 1,
+      };
+
       this.emit({ type: 'step:started', runId: run.id, stepId: step.id, timestamp: now() });
 
-      const stepResult = await this.executeStepWithExpressionFallback(step, run.state, runHandlers);
+      let stepResult = await this.executeStepWithExpressionFallback(step, run.state, runHandlers);
 
       if (stepResult.status === 'failed') {
         this.emit({ type: 'step:failed', runId: run.id, stepId: step.id, timestamp: now(), data: { error: stepResult.error } });
@@ -486,20 +522,32 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
               break;
             }
 
+            // Update __ctx.attempt for retry execution
+            if (typeof run.state.variables['__ctx'] === 'object' && run.state.variables['__ctx'] !== null) {
+              (run.state.variables['__ctx'] as Record<string, unknown>)['attempt'] = retryAttempt + 1;
+            }
             retryResult = await this.executeStepWithExpressionFallback(step, run.state, runHandlers);
           }
 
           if (retryResult.status === 'completed') {
-            // Cache idempotency key for retry-succeeded result
-            if (step.idempotencyKey !== undefined && this.idempotencyStore) {
-              const kv = String(evaluateExpression(step.idempotencyKey, run.state.variables) ?? '');
-              try { await this.idempotencyStore.set(`${step.id}:${kv}`, retryResult.output); } catch { /* best-effort */ }
+            // Phase W3 post-processing (schema validation, masking, payload offload)
+            const retryProcessed = await this.postProcessSuccess(step, retryResult, run, policy);
+            if (retryProcessed.status === 'failed') {
+              finalFailedResult = retryProcessed;
+              // Fall through to onError/compensation
+            } else {
+              if (step.idempotencyKey !== undefined && this.idempotencyStore) {
+                const kv = String(evaluateExpression(step.idempotencyKey, run.state.variables) ?? '');
+                try { await this.idempotencyStore.set(`${step.id}:${kv}`, retryProcessed.output); } catch { /* best-effort */ }
+              }
+              const ephemeral = step.outputScope === 'step';
+              (run as { state: WorkflowState }).state = advanceState(run.state, retryProcessed, resolveNextStep(def, step.id, retryProcessed), ephemeral);
+              for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
+              this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
+              await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
+              if (isTerminal(def, run.state)) await this.completeRun(run, def);
+              continue;
             }
-            (run as { state: WorkflowState }).state = advanceState(run.state, retryResult, resolveNextStep(def, step.id, retryResult));
-            this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
-            await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-            if (isTerminal(def, run.state)) await this.completeRun(run, def);
-            continue;
           }
           finalFailedResult = retryResult;
         }
@@ -518,16 +566,22 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
                 stepId: step.id, status: 'completed', output: fbOutput,
                 startedAt: fbStart, completedAt: now(),
               };
-              if (step.idempotencyKey !== undefined && this.idempotencyStore) {
-                const kv = String(evaluateExpression(step.idempotencyKey, run.state.variables) ?? '');
-                try { await this.idempotencyStore.set(`${step.id}:${kv}`, fbOutput); } catch { /* best-effort */ }
+              // Phase W3 post-processing on fallback result
+              const fbProcessed = await this.postProcessSuccess(step, fallbackResult, run, policy);
+              if (fbProcessed.status !== 'failed') {
+                if (step.idempotencyKey !== undefined && this.idempotencyStore) {
+                  const kv = String(evaluateExpression(step.idempotencyKey, run.state.variables) ?? '');
+                  try { await this.idempotencyStore.set(`${step.id}:${kv}`, fbProcessed.output); } catch { /* best-effort */ }
+                }
+                this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
+                const nextId = resolveNextStep(def, step.id, fbProcessed);
+                const fbEphemeral = step.outputScope === 'step';
+                (run as { state: WorkflowState }).state = advanceState(run.state, fbProcessed, nextId, fbEphemeral);
+                for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
+                await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
+                if (isTerminal(def, run.state)) await this.completeRun(run, def);
+                continue;
               }
-              this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
-              const nextId = resolveNextStep(def, step.id, fallbackResult);
-              (run as { state: WorkflowState }).state = advanceState(run.state, fallbackResult, nextId);
-              await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-              if (isTerminal(def, run.state)) await this.completeRun(run, def);
-              continue;
             } catch { /* fallback also failed — fall through to onError/compensation */ }
           }
         }
@@ -540,6 +594,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
             timestamp: now(),
           };
           (run as { state: WorkflowState }).state = advanceState(run.state, finalFailedResult, step.onError);
+          for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
           await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
           continue;
         }
@@ -558,6 +613,25 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         this.failRun(run, fullError);
         break;
       }
+
+      // Phase W3 — post-process successful output (schema, masking, payload offload)
+      const processedResult = await this.postProcessSuccess(step, stepResult, run, policy);
+      if (processedResult.status === 'failed') {
+        // Schema validation with action='fail' caused step to fail — handle as normal failure
+        this.emit({ type: 'step:failed', runId: run.id, stepId: step.id, timestamp: now(), data: { error: processedResult.error } });
+        if (step.onError) {
+          run.state.variables['__error'] = { message: processedResult.error, stepId: step.id, timestamp: now() };
+          (run as { state: WorkflowState }).state = advanceState(run.state, processedResult, step.onError);
+          for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
+          await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
+          continue;
+        }
+        this.failRun(run, processedResult.error ?? 'Output schema validation failed');
+        break;
+      }
+
+      // Use processed result from here on
+      stepResult = processedResult;
 
       this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
 
@@ -628,7 +702,9 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       }
 
       const nextStepId = resolveNextStep(def, step.id, stepResult);
-      (run as { state: WorkflowState }).state = advanceState(run.state, stepResult, nextStepId);
+      const mainEphemeral = step.outputScope === 'step';
+      (run as { state: WorkflowState }).state = advanceState(run.state, stepResult, nextStepId, mainEphemeral);
+      for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
       await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
 
       if (!nextStepId || isTerminal(def, run.state)) {
@@ -748,6 +824,77 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       }
     }
     return executeStep(step, state, handlers);
+  }
+
+  /**
+   * Phase W3 — Post-process a completed step result: output schema validation,
+   * secret masking, and large payload offload.  Returns a (potentially
+   * modified) result.  If schema validation uses action='fail' and the output
+   * is invalid, returns a failed result so the normal failure path takes over.
+   */
+  private async postProcessSuccess(
+    step: WorkflowStep,
+    result: WorkflowStepResult,
+    run: WorkflowRun,
+    policy: WorkflowPolicy | undefined,
+  ): Promise<WorkflowStepResult> {
+    let output = result.output;
+
+    // 1. Output schema validation
+    if (step.outputSchema && output !== undefined) {
+      const action = step.outputSchemaAction ?? 'warn';
+      const validation = validateStepOutput(output, step.outputSchema, action);
+      // Always apply coerced output when in coerce mode (even when valid=true, coercion may have fixed types)
+      if (action === 'coerce' && validation.coercedOutput !== undefined) {
+        output = validation.coercedOutput;
+      }
+      if (!validation.valid) {
+        if (action === 'fail') {
+          return {
+            stepId: step.id,
+            status: 'failed',
+            error: `Output schema validation failed: ${validation.errors.map(e => `${e.path}: ${e.message}`).join('; ')}`,
+            startedAt: result.startedAt,
+            completedAt: now(),
+          };
+        } else if (action !== 'coerce') {
+          this.emit({
+            type: 'step:output_schema_warn',
+            runId: run.id,
+            stepId: step.id,
+            timestamp: now(),
+            data: { errors: validation.errors },
+          });
+        }
+      }
+    }
+
+    // 2. Secret masking — applied before state + checkpoint persistence
+    const maskFields = step.maskFields ?? [];
+    if (maskFields.length > 0 && output !== undefined) {
+      output = maskStepOutput(output, maskFields);
+    }
+
+    // 3. Large payload offload
+    if (this.payloadStore && policy?.maxInlineBytes && output !== undefined) {
+      try {
+        const json = JSON.stringify(output);
+        if (json.length > policy.maxInlineBytes) {
+          const key = `${run.id}:${step.id}`;
+          await this.payloadStore.put(key, output);
+          this.emit({
+            type: 'step:payload_offloaded',
+            runId: run.id,
+            stepId: step.id,
+            timestamp: now(),
+            data: { key, byteSize: json.length },
+          });
+          output = { [PAYLOAD_REF_PROP]: key };
+        }
+      } catch { /* best-effort — don't fail the step on store errors */ }
+    }
+
+    return { ...result, output };
   }
 
   private async completeRun(run: WorkflowRun, def: WorkflowDefinition): Promise<void> {
