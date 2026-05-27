@@ -4,7 +4,10 @@
 
 // ─── Workflow Definition ─────────────────────────────────────
 
-export type WorkflowStepType = 'deterministic' | 'agentic' | 'branch' | 'loop' | 'condition' | 'wait' | 'parallel' | 'sub-workflow' | 'human-task';
+export type WorkflowStepType =
+  | 'deterministic' | 'agentic' | 'branch' | 'loop' | 'condition' | 'wait' | 'parallel' | 'sub-workflow' | 'human-task'
+  // Phase W1 — Control flow completeness
+  | 'switch' | 'forEach' | 'fork' | 'join';
 
 export interface WorkflowStep {
   id: string;
@@ -40,7 +43,19 @@ export interface WorkflowStep {
    */
   inputMap?: Record<string, string>;
   /**
-   * Phase 1 — Declarative output mapping.
+   * Phase W1 — Error boundary. If this step fails (and all retries are
+   * exhausted), execution jumps to this step ID instead of triggering global
+   * saga compensation. The error is available as `__error` in variables.
+   */
+  onError?: string;
+  /**
+   * Phase W1 — Skip condition. JSONLogic-ish expression evaluated against
+   * `state.variables`. If truthy the step is skipped; execution advances to
+   * `next` without running the handler.
+   */
+  skipIf?: unknown;
+  /**
+   * Phase W1 — Declarative output mapping.
    * Keys are dotted paths into `WorkflowState.variables` to write into.
    * Values are dotted paths into the handler's *return value*.
    * Example: { "kaggle.lastRunId": "id", "kaggle.lastStatus": "status" }

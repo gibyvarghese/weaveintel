@@ -312,6 +312,23 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         break;
       }
 
+      // Phase W1 — skipIf: evaluate expression; if truthy, skip step and advance.
+      if (step.skipIf !== undefined) {
+        let shouldSkip = false;
+        try { shouldSkip = evaluateBoolean(step.skipIf, run.state.variables); } catch { /* treat as false */ }
+        if (shouldSkip) {
+          const skippedResult: WorkflowStepResult = {
+            stepId: step.id, status: 'skipped', startedAt: now(), completedAt: now(),
+          };
+          this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
+          const nextStepId = resolveNextStep(def, step.id, skippedResult);
+          (run as { state: WorkflowState }).state = advanceState(run.state, skippedResult, nextStepId);
+          await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
+          if (!nextStepId || isTerminal(def, run.state)) { await this.completeRun(run, def); }
+          continue;
+        }
+      }
+
       this.emit({ type: 'step:started', runId: run.id, stepId: step.id, timestamp: now() });
 
       const stepResult = await this.executeStepWithExpressionFallback(step, run.state, runHandlers);
@@ -319,10 +336,13 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       if (stepResult.status === 'failed') {
         this.emit({ type: 'step:failed', runId: run.id, stepId: step.id, timestamp: now(), data: { error: stepResult.error } });
 
+        // Track the last failed result across retries so onError gets the final error.
+        let finalFailedResult = stepResult;
+
         // Retry logic with optional delay between attempts
         if (step.retries && step.retries > 0) {
           let retries = step.retries;
-          let retryResult = stepResult;
+          let retryResult: WorkflowStepResult = stepResult;
           while (retries > 0 && retryResult.status === 'failed') {
             retries--;
             const delayMs = step.retryDelayMs ?? (step.config?.['retryDelayMs'] as number | undefined) ?? 0;
@@ -338,6 +358,19 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
             }
             continue;
           }
+          finalFailedResult = retryResult;
+        }
+
+        // Phase W1 — onError: error boundary — jump to handler step instead of compensation.
+        if (step.onError) {
+          run.state.variables['__error'] = {
+            message: finalFailedResult.error ?? 'Step failed',
+            stepId: step.id,
+            timestamp: now(),
+          };
+          (run as { state: WorkflowState }).state = advanceState(run.state, finalFailedResult, step.onError);
+          await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
+          continue;
         }
 
         // Compensate — run in reverse completion order; record errors but still reach terminal state
@@ -347,7 +380,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
           run.state.variables,
         );
 
-        const errorMsg = stepResult.error ?? 'Step failed';
+        const errorMsg = finalFailedResult.error ?? 'Step failed';
         const fullError = compErrors.length
           ? `${errorMsg}; compensation errors: ${compErrors.map(e => `${e.stepId}: ${e.error}`).join(', ')}`
           : errorMsg;

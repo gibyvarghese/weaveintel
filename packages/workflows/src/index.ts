@@ -26,7 +26,7 @@ export {
 } from './compensation.js';
 
 // Checkpoint store
-export { InMemoryCheckpointStore, type CheckpointStore } from './checkpoint-store.js';
+export { InMemoryCheckpointStore, JsonFileCheckpointStore, type CheckpointStore } from './checkpoint-store.js';
 
 // Run repository
 export {
@@ -58,9 +58,10 @@ export {
   type SubWorkflowResolverDeps,
 } from './resolvers.js';
 
-// Phase 1 — Definition store
+// Phase 1 — Definition store (InMemory + file-backed)
 export {
   InMemoryWorkflowDefinitionStore,
+  JsonFileWorkflowDefinitionStore,
   type WorkflowDefinitionStore,
 } from './definition-store.js';
 

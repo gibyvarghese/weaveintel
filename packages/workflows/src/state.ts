@@ -52,6 +52,21 @@ export function resolveNextStep(
     }
   }
 
+  // Phase W1 — switch: route by string case key returned from the handler.
+  // config.cases: Record<caseKey, stepId>; 'default' is the fallback.
+  if (step.type === 'switch') {
+    const cases = step.config?.['cases'] as Record<string, string> | undefined;
+    if (cases) {
+      const key = String(stepResult.output ?? '');
+      return cases[key] ?? cases['default'];
+    }
+    // Fallback: treat like branch (positional)
+    if (Array.isArray(step.next)) {
+      const idx = typeof stepResult.output === 'number' ? stepResult.output : 0;
+      return step.next[idx];
+    }
+  }
+
   if (typeof step.next === 'string') return step.next;
   if (Array.isArray(step.next)) return step.next[0];
 

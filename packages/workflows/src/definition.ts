@@ -126,6 +126,114 @@ export class WorkflowBuilder {
     });
   }
 
+  // ─── Phase W1 shortcuts ──────────────────────────────────────
+
+  /** Shortcut: add a switch step. Handler returns a string case key; routing is driven by config.cases. */
+  switch(
+    id: string,
+    name: string,
+    opts: {
+      handler?: string;
+      cases: Record<string, string>;
+      next?: string | string[];
+      config?: Record<string, unknown>;
+      onError?: string;
+      skipIf?: unknown;
+    },
+  ): this {
+    return this.addStep({
+      id,
+      name,
+      type: 'switch',
+      handler: opts.handler,
+      next: opts.next,
+      config: { ...opts.config, cases: opts.cases },
+      onError: opts.onError,
+      skipIf: opts.skipIf,
+    });
+  }
+
+  /** Shortcut: add a forEach step. Handler returns an array; bodyHandler runs per item. */
+  forEach(
+    id: string,
+    name: string,
+    opts: {
+      handler: string;
+      bodyHandler?: string;
+      maxConcurrency?: number;
+      next?: string;
+      config?: Record<string, unknown>;
+      onError?: string;
+      skipIf?: unknown;
+    },
+  ): this {
+    return this.addStep({
+      id,
+      name,
+      type: 'forEach',
+      handler: opts.handler,
+      next: opts.next,
+      config: {
+        ...opts.config,
+        ...(opts.bodyHandler ? { bodyHandler: opts.bodyHandler } : {}),
+        ...(opts.maxConcurrency !== undefined ? { maxConcurrency: opts.maxConcurrency } : {}),
+      },
+      onError: opts.onError,
+      skipIf: opts.skipIf,
+    });
+  }
+
+  /** Shortcut: add a parallel step with named lanes. Results are keyed by lane name. */
+  parallelLanes(
+    id: string,
+    name: string,
+    opts: { lanes: Record<string, string>; next?: string; onError?: string },
+  ): this {
+    return this.addStep({
+      id,
+      name,
+      type: 'parallel',
+      next: opts.next,
+      config: { lanes: opts.lanes },
+      onError: opts.onError,
+    });
+  }
+
+  /** Shortcut: add a fork step. Fires N named branch handlers concurrently. */
+  fork(
+    id: string,
+    name: string,
+    opts: { branches: Record<string, string>; next?: string; onError?: string },
+  ): this {
+    return this.addStep({
+      id,
+      name,
+      type: 'fork',
+      next: opts.next,
+      config: { branches: opts.branches },
+      onError: opts.onError,
+    });
+  }
+
+  /** Shortcut: add a join step. Aggregates results from the matching fork step. */
+  join(
+    id: string,
+    name: string,
+    opts: { forkStepId: string; branches?: string[]; next?: string; onError?: string },
+  ): this {
+    return this.addStep({
+      id,
+      name,
+      type: 'join',
+      next: opts.next,
+      config: {
+        forkStepId: opts.forkStepId,
+        ...(opts.branches ? { branches: opts.branches } : {}),
+      },
+      onError: opts.onError,
+    });
+  }
+
   /** Shortcut: add a human-task step that creates a task in the queue and pauses. */
   humanTask(
     id: string,
