@@ -45,6 +45,9 @@ import { maskStepOutput } from './secret-masker.js';
 import { validateStepOutput } from './output-schema-validator.js';
 import { type StepLockStore } from './step-lock-store.js';
 import { makeAuditEvent } from './audit-log.js';
+import { type WorkflowRateLimiter } from './rate-limiter.js';
+import { type WorkflowRunQueue } from './run-queue.js';
+import { WorkflowConcurrencyError, WorkflowRateLimitError } from '@weaveintel/core';
 
 export type { WorkflowEngineOptions } from './engine-types.js';
 
@@ -74,6 +77,9 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   private stepLockStore?: StepLockStore;
   private sleepStore?: DurableSleepStore;
   private auditLog?: WorkflowAuditLog;
+  // Phase W5
+  private rateLimiter?: WorkflowRateLimiter;
+  private runQueue?: WorkflowRunQueue;
 
   constructor(opts?: WorkflowEngineOptions) {
     this.checkpointStore = opts?.checkpointStore ?? new InMemoryCheckpointStore();
@@ -95,6 +101,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     this.stepLockStore = opts?.stepLockStore;
     this.sleepStore = opts?.sleepStore;
     this.auditLog = opts?.auditLog;
+    this.rateLimiter = opts?.rateLimiter;
+    this.runQueue = opts?.runQueue;
   }
 
   /** Phase 5 — Public access to the cost meter so callers (LLM adapters,
@@ -112,6 +120,10 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   getStepLockStore(): StepLockStore | undefined { return this.stepLockStore; }
   /** Phase W4 — Access the durable sleep store (if configured). */
   getSleepStore(): DurableSleepStore | undefined { return this.sleepStore; }
+  /** Phase W5 — Access the rate limiter (if configured). */
+  getRateLimiter(): WorkflowRateLimiter | undefined { return this.rateLimiter; }
+  /** Phase W5 — Access the run queue (if configured). */
+  getRunQueue(): WorkflowRunQueue | undefined { return this.runQueue; }
   /** Phase W4 — Return the full immutable audit event history for a run. */
   async listWorkflowEvents(runId: string): Promise<WorkflowAuditEvent[]> {
     if (!this.auditLog) return [];
@@ -167,7 +179,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
 
   // ─── Run Management ────────────────────────────────────────
 
-  async startRun(workflowId: string, input?: Record<string, unknown>, opts?: { traceId?: string; tenantId?: string; parentRunId?: string }): Promise<WorkflowRun> {
+  async startRun(workflowId: string, input?: Record<string, unknown>, opts?: { traceId?: string; tenantId?: string; parentRunId?: string; priority?: number }): Promise<WorkflowRun> {
     let def = this.definitions.get(workflowId);
     if (!def && this.definitionStore) {
       const fromStore = await this.definitionStore.get(workflowId);
@@ -188,6 +200,46 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       }
     }
 
+    // Phase W5 — rate limiting (token bucket per workflow definition).
+    const policy = this.defaultPolicy ?? (def.metadata?.['policy'] as import('@weaveintel/core').WorkflowPolicy | undefined);
+    if (policy?.maxRunsPerMinute && this.rateLimiter) {
+      const allowed = await this.rateLimiter.allow(workflowId, policy.maxRunsPerMinute);
+      if (!allowed) throw new WorkflowRateLimitError(workflowId, policy.maxRunsPerMinute);
+    }
+
+    // Phase W5 — concurrency limit.
+    if (policy?.maxConcurrentRuns) {
+      const active = await this.runRepository.countActive(workflowId);
+      if (active >= policy.maxConcurrentRuns) {
+        if (this.runQueue) {
+          // Buffer the run: save it as pending and add to queue.
+          const pendingRun: WorkflowRun = {
+            id: newUUIDv7(),
+            workflowId,
+            status: 'pending',
+            state: createInitialState(def, input),
+            startedAt: now(),
+            costTotal: 0,
+            traceId: opts?.traceId ?? this.traceIdGenerator(),
+            tenantId: opts?.tenantId,
+            priority: opts?.priority ?? 0,
+            costBreakdown: {},
+            ...(opts?.parentRunId ? { parentRunId: opts.parentRunId } : {}),
+          };
+          await this.runRepository.save(pendingRun);
+          this.runCache.set(pendingRun.id, pendingRun);
+          await this.runQueue.enqueue({
+            runId: pendingRun.id, workflowId,
+            input: input ?? {},
+            priority: opts?.priority ?? 0,
+            opts: { traceId: opts?.traceId, tenantId: opts?.tenantId, parentRunId: opts?.parentRunId },
+          });
+          return pendingRun;
+        }
+        throw new WorkflowConcurrencyError(workflowId, active, policy.maxConcurrentRuns);
+      }
+    }
+
     const run: WorkflowRun = {
       id: newUUIDv7(),
       workflowId,
@@ -195,8 +247,10 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       state: createInitialState(def, input),
       startedAt: now(),
       costTotal: 0,
+      costBreakdown: {},
       traceId: opts?.traceId ?? this.traceIdGenerator(),
       tenantId: opts?.tenantId,
+      priority: opts?.priority ?? 0,
       ...(opts?.parentRunId ? { parentRunId: opts.parentRunId } : {}),
     };
     await this.runRepository.save(run);
@@ -282,6 +336,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     this.runCache.set(run.id, run);
     this.emit({ type: 'workflow:failed', runId, timestamp: now(), data: { reason: 'cancelled' } });
     void this.appendAudit(run, 'workflow:failed', { data: { reason: 'cancelled' } });
+    void this.drainQueue(run.workflowId).catch(() => { /* best-effort */ });
   }
 
   listRuns(workflowId?: string): WorkflowRun[] {
@@ -977,6 +1032,23 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       output = maskStepOutput(output, maskFields);
     }
 
+    // 2b. Phase W5 — cost tagging: extract __cost from output and accumulate.
+    if (output !== null && typeof output === 'object' && '__cost' in (output as object)) {
+      const costVal = (output as Record<string, unknown>)['__cost'];
+      if (typeof costVal === 'number' && costVal > 0) {
+        const handlerKey = step.handler ?? step.id;
+        const breakdown = (run.costBreakdown ?? {}) as Record<string, number>;
+        breakdown[handlerKey] = (breakdown[handlerKey] ?? 0) + costVal;
+        (run as { costBreakdown: Record<string, number> }).costBreakdown = breakdown;
+        // Also report to the cost meter so it counts toward the ceiling.
+        try { this.costMeter.record(run.id, { costUsd: costVal, source: `step:${step.id}` }); } catch { /* best-effort */ }
+        // Remove __cost from the output before persisting to state.
+        const { __cost: _stripped, ...rest } = output as Record<string, unknown>;
+        void _stripped;
+        output = rest;
+      }
+    }
+
     // 3. Large payload offload
     if (this.payloadStore && policy?.maxInlineBytes && output !== undefined) {
       try {
@@ -999,6 +1071,27 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     return { ...result, output };
   }
 
+  /** Phase W5 — drain the next queued run for the given workflowId after a slot frees. */
+  private async drainQueue(workflowId: string): Promise<void> {
+    if (!this.runQueue) return;
+    const entry = await this.runQueue.dequeue(workflowId);
+    if (!entry) return;
+    const pendingRun = await this.runRepository.get(entry.runId);
+    if (!pendingRun || pendingRun.status !== 'pending') return;
+    const def = this.definitions.get(workflowId) ?? (this.definitionStore ? await this.definitionStore.get(workflowId) : null);
+    if (!def) return;
+    (pendingRun as { status: WorkflowRunStatus }).status = 'running';
+    await this.runRepository.save(pendingRun);
+    this.runCache.set(pendingRun.id, pendingRun);
+    this.emit({ type: 'workflow:started', runId: pendingRun.id, timestamp: now() });
+    void this.appendAudit(pendingRun, 'workflow:started');
+    // Execute in background — don't await so completeRun/failRun returns promptly.
+    void this.executeRun(pendingRun, def).then(async r => {
+      await this.runRepository.save(r);
+      this.runCache.set(r.id, r);
+    }).catch(() => { /* errors already handled inside executeRun */ });
+  }
+
   private async completeRun(run: WorkflowRun, def: WorkflowDefinition): Promise<void> {
     (run as { status: WorkflowRunStatus }).status = 'completed';
     run.completedAt = now();
@@ -1010,6 +1103,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     if (this.stepLockStore) {
       try { await this.stepLockStore.clear(run.id); } catch { /* best-effort */ }
     }
+    // Phase W5 — free up a concurrency slot by draining the queue.
+    void this.drainQueue(run.workflowId).catch(() => { /* best-effort */ });
     // Phase 4 — emit typed mesh contract if declared. Failures are swallowed.
     if (this.contractEmitter && def.outputContract) {
       try {
@@ -1046,6 +1141,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     if (this.stepLockStore) {
       void this.stepLockStore.clear(run.id).catch(() => { /* best-effort */ });
     }
+    // Phase W5 — free up a concurrency slot.
+    void this.drainQueue(run.workflowId).catch(() => { /* best-effort */ });
   }
 
   private emit(event: WorkflowEvent): void {

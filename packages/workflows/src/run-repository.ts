@@ -6,12 +6,32 @@ import type { WorkflowRun } from '@weaveintel/core';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
+export interface RunFilterOpts {
+  workflowId?: string;
+  status?: WorkflowRun['status'];
+  tenantId?: string;
+  before?: string;
+  after?: string;
+  limit?: number;
+}
+
 export interface WorkflowRunRepository {
   save(run: WorkflowRun): Promise<void>;
   get(runId: string): Promise<WorkflowRun | null>;
   list(workflowId?: string): Promise<WorkflowRun[]>;
   /** Phase W4 — return all direct child runs spawned by the given parent run. */
   listByParent(parentRunId: string): Promise<WorkflowRun[]>;
+  /**
+   * Phase W5 — server-side filtered list with optional status, tenant, date
+   * range, and result limit.  Implementations without native query support may
+   * apply filters in memory after a full `list()` scan.
+   */
+  listFiltered(opts: RunFilterOpts): Promise<WorkflowRun[]>;
+  /**
+   * Phase W5 — count runs that are currently active (status 'running' or
+   * 'paused') for the given workflow definition.  Used for concurrency checks.
+   */
+  countActive(workflowId: string): Promise<number>;
   delete(runId: string): Promise<void>;
 }
 
@@ -37,6 +57,24 @@ export class InMemoryWorkflowRunRepository implements WorkflowRunRepository {
     return [...this.runs.values()]
       .filter(r => r.parentRunId === parentRunId)
       .map(r => structuredClone(r));
+  }
+
+  async listFiltered(opts: RunFilterOpts): Promise<WorkflowRun[]> {
+    let rows = [...this.runs.values()];
+    if (opts.workflowId) rows = rows.filter(r => r.workflowId === opts.workflowId);
+    if (opts.status)     rows = rows.filter(r => r.status === opts.status);
+    if (opts.tenantId)   rows = rows.filter(r => r.tenantId === opts.tenantId);
+    if (opts.before)     rows = rows.filter(r => r.startedAt < opts.before!);
+    if (opts.after)      rows = rows.filter(r => r.startedAt > opts.after!);
+    rows = rows.slice().sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    if (opts.limit)      rows = rows.slice(0, opts.limit);
+    return rows.map(r => structuredClone(r));
+  }
+
+  async countActive(workflowId: string): Promise<number> {
+    return [...this.runs.values()].filter(
+      r => r.workflowId === workflowId && (r.status === 'running' || r.status === 'paused'),
+    ).length;
   }
 
   async delete(runId: string): Promise<void> {
@@ -81,6 +119,23 @@ export class JsonFileWorkflowRunRepository implements WorkflowRunRepository {
   async listByParent(parentRunId: string): Promise<WorkflowRun[]> {
     const runs = await this.readAll();
     return runs.filter(r => r.parentRunId === parentRunId).map(r => structuredClone(r));
+  }
+
+  async listFiltered(opts: RunFilterOpts): Promise<WorkflowRun[]> {
+    let rows = await this.readAll();
+    if (opts.workflowId) rows = rows.filter(r => r.workflowId === opts.workflowId);
+    if (opts.status)     rows = rows.filter(r => r.status === opts.status);
+    if (opts.tenantId)   rows = rows.filter(r => r.tenantId === opts.tenantId);
+    if (opts.before)     rows = rows.filter(r => r.startedAt < opts.before!);
+    if (opts.after)      rows = rows.filter(r => r.startedAt > opts.after!);
+    rows = rows.slice().sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    if (opts.limit)      rows = rows.slice(0, opts.limit);
+    return rows.map(r => structuredClone(r));
+  }
+
+  async countActive(workflowId: string): Promise<number> {
+    const runs = await this.readAll();
+    return runs.filter(r => r.workflowId === workflowId && (r.status === 'running' || r.status === 'paused')).length;
   }
 
   async delete(runId: string): Promise<void> {

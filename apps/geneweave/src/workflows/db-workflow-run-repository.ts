@@ -6,7 +6,7 @@
  * Phase 5 governance/durability.
  */
 import type { WorkflowRun } from '@weaveintel/core';
-import type { WorkflowRunRepository } from '@weaveintel/workflows';
+import type { WorkflowRunRepository, RunFilterOpts } from '@weaveintel/workflows';
 import type { DatabaseAdapter, WorkflowRunRow } from '../db-types.js';
 
 function rowToRun(row: WorkflowRunRow): WorkflowRun {
@@ -24,6 +24,8 @@ function rowToRun(row: WorkflowRunRow): WorkflowRun {
     ...(row.tenant_id ? { tenantId: row.tenant_id } : {}),
     ...(row.parent_run_id ? { parentRunId: row.parent_run_id } : {}),
     ...(row.child_run_ids ? { childRunIds: JSON.parse(row.child_run_ids) as string[] } : {}),
+    ...(row.priority !== undefined && row.priority !== null ? { priority: row.priority } : {}),
+    ...(row.cost_breakdown ? { costBreakdown: JSON.parse(row.cost_breakdown) as Record<string, number> } : {}),
   };
 }
 
@@ -61,6 +63,8 @@ export class DbWorkflowRunRepository implements WorkflowRunRepository {
       // Phase W4 — persist parent/child linkage on every save so updates propagate.
       ...(run.parentRunId !== undefined ? { parent_run_id: run.parentRunId } : {}),
       ...(run.childRunIds !== undefined ? { child_run_ids: JSON.stringify(run.childRunIds) } : {}),
+      // Phase W5 — cost breakdown and priority.
+      ...(run.costBreakdown !== undefined ? { cost_breakdown: JSON.stringify(run.costBreakdown) } : {}),
     });
   }
 
@@ -75,11 +79,36 @@ export class DbWorkflowRunRepository implements WorkflowRunRepository {
   }
 
   async listByParent(parentRunId: string): Promise<WorkflowRun[]> {
-    const db = (this.db as unknown as { d: { prepare(s: string): { all(...args: unknown[]): unknown[] } } }).d;
+    const db = (this.db as unknown as { d: { prepare(s: string): { all(...args: unknown[]): unknown[]; get(...args: unknown[]): unknown } } }).d;
     const rows = db.prepare(
       'SELECT * FROM workflow_runs WHERE parent_run_id = ?',
     ).all(parentRunId) as WorkflowRunRow[];
     return rows.map(rowToRun);
+  }
+
+  async listFiltered(opts: RunFilterOpts): Promise<WorkflowRun[]> {
+    const db = (this.db as unknown as { d: { prepare(s: string): { all(...args: unknown[]): unknown[] } } }).d;
+    const conditions: string[] = [];
+    const args: unknown[] = [];
+    if (opts.workflowId) { conditions.push('workflow_id = ?'); args.push(opts.workflowId); }
+    if (opts.status)     { conditions.push('status = ?'); args.push(opts.status); }
+    if (opts.tenantId)   { conditions.push('tenant_id = ?'); args.push(opts.tenantId); }
+    if (opts.before)     { conditions.push('started_at < ?'); args.push(opts.before); }
+    if (opts.after)      { conditions.push('started_at > ?'); args.push(opts.after); }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = opts.limit ? ` LIMIT ${opts.limit}` : '';
+    const rows = db.prepare(
+      `SELECT * FROM workflow_runs ${where} ORDER BY started_at DESC${limit}`,
+    ).all(...args) as WorkflowRunRow[];
+    return rows.map(rowToRun);
+  }
+
+  async countActive(workflowId: string): Promise<number> {
+    const db = (this.db as unknown as { d: { prepare(s: string): { get(...args: unknown[]): unknown } } }).d;
+    const row = db.prepare(
+      "SELECT COUNT(*) as n FROM workflow_runs WHERE workflow_id = ? AND status IN ('running','paused')",
+    ).get(workflowId) as { n: number };
+    return row.n;
   }
 
   async delete(runId: string): Promise<void> {

@@ -169,3 +169,23 @@ export {
   JsonFileAuditLog,
   makeAuditEvent,
 } from './audit-log.js';
+
+// Phase W5 — Governance and Operations
+export {
+  InMemoryWorkflowRateLimiter,
+  JsonFileWorkflowRateLimiter,
+  type WorkflowRateLimiter,
+} from './rate-limiter.js';
+export {
+  InMemoryRunQueue,
+  JsonFileRunQueue,
+  type WorkflowRunQueue,
+  type RunQueueEntry,
+} from './run-queue.js';
+export {
+  DefaultWorkflowAdminService,
+  type WorkflowAdminService,
+  type AdminListRunsOpts,
+  type AdminRunView,
+} from './admin-service.js';
+export { type RunFilterOpts } from './run-repository.js';

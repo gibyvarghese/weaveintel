@@ -110,6 +110,10 @@ export interface WorkflowRunRow {
   parent_run_id?: string | null;
   /** Phase W4 — JSON array of direct child sub-workflow run IDs. */
   child_run_ids?: string | null;
+  /** Phase W5 — Run priority (0–9). */
+  priority?: number | null;
+  /** Phase W5 — Per-handler cost breakdown (JSON object). */
+  cost_breakdown?: string | null;
 }
 
 /** Phase W4 — single immutable audit event row. */

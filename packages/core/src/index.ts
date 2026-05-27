@@ -405,6 +405,9 @@ export {
   type WorkflowAuditLog,
   type SleepRecord,
   type DurableSleepStore,
+  // Phase W5 — Governance
+  WorkflowConcurrencyError,
+  WorkflowRateLimitError,
 } from './workflows.js';
 
 // Phase 5 — Capability Policy Bindings

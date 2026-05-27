@@ -230,6 +230,19 @@ export interface WorkflowRun {
    * Used by `cancelRun()` to cascade cancellation depth-first.
    */
   childRunIds?: string[];
+  // ─── Phase W5 — Governance ────────────────────────────────────────────────
+  /**
+   * Phase W5 — Run priority (0–9, higher = higher priority). Used when the
+   * concurrency limit is reached and runs are buffered in the run queue.
+   */
+  priority?: number;
+  /**
+   * Phase W5 — Per-handler-key cost accumulation. Step outputs that include a
+   * top-level `__cost: number` field have that value extracted and added here
+   * under the step's handler key. Enables per-resolver-kind cost visibility
+   * beyond the global `costTotal` ceiling check.
+   */
+  costBreakdown?: Record<string, number>;
 }
 
 /**
@@ -289,6 +302,20 @@ export interface WorkflowPolicy {
    * object `{ __payloadRef: key }`.  Default: unlimited (no offload).
    */
   maxInlineBytes?: number;
+  // ─── Phase W5 — Governance ────────────────────────────────────────────────
+  /**
+   * Phase W5 — Maximum number of simultaneously active (running or paused)
+   * runs for this workflow definition. When the limit is reached, `startRun()`
+   * throws `WorkflowConcurrencyError` unless a `runQueue` is configured on the
+   * engine, in which case the run is buffered and started as capacity frees.
+   */
+  maxConcurrentRuns?: number;
+  /**
+   * Phase W5 — Maximum number of new runs that may be started per minute for
+   * this workflow definition. Enforced via a per-definition token bucket.
+   * Exceeding this limit causes `startRun()` to throw `WorkflowRateLimitError`.
+   */
+  maxRunsPerMinute?: number;
 }
 
 export interface WorkflowCompensation {
@@ -370,6 +397,24 @@ export interface DurableSleepStore {
   list(): Promise<SleepRecord[]>;
 }
 
+// ─── Phase W5 — Governance Errors ────────────────────────────
+
+/** Thrown by `startRun()` when `policy.maxConcurrentRuns` is exceeded and no run queue is configured. */
+export class WorkflowConcurrencyError extends Error {
+  constructor(public readonly workflowId: string, public readonly activeCount: number, public readonly limit: number) {
+    super(`Workflow "${workflowId}" concurrency limit exceeded: ${activeCount}/${limit} active runs`);
+    this.name = 'WorkflowConcurrencyError';
+  }
+}
+
+/** Thrown by `startRun()` when `policy.maxRunsPerMinute` token bucket is exhausted. */
+export class WorkflowRateLimitError extends Error {
+  constructor(public readonly workflowId: string, public readonly limitPerMinute: number) {
+    super(`Workflow "${workflowId}" rate limit exceeded: ${limitPerMinute} runs/min`);
+    this.name = 'WorkflowRateLimitError';
+  }
+}
+
 // ─── Approval Tasks ──────────────────────────────────────────
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'expired';
@@ -393,7 +438,7 @@ export interface WorkflowEngine {
   createDefinition(def: WorkflowDefinition): Promise<WorkflowDefinition>;
   getDefinition(id: string): Promise<WorkflowDefinition | null>;
   listDefinitions(): Promise<WorkflowDefinition[]>;
-  startRun(workflowId: string, input?: Record<string, unknown>, opts?: { traceId?: string; tenantId?: string; parentRunId?: string }): Promise<WorkflowRun>;
+  startRun(workflowId: string, input?: Record<string, unknown>, opts?: { traceId?: string; tenantId?: string; parentRunId?: string; priority?: number }): Promise<WorkflowRun>;
   getRun(runId: string): Promise<WorkflowRun | null>;
   resumeRun(runId: string, data?: unknown): Promise<WorkflowRun>;
   cancelRun(runId: string): Promise<void>;

@@ -50,6 +50,8 @@ class RunIdCapturingRepo implements WorkflowRunRepository {
   get(id: string) { return this.inner.get(id); }
   list(workflowId?: string) { return this.inner.list(workflowId); }
   listByParent(parentRunId: string) { return this.inner.listByParent(parentRunId); }
+  listFiltered(opts: import('./run-repository.js').RunFilterOpts) { return this.inner.listFiltered(opts); }
+  countActive(workflowId: string) { return this.inner.countActive(workflowId); }
   delete(id: string) { return this.inner.delete(id); }
 }
 

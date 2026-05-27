@@ -10,6 +10,8 @@ import type { CircuitBreakerRegistry } from './circuit-breaker.js';
 import type { BulkheadRegistry } from './bulkhead.js';
 import type { PayloadStore } from './payload-store.js';
 import type { StepLockStore } from './step-lock-store.js';
+import type { WorkflowRunQueue } from './run-queue.js';
+import type { WorkflowRateLimiter } from './rate-limiter.js';
 
 export interface WorkflowEngineOptions {
   checkpointStore?: CheckpointStore;
@@ -111,4 +113,20 @@ export interface WorkflowEngineOptions {
    * resumed, child run cancelled. Query with `engine.listWorkflowEvents(runId)`.
    */
   auditLog?: WorkflowAuditLog;
+  // ─── Phase W5 — Governance ────────────────────────────────────────────────
+  /**
+   * Phase W5 — Token-bucket rate limiter. When set and a workflow definition
+   * declares `policy.maxRunsPerMinute`, the engine calls
+   * `rateLimiter.allow(workflowId, limit)` before creating a run; if the
+   * bucket is exhausted `WorkflowRateLimitError` is thrown.
+   */
+  rateLimiter?: WorkflowRateLimiter;
+  /**
+   * Phase W5 — Run queue for concurrency buffering. When set and a workflow
+   * definition declares `policy.maxConcurrentRuns`, runs that cannot start
+   * immediately are enqueued (with their requested priority) instead of
+   * throwing `WorkflowConcurrencyError`.  The queue is drained automatically
+   * as running runs reach a terminal or paused state.
+   */
+  runQueue?: WorkflowRunQueue;
 }
