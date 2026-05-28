@@ -112,14 +112,9 @@ async function buildBundle(symbol: string): Promise<InputBundle> {
 // ── Local: equity thesis prose (simulates skill-equity-thesis LLM call) ────
 
 function buildEquityThesis(score: SymbolScore): string {
-  const top3 = score.factors
-    .slice()
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 3);
-  const bot2 = score.factors
-    .slice()
-    .sort((a, b) => a.score - b.score)
-    .slice(0, 2);
+  const factorList = Object.values(score.factors);
+  const top3 = factorList.slice().sort((a, b) => b.score - a.score).slice(0, 3);
+  const bot2 = factorList.slice().sort((a, b) => a.score - b.score).slice(0, 2);
 
   const redFlagSummary   = score.redFlags.length   ? score.redFlags.map(f => `${f.code} (${f.severity})`).join(', ')   : 'None';
   const greenFlagSummary = score.greenFlags.length ? score.greenFlags.map(f => f.code).join(', ') : 'None';
@@ -129,7 +124,7 @@ function buildEquityThesis(score: SymbolScore): string {
     `Top positive factors: ${top3.map(f => `${f.category} (${f.score > 0 ? '+' : ''}${f.score.toFixed(2)}, coverage ${(f.coverage * 100).toFixed(0)}%)`).join('; ')}.`,
     `Weakest factors: ${bot2.map(f => `${f.category} (${f.score.toFixed(2)})`).join('; ')}.`,
     `Green flags: ${greenFlagSummary}. Red flags: ${redFlagSummary}.`,
-    `Peer count used in scoring: ${score.peerCount}.`,
+    `Peer count: ${score.peerSet.size}.`,
   ].join(' ');
 }
 
@@ -221,7 +216,7 @@ async function main() {
 
   // ── Step 6: Factor breakdown for #1 ───────────────────────────────────
   section(`Factor Breakdown — #1 Ranked: ${scores[0]!.symbol}`);
-  const breakdown = explainScore(scores[0]!, strategies['compounder-quality']!);
+  const breakdown = explainScore(scores[0]!);
   // Print first 20 lines of the markdown breakdown
   const lines = breakdown.split('\n').slice(0, 20);
   for (const line of lines) console.log(`  ${line}`);

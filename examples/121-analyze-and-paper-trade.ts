@@ -104,7 +104,7 @@ async function buildBundle(symbol: string): Promise<InputBundle> {
 }
 
 function buildThesisSummary(score: SymbolScore): string {
-  const top2 = score.factors.slice().sort((a, b) => b.score - a.score).slice(0, 2);
+  const top2 = Object.values(score.factors).slice().sort((a, b) => b.score - a.score).slice(0, 2);
   return [
     `${score.symbol} | composite=${score.composite.toFixed(3)} decile=${score.decile}/10`,
     `confidence=${(score.confidence * 100).toFixed(0)}%`,
@@ -126,25 +126,25 @@ async function setupBrokerMcp(paper: PaperBrokerAdapter) {
   await server.start(transport);
   const mcpClient = weaveMCPClient();
   await mcpClient.connect(client);
-  const ctx = weaveContext({});
 
+  // Two contexts — the client forwards ctx as _meta.executionContext to the server,
+  // which the contextFactory uses to build the tool handler's ctx (including metadata).
+  const disabledCtx = weaveContext({});
+  const enabledCtx  = weaveContext({ metadata: { tradingEnabled: true } });
+
+  // enabled=true routes through enabledCtx so the kill-switch passes.
+  // enabled=false (default) uses disabledCtx — mutating tools will reject.
   const callTool = async (
     name: string,
     args: Record<string, unknown>,
-    extraMeta: Record<string, unknown> = {},
+    enabled = false,
   ): Promise<unknown> => {
-    const result = await mcpClient.callTool(ctx, {
-      name,
-      arguments: { ...args, ...extraMeta },
-    }) as McpCallResult;
+    const ctx = enabled ? enabledCtx : disabledCtx;
+    const result = await mcpClient.callTool(ctx, { name, arguments: args }) as McpCallResult;
     return JSON.parse(result.content[0]!.text);
   };
 
-  const enabledMeta = () => ({
-    _meta: { executionContext: { metadata: { tradingEnabled: true } } },
-  });
-
-  return { callTool, enabledMeta };
+  return { callTool };
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────
@@ -200,7 +200,7 @@ async function main() {
     info(`Injected price ${sym} → $${quote.price.toFixed(2)}`);
   }
 
-  const { callTool, enabledMeta } = await setupBrokerMcp(paper);
+  const { callTool } = await setupBrokerMcp(paper);
   ok('Broker MCP server started (paper adapter)');
 
   section('Phase B.2 — Check initial account balance');
@@ -222,7 +222,7 @@ async function main() {
     side: 'buy',
     type: 'market',
     qty: buyQty,
-  }, enabledMeta()) as {
+  }, true) as {
     orderId: string;
     status: string;
     filledQty: number;
@@ -262,7 +262,7 @@ async function main() {
     qty: buyQty,
     limitPrice: exitPrice,
     timeInForce: 'gtc',
-  }, enabledMeta()) as {
+  }, true) as {
     orderId: string;
     status: string;
     symbol: string;
@@ -276,7 +276,7 @@ async function main() {
   section('Phase B.7 — Cancel the limit sell');
   const cancelled = await callTool('broker.orders.cancel', {
     orderId: sellResult.orderId,
-  }, enabledMeta()) as { status: string; orderId: string };
+  }, true) as { status: string; orderId: string };
   ok(`Order ${cancelled.orderId} cancelled — status: ${cancelled.status}`);
   if (cancelled.status !== 'cancelled') throw new Error(`Expected cancelled, got: ${cancelled.status}`);
 
