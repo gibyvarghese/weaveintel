@@ -189,3 +189,21 @@ export {
   type AdminRunView,
 } from './admin-service.js';
 export { type RunFilterOpts } from './run-repository.js';
+
+// Phase W6 — Observability and Developer Experience
+export {
+  InMemorySpanEmitter,
+  ConsoleSpanEmitter,
+  JsonFileSpanEmitter,
+  type WorkflowSpanEmitter,
+} from './span-emitter.js';
+export {
+  lintWorkflow,
+  getWorkflowGraph,
+} from './linter.js';
+export {
+  createWorkflowTestHarness,
+  type WorkflowTestHarness,
+  type WorkflowTestResult,
+  type MockHandlerFn,
+} from './test-harness.js';

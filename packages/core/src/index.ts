@@ -408,6 +408,17 @@ export {
   // Phase W5 — Governance
   WorkflowConcurrencyError,
   WorkflowRateLimitError,
+  // Phase W6 — Observability and DX
+  type SpanStatus,
+  type WorkflowSpan,
+  type RunTrace,
+  type WorkflowSpanEmitter,
+  type LintSeverity,
+  type LintResult,
+  type WorkflowGraphNode,
+  type WorkflowGraphEdge,
+  type WorkflowGraph,
+  type ReplayRunOpts,
 } from './workflows.js';
 
 // Phase 5 — Capability Policy Bindings

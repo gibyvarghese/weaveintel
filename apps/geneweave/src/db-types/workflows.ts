@@ -166,6 +166,25 @@ export interface WorkflowCheckpointRow {
   created_at: string;
 }
 
+/** Phase W6 — structured step span row (observability). */
+export interface WorkflowSpanRow {
+  id: string;
+  run_id: string;
+  workflow_id: string;
+  step_id: string;
+  handler_kind: string;
+  handler_key: string;
+  started_at: number;
+  completed_at: number;
+  duration_ms: number;
+  status: string;
+  retry_count: number;
+  cost_usd: number;
+  error: string | null;
+  attributes: string;  // JSON object
+  created_at: string;
+}
+
 export interface CapabilityPolicyBindingRow {
   id: string;
   binding_kind: string;

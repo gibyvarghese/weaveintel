@@ -48,6 +48,10 @@ import { makeAuditEvent } from './audit-log.js';
 import { type WorkflowRateLimiter } from './rate-limiter.js';
 import { type WorkflowRunQueue } from './run-queue.js';
 import { WorkflowConcurrencyError, WorkflowRateLimitError } from '@weaveintel/core';
+import { type WorkflowSpanEmitter } from './span-emitter.js';
+import { getWorkflowGraph } from './linter.js';
+import type { WorkflowSpan, RunTrace, WorkflowGraph, ReplayRunOpts } from '@weaveintel/core';
+import type {} from './replay-recorder.js';
 
 export type { WorkflowEngineOptions } from './engine-types.js';
 
@@ -80,6 +84,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   // Phase W5
   private rateLimiter?: WorkflowRateLimiter;
   private runQueue?: WorkflowRunQueue;
+  // Phase W6
+  private spanEmitter?: WorkflowSpanEmitter;
 
   constructor(opts?: WorkflowEngineOptions) {
     this.checkpointStore = opts?.checkpointStore ?? new InMemoryCheckpointStore();
@@ -103,6 +109,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     this.auditLog = opts?.auditLog;
     this.rateLimiter = opts?.rateLimiter;
     this.runQueue = opts?.runQueue;
+    this.spanEmitter = opts?.spanEmitter;
   }
 
   /** Phase 5 — Public access to the cost meter so callers (LLM adapters,
@@ -124,10 +131,94 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   getRateLimiter(): WorkflowRateLimiter | undefined { return this.rateLimiter; }
   /** Phase W5 — Access the run queue (if configured). */
   getRunQueue(): WorkflowRunQueue | undefined { return this.runQueue; }
+  /** Phase W6 — Access the span emitter (if configured). */
+  getSpanEmitter(): WorkflowSpanEmitter | undefined { return this.spanEmitter; }
   /** Phase W4 — Return the full immutable audit event history for a run. */
   async listWorkflowEvents(runId: string): Promise<WorkflowAuditEvent[]> {
     if (!this.auditLog) return [];
     return this.auditLog.list(runId);
+  }
+
+  /** Phase W6 — Return a full execution trace for a run (spans + run summary). */
+  async getRunTrace(runId: string): Promise<RunTrace | null> {
+    const run = await this.getRun(runId);
+    if (!run) return null;
+    const spans = this.spanEmitter ? await this.spanEmitter.getSpans(runId) : [];
+    const startedMs = run.startedAt ? new Date(run.startedAt).getTime() : Date.now();
+    const completedMs = run.completedAt ? new Date(run.completedAt).getTime() : Date.now();
+    return {
+      runId: run.id,
+      workflowId: run.workflowId,
+      status: run.status,
+      startedAt: run.startedAt,
+      completedAt: run.completedAt,
+      totalDurationMs: completedMs - startedMs,
+      costTotal: run.costTotal ?? 0,
+      costBreakdown: (run.costBreakdown as Record<string, number> | undefined) ?? {},
+      spans,
+    };
+  }
+
+  /**
+   * Phase W6 — Re-execute a completed or failed run.
+   * Steps before `opts.fromStepId` replay their recorded outputs from run history.
+   * Steps at/after that point run with live handlers (or per-step overrides).
+   */
+  async replayRun(runId: string, opts?: ReplayRunOpts): Promise<WorkflowRun> {
+    const original = await this.getRun(runId);
+    if (!original) throw new Error(`Workflow run not found: ${runId}`);
+    const def = await this.getDefinition(original.workflowId);
+    if (!def) throw new Error(`Workflow definition not found: ${original.workflowId}`);
+
+    // Build a replay trace from history entries up to (but not including) fromStepId.
+    const history = original.state.history ?? [];
+    const fromIdx = opts?.fromStepId
+      ? history.findIndex(h => h.stepId === opts.fromStepId)
+      : -1;
+    const replaySteps = fromIdx >= 0 ? history.slice(0, fromIdx) : history;
+    const overrides = opts?.overrides ?? {};
+
+    const replayEngine = new DefaultWorkflowEngine({
+      resolverRegistry: this.resolverRegistry,
+      definitionStore: this.definitionStore,
+      runRepository: this.runRepository,
+      checkpointStore: this.checkpointStore,
+      costMeter: this.costMeter,
+      spanEmitter: this.spanEmitter,
+      auditLog: this.auditLog,
+    });
+
+    // Register all live inline handlers first (for steps at/after fromStepId)
+    for (const [key, fn] of this.handlers.entries()) replayEngine.registerHandler(key, fn);
+
+    // Register replay handlers (by step ID and handler key) for steps before fromStepId.
+    // These win over live handlers because they are registered last.
+    const replayedStepIds = new Set(replaySteps.map(h => h.stepId));
+    for (const h of replaySteps) {
+      const recordedOutput = (overrides[h.stepId] !== undefined ? overrides[h.stepId] : h.output) as Record<string, unknown>;
+      const captured = recordedOutput;
+      const handlerName = async () => captured;
+      replayEngine.registerHandler(h.stepId, handlerName);
+      // Also register by handler key if defined in the workflow definition
+      const stepDef = def.steps.find(s => s.id === h.stepId);
+      if (stepDef?.handler && stepDef.handler !== h.stepId) {
+        replayEngine.registerHandler(stepDef.handler, async () => captured);
+      }
+    }
+    void replayedStepIds; // intentionally unused — kept for clarity
+
+    await replayEngine.createDefinition(def);
+    return replayEngine.startRun(def.id, original.state.variables as Record<string, unknown>, {
+      traceId: original.traceId,
+      tenantId: opts?.tenantId ?? original.tenantId,
+    });
+  }
+
+  /** Phase W6 — Return the adjacency list graph for a workflow definition. */
+  async getWorkflowGraph(workflowId: string): Promise<WorkflowGraph | null> {
+    const def = await this.getDefinition(workflowId);
+    if (!def) return null;
+    return getWorkflowGraph(def);
   }
 
   /** Subscribe to a specific workflow event type. Lazily creates an internal bus. */
@@ -520,6 +611,11 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         break;
       }
 
+      // Phase W6 — span tracking: record step start time, retry counter, and pre-step cost.
+      const stepStartMs = Date.now();
+      let stepRetryCount = 0;
+      const stepCostBefore = await Promise.resolve(this.costMeter.total(run.id));
+
       // Phase W1 — skipIf: evaluate expression; if truthy, skip step and advance.
       if (step.skipIf !== undefined) {
         let shouldSkip = false;
@@ -528,6 +624,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
           const skippedResult: WorkflowStepResult = {
             stepId: step.id, status: 'skipped', startedAt: now(), completedAt: now(),
           };
+          await this.emitStepSpan(run, step, stepStartMs, 'skipped', 0, 0);
           this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
           const nextStepId = resolveNextStep(def, step.id, skippedResult);
           (run as { state: WorkflowState }).state = advanceState(run.state, skippedResult, nextStepId);
@@ -634,6 +731,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
 
             retries--;
             retryAttempt++;
+            stepRetryCount++;
 
             const baseDelay = step.retryDelayMs ?? 0;
             if (baseDelay > 0) {
@@ -680,6 +778,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
               const ephemeral = step.outputScope === 'step';
               (run as { state: WorkflowState }).state = advanceState(run.state, retryProcessed, resolveNextStep(def, step.id, retryProcessed), ephemeral);
               for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
+              const retryCostUsd = (await Promise.resolve(this.costMeter.total(run.id))) - stepCostBefore;
+              await this.emitStepSpan(run, step, stepStartMs, 'completed', stepRetryCount, retryCostUsd);
               this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
               void this.appendAudit(run, 'step:completed', { stepId: step.id });
               await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
@@ -714,6 +814,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
                 if (this.stepLockStore) {
                   try { await this.stepLockStore.markDone(run.id, step.id, fbProcessed.output); } catch { /* best-effort */ }
                 }
+                const fbCostUsd = (await Promise.resolve(this.costMeter.total(run.id))) - stepCostBefore;
+                await this.emitStepSpan(run, step, stepStartMs, 'completed', stepRetryCount, fbCostUsd);
                 this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
                 void this.appendAudit(run, 'step:completed', { stepId: step.id });
                 const nextId = resolveNextStep(def, step.id, fbProcessed);
@@ -752,6 +854,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         const fullError = compErrors.length
           ? `${errorMsg}; compensation errors: ${compErrors.map(e => `${e.stepId}: ${e.error}`).join(', ')}`
           : errorMsg;
+        await this.emitStepSpan(run, step, stepStartMs, 'failed', stepRetryCount, 0, errorMsg);
         this.failRun(run, fullError);
         break;
       }
@@ -780,6 +883,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         try { await this.stepLockStore.markDone(run.id, step.id, stepResult.output); } catch { /* best-effort */ }
       }
 
+      const stepCostUsd = (await Promise.resolve(this.costMeter.total(run.id))) - stepCostBefore;
+      await this.emitStepSpan(run, step, stepStartMs, 'completed', stepRetryCount, stepCostUsd);
       this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
       void this.appendAudit(run, 'step:completed', { stepId: step.id });
 
@@ -832,6 +937,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         (run as { status: WorkflowRunStatus }).status = 'paused';
         await this.runRepository.save(run);
         this.runCache.set(run.id, run);
+        await this.emitStepSpan(run, step, stepStartMs, 'paused', 0, 0);
         this.emit({ type: 'workflow:paused', runId: run.id, timestamp: now() });
         await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
         return run;
@@ -844,6 +950,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         (run as { status: WorkflowRunStatus }).status = 'paused';
         await this.runRepository.save(run);
         this.runCache.set(run.id, run);
+        await this.emitStepSpan(run, step, stepStartMs, 'paused', 0, 0);
         this.emit({ type: 'workflow:paused', runId: run.id, timestamp: now() });
         await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
         // Phase W4 — durable sleep: schedule auto-resume if wakeAfterMs is set.
@@ -1129,6 +1236,47 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         }
       }
     }
+  }
+
+  /** Phase W6 — emit a step span if a span emitter is configured. Best-effort. */
+  private async emitStepSpan(
+    run: WorkflowRun,
+    step: WorkflowStep,
+    startMs: number,
+    status: import('@weaveintel/core').SpanStatus,
+    retryCount: number,
+    costUsd: number,
+    error?: string,
+  ): Promise<void> {
+    if (!this.spanEmitter) return;
+    const handlerKey = step.handler ?? step.id;
+    let handlerKind = step.type as string;
+    if (this.resolverRegistry) {
+      const resolved = this.resolverRegistry.forHandler(handlerKey);
+      if (resolved) handlerKind = resolved.resolver.kind;
+    } else if (handlerKey.includes(':')) {
+      handlerKind = handlerKey.split(':')[0]!;
+    }
+    const endMs = Date.now();
+    const span: WorkflowSpan = {
+      runId: run.id,
+      workflowId: run.workflowId,
+      stepId: step.id,
+      handlerKind,
+      handlerKey,
+      startedAt: startMs,
+      completedAt: endMs,
+      durationMs: endMs - startMs,
+      status,
+      retryCount,
+      costUsd,
+      ...(error ? { error } : {}),
+      attributes: {
+        traceId: run.traceId ?? '',
+        tenantId: run.tenantId ?? '',
+      },
+    };
+    await Promise.resolve(this.spanEmitter.emit(span)).catch(() => { /* best-effort */ });
   }
 
   private failRun(run: WorkflowRun, error: string): void {

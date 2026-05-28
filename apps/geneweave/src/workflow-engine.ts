@@ -31,11 +31,13 @@ import {
   type WorkflowDefinitionStore,
   type WorkflowRunRepository,
   type CheckpointStore,
+  type WorkflowSpanEmitter,
 } from '@weaveintel/workflows';
 import type { WorkflowDefinition, WorkflowStep } from '@weaveintel/core';
 import type { DatabaseAdapter } from './db.js';
 import { DbWorkflowRunRepository } from './workflows/db-workflow-run-repository.js';
 import { DbCheckpointStore } from './workflows/db-checkpoint-store.js';
+import { DbSpanEmitter } from './workflows/db-span-emitter.js';
 
 /**
  * DB-backed `WorkflowDefinitionStore` adapter.
@@ -240,6 +242,8 @@ export interface WorkflowEngineHandle {
   runRepository: WorkflowRunRepository;
   /** Phase 5: DB-backed checkpoint store. */
   checkpointStore: CheckpointStore;
+  /** Phase W6: DB-backed span emitter for observability. */
+  spanEmitter: WorkflowSpanEmitter;
 }
 
 /**
@@ -284,15 +288,17 @@ export function createGeneweaveWorkflowEngine(opts: {
   const costMeter = new InMemoryCostMeter();
   const runRepository = new DbWorkflowRunRepository(opts.db);
   const checkpointStore = new DbCheckpointStore(opts.db);
+  const spanEmitter = new DbSpanEmitter(opts.db);
   const engine = new DefaultWorkflowEngine({
     resolverRegistry: registry,
     definitionStore: layered,
     runRepository,
     checkpointStore,
     costMeter,
+    spanEmitter,
     ...(opts.contractEmitter ? { contractEmitter: opts.contractEmitter } : {}),
   });
-  return { engine, registry, store: layered, costMeter, runRepository, checkpointStore };
+  return { engine, registry, store: layered, costMeter, runRepository, checkpointStore, spanEmitter };
 }
 
 export { DbWorkflowDefinitionStore };

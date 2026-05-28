@@ -12,6 +12,7 @@ import type { PayloadStore } from './payload-store.js';
 import type { StepLockStore } from './step-lock-store.js';
 import type { WorkflowRunQueue } from './run-queue.js';
 import type { WorkflowRateLimiter } from './rate-limiter.js';
+import type { WorkflowSpanEmitter } from './span-emitter.js';
 
 export interface WorkflowEngineOptions {
   checkpointStore?: CheckpointStore;
@@ -129,4 +130,12 @@ export interface WorkflowEngineOptions {
    * as running runs reach a terminal or paused state.
    */
   runQueue?: WorkflowRunQueue;
+  // ─── Phase W6 — Observability ─────────────────────────────────────────────
+  /**
+   * Phase W6 — Span emitter. When set, the engine emits a `WorkflowSpan`
+   * after each step execution (completed, failed, skipped, paused). Spans
+   * include timing, retry count, cost, and handler kind — suitable for
+   * OpenTelemetry-compatible observability backends.
+   */
+  spanEmitter?: WorkflowSpanEmitter;
 }

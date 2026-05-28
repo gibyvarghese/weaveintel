@@ -453,4 +453,123 @@ export interface WorkflowEngine {
    * Returns an empty array when no audit log is configured.
    */
   listWorkflowEvents(runId: string): Promise<WorkflowAuditEvent[]>;
+  /**
+   * Phase W6 — Return a full execution trace for a run (spans + summary).
+   * Returns null if the run does not exist.
+   */
+  getRunTrace(runId: string): Promise<RunTrace | null>;
+  /**
+   * Phase W6 — Re-execute a run from scratch (or from a specific step),
+   * optionally overriding specific step outputs. Returns the new run.
+   */
+  replayRun(runId: string, opts?: ReplayRunOpts): Promise<WorkflowRun>;
+}
+
+// ─── Phase W6 — Observability and DX ─────────────────────────
+
+/** Status a span can report. */
+export type SpanStatus = 'completed' | 'failed' | 'skipped' | 'paused';
+
+/**
+ * A single step execution record emitted by the engine after each step.
+ * Modelled after OpenTelemetry spans — `startedAt`/`completedAt` are Unix ms.
+ */
+export interface WorkflowSpan {
+  runId: string;
+  workflowId: string;
+  stepId: string;
+  /** Resolver kind: 'noop' | 'tool' | 'script' | 'agent' | 'prompt' | 'mcp' | 'subworkflow' | step.type */
+  handlerKind: string;
+  /** The raw handler string (e.g. 'tool:web.search' or the step ID for inline). */
+  handlerKey: string;
+  startedAt: number;
+  completedAt: number;
+  durationMs: number;
+  status: SpanStatus;
+  /** Number of retry attempts made (0 = no retries). */
+  retryCount: number;
+  /** Cost in USD contributed by this step (from __cost extraction). */
+  costUsd: number;
+  /** Error message if status === 'failed'. */
+  error?: string;
+  /** Arbitrary key-value attributes (traceId, tenantId, etc.). */
+  attributes: Record<string, string | number | boolean>;
+}
+
+/**
+ * Full execution trace for a workflow run — spans ordered by execution,
+ * plus summary metadata.
+ */
+export interface RunTrace {
+  runId: string;
+  workflowId: string;
+  status: WorkflowRunStatus;
+  startedAt: string;
+  completedAt?: string;
+  totalDurationMs: number;
+  costTotal: number;
+  costBreakdown: Record<string, number>;
+  spans: WorkflowSpan[];
+}
+
+/** Emitter interface — apps plug in memory, file, or DB backends. */
+export interface WorkflowSpanEmitter {
+  emit(span: WorkflowSpan): void | Promise<void>;
+  getSpans(runId: string): Promise<WorkflowSpan[]>;
+  getAllSpans(): Promise<WorkflowSpan[]>;
+  clear(runId: string): Promise<void>;
+}
+
+/** Severity of a linter finding. */
+export type LintSeverity = 'error' | 'warning' | 'info';
+
+/** A single finding from `lintWorkflow()`. */
+export interface LintResult {
+  severity: LintSeverity;
+  /** The step ID the finding applies to, if any. */
+  stepId?: string;
+  message: string;
+  /** Machine-readable rule identifier. */
+  rule: string;
+}
+
+/** A workflow adjacency list suitable for rendering a visual graph. */
+export interface WorkflowGraphNode {
+  id: string;
+  name: string;
+  type: WorkflowStepType;
+  handler?: string;
+  isEntry: boolean;
+  isTerminal: boolean;
+}
+
+export interface WorkflowGraphEdge {
+  from: string;
+  to: string;
+  /** Edge label — 'true'/'false' for condition, case value for branch/switch. */
+  label?: string;
+}
+
+export interface WorkflowGraph {
+  nodes: WorkflowGraphNode[];
+  edges: WorkflowGraphEdge[];
+  entryStepId: string;
+  /** Step IDs unreachable from the entry step. */
+  unreachableStepIds: string[];
+}
+
+/** Options for `replayRun()`. */
+export interface ReplayRunOpts {
+  /**
+   * Re-execute from this step onward using live handlers.
+   * Steps before this step replay their recorded outputs from the run history.
+   */
+  fromStepId?: string;
+  /**
+   * Per-step output overrides. Key = stepId, value = the output to inject.
+   * Takes precedence over both recorded history and live handlers.
+   */
+  overrides?: Record<string, unknown>;
+  /** Tenant ID for the new replay run (defaults to original run's tenantId). */
+  tenantId?: string;
 }
