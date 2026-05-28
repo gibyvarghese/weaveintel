@@ -379,120 +379,13 @@ async function scenarioA() {
 // ════════════════════════════════════════════════════════════════════════
 
 async function scenarioB() {
-  header('Scenario B — Agent calls workflow as a tool; workflow calls tools internally');
+  header('Scenario B — weaveAgent calls workflow as a tool; workflow calls tools internally');
 
   const engine = buildEngine();
   await engine.createDefinition(salesPipelineDef);
 
-  // ── Tools the agent can call ──────────────────────────────────────────
+  // ── Register tools via weaveToolRegistry ─────────────────────────────
 
-  /**
-   * run_workflow — starts the sales pipeline and waits for completion.
-   * Returns the structured report + summary so the agent can reason on it.
-   */
-  const runWorkflowTool = {
-    name: 'run_workflow' as const,
-    description:
-      'Run the sales enrichment pipeline for a given region and quarter. ' +
-      'Returns a structured report with revenue, growth, top performer, and performance tier.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        region:  { type: 'string', description: 'Sales region (EMEA, APAC, AMER)' },
-        quarter: { type: 'string', description: 'Quarter label, e.g. Q4' },
-      },
-      required: ['region', 'quarter'],
-    },
-    async execute(args: Record<string, unknown>) {
-      const region  = String(args['region']  ?? '');
-      const quarter = String(args['quarter'] ?? 'Q4');
-      const run = await engine.startRun('sales-pipeline', { region, quarter });
-
-      if (run.status === 'failed') {
-        return { error: run.error ?? 'workflow failed', region, quarter };
-      }
-
-      const vars = run.state.variables as Record<string, unknown>;
-      return {
-        runId:    run.id,
-        region,
-        quarter,
-        status:   run.status,
-        report:   vars['report'],
-        summary:  vars['summary'],
-        stepsRan: run.state.history.length,
-      };
-    },
-  };
-
-  /**
-   * compare_regions — calls run_workflow for multiple regions and returns
-   * a side-by-side comparison. This is a higher-level agent tool built on
-   * top of the workflow.
-   */
-  const compareRegionsTool = {
-    name: 'compare_regions' as const,
-    description:
-      'Run the sales pipeline for multiple regions and return a ranked comparison table.',
-    inputSchema: {
-      type: 'object' as const,
-      properties: {
-        regions: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'List of regions to compare (e.g. ["EMEA","APAC","AMER"])',
-        },
-        quarter: { type: 'string', description: 'Quarter to compare across regions' },
-      },
-      required: ['regions', 'quarter'],
-    },
-    async execute(args: Record<string, unknown>) {
-      const regions = (args['regions'] as string[]) ?? [];
-      const quarter = String(args['quarter'] ?? 'Q4');
-
-      const results = await Promise.all(
-        regions.map(async (region) => {
-          const run = await engine.startRun('sales-pipeline', { region, quarter });
-          if (run.status === 'failed') return { region, error: run.error };
-          const vars = run.state.variables as Record<string, unknown>;
-          return {
-            region,
-            tier:       (vars['tier']       as string) ?? '',
-            badge:      (vars['badge']      as string) ?? '',
-            total:      (vars['total']      as number) ?? 0,
-            growthPct:  (vars['growthPct']  as number) ?? 0,
-            totalDeals: (vars['totalDeals'] as number) ?? 0,
-            topRep:     (vars['topRep']     as string) ?? '',
-            summary:    (vars['summary']    as string) ?? '',
-          };
-        }),
-      );
-
-      const ranked = results
-        .filter(r => !('error' in r))
-        .sort((a, b) => (b as { total: number }).total - (a as { total: number }).total);
-
-      return { quarter, ranked, runCount: results.length };
-    },
-  };
-
-  // ── Live agent path (requires ANTHROPIC_API_KEY) ─────────────────────
-
-  if (process.env['ANTHROPIC_API_KEY']) {
-    info('ANTHROPIC_API_KEY present — running live agent');
-    await runLiveAgent(runWorkflowTool.execute.bind(runWorkflowTool), compareRegionsTool.execute.bind(compareRegionsTool));
-  } else {
-    info('ANTHROPIC_API_KEY not set — running mock agent loop to demonstrate the pattern');
-    await runMockAgent(runWorkflowTool, compareRegionsTool);
-  }
-}
-
-// ── Live agent (weaveAgent) ───────────────────────────────────────────
-
-async function runLiveAgent(
-  runWorkflowExecute: (args: Record<string, unknown>) => Promise<unknown>,
-  compareRegionsExecute: (args: Record<string, unknown>) => Promise<unknown>,
-) {
   const tools = weaveToolRegistry();
 
   tools.register(weaveTool({
@@ -509,8 +402,14 @@ async function runLiveAgent(
       required: ['region', 'quarter'],
     },
     execute: async (args: { region: string; quarter: string }) => {
-      const result = await runWorkflowExecute(args);
-      info(`  [run_workflow] ${args.region}/${args.quarter} → ${JSON.stringify(result).slice(0, 100)}`);
+      const run = await engine.startRun('sales-pipeline', { region: args.region, quarter: args.quarter });
+      if (run.status === 'failed') return JSON.stringify({ error: run.error, region: args.region });
+      const vars = run.state.variables as Record<string, unknown>;
+      const result = {
+        runId: run.id, region: args.region, quarter: args.quarter, status: run.status,
+        report: vars['report'], summary: vars['summary'], stepsRan: run.state.history.length,
+      };
+      info(`  [run_workflow] ${args.region}/${args.quarter} → ${run.status} (${run.state.history.length} steps)`);
       return JSON.stringify(result);
     },
   }));
@@ -521,32 +420,52 @@ async function runLiveAgent(
     parameters: {
       type: 'object',
       properties: {
-        regions: { type: 'array', items: { type: 'string' }, description: 'List of regions to compare' },
+        regions: { type: 'array', items: { type: 'string' }, description: 'List of regions to compare (e.g. ["EMEA","APAC","AMER"])' },
         quarter: { type: 'string', description: 'Quarter to compare across regions' },
       },
       required: ['regions', 'quarter'],
     },
     execute: async (args: { regions: string[]; quarter: string }) => {
-      const result = await compareRegionsExecute(args);
-      info(`  [compare_regions] ${args.regions.join(',')}/${args.quarter} → ${JSON.stringify(result).slice(0, 100)}`);
-      return JSON.stringify(result);
+      const results = await Promise.all(
+        args.regions.map(async (region) => {
+          const run = await engine.startRun('sales-pipeline', { region, quarter: args.quarter });
+          if (run.status === 'failed') return { region, error: run.error };
+          const vars = run.state.variables as Record<string, unknown>;
+          return {
+            region,
+            tier:       (vars['tier']       as string) ?? '',
+            badge:      (vars['badge']      as string) ?? '',
+            total:      (vars['total']      as number) ?? 0,
+            growthPct:  (vars['growthPct']  as number) ?? 0,
+            totalDeals: (vars['totalDeals'] as number) ?? 0,
+            topRep:     (vars['topRep']     as string) ?? '',
+            summary:    (vars['summary']    as string) ?? '',
+          };
+        }),
+      );
+      const ranked = results
+        .filter(r => !('error' in r))
+        .sort((a, b) => (b as { total: number }).total - (a as { total: number }).total);
+      info(`  [compare_regions] ${args.regions.join(',')}/${args.quarter} → ${ranked.length} regions ranked`);
+      return JSON.stringify({ quarter: args.quarter, ranked, runCount: results.length });
     },
   }));
 
-  const model = weaveAnthropicModel('claude-haiku-4-5-20251001');
+  // ── Build and run weaveAgent ──────────────────────────────────────────
+
   const agent = weaveAgent({
     name: 'sales-agent',
-    model,
+    model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
     tools,
     systemPrompt:
-      'You are a sales analytics assistant. Use the available tools to fetch and analyse sales data, ' +
-      'then synthesise the results into clear business insights.',
+      'You are a sales analytics assistant. Use the available tools to fetch and analyse ' +
+      'sales data, then synthesise the results into clear business insights.',
     maxSteps: 10,
   });
 
   const ctx = weaveContext({ userId: 'analyst' });
-  info('User: Analyse Q4 sales for EMEA and APAC, compare and summarise for the board.');
 
+  info('User prompt: Analyse Q4 sales for EMEA and APAC, compare and summarise for the board.');
   const result = await agent.run(ctx, {
     messages: [{
       role: 'user',
@@ -557,62 +476,9 @@ async function runLiveAgent(
     }],
   });
 
-  info(`Agent response: ${result.output.slice(0, 600)}`);
-  ok('Live agent completed — agent called workflow tools, workflow called tool steps internally');
-}
-
-// ── Mock agent loop ───────────────────────────────────────────────────
-
-async function runMockAgent(
-  runWorkflowTool: { execute(args: Record<string, unknown>): Promise<unknown> },
-  compareRegionsTool: { execute(args: Record<string, unknown>): Promise<unknown> },
-) {
-  info('Simulating: agent calls compare_regions(["EMEA","APAC"], "Q4")');
-  info('  → compare_regions tool calls engine.startRun("sales-pipeline") for each region');
-  info('  → each workflow run executes: validate → fetch(tool) → calculate(tool) → classify(tool) → report(tool)');
-
-  const comparison = await compareRegionsTool.execute({ regions: ['EMEA', 'APAC', 'AMER'], quarter: 'Q4' }) as {
-    quarter: string;
-    ranked: Array<{ region: string; tier: string; badge: string; total: number; growthPct: number; totalDeals: number; topRep: string; summary: string }>;
-  };
-
-  ok('compare_regions returned:');
-  for (const r of comparison.ranked) {
-    info(`  ${r.badge} ${r.region}: $${r.total.toLocaleString()} (${r.growthPct >= 0 ? '+' : ''}${r.growthPct}% growth) — ${r.tier.toUpperCase()}`);
-    info(`     Top rep: ${r.topRep} | ${r.totalDeals} deals`);
-  }
-
-  info('');
-  info('Simulating: agent individually calls run_workflow for deeper EMEA drill-down');
-
-  const emeaResult = await runWorkflowTool.execute({ region: 'EMEA', quarter: 'Q4' }) as {
-    report: Record<string, unknown>;
-    summary: string;
-    stepsRan: number;
-  };
-
-  ok(`EMEA deep-dive: ${emeaResult.summary}`);
-  ok(`  Workflow executed ${emeaResult.stepsRan} steps (validate + 4 tool calls)`);
-
-  // Show what the agent would say
-  const top = comparison.ranked[0]!;
-  const mockSummary = [
-    `Executive Summary — Q4 Sales Performance`,
-    ``,
-    `${top.badge} WINNER: ${top.region} leads with $${top.total.toLocaleString()} revenue ` +
-    `(+${top.growthPct}% vs Q3), ${top.totalDeals} deals closed. Tier: ${top.tier.toUpperCase()}.`,
-    ``,
-    ...comparison.ranked.map(r =>
-      `• ${r.badge} ${r.region}: $${r.total.toLocaleString()} | ${r.growthPct >= 0 ? '+' : ''}${r.growthPct}% | ${r.totalDeals} deals | ${r.tier}`,
-    ),
-  ].join('\n');
-
-  info('');
-  info('Mock agent synthesis (what the LLM would write):');
-  for (const line of mockSummary.split('\n')) info(`  ${line}`);
-
-  ok('Mock agent loop complete');
-  ok('Pattern: agent → compare_regions tool → engine.startRun × 3 → each run calls tool:fetch, tool:calculate, tool:classify, tool:report');
+  info(`Agent output:\n${result.output.slice(0, 700)}`);
+  info(`Agent completed in ${result.steps.length} steps`);
+  ok('weaveAgent called workflow tools; each workflow run dispatched tool:fetch → tool:calculate → tool:classify → tool:report internally');
 }
 
 // ════════════════════════════════════════════════════════════════════════
