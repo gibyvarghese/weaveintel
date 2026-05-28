@@ -12,16 +12,16 @@
  * │  5. build-report    (tool:report)    — assembles structured JSON report    │
  * └────────────────────────────────────────────────────────────────────────────┘
  *
- * ┌─ Scenario B: Agent calls workflow as a tool; workflow calls tools itself ──┐
+ * ┌─ Scenario B: weaveAgent calls the workflow as a tool ──────────────────────┐
  * │  Agent receives "analyse Q4 sales for EMEA and APAC" from the user.       │
- * │  It calls `run_workflow` → the workflow executes tool steps internally.   │
- * │  Agent reads the run output and synthesises a business summary.           │
- * │  Set ANTHROPIC_API_KEY to run the live agent; otherwise a mock loop runs. │
+ * │  It calls run_workflow / compare_regions tools → each invokes the          │
+ * │  workflow engine, which in turn dispatches tool:* steps internally.        │
+ * │  Agent synthesises the outputs into a board-ready executive summary.       │
+ * │  Requires ANTHROPIC_API_KEY (loaded from .env automatically).              │
  * └────────────────────────────────────────────────────────────────────────────┘
  *
  * Run:
  *   npx tsx examples/22-workflow-tool-calls.ts
- *   ANTHROPIC_API_KEY=sk-... npx tsx examples/22-workflow-tool-calls.ts
  */
 
 import 'dotenv/config';
