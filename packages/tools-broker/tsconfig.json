@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../core" },
+    { "path": "../mcp-server" },
+    { "path": "../mcp-client" },
+    { "path": "../reliability" },
+    { "path": "../tools" },
+    { "path": "../tools-marketdata" },
+    { "path": "../testing" }
+  ]
+}

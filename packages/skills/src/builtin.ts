@@ -133,4 +133,48 @@ export const BUILT_IN_SKILLS: SkillDefinition[] = [
     },
     triggerPatterns: [],
   }),
+
+  // ── Equity thesis writer ──────────────────────────────────────────────────────
+  defineSkill({
+    id: 'skill-equity-thesis',
+    name: 'Equity Thesis Writer',
+    version: '1.0',
+    category: 'analysis',
+    summary: 'Write a structured investment thesis paragraph from a computed SymbolScore and InputBundle, citing only values present in the data.',
+    purpose: 'Turn deterministic factor scores into clear, human-readable investment logic that a portfolio manager can act on.',
+    whenToUse: 'Use after scoreSymbol/scoreUniverse produces a SymbolScore to explain the ranking in plain language with concrete numbers.',
+    whenNotToUse: 'Do NOT use as a substitute for data collection or scoring — this skill writes prose over already-computed numbers, never invents them.',
+    requiredContext: 'Must have: symbol, composite score, decile, confidence, factor scores (with rawInputs), redFlags, greenFlags, strategy name, and key financial metrics from the InputBundle fundamentals.',
+    executionGuidance: `
+Follow this structure exactly:
+1. LEAD LINE — composite score (formatted -1..+1), decile rank, and confidence level.
+2. STRATEGY — which ScoringStrategy was used and which factor weights dominated the composite.
+3. TOP 3 POSITIVE FACTORS — for each: factor name, score, and the actual numbers that drove it (cite rawInputs values, e.g. "ROIC of 22% vs industry median 9%"). Use peer context where available.
+4. BOTTOM 2 NEGATIVE FACTORS — same format, be honest about weaknesses.
+5. GREEN FLAGS — list each code and evidence string verbatim.
+6. RED FLAGS — list each code, severity, and evidence string verbatim. State the implication.
+7. OUTLOOK — one sentence synthesis.
+NEVER invent numbers. If a rawInput is null, say "data unavailable". Do not round aggressively — keep 1–2 significant decimals.`,
+    outputGuidance: 'Return 200-400 words of prose with a clear structure. No markdown headers inside the paragraph — write as flowing investment memo text.',
+    completionGuidance: 'Complete when all 7 sections are addressed and every cited number is present in the provided score/bundle data.',
+    ambiguityGuidance: 'If required score fields are missing, state the gap explicitly rather than estimating.',
+    failureGuidance: 'If the score data is insufficient (coverage < 0.3), lead with a coverage caveat before the thesis.',
+    policy: {
+      sideEffectsAllowed: false,
+      requiresApproval: false,
+      sensitivityHandling: 'Do not speculate about insider knowledge. Cite only data from the score and bundle.',
+    },
+    completionContract: {
+      narrative: 'Thesis covers score, strategy, top/bottom factors with actual numbers, flags, and a synthesis sentence.',
+      requiredEvidence: ['composite', 'decile', 'factors', 'redFlags', 'greenFlags'],
+    },
+    triggerPatterns: ['write.*thesis', 'explain.*score', 'investment.*thesis', 'analyze.*stock', 'why.*ranked'],
+    examples: [
+      {
+        input: 'Write an equity thesis for AAPL with composite=0.62, decile=8, strategy=compounder-quality.',
+        output: 'Apple (AAPL) scores 0.62 composite (decile 8/10, confidence 88%) under the Compounder Quality strategy, where quality (35%) and profitability (20%) dominate. The three strongest contributors are: quality (score +0.71), driven by ROIC of 55% vs sector median ~15% and Altman Z of 6.8 well above distress; profitability (+0.65), with gross margin 45.5%, operating margin 30.5%; and capital_allocation (+0.48), with 5-year ROIC slope positive and consistent positive FCF. The weakest factors are size (−0.12) reflecting its mega-cap profile, and value (−0.08) given P/E of 29.8 above sector median. Green flags: COMPOUNDER — 5y ROIC ≥ 15% every year. No red flags detected. Synthesis: Apple remains a high-quality compounder with exceptional capital efficiency; the primary risk is valuation compression if rate expectations shift upward.',
+        notes: 'Demonstrates exact-number citation, flag verbatim quoting, and honest weakness disclosure.',
+      },
+    ],
+  }),
 ];
