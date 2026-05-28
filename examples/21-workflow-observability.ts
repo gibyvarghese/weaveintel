@@ -19,6 +19,7 @@
  *   ANTHROPIC_API_KEY=sk-... npx tsx examples/21-workflow-observability.ts
  */
 
+import 'dotenv/config';
 import {
   DefaultWorkflowEngine,
   defineWorkflow,
@@ -30,6 +31,9 @@ import {
   createWorkflowTestHarness,
   InMemoryAuditLog,
 } from '@weaveintel/workflows';
+import { weaveContext, weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rm } from 'node:fs/promises';
@@ -466,56 +470,51 @@ async function section10() {
 async function section11() {
   header('11 — Agent tool integration: workflow observability tools');
 
-  if (!process.env['ANTHROPIC_API_KEY']) {
-    info('ANTHROPIC_API_KEY not set — skipping live agent demo');
-    info('The pattern: agent calls run_workflow tool, then get_run_trace tool to inspect spans');
-    ok('section skipped (set ANTHROPIC_API_KEY to run)');
-    return;
-  }
-
   // Wire the emitter + engine
   const emitter = new InMemorySpanEmitter();
   const engine = new DefaultWorkflowEngine({ spanEmitter: emitter });
   await engine.createDefinition(linearWorkflow);
   engine.registerHandler('fetch-handler',  async () => ({ items: ['alpha', 'beta', 'gamma'] }));
-  engine.registerHandler('enrich-handler', async (vars) => ({ count: (vars['items'] as string[]).length }));
+  engine.registerHandler('enrich-handler', async (vars) => {
+    const fetchOut = vars['__step_fetch'] as { items: string[] } | undefined;
+    const items = fetchOut?.items ?? (vars['items'] as string[] | undefined) ?? [];
+    return { count: items.length };
+  });
   engine.registerHandler('store-handler',  async () => ({ stored: true }));
 
-  // Tool definitions for the agent
-  type ToolInput = Record<string, unknown>;
+  // Build tools using weaveAgent pattern
+  const tools = weaveToolRegistry();
 
-  const runWorkflowTool = {
+  tools.register(weaveTool({
     name: 'run_workflow',
     description: 'Execute a workflow and return the run ID',
-    inputSchema: {
-      type: 'object' as const,
+    parameters: {
+      type: 'object',
       properties: {
         workflowId: { type: 'string' },
         input: { type: 'object' },
       },
       required: ['workflowId'],
     },
-    async execute(args: ToolInput) {
-      const run = await engine.startRun(
-        String(args['workflowId']),
-        (args['input'] as Record<string, unknown> | undefined) ?? {},
-      );
-      return { runId: run.id, status: run.status };
+    execute: async (args: { workflowId: string; input?: Record<string, unknown> }) => {
+      const run = await engine.startRun(args.workflowId, args.input ?? {});
+      info(`  [run_workflow] ${args.workflowId} → ${run.status}`);
+      return JSON.stringify({ runId: run.id, status: run.status });
     },
-  };
+  }));
 
-  const getRunTraceTool = {
+  tools.register(weaveTool({
     name: 'get_run_trace',
     description: 'Get the execution trace (spans) for a workflow run',
-    inputSchema: {
-      type: 'object' as const,
+    parameters: {
+      type: 'object',
       properties: { runId: { type: 'string' } },
       required: ['runId'],
     },
-    async execute(args: ToolInput) {
-      const trace = await engine.getRunTrace(String(args['runId']));
-      if (!trace) return { error: 'trace not found' };
-      return {
+    execute: async (args: { runId: string }) => {
+      const trace = await engine.getRunTrace(args.runId);
+      if (!trace) return JSON.stringify({ error: 'trace not found' });
+      const result = {
         status: trace.status,
         totalDurationMs: trace.totalDurationMs,
         spanCount: trace.spans.length,
@@ -527,87 +526,54 @@ async function section11() {
           handlerKind: s.handlerKind,
         })),
       };
+      info(`  [get_run_trace] ${args.runId} → ${result.spanCount} spans`);
+      return JSON.stringify(result);
     },
-  };
+  }));
 
-  const lintWorkflowTool = {
+  tools.register(weaveTool({
     name: 'lint_workflow',
     description: 'Static-analyze a workflow definition and return lint findings',
-    inputSchema: {
-      type: 'object' as const,
+    parameters: {
+      type: 'object',
       properties: { workflowId: { type: 'string' } },
       required: ['workflowId'],
     },
-    async execute(args: ToolInput) {
-      const def = await engine.getDefinition(String(args['workflowId']));
-      if (!def) return { error: 'definition not found' };
+    execute: async (args: { workflowId: string }) => {
+      const def = await engine.getDefinition(args.workflowId);
+      if (!def) return JSON.stringify({ error: 'definition not found' });
       const results = lintWorkflow(def);
-      return {
+      info(`  [lint_workflow] ${args.workflowId} → ${results.length} findings`);
+      return JSON.stringify({
         findings: results.length,
         errors: results.filter(r => r.severity === 'error').length,
         warnings: results.filter(r => r.severity === 'warning').length,
         details: results,
-      };
+      });
     },
-  };
+  }));
 
-  // Run a real agent that uses these tools
-  const { Anthropic } = await import('@anthropic-ai/sdk');
-  const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'] });
+  const model = weaveAnthropicModel('claude-haiku-4-5-20251001');
+  const agent = weaveAgent({
+    name: 'observability-agent',
+    model,
+    tools,
+    systemPrompt: 'You are a workflow observability assistant. Use the provided tools to run workflows, inspect their execution traces, and lint definitions.',
+    maxSteps: 10,
+  });
 
-  const tools: import('@anthropic-ai/sdk').Tool[] = [
-    { name: runWorkflowTool.name, description: runWorkflowTool.description, input_schema: runWorkflowTool.inputSchema },
-    { name: getRunTraceTool.name, description: getRunTraceTool.description, input_schema: getRunTraceTool.inputSchema },
-    { name: lintWorkflowTool.name, description: lintWorkflowTool.description, input_schema: lintWorkflowTool.inputSchema },
-  ];
+  const ctx = weaveContext({ userId: 'demo-user' });
+  info('Running weaveAgent with observability tools...');
 
-  const messages: import('@anthropic-ai/sdk').MessageParam[] = [
-    {
+  const result = await agent.run(ctx, {
+    messages: [{
       role: 'user',
       content: 'Please: 1) Run the "w6-linear" workflow with input {"source":"agent-test"}, 2) Get the trace for that run to see how long each step took, 3) Lint the "w6-linear" workflow definition and report the findings.',
-    },
-  ];
+    }],
+  });
 
-  let turnCount = 0;
-  while (turnCount < 8) {
-    turnCount++;
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      tools,
-      messages,
-    });
-
-    const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
-    const textBlocks = response.content.filter(b => b.type === 'text');
-
-    for (const block of textBlocks) {
-      if (block.type === 'text') info(`Agent: ${block.text.slice(0, 200)}`);
-    }
-
-    if (response.stop_reason === 'end_turn' || toolUseBlocks.length === 0) break;
-
-    messages.push({ role: 'assistant', content: response.content });
-
-    const toolResults: import('@anthropic-ai/sdk').ToolResultBlockParam[] = [];
-    for (const block of toolUseBlocks) {
-      if (block.type !== 'tool_use') continue;
-      let result: unknown;
-      try {
-        if (block.name === 'run_workflow') result = await runWorkflowTool.execute(block.input as ToolInput);
-        else if (block.name === 'get_run_trace') result = await getRunTraceTool.execute(block.input as ToolInput);
-        else if (block.name === 'lint_workflow') result = await lintWorkflowTool.execute(block.input as ToolInput);
-        else result = { error: `unknown tool: ${block.name}` };
-      } catch (err) {
-        result = { error: String(err) };
-      }
-      info(`  [tool] ${block.name} → ${JSON.stringify(result).slice(0, 120)}`);
-      toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
-    }
-
-    messages.push({ role: 'user', content: toolResults });
-  }
-
+  info(`Agent response: ${result.output.slice(0, 400)}`);
+  info(`Agent completed in ${result.steps.length} steps`);
   ok('Agent successfully used run_workflow, get_run_trace, and lint_workflow tools');
 }
 

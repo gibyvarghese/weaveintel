@@ -19,6 +19,7 @@
  *   ANTHROPIC_API_KEY=sk-... npx tsx examples/19-workflow-governance.ts
  */
 
+import 'dotenv/config';
 import {
   DefaultWorkflowEngine,
   defineWorkflow,
@@ -29,7 +30,9 @@ import {
   InMemoryAuditLog,
   DefaultWorkflowAdminService,
 } from '@weaveintel/workflows';
-import { WorkflowConcurrencyError, WorkflowRateLimitError } from '@weaveintel/core';
+import { WorkflowConcurrencyError, WorkflowRateLimitError, weaveContext, weaveEventBus, weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rm } from 'node:fs/promises';
@@ -514,13 +517,7 @@ ok('File-backed rate limiter works with engine');
 
 header('11. Agent tool integration — governance tools (run_workflow, get_run_cost, admin_list_runs)');
 
-if (!process.env['ANTHROPIC_API_KEY']) {
-  info('ANTHROPIC_API_KEY not set — skipping real agent demo');
-  info('Set ANTHROPIC_API_KEY=sk-... to run the full agent integration test');
-} else {
-  const { Anthropic } = await import('@anthropic-ai/sdk');
-  const client = new Anthropic();
-
+{
   // Governance engine for agent use
   const agentRL = new InMemoryWorkflowRateLimiter();
   const agentAuditLog = new InMemoryAuditLog();
@@ -554,122 +551,87 @@ if (!process.env['ANTHROPIC_API_KEY']) {
     agentAuditLog,
   );
 
-  const agentTools: import('@anthropic-ai/sdk').Tool[] = [
-    {
-      name: 'run_workflow',
-      description: 'Execute a workflow and return run details including cost.',
-      input_schema: {
-        type: 'object' as const,
-        properties: {
-          workflow_id: { type: 'string' as const },
-          tenant_id: { type: 'string' as const },
-        },
-        required: ['workflow_id'],
-      },
-    },
-    {
-      name: 'get_run_cost',
-      description: 'Get cost breakdown for a workflow run.',
-      input_schema: {
-        type: 'object' as const,
-        properties: { run_id: { type: 'string' as const } },
-        required: ['run_id'],
-      },
-    },
-    {
-      name: 'admin_list_runs',
-      description: 'List workflow runs with optional filters.',
-      input_schema: {
-        type: 'object' as const,
-        properties: {
-          workflow_id: { type: 'string' as const },
-          status: { type: 'string' as const },
-          limit: { type: 'number' as const },
-        },
-      },
-    },
-  ];
+  // Register tools using weaveAgent pattern
+  const tools = weaveToolRegistry();
 
-  type AgentToolInput = {
-    workflow_id?: string;
-    tenant_id?: string;
-    run_id?: string;
-    status?: string;
-    limit?: number;
-  };
+  tools.register(weaveTool({
+    name: 'run_workflow',
+    description: 'Execute a workflow and return run details including cost.',
+    parameters: {
+      type: 'object',
+      properties: {
+        workflow_id: { type: 'string' },
+        tenant_id: { type: 'string' },
+      },
+      required: ['workflow_id'],
+    },
+    execute: async (args: { workflow_id: string; tenant_id?: string }) => {
+      const run = await agentEngine.startRun(args.workflow_id, {}, { tenantId: args.tenant_id });
+      info(`  [run_workflow] ${args.workflow_id} → ${run.status} cost=$${run.costTotal?.toFixed(3) ?? '0.000'}`);
+      return JSON.stringify({ runId: run.id, status: run.status, costTotal: run.costTotal, costBreakdown: run.costBreakdown });
+    },
+  }));
 
-  async function processAgentTool(name: string, input: AgentToolInput): Promise<string> {
-    if (name === 'run_workflow') {
-      const run = await agentEngine.startRun(input.workflow_id ?? '', {}, { tenantId: input.tenant_id });
-      return JSON.stringify({
-        runId: run.id,
-        status: run.status,
-        costTotal: run.costTotal,
-        costBreakdown: run.costBreakdown,
-      });
-    }
-    if (name === 'get_run_cost') {
-      const run = await agentEngine.getRun(input.run_id ?? '');
-      return JSON.stringify({
-        costTotal: run?.costTotal,
-        costBreakdown: run?.costBreakdown,
-      });
-    }
-    if (name === 'admin_list_runs') {
+  tools.register(weaveTool({
+    name: 'get_run_cost',
+    description: 'Get cost breakdown for a workflow run.',
+    parameters: {
+      type: 'object',
+      properties: { run_id: { type: 'string' } },
+      required: ['run_id'],
+    },
+    execute: async (args: { run_id: string }) => {
+      const run = await agentEngine.getRun(args.run_id);
+      info(`  [get_run_cost] ${args.run_id} → costTotal=$${run?.costTotal?.toFixed(3) ?? '0.000'}`);
+      return JSON.stringify({ costTotal: run?.costTotal, costBreakdown: run?.costBreakdown });
+    },
+  }));
+
+  tools.register(weaveTool({
+    name: 'admin_list_runs',
+    description: 'List workflow runs with optional filters.',
+    parameters: {
+      type: 'object',
+      properties: {
+        workflow_id: { type: 'string' },
+        status: { type: 'string' },
+        limit: { type: 'number' },
+      },
+    },
+    execute: async (args: { workflow_id?: string; status?: string; limit?: number }) => {
       const runs = await agentAdminService.listRuns({
-        workflowId: input.workflow_id,
-        status: input.status as import('@weaveintel/core').WorkflowRunStatus | undefined,
-        limit: input.limit,
+        workflowId: args.workflow_id,
+        status: args.status as import('@weaveintel/core').WorkflowRunStatus | undefined,
+        limit: args.limit,
       });
-      return JSON.stringify(runs.map(r => ({
-        id: r.id,
-        status: r.status,
-        costTotal: r.costTotal,
-        costBreakdown: r.costBreakdown,
-      })));
-    }
-    return JSON.stringify({ error: 'Unknown tool' });
-  }
-
-  const messages: import('@anthropic-ai/sdk').MessageParam[] = [
-    {
-      role: 'user',
-      content: 'Run the "data-pipeline" workflow, then check its cost breakdown. Also list all completed runs. Tell me the total cost and which steps cost the most.',
+      info(`  [admin_list_runs] found ${runs.length} runs`);
+      return JSON.stringify(runs.map(r => ({ id: r.id, status: r.status, costTotal: r.costTotal, costBreakdown: r.costBreakdown })));
     },
-  ];
+  }));
 
-  info('Sending request to Claude with governance tools...');
-  let response = await client.messages.create({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
-    tools: agentTools,
-    messages,
+  const model = weaveAnthropicModel('claude-haiku-4-5-20251001');
+  const agent = weaveAgent({
+    name: 'governance-agent',
+    model,
+    tools,
+    systemPrompt: 'You are a workflow operations assistant. Use the available tools to run workflows and inspect their costs.',
+    maxSteps: 10,
   });
 
-  while (response.stop_reason === 'tool_use') {
-    const results: import('@anthropic-ai/sdk').MessageParam['content'] = [];
-    for (const block of response.content) {
-      if (block.type !== 'tool_use') continue;
-      info(`  Tool call: ${block.name}(${JSON.stringify(block.input)})`);
-      const result = await processAgentTool(block.name, block.input as AgentToolInput);
-      info(`  Tool result: ${result}`);
-      results.push({ type: 'tool_result', tool_use_id: block.id, content: result });
-    }
-    messages.push({ role: 'assistant', content: response.content });
-    messages.push({ role: 'user', content: results });
-    response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      tools: agentTools,
-      messages,
-    });
-  }
+  const ctx = weaveContext({ userId: 'demo-user' });
+  const bus = weaveEventBus();
+  void bus;
 
-  const finalText = response.content
-    .filter(b => b.type === 'text')
-    .map(b => (b as { type: 'text'; text: string }).text)
-    .join('\n');
-  info(`Agent response:\n${finalText}`);
+  info('Running weaveAgent with governance tools...');
+  const result = await agent.run(ctx, {
+    messages: [{
+      role: 'user',
+      content: 'Run the "data-pipeline" workflow, then check its cost breakdown. Also list all completed runs. Tell me the total cost and which steps cost the most.',
+    }],
+  });
+
+  info(`Agent response: ${result.output.slice(0, 400)}`);
+  info(`Agent steps: ${result.steps.length}`);
 
   const allRuns = await agentAdminService.listRuns();
   if (allRuns.length === 0) fail('Agent should have triggered at least one workflow run');

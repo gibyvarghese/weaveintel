@@ -24,6 +24,7 @@
  *   ANTHROPIC_API_KEY=sk-... npx tsx examples/22-workflow-tool-calls.ts
  */
 
+import 'dotenv/config';
 import {
   DefaultWorkflowEngine,
   HandlerResolverRegistry,
@@ -33,6 +34,9 @@ import {
   createToolResolver,
 } from '@weaveintel/workflows';
 import type { WorkflowDefinition } from '@weaveintel/core';
+import { weaveContext, weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -476,99 +480,84 @@ async function scenarioB() {
 
   if (process.env['ANTHROPIC_API_KEY']) {
     info('ANTHROPIC_API_KEY present — running live agent');
-    await runLiveAgent(runWorkflowTool, compareRegionsTool);
+    await runLiveAgent(runWorkflowTool.execute.bind(runWorkflowTool), compareRegionsTool.execute.bind(compareRegionsTool));
   } else {
     info('ANTHROPIC_API_KEY not set — running mock agent loop to demonstrate the pattern');
     await runMockAgent(runWorkflowTool, compareRegionsTool);
   }
 }
 
-// ── Live agent (Anthropic SDK) ────────────────────────────────────────
+// ── Live agent (weaveAgent) ───────────────────────────────────────────
 
 async function runLiveAgent(
-  runWorkflowTool: {
-    name: 'run_workflow';
-    description: string;
-    inputSchema: { type: 'object'; properties: Record<string, unknown>; required: string[] };
-    execute(args: Record<string, unknown>): Promise<unknown>;
-  },
-  compareRegionsTool: {
-    name: 'compare_regions';
-    description: string;
-    inputSchema: { type: 'object'; properties: Record<string, unknown>; required: string[] };
-    execute(args: Record<string, unknown>): Promise<unknown>;
-  },
+  runWorkflowExecute: (args: Record<string, unknown>) => Promise<unknown>,
+  compareRegionsExecute: (args: Record<string, unknown>) => Promise<unknown>,
 ) {
-  const { Anthropic } = await import('@anthropic-ai/sdk');
-  const client = new Anthropic({ apiKey: process.env['ANTHROPIC_API_KEY'] });
+  const tools = weaveToolRegistry();
 
-  const toolDefs: import('@anthropic-ai/sdk').Tool[] = [
-    {
-      name: runWorkflowTool.name,
-      description: runWorkflowTool.description,
-      input_schema: runWorkflowTool.inputSchema,
+  tools.register(weaveTool({
+    name: 'run_workflow',
+    description:
+      'Run the sales enrichment pipeline for a given region and quarter. ' +
+      'Returns a structured report with revenue, growth, top performer, and performance tier.',
+    parameters: {
+      type: 'object',
+      properties: {
+        region:  { type: 'string', description: 'Sales region (EMEA, APAC, AMER)' },
+        quarter: { type: 'string', description: 'Quarter label, e.g. Q4' },
+      },
+      required: ['region', 'quarter'],
     },
-    {
-      name: compareRegionsTool.name,
-      description: compareRegionsTool.description,
-      input_schema: compareRegionsTool.inputSchema,
+    execute: async (args: { region: string; quarter: string }) => {
+      const result = await runWorkflowExecute(args);
+      info(`  [run_workflow] ${args.region}/${args.quarter} → ${JSON.stringify(result).slice(0, 100)}`);
+      return JSON.stringify(result);
     },
-  ];
+  }));
 
-  const messages: import('@anthropic-ai/sdk').MessageParam[] = [
-    {
+  tools.register(weaveTool({
+    name: 'compare_regions',
+    description: 'Run the sales pipeline for multiple regions and return a ranked comparison table.',
+    parameters: {
+      type: 'object',
+      properties: {
+        regions: { type: 'array', items: { type: 'string' }, description: 'List of regions to compare' },
+        quarter: { type: 'string', description: 'Quarter to compare across regions' },
+      },
+      required: ['regions', 'quarter'],
+    },
+    execute: async (args: { regions: string[]; quarter: string }) => {
+      const result = await compareRegionsExecute(args);
+      info(`  [compare_regions] ${args.regions.join(',')}/${args.quarter} → ${JSON.stringify(result).slice(0, 100)}`);
+      return JSON.stringify(result);
+    },
+  }));
+
+  const model = weaveAnthropicModel('claude-haiku-4-5-20251001');
+  const agent = weaveAgent({
+    name: 'sales-agent',
+    model,
+    tools,
+    systemPrompt:
+      'You are a sales analytics assistant. Use the available tools to fetch and analyse sales data, ' +
+      'then synthesise the results into clear business insights.',
+    maxSteps: 10,
+  });
+
+  const ctx = weaveContext({ userId: 'analyst' });
+  info('User: Analyse Q4 sales for EMEA and APAC, compare and summarise for the board.');
+
+  const result = await agent.run(ctx, {
+    messages: [{
       role: 'user',
       content:
         'Please analyse Q4 sales performance for EMEA and APAC. ' +
         'Compare both regions, identify which is performing better and why, ' +
         'and give me a concise executive summary I can present to the board.',
-    },
-  ];
+    }],
+  });
 
-  info('User: Analyse Q4 sales for EMEA and APAC, compare and summarise for the board.');
-
-  let turn = 0;
-  while (turn < 8) {
-    turn++;
-    const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      system:
-        'You are a sales analytics assistant. Use the available tools to fetch and analyse sales data, ' +
-        'then synthesise the results into clear business insights.',
-      tools: toolDefs,
-      messages,
-    });
-
-    const textBlocks    = response.content.filter(b => b.type === 'text');
-    const toolUseBlocks = response.content.filter(b => b.type === 'tool_use');
-
-    for (const block of textBlocks) {
-      if (block.type === 'text') info(`Agent: ${block.text.slice(0, 400)}`);
-    }
-
-    if (response.stop_reason === 'end_turn' || toolUseBlocks.length === 0) break;
-
-    messages.push({ role: 'assistant', content: response.content });
-
-    const results: import('@anthropic-ai/sdk').ToolResultBlockParam[] = [];
-    for (const block of toolUseBlocks) {
-      if (block.type !== 'tool_use') continue;
-      info(`  [tool call] ${block.name}(${JSON.stringify(block.input).slice(0, 80)})`);
-      let result: unknown;
-      try {
-        if (block.name === 'run_workflow')    result = await runWorkflowTool.execute(block.input as Record<string, unknown>);
-        else if (block.name === 'compare_regions') result = await compareRegionsTool.execute(block.input as Record<string, unknown>);
-        else result = { error: `unknown tool: ${block.name}` };
-      } catch (err) {
-        result = { error: String(err) };
-      }
-      info(`  [tool result] ${JSON.stringify(result).slice(0, 120)}`);
-      results.push({ type: 'tool_result', tool_use_id: block.id, content: JSON.stringify(result) });
-    }
-    messages.push({ role: 'user', content: results });
-  }
-
+  info(`Agent response: ${result.output.slice(0, 600)}`);
   ok('Live agent completed — agent called workflow tools, workflow called tool steps internally');
 }
 
