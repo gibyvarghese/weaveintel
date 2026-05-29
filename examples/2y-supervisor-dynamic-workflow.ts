@@ -1,19 +1,23 @@
 /**
  * Example 2Y — Supervisor Agent Spawning a Dynamic Workflow (Phase W7)
  *
- * Demonstrates a WeaveAgent supervisor driving a Phase W7 dynamic workflow:
+ * Architecture:
+ *   ┌─ Supervisor (weaveAgent with workers) ─────────────────────────┐
+ *   │  Auto-gets: think, plan, delegate_to_worker                     │
+ *   │                                                                  │
+ *   │  delegate_to_worker ──► Planner Worker                          │
+ *   │                           list_handlers  → discovers handler names│
+ *   │                           plan_expansion → stores DynamicExpansion│
+ *   └──────────────────────────────────────────────────────────────────┘
+ *                    ▼ plannerFn (called by engine at step-exec time)
+ *   ┌─ WorkflowEngine ────────────────────────────────────────────────┐
+ *   │  gather-context → [dynamic: supervisor-plan] → finalize          │
+ *   │                           ↓                                      │
+ *   │               DynamicExpansion spliced + validated               │
+ *   │  fetch-market-data → compute-risk-score → generate-report       │
+ *   └──────────────────────────────────────────────────────────────────┘
  *
- *  1. list_handlers tool       — agent discovers available handler names + resolver kinds
- *  2. plan_expansion tool      — agent submits a DynamicExpansion using real handler names
- *  3. createPlannerResolver    — bridges agent ↔ engine: plan() runs the agent inline,
- *                                retrieves the stored expansion, returns it to the engine
- *  4. Governance validation    — validateExpansion blocks bad-handler and script: injection
- *  5. Real-LLM path (opt-in)  — ANTHROPIC_API_KEY: Claude generates the plan live
- *
- * Critical property: the supervisor calls list_handlers FIRST, then uses only those
- * handler names in plan_expansion. The engine's validateExpansion runs before any step
- * executes. Two safety layers: the tool validates domain names, the engine blocks
- * disallowed resolver kinds (script:, subworkflow:).
+ * Sections 1–4: fake models (no API key). Section 5: real Claude.
  *
  * Run:
  *   npx tsx examples/2y-supervisor-dynamic-workflow.ts
@@ -28,12 +32,13 @@ import {
   createNoopResolver,
   createPlannerResolver,
   describeHandlerKinds,
-  type WorkflowEngineOptions,
 } from '@weaveintel/workflows';
 import type { DynamicExpansion } from '@weaveintel/core';
 import { weaveContext, weaveTool, weaveToolRegistry } from '@weaveintel/core';
-import { weaveAgent, type ToolCallingAgentOptions } from '@weaveintel/agents';
+import { weaveAgent } from '@weaveintel/agents';
+import type { WorkerDefinition } from '@weaveintel/agents';
 import { weaveFakeModel } from '@weaveintel/testing';
+import type { Model } from '@weaveintel/core';
 
 /* ── Helpers ──────────────────────────────────────────────────────────────── */
 
@@ -48,43 +53,38 @@ function warn(msg: string) { console.log(`  ⚠ ${msg}`); }
 function step(msg: string) { console.log(`\n  [step] ${msg}`); }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   Domain handler names — the catalogue the agent sees via list_handlers
+   Domain handler catalogue
    ═══════════════════════════════════════════════════════════════════════════ */
 
 const DOMAIN_HANDLERS = [
   { name: 'fetch-market-data',  description: 'Fetch live or simulated prices for a list of tickers' },
   { name: 'compute-risk-score', description: 'Compute a portfolio risk score from market prices (0–1)' },
   { name: 'generate-report',    description: 'Produce a human-readable risk summary report' },
-  { name: 'send-alert',         description: 'Dispatch a slack/email alert when risk is HIGH' },
+  { name: 'send-alert',         description: 'Dispatch a Slack/email alert when risk is HIGH' },
 ] as const;
-
-const DOMAIN_HANDLER_NAMES = new Set(DOMAIN_HANDLERS.map(h => h.name));
+type DomainHandlerName = typeof DOMAIN_HANDLERS[number]['name'];
+const DOMAIN_HANDLER_NAMES = new Set<string>(DOMAIN_HANDLERS.map(h => h.name));
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   Shared engine setup
+   Engine setup — handlers + workflow definition
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/**
- * Register domain step handlers on an engine.
- * Handlers look for data across ALL step-output variables so they are
- * position-independent (step IDs are chosen by the agent at runtime).
- */
 function registerDomainHandlers(engine: DefaultWorkflowEngine) {
   engine.registerHandler('gather-context', async (vars) => {
     info('    gather-context: preparing run context');
     return {
       tickers: (vars['tickers'] as string[] | undefined) ?? ['AAPL', 'MSFT', 'GOOGL'],
-      goal: (vars['goal'] as string | undefined) ?? 'assess portfolio risk',
+      goal:    (vars['goal']    as string   | undefined) ?? 'assess portfolio risk',
     };
   });
 
   engine.registerHandler('fetch-market-data', async (vars) => {
-    // Find tickers from the gather-context step output (or run variables directly)
     const ctxStep = Object.values(vars).find(
-      (v): v is { tickers: string[] } => !!v && typeof v === 'object' && Array.isArray((v as Record<string, unknown>)['tickers']),
+      (v): v is { tickers: string[] } =>
+        !!v && typeof v === 'object' && Array.isArray((v as Record<string, unknown>)['tickers']),
     );
     const tickers = ctxStep?.tickers ?? (vars['tickers'] as string[] | undefined) ?? ['AAPL', 'MSFT'];
-    info(`    fetch-market-data: prices for ${tickers.join(', ')}`);
+    info(`    fetch-market-data: loading prices for ${tickers.join(', ')}`);
     return {
       prices: Object.fromEntries(tickers.map(t => [t, +(Math.random() * 200 + 50).toFixed(2)])),
       fetchedAt: new Date().toISOString(),
@@ -92,20 +92,18 @@ function registerDomainHandlers(engine: DefaultWorkflowEngine) {
   });
 
   engine.registerHandler('compute-risk-score', async (vars) => {
-    // Find market data by scanning step outputs for a `prices` object
-    const marketData = Object.values(vars).find(
+    const market = Object.values(vars).find(
       (v): v is { prices: Record<string, number> } =>
         !!v && typeof v === 'object' && typeof (v as Record<string, unknown>)['prices'] === 'object',
     );
-    const prices = Object.values(marketData?.prices ?? {});
-    const mean = prices.length ? prices.reduce((s, p) => s + p, 0) / prices.length : 0;
-    const risk = +(Math.random() * 0.3 + 0.1).toFixed(3);
+    const prices = Object.values(market?.prices ?? {});
+    const mean   = prices.length ? prices.reduce((s, p) => s + p, 0) / prices.length : 0;
+    const risk   = +(Math.random() * 0.3 + 0.1).toFixed(3);
     info(`    compute-risk-score: mean=${mean.toFixed(2)}, risk=${risk}`);
     return { riskScore: risk, meanPrice: +mean.toFixed(2), classification: risk > 0.25 ? 'HIGH' : 'MODERATE' };
   });
 
   engine.registerHandler('generate-report', async (vars) => {
-    // Find risk data by scanning step outputs for a `riskScore`
     const riskData = Object.values(vars).find(
       (v): v is { riskScore: number; classification: string } =>
         !!v && typeof v === 'object' && typeof (v as Record<string, unknown>)['riskScore'] === 'number',
@@ -119,34 +117,23 @@ function registerDomainHandlers(engine: DefaultWorkflowEngine) {
     };
   });
 
-  engine.registerHandler('send-alert', async (vars) => {
-    const riskData = Object.values(vars).find(
-      (v): v is { classification: string } =>
-        !!v && typeof v === 'object' && typeof (v as Record<string, unknown>)['classification'] === 'string',
-    );
-    info(`    send-alert: dispatching ${riskData?.classification ?? 'UNKNOWN'} alert`);
-    return { alertSent: true, channel: 'slack', severity: riskData?.classification };
-  });
-
   engine.registerHandler('finalize', async (vars) => {
-    // Find the most recent report-shaped output
-    const reportData = Object.values(vars).find(
-      (v): v is { summary: string; title?: string } =>
+    const report = Object.values(vars).find(
+      (v): v is { summary: string } =>
         !!v && typeof v === 'object' && typeof (v as Record<string, unknown>)['summary'] === 'string',
     );
-    return { status: 'done', summary: reportData?.summary ?? '(no report generated)' };
+    return { status: 'done', summary: report?.summary ?? '(no report generated)' };
   });
 }
 
-/** Static workflow: gather-context → [dynamic: supervisor plans] → finalize */
+/** The static workflow definition used by every demo section. */
 function buildWorkflowDef() {
   return defineWorkflow('Supervisor-Planned Analysis')
     .setId('supervisor-dynamic-analysis')
     .setPolicy({
       maxExpansionDepth: 3,
       maxGeneratedSteps: 10,
-      // Only allow safe resolver kinds in generated steps
-      dynamicHandlerKinds: ['noop', 'tool', 'prompt', 'agent', 'mcp'],
+      dynamicHandlerKinds: ['noop', 'tool', 'prompt', 'agent', 'mcp'], // script: blocked
     })
     .addStep({ id: 'gather-context', name: 'Gather Context', type: 'deterministic', handler: 'gather-context', next: 'supervisor-plan' })
     .dynamic('supervisor-plan', 'Supervisor Plans Analysis', {
@@ -158,18 +145,14 @@ function buildWorkflowDef() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   Agent tool builders — reused across demos
+   Planner worker tools — used by both fake and real worker agents
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /**
- * Build the two agent tools:
- *   list_handlers  — returns domain handlers + resolver kinds
- *   plan_expansion — validates handler names, stores the DynamicExpansion
- *
- * @param reg             Resolver registry (for describeHandlerKinds)
- * @param onExpansion     Called when agent submits a valid plan
+ * Build the planner worker's two tools.
+ * plan_expansion writes to `onExpansion`; list_handlers reads the registry.
  */
-function buildAgentTools(
+function buildPlannerWorkerTools(
   reg: HandlerResolverRegistry,
   onExpansion: (exp: DynamicExpansion) => void,
 ) {
@@ -178,17 +161,17 @@ function buildAgentTools(
   tools.register(weaveTool({
     name: 'list_handlers',
     description:
-      'List all available workflow step handlers. ' +
-      'Call this FIRST before planning so you use only valid handler names.',
+      'List all available workflow step handlers and resolver kinds. ' +
+      'Call this FIRST so you only use valid handler names in plan_expansion.',
     parameters: { type: 'object', properties: {}, required: [] },
     execute: async () => {
       const resolverKinds = describeHandlerKinds(reg);
       const payload = {
         domainHandlers: [...DOMAIN_HANDLERS],
-        resolverKinds: resolverKinds.map(k => ({ kind: k.kind, description: k.description })),
+        resolverKinds:  resolverKinds.map(k => ({ kind: k.kind, description: k.description })),
         note: 'Use domainHandlers[].name as the "handler" field in plan_expansion steps.',
       };
-      step(`Agent called list_handlers → ${payload.domainHandlers.length} domain handlers, ${payload.resolverKinds.length} resolver kinds`);
+      step(`Planner worker: list_handlers → ${payload.domainHandlers.length} domain handlers, ${payload.resolverKinds.length} resolver kinds`);
       return JSON.stringify(payload);
     },
   }));
@@ -196,61 +179,53 @@ function buildAgentTools(
   tools.register(weaveTool({
     name: 'plan_expansion',
     description:
-      'Submit a DynamicExpansion plan to the workflow engine. ' +
-      'Each step\'s "handler" MUST be a name returned by list_handlers. ' +
-      '"entry" is the first step id. "rejoin" should be "finalize".',
+      'Submit a DynamicExpansion plan. ' +
+      'Each step\'s "handler" must be a name from list_handlers. ' +
+      'Set "rejoin" to "finalize".',
     parameters: {
       type: 'object',
       required: ['steps', 'entry'],
       properties: {
         steps: {
           type: 'array',
-          description: 'Ordered list of steps. Use handler names from list_handlers.',
+          description: 'Steps for the sub-graph. Use only handler names from list_handlers.',
           items: {
             type: 'object',
             required: ['id', 'name', 'type', 'handler'],
             properties: {
-              id:      { type: 'string', description: 'Unique step id (e.g. "step-1-fetch")' },
-              name:    { type: 'string', description: 'Human-readable step name' },
+              id:      { type: 'string', description: 'Unique step id, e.g. "step-1-fetch"' },
+              name:    { type: 'string' },
               type:    { type: 'string', enum: ['deterministic', 'agentic'] },
-              handler: { type: 'string', description: 'Handler name — must be from list_handlers' },
-              next:    { type: 'string', description: 'Next step id (omit for last step)' },
+              handler: { type: 'string', description: 'Handler name from list_handlers' },
             },
           },
         },
-        entry:  { type: 'string', description: 'ID of the first step to execute' },
-        rejoin: { type: 'string', description: 'Step to route to when sub-graph ends (use "finalize")' },
+        entry:  { type: 'string', description: 'First step id' },
+        rejoin: { type: 'string', description: 'Step to route to after sub-graph ends (use "finalize")' },
       },
     },
     execute: async (args: {
-      steps: Array<{ id: string; name: string; type: string; handler: string; next?: string }>;
+      steps: Array<{ id: string; name: string; type: string; handler: string }>;
       entry: string;
       rejoin?: string;
     }) => {
-      // Validate: each handler must be a known domain name OR a colon-prefixed resolver ref
-      const unknown = args.steps.filter(s => {
-        if (s.handler.includes(':')) return false; // resolver-kind ref (governance validates kind)
-        return !DOMAIN_HANDLER_NAMES.has(s.handler as typeof DOMAIN_HANDLERS[number]['name']);
-      });
+      // Validate handler names (colon-prefixed resolver refs pass through to engine governance)
+      const unknown = args.steps.filter(s => !s.handler.includes(':') && !DOMAIN_HANDLER_NAMES.has(s.handler));
       if (unknown.length > 0) {
         const msg = `Unknown handler(s): ${unknown.map(s => `"${s.handler}"`).join(', ')}. Call list_handlers first.`;
         warn(`    plan_expansion rejected → ${msg}`);
         return JSON.stringify({ error: msg });
       }
-
       const expansion: DynamicExpansion = {
         steps: args.steps.map(s => ({
-          id: s.id,
-          name: s.name,
+          id: s.id, name: s.name,
           type: s.type as 'deterministic' | 'agentic',
           handler: s.handler,
-          ...(s.next ? { next: s.next } : {}),
         })),
-        entry: args.entry,
+        entry:  args.entry,
         rejoin: args.rejoin ?? 'finalize',
       };
-
-      step(`Agent submitted plan: ${args.steps.map(s => `${s.id}(${s.handler})`).join(' → ')}`);
+      step(`Planner worker: plan submitted → ${args.steps.map(s => `${s.id}(${s.handler})`).join(' → ')}`);
       onExpansion(expansion);
       return JSON.stringify({ accepted: true, stepCount: args.steps.length });
     },
@@ -260,160 +235,76 @@ function buildAgentTools(
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   Supervisor builder — weaveAgent in supervisor mode (workers: [...])
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function buildSupervisor(supervisorModel: Model, plannerWorkerModel: Model, plannerTools: ReturnType<typeof weaveToolRegistry>) {
+  const plannerWorker: WorkerDefinition = {
+    name: 'planner',
+    description:
+      'Specialist workflow planner. Has list_handlers to discover valid step handler names ' +
+      'and plan_expansion to submit a DynamicExpansion to the engine. ' +
+      'Always calls list_handlers BEFORE plan_expansion.',
+    model: plannerWorkerModel,
+    tools: plannerTools,
+  };
+
+  return weaveAgent({
+    name: 'workflow-supervisor',
+    model: supervisorModel,
+    workers: [plannerWorker],          // ← supervisor mode: auto-adds delegate_to_worker
+    systemPrompt:
+      'You are a workflow orchestration supervisor.\n' +
+      'When asked to plan an analysis workflow, delegate to the "planner" worker ' +
+      'with a clear goal. The planner will discover available handlers and submit the plan. ' +
+      'Report the result back to the user.',
+    maxSteps: 6,
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    1. Show what list_handlers returns
    ═══════════════════════════════════════════════════════════════════════════ */
 
 async function demoListHandlers() {
-  header('1. list_handlers — what the agent discovers');
+  header('1. list_handlers — what the planner worker discovers');
 
   const reg = new HandlerResolverRegistry();
   reg.register(createNoopResolver());
   reg.register(createPlannerResolver({ plan: async () => ({ steps: [], entry: '' }) }));
 
   const resolverKinds = describeHandlerKinds(reg);
-  ok(`Resolver kinds: ${resolverKinds.map(k => k.kind).join(', ')}`);
+  ok(`Resolver kinds registered: ${resolverKinds.map(k => k.kind).join(', ')}`);
   info(`  "noop" → "${resolverKinds.find(k => k.kind === 'noop')?.description?.slice(0, 55)}..."`);
   info(`  "plan" → "${resolverKinds.find(k => k.kind === 'plan')?.description?.slice(0, 55)}..."`);
 
   ok(`Domain handlers: ${DOMAIN_HANDLERS.map(h => h.name).join(', ')}`);
-  for (const h of DOMAIN_HANDLERS) {
-    info(`  "${h.name}" — ${h.description}`);
-  }
-  info('The supervisor calls list_handlers once per plan request, then picks names from the result.');
+  for (const h of DOMAIN_HANDLERS) info(`  "${h.name}" — ${h.description}`);
+  info('Supervisor delegates to "planner" worker → worker calls list_handlers → plan_expansion.');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   2. Fake-model demo — supervisor plans the workflow (no API key needed)
+   2. Fake-model supervisor (no API key needed)
    ═══════════════════════════════════════════════════════════════════════════ */
 
-async function demoFakeAgent() {
-  header('2. Fake-Model Supervisor — Discovers Handlers → Plans → Executes');
+async function demoFakeSupervisor() {
+  header('2. Fake-Model Supervisor → Planner Worker → Dynamic Workflow');
 
-  // capturedExpansion is written by plan_expansion tool, read by plannerFn
   let capturedExpansion: DynamicExpansion | null = null;
-
-  // supervisor is assigned after the tools are built (forward reference via let)
   let supervisor!: ReturnType<typeof weaveAgent>;
 
-  // plannerFn is invoked BY THE ENGINE when the dynamic step executes.
-  // It runs the supervisor agent inline and returns the plan the agent submits.
+  // plannerFn is called by the engine at dynamic-step execution time.
+  // It runs the supervisor, which delegates to the planner worker.
   const plannerFn = async (goal: string): Promise<DynamicExpansion> => {
-    info(`\n    plannerFn: engine requests a plan for "${goal}"`);
-    const agentCtx = weaveContext({ userId: 'planner-session' });
-    await supervisor.run(agentCtx, {
+    info(`\n    [engine→planner] requesting plan for: "${goal}"`);
+    const ctx = weaveContext({ userId: 'fake-supervisor-session' });
+    await supervisor.run(ctx, {
       messages: [{
         role: 'user',
-        content: `Plan a market analysis workflow for: ${goal}. Call list_handlers first to see available handlers, then call plan_expansion with your plan.`,
+        content: `Plan a portfolio analysis workflow. Goal: "${goal}". Delegate to the planner worker.`,
       }],
     });
-    if (!capturedExpansion) throw new Error('Supervisor did not submit a plan');
-    const result = capturedExpansion;
-    capturedExpansion = null;
-    return result;
-  };
-
-  // Build registry with the planner wired in
-  const reg = new HandlerResolverRegistry();
-  reg.register(createNoopResolver());
-  reg.register(createPlannerResolver({ plan: plannerFn }));
-
-  const engine = new DefaultWorkflowEngine({ resolverRegistry: reg } satisfies WorkflowEngineOptions);
-  registerDomainHandlers(engine);
-
-  // Build agent tools — plan_expansion calls onExpansion to store the plan
-  const agentTools = buildAgentTools(reg, exp => { capturedExpansion = exp; });
-
-  // Fake model: scripted 3-turn sequence
-  //  Turn 1 → call list_handlers
-  //  Turn 2 → parse response, call plan_expansion with handler names from the list
-  //  Turn 3 → final text summary
-  const fakeModel = weaveFakeModel({
-    responses: [
-      {
-        content: '',
-        toolCalls: [{
-          id: 'tc-list',
-          function: { name: 'list_handlers', arguments: JSON.stringify({}) },
-        }],
-      },
-      {
-        content: '',
-        toolCalls: [{
-          id: 'tc-plan',
-          function: {
-            name: 'plan_expansion',
-            arguments: JSON.stringify({
-              steps: [
-                { id: 'step-1-fetch',  name: 'Fetch Market Data',  type: 'deterministic', handler: 'fetch-market-data' },
-                { id: 'step-2-risk',   name: 'Compute Risk Score', type: 'deterministic', handler: 'compute-risk-score' },
-                { id: 'step-3-report', name: 'Generate Report',    type: 'deterministic', handler: 'generate-report' },
-              ],
-              entry: 'step-1-fetch',
-              rejoin: 'finalize',
-            }),
-          },
-        }],
-      },
-      {
-        content:
-          'I called list_handlers and found four domain handlers. ' +
-          'I submitted a 3-step plan: fetch-market-data → compute-risk-score → generate-report, ' +
-          'using only the valid handler names I discovered.',
-        toolCalls: [],
-      },
-    ],
-  });
-
-  // Assign supervisor AFTER tools and model are ready
-  supervisor = weaveAgent({
-    name: 'workflow-supervisor',
-    model: fakeModel,
-    tools: agentTools,
-    systemPrompt:
-      'You are a workflow planning supervisor.\n' +
-      '1. ALWAYS call list_handlers first to discover valid handler names.\n' +
-      '2. Call plan_expansion using ONLY names from list_handlers.\n' +
-      '3. Set rejoin to "finalize".\n' +
-      '4. Summarise the plan you submitted.',
-    maxSteps: 8,
-  } satisfies ToolCallingAgentOptions);
-
-  // Run the workflow — the engine will call plannerFn when it hits the dynamic step
-  const def = buildWorkflowDef();
-  await engine.createDefinition(def);
-
-  info('\nStarting workflow — engine will invoke the supervisor when it hits the dynamic step...');
-  const run = await engine.startRun(def.id, {
-    tickers: ['AAPL', 'MSFT', 'GOOGL'],
-    goal: 'analyze portfolio risk and generate a report',
-  });
-
-  console.log('');
-  ok(`Run status: ${run.status}`);
-  if (run.error) warn(`Run error: ${run.error}`);
-  ok(`Dynamic steps spliced: ${run.dynamicSteps?.length} (${run.dynamicSteps?.map(s => `${s.id}(${s.handler})`).join(' → ')})`);
-  ok(`Expansion depth: ${run.expansionDepth}`);
-
-  const final = run.state.variables['__step_finalize'] as { summary?: string } | undefined;
-  ok(`Final summary: "${final?.summary ?? '(none)'}"`);
-}
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   3. Bad handler name — rejected by plan_expansion tool before engine runs
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-async function demoBadHandlerRejection() {
-  header('3. Safety — Bad Handler Name Caught by plan_expansion Tool');
-
-  let capturedExpansion: DynamicExpansion | null = null;
-  let supervisor!: ReturnType<typeof weaveAgent>;
-
-  const plannerFn = async (goal: string): Promise<DynamicExpansion> => {
-    const agentCtx = weaveContext({ userId: 'bad-agent-session' });
-    await supervisor.run(agentCtx, {
-      messages: [{ role: 'user', content: `Plan something for: ${goal}` }],
-    });
-    if (!capturedExpansion) throw new Error('No plan submitted');
+    if (!capturedExpansion) throw new Error('No plan was submitted by the planner worker');
     const result = capturedExpansion;
     capturedExpansion = null;
     return result;
@@ -426,103 +317,208 @@ async function demoBadHandlerRejection() {
   const engine = new DefaultWorkflowEngine({ resolverRegistry: reg });
   registerDomainHandlers(engine);
 
-  const agentTools = buildAgentTools(reg, exp => { capturedExpansion = exp; });
+  // Planner worker tools
+  const plannerTools = buildPlannerWorkerTools(reg, exp => { capturedExpansion = exp; });
 
-  // This agent skips list_handlers and uses a made-up handler name
-  const badModel = weaveFakeModel({
+  // ── Scripted fake models ──────────────────────────────────────────────────
+  //
+  // Supervisor (2 turns):
+  //   Turn 1 → delegate_to_worker("planner", goal)
+  //   Turn 2 → summarise
+  //
+  // Planner worker (3 turns):
+  //   Turn 1 → list_handlers()
+  //   Turn 2 → plan_expansion(steps with real handler names)
+  //   Turn 3 → "Plan submitted."
+
+  const supervisorModel = weaveFakeModel({
     responses: [
       {
         content: '',
         toolCalls: [{
-          id: 'tc-bad',
+          id: 'sv-tc-1',
+          function: {
+            name: 'delegate_to_worker',
+            arguments: JSON.stringify({
+              worker: 'planner',
+              goal: 'Build a 3-step portfolio risk analysis: fetch market data, compute risk score, then generate a report.',
+            }),
+          },
+        }],
+      },
+      {
+        content:
+          'The planner worker has submitted a 3-step workflow: ' +
+          'fetch-market-data → compute-risk-score → generate-report. The engine will validate and execute it.',
+        toolCalls: [],
+      },
+    ],
+  });
+
+  const plannerWorkerModel = weaveFakeModel({
+    responses: [
+      // Turn 1: discover handlers
+      {
+        content: '',
+        toolCalls: [{
+          id: 'pw-tc-1',
+          function: { name: 'list_handlers', arguments: JSON.stringify({}) },
+        }],
+      },
+      // Turn 2: submit plan using names from the list
+      {
+        content: '',
+        toolCalls: [{
+          id: 'pw-tc-2',
           function: {
             name: 'plan_expansion',
             arguments: JSON.stringify({
-              steps: [{ id: 's1', name: 'Mystery Step', type: 'deterministic', handler: 'made-up-handler' }],
-              entry: 's1',
+              steps: [
+                { id: 'step-1-fetch',  name: 'Fetch Market Data',  type: 'deterministic', handler: 'fetch-market-data'  },
+                { id: 'step-2-risk',   name: 'Compute Risk Score', type: 'deterministic', handler: 'compute-risk-score' },
+                { id: 'step-3-report', name: 'Generate Report',    type: 'deterministic', handler: 'generate-report'    },
+              ],
+              entry: 'step-1-fetch',
               rejoin: 'finalize',
             }),
           },
         }],
       },
-      { content: 'I submitted a plan with made-up-handler.', toolCalls: [] },
+      // Turn 3: done
+      { content: 'Plan submitted with 3 steps using validated handler names.', toolCalls: [] },
     ],
   });
 
-  supervisor = weaveAgent({
-    name: 'bad-supervisor',
-    model: badModel,
-    tools: agentTools,
-    systemPrompt: 'Submit workflow plans.',
-    maxSteps: 4,
-  } satisfies ToolCallingAgentOptions);
+  supervisor = buildSupervisor(supervisorModel, plannerWorkerModel, plannerTools);
 
+  // ── Run the workflow ───────────────────────────────────────────────────────
   const def = buildWorkflowDef();
   await engine.createDefinition(def);
 
-  // The engine will invoke the supervisor via plannerFn.
-  // The supervisor calls plan_expansion with a bad name → tool rejects it → no plan stored.
-  // plannerFn throws "No plan submitted" → failRun.
-  const run = await engine.startRun(def.id, { tickers: ['AAPL'] });
+  info('\nStarting workflow — engine will call plannerFn → supervisor → planner worker...');
+  const run = await engine.startRun(def.id, {
+    tickers: ['AAPL', 'MSFT', 'GOOGL'],
+    goal: 'analyze portfolio risk and generate a report',
+  });
 
-  ok(`Run status: ${run.status} (expected: failed)`);
-  ok(`Error: "${run.error?.slice(0, 80)}"`);
-  ok('Bad handler name was caught by the tool before the engine ever saw the plan');
+  console.log('');
+  ok(`Run status: ${run.status}`);
+  if (run.error) warn(`Error: ${run.error}`);
+  ok(`Dynamic steps: ${run.dynamicSteps?.map(s => `${s.id}(${s.handler})`).join(' → ')}`);
+  ok(`Expansion depth: ${run.expansionDepth}`);
+  const final = run.state.variables['__step_finalize'] as { summary?: string } | undefined;
+  ok(`Final: "${final?.summary ?? '(none)'}"`);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   4. Script injection — engine's validateExpansion blocks it
+   3. Safety — bad handler name caught by plan_expansion before engine sees it
    ═══════════════════════════════════════════════════════════════════════════ */
 
-async function demoScriptInjection() {
-  header('4. Safety — script: Injection Blocked by Engine Governance');
+async function demoBadHandler() {
+  header('3. Safety — Bad Handler Name Caught by plan_expansion Tool');
 
-  // Here the tool is permissive (no pre-check on handler names).
-  // The engine's validateExpansion is the last line of defence.
   let capturedExpansion: DynamicExpansion | null = null;
   let supervisor!: ReturnType<typeof weaveAgent>;
 
   const plannerFn = async (goal: string): Promise<DynamicExpansion> => {
-    const agentCtx = weaveContext({ userId: 'injector-session' });
-    await supervisor.run(agentCtx, {
-      messages: [{ role: 'user', content: `Plan something for: ${goal}` }],
-    });
+    const ctx = weaveContext({ userId: 'bad-session' });
+    await supervisor.run(ctx, { messages: [{ role: 'user', content: `Plan for: ${goal}` }] });
     if (!capturedExpansion) throw new Error('No plan submitted');
-    const result = capturedExpansion;
-    capturedExpansion = null;
-    return result;
+    const r = capturedExpansion; capturedExpansion = null; return r;
   };
 
   const reg = new HandlerResolverRegistry();
   reg.register(createNoopResolver());
   reg.register(createPlannerResolver({ plan: plannerFn }));
 
-  // Policy: script: is NOT in the dynamic handler-kind allowlist
+  const engine = new DefaultWorkflowEngine({ resolverRegistry: reg });
+  registerDomainHandlers(engine);
+
+  const plannerTools = buildPlannerWorkerTools(reg, exp => { capturedExpansion = exp; });
+
+  // Planner worker uses a made-up handler (skips list_handlers)
+  const badPlannerModel = weaveFakeModel({
+    responses: [
+      {
+        content: '',
+        toolCalls: [{
+          id: 'bad-tc',
+          function: {
+            name: 'plan_expansion',
+            arguments: JSON.stringify({
+              steps: [{ id: 's1', name: 'Mystery Step', type: 'deterministic', handler: 'made-up-handler' }],
+              entry: 's1', rejoin: 'finalize',
+            }),
+          },
+        }],
+      },
+      { content: 'Submitted plan with made-up-handler.', toolCalls: [] },
+    ],
+  });
+
+  const supervisorModel = weaveFakeModel({
+    responses: [
+      {
+        content: '',
+        toolCalls: [{ id: 'sv-tc', function: { name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'planner', goal: 'Plan something.' }) } }],
+      },
+      { content: 'Planner returned an error — bad handler name.', toolCalls: [] },
+    ],
+  });
+
+  supervisor = buildSupervisor(supervisorModel, badPlannerModel, plannerTools);
+
+  const def = buildWorkflowDef();
+  await engine.createDefinition(def);
+  const run = await engine.startRun(def.id, { tickers: ['AAPL'] });
+
+  ok(`Run status: ${run.status} (expected: failed)`);
+  ok(`Error: "${run.error?.slice(0, 70)}"`);
+  ok('Engine never saw the plan — rejected at the tool layer');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   4. Safety — script: injection blocked by engine governance
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+async function demoScriptInjection() {
+  header('4. Safety — script: Injection Blocked by Engine Governance');
+
+  let capturedExpansion: DynamicExpansion | null = null;
+  let supervisor!: ReturnType<typeof weaveAgent>;
+
+  const plannerFn = async (goal: string): Promise<DynamicExpansion> => {
+    const ctx = weaveContext({ userId: 'inject-session' });
+    await supervisor.run(ctx, { messages: [{ role: 'user', content: `Plan for: ${goal}` }] });
+    if (!capturedExpansion) throw new Error('No plan');
+    const r = capturedExpansion; capturedExpansion = null; return r;
+  };
+
+  const reg = new HandlerResolverRegistry();
+  reg.register(createNoopResolver());
+  reg.register(createPlannerResolver({ plan: plannerFn }));
+
   const engine = new DefaultWorkflowEngine({
     resolverRegistry: reg,
-    defaultPolicy: { dynamicHandlerKinds: ['noop', 'tool', 'prompt', 'agent', 'mcp'] },
+    defaultPolicy: { dynamicHandlerKinds: ['noop', 'tool', 'prompt', 'agent', 'mcp'] }, // script: NOT allowed
   });
   registerDomainHandlers(engine);
 
-  // Permissive tool — accepts anything, stores it for the engine to validate
-  const tools = weaveToolRegistry();
-  tools.register(weaveTool({
+  // Permissive tool — accepts anything; engine governance is the safety net
+  const permissiveTools = weaveToolRegistry();
+  permissiveTools.register(weaveTool({
     name: 'plan_expansion',
-    description: 'Submit a plan (permissive — engine validates it).',
+    description: 'Submit a plan (permissive — engine will validate it).',
     parameters: {
       type: 'object', required: ['steps', 'entry'],
-      properties: {
-        steps: { type: 'array', items: { type: 'object' } },
-        entry: { type: 'string' }, rejoin: { type: 'string' },
-      },
+      properties: { steps: { type: 'array', items: { type: 'object' } }, entry: { type: 'string' }, rejoin: { type: 'string' } },
     },
     execute: async (args: { steps: Array<{ id: string; name: string; type: string; handler: string }>; entry: string; rejoin?: string }) => {
       capturedExpansion = {
         steps: args.steps.map(s => ({ id: s.id, name: s.name, type: 'deterministic' as const, handler: s.handler })),
-        entry: args.entry,
-        rejoin: args.rejoin ?? 'finalize',
+        entry: args.entry, rejoin: args.rejoin ?? 'finalize',
       };
-      warn(`    plan_expansion (permissive): accepted step with handler="${args.steps[0]?.handler}"`);
+      warn(`    plan_expansion (permissive): accepted handler="${args.steps[0]?.handler}"`);
       return JSON.stringify({ accepted: true });
     },
   }));
@@ -532,35 +528,35 @@ async function demoScriptInjection() {
       {
         content: '',
         toolCalls: [{
-          id: 'tc-inject',
+          id: 'inj-tc',
           function: {
             name: 'plan_expansion',
             arguments: JSON.stringify({
-              steps: [{ id: 'evil', name: 'Evil Step', type: 'deterministic', handler: 'script:return process.env.SECRET' }],
-              entry: 'evil',
-              rejoin: 'finalize',
+              steps: [{ id: 'evil', name: 'Evil', type: 'deterministic', handler: 'script:return process.env.SECRET' }],
+              entry: 'evil', rejoin: 'finalize',
             }),
           },
         }],
       },
-      { content: 'Plan submitted with script injection.', toolCalls: [] },
+      { content: 'Injected script handler.', toolCalls: [] },
     ],
   });
 
-  supervisor = weaveAgent({
-    name: 'injector',
-    model: injectorModel,
-    tools,
-    systemPrompt: 'Submit plans.',
-    maxSteps: 4,
-  } satisfies ToolCallingAgentOptions);
+  const supervisorModel = weaveFakeModel({
+    responses: [
+      { content: '', toolCalls: [{ id: 'sv-tc', function: { name: 'delegate_to_worker', arguments: JSON.stringify({ worker: 'planner', goal: 'Do something.' }) } }] },
+      { content: 'Done.', toolCalls: [] },
+    ],
+  });
+
+  supervisor = buildSupervisor(supervisorModel, injectorModel, permissiveTools);
 
   const def = buildWorkflowDef();
   await engine.createDefinition(def);
   const run = await engine.startRun(def.id, { tickers: ['AAPL'] });
 
   if (run.status === 'failed' && run.error?.includes('DISALLOWED_HANDLER_KIND')) {
-    ok(`Engine blocked script: injection — code: DISALLOWED_HANDLER_KIND`);
+    ok(`Engine blocked script: injection — DISALLOWED_HANDLER_KIND`);
     ok(`Error: "${run.error.slice(0, 80)}..."`);
   } else {
     warn(`Unexpected: status=${run.status} error=${run.error}`);
@@ -568,11 +564,11 @@ async function demoScriptInjection() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   5. Real LLM — Claude generates the plan live
+   5. Real Claude — supervisor in supervisor mode, planner worker with real LLM
    ═══════════════════════════════════════════════════════════════════════════ */
 
-async function demoRealAgent() {
-  header('5. Real Claude Supervisor (ANTHROPIC_API_KEY required)');
+async function demoRealSupervisor() {
+  header('5. Real Claude — Supervisor Mode with Planner Worker');
 
   if (!process.env['ANTHROPIC_API_KEY']) {
     info('Skipped — set ANTHROPIC_API_KEY to run this section.');
@@ -583,33 +579,35 @@ async function demoRealAgent() {
   let supervisor!: ReturnType<typeof weaveAgent>;
 
   const plannerFn = async (goal: string): Promise<DynamicExpansion> => {
-    info(`\n    plannerFn: invoking real Claude supervisor for goal="${goal}"`);
-    const agentCtx = weaveContext({ userId: 'real-planner-session' });
-    const agentResult = await supervisor.run(agentCtx, {
+    info(`\n    [engine→supervisor] requesting plan for: "${goal}"`);
+    const ctx = weaveContext({ userId: 'real-supervisor-session' });
+
+    const result = await supervisor.run(ctx, {
       messages: [{
         role: 'user',
         content:
-          `You are planning a workflow. Goal: "${goal}".\n` +
-          `1. Call list_handlers to see available step handlers.\n` +
-          `2. Call plan_expansion with 2–4 steps using only handler names from list_handlers.\n` +
-          `3. Set rejoin to "finalize" in plan_expansion.\n` +
-          `4. Confirm what you submitted.`,
+          `You are orchestrating a portfolio analysis workflow.\n` +
+          `Goal: "${goal}".\n\n` +
+          `Delegate to the "planner" worker with this instruction:\n` +
+          `"Call list_handlers to discover available step handlers, then call plan_expansion ` +
+          `with a 3-step plan using ONLY handler names from list_handlers. Set rejoin to 'finalize'."`,
       }],
     });
 
-    info(`    Agent completed in ${agentResult.steps.length} turns:`);
-    for (const s of agentResult.steps) {
+    info(`\n    Supervisor completed in ${result.steps.length} turns:`);
+    for (const s of result.steps) {
       if (s.toolCall) {
-        const args = JSON.stringify(s.toolCall.arguments).slice(0, 100);
-        info(`      [tool] ${s.toolCall.name}(${args}${args.length >= 100 ? '...' : ''})`);
+        const preview = JSON.stringify(s.toolCall.arguments).slice(0, 120);
+        info(`      [tool] ${s.toolCall.name}(${preview}${preview.length >= 120 ? '...' : ''})`);
+      } else if (s.content) {
+        info(`      [text] ${s.content.slice(0, 100)}${s.content.length > 100 ? '...' : ''}`);
       }
     }
-    info(`    Agent output: "${agentResult.output.slice(0, 160)}"`);
 
-    if (!capturedExpansion) throw new Error('Claude did not submit a plan');
-    const result = capturedExpansion;
+    if (!capturedExpansion) throw new Error('Planner worker did not submit a plan');
+    const plan = capturedExpansion;
     capturedExpansion = null;
-    return result;
+    return plan;
   };
 
   const reg = new HandlerResolverRegistry();
@@ -619,29 +617,21 @@ async function demoRealAgent() {
   const engine = new DefaultWorkflowEngine({ resolverRegistry: reg });
   registerDomainHandlers(engine);
 
-  const agentTools = buildAgentTools(reg, exp => { capturedExpansion = exp; });
+  const plannerTools = buildPlannerWorkerTools(reg, exp => { capturedExpansion = exp; });
 
   try {
     const { weaveAnthropicModel } = await import('@weaveintel/provider-anthropic');
-    const model = weaveAnthropicModel('claude-haiku-4-5-20251001');
 
-    supervisor = weaveAgent({
-      name: 'real-workflow-supervisor',
-      model,
-      tools: agentTools,
-      systemPrompt:
-        'You are a workflow planning supervisor.\n' +
-        '1. ALWAYS call list_handlers first.\n' +
-        '2. Call plan_expansion using ONLY names from list_handlers.\n' +
-        '3. Set rejoin to "finalize".\n' +
-        '4. Confirm what you submitted.',
-      maxSteps: 8,
-    } satisfies ToolCallingAgentOptions);
+    // Both supervisor and planner worker use real Claude
+    const supervisorModel = weaveAnthropicModel('claude-haiku-4-5-20251001');
+    const plannerModel    = weaveAnthropicModel('claude-haiku-4-5-20251001');
+
+    supervisor = buildSupervisor(supervisorModel, plannerModel, plannerTools);
 
     const def = buildWorkflowDef();
     await engine.createDefinition(def);
 
-    info('Starting workflow — engine will invoke real Claude when it hits the dynamic step...');
+    info('Starting workflow — engine will call plannerFn → real Claude supervisor → real Claude planner worker...');
     const run = await engine.startRun(def.id, {
       tickers: ['AAPL', 'MSFT', 'GOOGL'],
       goal: 'analyze portfolio risk and generate a report',
@@ -650,12 +640,14 @@ async function demoRealAgent() {
     console.log('');
     ok(`Run status: ${run.status}`);
     if (run.error) warn(`Error: ${run.error}`);
-    ok(`Dynamic steps: ${run.dynamicSteps?.map(s => `${s.id}(${s.handler})`).join(' → ')}`);
+    ok(`Dynamic steps generated: ${run.dynamicSteps?.length}`);
+    ok(`  ${run.dynamicSteps?.map(s => `${s.id}(${s.handler})`).join(' → ')}`);
     ok(`Expansion depth: ${run.expansionDepth}`);
     const final = run.state.variables['__step_finalize'] as { summary?: string } | undefined;
-    ok(`Final: "${final?.summary ?? '(none)'}"`);
+    ok(`Final summary: "${final?.summary ?? '(none)'}"`);
   } catch (e) {
-    warn(`Real agent error: ${(e as Error).message}`);
+    warn(`Real supervisor error: ${(e as Error).message}`);
+    if ((e as Error).stack) info((e as Error).stack!.split('\n').slice(0, 4).join('\n'));
   }
 }
 
@@ -665,13 +657,13 @@ async function demoRealAgent() {
 
 async function main() {
   console.log('\n@weaveintel/workflows — Phase W7: Supervisor Agent + Dynamic Workflow');
-  console.log('Sections 1–4: no API key needed. Section 5: needs ANTHROPIC_API_KEY.\n');
+  console.log('Sections 1–4: no API key. Section 5: real Claude via ANTHROPIC_API_KEY.\n');
 
   await demoListHandlers();
-  await demoFakeAgent();
-  await demoBadHandlerRejection();
+  await demoFakeSupervisor();
+  await demoBadHandler();
   await demoScriptInjection();
-  await demoRealAgent();
+  await demoRealSupervisor();
 
   console.log('\n' + '═'.repeat(64));
   console.log('  All demos complete.');
