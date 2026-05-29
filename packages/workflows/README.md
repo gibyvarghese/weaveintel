@@ -85,3 +85,95 @@ Phase 5 of the DB-Driven Capability Plan adds four primitives, all in-process an
 - GeneWeave admin: `/api/admin/capability-policy-bindings` (full CRUD; auth + CSRF gated). Sidebar entry under Orchestration.
 
 See `examples/101-workflow-governance.ts` for the end-to-end demo (no DB, no LLM).
+
+## Phase W7 — Dynamic Graphs
+
+Phase W7 adds **runtime graph expansion**: a `dynamic` step can return a `DynamicExpansion` from its handler. The engine validates the sub-graph, splices it into the live run, and routes into the expansion's entry step. Control rejoins the original graph once the sub-graph terminates.
+
+### Core primitives
+
+**`WorkflowStepType: 'dynamic'`** — a new step type whose handler is expected to return a `DynamicExpansion`. The engine's splice logic runs immediately after the step handler completes, before normal `resolveNextStep` routing.
+
+**`DynamicExpansion`** (from `@weaveintel/core`):
+```typescript
+interface DynamicExpansion {
+  steps: WorkflowStep[];  // generated sub-graph steps
+  entry: string;          // first step to execute in the sub-graph
+  rejoin?: string;        // step id to route to when the sub-graph finishes
+}
+```
+Steps with no explicit `next` and no following expansion step are automatically rewritten to point to `rejoin`. When `rejoin` is omitted, `step.next` of the dynamic step is used.
+
+**`WorkflowRun.definitionSnapshot`** — a deep-frozen copy of the workflow definition taken at `startRun` time. All routing within the run uses the snapshot so live definition edits cannot alter in-flight runs.
+
+**`WorkflowRun.dynamicSteps?: WorkflowStep[]`** — all generated steps accumulated across all expansions. Persisted alongside the run so a process restart can resume correctly.
+
+**`WorkflowRun.expansionDepth?: number`** — the number of successive expansions on this run.
+
+### Governance (`validateExpansion`)
+
+Every expansion is validated before splicing. Violations throw `WorkflowExpansionError` and fail the run:
+
+| Code | Trigger |
+|---|---|
+| `MAX_EXPANSION_DEPTH` | `expansionDepth >= policy.maxExpansionDepth` (default 5) |
+| `MAX_GENERATED_STEPS` | cumulative generated steps exceed `policy.maxGeneratedSteps` |
+| `INVALID_ENTRY` | expansion entry step not found in expansion.steps |
+| `ID_COLLISION` | generated step id collides with an existing step or sibling |
+| `DISALLOWED_HANDLER_KIND` | resolver-kind prefix (e.g. `script:`, `subworkflow:`) not in `policy.dynamicHandlerKinds` (default: `['noop','tool','prompt','agent','mcp']`) |
+| `LINT_ERROR` | merged graph produces an error-severity lint finding |
+
+Plain handler keys with no colon (pre-registered functions) are not subject to the kind allowlist — only resolver-kind-prefixed refs like `script:…` are blocked.
+
+### `createPlannerResolver(deps)` (opt-in)
+
+```typescript
+import { createPlannerResolver } from '@weaveintel/workflows';
+
+registry.register(createPlannerResolver({
+  plan: async (goal, context) => {
+    // context.variables — current run variables
+    // context.config — step config
+    // context.capabilities — allowed handler kinds (describeHandlerKinds)
+    const expansion: DynamicExpansion = await callYourLLM(goal, context);
+    return expansion;
+  },
+}));
+```
+
+Reference syntax: `plan:<goal>` (e.g. `handler: 'plan:organize the data pipeline'`). **Not** added to `createDefaultResolvers()` — must be explicitly registered. The expansion is always passed through `validateExpansion` before execution.
+
+### Restart-safety
+
+Dynamic steps are checkpointed before the sub-graph entry is set as `currentStepId`. On resume, `effectiveDef(run, snapshot)` merges `run.dynamicSteps` into the routing view so previously-spliced steps are visible. A paused `wait` step inside a generated sub-graph resumes correctly because `resumeRun` uses the effective def for step lookup.
+
+### Policy fields (in `WorkflowPolicy`)
+
+```typescript
+interface WorkflowPolicy {
+  maxExpansionDepth?: number;       // default 5
+  maxGeneratedSteps?: number;       // default unlimited
+  dynamicHandlerKinds?: string[];   // default ['noop','tool','prompt','agent','mcp']
+}
+```
+
+### Builder shortcut
+
+```typescript
+defineWorkflow('My Flow')
+  .dynamic('plan-step', 'AI Planner', {
+    handler: 'plan:research the topic',
+    next: 'summarise',
+    retries: 1,
+  })
+  .addStep({ id: 'summarise', ... })
+```
+
+### Example
+
+See `examples/2x-dynamic-workflows.ts` for a complete demo covering:
+- Definition snapshot isolation
+- Data-driven expansion (step count at runtime)
+- Stub planner resolver
+- Governance rejections
+- Restart-safety across process restarts

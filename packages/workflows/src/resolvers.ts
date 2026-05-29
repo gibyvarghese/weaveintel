@@ -222,9 +222,77 @@ export function createSubWorkflowResolver(deps: SubWorkflowResolverDeps): Handle
   };
 }
 
+// ─── Phase W7 — Dynamic Graph: planner resolver ─────────────────────────────
+
+/**
+ * Phase W7 — Dependency interface for the planner resolver.
+ * The host application supplies a `plan()` function that calls its LLM/agent
+ * and returns a `DynamicExpansion`. The package imports nothing concrete.
+ */
+export interface PlannerResolverDeps {
+  /**
+   * Call the planner with the operator-provided goal and the per-step `config`
+   * from the workflow definition. Returns a `DynamicExpansion` describing the
+   * sub-graph to splice into the live run. The expansion is ALWAYS validated by
+   * `validateExpansion` before execution — planners must not be trusted blindly.
+   */
+  plan(
+    goal: string,
+    context: {
+      variables: Record<string, unknown>;
+      config: Record<string, unknown>;
+      /** Handler-kind catalogue produced by `describeHandlerKinds` (if a registry is wired up). */
+      capabilities?: import('./handler-kind-registry.js').HandlerKindDescriptor[];
+    },
+  ): Promise<import('@weaveintel/core').DynamicExpansion>;
+}
+
+/**
+ * Phase W7 — Opt-in planner resolver. Kind: `'plan'`.
+ *
+ * A `dynamic` step whose `handler` is `'plan:<goal>'` delegates to
+ * `deps.plan(goal, context)`, wraps the result in `{ __expansion }`, and
+ * returns it so the standard engine splice + `validateExpansion` path applies.
+ *
+ * **Not added to `createDefaultResolvers()`** — this is a dependency-injected
+ * opt-in resolver; apps register it alongside their chosen LLM adapter:
+ *
+ * ```ts
+ * registry.register(createPlannerResolver({ plan: myLLMAdapter.plan }));
+ * ```
+ *
+ * The planner only sees an allowlisted capability catalogue (via
+ * `describeHandlerKinds`) so it composes from typed, schema-described
+ * capabilities rather than free-form handler strings.
+ */
+export function createPlannerResolver(deps: PlannerResolverDeps): HandlerResolver {
+  return {
+    kind: 'plan',
+    description:
+      'AI planner: delegates to `deps.plan(goal, context)` and returns a DynamicExpansion ' +
+      'that the engine validates and splices into the live graph. Opt-in only; ' +
+      'requires explicit registration. Reference syntax: `plan:<goal>`.',
+    async resolve(ctx) {
+      const goal = ctx.ref || (ctx.config['goal'] as string | undefined) || 'process the current step';
+      const handler: StepHandler = async (variables, config) => {
+        const expansion = await deps.plan(goal, {
+          variables,
+          config: config ?? {},
+        });
+        // Wrap so the engine's extractExpansion recognises it even if the planner
+        // returns something that looks like a plain DynamicExpansion.
+        return { __expansion: expansion };
+      };
+      return handler;
+    },
+  };
+}
+
 /**
  * Convenience: build a resolver registry pre-populated with the dependency-
  * free resolvers (`noop`, `script`). Apps add the rest via `register(...)`.
+ * Note: `createPlannerResolver` is intentionally NOT included here — it is
+ * opt-in and requires the caller to supply `PlannerResolverDeps`.
  */
 export function createDefaultResolvers(): HandlerResolver[] {
   return [createNoopResolver(), createScriptResolver()];

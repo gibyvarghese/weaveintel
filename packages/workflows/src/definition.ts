@@ -295,6 +295,41 @@ export class WorkflowBuilder {
     });
   }
 
+  // ─── Phase W7 — Dynamic Graph shortcut ──────────────────
+
+  /**
+   * Phase W7 — Shortcut: add a `dynamic` step whose handler returns a
+   * `DynamicExpansion`. The engine validates and splices the generated
+   * sub-graph into the live run, routes into `expansion.entry`, and rejoins
+   * at `expansion.rejoin ?? opts.next` when the sub-graph terminates.
+   */
+  dynamic(
+    id: string,
+    name: string,
+    opts?: {
+      handler?: string;
+      next?: string;
+      config?: Record<string, unknown>;
+      timeout?: number;
+      retries?: number;
+      onError?: string;
+      skipIf?: unknown;
+    },
+  ): this {
+    return this.addStep({
+      id,
+      name,
+      type: 'dynamic',
+      handler: opts?.handler,
+      next: opts?.next,
+      config: opts?.config,
+      timeout: opts?.timeout,
+      retries: opts?.retries,
+      onError: opts?.onError,
+      skipIf: opts?.skipIf,
+    });
+  }
+
   /** Shortcut: add a human-task step that creates a task in the queue and pauses. */
   humanTask(
     id: string,

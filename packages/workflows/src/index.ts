@@ -51,12 +51,18 @@ export {
   createMcpResolver,
   createSubWorkflowResolver,
   createDefaultResolvers,
+  // Phase W7 — opt-in planner resolver (dependency-injected, not in createDefaultResolvers)
+  createPlannerResolver,
   type ToolResolverDeps,
   type PromptResolverDeps,
   type AgentResolverDeps,
   type McpResolverDeps,
   type SubWorkflowResolverDeps,
+  type PlannerResolverDeps,
 } from './resolvers.js';
+
+// Phase W7 — Dynamic Graph governance error
+export { WorkflowExpansionError, type WorkflowExpansionErrorCode } from './expansion-error.js';
 
 // Phase 1 — Definition store (InMemory + file-backed)
 export {

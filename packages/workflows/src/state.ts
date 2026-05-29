@@ -65,6 +65,10 @@ export function resolveNextStep(
   def: WorkflowDefinition,
   currentStepId: string,
   stepResult: WorkflowStepResult,
+  // Phase W7 — when routing within an effectiveDef that includes appended dynamic
+  // steps, the declaration-order fallback must not route an original (non-dynamic)
+  // step into a dynamic step. Pass the set of dynamic step ids to enable this guard.
+  dynamicStepIds?: ReadonlySet<string>,
 ): string | undefined {
   const step = def.steps.find(s => s.id === currentStepId);
   if (!step) return undefined;
@@ -101,18 +105,31 @@ export function resolveNextStep(
   }
 
   // Default to declaration order when next is not explicitly provided.
+  // Phase W7: when dynamic steps are appended to effectiveDef, skip them in the
+  // fallback for original (non-dynamic) steps so they don't accidentally route into
+  // the generated sub-graph. Dynamic steps may still chain to each other via fallback.
+  const currentIsDynamic = dynamicStepIds?.has(currentStepId) ?? false;
   const currentIndex = def.steps.findIndex(s => s.id === currentStepId);
   if (currentIndex >= 0) {
-    return def.steps[currentIndex + 1]?.id;
+    for (let i = currentIndex + 1; i < def.steps.length; i++) {
+      const candidateId = def.steps[i]?.id;
+      if (!candidateId) break;
+      if (!currentIsDynamic && dynamicStepIds?.has(candidateId)) continue; // skip dynamic
+      return candidateId;
+    }
   }
   return undefined;
 }
 
 /** Check if workflow has reached its terminal state (no more steps). */
-export function isTerminal(def: WorkflowDefinition, state: WorkflowState): boolean {
+export function isTerminal(
+  def: WorkflowDefinition,
+  state: WorkflowState,
+  dynamicStepIds?: ReadonlySet<string>,
+): boolean {
   const step = def.steps.find(s => s.id === state.currentStepId);
   if (!step) return true;
   const lastResult = state.history[state.history.length - 1];
   if (!lastResult || lastResult.stepId !== state.currentStepId) return false;
-  return resolveNextStep(def, state.currentStepId, lastResult) === undefined;
+  return resolveNextStep(def, state.currentStepId, lastResult, dynamicStepIds) === undefined;
 }

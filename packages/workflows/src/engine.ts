@@ -49,9 +49,10 @@ import { type WorkflowRateLimiter } from './rate-limiter.js';
 import { type WorkflowRunQueue } from './run-queue.js';
 import { WorkflowConcurrencyError, WorkflowRateLimitError } from '@weaveintel/core';
 import { type WorkflowSpanEmitter } from './span-emitter.js';
-import { getWorkflowGraph } from './linter.js';
-import type { WorkflowSpan, RunTrace, WorkflowGraph, ReplayRunOpts } from '@weaveintel/core';
+import { getWorkflowGraph, lintWorkflow } from './linter.js';
+import type { WorkflowSpan, RunTrace, WorkflowGraph, ReplayRunOpts, DynamicExpansion } from '@weaveintel/core';
 import type {} from './replay-recorder.js';
+import { WorkflowExpansionError } from './expansion-error.js';
 
 export type { WorkflowEngineOptions } from './engine-types.js';
 
@@ -409,7 +410,9 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     const resumeDef = run.definitionSnapshot ?? def;
 
     // Advance to the correct next step, respecting branch selectors in resume data.
-    const currentStep = resumeDef.steps.find(s => s.id === run.state.currentStepId);
+    // Phase W7: use effectiveDef (snapshot + dynamicSteps) so that a paused
+    // wait step inside a generated sub-graph is correctly found and advanced past.
+    const currentStep = this.effectiveDef(run, resumeDef).steps.find(s => s.id === run.state.currentStepId);
     if (currentStep) {
       const nextId = resolveResumeNextId(currentStep, data);
       if (nextId) {
@@ -620,7 +623,10 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     }
 
     while (run.status === 'running') {
-      const step = activeDef.steps.find(s => s.id === run.state.currentStepId);
+      // ─── Phase W7 — Dynamic Graph: search merged (static + dynamic) steps ──
+      // Recompute each iteration: new steps may have been spliced since last turn.
+      const dynamicStepIds: ReadonlySet<string> = new Set(run.dynamicSteps?.map(s => s.id) ?? []);
+      const step = this.effectiveDef(run, activeDef).steps.find(s => s.id === run.state.currentStepId);
       if (!step) {
         this.failRun(run, `Step not found: ${run.state.currentStepId}`);
         break;
@@ -648,10 +654,10 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
           };
           await this.emitStepSpan(run, step, stepStartMs, 'skipped', 0, 0);
           this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
-          const nextStepId = resolveNextStep(activeDef, step.id, skippedResult);
+          const nextStepId = resolveNextStep(this.effectiveDef(run, activeDef), step.id, skippedResult, dynamicStepIds);
           (run as { state: WorkflowState }).state = advanceState(run.state, skippedResult, nextStepId);
           await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-          if (!nextStepId || isTerminal(activeDef, run.state)) { await this.completeRun(run, activeDef); }
+          if (!nextStepId || isTerminal(this.effectiveDef(run, activeDef), run.state, dynamicStepIds)) { await this.completeRun(run, activeDef); }
           continue;
         }
       }
@@ -667,10 +673,10 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
             startedAt: now(), completedAt: now(),
           };
           this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
-          const nextId = resolveNextStep(activeDef, step.id, cachedResult);
+          const nextId = resolveNextStep(this.effectiveDef(run, activeDef), step.id, cachedResult, dynamicStepIds);
           (run as { state: WorkflowState }).state = advanceState(run.state, cachedResult, nextId);
           await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-          if (!nextId || isTerminal(activeDef, run.state)) await this.completeRun(run, activeDef);
+          if (!nextId || isTerminal(this.effectiveDef(run, activeDef), run.state, dynamicStepIds)) await this.completeRun(run, activeDef);
           continue;
         }
       }
@@ -703,11 +709,11 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
           };
           this.emit({ type: 'step:replayed', runId: run.id, stepId: step.id, timestamp: now() });
           void this.appendAudit(run, 'step:replayed', { stepId: step.id });
-          const nextId = resolveNextStep(activeDef, step.id, replayedResult);
+          const nextId = resolveNextStep(this.effectiveDef(run, activeDef), step.id, replayedResult, dynamicStepIds);
           (run as { state: WorkflowState }).state = advanceState(run.state, replayedResult, nextId);
           for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
           await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-          if (!nextId || isTerminal(activeDef, run.state)) await this.completeRun(run, activeDef);
+          if (!nextId || isTerminal(this.effectiveDef(run, activeDef), run.state, dynamicStepIds)) await this.completeRun(run, activeDef);
           continue;
         }
         await this.stepLockStore.lock(run.id, step.id);
@@ -798,14 +804,14 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
                 try { await this.stepLockStore.markDone(run.id, step.id, retryProcessed.output); } catch { /* best-effort */ }
               }
               const ephemeral = step.outputScope === 'step';
-              (run as { state: WorkflowState }).state = advanceState(run.state, retryProcessed, resolveNextStep(activeDef, step.id, retryProcessed), ephemeral);
+              (run as { state: WorkflowState }).state = advanceState(run.state, retryProcessed, resolveNextStep(this.effectiveDef(run, activeDef), step.id, retryProcessed, dynamicStepIds), ephemeral);
               for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
               const retryCostUsd = (await Promise.resolve(this.costMeter.total(run.id))) - stepCostBefore;
               await this.emitStepSpan(run, step, stepStartMs, 'completed', stepRetryCount, retryCostUsd);
               this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
               void this.appendAudit(run, 'step:completed', { stepId: step.id });
               await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-              if (isTerminal(activeDef, run.state)) await this.completeRun(run, activeDef);
+              if (isTerminal(this.effectiveDef(run, activeDef), run.state, dynamicStepIds)) await this.completeRun(run, activeDef);
               continue;
             }
           }
@@ -840,12 +846,12 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
                 await this.emitStepSpan(run, step, stepStartMs, 'completed', stepRetryCount, fbCostUsd);
                 this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
                 void this.appendAudit(run, 'step:completed', { stepId: step.id });
-                const nextId = resolveNextStep(activeDef, step.id, fbProcessed);
+                const nextId = resolveNextStep(this.effectiveDef(run, activeDef), step.id, fbProcessed, dynamicStepIds);
                 const fbEphemeral = step.outputScope === 'step';
                 (run as { state: WorkflowState }).state = advanceState(run.state, fbProcessed, nextId, fbEphemeral);
                 for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
                 await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-                if (isTerminal(activeDef, run.state)) await this.completeRun(run, activeDef);
+                if (isTerminal(this.effectiveDef(run, activeDef), run.state, dynamicStepIds)) await this.completeRun(run, activeDef);
                 continue;
               }
             } catch { /* fallback also failed — fall through to onError/compensation */ }
@@ -987,13 +993,71 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         return run;
       }
 
-      const nextStepId = resolveNextStep(activeDef, step.id, stepResult);
+      // ─── Phase W7 — Dynamic Graph: splice sub-graph from 'dynamic' step ─────
+      // Must run AFTER postProcessSuccess and cost-ceiling checks (so costs are
+      // tracked) but BEFORE the normal resolveNextStep / advanceState path.
+      if (step.type === 'dynamic') {
+        const loopDef = this.effectiveDef(run, activeDef);
+        const expansion = this.extractExpansion(stepResult.output);
+        if (!expansion) {
+          this.failRun(run, `WorkflowExpansionError [INVALID_EXPANSION]: dynamic step "${step.id}" handler must return a DynamicExpansion or { __expansion: DynamicExpansion }`);
+          break;
+        }
+        // Compute rejoin target from expansion.rejoin or step.next
+        const rejoin = expansion.rejoin ?? (typeof step.next === 'string' ? step.next : (step.next as string[] | undefined)?.[0]);
+        // Rewrite only the truly terminal expansion steps (those that would
+        // fall off the end of the sub-graph) to point to the rejoin target.
+        // Mid-expansion steps with no explicit next route to the following
+        // expansion step via declaration-order fallback in resolveNextStep.
+        const rewrittenSteps: WorkflowStep[] = expansion.steps.map((s, idx) => {
+          if (s.next || !rejoin) return s;
+          // Rewrite only if no subsequent expansion step follows in declaration order
+          if (expansion.steps[idx + 1] !== undefined) return s;
+          return { ...s, next: rejoin };
+        });
+        const rewrittenExpansion: DynamicExpansion = { ...expansion, steps: rewrittenSteps };
+        // Validate (throws WorkflowExpansionError on any violation)
+        try {
+          this.validateExpansion(run, rewrittenExpansion, loopDef, policy);
+        } catch (err) {
+          this.failRun(run, err instanceof Error ? err.message : String(err));
+          break;
+        }
+        // Splice: append to run.dynamicSteps, bump depth
+        run.dynamicSteps = [...(run.dynamicSteps ?? []), ...rewrittenSteps];
+        run.expansionDepth = (run.expansionDepth ?? 0) + 1;
+        // Resolve handlers for the new steps (best-effort — pre-registered always win)
+        if (this.resolverRegistry) {
+          const tempDef: WorkflowDefinition = { ...activeDef, steps: rewrittenSteps };
+          const newHandlers = await this.resolveHandlersForRun(tempDef);
+          for (const [k, v] of newHandlers) if (!runHandlers.has(k)) runHandlers.set(k, v);
+        }
+        // Replace the full expansion in output with a lightweight summary so state
+        // variables don't carry an unbounded list of WorkflowStep objects.
+        stepResult = {
+          ...stepResult,
+          output: { expanded: true, entry: expansion.entry, stepCount: rewrittenSteps.length },
+        };
+        // Advance state, routing into the expansion entry step (not step.next)
+        const dynEphemeral = step.outputScope === 'step';
+        (run as { state: WorkflowState }).state = advanceState(run.state, stepResult, expansion.entry, dynEphemeral);
+        for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
+        // Persist run so dynamicSteps + expansionDepth survive process restart
+        await this.runRepository.save(run);
+        this.runCache.set(run.id, run);
+        await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
+        this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
+        void this.appendAudit(run, 'step:completed', { stepId: step.id });
+        continue; // loop — loopDef now includes the spliced steps
+      }
+
+      const nextStepId = resolveNextStep(this.effectiveDef(run, activeDef), step.id, stepResult, dynamicStepIds);
       const mainEphemeral = step.outputScope === 'step';
       (run as { state: WorkflowState }).state = advanceState(run.state, stepResult, nextStepId, mainEphemeral);
       for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
       await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
 
-      if (!nextStepId || isTerminal(activeDef, run.state)) {
+      if (!nextStepId || isTerminal(this.effectiveDef(run, activeDef), run.state, dynamicStepIds)) {
         await this.completeRun(run, activeDef);
       }
     }
@@ -1299,6 +1363,131 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       },
     };
     await Promise.resolve(this.spanEmitter.emit(span)).catch(() => { /* best-effort */ });
+  }
+
+  // ─── Phase W7 — Dynamic Graph helpers ──────────────────────────────────────
+
+  /**
+   * Phase W7 — Return a merged WorkflowDefinition whose `steps` array is the
+   * snapshot steps concatenated with any runtime-generated `dynamicSteps`.
+   * Used by the run loop for step lookups and routing so both static and
+   * dynamic steps are visible to `resolveNextStep` and `isTerminal`.
+   */
+  private effectiveDef(run: WorkflowRun, snapshot: WorkflowDefinition): WorkflowDefinition {
+    if (!run.dynamicSteps?.length) return snapshot;
+    return { ...snapshot, steps: [...snapshot.steps, ...run.dynamicSteps] };
+  }
+
+  /**
+   * Phase W7 — Extract a `DynamicExpansion` from a step output value.
+   * Accepts either a direct `DynamicExpansion` object or a `{ __expansion }` wrapper
+   * (used by the planner resolver to avoid ambiguity with plain handler outputs).
+   */
+  private extractExpansion(output: unknown): DynamicExpansion | null {
+    if (!output || typeof output !== 'object') return null;
+    const obj = output as Record<string, unknown>;
+    // Direct DynamicExpansion: has steps[] + entry string
+    if (Array.isArray(obj['steps']) && typeof obj['entry'] === 'string') {
+      return output as DynamicExpansion;
+    }
+    // Wrapped: { __expansion: DynamicExpansion }
+    const wrapped = obj['__expansion'];
+    if (wrapped && typeof wrapped === 'object') {
+      const w = wrapped as Record<string, unknown>;
+      if (Array.isArray(w['steps']) && typeof w['entry'] === 'string') {
+        return wrapped as DynamicExpansion;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Phase W7 — Governance gate for runtime-generated sub-graphs.
+   *
+   * Checks (in order):
+   *  1. maxExpansionDepth budget
+   *  2. maxGeneratedSteps budget
+   *  3. entry step exists in expansion.steps
+   *  4. No id collisions with the current effective graph
+   *  5. Handler-kind allowlist (script + subworkflow blocked by default)
+   *  6. Linter on merged graph (catches broken-next, cycles, etc.)
+   *
+   * Throws `WorkflowExpansionError` on the first violation found.
+   * Terminal-step rewriting (→ rejoin) must be applied BEFORE calling this
+   * method so the linter sees the final connected graph.
+   */
+  private validateExpansion(
+    run: WorkflowRun,
+    expansion: DynamicExpansion,
+    loopDef: WorkflowDefinition,
+    policy: WorkflowPolicy | undefined,
+  ): void {
+    // 1. maxExpansionDepth
+    const maxDepth = policy?.maxExpansionDepth ?? 5;
+    const currentDepth = run.expansionDepth ?? 0;
+    if (currentDepth >= maxDepth) {
+      throw new WorkflowExpansionError('MAX_EXPANSION_DEPTH',
+        `maxExpansionDepth (${maxDepth}) exceeded — current depth: ${currentDepth}`);
+    }
+
+    // 2. maxGeneratedSteps
+    const maxGen = policy?.maxGeneratedSteps;
+    const existingGen = run.dynamicSteps?.length ?? 0;
+    if (maxGen !== undefined && existingGen + expansion.steps.length > maxGen) {
+      throw new WorkflowExpansionError('MAX_GENERATED_STEPS',
+        `maxGeneratedSteps (${maxGen}) budget exceeded: ${existingGen} existing + ${expansion.steps.length} new`);
+    }
+
+    // 3. entry step exists
+    if (!expansion.steps.find(s => s.id === expansion.entry)) {
+      throw new WorkflowExpansionError('INVALID_ENTRY',
+        `expansion entry step "${expansion.entry}" not found in expansion.steps`);
+    }
+
+    // 4. ID collision — no expansion step may have the same id as any effective step
+    const existingIds = new Set(loopDef.steps.map(s => s.id));
+    const seenInExpansion = new Set<string>();
+    for (const s of expansion.steps) {
+      if (existingIds.has(s.id)) {
+        throw new WorkflowExpansionError('ID_COLLISION',
+          `generated step id "${s.id}" collides with an existing step id`);
+      }
+      if (seenInExpansion.has(s.id)) {
+        throw new WorkflowExpansionError('ID_COLLISION',
+          `generated step id "${s.id}" appears more than once in expansion.steps`);
+      }
+      seenInExpansion.add(s.id);
+    }
+
+    // 5. Handler-kind allowlist — only applies to colon-prefixed resolver refs
+    // (e.g. "script:return 1", "subworkflow:my-flow"). Plain handler keys such as
+    // "my-tool-fn" are pre-registered functions, not resolver-kind dispatches, and
+    // are not subject to this governance check.
+    const defaultAllowlist = ['noop', 'tool', 'prompt', 'agent', 'mcp'];
+    const allowed = new Set(policy?.dynamicHandlerKinds ?? defaultAllowlist);
+    for (const s of expansion.steps) {
+      const handlerRef = s.handler ?? s.id;
+      const colonAt = handlerRef.indexOf(':');
+      if (colonAt >= 0) {
+        const kind = handlerRef.slice(0, colonAt);
+        if (!allowed.has(kind)) {
+          throw new WorkflowExpansionError('DISALLOWED_HANDLER_KIND',
+            `generated step "${s.id}" uses handler kind "${kind}" which is not in the dynamicHandlerKinds allowlist (${[...allowed].join(', ')})`);
+        }
+      }
+    }
+
+    // 6. Lint the merged graph — reject on any error-severity finding
+    const mergedDef: WorkflowDefinition = {
+      ...loopDef,
+      steps: [...loopDef.steps, ...expansion.steps],
+    };
+    const lintResults = lintWorkflow(mergedDef);
+    const errors = lintResults.filter(r => r.severity === 'error');
+    if (errors.length > 0) {
+      throw new WorkflowExpansionError('LINT_ERROR',
+        `expansion produces an invalid graph: ${errors.map(e => e.message).join('; ')}`);
+    }
   }
 
   private failRun(run: WorkflowRun, error: string): void {

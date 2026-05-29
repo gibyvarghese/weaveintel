@@ -354,6 +354,20 @@ async function executeHumanTask(step: WorkflowStep, _state: WorkflowState, _hand
   return result(step.id, 'completed', { humanTaskRequired: true });
 }
 
+// ─── Phase W7 — Dynamic Graph ─────────────────────────────────
+
+/**
+ * Dynamic step executor — calls the registered handler and returns its output.
+ * The engine inspects the output (a `DynamicExpansion` or
+ * `{ __expansion: DynamicExpansion }`) and splices the generated sub-graph
+ * into the run AFTER this executor returns. The executor itself is identical
+ * in behaviour to `executeDeterministic`; the routing magic lives in the
+ * engine's run loop, not here.
+ */
+async function executeDynamic(step: WorkflowStep, state: WorkflowState, handlers: StepHandlerMap): Promise<WorkflowStepResult> {
+  return executeDeterministic(step, state, handlers);
+}
+
 const executors: Record<string, StepExecutor> = {
   deterministic: executeDeterministic,
   agentic: executeAgentic,
@@ -369,6 +383,8 @@ const executors: Record<string, StepExecutor> = {
   forEach: executeForEach,
   fork: executeFork,
   join: executeJoin,
+  // ─── Phase W7 — Dynamic Graph ─────────────────────────────
+  dynamic: executeDynamic,
 };
 
 export function getStepExecutor(type: string): StepExecutor | undefined {
