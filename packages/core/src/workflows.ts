@@ -7,7 +7,9 @@
 export type WorkflowStepType =
   | 'deterministic' | 'agentic' | 'branch' | 'loop' | 'condition' | 'wait' | 'parallel' | 'sub-workflow' | 'human-task'
   // Phase W1 — Control flow completeness
-  | 'switch' | 'forEach' | 'fork' | 'join';
+  | 'switch' | 'forEach' | 'fork' | 'join'
+  // ─── Phase W7 — Dynamic Graph ───────────────────────────
+  | 'dynamic';
 
 export interface WorkflowStep {
   id: string;
@@ -243,6 +245,26 @@ export interface WorkflowRun {
    * beyond the global `costTotal` ceiling check.
    */
   costBreakdown?: Record<string, number>;
+  // ─── Phase W7 — Dynamic Graph ─────────────────────────────────────────────
+  /**
+   * Phase W7 — Immutable snapshot of the workflow definition captured at
+   * `startRun` time. The engine uses this for all step lookups and routing
+   * during the run, so edits to the live definition store after the run starts
+   * have no effect on in-flight execution or replay. Persisted by the run
+   * repository so it survives process restarts.
+   */
+  definitionSnapshot?: WorkflowDefinition;
+  /**
+   * Phase W7 — Steps appended to the run's effective graph at runtime by
+   * `dynamic` steps. Stored on the run and checkpointed so sub-graph
+   * execution is restart-safe.
+   */
+  dynamicSteps?: WorkflowStep[];
+  /**
+   * Phase W7 — Number of times a `dynamic` step has spliced a sub-graph into
+   * this run. Used to enforce `policy.maxExpansionDepth`.
+   */
+  expansionDepth?: number;
 }
 
 /**
@@ -316,6 +338,44 @@ export interface WorkflowPolicy {
    * Exceeding this limit causes `startRun()` to throw `WorkflowRateLimitError`.
    */
   maxRunsPerMinute?: number;
+  // ─── Phase W7 — Dynamic Graph ─────────────────────────────────────────────
+  /**
+   * Phase W7 — Allowlist of handler kinds that generated steps (from `dynamic`
+   * expansions) may use. Defaults to `['noop', 'tool', 'prompt', 'agent', 'mcp']`
+   * when not set. `'script'` and `'subworkflow'` are intentionally excluded by
+   * default; add them explicitly if your threat model allows it.
+   */
+  dynamicHandlerKinds?: string[];
+  /**
+   * Phase W7 — Maximum total number of steps that may be generated across all
+   * `dynamic` expansions within a single run. Enforced by `validateExpansion`.
+   */
+  maxGeneratedSteps?: number;
+  /**
+   * Phase W7 — Maximum number of `dynamic` step expansions permitted per run
+   * (i.e., the maximum value of `run.expansionDepth`). Default: 5.
+   */
+  maxExpansionDepth?: number;
+}
+
+// ─── Phase W7 — Dynamic Graph ───────────────────────────────────────────────
+
+/**
+ * Phase W7 — The value returned by a `dynamic` step's handler.
+ * The engine splices `steps` into the run's effective graph and immediately
+ * routes execution into `entry`. When the sub-graph terminates, control
+ * returns to `rejoin` (or the dynamic step's `next` if `rejoin` is omitted).
+ */
+export interface DynamicExpansion {
+  /** Steps to append to the run's effective graph. IDs must not collide with existing steps. */
+  steps: WorkflowStep[];
+  /** ID of the first step to execute in the generated sub-graph. Must be in `steps`. */
+  entry: string;
+  /**
+   * Step ID to jump to when the generated sub-graph terminates (its final step
+   * has no `next`). Defaults to the `dynamic` step's own `next` when omitted.
+   */
+  rejoin?: string;
 }
 
 export interface WorkflowCompensation {

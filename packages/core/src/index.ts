@@ -419,6 +419,8 @@ export {
   type WorkflowGraphEdge,
   type WorkflowGraph,
   type ReplayRunOpts,
+  // ─── Phase W7 — Dynamic Graph ────────────────────────────
+  type DynamicExpansion,
 } from './workflows.js';
 
 // Phase 5 — Capability Policy Bindings

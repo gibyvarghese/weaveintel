@@ -167,8 +167,11 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   async replayRun(runId: string, opts?: ReplayRunOpts): Promise<WorkflowRun> {
     const original = await this.getRun(runId);
     if (!original) throw new Error(`Workflow run not found: ${runId}`);
-    const def = await this.getDefinition(original.workflowId);
-    if (!def) throw new Error(`Workflow definition not found: ${original.workflowId}`);
+    const liveDef = await this.getDefinition(original.workflowId);
+    if (!liveDef) throw new Error(`Workflow definition not found: ${original.workflowId}`);
+    // ─── Phase W7 — replay uses the snapshotted definition so the replay
+    // reflects the exact graph the original run executed against.
+    const def = original.definitionSnapshot ?? liveDef;
 
     // Build a replay trace from history entries up to (but not including) fromStepId.
     const history = original.state.history ?? [];
@@ -315,6 +318,8 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
             tenantId: opts?.tenantId,
             priority: opts?.priority ?? 0,
             costBreakdown: {},
+            // ─── Phase W7 — Dynamic Graph ─────────────────────────────────
+            definitionSnapshot: structuredClone(def),
             ...(opts?.parentRunId ? { parentRunId: opts.parentRunId } : {}),
           };
           await this.runRepository.save(pendingRun);
@@ -342,6 +347,10 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       traceId: opts?.traceId ?? this.traceIdGenerator(),
       tenantId: opts?.tenantId,
       priority: opts?.priority ?? 0,
+      // ─── Phase W7 — Dynamic Graph ───────────────────────────────────────
+      // Freeze the definition graph at run-start so mid-run edits to the
+      // live definition store cannot silently change topology or routing.
+      definitionSnapshot: structuredClone(def),
       ...(opts?.parentRunId ? { parentRunId: opts.parentRunId } : {}),
     };
     await this.runRepository.save(run);
@@ -395,8 +404,12 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
       void this.appendAudit(run, 'run:sleep_resumed', { data: data as Record<string, unknown> });
     }
 
+    // ─── Phase W7 — use snapshot for step lookup so resume respects the
+    // original graph topology even if the live definition has been edited.
+    const resumeDef = run.definitionSnapshot ?? def;
+
     // Advance to the correct next step, respecting branch selectors in resume data.
-    const currentStep = def.steps.find(s => s.id === run.state.currentStepId);
+    const currentStep = resumeDef.steps.find(s => s.id === run.state.currentStepId);
     if (currentStep) {
       const nextId = resolveResumeNextId(currentStep, data);
       if (nextId) {
@@ -576,11 +589,13 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     const run = await this.getRun(runId);
     if (!run) throw new Error(`Workflow run not found: ${runId}`);
     if (run.status !== 'running') return run;
-    const def = await this.getDefinition(run.workflowId);
-    if (!def) throw new Error(`Workflow definition not found: ${run.workflowId}`);
-    const handlers = await this.resolveHandlersForRun(def);
-    this.applyIOMappingForRun(def, handlers);
-    return this.executeRun(run, def, { handlers, maxStepsOverride: 1 });
+    const liveDef = await this.getDefinition(run.workflowId);
+    if (!liveDef) throw new Error(`Workflow definition not found: ${run.workflowId}`);
+    // ─── Phase W7 — use snapshot when present (see executeRun) ───────────
+    const activeDef = run.definitionSnapshot ?? liveDef;
+    const handlers = await this.resolveHandlersForRun(activeDef);
+    this.applyIOMappingForRun(activeDef, handlers);
+    return this.executeRun(run, liveDef, { handlers, maxStepsOverride: 1 });
   }
 
   private async executeRun(
@@ -588,17 +603,24 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     def: WorkflowDefinition,
     opts?: { handlers?: StepHandlerMap; maxStepsOverride?: number },
   ): Promise<WorkflowRun> {
-    const policy = this.defaultPolicy ?? (def.metadata?.['policy'] as WorkflowPolicy | undefined);
+    // ─── Phase W7 — Dynamic Graph ────────────────────────────────────────────
+    // Always drive execution from the snapshot captured at startRun.  This
+    // prevents live definition edits from altering an in-flight run's topology.
+    // Phase W7 further extends activeDef via effectiveSteps() to include
+    // any dynamically-generated steps appended during this run.
+    const activeDef = run.definitionSnapshot ?? def;
+
+    const policy = this.defaultPolicy ?? (activeDef.metadata?.['policy'] as WorkflowPolicy | undefined);
     let stepsExecuted = 0;
     const maxSteps = opts?.maxStepsOverride ?? policy?.maxSteps ?? 100;
     let runHandlers = opts?.handlers;
     if (!runHandlers) {
-      runHandlers = await this.resolveHandlersForRun(def);
-      this.applyIOMappingForRun(def, runHandlers);
+      runHandlers = await this.resolveHandlersForRun(activeDef);
+      this.applyIOMappingForRun(activeDef, runHandlers);
     }
 
     while (run.status === 'running') {
-      const step = def.steps.find(s => s.id === run.state.currentStepId);
+      const step = activeDef.steps.find(s => s.id === run.state.currentStepId);
       if (!step) {
         this.failRun(run, `Step not found: ${run.state.currentStepId}`);
         break;
@@ -626,10 +648,10 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
           };
           await this.emitStepSpan(run, step, stepStartMs, 'skipped', 0, 0);
           this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
-          const nextStepId = resolveNextStep(def, step.id, skippedResult);
+          const nextStepId = resolveNextStep(activeDef, step.id, skippedResult);
           (run as { state: WorkflowState }).state = advanceState(run.state, skippedResult, nextStepId);
           await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-          if (!nextStepId || isTerminal(def, run.state)) { await this.completeRun(run, def); }
+          if (!nextStepId || isTerminal(activeDef, run.state)) { await this.completeRun(run, activeDef); }
           continue;
         }
       }
@@ -645,10 +667,10 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
             startedAt: now(), completedAt: now(),
           };
           this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
-          const nextId = resolveNextStep(def, step.id, cachedResult);
+          const nextId = resolveNextStep(activeDef, step.id, cachedResult);
           (run as { state: WorkflowState }).state = advanceState(run.state, cachedResult, nextId);
           await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-          if (!nextId || isTerminal(def, run.state)) await this.completeRun(run, def);
+          if (!nextId || isTerminal(activeDef, run.state)) await this.completeRun(run, activeDef);
           continue;
         }
       }
@@ -681,11 +703,11 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
           };
           this.emit({ type: 'step:replayed', runId: run.id, stepId: step.id, timestamp: now() });
           void this.appendAudit(run, 'step:replayed', { stepId: step.id });
-          const nextId = resolveNextStep(def, step.id, replayedResult);
+          const nextId = resolveNextStep(activeDef, step.id, replayedResult);
           (run as { state: WorkflowState }).state = advanceState(run.state, replayedResult, nextId);
           for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
           await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-          if (!nextId || isTerminal(def, run.state)) await this.completeRun(run, def);
+          if (!nextId || isTerminal(activeDef, run.state)) await this.completeRun(run, activeDef);
           continue;
         }
         await this.stepLockStore.lock(run.id, step.id);
@@ -776,14 +798,14 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
                 try { await this.stepLockStore.markDone(run.id, step.id, retryProcessed.output); } catch { /* best-effort */ }
               }
               const ephemeral = step.outputScope === 'step';
-              (run as { state: WorkflowState }).state = advanceState(run.state, retryProcessed, resolveNextStep(def, step.id, retryProcessed), ephemeral);
+              (run as { state: WorkflowState }).state = advanceState(run.state, retryProcessed, resolveNextStep(activeDef, step.id, retryProcessed), ephemeral);
               for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
               const retryCostUsd = (await Promise.resolve(this.costMeter.total(run.id))) - stepCostBefore;
               await this.emitStepSpan(run, step, stepStartMs, 'completed', stepRetryCount, retryCostUsd);
               this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
               void this.appendAudit(run, 'step:completed', { stepId: step.id });
               await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-              if (isTerminal(def, run.state)) await this.completeRun(run, def);
+              if (isTerminal(activeDef, run.state)) await this.completeRun(run, activeDef);
               continue;
             }
           }
@@ -818,12 +840,12 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
                 await this.emitStepSpan(run, step, stepStartMs, 'completed', stepRetryCount, fbCostUsd);
                 this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
                 void this.appendAudit(run, 'step:completed', { stepId: step.id });
-                const nextId = resolveNextStep(def, step.id, fbProcessed);
+                const nextId = resolveNextStep(activeDef, step.id, fbProcessed);
                 const fbEphemeral = step.outputScope === 'step';
                 (run as { state: WorkflowState }).state = advanceState(run.state, fbProcessed, nextId, fbEphemeral);
                 for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
                 await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
-                if (isTerminal(def, run.state)) await this.completeRun(run, def);
+                if (isTerminal(activeDef, run.state)) await this.completeRun(run, activeDef);
                 continue;
               }
             } catch { /* fallback also failed — fall through to onError/compensation */ }
@@ -965,14 +987,14 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         return run;
       }
 
-      const nextStepId = resolveNextStep(def, step.id, stepResult);
+      const nextStepId = resolveNextStep(activeDef, step.id, stepResult);
       const mainEphemeral = step.outputScope === 'step';
       (run as { state: WorkflowState }).state = advanceState(run.state, stepResult, nextStepId, mainEphemeral);
       for (const k of promotedEphemeralKeys) delete (run.state.variables as Record<string, unknown>)[k];
       await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
 
-      if (!nextStepId || isTerminal(def, run.state)) {
-        await this.completeRun(run, def);
+      if (!nextStepId || isTerminal(activeDef, run.state)) {
+        await this.completeRun(run, activeDef);
       }
     }
 
