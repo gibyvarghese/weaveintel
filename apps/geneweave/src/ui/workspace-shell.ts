@@ -350,6 +350,11 @@ export function renderWorkspaceTopCard(options: {
         : null
     ),
     h('div', { className: 'top-actions' },
+      h('button', {
+        className: 'nav-btn',
+        title: 'Developer Documentation',
+        onClick: () => { window.open('/docs', '_blank', 'noopener'); },
+      }, '? Docs'),
       h('button', { className: 'nav-btn', onClick: () => { void options.createChat(); } }, '+ New Chat'),
       profileAnchor
     )

@@ -14,6 +14,7 @@ import type { DatabaseAdapter } from './db.js';
 import type { ChatEngine } from './chat.js';
 import { DashboardService } from './dashboard.js';
 import { getHTML } from './ui-server.js';
+import { getDocsHTML } from './docs-html.js';
 import { authenticateRequest, verifyCSRF } from './auth.js';
 import { type TriggerDispatcherHandle } from './admin/api/triggers.js';
 import { type LoadedGatewayConfig } from './mcp-gateway.js';
@@ -73,6 +74,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   const dashboard = new DashboardService(db);
   const router = new Router();
   const uiHtml = getHTML();
+  const docsHtml = getDocsHTML();
 
   async function setOAuthState(state: string, value: { userId: string | null; provider: OAuthProviderName; expiresAt: number }): Promise<void> {
     await db.createOAuthFlowState({
@@ -284,6 +286,12 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       } else {
         json(res, 404, { error: 'Avatar not found' });
       }
+      return;
+    }
+
+    // Developer documentation
+    if (method === 'GET' && (pathname === '/docs' || pathname === '/docs/')) {
+      html(res, 200, docsHtml);
       return;
     }
 
