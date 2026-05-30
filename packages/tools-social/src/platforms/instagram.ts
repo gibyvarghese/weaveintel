@@ -13,6 +13,7 @@
  */
 import { BaseSocialProvider } from '../base.js';
 import type { SocialAccountConfig, SocialPost, SocialPostOptions, SocialSearchOptions } from '../types.js';
+import { socialFetch } from '../_fetch.js';
 
 const DEFAULT_BASE = 'https://graph.facebook.com/v25.0';
 
@@ -186,7 +187,7 @@ export class InstagramProvider extends BaseSocialProvider {
   /* ===== HTTP helper ===== */
 
   protected async fetchRaw(method: string, url: string, headers: Record<string, string>): Promise<void> {
-    const resp = await fetch(url, { method, headers: { ...headers } });
+    const resp = await socialFetch(url, { method, headers: { ...headers } });
     if (!resp.ok && resp.status !== 204) {
       throw new Error(`instagram: ${method} ${resp.status} ${resp.statusText}`);
     }

@@ -55,6 +55,57 @@ import {
 } from './local-tools.js';
 import fs from 'fs/promises';
 import path from 'path';
+
+// Default-on safety wrapper for fetching Kaggle kernel-output files. URLs come
+// from the Kaggle API and are signed object-storage URLs (https). The wrapper
+// rejects non-https schemes and IP-literal hosts (SSRF defence in depth
+// against a tampered API response), enforces a request timeout, and caps the
+// response body so an attacker-chosen URL cannot stream gigabytes into
+// process memory. Returns null on any rejection or failure so callers can
+// continue gracefully.
+export async function safeFetchKaggleOutputText(
+  url: string,
+  opts: { timeoutMs?: number; maxBytes?: number } = {},
+): Promise<string | null> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:') return null;
+  if (/^[0-9.]+$/.test(parsed.hostname) || parsed.hostname.includes(':')) return null;
+
+  const timeoutMs = opts.timeoutMs ?? 30_000;
+  const maxBytes = opts.maxBytes ?? 8 * 1024 * 1024;
+
+  let resp: Response;
+  try {
+    resp = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+  } catch {
+    return null;
+  }
+  if (!resp.ok || !resp.body) return null;
+
+  const reader = resp.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try { await reader.cancel(); } catch { /* ignore */ }
+        return null;
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return null;
+  }
+  return Buffer.concat(chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.byteLength))).toString('utf8');
+}
 // ─── Kernel-based hyperparameter search (K7c) ─────────────────────────────
 
 export interface KernelOptimizeHyperparamsInput {
@@ -141,11 +192,15 @@ export async function kernelOptimizeHyperparams(
   let searchHistory = [];
   for (const f of output.files) {
     if (f.fileName === 'best_params.json') {
-      const resp = await fetch(f.url);
-      bestParams = await resp.json();
+      const text = await safeFetchKaggleOutputText(f.url, { maxBytes: 1024 * 1024 });
+      if (text) {
+        try { bestParams = JSON.parse(text); } catch { /* skip malformed */ }
+      }
     } else if (f.fileName === 'search_history.json') {
-      const resp = await fetch(f.url);
-      searchHistory = await resp.json();
+      const text = await safeFetchKaggleOutputText(f.url, { maxBytes: 4 * 1024 * 1024 });
+      if (text) {
+        try { searchHistory = JSON.parse(text); } catch { /* skip malformed */ }
+      }
     }
   }
   log = output.log || '';

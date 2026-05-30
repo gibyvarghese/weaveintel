@@ -9,6 +9,7 @@
 
 import type { ExecutionContext } from '@weaveintel/core';
 import type { MarketDataAdapter, OHLCVParams } from '../adapter.js';
+import { marketdataFetch } from '../_fetch.js';
 import type {
   SymbolSearchResult, CompanyProfile, Quote, OHLCVBar, Fundamentals,
   AnnualFinancials, QuarterlyFinancials, EarningsEvent, AnalystConsensus,
@@ -20,7 +21,7 @@ const EDGAR_BASE = 'https://data.sec.gov';
 const USER_AGENT = 'weaveintel-tools-marketdata/0.1 (github.com/weaveintel; contact@weaveintel.io)';
 
 async function edgarGet(path: string): Promise<unknown> {
-  const res = await fetch(`${EDGAR_BASE}${path}`, { headers: { 'User-Agent': USER_AGENT } });
+  const res = await marketdataFetch(`${EDGAR_BASE}${path}`, { headers: { 'User-Agent': USER_AGENT } });
   if (!res.ok) throw new Error(`EDGAR HTTP ${res.status}: ${path}`);
   return res.json();
 }
@@ -29,7 +30,7 @@ async function edgarGet(path: string): Promise<unknown> {
 const CIK_CACHE = new Map<string, string>();
 async function getCik(symbol: string): Promise<string> {
   if (CIK_CACHE.has(symbol)) return CIK_CACHE.get(symbol)!;
-  const data = await fetch('https://www.sec.gov/files/company_tickers.json', { headers: { 'User-Agent': USER_AGENT } }).then(r => r.json()) as Record<string, { cik_str: number; ticker: string; title: string }>;
+  const data = await marketdataFetch('https://www.sec.gov/files/company_tickers.json', { headers: { 'User-Agent': USER_AGENT } }).then(r => r.json()) as Record<string, { cik_str: number; ticker: string; title: string }>;
   const entry = Object.values(data).find(e => e.ticker.toUpperCase() === symbol.toUpperCase());
   if (!entry) throw new Error(`EDGAR: CIK not found for symbol "${symbol}"`);
   const cik = String(entry.cik_str).padStart(10, '0');

@@ -29,6 +29,7 @@
 import { BaseEnterpriseProvider } from '../../base.js';
 import type { EnterpriseConnectorConfig, EnterpriseRecord, EnterpriseQueryOptions } from '../../types.js';
 import { validateTableName, validateSysId, validateApiPath, validateHttpMethod, validateBaseUrl, MAX_ATTACHMENT_BYTES } from '../../validation.js';
+import { enterpriseFetch } from '../../_fetch.js';
 
 function table(config: EnterpriseConnectorConfig, tableName: string, path = ''): string {
   const base = validateBaseUrl(config.baseUrl);
@@ -66,7 +67,7 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
       refresh_token: refreshToken,
     });
     try {
-      const resp = await fetch(`${base}/oauth_token.do`, {
+      const resp = await enterpriseFetch(`${base}/oauth_token.do`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString(),
@@ -278,22 +279,21 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
 
   async downloadAttachment(id: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
     const safeId = validateSysId(id);
-    const resp = await fetch(apiUrl(config, `/api/now/attachment/${safeId}/file`), {
-      headers: { ...this.authHeaders(config) },
-    });
+    const resp = await enterpriseFetch(
+      apiUrl(config, `/api/now/attachment/${safeId}/file`),
+      { headers: { ...this.authHeaders(config) } },
+      { maxBytes: MAX_ATTACHMENT_BYTES },
+    );
     if (!resp.ok) throw new Error(`servicenow: GET attachment file ${resp.status}`);
     const contentType = resp.headers.get('content-type') ?? 'application/octet-stream';
     const buffer = await resp.arrayBuffer();
-    if (buffer.byteLength > MAX_ATTACHMENT_BYTES) {
-      throw new Error(`Attachment exceeds ${MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB size limit.`);
-    }
     const b64 = Buffer.from(buffer).toString('base64');
     return toRecord('attachment_file', { content_type: contentType, base64: b64, size: buffer.byteLength }, safeId);
   }
 
   async uploadAttachment(tableName: string, sysId: string, fileName: string, contentType: string, content: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
     const params = new URLSearchParams({ table_name: tableName, table_sys_id: sysId, file_name: fileName });
-    const resp = await fetch(apiUrl(config, `/api/now/attachment/file?${params}`), {
+    const resp = await enterpriseFetch(apiUrl(config, `/api/now/attachment/file?${params}`), {
       method: 'POST',
       headers: { 'Content-Type': contentType, ...this.authHeaders(config) },
       body: Buffer.from(content, 'base64'),
@@ -521,7 +521,7 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   }
 
   async importCSV(tableName: string, csvContent: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
-    const resp = await fetch(apiUrl(config, `/api/now/import/${tableName}/insertMultiple`), {
+    const resp = await enterpriseFetch(apiUrl(config, `/api/now/import/${tableName}/insertMultiple`), {
       method: 'POST',
       headers: { 'Content-Type': 'text/csv', ...this.authHeaders(config) },
       body: csvContent,
@@ -532,7 +532,7 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   }
 
   async importExcel(tableName: string, base64Content: string, config: EnterpriseConnectorConfig): Promise<EnterpriseRecord> {
-    const resp = await fetch(apiUrl(config, `/api/now/import/${tableName}/insertMultiple`), {
+    const resp = await enterpriseFetch(apiUrl(config, `/api/now/import/${tableName}/insertMultiple`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ...this.authHeaders(config) },
       body: Buffer.from(base64Content, 'base64'),
@@ -545,7 +545,7 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   async exportTable(tableName: string, query: string, format: string, config: EnterpriseConnectorConfig, limit = 1000): Promise<EnterpriseRecord> {
     const params = new URLSearchParams({ sysparm_query: query, sysparm_limit: String(limit) });
     const accept = format === 'csv' ? 'text/csv' : format === 'xml' ? 'application/xml' : 'application/json';
-    const resp = await fetch(table(config, tableName, `?${params}`), {
+    const resp = await enterpriseFetch(table(config, tableName, `?${params}`), {
       headers: { Accept: accept, ...this.authHeaders(config) },
     });
     if (!resp.ok) throw new Error(`servicenow: export ${resp.status}`);
@@ -1655,7 +1655,7 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
    * ================================================================ */
 
   protected async fetchWithBody(method: string, url: string, headers: Record<string, string>, body?: string): Promise<{ result: Record<string, unknown> }> {
-    const resp = await fetch(url, {
+    const resp = await enterpriseFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...headers },
       body,
@@ -1665,7 +1665,7 @@ export class ServiceNowProvider extends BaseEnterpriseProvider {
   }
 
   protected async fetchRaw(method: string, url: string, headers: Record<string, string>): Promise<void> {
-    const resp = await fetch(url, {
+    const resp = await enterpriseFetch(url, {
       method,
       headers: { Accept: 'application/json', ...headers },
     });

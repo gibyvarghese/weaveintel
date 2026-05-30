@@ -17,6 +17,7 @@ import {
   anthropicGetRequest,
   anthropicDeleteRequest,
 } from './shared.js';
+import { assertHttpsOrLoopback } from './_fetch.js';
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -223,6 +224,7 @@ export async function* weaveAnthropicGetBatchResults(
   const baseUrl = options?.baseUrl ?? 'https://api.anthropic.com';
   const url = `${baseUrl}/v1/messages/batches/${encodeURIComponent(batchId)}/results`;
 
+  assertHttpsOrLoopback(url);
   const res = await fetch(url, { method: 'GET', headers: getHeaders });
 
   if (!res.ok) {

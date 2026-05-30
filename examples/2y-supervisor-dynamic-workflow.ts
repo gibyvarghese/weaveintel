@@ -640,11 +640,31 @@ async function demoRealSupervisor() {
     console.log('');
     ok(`Run status: ${run.status}`);
     if (run.error) warn(`Error: ${run.error}`);
-    ok(`Dynamic steps generated: ${run.dynamicSteps?.length}`);
-    ok(`  ${run.dynamicSteps?.map(s => `${s.id}(${s.handler})`).join(' → ')}`);
     ok(`Expansion depth: ${run.expansionDepth}`);
-    const final = run.state.variables['__step_finalize'] as { summary?: string } | undefined;
-    ok(`Final summary: "${final?.summary ?? '(none)'}"`);
+
+    // ── Step execution history ─────────────────────────────────────────────
+    console.log('\n  Step execution history (run.state.history):');
+    for (const h of run.state.history) {
+      const dynTag = run.dynamicSteps?.some(d => d.id === h.stepId) ? ' [DYNAMIC]' : ' [static]';
+      console.log(`    ${h.status.padEnd(9)} ${h.stepId}${dynTag}`);
+    }
+
+    // ── Per-step outputs stored in variables ───────────────────────────────
+    console.log('\n  Step outputs (run.state.variables):');
+    for (const step of run.state.history) {
+      const key = `__step_${step.stepId}`;
+      const val = run.state.variables[key];
+      if (val !== undefined) {
+        console.log(`    __step_${step.stepId} →`, JSON.stringify(val).slice(0, 120));
+      }
+    }
+
+    // ── Dynamic steps as spliced by the engine ─────────────────────────────
+    console.log('\n  Dynamic steps spliced by engine (run.dynamicSteps):');
+    for (const ds of run.dynamicSteps ?? []) {
+      console.log(`    id=${ds.id}  handler=${ds.handler}  type=${ds.type}  next=${ds.next ?? '(none—terminal)'}`);
+    }
+
   } catch (e) {
     warn(`Real supervisor error: ${(e as Error).message}`);
     if ((e as Error).stack) info((e as Error).stack!.split('\n').slice(0, 4).join('\n'));

@@ -13,6 +13,7 @@
  * with the configured API key.
  */
 
+import { ollamaFetch } from '@weaveintel/provider-ollama';
 import type { DatabaseAdapter, ModelPricingRow } from './db.js';
 
 // ─── Built-in pricing registry ───────────────────────────────
@@ -150,7 +151,7 @@ async function fetchGoogleModels(apiKey: string): Promise<string[]> {
 
 async function fetchOllamaModels(baseUrl: string): Promise<string[]> {
   const url = baseUrl.replace(/\/+$/, '') + '/api/tags';
-  const res = await fetch(url);
+  const res = await ollamaFetch(url, undefined, { maxBytes: 1 * 1024 * 1024 });
   if (!res.ok) {
     throw new Error(`Ollama tags API returned ${res.status}: ${await res.text()}`);
   }

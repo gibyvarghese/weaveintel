@@ -19,6 +19,7 @@ import {
 } from '@weaveintel/core';
 import {
   liveKaggleAdapter,
+  safeFetchKaggleOutputText,
   validateSubmissionCsv,
   wrapAdapterWithResilience,
   KaggleRateLimitError,
@@ -754,29 +755,17 @@ export function createKaggleTools(opts: KaggleToolsOptions = {}): ToolRegistry {
           const url = f.url ?? '';
           if (!name || !url) continue;
           if (SCORE_FILE_RE.test(name)) {
+            const text = await safeFetchKaggleOutputText(url, { maxBytes: 8192 });
+            if (text === null) continue;
             try {
-              const resp = await fetch(url);
-              if (!resp.ok) continue;
-              const text = await resp.text();
-              if (text.length > 8192) continue;
-              try {
-                inlinedContents[name] = JSON.parse(text);
-              } catch {
-                inlinedContents[name] = text;
-              }
+              inlinedContents[name] = JSON.parse(text);
             } catch {
-              /* best-effort; never block the tool call */
+              inlinedContents[name] = text;
             }
           } else if (CSV_FILE_RE.test(name)) {
-            try {
-              const resp = await fetch(url);
-              if (!resp.ok) continue;
-              const text = await resp.text();
-              if (text.length > MAX_CSV_INLINE) continue;
-              inlinedCsvFiles[name] = text;
-            } catch {
-              /* best-effort */
-            }
+            const text = await safeFetchKaggleOutputText(url, { maxBytes: MAX_CSV_INLINE });
+            if (text === null) continue;
+            inlinedCsvFiles[name] = text;
           }
         }
         const enriched: Record<string, unknown> = { ...(out as object), log: display };

@@ -2,6 +2,7 @@ export {
   createKaggleMCPServer,
   liveKaggleAdapter,
   fixtureKaggleAdapter,
+  safeFetchKaggleOutputText,
   type KaggleAdapter,
   type KaggleCredentials,
   type KaggleMCPServerOptions,

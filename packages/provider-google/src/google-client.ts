@@ -1,6 +1,7 @@
 import { WeaveIntelError, parseRetryAfterMs } from '@weaveintel/core';
 import { createResilientCallable, type ResilientCallable } from '@weaveintel/resilience';
 import type { GoogleProviderOptions } from './google-types.js';
+import { googleFetch, assertHttpsOrLoopback } from './_fetch.js';
 
 export const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
@@ -96,7 +97,7 @@ async function googleRequestRaw(
   headers: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  const res = await fetch(url, {
+  const res = await googleFetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
@@ -112,6 +113,7 @@ async function googleStreamFetchRaw(
   headers: Record<string, string>,
   signal?: AbortSignal,
 ): Promise<ReadableStreamDefaultReader<Uint8Array>> {
+  assertHttpsOrLoopback(url);
   const res = await fetch(url, {
     method: 'POST',
     headers,

@@ -11,6 +11,7 @@
 
 import { WeaveIntelError, parseRetryAfterMs as coreParseRetryAfterMs } from '@weaveintel/core';
 import { createResilientCallable, type ResilientCallable } from '@weaveintel/resilience';
+import { anthropicFetch, assertHttpsOrLoopback } from './_fetch.js';
 
 // ─── Provider options ────────────────────────────────────────
 
@@ -161,7 +162,7 @@ async function anthropicRequestRaw(
     fetchOpts.body = JSON.stringify(body);
   }
 
-  const res = await fetch(url, fetchOpts);
+  const res = await anthropicFetch(url, fetchOpts);
 
   if (!res.ok) {
     const errorBody = await res.text().catch(() => '');
@@ -260,6 +261,7 @@ async function anthropicStreamFetchRaw(
   signal?: AbortSignal,
 ): Promise<ReadableStreamDefaultReader<Uint8Array>> {
   const url = `${baseUrl}${path}`;
+  assertHttpsOrLoopback(url);
   const res = await fetch(url, {
     method: 'POST',
     headers,

@@ -73,8 +73,28 @@ function exec(cmd: string, env?: Record<string, string>): string {
   }
 }
 
+/**
+ * Argument-array exec — preferred for any call that includes user-controlled
+ * values. Never invokes a shell, so values cannot inject metacharacters,
+ * command substitution, or pipe into a second command.
+ */
+function execFile(cmd: string, args: readonly string[], env?: Record<string, string>): string {
+  try {
+    return execFileSync(cmd, args as string[], {
+      encoding: 'utf8',
+      timeout: 30_000,
+      env: { ...process.env, ...env },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false,
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
 function commandExists(cmd: string): string | null {
-  const out = exec(`which ${cmd}`);
+  // `cmd` is always a hardcoded literal at call sites; still avoid shell.
+  const out = execFile('/usr/bin/env', ['which', cmd]);
   return out || null;
 }
 
@@ -100,10 +120,14 @@ export class OnePasswordProvider implements PasswordManagerProvider {
       env['OP_SERVICE_ACCOUNT_TOKEN'] = config['serviceAccountToken'];
     }
 
-    let cmd = 'op item list --categories Login --format json';
-    if (search) cmd += ` --tags "${search.replace(/"/g, '')}"`;
+    const listArgs = ['item', 'list', '--categories', 'Login', '--format', 'json'];
+    if (search) {
+      // 1Password tags are alnum/dash/underscore only; strip everything else.
+      const safeTag = search.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
+      if (safeTag) listArgs.push('--tags', safeTag);
+    }
 
-    const itemsJson = exec(cmd, env);
+    const itemsJson = execFile('op', listArgs, env);
     if (!itemsJson) return [];
 
     let items: Array<{ id: string; title: string; urls?: Array<{ href: string }> }>;
@@ -111,7 +135,9 @@ export class OnePasswordProvider implements PasswordManagerProvider {
 
     const results: ExternalCredential[] = [];
     for (const item of items.slice(0, 100)) {
-      const detailJson = exec(`op item get "${item.id}" --format json`, env);
+      // 1Password item ids are 26-char alnum; reject anything else defensively.
+      if (!/^[A-Za-z0-9]{6,64}$/.test(item.id)) continue;
+      const detailJson = execFile('op', ['item', 'get', item.id, '--format', 'json'], env);
       if (!detailJson) continue;
       try {
         const detail = JSON.parse(detailJson);
@@ -163,23 +189,28 @@ export class BitwardenProvider implements PasswordManagerProvider {
     if (!session && config['clientId'] && config['clientSecret']) {
       env['BW_CLIENTID'] = config['clientId'];
       env['BW_CLIENTSECRET'] = config['clientSecret'];
-      exec('bw login --apikey', env);
+      execFile('bw', ['login', '--apikey'], env);
       if (config['password']) {
-        session = exec(`bw unlock "${config['password'].replace(/"/g, '\"')}" --raw`, env);
+        session = execFile('bw', ['unlock', config['password'], '--raw'], env);
       }
     } else if (!session && config['password']) {
-      session = exec(`bw unlock "${config['password'].replace(/"/g, '\"')}" --raw`, env);
+      session = execFile('bw', ['unlock', config['password'], '--raw'], env);
     }
 
     if (session) env['BW_SESSION'] = session;
 
     // Sync first
-    exec('bw sync', env);
+    execFile('bw', ['sync'], env);
 
-    let cmd = 'bw list items --type 1'; // type 1 = login
-    if (search) cmd += ` --search "${search.replace(/"/g, '')}"`;
+    const listArgs = ['list', 'items', '--type', '1']; // type 1 = login
+    if (search) {
+      // Bitwarden's --search accepts arbitrary text but we cap length and
+      // strip control characters defensively.
+      const safeSearch = search.replace(/[\x00-\x1f\x7f]/g, '').slice(0, 128);
+      if (safeSearch) listArgs.push('--search', safeSearch);
+    }
 
-    const itemsJson = exec(cmd, env);
+    const itemsJson = execFile('bw', listArgs, env);
     if (!itemsJson) return [];
 
     let items: Array<{ name: string; login?: { username?: string; password?: string; uris?: Array<{ uri: string }>; totp?: string }; notes?: string }>;
@@ -258,10 +289,14 @@ export class AppleKeychainProvider implements PasswordManagerProvider {
 
     const results: ExternalCredential[] = [];
     for (const entry of Array.from(unique.values()).slice(0, 100)) {
-      // This triggers a macOS Keychain access dialog per-item
-      const password = exec(
-        `security find-internet-password -s "${entry.server.replace(/"/g, '')}" -a "${entry.account.replace(/"/g, '')}" -w 2>/dev/null`,
-      );
+      // This triggers a macOS Keychain access dialog per-item.
+      // Use execFile so server/account values cannot inject shell metachars.
+      const password = execFile('security', [
+        'find-internet-password',
+        '-s', entry.server,
+        '-a', entry.account,
+        '-w',
+      ]);
       if (!password) continue;
 
       results.push({
@@ -297,7 +332,7 @@ export class ChromeProvider implements PasswordManagerProvider {
     }
     if (process.platform === 'darwin') {
       // Check if we can read the Chrome Safe Storage key
-      const key = exec("security find-generic-password -wa 'Chrome' 2>/dev/null");
+      const key = execFile('security', ['find-generic-password', '-wa', 'Chrome']);
       if (!key) return { provider: this.name, available: false, reason: 'Cannot access Chrome Safe Storage key from macOS Keychain (access denied or Chrome not installed)' };
     }
     return { provider: this.name, available: true, version: 'local profile' };

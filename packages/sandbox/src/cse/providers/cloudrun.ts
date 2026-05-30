@@ -21,6 +21,7 @@ import { readFile } from 'node:fs/promises';
 import { createSign } from 'node:crypto';
 import type { ContainerProvider } from './base.js';
 import { buildRunCommand, languageExt, tryParseOutput } from './base.js';
+import { cseFetch } from './_fetch.js';
 import type {
   CSEConfig,
   CSEHealthStatus,
@@ -100,21 +101,20 @@ async function getGoogleToken(config: CSEConfig): Promise<string> {
   const signature = sign.sign(sa.private_key, 'base64url');
   const jwt = `${signingInput}.${signature}`;
 
-  const resp = await fetch(GOOGLE_AUTH_URL, {
+  const resp = await cseFetch(GOOGLE_AUTH_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
       grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
       assertion: jwt,
-    }),
+    }).toString(),
   });
 
   if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`Google auth failed: ${err}`);
+    throw new Error(`Google auth failed: ${resp.text}`);
   }
 
-  const data = (await resp.json()) as { access_token: string; expires_in: number };
+  const data = resp.data as { access_token: string; expires_in: number };
   cachedGToken = { ...data, obtainedAt: now };
   return data.access_token;
 }
@@ -125,7 +125,7 @@ async function crRequest(
   token: string,
   body?: unknown,
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const resp = await fetch(`${CLOUDRUN_API}${path}`, {
+  const resp = await cseFetch(`${CLOUDRUN_API}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -133,10 +133,7 @@ async function crRequest(
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-
-  let data: unknown;
-  try { data = await resp.json(); } catch { data = {}; }
-  return { ok: resp.ok, status: resp.status, data };
+  return { ok: resp.ok, status: resp.status, data: resp.data ?? {} };
 }
 
 // ─── Provider ────────────────────────────────────────────────

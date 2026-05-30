@@ -9,6 +9,7 @@
  */
 
 import { createHash, randomFillSync, randomUUID } from 'node:crypto';
+import { oauthFetch } from './_fetch.js';
 
 /* ================================================================== */
 /*  OAuth Provider Types                                              */
@@ -302,7 +303,7 @@ export class OAuthClient {
       code_verifier: codeVerifier,
     });
 
-    const response = await fetch(provider.endpoints.token, {
+    const response = await oauthFetch(provider.endpoints.token, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -312,11 +313,10 @@ export class OAuthClient {
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`OAuth token exchange failed: ${response.status} ${error}`);
+      throw new Error(`OAuth token exchange failed: ${response.status} ${response.text}`);
     }
 
-    const token = await response.json() as OAuthTokenResponse;
+    const token = response.data as OAuthTokenResponse;
     if (this.requiresIdToken(provider)) {
       if (!token.id_token) {
         throw new Error(`Missing id_token for provider ${provider.name}`);
@@ -340,7 +340,7 @@ export class OAuthClient {
       return this.extractUserProfile('apple', payload);
     }
 
-    const response = await fetch(provider.endpoints.userinfo, {
+    const response = await oauthFetch(provider.endpoints.userinfo, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Accept': 'application/json',
@@ -351,7 +351,7 @@ export class OAuthClient {
       throw new Error(`Failed to fetch user profile: ${response.status}`);
     }
 
-    const data = await response.json() as Record<string, unknown>;
+    const data = (response.data ?? {}) as Record<string, unknown>;
     return this.extractUserProfile(provider.name, data);
   }
 

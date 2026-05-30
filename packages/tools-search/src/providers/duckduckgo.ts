@@ -3,6 +3,7 @@
  */
 import { BaseSearchProvider } from '../base.js';
 import type { SearchResult, SearchOptions, SearchProviderConfig } from '../types.js';
+import { searchFetch } from '../_fetch.js';
 
 export class DuckDuckGoProvider extends BaseSearchProvider {
   readonly name = 'duckduckgo';
@@ -37,7 +38,7 @@ export class DuckDuckGoProvider extends BaseSearchProvider {
 
   private async searchHtmlResults(options: SearchOptions): Promise<SearchResult[]> {
     const params = new URLSearchParams({ q: options.query, kl: 'wt-wt' });
-    const res = await fetch(`https://html.duckduckgo.com/html/?${params.toString()}`, {
+    const res = await searchFetch(`https://html.duckduckgo.com/html/?${params.toString()}`, {
       headers: {
         Accept: 'text/html,application/xhtml+xml',
         'User-Agent': 'Mozilla/5.0 (compatible; weaveintel-tools-search/1.0)',

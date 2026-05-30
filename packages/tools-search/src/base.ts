@@ -5,6 +5,7 @@
  */
 
 import type { SearchResult, SearchOptions, SearchProviderConfig, SearchProvider } from './types.js';
+import { searchFetch } from './_fetch.js';
 
 export abstract class BaseSearchProvider implements SearchProvider {
   abstract readonly name: string;
@@ -13,7 +14,7 @@ export abstract class BaseSearchProvider implements SearchProvider {
   protected async fetchJSON<T>(url: string, headers?: Record<string, string>, body?: string): Promise<T> {
     const init: RequestInit = { headers: { 'Accept': 'application/json', ...headers } };
     if (body !== undefined) { init.method = 'POST'; init.body = body; }
-    const res = await fetch(url, init);
+    const res = await searchFetch(url, init);
     if (!res.ok) throw new Error(`${this.name}: HTTP ${res.status} — ${res.statusText}`);
     return res.json() as Promise<T>;
   }

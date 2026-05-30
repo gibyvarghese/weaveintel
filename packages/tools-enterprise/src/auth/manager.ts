@@ -6,6 +6,7 @@
  * (enterprise + social) via a single profile store.
  */
 import type { AuthProfile, TokenState, TokenResponse, AuthEvents } from './types.js';
+import { enterpriseFetch } from '../_fetch.js';
 
 /* ---------- URL template helpers ---------- */
 
@@ -247,7 +248,7 @@ export class AuthManager {
   }
 
   private async fetchToken(url: string, body: URLSearchParams): Promise<TokenResponse> {
-    const resp = await fetch(url, {
+    const resp = await enterpriseFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: body.toString(),

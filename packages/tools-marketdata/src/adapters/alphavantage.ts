@@ -5,6 +5,7 @@
 
 import type { ExecutionContext } from '@weaveintel/core';
 import type { MarketDataAdapter, OHLCVParams } from '../adapter.js';
+import { marketdataFetch } from '../_fetch.js';
 import type {
   SymbolSearchResult, CompanyProfile, Quote, OHLCVBar, Fundamentals,
   AnnualFinancials, QuarterlyFinancials, EarningsEvent, AnalystConsensus,
@@ -23,7 +24,7 @@ function extractKey(ctx: ExecutionContext): string {
 async function avFetch(params: Record<string, string>): Promise<Record<string, unknown>> {
   const url = new URL(BASE);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url.toString());
+  const res = await marketdataFetch(url.toString());
   if (!res.ok) throw new Error(`Alpha Vantage HTTP ${res.status}`);
   const json = await res.json() as Record<string, unknown>;
   if (json['Note'] || json['Information']) throw new Error(`Alpha Vantage rate limit: ${JSON.stringify(json)}`);

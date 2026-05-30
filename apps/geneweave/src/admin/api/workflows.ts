@@ -75,7 +75,27 @@ export function registerWorkflowRoutes(
     if (body['steps'] !== undefined) fields['steps'] = JSON.stringify(body['steps']);
     if (body['entry_step_id'] !== undefined) fields['entry_step_id'] = body['entry_step_id'];
     if (body['metadata'] !== undefined || body['output_contract'] !== undefined) {
-      const baseMetadata = (body['metadata'] && typeof body['metadata'] === 'object') ? (body['metadata'] as Record<string, unknown>) : {};
+      // When the caller patches output_contract WITHOUT metadata, preserve
+      // the existing metadata fields and only overlay __outputContract.
+      // Otherwise the row's metadata is silently wiped on every contract edit.
+      let baseMetadata: Record<string, unknown>;
+      if (body['metadata'] !== undefined) {
+        baseMetadata = (body['metadata'] && typeof body['metadata'] === 'object')
+          ? { ...(body['metadata'] as Record<string, unknown>) }
+          : {};
+      } else {
+        // Preserve existing row metadata (excluding the reserved key, which
+        // we're about to rewrite from output_contract).
+        const existingMeta = existing.metadata;
+        let parsed: Record<string, unknown> = {};
+        if (existingMeta && typeof existingMeta === 'string') {
+          try { parsed = JSON.parse(existingMeta) as Record<string, unknown>; } catch { parsed = {}; }
+        } else if (existingMeta && typeof existingMeta === 'object') {
+          parsed = { ...(existingMeta as Record<string, unknown>) };
+        }
+        delete parsed['__outputContract'];
+        baseMetadata = parsed;
+      }
       const merged = body['output_contract']
         ? { ...baseMetadata, __outputContract: body['output_contract'] }
         : baseMetadata;

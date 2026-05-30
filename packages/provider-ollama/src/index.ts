@@ -13,3 +13,5 @@ export {
   weaveOllamaEmbedding,
   type OllamaProviderOptions,
 } from './ollama.js';
+
+export { ollamaFetch, assertHttpsOrLoopback, type OllamaFetchOptions } from './_fetch.js';

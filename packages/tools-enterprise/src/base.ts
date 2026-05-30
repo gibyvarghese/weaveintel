@@ -3,6 +3,7 @@
  */
 import type { EnterpriseConnectorConfig, EnterpriseRecord, EnterpriseQueryOptions, EnterpriseProvider } from './types.js';
 import { validateBaseUrl } from './validation.js';
+import { enterpriseFetch } from './_fetch.js';
 
 export abstract class BaseEnterpriseProvider implements EnterpriseProvider {
   abstract readonly type: string;
@@ -33,7 +34,7 @@ export abstract class BaseEnterpriseProvider implements EnterpriseProvider {
   }
 
   protected async fetchJSON<T>(url: string, headers: Record<string, string>, body?: string): Promise<T> {
-    const resp = await fetch(url, {
+    const resp = await enterpriseFetch(url, {
       method: body ? 'POST' : 'GET',
       headers: { 'Content-Type': 'application/json', ...headers },
       body,

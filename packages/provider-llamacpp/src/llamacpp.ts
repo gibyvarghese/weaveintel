@@ -36,6 +36,7 @@ import {
 } from '@weaveintel/core';
 import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/models';
 import { openaiAdapter, translate } from '@weaveintel/tool-schema';
+import { llamacppFetch, assertHttpsOrLoopback } from './_fetch.js';
 
 // ─── Configuration ───────────────────────────────────────────
 
@@ -160,6 +161,7 @@ async function* sseStream(
   headers: Record<string, string>,
   signal?: AbortSignal,
 ): AsyncIterable<Record<string, unknown>> {
+  assertHttpsOrLoopback(url);
   const res = await fetch(url, {
     method: 'POST',
     headers,
@@ -308,7 +310,7 @@ export function weaveLlamaCppModel(
       const signal = deadlineSignal(ctx);
 
       try {
-        const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+        const res = await llamacppFetch(`${baseUrl}/v1/chat/completions`, {
           method: 'POST',
           headers,
           body: JSON.stringify(body),
@@ -417,7 +419,7 @@ export function weaveLlamaCppEmbeddingModel(
       const signal = deadlineSignal(ctx);
 
       try {
-        const res = await fetch(`${baseUrl}/v1/embeddings`, {
+        const res = await llamacppFetch(`${baseUrl}/v1/embeddings`, {
           method: 'POST',
           headers,
           body: JSON.stringify({ model: modelId, input: request.input }),

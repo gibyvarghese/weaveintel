@@ -30,6 +30,14 @@ export interface VaultTransitProviderOptions {
   readonly namespace?: string;
   /** Custom fetch implementation (testing). */
   readonly fetchImpl?: typeof fetch;
+  /** Per-request timeout in ms. Default 15000. */
+  readonly timeoutMs?: number;
+  /**
+   * Allow non-HTTPS `address`. Default `false`. HTTP is permitted only for
+   * loopback (localhost / 127.0.0.1 / ::1) regardless of this flag; this
+   * option is required to allow plaintext HTTP to a non-loopback host.
+   */
+  readonly allowInsecureHttp?: boolean;
 }
 
 interface VaultEncryptResponse {
@@ -49,11 +57,13 @@ export class VaultTransitProvider implements KmsProvider {
   readonly #tokenEnv: string;
   readonly #namespace: string | null;
   readonly #fetch: typeof fetch;
+  readonly #timeoutMs: number;
 
   constructor(opts: VaultTransitProviderOptions) {
     if (!opts.address) throw new KmsUnavailableError('VaultTransitProvider requires opts.address');
     if (!opts.keyName) throw new KmsUnavailableError('VaultTransitProvider requires opts.keyName');
     this.#address = opts.address.replace(/\/+$/, '');
+    assertSafeVaultAddress(this.#address, opts.allowInsecureHttp === true);
     this.#mount = (opts.mount ?? 'transit').replace(/^\/+|\/+$/g, '');
     this.#keyName = opts.keyName;
     this.#explicitToken = opts.token ?? null;
@@ -64,6 +74,7 @@ export class VaultTransitProvider implements KmsProvider {
       throw new KmsUnavailableError('VaultTransitProvider requires global fetch (Node 18+) or opts.fetchImpl');
     }
     this.#fetch = f;
+    this.#timeoutMs = opts.timeoutMs ?? 15_000;
   }
 
   async rootKeyId(_tenantId: string): Promise<string> {
@@ -82,6 +93,7 @@ export class VaultTransitProvider implements KmsProvider {
         method: 'POST',
         headers: this.#headers(),
         body,
+        signal: AbortSignal.timeout(this.#timeoutMs),
       });
     } catch (err) {
       throw new KmsUnavailableError(`Vault encrypt request failed: ${(err as Error).message}`, err);
@@ -115,6 +127,7 @@ export class VaultTransitProvider implements KmsProvider {
         method: 'POST',
         headers: this.#headers(),
         body,
+        signal: AbortSignal.timeout(this.#timeoutMs),
       });
     } catch (err) {
       throw new AeadError(`Vault decrypt request failed: ${(err as Error).message}`, err);
@@ -147,6 +160,30 @@ export class VaultTransitProvider implements KmsProvider {
     if (fromEnv && fromEnv.trim()) return fromEnv.trim();
     throw new KmsUnavailableError(
       `VaultTransitProvider has no token (set opts.token or env ${this.#tokenEnv})`,
+    );
+  }
+}
+
+function assertSafeVaultAddress(address: string, allowInsecureHttp: boolean): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(address);
+  } catch {
+    throw new KmsUnavailableError(`VaultTransitProvider: invalid address '${address}'`);
+  }
+  if (parsed.protocol === 'https:') return;
+  if (parsed.protocol !== 'http:') {
+    throw new KmsUnavailableError(
+      `VaultTransitProvider: address must be https:// (got ${parsed.protocol}//)`,
+    );
+  }
+  const host = parsed.hostname.toLowerCase();
+  const isLoopback = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  if (isLoopback) return;
+  if (!allowInsecureHttp) {
+    throw new KmsUnavailableError(
+      `VaultTransitProvider: refusing plaintext http:// to non-loopback host '${host}'. ` +
+        `Use https:// or set opts.allowInsecureHttp=true (not recommended).`,
     );
   }
 }

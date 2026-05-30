@@ -11,6 +11,7 @@
  */
 import { BaseEnterpriseProvider } from '../base.js';
 import type { EnterpriseConnectorConfig, EnterpriseRecord, EnterpriseQueryOptions } from '../types.js';
+import { enterpriseFetch } from '../_fetch.js';
 
 function api(config: EnterpriseConnectorConfig, path: string): string {
   const b = config.baseUrl ?? 'https://api.canva.com/rest/v1';
@@ -187,7 +188,7 @@ export class CanvaProvider extends BaseEnterpriseProvider {
   /* ===== HTTP helpers ===== */
 
   protected async fetchWithBody(method: string, url: string, headers: Record<string, string>, body?: string): Promise<Record<string, unknown>> {
-    const resp = await fetch(url, {
+    const resp = await enterpriseFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json', ...headers },
       body,
@@ -197,7 +198,7 @@ export class CanvaProvider extends BaseEnterpriseProvider {
   }
 
   protected async fetchRaw(method: string, url: string, headers: Record<string, string>): Promise<void> {
-    const resp = await fetch(url, { method, headers: { ...headers } });
+    const resp = await enterpriseFetch(url, { method, headers: { ...headers } });
     if (!resp.ok && resp.status !== 204) {
       throw new Error(`canva: ${method} ${resp.status} ${resp.statusText}`);
     }

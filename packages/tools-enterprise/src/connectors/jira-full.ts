@@ -11,6 +11,7 @@
  */
 import { BaseEnterpriseProvider } from '../base.js';
 import type { EnterpriseConnectorConfig, EnterpriseRecord, EnterpriseQueryOptions } from '../types.js';
+import { enterpriseFetch } from '../_fetch.js';
 
 /* ---------- internal helpers ---------- */
 
@@ -226,7 +227,7 @@ export class JiraFullProvider extends BaseEnterpriseProvider {
   /* ===== HTTP method helper ===== */
 
   protected async fetchWithMethod(method: string, url: string, headers: Record<string, string>, body?: string): Promise<void> {
-    const resp = await fetch(url, {
+    const resp = await enterpriseFetch(url, {
       method,
       headers: { 'Content-Type': 'application/json', ...headers },
       body,

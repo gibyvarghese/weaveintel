@@ -13,6 +13,7 @@ import type {
   FileListOptions,
 } from '@weaveintel/core';
 import { deadlineSignal, normalizeError } from '@weaveintel/core';
+import { openaiFetch } from './_fetch.js';
 import {
   type OpenAIProviderOptions,
   DEFAULT_BASE_URL,
@@ -64,12 +65,12 @@ export function weaveOpenAIFileStorage(
         form.append('file', fileData, request.filename ?? 'upload');
         form.append('purpose', request.purpose);
 
-        const res = await fetch(`${baseUrl}/files`, {
+        const res = await openaiFetch(`${baseUrl}/files`, {
           method: 'POST',
           headers: multipartHeaders,
           body: form,
           signal,
-        });
+        }, { maxBytes: 500 * 1024 * 1024 });
         if (!res.ok) {
           const text = await res.text();
           throw new Error(`OpenAI Files upload error ${res.status}: ${text}`);
@@ -105,11 +106,11 @@ export function weaveOpenAIFileStorage(
     async download(ctx: ExecutionContext, fileId: string): Promise<Uint8Array> {
       const signal = deadlineSignal(ctx);
       try {
-        const res = await fetch(`${baseUrl}/files/${encodeURIComponent(fileId)}/content`, {
+        const res = await openaiFetch(`${baseUrl}/files/${encodeURIComponent(fileId)}/content`, {
           method: 'GET',
           headers,
           signal,
-        });
+        }, { maxBytes: 500 * 1024 * 1024 });
         if (!res.ok) {
           const text = await res.text();
           throw new Error(`OpenAI Files download error ${res.status}: ${text}`);

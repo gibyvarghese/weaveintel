@@ -19,8 +19,10 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { newUUIDv7 } from '@weaveintel/core';
 import { spawn } from 'node:child_process';
+import { Agent, type Dispatcher } from 'undici';
 import type { ContainerProvider } from './base.js';
 import { buildRunCommand, languageExt, tryParseOutput } from './base.js';
+import { cseFetch } from './_fetch.js';
 import type {
   CSEConfig,
   CSEHealthStatus,
@@ -144,7 +146,38 @@ function escapeRx(s: string): string {
 // ─── K8s REST client ─────────────────────────────────────────
 
 export class K8sClient {
+  #dispatcher: Dispatcher | undefined;
+
   constructor(private ctx: KubeContext) {}
+
+  /**
+   * Build a per-instance undici Agent that scopes the kubeconfig CA / client cert
+   * to k8s API requests only. Never mutate the process-global
+   * NODE_TLS_REJECT_UNAUTHORIZED — that disables cert validation for every other
+   * fetch in the process (KMS, OAuth, LLM providers, etc.).
+   *
+   * Opt-out for development clusters with self-signed CAs and no caData:
+   *   WEAVE_K8S_SKIP_TLS=1 (scoped to this client only)
+   */
+  private getDispatcher(): Dispatcher | undefined {
+    if (this.#dispatcher) return this.#dispatcher;
+
+    const connect: Record<string, unknown> = {};
+    if (this.ctx.caData) {
+      connect['ca'] = Buffer.from(this.ctx.caData, 'base64').toString('utf8');
+    }
+    if (this.ctx.certData && this.ctx.keyData) {
+      connect['cert'] = Buffer.from(this.ctx.certData, 'base64').toString('utf8');
+      connect['key']  = Buffer.from(this.ctx.keyData,  'base64').toString('utf8');
+    }
+    if (process.env['WEAVE_K8S_SKIP_TLS'] === '1') {
+      connect['rejectUnauthorized'] = false;
+    }
+
+    if (Object.keys(connect).length === 0) return undefined;
+    this.#dispatcher = new Agent({ connect });
+    return this.#dispatcher;
+  }
 
   private async request(
     method: string,
@@ -162,22 +195,18 @@ export class K8sClient {
       headers['Authorization'] = `Bearer ${this.ctx.token}`;
     }
 
-    const fetchOpts: RequestInit = {
+    const fetchOpts: RequestInit & { dispatcher?: Dispatcher } = {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
     };
 
-    // Node.js 18+ fetch with TLS via env or native
-    if (this.ctx.caData && !this.ctx.inCluster) {
-      // Set CA via NODE_EXTRA_CA_CERTS is complex — use kubectl fallback for TLS
-      process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0'; // Dev only; prod should pass CA
-    }
+    const dispatcher = this.getDispatcher();
+    if (dispatcher) fetchOpts.dispatcher = dispatcher;
 
     try {
-      const resp = await fetch(url, fetchOpts);
-      const data = await resp.json().catch(() => ({}));
-      return { ok: resp.ok, status: resp.status, data };
+      const resp = await cseFetch(url, fetchOpts);
+      return { ok: resp.ok, status: resp.status, data: resp.data ?? {} };
     } catch (err) {
       throw new Error(`K8s API request failed: ${err instanceof Error ? err.message : String(err)}`);
     }

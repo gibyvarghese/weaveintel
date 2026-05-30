@@ -30,6 +30,7 @@ import {
 } from '@weaveintel/core';
 import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/models';
 import { openaiAdapter, translate } from '@weaveintel/tool-schema';
+import { openaiFetch, assertHttpsOrLoopback } from './_fetch.js';
 
 // ─── Configuration ───────────────────────────────────────────
 
@@ -83,7 +84,7 @@ async function openaiRequest(
   signal?: AbortSignal,
 ): Promise<unknown> {
   const url = `${baseUrl}${path}`;
-  const res = await fetch(url, {
+  const res = await openaiFetch(url, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),
@@ -141,6 +142,7 @@ async function* openaiStreamRequest(
   signal?: AbortSignal,
 ): AsyncIterable<unknown> {
   const url = `${baseUrl}${path}`;
+  assertHttpsOrLoopback(url);
   const res = await fetch(url, {
     method: 'POST',
     headers,

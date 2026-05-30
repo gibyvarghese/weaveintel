@@ -19,6 +19,7 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import type { ContainerProvider } from './base.js';
 import { buildRunCommand, languageExt, tryParseOutput } from './base.js';
+import { cseFetch } from './_fetch.js';
 import type {
   CSEConfig,
   CSEHealthStatus,
@@ -58,7 +59,7 @@ async function getAzureToken(config: CSEConfig): Promise<string> {
     );
   }
 
-  const resp = await fetch(`${AZURE_AUTH_URL}/${tenantId}/oauth2/v2.0/token`, {
+  const resp = await cseFetch(`${AZURE_AUTH_URL}/${tenantId}/oauth2/v2.0/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -66,15 +67,14 @@ async function getAzureToken(config: CSEConfig): Promise<string> {
       client_id: clientId,
       client_secret: clientSecret,
       scope: 'https://management.azure.com/.default',
-    }),
+    }).toString(),
   });
 
   if (!resp.ok) {
-    const err = await resp.text();
-    throw new Error(`Azure auth failed: ${err}`);
+    throw new Error(`Azure auth failed: ${resp.text}`);
   }
 
-  const data = (await resp.json()) as { access_token: string; expires_in: number };
+  const data = resp.data as { access_token: string; expires_in: number };
   cachedToken = { ...data, obtainedAt: now };
   return data.access_token;
 }
@@ -85,7 +85,7 @@ async function aciRequest(
   token: string,
   body?: unknown,
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
-  const resp = await fetch(`${ARM_BASE}${path}?api-version=${ACI_API_VERSION}`, {
+  const resp = await cseFetch(`${ARM_BASE}${path}?api-version=${ACI_API_VERSION}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
@@ -93,10 +93,7 @@ async function aciRequest(
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-
-  let data: unknown;
-  try { data = await resp.json(); } catch { data = {}; }
-  return { ok: resp.ok, status: resp.status, data };
+  return { ok: resp.ok, status: resp.status, data: resp.data ?? {} };
 }
 
 // ─── Provider ────────────────────────────────────────────────

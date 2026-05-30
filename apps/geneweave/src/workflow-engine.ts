@@ -165,7 +165,13 @@ export function buildWorkflowResolverRegistry(opts: {
 }): HandlerResolverRegistry {
   const reg = new HandlerResolverRegistry();
   reg.register(createNoopResolver());
-  reg.register(createScriptResolver());
+  // The `script:` resolver evaluates admin-supplied JavaScript in-process via
+  // `new Function(...)`. Any tenant_admin who can write to `workflow_defs`
+  // can therefore execute arbitrary code on the server. Gate it behind an
+  // explicit operator opt-in. Default OFF.
+  if (process.env['GENEWEAVE_ENABLE_SCRIPT_RESOLVER'] === '1') {
+    reg.register(createScriptResolver());
+  }
   if (opts.toolGetter) {
     const getter = opts.toolGetter;
     reg.register(

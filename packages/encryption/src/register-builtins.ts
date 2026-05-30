@@ -152,6 +152,9 @@ const vaultRegistration: KmsProviderRegistration = {
     const token = optionalString(config, 'token');
     const tokenEnv = optionalString(config, 'tokenEnv');
     const namespace = optionalString(config, 'namespace');
+    const timeoutMsRaw = config['timeoutMs'];
+    const timeoutMs = typeof timeoutMsRaw === 'number' && Number.isFinite(timeoutMsRaw) ? timeoutMsRaw : undefined;
+    const allowInsecureHttp = config['allowInsecureHttp'] === true;
     return new VaultTransitProvider({
       address,
       keyName,
@@ -159,6 +162,8 @@ const vaultRegistration: KmsProviderRegistration = {
       ...(token ? { token } : {}),
       ...(tokenEnv ? { tokenEnv } : {}),
       ...(namespace ? { namespace } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(allowInsecureHttp ? { allowInsecureHttp } : {}),
     });
   },
   healthCheck: defaultWrapUnwrapHealthCheck(),

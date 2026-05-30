@@ -5,6 +5,7 @@
 import type { ExecutionContext } from '@weaveintel/core';
 import type { NewsAdapter } from '../adapter.js';
 import type { NewsArticle, EarningsTranscript } from '../types.js';
+import { newsFetch } from '../_fetch.js';
 
 const BASE = 'https://finnhub.io/api/v1';
 
@@ -18,7 +19,7 @@ async function fhGet(path: string, key: string, params: Record<string, string> =
   const url = new URL(`${BASE}${path}`);
   url.searchParams.set('token', key);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url.toString());
+  const res = await newsFetch(url.toString());
   if (!res.ok) throw new Error(`Finnhub HTTP ${res.status}: ${path}`);
   return res.json();
 }

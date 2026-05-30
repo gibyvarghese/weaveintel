@@ -19,6 +19,7 @@ import {
   normalizeError,
   WeaveIntelError,
 } from '@weaveintel/core';
+import { openaiFetch } from './_fetch.js';
 import {
   type OpenAIProviderOptions,
   DEFAULT_BASE_URL,
@@ -57,7 +58,7 @@ export function weaveOpenAIAudioModel(
       const signal = deadlineSignal(ctx);
       const url = `${baseUrl}/audio/speech`;
       try {
-        const res = await fetch(url, {
+        const res = await openaiFetch(url, {
           method: 'POST',
           headers: jsonHeaders,
           body: JSON.stringify(body),
@@ -95,7 +96,7 @@ export function weaveOpenAIAudioModel(
       if (request.prompt) formData.append('prompt', request.prompt);
 
       try {
-        const res = await fetch(url, {
+        const res = await openaiFetch(url, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${apiKey}`,

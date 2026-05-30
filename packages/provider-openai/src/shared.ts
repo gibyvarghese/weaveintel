@@ -11,6 +11,7 @@
 
 import { WeaveIntelError, parseRetryAfterMs as coreParseRetryAfterMs } from '@weaveintel/core';
 import { createResilientCallable, type ResilientCallable } from '@weaveintel/resilience';
+import { openaiFetch, assertHttpsOrLoopback } from './_fetch.js';
 
 export interface OpenAIProviderOptions {
   apiKey?: string;
@@ -167,7 +168,7 @@ async function openaiRequestRaw(
     fetchOpts.body = JSON.stringify(body);
   }
 
-  const res = await fetch(url, fetchOpts);
+  const res = await openaiFetch(url, fetchOpts);
 
   if (!res.ok) {
     const errorBody = await res.text().catch(() => '');
@@ -257,6 +258,7 @@ async function openaiStreamFetchRaw(
   signal?: AbortSignal,
 ): Promise<ReadableStreamDefaultReader<Uint8Array>> {
   const url = `${baseUrl}${path}`;
+  assertHttpsOrLoopback(url);
   const res = await fetch(url, {
     method: 'POST',
     headers,

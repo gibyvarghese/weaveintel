@@ -2,6 +2,7 @@
  * Base social provider with HTTP helpers
  */
 import type { SocialAccountConfig, SocialPost, SocialPostOptions, SocialSearchOptions, SocialProvider } from './types.js';
+import { socialFetch } from './_fetch.js';
 
 export abstract class BaseSocialProvider implements SocialProvider {
   abstract readonly platform: string;
@@ -22,7 +23,7 @@ export abstract class BaseSocialProvider implements SocialProvider {
   }
 
   protected async fetchJSON<T>(url: string, headers: Record<string, string>, body?: string): Promise<T> {
-    const resp = await fetch(url, {
+    const resp = await socialFetch(url, {
       method: body ? 'POST' : 'GET',
       headers: { 'Content-Type': 'application/json', ...headers },
       body,
