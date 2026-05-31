@@ -30,6 +30,13 @@ export interface ExecutionContext {
   /** Optional tracer for automatic span emission across runtimes */
   readonly tracer?: import('./observability.js').Tracer;
 
+  /**
+   * Ambient cross-cutting runtime (Phase 2). Carries egress/tracer/secrets/
+   * audit/persistence/resilience. Resolve via `ctx.runtime?.egress.fetch(...)`
+   * etc. rather than constructing those concerns ad-hoc per call site.
+   */
+  readonly runtime?: import('./runtime.js').WeaveRuntime;
+
   /** Arbitrary request-scoped metadata */
   readonly metadata: Readonly<Record<string, unknown>>;
 
@@ -50,6 +57,9 @@ let idCounter = 0;
 export function createExecutionContext(
   overrides: Partial<ExecutionContext> = {},
 ): ExecutionContext {
+  // Prefer the runtime's tracer when a runtime is present but no explicit
+  // tracer override was passed — that's how ambient observability propagates.
+  const tracer = overrides.tracer ?? overrides.runtime?.tracer;
   return {
     executionId: overrides.executionId ?? `exec_${Date.now()}_${++idCounter}`,
     tenantId: overrides.tenantId,
@@ -57,7 +67,8 @@ export function createExecutionContext(
     signal: overrides.signal,
     deadline: overrides.deadline,
     parentSpanId: overrides.parentSpanId,
-    tracer: overrides.tracer,
+    tracer,
+    runtime: overrides.runtime,
     metadata: overrides.metadata ?? {},
     budget: overrides.budget,
   };
@@ -73,6 +84,7 @@ export function childContext(
     executionId: overrides.executionId ?? parent.executionId,
     parentSpanId: overrides.parentSpanId ?? parent.parentSpanId,
     tracer: overrides.tracer ?? parent.tracer,
+    runtime: overrides.runtime ?? parent.runtime,
     metadata: { ...parent.metadata, ...overrides.metadata },
     budget: overrides.budget ?? parent.budget,
   };

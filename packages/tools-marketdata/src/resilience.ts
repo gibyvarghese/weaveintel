@@ -1,20 +1,29 @@
 /**
  * Resilience wrapper for MarketDataAdapter.
+ *
  * Bounded exponential retry for transient HTTP errors + per-symbol circuit breaker.
- * Mirrors the pattern in @weaveintel/tools-kaggle/resilience.ts.
+ *
+ * Phase 5 — the bespoke BreakerState Map is replaced by `createCircuitBreaker`
+ * from `@weaveintel/resilience`, removing the local duplicate implementation.
  */
 
 import { createRetryBudget } from '@weaveintel/reliability';
+import { createCircuitBreaker } from '@weaveintel/resilience';
 import type { MarketDataAdapter } from './adapter.js';
-
-interface BreakerState {
-  consecutiveFailures: number;
-  openUntil: number;
-}
 
 const FAILURE_THRESHOLD = 5;
 const OPEN_COOLDOWN_MS = 60_000;
-const breakers = new Map<string, BreakerState>();
+
+const circuitBreakers = new Map<string, ReturnType<typeof createCircuitBreaker>>();
+
+function getBreaker(key: string): ReturnType<typeof createCircuitBreaker> {
+  let b = circuitBreakers.get(key);
+  if (!b) {
+    b = createCircuitBreaker({ failureThreshold: FAILURE_THRESHOLD, cooldownMs: OPEN_COOLDOWN_MS });
+    circuitBreakers.set(key, b);
+  }
+  return b;
+}
 
 const budget = createRetryBudget({
   maxRetries: 3,
@@ -36,28 +45,17 @@ export class MarketDataRateLimitError extends Error {
 }
 
 export function getMarketDataBreakerState(key: string): { open: boolean; remainingSeconds: number; consecutiveFailures: number } {
-  const s = breakers.get(key);
-  if (!s) return { open: false, remainingSeconds: 0, consecutiveFailures: 0 };
-  const remainingMs = Math.max(0, s.openUntil - Date.now());
-  return { open: remainingMs > 0, remainingSeconds: Math.ceil(remainingMs / 1000), consecutiveFailures: s.consecutiveFailures };
-}
-
-function checkBreaker(key: string): void {
-  const s = breakers.get(key);
-  if (s && s.openUntil > Date.now()) {
-    const remaining = Math.ceil((s.openUntil - Date.now()) / 1000);
-    throw new MarketDataRateLimitError(key, remaining, true);
-  }
-}
-
-function recordResult(key: string, ok: boolean): void {
-  const s = breakers.get(key) ?? { consecutiveFailures: 0, openUntil: 0 };
-  if (ok) { s.consecutiveFailures = 0; s.openUntil = 0; }
-  else {
-    s.consecutiveFailures += 1;
-    if (s.consecutiveFailures >= FAILURE_THRESHOLD) s.openUntil = Date.now() + OPEN_COOLDOWN_MS;
-  }
-  breakers.set(key, s);
+  const b = circuitBreakers.get(key);
+  if (!b) return { open: false, remainingSeconds: 0, consecutiveFailures: 0 };
+  const snap = b.snapshot();
+  const remainingMs = snap.state === 'open'
+    ? Math.max(0, snap.openedAt + snap.cooldownMs - Date.now())
+    : 0;
+  return {
+    open: snap.state === 'open',
+    remainingSeconds: Math.ceil(remainingMs / 1000),
+    consecutiveFailures: snap.consecutiveFailures,
+  };
 }
 
 function isRateLimit(err: unknown): boolean {
@@ -66,14 +64,20 @@ function isRateLimit(err: unknown): boolean {
 }
 
 async function guard<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  checkBreaker(key);
+  const breaker = getBreaker(key);
+  const pass = breaker.canPass();
+  if (!pass.allowed) {
+    const remainingMs = Math.max(0, pass.reopensAt - Date.now());
+    throw new MarketDataRateLimitError(key, Math.ceil(remainingMs / 1000), true);
+  }
+
   try {
     const r = await budget.execute(fn);
-    recordResult(key, true);
+    breaker.recordSuccess();
     return r;
   } catch (err) {
     if (isRateLimit(err)) {
-      recordResult(key, false);
+      breaker.recordFailure();
       const state = getMarketDataBreakerState(key);
       throw new MarketDataRateLimitError(key, state.remainingSeconds || 30, state.open, err instanceof Error ? err.message : String(err));
     }
@@ -92,5 +96,5 @@ export function wrapAdapterWithResilience(inner: MarketDataAdapter, adapterKey =
 }
 
 export function __resetBreakerStateForTests(): void {
-  breakers.clear();
+  circuitBreakers.clear();
 }

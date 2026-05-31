@@ -1,3 +1,4 @@
+// no-adhoc-resilience: allow (reason: per-handler-kind breaker registry predates @weaveintel/resilience; consolidation tracked as Phase 2.x deferred)
 /**
  * @weaveintel/workflows — circuit-breaker.ts
  *

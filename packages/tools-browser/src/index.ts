@@ -24,3 +24,10 @@ export { readability as weaveReadability } from './readability.js';
 export { createBrowserTools as weaveBrowserTools } from './mcp.js';
 export { createAutomationTools as weaveAutomationTools } from './mcp-automation.js';
 export { createBrowserAuthTools as weaveBrowserAuthTools } from './mcp-auth.js';
+
+// Phase 4 — durable pending-handoff store backed by `runtime.persistence.kv`.
+export {
+  type DurableBrowserHandoffStore,
+  type DurableBrowserHandoffStoreOptions,
+  createDurableBrowserHandoffStore,
+} from './durable-handoff.js';

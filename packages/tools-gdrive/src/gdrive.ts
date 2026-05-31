@@ -3,7 +3,7 @@
  * Uses Google Drive REST API v3. Credentials: ctx.metadata.gdriveAccessToken
  */
 
-import { weaveContext, type ExecutionContext } from '@weaveintel/core';
+import { hardenedFetch, weaveContext, type ExecutionContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveToolDescriptor as describeT } from '@weaveintel/tools';
 
@@ -51,10 +51,14 @@ async function driveFetch(
 ): Promise<unknown> {
   let activeToken = token;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const resp = await fetch(url, {
-      ...init,
-      headers: { Authorization: `Bearer ${activeToken}`, ...(init?.headers as Record<string, string> | undefined) },
-    });
+    const resp = await hardenedFetch(
+      url,
+      {
+        ...init,
+        headers: { Authorization: `Bearer ${activeToken}`, ...(init?.headers as Record<string, string> | undefined) },
+      },
+      { errorTag: 'tools-gdrive' },
+    );
     if (resp.status === 401 && attempt === 0 && refreshToken) {
       const refreshed = await refreshToken();
       if (refreshed) {

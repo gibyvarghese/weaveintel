@@ -1,3 +1,4 @@
+// no-raw-fetch: allow (reason: `fetch` in pollRows is a closure parameter, not the global)
 /**
  * Kaggle Competition — HTTP route handlers
  *

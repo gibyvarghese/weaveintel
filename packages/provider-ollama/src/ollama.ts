@@ -34,7 +34,7 @@ import {
 } from '@weaveintel/core';
 import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/models';
 import { openaiAdapter, translate } from '@weaveintel/tool-schema';
-import { ollamaFetch, assertHttpsOrLoopback } from './_fetch.js';
+import { ollamaFetch, ollamaFetchStream } from './_fetch.js';
 
 // ─── Configuration ───────────────────────────────────────────
 
@@ -260,8 +260,7 @@ async function* ollamaNdjsonStream(
   headers: Record<string, string>,
   signal?: AbortSignal,
 ): AsyncIterable<Record<string, unknown>> {
-  assertHttpsOrLoopback(url);
-  const res = await fetch(url, {
+  const res = await ollamaFetchStream(url, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),

@@ -3,7 +3,7 @@
  * Uses Slack Web API (https://slack.com/api/). Credentials: ctx.metadata.slackBotToken
  */
 
-import { weaveContext, type ExecutionContext } from '@weaveintel/core';
+import { hardenedFetch, weaveContext, type ExecutionContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveToolDescriptor as describeT } from '@weaveintel/tools';
 
@@ -53,11 +53,15 @@ async function slackFetch(
 ): Promise<Record<string, unknown>> {
   let activeToken = token;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const resp = await fetch(`https://slack.com/api/${method}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${activeToken}`, 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(params),
-    });
+    const resp = await hardenedFetch(
+      `https://slack.com/api/${method}`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${activeToken}`, 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(params),
+      },
+      { errorTag: 'tools-slack' },
+    );
     if (resp.status === 401 && attempt === 0 && refreshToken) {
       const refreshed = await refreshToken();
       if (refreshed) {

@@ -25,7 +25,7 @@
  * Phases K2/K4.
  */
 
-import { weaveContext, type ExecutionContext } from '@weaveintel/core';
+import { hardenedFetch, weaveContext, type ExecutionContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveToolDescriptor as describeT } from '@weaveintel/tools';
 import type {
@@ -81,7 +81,11 @@ export async function safeFetchKaggleOutputText(
 
   let resp: Response;
   try {
-    resp = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    resp = await hardenedFetch(
+      url,
+      { signal: AbortSignal.timeout(timeoutMs) },
+      { errorTag: 'tools-kaggle', timeoutMs: 0, maxBytes: 0 },
+    );
   } catch {
     return null;
   }
@@ -333,14 +337,18 @@ function authHeader(creds: KaggleCredentials): string {
 
 async function kaggleFetch(creds: KaggleCredentials, path: string, init?: RequestInit): Promise<unknown> {
   const url = path.startsWith('http') ? path : `${KAGGLE_API_BASE}${path}`;
-  const resp = await fetch(url, {
-    ...init,
-    headers: {
-      Authorization: authHeader(creds),
-      Accept: 'application/json',
-      ...(init?.headers as Record<string, string> | undefined),
+  const resp = await hardenedFetch(
+    url,
+    {
+      ...init,
+      headers: {
+        Authorization: authHeader(creds),
+        Accept: 'application/json',
+        ...(init?.headers as Record<string, string> | undefined),
+      },
     },
-  });
+    { errorTag: 'tools-kaggle' },
+  );
   if (!resp.ok) {
     const text = await resp.text().catch(() => resp.statusText);
     throw new Error(`Kaggle API error ${resp.status} ${resp.statusText}: ${text}`);
@@ -508,16 +516,20 @@ async function fetchCompetitionPage(
   maxBytes: number,
 ): Promise<KaggleCompetitionPage> {
   const url = buildCompetitionPageUrl(ref, slug);
-  const resp = await fetch(url, {
-    headers: {
-      // Auth is sent for consistency with other adapter calls; most overview
-      // pages are public but private/closed competitions require it.
-      Authorization: authHeader(creds),
-      Accept: 'text/html,application/xhtml+xml',
-      'User-Agent': 'weaveintel-tools-kaggle/0.1 (+https://github.com/)',
+  const resp = await hardenedFetch(
+    url,
+    {
+      headers: {
+        // Auth is sent for consistency with other adapter calls; most overview
+        // pages are public but private/closed competitions require it.
+        Authorization: authHeader(creds),
+        Accept: 'text/html,application/xhtml+xml',
+        'User-Agent': 'weaveintel-tools-kaggle/0.1 (+https://github.com/)',
+      },
+      redirect: 'follow',
     },
-    redirect: 'follow',
-  });
+    { errorTag: 'tools-kaggle' },
+  );
   if (!resp.ok) {
     throw new Error(`Kaggle page fetch error ${resp.status} ${resp.statusText} for ${url}`);
   }
@@ -616,10 +628,14 @@ export const liveKaggleAdapter: KaggleAdapter = {
     const maxBytes = opts?.maxBytes ?? 64 * 1024;
     // Kaggle endpoint returns a 302 to a signed CDN URL; fetch follows it.
     const url = `${KAGGLE_API_BASE}/competitions/data/download/${encodeURIComponent(ref)}/${encodeURIComponent(fileName)}`;
-    const resp = await fetch(url, {
-      headers: { Authorization: authHeader(creds), Accept: 'application/octet-stream' },
-      redirect: 'follow',
-    });
+    const resp = await hardenedFetch(
+      url,
+      {
+        headers: { Authorization: authHeader(creds), Accept: 'application/octet-stream' },
+        redirect: 'follow',
+      },
+      { errorTag: 'tools-kaggle', maxBytes: Math.max(maxBytes, 256 * 1024 * 1024) },
+    );
     if (!resp.ok) {
       const text = await resp.text().catch(() => resp.statusText);
       throw new Error(`Kaggle file download error ${resp.status} ${resp.statusText}: ${text.slice(0, 200)}`);
@@ -794,7 +810,11 @@ export const liveKaggleAdapter: KaggleAdapter = {
       throw new Error('Kaggle submit: missing createUrl/token in upload response');
     }
 
-    const uploadResp = await fetch(createUrl, { method: 'PUT', body: input.fileContent });
+    const uploadResp = await hardenedFetch(
+      createUrl,
+      { method: 'PUT', body: input.fileContent },
+      { errorTag: 'tools-kaggle' },
+    );
     if (!uploadResp.ok) {
       const body = await uploadResp.text().catch(() => uploadResp.statusText);
       throw new Error(`Kaggle submit upload failed (${uploadResp.status}): ${body}`);

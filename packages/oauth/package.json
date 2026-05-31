@@ -17,8 +17,12 @@
     "build": "tsc -b",
     "clean": "rm -rf dist"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@weaveintel/core": "*"
+  },
   "devDependencies": {
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^3.0.0",
+    "@weaveintel/persistence": "*"
   }
 }

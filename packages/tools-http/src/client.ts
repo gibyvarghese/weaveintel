@@ -7,7 +7,7 @@
  */
 import { readResponseTextLimited, validateOutboundUrl } from '@weaveintel/tools';
 import { runResilient } from '@weaveintel/resilience';
-import { WeaveIntelError, parseRetryAfterMs } from '@weaveintel/core';
+import { WeaveIntelError, parseRetryAfterMs, hardenedFetch } from '@weaveintel/core';
 import type { HttpEndpointConfig, HttpRequestOptions, HttpResponse } from './types.js';
 
 /* ---------- Auth helpers ---------- */
@@ -119,12 +119,16 @@ export async function httpRequest(options: HttpRequestOptions): Promise<HttpResp
   const timeoutId = options.timeout ? setTimeout(() => controller.abort(), options.timeout) : undefined;
   const maxResponseBytes = options.maxResponseBytes ?? 1_000_000;
   try {
-    const resp = await fetch(parsedUrl.toString(), {
-      method: options.method ?? 'GET',
-      headers: options.headers ?? {},
-      body: options.body ? (typeof options.body === 'string' ? options.body : JSON.stringify(options.body)) : undefined,
-      signal: controller.signal,
-    });
+    const resp = await hardenedFetch(
+      parsedUrl.toString(),
+      {
+        method: options.method ?? 'GET',
+        headers: options.headers ?? {},
+        body: options.body ? (typeof options.body === 'string' ? options.body : JSON.stringify(options.body)) : undefined,
+        signal: controller.signal,
+      },
+      { errorTag: 'tools-http', timeoutMs: 0, maxBytes: 0, enforceHttps: false },
+    );
     const body = await readResponseTextLimited(resp, maxResponseBytes, controller.signal);
     const headers: Record<string, string> = {};
     resp.headers.forEach((v, k) => { headers[k] = v; });

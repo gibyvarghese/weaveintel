@@ -1,4 +1,4 @@
-import type { EventBus, HumanTaskQueue, WorkflowPolicy, WorkflowAuditLog, DurableSleepStore } from '@weaveintel/core';
+import type { EventBus, HumanTaskQueue, WorkflowPolicy, WorkflowAuditLog, DurableSleepStore, WeaveRuntime } from '@weaveintel/core';
 import type { CheckpointStore } from './checkpoint-store.js';
 import type { WorkflowRunRepository } from './run-repository.js';
 import type { HandlerResolverRegistry } from './handler-resolver.js';
@@ -15,6 +15,13 @@ import type { WorkflowRateLimiter } from './rate-limiter.js';
 import type { WorkflowSpanEmitter } from './span-emitter.js';
 
 export interface WorkflowEngineOptions {
+  /**
+   * Phase 4 — When supplied, the engine automatically uses a
+   * `createDurableCheckpointStore` backed by `runtime.persistence` so
+   * workflow checkpoints survive process restarts. An explicit
+   * `checkpointStore` always wins over this auto-wiring.
+   */
+  runtime?: WeaveRuntime;
   checkpointStore?: CheckpointStore;
   bus?: EventBus;
   defaultPolicy?: WorkflowPolicy;

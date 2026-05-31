@@ -3,7 +3,7 @@
  * Uses Microsoft Graph API /me/calendar/events. Credentials: ctx.metadata.outlookCalAccessToken
  */
 
-import { weaveContext, type ExecutionContext } from '@weaveintel/core';
+import { hardenedFetch, weaveContext, type ExecutionContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveToolDescriptor as describeT } from '@weaveintel/tools';
 
@@ -63,7 +63,7 @@ async function graphFetch(
 ): Promise<unknown> {
   let activeToken = token;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const resp = await fetch(url, { ...init, headers: { Authorization: `Bearer ${activeToken}`, 'Content-Type': 'application/json', ...(init?.headers as Record<string, string> | undefined) } });
+    const resp = await hardenedFetch(url, { ...init, headers: { Authorization: `Bearer ${activeToken}`, 'Content-Type': 'application/json', ...(init?.headers as Record<string, string> | undefined) } }, { errorTag: 'tools-outlook-cal' });
     if (resp.status === 401 && attempt === 0 && refreshToken) {
       const refreshed = await refreshToken();
       if (refreshed) {

@@ -3,7 +3,7 @@
  * Sends HTTP requests to arbitrary endpoints. Optional auth via ctx.metadata.webhookBearerToken.
  */
 
-import { weaveContext, type ExecutionContext } from '@weaveintel/core';
+import { hardenedFetch, weaveContext, type ExecutionContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
 import {
   weaveToolDescriptor as describeT,
@@ -107,7 +107,9 @@ export const liveWebhookAdapter: WebhookAdapter = {
 
     let resp: Response;
     try {
-      resp = await fetch(url, {
+      resp = await hardenedFetch(
+        url,
+        {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -117,7 +119,9 @@ export const liveWebhookAdapter: WebhookAdapter = {
         },
         body: typeof body === 'string' ? body : JSON.stringify(body ?? {}),
         signal: controller.signal,
-      });
+      },
+      { errorTag: 'tools-webhook', timeoutMs: 0, maxBytes: 0 },
+    );
     } finally {
       clearTimeout(timer);
     }

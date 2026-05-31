@@ -42,6 +42,9 @@ export {
   getEndpointState,
   listEndpointStates,
   _resetEndpointRegistry,
+  createDurableEndpointRegistry,
+  type DurableEndpointRegistry,
+  type DurableEndpointRegistryOptions,
 } from './endpoint-registry.js';
 export {
   type ResilienceOptions,
@@ -49,3 +52,19 @@ export {
   createResilientCallable,
   runResilient,
 } from './pipeline.js';
+
+/**
+ * Canonical provider-level resilience defaults (Phase 5 — consolidation).
+ * All three built-in LLM providers (OpenAI, Anthropic, Google) use these
+ * values so quota behaviour is consistent across providers. Custom provider
+ * packages SHOULD import and reuse this constant rather than hardcoding their
+ * own copies.
+ *
+ * Values:
+ *   retry  — 2 auto-retries with 500 ms base, 30 s cap, jitter on.
+ *   circuit — opens after 8 consecutive failures, 30 s cooldown.
+ */
+export const PROVIDER_RESILIENCE_DEFAULTS = {
+  retry: { maxAttempts: 2, baseDelayMs: 500, maxDelayMs: 30_000, jitter: true },
+  circuit: { failureThreshold: 8, cooldownMs: 30_000 },
+} as const;

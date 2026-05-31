@@ -36,6 +36,7 @@ import {
   EventTypes,
   weaveToolRegistry,
   weaveResolveTracer,
+  weaveAudit,
 } from '@weaveintel/core';
 import { buildSupervisorRuntime, type WorkerDefinition } from './supervisor-runtime.js';
 
@@ -156,6 +157,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
       let toolCallCount = 0;
 
       eventBus?.emit(weaveEvent(EventTypes.AgentRunStart, { agent: config.name, goal: input.goal }, ctx));
+      void weaveAudit(ctx, { action: 'agent.run.start', outcome: 'success', resource: config.name, details: { goal: input.goal } });
 
       // Build conversation from history + input
       const messages: Message[] = [];
@@ -244,11 +246,41 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             continue;
           }
 
-          // No tool calls — this is a terminal response
+          // No tool calls — this is a terminal response.
+          // Phase 5: consult runtime guardrails.checkOutput before surfacing
+          // the response. A deny is fail-closed + audited; a redactedText
+          // replacement is used as-is. Missing slot = allow-all (graceful).
+          let finalContent = response.content;
+          const outputGuardrails = ctx.runtime?.guardrails;
+          if (outputGuardrails?.checkOutput) {
+            let outputDecision: { allow: boolean; redactedText?: string; reason?: string } = { allow: true };
+            try {
+              outputDecision = await outputGuardrails.checkOutput(ctx, response.content);
+            } catch (err) {
+              outputDecision = { allow: false, reason: `guardrails error: ${err instanceof Error ? err.message : String(err)}` };
+            }
+            if (!outputDecision.allow) {
+              const deniedContent = `Response blocked by guardrails: ${outputDecision.reason ?? 'no reason'}`;
+              void weaveAudit(ctx, { action: 'agent.output.denied', outcome: 'denied', resource: config.name, details: { reason: outputDecision.reason ?? 'guardrails' } });
+              const deniedStep: AgentStep = {
+                index: steps.length,
+                type: 'response',
+                content: deniedContent,
+                durationMs: Date.now() - stepStart,
+                tokenUsage: { prompt: response.usage.promptTokens, completion: response.usage.completionTokens },
+              };
+              steps.push(deniedStep);
+              return buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'completed');
+            }
+            if (outputDecision.redactedText !== undefined) {
+              finalContent = outputDecision.redactedText;
+            }
+          }
+
           const responseStep: AgentStep = {
             index: steps.length,
             type: 'response',
-            content: response.content,
+            content: finalContent,
             durationMs: Date.now() - stepStart,
             tokenUsage: { prompt: response.usage.promptTokens, completion: response.usage.completionTokens },
           };
@@ -265,7 +297,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             for (const msg of input.messages) {
               await memory.addMessage(ctx, msg);
             }
-            await memory.addMessage(ctx, { role: 'assistant', content: response.content });
+            await memory.addMessage(ctx, { role: 'assistant', content: finalContent });
           }
 
           eventBus?.emit(weaveEvent(EventTypes.AgentRunEnd, {
@@ -273,6 +305,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             status: 'completed',
             steps: steps.length,
           }, ctx));
+          void weaveAudit(ctx, { action: 'agent.run.end', outcome: 'success', resource: config.name, details: { steps: steps.length, status: 'completed' } });
 
           return buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'completed');
         }
@@ -285,6 +318,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           status: 'failed',
           error: err instanceof Error ? err.message : String(err),
         }, ctx));
+        void weaveAudit(ctx, { action: 'agent.run.end', outcome: 'failure', resource: config.name, details: { error: err instanceof Error ? err.message : String(err) } });
         throw err;
       }
     },
@@ -372,11 +406,27 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             continue;
           }
 
-          // Terminal response via streaming
+          // Terminal response via streaming — Phase 5: checkOutput guardrail
+          let streamFinalContent = accText;
+          const streamOutputGuardrails = ctx.runtime?.guardrails;
+          if (streamOutputGuardrails?.checkOutput) {
+            let outputDecision: { allow: boolean; redactedText?: string; reason?: string } = { allow: true };
+            try {
+              outputDecision = await streamOutputGuardrails.checkOutput(ctx, accText);
+            } catch (err) {
+              outputDecision = { allow: false, reason: `guardrails error: ${err instanceof Error ? err.message : String(err)}` };
+            }
+            if (!outputDecision.allow) {
+              void weaveAudit(ctx, { action: 'agent.output.denied', outcome: 'denied', resource: config.name, details: { reason: outputDecision.reason ?? 'guardrails' } });
+              streamFinalContent = `Response blocked by guardrails: ${outputDecision.reason ?? 'no reason'}`;
+            } else if (outputDecision.redactedText !== undefined) {
+              streamFinalContent = outputDecision.redactedText;
+            }
+          }
           const responseStep: AgentStep = {
             index: steps.length,
             type: 'response',
-            content: accText,
+            content: streamFinalContent,
             durationMs: Date.now() - stepStart,
             tokenUsage: finalUsage,
           };
@@ -459,6 +509,7 @@ async function executeToolCall(
 ): Promise<AgentStep> {
   const tool = toolReg.get(tc.name);
   const toolName = tc.name;
+  const guardrails = ctx.runtime?.guardrails;
 
   eventBus?.emit(weaveEvent(EventTypes.ToolCallStart, { tool: toolName, agent: agentName }, ctx));
 
@@ -466,13 +517,42 @@ async function executeToolCall(
 
   if (!tool) {
     resultContent = `Error: Tool "${tc.name}" not found. Available tools: ${toolReg.list().map((t) => t.schema.name).join(', ')}`;
+    void weaveAudit(ctx, { action: 'agent.tool.invoke', outcome: 'failure', resource: toolName, details: { agent: agentName, reason: 'not_found' } });
   } else {
-    // Policy check
+    // Ambient guardrails (Phase 3): preferred over the legacy per-agent
+    // `policy.approveToolCall` so cross-cutting policy can live on the
+    // runtime and apply uniformly across every agent in the process.
+    if (guardrails?.checkToolCall) {
+      let parsed: Record<string, unknown> = {};
+      try { parsed = JSON.parse(tc.arguments) as Record<string, unknown>; } catch { /* keep empty */ }
+      let decision: { allow: boolean; reason?: string } = { allow: true };
+      try {
+        decision = await guardrails.checkToolCall(ctx, tool.schema, parsed);
+      } catch (err) {
+        // Guardrails throwing means *fail closed* + audit; agents must
+        // never silently bypass an erroring policy check.
+        decision = { allow: false, reason: `guardrails error: ${err instanceof Error ? err.message : String(err)}` };
+      }
+      if (!decision.allow) {
+        resultContent = `Tool call denied by guardrails: ${decision.reason ?? 'no reason'}`;
+        eventBus?.emit(weaveEvent(EventTypes.ToolCallError, { tool: toolName, reason: 'guardrails_denied' }, ctx));
+        void weaveAudit(ctx, { action: 'agent.tool.invoke', outcome: 'denied', resource: toolName, details: { agent: agentName, reason: decision.reason ?? 'guardrails' } });
+        return {
+          index: 0,
+          type: 'tool_call',
+          toolCall: { name: toolName, arguments: parsed, result: resultContent },
+          durationMs: Date.now() - stepStart,
+        };
+      }
+    }
+
+    // Legacy per-agent policy hook — still honoured for backwards compat.
     if (policy?.approveToolCall) {
       const decision = await policy.approveToolCall(ctx, tool.schema, JSON.parse(tc.arguments));
       if (!decision.approved) {
         resultContent = `Tool call denied by policy: ${decision.reason ?? 'no reason'}`;
         eventBus?.emit(weaveEvent(EventTypes.ToolCallError, { tool: toolName, reason: 'policy_denied' }, ctx));
+        void weaveAudit(ctx, { action: 'agent.tool.invoke', outcome: 'denied', resource: toolName, details: { agent: agentName, reason: decision.reason ?? 'policy' } });
         return {
           index: 0,
           type: 'tool_call',
@@ -491,8 +571,15 @@ async function executeToolCall(
         () => tool.invoke(ctx, { name: toolName, arguments: args }),
       );
       resultContent = output.isError ? `Error: ${output.content}` : output.content;
+      void weaveAudit(ctx, {
+        action: 'agent.tool.invoke',
+        outcome: output.isError ? 'failure' : 'success',
+        resource: toolName,
+        details: { agent: agentName },
+      });
     } catch (err) {
       resultContent = `Tool error: ${err instanceof Error ? err.message : String(err)}`;
+      void weaveAudit(ctx, { action: 'agent.tool.invoke', outcome: 'failure', resource: toolName, details: { agent: agentName, error: err instanceof Error ? err.message : String(err) } });
     }
   }
 

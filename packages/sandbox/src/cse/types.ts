@@ -37,6 +37,16 @@ export interface CSEConfig {
   cpuCount?: number;
   /** Allow outbound network from the container. Default: false. */
   networkAccess?: boolean;
+  /**
+   * Phase 5 — explicit egress allowlist. When `networkAccess` is `true` an
+   * allowlist **must** be supplied; without one the container's network mode
+   * stays `none` regardless of `networkAccess`. Entries are hostnames or
+   * CIDR ranges (e.g. `['api.openai.com', '10.0.0.0/8']`). Full allowlist
+   * enforcement requires CNI-based egress filtering (road-mapped); for now
+   * this field gates whether the bridge is opened at all — a missing list is
+   * a hard deny.
+   */
+  networkAllowlist?: string[];
 
   // ── Kubernetes shared (AKS/GKE) ─────────────────────────────
   /** Path to kubeconfig file. Defaults to ~/.kube/config or in-cluster. */
@@ -125,6 +135,12 @@ export interface ExecutionRequest {
   timeoutMs?: number;
   /** Allow outbound network for this execution. */
   networkAccess?: boolean;
+  /**
+   * Phase 5 — per-request egress allowlist. Merged with the provider-level
+   * `CSEConfig.networkAllowlist`. If neither is set, `networkAccess: true`
+   * has no effect — network mode stays `none`.
+   */
+  networkAllowlist?: string[];
   /** Request browser automation (Playwright). Requires browserImage. */
   withBrowser?: boolean;
 }

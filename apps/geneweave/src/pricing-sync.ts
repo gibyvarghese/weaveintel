@@ -13,6 +13,7 @@
  * with the configured API key.
  */
 
+import { hardenedFetch } from '@weaveintel/core';
 import { ollamaFetch } from '@weaveintel/provider-ollama';
 import type { DatabaseAdapter, ModelPricingRow } from './db.js';
 
@@ -109,9 +110,9 @@ export interface PricingSyncReport {
 // ─── Fetch models from OpenAI ────────────────────────────────
 
 async function fetchOpenAIModels(apiKey: string): Promise<string[]> {
-  const res = await fetch('https://api.openai.com/v1/models', {
+  const res = await hardenedFetch('https://api.openai.com/v1/models', {
     headers: { Authorization: `Bearer ${apiKey}` },
-  });
+  }, { errorTag: 'geneweave-pricing-sync' });
   if (!res.ok) {
     throw new Error(`OpenAI models API returned ${res.status}: ${await res.text()}`);
   }
@@ -122,12 +123,12 @@ async function fetchOpenAIModels(apiKey: string): Promise<string[]> {
 // ─── Fetch models from Anthropic ─────────────────────────────
 
 async function fetchAnthropicModels(apiKey: string): Promise<string[]> {
-  const res = await fetch('https://api.anthropic.com/v1/models', {
+  const res = await hardenedFetch('https://api.anthropic.com/v1/models', {
     headers: {
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
     },
-  });
+  }, { errorTag: 'geneweave-pricing-sync' });
   if (!res.ok) {
     throw new Error(`Anthropic models API returned ${res.status}: ${await res.text()}`);
   }
@@ -138,7 +139,7 @@ async function fetchAnthropicModels(apiKey: string): Promise<string[]> {
 // ─── Fetch models from Google Gemini ─────────────────────────
 
 async function fetchGoogleModels(apiKey: string): Promise<string[]> {
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`);
+  const res = await hardenedFetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`, undefined, { errorTag: 'geneweave-pricing-sync' });
   if (!res.ok) {
     throw new Error(`Google models API returned ${res.status}: ${await res.text()}`);
   }

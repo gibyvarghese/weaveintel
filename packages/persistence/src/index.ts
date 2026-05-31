@@ -45,3 +45,11 @@ export {
   type Phase8ThroughputSummary,
   type Phase8BenchmarkReport,
 } from './phase8-benchmark.js';
+
+// Phase 4 — concrete RuntimePersistenceSlot factories. Adopters drop one
+// into `weaveRuntime({ persistence })` so DLQ + cost meter + idempotency
+// inherit durable behavior automatically.
+export {
+  weaveSqlitePersistence,
+  type SqliteRuntimePersistenceOptions,
+} from './runtime-slot.js';

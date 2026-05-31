@@ -10,8 +10,8 @@
  */
 
 import { WeaveIntelError, parseRetryAfterMs as coreParseRetryAfterMs } from '@weaveintel/core';
-import { createResilientCallable, type ResilientCallable } from '@weaveintel/resilience';
-import { openaiFetch, assertHttpsOrLoopback } from './_fetch.js';
+import { createResilientCallable, PROVIDER_RESILIENCE_DEFAULTS, type ResilientCallable } from '@weaveintel/resilience';
+import { openaiFetch, openaiFetchStream } from './_fetch.js';
 
 export interface OpenAIProviderOptions {
   apiKey?: string;
@@ -77,13 +77,8 @@ function composeRequestSignal(signal?: AbortSignal): AbortSignal {
  */
 const DEFAULT_ENDPOINT_ID = 'openai:rest';
 
-const RESILIENCE_DEFAULTS = {
-  // 1 auto-retry on transient/429. Heavy lifting comes from the shared token
-  // bucket pause (so other in-process callers also back off on 429) and the
-  // circuit breaker. Callers wanting more retries should wrap explicitly.
-  retry: { maxAttempts: 2, baseDelayMs: 500, maxDelayMs: 30_000, jitter: true },
-  circuit: { failureThreshold: 8, cooldownMs: 30_000 },
-} as const;
+// Shared provider defaults — consolidated in @weaveintel/resilience (Phase 5).
+const RESILIENCE_DEFAULTS = PROVIDER_RESILIENCE_DEFAULTS;
 
 type RequestArgs = [
   baseUrl: string,
@@ -258,8 +253,7 @@ async function openaiStreamFetchRaw(
   signal?: AbortSignal,
 ): Promise<ReadableStreamDefaultReader<Uint8Array>> {
   const url = `${baseUrl}${path}`;
-  assertHttpsOrLoopback(url);
-  const res = await fetch(url, {
+  const res = await openaiFetchStream(url, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),

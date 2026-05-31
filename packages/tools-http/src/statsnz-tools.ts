@@ -50,7 +50,7 @@
  * ──────────────────────────────────────────────────────────────────────────────
  */
 
-import { weaveTool } from '@weaveintel/core';
+import { hardenedFetch, weaveTool } from '@weaveintel/core';
 import type { Tool } from '@weaveintel/core';
 
 const ADE_BASE = 'https://api.data.stats.govt.nz/rest';
@@ -82,10 +82,14 @@ async function adeGet(path: string, params?: Record<string, string>): Promise<un
     }
   }
 
-  const response = await fetch(url.toString(), {
-    method: 'GET',
-    headers: buildHeaders(),
-  });
+  const response = await hardenedFetch(
+    url.toString(),
+    {
+      method: 'GET',
+      headers: buildHeaders(),
+    },
+    { errorTag: 'tools-http-statsnz' },
+  );
 
   if (!response.ok) {
     const text = await response.text().catch(() => '');

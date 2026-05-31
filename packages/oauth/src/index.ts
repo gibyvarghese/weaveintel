@@ -3,3 +3,8 @@
  */
 
 export * from './oauth.js';
+export {
+  type AsyncOAuthStateStore,
+  type DurableOAuthStateStoreOptions,
+  createDurableOAuthStateStore,
+} from './durable.js';

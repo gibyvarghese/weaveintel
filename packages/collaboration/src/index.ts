@@ -29,3 +29,13 @@ export {
   type HandoffManager,
   createHandoffManager,
 } from './handoff.js';
+
+// Phase 4 — durable variants backed by `runtime.persistence.kv`.
+export {
+  type DurableHandoffManager,
+  createDurableHandoffManager,
+  type DurableSharedSessionManager,
+  createDurableSharedSessionManager,
+  type DurableRunSubscriptionManager,
+  createDurableRunSubscriptionManager,
+} from './durable.js';

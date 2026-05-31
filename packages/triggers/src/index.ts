@@ -13,3 +13,17 @@ export * from './webhook.js';
 export * from './queue.js';
 export * from './change.js';
 export * from './binding.js';
+
+// DB-backed TriggerStore adapters (parity across all 5 backends).
+export { weaveSqliteTriggerStore, type WeaveSqliteTriggerStoreOptions } from './sqlite-trigger-store.js';
+export { weavePostgresTriggerStore, type WeavePostgresTriggerStoreOptions } from './postgres-trigger-store.js';
+export { weaveMongoDbTriggerStore, type WeaveMongoDbTriggerStoreOptions } from './mongodb-trigger-store.js';
+export { weaveRedisTriggerStore, type WeaveRedisTriggerStoreOptions } from './redis-trigger-store.js';
+export { weaveDynamoDbTriggerStore, type WeaveDynamoDbTriggerStoreOptions } from './dynamodb-trigger-store.js';
+
+// Phase 4 — durable per-trigger rate-limit windows backed by `runtime.persistence.kv`.
+export {
+  type DurableTriggerRateLimiter,
+  type DurableTriggerRateLimiterOptions,
+  createDurableTriggerRateLimiter,
+} from './durable-rate-limit.js';

@@ -28,6 +28,12 @@ export {
   type HumanTaskRepository,
 } from './repository.js';
 
+// Phase 4 — durable runtime-backed repository.
+export {
+  createDurableHumanTaskRepository,
+  type DurableHumanTaskRepositoryOptions,
+} from './durable.js';
+
 // Decision
 export { DecisionLog, createDecision, type DecisionRecord } from './decision.js';
 

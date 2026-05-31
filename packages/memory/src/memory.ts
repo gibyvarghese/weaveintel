@@ -20,7 +20,9 @@ import type {
   EmbeddingModel,
   AgentMemory,
   Message,
+  WeaveRuntime,
 } from '@weaveintel/core';
+import { weaveInMemoryPersistence } from '@weaveintel/core';
 import Database from 'better-sqlite3';
 import { Pool } from 'pg';
 import { createClient } from 'redis';
@@ -61,7 +63,12 @@ export type ConfiguredConversationMemory = AgentMemory & {
 };
 
 export interface ConfiguredMemoryStoreOptions {
-  backend: 'in-memory' | 'postgres' | 'redis' | 'sqlite' | 'mongodb' | 'cloud-nosql';
+  backend: 'in-memory' | 'runtime' | 'postgres' | 'redis' | 'sqlite' | 'mongodb' | 'cloud-nosql';
+  /** Phase 4 — when `backend: 'runtime'`, entries are stored via
+   *  `runtime.persistence.kv`. Falls back to in-memory when omitted. */
+  runtime?: WeaveRuntime;
+  /** Namespace prefix for KV keys when `backend: 'runtime'`. Defaults to `'mem'`. */
+  runtimeNamespace?: string;
   postgresUrl?: string;
   redisUrl?: string;
   redisKeyPrefix?: string;
@@ -281,6 +288,10 @@ export function createConfiguredMemoryStore(options: ConfiguredMemoryStoreOption
           return Promise.resolve();
         },
       };
+    }
+    case 'runtime': {
+      const store = weaveRuntimeMemoryStore({ runtime: options.runtime, namespace: options.runtimeNamespace });
+      return { ...store, async close() { return Promise.resolve(); } };
     }
     case 'postgres':
       if (!options.postgresUrl) {
@@ -731,6 +742,70 @@ export function weaveEntityMemory(store?: MemoryStore): EntityMemory {
         query,
         topK: 10,
       });
+    },
+  };
+}
+
+// ─── Phase 4: runtime-backed memory store ────────────────────────────────────
+
+export interface RuntimeMemoryStoreOptions {
+  /** When supplied and `runtime.persistence` is configured, entries survive
+   *  process restarts. Falls back to `weaveInMemoryPersistence()` otherwise. */
+  runtime?: WeaveRuntime;
+  /** KV key namespace. Defaults to `'mem'`. */
+  namespace?: string;
+}
+
+/**
+ * Durable memory store backed by `runtime.persistence.kv` (Phase 4).
+ *
+ * Key layout: `${namespace}:entry:${entry.id}` → JSON(MemoryEntry).
+ * All entries are loaded via a prefix scan and filtered / ranked in-memory,
+ * matching the approach used by `createDurableDeadLetterQueue`.
+ *
+ * This is the recommended durable path for memory. The existing per-backend
+ * factories (`weaveSqliteMemoryStore`, `weaveRedisMemoryStore`, …) remain
+ * available but are superseded for runtime-integrated deployments.
+ */
+export function weaveRuntimeMemoryStore(opts: RuntimeMemoryStoreOptions = {}): MemoryStore {
+  const ns = opts.namespace ?? 'mem';
+  const slot = opts.runtime?.persistence ?? weaveInMemoryPersistence();
+  const kv = slot.kv;
+
+  const entryKey = (id: string) => `${ns}:entry:${id}`;
+  const prefix = `${ns}:entry:`;
+
+  async function loadAll(): Promise<MemoryEntry[]> {
+    const entries = await kv.list(prefix);
+    const out: MemoryEntry[] = [];
+    for (const e of entries) {
+      try { out.push(JSON.parse(e.value) as MemoryEntry); } catch { /* skip malformed */ }
+    }
+    return out;
+  }
+
+  return {
+    async write(_ctx: ExecutionContext, newEntries: MemoryEntry[]): Promise<void> {
+      await Promise.all(newEntries.map((entry) => kv.set(entryKey(entry.id), JSON.stringify(entry))));
+    },
+
+    async query(_ctx: ExecutionContext, options: MemoryQuery): Promise<MemoryEntry[]> {
+      return applyMemoryQuery(await loadAll(), options);
+    },
+
+    async delete(_ctx: ExecutionContext, ids: string[]): Promise<void> {
+      await Promise.all(ids.map((id) => kv.delete(entryKey(id))));
+    },
+
+    async clear(_ctx: ExecutionContext, filter?: MemoryFilter): Promise<void> {
+      if (!filter) {
+        const all = await kv.list(prefix);
+        await Promise.all(all.map((e) => kv.delete(e.key)));
+        return;
+      }
+      const all = await loadAll();
+      const toDelete = all.filter((e) => matchesFilter(e, filter)).map((e) => e.id);
+      await Promise.all(toDelete.map((id) => kv.delete(entryKey(id))));
     },
   };
 }

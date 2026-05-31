@@ -21,10 +21,10 @@ import type {
   HumanTaskPriority,
   HumanDecision,
 } from '@weaveintel/core';
-import { newUUIDv7, weaveEventBus } from '@weaveintel/core';
+import { newUUIDv7, weaveEventBus, weaveAudit, weaveContext, type WeaveRuntime } from '@weaveintel/core';
 import { executeStep, type StepHandler, type StepHandlerMap } from './steps.js';
 import { createInitialState, advanceState, resolveNextStep, isTerminal } from './state.js';
-import { type CheckpointStore, InMemoryCheckpointStore } from './checkpoint-store.js';
+import { type CheckpointStore, InMemoryCheckpointStore, createDurableCheckpointStore } from './checkpoint-store.js';
 import { type CompensationRegistry, DefaultCompensationRegistry, runCompensations, type CompensationHandler } from './compensation.js';
 import { type WorkflowRunRepository, InMemoryWorkflowRunRepository } from './run-repository.js';
 import type { HandlerResolverRegistry } from './handler-resolver.js';
@@ -87,9 +87,12 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
   private runQueue?: WorkflowRunQueue;
   // Phase W6
   private spanEmitter?: WorkflowSpanEmitter;
+  // Phase 5 — ambient runtime for cross-cutting audit
+  private runtime?: WeaveRuntime;
 
   constructor(opts?: WorkflowEngineOptions) {
-    this.checkpointStore = opts?.checkpointStore ?? new InMemoryCheckpointStore();
+    this.runtime = opts?.runtime;
+    this.checkpointStore = opts?.checkpointStore ?? (opts?.runtime ? createDurableCheckpointStore({ runtime: opts.runtime }) : new InMemoryCheckpointStore());
     this.runRepository = opts?.runRepository ?? new InMemoryWorkflowRunRepository();
     this.bus = opts?.bus;
     this.defaultPolicy = opts?.defaultPolicy;
@@ -372,6 +375,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
 
     this.emit({ type: 'workflow:started', runId: run.id, timestamp: now() });
     void this.appendAudit(run, 'workflow:started');
+    this.emitRuntimeAudit(run, 'workflow.run.start');
 
     return this.executeRun(run, def);
   }
@@ -723,12 +727,14 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
 
       this.emit({ type: 'step:started', runId: run.id, stepId: step.id, timestamp: now() });
       void this.appendAudit(run, 'step:started', { stepId: step.id });
+      this.emitRuntimeAudit(run, 'workflow.step.start', 'success', { stepId: step.id, stepType: step.type });
 
       let stepResult = await this.executeStepWithExpressionFallback(step, run.state, runHandlers);
 
       if (stepResult.status === 'failed') {
         this.emit({ type: 'step:failed', runId: run.id, stepId: step.id, timestamp: now(), data: { error: stepResult.error } });
         void this.appendAudit(run, 'step:failed', { stepId: step.id, data: { error: stepResult.error } });
+        this.emitRuntimeAudit(run, 'workflow.step.end', 'failure', { stepId: step.id, error: stepResult.error });
 
         // Track the last failed result so onError / fallback receives the terminal error.
         let finalFailedResult = stepResult;
@@ -810,6 +816,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
               await this.emitStepSpan(run, step, stepStartMs, 'completed', stepRetryCount, retryCostUsd);
               this.emit({ type: 'step:completed', runId: run.id, stepId: step.id, timestamp: now() });
               void this.appendAudit(run, 'step:completed', { stepId: step.id });
+              this.emitRuntimeAudit(run, 'workflow.step.end', 'success', { stepId: step.id });
               await this.checkpointStore.save(run.id, step.id, run.state, run.workflowId);
               if (isTerminal(this.effectiveDef(run, activeDef), run.state, dynamicStepIds)) await this.completeRun(run, activeDef);
               continue;
@@ -1292,6 +1299,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     run.costTotal = await Promise.resolve(this.costMeter.total(run.id));
     this.emit({ type: 'workflow:completed', runId: run.id, timestamp: now() });
     void this.appendAudit(run, 'workflow:completed');
+    this.emitRuntimeAudit(run, 'workflow.run.end', 'success', { costTotal: run.costTotal });
     // Phase W4 — clear step lock records now that the run is terminal.
     if (this.stepLockStore) {
       try { await this.stepLockStore.clear(run.id); } catch { /* best-effort */ }
@@ -1496,6 +1504,7 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
     run.completedAt = now();
     this.emit({ type: 'workflow:failed', runId: run.id, timestamp: now(), data: { error } });
     void this.appendAudit(run, 'workflow:failed', { data: { error } });
+    this.emitRuntimeAudit(run, 'workflow.run.end', 'failure', { error });
     // Phase W4 — clear step lock records now that the run is terminal.
     if (this.stepLockStore) {
       void this.stepLockStore.clear(run.id).catch(() => { /* best-effort */ });
@@ -1532,6 +1541,32 @@ export class DefaultWorkflowEngine implements IWorkflowEngine {
         data: extra?.data,
       }));
     } catch { /* audit failures must never affect run execution */ }
+  }
+
+  /**
+   * Phase 5 — emit an entry into the ambient runtime audit logger. Runs
+   * alongside `appendAudit` so workflow events appear in the process-wide
+   * durable audit trail (e.g. the auto-wired SQLite logger) as well as the
+   * workflow-specific `WorkflowAuditLog`. Fire-and-forget; never throws.
+   */
+  private emitRuntimeAudit(
+    run: WorkflowRun,
+    action: string,
+    outcome: 'success' | 'failure' | 'denied' = 'success',
+    details?: Record<string, unknown>,
+  ): void {
+    if (!this.runtime) return;
+    const ctx = weaveContext({
+      runtime: this.runtime,
+      executionId: run.traceId ?? run.id,
+      ...(run.tenantId !== undefined ? { tenantId: run.tenantId } : {}),
+    });
+    void weaveAudit(ctx, {
+      action,
+      outcome,
+      resource: run.workflowId,
+      details: { runId: run.id, ...details },
+    });
   }
 }
 

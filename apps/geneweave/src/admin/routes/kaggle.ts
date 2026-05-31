@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { newUUIDv7 } from '@weaveintel/core';
+import { hardenedFetch, newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike } from '../api/types.js';
 
@@ -235,7 +235,7 @@ export function registerAdminConnectorRoutes(
     const tokenUrl = oauthCfg.tokenUrl.replace('{{domain}}', domain);
 
     try {
-      const tokenResp = await fetch(tokenUrl, {
+      const tokenResp = await hardenedFetch(tokenUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
         body: new URLSearchParams({
@@ -245,7 +245,7 @@ export function registerAdminConnectorRoutes(
           code,
           redirect_uri: redirectUri,
         }).toString(),
-      });
+      }, { errorTag: 'geneweave-oauth-callback' });
 
       if (!tokenResp.ok) {
         replyError(200, `Token exchange failed: ${tokenResp.status}`);
@@ -353,9 +353,9 @@ export function registerAdminConnectorRoutes(
         json(res, 200, { ok: true, message: 'No test endpoint configured' }); return;
       }
 
-      const testResp = await fetch(testUrl, {
+      const testResp = await hardenedFetch(testUrl, {
         headers: { 'Authorization': `Bearer ${connector.access_token}`, 'Accept': 'application/json' },
-      });
+      }, { errorTag: 'geneweave-connector-test' });
 
       if (testResp.ok) {
         json(res, 200, { ok: true, message: 'Connection verified' });

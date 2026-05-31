@@ -1,1660 +1,920 @@
 # Copilot Instructions
 
+## How to use this file
+
+This file is **permanent law**. Everything here applies to *every* new change unless a
+rule explicitly says it is superseded. It is intentionally free of build narrative.
+
+- **Forward-looking rules** (how to build) live here.
+- **Build history** (what was built, phase-by-phase, with assertion counts and debug
+  notes) lives in [`docs/PHASE_LOG.md`](docs/PHASE_LOG.md). Do not add "Phase N complete"
+  sections to this file.
+- **Durable contract facts** (table names, type names, route paths, hard invariants) are
+  condensed in the [Contract Reference](#contract-reference) at the bottom. When a phase
+  supersedes an earlier one, fold the durable facts forward here and drop the narrative
+  from the log.
+
+When the two ever conflict, this file wins.
+
+---
+
+## Definition of Done (read before writing any new capability)
+
+A new capability is not done until **all** of these hold. This is the single answer to
+"what must I consider when building new code."
+
+1. **One change set, end-to-end.** A DB-backed capability lands schema + adapter + admin
+   CRUD + runtime resolution in the *same* change. Never ship a schema without its
+   adapter, or an adapter without its runtime consumer.
+2. **DB-driven, not hardcoded.** Behaviour lives in database rows (catalogs, policies,
+   strategies, recipes), never in app-only conditionals. Selection comes from metadata +
+   admin-managed records.
+3. **Shared package first.** Implement reusable logic in the owning shared package and
+   keep apps (esp. GeneWeave) as consumers. Extend existing capability slots; never
+   duplicate. See [Reusability & Package Boundaries](#reusability--package-boundaries).
+4. **Model-facing descriptions preserved.** Any prompt, skill, tool, agent, workflow
+   handler, or capability record that an LLM can discover or route on carries an explicit,
+   structured, model-facing description — never a generic label.
+5. **Observability + eval hooks wired by default.** Emit the shared trace shape; do not
+   create app-only telemetry paths.
+6. **Reusability invariant respected.** The package imports only its declared
+   dependencies. No DB types, no app types, no `fetch`, no host imports leak into a
+   reusable package.
+7. **Graceful by construction.** New cross-cutting machinery is *never load-bearing* — see
+   [Graceful Degradation](#graceful-degradation). Failures degrade to a safe default, they
+   do not crash a request or a tick.
+8. **Idempotency on writes.** Every POST route that creates or modifies state uses an
+   `Idempotency-Key` header via `@weaveintel/reliability`.
+9. **The test quartet.** Ship: package unit tests, a GeneWeave DB-level test, a canonical
+   `examples/NN-*.ts` (in-process, no DB / no LLM / no external services), and a
+   `scripts/e2e-*.mjs` verified against a running server.
+10. **Examples and docs updated** so end-to-end usage stays discoverable.
+
+---
+
 ## Architecture Priorities
-- Prefer reusable package-level capabilities over app-local implementations when a feature belongs to the shared weaveIntel platform.
-- Keep GeneWeave database-driven for prompts, skills, agents, policies, and related configurable capabilities.
-- Route prompt parsing, rendering, and version normalization through `@weaveintel/prompts` instead of duplicating prompt logic inside apps.
-- Treat prompt records as prompt assets only when they are genuinely model-authored instructions or reusable prompt compositions.
-- Move behavior bundles, operational policies, and tool activation logic into skills, tools, contracts, or runtime policies when they are not prompt assets.
-- Keep the operator tool catalog (`tool_catalog` in DB, `/api/admin/tool-catalog`) as the single source of truth for which tools are active at runtime. Never hardcode tool enablement in code.
 
-## Prompt Boundary
-- Use prompts for templateable model instructions, reusable system/user message structures, few-shot exemplars, routing/judging/optimizer prompt assets, and model-facing text variants that benefit from versioning and experimentation.
-- Use skills for reusable behavior packs that combine instructions, tool activation, and execution guidance.
-- Use tools or workers for capabilities that must perform actions or fetch data instead of only shaping model text.
-- Use runtime policies for orchestration rules, hard execution constraints, guardrails, and non-optional workflow behavior.
-- Preserve strong descriptions and structured metadata on any prompt, skill, tool, or worker that is callable by an LLM.
+- Prefer reusable package-level capabilities over app-local implementations when a feature
+  belongs to the shared platform.
+- **Every adopter constructs exactly one `weaveRuntime` at boot, and every
+  `ExecutionContext` is derived from it.** Egress, tracer, secrets, audit, persistence,
+  and resilience are pulled from `ctx.runtime?.…` — never reconstructed per call site
+  and never read from process-wide singletons when a runtime is reachable. See
+  [Hardening Phase 2](#hardening-phase-2-complete--ambient-cross-cutting-concerns-via-weaveruntime).
+- **Every agent / tool / connector inherits observability + audit + guardrails
+  automatically from `ctx.runtime` (Phase 3).** The agent loop emits ambient audit at
+  run + tool boundaries and consults `runtime.guardrails?.checkToolCall` before any
+  tool invocation. Opt-out is explicit and must be logged via
+  `weaveLogSafetyDowngrade(ctx, ...)` — there is no silent way to be unaudited or
+  unobserved.
+- **Durable cross-cutting state flows through `runtime.persistence` (Phase 4).**
+  Every durable subsystem (DLQ, cost meter, future idempotency / audit ledger /
+  endpoint state) consumes `runtime.persistence.kv` ambient. Default is
+  `weaveInMemoryPersistence()` (zero-config, lost on exit); pass
+  `weaveSqlitePersistence({ path })` (or any other slot factory from
+  `@weaveintel/persistence`) to make every consumer restart-safe at once. There is
+  no per-call-site KV wiring and no module-level singleton. See
+  [Hardening Phase 4](#hardening-phase-4-complete--durable-cross-cutting-state-via-runtimepersistence).
+- Keep GeneWeave database-driven for prompts, skills, agents, policies, and related
+  configurable capabilities.
+- Route prompt parsing, rendering, and version normalization through `@weaveintel/prompts`
+  instead of duplicating prompt logic in apps.
+- Keep the operator tool catalog (`tool_catalog`, `/api/admin/tool-catalog`) as the single
+  source of truth for runtime tool enablement. Never hardcode tool enablement.
+- Favor modular changes that reduce pressure on large files (`chat.ts`, `ui.ts`,
+  `server.ts`, `server-admin.ts`). Extract by capability domain and re-compose from index
+  modules rather than appending new blocks.
+- For local runtime, `./geneweave.db` is the canonical SQLite database (`DATABASE_PATH`
+  from `.env`). Do not apply data fixes against `./apps/geneweave/geneweave.db` or
+  `./data/geneweave.db` unless runtime config is intentionally changed.
 
-## GeneWeave Expectations
-- Wire GeneWeave to shared packages rather than keeping parallel app-only versions of the same logic.
-- When prompt metadata changes, update GeneWeave database schema, admin CRUD, and runtime resolution together so the app remains internally consistent.
-- Keep admin surfaces usable: prefer explicit labels, structured JSON fields only where needed, and defaults that make creation safe.
-- Favor modular changes that help reduce pressure on large files such as `chat.ts`, `ui.ts`, `server.ts`, and `server-admin.ts`.
-- For local runtime work, treat `./geneweave.db` as the canonical GeneWeave SQLite database. Both `examples/12-geneweave.ts` (dev) and `deploy/server.ts` (prod) honor `DATABASE_PATH` from `.env`, which is set to `./geneweave.db`. Do not apply data fixes or validation against `./apps/geneweave/geneweave.db` or `./data/geneweave.db` unless runtime configuration is intentionally changed.
+---
 
-## Tool Platform (Phase 1 complete — Runtime Bridge)
-- The `tool_catalog` table (renamed from `tool_configs`) is the DB-backed registry of all known tools. It replaces the legacy `tool_configs` table.
-- `syncToolCatalog(db)` runs at startup to INSERT new BUILTIN_TOOLS entries into `tool_catalog` without overwriting operator customizations.
-- `createToolRegistry()` respects the `disabledToolKeys` set passed via `ToolRegistryOptions`. Server-side callers must load enabled keys via `db.listEnabledToolCatalog()` and compute the disabled set before calling `createToolRegistry()`.
-- Admin API path for tool catalog is `/api/admin/tool-catalog`. The old `/api/admin/tools` path is retired.
-- `ToolCatalogRow` is the canonical type (exported from `@weaveintel/geneweave`). `ToolConfigRow` is a deprecated alias kept for backward compatibility.
-- New tool fields: `tool_key` (unique key matching BUILTIN_TOOLS key), `version`, `side_effects`, `tags`, `source` (`builtin`|`custom`|`mcp`|`plugin`), `credential_id`.
-- Risk level values are: `read-only` | `write` | `destructive` | `privileged` | `financial` | `external-side-effect`. Old values (`low`, `medium`, `high`) are retired.
-- Phase 2 (Tool Policies) is **complete**. See the section below for the full Phase 2 contract.
+## Hardening (egress + SSRF)
 
-## Tool Platform (Phase 2 complete — Tool Policies)
-- Named `tool_policies` table in DB; admin CRUD at `/api/admin/tool-policies`. Seeded with 4 built-in policies: `default`, `strict_external`, `destructive_gate`, `read_only`.
-- `ToolPolicyResolver` interface (in `@weaveintel/tools`) is the contract for looking up the effective policy for a tool at runtime. GeneWeave supplies `DbToolPolicyResolver` backed by the `tool_policies` SQLite table.
-- `createPolicyEnforcedRegistry(registry, opts)` (in `@weaveintel/tools`) wraps every tool in the registry with an enforcement sequence: enabled check → circuit breaker → risk level gate → approval gate → rate limit → execute with timeout → audit emit.
-- `createToolRegistry()` in `tools.ts` accepts `policyResolver`, `auditEmitter`, and `rateLimiter` in `ToolRegistryOptions`. When a `policyResolver` is provided the returned registry is policy-enforced automatically.
-- `ChatEngine` constructor wires `DbToolPolicyResolver`, `DbToolRateLimiter`, and `DbToolAuditEmitter` into `this.toolOptions` so all tool invocations are policy-gated and persistently audited end-to-end.
-- Rate limiting uses `tool_rate_limit_buckets` with 1-minute tumbling windows. `checkAndIncrementRateLimit()` on `DatabaseAdapter` is atomic (INSERT OR IGNORE + UPDATE within the same window row).
-- `EffectiveToolPolicy.source` values are: `'default'` | `'global_policy'` | `'skill_override'` | `'persona_override'`. Skill-level overrides are passed via `skillPolicyKey` in `PolicyResolutionContext`.
-- Audit events are emitted via `ToolAuditEmitter`. GeneWeave uses `DbToolAuditEmitter` (persists every invocation to `tool_audit_events`). The legacy `consoleAuditEmitter` is no longer wired in production.
-- `ToolPolicyRow` and `ToolRateLimitBucketRow` are exported from `@weaveintel/geneweave` `db-types.ts`. All `tool_policies` rows use UUID primary keys.
-- Phase 3 (Tool Audit Trail + Health Persistence) is **complete**. See the section below for the full Phase 3 contract.
+The framework has a **single hardened egress path** for every server-side HTTP call.
+Bypassing it is a review-blocking bug. Every new server-side fetch goes through it.
 
-## Cross-Cutting Requirements
-- Reuse shared observability and evaluation hooks for new AI capabilities instead of creating app-only telemetry paths.
-- Update examples and supporting docs when adding or changing platform capabilities so end-to-end usage stays discoverable.
-- Add concise comments only where the control flow or data mapping is non-obvious.
-- Keep prompts grounded in runtime reality: if a prompt requires tools, data freshness, or deterministic checks, route that requirement through skills/tools/runtime policies instead of relying on instruction text alone.
+### Hardening Phase 0 (complete — SSRF chokepoint in `@weaveintel/core`)
+
+- `@weaveintel/core/net-guard` is the single source of truth for outbound URL validation:
+  `assertSafeOutboundUrl(url, policy)` and `followRedirectsSafely(resp, init, signal, policy)`.
+- Blocks cloud metadata endpoints (`169.254.169.254`, `metadata.google.internal`, Azure
+  IMDS), RFC1918 / loopback / link-local IPv4+IPv6 literals, DNS rebinding, and
+  non-loopback `http://`. Re-validates every redirect hop (max 5).
+- `OutboundUrlPolicy` carries a required `errorTag` so package identity surfaces in any
+  thrown message.
+- Never re-implement SSRF / metadata blocking inline. Always call `assertSafeOutboundUrl`
+  (or, preferably, route through `hardenedFetch` below which calls it for you).
+
+### Hardening Phase 1 (complete — one egress chokepoint, lint-enforced)
+
+- **All server-side HTTP goes through `@weaveintel/core` hardened fetch.** Either the raw
+  function `hardenedFetch(input, init?, opts)` or, preferred for per-package usage, a
+  closure built by `createHardenedFetch({ errorTag, timeoutMs?, maxBytes?, policy? })`
+  which returns `{ fetch, fetchStream, assertSafe }`.
+- The pipeline composes the five outbound-safety primitives once: SSRF guard → redirect
+  re-validation → HTTPS floor → outer `AbortSignal.timeout` (composed with caller signal)
+  → streaming response-size cap.
+- Defaults: `timeoutMs = 60_000`, `maxBytes = 50 MiB`. Each lever disables on `0`.
+  `errorTag` is REQUIRED and prefixes every thrown message.
+- `fetchStream(input, init)` is the canonical SSE / NDJSON / chunked-download path:
+  SSRF + redirect re-validation still apply; the outer timeout + size cap do not.
+  Internally it calls `hardenedFetch` with `{ timeoutMs: 0, maxBytes: 0 }`.
+- `enforceHttps: false` is reserved for genuinely non-public hosts (operator-supplied
+  IMAP proxies, in-app testing, local browser-fetcher CLIs) where the package layer
+  already validates upstream with `validateOutboundUrl`. Default is `true`.
+- The 13 per-package `_fetch.ts` adapters (provider-openai/anthropic/google/llamacpp/
+  ollama, a2a, oauth, sandbox/cse, tools-enterprise/marketdata/news/search/social) are
+  now thin closures over `createHardenedFetch`. Add new packages the same way —
+  **never re-implement the pipeline, never call `fetch` directly from package code**.
+- Encryption KMS providers route their default `fetchImpl` through `hardenedFetch` while
+  preserving an injectable `opts.fetchImpl` test seam.
+- The lint rule `npm run check:no-raw-fetch` (script `scripts/check-no-raw-fetch.mjs`)
+  scans all `.ts`/`.tsx` under `packages/**/src/**` and `apps/**/src/**` and fails on any
+  raw `fetch(` call. Exempt: `_fetch.ts`, `hardened-fetch.ts`, `net-guard.ts`, tests
+  (`*.test.ts` / `*.e2e.ts`), browser-side code (`ui-client.ts`, `ui/api.ts`,
+  `*-view.ts`, `views/`), `legacy/`, and the standalone live-agents-demo app. Per-file
+  escape: `// no-raw-fetch: allow (reason: ...)` comment within the first 20 lines.
+  Use sparingly and only for genuine non-global `fetch` symbols (closure params, DB
+  cursor callbacks, etc.).
+- Test coverage: `packages/core/src/hardened-fetch.test.ts` (17 tests) exercises the
+  SSRF gate, redirect re-validation, redirect cap, Content-Length precheck, streaming
+  size cap, outer timeout, the `timeoutMs:0` / `maxBytes:0` escape hatches, and the
+  factory.
+
+### Hardening Phase 2 (complete — ambient cross-cutting concerns via `weaveRuntime`)
+
+- **`weaveRuntime` is the single ambient root** for cross-cutting concerns. Every
+  adopter (app, agent host, worker) constructs **exactly one** at boot and every
+  `ExecutionContext` is derived from it. Never construct a parallel runtime, never
+  re-wrap egress/tracer/secrets/audit per call site, never reach for a process-wide
+  singleton when a runtime is reachable through `ctx.runtime`.
+- The runtime bundles, in one object: hardened **egress** (Phase 1 chokepoint),
+  **tracer** (observability), **secrets** (env / vault / KMS resolver), **audit**
+  logger, optional **persistence** slot, optional **resilience** signal-bus slot.
+  Persistence + resilience are structural (`{ kind }` / `{ emit(...) }`) so concrete
+  instances from `@weaveintel/persistence` and `@weaveintel/resilience` plug in
+  without `@weaveintel/core` taking a dependency on them.
+- **`RuntimeCapabilities`** namespace (all `CapabilityId`s):
+  `runtime.net.egress`, `runtime.observability`, `runtime.secrets`, `runtime.audit`,
+  `runtime.persistence`, `runtime.resilience`, `runtime.encryption`,
+  `runtime.guardrails`. Baseline four are always advertised; persistence/resilience
+  flip on only when configured; encryption/guardrails are advertised via
+  `extraCapabilities`.
+- **Capability-declared requirements.** `defineTool({ requires: [...] })` and the
+  `ToolSchema.requires` field let any tool name the runtime capabilities it needs.
+  At invocation, if `ctx.runtime` is present, the tool asserts those capabilities
+  before executing (`runtime.require(...)`); no-runtime contexts preserve the
+  zero-config DX. Use `assertRuntimeRequires(runtime, requires, featureName)` from
+  feature-registration paths (workflow handlers, connectors, schedulers) to fail
+  fast at *registration*, not first-call.
+- **Secrets MUST flow through `runtime.secrets`** in adopter code, not
+  `process.env.X` reads. The default `envSecretResolver()` reads `process.env`;
+  vault / KMS / per-tenant override resolvers compose via `chainSecretResolvers`.
+  Use `requireSecret(resolver, key)` when the value is mandatory.
+- **`createGeneWeave`** constructs one `weaveRuntime` at boot and exposes it as
+  `GeneWeaveApp.runtime`. The same tracer instance is installed as the process-wide
+  default (`weaveSetDefaultTracer`) so packages that read the global never disagree
+  with the runtime.
+- **`ExecutionContext.runtime`** is the propagation channel. `weaveContext({ runtime })`
+  adopts the runtime's tracer when no explicit tracer was passed; `childContext`
+  inherits the runtime by default. Features pull egress / secrets / audit from
+  `ctx.runtime?.…` rather than module-level singletons.
+- **One implementation per concern** — packages MUST NOT re-implement retry / backoff
+  / circuit-breaker / token-bucket / idempotency / dead-letter locally. Consume
+  `@weaveintel/resilience` (token bucket, circuit breaker, concurrency limiter,
+  retry policy, resilient callable) and `@weaveintel/reliability` (idempotency keys,
+  retry budgets, dead-letter, concurrency, backpressure, health). The lint rule
+  `npm run check:no-adhoc-resilience` (script `scripts/check-no-adhoc-resilience.mjs`)
+  fails on suspect file basenames (`retry.ts`, `backoff.ts`, `circuit-breaker.ts`,
+  `token-bucket.ts`, `concurrency-limiter.ts`, `dead-letter.ts`, `idempotency.ts`,
+  `resilience.ts`) outside `packages/resilience/` and `packages/reliability/`.
+  Per-file escape: `// no-adhoc-resilience: allow (reason: ...)` within the first
+  20 lines. Three legacy files are currently grandfathered with documented reasons
+  (kaggle/marketdata per-symbol breakers, workflows per-handler-kind breaker
+  registry) — consolidation onto `@weaveintel/resilience` is Phase 2.x deferred.
+- **Durable by default, switchable.** The runtime defaults are in-memory / noop /
+  env so a fresh `weaveRuntime()` works for tests and tiny adopters. Production
+  adopters pass durable backends (Postgres/Redis/Sqlite/etc. via the persistence
+  slot; real bus via the resilience slot; vault chain via the secret resolver) —
+  one swap, zero call-site changes.
+- **Graceful by construction.** Missing optional slots never crash a call — they
+  surface as a single `runtime.has(cap)` returning `false`, and `require(...)` /
+  `assertRuntimeRequires(...)` throw one readable error naming every missing
+  capability. Egress / tracer / secrets / audit are always present, so the
+  zero-config path cannot fault on baseline capabilities.
+- Test coverage: `packages/core/src/runtime.test.ts` (13 tests),
+  `packages/core/src/secrets.test.ts` (9 tests), `packages/core/src/tool-requires.test.ts`
+  (5 tests). Golden-path example: `examples/123-runtime-golden-path.ts` exercises
+  observability + safe egress + secret resolution + capability gating with no DB,
+  no LLM, no external service.
+- **Phase 2.x deferred work** (call out, don't block sign-off): migrate every
+  remaining `process.env.X_API_KEY` read in `apps/geneweave` and adapter packages
+  to `runtime.secrets.resolve(...)`; refactor the three grandfathered local breakers
+  onto `@weaveintel/resilience` `createCircuitBreaker`; add `requires: [...]` to
+  every shipped tool definition so registration-time assertion replaces invocation-
+  time assertion; wire `apps/live-agents-demo` to consume a `weaveRuntime`.
+
+### Hardening Phase 3 (complete — ambient runtime in the agent loop, tool registry, guardrails, audit)
+
+- **Every agent, tool, and connector inherits observability + audit + guardrails
+  automatically from `ctx.runtime`.** There is no silent way to be unaudited or
+  unobserved. Explicit opt-out is permitted but must be logged via
+  `weaveLogSafetyDowngrade(ctx, { feature, reason, component? })` — a documented
+  hole, never a hidden one.
+- **`RuntimeGuardrailsSlot` is a structural interface** with two optional methods:
+  `checkToolCall(ctx, schema, args)` and `checkOutput(ctx, text)`. The agent loop
+  consults `runtime.guardrails?.checkToolCall` ambient before invoking a tool;
+  a thrown check is treated as **fail-closed** (deny + audit). Missing slot =
+  unset capability = allow-all (graceful by construction).
+- **`weaveAudit(ctx, AuditEntry)`** is the ambient audit helper. It pulls
+  `audit` from `ctx.runtime?.audit`, logs the entry, and swallows logger errors.
+  No-op when no runtime is attached. The agent loop emits `agent.run.start`,
+  `agent.tool.invoke` (`success`/`failure`/`denied`), and `agent.run.end` at the
+  natural boundaries — no call-site wiring required.
+- **`createToolRegistry({ runtime })`** asserts each tool's
+  `schema.requires` at `register()` time via `assertRuntimeRequires`. Misconfig
+  surfaces at boot, not on the first invocation hours later. The zero-config
+  constructor (`createToolRegistry()`) still works and defers to the invocation-
+  time check from Phase 2.
+- **`@weaveintel/weaveintel`** is the curated meta-package — the one import most
+  adopters need. Re-exports `weaveRuntime`, `RuntimeCapabilities`, `weaveAgent`,
+  `weaveTool`/`weaveToolRegistry`, `weaveContext`, `hardenedFetch`,
+  `envSecretResolver`, audit helpers, and the two concrete tracers
+  (`weaveConsoleTracer`, `weaveInMemoryTracer`). No hidden behavior — pure
+  re-exports.
+- **Golden-path example**: `examples/124-ambient-agent.ts`. Sub-100 lines, no DB,
+  no LLM, no external service. Constructs one `weaveRuntime`, registers one tool,
+  runs a stub-backed `weaveAgent`, and asserts ambient audit + tracer fired. Also
+  exercises the guardrails-deny path.
+- **Test coverage**: `packages/core/src/runtime.test.ts` (18 tests, +5 for
+  guardrails / audit / downgrade), `packages/core/src/tool-requires.test.ts`
+  (8 tests, +3 for registry registration-time check), `packages/agents/src/
+  agent.ambient.test.ts` (2 tests: ambient layers end-to-end + guardrails deny
+  audited). Total 88 core/agents tests green.
+- **Phase 3.x deferred work** (do not block sign-off): migrate the workflow
+  engine and live-agents tick loop onto the same ambient pattern (currently they
+  observe via `withObservedSpan` but do not emit ambient audit at run/tool
+  boundaries); annotate every shipped tool definition with `requires: [...]` so
+  the registration-time assertion replaces the invocation-time one; expand the
+  guardrails slot consumers to also call `checkOutput(ctx, text)` on final agent
+  responses (the slot exists but no built-in caller wires it yet).
+
+### Hardening Phase 5 (complete — security depth, simplification, and durability consolidation)
+
+These rules apply to **every** new file, regardless of whether Phase 5 is mentioned. They
+are permanent law, not phase-specific guidance.
+
+#### No raw network
+- **Never call `fetch`, `http.request`, or `https.request` directly in `packages/**` or
+  `apps/**`.** All outbound HTTP goes through the single hardened egress client from
+  `@weaveintel/core` (`hardenedFetch` / `createHardenedFetch`), which enforces SSRF
+  blocking (cloud-metadata + private hosts), redirect re-validation per hop, HTTPS floor,
+  outer `AbortSignal.timeout`, and response-size cap. The lint rule
+  `npm run check:no-raw-fetch` blocks violations at CI.
+- New tools that need outbound network **must** declare `requires: ['runtime.net.egress']`
+  in their schema and receive the client through the runtime's egress slot — they cannot
+  construct their own fetch closure or bypass the guard.
+
+#### Ambient cross-cutting concerns
+- **Observability, resilience, guardrails, and audit are resolved from `ctx.runtime`, never
+  constructed ad-hoc per call site.** Any new agent / workflow / tool / connector inherits
+  them automatically. There is no way to be unobserved or unguarded by omission.
+- Opting out is explicit and logged via `weaveLogSafetyDowngrade(ctx, { feature, reason })`
+  — a structured audit entry that shows up in every audit sink.
+
+#### One implementation per concern
+- **Retry/backoff → `@weaveintel/resilience` + `core/error-classifier`.**
+- **Circuit breaker / bulkhead / concurrency → `@weaveintel/resilience`.**
+- **Durability (idempotency, DLQ, health, backpressure) → `@weaveintel/durability`**
+  (`@weaveintel/reliability` is the implementation; import from `@weaveintel/durability`).
+- **Storage → `@weaveintel/persistence`.**
+- Do **not** add package-local `resilience.ts`, `_fetch.ts`, or bespoke `new Map()` stores
+  for these concerns in new code. The lint rule `check:no-adhoc-resilience` blocks new
+  local re-implementations.
+
+#### Durable by default-switchable
+- Any stateful capability keeps an **in-memory adapter for zero-config DX** but must accept
+  a persistence backend via the runtime. Never hardcode `new Map()` as the only store for
+  data that must survive a restart.
+- The canonical pattern: `opts.runtime?.persistence ?? weaveInMemoryPersistence()` —
+  already used by DLQ, cost meter, checkpoint store, endpoint registry, memory store, and
+  the durable audit logger.
+
+#### Capability-declared requirements
+- Features declare the cross-cutting capabilities they need via `schema.requires: [...]`
+  (tools) or `assertRuntimeRequires(runtime, requires, featureName)` (registration-time
+  check for workflows, connectors, schedulers). The runtime asserts and injects them at
+  registration. A missing capability surfaces at boot, not on the first invocation hours
+  later.
+
+#### Packages first, apps as consumers
+- **Framework capabilities live in `packages/`** so every adopter benefits. `apps/` only
+  holds app-specific glue: configuration, DB schema, admin UI, deployment wiring.
+- When a package gains new behavior, update apps to *consume* it rather than keeping
+  parallel logic.
+- If a behavior is in an app but belongs to the platform, lift it into a package as part
+  of the same change.
+
+#### End-to-end tests are mandatory
+- Every phase ships with an end-to-end test that exercises the *wired* path, not just the
+  unit. Prove: a metadata/private-IP URL is rejected; an agent run emits ambient spans and
+  audit without manual setup; a workflow survives a simulated restart with a durable
+  backend; a DLQ entry persists across process restart.
+- Run the full example suite (`npm run test:examples`) after each phase and fix breakage
+  immediately — examples are the adopter's first contract.
+
+#### Phase 5 specific changes (complete)
+- **`assertTlsFloor()`** in `@weaveintel/core` — called by `weaveRuntime()` by default.
+  Throws if `NODE_TLS_REJECT_UNAUTHORIZED === '0'` (silent MITM vector). Suppress with
+  `{ tlsFloor: false }` in test environments only; downgrade entry is encouraged. Never
+  disable in production.
+- **`createDurableAuditLogger({ persistence?, namespace? })`** in `@weaveintel/core` —
+  writes every `AuditEntry` to `runtime.persistence.kv` under
+  `${namespace}:${timestamp}:${uuid}`. **Auto-wired by `weaveRuntime`** when a `persistence`
+  slot is configured and no explicit `audit` logger is supplied — zero config required from
+  adopters. Falls back to `weaveInMemoryPersistence()` when called standalone.
+- **`createRedactingAuditLogger(inner, redactor)`** in `@weaveintel/core` — wraps any
+  `AuditLogger` and passes every entry's `details` through a `Redactor` before forwarding,
+  so PII is stripped from audit trails at the write path. **Auto-wired by `weaveRuntime`**
+  when a `redactor` is configured via `WeaveRuntimeOptions.redactor`. The `Redactor`
+  interface is structural — pass any `weaveRedactor(policy)` from `@weaveintel/redaction`.
+- **`WeaveRuntimeOptions.redactor?: Redactor`** — when supplied, wraps the audit logger
+  (whether explicit or auto-wired durable) with `createRedactingAuditLogger`.
+- **`guardrails.checkOutput` is now called** on every terminal agent response in both
+  `run()` and `runStream()`. A `{ allow: false }` is fail-closed + audited as
+  `agent.output.denied`; a `{ redactedText }` replacement is surfaced to the caller and
+  saved to memory instead of the raw text.
+- **Sandbox egress allowlist** — `CSEConfig.networkAllowlist?: string[]` and
+  `ExecutionRequest.networkAllowlist?: string[]` are now required to open the Docker bridge.
+  `networkAccess: true` alone keeps network mode `none`. Full per-host filtering requires
+  CNI-based egress (road-mapped); the allowlist today gates whether any bridge opens.
+- **`@weaveintel/durability`** — new canonical package (re-exports `@weaveintel/reliability`).
+  New code MUST import durability primitives from `@weaveintel/durability`. The
+  `@weaveintel/reliability` package remains for backward compatibility.
+  Architectural boundary:
+    - `@weaveintel/resilience`  — live per-call guard pipeline (token bucket, circuit
+      breaker, concurrency limiter, retry policy).
+    - `@weaveintel/durability`  — operational durability (idempotency, DLQ, retry budget,
+      health, backpressure) that consumes resilience for its internals.
+- **Two sandbox subsystems** — `sandbox/src/cse/providers/*` (cloud-provider sessions:
+  local Docker, ACI, AKS, GKE, Cloud Run) and `sandbox/src/executors/container/*`
+  (DockerRuntime + image-policy for ephemeral exec). The `cse` path is the **canonical**
+  provider for new work; `executors/container` handles ephemeral single-exec without a
+  session and is not deprecated but should not be extended.
+- **Two persistence subsystems** — `@weaveintel/persistence` (8-adapter CRUD layer for
+  live-agents state, phase7/8 benchmarks) and `runtime.persistence` (the structural KV
+  slot used by DLQ / cost-meter / audit / checkpoint / endpoint-registry / memory store).
+  Use `@weaveintel/persistence` factories (`weaveSqlitePersistence`, etc.) to populate the
+  `runtime.persistence` slot; the CRUD adapters serve the live-agents state-store surface.
+  There is intentionally one implementation of each; they serve different contracts.
+- **Test coverage** — `examples/127-phase5-security.ts` (5 assertions):
+  TLS floor assertion, durable audit auto-wired and KV-verified, auto-redaction strips
+  PII before KV write, `checkOutput` deny + redact paths, sandbox network-mode gate.
+  All assertions pass with no LLM, no external service, no DB beyond a tmp SQLite file.
+- **Phase 5.x deferred** (do not block sign-off): migrate `apps/geneweave` to construct
+  `weaveRuntime` with `redactor: weaveRedactor(DEFAULT_REDACTION_POLICY)` and verify the
+  auto-redacting audit logger picks it up; add `requires: ['runtime.net.egress']` to every
+  shipped tool that calls outbound HTTP; wire `apps/live-agents-demo` onto the same runtime
+  entry point; add a `weaveRedisPersistence` / `weaveMongoPersistence` slot factory for
+  multi-node deployments.
+
+### Hardening Phase 4 (complete — durable cross-cutting state via `runtime.persistence`)
+
+- **Durable by default, switchable.** Every adopter constructs one
+  `weaveRuntime` at boot and **passes a single `persistence` slot**. Every
+  durable subsystem (DLQ, cost meter, future idempotency / audit ledger /
+  endpoint state) consumes `runtime.persistence.kv` ambient. Swap the slot →
+  every consumer becomes restart-safe at once. There is no per-call-site KV
+  wiring and no module-level singleton.
+- **`RuntimePersistenceSlot` now carries real operations.** Phase 2 shipped a
+  `{ kind }` marker; Phase 4 promotes it to a structural contract: `{ kind,
+  kv: RuntimeKvStore }` where `RuntimeKvStore` exposes the four-method KV
+  surface (`get`, `set`, `delete`, `list(prefix)`) every durable subsystem
+  needs. Values are opaque strings (callers JSON-encode); `list(prefix)`
+  returns lex-sorted entries; `set(key, value, { ttlMs })` is honoured lazily
+  on read / list. Best-effort throughout — a thrown KV op never crashes the
+  runtime itself.
+- **`weaveInMemoryPersistence()`** is the zero-config default in
+  `@weaveintel/core` (Map-backed, TTL-aware). Use it directly when you want a
+  process-local durable seam in tests / examples without depending on
+  `@weaveintel/persistence`.
+- **`weaveSqlitePersistence({ path, table? })`** is the canonical durable
+  factory in `@weaveintel/persistence`. Lazy-loads `better-sqlite3` via
+  `createRequire(import.meta.url)` so the persistence package does not force
+  the dep on adopters that pick a different backend. Schema is
+  `(k TEXT PRIMARY KEY, v TEXT NOT NULL, expires_at INTEGER)` — created on
+  first use; safe to share a path across processes (SQLite serialises writes).
+  Postgres / Redis / Mongo / Cosmos slot factories follow the same shape and
+  land alongside their existing persistence-package adapters as adopters
+  request them.
+- **`createDurableDeadLetterQueue({ runtime?, namespace? })`** in
+  `@weaveintel/reliability` is the runtime-aware DLQ. Records serialised under
+  `${namespace}:${id}` (default namespace `'dlq'`). When `runtime?.persistence`
+  is missing it falls back to `weaveInMemoryPersistence()` so the
+  zero-config DX matches `createDeadLetterQueue()`. Returns the
+  `AsyncDeadLetterQueue` interface — every method is `Promise`-returning so
+  the same surface works against any backend. The legacy sync
+  `createDeadLetterQueue()` stays for back-compat (example 19) but new code
+  should pick the durable variant.
+- **`createDurableCostMeter({ runtime?, namespace? })`** in
+  `@weaveintel/workflows` is the runtime-aware cost meter. Totals stored as
+  integer cents (`Math.round(costUsd * 100)`) under `${namespace}:${runId}`
+  to avoid float drift. Same fall-back rules as the durable DLQ. The legacy
+  `InMemoryCostMeter` remains for back-compat.
+- **Workflows already had multi-backend stores.** The persistence
+  matrix (sqlite/postgres/redis/mongodb/dynamodb × checkpoint-store /
+  run-repository / run-queue / idempotency-store / payload / audit /
+  rate-limiter / sleep / step-lock) is in place; Phase 4 does not duplicate
+  it. The path forward for new geneweave wiring is to construct those stores
+  from the same `runtime.persistence` config the rest of the framework uses,
+  but that consolidation is incremental.
+- **`@weaveintel/memory` already delegates to `@weaveintel/persistence`** via
+  `createConfiguredMemoryStore` — no parallel DB-driver imports inside
+  `packages/memory/src`. Treat memory as already-consolidated; do not
+  re-implement memory backends.
+- **Test coverage**: `packages/reliability/src/dead-letter.restart.test.ts`
+  (2 tests — restart survival via SQLite-backed slot, plus the no-runtime
+  fallback). Golden-path example: `examples/125-durable-runtime.ts` constructs
+  one runtime with `weaveSqlitePersistence`, enqueues a DLQ record + records
+  cost via the durable meter, disposes the runtime, reconstructs a fresh
+  runtime on the same path, and asserts both records survive. Sub-100 lines,
+  no DB beyond a tmp SQLite file, no LLM, no external service.
+- **Lint + meta-package re-exports.** `weaveInMemoryPersistence`,
+  `RuntimeKvStore`, `weaveSqlitePersistence`, `createDurableDeadLetterQueue`,
+  `createDurableCostMeter` are re-exported from `@weaveintel/weaveintel` so
+  the curated meta-package stays the one import most adopters need.
+  `check-no-raw-fetch` and `check-no-adhoc-resilience` remain green.
+- **Phase 4.x deferred work** (do not block sign-off): wire `apps/geneweave`
+  to construct `weaveRuntime({ persistence: weaveSqlitePersistenceSlot(
+  DATABASE_PATH) })` and migrate every existing in-process DLQ / cost-meter
+  / endpoint-state consumer onto the durable variants; ship
+  `weavePostgresPersistence`, `weaveRedisPersistence`, `weaveMongoPersistence`,
+  `weaveCosmosPersistence` slot factories alongside the existing high-level
+  adapters; refactor `packages/resilience/src/endpoint-registry.ts` from a
+  module-level `Map` to a `runtime.persistence`-backed registry so endpoint
+  state survives process restart and coordinates across nodes (this is a
+  significant architecture change — quota counters need atomic `incr` /
+  windowing semantics that the current KV contract does not yet expose);
+  collapse the workflows persistence matrix onto the same `runtime.persistence`
+  config the rest of the framework consumes.
+
+- **Phase 4.x complete subsystems (durable variants shipped).** Each one
+  follows the canonical DLQ/cost-meter pattern — `createDurable*({ runtime?,
+  namespace? })`, falls back to `weaveInMemoryPersistence()` when no slot is
+  supplied, and exposes a Promise-returning interface alongside the existing
+  sync API. Adopters opt in by passing a `weaveSqlitePersistence({ path })`
+  (or any other slot factory) on `weaveRuntime` and constructing the durable
+  variant instead of the legacy in-memory one. Restart-survival tests live
+  in `packages/compliance/src/durable.restart.test.ts` and
+  `packages/oauth/src/durable.restart.test.ts`; the cross-subsystem
+  golden-path is `examples/126-durable-subsystems.ts`.
+  - **OAuth flow state** — [packages/oauth/src/durable.ts](packages/oauth/src/durable.ts)
+    (`createDurableOAuthStateStore`, ns `oauth-flow`, TTL via `expiresAt`).
+  - **Trigger rate-limit windows** — [packages/triggers/src/durable-rate-limit.ts](packages/triggers/src/durable-rate-limit.ts)
+    (`createDurableTriggerRateLimiter`, ns `trigger-rate`, 60s tumbling).
+  - **Human-tasks pending approvals** — [packages/human-tasks/src/durable.ts](packages/human-tasks/src/durable.ts)
+    (`createDurableHumanTaskRepository`, ns `human-tasks`, priority-ordered).
+  - **Cost-governor ledgers** — [packages/cost-governor/src/durable-ledger.ts](packages/cost-governor/src/durable-ledger.ts)
+    (`createDurableCostLedger` ns `cost-ledger` with padded ordinal keys for
+    sortable replay; `createDurableRunCostStateTracker` ns `cost-runstate`).
+  - **Tenancy budget usage** — [packages/tenancy/src/durable-budget.ts](packages/tenancy/src/durable-budget.ts)
+    (`createDurableBudgetEnforcer`, ns `tenant-budget`; usage stored as
+    integer microUSD to avoid float drift across cumulative writes).
+  - **Compliance (six stores)** — [packages/compliance/src/durable.ts](packages/compliance/src/durable.ts):
+    `createDurableLegalHoldManager` (`legal-hold`),
+    `createDurableConsentManager` (`consent`, compound key
+    `${subjectId}::${purpose}`), `createDurableResidencyEngine`
+    (`residency`), `createDurableRetentionEngine` (`retention`),
+    `createDurableAuditExportManager` (`audit-export`),
+    `createDurableDeletionManager` (`deletion`).
+  - **Collaboration (three stores)** — [packages/collaboration/src/durable.ts](packages/collaboration/src/durable.ts):
+    `createDurableHandoffManager` (`handoff`),
+    `createDurableSharedSessionManager` (`collab-session`, single record
+    with embedded participants array), `createDurableRunSubscriptionManager`
+    (`run-sub`, compound key `${runId}::${subscriberId}`).
+  - **Browser MCP-auth pending handoffs** — [packages/tools-browser/src/durable-handoff.ts](packages/tools-browser/src/durable-handoff.ts)
+    (`createDurableBrowserHandoffStore`, ns `browser-handoff`).
+  - **Per-host HTTP rate buckets** — [packages/tools-http/src/durable-rate.ts](packages/tools-http/src/durable-rate.ts)
+    (`createDurableHttpRateBucketStore`, ns `http-rate`, throws on
+    over-budget to match existing in-memory semantics).
+
+- **Phase 4.x still deferred** — `packages/resilience/src/endpoint-registry.ts`
+  needs the atomic-counter + windowing extension to the `RuntimeKvStore`
+  contract before its module-level `Map` can move to durable storage. The
+  9-subsystem batch above did not require any contract changes.
+
+---
+
+## Prompt / Skill / Tool / Policy Boundary
+
+Pick the right primitive for the requirement:
+
+- **Prompts** — templateable model instructions, reusable system/user structures, few-shot
+  exemplars, routing/judging/optimizer assets, and model-facing text variants that benefit
+  from versioning and experimentation.
+- **Skills** — reusable behavior packs combining instructions, tool activation, and
+  execution guidance.
+- **Tools / workers** — capabilities that perform actions or fetch data, not just shape
+  model text.
+- **Runtime policies** — orchestration rules, hard execution constraints, guardrails, and
+  non-optional workflow behavior.
+
+A prompt is a prompt asset only when it is genuinely model-authored instructions or a
+reusable composition. Behavior bundles, operational policies, and tool-activation logic
+belong in skills/tools/contracts/runtime policies — not prompt text. Preserve strong
+descriptions and structured metadata on anything callable by an LLM.
+
+---
 
 ## Durable Cross-Cutting Principles
 
-These principles emerged from the Scientific Validation feature (sv:) but apply framework-wide. Every new contribution must follow them.
+These govern the whole framework. Every new contribution follows them.
 
-- **Every database row uses a UUID primary key** — UUIDs prevent ID collisions across replay, export/import, and future sharding. SQLite uses `TEXT` with UUID v7 via `newUUIDv7()` from `@weaveintel/core` (re-exported from `apps/geneweave/src/lib/uuid.ts` for back-compat); Postgres adopters get `uuid` natively. Never use `INTEGER PRIMARY KEY AUTOINCREMENT` for new tables. For short-id patterns use `newUUIDv7().slice(-N)` not `.slice(0, N)` — the first 8 hex chars are a timestamp prefix and collide for same-ms requests; the last chars are the random tail. The OAuth nonce in `packages/oauth/src/oauth.ts` deliberately uses `randomUUID()` (full random entropy required by spec, NOT a sortable id).
-- **The evidence ledger is always `@weaveintel/contracts`** — Any feature that needs to track "things an agent discovered that justify a conclusion" uses completion contracts with evidence bundles. Never invent a parallel ledger table.
-- **Reproducibility is always `@weaveintel/replay`** — Any feature that needs "run it again and get the same answer" uses replay traces. Never invent a bespoke bundle format.
-- **Sandboxed compute for anything with native code, subprocesses, or non-trivial memory** — The in-process sandbox executor is not sufficient for SymPy, SciPy, R, RDKit, OpenMM, Biopython, and similar. Use the container executor (`ContainerExecutor` in `@weaveintel/sandbox`).
-- **Tool invocations flow through `@weaveintel/tools` with risk tags** — No ad-hoc subprocess spawning. Every tool is a registration with versioning, risk classification, and health tracking. Guardrails enforce the risk policy.
-- **Multi-agent dialogue flows through `@weaveintel/a2a`** — In-process bus for local; HTTP transport for distributed. Never pass messages between agents by shared module state.
-- **Model selection flows through `@weaveintel/routing`** — Agents never hard-code a model id. They declare a capability requirement; routing decides.
-- **Redaction happens before the model call, not after** — `@weaveintel/redaction` with reversible tokenisation sits as middleware on the model client. LLMs never see raw PII.
-- **Observability is wired at the entrypoint, not yet end-to-end** — `@weaveintel/observability` tracer is initialised in `createGeneWeave()` via `weaveSetDefaultTracer`; individual workflow steps, cost attribution, and budget enforcement at step boundaries are aspirational targets (in progress).
-- **Idempotency on writes** — `@weaveintel/reliability` provides the idempotency key mechanism. Every POST route that creates or modifies state uses an `Idempotency-Key` header.
+- **Every DB row uses a UUID primary key.** SQLite: `TEXT` with UUID v7 via `newUUIDv7()`
+  from `@weaveintel/core`. Never `INTEGER PRIMARY KEY AUTOINCREMENT` for new tables. For
+  short ids use `newUUIDv7().slice(-N)` (the *tail* is random; the first 8 hex chars are a
+  timestamp prefix that collides within the same ms). The OAuth nonce deliberately uses
+  `randomUUID()` (spec-required full entropy, not a sortable id).
+- **The evidence ledger is always `@weaveintel/contracts`.** Never invent a parallel
+  ledger table.
+- **Reproducibility is always `@weaveintel/replay`.** Never invent a bespoke bundle format.
+- **Sandboxed compute for native code / subprocesses / non-trivial memory.** The
+  in-process executor is insufficient for SymPy, SciPy, R, RDKit, OpenMM, Biopython, etc.
+  Use `ContainerExecutor` in `@weaveintel/sandbox`.
+- **Tool invocations flow through `@weaveintel/tools` with risk tags.** No ad-hoc
+  subprocess spawning. Every tool is a versioned registration with risk classification and
+  health tracking; guardrails enforce the risk policy.
+- **Multi-agent dialogue flows through `@weaveintel/a2a`.** In-process bus locally, HTTP
+  transport distributed. Never pass messages between agents via shared module state.
+- **Model selection flows through `@weaveintel/routing`.** Agents declare a capability
+  requirement; routing decides. Never hard-code a model id.
+- **Redaction happens before the model call.** `@weaveintel/redaction` with reversible
+  tokenisation sits as middleware on the model client. LLMs never see raw PII.
+- **Observability is wired at the entrypoint.** Tracer initialised in `createGeneWeave()`
+  via `weaveSetDefaultTracer`. Step-level cost attribution / budget enforcement is an
+  in-progress target.
+- **Idempotency on writes.** `@weaveintel/reliability` idempotency keys on every
+  state-mutating POST.
+
+---
 
 ## Grounding Reality Guardrails
-- Treat prompt text as guidance, not guaranteed execution. Any requirement that must always happen (tool call, policy check, verification pass, formatting guarantee) belongs in code-level orchestration and shared runtime hooks.
-- Keep execution strategies DB-driven and traceable: strategy selection should come from prompt metadata (`executionDefaults.strategy`) plus admin-managed strategy records, not hardcoded app-only conditionals.
-- Ensure runtime metadata captures which strategy, contracts, and evaluations were used so observability and audits can explain model behavior after the fact.
-- Prefer app-wide reusable helpers in `@weaveintel/prompts` for prompt execution and strategy overlays; GeneWeave should consume these helpers, not duplicate them.
-
-## Phase 8 Observability and Runtime Adoption
-- Add new observability schemas in shared packages first (`@weaveintel/core` contracts, `@weaveintel/observability` helpers) so prompts, skills, agents, and tools can emit one comparable trace shape.
-- Keep capability telemetry grounded in code, not prompt text: prompt/skill/agent runtime metadata must be emitted from runtime hooks and stored in DB-backed traces.
-- When GeneWeave adopts new shared observability helpers, wire them into existing trace persistence and dashboard views instead of creating app-only telemetry stores.
-- Capability descriptions in traces must remain model-facing and explicit enough to support future routing, audits, and replay review.
-
-## Phase 9 Modularization and Reusability
-- Put reusable admin capability schema primitives in shared packages first (for example, `@weaveintel/core`) and keep GeneWeave as a consumer.
-- For large GeneWeave files, extract by capability domain (prompt tabs, skill tabs, routes, runtime units) and re-compose from index modules rather than appending new blocks.
-- New capability records must stay DB-driven end-to-end: schema + adapter + admin CRUD + runtime resolution in one change set.
-- New prompt/skill/tool/agent-facing admin fields must preserve model-facing descriptions; avoid generic labels for LLM-discovered entities.
-- New features must wire shared observability/eval hooks by default so prompts, skills, agents, and tools emit comparable telemetry without app-only pipelines.
-- When modularizing UI/admin surfaces, preserve operator UX: explicit labels, safe defaults, and JSON hints for advanced fields.
-
-## Live-Agents Framework (Phases 14-16)
-
-### When to use live-agents vs @weaveintel/agents
-
-**Use live-agents when:**
-- Agents run continuously over hours/days/weeks (not one-shot interactions)
-- Agents need to persist and accumulate learnings in contracts
-- Multiple agents run in parallel (need distributed coordination)
-- Agents need to respond to external events (webhooks, file changes) continuously
-- You need mesh-level isolation and cross-mesh bridges for multi-team collaboration
-
-**Use @weaveintel/agents when:**
-- Single request/response interaction (user query → agent response)
-- Stateless tool-calling chains
-- ReAct loop with bounded depth
-
-### Live-agents core patterns
-
-**Mesh and agents:**
-```typescript
-const mesh = await createMesh('my-team', { stateStore });
-const agent = await mesh.spawnAgent('assistant', { 
-  instructions: '...',
-  attentionPolicy: (agent) => [...], // Defines when agent should work
-});
-```
-
-**Contracts and evidence:**
-- Contracts are immutable work products (findings, decisions, errors)
-- Evidence links contracts to tool outputs (reproducible and auditable)
-- Use contracts for cross-mesh collaboration (bridges filter by contract type)
-
-**Heartbeat and ticks:**
-- Heartbeat scheduler runs every 10 minutes
-- Attention policy decides what work each agent should do
-- Ticks are scheduled units of work (atomic, claimed by workers)
-- Supports time-based (daily compression, hourly email check) and event-based (new contracts) scheduling
-
-**Account binding (critical invariant):**
-- Only humans bind accounts to agents (agent cannot self-bind)
-- Binding includes capabilities array (SEND_EMAIL, READ_INBOX, etc.)
-- Revocation is immediate (next tick sees revoked binding)
-- See docs/live-agents/ADR/001-account-binding-invariants.md
-
-**MCP integration:**
-- MCP tools connect agents to external systems (Gmail, Slack, Drive)
-- Credentials live in environment variables (never in DB)
-- Account binding controls which agent can use which account's credentials
-- Fixtures enable testing without real API calls
-
-**Cross-mesh bridges:**
-- Bridge: source mesh → target mesh, filters by contract type, requires both meshes to approve
-- Authorization: source registers bridge, target approves
-- Revocation: either mesh can revoke, stops message routing immediately
-
-### Live-agents documentation
-
-- [`@weaveintel/live-agents`](packages/live-agents/README.md) — Framework overview, core concepts, when to use
-- [Use Cases](docs/live-agents/use-cases.md) — Six scenarios with examples 52-57
-- [Account Model](docs/live-agents/account-model.md) — Why humans bind accounts, threat model, anti-patterns
-- [MCP Integration](docs/live-agents/mcp-integration.md) — How external tools connect, credential scoping, testing
-- [StateStore Guide](docs/live-agents/statestore-guide.md) — Persistence layer, in-memory/Redis/Postgres, implementing custom stores
-- [Compression Guide](docs/live-agents/compression-guide.md) — Context compression strategies, token budgeting, daily/weekly/hierarchical summaries
-- [ADRs](docs/live-agents/ADR/) — Architectural decision records (account binding, heartbeat, bridges, state store, credentials)
-
-### Tools for live-agents
-
-- [`@weaveintel/tools-webhook`](packages/tools-webhook/README.md) — Receive webhooks (GitHub push, Stripe payment, Slack mention) and route to agents
-- [`@weaveintel/tools-filewatch`](packages/tools-filewatch/README.md) — Monitor file system, trigger agent actions on file events
-
-### Reference implementation
-
-- [`apps/live-agents-demo`](apps/live-agents-demo) — Complete HTTP API, PostgreSQL state store, in-memory/Redis options, interactive UI
-- [`examples/52-57`](examples/) — Six core examples covering all major use cases
-- [`examples/58-live-agents-demo-e2e.ts`](examples/58-live-agents-demo-e2e.ts) — E2E test of demo app API
-
-## LLM-Callable Metadata
-- Enforce detailed model-facing descriptions for prompts, skills, tools, and agents through shared validation helpers in `@weaveintel/core`.
-- Prefer shared prompt runtime helpers in `@weaveintel/prompts` for DB-backed rendering with lifecycle hooks and evaluations.
-- Keep admin UX labels explicit when fields are used for model discovery and routing.
-
-## Phase 2 Prompt Capabilities (`@weaveintel/prompts`)
-
-### Fragment Inclusions (`{{>key}}` syntax)
-- Templates may embed reusable text blocks via `{{>fragmentKey}}` markers (note the `>` prefix distinguishing them from `{{variable}}` slots).
-- Use `resolveFragments(template, registry)` to expand all fragment markers before interpolation; unresolvable keys are left in place for lint to catch.
-- Build registries with `InMemoryFragmentRegistry` in-memory or load from the GeneWeave `prompt_fragments` DB table via `fragmentFromRecord(row)`.
-- Use `extractFragmentKeys(template)` to discover all `{{>key}}` references in a template without a registry.
-- Circular references are detected (max depth 5) and left unexpanded rather than throwing.
-- GeneWeave DB: `prompt_fragments` table; admin CRUD at `/api/admin/prompt-fragments`.
-
-### Framework Registry (Named Section Structures)
-- Frameworks define ordered, named sections (e.g. role → task → context → expectations) assembled by `renderFramework(framework, sectionValues)`.
-- Use `defaultFrameworkRegistry` which ships four built-ins: `rtce`, `full`, `critique`, `judge`.
-- Build custom frameworks in-memory with `InMemoryFrameworkRegistry` or load from `prompt_frameworks` DB via `frameworkFromRecord(row)`.
-- Only sections whose key is in `SYSTEM_SECTIONS` (currently `'role'`) map to the system message; all others map to the user turn.
-- GeneWeave DB: `prompt_frameworks` table; admin CRUD at `/api/admin/prompt-frameworks`.
-
-### Lint / Static Analysis
-- Call `lintPromptTemplate(template, variables, values, context?)` after fragment expansion to get typed `PromptLintResult[]`.
-- Nine built-in rules: `missing_required_variable`, `missing_optional_variable`, `undefined_variable`, `empty_template`, `excessive_size`, `unresolved_fragment`, `circular_fragment`, `missing_description`, `no_variables_declared`.
-- Use `hasLintErrors(results)`, `topLintSeverity(results)`, `formatLintResults(results, promptName)` as diagnostic helpers.
-- Attach `lintResults` to observability spans when non-empty to surface quality signals in production.
-
-### Unified Entry Point: `renderWithOptions()`
-- `renderWithOptions(template, variables, values, options?)` is the Phase 2 unified path: fragment expansion → optional lint → interpolation.
-- Returns a `RenderResult` with `.text`, `.lintResults`, and `.expandedTemplate`.
-- Prefer this over calling `resolveFragments` + `createTemplate().render()` separately.
-
-### Provider-Aware Render Adapters
-- `openAIAdapter()` → `.adaptText(userText, systemText?)` returns `{role, content}[]` compatible with OpenAI Chat Completions.
-- `anthropicAdapter()` → `.adaptForAnthropic(userText, systemText?)` returns `{ system, messages }`.
-- `textAdapter()` → `.toText(userText, systemText?)` returns a single concatenated string.
-- `systemAsUserAdapter()` → wraps system content as `<<SYSTEM>>\n...\n<</SYSTEM>>` for models without a system role.
-- `resolveAdapter(provider)` selects the right adapter from a `KnownProvider` string (`'openai' | 'anthropic' | 'text' | 'system-as-user'`).
-
-### chat.ts Fragment Integration
-- GeneWeave `chat.ts` loads enabled DB fragments before rendering a DB-backed system prompt and calls `resolveFragments()` to expand `{{>key}}` markers.
-- Fragment expansion failure is non-fatal — the raw template is used as fallback.
-
-## Tool Platform (Phase 3 complete — Tool Audit Trail + Health Persistence)
-- Every tool invocation is persisted to `tool_audit_events` (UUID PK, all `ToolAuditOutcome` values, duration_ms, chat/user/agent context, input/output previews, error message, policy_id).
-- `DbToolAuditEmitter implements ToolAuditEmitter` (in `apps/geneweave/src/tool-audit-emitter.ts`) wraps `db.insertToolAuditEvent()` — best-effort, never throws, maps camelCase→snake_case, generates UUID via `randomUUID()`.
-- `startToolHealthJob(db)` (in `apps/geneweave/src/tool-health-job.ts`) runs every 15 minutes via `setInterval` (`.unref()` for clean shutdown), queries the last window of audit events, groups by `tool_name`, computes `success_count`, `error_count`, `denied_count`, `avg_duration_ms`, `p95_duration_ms` (in-process percentile), `error_rate`, `availability`, and writes one `tool_health_snapshots` row per tool.
-- `tool_health_snapshots` table stores historical point-in-time snapshots per tool per window for trend analysis.
-- Admin API path for audit log is `/api/admin/tool-audit` (GET list with `tool_name`, `chat_id`, `outcome`, `after`, `before`, `limit`, `offset` filters; GET by ID). Append-only — no mutations exposed.
-- Admin API path for health is `/api/admin/tool-health` (GET live 24h summary via SQL aggregation; GET `/api/admin/tool-health/:toolName/snapshots` for historical snapshots).
-- Both tabs use `readOnly: true` in `AdminTabDef` (no Create/Edit/Delete UI rendered). `AdminFieldDef` now supports `readonly?: boolean` for individual field display.
-- `ToolAuditEventRow` and `ToolHealthSnapshotRow` are exported from `@weaveintel/geneweave` `db-types.ts`. All `tool_audit_events` rows use UUID primary keys.
-- Startup sequence in `index.ts`: `seedDefaultData()` → `syncToolCatalog(db)` → `startToolHealthJob(db)` → HTTP server listen.
-
-## Tool Platform (Phase 4 complete — Credentials + External Tool Support)
-- `tool_credentials` table stores operator-managed credentials for external tools. **Secrets are never stored in DB** — only `env_var_name` is stored; the actual secret lives in the process environment.
-- `ToolCredentialRow` exported from `@weaveintel/geneweave` `db-types.ts`. UUID primary keys. Fields: `id, name, description, credential_type, tool_names (JSON), env_var_name, config (JSON), rotation_due_at, validation_status, enabled`.
-- Admin API at `/api/admin/tool-credentials` — full CRUD + `POST /:id/validate` (checks env var, updates `validation_status`, returns `{ status, configured: boolean }` — never exposes secret).
-- `tool_catalog.config` column (`TEXT`, nullable) — stores JSON configuration for MCP (`{ endpoint }`) and A2A (`{ agentUrl }`) tools.
-- **`createToolRegistry()` is now `async`** — all call sites must `await` it. `buildWorkersFromDb()` in `chat.ts` is also async.
-- `ToolRegistryOptions` extended: `credentialResolver?: (id: string) => Promise<ToolCredentialRow | null>` and `catalogEntries?: ToolCatalogRow[]`.
-- MCP tool loading: catalog entries with `source='mcp'` use `createHttpMCPTransport()` which injects `Authorization` headers from `env_var_name`. Non-fatal per entry — broken MCP servers do not block request processing.
-- A2A tool loading: catalog entries with `source='a2a'` use `buildA2ATool()` wrapping `weaveA2AClient().sendTask()` with the correct `A2ATask` shape (`id, input: { role, parts: [{ type: 'text', text }] }`). Non-fatal per entry.
-- `ChatEngine` wires `credentialResolver: (id) => db.getToolCredential(id)` and passes `catalogEntries` from `db.listEnabledToolCatalog()` in both streaming and non-streaming `toolOptions`.
-
-
-
-### Strategy Runtime (DB + Shared Package)
-- Use `executePromptRecord(record, variables, options?)` as the package-level execution entry point when strategy overlays are needed.
-- `executePromptRecord()` performs shared render + strategy resolution + evaluation hook execution in one path.
-- Strategy resolution order: explicit `options.strategyKey` → prompt `executionDefaults.strategy` → fallback strategy.
-- Load DB rows into runtime strategy definitions with `strategyFromRecord(row)` and register them in `InMemoryPromptStrategyRegistry`.
-- Start with `defaultPromptStrategyRegistry`, then layer DB-defined strategies for app/tenant-specific behavior.
-- GeneWeave DB: `prompt_strategies` table; admin CRUD at `/api/admin/prompt-strategies`.
-
-## Tool Platform (Phase 6 complete — Skill→Tool Policy Closure + Approval Workflow)
-- When a skill is activated in chat, its `toolPolicyKey` is passed as `skillPolicyKey` in `PolicyResolutionContext` so every tool call in that session is evaluated under the skill's effective policy.
-- Tools whose effective policy has `requireApproval: true` are blocked at runtime; the approval gate creates a `tool_approval_requests` row (UUID PK) with `status: 'pending'`.
-- `tool_approval_requests` table: `id (UUID), tool_name, chat_id, skill_key, policy_key, status ('pending'|'approved'|'denied'), requested_at, resolved_at, resolved_by, resolution_note, input_preview`.
-- Admin API at `/api/admin/tool-approval-requests`:
-  - `GET /api/admin/tool-approval-requests` — list with `status`, `chat_id`, `tool_name`, `limit`, `offset` filters
-  - `GET /api/admin/tool-approval-requests/:id` — single request (404 if not found)
-  - `POST /api/admin/tool-approval-requests/:id/approve` — approve with optional `{ note }`; 409 if already resolved
-  - `POST /api/admin/tool-approval-requests/:id/deny` — deny with optional `{ note }`; 409 if already resolved
-- All routes require authentication (`{ auth: true }` option) and return 401 for unauthenticated callers.
-- `registerToolApprovalRequestRoutes(router, db, helpers)` is wired in `server-admin.ts` on the direct `router` (not `adminRouter`) with manual `if (!auth)` guard per route.
-- `DbToolApprovalGate` (in `apps/geneweave/src/tool-approval-gate.ts`) implements the approval gate by inserting `tool_approval_requests` rows when policy requires approval.
-- API tests: `describeAdmin('Tool Approval Requests API', ...)` in `api.test.ts` (5 tests — all pass).
-- Example: `examples/34-skill-tool-policy-approval.ts`.
-
-## Tool Platform (Phase 5 complete — Tool Simulation + Test Harness)
-- Admin operators can run dry-run or live simulations of any registered tool without starting a real chat session.
-- `GET /api/admin/tool-simulation/tools` — lists BUILTIN_TOOLS + enabled catalog entries for simulation selection.
-- `POST /api/admin/tool-simulation` — accepts `{ toolName, inputJson, dryRun?, chatContext?, agentPersona?, skillPolicyKey? }`. Returns `{ simulationId, auditEventId, toolName, dryRun, policy, policyTrace, allowed, violationReason?, result?, durationMs }`.
-- `policyTrace` is `Array<{ step: string, passed: boolean, detail: string }>` with steps: `enabled_check → risk_level_gate → approval_gate → rate_limit → [execute]`.
-- On dry-run, the full policy trace is returned but execution is skipped and `result` is omitted from response.
-- On live run, execution is attempted (may call real tool) and `result.content` contains the tool output string.
-- All simulation invocations emit an audit event with `outcome: 'simulation'` — best-effort, non-blocking.
-- `ToolAuditOutcome` in `@weaveintel/core` now includes `'simulation'` as a valid value.
-- `AdminTabDef` in `@weaveintel/core` now has `customView?: string` — set `customView: 'tool-simulation'` to bypass standard CRUD list/form and render a custom UI component.
-- Custom view injection pattern in `renderAdminView`: check `schema?.customView === 'tool-simulation'` before the `showEditor` block, then `appendChild(renderToolSimulationView(...))`.
-- `tool-simulation` tab is under Orchestration group in admin sidebar; `readOnly: true, customView: 'tool-simulation'` in tab schema.
-- Source files: `apps/geneweave/src/admin/api/tool-simulation.ts` (API routes), `apps/geneweave/src/ui/tool-simulation-ui.ts` (custom admin UI component).
-- API tests: `describeAdmin('Tool Simulation API', ...)` in `api.test.ts`; E2E: two Playwright tests in `admin-ux.e2e.ts`.
-
-## Phase 5 Prompt Capabilities (`@weaveintel/prompts` + GeneWeave)
-
-### Prompt Version & Experiment Resolution (Grounding Runtime)
-- Use `resolvePromptRecordForExecution()` as the shared package-level resolver for runtime prompt selection.
-- Resolution order is deterministic and must remain package-owned: requested version override → active experiment weighted variant → active published version → latest published version → base prompt fallback.
-- Keep runtime safe during partial migrations: if version or experiment tables are empty/unavailable, fallback to base prompt behavior without failing request execution.
-- Avoid app-local branching for version picking in GeneWeave; apps should pass DB rows to shared resolver and consume returned `{ record, meta }`.
-
-### DB-Driven Configuration Requirements
-- Keep prompt lifecycle and rollout controls in DB records, not hardcoded conditionals.
-- GeneWeave DB tables for Phase 5: `prompt_versions` and `prompt_experiments`.
-- Admin CRUD must stay aligned with schema and runtime contracts for both entities.
-
-### Observability & Evaluation Expectations
-- Capture prompt resolution metadata (`source`, `resolvedVersion`, `selectedBy`, experiment metadata) in runtime message metadata for audits and evaluation traces.
-- Preserve shared execution metadata from strategy/contract/evaluation hooks so prompt behavior is explainable after the fact.
-
-### LLM-Callable Metadata Quality
-- Prompt version descriptions, experiment descriptions, and variant labels should be explicit and model-facing when they influence runtime behavior.
-- Prefer structured metadata fields over freeform text for fields consumed by routing/selection logic.
-
-## Phase 7 Prompt Evaluation and Optimization (`@weaveintel/prompts` + `@weaveintel/evals` + GeneWeave)
-
-### Shared Package-First Evaluation Runtime
-- Implement prompt evaluation logic in shared packages first (`@weaveintel/prompts`, `@weaveintel/evals`) and keep GeneWeave as a consumer of package APIs.
-- Use dataset-driven prompt evaluation (`PromptEvalDataset`) with explicit case payloads, expected outputs, and rubric criteria; avoid app-local ad-hoc scoring logic.
-- Prefer reusable rubric judge adapters and normalized score helpers from `@weaveintel/evals` so scoring behavior remains comparable across prompts, skills, and agents.
-
-### DB-Driven Prompt Optimization and Governance
-- Keep optimizer selection and configuration DB-managed via optimizer records (key, kind, config, enabled), not hardcoded app conditionals.
-- Persist evaluation runs and optimization runs as first-class records for auditability, rollback decisions, and trend analysis.
-- Require model-facing descriptions for optimizer records and evaluation artifacts that can influence LLM discovery/routing.
-
-### Grounding Reality for Optimization Loops
-- Treat optimization prompts as hypotheses; always verify candidate quality with deterministic evaluation passes before promotion.
-- Runtime promotion decisions (accept/reject candidate versions) must be code-level and data-backed, never instruction-only.
-- Capture baseline-vs-candidate evidence in metadata (`avgScore`, pass/fail counts, diff metadata, selected optimizer key) to support observability and postmortems.
-
-### GeneWeave Admin and UX Expectations
-- Expose Phase 7 entities in admin with explicit labels and JSON hints: eval datasets, eval runs, optimizers, optimization runs.
-- Keep defaults safe for operators (e.g., draft status, conservative thresholds, deterministic starter optimizer).
-- Ensure admin CRUD stays aligned with DB schema and shared runtime contracts when fields evolve.
-
-
-## Scientific Validation Feature (sv: — complete)
-
-### Design Patterns
-- `SVWorkflowRunner` is instantiated once at server startup and passed to `registerSVRoutes`. Never create per-request runner instances.
-- Model factories on `SVRunnerOptions` are **async**: `makeReasoningModel: () => Promise<Model>` and `makeToolModel: () => Promise<Model>`. Never use sync lazy wrappers.
-- Specialist agents (literature, statistical, mechanistic, simulation, synthesis, critique) are composed inside the runner via the workflow engine. The router never invokes agents directly.
-- `SvHypothesisStatus` values are `'queued' | 'running' | 'verdict' | 'abandoned'`. Never use `'pending'`, `'completed'`, or `'error'`.
-- Terminal statuses are `new Set(['verdict', 'abandoned'])`. Use this set when checking SSE poll termination conditions.
-
-### DB Tables
-- `sv_hypothesis` — one row per submitted hypothesis; UUID PK.
-- `sv_sub_claim` — decomposed sub-claims from the supervisor; UUID PK. Fields: `id, tenant_id, hypothesis_id, parent_sub_claim_id, statement, claim_type, testability_score, created_at`. No `rationale` or `status` columns.
-- `sv_verdict` — final verdict row; UUID PK.
-- `sv_evidence_event` — evidence records emitted per agent per step; UUID PK. Fields: `id, hypothesis_id, step_id, agent_id, evidence_id, kind, summary, source_type, tool_key, reproducibility_hash, created_at`. No `tenant_id` column.
-- `sv_agent_turn` — inter-agent dialogue messages; UUID PK.
-
-### `SvClaimType` Values
-Valid values: `'mechanism' | 'epidemiological' | 'mathematical' | 'dose_response' | 'causal' | 'other'`. Do NOT use `'empirical'`.
-
-### Route Contracts
-- `POST /api/sv/hypotheses` → 201 `{ id, status: 'queued', traceId, contractId }`
-- `GET /api/sv/hypotheses/:id` → 200 `{ hypothesis: {..., domainTags: string[]}, verdict: VerdictShape | null }`
-- `POST /api/sv/hypotheses/:id/cancel` → 200 `{ id, status: 'abandoned' }` (idempotent — no 409 for already-abandoned)
-- `POST /api/sv/hypotheses/:id/reproduce` → 201 `{ id, originalId, status: 'queued', traceId }`
-- `GET /api/sv/verdicts/:id/bundle` → 200 JSON with `{ schemaVersion, hypothesis, verdict, subClaims, evidenceEvents, agentTurns }`
-
-### Phase 6 — API routes, idempotency, auth, and test coverage (complete)
-- All 7 SV routes are registered via `registerSVRoutes(router, db, json, readBody, runner)` — wired in `server.ts`.
-- `Idempotency-Key` header is required on `POST /api/sv/hypotheses` and `POST /api/sv/hypotheses/:id/reproduce`. Replays return the original response without creating a duplicate DB row. Store uses `@weaveintel/reliability`'s `createIdempotencyStore` with a 24-hour TTL, scoped inside `registerSVRoutes`.
-- Idempotency key namespacing: `hypotheses:<key>` for the submit route and `reproduce:<key>` for the reproduce route.
-- Auth enforcement: every route returns 401 when `auth` is `null`. Tenant isolation is enforced by scoping all `db.getHypothesis(id, tenantId)` calls to the requester's `tenantId`.
-- Test file at `features/scientific-validation/routes/sv-routes.test.ts` — 31 tests covering happy path, auth failures (all 7 routes), tenant isolation, idempotency replay, SSE content-type, Last-Event-ID cursor, and evidence/verdict event emission.
-- Integration tests in `api.test.ts` under `describeAdmin('Scientific Validation API', ...)` — 8 tests covering 401 checks, 404s, submit, idempotency replay, and cancel.
-
-### SV Tool Registration
-- 18 SV tools are registered only for SV agent invocations via `toolMap` passed to `SVWorkflowRunner`. They are NOT in `tool_catalog` and NOT managed by operator tool policies.
-- Tool invocation within SV agents uses `ToolInput = { name: string; arguments: Record<string, unknown> }`.
-- All index-signature result properties must use bracket notation (`result['ok']`, not `result.ok`) because `noPropertyAccessFromIndexSignature` is enabled.
-
-### SSE Streaming Pattern
-- Use `pollRows(rowFetcher, afterId, isTerminalFn)` async generator for both events and dialogue streams.
-- Emit `keepalive` pings every 15 s via `startSSEKeepalive(res)` / `clearInterval(ka)`.
-- Wrap SSE handlers in `try/finally` to always call `clearInterval(ka)` and `res.end()`.
-- Maximum SSE stream duration: 5 minutes (enforced inside `pollRows`).
-
-### UI Architecture (Phases 7–9 — complete, Playwright verified)
-- Three views: `sv-submit-view.ts` (form), `sv-live-view.ts` (SSE deliberation), `sv-verdict-view.ts` (verdict + bundle).
-- All views exported from `features/scientific-validation/ui/index.ts` barrel.
-- State fields: `state.svView` (`'submit' | 'live' | 'verdict'`), `state.svHypothesisId`, `state.svHypothesis`, `state.svVerdict`.
-- View routing: `ui-client.ts` `else if (state.view === 'scientific-validation')` branch routes on `state.svView`.
-- `'scientific-validation'` is in the `allowedViews` Set; sidebar nav entry is in `workspace-shell.ts`.
-- SSE cleanup: `MutationObserver` on `document.body` detects DOM removal of the live view element and calls `cleanup()` to close `EventSource` instances and clear the polling interval.
-- `EventSource` opens with `{ withCredentials: true }`. SSE event types: `evidence`, `turn`, `verdict`, `keepalive`.
-- `globalThis.state` is exposed at the bottom of `ui-client.ts` (alongside `render`, `initialize`, etc.) so Playwright tests and devtools can manipulate SV state (`svView`, `svHypothesisId`) directly.
-- `server.ts` static-file route regex covers `/features/` paths so ES module imports in `ui-client.js` (e.g. `./features/scientific-validation/ui/index.js`) are served correctly from `dist/`.
-- `sv-submit-view.ts` title input placeholder must include the word "title" (for test selector `input[placeholder*="title" i]`) and the textarea placeholder must include "statement" (for `textarea[placeholder*="statement" i]`).
-- Live deliberation view h2 text is `'Live Deliberation'` — Playwright selects via `/Deliberation|Live|Running/i`.
-- Cancel button calls `POST /api/sv/hypotheses/:id/cancel` and on response (or error) sets `svView = 'submit'` and re-renders.
-- Playwright E2E test file: `apps/geneweave/src/sv-ui.e2e.ts` — 8 tests covering nav entry, submit form, validation, live view, cancel, verdict, and bundle download.
-
-### Eval Corpus
-- `evals/corpus.json` — 20 curated hypotheses (5 known-true, 5 known-false, 5 ill-posed, 5 p-hacked).
-- `evals/run-corpus.ts` — CLI runner; submits each hypothesis, polls for verdict, reports per-category pass/fail rates.
-- Target accuracy ≥ 85% on known-true, known-false, and p-hacked categories.
-- `expectedVerdict` values: `'supported' | 'refuted' | 'inconclusive' | 'needs_revision'`.
-
-## Live-Agents Capability Parity and Naming Conventions
-
-These rules govern any change inside `@weaveintel/live-agents`, `@weaveintel/live-agents-runtime`, or any app that consumes them (geneweave, live-agents-demo, examples). The full design is in [docs/live-agents/LLM_FIRST_CLASS_CAPABILITY_PLAN.md](../docs/live-agents/LLM_FIRST_CLASS_CAPABILITY_PLAN.md).
-
-### Capability parity with `@weaveintel/agents`
-- Live-agents is a **temporal extension** of `weaveAgent`, not a parallel implementation. If `weaveAgent` accepts a capability slot (`model`, `tools`, `memory`, `policy`, `bus`, `workers`), `weaveLiveAgent` must accept the same type — either reusing the same implementation or extending it with a per-tick variant. Never duplicate.
-- `@weaveintel/live-agents` already ships six state-store backends (`weaveInMemoryStateStore`, `weaveSqliteStateStore`, `weavePostgresStateStore`, `weaveRedisStateStore`, `weaveMongoDbStateStore`, `weaveDynamoDbStateStore`) and an LLM ReAct scaffold (`runLiveReactLoop`). Do not assume "memory only" — extend, don't replace.
-- Per-tick capability resolution (model, tools, prompt, policy gates) is first-class. Anything that may change between ticks must be resolvable per invocation via a resolver interface (e.g. `ModelResolver`), not pinned at construction time. Pinned values remain supported for tests and short-lived agents.
-
-### Naming conventions
-- `weave*` — user-facing constructor that returns a runnable thing (agent, mesh, store, resolver, model adapter, policy). Examples: `weaveAgent`, `weaveSupervisor`, `weaveLiveAgent`, `weaveLiveSupervisor`, `weaveLiveMesh`, `weaveLiveMeshFromDb`, `weaveLiveAgentFromDb`, `weaveModelResolver`, `weaveDbModelResolver`, `weaveLiveAgentPolicy`.
-- `create*` — internal factory that returns infrastructure plumbing (registry, dispatcher, scheduler, supervisor handle). Examples: `createHandlerRegistry`, `createDefaultHandlerRegistry`, `createHeartbeat`, `createLiveAgentsRuntime`, `createCompressionMaintainer`.
-- Types use `PascalCase` nouns: `LiveAgent`, `Mesh`, `ModelResolver`, `LiveAgentPolicy`.
-- New PRs that add `createLiveXxx` user-facing constructors will be asked to rename to `weaveLiveXxx`.
-- Deprecated aliases (e.g. `createAgenticTaskHandler` → `weaveLiveAgent`) are kept for one minor release cycle, then removed.
-
-### DB hydration and runtime composition
-- DB hydration goes through `@weaveintel/live-agents-runtime`, never re-implemented in apps. Apps may compose new handler kinds via the registry, but mesh provisioning, handler binding, tool binding, model resolution, and attention policies must use the package functions (`provisionMesh`, `resolveAgentToolCatalog`, `resolveAgentModelSpec`, `resolveAttentionPolicyFromDb`, `createHeartbeatSupervisor`, `bridgeRunState`).
-- The single hydration entry points are `weaveLiveMeshFromDb(db, meshId, opts)` and `weaveLiveAgentFromDb(db, agentId, opts)`. App boot files should call these and supply only domain-specific extras (handler kinds, model resolver, account bindings).
-- No geneweave types leak into `@weaveintel/live-agents-runtime`. The runtime defines a `LiveAgentsDb` interface aggregating only the row-reader shapes it needs; geneweave's `DatabaseAdapter` implements this interface structurally.
-
-### Audit trail
-- Every model resolution, tool resolution, policy decision, and contract change emits a `live_run_events` row. The package emits these; the app does not.
-- `live_run_events` kinds in use: `model.resolved`, `tool.resolved`, `policy.decision`, `contract.changed`, `tick.started`, `tick.completed`, `tick.errored`. Add new kinds via PR review, never silently.
-
-### When in doubt
-- Adding a new capability to live-agents? Check whether `weaveAgent` already exposes it under a similar name, and reuse that name and shape.
-- Adding a new boot path? Use `weaveLiveMeshFromDb` — do not write another `bootXxxMesh()` wrapper.
-- Adding a per-tick concern? Inject it as a resolver, not a static value.
-
-### Phase 1 — `ModelResolver` (complete)
-- `ModelResolver` (in `@weaveintel/live-agents/src/model-resolver.ts`) is the **first-class capability slot** for per-tick model selection. It mirrors `weaveAgent`'s pinned `model: Model` slot but is called fresh on every tick.
-- `createAgenticTaskHandler` accepts both: `model?: Model` (pinned, parity with `weaveAgent`) and `modelResolver?: ModelResolver` (per-tick). At construction at least one MUST be provided or it throws. Never strip pinned `model` support — tests and short-lived agents rely on it.
-- Fallback chain (single source of truth: `resolveModelForTick(resolver, pinned, ctx)`): resolver returns `Model` → use it; resolver returns `undefined` → fall back to pinned; resolver throws → fall back to pinned and capture `error` in `ResolvedModel.error`; neither available → throw a clear error mentioning both slots.
-- `weaveModelResolver({ model })` is the canonical in-memory factory (pinned wrapper). `weaveModelResolverFromFn(fn)` lifts an existing routing callback into the resolver shape. `composeModelResolvers([a, b, c])` chains resolvers — first non-undefined wins, throws are logged and treated as undefined.
-- `ModelResolverContext` carries `{ role, capability, agentId, meshId, tenantId, runId, stepId }`. Callers SHOULD populate as many fields as they have so DB-backed resolvers can route on role/task/run.
-- DB-backed resolver (`weaveDbModelResolver`) belongs in `@weaveintel/live-agents-runtime` (Phase 2 of the plan). The `live-agents` package never imports DB types.
-- `HandlerContext.modelResolver` (in `@weaveintel/live-agents-runtime/src/handler-registry.ts`) is the runtime-side slot. The built-in `agentic.react` handler accepts either `ctx.model` or `ctx.modelResolver`; geneweave or any consumer fills whichever it has.
-- GeneWeave kaggle: `KaggleRoleHandlersOptions` accepts `modelResolver?: ModelResolver` (preferred) alongside the legacy `resolveModelForRole?` callback (deprecated alias kept for back-compat). The strategist wrapper prefers `modelResolver` when both are set. The legacy callback will be removed in Phase 5.
-- Example: `examples/91-live-agents-model-resolver.ts` demonstrates pinned, rotating, composed, and fallback patterns end-to-end with no external services.
-
-### Phase 2 — DB-backed `ModelResolver` + per-agent overlay (complete)
-- `weaveDbModelResolver` lives in `@weaveintel/live-agents-runtime` (NOT `@weaveintel/live-agents`). It accepts injected adapters — `listCandidates`, `routeModel`, `getOrCreateModel` — so the runtime package never imports geneweave or `@weaveintel/routing` types. Anything DB-shaped is wrapped at the consumer boundary.
-- Sequence per tick: `listCandidates(ctx)` → `routeModel(candidates, hints)` (taskType derived from `ctx.capability?.task ?? roleTaskMap[ctx.role] ?? defaultTaskType ?? 'reasoning'`; prompt = `live-agent-<role>`) → `getOrCreateModel(provider, modelId)`. Returns the Model with `id` tagged via `Object.defineProperty` for log clarity (skip with `tagModelId: false`). All failure modes return `undefined` so the live-agents fallback chain (Phase 1) lands on the pinned `model`.
-- `weaveAgentOverlayResolver({ base, getAgentRow, loadPinnedModel?, appendAuditEvent? })` wraps any base resolver with per-agent intent encoded in the `live_agents` row:
-  - `model_pinned_id` set → bypass routing, call `loadPinnedModel(pinnedId)`. Throws fall back to `base`.
-  - `model_capability_json` set → merge into `ctx.capability` (deep-merged with existing), then delegate. `model_routing_policy_key` is forwarded as `capability.hints.policyKey`.
-  - Neither set OR no agentId → delegate to `base` untouched.
-- Audit trail: every successful resolution emits a `live_run_events` row of kind `'model.resolved'` via `appendAuditEvent` (only when `runId` and the writer are both supplied). Audit failures are swallowed — never block resolution.
-- `createHeartbeatSupervisor` (in `@weaveintel/live-agents-runtime`) accepts `modelResolver?: ModelResolver` alongside the existing pinned `model` slot. Threaded into `HandlerContext` so any handler (built-in `agentic.react` or custom) prefers the resolver when present and falls back to pinned.
-- GeneWeave consumers (`apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts` and `apps/geneweave/src/live-agents/generic-supervisor-boot.ts`) construct exactly **one** `weaveDbModelResolver` per supervisor by wrapping `routeModel(db, ...)`, `getOrCreateModel(...)`, and `listAvailableModelsForRouting(db)` (kaggle) or a `model_pricing` enumeration (generic). The legacy `resolveModelForRole(role, hint)` closure is now a thin shim over `dbModelResolver.resolve({ role, capability })` for back-compat — slated for removal in Phase 5.
-- `agent-model-resolver.ts` in geneweave re-exports `weaveAgentOverlayResolver`, `WeaveAgentOverlayResolverOptions`, and `ModelResolvedAuditEvent` from the runtime package. The legacy `resolveLiveAgentModel` function + cache are retained for back-compat only (no external callers; safe deletion in Phase 5).
-- Example: `examples/92-live-agents-db-routing.ts` demonstrates the round-robin resolver and pinned overlay end-to-end with stub adapters and no external services. Audit events print inline so the resolution trail is visible.
-
-### Phase 3 — `LiveAgentPolicy` (complete)
-- `LiveAgentPolicy` lives in `@weaveintel/live-agents/src/policy.ts`. It is the **first-class capability slot** mirroring `weaveAgent`'s pinned `policy: AgentPolicy` and bundles four primitives from `@weaveintel/tools`: `policyResolver?: ToolPolicyResolver`, `approvalGate?: ToolApprovalGate`, `rateLimiter?: ToolRateLimiter`, `auditEmitter?: ToolAuditEmitter`, plus an optional `defaultResolutionContext: Partial<PolicyResolutionContext>`. All four primitives are independently optional.
-- `weaveLiveAgentPolicy(opts)` is the user-facing factory; pure passthrough using conditional spreads. `hasAnyPolicyCapability(p)` is the boolean predicate (returns `true` iff any of the four primitives is set; `defaultResolutionContext` alone does NOT count).
-- `createAgenticTaskHandler({ policy })` wraps the per-tick `prep.tools` registry with `createPolicyEnforcedRegistry` BEFORE the ReAct loop, but only when `hasAnyPolicyCapability(policy)`. The resolution context per call is `{ ...policy.defaultResolutionContext, chatId: agent.id, agentPersona: opts.role ?? opts.name }`.
-- A module-level `permissivePolicyResolver` (returns `DEFAULT_TOOL_POLICY`) is synthesized when the caller omits `policyResolver`. This enables audit-only / rate-limit-only configurations without forcing callers to construct a no-op resolver.
-- `HandlerContext.policy?: LiveAgentPolicy` (in `@weaveintel/live-agents-runtime/src/handler-registry.ts`) is the runtime-side slot. The built-in `agentic.react` handler conditionally spreads `ctx.policy` into the handler options. `createHeartbeatSupervisor` accepts `policy?: LiveAgentPolicy` and threads it through the dispatcher into every `HandlerContext`.
-- `weaveDbLiveAgentPolicy(opts)` lives in `@weaveintel/live-agents-runtime/src/db-policy.ts`. It is a pure passthrough that accepts already-built DB adapter instances (no DB types in the runtime package); apps construct `DbToolPolicyResolver`, `DbToolApprovalGate`, `DbToolRateLimiter`, `DbToolAuditEmitter` from geneweave and pass them in.
-- GeneWeave generic supervisor (`apps/geneweave/src/live-agents/generic-supervisor-boot.ts`) wires the same four DB-backed adapter classes that ChatEngine already uses, so live-agent tool calls and chat tool calls share one policy/audit/approval surface end-to-end.
-- The kaggle strategist path is **fully migrated** (Phase 8.1 audit pass): `KaggleStrategistAgentOptions` accepts `policy?: LiveAgentPolicy` and forwards it to `weaveLiveAgent`; `KaggleRoleHandlersOptions.policy` is forwarded through `createStrategistAgenticWithHandoff` → `createKaggleStrategistHandler`; `apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts` constructs `weaveDbLiveAgentPolicy({ policyResolver: new DbToolPolicyResolver(db), approvalGate: new DbToolApprovalGate(db), rateLimiter: new DbToolRateLimiter(db), auditEmitter: new DbToolAuditEmitter(db) })` so kaggle tool calls share the same DB-backed gating pipeline as chat and the generic supervisor.
-- `LiveAgent` declarative metadata for break-glass authority, grant authority, and contract authority (in `live-agents/types.ts`) is **not yet runtime-enforced** — declarative only. Enforcement is a follow-up phase.
-- Example: `examples/93-live-agents-policy.ts` demonstrates audit-only, rate-limited (1/min then deny), and approval-required (auto-deny) configurations end-to-end with stub model and tools — no DB or external services required.
-
-### Phase 4 — `weaveLiveAgent` constructor (complete)
-- `weaveLiveAgent(opts)` lives in `@weaveintel/live-agents/src/weave-live-agent.ts`. It is the **canonical user-facing constructor** mirroring `weaveAgent({ name, model, tools, systemPrompt, policy, memory, bus, maxSteps })` from `@weaveintel/agents`. New code MUST use `weaveLiveAgent`; `createAgenticTaskHandler` is `@deprecated` and kept only as the underlying impl.
-- Returns `{ handler: TaskHandler, definition: LiveAgentDefinition }`. `definition` exposes `name`, `role`, `capabilities` flags (`model`, `modelResolver`, `tools`, `policy`, `memory`, `bus`, `customPrepare`), and the original `options` for introspection by mesh provisioning, observability, and tests.
-- Validation throws `TypeError` at construction in two cases (clear messages name both slots): (a) neither `model` nor `modelResolver` supplied; (b) neither `prepare` nor `systemPrompt` supplied.
-- When `prepare` is omitted but `systemPrompt` is set, a default prepare is synthesized: `({ inbound }) => ({ systemPrompt, ...(tools && { tools }), userGoal: inbound?.body ?? inbound?.subject ?? '' })`. This is the 80% case for simple long-running agents.
-- `memory?: ContextPolicy` and `bus?: LiveAgentBus` are **captured on `LiveAgentDefinition` for introspection only** — runtime wiring (context window pruning, event bus routing) is deferred to Phase 6 (mesh provisioning). Setting them today is forward-compatible but does not yet change handler behavior.
-- Underlying impl is unchanged: `weaveLiveAgent` builds an `AgenticTaskHandlerOptions` via conditional spreads and calls `createAgenticTaskHandler(...)`. So all Phase 1–3 capabilities (modelResolver, policy enforcement, audit, approval gate, rate limiting) flow through automatically.
-- Migrated call sites: `apps/geneweave/src/live-agents/kaggle/strategist-agent.ts` (kaggle strategist) and `packages/live-agents-runtime/src/handlers/agentic-react.ts` (built-in `agentic.react` handler kind) both call `weaveLiveAgent` and destructure `{ handler }`. The runtime handler still returns a bare `TaskHandler` — `definition` is discarded by the runtime today (mesh provisioning will start consuming it in Phase 6).
-- Tests: `packages/live-agents/src/weave-live-agent.test.ts` (8 tests — construction validation, capability flags, default prepare synthesis, end-to-end handler run, policy forwarding).
-- Example: `examples/94-weave-live-agent-parity.ts` shows side-by-side `weaveAgent` vs `weaveLiveAgent` with identical-looking signatures and a stub model — no DB or external services required.
-
-### Phase 5 — Delete kaggle bespoke model-routing plumbing (complete)
-- The single canonical kaggle model-routing path is `weaveDbModelResolver` (in `@weaveintel/live-agents-runtime`). `buildPlannerModel()` and the `resolveModelForRole(role, hint)` shim closure in `apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts` are **removed**. `listAvailableModelsForRouting()` is retained as a named function only because the resolver's `listCandidates` callback delegates to it for log clarity.
-- The deprecated `resolveModelForRole?:` field on `KaggleRoleHandlersOptions` (in `apps/geneweave/src/live-agents/kaggle/handlers/_shared.ts`) is **removed**. Callers MUST use `modelResolver: ModelResolver`. To wrap an existing per-role callback, lift it via `weaveModelResolverFromFn(...)`.
-- `plannerModel?: Model` on `KaggleRoleHandlersOptions` is **retained** as a deterministic static-fallback escape hatch — the strategist falls back to it when the resolver returns `undefined` or throws. This preserves parity with `weaveAgent`'s pinned `model` slot for tests and single-model deployments.
-- Agentic-mode trigger in `role-handlers.ts` is now `if (opts.plannerModel || opts.modelResolver)`; the legacy `|| opts.resolveModelForRole` branch is gone.
-- Both kaggle (`heartbeat-runner.ts`) and the generic supervisor (`generic-supervisor-boot.ts`) construct exactly **one** `weaveDbModelResolver` per supervisor and pass it to handlers — no per-role wrappers, no per-tick closures.
-- The strategist handler (`handlers/strategist.ts`) has a single per-tick model resolution path: `opts.modelResolver.resolve({ role: 'strategist', agentId, meshId, capability: { task: 'reasoning' } })` → on success, rebuild inner ReAct handler with the routed model; on `undefined`/throw, fall back to the static `plannerModel` inner handler.
-- Net ~140 LOC removed from the kaggle folder; behavior unchanged. Verified via `npx tsc -b apps/geneweave` (clean) and `vitest run` against `@weaveintel/live-agents` (69 tests) and `@weaveintel/live-agents-runtime` (20 tests).
-
-### Phase 6 — `weaveLiveMeshFromDb` / `weaveLiveAgentFromDb` (complete)
-- `weaveLiveMeshFromDb(db, opts)` and `weaveLiveAgentFromDb(db, agentId, opts)` (in `@weaveintel/live-agents-runtime`) are the **canonical user-facing entry points** for booting a DB-driven mesh or hydrating a single agent. They compose every Phase 1–5 primitive (provisioner + handler registry + model resolver + attention policy + heartbeat supervisor + run-state bridge) into one call. New apps MUST use these — do not write bespoke `bootXxxMesh()` wrappers.
-- `LiveAgentsDb` (in `db-types.ts`) is the **single aggregated structural interface** these entry points consume. It is the intersection of `ProvisionMeshDb & SupervisorDb & AttentionPolicyDb & AgentToolBindingDb`. The runtime package never imports geneweave types — geneweave's `DatabaseAdapter` satisfies the contract structurally.
-- `SingleAgentReaderDb` is the narrow read-only slice for `weaveLiveAgentFromDb` — only `listLiveAgents` + `listLiveAgentHandlerBindings` + the two tool-binding methods are required. Use this for tests and ad-hoc invocation.
-- `weaveLiveMeshFromDb` has two operating modes:
-  - **Boot existing meshes** (default): supervisor starts and ticks every active mesh in the DB. The common case for long-running services where operators manage meshes via the admin UI.
-  - **Provision then boot**: pass `provision: { meshDefId | meshDefKey, tenantId, ownerHumanId, ... }` and the function calls `provisionMesh()` first, then boots. Returns the `ProvisionMeshResult` on `result.provisioned`.
-- Composition order inside `weaveLiveMeshFromDb`: (1) optional `provisionMesh` → (2) build/extend `HandlerRegistry` (caller-supplied wins; otherwise `createDefaultHandlerRegistry()` + `extraHandlerKinds`) → (3) `createHeartbeatSupervisor` with `modelResolver`, `policy`, `attentionPolicyKey`, `extraContextFor`, etc. forwarded as-is. Returns `{ provisioned, handlerRegistry, supervisor, stop }` with idempotent `stop()`.
-- `weaveLiveAgentFromDb` returns `{ agent, binding, context, handler }` — the handler is fully runnable. Throws on unknown agent id, no enabled binding, or unknown handler kind.
-- Conditional spreads (`...(opt ? { opt } : {})`) are mandatory in both files because the runtime package uses `exactOptionalPropertyTypes`. Never assign `undefined` to an optional field.
-- Tests: `packages/live-agents-runtime/src/weave-live-mesh-from-db.test.ts` (6 tests — boot, custom registry, single-agent hydration, three error paths). All 26 runtime-package tests pass.
-- Example: `examples/96-live-agents-phase6-mesh-from-db.ts` runs end-to-end with an in-memory stub DB and `weaveInMemoryStateStore` — no SQLite, no LLM, no external services.
-- GeneWeave migration is **incremental**: the existing `apps/geneweave/src/live-agents/generic-supervisor-boot.ts` continues to compose primitives directly (still works). New consumers (kaggle's next refactor, future domain meshes) MUST adopt `weaveLiveMeshFromDb`.
-
-### Phase 7 — GeneWeave migration onto `weaveLiveMeshFromDb` (complete)
-- `apps/geneweave/src/live-agents/generic-supervisor-boot.ts` now calls `weaveLiveMeshFromDb(opts.db, { store, handlerRegistry, modelFactory, modelResolver, policy, resolveSystemPrompt, extraContextFor, attentionPolicyKey, logger })` instead of `createHeartbeatSupervisor` directly. Same primitives, single entry point. Returns `meshHandle.supervisor` to preserve the existing `HeartbeatSupervisorHandle` external contract.
-- The kaggle heartbeat (`apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts`) is **not** migrated to `weaveLiveMeshFromDb` because it is structurally different from a generic supervisor: it owns bespoke per-tick scheduling tied to `kgl_competition_runs`, custom `kgl_run_step` / `kgl_run_event` bridging, and uses low-level `createHeartbeat` workers rather than `createHeartbeatSupervisor`. It already consumes Phase 1–5 primitives correctly (`weaveDbModelResolver`, `resolveAttentionPolicyFromDb`, `createKaggleRoleHandlers` with `modelResolver`). Future refactor would require generalizing `weaveLiveMeshFromDb` to accept a custom scheduler/bridge — out of scope for Phase 7.
-- The three geneweave shim files (`agent-model-resolver.ts`, `agent-attention-resolver.ts`, `agent-tool-registry.ts`) were already thin re-exports of `@weaveintel/live-agents-runtime` from earlier phases — no further changes needed.
-- Net change in geneweave for Phase 7: ~10 LOC swapped (one import + one constructor call). The bulk of the LOC reduction promised in the original plan was already delivered across Phases 2–5.
-- Verified via `npx tsc -b apps/geneweave` (clean) and `vitest run` against `@weaveintel/live-agents` + `@weaveintel/live-agents-runtime` + `apps/geneweave` — all package tests pass; the only failures (`grounding.api.test.ts`) are pre-existing e2e tests that require a running server on `:3500`.
-
-### Phase 8 — Adoption surface: README, ADRs, examples + demo audit (complete)
-- `packages/live-agents/README.md` gained a **First-class capabilities** section covering: (1) pinned `model` vs `modelResolver` per-tick, (2) `weaveLiveAgentPolicy` four-primitive bundle, (3) `weaveLiveMeshFromDb` single-call DB hydration, (4) the `weave*`/`create*` naming rule, and (5) a migration cheatsheet table. New adopters land here first.
-- ADR 006 — [`docs/live-agents/ADR/006-model-resolver.md`](../docs/live-agents/ADR/006-model-resolver.md) — captures the `ModelResolver` contract: fallback chain (`resolver → pinned → throw`), `ResolverContext` shape, DB-backed implementation in `@weaveintel/live-agents-runtime`, agent-row overlay semantics, audit emission as `live_run_events.kind = 'model.resolved'`.
-- ADR 007 — [`docs/live-agents/ADR/007-naming-convention.md`](../docs/live-agents/ADR/007-naming-convention.md) — codifies `weave*` (user-facing constructors that return runnable things) vs `create*` (internal infrastructure factories). Includes the quick decision rule, deprecation policy (one minor cycle for aliases), and migration status table for every public surface.
-- **Examples 52–57 audit:** these examples demonstrate deterministic action executors (`createActionExecutor`, `createHeartbeat`) and bus/mesh primitives — they do NOT instantiate LLM agents. They never used `createAgenticTaskHandler`, so they need no migration to `weaveLiveAgent`. Confirmed via `grep` across `examples/` for `createAgenticTaskHandler`. The canonical unified-API examples for new adopters remain `examples/91` (model resolver), `92` (DB routing), `93` (policy), `94` (parity demo), `95` (kaggle-style routing), `96` (`weaveLiveMeshFromDb`).
-- **`apps/live-agents-demo` audit:** the demo wires deterministic action executors over an HTTP API with in-memory or Postgres state stores. It does NOT use a DB blueprint to hydrate meshes — meshes/agents/contracts are POSTed via the API at runtime. `weaveLiveMeshFromDb` does not apply (no `live_meshes`/`live_agents` rows to read). The demo continues to import `createHeartbeat` and `createActionExecutor` from `@weaveintel/live-agents` directly. This is the correct boundary; do not force `weaveLiveMeshFromDb` where there is no DB blueprint.
-- **Net deliverable:** ~120 LOC docs added, ~280 LOC ADRs added, no LOC removed. The naming convention is now enforceable in code review; the model-resolver contract is now citable in PRs.
-- Verified via `npx tsc -b packages/live-agents packages/live-agents-runtime apps/geneweave apps/live-agents-demo` (clean) and `npx vitest run packages/live-agents packages/live-agents-runtime` (95 passed, 4 skipped — Redis/Mongo/DynamoDB integration tests). Smoke-tested `examples/96-live-agents-phase6-mesh-from-db.ts` end-to-end.
-
-### Phase 9 — Declarative `prepare()` (DB-Driven Capability Plan Phase 2 — complete)
-- Live agents can now declare their per-tick `prepare()` as a JSON **recipe** stored in `live_agents.prepare_config_json` (TEXT, nullable; added in migration `m22DefAlters`). The runtime synthesises an async `prepare()` from the recipe so operators no longer need to write JS to add a long-running agent.
-- Recipe shape (`PrepareConfig` in `@weaveintel/live-agents-runtime/src/db-prepare-resolver.ts`): `{ systemPrompt: string | { promptKey, variables? }, tools?: "$auto", userGoal?: string | { from: 'inbound.body' | 'inbound.subject' | 'inbound' } | { template: string }, memory?: { windowMessages?, summarizer? } }`.
-- Two package primitives:
-  - `parsePrepareConfig(json)` — returns `null` for `null` / empty / `'{}'`, throws on malformed JSON or invalid shape, otherwise returns a typed `PrepareConfig`.
-  - `dbPrepareFromConfig(config, deps)` — synthesises an async `prepare(input) => PrepareOutput`. `deps: PrepareResolutionDeps = { resolvePromptText?: (key) => Promise<string> }`. Returns `null` when `config` is `null`.
-- Synthesis rules (single source of truth in `dbPrepareFromConfig`):
-  - `systemPrompt` literal → used as-is. `{ promptKey }` → calls `deps.resolvePromptText(promptKey)`; throws if resolver is missing. Falls back to `defaultSystemPrompt` option if recipe has no `systemPrompt` set.
-  - `userGoal` literal → used as-is. `{ from: 'inbound.body' }` → `inbound?.body ?? inbound?.subject ?? ''` (note: empty string `''` is NOT nullish, so `body: ''` does NOT fall back to subject — tests must use `body: undefined`). `{ template }` → interpolates `{{subject}}` / `{{body}}` from the inbound message.
-  - `tools: "$auto"` → forwards `ctx.tools` to the handler so policy gating still applies. Omitted → no tools field on the output.
-  - `memory` → parsed and exposed on `PrepareConfig` but **not enforced today** (forward-compat for Phase 6+ window/summarizer wiring).
-- Caller-supplied `prepare` ALWAYS wins (back-compat invariant). The `agentic.react` handler in `@weaveintel/live-agents-runtime` only consults the recipe when `prepare` is unset on the agent definition.
-- DB column wiring in `apps/geneweave`:
-  - `LiveAgentRow.prepare_config_json?: string | null` (in `db-types.ts`).
-  - `createLiveAgent` INSERT writes 18 columns ending with `prepare_config_json`. `listLiveAgents` / `getLiveAgent` use `SELECT *`. `updateLiveAgent` uses dynamic patch loop.
-  - Migration `m22DefAlters` adds the column. **Do not put backticks in the SQL comment** — the migration file is a TS template literal and `\`prepare()\`` breaks parsing. Use plain text.
-- Admin API surface (`apps/geneweave/src/admin/api/live-runtime-meshes.ts`):
-  - `POST /api/admin/live-agents` accepts `prepare_config_json` (and `model_pinned_id`, `model_capability_json`, `model_routing_policy_key`).
-  - `PUT /api/admin/live-agents/:id` accepts the same four fields for partial patch.
-  - Admin tab `live-agents` exposes `prepare_config_json` as a textarea with a JSON example in its label.
-- Generic supervisor (`apps/geneweave/src/live-agents/generic-supervisor-boot.ts`) wires `prepareDeps.resolvePromptText` automatically by adapting the existing `resolveSystemPrompt(promptKey)` lambda. Kaggle heartbeat is **NOT** migrated — it stays bespoke for now (kaggle owns its own per-tick scheduling tied to `kgl_competition_runs`).
-- Tests: `packages/live-agents-runtime/src/db-prepare-resolver.test.ts` (21 tests covering parse + synthesis branches). All 47 runtime-package tests pass after this phase.
-- Example: `examples/98-live-agent-db-prepare.ts` demonstrates literal, prompt-key (with injected `resolvePromptText`), template interpolation, and null-parse cases — runs cleanly with no DB or external services.
-- E2E verified against local server: `POST /api/admin/live-agents` and `PUT /api/admin/live-agents/:id` accept `prepare_config_json`, `GET` returns it intact in the row payload.
-
-
-
-## Workflow Platform (Phase 1 complete — Composable DB-driven Steps)
-
-The workflow platform makes step composition DB-driven via `@weaveintel/workflows`. Operators define workflows as rows in `workflow_defs`; the engine resolves each step's `handler` string to a runnable via a registry of `HandlerResolver`s. No JS handler registration is needed at runtime.
-
-### Package contract (`@weaveintel/workflows`)
-- `DefaultWorkflowEngine` — engine implementation (`startRun`, `tickRun`, etc.). `startRun` drives the run synchronously to a terminal state; `tickRun` is for paused/checkpointed continuations.
-- `HandlerResolverRegistry` — maps a `kind` (e.g. `'noop' | 'script' | 'tool' | 'prompt' | 'agent' | 'mcp' | 'subworkflow'`) to a `HandlerResolver` that returns a runnable `(variables, config) => Promise<unknown>`.
-- `WorkflowDefinitionStore` interface — pluggable persistence (`save`, `get`, `list`, `delete`). `InMemoryWorkflowDefinitionStore` ships in-package; geneweave provides a DB-backed store over `workflow_defs`.
-- Built-in resolvers shipped: `createNoopResolver()`, `createScriptResolver()`, `createToolResolver({ getTool })`. Other kinds (`prompt`, `agent`, `mcp`, `subworkflow`) are reserved for Phase 2 and intentionally NOT wired in geneweave yet.
-- `describeHandlerKinds(registry)` returns a serializable list `[{ kind, description }]` used to seed the operator-facing `workflow_handler_kinds` catalog.
-
-### Step schema (`WorkflowStep` in `@weaveintel/core/workflows`)
-- Required: `id`, `name`, `type` (`'deterministic' | 'agentic' | 'branch' | 'loop' | 'condition' | 'wait' | 'parallel' | 'sub-workflow' | 'human-task'`).
-- `handler` — three forms accepted: bare key (`'echo'`), prefixed (`'tool:upper'`, `'script:slug'`, `'noop'`), or omitted (falls back to step `id`).
-- `next` — `string | string[]` for explicit step ordering. **There is no `nextSteps` field** — it is silently ignored. When `next` is omitted, the engine falls through to declaration order (this is intentional but easy to misread; prefer explicit `next`).
-- `inputMap` — projects run-state into the handler's input. Keys are dotted paths into the *handler input*; values are dotted paths into `state.variables`. Paths are read directly (no `variables.` prefix). Example: `{ "json": "payload", "indent": "indent" }` reads `state.variables.payload` and `state.variables.indent`.
-- `outputMap` — projects handler return value back into `state.variables`. Keys are dotted paths into `variables`; values are dotted paths into the result. Use `"$"` (or `""`) to write the entire result. Example: `{ "pretty": "content", "length": "$" }`.
-- `script:` resolver: body has access to `variables` and `config` and **must `return`** a value (it is wrapped in `new Function('variables', 'config', body)`).
-
-### Tool adapter shape
-The `tool:` resolver in geneweave wraps tools registered in `BUILTIN_TOOLS`. It accepts BOTH common tool shapes:
-- `weaveTool()/defineTool()` shape: `{ schema, invoke(ctx, { arguments }) }` — wrapped as `async (vars) => invoke({}, { arguments: vars })`.
-- Plain shape: `{ execute(args) }` — invoked directly with the projected input.
-- Unknown keys cause the run to fail with `"no tool registered for key 'X'"`. This is intentional — graceful degradation belongs in the workflow definition (use `condition` steps), not the resolver.
-
-### GeneWeave wiring
-- `workflow_handler_kinds` table — operator-visible catalog of available handler kinds. Columns: `kind` (PK), `description`, `source` (`'builtin' | 'custom'`), `enabled` (1/0). Synced at startup via `syncWorkflowHandlerKindsToDb(db, registry)` using `INSERT … ON CONFLICT(kind) DO UPDATE` that **preserves operator-edited `enabled`**.
-- `workflow_defs` table — existing table reused for definition persistence (no schema change for Phase 1).
-- Engine construction in `apps/geneweave/src/index.ts` after `startToolHealthJob(db)`:
-  ```ts
-  const workflowEngineHandle = createGeneweaveWorkflowEngine({
-    db,
-    toolGetter: (key) => BUILTIN_TOOLS[key],
-  });
-  await syncWorkflowHandlerKindsToDb(db, workflowEngineHandle.registry);
-  ```
-  The handle (`{ engine, store, registry }`) is passed to `createGeneWeaveServer` as `workflowEngine`.
-- Admin routes (in `apps/geneweave/src/admin/api/workflow-platform.ts`):
-  - `GET /api/admin/workflow-handler-kinds` (auth: true) → `{ kinds: [...] }`
-  - `POST /api/admin/workflows/:id/run` (auth: true, csrf: true) → body `{ variables?, runOnce? }`. Returns 503 if engine not wired, 400 on bad JSON, 201 with `{ runId, run }` on success. `runOnce` is rarely needed because `startRun` is synchronous.
-- Phase 2 deferred: `prompt:`, `agent:`, `mcp:`, `subworkflow:` resolvers (require routing into `@weaveintel/prompts`, `@weaveintel/agents`, MCP gateway, and recursive engine respectively). The `workflow_handler_kinds` catalog is the single source of truth — adding a kind means: (1) implement resolver, (2) register in `buildWorkflowResolverRegistry`, (3) `describeHandlerKinds` will pick it up automatically.
-
-### Reference
-- Canonical example: `examples/97-db-driven-workflow.ts` (in-memory store + tool/script/noop pipeline).
-- Tests: `packages/workflows/src/phase1.test.ts` (21) + `packages/workflows/src/workflows.test.ts` (37) + `apps/geneweave/src/workflow-engine.db.test.ts` (3, end-to-end with SQLite + handler-kinds sync + tool resolver shapes).
-
-## Trigger Platform (Phase 3 of DB-Driven Capability Plan — complete)
-
-The trigger platform connects external events to runtime targets via DB-driven rows. Package: `@weaveintel/triggers`. Reference impl: `apps/geneweave`. Plan: `docs/DB_DRIVEN_CAPABILITY_PLAN.md` lines 340-490.
-
-### Package boundary (`@weaveintel/triggers`)
-- The package ships **only**: interfaces (`Trigger`, `TriggerEvent`, `SourceAdapter`, `TargetAdapter`, `TriggerStore`, `TriggerInvocation`), the dispatcher (`createTriggerDispatcher`), the JSONLogic-lite filter evaluator (`evaluateFilter`), the rate limiter, and three built-in pieces: `ManualSourceAdapter`, `CronSourceAdapter` (used **internally** by the dispatcher per cron trigger), `SignalBusSourceAdapter`, `WebhookOutTargetAdapter`, `CallbackTargetAdapter`, `InMemoryTriggerStore`.
-- The package never imports DB types. Persistence is wired by the host via a `TriggerStore` implementation.
-- Exports surface in `packages/triggers/src/index.ts` re-exports `./dispatcher.js` (canonical) plus legacy modules (`trigger.js`, `cron.js`, `webhook.js`, `queue.js`, `change.js`, `binding.js`) kept for back-compat.
-
-### `TriggerStore` contract
-- `list(): Promise<Trigger[]>` — read all triggers (dispatcher calls this on `reload()`).
-- `save(trigger: Trigger): Promise<void>` — upsert.
-- `recordInvocation(inv: TriggerInvocation): Promise<void>` — receives the **full** invocation object (id pre-assigned by dispatcher), returns void. Failures must be swallowed by the store (logged, not thrown) so dispatch is never blocked.
-
-### Trigger row shape (model-facing)
-- `Trigger` uses **nested refs**: `source: { kind, config }`, `target: { kind, config }`, `filter?: { expression }`, `rateLimit?: { perMinute }`. Do NOT use the flat snake_case shape (`sourceKind`, `sourceConfig`, …) inside the package.
-- `TriggerSourceKind` = `cron | webhook | filewatch | mcp_event | db_change | contract_emitted | workflow_event | signal_bus | manual`.
-- `TriggerTargetKind` = `workflow | agent_tick | mesh_message | contract | webhook_out`. Today only `workflow` and `webhook_out` have built-in/wired adapters in geneweave; the others record `no_target_adapter` until wired.
-- `TriggerInvocationStatus` = `dispatched | filtered | rate_limited | disabled | no_target_adapter | error`.
-
-### Dispatch path
-- `dispatcher.dispatch(event, opts?: { onlyTriggerId?: string })` filters candidates by **both** `t.source.kind === event.sourceKind` AND `(!onlyTriggerId || t.id === onlyTriggerId)`. Per-trigger steps: enabled check → filter eval (`filtered` on miss, fail-closed on unknown ops) → rate limit (`rate_limited`) → `inputMap` projection → target lookup (`no_target_adapter`) → `target.dispatch()` (`dispatched` on success with optional `targetRef`, `error` on throw). Every outcome emits one `TriggerInvocation`.
-- After every CRUD write the host MUST call `dispatcher.reload()` so the in-memory triggers cache stays current.
-- `dispatcher.start()` spins up one `CronSourceAdapter` per enabled cron trigger; `dispatcher.stop()` clears them.
-
-### GeneWeave wiring (reference impl)
-- DB tables: `triggers` (id PK, key UNIQUE, enabled, source_kind, source_config, filter_expr, target_kind, target_config, input_map, rate_limit_per_minute, metadata, timestamps) and `trigger_invocations` (id PK, trigger_id FK CASCADE, fired_at, source_kind, status, target_ref, error_message, source_event, created_at). Both UUID PKs.
-- 8 `DatabaseAdapter` methods: `listTriggers`, `getTrigger`, `getTriggerByKey`, `createTrigger`, `updateTrigger`, `deleteTrigger`, `insertTriggerInvocation`, `listTriggerInvocations`.
-- `apps/geneweave/src/triggers/db-trigger-store.ts` wraps the adapter — translates DB row ⇆ nested `Trigger` shape.
-- `apps/geneweave/src/triggers/target-adapters.ts` provides `createWorkflowTargetAdapter(handle)` over `WorkflowEngineHandle.engine.startRun(workflowDefId, variables)`. Other target kinds (`agent_tick`, `mesh_message`, `contract`) are **deferred** — they currently record `no_target_adapter`.
-- Boot wiring (Block 5-TR in `apps/geneweave/src/index.ts`) constructs the store, manual source, and dispatcher with `[manualSource]` + `[WebhookOutTargetAdapter, createWorkflowTargetAdapter(workflowEngineHandle)]`. `await dispatcher.start()` is wrapped in try/catch; `stop()` awaits `dispatcher.stop()`.
-- Admin API (in `apps/geneweave/src/admin/api/triggers.ts`):
-  - `GET/POST/PUT/DELETE /api/admin/triggers` and `POST /api/admin/triggers/:id/fire` — auth + CSRF gated.
-  - `GET /api/admin/trigger-invocations` — readonly audit ledger with `trigger_id`, `status`, `source_kind`, `after`, `before`, `limit`, `offset` filters.
-  - **API body shape is snake_case** (`source_kind`, `source_config`, `target_kind`, `target_config`, `filter_expr`, `input_map`, `rate_limit_per_minute`, `metadata`). The route translates between snake_case JSON ⇆ nested `Trigger`.
-  - **Every CRUD write calls `dispatcher.reload()`**.
-  - Manual fire: `dispatcher.dispatch({ sourceKind: 'manual', payload, observedAt: Date.now() }, { onlyTriggerId: id })`. Today this only fires triggers with `source.kind === 'manual'`.
-
-### Implementation gotchas (verified during Phase 3 build)
-- The router exposes `del` not `delete`. Bind it locally: `const delMethod = router.del.bind(router); delMethod('/path', ...)`. There is no fallback to `router.delete`.
-- `exactOptionalPropertyTypes` is on — every JSON-serialized optional field (`filter_expr`, `input_map`, `metadata`, `target_ref`, `error_message`, `source_event`) MUST use a conditional spread (`...(x !== undefined ? { x } : {})`) when constructing rows.
-- Invocation IDs are minted by the dispatcher (not the store). Use `crypto.randomUUID()`.
-- SQL migrations live in TS template literals — never put backticks in the SQL comments inside the migration string.
-- Manual admin fire only matches triggers whose `source.kind === 'manual'`. To force-run a cron/webhook trigger from the admin UI, either temporarily flip its source kind, or extend the dispatcher to bypass the source filter when `onlyTriggerId` is set.
-
-### Reference
-- Canonical example: `examples/99-db-driven-triggers.ts` (deterministic, no DB, no LLM).
-- Package README: `packages/triggers/README.md`.
-- Tests: `packages/triggers/src/dispatcher.test.ts` (20 unit tests).
-- E2E verified against `http://localhost:3500`: register → promote to tenant_admin → login + CSRF → create trigger → fire → invocation row persisted with `status=dispatched, target_ref=http:200` → delete.
-
-## Mesh ↔ Workflow Binding (Phase 4 of DB-Driven Capability Plan — complete)
-
-The binding closes the loop between workflow output and downstream workflow / agent / webhook input. A workflow declares an `outputContract`; the engine emits it via `ContractEmitter` on successful completion; geneweave persists the contract to `mesh_contracts` and re-publishes it on a Node `EventEmitter` bus; `MeshContractSourceAdapter` (in `@weaveintel/triggers`) consumes the bus and fires triggers whose `source.kind === 'contract_emitted'`; the trigger target dispatches the next runtime unit. End-to-end DB-driven, zero hardcoded wiring per cascade.
-
-### Package surface
-- `WorkflowOutputContract` (in `@weaveintel/core/workflows`): `{ kind: string, bodyMap?: Record<string, string>, evidence?: { fromHistory?: boolean }, meshId?: string, metadata?: Record<string, unknown> }`. `bodyMap` projects final `state.variables` (values are dotted paths into variables) into the contract body.
-- `ContractEmitter` interface (in `@weaveintel/workflows`): `emit(contract: { kind, body, evidence?, meshId?, metadata?, sourceWorkflowDefinitionId, sourceWorkflowRunId }): Promise<void>`.
-- `DefaultWorkflowEngine` accepts `contractEmitter?: ContractEmitter` in constructor opts. Emission happens **after** the run reaches a successful terminal state. Emission is **best-effort**: failures are caught, logged as `workflow:contract_emit_failed`, and the run still completes successfully.
-- `MeshContractSourceAdapter` (in `@weaveintel/triggers`): wraps a Node `EventEmitter`; emits `{ sourceKind: 'contract_emitted', payload: <bus-payload>, observedAt }` on every `mesh.contract` event. Filter expressions can match `payload.kind`, `payload.body.*`, `payload.meta.*`.
-
-### GeneWeave wiring (reference impl)
-- `mesh_contracts` table (UUID PK): `id, kind, body_json, evidence_json, mesh_id, source_workflow_definition_id, source_workflow_run_id, source_agent_id, metadata, emitted_at, created_at`.
-- `DbContractEmitter` (in `apps/geneweave/src/contracts/db-contract-emitter.ts`): `(db, bus, opts?: { eventName? })`. `emit()` mints `randomUUID()`, calls `db.insertMeshContract(...)`, then **best-effort** `bus.emit(eventName ?? 'mesh.contract', { id, kind, body, ...(evidence ? { evidence } : {}), meta })`. Bus failures are swallowed.
-- App boot (`apps/geneweave/src/index.ts`): constructs **one** `EventEmitter` per process, hands it to **both** `DbContractEmitter` (publisher) and `MeshContractSourceAdapter` (consumer). Never use module-level state for the bus.
-- Engine wiring: `createGeneweaveWorkflowEngine({ db, toolGetter, contractEmitter })` plumbs the emitter into the engine; runs that complete successfully publish their contract automatically.
-- Admin readonly audit at `/api/admin/mesh-contracts` (auth: true): GET list with `kind`, `mesh_id`, `limit`, `offset` filters; GET by id. Append-only — no mutations.
-
-### Reserved-key convention for `outputContract` round-trip
-- `WorkflowDefinition` carries `outputContract` at the top level, but `workflow_defs` has no dedicated column for it. **The convention is to pack/unpack via the reserved key `metadata.__outputContract`.** No schema migration was needed.
-- Both code paths must agree:
-  - `apps/geneweave/src/workflow-engine.ts` `save()`: `mergedMetadata = { ...def.metadata, ...(def.outputContract ? { __outputContract: def.outputContract } : {}) }` → write to `metadata` column.
-  - `apps/geneweave/src/workflow-engine.ts` `rowToWorkflow()`: parses `metadata` JSON; if `__outputContract` is present, lifts it back out (`const { __outputContract: oc, ..._drop } = parsed`; with the `_drop` rest-destructure to satisfy `noUnusedLocals`) and returns `{ ...rest, ...(oc ? { outputContract: oc } : {}) }`.
-  - `apps/geneweave/src/admin/api/workflows.ts` POST/PUT: accepts `body['output_contract']` (snake_case in REST), merges into `metadata.__outputContract`, persists. PUT only writes `fields['metadata']` when `metadata` OR `output_contract` is present in the patch.
-- **Collision risk:** if user metadata sets `__outputContract` directly, the explicit `output_contract` field silently overwrites it. Acceptable for now — document as known.
-
-### Critical gotcha: dist staleness
-- `apps/geneweave/package.json` declares `"main": "./dist/index.js"`. Examples that import `@weaveintel/geneweave` via `tsx` (e.g. `examples/12-geneweave.ts`, `examples/100-mesh-workflow-binding.ts`) load the **compiled dist**, not the TypeScript source. **After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the example, or the change has zero runtime effect.** This burned multiple debug cycles during Phase 4 build — debug `console.log` statements added to source code did not appear in server output until the dist was rebuilt.
-
-### Other contract gotchas verified during Phase 4 build
-- Admin workflow API uses **flat snake_case** body shape; full nested `WorkflowDefinition` is rejected. POST auto-generates id as `'wf-' + randomUUID().slice(0, 8)` — never accept caller-supplied id. POST returns `{ workflow }` (single-field wrapper).
-- Triggers admin POST returns the row directly (no `{ trigger }` wrapper). Inconsistent with workflows but stable contract.
-- `ContractEmitter.emit` MUST be async and MUST swallow its own internal errors when publishing to the bus (the engine catches outer throws too, but the emitter should not rely on that).
-- The single canonical filter language for `contract_emitted` triggers is JSONLogic-lite (already implemented). Common pattern: `{ "==": [ { "var": "payload.kind" }, "order.fulfilled" ] }`.
-
-### Reference
-- Canonical example: `examples/100-mesh-workflow-binding.ts` (~140 lines, custom in-process bus + emitter, two workflows, trigger filtered by kind, runs cleanly).
-- Package READMEs: `packages/workflows/README.md` (`outputContract` + `ContractEmitter`), `packages/triggers/README.md` (`MeshContractSourceAdapter`).
-- Tests: `packages/workflows/src/contract-emitter.test.ts` (8), `apps/geneweave/src/contracts/db-contract-emitter.test.ts` (2).
-- E2E verified against `http://localhost:3500`: register → tenant_admin promote → login + CSRF → create downstream workflow B → create source workflow A with `output_contract` → create trigger filtered by `payload.kind` → run A → `mesh_contracts` row persisted → trigger invocation `status=dispatched` with `target_ref` pointing to downstream workflow B run id.
-
-### Known non-Phase-4 issues (do not fix unless asked)
-- Pre-existing tsc errors in `examples/86, 92, 95, 97, comprehensive-live-agents-workflow.ts` use older live-agents/workflow API surfaces. Unrelated to Phase 4. Building `apps/geneweave packages/workflows packages/triggers` is clean.
-
-## Workflow Governance / Durability / Replay (Phase 5 of DB-Driven Capability Plan — complete)
-
-Adds four primitives that make workflows safe to run unattended: input-shape governance, cost ceilings, deterministic replay, durable persistence — plus capability policy bindings that let operators attach tool/rate/approval policies to any workflow / mesh / agent without code changes. Plan: `docs/DB_DRIVEN_CAPABILITY_PLAN.md` line 510.
-
-### Package surface (`@weaveintel/workflows` + `@weaveintel/core`)
-- `validateWorkflowInput(input, schema)` + `WorkflowInputValidationError` — **ajv-free** JSON-schema-lite (`type`, `required`, `properties`, `enum`, `minLength`/`maxLength`, `minimum`/`maximum`). Anything outside that scope is silently ignored — apps that need full JSON Schema wire their own validator and leave `WorkflowDefinition.inputSchema` unset.
-- `engine.startRun(workflowId, input)` rejects with `WorkflowInputValidationError` **before any step executes** when `inputSchema` is set and input fails. Step caches and run rows are never created on rejection.
-- `CostMeter` interface + `InMemoryCostMeter`. Steps/tools/sub-workflows call `meter.record(runId, { costUsd, source })`. The engine reads `meter.total(runId)` at every step boundary.
-- `WorkflowPolicy.costCeiling: number` (USD). Exceed → run sets `status: 'failed'`, `error: 'Cost ceiling exceeded: $X > $Y'`, **emits `workflow:cost_exceeded` event on the bus**, persists `run.costTotal`. Without `costCeiling` the meter is purely observational.
-- `WorkflowReplayRecorder` records `(runId, step) => void` with monotonic ordinals. `recorder.trace(runId, workflowId)` returns `WorkflowReplayTrace`. Helper `wrapRegistryWithRecorder(registry, recorder, runIdGetter)` is the canonical wrapping pattern.
-- `createReplayRegistry(trace)` — replay is **ordinal-strict**: each step's output is keyed by the ordinal in the trace, NOT by stepId. Replay overrun (workflow has more steps than trace) → run fails with `Replay overrun`. No resolver is invoked, no LLM call, no clock read.
-- `CheckpointStore` + `InMemoryCheckpointStore` — store `WorkflowCheckpoint` snapshots. `WorkflowRunRepository` + `InMemoryWorkflowRunRepository` + `JsonFileWorkflowRunRepository` — persist `WorkflowRun` rows.
-- `CapabilityPolicyBinding` (in `@weaveintel/core`) — `{ id, bindingKind: 'agent'|'mesh'|'workflow', bindingRef, policyKind: 'tool_policy'|'rate_limit'|'approval', policyRef, precedence, enabled }`. `resolveCapabilityBinding(bindings, kind, ref, policyKind)` returns the highest-precedence match. **Convention: agent=100 > mesh=50 > workflow=10**.
-
-### GeneWeave wiring (reference impl)
-- DB tables added in Phase 5 block of `db-sqlite-migrations.ts`: `workflow_runs.cost_total` column added; `workflow_checkpoints` (UUID PK, FK CASCADE to workflow_runs); `capability_policy_bindings` (UUID PK, columns: `binding_kind, binding_ref, policy_kind, policy_ref, precedence, enabled, created_at, updated_at`).
-- `DbWorkflowRunRepository` (in `apps/geneweave/src/workflows/db-workflow-run-repository.ts`) and `DbCheckpointStore` (in `apps/geneweave/src/workflows/db-checkpoint-store.ts`) implement the package interfaces over SQLite.
-- **SQLite `created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` has 1-second precision.** ORDER BY clauses on `created_at` MUST add `, rowid ASC` (or matching `DESC`) for deterministic tie-breaking — without it `latest()` is non-deterministic for rows inserted in the same second. Bug fixed in `listWorkflowCheckpoints` SQL.
-- 5 DB adapter methods on `CapabilityPolicyBindingRow`: `createCapabilityPolicyBinding`, `getCapabilityPolicyBinding`, `listCapabilityPolicyBindings({ bindingKind?, bindingRef?, policyKind?, enabledOnly? })`, `updateCapabilityPolicyBinding`, `deleteCapabilityPolicyBinding`.
-- Admin API: `/api/admin/capability-policy-bindings` (in `apps/geneweave/src/admin/api/capability-policy-bindings.ts`) — full CRUD, all routes auth-gated, mutations CSRF-gated. Sidebar entry under Orchestration. Tab schema in `platform-capability-tabs.ts` (apiPath `admin/capability-policy-bindings`, listKey `bindings`).
-- Workflow-runs admin tab gained `cost_total` (readonly) for visibility.
-
-### Patterns and gotchas (verified during Phase 5 build)
-- **`DefaultWorkflowEngine` caches resolved handlers by `handlerRef` for the duration of a run** — replay must be ordinal-strict, not stepId-strict, because the same handlerRef may be reused across multiple steps.
-- **`RunIdCapturingRepo` pattern**: when a resolver needs the runId at call time but the runId isn't known until `engine.startRun()` returns, wrap the repository so the first `save()` captures the runId for the resolver to read. Used in cost-meter recording and replay-recorder wiring (see `examples/101-workflow-governance.ts`).
-- **`HandlerResolveContext` does NOT have `handlerRef`** — use `ctx.step.handler ?? ctx.step.id` to recover the canonical reference for recorder entries.
-- `createScriptResolver()` reads the script body from `step.config.script` (NOT `body`) or from `ctx.ref` after the `script:` prefix.
-- `EventBus` stubs in tests/examples: cast as `as unknown as EventBus`. Provide `{ emit, on, onAll, onMatch }` no-ops if you only care about emit.
-- **Dist staleness**: `apps/geneweave/package.json` has `"main": "./dist/index.js"`. Examples that import `@weaveintel/geneweave` via `tsx` (e.g. `examples/12-geneweave.ts`) load the compiled dist. **After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the example/server.** This is the same gotcha as Phase 4.
-
-### E2E auth pattern (validated this phase)
-- Users table column for admin role is **`persona`** (NOT `role`). Promote: `sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='X';"`.
-- CSRF token is returned in the **login response body** as `csrfToken` (NOT a separate `/api/csrf` endpoint — there is none). Send as header `X-CSRF-Token` on all mutations.
-- zsh: `set +H` (or avoid `!`) when test passwords contain `!` to prevent history expansion.
-- Working pattern is preserved in `scripts/e2e-phase4-mesh-workflow-binding.mjs`.
-
-### Reference
-- Canonical example: `examples/101-workflow-governance.ts` — pure in-process, demonstrates all four primitives + capability precedence in ~190 lines. No DB, no LLM, no external services.
-- Tests: `packages/workflows/src/phase5.test.ts` (12), `apps/geneweave/src/workflow-phase5.db.test.ts` (4).
-- Package READMEs: `packages/workflows/README.md` Phase 5 section.
-
-### Known non-Phase-5 issues (do not fix unless asked)
-- Pre-existing tsc errors in `examples/86, 92, 95, 97, comprehensive-live-agents-workflow.ts` use older live-agents/workflow API surfaces. Unrelated to Phase 5. Building `apps/geneweave packages/workflows packages/core` is clean.
-
-## Capability Packs (Phase 6 of DB-Driven Capability Plan — complete)
-
-Versioned, exportable bundles of DB rows that can be installed/uninstalled atomically. Package: `@weaveintel/capability-packs`. Reference impl: `apps/geneweave`. Plan: `docs/DB_DRIVEN_CAPABILITY_PLAN.md` line 597.
-
-### Package surface (`@weaveintel/capability-packs`)
-- `validateManifest(manifest) → { ok, issues }`. KEY_RE = `/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$/` (no hyphens, lower.dotted.snake_case). SEMVER_RE = `/^\d+\.\d+\.\d+(?:-[\w.]+)?$/`.
-- `installPack(manifest, adapter, opts?) → { ledger, unmetPreconditions }`. If `unmetPreconditions.length > 0`, NO rows are written. `opts.skipPreconditions: true` bypasses; `opts.installOrder?: string[]` overrides bucket iteration order.
-- `uninstallPack(ledger, adapter)` — deletes exactly the rows recorded in the ledger.
-- `resolveActivePackVersion(candidates)` — returns highest published version (semver compare).
-- `PackInstallAdapter` interface: `checkPreconditions(pre) → string[]` (unmet keys), `upsertRows(kind, rows) → string[]` (persisted ids), `deleteRows(kind, ids)`, optional `withTransaction<T>(fn)`.
-- 18 package tests in `packages/capability-packs/src/capability-packs.test.ts`.
-
-### Manifest shape
-```ts
-{
-  manifestVersion: '1',
-  key: string,                // lower.dotted.snake_case
-  version: string,            // semver MAJOR.MINOR.PATCH
-  name: string,
-  description: string,
-  authoredBy?: string,
-  dependencies?: PackDependency[],
-  preconditions?: { requiredHandlerKinds?, requiredToolKeys?, requiredMcpServers?, requiredTriggerSourceKinds? },
-  contents: Record<string, ReadonlyArray<Record<string, unknown>>>,
-  metadata?: Record<string, unknown>
-}
-```
-
-### GeneWeave wiring (reference impl)
-- 3 DB tables (UUID PKs): `capability_packs` (UNIQUE(pack_key, version), status: draft|published|retired), `capability_pack_installations` (FK CASCADE, ledger TEXT JSON, uninstalled_at nullable), `capability_pack_experiments` (variants JSON).
-- 14 `DatabaseAdapter` methods on `CapabilityPackRow` / `CapabilityPackInstallationRow` / `CapabilityPackExperimentRow`.
-- `apps/geneweave/src/capability-packs/install-adapter.ts` — `createGeneweavePackInstallAdapter(db, opts?)`. **6 supported buckets**: `workflow_defs`, `triggers`, `prompts`, `prompt_fragments`, `tool_policies`, `capability_policy_bindings`. Unknown buckets cause install to throw at `upsertRows`.
-- 11 admin routes in `apps/geneweave/src/admin/api/capability-packs.ts`:
-  - `GET/POST/PUT/DELETE /api/admin/capability-packs` + `GET /:id/export` + `POST /:id/install`
-  - `GET /api/admin/capability-pack-installations` + `GET /:id` + `POST /:id/uninstall`
-  - All routes auth-gated; mutations CSRF-gated.
-- Two admin tabs under Orchestration: `capability-packs` (full CRUD) and `capability-pack-installations` (readonly).
-
-### Critical gotchas (verified during Phase 6 build)
-- **Pack key disallows hyphens** — `e2e-1234` is rejected; use `e2e_1234`. Burned a debug cycle on `tag = e2e-${Date.now()}` in the E2E script.
-- **`workflow_defs` bucket row shape MUST match the actual `WorkflowDefRow` columns**: `{ id, name, description, version, steps, entry_step_id, metadata, enabled }`. Do NOT use fictional fields like `key`, `definition`, `created_by` — they will fail tsc and at runtime. Fixed install-adapter to use real columns.
-- Install endpoint persists `JSON.stringify(result.ledger)` into `capability_pack_installations.ledger` and updates pack `installed_at` / `installed_by` on success.
-- Install returns 412 (not 400) when preconditions are unmet.
-- Re-uninstall returns 409 (already uninstalled).
-- Manifest `authoredBy` (camelCase) at the top level vs `authored_by` column on the row — the route handler maps explicitly.
-- Same dist-staleness rule applies: after editing `apps/geneweave/src/**` MUST run `npx tsc -b apps/geneweave` before restarting the server.
-
-### E2E auth pattern (reused from Phase 5)
-- `set +H` to disable zsh history expansion.
-- Promote test user with `sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='X';"` (column is `persona`, NOT `role`).
-- CSRF token comes from login response body as `csrfToken`; send as `X-CSRF-Token` on all mutations.
-- See `scripts/e2e-phase6-capability-packs.mjs` (27 assertions, all pass).
-
-### Reference
-- Canonical example: `examples/102-capability-packs.ts` — in-process StubAdapter demo of validate → install → uninstall → version resolution. ~120 lines, no DB, no LLM, no external services.
-- Package README: `packages/capability-packs/README.md`.
-- E2E script: `scripts/e2e-phase6-capability-packs.mjs`.
-
-### Known non-Phase-6 issues (do not fix unless asked)
-- Same pre-existing tsc errors in `examples/86, 92, 95, 97, comprehensive-live-agents-workflow.ts` as Phase 5. Unrelated. Building `apps/geneweave packages/capability-packs` is clean.
-
-## Cost Governor Platform (Phase 1 + Phase 2 — complete)
-
-Cost-control levers shipped as a reusable platform package (`@weaveintel/cost-governor`) with DB-backed configuration in geneweave. Phases 3–7 (per `docs/COST_CONTROL_PLAN.md`) wire individual lever resolvers (model cascade, tool subset, intel gating, history compaction, budget gate). Phase 1 = ledger + per-step USD recording. Phase 2 = operator-facing tier presets, `CostPolicy` config surface, and DB-driven resolver bound via the unified capability-bindings table.
-
-### Package surface (`@weaveintel/cost-governor`)
-- `CostTier = 'economy' | 'balanced' | 'performance' | 'max' | 'custom'`. `DEFAULT_COST_TIER = 'balanced'`.
-- `CostPolicy` — operator-facing config with `tier` plus optional per-lever overrides (`modelCascade`, `promptCaching`, `toolSubset`, `intelGating`, `historyCompaction`, `maxStepsCap`, `reasoningEffort`, `toolOutputTruncation`, `budgetCeilingUsd`).
-- `ResolvedCostPolicy` — every lever resolved (after preset merge). Returned by `resolveCostPolicy(policy)`.
-- `TIER_PRESETS: Record<Exclude<CostTier,'custom'>, ResolvedCostPolicy>` — source of truth for the four built-in tiers. `tier: 'custom'` skips preset merge — caller MUST supply every lever explicitly.
-- `weaveCostGovernor(policy) → CostGovernorBundle` — returns `{ policy, modelResolver, toolFilter, promptShaper, historyCompactor, budgetGate }`. **All five lever resolvers are NO-OP STUBS in Phase 2** (`noopModelResolver`, `noopToolFilter`, `noopPromptShaper`, `noopHistoryCompactor`, `noopBudgetGate`). Operators can configure tiers and bindings today; runtime behavior is unchanged until Phases 3–7 land. `CostCeilingExceededError` is exported for the future budget gate.
-- `CostPolicyResolver` interface — `resolve(ctx: CostPolicyResolutionContext): Promise<ResolvedCostPolicyBinding | null>`. Context carries `{ tenantId?, meshId?, agentId?, workflowId?, perRunOverride? }`.
-- `ResolvedCostPolicyBinding` — `{ policy, source, bindingId?, policyId? }` where `source` is `'per_run_override' | 'agent_binding' | 'mesh_binding' | 'workflow_binding' | 'tenant_default' | 'package_default' | 'static'`.
-- `weaveStaticCostPolicyResolver(policy)` — pinned single-policy resolver. Always returns `source: 'static'`.
-- `composeCostPolicyResolvers([a, b, c])` — first non-null wins; thrown errors are logged and treated as null.
-- `resolveCostGovernorBundle(resolver, ctx) → { bundle, binding }` — single-call convenience: `perRunOverride` wins; else `resolver.resolve(ctx)`; else falls back to `{ tier: DEFAULT_COST_TIER, source: 'package_default' }`. Always returns a bundle.
-
-### GeneWeave wiring (reference impl)
-- `cost_policies` table (UUID PK): `id, key (UNIQUE), tier ('balanced' default), levers_json, description, enabled, created_at, updated_at`. Migration in `db-sqlite-migrations.ts`.
-- `CostPolicyRow` exported from `@weaveintel/geneweave` `db-types.ts`. 6 `DatabaseAdapter` methods: `createCostPolicy`, `getCostPolicy`, `getCostPolicyByKey`, `listCostPolicies({ enabledOnly? })`, `updateCostPolicy`, `deleteCostPolicy`.
-- **No new bindings table** — cost policies reuse `capability_policy_bindings` with `policy_kind = 'cost_policy'` (added to `CapabilityPolicyKind` enum in `@weaveintel/core/capability-policy.ts`). `policy_ref` points at a `cost_policies.id`. Precedence convention is shared with all other capability policies: agent=100 > mesh=50 > workflow=10.
-- `DbCostPolicyResolver` (in `apps/geneweave/src/cost/db-cost-policy-resolver.ts`) implements `CostPolicyResolver`: lists `capability_policy_bindings` filtered by `{ policyKind: 'cost_policy', enabledOnly: true }`, walks agent → mesh → workflow via `resolveCapabilityBinding` from `@weaveintel/core`, loads the matching `cost_policies` row, returns `{ policy, source, bindingId, policyId }`.
-- Admin API at `/api/admin/cost-policies` (in `apps/geneweave/src/admin/api/cost-policies.ts`) — full CRUD, all routes auth-gated, mutations CSRF-gated. Uses local minimal `CostPolicyRouteHelpers = { json, readBody }` type (NOT `AdminHelpers`) — mirrors the cost-ledger pattern to avoid the `requireDetailedDescription` requirement that's only meaningful for LLM-callable entity routes. POST validates `tier` against the 5 valid values and returns 409 on duplicate `key`. Routes registered in `server.ts` after the cost-ledger routes.
-- Admin sidebar entry under Orchestration: `cost-policies` (between `capability-policy-bindings` and `capability-packs`). Tab schema in `platform-capability-tabs.ts` exposes `key`, `tier` (select with 5 options), `description` (textarea), `levers_json` (textarea with JSON hint), `enabled` (checkbox). The `capability-policy-bindings` `policy_kind` field's label was updated to include `cost_policy`.
-- Runtime wiring: `apps/geneweave/src/live-agents/generic-supervisor-boot.ts` constructs **one** `DbCostPolicyResolver` per supervisor and injects it into `extraContextFor` as `costPolicyResolver`. Per-tick handlers can call `await resolveCostGovernorBundle(ctx.costPolicyResolver, { meshId, agentId })` to get the resolved bundle. Because Phase 2 resolvers are no-op stubs, this is currently observational — operators can configure but runtime behavior is unchanged.
-- **Kaggle heartbeat (`apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts`) is NOT yet wired** — it stays bespoke. The hook will be added when a kaggle-specific lever ships in Phase 3+.
-
-### Reusability invariant
-- `@weaveintel/cost-governor` never imports geneweave, never imports DB adapters, never imports `@weaveintel/core` capability-binding helpers. The package only knows about `CostPolicy`, the resolver interface, and the no-op governor bundle. Any consumer (geneweave, future apps, examples, tests) supplies their own `CostPolicyResolver` impl and passes it to `resolveCostGovernorBundle`. The "DB-driven" property is a property of the geneweave reference impl, not the package.
-
-### Patterns + gotchas (verified during Phase 2 build)
-- **`tier: 'custom'` skips preset merge entirely** — caller must populate every lever they want active. For partial overrides on top of a preset, set `tier` to one of the four named tiers and add only the fields you want to override.
-- **All Phase 2 lever resolvers are no-ops** — wiring them does not change behavior. This is intentional. Phase 3 (model cascade) will be the first phase to flip a real resolver on.
-- **Local helpers type, not `AdminHelpers`** — `cost-policies.ts` and `cost-ledger.ts` both use a local `{ json, readBody }` type. Do NOT use `AdminHelpers` for routes that aren't tied to LLM-callable entity description requirements.
-- **Same dist-staleness gotcha as every other phase** — `apps/geneweave/package.json` has `"main": "./dist/index.js"`. After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the server, or the change has zero runtime effect.
-- E2E auth pattern reused from Phase 5/6: `set +H` to disable zsh history expansion; promote with `sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='X';"` (column is `persona`); CSRF token in login response body as `csrfToken`; send as `X-CSRF-Token` header on mutations.
-
-### Reference
-- Canonical example: `examples/103-cost-policy-binding.ts` — pure in-memory, no DB, no LLM. Demonstrates static resolver, custom in-memory DB-mimicking resolver, composition, per-run override precedence, tier-preset merge, and end-to-end bundle resolution. ~120 lines.
-- Tests: `packages/cost-governor/src/*.test.ts` (28 tests, all pass).
-- E2E script: `scripts/e2e-phase2-cost-policies.mjs` (21 assertions verified against `http://localhost:3500`).
-- Plan: `docs/COST_CONTROL_PLAN.md` §4.2 (tier presets) and §5 (resolver/binding model).
-
-## Cost Governor Platform (Phase 3 — Prompt Caching, complete)
-
-Adds the L2 prompt-caching lever as a reusable, provider-agnostic shaper in `@weaveintel/cost-governor`, plus a Model wrapper that injects per-call cache hints. Reuses the Phase 1+2 `cost_policies` table and `capability_policy_bindings` (with `policy_kind='cost_policy'`) — no new tables.
-
-### Package surface (`@weaveintel/cost-governor`)
-- `PromptCacheHints` = `{ cacheKey: string, markSystemAsCacheable: boolean, ttl?: '5m' | '1h' }`. `cacheKey` sanitised to ASCII (`[A-Za-z0-9_\-:.]`), ≤ 64 chars (OpenAI's `prompt_cache_key` limit).
-- `CacheShapeContext` = `{ provider, role?, phase?, modelId?, tenantId?, meshId?, agentId?, version? }`. Consumers fill in what they have.
-- `CacheShaper.compute(ctx) → PromptCacheHints | null`. `null` means caching disabled / not computable.
-- `noopCacheShaper` — always returns null. Used when `policy.promptCaching.enabled === false`.
-- `weavePromptCachingShaper(config: PromptCachingConfig)` — three key strategies:
-  - `'static'` → `static:v{version|'1'}` (single global lane — coldest cache, max sharing)
-  - `'role'` (default) → `role:{role|'default'}:v{version|'1'}` (per-role lane — best balance)
-  - `'role+phase'` → `role:{role}:phase:{phase}:v{version}` (per-role per-phase lane — finest granularity, used by `balanced`/`performance`/`max` tier presets)
-- `wrapModelWithCacheHints(inner, shaper, { resolveContext })` — provider-aware wrapper. Per call:
-  - If `shaper.compute()` returns null OR `resolveContext()` returns null → request forwarded unchanged.
-  - For `inner.info.provider === 'anthropic'`: rewrites the `system` message into `metadata.systemPrompt` as a content-block array `[{ type:'text', text, cache_control:{ type:'ephemeral', ttl? } }]`, and **drops the system message from `messages`** (Anthropic adapter reads the prefix from `metadata.systemPrompt`). Stamps `metadata.promptCacheKey` for observability.
-  - For all other providers: stamps `metadata.promptCacheKey` only; `messages` array untouched. The OpenAI provider reads this and forwards as the `prompt_cache_key` body field.
-  - Errors thrown by `shaper.compute()` are swallowed (logged to stderr) and request is forwarded unchanged.
-- `weaveCostGovernor(policy)` now exposes a `cacheShaper: CacheShaper` slot on the bundle (in addition to the existing `promptShaper` for L4 section-gating, which remains a no-op in Phase 3). When `resolved.promptCaching.enabled` is true, the bundle's `cacheShaper = weavePromptCachingShaper(resolved.promptCaching)`; else `noopCacheShaper`.
-- Reusability invariant preserved: package imports only from `@weaveintel/core`. **Use `Message` from `@weaveintel/core`, NOT `StructuredPromptMessage`** — the latter excludes the `'tool'` role and breaks tsc when typing the messages array post-rewrite.
-
-### OpenAI provider integration (`@weaveintel/provider-openai`)
-- Both `generate()` and `stream()` read `(request.metadata as Record<string, unknown> | undefined)?.['promptCacheKey']` and, when a non-empty string, set `body['prompt_cache_key']` on the outgoing chat-completions request. Zero coupling to cost-governor — the provider just forwards a metadata field.
-- OpenAI's auto-cache requires the cached prefix to be **≥ 1024 tokens** to take effect. Operators bear responsibility for prompt sizing; the shaper is a no-op for short prompts.
-
-### Anthropic provider integration
-- No provider change needed in Phase 3. The existing Anthropic adapter already reads `metadata.systemPrompt` content blocks (with `cache_control` blocks honoured natively per Anthropic's prompt-caching API). The wrapper produces the right shape.
-
-### GeneWeave wiring (reference impl)
-- `seedDefaultCostPolicies()` (called at the end of `seedDefaultData()` in `apps/geneweave/src/db-sqlite.ts`) inserts 4 idempotent rows into `cost_policies` via `INSERT OR IGNORE`: keys `economy`, `balanced`, `performance`, `max`, each with `tier` matching the key, `levers_json='{}'` (empty override → use tier preset), `enabled=1`. Stable UUIDs `01970000-c057-7000-8000-00000000000{1-4}` so re-seeds are no-ops.
-- **`cachingModelResolver` composing pattern** (duplicated identically in both `apps/geneweave/src/live-agents/generic-supervisor-boot.ts` and `apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts`): builds a `ModelResolver` that wraps the base resolver — calls `inner.resolve(ctx)`, then `await resolveCostGovernorBundle(cachedCostPolicyResolver, { ...(meshId?{meshId}:{}), ...(agentId?{agentId}:{}) })`, then if `bundle.policy.promptCaching.enabled` returns `wrapModelWithCacheHints(model, bundle.cacheShaper, { resolveContext: () => ({ provider: model.info.provider, modelId: model.info.modelId, role: ctx.role, ...(meshId?{meshId}:{}), ...(agentId?{agentId}:{}) }) })`. Errors during cost-policy resolution fall through to the unwrapped model — caching is never load-bearing.
-- In kaggle this layer sits **on top of** the existing cost-ledger model resolver (`wrapped.modelResolver`) so usage costs are still recorded under the cache-hinted call.
-- `apps/geneweave/src/admin/api/cost-policies.ts` already exposes the seeded rows via `GET /api/admin/cost-policies`. No new admin route is needed for Phase 3.
-
-### Patterns + gotchas (verified during Phase 3 build)
-- **Use `Message` not `StructuredPromptMessage`** — `'tool'` role messages break the latter (TS2322).
-- **`ModelInfo.modelId` not `.id`** — `ModelInfo` exposes `provider` and `modelId`. Burned a tsc cycle on `m.info.id`.
-- **Watch for duplicate `Model` import in kaggle/heartbeat-runner.ts** — `Model` is already imported elsewhere; do not re-import when adding cost-governor wiring (TS2300).
-- **The strategist's `prepare()` already separates static (system prompt) from dynamic (user goal)** — no reorder needed for prefix stability. When adding new prepare() recipes, keep all dynamic content (timestamps, recent intel, run-specific facts) in the user message, NOT the system message.
-- Same dist-staleness rule as every other phase: `apps/geneweave/package.json` has `"main": "./dist/index.js"`. After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the server, or the change has zero runtime effect.
-
-### Reference
-- Canonical example: `examples/104-prompt-caching.ts` — pure in-memory, demonstrates all 3 key strategies + OpenAI/Anthropic provider modes + tier-preset bundle resolution. Runs with no DB, no LLM, no external services.
-- Tests: `packages/cost-governor/src/cache-shaper.test.ts` (13 tests). Total cost-governor suite: 41 tests pass.
-- E2E script: `scripts/e2e-phase3-prompt-caching.mjs` — 26 assertions covering seed, list, bind via `capability_policy_bindings` with `policy_kind='cost_policy'`. All pass against `http://localhost:3500`.
-- Plan: `docs/COST_CONTROL_PLAN.md` §5.3 (prompt caching lever).
-
-## Cost Governor Platform (Phase 4 — Model Cascade, complete)
-
-Adds the L1 (model cascade) lever as a reusable, provider-agnostic resolver layer in `@weaveintel/cost-governor`. Reuses the Phase 1+2 `cost_policies` table — the cascade config lives in `levers_json -> modelCascade`. No new tables.
-
-### Package surface (`@weaveintel/cost-governor`)
-- `RunCostStateTracker` — per-run signal accumulator. In-memory `Map<runId, RunCostState>` with optional TTL eviction (`new RunCostStateTracker({ ttlMs })`). Methods: `get`, `ensure`, `recordToolCall(runId, { ok })`, `recordJsonParse(runId, { ok })`, `setCurrentStep(runId, kind)`, `setIntelScore(runId, score)`, `noteResolve(runId)`, `forget(runId)`, `size()`. State shape: `{ toolCallFailedCount, jsonParseFailedCount, currentStepKind?, intelScore?, resolveCount, lastUpdatedAt }`.
-- `decideCascadeModel(config, state, ctx) → CascadeDecision` — pure decision. Returns `{ choice: 'pass-through' }` when config is missing/invalid; `{ choice: 'cheap', modelRef }` by default; `{ choice: 'expensive', triggerRule, modelRef }` when any escalation rule fires.
-- `evaluateEscalationRule(rule, state) → boolean` — pure predicate. Supported rule kinds: `tool_call_failed_count` (threshold), `json_parse_failed_count` (threshold), `step_kind` (stepKinds[] — matched against `ctx.stepKind`), `intel_score_below` (threshold — matched against `state.intelScore`).
-- `weaveModelCascadeResolver({ base, resolveConfig, loadModel, tracker?, log? })` — wraps any base `ModelResolverLike`. Per call: `resolveConfig(ctx)` returns `ModelCascadeConfig | null` → `decideCascadeModel(...)` → on `pass-through` returns `base.resolve(ctx)`; on `cheap`/`expensive` calls `loadModel(modelRef)`. **All errors from resolveConfig and loadModel are caught and treated as `pass-through`** — cascade is NEVER load-bearing.
-- `wrapAuditEmitterWithCascadeTracker(inner, tracker, opts)` — drop-in `ToolAuditEmitter` wrapper that forwards every event to `inner` then increments the tracker on `error` outcomes (configurable via `failureOutcomes`). Uses `opts.resolveRunId(event)` to map audit events to tracker keys (typical: `(e) => e.chatId ?? null` because `chatId === agent.id` for live-agent tool calls).
-- All five symbols re-exported from `packages/cost-governor/src/index.ts`. Reusability invariant preserved: package depends only on `@weaveintel/core` + `@weaveintel/tools`.
-
-### `ModelCascadeConfig` shape (stored in `cost_policies.levers_json -> modelCascade`)
-```json
-{
-  "modelCascade": {
-    "cheap":     { "provider": "openai", "modelId": "gpt-4o-mini" },
-    "expensive": { "provider": "openai", "modelId": "gpt-4o" },
-    "escalateOn": [
-      { "kind": "tool_call_failed_count", "threshold": 2 },
-      { "kind": "json_parse_failed_count", "threshold": 2 },
-      { "kind": "step_kind", "stepKinds": ["final_answer", "submit"] },
-      { "kind": "intel_score_below", "threshold": 0.5 }
-    ]
-  }
-}
-```
-
-### Tier preset defaults
-- `TIER_PRESETS.balanced.modelCascade.escalateOn` ships three default rules (`tool_call_failed_count >= 2`, `json_parse_failed_count >= 2`, `step_kind in ['final_answer','submit']`). Operators inherit these by setting `tier: 'balanced'` and leaving `levers_json.modelCascade` unset (or with only partial overrides). Set explicit `modelCascade.cheap`/`expensive` ModelRefs in `levers_json` to activate cascade for that policy — without them the cascade resolver falls through to base.
-- **No seed change** — `seedDefaultCostPolicies()` continues to seed empty `levers_json='{}'`. Operators set ModelRefs explicitly per deployment via the admin UI; the package never assumes which models are available in a tenant.
-
-### GeneWeave wiring (reference impl)
-- **Resolver chain order is mandatory**: `caching → cascade → base` for the generic supervisor; `caching → cascade → cost-ledger → base` for kaggle (the cost-ledger sits between cascade and base so escalated tick costs are still recorded).
-- **One `RunCostStateTracker` per supervisor**, not per tick. Constructed with `new RunCostStateTracker({ ttlMs: 60 * 60 * 1000 })`. State is keyed by **agent.id used as synthetic runId** because the live-agents runtime does not stamp a per-tick `runId` by default. The supervisor's `innerResolver` synthesizes `runId = ctx.runId ?? ctx.agentId` before delegating to `cascadeModelResolver`.
-- **Audit emitter must be wrapped** so the cascade tracker sees real-world tool failures: `wrapAuditEmitterWithCascadeTracker(inner, cascadeTracker, { resolveRunId: (e) => e.chatId ?? null })`. In kaggle the wrapped emitter sits on top of the cost-ledger emitter so the chain is `cascade-tracker → cost-ledger → DbToolAuditEmitter`.
-- Both `apps/geneweave/src/live-agents/generic-supervisor-boot.ts` and `apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts` follow the identical wiring pattern. Both files create the tracker once at supervisor construction and inject it into both the cascade resolver (via `tracker` opt) and the audit-emitter wrapper (via the wrapped `weaveDbLiveAgentPolicy.auditEmitter`).
-- **No new admin route** — existing `/api/admin/cost-policies` already accepts arbitrary `levers_json`. The cascade config round-trips through the existing CRUD endpoints. E2E verified: 18 assertions in `scripts/e2e-phase4-model-cascade.mjs`.
-
-### Patterns + gotchas (verified during Phase 4 build)
-- **Cascade is never load-bearing.** Every error path inside `weaveModelCascadeResolver` (config resolve throws, `loadModel` throws, ModelRef invalid) falls back to `base.resolve(ctx)`. This is a **package invariant** — do not add throwing branches inside the resolver. Tests assert it explicitly.
-- **`runId` is the consumer's responsibility.** The package does not stamp a runId. Live-agents callers MUST synthesize `runId = ctx.runId ?? ctx.agentId` before calling `cascadeModelResolver.resolve(...)`. Without a runId the tracker silently no-ops (`get(undefined) → null`) and cascade always returns `cheap` (or `pass-through` if no config).
-- **`chatId === agent.id` for live-agent tool calls** — the default `resolveRunId: (e) => e.chatId ?? null` works because `weaveDbLiveAgentPolicy` sets `defaultResolutionContext.chatId = agent.id`. If a future capability sets `chatId` to a real chat session id, this mapping breaks and the audit-emitter wrap stops feeding the cascade tracker. Add a custom `resolveRunId` in that case.
-- **Use `ToolAuditEvent` from `@weaveintel/core/tool-lifecycle`** (NOT `@weaveintel/tools`). Audit outcomes: `'success' | 'error' | 'denied' | 'denied_approval' | 'timeout' | 'circuit_open' | 'simulation'`. Default `failureOutcomes` for the wrapper is `new Set(['error'])` — pass a custom set to also escalate on `timeout`/`denied`.
-- **Cascade decision is deterministic and pure.** `decideCascadeModel(config, state, ctx)` has no side effects. Compose it directly in tests without touching the tracker.
-- Same dist-staleness rule as every other phase: `apps/geneweave/package.json` has `"main": "./dist/index.js"`. After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the server.
-
-### Reference
-- Canonical example: `examples/105-model-cascade.ts` — pure in-memory, demonstrates `evaluateEscalationRule`, `decideCascadeModel`, `RunCostStateTracker`, `weaveModelCascadeResolver` (incl. graceful degradation when config throws), and the audit-emitter wrap closing the loop. ~150 lines, no DB, no LLM, no external services.
-- Tests: `packages/cost-governor/src/model-cascade.test.ts` (29 tests). Total cost-governor suite: 70 tests pass.
-- E2E script: `scripts/e2e-phase4-model-cascade.mjs` — 18 assertions covering create / GET roundtrip / PUT update / DELETE of a cost policy with `modelCascade` levers. All pass against `http://localhost:3500`.
-- Plan: `docs/COST_CONTROL_PLAN.md` §5.1 (model cascade lever).
-
-## Cost Governor Platform (Phase 5 — Tool Subset, complete)
-
-Adds the L3 (dynamic tool subset) lever as a reusable, provider-agnostic filter layer in `@weaveintel/cost-governor`. Reuses Phase 1+2 `cost_policies` (config in `levers_json -> toolSubset`) — no new tables. Cuts per-call token cost by exposing only the tool subset relevant to the agent's current phase/intent.
-
-### Package surface (`@weaveintel/cost-governor`)
-- `decideToolSubset(config, availableKeys, ctx) → { filtered: boolean, kept: readonly string[], reason: string }` — pure decision. `filtered: false` means pass-through (full set).
-- `weaveToolSubsetFilter(config) → ToolFilter` — returns `(toolKeys, ctx) => Promise<readonly string[] | null>`. Returning `null` signals pass-through; consumers must keep the full registry.
-- `applyToolFilterToRegistry(source, filter, ctx, target?)` — narrows a live `ToolRegistry` to the filtered subset; copies into a fresh `weaveToolRegistry()` if `target` omitted.
-- `bundle.toolFilter` exposed by `weaveCostGovernor(policy)` (sourced from tier preset or explicit override).
-- All four symbols re-exported from `packages/cost-governor/src/index.ts`. Reusability invariant preserved: package depends only on `@weaveintel/core` + `@weaveintel/tools`.
-
-### `ToolSubsetConfig` shape (in `cost_policies.levers_json -> toolSubset`)
-```json
-{
-  "toolSubset": {
-    "strategy": "phase",
-    "phases": {
-      "discovery":   ["kaggle_list_competitions", "web_search"],
-      "kernel":      ["kaggle_push_kernel", "kaggle_wait_for_kernel"],
-      "improvement": ["kaggle_push_kernel", "kaggle_get_kernel_output"]
-    }
-  }
-}
-```
-Strategies: `'all'` (pass-through), `'phase'` (lookup `ctx.phase` in `phases` map). `'intent-rag'` reserved for a later phase.
-
-### Tier preset behavior
-- `tier: 'max'` → `strategy: 'all'` → pass-through (full registry, max quality).
-- `tier: 'balanced' | 'economy' | 'performance'` → `strategy: 'phase'` with empty default `phases` map. Operators populate `phases` per deployment via `levers_json`. Without a `phases` entry for the requested ctx.phase, the filter passes through (graceful degradation, never load-bearing).
-
-### Graceful-degradation invariant (HARD)
-The tool filter is **never load-bearing**. Pass-through happens on: null/missing config, `strategy: 'all'`, missing `ctx.phase`, no `phases[ctx.phase]` entry, zero overlap between requested and available keys, OR any thrown error. Consumers MUST keep the original full registry on `null` return. Tests assert every branch.
-
-### GeneWeave wiring (kaggle-only — reference impl)
-- `KaggleStrategistAgentOptions.costToolFilter?: (ctx: { meshId, agentId?, toolKeys }) => Promise<readonly string[] | null>` — graceful: errors are logged and swallowed; the strategist falls back to the full registry.
-- `apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts` builds the closure that:
-  1. Finds the active running competition_run for `ctx.meshId` via `db.listKglCompetitionRuns({ status: 'running' })`.
-  2. Counts `kgl_run_event` rows with `kind='kernel_pushed'` via `db.listKglRunEvents(runId, { limit: 500 })` (**positional signature** — NOT object form).
-  3. Derives phase: `0 → 'discovery'`, `1 → 'kernel'`, `≥2 → 'improvement'`.
-  4. Calls `resolveCostGovernorBundle(cachedCostPolicyResolver, { meshId, agentId })`.
-  5. Calls `bundle.toolFilter(ctx.toolKeys, { phase, agentId, meshId, agentRole: 'strategist' })`.
-- Strategist-agent.ts then narrows the live registry by building a fresh `createToolRegistry()` containing only kept tools (re-registering each tool by key).
-- `apps/geneweave/src/live-agents/generic-supervisor-boot.ts` is **intentionally NOT wired** — the generic supervisor has no domain-specific phase concept. Add per-domain wiring as new domains adopt Phase 5.
-
-### Seed data
-`seedDefaultCostPolicies()` in `apps/geneweave/src/db-sqlite.ts` inserts a 5th idempotent row `kaggle_phase_subset` (stable UUID `019700000-c057-7000-8000-000000000005`) with `tier='balanced'` and `levers_json` containing `toolSubset.phases.{discovery,kernel,improvement}`. The 4 tier-key seed rows (`economy`/`balanced`/`performance`/`max`) keep `levers_json='{}'` and inherit tier-preset behavior.
-
-### Patterns + gotchas (verified during Phase 5 build)
-- **Core barrel aliases:** Bare names `createToolRegistry` / `defineTool` are NOT exported from `@weaveintel/core`. Use `weaveToolRegistry as createToolRegistry, weaveTool as defineTool`.
-- **`db.listKglRunEvents` is positional:** `(runId: string, opts?: { afterId?, limit? })`. Calling it with `{ runId, limit }` returns the wrong rows.
-- **Tool result shape in tests:** `execute: async () => ({ content: 'ok' })` (NOT `{ ok: true }` — the latter fails type-check).
-- **Same dist-staleness rule as every prior phase:** `apps/geneweave/package.json` has `"main": "./dist/index.js"`. After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the server, or the change has zero runtime effect. Burned a debug cycle: the seed change appeared in source but not in DB until the dist was rebuilt.
-- **Reusability:** `@weaveintel/cost-governor` imports only from `@weaveintel/core` + `@weaveintel/tools`. NO geneweave/DB imports. Consumers wire their own `CostPolicyResolver`.
-
-### Reference
-- Canonical example: `examples/106-tool-subset.ts` — pure in-memory, demonstrates `decideToolSubset` across phases, all 4 pass-through guarantees (null config, strategy=`all`, no phase ctx, zero overlap), `weaveToolSubsetFilter` factory, `applyToolFilterToRegistry` narrowing a live registry, `weaveCostGovernor` bundle integration, and tier=`max` pass-through. ~150 lines, no DB, no LLM, no external services.
-- Tests: `packages/cost-governor/src/tool-subset.test.ts` (14 tests). All cost-governor unit tests pass (excluding pre-existing `cache-shaper.test.ts` Model-interface drift).
-- E2E script: `scripts/e2e-phase5-tool-subset.mjs` — 24 assertions covering seed presence (`kaggle_phase_subset`), POST/GET roundtrip of `toolSubset.strategy` + `phases`, PUT updates phase map, DELETE + 404. All pass against `http://localhost:3500`.
-- Plan: `docs/COST_CONTROL_PLAN.md` §5.3 (tool subset lever).
-
-## Cost Governor Platform (Phase 6 — Intel Gating + History Compaction, complete)
-
-Adds the L4 (intel-gated prompt sections) and L5 (history compaction) levers as reusable, provider-agnostic shapers in `@weaveintel/cost-governor`. Reuses the Phase 1+2 `cost_policies` table — both configs live in `levers_json -> intelGating` and `levers_json -> historyCompaction`. No new tables.
-
-### Package surface (`@weaveintel/cost-governor`)
-- `decideIntelGating(config, score) → IntelGatingDecision` — pure decision. `IntelGatingDecision { keepIntelHeader, keepSnippets, score, reason }`. Score `null` or config `null/disabled` → keep both (cold-start safety).
-- `IntelScoreProvider.compute(ctx) → Promise<IntelScore | null> | IntelScore | null`. Score in `[0, 1]`. Domain-specific (kaggle, scientific-validation, etc.) — package never computes the score.
-- `weaveIntelGate(config, provider, opts?) → CostPromptShaper` — returns `(ctx) => Promise<PromptShape | null>`. `null` = pass-through (keep all sections). Throws are caught and treated as `score=null` (graceful, never load-bearing).
-- `shouldKeepSection(shape: PromptShape | null, sectionKey: string) → boolean` — consumer-side check inside `prepare()`. `null` shape keeps everything.
-- `INTEL_HEADER_SECTION = 'intel_header'`, `INTEL_SNIPPETS_SECTION = 'intel_snippets'` — conventional section keys for the gate's decision. Apps map these to their own prepare() sections.
-- `decideCompaction(history, config, ctx, summarizer?) → Promise<CompactedHistory>` — pure decision. Strategies: `'none'` (pass-through), `'sliding'` (keep last `windowTurns`), `'summary'` (sliding + recap), `'hierarchical'` (reserved → pass-through).
-- `weaveHistoryCompactor(config, summarizer?, opts?) → CostHistoryCompactor` — bundle slot. Errors are caught; original history is returned.
-- `HistorySummarizer = (dropped, ctx) => Promise<string> | string` — consumer-injected. Errors → no summary, original history returned.
-- **Hard invariants** (all asserted in tests): (a) first system message always preserved; (b) last 2 messages always preserved (MIN_PRESERVED_TAIL=2); (c) compactor + gate are never load-bearing.
-- `weaveCostGovernor(policy, opts?: CostGovernorOptions)` — `opts` extended: `intelScoreProvider?`, `historySummarizer?`, `log?`. Bundle slots `promptShaper` / `historyCompactor` flip on real impls when policy enables them AND the matching opt is supplied. Without `intelScoreProvider`, L4 stays a no-op even if policy enables it (graceful — domain-specific score source required).
-- All Phase 6 symbols re-exported from `packages/cost-governor/src/index.ts`. **Reusability invariant preserved**: package depends only on `@weaveintel/core` + `@weaveintel/tools`. NO geneweave/DB imports.
-
-### Tier preset defaults
-- `economy` — intelGating `{enabled:true, low:0.3, high:0.6}` + historyCompaction `{strategy:'sliding', windowTurns:8}`.
-- `balanced` — intelGating `{enabled:true, low:0.4, high:0.7}` + historyCompaction `{strategy:'sliding', windowTurns:12}`.
-- `performance` — intelGating `{enabled:true, low:0.5, high:0.8}` + historyCompaction `{strategy:'sliding', windowTurns:20}`.
-- `max` — intelGating `{enabled:false}` + historyCompaction `{strategy:'none'}` (max quality, max cost).
-
-### `IntelGatingConfig` / `HistoryCompactionConfig` shape (in `cost_policies.levers_json`)
-```json
-{
-  "intelGating": {
-    "enabled": true,
-    "thresholds": { "low": 0.4, "high": 0.7 }
-  },
-  "historyCompaction": {
-    "strategy": "sliding",
-    "windowTurns": 12
-  }
-}
-```
-
-### GeneWeave wiring (kaggle-only — reference impl)
-- `KaggleRoleHandlersOptions` (in `apps/geneweave/src/live-agents/kaggle/handlers/_shared.ts`) gained two slots:
-  - `intelGate?: (ctx: { meshId, agentId? }) => Promise<PromptShape | null>` — graceful: errors are logged + swallowed inside the strategist; falls back to "keep everything".
-  - `historyCompactor?: (history, ctx) => Promise<ReadonlyArray<HistoryItem>>` — graceful: errors → original history.
-- `apps/geneweave/src/cost/db-intel-score-provider.ts` (`createDbIntelScoreProvider({ db, tenantId?, log? })`) computes a 5-signal aggregate (each worth 0.2): `kgl_competition_runs` row found, objective set, title set, has `step_completed` event, has `kernel_pushed` event, step count ≥ 3. Uses **positional** `db.listKglRunEvents(runId, opts)`.
-- `apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts` constructs **one** `dbIntelScoreProvider` per supervisor and an `intelGate` closure that:
-  1. Calls `resolveCostGovernorBundle(cachedCostPolicyResolver, { meshId, agentId? })`.
-  2. Returns `null` (pass-through) when `!bundle.policy.intelGating.enabled`.
-  3. Otherwise calls `weaveIntelGate(bundle.policy.intelGating, dbIntelScoreProvider)({meshId, agentId?})`.
-- `intelGate` is forwarded into `registerKaggleHandlerKinds(...)` opts. `handler-kinds.ts` already spreads `sharedCtx = buildSharedCtx(opts)` so all handlers see it.
-- `apps/geneweave/src/live-agents/kaggle/strategist-agent.ts` consumes the gate: calls `intelGate({meshId, agentId?})` in try/catch, derives `keepIntelHeader/keepIntelSnippets` via `shouldKeepSection`, conditionally appends `CV_SCORES_ADDENDUM` only when keepIntelHeader, and truncates inbound body to 500 chars + marker `[…intel-snippets truncated by cost-governor intelGate…]` when `!keepIntelSnippets`.
-- `apps/geneweave/src/live-agents/generic-supervisor-boot.ts` is **intentionally NOT wired** — the generic supervisor has no domain-specific intel-score signals. Add per-domain wiring as new domains adopt Phase 6.
-- `historyCompactor` slot is declared on `KaggleRoleHandlersOptions` but **not yet consumed** in `strategist-agent.ts` (the strategist's history shape is internal to the ReAct loop). Wire it as a follow-up if a future role needs it.
-
-### Seed data
-`seedDefaultCostPolicies()` in `apps/geneweave/src/db-sqlite.ts` inserts a 6th idempotent row `kaggle_intel_aware` (stable UUID `019700000-c057-7000-8000-000000000006`) with `tier='balanced'` and `levers_json = { intelGating: { enabled: true, thresholds: { low: 0.4, high: 0.7 } }, historyCompaction: { strategy: 'sliding', windowTurns: 12 } }`.
-
-### Patterns + gotchas (verified during Phase 6 build)
-- **The package owns the *decision*; consumers own the *score*.** Every domain wires its own `IntelScoreProvider` — no built-in scorer ships with the package.
-- **`PromptShape | null` is the consumer contract.** `null` = no shape change; consumers must keep all sections. Only the internal `IntelGatingDecision` carries the keep/drop booleans + reason; apps consume `PromptShape` only via `shouldKeepSection`.
-- **Intel-score provider MUST NOT throw — but the gate catches anyway** (defence in depth). `provider.compute` throws → score treated as `null` → keep everything.
-- **History compactor preserves first system message AND last 2 messages always.** Even with `windowTurns: 0`, the compactor keeps these. Tests assert it.
-- **Strategist's prepare() truncates inbound body, not the system prompt.** This keeps the cached prefix stable (Phase 3 caching invariant) while still cutting tokens when intel-snippets should be dropped.
-- **Same dist-staleness rule as every prior phase**: `apps/geneweave/package.json` has `"main": "./dist/index.js"`. After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the server.
-- **Pre-existing Phase 3 `cache-shaper.test.ts` drift** (Model interface evolution) was repaired during this phase: added `hasCapability(_id) => false` to the Model stub, replaced legacy `{message, usage, finishReason}` with the current `ModelResponse` shape `{id, content, model, usage, finishReason}`, removed non-existent `runId` from `ExecutionContext` literal, dropped `ttl` from `weavePromptCachingShaper` config (TTL belongs on the resulting hint, not config). Without these fixes `npx tsc -b apps/geneweave` could not rebuild dist (cost-governor was a transitive dep).
-
-### Reference
-- Canonical example: `examples/107-intel-history.ts` — pure in-memory. Demonstrates `decideIntelGating` decision table, `weaveIntelGate` returning `PromptShape | null`, `shouldKeepSection` consumer helper, `decideCompaction` sliding + summary strategies, end-to-end `weaveCostGovernor(balanced)` with both levers wired, `tier=max` no-op, and graceful degradation when provider throws. ~110 lines, no DB, no LLM, no external services.
-- Tests: `packages/cost-governor/src/intel-gating.test.ts` (21) + `history-compactor.test.ts` (13). All 118 cost-governor unit tests pass.
-- E2E script: `scripts/e2e-phase6-intel-history.mjs` — 26 assertions covering seed presence (`kaggle_intel_aware`), POST/GET roundtrip of `intelGating.thresholds` + `historyCompaction.{strategy,windowTurns}`, PUT updates (disable intel + switch strategy), DELETE + 404. All pass against `http://localhost:3500`.
-- Plan: `docs/COST_CONTROL_PLAN.md` §6 (intel gating + history compaction levers).
-
-## Cost Governor Platform (Phase 7 — maxSteps + Reasoning Effort + Output Truncation + Budget Gate, complete)
-
-Adds the L6 (maxStepsCap), L7 (reasoningEffort), L8 (toolOutputTruncation), L9 (budgetGate) levers as reusable, provider-agnostic primitives in `@weaveintel/cost-governor`. Reuses Phase 1+2 `cost_policies` table — all 4 lever configs live in `levers_json`. No new tables.
-
-### Package surface (`@weaveintel/cost-governor`)
-- `decideMaxSteps(policy, requested?) → number` — clamps requested step count to `policy.maxStepsCap`. Returns `requested` when ≤ cap, else `cap`. `decideMaxStepsDetailed(...)` returns `{ steps, capped, cap, requested }` for observability.
-- `wrapModelWithReasoningEffort(inner, { resolveEffort })` and `wrapModelWithStaticReasoningEffort(inner, effort)` — Model wrappers that stamp `request.metadata.reasoningEffort` (`'low'|'medium'|'high'`) on every `generate`/`stream` call. Provider adapters (OpenAI) read this and forward as `reasoning_effort` body field. **Argument order on wrapped Model: `generate(ctx, request)` — `ctx` first, `request` second.** Burned a debug cycle calling them reversed.
-- `weaveToolOutputTruncator(config) → (text: string) => { text, truncated, originalBytes }` — UTF-8-safe byte-cap truncator for tool outputs. `wrapToolRegistryWithOutputTruncation(source, config)` returns a fresh registry whose tool results are truncated.
-- `weaveBudgetGate({ ledger, ceilingUsd, runIdResolver, log?, onExceed?, throwOnExceed? }) → CostBudgetGate { check(ctx) }` — reads `ledger.total(runId)`; throws `CostCeilingExceededError` when total > ceiling. Calls `onExceed` BEFORE throwing. `onExceed` errors are swallowed.
-- `weaveCostLedgerFromBreakdown({ readBreakdown }) → CostLedger` — adapter for apps that persist via `CostLedgerSink` but need a `total(runId)` reader for the gate. `record()` is no-op; `total()` returns `bd.totalUsd ?? 0`; errors → 0 (graceful).
-- `CostCeilingExceededError(runId, costUsd, ceilingUsd)` — properties are **`runId`, `costUsd`, `ceilingUsd`** (NOT `totalUsd`). Always construct in this order.
-- `weaveCostGovernor(policy, opts?: { costLedger?, runIdResolver?, ... })` — bundle slots `maxStepsCap`, `reasoningEffortWrapper`, `toolOutputTruncator`, `budgetGate` flip on real impls when policy enables them AND matching opts are supplied. Without `costLedger`+`runIdResolver`, the budget gate stays a no-op (graceful — domain-specific ledger required).
-
-### Tier preset defaults (Phase 7 fields)
-| tier | maxStepsCap | reasoningEffort | toolOutputTruncation | budgetCeilingUsd |
-|------|-------------|-----------------|----------------------|-------------------|
-| economy | 20 | low | `{ maxBytesPerTurn: 2048, keepLastN: 2 }` | 1.5 |
-| balanced | 40 | medium | `{ maxBytesPerTurn: 4096, keepLastN: 3 }` | 5 |
-| performance | 60 | medium | `{ maxBytesPerTurn: 8192, keepLastN: 5 }` | 15 |
-| max | 80 | high | `{}` (disabled) | 50 |
-
-### Critical invariants
-- **`CostCeilingExceededError` field names are `costUsd` and `ceilingUsd`** — NOT `totalUsd`. Tests and example access these properties directly. Burned a debug cycle when stub used `totalUsd`.
-- **Disabled budget gate fast path is SYNC.** When `ceilingUsd <= 0` OR `NaN`, `weaveBudgetGate` returns `{ check: () => undefined }` (sync, returns undefined directly — NOT a Promise). Tests for this path MUST use `expect(g.check(ctx)).toBeUndefined()` — DO NOT use `await expect(...).resolves` (vitest throws "You must provide a Promise to expect()").
-- **Model wrapper invariant**: every Model wrapper must forward `inner.capabilities`, bind `inner.hasCapability`, and conditional-spread `stream?` (`...(inner.stream ? { stream(...){...} } : {})`). Required by `exactOptionalPropertyTypes`.
-- **Reusability invariant**: `@weaveintel/cost-governor` imports only from `@weaveintel/core` + `@weaveintel/tools`. NO geneweave/DB imports. The "DB-driven" property is a property of the geneweave reference impl, not the package.
-- **Boot-time vs per-tick resolution**: kaggle resolves the cost-governor bundle ONCE at supervisor construction with empty resolution context, then passes the four scalar Phase 7 levers (`maxStepsCap`, `reasoningEffortWrapper`, `toolOutputTruncator`, `budgetGate`) into `registerKaggleHandlerKinds`. Per-agent variation requires creating a `capability_policy_bindings` row with `policy_kind='cost_policy'` and restarting the supervisor. Per-tick re-resolution is a future optimization.
-- **runId convention**: live-agents handlers synthesize `runId = ctx.runId ?? ctx.agentId` before calling the budget gate. Without a runId the gate skips silently.
-
-### GeneWeave wiring (kaggle-only — reference impl)
-- `KaggleRoleHandlersOptions` (in `apps/geneweave/src/live-agents/kaggle/handlers/_shared.ts`) gained 4 Phase 7 slots: `maxStepsCap?`, `reasoningEffortWrapper?`, `toolOutputTruncator?`, `budgetGate?`. All optional; `handler-kinds.ts` `buildSharedCtx` auto-flows them via spread.
-- `apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts` boot-time block: calls `resolveCostGovernorBundle(cachedCostPolicyResolver, {})` once, then passes the four scalar values into `registerKaggleHandlerKinds(...)` via 4 conditional spreads (`...(bundle.maxStepsCap ? { maxStepsCap: bundle.maxStepsCap } : {})`).
-- `apps/geneweave/src/live-agents/kaggle/strategist-agent.ts`: applies all 4 levers — clamps `maxSteps` via `decideMaxSteps`, wraps the model via `wrapModelWithStaticReasoningEffort` if `reasoningEffortWrapper` slot is present, manually wraps each tool's `execute` to truncate via `toolOutputTruncator` callable, and wraps the end of the handler in a try/catch for `CostCeilingExceededError` returning `{ completed: true, summaryProse: 'Run halted: cost ceiling exceeded ($X > $Y)...' }`.
-- The generic supervisor (`apps/geneweave/src/live-agents/generic-supervisor-boot.ts`) is **intentionally NOT wired** for Phase 7 — the generic supervisor has no canonical "step count" or "tool truncation" semantics. Add per-domain wiring as new domains adopt Phase 7.
-
-### Seed data
-`seedDefaultCostPolicies()` in `apps/geneweave/src/db-sqlite.ts` inserts a 7th idempotent row `kaggle_full_governor` (stable UUID `019700000-c057-7000-8000-000000000007`) with `tier='balanced'` and `levers_json = { maxStepsCap: 30, reasoningEffort: 'low', toolOutputTruncation: { maxBytesPerTurn: 2048, keepLastN: 3 }, budgetCeilingUsd: 2.5 }`.
-
-### OpenAI provider integration
-`packages/provider-openai/src/openai.ts` `generate()` and `stream()` read `(request.metadata as Record<string, unknown> | undefined)?.['reasoningEffort']` and, when one of `'low' | 'medium' | 'high'`, set `body['reasoning_effort']` on the outgoing chat-completions request. Zero coupling to cost-governor — the provider just forwards a metadata field. Same provider-agnostic pattern as Phase 3 `prompt_cache_key`.
-
-### Patterns + gotchas
-- **`generate(ctx, request)` argument order on Model interface** — `ctx` first, `request` second. Wrappers must preserve this order.
-- **Same dist-staleness rule as every prior phase**: `apps/geneweave/package.json` has `"main": "./dist/index.js"`. After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the server.
-- E2E auth pattern reused from Phase 5/6: `set +H`; promote with `sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='X';"`; CSRF token in login response body as `csrfToken`; send as `X-CSRF-Token` header on mutations.
-
-### Reference
-- Canonical example: `examples/108-budget-governor.ts` — pure in-memory, no DB, no LLM. Demonstrates `decideMaxSteps`, `wrapModelWithStaticReasoningEffort` (with correct `(ctx, request)` arg order), `weaveToolOutputTruncator`, `weaveBudgetGate` with stub ledger throwing `CostCeilingExceededError` (verifies `err.runId`, `err.costUsd`, `err.ceilingUsd`), `weaveCostLedgerFromBreakdown` adapter, end-to-end `weaveCostGovernor(economy)` bundle. ~100 lines.
-- Tests: `packages/cost-governor/src/{max-steps,reasoning-effort,output-truncation,budget-gate}.test.ts` (7+8+13+13 = 41 new). All 159 cost-governor unit tests pass.
-- E2E script: `scripts/e2e-phase7-budget-governor.mjs` — 27 assertions covering seed presence (`kaggle_full_governor`), POST/GET roundtrip of all 4 Phase 7 levers, PUT updates, DELETE + 404. All pass against `http://localhost:3500`.
-- Plan: `docs/COST_CONTROL_PLAN.md` §6 (maxSteps + reasoning + output truncation + budget gate levers).
-
-## Cost Governor Platform (Phase 8 — Intent-RAG Tool Retrieval, complete)
-
-Adds the L3 strategy upgrade `'intent-rag'` to `ToolSubsetConfig.strategy` — per-step top-K tool retrieval via cosine similarity between the agent's current goal text and pre-computed tool description embeddings. Sits alongside the Phase 5 `'phase'` strategy. Reuses `cost_policies` table — config in `levers_json -> toolSubset`. Adds one new table: `tool_embeddings` for the embedding cache.
-
-### Package surface (`@weaveintel/cost-governor`)
-- `Embedder` interface — `{ modelId, dimension, embed(texts) → Promise<number[][]> }`. Apps adapt their preferred provider (OpenAI, local, llamacpp) into this shape.
-- `EmbeddingStore` interface — `{ get(toolKey), getAll(), upsert(embedding) }`. Apps wire over SQLite/Postgres/Redis/in-memory.
-- `GoalResolver` — `(ctx) => string | null`. Apps decide what counts as "current intent" (recent inbound message, current step kind, etc.).
-- `ToolEmbedding` — `{ toolKey, modelId, dimension, vector, descriptionHash }`.
-- `IntentRagConfig` — `{ topK?, minSimilarity?, includeAlways? }`. Defaults: `topK=6`, `minSimilarity=0.15`, `includeAlways=[]`.
-- `cosineSimilarity(a, b)` — pure helper; returns 0 on length mismatch / zero norm (defensive — never throws).
-- `hashDescription(text)` — pure FNV-1a 64-bit hex hash (16 chars). No `crypto` dependency, runtime-agnostic. Used for change detection in the warmer.
-- `decideIntentRagSubset({ config, availableKeys, goalVector, toolEmbeddings }) → ToolSubsetDecision` — pure ranking. Returns `filtered: false` (pass-through) on no goal vector / empty embeddings / zero overlap.
-- `weaveIntentRagToolSubsetFilter({ config, embedder, embeddingStore, goalResolver, log? }) → CostToolFilter` — full filter factory. Returns `null` (pass-through) on any error path.
-- All 7 symbols re-exported from `packages/cost-governor/src/index.ts`. **Reusability invariant preserved**: package depends only on `@weaveintel/core` + `@weaveintel/tools`. NO geneweave/DB imports, NO network, NO `crypto`.
-
-### `ToolSubsetConfig` extended
-- `strategy: 'all' | 'phase' | 'intent-rag'` — Phase 8 adds `'intent-rag'`.
-- `topK?`, `minSimilarity?`, `includeAlways?` are read by both `weaveIntentRagToolSubsetFilter` and the pure decision helper.
-- The `'phase'` strategy is unchanged. Operators choose strategy per cost policy via `levers_json.toolSubset.strategy`.
-
-### Graceful-degradation invariant (HARD)
-Intent-RAG is **never load-bearing**. Pass-through (`null` from filter / `filtered: false` from decision) on: missing/malformed config, missing embedder, empty store, missing goal text, embedder throws, goalResolver throws, store throws, dimension mismatch, zero overlap between top-K keys and `availableKeys`, OR any unexpected error. Tests cover every branch.
-
-### GeneWeave wiring (kaggle-only — reference impl)
-- `tool_embeddings` table (UUID PK): `id, tool_key (UNIQUE), model_id, dimension, embedding (TEXT JSON), description_hash, created_at, updated_at`. Migration `m23ToolEmbeddings` in `db-sqlite-migrations.ts`. Index on `model_id`.
-- `ToolEmbeddingRow` in `apps/geneweave/src/db-types.ts`. 4 `DatabaseAdapter` methods: `upsertToolEmbedding`, `getToolEmbedding`, `listToolEmbeddings({ modelId? })`, `deleteToolEmbedding`. Implementations in `db-sqlite.ts`.
-- `apps/geneweave/src/cost/db-tool-embedding-store.ts` — `createDbToolEmbeddingStore({ db, modelId? })` returns `EmbeddingStore`. `get` filters by modelId. `upsert` mints `randomUUID()` + `JSON.stringify(vector)`. Corrupt JSON in DB → empty vector (decision helper treats as dimension mismatch, skips silently).
-- `apps/geneweave/src/cost/openai-embedder.ts` — `createOpenAIEmbedder({ modelId?, dimension?, apiKeyEnv? })` returns `Embedder | null`. Defaults: `text-embedding-3-small`, dim 1536, env var `OPENAI_API_KEY`. **Returns `null` when env var is absent** so boot wiring can skip warming gracefully. Uses `weaveOpenAIEmbeddingModel(...).embed(ctx, { input: texts })` under the hood.
-- `apps/geneweave/src/cost/warm-tool-embeddings.ts` — `warmToolEmbeddings({ embedder, store, log? })`. Walks `BUILTIN_TOOLS`, skips empty descriptions, hashes each, compares to existing row (must match BOTH `descriptionHash` AND `modelId`), batch-embeds new/changed in one call, validates `vec.length === embedder.dimension`, upserts. Returns `{ embedded, skipped, total }`. Best-effort — every failure is logged and swallowed.
-- Boot wiring (`apps/geneweave/src/index.ts`): warmer block sits between `await syncToolCatalog(db);` and `startToolHealthJob(db);` using **dynamic imports inside try/catch** so a missing API key or transient failure never blocks server startup. Logs `cost.intent-rag: warmer up-to-date { total, skipped }` on success.
-- Kaggle heartbeat (`apps/geneweave/src/live-agents/kaggle/heartbeat-runner.ts`): `costToolFilter` closure adds an `intent-rag` branch ABOVE the Phase 5 phase-strategy branch. When `bundle.policy.toolSubset.strategy === 'intent-rag'`, builds `weaveIntentRagToolSubsetFilter` with `createOpenAIEmbedder()` + `createDbToolEmbeddingStore({ db, modelId })` + a goal resolver that reads `ctx.goal`. Falls through to phase-strategy when intent-rag returns null.
-- `goal` plumbed through: `KaggleRoleHandlersOptions.costToolFilter` ctx extended with `goal?: string` (in `handlers/_shared.ts`); strategist invocation at `strategist-agent.ts:~416` passes `...(inboundBody ? { goal: inboundBody } : {})`.
-- `apps/geneweave/src/live-agents/generic-supervisor-boot.ts` is **intentionally NOT wired** — the generic supervisor has no canonical "current goal" semantics. Per-domain wiring follows the kaggle pattern.
-
-### Seed data
-`seedDefaultCostPolicies()` in `apps/geneweave/src/db-sqlite.ts` inserts an 8th idempotent row `kaggle_intent_rag` (stable UUID `019700000-c057-7000-8000-000000000008`) with `tier='balanced'` and `levers_json = { toolSubset: { strategy: 'intent-rag', topK: 6, minSimilarity: 0.15, includeAlways: ['kaggle_submit'] } }`.
-
-### Critical gotchas (verified during Phase 8 build)
-- **`createExecutionContext` from `@weaveintel/core` is re-exported only as alias `weaveContext`.** Importing the original name fails with TS2724. Always: `import { weaveContext } from '@weaveintel/core'` then `weaveContext({})`. Burned a tsc cycle on this — added to durable lessons.
-- **`BUILTIN_TOOLS` lives in `apps/geneweave/src/tools.ts`**, NOT in `@weaveintel/tools`. It's re-exported from `apps/geneweave/src/index.ts:375`. Inside geneweave use `import { BUILTIN_TOOLS } from '../tools.js'`. External packages should never import it.
-- **Lazy embedder pattern**: `createOpenAIEmbedder({ apiKeyEnv })` returns `Embedder | null`. Boot wiring uses `if (!embedder) return;` so a missing/fake API key gracefully skips warming. The warmer logs success/failure but never throws.
-- **Hash + modelId BOTH must match** for the warmer to skip a tool. Switching embedding models invalidates the entire cache (correct behavior — different models produce incompatible vectors).
-- **Same dist-staleness rule as every prior phase**: `apps/geneweave/package.json` has `"main": "./dist/index.js"`. After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the server.
-- **`hashDescription` uses no `crypto` module** — pure JS FNV-1a 64-bit. Keeps the package usable in browsers / edge runtimes.
-- **`includeAlways` keys are added even when below `minSimilarity`** but only when present in `availableKeys`. Used for `submit` / `final_answer` style tools the agent must always reach.
-- E2E auth pattern reused from Phase 5/6/7: `set +H`; promote with `sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='X';"`; CSRF token in login response body as `csrfToken`; send as `X-CSRF-Token` header on mutations.
-
-### Reference
-- Canonical example: `examples/109-intent-rag-tool-retrieval.ts` — pure in-memory, deterministic stub embedder (bag-of-words), in-memory store. Demonstrates `cosineSimilarity`, `hashDescription`, `decideIntentRagSubset` (modelling vs submission goals), `weaveIntentRagToolSubsetFilter` end-to-end + all 4 pass-through guarantees (no goal, embedder throws, empty store, zero overlap). ~180 lines, no DB, no LLM, no network.
-- Tests: `packages/cost-governor/src/intent-rag.test.ts` (24 tests). All 183 cost-governor unit tests pass.
-- E2E script: `scripts/e2e-phase8-intent-rag.mjs` — 25 assertions covering seed presence (`kaggle_intent_rag`), POST/GET roundtrip of `intent-rag` strategy + topK + minSimilarity + includeAlways, PUT updates, DELETE + 404. All pass against `http://localhost:3500`.
-- Plan: `docs/COST_CONTROL_PLAN.md` §5.2 (intent-RAG tool retrieval lever — strategy upgrade for L3).
-
-## Live-Agents Trace Tools (Phase 9 — Lazy Trace Retrieval Generalisation, complete)
-
-Generalises the kaggle-bespoke `kaggle_get_*` trace tools (`get_run_timeline`, `get_failed_attempts`, `get_recent_events`, `get_event_details`, `get_step_artifact`) into a reusable, domain-agnostic package: `@weaveintel/live-agents-trace-tools`. Any live-agent recipe can now opt into trace-introspection tools via `prepare_config_json` — no per-domain code. Plan: `docs/COST_CONTROL_PLAN.md` §5.7.
-
-### Package surface (`@weaveintel/live-agents-trace-tools`)
-- `createLiveTraceTools({ runId, agentId?, eventReader, stepReader, costSoFarReader?, payloadByteLimit?, log? }) → ReadonlyArray<Tool>` — returns the 5 trace tools, each closure-bound to ONE `runId` resolved at prepare-time. The LLM never passes `runId`; the tools only see / can introspect the run they were minted for.
-- 5 tools (registry keys = `tool.schema.name`): `live_get_run_timeline`, `live_get_failed_attempts`, `live_get_recent_events`, `live_get_event_details`, `live_get_step_artifact`.
-- `LiveRunEventReader` interface — `{ list({runId, limit?, afterId?, kindIn?, kindNotIn?}), get(eventId) }`. Returns `LiveRunEventRow { id, run_id, kind, payload?, created_at, agent_id?, step_id? }`.
-- `LiveRunStepReader` interface — `{ list({runId, limit?, afterId?}), get(stepId) }`. Returns `LiveRunStepRow { id, run_id, agent_id, role, status, started_at?, completed_at?, summary?, payload? }`.
-- `CostSoFarReader` (optional) — `(runId) => Promise<{ totalUsd?, breakdown? } | null>` for the cost slice of `live_get_run_timeline`. Pass-through `null` is fine — the timeline simply omits cost.
-- `FAILURE_EVENT_KINDS = new Set(['error', 'tool_error', 'agent_error', 'step_failed', 'denied', 'denied_approval', 'timeout', 'circuit_open'])` — used by `live_get_failed_attempts` to derive failure rows from both events and step rows (`status: 'FAILED'`).
-- `payloadByteLimit` defaults to 4000 bytes per row; `live_get_event_details` truncates at the boundary and stamps `truncatedAt` so the agent knows to call `live_get_step_artifact` for the full text.
-- All exports re-routed via `packages/live-agents-trace-tools/src/index.ts`. **Reusability invariant**: package depends ONLY on `@weaveintel/core` + `@weaveintel/tools`. NO geneweave, NO DB, NO `crypto` imports.
-
-### Run-isolation invariant (HARD)
-Every tool's `invoke` callback re-validates `row.run_id === closure.runId` before returning data. A cross-run lookup (e.g. agent on run-A asking for an event-id from run-B) returns `{ error: 'event_not_in_current_run', message: '...', runId }` — never a row from another run. Tests assert this for both `live_get_event_details` and `live_get_step_artifact`. Recipe authors and operators get this guarantee for free; no per-domain code needed.
-
-### Recipe extension (`prepare_config_json.tools`)
-- `tools` field on `PrepareConfig` (in `@weaveintel/live-agents-runtime`) is now `'$auto' | { auto?: boolean; traceTools?: '$auto' }` (was just `'$auto'`).
-- Three valid object forms: `{ auto: true }` (only base tools), `{ traceTools: '$auto' }` (only trace tools), `{ auto: true, traceTools: '$auto' }` (merged).
-- Legacy string `'$auto'` is fully back-compat and equivalent to `{ auto: true }`.
-- Parser throws `unknown key`, `tools.auto must be boolean`, or `tools.traceTools must be "$auto"` on malformed shapes — operators see the error in the admin form before save.
-- `dbPrepareFromConfig(config, deps)` accepts `deps.traceToolsFactory?: (ctx: { agentId?, meshId? }) => ReadonlyArray<Tool> | null`. When present + recipe asks for trace tools: factory is called per `prepare()` call → returned tools are merged into the registry (registry stores by `tool.schema.name`, so re-registration on every tick is safe).
-- Factory throws / returns null → graceful pass-through: prepare() returns whatever base tools were resolved, never throws. Trace tools are NEVER load-bearing. Tests cover this.
-
-### GeneWeave wiring (reference impl)
-- `apps/geneweave/src/cost/db-live-trace-tools.ts` (~85 lines): `createDbLiveRunEventReader(db) → LiveRunEventReader` + `createDbLiveRunStepReader(db) → LiveRunStepReader`. Adapts `db.listLiveRunEvents`, `db.getLiveRunEvent`, `db.listLiveRunSteps`, `db.getLiveRunStep` to the package interfaces.
-- `apps/geneweave/src/live-agents/generic-supervisor-boot.ts` `prepareDeps` block now includes `traceToolsFactory: (ctx) => { ... }`:
-  1. Look up the active running run for `ctx.meshId`: `db.listLiveRuns({ meshId, status: 'RUNNING', limit: 1 })`.
-  2. If no run: return `null` → graceful pass-through.
-  3. Else: build `createLiveTraceTools({ runId, agentId: ctx.agentId, eventReader, stepReader })` and return the array.
-  4. Wrap in try/catch: any throw → log + return `null`.
-- The 5 trace tools are NOT registered in `tool_catalog` and NOT subject to operator tool-policies — they are per-tick recipe-injected tools, scoped tightly to the live run that minted them. By design.
-- Kaggle migration recommendation (NOT yet performed): the existing 5 bespoke `kaggle_get_*` tools in `apps/geneweave/src/live-agents/kaggle/handlers/strategist-tools.ts` can now be replaced by `createLiveTraceTools(...)` plus the recipe-driven `traceTools: '$auto'` form. Net deletion ~250 LOC. Defer to a separate cleanup pass.
-
-### Patterns + gotchas (verified during Phase 9 build)
-- **`ToolRegistry` stores by `tool.schema.name`**, NOT by a top-level `name` field. When asserting kept tool keys in tests, sort and compare against the schema names. Burned a debug cycle on `expect(names).toEqual(['a', 'b', ...])` failing because the test tool used a top-level name that the registry ignored.
-- **`createExecutionContext` from `@weaveintel/core` is re-exported only as alias `weaveContext`.** Importing the original name fails with TS2724. Always: `import { weaveContext } from '@weaveintel/core'`.
-- **`BUILTIN_TOOLS` lives in `apps/geneweave/src/tools.ts`**, NOT in `@weaveintel/tools`. External packages should never import it.
-- **Single runId per closure** — the factory MUST resolve a runId before calling `createLiveTraceTools`. Per-tick re-resolution is correct; per-tool re-resolution would race.
-- **Same dist-staleness rule as every prior phase**: `apps/geneweave/package.json` has `"main": "./dist/index.js"`. After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the server, or the change has zero runtime effect.
-- E2E auth pattern reused from Phase 5/6/7/8: `set +H`; promote with `sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='X';"`; CSRF token in login response body as `csrfToken`; send as `X-CSRF-Token` header on mutations.
-- Admin response shapes: `/api/admin/live-meshes` list = `{ 'live-meshes': [...] }`; single = `{ 'live-mesh': {...} }`. `/api/admin/live-agents` list = `{ 'live-agents': [...] }`; single = `{ 'live-agent': {...} }`. Note kebab-case keys.
-
-### Reference
-- Canonical example: `examples/110-live-agents-trace-tools.ts` (~190 lines) — pure in-memory readers, no DB, no LLM. 4 demos: (1) direct `createLiveTraceTools` registry + cross-run isolation rejection, (2) recipe parser across all 4 forms, (3) recipe-driven prepare() with `traceToolsFactory` in two ctx variants (trace-only and merged), (4) graceful pass-through when factory throws.
-- Tests: `packages/live-agents-trace-tools/src/trace-tools.test.ts` (20 tests) + `packages/live-agents-runtime/src/db-prepare-resolver.test.ts` (33 tests, was 21 before Phase 9). Total: 79 tests across both packages pass.
-- E2E script: `scripts/e2e-phase9-trace-tools.mjs` — 20 assertions covering live_mesh location, POST live_agent with `prepare_config_json.tools.traceTools='$auto'`, GET roundtrip, PUT switch to merge form `{auto:true, traceTools:'$auto'}`, PUT legacy string `'$auto'` form (back-compat), DELETE + 404. All pass against `http://localhost:3500`.
-- Plan: `docs/COST_CONTROL_PLAN.md` §5.7 (lazy trace retrieval — generalisation of L3 introspection lever).
-
-## Cost Governor — Default-On Behavior (mandatory, no admin binding required)
-
-The cost-governor platform (Phases 1-9) is **automatically active for every live-agent tick** without any operator action. The mechanism is built into `resolveCostGovernorBundle` in `@weaveintel/cost-governor`:
-
-- When a `CostPolicyResolver` returns `null` (no `capability_policy_bindings` row matches the `(tenantId, meshId, agentId, workflowId)`), the function falls back to `{ policy: { tier: DEFAULT_COST_TIER }, source: 'package_default' }` where `DEFAULT_COST_TIER = 'balanced'`.
-- This means every consumer that calls `resolveCostGovernorBundle(resolver, ctx)` always receives a usable bundle — never `null`. The `balanced` tier preset (TIER_PRESETS.balanced) ships sensible defaults for L1 (model cascade), L2 (prompt caching, role+phase), L3 (tool subset, phase strategy), L5 (history compaction, sliding-12), L6 (maxStepsCap=40), L7 (reasoningEffort=medium), L8 (output truncation 4096B/keep-3), L9 (budget ceiling $5).
-- Operators can override per agent/mesh/workflow/tenant by inserting a `capability_policy_bindings` row with `policy_kind='cost_policy'` and `policy_ref` pointing at a `cost_policies` row. Without any binding, every agent inherits `balanced`.
-
-### Resolver precedence chain (`DbCostPolicyResolver`)
-- Single source of truth: `apps/geneweave/src/cost/db-cost-policy-resolver.ts`. Walks `capability_policy_bindings` rows with `policy_kind='cost_policy'` in this order, returning the first match:
-  1. **agent** (`binding_kind='agent'`, `binding_ref=ctx.agentId`) — precedence 100
-  2. **mesh** (`binding_kind='mesh'`, `binding_ref=ctx.meshId`) — precedence 50
-  3. **workflow** (`binding_kind='workflow'`, `binding_ref=ctx.workflowId`) — precedence 10
-  4. **tenant** (`binding_kind='tenant'`, `binding_ref=ctx.tenantId`) — precedence 5
-  5. **null** → `resolveCostGovernorBundle` falls through to `package_default` (balanced)
-- Workflow id convention is `'kaggle'` for the kaggle supervisor; bind a workflow-scoped row with `binding_ref='kaggle'` to set a kaggle-wide default.
-- Tests: `apps/geneweave/src/cost/db-cost-policy-resolver.test.ts` (7 tests covering all 5 chain steps, precedence ordering, and `enabled=false` skip).
-
-### Per-tick vs boot-time resolution
-- **All 9 levers are per-tick on kaggle.** L1/L2/L3/L4 resolved in `cachingModelResolver` / `costToolFilter` / `intelGate` closures (since Phases 3-6). L6/L7/L8/L9 resolved in `phase7Resolver` closure on `KaggleRoleHandlersOptions` (refactored from boot-time scalars; the strategist invokes it on every tick with the live `(meshId, agentId)` and the returned levers override boot-time fallbacks).
-- **Generic supervisor wires L1, L2 per-tick.** L3-L9 slots exist on `KaggleRoleHandlersOptions` only; they need per-domain wiring to flip on (e.g. `IntelScoreProvider` for L4, phase derivation for L3-phase, cost-ledger for L9). The generic supervisor stays bespoke-free and resolves nothing it can't synthesize.
-- **`phase7Resolver` is graceful** — throws are caught by the strategist and treated as no overrides, so a malformed binding cannot crash a tick.
-- Per-lever activation depends on consumer wiring (kaggle wires all 9; generic supervisor wires L1, L2 plus the L4-L9 slots). Levers L4 (intel-gating) and L9 (budget gate) require domain-specific dependencies (`intelScoreProvider`, `costLedger`+`runIdResolver`) that the package can't synthesize.
-
-### Coverage matrix (current state)
-| Lever | kaggle/heartbeat-runner.ts | generic-supervisor-boot.ts | Notes |
-|---|---|---|---|
-| L1 model cascade | ✅ per-tick | ✅ per-tick | universal |
-| L2 prompt caching | ✅ per-tick | ✅ per-tick | universal |
-| L3 tool subset (phase) | ✅ per-tick | — | needs domain phase derivation |
-| L3 tool subset (intent-rag) | ✅ per-tick | — | kaggle wires `createOpenAIEmbedder` + `createDbToolEmbeddingStore` |
-| L4 intel gating | ✅ per-tick | — | needs domain `IntelScoreProvider` |
-| L5 history compaction | slot only (unconsumed) | — | runtime ReAct loop owns history; consumer-side wiring requires runtime-package change |
-| L6 maxStepsCap | ✅ per-tick (via `phase7Resolver`) | — | strategist clamps via `decideMaxSteps` |
-| L7 reasoningEffort | ✅ per-tick (via `phase7Resolver`) | — | strategist wraps via `wrapModelWithStaticReasoningEffort` |
-| L8 output truncation | ✅ per-tick (via `phase7Resolver`) | — | strategist wraps each tool's `execute` |
-| L9 budget gate | ✅ per-tick (via `phase7Resolver`) | — | strategist try/catches `CostCeilingExceededError` |
-| L10 (Phase 9) trace tools | ✅ (bespoke `createKaggleTraceTools` over `kgl_run_*` tables) | ✅ (`createLiveTraceTools` over `live_run_*` tables) | kaggle keeps richer kgl-table-aware impl; generic uses package version |
-
-### Why kaggle's trace-tools stay bespoke
-Kaggle persists run state in `kgl_competition_runs` / `kgl_run_steps` / `kgl_run_events` (not `live_runs` / `live_run_steps` / `live_run_events`). The package adapters in `apps/geneweave/src/cost/db-live-trace-tools.ts` target the `live_run_*` tables. Migrating kaggle would require translation adapters AND would change tool names from `kaggle_get_*` to `live_get_*`. The bespoke impl produces richer projections (step.role, step.title, step-vs-tool-audit join) that reflect the kaggle pipeline schema. Status: leave as-is. Document, don't migrate.
-
-### Why L5 history compaction is a slot-only stub on kaggle
-The strategist's history shape is owned by the underlying `agentic.react` handler in `@weaveintel/live-agents-runtime`, not by the strategist wrapper. Wiring `bundle.historyCompactor` would require a runtime-package contract change to expose a per-iteration history hook on the ReAct handler. Out of scope for the cost-governor phases. The slot exists on `KaggleRoleHandlersOptions` for the day that hook lands.
-
-## Tenant Encryption (Phase 1 — complete)
-
-Adds tenant-scoped envelope encryption as a reusable, provider-agnostic package: `@weaveintel/encryption`. Per-tenant KEK→DEK key hierarchy with versioned epochs, AES-256-GCM authenticated encryption, AAD binding ciphertext to (tenant, table, column, rowId, epoch), and a versioned sentinel for in-place storage. GeneWeave wires DB-backed adapters and exposes a module-level `geneweaveEncryptionManager`. Phase 3 (chat/sv consumer integration) is **deferred** — Phase 1 ships the engine + storage + bootstrap only.
-
-### Package surface (`@weaveintel/encryption`)
-- `weaveTenantKeyManager({ store, kms, audit }) → TenantKeyManager` — canonical user-facing constructor. Methods: `encrypt(plaintext, ctx)`, `decrypt(sentinel, ctx)`, `bootstrapTenant({ tenantId, enable, actor })`, `rotateDek(tenantId, actor)`, `rotateKek(tenantId, actor)`, `shred(tenantId, actor)`. `ctx` carries `{ tenant, table, column, rowId }` — bound into AAD on every call so cross-context replay is rejected at decrypt.
-- `LocalKmsProvider({ masterKey: Buffer })` — reference KMS that wraps DEKs with a 32-byte master key from process env. Other KMS providers (Azure Key Vault, AWS KMS, GCP KMS) implement the `KmsProvider` interface — `wrap(plaintext) → Promise<WrappedKey>` and `unwrap(wrapped) → Promise<Buffer>` operate on Buffers internally.
-- `loadMasterKeyFromEnv({ envVar?, devGenerateIfMissing? }) → { key: Buffer, source: 'env' | 'dev-generated' }` — reads `WEAVE_ENCRYPTION_MASTER_KEY` (hex64 or base64, must decode to 32 bytes). **Throws `KmsUnavailableError`** when env var is missing AND `devGenerateIfMissing` is false. With `devGenerateIfMissing: true`, generates an ephemeral key and logs `source: 'dev-generated'` (NEVER use in production — keys are lost on restart).
-- `EncryptionStore` interface (12 methods) — pluggable persistence for policy + key rows: `getPolicy/upsertPolicy/listKeks/insertKek/updateKekStatus/listDeks/insertDek/updateDekStatus/listBiks/insertBik/updateBikStatus`. Records: `TenantPolicyRecord, KekRecord, DekRecord, BikRecord` (BIK = blind-index key for searchable encryption — Phase 2).
-- `AuditEmitter` interface — `emit(event)` for every key operation (bootstrap, rotation, shred, encrypt failure). `noopAuditEmitter` ships in-package; production wires `DbAuditEmitter` over `encryption_audit` table.
-- `mergeFieldPolicy(base, overlay)` helper — composes per-tenant field-level encryption policies (column allow/deny lists, blind-index opt-in).
-- All exports re-routed via `packages/encryption/src/index.ts`. **Reusability invariant**: package depends ONLY on `@weaveintel/core` + `node:crypto`. No DB, no fetch, no third-party deps. Other apps wire their own `EncryptionStore` and `KmsProvider` impls.
-- Tests: `packages/encryption/src/*.test.ts` — 26 tests pass (envelope round-trip, key-manager lifecycle, AAD-mismatch rejection, rotation epoch isolation, KMS provider, env loader).
-
-### Sentinel format (canonical wire/storage shape)
-- `enc:v1:<epoch>:<iv_b64>:<ct_b64>` — `v1` is the format version, `epoch` is the DEK epoch (decimal int), `iv_b64` is the 12-byte IV (base64url), `ct_b64` is `ciphertext || authTag` (16-byte tag appended, base64url).
-- AAD: `tenant|table|column|rowId|epoch` (UTF-8 byte string). Decrypt with mismatched context fails GCM tag verification → throws `EncryptionContextMismatchError`. Tests assert this for every field combination.
-- Decrypt looks up the DEK by `(tenantId, epoch)` — old ciphertexts remain readable after rotation because retired DEKs (status=`'previous'`) stay in the store. Only `'revoked'` DEKs (post-shred) cannot decrypt.
-
-### KeyStatus values (HARD)
-`KeyStatus = 'active' | 'previous' | 'revoked'`. **Do NOT use `'rotated'`** — KEK/DEK/BIK rotations transition the previous key from `active → previous`, not `→ rotated`. The new key is inserted as `active`. Shredding transitions all keys for a tenant to `revoked`.
-
-### GeneWeave wiring (reference impl)
-- 6 DB tables added in encryption block of `db-sqlite-migrations.ts`: `tenant_encryption_policy` (TEXT created_at/updated_at via `datetime('now')`), `tenant_keks`, `tenant_deks`, `tenant_biks` (all 3 use ms-epoch INTEGER timestamps + UUID PK), `encryption_audit` (ms-epoch INTEGER), `encryption_rewrite_progress` (forward-compat for Phase 2 background re-encrypt jobs).
-- 5 row types in `apps/geneweave/src/db-types.ts`: `TenantEncryptionPolicyRow, TenantKekRow, TenantDekRow, TenantBikRow, EncryptionAuditRow`. (`EncryptionRewriteProgressRow` deferred — used only by Phase 2.) 13 `DatabaseAdapter` method declarations + implementations in `db-sqlite.ts`.
-- `apps/geneweave/src/encryption/db-encryption-store.ts` — `createDbEncryptionStore(db) → EncryptionStore`. Wraps `db.*` adapter methods. JSON columns (`details`, `kms_config`, `field_policy`, `wrapped`) stored as raw TEXT; the store does `JSON.parse` on read and `JSON.stringify` on write.
-- `apps/geneweave/src/encryption/db-audit-emitter.ts` — `createDbAuditEmitter(db) → AuditEmitter`. Persists every `AuditEvent` to `encryption_audit`. Best-effort — failures swallowed.
-- `apps/geneweave/src/encryption/bootstrap.ts` — `bootstrapEncryption(db, opts={}) → BootstrapEncryptionResult | null`. Wraps `loadMasterKeyFromEnv` in try/catch; logs `[encryption] bootstrap skipped (KMS unavailable)` and **returns null** when `WEAVE_ENCRYPTION_MASTER_KEY` is missing. On success returns `{ manager, source }` and logs `[encryption] encryption bootstrapped (source: env|dev-generated, kms: local)`.
-- `apps/geneweave/src/index.ts` — module-level `export let geneweaveEncryptionManager: TenantKeyManager | null = null;` (declared before factory). Boot block 5-EN sits AFTER `startToolHealthJob(db)` and BEFORE block 5-IR (intent-rag warmer). Wraps `bootstrapEncryption(db)` in try/catch; assigns the manager on success. Server boots cleanly even when env var is absent (manager stays null — encryption is opt-in).
-- `seedDefaultEncryptionPolicies()` private async method in `db-sqlite.ts` (called from `seedDefaultData()` immediately after `seedDefaultCostPolicies()`). Inserts one idempotent row `demo-encrypted-tenant` via `INSERT OR IGNORE` with `enabled=0, kms_provider_id='local', rotation_schedule='manual', blind_index_enabled=0, field_policy='{}'`. Operators flip `enabled=1` per tenant when they're ready to encrypt.
-
-### CRITICAL gotcha — `WrappedKey` vs `SerializedWrappedKey`
-- `WrappedKey` is **Buffer-based** (used by KMS providers internally — `kms.wrap()` returns `WrappedKey`, `kms.unwrap()` consumes it).
-- `SerializedWrappedKey` is **string-based** (JSON-safe, used on `KekRecord/DekRecord/BikRecord.wrapped` field).
-- Records carry `SerializedWrappedKey` directly. The DB adapter is a thin layer: read = `JSON.parse(r.wrapped) as SerializedWrappedKey`, write = `JSON.stringify(k.wrapped)`. **Do NOT call `serializeWrappedKey`/`deserializeWrappedKey` at the DB boundary** — those convert between Buffer-based `WrappedKey` (KMS internals) and string-based `SerializedWrappedKey` (records), and they're already applied inside `weaveTenantKeyManager` when records are produced. Burned a debug cycle on this — added serialize/deserialize at DB boundary, got 6 tsc errors. Fixed by removing the wrapper calls.
-
-### Patterns + gotchas
-- **Bootstrap is idempotent and non-fatal** — missing env var logs a warning and returns null. Production deployments MUST set `WEAVE_ENCRYPTION_MASTER_KEY` (32-byte hex64 or base64). Dev/CI may omit it; the manager stays null and any encrypt/decrypt call would NPE — Phase 3 consumers will gate calls on `if (geneweaveEncryptionManager) { ... }`.
-- **Encryption KEY tables use ms-epoch INTEGER timestamps**; only `tenant_encryption_policy` uses TEXT created_at/updated_at via `datetime('now')`. Don't mix conventions — burned a debug cycle when an INTEGER column got a TEXT value.
-- **AAD mismatch on decrypt is intentional and unrecoverable.** If `(tenant, table, column, rowId)` changes between encrypt and decrypt, decrypt throws `EncryptionContextMismatchError`. This blocks ciphertext replay across columns or tenants. Schema migrations that rename a column or move data MUST decrypt with the old context and re-encrypt with the new context (Phase 2 background re-encrypt job will own this).
-- **Same dist-staleness rule as every prior phase**: `apps/geneweave/package.json` has `"main": "./dist/index.js"`. After every edit under `apps/geneweave/src/**` you MUST run `npx tsc -b apps/geneweave` before restarting the server.
-
-### Reference
-- Canonical example: `examples/13-encryption-phase1.ts` — pure in-memory `EncryptionStore`, `loadMasterKeyFromEnv({ devGenerateIfMissing: true })`, `LocalKmsProvider`, `weaveTenantKeyManager`. Demos: bootstrap → encrypt → decrypt round-trip → `rotateDek` → decrypt OLD ciphertext (epoch lookup) → encrypt with new DEK → assert new sentinel epoch. ~140 lines, no DB, no LLM, no external services.
-- Verification script: `scripts/verify-encryption-phase1.mjs` — boots geneweave with a stub provider + ephemeral DB + env-supplied master key, asserts seed row exists and `geneweaveEncryptionManager` is non-null.
-- Tests: `packages/encryption/src/*.test.ts` (26 tests pass).
-- Phase 3 (chat/sv consumer integration) — gating per-call usage of the manager behind tenant policy checks, encrypting select chat/sv columns at write, decrypting at read with same AAD context — deferred to a future phase.
-
-## Tenant Encryption (Phase 2 — Admin REST surface + lifecycle, complete)
-
-Phase 2 ships the operator-facing admin REST surface and key-lifecycle endpoints around the Phase 1 engine. Per-tenant CRUD, auto-bootstrap-on-enable, rotation, and shred — all DB-driven via the `tenant_encryption_policy` row. Package (`@weaveintel/encryption`) is **frozen and untouched** in Phase 2; all integration is at the geneweave app level. Phase 3 (chat/sv read/write consumer integration) is **deferred**.
-
-### Admin REST surface (`/api/admin/tenant-encryption-policies`)
-All routes under `apps/geneweave/src/admin/api/tenant-encryption-policies.ts`. 10 endpoints, all auth-gated, all mutations CSRF-gated.
-
-- `GET /api/admin/tenant-encryption-policies` → `{ policies: TenantEncryptionPolicyRow[], manager_available: boolean }`. `manager_available` is true iff `geneweaveEncryptionManager` was bootstrapped (i.e. `WEAVE_ENCRYPTION_MASTER_KEY` env var is set at server start).
-- `GET /:tenantId` → `{ policy, key_counts: { keks, deks, biks }, manager_available }`. 404 when missing.
-- `POST /` (csrf) → 201 `{ policy, bootstrapped: boolean, bootstrap_reason?: string }`. 409 if tenant already has a policy. **Auto-bootstrap behavior**: when the POST body sets `enabled=1` AND `manager_available===true`, the route calls `manager.bootstrapTenant({ tenantId, enable: true, actor: auth.userId })` immediately after upsert. `bootstrapped` is true on success; otherwise `bootstrap_reason` carries the cause (`'manager_unavailable'` when env var absent, error message on exception).
-- `PUT /:tenantId` (csrf) → 200 `{ policy }`. Patch semantics on the 12 non-timestamp fields.
-- `DELETE /:tenantId` (csrf) → 200 `{ ok: true }`. Bound via `const delMethod = router.del.bind(router)` — router exposes `.del` not `.delete`.
-- `POST /:tenantId/bootstrap` (csrf) → 503 `{ error: 'encryption_manager_unavailable' }` when manager null; else 200 with bootstrap result.
-- `POST /:tenantId/rotate-dek` (csrf) → 503 when manager null; else 200 `{ ok, kek_id, dek_id, epoch }`. Response sanitised — never exposes `wrapped`.
-- `POST /:tenantId/rotate-kek` (csrf) → 503 when manager null; else 200 `{ ok, kek_id, dek_id }`. Response sanitised.
-- `POST /:tenantId/shred` (csrf) — **requires body `{ confirm: tenantId }`** (string match against URL tenantId), else 400. 503 when manager null. On success, all KEKs/DEKs/BIKs for the tenant transition to `status='revoked'`.
-- `GET /:tenantId/keys` → `{ keks, deks, biks }`. Internal `sanitize()` strips the `wrapped` field on EVERY key row before responding. Never returns raw wrapped keys to the admin UI.
-- `GET /:tenantId/audit?limit=N&offset=N` → `{ events }`. Read-only audit ledger from `encryption_audit`.
-
-### ESM live-binding pattern (CRITICAL)
-- `apps/geneweave/src/server.ts` and admin route registration MUST use **namespace import + getter** to read `geneweaveEncryptionManager`. Project is pure ESM; `require()` does NOT work, and importing the binding directly captures the initial null value, not the post-bootstrap manager.
-- Pattern: `import * as indexModule from './index.js';` then `const getManager = () => indexModule.geneweaveEncryptionManager;` and the route reads `getManager()` per request. This gives a live binding that flips from null → manager after `bootstrapEncryption(db)` completes.
-- `apps/geneweave/src/index.ts:~122` declares `export let geneweaveEncryptionManager: TenantKeyManager | null = null;` BEFORE the factory; the bootstrap block (~lines 225-231) reassigns it after `bootstrapEncryption(db)` succeeds.
-
-### Auto-bootstrap policy
-- POST `/api/admin/tenant-encryption-policies` with `enabled=1` triggers `manager.bootstrapTenant({ tenantId, enable: true })` immediately. This generates the first KEK + DEK for the tenant and inserts both rows into `tenant_keks` / `tenant_deks`. Operators do NOT need to call `/bootstrap` separately for the common case.
-- `bootstrapTenant` is idempotent — calling it on an already-bootstrapped tenant is a no-op that returns the existing key ids.
-- `manager_unavailable` outcome (env var absent at server start) returns the policy row successfully but `bootstrapped: false, bootstrap_reason: 'manager_unavailable'`. Operators must set the env var and restart to get keys.
-
-### Admin sidebar wiring (dual location)
-- Both files MUST be updated for the tab to appear: `apps/geneweave/src/admin-schema.ts` (under Governance group) AND `apps/geneweave/src/admin/schema/platform-capability-tabs.ts:504-518`. Tab key `tenant-encryption-policies`. `idField` is NOT a valid `AdminTabDef` field — do not add it.
-
-### Seed enrichment
-`seedDefaultEncryptionPolicies()` in `apps/geneweave/src/db-sqlite.ts` (called by `seedDefaultData()`) inserts one idempotent row via `INSERT OR IGNORE`:
-- `tenant_id='demo-encrypted-tenant'`
-- `enabled=0` (opt-in per tenant; operators flip to 1 when ready)
-- `kms_provider_id='local'`
-- `rotation_schedule='manual'`
-- `blind_index_enabled=0`
-- `field_policy='{"messages":{"columns":["content","metadata"]},"chats":{"columns":["title","system_prompt"]}}'` — realistic shape Phase 3 consumers will honour.
-
-### DB adapter methods (added in Phase 2)
-- `listTenantEncryptionPolicies()` — returns all policy rows.
-- `deleteTenantEncryptionPolicy(tenantId)` — hard delete (audit table retains history independently).
-- These complement the Phase 1 `getPolicy` / `upsertPolicy` already on the encryption store contract.
-
-### Route-helper convention
-- Uses local minimal `{ json, readBody }` helper type (NOT `AdminHelpers`) — mirrors the cost-policies and cost-ledger pattern. `AdminHelpers` requires `requireDetailedDescription` which is only meaningful for LLM-callable entity routes. Tenant-encryption-policies is operator-only.
-
-### HARD invariants (verified)
-- **Package decrypt does NOT gate on key status.** `weaveTenantKeyManager.decrypt(sentinel, ctx)` looks up the DEK by `(tenantId, epoch)` and calls `kms.unwrap(...)` directly — there is no `if (key.status === 'revoked')` check. Under `LocalKmsProvider`, shred therefore only marks rows `status='revoked'` for audit-grade defence; the wrapped key material is still unwrappable and ciphertext is still readable. **Cryptographic shred requires real KMS deletion** (Azure Key Vault soft-delete + purge, AWS KMS schedule-key-deletion, GCP KMS destroyCryptoKeyVersion). Consumer enforcement (refusing to call decrypt against a revoked DEK) is a Phase 3 concern and belongs in chat/sv code paths.
-- **`/keys` route MUST strip `wrapped`** on every row before responding. Tests assert this. The admin UI never sees wrapped material.
-- **Shred requires `{confirm: tenantId}` body** — guards against accidental tenant wipe via misclicked button.
-- **Server startup requires BOTH a non-empty LLM provider api key (`.env` → `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`) AND `WEAVE_ENCRYPTION_MASTER_KEY` env var** for encryption to bootstrap. Without the master key, the manager stays null, all rotate/shred/bootstrap routes return 503, and the GET routes still work (manager_available: false).
-- **KeyStatus values are `'active' | 'previous' | 'revoked'`** — never `'rotated'`. Rotation transitions `active → previous`; shred transitions all → `revoked`.
-- **`AuthContext` field access is direct: `auth.userId`, `auth.tenantId`** — not via a `.user` sub-object. Burned a tsc cycle on `auth.user.id`.
-- **`TenantEncryptionPolicyRow` has 12 non-timestamp fields** — all required in the upsert path.
-- **Same dist-staleness rule**: `npx tsc -b apps/geneweave` after every edit under `apps/geneweave/src/**` before restarting the server.
-
-### Reference
-- Canonical example: `examples/14-encryption-phase2.ts` — pure in-memory rehearsal of the admin-surface lifecycle (bootstrap, encrypt, rotate-dek, decrypt-old-epoch, shred-marks-revoked-but-decrypt-still-works-under-local-kms). Passive log: "All assertions passed." No false claim that local-KMS shred is cryptographic.
-- E2E script: `scripts/e2e-phase2-tenant-encryption.mjs` — 38 assertions against `http://localhost:3500` covering register → promote → login (CSRF from body) → seed presence → POST enabled=1 auto-bootstrap → rotate-dek → rotate-kek → /keys sanitization → /audit ≥3 events → shred bad-confirm rejected → shred good-confirm → all keys revoked → DELETE → 404. All pass.
-- Server launch helper for local dev: `/tmp/start-gw.sh` — bash script that sources `.env`, exports a generated `WEAVE_ENCRYPTION_MASTER_KEY`, and runs `npx tsx examples/12-geneweave.ts`. Workaround for zsh inline-`$()` parsing pitfall in async terminals.
-- Phase 3 (chat consumer integration — complete). See section below. SV consumer integration is still deferred.
-
-## Tenant Encryption (Phase 3 — Chat message encryption-at-rest, complete)
-
-Phase 3 wires `geneweaveEncryptionManager` into the chat write/read path so message rows persist as Phase 1 sentinels when the tenant policy enables encryption. Implementation is a thin **Proxy wrapper around `DatabaseAdapter`** — no schema migration, no chat-handler changes, no SV changes (deferred).
-
-### Wrapper surface (`withTenantEncryptedMessages`)
-- File: `apps/geneweave/src/encryption/with-tenant-encrypted-messages.ts`. Exports `withTenantEncryptedMessages(db, getManager) → DatabaseAdapter`.
-- `getManager: () => TenantKeyManager | null` is a live-binding closure (NOT the manager itself) — same pattern as the admin route handlers — so the wrapper picks up bootstrap completion without restart.
-- Returns a `Proxy` that intercepts only **3 message methods**: `insertMessage`, `getMessage`, `listMessages`. All other DatabaseAdapter methods pass through untouched.
-- Encrypts on write iff: manager exists AND `tenantId` resolvable from row AND `getPolicy(tenantId)?.enabled === 1` AND `field_policy.messages.columns` contains the column. Otherwise writes plaintext (graceful — encryption is opt-in per tenant).
-- Decrypts on read for any value matching the `enc:v1:` sentinel prefix. **Plaintext rows pass through untouched** — the wrapper is lazy-upgrade tolerant: legacy plaintext written before policy was enabled remains readable. New writes upgrade to ciphertext.
-- AAD context per call: `{ tenant: tenantId, table: 'messages', column, rowId: messageId }` — bound on encrypt AND on decrypt. Mismatched row-id at read raises `EncryptionContextMismatchError` from the package; the wrapper logs and returns the raw sentinel (defensive — never crashes the API).
-- Wired in `apps/geneweave/src/index.ts` immediately after the encryption bootstrap block, before any consumer references `db`. The bare `db` is replaced in-place by the proxy: `db = withTenantEncryptedMessages(db, () => geneweaveEncryptionManager);`
-
-### `tenant_id` requirement
-- Encryption requires `users.tenant_id` to be populated. Registration leaves it NULL on first user — operators must assign per tenant via SQL or an explicit promotion step before encryption activates for that user's chats.
-- E2E pattern: `sqlite3 ./geneweave.db "UPDATE users SET tenant_id='<tenant>' WHERE email='<email>';"` after register, before login.
-- When `tenantId` is missing on a row insert, the wrapper passes through unencrypted (graceful — does not throw). This means a misconfigured user silently writes plaintext. **Operators must verify `tenant_id` propagation as part of bootstrap.**
-
-### Sentinel epoch advancement on rotation
-- After `POST /api/admin/tenant-encryption-policies/:tenantId/rotate-dek`, the new DEK is `active` (epoch N+1) and the previous DEK transitions to `status='previous'` but stays in the store.
-- New writes use epoch N+1 (verifiable by parsing the `enc:v1:<epoch>:...` sentinel prefix).
-- Old reads still decrypt because the package's `decrypt` looks up DEK by `(tenantId, epoch)` and `'previous'` rows remain unwrappable. Verified end-to-end: epoch 1 messages and epoch 2 messages both round-trip plaintext after rotation.
-
-### Cleanup ordering invariant (HARD)
-- **DELETE policy returns 409 when live keys exist.** Route at `apps/geneweave/src/admin/api/tenant-encryption-policies.ts:227` returns `{ error: 'Cannot delete: tenant has live key material. POST /shred first.' }`.
-- Required cleanup sequence: `POST /:tenantId/shred {confirm: tenantId}` → `DELETE /:tenantId`. Skipping shred and trying delete is the most common e2e failure mode.
-
-### Reference
-- E2E script: `scripts/e2e-phase3-chat-encryption.mjs` — **34 assertions, all pass** against `http://localhost:3500`. Covers: register → SQL UPDATE tenant_id → policy POST with auto-bootstrap → create chat → send message via LLM → raw SQL read confirms 3 sentinel columns (`messages.content` × 2 + `messages.metadata`) → API GET returns plaintext → INSERT legacy plaintext via raw SQL → API GET still returns it (lazy-upgrade tolerance) → rotate-dek → epoch advances 1→2 in new sentinel → all messages still decrypt cross-epoch → cleanup with shred-then-delete (and a 409-guard assertion that delete-without-shred is refused).
-- SV consumer integration (sv_hypothesis statements, evidence summaries) — still deferred. Same Proxy pattern would apply at the SV adapter boundary.
-
-## Tenant Encryption (Phase 4 — Coverage expansion across PII tables, complete)
-
-Phase 4 generalises the Phase 3 chat-only Proxy wrapper into a reusable, multi-table package primitive and extends geneweave coverage from `messages` only to `messages` + `chats`. No schema migration. Per `docs/TENANT_ENCRYPTION_DESIGN.md` §13.
-
-### Package surface (`@weaveintel/encryption`)
-- `weaveTenantEncryptedProxy<DB extends object>({ db, getManager, specs }) → DB` — generalised factory. Accepts a list of `EncryptedMethodSpec` entries declaring per-method encryption behaviour. Returns a `Proxy` that intercepts ONLY the methods named in `specs`; everything else passes through untouched.
-- `EncryptedMethodSpec` — `{ method: keyof DB, role: 'insert' | 'read-single' | 'read-list', table: string, resolveTenantId(args, result?), resolveRowId(args, result?), encryptableColumns: readonly string[], updateInPlace?: boolean }`. Roles map to the three lifecycle moments: insert (encrypt args before call), read-single (decrypt single row in result), read-list (decrypt array of rows).
-- `TenantPolicySnapshot` / `FieldPolicy` / `mergeFieldPolicy(base, overlay)` / `isFieldEncrypted(policy, table, column)` — operator-policy primitives reused across consumers. `field_policy` shape: `{ <tableName>: { columns: string[] } }`.
-- The Phase 3 single-table wrapper `withTenantEncryptedMessages` is now a thin alias that calls `weaveTenantEncryptedProxy` with the messages-only spec list. Back-compat preserved; existing call sites continue to work.
-- Tests: `packages/encryption/src/proxy.test.ts` (passing). All other Phase 1 invariants (sentinel format, AAD binding, KeyStatus values, dist-staleness rule) carry forward unchanged.
-
-### GeneWeave wiring (reference impl)
-- `apps/geneweave/src/encryption/db-encrypted-adapter.ts` — exports `withTenantEncryptedDb(db, getManager) → DatabaseAdapter` (the new canonical wrapper) and re-exports `withTenantEncryptedMessages` as a back-compat alias. Spec list covers:
-  - `messages` table: columns `content`, `metadata` — methods `insertMessage` (insert), `getMessage` (read-single), `listMessages` (read-list).
-  - `chats` table: column `title` — methods `createChat` (insert), `getChat` (read-single), `listChats` (read-list), `updateChatTitle` (insert; positional-arg).
-- **Positional-arg escape hatch**: `updateChatTitle(chatId, newTitle, userId?)` does NOT take an object payload. The proxy's spec for it includes `resolveRowId: (args) => args[0]` and a custom encrypt path that reads/writes `args[1]` directly. All other wrapped methods use object-arg payloads.
-- Wired in `apps/geneweave/src/index.ts` immediately after the encryption bootstrap block: `db = withTenantEncryptedDb(db, () => geneweaveEncryptionManager);` (replaced the Phase 3 `withTenantEncryptedMessages` call).
-- Seed extended in `apps/geneweave/src/db-sqlite.ts` `seedDefaultEncryptionPolicies()`: tenant `'demo-encrypted-tenant'` `field_policy = '{"messages":{"columns":["content","metadata"]},"chats":{"columns":["title"]}}'` (`enabled=0`; opt-in per tenant).
-
-### Kill-switch + cross-epoch invariants (verified)
-- **Kill-switch is per-tenant, applies to NEW writes only.** Setting `enabled=0` on the tenant policy (PUT `/api/admin/tenant-encryption-policies/:tenantId`) makes all subsequent insert/update calls write plaintext for that tenant. Existing ciphertext rows continue to decrypt on read because the manager still has the keys. Re-enabling resumes encryption for new writes; mid-table mixed plaintext+ciphertext rows coexist (lazy-upgrade tolerance carries from Phase 3).
-- **Cross-epoch reads work across all wrapped tables.** After `POST /:tenantId/rotate-dek`, the new DEK is `active` (epoch N+1), the previous transitions to `'previous'`, and old ciphertexts (in `chats.title` AND `messages.content`/`messages.metadata`) all continue to decrypt because the lookup is by `(tenantId, epoch)`. New writes use epoch N+1 — verifiable in the sentinel prefix.
-- **AAD context per call**: `{ tenant: tenantId, table: <wrapped table>, column: <column>, rowId: <row PK> }`. Cross-row or cross-column replay rejected by GCM tag verification.
-
-### Cleanup ordering invariant (HARD, unchanged from Phase 3)
-- DELETE `/api/admin/tenant-encryption-policies/:tenantId` returns **409** when live key material exists. Required sequence: `POST /:tenantId/shred {confirm: tenantId}` → `DELETE /:tenantId`. Most common e2e failure mode if skipped.
-
-### Reference
-- Canonical example: `examples/15-encryption-phase4.ts` — pure in-memory rehearsal of the multi-table proxy across both `chats` and `messages`.
-- E2E script: `scripts/e2e-phase4-multi-table.mjs` — **45 assertions, all pass** against `http://localhost:3500`. Covers: register → SQL promote+tenant_id → enable policy with chats+messages columns + auto-bootstrap → create chat (raw SQL: `chats.title` is sentinel) → send message (raw SQL: `messages.content` × 2 + `messages.metadata` are sentinels) → API GET round-trips plaintext → PUT rename via positional-arg path (new sentinel, different IV/ct) → kill-switch (PUT `enabled=0`): new chat written as plaintext at rest, old encrypted chat still decrypts via API → re-enable + rotate-dek (epoch 1→2) → new messages use epoch 2, old messages (epoch 1) still decrypt → cleanup with shred-then-delete (and 409-guard assertion that delete-without-shred is refused).
-- SV consumer integration (sv_hypothesis statements, evidence summaries) — still deferred. Same `weaveTenantEncryptedProxy` pattern applies at the SV adapter boundary.
-
-## Tenant Encryption (Phase 5 — Automated DEK Rotation Scheduler, complete)
-
-Phase 5 ships a background scheduler that auto-rotates active DEKs when they exceed the per-tenant `tenant_encryption_policy.rotation_schedule` threshold. Entirely app-level — `@weaveintel/encryption` is FROZEN. Reuses the Phase 1 `weaveDekRotator({ manager })` primitive.
-
-### Scheduler surface (`apps/geneweave/src/encryption/rotation-scheduler.ts`)
-- `startEncryptionRotationScheduler({ db, getManager, intervalMs?, log? }) → { stop, tickNow }` — installs a `setInterval(...).unref()` timer (default `intervalMs = 1h`). Returns `tickNow()` for tests + the e2e helper. Boot wiring lives in `apps/geneweave/src/index.ts` block `5-EN-RS`, immediately after Phase 1 bootstrap. Uses **live-binding getter closure** for `geneweaveEncryptionManager` (same ESM pattern as the admin route handlers — never capture the manager directly).
-- `SCHEDULE_THRESHOLDS_MS = { monthly: 30d, quarterly: 90d, annual: 365d }`. `'manual'` is **silently skipped** — operators rotate by hand via the admin endpoint.
-- `SCHEDULER_ACTOR = 'system:rotation-scheduler'` — written into the audit-event `actor` column so operators can distinguish auto-rotations from operator-initiated ones.
-- **Strict `>` boundary**: `if (age <= threshold) continue;` — a DEK exactly at the threshold is NOT yet eligible. Tests assert this.
-- Per-tenant try/catch around `rotator.rotateDek(tenantId, SCHEDULER_ACTOR)` — one tenant's failure never blocks the rest of the tick. Errors counted in tick result `{ checked, rotated, errors }`.
-- Calls `db.listTenantEncryptionPolicies()` on each tick; for each `enabled=1` policy with non-`'manual'` schedule, finds the active DEK via `db.listTenantDeks({ tenantId, status: 'active' })`, computes age from `created_at`, rotates when over threshold.
-
-### CRITICAL invariants (verified)
-- **Audit emission lives INSIDE `manager.rotateDek` — scheduler MUST NOT double-emit.** The frozen `@weaveintel/encryption` package auto-emits `event_kind='dek_rotate'` via the wired `AuditEmitter` when rotation succeeds. Adding a `auditEmitter.emit(...)` call inside the scheduler causes duplicate audit rows.
-- **Audit column is `event_kind` snake_case at DB + REST layer; package types use camelCase `eventKind`.** Translation happens in `DbAuditEmitter.emit()` (insert path). Reads bypass the translation — admin GET `/api/admin/tenant-encryption-policies/:tenantId/audit` returns rows with raw `event_kind` field. E2E assertion checks `e.event_kind === 'dek_rotate'`.
-- Same dist-staleness rule as every prior phase: `npx tsc -b apps/geneweave` after every edit under `apps/geneweave/src/**` before restarting the server.
-
-### Reference
-- Tests: `apps/geneweave/src/encryption/rotation-scheduler.test.ts` — 8/8 pass in 3ms. Covers strict `>` boundary, `'manual'` skip, monthly/quarterly/annual thresholds, per-tenant try/catch isolation, no-double-audit assertion.
-- E2E helper: `scripts/_phase5-tick-once.mjs` — boots a transient `DatabaseAdapter` (`createDatabaseAdapter({ type: 'sqlite', path: process.env.DATABASE_PATH })`), bootstraps the encryption manager from `WEAVE_ENCRYPTION_MASTER_KEY`, calls `tickNow()`, writes `{checked, rotated, errors}` JSON to stdout. Invoked via `execSync` from the e2e script with `env: { ...process.env, WEAVE_ENCRYPTION_MASTER_KEY, DATABASE_PATH: './geneweave.db' }`.
-- E2E script: `scripts/e2e-phase5-rotation-scheduler.mjs` — **29 assertions, all pass** against `http://localhost:3500`. Covers: register → promote → login (csrf from body) → POST policy `rotation_schedule:'monthly'` with auto-bootstrap → GET /keys (epoch=1, status=active) → raw SQL `UPDATE tenant_deks SET created_at=<now-31d>` → execSync helper → assert `{checked>=1, rotated>=1, errors:0}` → GET /keys (2 deks, new epoch=2 active, old `status='previous'`) → GET /audit (≥1 row with `event_kind='dek_rotate'` AND `actor='system:rotation-scheduler'`) → shred → DELETE → 404.
-- zsh launcher gotcha: inline `nohup ... &` with `$(...)` substitution + multiple `&&` triggers `dquote>` continuation. Use a script file (`/tmp/start-phase5.sh` pattern: `set -a; source .env; set +a; export WEAVE_ENCRYPTION_MASTER_KEY=$(node -e 'console.log(require("crypto").randomBytes(32).toString("hex"))'); echo "MK=$WEAVE_ENCRYPTION_MASTER_KEY" > /tmp/phase5-mk.env; nohup npx tsx examples/12-geneweave.ts > /tmp/phase5-server.log 2>&1 &`).
-
-## Tenant Encryption (Phase 6 — GDPR hard-shred + Tenant deletion lifecycle, complete)
-
-Phase 6 ships the operator-facing GDPR right-to-erasure pipeline: per-tenant deletion requests with a configurable retention window, cancellation while pending, automated background purge after expiry, and a one-shot restore path while keys are still soft-shredded. `@weaveintel/encryption` gains a small reusable surface (`hardShred`, `restoreFromShred`, `weavePurgeScheduler`); geneweave wires the DB-backed deletion-request store + admin REST + boot scheduler.
-
-### Package surface (`@weaveintel/encryption`)
-- `EncryptionStore.deleteAllWrappedMaterial(tenantId) → { keks, deks, biks }` — new required method on the store interface. Implementations cascade-delete from `tenant_keks`/`tenant_deks`/`tenant_biks` (typically inside a single transaction) and return the deleted row counts.
-- `manager.hardShred(tenantId, actor) → { keks, deks, biks }` — calls `manager.shred(...)` to flip key status to `'revoked'` (audit-grade), then immediately calls `store.deleteAllWrappedMaterial(tenantId)` to wipe the actual wrapped key material. Emits a `tenant_purged` audit event with the deleted counts. After this point the tenant's old ciphertext is permanently undecryptable under `LocalKmsProvider` (whose master key was the only thing wrapping the DEKs); for cloud KMS providers the wrapped blobs are gone too.
-- `manager.restoreFromShred(tenantId, actor) → { kekId, dekId }` — one-shot un-shred while keys are still in the store. Picks the highest-version revoked KEK + highest-epoch revoked DEK, flips both to `'active'`, clears the policy's `shredRequestedAt`/`shredCompletedAt`, and re-enables encryption. Throws when (a) tenant has no pending shred OR (b) tenant has been hard-shredded (no revoked rows left). This is the operator's safety net during the retention window.
-- `weavePurgeScheduler({ getManager, listDuePurges, markPurged, intervalMs?, log? }) → { stop, tickNow }` — generic background scheduler. Reusable across apps: callers supply `listDuePurges(now) → DueTenantPurge[]` and `markPurged(requestId, now)` callbacks over their own deletion-request store. Default `intervalMs = 1h`. `setInterval(...).unref()` for clean shutdown. Live-binding `getManager` getter (same ESM pattern as rotation scheduler — never capture the manager directly). Per-tenant try/catch around `manager.hardShred(...)` so one failure never blocks the rest of the tick. Manager-unavailable path returns `{ checked: 0, purged: 0, errors: 0, skipped: 'manager_unavailable' }` (sentinel field for tests). `listDuePurges` throw → `{ checked: 0, purged: 0, errors: 1 }` (never propagates).
-- `PURGE_SCHEDULER_ACTOR = 'system:purge-scheduler'` — written into the `tenant_purged` audit event's `actor` column so operators can distinguish auto-purges from operator-initiated `hardShred` calls.
-- `DueTenantPurge` shape: `{ id, tenantId, requestedAt, retentionUntil }`. The scheduler doesn't care what's stored on the request row — it only needs the four fields.
-- All exports re-routed via `packages/encryption/src/index.ts`. **Reusability invariant preserved**: package depends only on `@weaveintel/core` + `node:crypto`. Schedulers + stores are interface-level; no DB, no fetch.
-
-### GeneWeave wiring (reference impl)
-- New table `tenant_deletion_requests` (UUID PK): `id, tenant_id, requested_by, requested_at, retention_until, status ('pending'|'cancelled'|'purged'), purged_at, reason, created_at, updated_at`. Migration in `db-sqlite-migrations.ts`. Index on `(status, retention_until)` for fast scheduler scans.
-- 5 `DatabaseAdapter` methods: `createTenantDeletionRequest`, `getTenantDeletionRequest`, `listTenantDeletionRequests({ status?, tenantId?, dueBefore?, limit?, offset? })`, `updateTenantDeletionRequestStatus`, `listDueTenantDeletionRequests(now)`.
-- `apps/geneweave/src/encryption/db-encryption-store.ts` `deleteAllWrappedMaterial` impl: single `BEGIN TRANSACTION` deleting from all three tables; returns `{ keks, deks, biks }` row counts. Bound on the encryption store, NOT a generic DB method — cleaner separation.
-- `apps/geneweave/src/encryption/purge-scheduler.ts` — `startEncryptionPurgeScheduler({ db, getManager, intervalMs?, log? }) → { stop, tickNow }`. Thin app adapter that wires `db.listDueTenantDeletionRequests(now)` → `weavePurgeScheduler.listDuePurges` and `db.updateTenantDeletionRequestStatus(id, 'purged', now)` → `markPurged`. Boot wiring lives in `apps/geneweave/src/index.ts` block `5-EN-PS`, immediately after the rotation scheduler block.
-- 5 admin REST endpoints in `apps/geneweave/src/admin/api/tenant-encryption-policies.ts`:
-  - `POST /api/admin/tenant-encryption-policies/:tenantId/request-deletion` (csrf, auth) → 201 `{ request }`. Body `{ retentionDays? (default 30), reason? }`. Returns 409 if a pending request already exists for the tenant.
-  - `POST /api/admin/tenant-encryption-policies/:tenantId/cancel-deletion` (csrf, auth) → 200 `{ request }`. 409 if status is not `'pending'`. Calls `manager.restoreFromShred(...)` if keys were already soft-shredded by a prior step, but typically the cancel happens before any shred (the scheduler hard-shreds at purge time, not at request time).
-  - `POST /api/admin/tenant-encryption-policies/:tenantId/restore-from-shred` (csrf, auth) → 200 `{ kekId, dekId }`. 503 when manager null. 4xx error from package (`'cannot be restored: ... purged'`) bubbles up as 409.
-  - `GET /api/admin/tenant-deletion-requests?status=&tenantId=&limit=&offset=` (auth) → `{ requests }`. Operator visibility across all tenants.
-  - `GET /api/admin/tenant-deletion-requests/:id` (auth) → `{ request }` or 404.
-- `restore-from-shred` is a separate endpoint from `cancel-deletion` because the two operate on different state machines: cancel acts on a pending deletion request; restore acts on the encryption policy's shred timestamps. A tenant whose request was already purged cannot be restored (keys are gone); a tenant whose request was cancelled before purge needs no restore (keys were never shredded).
-- E2E helper: `scripts/_phase6-tick-once.mjs` — same pattern as Phase 5 helper. Boots transient `DatabaseAdapter` + manager from env, calls `purgeScheduler.tickNow()`, writes `{checked, purged, errors}` JSON to stdout.
-
-### CRITICAL invariants (verified)
-- **Hard-shred is irreversible under `LocalKmsProvider`.** Once `deleteAllWrappedMaterial` runs, the wrapped DEKs are gone and the master key alone cannot recover them. Cloud KMS providers (Azure Key Vault soft-delete, AWS KMS schedule-key-deletion, GCP KMS destroyCryptoKeyVersion) have their own retention semantics on the wrapping side; geneweave does NOT call into the KMS to delete the master key during hard-shred — only the wrapped blobs in the local store. **For full GDPR-grade cryptographic shred at cloud-KMS scale, operators must additionally schedule deletion of the wrapping key in the KMS console.** Document this in any GDPR DPA.
-- **Restore vs hard-shred ordering matters.** `restoreFromShred` works ONLY while the keys are in `'revoked'` status but still present in the store. The purge scheduler hard-shreds at the retention boundary, AFTER which restore fails fast with `'cannot be restored: wrapped key material is gone (purged)'`. Operators have until `retention_until` to call cancel-deletion; after that, restore fails and the data is unrecoverable.
-- **Purge scheduler operates on `retention_until <= now`.** Strict `<=` (not `<`) — a request exactly at the boundary IS eligible. Differs from rotation scheduler's strict `>` boundary.
-- **Audit emission is package-side only.** `manager.hardShred(...)` emits `tenant_purged` via the wired `AuditEmitter`. Scheduler MUST NOT double-emit. Same gotcha as Phase 5.
-- **Cancel-deletion fast path: 409 if not pending.** A request that's already cancelled or purged cannot be cancelled again. Tests cover this.
-- Same dist-staleness rule as every prior phase: `npx tsc -b apps/geneweave` after every edit under `apps/geneweave/src/**` before restarting the server.
-
-### Reference
-- Canonical example: `examples/16-encryption-phase6.ts` — pure in-memory rehearsal of the full lifecycle. 18 assertions covering: bootstrap → encrypt → request-deletion → tick once → key material wiped → audit `tenant_purged` from `system:purge-scheduler` actor → manager-unavailable graceful no-op → `listDuePurges` throw caught into errors count → `restoreFromShred` succeeds while soft-shredded → fails fast after `hardShred`. No DB, no LLM, no external services.
-- Tests: `apps/geneweave/src/encryption/purge-scheduler.test.ts` — strict `<=` boundary, manager-unavailable skip, per-tenant isolation, audit-no-double-emit. Plus package-level tests for `weavePurgeScheduler`, `hardShred`, `restoreFromShred`.
-- E2E script: `scripts/e2e-phase6-tenant-deletion.mjs` — **33 assertions, all pass** against `http://localhost:3500`. Covers: register → promote + tenant_id assign → login (csrf from body) → manager_available → POST policy with auto-bootstrap → POST /request-deletion (default 30d retention) → GET /tenant-deletion-requests list → POST /cancel-deletion → 409 on cancel-again → second request with `retentionDays: 1` → SQL `UPDATE retention_until = strftime('%s','now')*1000 - 1000` → execSync helper → assert `{checked>=1, purged>=1, errors:0}` → request status=purged → wrapped key material count == 0 → audit ≥1 `tenant_purged` from `system:purge-scheduler` → DELETE policy succeeds (no live keys) → 404.
-- Same zsh launcher gotcha as Phase 5: use `/tmp/start-phase6.sh` script file pattern with `set -a; source .env; set +a` and explicit `WEAVE_ENCRYPTION_MASTER_KEY` export.
-
-
-## Tenant Encryption — Phase 7: Cloud KMS Provider Registry
-
-Phase 7 makes the encryption layer multi-cloud: each tenant selects a KMS at the policy level (`tenant_encryption_policy.kms_provider_id` + `kms_config`). Five providers ship in `@weaveintel/encryption` — `local`, `aws-kms`, `azure-kv`, `gcp-kms`, `vault` — and operators can register custom providers (HSM, in-house REST KMS) without forking the package.
-
-### Package surface (`@weaveintel/encryption`)
-- `KmsProviderRegistry` (in `provider-registry.ts`) — `register({ id, build, healthCheck })`, `list()`, `build(id, config)`, `healthCheck(provider)`. The `build` factory is responsible for validating per-tenant config shape and throwing on bad input.
-- `defaultWrapUnwrapHealthCheck(provider)` — exercises a real wrap+unwrap roundtrip, returns `{ ok, latencyMs, error? }`. Used by every built-in provider; safe default for custom providers.
-- `createCachedKmsResolver({ registry, store, defaultProviderId, defaultConfig? })` (in `kms-resolver.ts`) — returns `{ resolve, invalidate(tenantId), invalidateAll(), size() }`. Cache key is `(tenantId, providerId, sha256(JSON.stringify(config, sortedKeys)).slice(0,16))` so config edits naturally invalidate. Falls back to `defaultProviderId` when the tenant has no policy row.
-- `createBuiltinKmsRegistry()` and `registerBuiltinKmsProviders(registry)` (in `register-builtins.ts`) — register all 5 built-ins. `BUILTIN_KMS_PROVIDER_IDS` is the canonical list.
-- `weaveTenantKeyManager({ store, kms?, kmsResolver, audit })` — the resolver is the per-tenant routing path; `kms` stays optional for legacy single-provider deployments. Manager calls `await this.#resolveKms(tenantId)` on every wrap/unwrap.
-- New audit kind: `'kms_health_check'` (added to `AuditEvent.kind`). Payload: `{ providerId, ok, latencyMs, error? }`.
-- All exports re-routed via `packages/encryption/src/index.ts` — including provider classes (`AwsKmsProvider`, `AzureKeyVaultProvider`, `GcpKmsProvider`, `VaultTransitProvider`) and option types. **Reusability invariant preserved**: package depends only on `@weaveintel/core` + `node:crypto`. Cloud SDKs are dynamically imported inside provider classes — they remain optional installs.
-
-### GeneWeave wiring (reference impl)
-- `apps/geneweave/src/encryption/bootstrap.ts` returns `{ manager, registry, resolver, source }` (source is `'env' | 'dev-generated' | 'no-default'`). Always uses `createBuiltinKmsRegistry()`. Optional `registerExtra(registry)` hook lets callers add custom providers BEFORE the resolver wraps it. Returns `null` only when no local master key AND `defaultProviderId === 'local'` — cloud-only deployments can boot with `defaultProviderId: 'aws-kms'` and no env key.
-- `apps/geneweave/src/index.ts` exports three module-level singletons: `geneweaveEncryptionManager`, `geneweaveKmsRegistry`, `geneweaveKmsResolver`. The bootstrap result populates all three; admin routes read them via getter pattern (live binding).
-- 2 new admin REST endpoints in `apps/geneweave/src/admin/api/tenant-encryption-policies.ts`:
-  - `GET /api/admin/encryption/kms-providers` (auth) → `{ providers: string[] }`. Lists registered ids from the live registry — never hardcoded.
-  - `POST /api/admin/tenant-encryption-policies/:tenantId/kms/health-check` (csrf, auth) → 200 `{ ok: true, providerId, latencyMs }` or 502 `{ ok: false, providerId, error }`. Resolves provider via `resolver.resolve(tenantId)`, runs `registry.healthCheck(provider)`, persists `kms_health_check` audit row before returning.
-- POST/PUT policy endpoints validate `kms_provider_id` against `registry.list()` and return 400 on unknown ids. Both call `getKmsResolver()?.invalidate(tenantId)` after upsert so the next health-check / wrap / unwrap rebuilds the provider with the new config.
-- `registerTenantEncryptionPolicyRoutes(...)` signature gained two optional getter args: `getKmsRegistry: () => KmsProviderRegistry | null` and `getKmsResolver: () => CachedKmsResolver | null`. Both default to `() => null` so the existing call sites without registry support keep compiling.
-
-### CRITICAL invariants (verified)
-- **Cache invalidation is config-driven, not policy-id-driven.** The cache key includes a config hash so changing `kms_config` (e.g. rotating `rootKeyId`, switching `keyVersion`) automatically produces a new cache entry on the next call. Admin routes also call `resolver.invalidate(tenantId)` defensively after every upsert.
-- **Provider validation runs at write time, not read time.** Saving a policy with an unknown `kms_provider_id` is rejected with 400. The resolver still throws `KmsUnavailableError` at runtime if the registry was rebuilt without a previously-saved provider — defence in depth.
-- **Cloud SDKs stay lazy.** `register-builtins.ts` references provider classes directly, but the cloud SDK `import('@aws-sdk/client-kms')` etc. happens INSIDE each provider's wrap/unwrap call. A geneweave deployment that only uses `local` never installs cloud SDKs.
-- **Health-check is the only operation that can write `kms_health_check` audit rows.** Admin route MUST persist the row regardless of `ok` value (failure observability). `wrap`/`unwrap` audit events stay at the `dek_*` / `kek_*` level — don't add another health audit kind.
-- **Default fallback is intentional.** When a tenant has no policy row, the resolver builds the `defaultProviderId` (typically `'local'`) with `defaultConfig`. New tenants don't need an explicit policy to encrypt; they can opt into a cloud KMS later by upserting one.
-- Same dist-staleness rule as every prior phase: `npx tsc -b apps/geneweave` after every edit under `apps/geneweave/src/**` before restarting the server.
-
-### Reference
-- E2E script: `scripts/e2e-phase7-kms-providers.mjs` — registers tenant_admin → `GET /kms-providers` asserts all 5 builtin ids → POST 2 policies with `local` provider but distinct configs → POST unknown-id rejected with 400 → POST `/kms/health-check` per tenant → assert `kms_health_check` audit row → PUT alters config → next health-check still passes (cache invalidated).
-- Operator docs: `docs/ENCRYPTION_KMS_PROVIDERS.md` — per-provider config schemas, IAM templates (AWS, GCP), RBAC roles (Azure), Vault Transit policy, custom-provider registration example, operational checklist.
-- Phase 7 of `docs/TENANT_ENCRYPTION_DESIGN.md` — design rationale + exit criteria.
-
-## Tenant Encryption — Phase 8: Blind Indexes
-
-Phase 8 lets equality lookups (login by email, dedup, join keys) work against AEAD-encrypted columns without exposing plaintext to the database. A companion column `<column>_bidx` stores `HMAC-SHA-256(BIK, "table|column|value")` truncated to 24 hex chars (96 bits). The BIK ("blind index key") is a third per-tenant per-epoch key alongside KEK + DEK, wrapped under the same KEK.
-
-### Package surface (`@weaveintel/encryption`)
-- `TenantKeyManager.computeBlindIndex({ tenantId, table, column, value })` → 24-hex MAC under the active BIK. Throws if `blindIndexEnabled=false`.
-- `TenantKeyManager.rotateBik(tenantId, actor)` → new BIK with `epoch+1`, prior BIK marked `previous`, emits `bik_rotate`. **Caller MUST follow with a bidx rebuild** — without it, lookups miss until lazy-upgrade refills.
-- `BlindIndexSpec` + `DEFAULT_BLIND_INDEX_SPECS` (ships `[{ table: 'users', column: 'email' }]`) + `mergeBlindIndexSpecs(...)` for app-side merging.
-- `bidxColumnName(spec)` — defaults to `${column}_bidx`; overridable via `spec.bidxColumn`.
-- `maybeBlindIndex(state, table, column, value)` — returns MAC or `null` when manager missing / tenant disabled / column not in spec / value empty / value already a sentinel ciphertext.
-- `computeRowBlindIndices(state, table, row)` — returns `{ <bidxColumn>: mac }` for spec'd columns present in row. **Skips ciphertext** rather than emitting null — partial rewrites can't silently break a stored bidx.
-- New audit kinds: `bik_create`, `bik_rotate`, `bik_revoke`, `bidx_compute`, `bidx_rebuild`.
-- `EncryptionStore` gained `listBiks / insertBik / updateBikStatus`; `TenantPolicyRecord` gained `blindIndexEnabled: boolean`. **Reusability invariant preserved**: still only `@weaveintel/core` + `node:crypto`.
-
-### GeneWeave wiring (reference impl)
-- **Migration** (`apps/geneweave/src/db-sqlite-migrations.ts`) — adds `users.email_bidx TEXT` + `idx_users_email_bidx` via `safeExec` (idempotent).
-- **SYSTEM tenant** (`apps/geneweave/src/encryption/system-tenant.ts`) — reserved tenant id `__system__`. Login by email runs before any user-tenant context exists, so per-tenant BIK can't help; instead, **every** `users.email_bidx` is computed under the SYSTEM tenant's BIK. `bootstrapSystemTenant(db, manager)` is idempotent and is called from `index.ts` after `bootstrapEncryption`. It force-flips `blind_index_enabled=1` and `enabled=1` if a stale policy row exists.
-- **Adapter wiring** (`apps/geneweave/src/encryption/db-encrypted-adapter.ts`) — outer Proxy intercepts `createUser`, `updateUser`, and `getUserByEmail`. Writes compute and persist `email_bidx`; reads compute the MAC and try `getUserByEmailBidx(bidx)` first, falling through to legacy plaintext-equality (`getUserByEmail`) on miss. **Lazy-upgrade is intentional** — rows that predate backfill still authenticate.
-- **Adapter methods** (`db-sqlite.ts` + `db-types.ts`):
-  - `getUserByEmailBidx(bidx)` — indexed equality lookup.
-  - `setUserEmailBidx(userId, bidx | null)` — used by rebuild.
-  - `listUsersForBidxRebuild(limit, afterId)` — id-cursor paging (stable, no offset drift).
-  - `createUser` / `updateUser` accept `emailBidx?: string | null`.
-- **Admin endpoints** (`apps/geneweave/src/admin/api/tenant-encryption-policies.ts`):
-  - `POST /:tenantId/rotate-bik` → mints next BIK; returns `{ ok, bik: sanitized }`.
-  - `POST /:tenantId/rebuild-bidx` → id-cursor pages 500 rows at a time, recomputes MAC per row, writes via `setUserEmailBidx`. Returns `{ scanned, written, skipped, scope }`. **No-op (`scope: 'noop'`) for any tenantId other than `__system__`** until apps register additional bidx scopes.
-
-### CRITICAL invariants (verified)
-- **SYSTEM tenant is the ONLY scope that can serve cross-tenant equality.** Per-user-tenant BIKs cannot help with login because the user's tenant is unknown until after lookup. Apps that need per-tenant equality (e.g. `orders.customer_email` within an authenticated tenant context) should add their own spec via `mergeBlindIndexSpecs` and use `tenantId = userTenantId`, NOT `__system__`.
-- **Bidx column writes are package-mediated.** Apps NEVER call HMAC themselves. `computeBlindIndex` / `maybeBlindIndex` / `computeRowBlindIndices` are the only sanctioned entry points — that keeps the domain-separation prefix `table|column|` and truncation rule consistent across consumers.
-- **Sentinel-safe by construction.** `maybeBlindIndex` returns `null` for already-encrypted values, and `computeRowBlindIndices` skips ciphertext columns. Round-tripping a row through the proxy can never overwrite a real bidx with a MAC of the ciphertext.
-- **Rotate without rebuild is supported but degraded.** After `rotateBik`, the previous BIK is kept (status `previous`) so reads can still match old MACs during the cutover window — but the bidx fast-path will miss for new lookups. The proxy falls through to plaintext-equality so login never breaks; **always** call `/rebuild-bidx` immediately after `/rotate-bik` to restore the fast path.
-- **No range / prefix / `LIKE`.** Equality only — supporting prefix would be a different primitive (e.g. tokenized n-grams) and isn't in scope.
-- **`rotateKek` does not re-wrap BIKs.** Cutover requires `rotateBik` + `/rebuild-bidx` on top. KEK lifetime is independent.
-- Same dist-staleness rule: `npx tsc -b apps/geneweave` after every edit under `apps/geneweave/src/**` before restarting the server.
-
-### Operator runbook (one-liner)
-1. `PUT /api/admin/tenant-encryption-policies/__system__` with `blind_index_enabled: true` (already on if SYSTEM auto-bootstrapped at server start).
-2. `POST /…/__system__/rebuild-bidx` to backfill existing rows.
-3. To rotate: `POST /…/__system__/rotate-bik` → **immediately** `POST /…/__system__/rebuild-bidx`.
-4. `GET /…/__system__/audit` shows every `bidx_compute` / `bidx_rebuild` / `bik_rotate` event with actor + timestamp.
-
-### Reusability — adopting in another app
-```ts
-import { DEFAULT_BLIND_INDEX_SPECS, mergeBlindIndexSpecs, computeRowBlindIndices } from '@weaveintel/encryption';
-const SPECS = mergeBlindIndexSpecs(DEFAULT_BLIND_INDEX_SPECS, [{ table: 'orders', column: 'customer_email' }]);
-const bidxes = await computeRowBlindIndices({ manager, tenantId, enabled: true, specs: SPECS }, 'orders', row);
-db.insertOrder({ ...row, ...bidxes });
-```
-Then add `<column>_bidx TEXT` + index in the app's migration and intercept the lookup method (or expose `getOrderByCustomerEmailBidx`).
-
-### Reference
-- E2E script: `scripts/e2e-phase8-blind-indexes.mjs` — register → bidx populated → login via bidx → promote to tenant_admin → SYSTEM policy `blind_index_enabled=1` → rotate-bik → login still works (lazy fallback) → rebuild-bidx → bidx changed → final login OK.
-- Operator docs: `docs/ENCRYPTION_BLIND_INDEXES.md` — wire diagram, package surface, runbook, reuse example, security properties, known gaps.
-- Phase 8 of `docs/TENANT_ENCRYPTION_DESIGN.md` — design rationale + exit criteria.
-
-## Tenant Encryption — Phase 9: Observability + Alert Evaluator
-
-Phase 9 makes the encryption stack observable from the inside without coupling it to any specific metrics backend or host app. The package ships a fire-and-forget `MetricsEmitter` interface, an `InMemoryMetricsEmitter` (bounded cardinality), a pure `evaluateAlerts()` function, and a default rule set (`DEFAULT_ALERT_RULES`). GeneWeave wires it into the bootstrap, persists operator overrides in `tenant_encryption_alert_config`, and exposes a read-only Encryption Health dashboard surface.
-
-### Package surface (`@weaveintel/encryption`)
-- `MetricsEmitter` — single-method `record(rec: MetricRecord): void`. **Synchronous on purpose** — crypto hot paths must never await observability work. Emits MUST be wrapped in `try/catch` at the call site only if the implementation can throw (the in-memory one is no-op-on-error).
-- `InMemoryMetricsEmitter({ maxSeries=256, maxSamples=1024 })` — bounded by series cardinality (FIFO eviction once cap hit) and per-series ring buffer for histogram samples. `snapshot(now?)` returns a `MetricsSnapshot { takenAt, series[] }` with counter sums and histogram p50/p95/p99 estimates.
-- `noopMetricsEmitter` — process-wide singleton for hosts that opt out.
-- `startTimer()` — returns a `() => elapsedMs` closure for histogram observations.
-- `evaluateAlerts({ rules, snapshot, rotationStatus?, now? }): AlertFiring[]` — pure. Supports five rule kinds: `rotation_overdue`, `kms_error_rate` / `aead_error_rate` (counter rate over `windowMs`), `decrypt_latency_p95` (histogram p95 vs threshold), `cache_hit_rate` (lower-is-worse).
-- `DEFAULT_ALERT_RULES` — fleet-scoped rule template (5 entries). Hosts seed these once; operators tune via DB.
-- **Reusability invariant preserved**: still only `@weaveintel/core` + `node:crypto`. No host imports.
-
-### Instrumentation already in place
-- `key-manager.ts` records `encryption.encrypt.duration_ms`, `encryption.decrypt.duration_ms` (histograms, labeled `tenantId/table/column`), `encryption.aead.error` (counter), `encryption.kms.error` (counter, labeled `provider/kind`), `encryption.cache.hit` / `.miss` (counters, labeled `cache: 'kek'|'dek'|'bik'`).
-- `kms-resolver.ts` records `encryption.cache.hit` / `.miss` for the KMS resolver layer (`cache: 'kms'`) and `encryption.kms.duration_ms`.
-
-### GeneWeave wiring (reference impl)
-- **Schema** (`db-sqlite-migrations.ts`) — `tenant_encryption_alert_config` table + unique index `(IFNULL(tenant_id,'__fleet__'), kind)` so a fleet rule and a per-tenant override can coexist for the same `kind`.
-- **Adapter** (`db-sqlite.ts`) — `upsertEncryptionAlertConfig` uses transaction-wrapped manual select-then-insert/update (NOT `ON CONFLICT` — SQLite's expression-index conflict-target matching is brittle here). `listEncryptionAlertConfig({ tenantId? })` filters fleet-only when `tenantId === null`. `deleteEncryptionAlertConfig(id)`.
-- **Bootstrap** (`encryption/bootstrap.ts`) — when caller omits `metrics`, defaults to `new InMemoryMetricsEmitter()` so the dashboard works out of the box. The same emitter is wired into BOTH `createCachedKmsResolver` and `weaveTenantKeyManager`.
-- **Singleton + live-binding** (`index.ts`) — `export let geneweaveEncryptionMetrics = null` is captured from `bootstrapTenantEncryption({ metrics })` result. Other modules access via `() => indexModule.geneweaveEncryptionMetrics` getters so post-boot wiring isn't frozen at module-init time.
-- **Seed** (`encryption/alert-store.ts → seedDefaultAlertRules`) — idempotent: lists existing fleet rows first, skips by `kind`. Operator edits survive reboot. Called from `index.ts` after `bootstrapSystemTenant`.
-- **Admin routes** (`admin/api/encryption-observability.ts`):
-  - `GET /api/admin/encryption/health` — aggregated dashboard payload (per-tenant rotation age, per-cache-layer hit rates, latency p50/p95/p99 by metric, KMS/AEAD error counters over 5min window, alert rule counts, firing alerts list, registered KMS providers).
-  - `GET /api/admin/encryption/metrics?tenantId=&name=` — raw `MetricsSnapshot` with optional label/prefix filters.
-  - `POST /api/admin/encryption/alerts/evaluate` — evaluate now, return firings (does NOT persist).
-  - `GET / POST / PUT / DELETE /api/admin/encryption/alerts[/:id]` — CRUD with CSRF + auth on writes.
-
-### CRITICAL invariants (verified)
-- **Metrics emit is fire-and-forget.** Never `await` `record()`, never throw out of it. The bounded in-memory emitter is the floor — hosts can swap to OTLP / Prometheus / Datadog by implementing `MetricsEmitter` and passing it to `bootstrapTenantEncryption({ metrics })`.
-- **Series cardinality is bounded by construction.** The in-memory emitter caps at 256 distinct label-tuples per name and FIFO-evicts older series. High-cardinality labels (e.g. raw user IDs) MUST NOT be added — keep labels to `tenantId / table / column / provider / kind / cache`.
-- **Alert config is DB-driven, not code-hardcoded.** `DEFAULT_ALERT_RULES` is a *seed*, not a runtime source of truth. Evaluators always read live rows via `listEncryptionAlertConfig`. Operators tune thresholds without redeploys.
-- **Fleet vs per-tenant rules coexist.** Rule with `tenant_id IS NULL` applies fleet-wide; a row with the same `kind` but a real `tenant_id` is the per-tenant override. Both are evaluated independently by `evaluateAlerts`.
-- **Read-only dashboard.** The `/health` endpoint never mutates state — it's safe to scrape from external monitoring as long as the caller is authenticated.
-- Same dist-staleness rule: `npx tsc -b apps/geneweave` after every edit under `apps/geneweave/src/**` before restarting.
-
-### Operator runbook (one-liner)
-1. Boot with `WEAVE_ENCRYPTION_MASTER_KEY` set → bootstrap auto-creates the in-memory emitter and seeds 5 fleet alert rules.
-2. `GET /api/admin/encryption/health` from any tenant_admin session for the dashboard payload.
-3. Tune a rule: `POST /api/admin/encryption/alerts` with `{ tenant_id, kind, threshold, window_ms?, enabled?, description? }`.
-4. Test current state: `POST /api/admin/encryption/alerts/evaluate` returns firings without persisting anything.
-
-### Reusability — adopting in another app
-```ts
-import { bootstrapTenantEncryption, InMemoryMetricsEmitter } from '@weaveintel/encryption';
-const metrics = new InMemoryMetricsEmitter();
-const enc = await bootstrapTenantEncryption({ store, providers, metrics });
-// later, in admin route:
-import { evaluateAlerts, DEFAULT_ALERT_RULES } from '@weaveintel/encryption';
-const firings = evaluateAlerts({ rules: DEFAULT_ALERT_RULES, snapshot: metrics.snapshot() });
-```
-Hosts can also swap in their own `MetricsEmitter` (OTLP, Prometheus, etc.) — the package only depends on the interface shape.
-
-### Reference
-- E2E script: `scripts/e2e-phase9-observability.mjs` — health endpoint payload shape, default rules seeded, raw metrics snapshot, custom rule create/evaluate-fires/disable/delete.
-- Operator docs: `docs/ENCRYPTION_OBSERVABILITY.md` — metric catalog, dashboard payload schema, alert rule kinds, runbook, reuse example.
-- Phase 9 of `docs/TENANT_ENCRYPTION_DESIGN.md` — design rationale + exit criteria.
-
-## Phase 10 — BYOK / HYOK / break-glass / attestation
-
-Customer-managed key escalation. Default `local` provider serves most tenants; this phase exists when customers must hold the private key (RSA-4096) and operators must never see plaintext key material. Full design: `docs/ENCRYPTION_BYOK_HYOK.md`.
-
-### Layering (do not violate)
-- **`packages/encryption/src/byok/`** — pure crypto, only depends on `node:crypto` + `@weaveintel/core`. Exports: `ByokPemKmsProvider`, `loadByokPublicKey`, `fingerprintPublicKey`, `makeLocalUnwrapDelegate` (DEV), `LocalByokKeystore`, `createHttpHyokProxyDelegate`, `composeDelegates`, `createBreakGlassUnwrapDelegate`, `approveBreakGlass`/`denyBreakGlass`/`reapExpiredBreakGlass`/`findActiveGrant`/`validateNewBreakGlassRequest`, `buildAuditChain`/`canonicalize`, `buildAndSignAttestation`/`verifyAttestation`/`generateAttestationSigningKey`/`loadAttestationSigningKey`/`fingerprintEd25519PublicKey`.
-- **`apps/geneweave/src/encryption/byok-service.ts`** — host glue: persists `tenant_byok_config` and **mirrors** the equivalent shape into `tenant_encryption_policy.kms_config` so the existing `CachedKmsResolver` routes through `byok-pem` automatically. Lazy-seeds the platform Ed25519 signing key into `system_attestation_signing_key` (race-safe via `INSERT OR IGNORE` + re-read).
-- **`apps/geneweave/src/admin/api/tenant-byok.ts`** — thin HTTP surface. No crypto here.
-
-### CRITICAL invariants
-- **RSA-4096 minimum.** `loadByokPublicKey` rejects smaller keys at the package boundary; the admin route surfaces this as 400.
-- **HYOK secrets never live in DB.** Store `hyok_bearer_secret_id` (the `process.env` *name*) only; the actual token is resolved at config-time and embedded in `kms_config` in-memory only.
-- **Dual approval is non-bypassable.** `approveBreakGlass` throws if `customerApprover === request.requestedBy`. The window is capped at 24h regardless of requested `windowMs`.
-- **Attestation payloads use canonical JSON.** `canonicalize()` recursively sorts keys; this is what gets hashed (`payload_hash` = SHA-256 of canonical JSON) and signed (Ed25519). Cross-runtime verifiers MUST canonicalize the same way before verifying.
-- **`payload_hash` is recomputable.** Any client can re-canonicalize the returned payload, SHA-256 it, and assert it matches `att.payloadHash` — protects against in-transit tampering even before signature checks.
-- **Audit chain is append-only and tip-anchored.** `buildAuditChain(events).tip` is a SHA-256 of `(prev_tip || sha256(canonical(event)))` per row. Inclusion in attestation makes operator-side audit deletion detectable.
-- **Mirror, don't duplicate config.** `upsertByokConfig` reads existing `tenant_encryption_policy` first to preserve `active_kek_id`/`active_dek_id`/`active_bik_id`/`rotation_schedule`/`blind_index_enabled`/`field_policy`/`shred_*`. Never write a partial row.
-- **Audit `actor` is required.** All `insertEncryptionAudit` calls in `byok-service.ts` populate `actor` (request principal, denier, approver, or `null` for system sweeps).
-
-### Reusability — adopting in another app
-1. Build encryption package; import `byok` symbols from `@weaveintel/encryption`.
-2. Add 4 tables: `tenant_byok_config`, `tenant_break_glass_request`, `tenant_attestation_log`, `system_attestation_signing_key` (see `apps/geneweave/src/db-sqlite-migrations.ts:3088-3151`).
-3. Add ~12 adapter methods (mirror `apps/geneweave/src/db-sqlite.ts` Phase 10 block).
-4. Copy `byok-service.ts` (~440 lines) and swap the `DatabaseAdapter` import for your adapter type. No crypto edits required.
-5. Register the admin routes via `registerTenantByokRoutes(router, db, helpers)`.
-
-### Reference
-- E2E: `scripts/e2e-phase10-byok.mjs` — RSA-4096 enforcement, mirroring, dual-approval block, 24h cap, attestation Ed25519 round-trip + tamper detection + payload_hash recomputation.
-- Tests: `packages/encryption/src/byok/byok.test.ts` — 28 unit tests covering provider, keystore, HYOK proxy, delegate composition, break-glass evaluator, attestation sign/verify.
-- Phase 10 of `docs/TENANT_ENCRYPTION_DESIGN.md` — exit criteria.
+
+- Treat prompt text as guidance, not guaranteed execution. Anything that must *always*
+  happen (tool call, policy check, verification pass, formatting guarantee) belongs in
+  code-level orchestration and shared runtime hooks.
+- Keep execution strategies DB-driven and traceable: strategy selection comes from prompt
+  metadata (`executionDefaults.strategy`) plus admin-managed strategy records, not app-only
+  conditionals.
+- Runtime metadata must capture which strategy, contracts, and evaluations were used so
+  audits can explain model behavior after the fact.
+- Prefer shared helpers in `@weaveintel/prompts` for prompt execution and strategy
+  overlays; GeneWeave consumes them, never duplicates.
+- Optimization prompts are hypotheses: verify candidate quality with deterministic
+  evaluation passes before promotion. Promotion decisions are code-level and data-backed,
+  never instruction-only.
+
+---
+
+## Reusability & Package Boundaries
+
+A reusable package imports **only** its declared dependencies. These boundaries are hard;
+violating one is a review-blocking bug.
+
+| Package | May import | Must NOT import |
+|---|---|---|
+| `@weaveintel/cost-governor` | `@weaveintel/core`, `@weaveintel/tools` | geneweave, any DB adapter, `@weaveintel/core` capability-binding helpers |
+| `@weaveintel/encryption` | `@weaveintel/core`, `node:crypto` | DB, `fetch`, cloud SDKs (lazy-`import()` inside providers only), any third-party dep |
+| `@weaveintel/triggers` | interfaces + built-ins | DB types (persistence wired by host via `TriggerStore`) |
+| `@weaveintel/live-agents` | capability slots | DB types |
+| `@weaveintel/live-agents-runtime` | structural `LiveAgentsDb` interface | concrete geneweave types (`DatabaseAdapter` satisfies the interface structurally) |
+| `@weaveintel/live-agents-trace-tools` | `@weaveintel/core`, `@weaveintel/tools` | geneweave, DB, `crypto` |
+
+The "DB-driven" property of any feature is a property of the **GeneWeave reference impl**,
+not the package. Consumers always supply their own store / resolver / adapter
+implementations and pass them in.
+
+DB hydration for live-agents goes through `@weaveintel/live-agents-runtime`
+(`weaveLiveMeshFromDb`, `weaveLiveAgentFromDb`) — never re-implemented in apps, never a
+new `bootXxxMesh()` wrapper.
+
+---
+
+## Naming Conventions
+
+- `weave*` — user-facing constructor that returns a runnable thing (agent, mesh, store,
+  resolver, model adapter, policy). New user-facing constructors MUST use this prefix.
+- `create*` — internal factory returning infrastructure plumbing (registry, dispatcher,
+  scheduler, supervisor handle).
+- Types use `PascalCase` nouns.
+- Deprecated aliases are kept for one minor release cycle, then removed.
+
+---
+
+## Build & Test Environment Invariants
+
+These apply to **every** change. They are stated once here; do not re-derive them per
+feature.
+
+### Dist staleness (the #1 time-waster)
+`apps/geneweave/package.json` declares `"main": "./dist/index.js"`. Anything importing
+`@weaveintel/geneweave` via `tsx` (examples, e2e scripts) loads the **compiled dist**, not
+the source. **After every edit under `apps/geneweave/src/**` you MUST run
+`npx tsc -b apps/geneweave` before restarting the server/example**, or the change has zero
+runtime effect.
+
+### TypeScript strictness
+- `exactOptionalPropertyTypes` is on. Never assign `undefined` to an optional field — use
+  conditional spreads: `...(x !== undefined ? { x } : {})`.
+- `noPropertyAccessFromIndexSignature` is on. Use bracket notation for index-signature
+  result properties (`result['ok']`, not `result.ok`).
+- `noUnusedLocals` is on. Use rest-destructure drops (`const { __drop: _d, ...rest } = x`)
+  when intentionally discarding keys.
+
+### Known import aliases (these bite repeatedly)
+- `createExecutionContext` is re-exported from `@weaveintel/core` **only** as alias
+  `weaveContext`. Importing the original name fails (TS2724).
+- Bare `createToolRegistry` / `defineTool` are **not** exported from `@weaveintel/core`.
+  Use `weaveToolRegistry as createToolRegistry`, `weaveTool as defineTool`.
+- `BUILTIN_TOOLS` lives in `apps/geneweave/src/tools.ts` (re-exported from
+  `apps/geneweave/src/index.ts`), NOT in `@weaveintel/tools`. External packages never
+  import it.
+- A `ToolRegistry` stores tools by `tool.schema.name`, not a top-level `name` field.
+
+### SQLite quirks
+- `created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP` has **1-second precision**. Any
+  `ORDER BY created_at` that needs determinism MUST add `, rowid ASC` (or matching `DESC`)
+  for tie-breaking within the same second.
+- Migrations live in TS template literals — **never put backticks in SQL comments** inside
+  a migration string (it breaks parsing). Use plain text.
+- Encryption *key* tables use ms-epoch `INTEGER` timestamps; `tenant_encryption_policy`
+  uses TEXT `datetime('now')`. Do not mix conventions per table.
+
+### Router
+The router exposes `del`, not `delete`. Bind it locally:
+`const delMethod = router.del.bind(router); delMethod('/path', ...)`. There is no fallback.
+
+### Admin route helpers
+Operator-only routes (cost policies, cost ledger, encryption) use a local minimal
+`{ json, readBody }` helper type, NOT `AdminHelpers`. `AdminHelpers` carries
+`requireDetailedDescription`, which is only meaningful for LLM-callable entity routes.
+
+### E2E auth quartet (validated, reusable)
+- `set +H` in zsh (or avoid `!`) when passwords contain `!` (history expansion).
+- The admin-role column is **`persona`**, not `role`. Promote:
+  `sqlite3 ./geneweave.db "UPDATE users SET persona='tenant_admin' WHERE email='X';"`.
+- The CSRF token is returned in the **login response body** as `csrfToken`. There is no
+  `/api/csrf` endpoint. Send it as the `X-CSRF-Token` header on every mutation.
+- For zsh launch scripts, prefer a `/tmp/start-*.sh` file (`set -a; source .env; set +a;
+  export …`) over inline `nohup … &` with `$(...)` + multiple `&&` (triggers `dquote>`).
+
+---
+
+## Graceful Degradation
+
+Cross-cutting machinery is **never load-bearing**. This is a project-wide invariant, not a
+per-feature decision.
+
+- Resolvers fall back: `resolver → pinned → throw` only as a last resort with a clear
+  message naming both slots.
+- Cost-governor levers (model cascade, tool subset, intel gate, caching, budget gate) all
+  pass through on any error, missing config, or missing context. A malformed binding must
+  never crash a tick.
+- Audit emitters are best-effort: they swallow their own errors and never throw into the
+  caller.
+- Bus publishes inside contract emitters are best-effort and swallowed.
+- Encryption is opt-in per tenant: missing manager / missing policy / missing `tenant_id`
+  → write plaintext, do not crash. Lazy-upgrade tolerant: legacy plaintext rows remain
+  readable.
+- `tool_search` / connector lookups returning nothing → respond normally, do not assert
+  unavailability.
+
+If you find yourself adding a throwing branch to a resolver, filter, gate, or emitter,
+stop — it almost certainly belongs as a degraded pass-through instead.
+
+---
+
+## Observability & LLM-Callable Metadata
+
+- Add new observability schemas in shared packages first (`@weaveintel/core` contracts,
+  `@weaveintel/observability` helpers) so prompts, skills, agents, and tools emit one
+  comparable trace shape.
+- Capability telemetry is grounded in code: runtime metadata is emitted from runtime hooks
+  and stored in DB-backed traces, never inferred from prompt text.
+- Capability descriptions in traces stay model-facing and explicit enough to support future
+  routing, audits, and replay review.
+- Enforce detailed model-facing descriptions for prompts/skills/tools/agents through shared
+  validation helpers in `@weaveintel/core`.
+- Capture prompt resolution metadata (`source`, `resolvedVersion`, `selectedBy`,
+  experiment metadata) in runtime message metadata.
+
+---
+
+## Live-Agents: When to Use & Capability Parity
+
+**Use live-agents** when agents run continuously (hours/days), accumulate learnings in
+contracts, run in parallel needing distributed coordination, respond to external events
+continuously, or need mesh isolation / cross-mesh bridges.
+
+**Use `@weaveintel/agents`** for single request/response, stateless tool-calling chains, or
+a bounded-depth ReAct loop.
+
+Capability parity is the rule: live-agents is a *temporal extension* of `weaveAgent`, not a
+parallel implementation. If `weaveAgent` accepts a capability slot (`model`, `tools`,
+`memory`, `policy`, `bus`, `workers`), `weaveLiveAgent` accepts the same type — reuse or
+extend with a per-tick variant, never duplicate.
+
+- Per-tick capability resolution (model, tools, prompt, policy gates) is first-class:
+  anything that may change between ticks is resolvable per invocation via a resolver
+  interface, not pinned at construction. Pinned values stay supported for tests and
+  short-lived agents.
+- New user-facing constructor → `weaveLiveXxx`. New boot path → `weaveLiveMeshFromDb`. New
+  per-tick concern → inject as a resolver, not a static value.
+- Every model resolution, tool resolution, policy decision, and contract change emits a
+  `live_run_events` row. The **package** emits these; the app does not. Add new kinds via
+  PR review, never silently.
+
+Account binding (hard invariant): only humans bind accounts to agents; binding includes a
+capabilities array; revocation is immediate (next tick sees it). MCP credentials live in
+environment variables, never in the DB.
+
+---
+
+## Contract Reference
+
+Condensed durable facts per platform. Full build history → `docs/PHASE_LOG.md`.
+
+### Tool platform
+- Tables: `tool_catalog` (registry; `tool_key` unique, `version`, `side_effects`, `tags`,
+  `source` ∈ `builtin|custom|mcp|plugin`, `credential_id`, `config`), `tool_policies`
+  (UUID PK; seeded `default|strict_external|destructive_gate|read_only`),
+  `tool_rate_limit_buckets` (1-min tumbling), `tool_audit_events`,
+  `tool_health_snapshots`, `tool_approval_requests`, `tool_credentials`.
+- Risk levels: `read-only | write | destructive | privileged | financial |
+  external-side-effect` (old `low/medium/high` retired).
+- Admin paths: `/api/admin/tool-catalog`, `/api/admin/tool-policies`,
+  `/api/admin/tool-audit`, `/api/admin/tool-health`, `/api/admin/tool-credentials`,
+  `/api/admin/tool-approval-requests`, `/api/admin/tool-simulation`.
+- Canonical types from `@weaveintel/geneweave`: `ToolCatalogRow` (deprecated alias
+  `ToolConfigRow`), `ToolPolicyRow`, `ToolAuditEventRow`, `ToolHealthSnapshotRow`,
+  `ToolCredentialRow`.
+- `createToolRegistry()` is **async** — all call sites `await` it. When a `policyResolver`
+  is supplied it returns a policy-enforced registry automatically (enabled → circuit
+  breaker → risk gate → approval gate → rate limit → timed execute → audit emit).
+- `EffectiveToolPolicy.source`: `default | global_policy | skill_override |
+  persona_override`. Skill overrides via `skillPolicyKey` in `PolicyResolutionContext`.
+- **Secrets never in DB** — `tool_credentials` stores `env_var_name` only.
+- Startup order in `index.ts`: `seedDefaultData()` → `syncToolCatalog(db)` →
+  `startToolHealthJob(db)` → workflow engine → HTTP listen.
+
+### Prompts platform (`@weaveintel/prompts`)
+- Tables: `prompt_fragments`, `prompt_frameworks`, `prompt_versions`,
+  `prompt_experiments`, `prompt_strategies` (+ eval datasets / runs / optimizers /
+  optimization runs).
+- Fragments: `{{>key}}` syntax, `resolveFragments(template, registry)`; circular refs
+  detected (max depth 5) and left unexpanded. Frameworks: ordered named sections; only
+  keys in `SYSTEM_SECTIONS` (`'role'`) map to the system message.
+- Unified render: `renderWithOptions(template, variables, values, options?)` → fragment
+  expand → optional lint → interpolation. Returns `RenderResult` (`.text`, `.lintResults`,
+  `.expandedTemplate`). Prefer over `resolveFragments` + `createTemplate().render()`.
+- Adapters: `openAIAdapter`, `anthropicAdapter`, `textAdapter`, `systemAsUserAdapter`;
+  select via `resolveAdapter(provider)`.
+- Runtime selection: `resolvePromptRecordForExecution()` order is requested override →
+  active experiment weighted variant → active published version → latest published → base
+  prompt fallback. Empty/unavailable version/experiment tables fall back without failing.
+- Execution: `executePromptRecord(record, variables, options?)` (render + strategy +
+  evaluation hooks). Strategy order: explicit `strategyKey` → `executionDefaults.strategy`
+  → fallback.
+
+### Workflows platform (`@weaveintel/workflows`)
+- Tables: `workflow_defs`, `workflow_handler_kinds` (catalog; `INSERT … ON CONFLICT DO
+  UPDATE` preserves operator-edited `enabled`), `workflow_runs` (+ `cost_total`),
+  `workflow_checkpoints`.
+- `DefaultWorkflowEngine` (`startRun` synchronous to terminal; `tickRun` for paused).
+  `HandlerResolverRegistry` maps `kind` (`noop|script|tool|prompt|agent|mcp|subworkflow`)
+  to a runnable. Built-ins wired in geneweave: `noop`, `script`, `tool`. Others reserved.
+- `WorkflowStep`: required `id`, `name`, `type`. `handler` forms: bare key / prefixed
+  (`tool:`, `script:`) / omitted (falls back to `id`). Ordering via `next` (string |
+  string[]); **there is no `nextSteps` field**. `inputMap` reads `state.variables` (no
+  `variables.` prefix); `outputMap` writes to `variables` (`"$"`/`""` = whole result).
+  `script:` body has `variables` + `config` and **must `return`**.
+- Governance (Phase 5): `validateWorkflowInput` (ajv-free JSON-schema-lite) rejects bad
+  input before any step runs; `WorkflowPolicy.costCeiling` → run fails + emits
+  `workflow:cost_exceeded`; replay is **ordinal-strict** (keyed by ordinal, not stepId);
+  `CheckpointStore` / `WorkflowRunRepository` persistence.
+- Output binding: `WorkflowOutputContract` packs/unpacks via reserved key
+  `metadata.__outputContract` (no dedicated column). `ContractEmitter` emits **after**
+  successful terminal state, best-effort.
+- Admin: `POST /api/admin/workflows/:id/run` (503 if engine unwired, 400 bad JSON, 201
+  `{ runId, run }`). Admin body shape is **flat snake_case**; POST auto-generates
+  `'wf-'+randomUUID().slice(0,8)`; returns `{ workflow }`.
+
+### Triggers platform (`@weaveintel/triggers`)
+- Tables: `triggers`, `trigger_invocations` (both UUID PK, FK CASCADE).
+- `Trigger` uses **nested refs**: `source:{kind,config}`, `target:{kind,config}`,
+  `filter:{expression}`, `rateLimit:{perMinute}` — never flat snake_case inside the
+  package. Source kinds: `cron|webhook|filewatch|mcp_event|db_change|contract_emitted|
+  workflow_event|signal_bus|manual`. Target kinds: `workflow|agent_tick|mesh_message|
+  contract|webhook_out` (only `workflow` + `webhook_out` wired; others record
+  `no_target_adapter`). Invocation status: `dispatched|filtered|rate_limited|disabled|
+  no_target_adapter|error`.
+- `TriggerStore`: `list`/`save`/`recordInvocation` (store swallows its own failures).
+  After **every** CRUD write the host calls `dispatcher.reload()`. Invocation ids minted
+  by the dispatcher (`crypto.randomUUID()`).
+- Filter language: JSONLogic-lite, fail-closed on unknown ops. `MeshContractSourceAdapter`
+  consumes a Node `EventEmitter` for `contract_emitted` triggers — one bus per process,
+  shared by `DbContractEmitter` (publisher) and the adapter (consumer); never module-level
+  state.
+- Admin body shape is **snake_case** (route translates to nested `Trigger`). Manual fire
+  matches only `source.kind === 'manual'`.
+
+### Capability bindings, packs, cost
+- `capability_policy_bindings` (UUID PK): `binding_kind` ∈ `agent|mesh|workflow|tenant`,
+  `policy_kind` ∈ `tool_policy|rate_limit|approval|cost_policy`, `precedence`, `enabled`.
+  **Precedence: agent=100 > mesh=50 > workflow=10 > tenant=5 > package_default.** Resolve
+  with `resolveCapabilityBinding(...)`. Kaggle workflow id convention is `'kaggle'`.
+- `capability_packs` / `_installations` / `_experiments`: manifest key is
+  `lower.dotted.snake_case` (**no hyphens**), version is semver. `installPack` is atomic
+  (no rows written if preconditions unmet → 412); `uninstallPack` deletes exactly the
+  ledger rows (re-uninstall → 409). 6 supported buckets: `workflow_defs`, `triggers`,
+  `prompts`, `prompt_fragments`, `tool_policies`, `capability_policy_bindings`.
+- `cost_policies` (UUID PK, `key` unique, `tier`, `levers_json`). `CostTier` ∈
+  `economy|balanced|performance|max|custom`; `DEFAULT_COST_TIER = 'balanced'`.
+  **Cost governor is default-on**: `resolveCostGovernorBundle` never returns null — no
+  binding → `package_default` (`balanced`). `DbCostPolicyResolver` walks agent → mesh →
+  workflow → tenant → null. `tier: 'custom'` skips preset merge (supply every lever).
+  Levers L1–L9: model cascade, prompt caching, tool subset (`all|phase|intent-rag`),
+  intel gating, history compaction, maxStepsCap, reasoningEffort, output truncation,
+  budget gate. All resolvers are **never load-bearing**.
+
+### Scientific Validation (`sv:`)
+- Tables (UUID PK): `sv_hypothesis`, `sv_sub_claim`, `sv_verdict`, `sv_evidence_event`
+  (no `tenant_id`), `sv_agent_turn`.
+- `SvHypothesisStatus`: `queued|running|verdict|abandoned` (terminal set:
+  `{verdict, abandoned}`). `SvClaimType`: `mechanism|epidemiological|mathematical|
+  dose_response|causal|other` (never `empirical`). Verdicts: `supported|refuted|
+  inconclusive|needs_revision`.
+- `SVWorkflowRunner` instantiated once at startup; model factories are **async**. 18 SV
+  tools are SV-agent-only (not in `tool_catalog`, not operator-policy-managed). Routes
+  under `/api/sv/...`; `Idempotency-Key` required on submit + reproduce. SSE via
+  `pollRows`, keepalive every 15s, max stream 5 min.
+
+### Live-agents runtime
+- DB column `live_agents.prepare_config_json` (declarative `prepare()` recipe). Recipe
+  `tools`: `'$auto'` | `{ auto?, traceTools?: '$auto' }`. Caller-supplied `prepare`
+  always wins. `live_run_events` kinds: `model.resolved`, `tool.resolved`,
+  `policy.decision`, `contract.changed`, `tick.started`, `tick.completed`, `tick.errored`.
+- Six state-store backends ship (`weaveInMemory/Sqlite/Postgres/Redis/MongoDb/DynamoDb
+  StateStore`). Entry points: `weaveLiveMeshFromDb`, `weaveLiveAgentFromDb`,
+  `weaveLiveAgent`, `weaveLiveAgentPolicy`, `weaveModelResolver`, `weaveDbModelResolver`.
+- Admin response keys are kebab-case: list `{ 'live-meshes': [...] }` / `{ 'live-agents':
+  [...] }`; single `{ 'live-mesh': {...} }` / `{ 'live-agent': {...} }`.
+
+### Tenant encryption (`@weaveintel/encryption`)
+- Tables: `tenant_encryption_policy` (TEXT timestamps), `tenant_keks`/`tenant_deks`/
+  `tenant_biks` (ms-epoch INTEGER, UUID PK), `encryption_audit`,
+  `encryption_rewrite_progress`, `tenant_deletion_requests`, `tenant_byok_config`,
+  `tenant_break_glass_request`, `tenant_attestation_log`,
+  `system_attestation_signing_key`, `tenant_encryption_alert_config`.
+- Sentinel: `enc:v1:<epoch>:<iv_b64>:<ct_b64>`. AAD: `tenant|table|column|rowId|epoch`
+  (mismatch → `EncryptionContextMismatchError`). `KeyStatus`: `active|previous|revoked`
+  (**never `'rotated'`**) — rotation: active→previous; shred: all→revoked. Decrypt looks
+  up DEK by `(tenantId, epoch)`, so `previous` DEKs stay readable.
+- Engine: `weaveTenantKeyManager`; KMS via `KmsProviderRegistry` (5 built-ins:
+  `local|aws-kms|azure-kv|gcp-kms|vault`); per-tenant routing via cached resolver
+  (cache key includes a config hash). **`WrappedKey` is Buffer-based (KMS internals);
+  `SerializedWrappedKey` is string-based (records)** — do not call
+  serialize/deserialize at the DB boundary.
+- Multi-table proxy: `weaveTenantEncryptedProxy({ db, getManager, specs })` /
+  `withTenantEncryptedDb` (canonical). `withTenantEncryptedMessages` is a back-compat
+  alias — **prefer `withTenantEncryptedDb`**. `getManager` is a live-binding getter
+  closure (ESM live binding; never capture the manager directly).
+- Blind indexes: companion `<column>_bidx` = `HMAC-SHA-256(BIK, "table|column|value")`
+  truncated to 24 hex. Equality-only. Cross-tenant equality (login by email) uses the
+  reserved `__system__` tenant. After `rotate-bik` you **must** `rebuild-bidx`.
+- Schedulers: rotation (strict `>` age boundary, `'manual'` skipped, actor
+  `system:rotation-scheduler`), purge (strict `<=` boundary, actor
+  `system:purge-scheduler`). **Audit emission is package-side only — schedulers must not
+  double-emit.** Audit column is `event_kind` (snake_case at DB/REST; camelCase
+  `eventKind` in package types).
+- Observability: `MetricsEmitter.record()` is **synchronous, fire-and-forget**; bounded
+  `InMemoryMetricsEmitter`; pure `evaluateAlerts()`; alert config is DB-driven (fleet rule
+  `tenant_id IS NULL` + per-tenant override coexist). Keep labels low-cardinality
+  (`tenantId/table/column/provider/kind/cache`).
+- BYOK/HYOK: RSA-4096 minimum (enforced at package boundary → 400). HYOK secrets never in
+  DB (store env var *name* only). Break-glass dual approval is non-bypassable, window
+  capped at 24h. Attestation uses canonical JSON (recursively sorted keys) → SHA-256
+  `payload_hash` → Ed25519 signature; audit chain is append-only and tip-anchored.
+- Boot is idempotent and non-fatal: missing `WEAVE_ENCRYPTION_MASTER_KEY` → manager stays
+  null, encryption is opt-in. **DELETE policy returns 409 if live keys exist — shred
+  first, then delete.**
+
+---
+
+## Known pre-existing issues (do not fix unless asked)
+
+Pre-existing tsc errors in `examples/86, 92, 95, 97` and
+`comprehensive-live-agents-workflow.ts` use older live-agents/workflow API surfaces.
+Building `apps/geneweave` + the relevant packages is clean.

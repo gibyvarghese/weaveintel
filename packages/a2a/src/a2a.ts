@@ -16,7 +16,7 @@ import type {
   ExecutionContext,
 } from '@weaveintel/core';
 import { weaveContext, WeaveIntelError, weaveResolveTracer } from '@weaveintel/core';
-import { a2aFetch, assertHttpsOrLoopback } from './_fetch.js';
+import { a2aFetch, a2aFetchStream } from './_fetch.js';
 
 async function withObservedSpan<T>(
   ctx: ExecutionContext,
@@ -73,12 +73,11 @@ export function weaveA2AClient(): A2AClient {
       const taskUrl = agentUrl.replace(/\/$/, '') + '/tasks/stream';
       // SSE streams are inherently long-running: enforce HTTPS only, skip
       // request-level timeout + size cap (would kill a healthy stream).
-      assertHttpsOrLoopback(taskUrl);
       const response = await withObservedSpan(
         ctx,
         'a2a.client.stream_task',
         { agentUrl, taskId: task.id },
-        () => fetch(taskUrl, {
+        () => a2aFetchStream(taskUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
           body: JSON.stringify(task),

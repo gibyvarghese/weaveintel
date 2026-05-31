@@ -19,6 +19,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
+import { hardenedFetch } from '@weaveintel/core';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -85,22 +86,22 @@ function parseArgs(): {
 }
 
 async function post(url: string, body: unknown, apiKey: string): Promise<unknown> {
-  const res = await fetch(url, {
+  const res = await hardenedFetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     },
     body: JSON.stringify(body),
-  });
+  }, { errorTag: 'sv-eval-corpus', enforceHttps: false });
   if (!res.ok) throw new Error(`POST ${url} → ${res.status}`);
   return res.json() as Promise<unknown>;
 }
 
 async function get(url: string, apiKey: string): Promise<unknown> {
-  const res = await fetch(url, {
+  const res = await hardenedFetch(url, {
     headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-  });
+  }, { errorTag: 'sv-eval-corpus', enforceHttps: false });
   if (!res.ok) throw new Error(`GET ${url} → ${res.status}`);
   return res.json() as Promise<unknown>;
 }

@@ -202,7 +202,18 @@ export class LocalDockerProvider implements ContainerProvider {
       const timeoutMs = request.timeoutMs ?? config.timeoutMs ?? 30_000;
       const memoryMb = config.memoryMb ?? 512;
       const cpuCount = config.cpuCount ?? 1;
-      const networkMode = (request.networkAccess ?? config.networkAccess) ? 'bridge' : 'none';
+      // Phase 5: networkAccess alone is insufficient — an explicit allowlist
+      // must be provided (per-request or provider-level) to open the bridge.
+      // Without one, the container's network stays 'none' to prevent
+      // unintended full outbound access. Full per-host enforcement requires
+      // CNI-based egress filtering (road-mapped); the allowlist today gates
+      // whether any bridge is opened at all.
+      const wantsNetwork = request.networkAccess ?? config.networkAccess ?? false;
+      const effectiveAllowlist = [
+        ...(config.networkAllowlist ?? []),
+        ...(request.networkAllowlist ?? []),
+      ];
+      const networkMode = wantsNetwork && effectiveAllowlist.length > 0 ? 'bridge' : 'none';
 
       const dockerArgs = [
         'run',
@@ -266,7 +277,11 @@ export class LocalDockerProvider implements ContainerProvider {
 
     const memoryMb = config.memoryMb ?? 512;
     const cpuCount = config.cpuCount ?? 1;
-    const networkMode = config.networkAccess ? 'bridge' : 'none';
+    // Phase 5: same allowlist gate as one-shot execution — sessions require an
+    // explicit networkAllowlist to enable the bridge; networkAccess alone is
+    // not sufficient.
+    const sessionAllowlist = config.networkAllowlist ?? [];
+    const networkMode = config.networkAccess && sessionAllowlist.length > 0 ? 'bridge' : 'none';
 
     const dockerArgs = [
       'run', '-d',

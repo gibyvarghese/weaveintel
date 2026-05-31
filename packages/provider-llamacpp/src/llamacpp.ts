@@ -36,7 +36,7 @@ import {
 } from '@weaveintel/core';
 import { weaveRegisterModel, weaveRegisterEmbedding } from '@weaveintel/models';
 import { openaiAdapter, translate } from '@weaveintel/tool-schema';
-import { llamacppFetch, assertHttpsOrLoopback } from './_fetch.js';
+import { llamacppFetch, llamacppFetchStream } from './_fetch.js';
 
 // ─── Configuration ───────────────────────────────────────────
 
@@ -161,8 +161,7 @@ async function* sseStream(
   headers: Record<string, string>,
   signal?: AbortSignal,
 ): AsyncIterable<Record<string, unknown>> {
-  assertHttpsOrLoopback(url);
-  const res = await fetch(url, {
+  const res = await llamacppFetchStream(url, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),

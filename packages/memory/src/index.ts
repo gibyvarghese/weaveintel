@@ -1,5 +1,6 @@
 export {
   weaveMemoryStore,
+  weaveRuntimeMemoryStore,
   weaveConversationMemory,
   createConfiguredConversationMemory,
   createConfiguredMemoryStore,
@@ -15,6 +16,7 @@ export {
 export type {
   ConfiguredConversationMemory,
   ConfiguredMemoryStoreOptions,
+  RuntimeMemoryStoreOptions,
 } from './memory.js';
 
 export { weaveGovernancePolicy } from './governance.js';

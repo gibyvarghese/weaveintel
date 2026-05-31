@@ -6,8 +6,10 @@
  * any other source — all through the same contract.
  */
 
+import type { CapabilityId } from './capabilities.js';
 import type { ExecutionContext } from './context.js';
 import type { JsonSchema } from './models.js';
+import { assertRuntimeRequires, type WeaveRuntime } from './runtime.js';
 import type { ToolRiskLevel } from './tool-lifecycle.js';
 
 export interface ToolSchema {
@@ -19,6 +21,13 @@ export interface ToolSchema {
   readonly tags?: readonly string[];
   /** Declared risk level for this tool. Used by syncToolCatalog to populate tool_catalog. Defaults to 'read-only'. */
   readonly riskLevel?: ToolRiskLevel;
+  /**
+   * Cross-cutting runtime capabilities this tool needs (Phase 2). The
+   * registry / runtime asserts these are present on the active
+   * `WeaveRuntime` before the tool can be invoked. Use the ids exported
+   * from `RuntimeCapabilities` (e.g. `'runtime.net.egress'`).
+   */
+  readonly requires?: readonly (CapabilityId | string)[];
 }
 
 export interface ToolInput {
@@ -63,11 +72,24 @@ export interface ToolRegistry {
   toDefinitions(): { name: string; description: string; parameters: JsonSchema }[];
 }
 
-export function createToolRegistry(): ToolRegistry {
+export function createToolRegistry(opts?: {
+  /**
+   * Optional runtime used to assert `tool.schema.requires` at *registration*
+   * time (Phase 3). If supplied, `register(tool)` throws immediately when
+   * the runtime does not satisfy a tool's declared cross-cutting needs \u2014
+   * surfacing the misconfiguration at boot rather than on the first
+   * invocation hours later.
+   */
+  runtime?: WeaveRuntime;
+}): ToolRegistry {
   const tools = new Map<string, Tool>();
+  const runtime = opts?.runtime;
 
   return {
     register(tool: Tool): void {
+      if (runtime && tool.schema.requires && tool.schema.requires.length > 0) {
+        assertRuntimeRequires(runtime, tool.schema.requires, `tool:${tool.schema.name}`);
+      }
       tools.set(tool.schema.name, tool);
     },
     unregister(name: string): void {
@@ -104,6 +126,13 @@ export function defineTool<TArgs extends Record<string, unknown>>(opts: {
   requiresApproval?: boolean;
   tags?: string[];
   riskLevel?: ToolRiskLevel;
+  /**
+   * Cross-cutting runtime capabilities this tool needs (Phase 2).
+   * Use the ids exported from `RuntimeCapabilities`. The active runtime is
+   * asserted to satisfy these before the tool invokes — there is no way to
+   * silently bypass.
+   */
+  requires?: readonly (CapabilityId | string)[];
 }): Tool {
   return {
     schema: {
@@ -113,8 +142,16 @@ export function defineTool<TArgs extends Record<string, unknown>>(opts: {
       requiresApproval: opts.requiresApproval,
       tags: opts.tags,
       riskLevel: opts.riskLevel,
+      ...(opts.requires ? { requires: opts.requires } : {}),
     },
     async invoke(ctx: ExecutionContext, input: ToolInput): Promise<ToolOutput> {
+      // Phase 2 capability gate: if the tool declares requires and an
+      // ambient runtime is present on the context, assert satisfaction
+      // before executing. When no runtime is present we trust the caller
+      // (preserves zero-config DX for tests and tiny adopters).
+      if (opts.requires && opts.requires.length > 0 && ctx.runtime) {
+        ctx.runtime.require(...opts.requires.map((r) => (typeof r === 'string' ? (r as CapabilityId) : r)));
+      }
       const result = await opts.execute(input.arguments as TArgs, ctx);
       if (typeof result === 'string') {
         return { content: result };

@@ -10,8 +10,8 @@
  */
 
 import { WeaveIntelError, parseRetryAfterMs as coreParseRetryAfterMs } from '@weaveintel/core';
-import { createResilientCallable, type ResilientCallable } from '@weaveintel/resilience';
-import { anthropicFetch, assertHttpsOrLoopback } from './_fetch.js';
+import { createResilientCallable, PROVIDER_RESILIENCE_DEFAULTS, type ResilientCallable } from '@weaveintel/resilience';
+import { anthropicFetch, anthropicFetchStream } from './_fetch.js';
 
 // ─── Provider options ────────────────────────────────────────
 
@@ -72,10 +72,7 @@ function composeRequestSignal(signal?: AbortSignal): AbortSignal {
 
 const DEFAULT_ENDPOINT_ID = 'anthropic:rest';
 
-const RESILIENCE_DEFAULTS = {
-  retry: { maxAttempts: 2, baseDelayMs: 500, maxDelayMs: 30_000, jitter: true },
-  circuit: { failureThreshold: 8, cooldownMs: 30_000 },
-} as const;
+const RESILIENCE_DEFAULTS = PROVIDER_RESILIENCE_DEFAULTS;
 
 type RequestArgs = [
   baseUrl: string,
@@ -261,8 +258,7 @@ async function anthropicStreamFetchRaw(
   signal?: AbortSignal,
 ): Promise<ReadableStreamDefaultReader<Uint8Array>> {
   const url = `${baseUrl}${path}`;
-  assertHttpsOrLoopback(url);
-  const res = await fetch(url, {
+  const res = await anthropicFetchStream(url, {
     method: 'POST',
     headers,
     body: JSON.stringify(body),

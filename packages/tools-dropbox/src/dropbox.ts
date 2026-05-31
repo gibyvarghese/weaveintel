@@ -3,7 +3,7 @@
  * Uses Dropbox API v2. Credentials: ctx.metadata.dropboxAccessToken
  */
 
-import { weaveContext, type ExecutionContext } from '@weaveintel/core';
+import { hardenedFetch, weaveContext, type ExecutionContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveToolDescriptor as describeT } from '@weaveintel/tools';
 
@@ -50,11 +50,15 @@ async function dbxFetch(
   const baseUrl = isContent ? 'https://content.dropboxapi.com/2' : 'https://api.dropboxapi.com/2';
   let activeToken = token;
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const resp = await fetch(`${baseUrl}/${endpoint}`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${activeToken}`, 'Content-Type': isContent ? 'application/octet-stream' : 'application/json', ...(isContent ? { 'Dropbox-API-Arg': JSON.stringify(body) } : {}) },
-      body: isContent ? undefined : JSON.stringify(body),
-    });
+    const resp = await hardenedFetch(
+      `${baseUrl}/${endpoint}`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${activeToken}`, 'Content-Type': isContent ? 'application/octet-stream' : 'application/json', ...(isContent ? { 'Dropbox-API-Arg': JSON.stringify(body) } : {}) },
+        body: isContent ? undefined : JSON.stringify(body),
+      },
+      { errorTag: 'tools-dropbox' },
+    );
     if (resp.status === 401 && attempt === 0 && refreshToken) {
       const refreshed = await refreshToken();
       if (refreshed) {
@@ -88,10 +92,14 @@ export const liveDropboxAdapter: DropboxAdapter = {
   async readFile(creds, path) {
     let activeToken = creds.accessToken;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const resp = await fetch('https://content.dropboxapi.com/2/files/download', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${activeToken}`, 'Dropbox-API-Arg': JSON.stringify({ path }), 'Content-Type': '' },
-      });
+      const resp = await hardenedFetch(
+        'https://content.dropboxapi.com/2/files/download',
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${activeToken}`, 'Dropbox-API-Arg': JSON.stringify({ path }), 'Content-Type': '' },
+        },
+        { errorTag: 'tools-dropbox' },
+      );
       if (resp.status === 401 && attempt === 0 && creds.refreshAccessToken) {
         const refreshed = await creds.refreshAccessToken();
         if (refreshed) {
@@ -110,11 +118,15 @@ export const liveDropboxAdapter: DropboxAdapter = {
   async createFile(creds, path, content) {
     let activeToken = creds.accessToken;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const raw = await fetch('https://content.dropboxapi.com/2/files/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${activeToken}`, 'Content-Type': 'application/octet-stream', 'Dropbox-API-Arg': JSON.stringify({ path, mode: 'add', autorename: true }) },
-        body: content,
-      });
+      const raw = await hardenedFetch(
+        'https://content.dropboxapi.com/2/files/upload',
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${activeToken}`, 'Content-Type': 'application/octet-stream', 'Dropbox-API-Arg': JSON.stringify({ path, mode: 'add', autorename: true }) },
+          body: content,
+        },
+        { errorTag: 'tools-dropbox' },
+      );
       if (raw.status === 401 && attempt === 0 && creds.refreshAccessToken) {
         const refreshed = await creds.refreshAccessToken();
         if (refreshed) {
@@ -130,11 +142,15 @@ export const liveDropboxAdapter: DropboxAdapter = {
   async updateFile(creds, path, content) {
     let activeToken = creds.accessToken;
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const raw = await fetch('https://content.dropboxapi.com/2/files/upload', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${activeToken}`, 'Content-Type': 'application/octet-stream', 'Dropbox-API-Arg': JSON.stringify({ path, mode: 'overwrite' }) },
-        body: content,
-      });
+      const raw = await hardenedFetch(
+        'https://content.dropboxapi.com/2/files/upload',
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${activeToken}`, 'Content-Type': 'application/octet-stream', 'Dropbox-API-Arg': JSON.stringify({ path, mode: 'overwrite' }) },
+          body: content,
+        },
+        { errorTag: 'tools-dropbox' },
+      );
       if (raw.status === 401 && attempt === 0 && creds.refreshAccessToken) {
         const refreshed = await creds.refreshAccessToken();
         if (refreshed) {

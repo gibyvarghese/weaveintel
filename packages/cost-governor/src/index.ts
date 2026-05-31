@@ -196,3 +196,12 @@ export type {
 
 // Seed utilities
 export { DEFAULT_COST_POLICIES, type CostPolicySeedRow } from './seed.js';
+
+// Phase 4 — durable variants backed by `runtime.persistence.kv`.
+export {
+  createDurableCostLedger,
+  createDurableRunCostStateTracker,
+  type DurableLedgerOptions,
+  type DurableRunCostState,
+  type DurableRunCostStateTracker,
+} from './durable-ledger.js';

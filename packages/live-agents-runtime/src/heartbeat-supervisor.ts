@@ -23,7 +23,7 @@
  * One failing agent never stops the loop.
  */
 
-import { weaveContext, type Model } from '@weaveintel/core';
+import { weaveContext, weaveAudit, type Model, type WeaveRuntime } from '@weaveintel/core';
 import {
   createActionExecutor,
   createHeartbeat,
@@ -175,6 +175,13 @@ export interface HeartbeatSupervisorOptions {
   >;
   /** Logger (defaults to console.log with a tag). */
   logger?: (msg: string) => void;
+  /**
+   * Phase 5 — ambient cross-cutting runtime. When supplied, every tick
+   * boundary emits a `weaveAudit` entry into the runtime's durable audit
+   * logger so agent activity is visible alongside other framework events.
+   * Omitting this field is safe — audit is best-effort and gracefully absent.
+   */
+  runtime?: WeaveRuntime;
 }
 
 export interface HeartbeatSupervisorHandle {
@@ -408,15 +415,31 @@ export async function createHeartbeatSupervisor(
     }
   };
 
+  const runtime = opts.runtime;
+
   // Worker tick driver — each worker independently calls heartbeat.tick().
   const runWorker = async (
     w: { id: string; heartbeat: Heartbeat; busy: boolean },
   ): Promise<void> => {
     if (stopped || w.busy) return;
     w.busy = true;
+    // Phase 5: propagate the runtime so the tick context inherits ambient
+    // observability, secrets, and durable audit.
+    const tickCtx = weaveContext({
+      userId: 'human:geneweave-system',
+      ...(runtime !== undefined ? { runtime } : {}),
+    });
+    void weaveAudit(tickCtx, { action: 'live-agent.tick.start', outcome: 'success', resource: w.id });
     try {
-      await w.heartbeat.tick(weaveContext({ userId: 'human:geneweave-system' }));
+      await w.heartbeat.tick(tickCtx);
+      void weaveAudit(tickCtx, { action: 'live-agent.tick.end', outcome: 'success', resource: w.id });
     } catch (err) {
+      void weaveAudit(tickCtx, {
+        action: 'live-agent.tick.end',
+        outcome: 'failure',
+        resource: w.id,
+        details: { error: err instanceof Error ? err.message : String(err) },
+      });
       log(`worker ${w.id} tick failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       w.busy = false;

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { newUUIDv7 } from '@weaveintel/core';
+import { hardenedFetch, newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import { validateDetailedDescription } from '../api/admin-route-helpers.js';
 import {
@@ -1657,12 +1657,13 @@ export function registerAdminRoutingRoutes(
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 8000);
-      const resp = await fetch(
+      const resp = await hardenedFetch(
         'https://api.github.com/repos/gibyvarghese/weaveintel/releases/latest',
         {
           headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'geneweave' },
           signal: ctrl.signal,
         },
+        { errorTag: 'geneweave-update-check', timeoutMs: 0, maxBytes: 0 },
       );
       clearTimeout(timer);
       if (resp.ok) {

@@ -24,7 +24,7 @@
  */
 
 import type { Server } from 'node:http';
-import { weaveSetDefaultTracer } from '@weaveintel/core';
+import { weaveSetDefaultTracer, weaveRuntime, envSecretResolver, type WeaveRuntime } from '@weaveintel/core';
 import { weaveConsoleTracer } from '@weaveintel/observability';
 import { createDatabaseAdapter, type DatabaseAdapter, type DatabaseConfig } from './db.js';
 import { ChatEngine, type ProviderConfig } from './chat.js';
@@ -97,6 +97,14 @@ export interface GeneWeaveApp {
   db: DatabaseAdapter;
   /** Chat engine (for programmatic use) */
   chatEngine: ChatEngine;
+  /**
+   * Ambient cross-cutting runtime constructed at boot (Phase 2). Carries
+   * the hardened egress client, tracer, secret resolver, audit logger, and
+   * (when configured) persistence/resilience slots. Pass this into any
+   * `ExecutionContext` derived from this app so features inherit one
+   * coherent set of cross-cutting concerns.
+   */
+  runtime: WeaveRuntime;
   /** Sync model pricing from provider APIs into the database */
   syncPricing(): Promise<PricingSyncReport>;
   /** Gracefully stop the server and close the database */
@@ -149,8 +157,20 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     console.warn(warning);
   }
 
-  // Ensure cross-package runtime tracing is enabled by default for all execution paths.
-  weaveSetDefaultTracer(weaveConsoleTracer());
+  // Construct exactly one ambient runtime for this app. Every feature that
+  // needs egress / tracing / secrets / audit pulls them from here — no
+  // call site reconstructs them. `weaveSetDefaultTracer` is kept for
+  // back-compat with packages that read the process-wide default; the
+  // runtime tracer is the same instance so the two never disagree.
+  const consoleTracer = weaveConsoleTracer();
+  const runtime = weaveRuntime({
+    tracer: consoleTracer,
+    secrets: envSecretResolver(),
+    installDefaultTracer: true,
+  });
+  // `installDefaultTracer: true` already wired the runtime's tracer as the
+  // process default; explicit call here documents intent for readers.
+  weaveSetDefaultTracer(consoleTracer);
 
   const activeProviders = Object.fromEntries(
     Object.entries(config.providers).filter(([key, provider]) => {
@@ -426,6 +446,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     server,
     db,
     chatEngine,
+    runtime,
     async syncPricing() {
       return syncModelPricing(db, activeProviders);
     },

@@ -11,3 +11,11 @@ export { httpRequest as weaveHttpRequest } from './client.js';
 export { executeEndpoint as weaveHttpEndpoint } from './client.js';
 export { createHttpTools as weaveHttpTools } from './mcp.js';
 export { statsNzToolMap as weaveStatsNzTools } from './statsnz-tools.js';
+
+// Phase 4 — durable per-host rate-bucket store backed by `runtime.persistence.kv`.
+export {
+  type DurableHttpRateBucketStore,
+  type DurableHttpRateBucketStoreOptions,
+  type PersistedRateBucket,
+  createDurableHttpRateBucketStore,
+} from './durable-rate.js';

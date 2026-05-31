@@ -18,6 +18,8 @@
     "test": "turbo test",
     "check:api-boundaries": "node scripts/validate-api-boundaries.mjs",
     "check:workspace-topology": "node scripts/validate-workspace-topology.mjs",
+    "check:no-raw-fetch": "node scripts/check-no-raw-fetch.mjs",
+    "check:no-adhoc-resilience": "node scripts/check-no-adhoc-resilience.mjs",
     "test:examples": "tsc --noEmit --project tsconfig.examples.json",
     "lint": "turbo lint",
     "clean": "turbo clean",

@@ -8,8 +8,13 @@ function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
     const st = statSync(full);
-    if (st.isDirectory()) walk(full, out);
-    else if (full.endsWith('.ts') && !full.endsWith('.test.ts')) out.push(full);
+    if (st.isDirectory()) {
+      // `./stores/` ships opt-in driver-coupled adapters (better-sqlite3, pg,
+      // mongodb, redis, dynamodb) via subpath exports + peerDependencies.
+      // They are deliberately excluded from the core-only invariant.
+      if (name === 'stores') continue;
+      walk(full, out);
+    } else if (full.endsWith('.ts') && !full.endsWith('.test.ts')) out.push(full);
   }
   return out;
 }

@@ -12,6 +12,7 @@
  * `VAULT_TOKEN` env var. Missing token throws KmsUnavailableError on first use.
  */
 
+import { hardenedFetch } from '@weaveintel/core';
 import { AeadError, KmsUnavailableError } from '../errors.js';
 import type { KmsProvider, WrappedKey } from '../kms.js';
 
@@ -69,11 +70,18 @@ export class VaultTransitProvider implements KmsProvider {
     this.#explicitToken = opts.token ?? null;
     this.#tokenEnv = opts.tokenEnv ?? 'VAULT_TOKEN';
     this.#namespace = opts.namespace ?? null;
-    const f = opts.fetchImpl ?? (globalThis.fetch as typeof fetch | undefined);
-    if (!f) {
-      throw new KmsUnavailableError('VaultTransitProvider requires global fetch (Node 18+) or opts.fetchImpl');
-    }
-    this.#fetch = f;
+    const defaultFetch: typeof fetch = (input, init) =>
+      hardenedFetch(typeof input === 'string' ? input : input.toString(), init, {
+        errorTag: 'encryption-vault',
+        // The provider attaches its own AbortSignal.timeout per call and
+        // caps body size by reading JSON itself, so disable the outer
+        // timeout / size cap. enforceHttps is delegated to
+        // assertSafeVaultAddress above (which honors allowInsecureHttp).
+        timeoutMs: 0,
+        maxBytes: 0,
+        enforceHttps: false,
+      });
+    this.#fetch = opts.fetchImpl ?? defaultFetch;
     this.#timeoutMs = opts.timeoutMs ?? 15_000;
   }
 

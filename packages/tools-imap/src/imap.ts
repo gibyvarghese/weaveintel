@@ -8,7 +8,7 @@
  *              ctx.metadata.imapPort (optional, default 993), ctx.metadata.imapTls (optional, default 'true')
  */
 
-import { weaveContext, type ExecutionContext } from '@weaveintel/core';
+import { hardenedFetch, weaveContext, type ExecutionContext } from '@weaveintel/core';
 import { weaveMCPServer } from '@weaveintel/mcp-server';
 import { weaveToolDescriptor as describeT } from '@weaveintel/tools';
 
@@ -64,11 +64,15 @@ export const liveImapAdapter: ImapAdapter = {
   async listMessages(creds, mailbox, limit) {
     const proxyUrl = process.env['IMAP_PROXY_URL'];
     if (!proxyUrl) throw new Error('IMAP_PROXY_URL env var required for live IMAP adapter');
-    const resp = await fetch(`${proxyUrl}/list`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ host: creds.host, port: creds.port, user: creds.user, password: creds.password, tls: creds.tls, mailbox, limit }),
-    });
+    const resp = await hardenedFetch(
+      `${proxyUrl}/list`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: creds.host, port: creds.port, user: creds.user, password: creds.password, tls: creds.tls, mailbox, limit }),
+      },
+      { errorTag: 'tools-imap', enforceHttps: false },
+    );
     if (!resp.ok) throw new Error(`IMAP proxy error ${resp.status}: ${await resp.text()}`);
     return resp.json() as Promise<ImapMessage[]>;
   },
@@ -76,11 +80,15 @@ export const liveImapAdapter: ImapAdapter = {
   async readMessage(creds, mailbox, uid) {
     const proxyUrl = process.env['IMAP_PROXY_URL'];
     if (!proxyUrl) throw new Error('IMAP_PROXY_URL env var required for live IMAP adapter');
-    const resp = await fetch(`${proxyUrl}/read`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ host: creds.host, port: creds.port, user: creds.user, password: creds.password, tls: creds.tls, mailbox, uid }),
-    });
+    const resp = await hardenedFetch(
+      `${proxyUrl}/read`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: creds.host, port: creds.port, user: creds.user, password: creds.password, tls: creds.tls, mailbox, uid }),
+      },
+      { errorTag: 'tools-imap', enforceHttps: false },
+    );
     if (!resp.ok) throw new Error(`IMAP proxy error ${resp.status}: ${await resp.text()}`);
     return resp.json() as Promise<ImapMessage>;
   },
@@ -88,11 +96,15 @@ export const liveImapAdapter: ImapAdapter = {
   async searchMessages(creds, mailbox, query) {
     const proxyUrl = process.env['IMAP_PROXY_URL'];
     if (!proxyUrl) throw new Error('IMAP_PROXY_URL env var required for live IMAP adapter');
-    const resp = await fetch(`${proxyUrl}/search`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ host: creds.host, port: creds.port, user: creds.user, password: creds.password, tls: creds.tls, mailbox, query }),
-    });
+    const resp = await hardenedFetch(
+      `${proxyUrl}/search`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: creds.host, port: creds.port, user: creds.user, password: creds.password, tls: creds.tls, mailbox, query }),
+      },
+      { errorTag: 'tools-imap', enforceHttps: false },
+    );
     if (!resp.ok) throw new Error(`IMAP proxy error ${resp.status}: ${await resp.text()}`);
     return resp.json() as Promise<ImapMessage[]>;
   },

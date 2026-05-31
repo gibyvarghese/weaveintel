@@ -8,6 +8,31 @@
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./sqlite": {
+      "import": "./dist/stores/sqlite-encryption-store.js",
+      "types": "./dist/stores/sqlite-encryption-store.d.ts",
+      "default": "./dist/stores/sqlite-encryption-store.js"
+    },
+    "./postgres": {
+      "import": "./dist/stores/postgres-encryption-store.js",
+      "types": "./dist/stores/postgres-encryption-store.d.ts",
+      "default": "./dist/stores/postgres-encryption-store.js"
+    },
+    "./mongodb": {
+      "import": "./dist/stores/mongodb-encryption-store.js",
+      "types": "./dist/stores/mongodb-encryption-store.d.ts",
+      "default": "./dist/stores/mongodb-encryption-store.js"
+    },
+    "./redis": {
+      "import": "./dist/stores/redis-encryption-store.js",
+      "types": "./dist/stores/redis-encryption-store.d.ts",
+      "default": "./dist/stores/redis-encryption-store.js"
+    },
+    "./dynamodb": {
+      "import": "./dist/stores/dynamodb-encryption-store.js",
+      "types": "./dist/stores/dynamodb-encryption-store.d.ts",
+      "default": "./dist/stores/dynamodb-encryption-store.js"
     }
   },
   "main": "./dist/index.js",
@@ -21,7 +46,31 @@
   "dependencies": {
     "@weaveintel/core": "*"
   },
+  "peerDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.810.0",
+    "@aws-sdk/lib-dynamodb": "^3.810.0",
+    "better-sqlite3": "^11.10.0",
+    "mongodb": "^6.16.0",
+    "pg": "^8.13.1",
+    "redis": "^4.7.0"
+  },
+  "peerDependenciesMeta": {
+    "@aws-sdk/client-dynamodb": { "optional": true },
+    "@aws-sdk/lib-dynamodb": { "optional": true },
+    "better-sqlite3": { "optional": true },
+    "mongodb": { "optional": true },
+    "pg": { "optional": true },
+    "redis": { "optional": true }
+  },
   "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.810.0",
+    "@aws-sdk/lib-dynamodb": "^3.810.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/pg": "^8.11.10",
+    "better-sqlite3": "^11.10.0",
+    "mongodb": "^6.16.0",
+    "pg": "^8.13.1",
+    "redis": "^4.7.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }

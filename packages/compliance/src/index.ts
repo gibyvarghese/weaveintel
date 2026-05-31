@@ -40,3 +40,19 @@ export {
   type AuditExportManager,
   createAuditExportManager,
 } from './audit-export.js';
+
+// Phase 4 — durable variants backed by `runtime.persistence.kv`.
+export {
+  type DurableLegalHoldManager,
+  createDurableLegalHoldManager,
+  type DurableConsentManager,
+  createDurableConsentManager,
+  type DurableResidencyEngine,
+  createDurableResidencyEngine,
+  type DurableRetentionEngine,
+  createDurableRetentionEngine,
+  type DurableAuditExportManager,
+  createDurableAuditExportManager,
+  type DurableDeletionManager,
+  createDurableDeletionManager,
+} from './durable.js';

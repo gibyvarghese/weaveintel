@@ -7,6 +7,66 @@
 // for new ID minting in package-level code.
 export { newUUIDv7 } from './uuid.js';
 
+// Outbound-network safety guard. Every package that calls fetch() must validate
+// destinations against SSRF (cloud metadata, RFC1918, DNS rebinding) and follow
+// redirects manually so each hop is re-validated.
+export {
+  type OutboundUrlPolicy,
+  assertSafeOutboundUrl,
+  followRedirectsSafely,
+  validateResolvedAddress,
+} from './net-guard.js';
+
+// Hardened egress client (Phase 1 — single source of truth for outbound HTTP).
+// Replaces the 13 hand-rolled `_fetch.ts` files. Provider/tool packages bind a
+// closure with their `errorTag` via `createHardenedFetch({ errorTag, ... })`
+// instead of re-implementing the timeout/size/redirect/SSRF pipeline.
+// Streaming consumers (SSE/NDJSON) use the returned `fetchStream` or
+// `assertSafe` to keep the SSRF guard without the outer timeout/size cap.
+export {
+  type HardenedFetchOptions,
+  type HardenedFetchDefaults,
+  assertSafeForEgress,
+  hardenedFetch,
+  createHardenedFetch,
+} from './hardened-fetch.js';
+
+// Ambient cross-cutting runtime (Phase 2). One object that bundles egress,
+// tracer, secrets, audit, persistence, resilience so no call site constructs
+// these ad-hoc. ExecutionContext.runtime carries it; features that declare
+// `requires: [...]` are asserted against it at registration / invocation.
+export {
+  type WeaveRuntime,
+  type WeaveRuntimeOptions,
+  type RuntimeEgressSlot,
+  type RuntimePersistenceSlot,
+  type RuntimeKvStore,
+  type RuntimeResilienceSlot,
+  type RuntimeGuardrailsSlot,
+  RuntimeCapabilities,
+  weaveRuntime,
+  assertRuntimeRequires,
+  describeRuntimeCapabilities,
+  weaveAudit,
+  weaveLogSafetyDowngrade,
+  weaveInMemoryPersistence,
+  // Phase 5 — security depth
+  assertTlsFloor,
+  createDurableAuditLogger,
+  createRedactingAuditLogger,
+} from './runtime.js';
+
+// Secret resolution (Phase 2). Apps and packages MUST resolve secrets via
+// `runtime.secrets` rather than reading `process.env` ad-hoc, so vault /
+// per-tenant overrides can plug in without touching call sites.
+export {
+  type EnvSecretResolverOptions,
+  envSecretResolver,
+  inMemorySecretResolver,
+  chainSecretResolvers,
+  requireSecret,
+} from './secrets.js';
+
 // Capability system
 export {
   type CapabilityId,
