@@ -15,6 +15,8 @@ import 'dotenv/config';
 import assert from 'node:assert/strict';
 
 import {
+  type AgentResult,
+  type AgentStep,
   RuntimeCapabilities,
   describeRuntimeCapabilities,
   weaveContext,
@@ -40,6 +42,44 @@ import {
   defineWorkflow,
 } from '@weaveintel/workflows';
 import { weaveOpenAIModel } from '@weaveintel/provider-openai';
+
+function section(title: string): void {
+  console.log(`\n=== ${title} ===`);
+}
+
+function pretty(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+function logKV(label: string, value: unknown): void {
+  console.log(`${label}: ${pretty(value)}`);
+}
+
+function summarizeAgentStep(step: AgentStep, index: number): Record<string, unknown> {
+  return {
+    index,
+    type: step.type,
+    contentPreview:
+      typeof step.content === 'string' ? step.content.slice(0, 160) : undefined,
+    toolName: step.toolCall?.name,
+    toolArgs: step.toolCall?.arguments,
+    toolResultPreview:
+      typeof step.toolCall?.result === 'string' ? step.toolCall.result.slice(0, 160) : undefined,
+    durationMs: step.durationMs,
+  };
+}
+
+function logAgentRun(label: string, run: AgentResult): void {
+  section(`agent trace: ${label}`);
+  logKV('status', run.status);
+  logKV('stepCount', run.steps.length);
+  logKV('usage', run.usage);
+  logKV('outputPreview', run.output.slice(0, 220));
+  logKV(
+    'steps',
+    run.steps.map((step, idx) => summarizeAgentStep(step, idx)),
+  );
+}
 
 if (!process.env['OPENAI_API_KEY']) {
   throw new Error('OPENAI_API_KEY is required for example 129');
@@ -87,8 +127,8 @@ const runtime = weaveRuntime({
 
 const ctx = weaveContext({ runtime });
 
-console.log('--- runtime capabilities ---');
-console.log(describeRuntimeCapabilities(runtime));
+section('runtime capabilities');
+logKV('runtimeCapabilities', describeRuntimeCapabilities(runtime));
 assert.ok(runtime.has(RuntimeCapabilities.NetEgress));
 assert.ok(runtime.has(RuntimeCapabilities.Observability));
 assert.ok(runtime.has(RuntimeCapabilities.Secrets));
@@ -96,24 +136,36 @@ assert.ok(runtime.has(RuntimeCapabilities.Audit));
 assert.ok(runtime.has(RuntimeCapabilities.Persistence));
 assert.ok(runtime.has(RuntimeCapabilities.Resilience));
 assert.ok(runtime.has(RuntimeCapabilities.Guardrails));
+console.log('capability assertions passed');
 
-console.log('--- egress + secrets + persistence + resilience ---');
+section('egress + secrets + persistence + resilience');
 process.env['EX129_SECRET'] = 'runtime-secret-live';
 const secret = await runtime.secrets.resolve('EX129_SECRET');
 assert.equal(secret, 'runtime-secret-live');
+logKV('resolvedSecret', { key: 'EX129_SECRET', value: secret });
 
 await runtime.persistence?.kv.set('ex129:key', JSON.stringify({ ok: true }));
 const persisted = await runtime.persistence?.kv.get('ex129:key');
 assert.equal(persisted, JSON.stringify({ ok: true }));
+logKV('persistenceRoundTrip', {
+  key: 'ex129:key',
+  written: { ok: true },
+  readRaw: persisted,
+});
 
 runtime.resilience?.emit({ kind: 'endpoint.degraded', endpoint: 'demo://ex129' });
 assert.equal(emittedSignals.length, 1);
+logKV('resilienceSignal', emittedSignals[0]);
 
 const egressResponse = await runtime.egress.fetch('https://example.com', undefined, {
   errorTag: 'example-129',
   timeoutMs: 7000,
 });
-console.log('egress status:', egressResponse.status);
+logKV('egressSuccess', {
+  url: 'https://example.com',
+  status: egressResponse.status,
+  contentType: egressResponse.headers.get('content-type'),
+});
 assert.equal(typeof egressResponse.status, 'number');
 await assert.rejects(
   runtime.egress.fetch('https://169.254.169.254/latest/meta-data/', undefined, {
@@ -121,8 +173,9 @@ await assert.rejects(
     timeoutMs: 5000,
   }),
 );
+console.log('ssrf rejection assertion passed for metadata endpoint');
 
-console.log('--- tool requires checks ---');
+section('tool requires checks');
 const sharedTools = createToolRegistry({ runtime });
 sharedTools.register(
   defineTool({
@@ -144,6 +197,7 @@ sharedTools.register(
     },
   }),
 );
+console.log('registered shared runtime_echo tool with requires checks');
 
 const researcherTools = createToolRegistry({ runtime });
 researcherTools.register(
@@ -157,10 +211,12 @@ researcherTools.register(
     },
     requires: [RuntimeCapabilities.NetEgress, RuntimeCapabilities.Persistence],
     async execute(args) {
+      logKV('tool:research_lookup input', args);
       return `findings:${String(args['topic'] ?? '')}`;
     },
   }),
 );
+console.log('registered researcher tool');
 
 const writerTools = createToolRegistry({ runtime });
 writerTools.register(
@@ -174,12 +230,14 @@ writerTools.register(
     },
     requires: [RuntimeCapabilities.Persistence, RuntimeCapabilities.Resilience],
     async execute(args) {
+      logKV('tool:draft_report input', args);
       return `report:${String(args['notes'] ?? '')}`;
     },
   }),
 );
+console.log('registered writer tool');
 
-console.log('--- live supervisor (real LLM) ---');
+section('live supervisor (real LLM)');
 const liveModel = weaveOpenAIModel('gpt-4o-mini', {
   apiKey: process.env['OPENAI_API_KEY'],
 });
@@ -204,28 +262,33 @@ const supervisor = weaveAgent({
   maxSteps: 10,
 });
 
-const supervisorRun = await supervisor.run(ctx, {
+const supervisorInput = {
   goal: 'Delegate to researcher and writer. Return a short final summary.',
   messages: [
     {
-      role: 'user',
+      role: 'user' as const,
       content:
         'Use delegate_to_worker to call researcher first, then writer. Final answer should be one short paragraph.',
     },
   ],
+};
+logKV('supervisorInput', supervisorInput);
+
+const supervisorRun = await supervisor.run(ctx, {
+  goal: supervisorInput.goal,
+  messages: supervisorInput.messages,
 });
 
-console.log('supervisor status:', supervisorRun.status);
-console.log('supervisor output length:', supervisorRun.output.length);
 assert.equal(supervisorRun.status, 'completed');
 assert.ok(supervisorRun.steps.length > 0);
+logAgentRun('supervisor', supervisorRun);
 
 const delegated = supervisorRun.steps.some(
   (s) => s.type === 'tool_call' && s.toolCall?.name === 'delegate_to_worker',
 );
-console.log('delegate_to_worker observed:', delegated);
+logKV('delegateToWorkerObserved', delegated);
 
-console.log('--- workflow with tool + agent handlers ---');
+section('workflow with tool + agent handlers');
 const workflowTools = weaveToolRegistry();
 workflowTools.register(
   defineTool({
@@ -238,6 +301,7 @@ workflowTools.register(
     },
     requires: [RuntimeCapabilities.Persistence],
     async execute(args) {
+      logKV('tool:wf_echo input', args);
       return { content: `wf-echo:${String(args['text'] ?? '')}` };
     },
   }),
@@ -249,10 +313,13 @@ handlerRegistry.register(createScriptResolver());
 handlerRegistry.register(
   createToolResolver({
     async getTool(toolKey) {
+      logKV('workflow.toolResolver.lookup', { toolKey });
       const tool = workflowTools.get(toolKey);
       if (!tool) return undefined;
       return async (input: Record<string, unknown>) => {
+        logKV('workflow.toolResolver.invoke.input', { toolKey, input });
         const out = await tool.invoke(ctx, { name: toolKey, arguments: input });
+        logKV('workflow.toolResolver.invoke.output', { toolKey, out });
         return { text: out.content };
       };
     },
@@ -261,6 +328,7 @@ handlerRegistry.register(
 handlerRegistry.register(
   createAgentResolver({
     async invokeAgent(agentKey, variables) {
+      logKV('workflow.agentResolver.invoke.input', { agentKey, variables });
       if (agentKey !== 'supervisor') {
         throw new Error(`unknown workflow agent ${agentKey}`);
       }
@@ -269,6 +337,7 @@ handlerRegistry.register(
         goal,
         messages: [{ role: 'user', content: goal }],
       });
+      logAgentRun(`workflow-agentResolver:${agentKey}`, res);
       return { output: res.output, status: res.status, stepCount: res.steps.length };
     },
   }),
@@ -285,17 +354,39 @@ const workflow = defineWorkflow('Live Runtime Capability Workflow')
   })
   .build();
 
-await engine.createDefinition(workflow);
-const workflowRun = await engine.startRun('ex129-runtime-workflow', {
-  text: 'workflow hello',
-  goal: 'Use supervisor to produce a concise summary from worker results.',
+logKV('workflowDefinition', {
+  id: workflow.id,
+  name: workflow.name,
+  entryStepId: workflow.entryStepId,
+  steps: workflow.steps.map((s) => ({ id: s.id, type: s.type, handler: s.handler, next: s.next })),
 });
 
-console.log('workflow status:', workflowRun.status);
+await engine.createDefinition(workflow);
+const workflowInput = {
+  text: 'workflow hello',
+  goal: 'Use supervisor to produce a concise summary from worker results.',
+};
+logKV('workflowInput', workflowInput);
+
+const workflowRun = await engine.startRun('ex129-runtime-workflow', workflowInput);
+
 assert.equal(workflowRun.status, 'completed');
 assert.ok(workflowRun.state.history.some((h) => h.stepId === 'echo-step'));
 assert.ok(workflowRun.state.history.some((h) => h.stepId === 'supervise-step'));
 assert.ok(workflowRun.state.history.some((h) => h.stepId === 'summary-step'));
+logKV('workflowRunSummary', {
+  id: workflowRun.id,
+  status: workflowRun.status,
+  historyCount: workflowRun.state.history.length,
+  currentStepId: workflowRun.state.currentStepId,
+  history: workflowRun.state.history.map((h, idx) => ({
+    index: idx,
+    stepId: h.stepId,
+    status: h.status,
+    output: h.output,
+  })),
+  stateVariables: workflowRun.state.variables,
+});
 
 const auditActions = audit.map((a) => `${a.action}/${a.outcome}`);
 assert.ok(auditActions.some((a) => a.startsWith('agent.run.start/')));
@@ -303,8 +394,29 @@ assert.ok(auditActions.some((a) => a.startsWith('agent.run.end/')));
 assert.ok(auditActions.some((a) => a.startsWith('workflow.run.start/')));
 assert.ok(auditActions.some((a) => a.startsWith('workflow.run.end/')));
 
-console.log('audit action count:', auditActions.length);
-console.log('span count:', tracer.spans.length);
+section('audit + observability summary');
+logKV('auditActionCount', auditActions.length);
+logKV('auditActions', auditActions);
+logKV(
+  'auditRecordsPreview',
+  audit.map((entry) => ({
+    timestamp: entry.timestamp,
+    action: entry.action,
+    outcome: entry.outcome,
+    resource: entry.resource,
+    details: entry.details,
+  })),
+);
+logKV('spanCount', tracer.spans.length);
+logKV(
+  'spanPreview',
+  tracer.spans.map((s) => ({
+    name: s.name,
+    status: s.status,
+    durationMs: s.endTime - s.startTime,
+    attributes: s.attributes,
+  })),
+);
 assert.ok(tracer.spans.length > 0);
 
 console.log('\nExample 129 complete: runtime capabilities verified with live LLM-backed supervisor + workflow.');
