@@ -6,6 +6,7 @@
  *
  * Requirements:
  * - OPENAI_API_KEY in environment
+ * - Optional: WEAVE_EX129_PERSISTENCE_PATH for SQLite file location
  *
  * Run:
  *   set -a && source .env && set +a && npx tsx examples/129-runtime-capabilities-live-llm.ts
@@ -13,6 +14,8 @@
 
 import 'dotenv/config';
 import assert from 'node:assert/strict';
+import { mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import {
   type AgentResult,
@@ -20,7 +23,6 @@ import {
   RuntimeCapabilities,
   describeRuntimeCapabilities,
   weaveContext,
-  weaveInMemoryPersistence,
   weaveRuntime,
   weaveTool as defineTool,
   weaveToolRegistry as createToolRegistry,
@@ -42,6 +44,7 @@ import {
   defineWorkflow,
 } from '@weaveintel/workflows';
 import { weaveOpenAIModel } from '@weaveintel/provider-openai';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
 
 function section(title: string): void {
   console.log(`\n=== ${title} ===`);
@@ -110,11 +113,15 @@ const auditLogger: AuditLogger = {
   },
 };
 
+const persistencePath =
+  process.env['WEAVE_EX129_PERSISTENCE_PATH'] ?? join(process.cwd(), 'data', 'example-129-runtime.db');
+mkdirSync(dirname(persistencePath), { recursive: true });
+
 const runtime = weaveRuntime({
   tracer,
   audit: auditLogger,
   guardrails,
-  persistence: weaveInMemoryPersistence(),
+  persistence: weaveSqlitePersistence({ path: persistencePath }),
   resilience: {
     emit(event) {
       emittedSignals.push({ kind: event.kind, endpoint: event.endpoint });
@@ -129,6 +136,7 @@ const ctx = weaveContext({ runtime });
 
 section('runtime capabilities');
 logKV('runtimeCapabilities', describeRuntimeCapabilities(runtime));
+logKV('persistenceBackend', { kind: runtime.persistence?.kind, path: persistencePath });
 assert.ok(runtime.has(RuntimeCapabilities.NetEgress));
 assert.ok(runtime.has(RuntimeCapabilities.Observability));
 assert.ok(runtime.has(RuntimeCapabilities.Secrets));
