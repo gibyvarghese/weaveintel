@@ -1,15 +1,136 @@
 import { weaveContext, type ExecutionContext } from '@weaveintel/core';
 import {
-  createConcurrencyLimiter,
-  createHealthChecker,
-  createRetryBudget,
-  type HealthStatus,
-} from '@weaveintel/reliability';
-import {
   createPhase7RuntimePersistence,
   type Phase7RuntimePersistence,
   type Phase7RuntimePersistenceOptions,
 } from './phase7-runtime-persistence.js';
+
+interface ConcurrencyLimiter {
+  execute<T>(fn: () => Promise<T>): Promise<T>;
+}
+
+interface RetryController {
+  execute<T>(fn: () => Promise<T>): Promise<T>;
+}
+
+interface HealthCheckResult {
+  readonly name: string;
+  readonly ok: boolean;
+  readonly message?: string;
+  readonly durationMs: number;
+}
+
+export interface HealthStatus {
+  readonly service: string;
+  readonly healthy: boolean;
+  readonly checks: readonly HealthCheckResult[];
+  readonly checkedAt: string;
+}
+
+type HealthCheckFn = () => Promise<{ ok: boolean; message?: string }>;
+
+interface HealthChecker {
+  addCheck(name: string, check: HealthCheckFn): void;
+  run(): Promise<HealthStatus>;
+}
+
+function createConcurrencyLimiter(maxConcurrent: number, maxQueued: number): ConcurrencyLimiter {
+  let active = 0;
+  const queue: Array<() => void> = [];
+
+  async function acquire(): Promise<void> {
+    if (active < maxConcurrent) {
+      active += 1;
+      return;
+    }
+    if (queue.length >= maxQueued) {
+      throw new Error('phase8:queue limit reached');
+    }
+    await new Promise<void>((resolve) => {
+      queue.push(resolve);
+    });
+  }
+
+  function release(): void {
+    const next = queue.shift();
+    if (next) {
+      next();
+      return;
+    }
+    if (active > 0) {
+      active -= 1;
+    }
+  }
+
+  return {
+    async execute<T>(fn: () => Promise<T>): Promise<T> {
+      await acquire();
+      try {
+        return await fn();
+      } finally {
+        release();
+      }
+    },
+  };
+}
+
+function createRetryBudget(maxRetries: number, baseDelayMs: number, maxDelayMs: number): RetryController {
+  return {
+    async execute<T>(fn: () => Promise<T>): Promise<T> {
+      let lastError: unknown;
+      for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+        try {
+          return await fn();
+        } catch (error: unknown) {
+          lastError = error;
+          if (attempt >= maxRetries) {
+            throw error;
+          }
+          const delay = Math.min(baseDelayMs * Math.pow(2, attempt), maxDelayMs);
+          await new Promise<void>((resolve) => setTimeout(resolve, delay));
+        }
+      }
+      throw lastError;
+    },
+  };
+}
+
+function createHealthChecker(service: string): HealthChecker {
+  const checks = new Map<string, HealthCheckFn>();
+  return {
+    addCheck(name: string, check: HealthCheckFn): void {
+      checks.set(name, check);
+    },
+    async run(): Promise<HealthStatus> {
+      const results: HealthCheckResult[] = [];
+      for (const [name, check] of checks) {
+        const started = Date.now();
+        try {
+          const result = await check();
+          results.push({
+            name,
+            ok: result.ok,
+            message: result.message,
+            durationMs: Date.now() - started,
+          });
+        } catch (error: unknown) {
+          results.push({
+            name,
+            ok: false,
+            message: error instanceof Error ? error.message : String(error),
+            durationMs: Date.now() - started,
+          });
+        }
+      }
+      return {
+        service,
+        healthy: results.every((result) => result.ok),
+        checks: results,
+        checkedAt: new Date().toISOString(),
+      };
+    },
+  };
+}
 
 export type Phase8BenchmarkScenario = 'write' | 'read' | 'claim';
 
@@ -84,17 +205,16 @@ export function createPhase8PersistenceBenchmark(
   let syntheticFailureInjected = false;
   let syntheticFailureRecovered = false;
 
-  const limiter = createConcurrencyLimiter({
-    maxConcurrent: Math.max(1, options.concurrency),
-    maxQueued: Math.max(options.iterationCount * 2, 100),
-    strategy: 'queue',
-  });
+  const limiter = createConcurrencyLimiter(
+    Math.max(1, options.concurrency),
+    Math.max(options.iterationCount * 2, 100),
+  );
 
-  const retry = createRetryBudget({
-    maxRetries: options.retryBudget?.maxRetries ?? 2,
-    baseDelayMs: options.retryBudget?.baseDelayMs ?? 5,
-    maxDelayMs: options.retryBudget?.maxDelayMs ?? 25,
-  });
+  const retry = createRetryBudget(
+    options.retryBudget?.maxRetries ?? 2,
+    options.retryBudget?.baseDelayMs ?? 5,
+    options.retryBudget?.maxDelayMs ?? 25,
+  );
 
   function createScenarioContext(base?: ExecutionContext): ExecutionContext {
     if (base) {
