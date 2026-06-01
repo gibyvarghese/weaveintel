@@ -9,8 +9,11 @@ function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function code(lang: string, src: string): string {
-  return `<div class="cb"><div class="cb-hdr"><span class="cb-lang">${lang}</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div><pre><code class="language-${lang}">${esc(src.trim())}</code></pre></div>`;
+let _codeIdx = 0;
+function code(lang: string, src: string, deps?: string[]): string {
+  const id = `cb${++_codeIdx}`;
+  const depsAttr = deps ? ` data-deps="${deps.join(',')}"` : '';
+  return `<div class="cb" id="${id}"${depsAttr}><div class="cb-hdr"><span class="cb-lang">${lang}</span><div class="cb-actions"><button class="copy-btn" onclick="copyCode(this)">Copy</button><button class="run-btn" onclick="showRun('${id}')">▶ Run</button></div></div><pre><code class="language-${lang}">${esc(src.trim())}</code></pre></div>`;
 }
 
 function callout(type: 'info' | 'tip' | 'warn' | 'danger', icon: string, title: string, body: string): string {
@@ -62,24 +65,52 @@ function typeTable(rows: [string, string][]): string {
 
 function sHome(): string {
   const pkgs = [
-    ['agents', '🤖', 'Agents', 'ReAct tool-calling loops, supervisor mode, worker delegation'],
-    ['workflows', '⚙️', 'Workflows', 'Durable multi-step orchestration with checkpointing and human gates'],
-    ['models', '🧠', 'Models', 'Provider-agnostic model factory with routing and cost tracking'],
-    ['prompts', '💬', 'Prompts', 'Versioned prompts, output contracts, A/B experiments, evaluation'],
-    ['memory', '🧩', 'Memory', 'Semantic, entity, conversation and working memory with vector search'],
-    ['retrieval', '🔍', 'Retrieval', 'Chunking, embedding pipelines, hybrid RAG, query rewriting'],
-    ['tools', '🔧', 'Tool Framework', 'Policy, audit, approval gates and health tracking for any tool'],
-    ['evals', '📊', 'Evals', 'Rubric-based LLM-as-judge evaluation with dataset comparison'],
-    ['guardrails', '🛡️', 'Guardrails', 'Pre/post-execution risk, PII, confidence and cost gates'],
-    ['resilience', '♻️', 'Resilience', 'Token bucket, circuit breaker, retry and concurrency primitives'],
-    ['cost-governor', '💰', 'Cost Governor', '8-lever cost optimisation with tier policies and model cascade'],
-    ['tools-time', '🕐', 'tools-time', '16 time-aware tools: datetime, timers, stopwatches, reminders'],
-    ['tools-browser', '🌐', 'tools-browser', 'Web fetch, content extraction, scraping, Playwright automation'],
-    ['tools-search', '🔎', 'tools-search', 'Multi-provider search with auto-failover (9 providers)'],
-    ['mcp', '🔌', 'MCP', 'Model Context Protocol client and server — cross-system tool sharing'],
-    ['observability', '📈', 'Observability', 'Tracing, usage tracking, budget monitoring and span export'],
-    ['sandbox', '📦', 'Sandbox', 'Safe execution of LLM-generated code with resource limits'],
-    ['core', '⚛️', 'Core', 'Zero-dependency contract layer — every interface lives here'],
+    // Agent Layer
+    ['agents',       '🤖', 'Agents',          'ReAct tool-calling loops, supervisor mode, worker delegation'],
+    ['workflows',    '⚙️', 'Workflows',        'Durable multi-step orchestration with checkpointing and human gates'],
+    ['a2a',          '🔄', 'A2A Protocol',     'Agent-to-Agent typed messaging — in-process bus or HTTP transport'],
+    ['live-agents',  '⚡', 'Live Agents',      'Long-running agents in meshes: per-tick execution, backlog, state persistence'],
+    // Agent Layer (continued)
+    ['skills',       '🎯', 'Skills',           'Named capability bundles — instructions + tools + model in one unit'],
+    // Model Layer
+    ['routing',      '🔀', 'Model Routing',    'Capability-based selection with health tracking and cost-aware failover'],
+    ['providers',    '☁️', 'Providers',        'OpenAI, Anthropic, Google, Ollama, llama.cpp — same Model interface'],
+    ['models',       '🧠', 'Models',           'Named model registry, smart capability-based routing, cost tracking'],
+    ['prompts',      '💬', 'Prompts',          'Versioned prompts, output contracts, A/B experiments, evaluation'],
+    ['cost-governor','💰', 'Cost Governor',    '8-lever cost optimisation with tier policies and model cascade'],
+    // Memory & Knowledge
+    ['memory',       '🧩', 'Memory',           'Semantic, entity, conversation and working memory with vector search'],
+    ['retrieval',    '🔍', 'Retrieval',        'Chunking, embedding pipelines, hybrid RAG + BM25, query rewriting'],
+    ['extraction',   '🔬', 'Extraction',       'Schema-driven LLM extraction from unstructured text, batch-capable'],
+    // Tools
+    ['oauth',         '🔑', 'OAuth',            'Per-user OAuth 2.0 with PKCE, durable flow state, and auto token refresh'],
+    ['tools',         '🔧', 'Tool Framework',   'Risk classification, policy enforcement, approval gates, audit, health tracking'],
+    ['tools-time',    '🕐', 'tools-time',       '16 time-aware tools: datetime, timers, stopwatches, reminders'],
+    ['tools-browser', '🌐', 'Browser Tools',    'Web fetch, content extraction, scraping, Playwright automation'],
+    ['tools-search',  '🔎', 'Search Tools',     'Multi-provider search with auto-failover (9 providers)'],
+    ['sandbox',       '📦', 'Sandbox',          'Safe execution of LLM-generated code with resource limits'],
+    ['mcp',           '🔌', 'MCP',              'Model Context Protocol client and server — cross-system tool sharing'],
+    ['triggers',      '⚡', 'Triggers',         'Event-driven workflow/agent invocation: cron, webhook, DB change'],
+    // Quality & Safety
+    ['guardrails',   '🛡️', 'Guardrails',       'Pre/post-execution risk, PII, confidence and cost gates'],
+    ['evals',        '📊', 'Evals',            'Rubric-based LLM-as-judge evaluation, model comparison, CI gate'],
+    ['redaction',    '✂️', 'Redaction',        'PII detection & redaction middleware — LLMs never see raw sensitive data'],
+    ['resilience',   '♻️', 'Resilience',       'Token bucket, circuit breaker, retry and concurrency primitives'],
+    ['observability','📈', 'Observability',    'Tracing, usage tracking, budget monitoring and span export'],
+    // Security & Operations
+    ['security',     '🔒', 'Security',         'SSRF protection, TLS floor, durable audit, PII redaction, DNS pinning'],
+    ['tenancy',      '🏢', 'Tenancy',          'Multi-tenant context, per-tenant budgets and capability bindings'],
+    ['compliance',   '📋', 'Compliance',       'Legal hold, consent, retention, GDPR deletion — all durable'],
+    ['durability',   '💾', 'Durability',       'DLQ, idempotency keys, retry budgets, health checks, backpressure'],
+    ['persistence',  '🗄️', 'Persistence',      '8-adapter KV + high-level stores; RuntimePersistenceSlot factories'],
+    ['encryption',   '🔐', 'Encryption',       'AES-256-GCM field encryption, BYOK, blind indexes, key rotation'],
+    // Evidence & Reproducibility
+    ['contracts',    '📜', 'Contracts',         'Append-only evidence ledger — signed records of every agent decision'],
+    ['artifacts',    '📎', 'Artifacts',         'Versioned file storage for agent outputs — charts, PDFs, code files'],
+    ['replay',       '⏮️', 'Replay',            'Deterministic re-execution of workflow runs from saved snapshots'],
+    ['trace-tools',  '🔭', 'Trace Tools',       'Agent-callable tools for inspecting live mesh state and contracts'],
+    // Core
+    ['core',         '⚛️', 'Core',             'Zero-dependency contract layer — every interface lives here'],
   ].map(([id, icon, name, desc]) =>
     `<div class="pkg-card" onclick="nav('${id}')"><div class="pkg-icon">${icon}</div><div class="pkg-name">${name}</div><div class="pkg-desc">${desc}</div></div>`
   ).join('');
@@ -99,16 +130,66 @@ function sHome(): string {
 
 ${callout('info', '💡', 'Architecture principle.', 'Every interface lives in <code>@weaveintel/core</code>. No package imports a concrete implementation — swap any model, store, or transport without touching business logic.')}
 
-<h2 class="sec-title"><span class="sec-anchor">#</span>Packages</h2>
+<h2 class="sec-title"><span class="sec-anchor">#</span>Quick Start — First agent in 3 steps</h2>
+
+<div class="qs-steps">
+  <div class="qs-step"><div class="qs-num">1</div><div class="qs-label">Install</div></div>
+  <div class="qs-step"><div class="qs-num">2</div><div class="qs-label">Configure</div></div>
+  <div class="qs-step"><div class="qs-num">3</div><div class="qs-label">Run</div></div>
+</div>
+
+${code('bash', `npm install @weaveintel/agents @weaveintel/core @weaveintel/provider-anthropic`)}
+
+${code('typescript', `// agent.ts
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveRuntime, weaveContext, weaveTool, weaveToolRegistry } from '@weaveintel/core';
+
+// 1. One runtime — wires egress, secrets, audit, tracer
+const runtime = weaveRuntime();
+
+// 2. A simple tool
+const tools = weaveToolRegistry();
+tools.register(weaveTool({
+  name: 'get_time',
+  description: 'Return the current UTC time.',
+  parameters: { type: 'object', properties: {} },
+  execute: async () => new Date().toUTCString(),
+}));
+
+// 3. An agent
+const agent = weaveAgent({
+  model:        weaveAnthropicModel('claude-haiku-4-5-20251001'),
+  tools,
+  systemPrompt: 'You are a helpful assistant. Use tools when you need live data.',
+  maxSteps:     4,
+});
+
+// 4. Run it
+const ctx    = weaveContext({ runtime, userId: 'alice' });
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'What time is it right now?' }],
+});
+console.log(result.output);`, ['@weaveintel/agents', '@weaveintel/core', '@weaveintel/provider-anthropic'])}
+
+${code('bash', `ANTHROPIC_API_KEY=sk-ant-... npx tsx agent.ts`)}
+
+${callout('tip', '🚀', 'Next steps.', 'Add persistence: <code>weaveRuntime({ persistence: weaveSqlitePersistence({ path: \'./data.db\' }) })</code> — DLQ, audit log, memory, and checkpoints all become durable at once. See <strong>Security</strong> for the full runtime options reference.')}
+
+<h2 class="sec-title" style="margin-top:40px"><span class="sec-anchor">#</span>Packages</h2>
 <div class="pkg-grid">${pkgs}</div>
 
 <h2 class="sec-title" style="margin-top:40px"><span class="sec-anchor">#</span>Layer overview</h2>
 ${code('text', `Applications (geneweave, your app)
-  └─ Agent Layer    @weaveintel/agents · @weaveintel/workflows · @weaveintel/cost-governor
+  └─ Agent Layer    @weaveintel/agents · @weaveintel/workflows · @weaveintel/live-agents
+                    @weaveintel/a2a · @weaveintel/skills · @weaveintel/cost-governor
   └─ Capability     @weaveintel/prompts · @weaveintel/memory · @weaveintel/retrieval
+                    @weaveintel/extraction · @weaveintel/graph · @weaveintel/collaboration
                     @weaveintel/evals · @weaveintel/guardrails · @weaveintel/resilience
-  └─ Integration    @weaveintel/models · @weaveintel/mcp-client · @weaveintel/mcp-server
-                    @weaveintel/tools-* · @weaveintel/sandbox · @weaveintel/observability
+  └─ Integration    @weaveintel/providers · @weaveintel/mcp-client · @weaveintel/mcp-server
+                    @weaveintel/tools-* · @weaveintel/sandbox · @weaveintel/oauth
+  └─ Platform       @weaveintel/security · @weaveintel/tenancy · @weaveintel/compliance
+                    @weaveintel/encryption · @weaveintel/durability · @weaveintel/persistence
   └─ Contracts      @weaveintel/core  (zero runtime dependencies)`)}`;
 }
 
@@ -927,7 +1008,82 @@ const prompt = buildPromptFromFramework('RTCE', {
     { input: 'app.get("/files/:name", (req, res) => res.sendFile(req.params.name))',
       output: 'CRITICAL: Path traversal vulnerability. User input passed directly to sendFile.' },
   ],
-});`)}
+});`, ['@weaveintel/prompts'])}
+`)}
+
+${section('prompts-execution', 'Execution Pipeline', `
+<p><code>resolvePromptRecordForExecution</code> selects the right prompt version for a given key — resolving active experiments, selecting weighted variants, falling back through published versions to a base prompt.</p>
+
+${code('typescript', `import {
+  resolvePromptRecordForExecution,
+  executePromptRecord,
+  renderWithOptions,
+} from '@weaveintel/prompts';
+
+// Resolution order: requested override → active experiment variant → active published → latest published → base
+const record = await resolvePromptRecordForExecution({
+  db,
+  promptKey:    'summarise-article',
+  userId:       'alice',                 // used for experiment cohort assignment
+  tenantId:     'acme',
+  overrideKey:  undefined,               // explicit version override (e.g. from admin)
+});
+
+// record.resolvedVersion — which version was selected
+// record.experimentId    — which experiment it belongs to (if any)
+// record.variantId       — which variant within the experiment
+
+// Execute the prompt record with variables and optional evaluation hooks
+const result = await executePromptRecord(record, {
+  article:      articleText,
+  maxWords:     150,
+  focusAreas:   'key findings, business impact',
+}, {
+  model,
+  ctx,
+  strategy:     'chain-of-thought',  // overrides record.executionDefaults.strategy
+  evalHooks:    [myEvalHook],        // called after each generation attempt
+});
+
+console.log(result.text);
+console.log(result.resolvedVersion, result.selectedBy);`, ['@weaveintel/prompts'])}
+`)}
+
+${section('prompts-ab', 'A/B Experiments', `
+<p>Create an experiment on a prompt key. Users are randomly assigned to variants based on weights. The winning variant can be promoted with a single call — all traffic switches automatically.</p>
+
+${code('typescript', `import { createExperiment, getExperimentResults, promoteVariant } from '@weaveintel/prompts';
+
+// Create an A/B experiment on the summarise-article prompt
+const experiment = await createExperiment({
+  db,
+  promptKey:  'summarise-article',
+  name:       'Bullet vs Paragraph Style',
+  variants: [
+    {
+      id:     'control',
+      weight: 0.5,
+      versionKey: 'summarise-article@2.0.0',  // existing version
+    },
+    {
+      id:     'bullet-style',
+      weight: 0.5,
+      // Inline variant — not a separate stored version
+      template: \`You are an editor. Summarise in {{maxWords}} bullet points.\`,
+      variables: { maxWords: { type: 'number', required: true } },
+    },
+  ],
+  metrics: ['user_rating', 'engagement_time'],
+});
+
+// After collecting data — get results per variant
+const results = await getExperimentResults({ db, experimentId: experiment.id });
+results.variants.forEach(v => {
+  console.log(\`\${v.id}: impressions=\${v.impressions} rating=\${v.metrics.user_rating?.mean.toFixed(2)}\`);
+});
+
+// Promote the winning variant — all traffic switches
+await promoteVariant({ db, experimentId: experiment.id, variantId: 'bullet-style' });`, ['@weaveintel/prompts'])}
 `)}`;
 }
 
@@ -1031,13 +1187,91 @@ await convMemory.addMessage({ role: 'user', content: 'I live in Auckland and pre
 // Automatically extracts: location=Auckland, preference=dark mode`)}
 `)}
 
-${section('memory-backends', 'Backends', `
+${section('memory-runtime', 'Runtime-Backed Memory Store (Recommended)', `
+<p>The runtime-backed store routes all memory reads and writes through <code>runtime.persistence.kv</code>. Pass a <code>WeaveRuntime</code> with a persistence slot once and all memory entries survive process restarts — no per-backend configuration needed.</p>
+
+${code('typescript', `import { weaveRuntimeMemoryStore } from '@weaveintel/memory';
+import { weaveRuntime, weaveContext } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveSemanticMemory, weaveConversationMemory } from '@weaveintel/memory';
+
+// One runtime wires persistence for memory + audit + DLQ simultaneously
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './memory.db' }),
+});
+
+// Runtime-backed MemoryStore — entries survive restarts
+const store = weaveRuntimeMemoryStore({ runtime, namespace: 'mem' });
+
+// Build semantic memory on top of the durable store
+const semantic = weaveSemanticMemory(
+  weaveAnthropicModel('text-embedding-3-small'),  // embedding model
+  store,
+);
+
+// Build conversation memory on top of the same store
+const conversation = weaveConversationMemory();
+
+// Attach both to an agent
+const agent = weaveAgent({
+  model:   weaveAnthropicModel('claude-sonnet-4-6'),
+  memory:  conversation,
+  tools,
+  systemPrompt: 'You have access to conversation history and semantic memory.',
+});
+
+const ctx = weaveContext({ runtime, userId: 'alice' });
+
+// Store a user preference
+await semantic.store(ctx, 'User prefers bullet-point responses, not paragraphs.');
+await semantic.store(ctx, 'User works in the fintech industry in Auckland.');
+
+// Run the agent — it loads history automatically
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'Summarise what you know about me.' }],
+});
+// Agent recalls: Auckland location, fintech industry, bullet-point preference`, ['@weaveintel/memory', '@weaveintel/core', '@weaveintel/persistence', '@weaveintel/agents', '@weaveintel/provider-anthropic'])}
+`)}
+
+${section('memory-backends', 'Backend Options', `
+<p>Use <code>createConfiguredMemoryStore</code> when you need a specific named backend without a <code>WeaveRuntime</code>.</p>
+
+${code('typescript', `import { createConfiguredMemoryStore } from '@weaveintel/memory';
+
+// SQLite — single-process durable, zero external deps
+const sqlite = createConfiguredMemoryStore({ backend: 'sqlite', sqlitePath: './mem.db' });
+
+// Postgres — multi-process, horizontal scale
+const pg = createConfiguredMemoryStore({ backend: 'postgres', postgresUrl: process.env['DATABASE_URL']! });
+
+// Redis — low-latency, TTL-aware keys
+const redis = createConfiguredMemoryStore({ backend: 'redis', redisUrl: process.env['REDIS_URL']! });
+
+// MongoDB — flexible document model
+const mongo = createConfiguredMemoryStore({ backend: 'mongodb', mongoUrl: process.env['MONGO_URL']! });
+
+// Runtime KV — preferred, auto-wired, no separate config
+const runtime = createConfiguredMemoryStore({ backend: 'runtime', runtime: myRuntime });`, ['@weaveintel/memory'])}
+
+<h4>Backend comparison</h4>
+<table class="ptable"><thead><tr><th>Backend</th><th>Persistence</th><th>Scale</th><th>Best for</th></tr></thead><tbody>
+<tr><td><code>memory</code></td><td>Lost on restart</td><td>Single process</td><td>Tests, demos, ephemeral sessions</td></tr>
+<tr><td><code>runtime</code></td><td>Durable (via slot)</td><td>Single node</td><td>Production default — one persistence config for everything</td></tr>
+<tr><td><code>sqlite</code></td><td>Durable</td><td>Single process</td><td>Low-traffic single-node apps</td></tr>
+<tr><td><code>postgres</code></td><td>Durable</td><td>Multi-process</td><td>High-traffic, pgvector for semantic search</td></tr>
+<tr><td><code>redis</code></td><td>Configurable TTL</td><td>Multi-process</td><td>Session memory with auto-expiry</td></tr>
+<tr><td><code>mongodb</code></td><td>Durable</td><td>Multi-process</td><td>Flexible schema, atlas vector search</td></tr>
+</tbody></table>
 ${params([
-  ['backend', '"sqlite" | "postgres" | "redis" | "mongodb" | "memory"', 'required', 'Storage backend for memory records and vector embeddings.'],
-  ['path', 'string', 'optional', 'File path (sqlite). Ignored for network backends.'],
-  ['connectionString', 'string', 'optional', 'Connection string for postgres/redis/mongodb.'],
-  ['vectorExtension', '"pgvector" | "chromadb" | "pinecone" | "weaviate"', 'optional', 'Vector store for semantic search. Defaults to in-process cosine similarity.'],
-  ['retentionDays', 'number', 'optional', 'Auto-expire memories older than N days.'],
+  ['backend', 'string', 'required', 'Storage backend — see table above.'],
+  ['runtime', 'WeaveRuntime', 'optional', 'Required when backend is <code>"runtime"</code>.'],
+  ['sqlitePath', 'string', 'optional', 'File path for SQLite backend.'],
+  ['postgresUrl', 'string', 'optional', 'Connection string for Postgres backend.'],
+  ['redisUrl', 'string', 'optional', 'Connection URL for Redis backend.'],
+  ['mongoUrl', 'string', 'optional', 'Connection URL for MongoDB backend.'],
+  ['retentionDays', 'number', 'optional', 'Auto-expire memory entries older than N days.'],
 ])}
 `)}`;
 }
@@ -1104,42 +1338,123 @@ await pipeline.indexBatch(documents, { upsert: true });
 await pipeline.delete('policy-v2');`)}
 `)}
 
-${section('retrieval-hybrid', 'Hybrid Search', `
+${section('retrieval-hybrid', 'Hybrid Search — Dense + BM25 + RRF', `
+<p>Hybrid search combines dense vector similarity (semantic) with BM25 keyword matching. Results are merged using Reciprocal Rank Fusion (RRF), then optionally reranked by a cross-encoder. This consistently outperforms either approach alone.</p>
+
 ${code('typescript', `import {
   weaveHybridRetriever,
+  weaveBM25Index,
   weaveQueryRewriter,
   weaveCitationExtractor,
 } from '@weaveintel/retrieval';
 
-// Hybrid = dense (semantic) + sparse (keyword/BM25)
+// Build a BM25 keyword index from the same chunks you embedded
+const bm25 = await weaveBM25Index({
+  store: sqliteStore,            // persist index to SQLite
+  language: 'english',          // stemming + stop-words
+  k1: 1.5, b: 0.75,             // BM25 tuning params
+});
+await bm25.index(chunks);       // index all document chunks
+
+// Hybrid retriever — dense + keyword, fused with RRF
 const retriever = weaveHybridRetriever({
-  denseRetriever:   vectorStore,
-  keywordRetriever: bm25Index,
-  fusionMethod: 'rrf',              // Reciprocal Rank Fusion
-  weights: { dense: 0.7, keyword: 0.3 },
-  topK: 20,
-  reranker: crossEncoderReranker,   // Optional: rerank top-20 → top-5
+  denseRetriever:   vectorStore,   // dense semantic search (any VectorStore)
+  keywordRetriever: bm25,          // BM25 keyword search
+  fusionMethod:     'rrf',         // 'rrf' | 'weighted' | 'max'
+  weights:          { dense: 0.7, keyword: 0.3 },
+  topK:             20,            // candidates before reranking
+  reranker: {
+    model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
+    topN:  5,                      // rerank 20 → return top 5
+  },
+  filter: { department: 'legal' },
 });
 
-// Optional: rewrite query before retrieval
+// Query rewriting — expand/decompose the question before retrieval
 const rewriter = weaveQueryRewriter({
-  model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
-  strategy: 'decompose',  // 'expand' | 'decompose' | 'hypothetical-document'
+  model:    weaveAnthropicModel('claude-haiku-4-5-20251001'),
+  strategy: 'decompose',    // 'expand' | 'decompose' | 'hypothetical-document'
 });
+const { queries } = await rewriter.rewrite('return policy for damaged goods');
+// queries = ['what is the return policy for damaged goods',
+//            'how do I get a refund for a defective product']
 
-const rewritten = await rewriter.rewrite('return policy for damaged goods');
-// rewritten.queries = ['damaged goods return policy', 'refund for defective product']
+// Search with all rewritten queries and merge results
+const results = await retriever.retrieve(queries, { minScore: 0.35 });
 
-// Retrieve with all rewritten queries, merge results
-const results = await retriever.retrieve(rewritten.queries, {
-  limit: 5,
-  minScore: 0.4,
-  filter: { department: 'legal' },  // Metadata filter
-});
-
-// Extract citation spans from retrieved chunks
+// Extract citations from the generated answer
 const extractor = weaveCitationExtractor();
-const citations = extractor.extract(results, generatedAnswer);`)}
+const citations = extractor.extract(results, generatedAnswer);
+// citations = [{ chunkId, source, pageNumber, span: [start, end] }, ...]`, ['@weaveintel/retrieval'])}
+
+<h4>Query rewriting strategies</h4>
+${typeTable([
+  ['expand', 'Generates synonyms and related terms. Best for broad coverage when the user query is ambiguous.'],
+  ['decompose', 'Splits a complex multi-part question into focused sub-queries. Best for compound research questions.'],
+  ['hypothetical-document', 'Generates a hypothetical ideal answer, then retrieves documents similar to that answer (HyDE). Best for retrieval from highly technical corpora.'],
+])}
+`)}
+
+${section('retrieval-e2e', 'End-to-End: RAG Agent', `
+${code('typescript', `import { weaveEmbeddingPipeline, weaveHybridRetriever, weaveBM25Index } from '@weaveintel/retrieval';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel, weaveOpenAIModel } from '@weaveintel/provider-anthropic';
+import { weaveTool, weaveToolRegistry, weaveContext } from '@weaveintel/core';
+
+// 1. Index documents once
+const embedPipeline = weaveEmbeddingPipeline({
+  embeddingModel: weaveOpenAIModel('text-embedding-3-small'),
+  vectorStore, batchSize: 100,
+});
+await embedPipeline.indexBatch(myDocuments, { upsert: true });
+
+const bm25 = await weaveBM25Index({ store: sqliteStore });
+await bm25.index(chunks);
+
+// 2. Build hybrid retriever
+const retriever = weaveHybridRetriever({
+  denseRetriever: vectorStore, keywordRetriever: bm25,
+  fusionMethod: 'rrf', topK: 10,
+  reranker: { model: weaveAnthropicModel('claude-haiku-4-5-20251001'), topN: 4 },
+});
+
+// 3. Create a retrieval tool the agent calls
+const searchKbTool = weaveTool({
+  name: 'search_knowledge_base',
+  description: 'Search the internal knowledge base for relevant information. Call this before answering any factual question.',
+  parameters: {
+    type: 'object', required: ['query'],
+    properties: { query: { type: 'string', description: 'Specific search query.' } },
+  },
+  riskLevel: 'read-only',
+  execute: async ({ query }) => {
+    const results = await retriever.retrieve([query as string]);
+    return JSON.stringify(results.map(r => ({
+      content: r.content,
+      source:  r.metadata.source,
+      score:   r.score.toFixed(3),
+    })));
+  },
+});
+
+// 4. Wire everything into an agent
+const tools = weaveToolRegistry();
+tools.register(searchKbTool);
+
+const agent = weaveAgent({
+  model:        weaveAnthropicModel('claude-sonnet-4-6'),
+  tools,
+  systemPrompt: \`You are a helpful assistant with access to the company knowledge base.
+ALWAYS search the knowledge base before answering factual questions.
+Cite the source of each fact you state.\`,
+  maxSteps: 4,
+});
+
+const ctx    = weaveContext({ userId: 'alice' });
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'What is our refund policy for software purchases?' }],
+});
+console.log(result.output);`, ['@weaveintel/retrieval', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}`;
 }
 
@@ -1148,67 +1463,126 @@ function sEvals(): string {
 <div class="pkg-hdr">
   <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/evals</span></div>
   <h1 class="pkg-title">Evals</h1>
-  <p class="pkg-desc">LLM-as-judge evaluation with rubric scoring, dataset comparison, and weighted aggregation. Run evals inline, in tests, or as a CI quality gate.</p>
+  <p class="pkg-desc">LLM-as-judge evaluation with rubric scoring, model comparison, CI quality gates, and dataset versioning. Run evals inline during development, as vitest/jest assertions, or as an automated CI gate that fails the build when quality regresses.</p>
 </div>
+
+${featureCards([
+  ['Rubric scoring', 'Define weighted criteria (factual accuracy, completeness, tone, etc.). The judge model scores each criterion independently and returns reasoning.'],
+  ['Model comparison', 'Run the same dataset through two models/prompts and compare scores side by side — detects regressions before deploy.'],
+  ['CI quality gate', 'Assert minimum pass rate and mean score. Integrate with vitest/jest — the test fails when quality drops.'],
+  ['Parallelism', 'Run up to N eval cases simultaneously to keep CI times short even with large datasets.'],
+  ['Deterministic judge', 'Judge model runs at temperature=0 with a structured output contract — scores are reproducible.'],
+])}
 
 ${exlinks([
   ['09-eval-suite.ts', 'Example 09 — Eval Suite'],
 ])}
 
-${section('evals-runner', 'Eval Runner', `
-${code('typescript', `import { weaveEvalRunner, weightedRubricScore } from '@weaveintel/evals';
+${section('evals-runner', 'Basic Eval Run', `
+${code('typescript', `import { weaveEvalRunner } from '@weaveintel/evals';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 
 const runner = weaveEvalRunner({
   judgeModel: weaveAnthropicModel('claude-sonnet-4-6'),
   rubric: [
-    {
-      criterion: 'factual_accuracy',
-      weight: 0.40,
-      description: 'Is every factual claim in the answer verifiable and correct?',
-      scale: '1=completely wrong, 5=fully accurate',
-    },
-    {
-      criterion: 'completeness',
-      weight: 0.30,
-      description: 'Does the answer address all aspects of the question?',
-    },
-    {
-      criterion: 'conciseness',
-      weight: 0.20,
-      description: 'Is the answer appropriately brief without losing important detail?',
-    },
-    {
-      criterion: 'tone',
-      weight: 0.10,
-      description: 'Is the tone professional and appropriate for the audience?',
-    },
+    { criterion: 'factual_accuracy', weight: 0.40,
+      description: 'Is every factual claim verifiable and correct?',
+      scale: '1=completely wrong, 5=fully accurate' },
+    { criterion: 'completeness', weight: 0.30,
+      description: 'Does the answer address all aspects of the question?' },
+    { criterion: 'conciseness', weight: 0.20,
+      description: 'Is the answer appropriately brief without losing detail?' },
+    { criterion: 'tone', weight: 0.10,
+      description: 'Is the tone professional and appropriate?' },
   ],
-  parallelism: 4,  // Run 4 eval cases simultaneously
+  parallelism:      4,       // 4 concurrent judge calls
+  passingThreshold: 0.80,    // overall >= 0.80 → passed: true
 });
 
 const dataset = [
-  { id: 'q1', input: 'What is the capital of France?', expected: 'Paris',
-    context: { difficulty: 'easy' } },
-  { id: 'q2', input: 'Explain quantum entanglement.', expected: 'A correlation between particles...',
-    context: { difficulty: 'hard' } },
+  { id: 'q1', input: 'What is the capital of France?',
+    expected: 'Paris, which has been France\'s capital since the 12th century.' },
+  { id: 'q2', input: 'Explain quantum entanglement in one sentence.',
+    expected: 'Entangled particles share correlated quantum states regardless of distance.' },
 ];
 
 const results = await runner.run(dataset, async ({ input }) => {
-  return (await myAgent.answer(input)).output;
+  const resp = await myAgent.run(ctx, { messages: [{ role:'user', content: input }] });
+  return resp.output;
 });
 
-// results[0] = {
-//   id: 'q1',
-//   input, expected, actual,
-//   scores: { factual_accuracy: 0.96, completeness: 0.88, conciseness: 0.95, tone: 1.0 },
-//   overall: 0.937,   // weighted average
-//   reasoning: '...',  // judge's explanation
-//   passed: true,      // overall >= passingThreshold
-// }
+// Inspect results
+results.forEach(r => {
+  console.log(\`[\${r.id}] overall=\${r.overall.toFixed(3)} passed=\${r.passed}\`);
+  console.log('  reasoning:', r.reasoning.slice(0, 120));
+});
 
-// Aggregate
+// Aggregate statistics
+const passRate = results.filter(r => r.passed).length / results.length;
 const avgScore = results.reduce((s, r) => s + r.overall, 0) / results.length;
-console.log(\`Average score: \${avgScore.toFixed(3)}\`);`)}
+console.log(\`Pass rate: \${Math.round(passRate * 100)}%  Mean score: \${avgScore.toFixed(3)}\`);`, ['@weaveintel/evals', '@weaveintel/provider-anthropic'])}
+`)}
+
+${section('evals-compare', 'Model Comparison', `
+${code('typescript', `import { weaveEvalRunner, compareEvalResults } from '@weaveintel/evals';
+
+const runner = weaveEvalRunner({ judgeModel, rubric, parallelism: 4 });
+
+// Run the same dataset through two candidates
+const [baselineResults, candidateResults] = await Promise.all([
+  runner.run(dataset, input => callModel(baselineModel, input)),
+  runner.run(dataset, input => callModel(candidateModel, input)),
+]);
+
+const comparison = compareEvalResults(baselineResults, candidateResults);
+
+console.log(\`Baseline mean: \${comparison.baseline.meanScore.toFixed(3)}\`);
+console.log(\`Candidate mean: \${comparison.candidate.meanScore.toFixed(3)}\`);
+console.log(\`Delta: \${comparison.delta.toFixed(3)} (\${comparison.delta > 0 ? '✓ improved' : '✗ regressed'})\`);
+
+// Per-criterion breakdown
+comparison.perCriterion.forEach(({ criterion, baseline, candidate }) => {
+  const arrow = candidate > baseline ? '↑' : candidate < baseline ? '↓' : '→';
+  console.log(\`  \${criterion}: \${baseline.toFixed(3)} \${arrow} \${candidate.toFixed(3)}\`);
+});`, ['@weaveintel/evals'])}
+`)}
+
+${section('evals-ci', 'CI Quality Gate', `
+<p>Integrate with vitest or Jest to block deployments when quality regresses below threshold.</p>
+
+${code('typescript', `// evals/quality.test.ts — runs in CI
+import { describe, it, expect } from 'vitest';
+import { weaveEvalRunner } from '@weaveintel/evals';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveContext } from '@weaveintel/core';
+
+const PASS_RATE_THRESHOLD  = 0.85;   // ≥ 85% of cases must pass
+const MEAN_SCORE_THRESHOLD = 0.80;   // mean score must be ≥ 0.80
+
+describe('agent quality gate', () => {
+  it('meets minimum quality thresholds on the golden dataset', async () => {
+    const runner = weaveEvalRunner({
+      judgeModel:       weaveAnthropicModel('claude-sonnet-4-6'),
+      rubric:           [/* ...criteria... */],
+      passingThreshold: 0.80,
+    });
+
+    const agent = weaveAgent({ model: weaveAnthropicModel('claude-haiku-4-5-20251001'), tools });
+    const ctx   = weaveContext();
+
+    const results = await runner.run(goldenDataset, async ({ input }) => {
+      const r = await agent.run(ctx, { messages: [{ role:'user', content: input }] });
+      return r.output;
+    });
+
+    const passRate  = results.filter(r => r.passed).length / results.length;
+    const meanScore = results.reduce((s, r) => s + r.overall, 0) / results.length;
+
+    expect(passRate).toBeGreaterThanOrEqual(PASS_RATE_THRESHOLD);
+    expect(meanScore).toBeGreaterThanOrEqual(MEAN_SCORE_THRESHOLD);
+  }, 60_000);   // allow up to 60 s for eval run
+});`, ['@weaveintel/evals', '@weaveintel/provider-anthropic', '@weaveintel/agents', '@weaveintel/core'])}
 `)}`;
 }
 
@@ -1290,6 +1664,62 @@ ${params([
   ['SycophancyDetector', 'Check', 'optional', 'Detects sycophantic patterns (excessive agreement, flattery) in post-execution responses.'],
   ['GroundingGuard', 'Check', 'optional', 'Checks that factual claims in the response are grounded in provided evidence (tool results, RAG context).'],
 ])}
+`)}
+
+${section('guardrails-runtime', 'Runtime Slot — Ambient Guardrails (Recommended)', `
+<p>The <code>RuntimeGuardrailsSlot</code> on <code>weaveRuntime</code> is the recommended path. Unlike the pipeline above (which requires explicit call-site integration), the runtime slot is consulted automatically by the agent loop for every tool call and model output — no call-site wiring required.</p>
+
+${code('typescript', `import { weaveRuntime, weaveContext } from '@weaveintel/core';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+import type { RuntimeGuardrailsSlot } from '@weaveintel/core';
+
+// Build the guardrails slot — same interface, zero call-site wiring
+const guardrails: RuntimeGuardrailsSlot = {
+  // Called automatically before EVERY tool invocation
+  async checkToolCall(ctx, schema, args) {
+    // Deny financial tools for free tier
+    if (schema.riskLevel === 'financial' && ctx.metadata['plan'] === 'free') {
+      return { allow: false, reason: 'financial tools require a paid plan' };
+    }
+    // Block prompt-injection attempts in tool arguments
+    const argStr = JSON.stringify(args);
+    if (/ignore previous|forget all|system prompt/i.test(argStr)) {
+      return { allow: false, reason: 'potential prompt injection in tool arguments' };
+    }
+    return { allow: true };
+  },
+
+  // Called automatically on EVERY terminal agent response
+  async checkOutput(ctx, text) {
+    // Redact leaked API keys
+    if (/sk-[A-Za-z0-9]{20,}/.test(text)) {
+      return { allow: true, redactedText: text.replace(/sk-[A-Za-z0-9]{20,}/g, '[API_KEY]') };
+    }
+    // Block medical advice from non-clinical agents
+    if (/take \d+mg|prescribed|diagnos/i.test(text) && ctx.metadata['agentType'] !== 'clinical') {
+      return { allow: false, reason: 'medical advice from non-clinical agent is blocked' };
+    }
+    return { allow: true };
+  },
+};
+
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './app.db' }),
+  guardrails,   // ← wired once, applies to every agent derived from this runtime
+});
+
+// Any agent that uses this runtime is automatically guarded
+const agent = weaveAgent({ model: weaveAnthropicModel('claude-sonnet-4-6'), tools });
+const ctx   = weaveContext({ runtime, userId: 'alice', metadata: { plan: 'free', agentType: 'assistant' } });
+
+const result = await agent.run(ctx, { messages });
+// Tool denials → audit entry: action:"agent.tool.invoke" outcome:"denied"
+// Output denials → audit entry: action:"agent.output.denied" outcome:"denied"
+// Output redactions → agent returns the redactedText instead of the raw response`, ['@weaveintel/core', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/persistence'])}
+
+${callout('tip', '💡', 'Pipeline vs slot.', 'Use the <strong>pipeline</strong> (<code>@weaveintel/guardrails</code>) when you need full pre/post check composition with built-in checks, cost guards, and violation callbacks. Use the <strong>runtime slot</strong> when you want ambient coverage across all agents without any per-agent wiring. Both can coexist — the slot fires automatically, and the pipeline is called explicitly in your chat handler.')}
 `)}`;
 }
 
@@ -1350,32 +1780,129 @@ ${code('typescript', `import {
   createCircuitBreaker,
   createRetryPolicy,
   createConcurrencyLimiter,
-  ResilienceSignalEmitter,
+  createResilienceSignalBus,
+  PROVIDER_RESILIENCE_DEFAULTS,
 } from '@weaveintel/resilience';
 
-// Token bucket — emit signals on rate limit events
-const emitter = new ResilienceSignalEmitter();
-emitter.on('rate_limited', (sig) => monitor.alert(\`Rate limited on \${sig.endpoint}\`));
-emitter.on('circuit_opened', (sig) => monitor.alert(\`Circuit opened: \${sig.endpoint}\`));
+// PROVIDER_RESILIENCE_DEFAULTS — canonical shared defaults used by all built-in providers.
+// Use these in your own provider or connector to stay consistent.
+console.log(PROVIDER_RESILIENCE_DEFAULTS);
+// { retry: { maxAttempts: 2, baseDelayMs: 500, maxDelayMs: 30_000, jitter: true },
+//   circuit: { failureThreshold: 8, cooldownMs: 30_000 } }
 
-const bucket  = createTokenBucket({ capacity: 100, refillRate: 100, emitter });
-const breaker = createCircuitBreaker({ failureThreshold: 5, timeout: 30_000, emitter });
-const limiter = createConcurrencyLimiter({ maxConcurrent: 10, emitter });
-const retry   = createRetryPolicy({ maxAttempts: 3, initialDelayMs: 200 });
+// Signal bus — receive normalised events from every resilience primitive
+const bus = createResilienceSignalBus();
+bus.on('circuit_opened',  sig => monitor.alert(\`Circuit opened: \${sig.endpoint}\`));
+bus.on('circuit_closed',  sig => monitor.info(\`Circuit closed: \${sig.endpoint}\`));
+bus.on('rate_limited',    sig => metrics.increment('rate_limited', { endpoint: sig.endpoint }));
+bus.on('retry_exhausted', sig => monitor.alert(\`Retries exhausted on \${sig.endpoint}\`));
 
-// Use individually
-const allowed = await bucket.consume(1);
-if (!allowed) throw new RateLimitError('Rate limited');
+// Token bucket — shared rate quota across all callers with the same endpoint key
+const bucket = createTokenBucket({ capacity: 60, refillPerSec: 1 });
+// Try without waiting (returns false when empty)
+if (!bucket.tryAcquire()) throw new Error('Rate limited — try again later');
+// Wait up to 5 s for a token
+await bucket.acquire(5_000);
 
-if (!breaker.canExecute()) throw new CircuitOpenError('Service unavailable');
+// Circuit breaker — opens after N consecutive failures, half-opens after cooldown
+const breaker = createCircuitBreaker({ failureThreshold: 5, cooldownMs: 30_000 });
+const canPass = breaker.canPass();
+if (!canPass.allowed) throw new Error(\`Circuit open, reopens in \${canPass.reopensAt - Date.now()}ms\`);
 try {
-  const result = await retryPolicy.execute(() => callExternalService());
+  const result = await callExternalService();
   breaker.recordSuccess();
   return result;
 } catch (err) {
-  breaker.recordFailure();
+  const { transitionedToOpen } = breaker.recordFailure();
+  if (transitionedToOpen) monitor.alert('Circuit opened on external service');
   throw err;
-}`)}
+}
+
+// Retry policy — exponential backoff with jitter
+const retry = createRetryPolicy({ maxAttempts: 3, baseDelayMs: 500, maxDelayMs: 10_000, jitter: true });
+const result = await retry.execute(() => callFlakyApi());
+
+// Concurrency limiter — cap in-flight requests
+const limiter = createConcurrencyLimiter({ maxConcurrent: 10 });
+await limiter.run(() => heavyOperation());`, ['@weaveintel/resilience'])}
+
+<h4>Primitive API reference</h4>
+${typeTable([
+  ['createTokenBucket({ capacity, refillPerSec })', 'Token bucket with <code>tryAcquire()</code>, <code>acquire(timeoutMs?)</code>, <code>pauseFor(ms)</code>, <code>snapshot()</code>.'],
+  ['createCircuitBreaker({ failureThreshold, cooldownMs })', 'Three-state (closed/open/half-open). <code>canPass()</code>, <code>recordSuccess()</code>, <code>recordFailure()</code>, <code>snapshot()</code>.'],
+  ['createRetryPolicy({ maxAttempts, baseDelayMs, jitter })', 'Exponential backoff. <code>execute(fn)</code>, <code>shouldRetry(err)</code>, <code>nextDelayMs(attempt, err)</code>.'],
+  ['createConcurrencyLimiter({ maxConcurrent })', 'Async semaphore. <code>run(fn)</code> waits for a slot; rejects when queue is full.'],
+  ['PROVIDER_RESILIENCE_DEFAULTS', 'Canonical retry + circuit defaults used by all built-in LLM providers.'],
+])}
+`)}
+
+${section('resilience-durable', 'Durable Endpoint Registry', `
+<p>The module-level <code>getOrCreateEndpointState</code> is process-scoped. <code>createDurableEndpointRegistry</code> persists circuit-breaker state across restarts — a known-bad endpoint stays open through a deploy instead of triggering a thundering herd of retries.</p>
+
+${code('typescript', `import { createDurableEndpointRegistry } from '@weaveintel/resilience';
+import { weaveRuntime } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './resilience.db' }),
+});
+
+const registry = createDurableEndpointRegistry({ runtime, namespace: 'er' });
+
+// Circuit-breaker state is restored from KV on startup
+const state = await registry.getOrCreateEndpointState('openai:rest', {
+  rateLimit:   { capacity: 60, refillPerSec: 1 },
+  concurrency: { maxConcurrent: 20 },
+  circuit:     { failureThreshold: 8, cooldownMs: 30_000 },
+});
+
+// recordFailure() writes a snapshot to KV immediately
+// → after a process restart, if the circuit was open and cooldown hasn't
+//   elapsed, it is automatically re-tripped to protect the downstream service
+state.circuit!.recordFailure();
+
+// Inspect all registered endpoints
+const all = registry.listEndpointStates();
+all.forEach(s => console.log(s.endpoint, s.circuit?.state()));`, ['@weaveintel/resilience', '@weaveintel/core', '@weaveintel/persistence'])}
+`)}
+
+${section('resilience-e2e', 'End-to-End: Resilient External API Call', `
+${code('typescript', `import { createResilientCallable, PROVIDER_RESILIENCE_DEFAULTS } from '@weaveintel/resilience';
+import { createHardenedFetch } from '@weaveintel/core';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveContext, weaveTool, weaveToolRegistry } from '@weaveintel/core';
+
+const { fetch } = createHardenedFetch({ errorTag: 'stock-api', timeoutMs: 10_000 });
+
+// Wrap the API call in a resilient callable — shared circuit + token bucket
+const resilientStockFetch = createResilientCallable(
+  async (ticker: string) => {
+    const r = await fetch(\`https://api.stockdata.com/v1/data/quote?symbols=\${ticker}\`);
+    return (await r.json()) as { data: { close: number }[] };
+  },
+  { endpoint: 'stockdata:quote', ...PROVIDER_RESILIENCE_DEFAULTS },
+);
+
+const stockTool = weaveTool({
+  name: 'get_stock_price', description: 'Get the latest close price for a ticker.',
+  parameters: { type:'object', required:['ticker'], properties:{ ticker: { type:'string' } } },
+  riskLevel: 'read-only',
+  execute: async ({ ticker }) => {
+    const data = await resilientStockFetch(ticker as string);
+    return JSON.stringify({ ticker, price: data.data[0]?.close });
+  },
+});
+
+const tools = weaveToolRegistry();
+tools.register(stockTool);
+
+const agent  = weaveAgent({ model: weaveAnthropicModel('claude-haiku-4-5-20251001'), tools });
+const ctx    = weaveContext();
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'What is AAPL trading at today?' }],
+});
+console.log(result.output);`, ['@weaveintel/resilience', '@weaveintel/core', '@weaveintel/agents', '@weaveintel/provider-anthropic'])}
 `)}`;
 }
 
@@ -1466,39 +1993,139 @@ function sTools(): string {
 <div class="pkg-hdr">
   <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tools</span></div>
   <h1 class="pkg-title">Tool Framework</h1>
-  <p class="pkg-desc">Policy enforcement, audit logging, approval gates, rate limiting, network guards, and health tracking for any tool. Wraps existing tools without modifying them.</p>
+  <p class="pkg-desc">Versioned tool registration with risk classification, policy enforcement, approval gates, rate limiting, network guards, audit logging, and health tracking. Wraps any tool without modifying it.</p>
 </div>
+
+${featureCards([
+  ['Risk levels', '<code>read-only</code>, <code>write</code>, <code>destructive</code>, <code>privileged</code>, <code>financial</code>, <code>external-side-effect</code> — enforced by policy at invocation.'],
+  ['Capability requirements', '<code>requires: [RuntimeCapabilities.NetEgress]</code> asserts the ambient runtime provides needed capabilities at registration time.'],
+  ['Approval gates', 'Side-effecting tools can require human approval. Requests queue in a persistent store; agent pauses until a human approves or rejects.'],
+  ['Rate limiting', 'Per-tool per-user token-bucket rate limiting. Excess calls throw structured errors the agent can read.'],
+  ['Health tracking', 'Success rate, p50/p95/p99 latency, and recent errors per tool — queryable for dashboards.'],
+  ['Audit emission', 'Every invocation emits a structured audit event: tool name, args hash, outcome, latency, user, tenant.'],
+])}
+
+${section('tools-define', 'Defining Tools with Risk & Capability Requirements', `
+${code('typescript', `import { weaveTool, weaveToolRegistry, RuntimeCapabilities } from '@weaveintel/core';
+
+// Read-only tool — low risk, network egress required
+const searchTool = weaveTool({
+  name: 'web_search',
+  description: 'Search the web and return the top results for a query.',
+  parameters: {
+    type: 'object', required: ['query'],
+    properties: {
+      query:      { type: 'string',  description: 'Search query.' },
+      maxResults: { type: 'number',  description: 'Number of results. Default 5.' },
+    },
+  },
+  riskLevel: 'read-only',
+  requires:  [RuntimeCapabilities.NetEgress],   // asserted at registry.register() time
+  execute: async ({ query, maxResults = 5 }) => {
+    const results = await searchProvider.search(query as string, maxResults as number);
+    return JSON.stringify(results);
+  },
+});
+
+// Side-effecting tool — requires human approval before execution
+const sendEmailTool = weaveTool({
+  name: 'send_email',
+  description: 'Send an email to a recipient. Use only when explicitly requested by the user.',
+  parameters: {
+    type: 'object', required: ['to', 'subject', 'body'],
+    properties: {
+      to:      { type: 'string', description: 'Recipient email address.' },
+      subject: { type: 'string', description: 'Email subject line.' },
+      body:    { type: 'string', description: 'Plain-text email body.' },
+    },
+  },
+  riskLevel:        'external-side-effect',
+  requiresApproval: true,
+  tags:             ['email', 'communication'],
+  requires:         [RuntimeCapabilities.NetEgress],
+  execute: async ({ to, subject, body }) => {
+    const id = await emailService.send(to as string, subject as string, body as string);
+    return JSON.stringify({ messageId: id, status: 'sent' });
+  },
+});
+
+// Register — runtime.net.egress assertion happens here, not at call time
+const runtime = weaveRuntime({ /* ... */ });
+const registry = weaveToolRegistry({ runtime });
+registry.register(searchTool);
+registry.register(sendEmailTool);`, ['@weaveintel/core'])}
+`)}
 
 ${section('tools-policy', 'Policy-Enforced Registry', `
 ${code('typescript', `import { createPolicyEnforcedRegistry, weaveHealthTracker } from '@weaveintel/tools';
 import { weaveToolRegistry } from '@weaveintel/core';
 
 const base = weaveToolRegistry();
+base.register(searchTool);
 base.register(sendEmailTool);
-base.register(writeFileTool);
-base.register(fetchPageTool);
 
 const tracker = weaveHealthTracker({ windowMs: 60_000 });
 
 const enforced = createPolicyEnforcedRegistry(base, {
-  allowedTools: ['fetch_page', 'search_web', 'send_email'],
-  blockedTools: ['delete_database', 'drop_table'],
-  rateLimit: { maxPerMinute: 30, maxPerHour: 500 },
-  requireApproval: ['send_email', 'write_file'],
+  allowedTools:    ['web_search', 'send_email'],
+  blockedTools:    ['delete_database', 'drop_table'],
+  rateLimit:       { maxPerMinute: 30, maxPerHour: 500 },
+  requireApproval: ['send_email'],
   networkGuard: {
-    blockPrivateIps: true,        // Block 10.x, 192.168.x, 127.x
-    allowedDomains: ['api.example.com', 'cdn.example.com'],
+    blockPrivateIps: true,
+    allowedDomains:  ['api.example.com', 'cdn.example.com'],
   },
   costLimit: { maxCostUsd: 0.05, ledger: costLedger },
 }, {
-  auditEmitter: myAuditEmitter,
-  approvalGate: myApprovalGate,
+  auditEmitter:  myAuditEmitter,
+  approvalGate:  myApprovalGate,
   healthTracker: tracker,
 });
 
-// Every call through 'enforced' is policy-checked, audited, and tracked
+// Query health after some calls
 const health = tracker.getHealth('send_email');
-// { successRate: 0.99, avgLatencyMs: 320, recentErrors: [] }`)}
+// { successRate: 0.99, avgLatencyMs: 320, p95LatencyMs: 580, recentErrors: [] }`, ['@weaveintel/tools', '@weaveintel/core'])}
+`)}
+
+${section('tools-e2e', 'End-to-End: Governed Agent', `
+${code('typescript', `import { weaveTool, weaveToolRegistry, weaveContext, weaveRuntime, RuntimeCapabilities } from '@weaveintel/core';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './app.db' }),
+  guardrails: {
+    async checkToolCall(ctx, schema) {
+      if (schema.riskLevel === 'financial' && ctx.metadata['plan'] === 'free') {
+        return { allow: false, reason: 'financial tools require a paid plan' };
+      }
+      return { allow: true };
+    },
+  },
+});
+
+const calcTool = weaveTool({
+  name: 'calculate', description: 'Evaluate a mathematical expression.',
+  parameters: { type: 'object', required: ['expression'],
+    properties: { expression: { type: 'string' } } },
+  riskLevel: 'read-only',
+  execute: async ({ expression }) => {
+    const result = Function(\`return (\${expression as string})\`)();
+    return JSON.stringify({ expression, result });
+  },
+});
+
+const registry = weaveToolRegistry({ runtime });
+registry.register(calcTool);
+
+const agent = weaveAgent({ model: weaveAnthropicModel('claude-haiku-4-5-20251001'), tools: registry });
+const ctx   = weaveContext({ runtime, userId: 'alice', metadata: { plan: 'pro' } });
+
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'What is 15% of 847.50?' }],
+});
+console.log(result.output);   // "15% of 847.50 is 127.125"`, ['@weaveintel/core', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/persistence'])}
 `)}`;
 }
 
@@ -1601,29 +2228,61 @@ await client.close();`)}
 
 ${section('mcp-server', 'MCP Server', `
 ${code('typescript', `import { weaveMCPServer } from '@weaveintel/mcp-server';
+import { weaveToolRegistry, weaveTool } from '@weaveintel/core';
+
+const tools = weaveToolRegistry();
+tools.register(weaveTool({
+  name: 'company_search',
+  description: 'Search the internal company knowledge base.',
+  parameters: { type:'object', required:['query'], properties:{ query:{type:'string'} } },
+  execute: async ({ query }) => JSON.stringify(await kb.search(query as string)),
+}));
 
 const server = weaveMCPServer({
-  name: 'my-company-tools',
-  version: '1.0.0',
-  description: 'Internal WeaveIntel tools exposed via MCP.',
-  tools: myToolRegistry,           // Any ToolRegistry
-  resources: myResourceRegistry,   // Optional: file/data resources
-  prompts: myPromptRegistry,       // Optional: prompt templates
-  capabilities: {
-    tools: { listChanged: true },  // Enable tool list change notifications
-    logging: {},
-  },
+  name:        'acme-internal-tools',
+  version:     '1.0.0',
+  description: 'ACME internal tools exposed via MCP for Claude Desktop and Cursor.',
+  tools,
+  capabilities: { tools: { listChanged: true }, logging: {} },
 });
 
-// Expose via HTTP (for remote clients, Claude Desktop, etc.)
-await server.startHTTP({
-  port: 3001,
-  path: '/mcp',
-  cors: { origin: 'https://claude.ai' },
+// HTTP — for remote clients (Claude Desktop, Cursor, etc.)
+await server.startHTTP({ port: 3001, path: '/mcp', cors: { origin: '*' } });
+
+// Or stdio — for local subprocess usage
+// await server.startStdio();`)}
+`)}
+
+${section('mcp-e2e', 'End-to-End: Agent with MCP Tools', `
+${code('typescript', `import { weaveMCPClient, weaveMCPTools, createMCPStdioClientTransport } from '@weaveintel/mcp-client';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveContext } from '@weaveintel/core';
+
+// Connect to the official filesystem MCP server (no API key needed)
+const transport = createMCPStdioClientTransport({
+  command: 'npx',
+  args: ['-y', '@modelcontextprotocol/server-filesystem', process.env['HOME']! + '/docs'],
 });
 
-// Or via stdio (for subprocess usage)
-await server.startStdio();`)}
+const client   = await weaveMCPClient(transport);
+const mcpTools = await weaveMCPTools(client);   // all MCP tools as a ToolRegistry
+
+const agent  = weaveAgent({
+  model:        weaveAnthropicModel('claude-sonnet-4-6'),
+  tools:        mcpTools,
+  systemPrompt: 'You have access to the user\'s ~/docs directory via MCP tools. Help them find and summarise documents.',
+  maxSteps:     5,
+});
+
+const ctx    = weaveContext({ userId: 'alice' });
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'Find and summarise the latest quarterly report in my docs folder.' }],
+});
+console.log(result.output);
+
+// Clean up
+await client.close();`, ['@weaveintel/mcp-client', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
 `)}`;
 }
 
@@ -1632,43 +2291,104 @@ function sObservability(): string {
 <div class="pkg-hdr">
   <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/observability</span></div>
   <h1 class="pkg-title">Observability</h1>
-  <p class="pkg-desc">Distributed tracing, usage tracking, budget monitoring, trace graph reconstruction, and run timelines for agents and workflows. Pluggable span emitters (console, file, OpenTelemetry).</p>
+  <p class="pkg-desc">Distributed tracing, usage tracking, budget monitoring, and span export for agents and workflows. Observability is ambient — attach a tracer to <code>weaveRuntime</code> once and every agent, tool call, and model call emits spans automatically.</p>
 </div>
+
+${callout('info', '📈', 'Ambient wiring.', 'Attach the tracer to the runtime at construction. Every context derived from it inherits the tracer automatically — you never pass a tracer through function arguments.')}
 
 ${exlinks([
   ['10-observability.ts', 'Example 10 — Observability'],
+  ['123-runtime-golden-path.ts', 'Example 123 — Runtime Golden Path (tracer wired)'],
   ['21-workflow-observability.ts', 'Example 21 — Workflow Observability (W6)'],
 ])}
 
-${section('obs-tracer', 'Tracing', `
-${code('typescript', `import {
-  weaveInMemoryTracer,
-  weaveConsoleTracer,
-  weaveUsageTracker,
-  weaveBudgetTracker,
-} from '@weaveintel/observability';
+${section('obs-tracer', 'Setting up Tracing', `
+${code('typescript', `import { weaveConsoleTracer, weaveInMemoryTracer } from '@weaveintel/observability';
+import { weaveRuntime, weaveContext } from '@weaveintel/core';
+import { weaveAgent } from '@weaveintel/agents';
 
-// In-memory tracer — retrieve spans after a run
-const tracer = weaveInMemoryTracer();
-
-const agent = weaveAgent({ model, tools, bus: tracer.bus });
-const ctx = weaveContext({ userId: 'alice' });
-await agent.run(ctx, { messages });
-
-const spans = tracer.getSpans(ctx.traceId);
-spans.forEach(s => {
-  console.log(\`[\${s.name}] \${s.durationMs}ms — \${s.status}\`);
+// Console tracer — prints spans to stdout (development)
+const consoleRuntime = weaveRuntime({
+  tracer: weaveConsoleTracer(),
 });
 
-// Budget tracker with alerts
+// In-memory tracer — query spans programmatically (tests, CI)
+const tracer = weaveInMemoryTracer();
+const runtime = weaveRuntime({ tracer });
+
+// Construct a context — it inherits the tracer automatically
+const ctx = weaveContext({ runtime, userId: 'alice', tenantId: 'acme' });
+
+// Run the agent — spans emit through the tracer with no extra wiring
+const agent = weaveAgent({ model, tools });
+await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'Analyse the latest earnings report.' }],
+});
+
+// Retrieve spans after the run
+const spans = tracer.getSpans();
+spans.forEach(s => {
+  console.log(\`[\${s.name}] \${s.durationMs}ms status=\${s.status ?? 'ok'}\`);
+  if (s.attributes['tool.name']) {
+    console.log('  tool:', s.attributes['tool.name']);
+  }
+});`, ['@weaveintel/observability', '@weaveintel/core', '@weaveintel/agents'])}
+
+<h4>Span structure</h4>
+${returns([
+  ['spanId', 'Unique span identifier (UUIDv7).'],
+  ['parentSpanId', 'Parent span id for trace tree reconstruction. Root spans have no parent.'],
+  ['name', 'Span operation name, e.g. <code>agents.model.generate</code>, <code>agents.tool.invoke</code>.'],
+  ['startTime', 'Unix ms timestamp when the span started.'],
+  ['endTime', 'Unix ms timestamp when the span ended.'],
+  ['status', '<code>"ok"</code> or <code>"error"</code>.'],
+  ['attributes', 'Free-form key/value bag — includes model id, tool name, token counts, agent name.'],
+])}
+`)}
+
+${section('obs-budget', 'Budget Tracking & Alerts', `
+${code('typescript', `import { weaveBudgetTracker, weaveUsageTracker } from '@weaveintel/observability';
+import { weaveEventBus } from '@weaveintel/core';
+
+const bus = weaveEventBus();
+
+// Track cumulative spend and alert at thresholds
 const budget = weaveBudgetTracker({
-  bus: tracer.bus,
-  monthlyBudgetUsd: 100,
-  alertThresholds: [0.5, 0.8, 0.95],
-  onAlert: async (pct, spent) => {
-    await slack.notify(\`⚠️ \${Math.round(pct * 100)}% of monthly AI budget used ($\${spent.toFixed(2)})\`);
+  bus,
+  monthlyBudgetUsd: 500,
+  alertThresholds:  [0.5, 0.8, 0.95],   // 50%, 80%, 95%
+  onAlert: async (fraction, spentUsd) => {
+    await pagerDuty.trigger(\`\${Math.round(fraction*100)}% AI budget used — $\${spentUsd.toFixed(2)}\`);
   },
-});`)}
+});
+
+// Usage tracker counts tokens and cost per model
+const usage = weaveUsageTracker({ bus });
+
+const agent = weaveAgent({ model, tools, bus });
+const ctx   = weaveContext({ userId: 'alice' });
+await agent.run(ctx, { messages });
+
+const report = usage.getReport();
+// { 'claude-sonnet-4-6': { calls: 3, tokens: 4200, costUsd: 0.063 }, ... }
+console.log(report);`, ['@weaveintel/observability', '@weaveintel/core', '@weaveintel/agents'])}
+`)}
+
+${section('obs-otel', 'OpenTelemetry Export', `
+${code('typescript', `import { weaveOtelTracer } from '@weaveintel/observability';
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+
+// Wire OpenTelemetry SDK
+const sdk = new NodeSDK({
+  traceExporter: new OTLPTraceExporter({ url: 'http://otel-collector:4318/v1/traces' }),
+});
+sdk.start();
+
+// weaveOtelTracer bridges weaveIntel spans → OTEL spans
+const runtime = weaveRuntime({ tracer: weaveOtelTracer() });
+const ctx = weaveContext({ runtime });
+// All spans now appear in your Jaeger / Tempo / Honeycomb dashboard`, ['@weaveintel/observability', '@weaveintel/core'])}
 `)}`;
 }
 
@@ -1677,92 +2397,962 @@ function sCore(): string {
 <div class="pkg-hdr">
   <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/core</span></div>
   <h1 class="pkg-title">@weaveintel/core</h1>
-  <p class="pkg-desc">Zero-dependency contract layer. Defines every interface used across the monorepo — Model, Tool, Memory, EventBus, ExecutionContext, Agent, Workflow types. No package imports a concrete implementation from another package; all use these contracts.</p>
+  <p class="pkg-desc">Zero-dependency contract layer. Every interface used across the monorepo — Model, Tool, Memory, EventBus, ExecutionContext, WeaveRuntime, AuditLogger — lives here. No package imports a concrete implementation from another; all use these contracts. This is what keeps the framework swappable and testable.</p>
 </div>
 
-${callout('info', '💡', 'Import rule.', 'Application code should <em>only</em> import three things from core: <code>weaveContext()</code>, <code>weaveTool()</code>, and <code>weaveToolRegistry()</code>. Everything else is an interface — get implementations from the relevant package.')}
+${callout('info', '⚛️', 'The import rule.', 'Application code imports <em>contracts</em> from <code>@weaveintel/core</code> and <em>implementations</em> from specific packages. Never import a provider or adapter directly in shared business logic — this is what makes the whole system testable and swappable.')}
 
-${section('core-context', 'ExecutionContext', `
-${code('typescript', `import { weaveContext, createExecutionContext } from '@weaveintel/core';
+${exlinks([
+  ['123-runtime-golden-path.ts', 'Example 123 — Runtime Golden Path'],
+  ['124-ambient-agent.ts', 'Example 124 — Ambient Agent (all cross-cutting concerns wired)'],
+])}
 
-// Quick factory
-const ctx = weaveContext({
-  userId:    'user-alice',      // Propagated to every tool.invoke() call
-  sessionId: 'sess-2025-abc',   // Groups events in the tracer
-  tenantId:  'org-acme',        // Multi-tenant isolation
-  traceId:   'trace-001',       // Distributed trace correlation
-  metadata:  {
-    tier: 'pro',
-    region: 'ap-southeast-2',
-    ipAddress: '203.0.113.5',
+${section('core-runtime', 'weaveRuntime — The Composition Root', `
+<p><code>weaveRuntime()</code> is the single object every adopter constructs once at boot. Every <code>ExecutionContext</code> is derived from it. Cross-cutting concerns (egress, secrets, audit, tracer, guardrails, persistence, resilience) are resolved from <code>ctx.runtime</code> — never constructed ad-hoc per call site.</p>
+
+${code('typescript', `import {
+  weaveRuntime,
+  weaveContext,
+  weaveAudit,
+  weaveLogSafetyDowngrade,
+  RuntimeCapabilities,
+  assertRuntimeRequires,
+} from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+import { weaveConsoleTracer } from '@weaveintel/observability';
+import { weaveRedactor } from '@weaveintel/redaction';
+
+const runtime = weaveRuntime({
+  // 1. Tracer — every span, agent step, and tool call emits here
+  tracer:   weaveConsoleTracer(),
+
+  // 2. Secrets — API keys and credentials resolved through this, not process.env
+  secrets:  envSecretResolver(),      // default — reads process.env
+
+  // 3. Persistence — one slot, all durable subsystems inherit it
+  persistence: weaveSqlitePersistence({ path: './weave.db' }),
+
+  // 4. Audit — auto-wired from persistence; log is durable with no extra config
+  //    (omit to use the auto-wired durable logger)
+
+  // 5. Auto-redaction on audit write paths
+  redactor: weaveRedactor({
+    patterns: [
+      { name: 'email', type: 'builtin', builtinType: 'email' },
+      { name: 'phone', type: 'builtin', builtinType: 'phone' },
+    ],
+  }),
+
+  // 6. Guardrails — consulted before every tool call and model output
+  guardrails: {
+    async checkToolCall(ctx, schema) {
+      if (schema.riskLevel === 'financial' && ctx.metadata['plan'] === 'free') {
+        return { allow: false, reason: 'financial tools require a paid plan' };
+      }
+      return { allow: true };
+    },
+    async checkOutput(ctx, text) {
+      if (/sk-[A-Za-z0-9]{20,}/.test(text)) {
+        return { allow: true, redactedText: text.replace(/sk-[A-Za-z0-9]{20,}/g, '[API_KEY]') };
+      }
+      return { allow: true };
+    },
   },
+
+  // 7. TLS floor — throw at construction if NODE_TLS_REJECT_UNAUTHORIZED=0
+  tlsFloor: true,     // default
+
+  // 8. Install as process-wide default tracer (for legacy call sites)
+  installDefaultTracer: true,  // default
 });
 
-// ctx is immutable. To derive a child context for a sub-operation:
-const childCtx = { ...ctx, traceId: newTraceId(), sessionId: ctx.sessionId + ':child' };`)}
+// Derive every context from the runtime
+const ctx = weaveContext({ runtime, userId: 'alice', tenantId: 'acme' });
+
+// Emit an audit entry — lands in the auto-wired durable logger
+await weaveAudit(ctx, {
+  action:   'user.login',
+  outcome:  'success',
+  resource: 'auth',
+  details:  { email: 'alice@example.com' },  // auto-redacted to [EMAIL]
+});
+
+// Log an explicit safety downgrade (shows up in every audit sink)
+await weaveLogSafetyDowngrade(ctx, {
+  feature:   'guardrails',
+  reason:    'trusted-internal-agent',
+  component: 'batch-processor',
+});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/observability', '@weaveintel/redaction'])}
+
+<h4>WeaveRuntimeOptions — complete reference</h4>
+${params([
+  ['tracer', 'Tracer | "noop"', 'optional', 'Observability tracer. Default: built-in noop. Use <code>weaveConsoleTracer()</code> for dev, <code>weaveInMemoryTracer()</code> for tests, <code>weaveOtelTracer()</code> for production.'],
+  ['secrets', 'SecretResolver', 'optional', 'Secret resolution strategy. Default: <code>envSecretResolver()</code>. Chain multiple resolvers with <code>chainSecretResolvers([])</code>.'],
+  ['persistence', 'RuntimePersistenceSlot', 'optional', 'Durable KV backend. When set: DLQ, cost meter, audit, checkpoints, endpoint state all use it. Default: noop (in-memory only).'],
+  ['audit', 'AuditLogger', 'optional', 'Explicit audit logger. When omitted and persistence is set, auto-wires a durable logger. When omitted with no persistence, uses noop.'],
+  ['redactor', 'Redactor', 'optional', 'When set, wraps the audit logger to auto-redact <code>entry.details</code> before every write.'],
+  ['guardrails', 'RuntimeGuardrailsSlot', 'optional', 'Consulted before every tool call (<code>checkToolCall</code>) and after every model response (<code>checkOutput</code>). Absent = allow-all.'],
+  ['resilience', 'RuntimeResilienceSlot', 'optional', 'Signal bus for endpoint health events. Custom providers wire endpoint signals here.'],
+  ['tlsFloor', 'boolean', 'optional', 'Throw at construction if <code>NODE_TLS_REJECT_UNAUTHORIZED=0</code>. Default: <code>true</code>. Set <code>false</code> only in test environments.'],
+  ['installDefaultTracer', 'boolean', 'optional', 'Also call <code>weaveSetDefaultTracer(tracer)</code> so legacy call sites pick it up. Default: <code>true</code>.'],
+  ['extraCapabilities', 'CapabilityId[]', 'optional', 'Additional capability IDs to advertise (e.g. <code>RuntimeCapabilities.Encryption</code> when the encryption package is configured).'],
+])}
+`)}
+
+${section('core-capabilities', 'RuntimeCapabilities — Checking What the Runtime Provides', `
+${code('typescript', `import { RuntimeCapabilities, assertRuntimeRequires } from '@weaveintel/core';
+
+// Check a single capability
+if (runtime.has(RuntimeCapabilities.Persistence)) {
+  console.log('Durable storage is available');
+}
+
+// Assert multiple capabilities at registration time (throws a readable error if missing)
+assertRuntimeRequires(
+  runtime,
+  [RuntimeCapabilities.NetEgress, RuntimeCapabilities.Audit],
+  'my-feature',
+);
+// ↑ throws: "my-feature: runtime does not satisfy declared requires: missing runtime.audit"
+
+// Describe everything the runtime provides
+import { describeRuntimeCapabilities } from '@weaveintel/core';
+console.log(describeRuntimeCapabilities(runtime));
+// ['runtime.net.egress', 'runtime.observability', 'runtime.secrets', 'runtime.audit',
+//  'runtime.persistence', 'runtime.guardrails']`, ['@weaveintel/core'])}
+
+<h4>All capability IDs</h4>
+${typeTable([
+  ['RuntimeCapabilities.NetEgress       (runtime.net.egress)', 'Hardened egress client is available. Always present.'],
+  ['RuntimeCapabilities.Observability   (runtime.observability)', 'A real tracer is wired. Always present (noop counts).'],
+  ['RuntimeCapabilities.Secrets         (runtime.secrets)', 'Secret resolver is available. Always present.'],
+  ['RuntimeCapabilities.Audit           (runtime.audit)', 'Audit logger is available. Always present (noop counts).'],
+  ['RuntimeCapabilities.Persistence     (runtime.persistence)', 'KV persistence slot is configured. Present only when <code>persistence</code> is set.'],
+  ['RuntimeCapabilities.Resilience      (runtime.resilience)', 'Resilience signal bus is wired. Present only when <code>resilience</code> is set.'],
+  ['RuntimeCapabilities.Encryption      (runtime.encryption)', 'Tenant encryption is configured. Advertised via <code>extraCapabilities</code>.'],
+  ['RuntimeCapabilities.Guardrails      (runtime.guardrails)', 'Guardrails slot is configured. Present only when <code>guardrails</code> is set.'],
+])}
+`)}
+
+${section('core-context', 'ExecutionContext', `
+${code('typescript', `import { weaveContext, weaveChildContext } from '@weaveintel/core';
+
+// Root context — constructed once per request/run
+const rootCtx = weaveContext({
+  runtime,                       // inherits tracer, secrets, audit, guardrails
+  userId:    'user-alice',
+  tenantId:  'org-acme',
+  metadata:  { plan: 'pro', region: 'ap-southeast-2' },
+});
+
+// Child context for a sub-operation — inherits all parent fields
+const childCtx = weaveChildContext(rootCtx, {
+  metadata: { ...rootCtx.metadata, subOp: 'embedding' },
+});
+
+// Cancellable context — abort after 30 s
+const abortCtx = weaveContext({
+  runtime,
+  signal: AbortSignal.timeout(30_000),
+  userId: 'alice',
+});`, ['@weaveintel/core'])}
+
+<h4>ExecutionContext fields</h4>
+${returns([
+  ['executionId', 'Unique trace root ID (UUIDv7). Auto-generated if not provided.'],
+  ['runtime', 'The ambient WeaveRuntime. Carry cross-cutting services without function-argument threading.'],
+  ['userId', 'User identity for access control and audit entries.'],
+  ['tenantId', 'Tenant isolation — propagated to memory writes, audit entries, encryption context.'],
+  ['metadata', 'Arbitrary request-scoped bag. Accessible inside every tool.execute() call.'],
+  ['signal', 'AbortSignal for cancellation and timeout. Composited automatically with provider timeouts.'],
+  ['tracer', 'Resolved from runtime.tracer when runtime is present; otherwise from the process-wide default.'],
+])}
 `)}
 
 ${section('core-tools', 'Tool Interfaces', `
-${code('typescript', `import { weaveTool, weaveToolRegistry, defineTool } from '@weaveintel/core';
-import type { Tool, ToolRegistry, ToolInput, ToolOutput, ToolSchema } from '@weaveintel/core';
+${code('typescript', `import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import type { Tool, ToolRegistry, ToolOutput } from '@weaveintel/core';
 
-// Full tool definition
 const bookFlightTool = weaveTool({
-  name: 'book_flight',
-  description:
-    'Book a flight for a passenger. Use this when the user wants to reserve a specific flight.',
+  name:        'book_flight',
+  description: 'Book a flight for a passenger. Use when the user wants to reserve a specific flight.',
   parameters: {
     type: 'object',
     required: ['from', 'to', 'date', 'passengerId'],
     properties: {
-      from:        { type: 'string', description: 'IATA departure airport code' },
-      to:          { type: 'string', description: 'IATA destination airport code' },
-      date:        { type: 'string', format: 'date', description: 'Travel date YYYY-MM-DD' },
+      from:        { type: 'string', description: 'IATA departure airport code.' },
+      to:          { type: 'string', description: 'IATA destination airport code.' },
+      date:        { type: 'string', format: 'date', description: 'Travel date YYYY-MM-DD.' },
       passengerId: { type: 'string' },
       cabinClass:  { type: 'string', enum: ['economy', 'business', 'first'] },
     },
   },
-  requiresApproval: true,           // Human must confirm before execution
-  riskLevel: 'high',                // 'low' | 'medium' | 'high' | 'critical'
-  tags: ['travel', 'booking', 'pii'],
+  requiresApproval: true,
+  riskLevel:        'write',
+  requires:         [RuntimeCapabilities.NetEgress],
+  tags:             ['travel', 'booking'],
   execute: async ({ from, to, date, passengerId, cabinClass = 'economy' }, ctx) => {
     const booking = await flightService.book({ from, to, date, passengerId, cabinClass });
     return JSON.stringify({ bookingId: booking.id, status: 'confirmed', total: booking.totalUsd });
   },
 });
 
-const registry = weaveToolRegistry();
-registry.register(bookFlightTool);
-registry.register(cancelFlightTool);
-registry.unregister('cancel_flight');  // Remove dynamically
+// Return an error without throwing — agent sees "Error: ..." in its context
+const errorTool = weaveTool({
+  name: 'failing_tool', description: '…',
+  parameters: { type: 'object', properties: {} },
+  execute: async () => {
+    const output: ToolOutput = { content: 'Service is unavailable', isError: true };
+    return output;   // agent continues; step.toolCall.result starts with "Error:"
+  },
+});
 
-const tool = registry.get('book_flight');
-const defs = registry.toDefinitions();  // For sending to LLM`)}
+const registry = weaveToolRegistry({ runtime });   // runtime optional — enables capability check
+registry.register(bookFlightTool);
+const defs = registry.toDefinitions();             // shape sent to the LLM`, ['@weaveintel/core'])}
 `)}
 
 ${section('core-events', 'EventBus', `
 ${code('typescript', `import { weaveEventBus, EventTypes } from '@weaveintel/core';
-import type { EventBus, AgentStepEvent, ModelCallEvent } from '@weaveintel/core';
 
 const bus = weaveEventBus();
 
-// Subscribe to all agent steps (ReAct loop iterations)
-const unsubAgent = bus.on(EventTypes.AGENT_STEP, (event: AgentStepEvent) => {
-  if (event.step.type === 'tool_call') {
-    console.log(\`Tool: \${event.step.toolCall?.name}(\${JSON.stringify(event.step.toolCall?.arguments)})\`);
-  }
+// Listen to agent steps
+bus.on(EventTypes.AgentRunStart, e => console.log(\`Agent started: \${e.data.agent}\`));
+bus.on(EventTypes.ToolCallStart,  e => console.log(\`Tool call: \${e.data.tool}\`));
+bus.on(EventTypes.ToolCallEnd,    e => console.log(\`Tool done: \${e.data.tool} result=\${e.data.result?.slice(0,60)}\`));
+bus.on(EventTypes.AgentRunEnd,    e => console.log(\`Agent done: steps=\${e.data.steps}\`));
+
+// Listen to model calls for token metering
+bus.on(EventTypes.ModelCallEnd, e => {
+  metrics.increment('llm.tokens', e.data.usage?.totalTokens ?? 0, { provider: e.data.provider });
 });
 
-// Subscribe to model calls for token counting
-const unsubModel = bus.on(EventTypes.MODEL_CALL, (event: ModelCallEvent) => {
-  metricsClient.histogram('llm.tokens', event.usage?.totalTokens ?? 0, {
-    model: event.modelId, provider: event.provider,
-  });
+// One-time listener
+const unsub = bus.on(EventTypes.AgentRunEnd, handler);
+unsub();   // unsubscribe`, ['@weaveintel/core'])}
+`)}
+
+${section('core-audit', 'AuditEntry — Reference', `
+${params([
+  ['timestamp', 'string (ISO-8601)', 'required', 'When the entry was created. Auto-set by <code>weaveAudit()</code>.'],
+  ['executionId', 'string', 'required', 'Trace root — <code>ctx.executionId</code>. Links audit entries to a specific run.'],
+  ['tenantId', 'string', 'optional', 'From <code>ctx.tenantId</code>. Used for multi-tenant audit export and filtering.'],
+  ['userId', 'string', 'optional', 'From <code>ctx.userId</code>. Links audit entries to a specific user.'],
+  ['action', 'string', 'required', 'What happened. Framework standard actions: <code>agent.run.start</code>, <code>agent.tool.invoke</code>, <code>agent.run.end</code>, <code>agent.output.denied</code>, <code>workflow.run.start</code>, <code>workflow.step.start</code>, <code>live-agent.tick.start</code>.'],
+  ['resource', 'string', 'optional', 'What was acted on — tool name, workflow id, agent name, etc.'],
+  ['outcome', '"success" | "failure" | "denied"', 'required', 'The result of the action.'],
+  ['details', 'Record&lt;string,unknown&gt;', 'optional', 'Structured context. Auto-redacted when a <code>Redactor</code> is configured on the runtime.'],
+])}
+`)}`;
+}
+
+// ── Section: Security & Hardening ────────────────────────────────────────
+
+function sSecurity(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">Security &amp; Hardening</span></div>
+  <h1 class="pkg-title">Security &amp; Hardening</h1>
+  <p class="pkg-desc">Production-grade security is ambient in weaveIntel — not something you bolt on. Every outbound HTTP call is SSRF-blocked, every audit entry can auto-redact PII, TLS floor is enforced at runtime construction, and the agent loop is fail-closed against guardrails violations. This section covers every security primitive, what it protects against, and how to configure it.</p>
+</div>
+
+${callout('danger', '🔒', 'Security is default-on.', 'All safety primitives activate when you call <code>weaveRuntime()</code>. Disabling any is explicit, logged, and auditable. There is no silent way to bypass egress guards, TLS floor, or guardrails.')}
+
+${exlinks([
+  ['123-runtime-golden-path.ts', 'Example 123 — Runtime Golden Path (all safety on)'],
+  ['127-phase5-security.ts', 'Example 127 — Phase 5 Security (TLS floor, durable audit, PII redaction, DNS pinning)'],
+])}
+
+${section('sec-egress', 'Hardened Egress — SSRF & Redirect Protection', `
+<p>Every outbound HTTP call in weaveIntel packages goes through <code>hardenedFetch</code> — a pipeline that composes five safety primitives in sequence. No package calls the global <code>fetch</code> directly.</p>
+
+${featureCards([
+  ['SSRF blocking', 'Rejects cloud-metadata endpoints (AWS 169.254.169.254, GCP metadata.google.internal, Azure IMDS), all RFC1918 + link-local + ULA ranges, and loopback unless explicitly allowed.'],
+  ['Redirect re-validation', 'Uses <code>redirect: "manual"</code> and re-runs the SSRF check on every Location header before following. A crafted 302 to a metadata endpoint is blocked.'],
+  ['DNS rebinding (TOCTOU) fix', 'An undici Agent with a custom <code>connect.lookup</code> hook validates the resolved IP at connection time — the same IP that was checked during validation is the one used for the TCP handshake.'],
+  ['TLS/HTTPS floor', 'Only HTTPS is allowed for non-loopback hosts. <code>http://</code> to external hosts throws immediately. Configurable <code>enforceHttps: false</code> for intranet-only callers.'],
+  ['Outer timeout + size cap', 'Default: 60 s timeout, 50 MiB response cap. Both are configurable per-package and per-call. Streaming endpoints skip the cap via <code>timeoutMs: 0, maxBytes: 0</code>.'],
+])}
+
+<h4>Per-package usage (recommended)</h4>
+${code('typescript', `import { createHardenedFetch } from '@weaveintel/core';
+
+// Each package binds a closure with its own errorTag.
+// Every call from this package uses the same safety pipeline.
+const { fetch, fetchStream, assertSafe } = createHardenedFetch({
+  errorTag:  'my-integration',   // appears in every thrown error
+  timeoutMs: 30_000,             // per-call wall-clock limit (default 60 s)
+  maxBytes:  10 * 1024 * 1024,   // 10 MiB response cap (default 50 MiB)
+  policy: {
+    allowedHosts: ['api.openai.com', 'api.anthropic.com'],  // allowlist
+    blockedHosts: ['internal.corp'],                         // extra blocklist
+    allowLoopback: false,         // deny even 127.0.0.1
+  },
 });
 
-// Clean up subscriptions
-unsubAgent();
-unsubModel();`)}
+// Regular JSON call
+const resp = await fetch('https://api.openai.com/v1/models', {
+  headers: { Authorization: \`Bearer \${apiKey}\` },
+});
+const data = await resp.json();
+
+// Long-lived SSE / NDJSON stream — SSRF guard still applies, timeout skipped
+const stream = await fetchStream('https://api.openai.com/v1/chat/completions', {
+  method: 'POST',
+  body: JSON.stringify({ model: 'gpt-4o', stream: true, messages }),
+  headers: { Authorization: \`Bearer \${apiKey}\`, 'Content-Type': 'application/json' },
+});
+const reader = stream.body!.getReader();`, ['@weaveintel/core'])}
+
+<h4>One-off hardened call</h4>
+${code('typescript', `import { hardenedFetch } from '@weaveintel/core';
+
+// Use directly when you do not own the package, e.g. in app code.
+const resp = await hardenedFetch('https://api.example.com/data', {
+  method: 'POST',
+  body: JSON.stringify({ q: userInput }),
+  headers: { 'Content-Type': 'application/json' },
+}, {
+  errorTag:  'my-app',
+  timeoutMs: 15_000,
+  maxBytes:  2 * 1024 * 1024,
+});`, ['@weaveintel/core'])}
+
+<h4>Manual URL validation</h4>
+${code('typescript', `import { assertSafeOutboundUrl, validateResolvedAddress } from '@weaveintel/core';
+
+// Use when you handle fetch yourself (e.g. inside an undici Agent)
+await assertSafeOutboundUrl('https://api.example.com/webhook', {
+  errorTag: 'my-tool',
+  allowLoopback: false,
+});
+
+// Use inside a custom DNS lookup hook to close the TOCTOU window
+validateResolvedAddress('10.0.0.1', { errorTag: 'my-tool' });
+// ↑ throws: "my-tool: host resolved to private address 10.0.0.1 — DNS rebinding detected"`, ['@weaveintel/core'])}
+
+${params([
+  ['errorTag', 'string', 'required', 'Prefix in every thrown error. Identifies the calling package.'],
+  ['timeoutMs', 'number', 'optional', 'Outer AbortSignal timeout. Default 60 000. Pass 0 for streaming (disables timeout + size cap).'],
+  ['maxBytes', 'number', 'optional', 'Maximum response body size in bytes. Default 50 MiB. Pass 0 to disable.'],
+  ['enforceHttps', 'boolean', 'optional', 'Reject non-HTTPS non-loopback URLs. Default true.'],
+  ['policy.allowedHosts', 'string[]', 'optional', 'If non-empty, only these hostnames (exact or suffix match) are permitted.'],
+  ['policy.blockedHosts', 'string[]', 'optional', 'Extra hostnames to block in addition to the default cloud-metadata list.'],
+  ['policy.allowLoopback', 'boolean', 'optional', 'Allow http://localhost / 127.0.0.1. Default true.'],
+  ['policy.allowPrivateNetwork', 'boolean', 'optional', 'Allow RFC1918 / link-local destinations. Default false.'],
+])}
+`)}
+
+${section('sec-tls', 'TLS Floor — NODE_TLS_REJECT_UNAUTHORIZED Guard', `
+<p><code>NODE_TLS_REJECT_UNAUTHORIZED=0</code> silently disables TLS certificate verification for the entire Node.js process, making every HTTPS connection vulnerable to MITM. <code>assertTlsFloor()</code> detects this and throws at construction time.</p>
+
+${code('typescript', `import { weaveRuntime, assertTlsFloor } from '@weaveintel/core';
+
+// Default: assertTlsFloor() is called inside weaveRuntime()
+// Throws immediately if NODE_TLS_REJECT_UNAUTHORIZED=0
+const runtime = weaveRuntime();  // ← safe
+
+// Test environments with self-signed certs — suppress the check
+const testRuntime = weaveRuntime({ tlsFloor: false });
+
+// Call directly to check from outside the runtime
+assertTlsFloor(); // throws: "weaveRuntime: TLS floor violated — NODE_TLS_REJECT_UNAUTHORIZED=0 is set…"`, ['@weaveintel/core'])}
+
+${callout('warn', '⚠️', 'Never disable in production.', 'Set <code>tlsFloor: false</code> only in CI/test environments with controlled self-signed certs (e.g. a local Vault dev server). Production deployments with valid certs should always leave it on.')}
+`)}
+
+${section('sec-audit', 'Durable Audit Logger — Auto-wired on Persistence', `
+<p>Every agent run, tool call, workflow step, and policy denial emits a structured <code>AuditEntry</code> through <code>weaveAudit(ctx, entry)</code>. By default the runtime uses a noop logger. When you configure a <code>persistence</code> slot, a durable KV-backed logger is automatically wired — no extra configuration needed.</p>
+
+${code('typescript', `import { weaveRuntime, weaveContext, weaveAudit } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+
+// Persistence slot = durable audit logger, auto-wired
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './audit.db' }),
+  tlsFloor: false,  // set true in production
+});
+const ctx = weaveContext({ runtime, userId: 'alice', tenantId: 'acme' });
+
+// Emit a custom audit entry — same call the agent loop uses internally
+await weaveAudit(ctx, {
+  action:   'payment.initiated',
+  outcome:  'success',
+  resource: 'order/ORD-001',
+  details:  { amount: 99.99, currency: 'USD' },
+});
+
+// Read back all audit entries from the KV store
+const entries = await runtime.persistence!.kv.list('audit:');
+for (const e of entries) {
+  const entry = JSON.parse(e.value);
+  console.log(entry.action, entry.outcome, entry.timestamp);
+}`, ['@weaveintel/core', '@weaveintel/persistence'])}
+
+<h4>Standalone durable logger (without a full runtime)</h4>
+${code('typescript', `import { createDurableAuditLogger, weaveInMemoryPersistence } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+
+const logger = createDurableAuditLogger({
+  persistence: weaveSqlitePersistence({ path: './audit.db' }),
+  namespace:   'myapp',            // KV key prefix, default: "audit"
+});
+
+await logger.log({
+  timestamp:   new Date().toISOString(),
+  executionId: 'exec-001',
+  tenantId:    'acme',
+  userId:      'alice',
+  action:      'tool.invoke',
+  outcome:     'success',
+  resource:    'web_search',
+  details:     { query: 'latest AI news' },
+});`, ['@weaveintel/core', '@weaveintel/persistence'])}
+
+${params([
+  ['persistence', 'RuntimePersistenceSlot', 'optional', 'KV backend. Falls back to <code>weaveInMemoryPersistence()</code> for zero-config DX.'],
+  ['namespace', 'string', 'optional', 'KV key prefix. Default: <code>"audit"</code>. Keys are <code>audit:&lt;timestamp&gt;:&lt;uuid&gt;</code>.'],
+])}
+`)}
+
+${section('sec-redaction', 'Auto-Redaction on Audit Write Paths', `
+<p>When a <code>Redactor</code> is configured on the runtime, every audit entry's <code>details</code> object is automatically run through the redactor before the entry reaches the KV store. PII never lands in the audit trail, without any changes to call sites.</p>
+
+${code('typescript', `import { weaveRuntime, weaveContext, weaveAudit } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+import { weaveRedactor } from '@weaveintel/redaction';
+
+const redactor = weaveRedactor({
+  patterns: [
+    { name: 'email',       type: 'builtin', builtinType: 'email' },
+    { name: 'phone',       type: 'builtin', builtinType: 'phone' },
+    { name: 'ssn',         type: 'builtin', builtinType: 'ssn' },
+    { name: 'credit-card', type: 'builtin', builtinType: 'credit_card' },
+    { name: 'api-key',     type: 'regex',   pattern: 'sk-[A-Za-z0-9]{20,}' },
+  ],
+});
+
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './audit.db' }),
+  redactor,   // ← wraps the durable audit logger with auto-redaction
+});
+const ctx = weaveContext({ runtime });
+
+// This entry's details.email will be "[EMAIL]" in the store
+await weaveAudit(ctx, {
+  action: 'user.login', outcome: 'success',
+  details: { email: 'alice@example.com', ip: '1.2.3.4' },
+});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/redaction'])}
+
+<h4>Wrap any logger manually</h4>
+${code('typescript', `import { createRedactingAuditLogger } from '@weaveintel/core';
+
+// Wrap any AuditLogger — e.g. your existing logging service
+const redactingLogger = createRedactingAuditLogger(existingLogger, redactor);
+// Every entry.details is JSON-stringified → redacted → parsed before forwarding`, ['@weaveintel/core'])}
+`)}
+
+${section('sec-guardrails', 'Ambient Guardrails — Tool Call & Output Gate', `
+<p>The <code>RuntimeGuardrailsSlot</code> is a structural interface on <code>WeaveRuntime</code>. The agent loop consults it before every tool invocation (<code>checkToolCall</code>) and on every terminal response (<code>checkOutput</code>). A denial is always fail-closed: the tool call or response is blocked, and an audit entry is emitted.</p>
+
+${code('typescript', `import { weaveRuntime, weaveContext } from '@weaveintel/core';
+import type { RuntimeGuardrailsSlot } from '@weaveintel/core';
+import { weaveAgent } from '@weaveintel/agents';
+
+const guardrails: RuntimeGuardrailsSlot = {
+  // Called before every tool invocation
+  async checkToolCall(ctx, schema, args) {
+    // Deny financial tools for read-only users
+    if (schema.riskLevel === 'financial' && ctx.userId === 'viewer') {
+      return { allow: false, reason: 'financial tools require write permission' };
+    }
+    // Deny if a URL argument is not HTTPS
+    const url = args['url'];
+    if (typeof url === 'string' && !url.startsWith('https://')) {
+      return { allow: false, reason: 'only HTTPS URLs are permitted' };
+    }
+    return { allow: true };
+  },
+
+  // Called on every terminal agent response
+  async checkOutput(ctx, text) {
+    // Strip any leaked API keys
+    if (/sk-[A-Za-z0-9]{20,}/.test(text)) {
+      return {
+        allow: true,
+        redactedText: text.replace(/sk-[A-Za-z0-9]{20,}/g, '[API_KEY]'),
+      };
+    }
+    // Block responses containing NSFW content (integrate your classifier here)
+    if (await nsfwClassifier.isFlagged(text)) {
+      return { allow: false, reason: 'content policy violation' };
+    }
+    return { allow: true };
+  },
+};
+
+const runtime = weaveRuntime({ guardrails });
+const agent = weaveAgent({ model, tools });
+const ctx = weaveContext({ runtime });
+const result = await agent.run(ctx, { messages });
+// Tool denials → audit entry action:"agent.tool.invoke" outcome:"denied"
+// Output denials → audit entry action:"agent.output.denied" outcome:"denied"`, ['@weaveintel/core', '@weaveintel/agents'])}
+
+${params([
+  ['checkToolCall', '(ctx, schema, args) => Promise<{ allow, reason? }>', 'optional', 'Called before every tool invocation. Return <code>{ allow: false, reason }</code> to block. Errors are treated as denials (fail-closed).'],
+  ['checkOutput', '(ctx, text) => Promise<{ allow, redactedText?, reason? }>', 'optional', 'Called on every terminal agent response. Return <code>redactedText</code> to substitute, or <code>allow: false</code> to block entirely.'],
+])}
+
+${callout('info', '💡', 'Graceful by construction.', 'A missing <code>guardrails</code> slot is equivalent to allow-all. The agent loop never throws when guardrails are absent. Opting out of a configured guardrail must be explicit and logged via <code>weaveLogSafetyDowngrade(ctx, { feature, reason })</code>.')}
+`)}
+
+${section('sec-sandbox-egress', 'Sandbox Egress Allowlist', `
+<p>The code-execution sandbox (<code>@weaveintel/sandbox</code>) runs containers with <code>--network=none</code> by default. Enabling outbound network access requires an explicit <code>networkAllowlist</code> — without one, <code>networkAccess: true</code> has no effect and the container stays isolated.</p>
+
+${code('typescript', `import { createCSEProvider } from '@weaveintel/sandbox';
+
+const provider = createCSEProvider({
+  networkAccess: true,                       // necessary but not sufficient
+  networkAllowlist: [                        // ← required to open bridge
+    'pypi.org',
+    'files.pythonhosted.org',
+    'api.openai.com',
+  ],
+});
+
+// Without networkAllowlist, the above would still use --network=none.
+// With the allowlist, Docker bridge mode is enabled.
+// Full per-host filtering requires CNI-based egress (road-mapped).`, ['@weaveintel/sandbox'])}
+`)}
+
+${section('sec-runtime-secrets', 'Secret Resolution — Never Read process.env Directly', `
+<p>Provider API keys and other secrets MUST flow through <code>runtime.secrets</code> rather than being read from <code>process.env</code> at call sites. This lets vault, KMS, or per-tenant override resolvers plug in without touching business logic.</p>
+
+${code('typescript', `import { weaveRuntime, weaveContext, envSecretResolver, chainSecretResolvers, requireSecret } from '@weaveintel/core';
+
+// Default: reads from process.env (fine for development)
+const runtime = weaveRuntime();
+const ctx = weaveContext({ runtime });
+const apiKey = await requireSecret(ctx.runtime!.secrets, 'OPENAI_API_KEY');
+
+// Production: chain resolvers — Vault first, fall back to env
+import { vaultSecretResolver } from './vault-resolver';
+const chainedRuntime = weaveRuntime({
+  secrets: chainSecretResolvers([
+    vaultSecretResolver({ path: 'secret/data/myapp' }),
+    envSecretResolver(),  // fallback
+  ]),
+});
+
+// Provide secrets in-memory (for testing)
+import { inMemorySecretResolver } from '@weaveintel/core';
+const testRuntime = weaveRuntime({
+  secrets: inMemorySecretResolver({ OPENAI_API_KEY: 'sk-test-...' }),
+});`, ['@weaveintel/core'])}
+`)}`;
+}
+
+// ── Section: Providers ────────────────────────────────────────────────────
+
+function sProviders(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap">
+    <span class="pkg-badge">@weaveintel/provider-*</span>
+  </div>
+  <h1 class="pkg-title">Providers</h1>
+  <p class="pkg-desc">Provider packages implement the <code>Model</code> interface from <code>@weaveintel/core</code> for each LLM vendor or local runtime. Every provider: routes through the hardened egress client (SSRF-safe), wraps calls in a shared process-wide circuit breaker + token bucket, and resolves API keys through <code>runtime.secrets</code>.</p>
+</div>
+
+${callout('info', '🔌', 'All providers use the same interface.', 'Once you have a <code>Model</code> instance from any provider, you pass it to <code>weaveAgent</code>, <code>DefaultWorkflowEngine</code>, or any other consumer. Swapping providers requires changing one line.')}
+
+${exlinks([
+  ['01-simple-chat.ts', 'Example 01 — Simple Chat (OpenAI)'],
+  ['11-anthropic-provider.ts', 'Example 11 — Anthropic Provider'],
+])}
+
+${section('prov-anthropic', 'Anthropic — Claude Models', `
+${code('typescript', `import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+
+// All Claude 4 models
+const haiku  = weaveAnthropicModel('claude-haiku-4-5-20251001');   // fastest, cheapest
+const sonnet = weaveAnthropicModel('claude-sonnet-4-6');            // best balance
+const opus   = weaveAnthropicModel('claude-opus-4-8');              // most capable
+
+// With explicit options
+const model = weaveAnthropicModel('claude-sonnet-4-6', {
+  apiKey:  process.env['ANTHROPIC_API_KEY'],   // or omit to use ANTHROPIC_API_KEY env
+  baseUrl: 'https://api.anthropic.com',        // override for proxy setups
+  betaFeatures: ['interleaved-thinking-2025-05-14'],  // enable beta headers
+  defaultHeaders: { 'anthropic-client-id': 'myapp' },
+});
+
+// Stream a response
+const ctx = weaveContext();
+const response = await model.generate(ctx, {
+  messages: [{ role: 'user', content: 'Write a haiku about TypeScript.' }],
+  maxTokens: 100,
+  temperature: 0.7,
+});
+console.log(response.content);
+console.log(response.usage); // { promptTokens, completionTokens, totalTokens }`, ['@weaveintel/provider-anthropic', '@weaveintel/core'])}
+
+${params([
+  ['modelId', 'string', 'required', 'Anthropic model identifier. See <a href="https://docs.anthropic.com/models" target="_blank">Anthropic docs</a> for the full list.'],
+  ['options.apiKey', 'string', 'optional', 'Defaults to <code>process.env[\'ANTHROPIC_API_KEY\']</code>.'],
+  ['options.baseUrl', 'string', 'optional', 'Override for proxy or on-prem deployments.'],
+  ['options.betaFeatures', 'string[]', 'optional', 'Beta feature strings appended to <code>anthropic-beta</code> header.'],
+  ['options.defaultHeaders', 'Record&lt;string,string&gt;', 'optional', 'Extra headers on every request.'],
+])}
+`)}
+
+${section('prov-openai', 'OpenAI — GPT Models', `
+${code('typescript', `import { weaveOpenAIModel } from '@weaveintel/provider-openai';
+
+const gpt4o     = weaveOpenAIModel('gpt-4o');
+const gpt4oMini = weaveOpenAIModel('gpt-4o-mini');
+const embed     = weaveOpenAIModel('text-embedding-3-small');    // for embeddings
+const o4mini    = weaveOpenAIModel('o4-mini');                   // reasoning model
+
+const model = weaveOpenAIModel('gpt-4o', {
+  apiKey:       process.env['OPENAI_API_KEY'],
+  organization: process.env['OPENAI_ORG'],
+  baseUrl:      'https://api.openai.com/v1',
+  defaultHeaders: { 'x-custom-header': 'value' },
+});
+
+// Tool-calling
+import { weaveContext } from '@weaveintel/core';
+const ctx = weaveContext();
+const resp = await model.generate(ctx, {
+  messages: [{ role: 'user', content: 'What files are in /tmp?' }],
+  tools: [{ name: 'list_files', description: '…', parameters: { type: 'object', properties: {} } }],
+  toolChoice: 'auto',
+});
+if (resp.toolCalls?.length) {
+  console.log(resp.toolCalls[0].name, resp.toolCalls[0].arguments);
+}`, ['@weaveintel/provider-openai', '@weaveintel/core'])}
+`)}
+
+${section('prov-google', 'Google — Gemini Models', `
+${code('typescript', `import { weaveGoogleModel } from '@weaveintel/provider-google';
+
+const flash = weaveGoogleModel('gemini-2.0-flash');
+const pro   = weaveGoogleModel('gemini-1.5-pro');
+const embed = weaveGoogleModel('text-embedding-004');  // embeddings
+
+const model = weaveGoogleModel('gemini-2.0-flash', {
+  apiKey:  process.env['GOOGLE_API_KEY'],
+  baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+});
+
+const ctx = weaveContext();
+const resp = await model.generate(ctx, {
+  messages: [{ role: 'user', content: 'Explain transformers in 2 sentences.' }],
+  maxTokens: 150,
+});`, ['@weaveintel/provider-google', '@weaveintel/core'])}
+`)}
+
+${section('prov-ollama', 'Ollama — Local Models', `
+<p>Run any model locally via <a href="https://ollama.ai" target="_blank">Ollama</a>. No API key required. Ideal for development, privacy-sensitive workloads, or offline environments.</p>
+
+${code('typescript', `// 1. Start Ollama: ollama serve
+// 2. Pull a model: ollama pull llama3.2
+import { weaveOllamaModel } from '@weaveintel/provider-ollama';
+
+const llama  = weaveOllamaModel('llama3.2');
+const mistral = weaveOllamaModel('mistral');
+const phi3   = weaveOllamaModel('phi3');
+
+// Custom Ollama host (e.g. remote GPU server)
+const remote = weaveOllamaModel('llama3.2', {
+  baseUrl: 'http://gpu-server.local:11434',
+});
+
+const ctx = weaveContext();
+const resp = await llama.generate(ctx, {
+  messages: [{ role: 'user', content: 'Hello!' }],
+  temperature: 0.5,
+});`, ['@weaveintel/provider-ollama', '@weaveintel/core'])}
+`)}
+
+${section('prov-llamacpp', 'llama.cpp — GGUF Local Models', `
+${code('typescript', `// 1. Start llama.cpp server:
+//    ./server -m model.gguf --port 8080 --host 0.0.0.0
+import { weaveLlamacppModel } from '@weaveintel/provider-llamacpp';
+
+const model = weaveLlamacppModel('local-gguf', {
+  baseUrl: 'http://localhost:8080',
+});
+
+const ctx = weaveContext();
+const resp = await model.generate(ctx, {
+  messages: [{ role: 'user', content: 'What is the capital of France?' }],
+});`, ['@weaveintel/provider-llamacpp', '@weaveintel/core'])}
+`)}
+
+${section('prov-resilience', 'Built-in Provider Resilience', `
+<p>All built-in providers automatically wrap every outbound request in a process-wide circuit breaker + token bucket. The shared state means a single 429 from OpenAI pauses the bucket for <em>every caller</em> in the process — chats, agents, evals — instead of each one hammering independently. The defaults come from <code>PROVIDER_RESILIENCE_DEFAULTS</code> exported by <code>@weaveintel/resilience</code>.</p>
+
+${code('typescript', `import { PROVIDER_RESILIENCE_DEFAULTS } from '@weaveintel/resilience';
+
+console.log(PROVIDER_RESILIENCE_DEFAULTS);
+// {
+//   retry:   { maxAttempts: 2, baseDelayMs: 500, maxDelayMs: 30_000, jitter: true },
+//   circuit: { failureThreshold: 8, cooldownMs: 30_000 }
+// }
+
+// Custom providers should reuse these defaults:
+import { createResilientCallable, PROVIDER_RESILIENCE_DEFAULTS } from '@weaveintel/resilience';
+
+const myCallable = createResilientCallable(myFetchFn, {
+  endpoint: 'my-provider:rest',
+  ...PROVIDER_RESILIENCE_DEFAULTS,
+});`, ['@weaveintel/resilience'])}
+`)}`;
+}
+
+// ── Section: Sandbox ─────────────────────────────────────────────────────
+
+function sSandbox(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/sandbox</span></div>
+  <h1 class="pkg-title">Sandbox — Safe Code Execution</h1>
+  <p class="pkg-desc">Run LLM-generated code in isolated Docker containers with hard resource limits, a read-only filesystem, dropped Linux capabilities, and network-none by default. Supports ephemeral one-shot execution and persistent sessions for multi-turn REPL-style interactions.</p>
+</div>
+
+${featureCards([
+  ['Security posture', '--network=none, --cap-drop=ALL, --read-only, --user=65534, --security-opt no-new-privileges, tmpfs with noexec'],
+  ['Image digest pinning', 'Execution and browser images are pinned by digest so a supply-chain attack cannot substitute a malicious image at runtime.'],
+  ['Resource limits', 'CPU cores, memory (MiB), wall-clock timeout, and output directory all configured per-request.'],
+  ['Session containers', 'Reuse the same container across turns via chatId. Sessions self-destruct after configurable TTL.'],
+  ['Cloud providers', 'Local Docker (dev), ACI, AKS (Kata), GKE (gVisor), Cloud Run — all behind one interface.'],
+  ['Browser automation', 'Playwright-enabled image for web scraping, screenshot, and form interaction.'],
+])}
+
+${callout('info', '🔒', 'Network isolation.', '<code>networkAccess: true</code> alone does NOT open the network. You must also supply a <code>networkAllowlist</code> with the allowed hostnames. Without a list, the container always runs with <code>--network=none</code>.')}
+
+${exlinks([
+  ['sandbox-ephemeral.ts', 'Ephemeral code execution'],
+  ['sandbox-session.ts', 'Session-based REPL'],
+])}
+
+${section('sandbox-setup', 'Setup & Configuration', `
+${code('typescript', `import { createLocalCSEProvider } from '@weaveintel/sandbox';
+
+const sandbox = createLocalCSEProvider({
+  executionImage: 'python:3.12-slim',   // default
+  browserImage:   'mcr.microsoft.com/playwright:v1.44.0-jammy',
+  timeoutMs:      30_000,              // per-execution wall-clock limit
+  memoryMb:       512,
+  cpuCount:       1,
+  sessionTtlMs:   600_000,            // 10 min idle before container stops
+  maxSessions:    20,
+
+  // Egress — both required to enable network
+  networkAccess:    false,             // default: isolated
+  networkAllowlist: [],               // must be non-empty to open bridge
+});
+
+// Health check (checks Docker daemon connectivity)
+const health = await sandbox.health();
+console.log(health.status); // 'healthy' | 'degraded' | 'unavailable'`, ['@weaveintel/sandbox'])}
+`)}
+
+${section('sandbox-ephemeral', 'Ephemeral Execution', `
+<p>Each call starts a fresh container, runs the code, captures stdout/stderr + output files, then destroys the container. Suitable for stateless code snippets.</p>
+
+${code('typescript', `import { createLocalCSEProvider } from '@weaveintel/sandbox';
+
+const sandbox = createLocalCSEProvider({ memoryMb: 512 });
+
+const result = await sandbox.execute({
+  code: \`
+import json, math
+data = [1, 2, 3, 4, 5]
+print(json.dumps({ "mean": sum(data)/len(data), "std": math.sqrt(sum((x - sum(data)/len(data))**2 for x in data)/len(data)) }))
+\`,
+  language: 'python',
+  timeoutMs: 10_000,
+
+  // Inject input files into /workspace
+  files: [
+    { name: 'data.csv', content: 'a,b\\n1,2\\n3,4', binary: false },
+  ],
+
+  // Environment variables (no secrets — container is ephemeral but logs exist)
+  env: { MY_VAR: 'value' },
+});
+
+if (result.exitCode === 0) {
+  console.log(result.output);         // parsed stdout (JSON if valid, else string)
+  console.log(result.artifacts);      // files written to /workspace/output/
+} else {
+  console.error(result.error);        // stderr (first 2 KB)
+}
+console.log(\`Ran in \${result.durationMs} ms\`);`, ['@weaveintel/sandbox'])}
+
+${params([
+  ['code', 'string', 'required', 'Source code to execute.'],
+  ['language', '"python" | "javascript" | "typescript" | "bash" | "shell"', 'optional', 'Defaults to <code>"python"</code>.'],
+  ['timeoutMs', 'number', 'optional', 'Per-execution timeout override. Falls back to <code>CSEConfig.timeoutMs</code>.'],
+  ['files', 'FileInput[]', 'optional', 'Files injected into <code>/workspace</code> before execution. Binary files as base-64.'],
+  ['env', 'Record&lt;string,string&gt;', 'optional', 'Extra container env vars. Do not pass secrets — use a secrets manager instead.'],
+  ['networkAccess', 'boolean', 'optional', 'Request network access. Only opens bridge if provider-level <code>networkAllowlist</code> is also set.'],
+  ['withBrowser', 'boolean', 'optional', 'Use the Playwright-enabled image instead of the execution image.'],
+])}
+`)}
+
+${section('sandbox-session', 'Session-Based REPL', `
+<p>Sessions keep a container alive so state (variables, installed packages, loaded files) persists across multiple code executions in the same conversation.</p>
+
+${code('typescript', `import { createLocalCSEProvider } from '@weaveintel/sandbox';
+
+const sandbox = createLocalCSEProvider({ memoryMb: 1024, sessionTtlMs: 300_000 });
+
+// Create a session (one per chatId)
+const session = await sandbox.createSession('chat-abc123', {}, false);
+
+// First turn — install a package and define a function
+await sandbox.executeInSession(session.id, {
+  code: \`
+!pip install pandas -q
+import pandas as pd
+df = pd.DataFrame({'x': [1,2,3], 'y': [4,5,6]})
+print(df.head())
+\`,
+});
+
+// Second turn — the dataframe is still in memory
+const result = await sandbox.executeInSession(session.id, {
+  code: 'print(df.describe())',   // df from previous turn
+});
+console.log(result.output);
+
+// Destroy session when done
+await sandbox.destroySession(session.id);`, ['@weaveintel/sandbox'])}
+`)}
+
+${section('sandbox-agent', 'End-to-End: Code-Interpreter Agent', `
+<p>A complete agent that uses the sandbox as a tool to execute Python code generated by the model.</p>
+
+${code('typescript', `import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveContext, weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import { createLocalCSEProvider } from '@weaveintel/sandbox';
+
+const sandbox = createLocalCSEProvider({ memoryMb: 512, timeoutMs: 30_000 });
+
+const tools = weaveToolRegistry();
+tools.register(weaveTool({
+  name: 'run_python',
+  description: 'Execute a Python code snippet and return stdout. Use for calculations, data analysis, and visualisations.',
+  parameters: {
+    type: 'object', required: ['code'],
+    properties: {
+      code: { type: 'string', description: 'Valid Python 3 source code.' },
+    },
+  },
+  riskLevel: 'write',
+  execute: async ({ code }) => {
+    const result = await sandbox.execute({ code: code as string, language: 'python' });
+    return result.exitCode === 0
+      ? JSON.stringify({ output: result.output })
+      : JSON.stringify({ error: result.error });
+  },
+}));
+
+const agent = weaveAgent({
+  model: weaveAnthropicModel('claude-sonnet-4-6'),
+  tools,
+  systemPrompt: 'You are a data analyst. Run Python code to answer quantitative questions.',
+  maxSteps: 6,
+});
+
+const ctx = weaveContext();
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'Simulate 10,000 rolls of two dice and plot the distribution of sums.' }],
+});
+console.log(result.output);`, ['@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core', '@weaveintel/sandbox'])}
+`)}`;
+}
+
+// ── Section: A2A ─────────────────────────────────────────────────────────
+
+function sA2A(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/a2a</span></div>
+  <h1 class="pkg-title">A2A — Agent-to-Agent Protocol</h1>
+  <p class="pkg-desc">Structured message passing between agents — in-process via an in-memory bus, or distributed via HTTP transport. Agents declare capabilities, discover each other by role, and communicate through typed message envelopes. All communication is audited and traceable.</p>
+</div>
+
+${callout('info', '🔄', 'When to use A2A.', 'Use A2A when two agents run in <em>separate processes</em> or on separate machines, or when you need typed, versioned message contracts between agents. For single-process multi-agent patterns, the <strong>Supervisor</strong> mode in <code>@weaveintel/agents</code> is simpler.')}
+
+${section('a2a-local', 'In-Process A2A', `
+${code('typescript', `import { createA2ABus, createA2AAgent, A2AMessage } from '@weaveintel/a2a';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveContext } from '@weaveintel/core';
+
+// One shared in-process bus
+const bus = createA2ABus();
+
+// Researcher agent
+const researcher = createA2AAgent({
+  bus,
+  role: 'researcher',
+  capabilities: ['web_search', 'summarise'],
+  agent: weaveAgent({ model: fastModel, tools: searchTools }),
+});
+
+// Writer agent
+const writer = createA2AAgent({
+  bus,
+  role: 'writer',
+  capabilities: ['draft', 'format_markdown'],
+  agent: weaveAgent({ model: smartModel, tools: writingTools }),
+});
+
+const ctx = weaveContext();
+
+// Send a task to the researcher
+const msg: A2AMessage = {
+  type:    'task.request',
+  from:    'orchestrator',
+  to:      'researcher',
+  payload: { query: 'Latest advances in quantum computing 2025' },
+};
+const response = await bus.send(ctx, msg);
+console.log(response.payload.summary);`, ['@weaveintel/a2a', '@weaveintel/agents', '@weaveintel/core'])}
+`)}
+
+${section('a2a-http', 'Distributed A2A over HTTP', `
+${code('typescript', `import { createA2AHttpServer, createA2AHttpClient } from '@weaveintel/a2a';
+
+// Server side — expose the agent over HTTP
+const server = createA2AHttpServer({
+  agent:    researchAgent,
+  port:     3001,
+  basePath: '/a2a',
+  auth:     { type: 'bearer', token: process.env['A2A_SECRET']! },
+});
+await server.start();
+
+// Client side — call a remote agent as if it were local
+const client = createA2AHttpClient({
+  baseUrl: 'https://research-agent.internal:3001/a2a',
+  auth:    { type: 'bearer', token: process.env['A2A_SECRET']! },
+});
+
+const ctx = weaveContext();
+const result = await client.send(ctx, {
+  type:    'task.request',
+  from:    'orchestrator',
+  to:      'researcher',
+  payload: { query: 'Summarise recent SEC filings for AAPL' },
+});`, ['@weaveintel/a2a', '@weaveintel/core'])}
 `)}`;
 }
 
@@ -1779,73 +3369,2007 @@ unsubModel();`)}
 (DOCS_SECTIONS as Record<string, () => string>)['mcp']          = sMcp;
 (DOCS_SECTIONS as Record<string, () => string>)['observability']= sObservability;
 (DOCS_SECTIONS as Record<string, () => string>)['core']         = sCore;
+// ── Section: Live Agents ──────────────────────────────────────────────────
+
+function sLiveAgents(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap">
+    <span class="pkg-badge">@weaveintel/live-agents</span>
+    <span class="pkg-badge" style="margin-left:6px">@weaveintel/live-agents-runtime</span>
+  </div>
+  <h1 class="pkg-title">Live Agents</h1>
+  <p class="pkg-desc">Long-running agents that run continuously for hours or days, accumulate knowledge via contracts, coordinate in meshes with claim-based leasing, respond to external events, and survive process restarts. Built on the same <code>weaveAgent</code> core with a per-tick execution model layered on top.</p>
+</div>
+
+${callout('info', '⚡', 'Live Agents vs weaveAgent.', 'Use <strong>live-agents</strong> when an agent runs continuously, processes a queue of backlog items, or coordinates with other agents in a mesh. Use <strong>weaveAgent</strong> for single request/response or bounded ReAct loops.')}
+
+${featureCards([
+  ['Per-tick execution', 'Each heartbeat invokes the agent once with its current backlog + inbox. Ticks are claim-leased so multiple workers compete safely without double-processing.'],
+  ['Mesh coordination', 'Agents form meshes with defined roles. Agents discover each other by role and exchange typed messages via an A2A bus.'],
+  ['State persistence', 'Agent state, backlog, inbox, and contracts live in a StateStore — swappable between in-memory, SQLite, Postgres, Redis, MongoDB, DynamoDB.'],
+  ['Handler registry', 'A HandlerRegistry maps role-key → handler kind (agentic.react, deterministic.forward, deterministic.template, human.approval).'],
+  ['Capability parity', 'Same model/tools/memory/policy slots as weaveAgent. Per-tick resolution via ModelResolver so model can change between ticks.'],
+  ['Audit integration', 'Every tick emits live-agent.tick.start / live-agent.tick.end audit entries into the runtime\'s ambient audit logger.'],
+])}
+
+${exlinks([
+  ['110-live-agents-trace-tools.ts', 'Example 110 — Live Agents Trace Tools'],
+  ['120-equity-analyst-mesh.ts', 'Example 120 — Equity Analyst Mesh'],
+  ['122-live-equity-analysis.ts', 'Example 122 — Live Equity Analysis'],
+])}
+
+${section('la-mesh', 'Provisioning a Mesh', `
+${code('typescript', `import { provisionMesh } from '@weaveintel/live-agents-runtime';
+import { weaveInMemoryStateStore } from '@weaveintel/live-agents';
+
+const store = weaveInMemoryStateStore();
+
+// Provision a mesh with two agent roles
+const mesh = await provisionMesh({
+  store,
+  mesh: { id: 'equity-mesh', name: 'Equity Analysis Mesh', status: 'active' },
+  agents: [
+    {
+      id: 'agent-researcher', meshId: 'equity-mesh',
+      roleKey: 'equity.researcher', name: 'Researcher',
+      status: 'active', attentionPolicyKey: null,
+    },
+    {
+      id: 'agent-writer', meshId: 'equity-mesh',
+      roleKey: 'equity.writer', name: 'Report Writer',
+      status: 'active', attentionPolicyKey: null,
+    },
+  ],
+});
+console.log(mesh.agents.map(a => a.id));`, ['@weaveintel/live-agents-runtime', '@weaveintel/live-agents'])}
+`)}
+
+${section('la-supervisor', 'Starting the Heartbeat Supervisor', `
+<p>The supervisor manages N parallel workers that each call <code>heartbeat.tick()</code> on every interval. It auto-rebuilds workers when new roles appear in the DB.</p>
+
+${code('typescript', `import { createHeartbeatSupervisor, HandlerRegistry } from '@weaveintel/live-agents-runtime';
+import { weaveInMemoryStateStore } from '@weaveintel/live-agents';
+import { weaveRuntime, weaveContext } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './agents.db' }),
+});
+
+const store = weaveInMemoryStateStore();
+
+const handlerRegistry = new HandlerRegistry();
+// Handlers resolve per-tick: modelFactory returns the model to use
+handlerRegistry.registerBuiltins({
+  modelFactory: async () => yourModel,
+});
+
+// db must implement SupervisorDb (list meshes, agents, handler bindings)
+const supervisor = await createHeartbeatSupervisor({
+  db:              yourDb,
+  store,
+  handlerRegistry,
+  runtime,          // ← audit entries flow into the durable logger
+  intervalMs:      5_000,   // tick every 5 s
+  refreshMs:       30_000,  // re-check active roles every 30 s
+  workers:         4,        // parallel heartbeat workers
+});
+
+// Stop cleanly on shutdown
+process.on('SIGTERM', () => supervisor.stop());`, ['@weaveintel/live-agents-runtime', '@weaveintel/live-agents', '@weaveintel/core', '@weaveintel/persistence'])}
+
+${params([
+  ['db', 'SupervisorDb', 'required', 'Database adapter implementing listLiveMeshes, listLiveAgents, listLiveAgentHandlerBindings.'],
+  ['store', 'StateStore', 'required', 'Live-agents state store. Use weaveInMemoryStateStore() for dev or a durable backend for prod.'],
+  ['handlerRegistry', 'HandlerRegistry', 'required', 'Maps handler kinds to their implementation. Call registerBuiltins() to get agentic.react etc.'],
+  ['runtime', 'WeaveRuntime', 'optional', 'When supplied, every tick emits audit entries and inherits the ambient runtime context.'],
+  ['intervalMs', 'number', 'optional', 'How often ticks fire. Default 5000.'],
+  ['workers', 'number', 'optional', 'Number of parallel tick workers. Default 4.'],
+  ['modelFactory', '() => Promise&lt;Model|undefined&gt;', 'optional', 'Pinned model factory. Prefer modelResolver for per-tick routing.'],
+  ['modelResolver', 'ModelResolver', 'optional', 'Per-tick model resolution. Takes precedence over modelFactory.'],
+  ['policy', 'LiveAgentPolicy', 'optional', 'Tool policy, rate limiting, approval gates applied every tick.'],
+])}
+`)}
+
+${section('la-state-stores', 'State Store Backends', `
+${code('typescript', `import {
+  weaveInMemoryStateStore,
+  weaveSqliteStateStore,
+  weavePostgresStateStore,
+  weaveRedisStateStore,
+  weaveMongoDbStateStore,
+  weaveDynamoDbStateStore,
+} from '@weaveintel/live-agents';
+
+// Development — in-memory, lost on restart
+const devStore = weaveInMemoryStateStore();
+
+// SQLite — single-process durable
+const sqliteStore = weaveSqliteStateStore({ path: './live-agents.db' });
+
+// Postgres — multi-process, horizontal scale
+const pgStore = weavePostgresStateStore({ connectionString: process.env['DATABASE_URL']! });
+
+// Redis — low-latency, TTL-aware
+const redisStore = weaveRedisStateStore({ url: process.env['REDIS_URL']! });`, ['@weaveintel/live-agents'])}
+`)}
+
+${section('la-db-boot', 'DB-Backed Boot (Production Entry Points)', `
+<p>In production, meshes and agents are defined in the database. <code>weaveLiveMeshFromDb</code> and <code>weaveLiveAgentFromDb</code> boot the full mesh from DB records, resolving models, tools, policies, and prepare configs automatically.</p>
+
+${code('typescript', `import { weaveLiveMeshFromDb, weaveLiveAgentFromDb } from '@weaveintel/live-agents-runtime';
+import { weaveSqliteStateStore } from '@weaveintel/live-agents';
+
+const store = weaveSqliteStateStore({ path: './live-agents.db' });
+
+// Boot an entire mesh from the database
+// db must have live_meshes + live_agents + live_agent_handler_bindings rows
+const mesh = await weaveLiveMeshFromDb({
+  db,
+  meshId:          'equity-mesh',
+  store,
+  handlerRegistry: myHandlerRegistry,
+  modelFactory:    async () => weaveAnthropicModel('claude-sonnet-4-6'),
+  policy:          weaveDbLiveAgentPolicy({ db }),
+  toolCatalog:     resolveAgentToolCatalog({ db, registry: myToolRegistry }),
+});
+
+// Boot a single agent from its DB record
+const agent = await weaveLiveAgentFromDb({
+  db,
+  agentId:         'agent-researcher',
+  store,
+  handlerRegistry: myHandlerRegistry,
+  modelFactory:    async () => weaveAnthropicModel('claude-haiku-4-5-20251001'),
+});
+
+// Start ticking
+const supervisor = await createHeartbeatSupervisor({ db, store, handlerRegistry: myHandlerRegistry, runtime });
+// Agents now tick on their own schedule — supervisor manages lifecycle`, ['@weaveintel/live-agents-runtime', '@weaveintel/live-agents'])}
+`)}
+
+${section('la-e2e', 'End-to-End: Full Production Setup', `
+${code('typescript', `import { createHeartbeatSupervisor, HandlerRegistry, provisionMesh } from '@weaveintel/live-agents-runtime';
+import { weaveSqliteStateStore } from '@weaveintel/live-agents';
+import { weaveRuntime, weaveContext } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+
+// 1. Runtime — all durable subsystems inherit one persistence slot
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './app.db' }),
+});
+
+// 2. State store — separate file or DB table for agent state
+const store = weaveSqliteStateStore({ path: './agents.db' });
+
+// 3. Handler registry — maps handler kind → implementation
+const handlerRegistry = new HandlerRegistry();
+handlerRegistry.registerBuiltins({
+  modelFactory: async () => weaveAnthropicModel('claude-sonnet-4-6'),
+});
+
+// 4. Provision the initial mesh (idempotent — safe to re-run)
+await provisionMesh({
+  store,
+  mesh:   { id: 'equity-mesh', name: 'Equity Analysis', status: 'active' },
+  agents: [
+    { id: 'researcher', meshId: 'equity-mesh', roleKey: 'equity.researcher',
+      name: 'Researcher', status: 'active', attentionPolicyKey: null },
+    { id: 'writer', meshId: 'equity-mesh', roleKey: 'equity.writer',
+      name: 'Report Writer', status: 'active', attentionPolicyKey: null },
+  ],
+});
+
+// 5. Start the supervisor — agents tick every intervalMs
+const supervisor = await createHeartbeatSupervisor({
+  db:              yourDb,
+  store,
+  handlerRegistry,
+  runtime,           // audit + persistence flows through
+  intervalMs:      5_000,
+  workers:         4,
+});
+
+// 6. Graceful shutdown
+process.on('SIGTERM', async () => {
+  await supervisor.stop();
+  process.exit(0);
+});
+
+console.log('Live agent mesh running. Ctrl+C to stop.');`, ['@weaveintel/live-agents-runtime', '@weaveintel/live-agents', '@weaveintel/core', '@weaveintel/persistence', '@weaveintel/provider-anthropic'])}
+`)}`;
+}
+
+// ── Section: Durability ───────────────────────────────────────────────────
+
+function sDurability(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/durability</span></div>
+  <h1 class="pkg-title">Durability</h1>
+  <p class="pkg-desc">Operational durability primitives: idempotency keys, dead-letter queue, retry budgets, health checks, and backpressure. All are runtime-aware — pass a <code>WeaveRuntime</code> with a persistence slot and every primitive automatically uses durable KV storage. Without a runtime, the zero-config in-memory path is the default.</p>
+</div>
+
+${callout('info', '💾', 'Canonical import.', 'Import from <code>@weaveintel/durability</code> — it is the renamed canonical package that re-exports everything from <code>@weaveintel/reliability</code>. New code should not import from reliability directly.')}
+
+${featureCards([
+  ['Dead-letter queue', 'Captures failed operations for manual retry or investigation. Durable variant survives process restart.'],
+  ['Idempotency keys', 'Prevents duplicate side effects on retry. Keys stored in KV with configurable TTL.'],
+  ['Retry budget', 'Shared retry budget across callers so one hot path cannot exhaust retries for everyone.'],
+  ['Health checks', 'Register health probes; aggregate status for liveness/readiness endpoints.'],
+  ['Backpressure', 'Token-bucket style backpressure for queues and external system calls.'],
+])}
+
+${exlinks([
+  ['125-durable-runtime.ts', 'Example 125 — Durable Runtime (DLQ + Cost Meter survive restart)'],
+  ['126-durable-subsystems.ts', 'Example 126 — Durable Subsystems (all nine durable stores)'],
+])}
+
+${section('dur-dlq', 'Dead-Letter Queue', `
+<p>The DLQ captures failed operations. The durable variant persists records to <code>runtime.persistence.kv</code> so entries survive restarts. Both sync and async interfaces are available.</p>
+
+${code('typescript', `import { createDurableDeadLetterQueue } from '@weaveintel/durability';
+import { weaveRuntime } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './ops.db' }),
+});
+
+const dlq = createDurableDeadLetterQueue({ runtime, namespace: 'payments' });
+
+// Enqueue a failed operation
+const record = await dlq.enqueue({
+  type:       'payment.charge',
+  payload:    { orderId: 'ORD-001', amountCents: 9999 },
+  error:      'Stripe timeout after 30s',
+  retryCount: 2,
+});
+console.log(record.id, record.firstFailedAt);
+
+// List all unresolved records
+const pending = await dlq.list({ resolved: false });
+
+// Retry with a handler — marks resolved on success
+const ok = await dlq.retry(record.id, async (payload) => {
+  const p = payload as { orderId: string; amountCents: number };
+  await stripe.charge(p.orderId, p.amountCents);
+});
+
+// Clear resolved records
+const removed = await dlq.clear();
+console.log(\`Cleared \${removed} resolved records\`);`, ['@weaveintel/durability', '@weaveintel/core', '@weaveintel/persistence'])}
+
+${params([
+  ['runtime', 'WeaveRuntime', 'optional', 'When supplied and persistence is configured, records survive restarts. Falls back to in-memory.'],
+  ['namespace', 'string', 'optional', 'KV key prefix. Default: <code>"dlq"</code>.'],
+])}
+`)}
+
+${section('dur-idempotency', 'Idempotency Keys', `
+${code('typescript', `import { createIdempotencyStore, createDurableIdempotencyStore } from '@weaveintel/durability';
+
+// In-memory (test / dev)
+const store = createIdempotencyStore();
+
+// Durable (production)
+const durableStore = createDurableIdempotencyStore({
+  runtime,
+  namespace: 'payments',
+  ttlMs:     24 * 60 * 60 * 1000,   // 24 h — keys expire after this
+});
+
+// Use before any state-mutating operation
+const key = 'charge:ORD-001:attempt-3';
+const existing = await durableStore.get(key);
+if (existing) {
+  return existing.result;   // replay cached result — no duplicate charge
+}
+
+const result = await stripe.charge(orderId, amount);
+await durableStore.set(key, { result, completedAt: new Date().toISOString() });`, ['@weaveintel/durability'])}
+`)}
+
+${section('dur-retry-budget', 'Retry Budget', `
+<p>A shared retry budget prevents a single hot code path from burning all retry capacity. Unlike per-call retry policies, the budget is a process-wide counter.</p>
+
+${code('typescript', `import { createRetryBudget } from '@weaveintel/durability';
+
+// Shared across all callers that import this instance
+const budget = createRetryBudget({
+  maxRetries:     3,
+  baseDelayMs:    1_000,
+  maxDelayMs:     30_000,
+  retryableErrors: ['429', 'ECONNRESET', 'socket hang up'],
+});
+
+// Every caller uses the same budget — once exhausted, retries stop
+const result = await budget.execute(async () => {
+  return fetch('https://api.example.com/data');
+});`, ['@weaveintel/durability'])}
+`)}
+
+${section('dur-health', 'Health Checks', `
+${code('typescript', `import { createHealthRegistry, createHealthCheck } from '@weaveintel/durability';
+
+const health = createHealthRegistry();
+
+health.register(createHealthCheck('database', async () => {
+  await db.query('SELECT 1');
+  return { status: 'healthy' };
+}));
+
+health.register(createHealthCheck('redis', async () => {
+  const pong = await redis.ping();
+  return { status: pong === 'PONG' ? 'healthy' : 'degraded', detail: pong };
+}));
+
+// Express / Hono liveness endpoint
+app.get('/health', async (req, res) => {
+  const result = await health.check();
+  res.status(result.status === 'healthy' ? 200 : 503).json(result);
+});
+// { status: 'healthy', checks: { database: 'healthy', redis: 'healthy' } }`, ['@weaveintel/durability'])}
+`)}`;
+}
+
+// ── Section: Persistence ──────────────────────────────────────────────────
+
+function sPersistence(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/persistence</span></div>
+  <h1 class="pkg-title">Persistence</h1>
+  <p class="pkg-desc">8-adapter persistence layer for live-agents state and workflow stores, plus the <code>RuntimePersistenceSlot</code> factories that wire KV-backed durable storage into every runtime subsystem (DLQ, cost meter, audit, checkpoint, endpoint state).</p>
+</div>
+
+${featureCards([
+  ['RuntimePersistenceSlot factories', 'weaveSqlitePersistence, and (road-mapped) weavePostgresPersistence, weaveRedisPersistence — drop one into weaveRuntime({ persistence }) to make every durable subsystem restart-safe at once.'],
+  ['8 adapter types', 'In-memory, SQLite, Postgres, Redis, MongoDB, CosmosDB, DynamoDB for live-agents StateStore and workflow stores.'],
+  ['Uniform KV interface', 'get / set / delete / list(prefix) — every durable subsystem (DLQ, cost meter, audit, checkpoint) uses this surface.'],
+  ['Zero-config default', 'weaveInMemoryPersistence() (from @weaveintel/core) is the drop-in default so tests and tiny adopters never configure storage.'],
+])}
+
+${exlinks([
+  ['125-durable-runtime.ts', 'Example 125 — Runtime Persistence (SQLite slot)'],
+  ['119-sqlite-e2e.ts', 'Example 119 — SQLite E2E (workflows + live-agents)'],
+])}
+
+${section('pers-slot', 'RuntimePersistenceSlot — Wiring the Runtime', `
+<p>The slot is the single switch that makes every runtime-aware durable subsystem restart-safe. Pass it to <code>weaveRuntime</code> once and everything inherits it.</p>
+
+${code('typescript', `import { weaveRuntime } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+
+// SQLite — recommended for single-node prod and all development
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({
+    path:  './weave.db',    // file path; ':memory:' for ephemeral
+    table: 'runtime_kv',   // KV table name (default: runtime_kv)
+  }),
+});
+
+// All of these now use the SQLite slot automatically:
+// • createDurableDeadLetterQueue({ runtime })
+// • createDurableCheckpointStore({ runtime })
+// • createDurableAuditLogger — auto-wired inside weaveRuntime itself
+// • createDurableEndpointRegistry({ runtime })
+// • createDurableCostMeter({ runtime })
+// • weaveRuntimeMemoryStore({ runtime })
+
+const ctx = weaveContext({ runtime });`, ['@weaveintel/core', '@weaveintel/persistence'])}
+
+${params([
+  ['path', 'string', 'required', 'SQLite file path. Use <code>":memory:"</code> for an ephemeral instance (tests, demos).'],
+  ['table', 'string', 'optional', 'KV table name inside the SQLite file. Default: <code>"runtime_kv"</code>. Multiple slots can share one file with different table names.'],
+])}
+`)}
+
+${section('pers-kv', 'Direct KV Access', `
+${code('typescript', `import { weaveSqlitePersistence } from '@weaveintel/persistence';
+
+const slot = weaveSqlitePersistence({ path: './store.db' });
+const kv   = slot.kv;
+
+// Store arbitrary JSON (callers handle serialisation)
+await kv.set('user:alice:prefs', JSON.stringify({ theme: 'dark', lang: 'en' }));
+await kv.set('session:xyz',      JSON.stringify({ userId: 'alice' }), { ttlMs: 3_600_000 });
+
+// Read
+const raw = await kv.get('user:alice:prefs');
+const prefs = raw ? JSON.parse(raw) : null;
+
+// List by prefix — lexicographically sorted
+const sessions = await kv.list('session:');
+for (const { key, value } of sessions) {
+  console.log(key, JSON.parse(value));
+}
+
+// Delete
+const deleted = await kv.delete('session:xyz');  // true if key existed`, ['@weaveintel/persistence'])}
+`)}
+
+${section('pers-adapters', 'High-Level Adapters (Workflow Stores)', `
+<p>Workflow stores (checkpoints, run repository, audit log, etc.) use typed adapters with CRUD operations on top of the underlying DB driver. These differ from the KV slot — they manage workflow-specific schemas and queries.</p>
+
+${code('typescript', `import {
+  SqliteCheckpointStore,
+  SqliteWorkflowRunRepository,
+  SqliteAuditLog,
+  SqliteStepLockStore,
+  SqliteIdempotencyStore,
+} from '@weaveintel/workflows';
+
+// All SQLite-backed workflow stores share one file
+const dbPath = './workflows.db';
+
+const engine = new DefaultWorkflowEngine({
+  checkpointStore: new SqliteCheckpointStore(dbPath),
+  runRepository:   new SqliteWorkflowRunRepository(dbPath),
+  auditLog:        new SqliteAuditLog(dbPath),
+  stepLockStore:   new SqliteStepLockStore(dbPath),
+  idempotencyStore: new SqliteIdempotencyStore(dbPath),
+});`, ['@weaveintel/workflows'])}
+`)}`;
+}
+
+// ── Section: Encryption ───────────────────────────────────────────────────
+
+function sEncryption(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/encryption</span></div>
+  <h1 class="pkg-title">Encryption</h1>
+  <p class="pkg-desc">Per-tenant field-level AES-256-GCM encryption with automatic key rotation, blind indexes for equality search on encrypted columns, BYOK/HYOK support, multi-KMS provider routing, break-glass dual approval, and an attestation chain for audit.</p>
+</div>
+
+${callout('warn', '🔐', 'Opt-in per tenant.', 'Encryption is opt-in per tenant. Missing manager / missing policy / missing tenant_id → writes go plaintext, reads succeed without decryption. This is intentional: the app never crashes due to an absent encryption configuration.')}
+
+${featureCards([
+  ['AES-256-GCM field encryption', 'Encrypts individual DB columns, not whole rows. Sentinel format: enc:v1:<epoch>:<iv_b64>:<ct_b64>.'],
+  ['Key hierarchy', 'MEK (master encryption key) → KEK (key encryption key) → DEK (data encryption key). DEKs are rotated on schedule; MEK lives in vault/env.'],
+  ['Blind indexes', 'HMAC-SHA-256 companion columns for equality search on encrypted fields without decrypting all rows.'],
+  ['5 KMS providers', 'Local (env-based), AWS KMS, Azure Key Vault, GCP KMS, HashiCorp Vault — per-tenant routing via cached resolver.'],
+  ['BYOK / HYOK', 'Bring Your Own Key / Hold Your Own Key — adopters supply RSA-4096 wrapped keys. HYOK secrets never leave the tenant\'s environment.'],
+  ['Break-glass', 'Dual-approval emergency access with a 24-hour window cap. All access is audited via an append-only attestation chain.'],
+])}
+
+${section('enc-setup', 'Setup', `
+${code('typescript', `import { weaveTenantKeyManager, KmsProviderRegistry } from '@weaveintel/encryption';
+
+// 1. Register KMS providers
+const kmsRegistry = new KmsProviderRegistry();
+kmsRegistry.register('local',   localKmsProvider({ masterKey: process.env['WEAVE_ENCRYPTION_MASTER_KEY']! }));
+kmsRegistry.register('aws-kms', awsKmsProvider({ keyArn: process.env['AWS_KMS_KEY_ARN']! }));
+
+// 2. Create a key manager (one per tenant, cached by the resolver)
+const manager = weaveTenantKeyManager({
+  tenantId: 'acme',
+  kmsRegistry,
+  db,             // DB adapter for storing DEKs, KEKs, policy
+});
+
+// 3. Encrypt / decrypt a field value
+const ciphertext = await manager.encrypt('alice@example.com', {
+  table:  'users',
+  column: 'email',
+  rowId:  'user-001',
+});
+// → "enc:v1:1234567890:iv_base64:ciphertext_base64"
+
+const plaintext = await manager.decrypt(ciphertext, {
+  table: 'users', column: 'email', rowId: 'user-001',
+});
+// → "alice@example.com"`, ['@weaveintel/encryption'])}
+`)}
+
+${section('enc-proxy', 'Multi-Table Encrypted DB Proxy', `
+<p>The proxy wraps any DB adapter and transparently encrypts/decrypts specified columns on every read and write. Use this instead of calling encrypt/decrypt at each call site.</p>
+
+${code('typescript', `import { withTenantEncryptedDb } from '@weaveintel/encryption';
+
+const encryptedDb = withTenantEncryptedDb({
+  db,
+  getManager: () => tenantKeyManager,   // live-binding getter
+  specs: [
+    { table: 'users',    column: 'email',   rowIdColumn: 'id' },
+    { table: 'users',    column: 'phone',   rowIdColumn: 'id' },
+    { table: 'messages', column: 'content', rowIdColumn: 'id' },
+  ],
+});
+
+// All reads/writes through encryptedDb are automatically encrypted
+const user = await encryptedDb.users.findById('user-001');
+console.log(user.email); // "alice@example.com" — already decrypted`, ['@weaveintel/encryption'])}
+`)}
+
+${section('enc-blind-index', 'Blind Indexes — Equality Search', `
+${code('typescript', `import { computeBlindIndex } from '@weaveintel/encryption';
+
+// Compute the index value to search with
+const bidx = await computeBlindIndex({
+  manager,
+  table:  'users',
+  column: 'email',
+  value:  'alice@example.com',
+});
+
+// Search the companion column instead of decrypting all rows
+const user = await db.query(
+  'SELECT * FROM users WHERE email_bidx = ?',
+  [bidx],
+);`, ['@weaveintel/encryption'])}
+`)}`;
+}
+
+// ── Section: Tenancy ─────────────────────────────────────────────────────
+
+function sTenancy(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tenancy</span></div>
+  <h1 class="pkg-title">Tenancy</h1>
+  <p class="pkg-desc">Multi-tenant isolation for agents, models, and capabilities. Each tenant gets independent context propagation, budget enforcement, capability bindings, and optionally field-level encryption. Tenancy is ambient — set <code>tenantId</code> on the <code>ExecutionContext</code> and every subsystem picks it up.</p>
+</div>
+
+${featureCards([
+  ['Context propagation', '<code>tenantId</code> flows through ExecutionContext to every tool call, memory write, audit entry, and model call automatically.'],
+  ['Per-tenant budgets', 'Durable per-tenant spending ledger tracks token and USD spend, enforces monthly caps, and alerts on threshold crossings.'],
+  ['Capability bindings', 'Tenants receive exactly the tools, models, and prompts their subscription tier entitles them to.'],
+  ['Isolated encryption', 'Each tenant has its own DEK/KEK hierarchy. One tenant\'s data is unreadable by another — even on shared infrastructure.'],
+])}
+
+${exlinks([
+  ['112-tenancy.ts', 'Example 112 — Tenancy & Per-Tenant Budgets'],
+])}
+
+${section('ten-context', 'Tenant Context', `
+<p>Set <code>tenantId</code> once on the context. It propagates to audit entries, memory writes, observability spans, and cost tracking with no further wiring.</p>
+
+${code('typescript', `import { weaveContext, weaveRuntime } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+import { weaveAgent } from '@weaveintel/agents';
+
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './ops.db' }),
+});
+
+// Derive a per-request context with the caller's tenant
+function buildCtx(req: Request) {
+  return weaveContext({
+    runtime,
+    tenantId: req.headers['x-tenant-id'] as string,
+    userId:   req.headers['x-user-id']   as string,
+    metadata: { plan: req.headers['x-plan'] as string },
+  });
+}
+
+// Every agent run, tool call, and audit entry is scoped to this tenant
+const agent = weaveAgent({ model, tools });
+const ctx   = buildCtx(req);
+const result = await agent.run(ctx, { messages });`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/agents'])}
+`)}
+
+${section('ten-budget', 'Per-Tenant Budget Enforcement', `
+${code('typescript', `import { createDurableBudgetEnforcer } from '@weaveintel/tenancy';
+import { weaveRuntime } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './budgets.db' }),
+});
+
+// One enforcer per tenant (or create on demand per request)
+const enforcer = createDurableBudgetEnforcer({
+  runtime,
+  tenantId:         'acme',
+  monthlyBudgetUsd: 50.00,
+  namespace:        'tenant-budget',   // KV prefix
+});
+
+// Check before a model call
+const check = await enforcer.check();
+if (!check.allowed) {
+  return { error: \`Monthly budget exceeded. Spent: $\${check.spentUsd.toFixed(2)} / $\${check.budgetUsd.toFixed(2)}\` };
+}
+
+// Record spend after a model call (in USD)
+await enforcer.record(0.0042);   // $0.0042 for this call
+
+// Get current usage summary
+const summary = await enforcer.summary();
+console.log(\`\${summary.tenantId}: $\${summary.spentUsd.toFixed(4)} / $\${summary.budgetUsd.toFixed(2)} (\${Math.round(summary.fractionUsed * 100)}%)\`);`, ['@weaveintel/tenancy', '@weaveintel/core', '@weaveintel/persistence'])}
+
+${params([
+  ['runtime', 'WeaveRuntime', 'required', 'Runtime with a persistence slot. Spend is stored under <code>namespace:tenantId:*</code> keys.'],
+  ['tenantId', 'string', 'required', 'Tenant identifier. Matches <code>ExecutionContext.tenantId</code>.'],
+  ['monthlyBudgetUsd', 'number', 'required', 'Monthly spend cap in USD. Stored in microUSD internally to avoid float drift.'],
+  ['namespace', 'string', 'optional', 'KV key prefix. Default: <code>"tenant-budget"</code>.'],
+])}
+`)}
+
+${section('ten-caps', 'Capability Bindings', `
+<p>Capability policy bindings determine which tools, models, and prompts each tenant (and each agent or mesh within a tenant) can access. Resolved at runtime with precedence: agent=100 > mesh=50 > workflow=10 > tenant=5 > package_default.</p>
+
+${code('typescript', `import { resolveCapabilityBinding } from '@weaveintel/capability-packs';
+
+// Resolve the effective tool policy for this agent+tenant combination
+const policy = await resolveCapabilityBinding({
+  db,
+  bindingKind:  'agent',
+  policyKind:   'tool_policy',
+  agentId:      'agent-analyst',
+  tenantId:     'acme',
+});
+// policy.allowedTools, policy.blockedTools, policy.maxCallsPerMin
+
+// Check whether the tenant has a feature flag / pack installed
+const hasPremiumSearch = await resolveCapabilityBinding({
+  db,
+  bindingKind: 'tenant',
+  policyKind:  'capability_pack',
+  tenantId:    'acme',
+  packKey:     'premium.search',
+});`, ['@weaveintel/capability-packs'])}
+`)}`;
+}
+
+// ── Section: Redaction ────────────────────────────────────────────────────
+
+function sRedaction(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/redaction</span></div>
+  <h1 class="pkg-title">Redaction</h1>
+  <p class="pkg-desc">PII detection and redaction middleware. Runs as a model-call interceptor so LLMs never see raw sensitive data. Supports built-in patterns (email, phone, SSN, credit card, IPv4), custom regex, allowlists, and optionally reversible tokenisation so the original value can be restored after the model response.</p>
+</div>
+
+${callout('info', '✂️', 'Redaction before the model call.', 'The canonical placement is as middleware on the model client — messages are redacted before being sent to the provider and tokens are de-redacted in the response. LLMs never see raw PII.')}
+
+${exlinks([
+  ['08-pii-redaction.ts', 'Example 08 — PII Redaction'],
+  ['127-phase5-security.ts', 'Example 127 — Auto-Redaction on Audit Writes'],
+])}
+
+${section('red-setup', 'Basic Setup', `
+${code('typescript', `import { weaveRedactor } from '@weaveintel/redaction';
+import { weaveContext } from '@weaveintel/core';
+
+const redactor = weaveRedactor({
+  patterns: [
+    { name: 'email',       type: 'builtin', builtinType: 'email' },
+    { name: 'phone',       type: 'builtin', builtinType: 'phone' },
+    { name: 'ssn',         type: 'builtin', builtinType: 'ssn' },
+    { name: 'credit-card', type: 'builtin', builtinType: 'credit_card' },
+    { name: 'ipv4',        type: 'builtin', builtinType: 'ipv4' },
+    // Custom pattern — redact any AWS access key
+    { name: 'aws-key', type: 'regex', pattern: 'AKIA[0-9A-Z]{16}',
+      replacement: '[AWS_KEY]' },
+  ],
+  allowlist:  ['noreply@weaveintel.com'],  // never redact this email
+  reversible: true,    // store originals so we can de-redact responses
+});
+
+const ctx = weaveContext({ userId: 'alice' });
+
+// Redact before the model call
+const userMessage = 'My email is alice@example.com and SSN is 123-45-6789.';
+const { redacted, detections } = await redactor.redact(ctx, userMessage);
+// redacted = "My email is [EMAIL_1] and SSN is [SSN_1]."
+// detections = [{ type:'email', start:12, end:29, token:'[EMAIL_1]', original:'alice@example.com' }, ...]
+
+// Send redacted text to the model
+const response = await model.generate({
+  messages: [{ role: 'user', content: redacted }],
+});
+
+// Restore originals in the response (reversible mode)
+const restored = await redactor.restore!(ctx, response.content, detections);`, ['@weaveintel/redaction', '@weaveintel/core'])}
+`)}
+
+${section('red-model-middleware', 'Model Middleware (Recommended)', `
+<p>Wrap the model with a redaction middleware so every <code>model.generate()</code> call transparently redacts + de-redacts without any call-site changes.</p>
+
+${code('typescript', `import { weaveRedactor, createRedactingModel } from '@weaveintel/redaction';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveContext } from '@weaveintel/core';
+
+const redactor = weaveRedactor({
+  patterns: [
+    { name: 'email', type: 'builtin', builtinType: 'email' },
+    { name: 'phone', type: 'builtin', builtinType: 'phone' },
+  ],
+  reversible: true,
+});
+
+// Wraps the model — redacts before generate(), de-redacts after
+const safeModel = createRedactingModel(
+  weaveAnthropicModel('claude-sonnet-4-6'),
+  redactor,
+);
+
+// The agent uses the safe model — PII never reaches Anthropic's servers
+const agent = weaveAgent({
+  model:        safeModel,
+  systemPrompt: 'Help users with their account inquiries.',
+  tools,
+});
+
+const ctx    = weaveContext({ userId: 'alice' });
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'My phone is 555-867-5309. Can you update my profile?' }],
+});
+// The model sees "[PHONE_1]" — the response with "[PHONE_1]" is de-redacted back to "555-867-5309"`, ['@weaveintel/redaction', '@weaveintel/provider-anthropic', '@weaveintel/agents', '@weaveintel/core'])}
+`)}
+
+${section('red-audit', 'Auto-Redaction on Audit Writes', `
+<p>When a <code>redactor</code> is configured on <code>weaveRuntime</code>, every audit entry's <code>details</code> object is automatically redacted before reaching the KV store. No call-site changes required.</p>
+
+${code('typescript', `import { weaveRuntime, weaveContext, weaveAudit } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+import { weaveRedactor } from '@weaveintel/redaction';
+
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './audit.db' }),
+  redactor: weaveRedactor({
+    patterns: [
+      { name: 'email', type: 'builtin', builtinType: 'email' },
+      { name: 'ssn',   type: 'builtin', builtinType: 'ssn' },
+    ],
+  }),
+});
+
+const ctx = weaveContext({ runtime });
+
+// This details.email will be "[EMAIL]" in the KV store
+await weaveAudit(ctx, {
+  action:   'user.profile.update',
+  outcome:  'success',
+  resource: 'users/alice',
+  details:  { email: 'alice@example.com', newPlan: 'pro' },
+});`, ['@weaveintel/core', '@weaveintel/persistence', '@weaveintel/redaction'])}
+
+${params([
+  ['patterns', 'RedactionPattern[]', 'required', 'Array of patterns to detect. Each has <code>name</code>, <code>type</code> (builtin|regex|model), and optional <code>replacement</code>.'],
+  ['allowlist', 'string[]', 'optional', 'Values that should never be redacted even if they match a pattern.'],
+  ['reversible', 'boolean', 'optional', 'Store original values so they can be restored after a model call. Default: false.'],
+])}
+`)}`;
+}
+
+// ── Section: Compliance ───────────────────────────────────────────────────
+
+function sCompliance(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/compliance</span></div>
+  <h1 class="pkg-title">Compliance</h1>
+  <p class="pkg-desc">Data governance primitives for regulated environments: legal hold, consent management, data residency enforcement, retention policies with scheduled deletion, audit export, and GDPR-compliant user deletion. All six stores are runtime-aware — pass a persistence slot to make them restart-safe.</p>
+</div>
+
+${featureCards([
+  ['Legal hold', 'Freeze specific data subjects or record sets, preventing deletion during litigation or regulatory review.'],
+  ['Consent management', 'Per-subject, per-purpose consent records with versioned policies and temporal validity windows.'],
+  ['Data residency', 'Enforce that data for a given subject is only processed in specified geographic regions.'],
+  ['Retention policies', 'Declarative TTL policies per data category. Scheduler purges expired records on configurable intervals.'],
+  ['Audit export', 'Export structured audit trails in compliance-ready formats (NDJSON, CSV) for regulatory submission.'],
+  ['GDPR deletion', 'Right-to-erasure workflows: request intake, hold check, scheduled execution, and confirmation receipt.'],
+])}
+
+${section('comp-setup', 'Setup — Durable Compliance Stores', `
+${code('typescript', `import {
+  createDurableLegalHoldManager,
+  createDurableConsentManager,
+  createDurableRetentionEngine,
+  createDurableDeletionManager,
+} from '@weaveintel/compliance';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+import { weaveRuntime } from '@weaveintel/core';
+
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './compliance.db' }),
+});
+
+// All stores use the same runtime slot — one persistence config for all
+const holds     = createDurableLegalHoldManager({ runtime, namespace: 'legal-hold' });
+const consent   = createDurableConsentManager({ runtime, namespace: 'consent' });
+const retention = createDurableRetentionEngine({ runtime, namespace: 'retention' });
+const deletion  = createDurableDeletionManager({ runtime, namespace: 'deletion' });`, ['@weaveintel/compliance', '@weaveintel/persistence', '@weaveintel/core'])}
+`)}
+
+${section('comp-consent', 'Consent Management', `
+${code('typescript', `import { createDurableConsentManager } from '@weaveintel/compliance';
+
+const consent = createDurableConsentManager({ runtime });
+
+// Record user consent
+await consent.grant({
+  subjectId: 'user-alice',
+  purpose:   'marketing-emails',
+  version:   'v2025-01',
+  grantedAt: new Date().toISOString(),
+  expiresAt: new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString(),
+});
+
+// Check consent before sending
+const allowed = await consent.check({ subjectId: 'user-alice', purpose: 'marketing-emails' });
+if (!allowed.granted) {
+  console.log('No consent for marketing emails:', allowed.reason);
+}
+
+// Revoke consent
+await consent.revoke({ subjectId: 'user-alice', purpose: 'marketing-emails' });`, ['@weaveintel/compliance'])}
+`)}
+
+${section('comp-gdpr', 'GDPR Deletion (Right to Erasure)', `
+${code('typescript', `import { createDurableDeletionManager } from '@weaveintel/compliance';
+import { createDurableLegalHoldManager } from '@weaveintel/compliance';
+
+const deletion = createDurableDeletionManager({ runtime });
+const holds    = createDurableLegalHoldManager({ runtime });
+
+// Step 1: Receive a deletion request
+const req = await deletion.request({
+  subjectId:   'user-alice',
+  requestedAt: new Date().toISOString(),
+  requestedBy: 'alice@example.com',
+  reason:      'gdpr-erasure',
+});
+
+// Step 2: Check for active legal holds before executing
+const holdStatus = await holds.check({ subjectId: 'user-alice' });
+if (holdStatus.held) {
+  console.log('Deletion deferred — active legal hold:', holdStatus.holdId);
+} else {
+  // Step 3: Execute deletion and record completion
+  await yourDb.deleteUserData('user-alice');
+  await deletion.complete({
+    requestId:   req.id,
+    completedAt: new Date().toISOString(),
+    deletedAt:   new Date().toISOString(),
+  });
+}`, ['@weaveintel/compliance'])}
+`)}`;
+}
+
+// ── Section: Triggers ─────────────────────────────────────────────────────
+
+function sTriggers(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/triggers</span></div>
+  <h1 class="pkg-title">Triggers</h1>
+  <p class="pkg-desc">Event-driven invocation of workflows and agents. Triggers subscribe to events from multiple sources (cron, webhooks, DB change, file watch, contract events, MCP events, manual) and route them to workflow runs or agent ticks. Rate limiting and JSONLogic filters ship built-in.</p>
+</div>
+
+${featureCards([
+  ['9 source kinds', 'cron, webhook, filewatch, mcp_event, db_change, contract_emitted, workflow_event, signal_bus, manual'],
+  ['2 target kinds', 'workflow (start a run), webhook_out (POST to external URL). Agent tick routing is road-mapped.'],
+  ['JSONLogic filters', 'Evaluate event payload against a JSONLogic expression before dispatching. Unknown ops fail-closed.'],
+  ['Rate limiting', 'Per-trigger token bucket with a 60-second tumbling window. Excess invocations are recorded as rate_limited.'],
+  ['Durable rate-limit windows', 'createDurableTriggerRateLimiter uses runtime.persistence.kv — rate state survives process restart.'],
+])}
+
+${section('trig-setup', 'Defining a Trigger', `
+${code('typescript', `import { TriggerDispatcher, TriggerStore } from '@weaveintel/triggers';
+import { InMemoryTriggerStore } from '@weaveintel/triggers';
+import type { Trigger } from '@weaveintel/triggers';
+
+const store      = new InMemoryTriggerStore();
+const dispatcher = new TriggerDispatcher({ store, workflowEngine: engine });
+
+// Cron trigger — run a report workflow every day at 09:00 UTC
+const trigger: Trigger = {
+  id:     'daily-report',
+  name:   'Daily Revenue Report',
+  enabled: true,
+  source: {
+    kind:   'cron',
+    config: { schedule: '0 9 * * *', timezone: 'UTC' },
+  },
+  target: {
+    kind:   'workflow',
+    config: { workflowId: 'revenue-report', input: { currency: 'USD' } },
+  },
+  rateLimit: { perMinute: 2 },  // safety valve
+};
+
+await store.save(trigger);
+dispatcher.reload();  // always call after store changes
+
+// Webhook trigger — route incoming GitHub push events to a CI workflow
+const webhookTrigger: Trigger = {
+  id:     'github-push',
+  name:   'GitHub Push → CI',
+  enabled: true,
+  source: {
+    kind:   'webhook',
+    config: { secret: process.env['GITHUB_WEBHOOK_SECRET'] },
+  },
+  filter: { expression: { '===': [{ var: 'ref' }, 'refs/heads/main'] } },
+  target: {
+    kind:   'workflow',
+    config: { workflowId: 'ci-pipeline' },
+  },
+};
+await store.save(webhookTrigger);
+dispatcher.reload();`, ['@weaveintel/triggers'])}
+`)}
+
+${section('trig-fire', 'Firing & Monitoring', `
+${code('typescript', `import { TriggerDispatcher } from '@weaveintel/triggers';
+
+// Manual fire (source.kind must be 'manual')
+await dispatcher.fire('daily-report', { triggeredBy: 'admin@example.com' });
+
+// Express webhook endpoint
+app.post('/webhooks/github', async (req, res) => {
+  await dispatcher.handleWebhook('github-push', req.body, req.headers);
+  res.status(200).send('ok');
+});
+
+// List invocation history
+const invocations = await store.listInvocations({ triggerId: 'daily-report' });
+for (const inv of invocations) {
+  console.log(inv.id, inv.status, inv.dispatchedAt);
+  // status: dispatched | filtered | rate_limited | disabled | no_target_adapter | error
+}`, ['@weaveintel/triggers'])}
+`)}`;
+}
+
+// ── Section: Tools — Browser ──────────────────────────────────────────────
+
+function sToolsBrowser(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tools-browser</span></div>
+  <h1 class="pkg-title">Browser Tools</h1>
+  <p class="pkg-desc">Web page fetching, content extraction, structured scraping, screenshot capture, and Playwright browser automation — all as agent-callable tools with SSRF protection built in.</p>
+</div>
+
+${featureCards([
+  ['fetch_page', 'Fetch the raw HTML/text content of a URL. SSRF-blocked. Configurable User-Agent, timeout, and size limit.'],
+  ['extract_content', 'Extract clean readable text from a URL using Mozilla Readability — strips navigation, ads, and boilerplate.'],
+  ['scrape_structured', 'Scrape structured data from a URL using CSS selectors and return as JSON.'],
+  ['take_screenshot', 'Capture a full-page or viewport screenshot using Playwright (requires browser-enabled sandbox).'],
+  ['fill_form', 'Fill and submit a web form using Playwright — for automating login, search, or data entry flows.'],
+  ['click_element', 'Click a page element identified by CSS selector using Playwright.'],
+])}
+
+${section('browser-setup', 'Setup', `
+${code('typescript', `import { createBrowserToolRegistry } from '@weaveintel/tools-browser';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveContext } from '@weaveintel/core';
+
+// Creates a registry with all browser tools pre-registered
+const browserTools = createBrowserToolRegistry({
+  // Optional: only include specific tools
+  include: ['fetch_page', 'extract_content', 'scrape_structured'],
+  fetchOptions: {
+    timeoutMs: 15_000,
+    maxBytes:  5 * 1024 * 1024,  // 5 MiB
+    userAgent: 'WeaveIntel/1.0 (Research Bot)',
+  },
+});
+
+const agent = weaveAgent({
+  model:        weaveAnthropicModel('claude-sonnet-4-6'),
+  tools:        browserTools,
+  systemPrompt: 'You are a research assistant. Use browser tools to find and extract information from the web.',
+  maxSteps:     6,
+});
+
+const ctx    = weaveContext();
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'What is the current Node.js LTS version? Check nodejs.org.' }],
+});
+console.log(result.output);`, ['@weaveintel/tools-browser', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+`)}
+
+${section('browser-playwright', 'Playwright Automation', `
+<p>Playwright tools require the sandbox with a browser-enabled image. Use them for dynamic pages that require JavaScript execution.</p>
+
+${code('typescript', `import { createPlaywrightToolRegistry } from '@weaveintel/tools-browser';
+import { createLocalCSEProvider } from '@weaveintel/sandbox';
+
+const sandbox = createLocalCSEProvider({
+  networkAccess:    true,
+  networkAllowlist: ['github.com', 'api.github.com'],
+});
+
+// Playwright tools run code inside a browser-enabled sandbox container
+const playwrightTools = createPlaywrightToolRegistry({ sandbox });
+
+const agent = weaveAgent({
+  model: weaveAnthropicModel('claude-sonnet-4-6'),
+  tools: playwrightTools,
+  systemPrompt: 'You can control a browser. Take screenshots and interact with web pages.',
+});
+
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'Go to github.com/trending and screenshot the top 5 repos.' }],
+});`, ['@weaveintel/tools-browser', '@weaveintel/sandbox'])}
+`)}`;
+}
+
+// ── Section: Tools — Search ───────────────────────────────────────────────
+
+function sToolsSearch(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/tools-search</span></div>
+  <h1 class="pkg-title">Search Tools</h1>
+  <p class="pkg-desc">Multi-provider web search with automatic failover. 9 search providers supported. A single <code>web_search</code> tool tries providers in order and returns results from the first that succeeds — no call-site changes needed to swap providers.</p>
+</div>
+
+${featureCards([
+  ['9 providers', 'Tavily, Brave, Bing, Google Custom Search, SerpApi, You.com, Exa, Perplexity, DuckDuckGo'],
+  ['Auto-failover', 'Tries providers in configured priority order. If provider A is down or rate-limited, B is tried automatically.'],
+  ['Unified result shape', 'Every provider returns the same SearchResult shape: title, url, snippet, rank, source.'],
+  ['SSRF protected', 'All outbound fetch calls go through the hardened egress client — search result URLs are not blindly followed.'],
+])}
+
+${section('search-setup', 'Setup', `
+${code('typescript', `import { createSearchToolRegistry } from '@weaveintel/tools-search';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveContext } from '@weaveintel/core';
+
+const searchTools = createSearchToolRegistry({
+  providers: [
+    { kind: 'tavily', apiKey: process.env['TAVILY_API_KEY']! },
+    { kind: 'brave',  apiKey: process.env['BRAVE_API_KEY']! },
+    { kind: 'bing',   apiKey: process.env['BING_API_KEY']! },
+  ],
+  maxResults:  5,      // results per call
+  timeoutMs:   8_000,  // per provider timeout
+  includeRaw:  false,  // exclude raw HTML from results
+});
+
+const agent = weaveAgent({
+  model:        weaveAnthropicModel('claude-sonnet-4-6'),
+  tools:        searchTools,
+  systemPrompt: 'You are a research assistant with web search capability.',
+  maxSteps:     4,
+});
+
+const ctx    = weaveContext();
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'What are the top 3 AI safety papers published in 2025?' }],
+});
+console.log(result.output);`, ['@weaveintel/tools-search', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+
+${params([
+  ['providers', '{ kind, apiKey }[]', 'required', 'Ordered list of providers to try. First available is used; others are failovers.'],
+  ['maxResults', 'number', 'optional', 'Max results to return per search. Default: 5.'],
+  ['timeoutMs', 'number', 'optional', 'Per-provider request timeout in ms. Default: 8000.'],
+  ['includeRaw', 'boolean', 'optional', 'Include raw HTML in results. Default: false. Increases token consumption significantly.'],
+])}
+`)}
+
+${section('search-e2e', 'End-to-End: Research Agent', `
+${code('typescript', `import { createSearchToolRegistry } from '@weaveintel/tools-search';
+import { createBrowserToolRegistry } from '@weaveintel/tools-browser';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveContext, weaveToolRegistry } from '@weaveintel/core';
+
+// Combine search + browser tools for deep research
+const tools = weaveToolRegistry();
+const searchTools  = createSearchToolRegistry({ providers: [{ kind: 'tavily', apiKey: process.env['TAVILY_API_KEY']! }] });
+const browserTools = createBrowserToolRegistry({ include: ['extract_content'] });
+
+// Merge both registries
+searchTools.list().forEach(t => tools.register(t));
+browserTools.list().forEach(t => tools.register(t));
+
+const agent = weaveAgent({
+  model:        weaveAnthropicModel('claude-opus-4-8'),
+  tools,
+  systemPrompt: \`You are a thorough research assistant.
+Steps to follow for every research task:
+1. Search for the topic to get an overview.
+2. Extract full content from the 2 most relevant results.
+3. Synthesise findings into a structured report.\`,
+  maxSteps: 8,
+});
+
+const ctx    = weaveContext();
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'Research the current state of multi-modal AI models.' }],
+});
+console.log(result.output);`, ['@weaveintel/tools-search', '@weaveintel/tools-browser', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+`)}`;
+}
+
+// Phase 5 / new sections
+(DOCS_SECTIONS as Record<string, () => string>)['security']     = sSecurity;
+(DOCS_SECTIONS as Record<string, () => string>)['providers']    = sProviders;
+(DOCS_SECTIONS as Record<string, () => string>)['sandbox']      = sSandbox;
+(DOCS_SECTIONS as Record<string, () => string>)['a2a']          = sA2A;
+// Piece 3
+(DOCS_SECTIONS as Record<string, () => string>)['live-agents']  = sLiveAgents;
+(DOCS_SECTIONS as Record<string, () => string>)['durability']   = sDurability;
+(DOCS_SECTIONS as Record<string, () => string>)['persistence']  = sPersistence;
+(DOCS_SECTIONS as Record<string, () => string>)['encryption']   = sEncryption;
+// ── Section: Skills ──────────────────────────────────────────────────────
+
+function sSkills(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/skills</span></div>
+  <h1 class="pkg-title">Skills</h1>
+  <p class="pkg-desc">Reusable capability bundles that combine instructions, tool activation, execution guidance, and optional prompt templates into a single composable unit. Skills are registered once and resolved by name — agents pick them up without knowing the implementation details.</p>
+</div>
+
+${callout('info', '🎯', 'Skills vs Prompts vs Tools.', 'A <strong>prompt</strong> is model instructions. A <strong>tool</strong> is a capability. A <strong>skill</strong> is a named bundle that activates both — it defines which tools are available, what the system prompt says, and how the agent should behave for a specific task type.')}
+
+${section('skills-define', 'Defining Skills', `
+${code('typescript', `import { weaveSkill, weaveSkillRegistry } from '@weaveintel/skills';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+
+const registry = weaveSkillRegistry();
+
+// Register a named skill bundle
+registry.register(weaveSkill({
+  key:  'web-research',
+  name: 'Web Research',
+  description: 'Search the web, extract content, and synthesise findings into a structured report.',
+  systemPrompt: \`You are a thorough research assistant.
+For every research task:
+1. Search for the topic to get an overview.
+2. Extract full content from the 2 most relevant results.
+3. Synthesise findings into a structured bullet-point report with citations.\`,
+  tools:    ['web_search', 'extract_content'],   // Tool keys to activate
+  model:    weaveAnthropicModel('claude-sonnet-4-6'),
+  maxSteps: 8,
+  metadata: { category: 'research', tier: 'pro' },
+}));
+
+registry.register(weaveSkill({
+  key:  'code-review',
+  name: 'Code Review',
+  description: 'Review code for correctness, security, and style.',
+  systemPrompt: 'You are a senior engineer. Review the provided code for bugs, security issues, and style violations. Output findings as a structured list.',
+  tools:    [],   // No external tools — pure model reasoning
+  model:    weaveAnthropicModel('claude-opus-4-8'),
+  maxSteps: 3,
+}));`, ['@weaveintel/skills', '@weaveintel/provider-anthropic'])}
+`)}
+
+${section('skills-invoke', 'Invoking a Skill', `
+${code('typescript', `import { weaveSkillRegistry } from '@weaveintel/skills';
+import { weaveContext } from '@weaveintel/core';
+
+const ctx  = weaveContext({ userId: 'alice' });
+const skill = registry.get('web-research');
+
+// Build an agent from the skill definition
+const agent = skill.toAgent({ tools: myToolRegistry });
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'Research the latest advances in quantum error correction.' }],
+});
+console.log(result.output);`, ['@weaveintel/skills', '@weaveintel/core'])}
+`)}`;
+}
+
+// ── Section: Routing ──────────────────────────────────────────────────────
+
+function sRouting(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/routing</span></div>
+  <h1 class="pkg-title">Model Routing</h1>
+  <p class="pkg-desc">Capability-based model routing and health tracking. Declare what your agent needs (tool calling, vision, long context) and the router selects the cheapest model that meets those requirements — automatically failing over when a model is unavailable.</p>
+</div>
+
+${callout('info', '🔀', 'Prefer routing over hardcoded model IDs.', 'Hardcoding a model ID means a single failing model breaks the feature. The router selects from a pool and tracks health — a degraded model is skipped automatically.')}
+
+${section('routing-setup', 'Setup & Usage', `
+${code('typescript', `import { SmartModelRouter, ModelHealthTracker } from '@weaveintel/routing';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveOpenAIModel } from '@weaveintel/provider-openai';
+import { weaveOllamaModel } from '@weaveintel/provider-ollama';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveContext } from '@weaveintel/core';
+
+const tracker = new ModelHealthTracker();
+const router  = new SmartModelRouter({
+  healthTracker: tracker,
+  models: [
+    {
+      key:          'fast',
+      model:        weaveAnthropicModel('claude-haiku-4-5-20251001'),
+      capabilities: ['text', 'tool_calling'],
+      costPerMToken: 0.25,
+      priority:      1,       // try first (lowest cost)
+    },
+    {
+      key:          'smart',
+      model:        weaveAnthropicModel('claude-sonnet-4-6'),
+      capabilities: ['text', 'tool_calling', 'vision', 'long_context'],
+      costPerMToken: 3.00,
+      priority:      2,
+    },
+    {
+      key:          'local',
+      model:        weaveOllamaModel('llama3.2'),
+      capabilities: ['text'],
+      costPerMToken: 0,
+      priority:      0,       // free — use when no capabilities needed
+    },
+  ],
+});
+
+// Route by declared capability requirements
+const chatModel   = router.select({ requiredCapabilities: ['text'] });                  // → local (free, lowest priority)
+const agentModel  = router.select({ requiredCapabilities: ['text', 'tool_calling'] });  // → fast (cheapest with tools)
+const visionModel = router.select({ requiredCapabilities: ['text', 'vision'] });        // → smart (only one with vision)
+const budgetModel = router.select({ requiredCapabilities: ['text'], maxCostPerMToken: 1.0 }); // → fast ($0.25 < $1.00)
+
+// Use the selected model in an agent
+const agent = weaveAgent({ model: agentModel, tools });
+const ctx   = weaveContext();
+const result = await agent.run(ctx, { messages });`, ['@weaveintel/routing', '@weaveintel/provider-anthropic', '@weaveintel/provider-openai', '@weaveintel/provider-ollama', '@weaveintel/agents', '@weaveintel/core'])}
+
+${params([
+  ['requiredCapabilities', 'string[]', 'required', 'Capabilities the selected model must have. Available: <code>text</code>, <code>tool_calling</code>, <code>vision</code>, <code>long_context</code>, <code>embedding</code>.'],
+  ['maxCostPerMToken', 'number', 'optional', 'Maximum cost per million tokens in USD. Models over this threshold are excluded.'],
+  ['excludeKeys', 'string[]', 'optional', 'Model keys to skip for this request (e.g. when a model has circuit-opened).'],
+])}
+`)}`;
+}
+
+// ── Section: Contracts ────────────────────────────────────────────────────
+
+function sContracts(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/contracts</span></div>
+  <h1 class="pkg-title">Contracts</h1>
+  <p class="pkg-desc">Evidence ledger for agent decisions. Every significant model output — a claim, a verdict, a recommendation — is recorded as a signed, append-only contract entry. Contracts are queryable, replayable, and provide the audit trail that makes AI decisions explainable after the fact.</p>
+</div>
+
+${featureCards([
+  ['Immutable evidence chain', 'Entries are append-only with a tip-anchor hash — tampering breaks the chain and is detectable.'],
+  ['Structured schema', 'Contract entries carry: runId, workflowId, stepId, kind (claim/verdict/recommendation/evidence), payload, confidence, and a payload hash.'],
+  ['Workflow integration', 'WorkflowOutputContract packs and unpacks the contract via a reserved metadata key — no dedicated column needed.'],
+  ['Replay compatibility', 'Contracts are used by the replay system to reconstruct the exact evidence a model had access to when making a decision.'],
+])}
+
+${section('contracts-emit', 'Emitting Contracts from Workflows', `
+${code('typescript', `import { DefaultWorkflowEngine } from '@weaveintel/workflows';
+import { DbContractEmitter } from '@weaveintel/contracts';
+
+// Wire a contract emitter into the workflow engine
+const engine = new DefaultWorkflowEngine({
+  resolverRegistry: myResolvers,
+  contractEmitter:  new DbContractEmitter({ db }),   // writes to the evidence ledger
+});
+
+// In your workflow definition, declare an outputContract
+const def = {
+  id: 'equity-analysis',
+  name: 'Equity Analysis',
+  outputContract: {
+    kind:   'recommendation',
+    fields: ['ticker', 'action', 'confidence', 'reasoning'],
+    schema: {
+      type: 'object', required: ['ticker', 'action', 'confidence'],
+      properties: {
+        ticker:     { type: 'string' },
+        action:     { type: 'string', enum: ['buy', 'sell', 'hold'] },
+        confidence: { type: 'number', minimum: 0, maximum: 1 },
+        reasoning:  { type: 'string' },
+      },
+    },
+  },
+  steps: [/* ...your analysis steps... */],
+};
+
+await engine.createDefinition(def);
+const run = await engine.startRun('equity-analysis', { ticker: 'AAPL' });
+// After completion, a signed contract entry is appended to the evidence ledger.
+// run.metadata.__outputContract contains the emitted contract id.`, ['@weaveintel/workflows', '@weaveintel/contracts'])}
+`)}
+
+${section('contracts-query', 'Querying the Evidence Ledger', `
+${code('typescript', `import { ContractLedger } from '@weaveintel/contracts';
+
+const ledger = new ContractLedger({ db });
+
+// List all contracts for a specific workflow run
+const entries = await ledger.list({ runId: run.id });
+
+for (const entry of entries) {
+  console.log(entry.kind, entry.confidence, entry.payloadHash);
+  const payload = JSON.parse(entry.payload);
+  console.log(payload.action, payload.reasoning);
+}
+
+// Verify the chain integrity — detects tampering
+const valid = await ledger.verifyChain({ runId: run.id });
+console.log('Chain intact:', valid);`, ['@weaveintel/contracts'])}
+`)}`;
+}
+
+// ── Section: Artifacts ────────────────────────────────────────────────────
+
+function sArtifacts(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/artifacts</span></div>
+  <h1 class="pkg-title">Artifacts</h1>
+  <p class="pkg-desc">Versioned file and blob storage for agent outputs — charts, PDFs, generated code files, data exports. Artifacts are referenced by a stable handle, stored in a pluggable backend (local filesystem, S3, Azure Blob, GCS), and can be attached to workflow runs for downstream consumption.</p>
+</div>
+
+${featureCards([
+  ['Stable handles', 'Every artifact has a stable id (UUIDv7) and a human-readable slug. The id never changes even if the file is renamed.'],
+  ['Versioning', 'Creating an artifact with the same slug creates a new version. Previous versions are retained and queryable.'],
+  ['Backend-agnostic', 'Local filesystem for development; S3, Azure Blob, or GCS for production. One interface, swap a config line.'],
+  ['Workflow attachment', 'Artifacts can be attached to workflow runs so downstream steps can retrieve them by name without tracking the id.'],
+])}
+
+${section('artifacts-store', 'Storing & Retrieving', `
+${code('typescript', `import { createArtifactStore } from '@weaveintel/artifacts';
+import { weaveContext } from '@weaveintel/core';
+
+const store = createArtifactStore({
+  backend:  'local',
+  basePath: './data/artifacts',
+  // For S3: { backend: 's3', bucket: 'my-bucket', region: 'us-east-1' }
+});
+
+const ctx = weaveContext({ userId: 'alice', tenantId: 'acme' });
+
+// Store a generated chart
+const artifact = await store.put(ctx, {
+  slug:        'aapl-price-chart-2025-q1',
+  contentType: 'image/png',
+  data:        chartPngBuffer,
+  metadata:    { ticker: 'AAPL', period: '2025-Q1', generatedBy: 'equity-agent' },
+});
+console.log(artifact.id, artifact.version);  // "art_01JP..." v1
+
+// Retrieve by id
+const data = await store.get(ctx, artifact.id);
+// Retrieve latest version by slug
+const latest = await store.getBySlug(ctx, 'aapl-price-chart-2025-q1');
+
+// List all artifacts for the tenant
+const all = await store.list(ctx, { tenantId: 'acme', limit: 50 });`, ['@weaveintel/artifacts', '@weaveintel/core'])}
+`)}
+
+${section('artifacts-agent', 'Agent Tool: generate and store', `
+${code('typescript', `import { createArtifactStore } from '@weaveintel/artifacts';
+import { weaveTool, weaveToolRegistry, weaveContext } from '@weaveintel/core';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+
+const artifactStore = createArtifactStore({ backend: 'local', basePath: './artifacts' });
+
+const saveSvgTool = weaveTool({
+  name: 'save_chart',
+  description: 'Save a generated SVG chart as a named artifact and return its URL.',
+  parameters: {
+    type: 'object', required: ['slug', 'svgContent'],
+    properties: {
+      slug:       { type: 'string', description: 'Human-readable artifact name.' },
+      svgContent: { type: 'string', description: 'Valid SVG markup.' },
+    },
+  },
+  riskLevel: 'write',
+  execute: async ({ slug, svgContent }, ctx) => {
+    const artifact = await artifactStore.put(ctx, {
+      slug:        slug as string,
+      contentType: 'image/svg+xml',
+      data:        Buffer.from(svgContent as string),
+    });
+    return JSON.stringify({ artifactId: artifact.id, version: artifact.version });
+  },
+});
+
+const tools = weaveToolRegistry();
+tools.register(saveSvgTool);
+
+const agent = weaveAgent({
+  model:        weaveAnthropicModel('claude-sonnet-4-6'),
+  tools,
+  systemPrompt: 'Generate SVG charts for data analysis tasks and save them as artifacts.',
+});
+
+const ctx    = weaveContext({ userId: 'alice' });
+const result = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'Create a bar chart of FAANG stock returns in 2024.' }],
+});
+console.log(result.output);  // "Chart saved as artifact art_01JP..., version 1"`, ['@weaveintel/artifacts', '@weaveintel/core', '@weaveintel/agents', '@weaveintel/provider-anthropic'])}
+`)}`;
+}
+
+// ── Section: Replay ───────────────────────────────────────────────────────
+
+function sReplay(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/replay</span></div>
+  <h1 class="pkg-title">Replay</h1>
+  <p class="pkg-desc">Deterministic re-execution of workflow runs from a saved snapshot. Replay uses the same definition, inputs, and tool outputs from the original run — so you can reproduce exact model behaviour, debug failures, or run evals against historical data without hitting live APIs.</p>
+</div>
+
+${callout('info', '🔁', 'Reproducibility is always @weaveintel/replay.', 'Never invent a bespoke bundle format for reproducing runs. The replay package handles definition snapshots, step-level output recording, and ordinal-strict re-execution.')}
+
+${section('replay-record', 'Recording a Run for Replay', `
+<p>Every workflow run automatically records step outputs when a checkpoint store and run repository are configured. No extra wiring is needed — runs are replayable by default when persistence is on.</p>
+
+${code('typescript', `import { DefaultWorkflowEngine } from '@weaveintel/workflows';
+import { SqliteWorkflowRunRepository, SqliteCheckpointStore } from '@weaveintel/workflows';
+
+// Configure durable stores — this enables replay automatically
+const engine = new DefaultWorkflowEngine({
+  runRepository:   new SqliteWorkflowRunRepository('./workflows.db'),
+  checkpointStore: new SqliteCheckpointStore('./workflows.db'),
+  resolverRegistry: myResolvers,
+});
+
+// Run normally
+const run = await engine.startRun('equity-analysis', { ticker: 'AAPL' });
+console.log('run id:', run.id);   // save this for replay`, ['@weaveintel/workflows'])}
+`)}
+
+${section('replay-replay', 'Re-executing a Run', `
+${code('typescript', `import { DefaultWorkflowEngine } from '@weaveintel/workflows';
+
+// Replay from a specific step — steps before fromStepId use recorded outputs
+const replayRun = await engine.replayRun(originalRunId, {
+  fromStepId: 'generate-recommendation',  // re-execute from this step onwards
+  tenantId:   'acme',
+
+  // Override specific step outputs (e.g. inject fixed tool responses for eval)
+  overrides: {
+    'fetch-price-data': { price: 189.50, volume: 54_200_000 },
+  },
+});
+
+console.log(replayRun.status);   // 'completed' | 'failed'
+console.log(replayRun.state.variables);  // final output variables
+
+// Full replay (re-run all steps from scratch with recorded context)
+const fullReplay = await engine.replayRun(originalRunId);`, ['@weaveintel/workflows'])}
+
+${params([
+  ['originalRunId', 'string', 'required', 'The run ID to replay. The run must have been executed with a durable runRepository.'],
+  ['fromStepId', 'string', 'optional', 'Step ID to resume from. Steps before this are replayed from checkpoints without calling handlers. Default: replay all steps.'],
+  ['tenantId', 'string', 'optional', 'Override tenantId for the replay run. Useful for cross-tenant eval.'],
+  ['overrides', 'Record&lt;string, unknown&gt;', 'optional', 'Map of stepId → output override. Replaces the recorded output for that step, useful for injecting controlled data in evals.'],
+])}
+`)}`;
+}
+
+// ── Section: Live Agents Trace Tools ─────────────────────────────────────
+
+function sLiveAgentsTraceTools(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/live-agents-trace-tools</span></div>
+  <h1 class="pkg-title">Live Agents Trace Tools</h1>
+  <p class="pkg-desc">A thin tool pack that exposes live-agent mesh state as agent-callable tools. Attach these to any agent so it can inspect running meshes, read agent contracts, and trace the history of an agent's decisions — useful for supervisor agents and for admin/debugging interfaces.</p>
+</div>
+
+${exlinks([
+  ['110-live-agents-trace-tools.ts', 'Example 110 — Live Agents Trace Tools'],
+])}
+
+${section('trace-tools-setup', 'Setup', `
+${code('typescript', `import { createLiveAgentTraceToolRegistry } from '@weaveintel/live-agents-trace-tools';
+import { weaveAgent } from '@weaveintel/agents';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveContext } from '@weaveintel/core';
+
+// Create a registry of live-agent trace tools
+// These tools read from the live-agents state store and contract ledger
+const traceTools = createLiveAgentTraceToolRegistry({
+  store:  liveAgentStateStore,    // the same StateStore the mesh uses
+  ledger: contractLedger,         // optional — enables contract queries
+  db:     geneWeaveDb,            // optional — enables run event queries
+});
+
+// Attach to a supervisor agent that monitors the mesh
+const monitorAgent = weaveAgent({
+  model:        weaveAnthropicModel('claude-sonnet-4-6'),
+  tools:        traceTools,
+  systemPrompt: \`You are a mesh monitor. Use the trace tools to:
+- List all active agents and their current status
+- Read the most recent contracts for any agent
+- Diagnose agents that appear stuck or have high error rates
+- Summarise what the mesh has been doing in the last hour\`,
+  maxSteps: 6,
+});
+
+const ctx    = weaveContext({ userId: 'admin' });
+const result = await monitorAgent.run(ctx, {
+  messages: [{ role: 'user', content: 'Which agents are currently active and what did they produce in the last 30 minutes?' }],
+});
+console.log(result.output);`, ['@weaveintel/live-agents-trace-tools', '@weaveintel/agents', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+`)}
+
+${section('trace-tools-list', 'Available Tools', `
+<table class="ptable"><thead><tr><th>Tool</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>list_agents</code></td><td>List all agents in the mesh with id, role, status, and last-active timestamp</td></tr>
+<tr><td><code>get_agent_state</code></td><td>Full state for a specific agent: backlog, inbox, active contracts</td></tr>
+<tr><td><code>list_contracts</code></td><td>List recent contract entries for an agent — claims, verdicts, recommendations</td></tr>
+<tr><td><code>get_run_events</code></td><td>Retrieve tick events (started/completed/errored) for an agent over a time window</td></tr>
+<tr><td><code>get_backlog</code></td><td>List pending backlog items for an agent with status and priority</td></tr>
+<tr><td><code>read_message</code></td><td>Read a specific inbox message by id</td></tr>
+<tr><td><code>get_mesh_summary</code></td><td>High-level mesh health: agent count, tick rate, error rate, last-contract timestamps</td></tr>
+</tbody></table>
+`)}`;
+}
+
+// ── Section: OAuth ───────────────────────────────────────────────────────
+
+function sOAuth(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/oauth</span></div>
+  <h1 class="pkg-title">OAuth</h1>
+  <p class="pkg-desc">OAuth 2.0 Authorization Code flow for agent tools that need per-user credentials — Google Calendar, Gmail, Dropbox, OneDrive, Slack, and any OAuth 2.0 provider. Flow state is durable (survives restarts via <code>runtime.persistence.kv</code>) and PKCE is applied by default.</p>
+</div>
+
+${featureCards([
+  ['Durable flow state', 'OAuth state (nonce, code verifier, redirect URI) is stored in KV with a TTL. Survives process restarts between redirect and callback.'],
+  ['PKCE by default', 'Code verifier and challenge are generated and verified automatically. No need to configure it explicitly.'],
+  ['Token refresh', 'Access tokens are refreshed automatically before expiry. Refresh failures surface a structured error so the agent can re-initiate the flow.'],
+  ['Multi-tenant', 'State and tokens are namespaced by userId + tenantId so different users never see each other\'s credentials.'],
+])}
+
+${section('oauth-setup', 'Setup & Flow', `
+${code('typescript', `import { createOAuthFlow, createDurableOAuthStateStore } from '@weaveintel/oauth';
+import { weaveRuntime } from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+
+const runtime = weaveRuntime({
+  persistence: weaveSqlitePersistence({ path: './oauth.db' }),
+});
+
+// Durable state store — flow state survives restarts
+const stateStore = createDurableOAuthStateStore({ runtime, namespace: 'oauth-flow' });
+
+// Configure an OAuth flow for Google Calendar
+const googleFlow = createOAuthFlow({
+  provider:     'google',
+  clientId:     process.env['GOOGLE_CLIENT_ID']!,
+  clientSecret: process.env['GOOGLE_CLIENT_SECRET']!,
+  redirectUri:  'https://myapp.example.com/oauth/callback',
+  scopes:       ['https://www.googleapis.com/auth/calendar.readonly'],
+  stateStore,
+});
+
+// Step 1: Generate the authorization URL (redirect user here)
+const { url, state } = await googleFlow.authorize({ userId: 'alice', tenantId: 'acme' });
+// Redirect the user to: url
+
+// Step 2: Handle the callback (after user grants permission)
+app.get('/oauth/callback', async (req, res) => {
+  const { code, state } = req.query as { code: string; state: string };
+  const tokens = await googleFlow.exchange({ code, state });
+  // tokens.accessToken, tokens.refreshToken, tokens.expiresAt
+  await tokenStore.save({ userId: 'alice', provider: 'google', ...tokens });
+  res.redirect('/app');
+});
+
+// Step 3: Use the token in a tool call (auto-refreshed)
+const validToken = await googleFlow.getValidToken({ userId: 'alice', tenantId: 'acme', tokenStore });
+const events     = await gcal.listEvents(validToken.accessToken);`, ['@weaveintel/oauth', '@weaveintel/core', '@weaveintel/persistence'])}
+`)}
+
+${section('oauth-tool', 'OAuth as an Agent Tool', `
+${code('typescript', `import { createOAuthFlow, createDurableOAuthStateStore } from '@weaveintel/oauth';
+import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
+import { weaveAgent } from '@weaveintel/agents';
+
+const tools = weaveToolRegistry();
+
+// Tool that checks if the user has granted Google Calendar access
+tools.register(weaveTool({
+  name: 'check_google_auth',
+  description: 'Check if the user has granted Google Calendar access. If not, return the authorization URL.',
+  parameters: { type: 'object', properties: {} },
+  execute: async (_, ctx) => {
+    const token = await googleFlow.getValidToken({ userId: ctx.userId!, tokenStore });
+    if (!token) {
+      const { url } = await googleFlow.authorize({ userId: ctx.userId!, tenantId: ctx.tenantId! });
+      return JSON.stringify({ authorized: false, authUrl: url });
+    }
+    return JSON.stringify({ authorized: true });
+  },
+}));
+
+tools.register(weaveTool({
+  name: 'list_calendar_events',
+  description: 'List upcoming Google Calendar events for the authenticated user.',
+  parameters: { type:'object', properties:{ days: { type:'number' } } },
+  execute: async ({ days = 7 }, ctx) => {
+    const token  = await googleFlow.getValidToken({ userId: ctx.userId!, tokenStore });
+    if (!token) return JSON.stringify({ error: 'Not authorized. Call check_google_auth first.' });
+    const events = await gcal.listEvents(token.accessToken, { days: days as number });
+    return JSON.stringify(events);
+  },
+}));
+
+const agent = weaveAgent({ model, tools, maxSteps: 4 });`, ['@weaveintel/oauth', '@weaveintel/core', '@weaveintel/agents'])}
+`)}`;
+}
+
+// ── Section: Extraction ───────────────────────────────────────────────────
+
+function sExtraction(): string {
+  return `
+<div class="pkg-hdr">
+  <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/extraction</span></div>
+  <h1 class="pkg-title">Extraction</h1>
+  <p class="pkg-desc">Structured data extraction from unstructured text using LLM-powered schemas. Define what you want to extract with a JSON Schema; the extraction pipeline handles prompting, validation, repair, and confidence scoring. Works on single documents or streaming batches.</p>
+</div>
+
+${featureCards([
+  ['Schema-driven', 'Define extraction targets as JSON Schema. The pipeline generates appropriate prompts and validates the output against the schema.'],
+  ['LLM + rule hybrid', 'Combine LLM extraction for complex fields with regex rules for structured fields (emails, phone numbers, dates) to minimise cost.'],
+  ['Auto-repair', 'Malformed JSON outputs are automatically repaired using a smaller, faster model before falling back to a manual repair pass.'],
+  ['Confidence scoring', 'Each extracted field gets a confidence score. Low-confidence fields are flagged for human review.'],
+  ['Batch streaming', 'Process thousands of documents in parallel with configurable concurrency. Progress callbacks for pipeline observability.'],
+])}
+
+${exlinks([
+  ['113-extraction-pipeline.ts', 'Example 113 — Document Extraction Pipeline'],
+])}
+
+${section('extraction-schema', 'Schema-Driven Extraction', `
+${code('typescript', `import { weaveExtractor } from '@weaveintel/extraction';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveContext } from '@weaveintel/core';
+
+const extractor = weaveExtractor({
+  model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
+  schema: {
+    type: 'object',
+    required: ['companyName', 'foundingYear', 'headcount'],
+    properties: {
+      companyName:  { type: 'string',  description: 'Legal name of the company.' },
+      foundingYear: { type: 'number',  description: 'Year the company was founded.' },
+      headcount:    { type: 'number',  description: 'Approximate number of employees.' },
+      ceo:          { type: 'string',  description: 'Name of the current CEO, if mentioned.' },
+      revenue:      { type: 'number',  description: 'Annual revenue in USD millions, if mentioned.' },
+      isPublic:     { type: 'boolean', description: 'Whether the company is publicly traded.' },
+    },
+  },
+  repair:       true,   // attempt auto-repair on malformed output
+  confidence:   true,   // add a confidence score per field
+  maxRetries:   2,
+});
+
+const ctx = weaveContext({ userId: 'alice' });
+
+const result = await extractor.extract(ctx, \`
+  Anthropic, founded in 2021, is an AI safety company based in San Francisco.
+  The company employs approximately 800 people and is led by CEO Dario Amodei.
+  It remains privately held and does not disclose revenue figures.
+\`);
+
+console.log(result.data);
+// { companyName: 'Anthropic', foundingYear: 2021, headcount: 800,
+//   ceo: 'Dario Amodei', revenue: null, isPublic: false }
+
+console.log(result.confidence);
+// { companyName: 0.99, foundingYear: 0.98, headcount: 0.87,
+//   ceo: 0.99, revenue: null, isPublic: 0.97 }
+
+console.log(result.flagged);  // fields with confidence < threshold`, ['@weaveintel/extraction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+`)}
+
+${section('extraction-batch', 'Batch Extraction from Documents', `
+${code('typescript', `import { weaveExtractor, weaveBatchExtractor } from '@weaveintel/extraction';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+import { weaveContext } from '@weaveintel/core';
+
+const extractor = weaveExtractor({
+  model:  weaveAnthropicModel('claude-haiku-4-5-20251001'),
+  schema: companySchema,
+});
+
+const batchExtractor = weaveBatchExtractor({
+  extractor,
+  concurrency: 10,   // 10 parallel extraction calls
+  onProgress: (done, total) => console.log(\`\${done}/\${total}\`),
+  onError:    (doc, err)   => console.error(\`Failed on \${doc.id}:\`, err.message),
+});
+
+const ctx  = weaveContext();
+const docs = await loadDocuments('./data/companies/*.txt');
+
+const results = await batchExtractor.extractBatch(ctx, docs);
+
+// results[i] = { documentId, data, confidence, flagged, durationMs }
+const successful = results.filter(r => !r.error);
+console.log(\`Extracted: \${successful.length}/\${docs.length}\`);
+
+// Export to CSV
+const csv = results.map(r =>
+  [r.documentId, r.data.companyName, r.data.foundingYear, r.data.revenue ?? ''].join(',')
+).join('\n');`, ['@weaveintel/extraction', '@weaveintel/provider-anthropic', '@weaveintel/core'])}
+`)}
+
+${section('extraction-e2e', 'End-to-End: Research → Extract → Store', `
+${code('typescript', `import { weaveExtractor } from '@weaveintel/extraction';
+import { weaveAgent } from '@weaveintel/agents';
+import { createBrowserToolRegistry } from '@weaveintel/tools-browser';
+import { weaveTool, weaveToolRegistry, weaveContext } from '@weaveintel/core';
+import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
+
+const extractor = weaveExtractor({
+  model: weaveAnthropicModel('claude-haiku-4-5-20251001'),
+  schema: {
+    type: 'object', required: ['name', 'ticker', 'sector', 'peRatio'],
+    properties: {
+      name:    { type: 'string', description: 'Company name.' },
+      ticker:  { type: 'string', description: 'Stock ticker symbol.' },
+      sector:  { type: 'string', description: 'Industry sector.' },
+      peRatio: { type: 'number', description: 'Price-to-earnings ratio.' },
+      revenue: { type: 'number', description: 'Annual revenue in USD billions.' },
+    },
+  },
+});
+
+// Tool that fetches a URL and extracts structured company data
+const tools = weaveToolRegistry();
+const browserTools = createBrowserToolRegistry({ include: ['extract_content'] });
+browserTools.list().forEach(t => tools.register(t));
+
+tools.register(weaveTool({
+  name: 'extract_company_data',
+  description: 'Extract structured company financial data from a URL.',
+  parameters: { type:'object', required:['url'], properties:{ url:{type:'string'} } },
+  execute: async ({ url }, ctx) => {
+    const { content } = await fetch(url as string).then(r => r.text()).then(html => ({ content: html }));
+    const result = await extractor.extract(ctx, content);
+    return JSON.stringify(result.data);
+  },
+}));
+
+const agent = weaveAgent({
+  model:        weaveAnthropicModel('claude-sonnet-4-6'),
+  tools,
+  systemPrompt: 'Research companies by extracting structured data from web pages.',
+});
+
+const ctx = weaveContext({ userId: 'analyst' });
+const res = await agent.run(ctx, {
+  messages: [{ role: 'user', content: 'Extract the key financial metrics for Apple from their investor relations page.' }],
+});
+console.log(res.output);`, ['@weaveintel/extraction', '@weaveintel/agents', '@weaveintel/tools-browser', '@weaveintel/core', '@weaveintel/provider-anthropic'])}
+`)}`;
+}
+
+// Piece 7
+(DOCS_SECTIONS as Record<string, () => string>)['oauth']        = sOAuth;
+(DOCS_SECTIONS as Record<string, () => string>)['extraction']   = sExtraction;
+// Piece 6
+(DOCS_SECTIONS as Record<string, () => string>)['contracts']    = sContracts;
+(DOCS_SECTIONS as Record<string, () => string>)['artifacts']    = sArtifacts;
+(DOCS_SECTIONS as Record<string, () => string>)['replay']       = sReplay;
+(DOCS_SECTIONS as Record<string, () => string>)['trace-tools']  = sLiveAgentsTraceTools;
+// Piece 5
+(DOCS_SECTIONS as Record<string, () => string>)['skills']       = sSkills;
+(DOCS_SECTIONS as Record<string, () => string>)['routing']      = sRouting;
+// Piece 4
+(DOCS_SECTIONS as Record<string, () => string>)['tenancy']      = sTenancy;
+(DOCS_SECTIONS as Record<string, () => string>)['redaction']    = sRedaction;
+(DOCS_SECTIONS as Record<string, () => string>)['compliance']   = sCompliance;
+(DOCS_SECTIONS as Record<string, () => string>)['triggers']     = sTriggers;
+(DOCS_SECTIONS as Record<string, () => string>)['tools-browser']= sToolsBrowser;
+(DOCS_SECTIONS as Record<string, () => string>)['tools-search'] = sToolsSearch;
 
 // ── Full HTML export ──────────────────────────────────────────────────────
 
 export function getDocsHTML(): string {
-  // Pre-render all sections at build time
+  // Pre-render all sections at build time, and store as a single JSON string for robust embedding
   const rendered: Record<string, string> = {};
   for (const [key, fn] of Object.entries(DOCS_SECTIONS)) {
     rendered[key] = fn();
   }
-  const sectionsJson = JSON.stringify(rendered).replace(/<\/script>/g, '<\\/script>');
+  // Serialize the entire object as a single JSON string
+  let sectionsJsonString = JSON.stringify(rendered);
+  // Escape </script> to prevent script tag termination
+  sectionsJsonString = sectionsJsonString.replace(/<\/script>/gi, '<\\/script>'); // Escape </script> to prevent script tag termination
 
   const NAV_STRUCTURE = JSON.stringify([
     { id: 'home',         label: 'Home',            icon: '🏠', group: 'Overview' },
+    // ── Agent Layer
     { id: 'agents',       label: 'Agents',           icon: '🤖', group: 'Agent Layer',
       subs: ['weave-agent','supervisor','agent-tools','agent-memory','agent-events'] },
     { id: 'workflows',    label: 'Workflows',        icon: '⚙️', group: 'Agent Layer',
       subs: ['wf-engine','wf-builder','wf-steps','wf-resolvers','wf-policy','wf-phases'] },
+    { id: 'a2a',          label: 'A2A Protocol',     icon: '🔄', group: 'Agent Layer',
+      subs: ['a2a-local','a2a-http'] },
+    { id: 'live-agents',  label: 'Live Agents',      icon: '⚡', group: 'Agent Layer',
+      subs: ['la-mesh','la-supervisor','la-state-stores','la-db-boot','la-e2e'] },
+    { id: 'skills',       label: 'Skills',           icon: '🎯', group: 'Agent Layer',
+      subs: ['skills-define','skills-invoke'] },
+    // ── Model Layer
+    { id: 'providers',    label: 'Providers',        icon: '☁️', group: 'Model Layer',
+      subs: ['prov-anthropic','prov-openai','prov-google','prov-ollama','prov-llamacpp','prov-resilience'] },
+    { id: 'routing',      label: 'Model Routing',    icon: '🔀', group: 'Model Layer',
+      subs: ['routing-setup'] },
     { id: 'models',       label: 'Models',           icon: '🧠', group: 'Model Layer',
       subs: ['models-register','models-routing','models-providers'] },
     { id: 'prompts',      label: 'Prompts',          icon: '💬', group: 'Model Layer',
-      subs: ['prompts-registry','prompts-contracts','prompts-frameworks'] },
+      subs: ['prompts-registry','prompts-contracts','prompts-frameworks','prompts-execution','prompts-ab'] },
+    { id: 'contracts',    label: 'Contracts',        icon: '📜', group: 'Model Layer',
+      subs: ['contracts-emit','contracts-query'] },
     { id: 'cost-governor',label: 'Cost Governor',    icon: '💰', group: 'Model Layer',
       subs: ['cost-levers','cost-setup'] },
+    // ── Memory & Knowledge
     { id: 'memory',       label: 'Memory',           icon: '🧩', group: 'Memory & Knowledge',
-      subs: ['memory-types','memory-extraction','memory-backends'] },
+      subs: ['memory-types','memory-extraction','memory-runtime','memory-backends'] },
     { id: 'retrieval',    label: 'Retrieval',        icon: '🔍', group: 'Memory & Knowledge',
-      subs: ['retrieval-chunking','retrieval-embedding','retrieval-hybrid'] },
-    { id: 'tools',        label: 'Tool Framework',   icon: '🔧', group: 'Tools',
-      subs: ['tools-policy'] },
-    { id: 'tools-time',   label: 'tools-time',       icon: '🕐', group: 'Tools',
+      subs: ['retrieval-chunking','retrieval-embedding','retrieval-hybrid','retrieval-e2e'] },
+    { id: 'extraction',   label: 'Extraction',       icon: '🔬', group: 'Memory & Knowledge',
+      subs: ['extraction-schema','extraction-batch','extraction-e2e'] },
+    // ── Tools
+    { id: 'oauth',         label: 'OAuth',            icon: '🔑', group: 'Tools',
+      subs: ['oauth-setup','oauth-tool'] },
+    { id: 'tools',         label: 'Tool Framework',   icon: '🔧', group: 'Tools',
+      subs: ['tools-define','tools-policy','tools-approval','tools-e2e'] },
+    { id: 'tools-time',    label: 'tools-time',       icon: '🕐', group: 'Tools',
       subs: ['tools-time-setup'] },
-    { id: 'mcp',          label: 'MCP',              icon: '🔌', group: 'Tools',
-      subs: ['mcp-client','mcp-server'] },
+    { id: 'tools-browser', label: 'Browser Tools',    icon: '🌐', group: 'Tools',
+      subs: ['browser-setup','browser-playwright'] },
+    { id: 'tools-search',  label: 'Search Tools',     icon: '🔎', group: 'Tools',
+      subs: ['search-setup','search-e2e'] },
+    { id: 'sandbox',       label: 'Sandbox',          icon: '📦', group: 'Tools',
+      subs: ['sandbox-setup','sandbox-ephemeral','sandbox-session','sandbox-agent'] },
+    { id: 'mcp',           label: 'MCP',              icon: '🔌', group: 'Tools',
+      subs: ['mcp-client','mcp-server','mcp-e2e'] },
+    { id: 'trace-tools',   label: 'Trace Tools',      icon: '🔭', group: 'Tools',
+      subs: ['trace-tools-setup','trace-tools-list'] },
+    { id: 'triggers',      label: 'Triggers',         icon: '⚡', group: 'Tools',
+      subs: ['trig-setup','trig-fire'] },
+    // ── Quality & Safety
     { id: 'guardrails',   label: 'Guardrails',       icon: '🛡️', group: 'Quality & Safety',
-      subs: ['guardrails-pipeline','guardrails-checks'] },
+      subs: ['guardrails-pipeline','guardrails-checks','guardrails-runtime'] },
     { id: 'evals',        label: 'Evals',            icon: '📊', group: 'Quality & Safety',
-      subs: ['evals-runner'] },
+      subs: ['evals-runner','evals-compare','evals-ci'] },
+    { id: 'redaction',    label: 'Redaction',        icon: '✂️', group: 'Quality & Safety',
+      subs: ['red-setup','red-model-middleware','red-audit'] },
     { id: 'resilience',   label: 'Resilience',       icon: '♻️', group: 'Quality & Safety',
-      subs: ['resilience-run','resilience-primitives'] },
+      subs: ['resilience-run','resilience-primitives','resilience-durable','resilience-e2e'] },
     { id: 'observability',label: 'Observability',    icon: '📈', group: 'Quality & Safety',
-      subs: ['obs-tracer'] },
+      subs: ['obs-tracer','obs-budget','obs-otel'] },
+    // ── Operations
+    { id: 'artifacts',    label: 'Artifacts',        icon: '📎', group: 'Operations',
+      subs: ['artifacts-store','artifacts-agent'] },
+    { id: 'replay',       label: 'Replay',           icon: '⏮️', group: 'Operations',
+      subs: ['replay-record','replay-replay'] },
+    { id: 'tenancy',      label: 'Tenancy',          icon: '🏢', group: 'Operations',
+      subs: ['ten-context','ten-budget','ten-caps'] },
+    { id: 'compliance',   label: 'Compliance',       icon: '📋', group: 'Operations',
+      subs: ['comp-setup','comp-consent','comp-gdpr'] },
+    { id: 'durability',   label: 'Durability',       icon: '💾', group: 'Operations',
+      subs: ['dur-dlq','dur-idempotency','dur-retry-budget','dur-health'] },
+    { id: 'persistence',  label: 'Persistence',      icon: '🗄️', group: 'Operations',
+      subs: ['pers-slot','pers-kv','pers-adapters'] },
+    { id: 'encryption',   label: 'Encryption',       icon: '🔐', group: 'Operations',
+      subs: ['enc-setup','enc-proxy','enc-blind-index'] },
+    // ── Security
+    { id: 'security',     label: 'Security',         icon: '🔒', group: 'Security',
+      subs: ['sec-egress','sec-tls','sec-audit','sec-redaction','sec-guardrails','sec-sandbox-egress','sec-runtime-secrets'] },
+    // ── Core
     { id: 'core',         label: '@weaveintel/core', icon: '⚛️', group: 'Core',
-      subs: ['core-context','core-tools','core-events'] },
+      subs: ['core-runtime','core-capabilities','core-context','core-tools','core-events','core-audit'] },
   ]);
 
   const SUB_LABELS = JSON.stringify({
+    // Agents
     'weave-agent':'weaveAgent','supervisor':'Supervisor Mode','agent-tools':'Tool Binding',
     'agent-memory':'Memory Integration','agent-events':'Event Bus',
+    // Workflows
     'wf-engine':'Engine Setup','wf-builder':'Defining Workflows','wf-steps':'All Step Types',
     'wf-resolvers':'Handler Resolvers','wf-policy':'WorkflowPolicy','wf-phases':'Phase Reference',
     'step-deterministic':'deterministic','step-agentic':'agentic','step-condition':'condition',
     'step-switch':'switch','step-forEach':'forEach','step-parallel':'parallel (lanes)',
     'step-fork-join':'fork / join','step-wait':'wait','step-human-task':'human-task',
     'step-dynamic':'dynamic (W7)',
+    // A2A
+    'a2a-local':'In-Process A2A','a2a-http':'HTTP Transport',
+    // Live Agents
+    'la-mesh':'Provisioning a Mesh','la-supervisor':'Heartbeat Supervisor','la-state-stores':'State Store Backends',
+    // Tenancy
+    'ten-context':'Tenant Context','ten-budget':'Per-Tenant Budget','ten-caps':'Capability Bindings',
+    // Compliance
+    'comp-setup':'Setup','comp-consent':'Consent Management','comp-gdpr':'GDPR Deletion',
+    // Triggers
+    'trig-setup':'Defining a Trigger','trig-fire':'Firing & Monitoring',
+    // Browser Tools
+    'browser-setup':'Setup','browser-playwright':'Playwright Automation',
+    // Search Tools
+    'search-setup':'Setup','search-e2e':'Research Agent',
+    // Evals
+    'evals-compare':'Model Comparison','evals-ci':'CI Quality Gate',
+    // Resilience
+    'resilience-durable':'Durable Endpoint Registry','resilience-e2e':'End-to-End Example',
+    // Prompts
+    'prompts-execution':'Execution Pipeline','prompts-ab':'A/B Experiments',
+    // MCP
+    'mcp-e2e':'End-to-End Agent',
+    // Trace Tools
+    'trace-tools-setup':'Setup','trace-tools-list':'Available Tools',
+    // Contracts
+    'contracts-emit':'Emitting Contracts','contracts-query':'Querying Evidence',
+    // Artifacts
+    'artifacts-store':'Storing & Retrieving','artifacts-agent':'Agent Tool',
+    // Replay
+    'replay-record':'Recording a Run','replay-replay':'Re-executing',
+    // Redaction
+    'red-setup':'Basic Setup','red-model-middleware':'Model Middleware','red-audit':'Audit Auto-Redaction',
+    // Durability
+    'dur-dlq':'Dead-Letter Queue','dur-idempotency':'Idempotency Keys',
+    'dur-retry-budget':'Retry Budget','dur-health':'Health Checks',
+    // Persistence
+    'pers-slot':'RuntimePersistenceSlot','pers-kv':'Direct KV Access','pers-adapters':'Workflow Store Adapters',
+    // Encryption
+    'enc-setup':'Setup','enc-proxy':'Encrypted DB Proxy','enc-blind-index':'Blind Indexes',
+    // Providers
+    'prov-anthropic':'Anthropic (Claude)','prov-openai':'OpenAI (GPT)','prov-google':'Google (Gemini)',
+    'prov-ollama':'Ollama (Local)','prov-llamacpp':'llama.cpp (Local)','prov-resilience':'Built-in Resilience',
+    // Models
     'models-register':'Registration','models-routing':'Smart Routing','models-providers':'Providers',
+    // Prompts
     'prompts-registry':'Registry & Versioning','prompts-contracts':'Output Contracts',
     'prompts-frameworks':'Frameworks',
+    // Cost Governor
     'cost-levers':'8 Levers','cost-setup':'Setup & Usage',
-    'memory-types':'Memory Types','memory-extraction':'Extraction','memory-backends':'Backends',
+    // Memory
+    'memory-types':'Memory Types','memory-extraction':'Extraction',
+    'memory-runtime':'Runtime-Backed Store','memory-backends':'Backend Options',
+    // Retrieval
     'retrieval-chunking':'Chunking','retrieval-embedding':'Embedding Pipeline',
     'retrieval-hybrid':'Hybrid Search',
-    'tools-policy':'Policy-Enforced Registry','tools-time-setup':'Setup & Tools',
+    // Tools
+    'tools-define':'Defining Tools','tools-policy':'Policy-Enforced Registry',
+    'tools-approval':'Approval Gates','tools-e2e':'End-to-End Agent',
+    'tools-time-setup':'Setup & Tools',
+    // Skills
+    'skills-define':'Defining Skills','skills-invoke':'Invoking a Skill',
+    // Routing
+    'routing-setup':'Setup & Usage',
+    // Sandbox
+    'sandbox-setup':'Setup & Config','sandbox-ephemeral':'Ephemeral Execution',
+    'sandbox-session':'Session REPL','sandbox-agent':'Code-Interpreter Agent',
+    // MCP
     'mcp-client':'MCP Client','mcp-server':'MCP Server',
+    // Quality & Safety
     'guardrails-pipeline':'Building a Pipeline','guardrails-checks':'Built-in Checks',
     'evals-runner':'Eval Runner','resilience-run':'runResilient','resilience-primitives':'Primitives',
-    'obs-tracer':'Tracing',
-    'core-context':'ExecutionContext','core-tools':'Tool Interfaces','core-events':'EventBus',
+    'obs-tracer':'Tracing Setup','obs-budget':'Budget Tracking','obs-otel':'OpenTelemetry Export',
+    // Security
+    'sec-egress':'Hardened Egress (SSRF)','sec-tls':'TLS Floor','sec-audit':'Durable Audit Logger',
+    'sec-redaction':'Auto-Redaction','sec-guardrails':'Guardrails Slot',
+    'sec-sandbox-egress':'Sandbox Egress Allowlist','sec-runtime-secrets':'Secret Resolution',
+    // Retrieval (expanded)
+    'retrieval-e2e':'RAG Agent',
+    // Extraction
+    'extraction-schema':'Schema-Driven Extraction','extraction-batch':'Batch Extraction','extraction-e2e':'Research→Extract→Store',
+    // OAuth
+    'oauth-setup':'Setup & Flow','oauth-tool':'OAuth as Agent Tool',
+    // Live Agents (expanded)
+    'la-db-boot':'DB-Backed Boot','la-e2e':'Full Production Setup',
+    // Guardrails (expanded)
+    'guardrails-runtime':'Runtime Slot (Recommended)',
+    // Core (expanded)
+    'core-runtime':'weaveRuntime Constructor','core-capabilities':'RuntimeCapabilities',
+    'core-context':'ExecutionContext','core-tools':'Tool Interfaces','core-events':'EventBus','core-audit':'AuditEntry Reference',
   });
 
   return `<!DOCTYPE html>
@@ -2012,9 +5536,29 @@ strong{color:var(--fg);font-weight:600}
 .cb{margin:14px 0 20px;border-radius:var(--radius);overflow:hidden;border:1px solid var(--bg4)}
 .cb-hdr{display:flex;align-items:center;justify-content:space-between;background:var(--bg3);padding:8px 14px;border-bottom:1px solid var(--bg4)}
 .cb-lang{font-size:10px;color:var(--fg3);font-family:var(--mono);font-weight:700;text-transform:uppercase;letter-spacing:.07em}
-.copy-btn{background:var(--bg4);border:1px solid var(--bg4);color:var(--fg3);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;transition:all .14s}
-.copy-btn:hover{background:var(--bg);color:var(--fg);border-color:var(--fg3)}
+.cb-actions{display:flex;align-items:center;gap:6px}
+.copy-btn,.run-btn{background:var(--bg4);border:1px solid var(--bg4);color:var(--fg3);border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;transition:all .14s}
+.copy-btn:hover,.run-btn:hover{background:var(--bg);color:var(--fg);border-color:var(--fg3)}
 .copy-btn.ok{color:var(--success);border-color:var(--success)}
+.run-btn{color:var(--accent2);border-color:color-mix(in oklab,var(--accent) 30%,transparent)}
+.run-btn:hover{background:var(--accent-dim);color:var(--accent);border-color:var(--accent)}
+
+/* ── Docker run modal ──────────────────────────────────────────── */
+.docker-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:600;align-items:center;justify-content:center}
+.docker-overlay.open{display:flex}
+.docker-box{background:var(--bg2);border:1px solid var(--bg4);border-radius:var(--radius-lg);width:680px;max-width:96vw;box-shadow:var(--shadow-hover);overflow:hidden}
+.docker-hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--bg4);background:var(--bg3)}
+.docker-hdr-title{font-weight:700;font-size:14px;color:var(--fg);display:flex;align-items:center;gap:8px}
+.docker-close{background:none;border:none;color:var(--fg3);font-size:18px;cursor:pointer;line-height:1;padding:2px 6px;border-radius:4px}
+.docker-close:hover{background:var(--bg4);color:var(--fg)}
+.docker-body{padding:18px;overflow-y:auto;max-height:70vh}
+.docker-step{margin-bottom:16px}
+.docker-step-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--fg3);margin-bottom:6px}
+.docker-note{font-size:12px;color:var(--fg2);margin-bottom:12px;line-height:1.5}
+.docker-note code{font-family:var(--mono);font-size:11px;background:var(--bg3);border:1px solid var(--bg4);padding:1px 5px;border-radius:3px;color:var(--accent2)}
+.docker-cmd{background:var(--bg3);border:1px solid var(--bg4);border-radius:8px;padding:12px 14px;font-family:var(--mono);font-size:12px;color:var(--fg);white-space:pre-wrap;word-break:break-all;line-height:1.5;position:relative}
+.docker-copy{position:absolute;top:8px;right:8px;background:var(--bg4);border:1px solid var(--bg4);color:var(--fg3);border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer}
+.docker-copy:hover{background:var(--bg);color:var(--fg)}
 .cb pre{margin:0;padding:16px;overflow-x:auto;background:var(--bg2)}
 .cb pre code.hljs{font-family:var(--mono);font-size:13px;line-height:1.6;background:transparent!important;padding:0}
 .tbl-wrap{overflow-x:auto;margin:14px 0 20px}
@@ -2079,6 +5623,17 @@ strong{color:var(--fg);font-weight:600}
   </div>
 </div>
 
+<!-- Docker run modal -->
+<div class="docker-overlay" id="dockerOverlay" onclick="closeRun(event)">
+  <div class="docker-box" onclick="event.stopPropagation()">
+    <div class="docker-hdr">
+      <div class="docker-hdr-title">🐳 Run in Docker</div>
+      <button class="docker-close" onclick="closeRun()">✕</button>
+    </div>
+    <div class="docker-body" id="dockerBody"></div>
+  </div>
+</div>
+
 <!-- Search overlay -->
 <div class="s-overlay" id="sOverlay" onclick="closeSO(event)">
   <div class="s-box" onclick="event.stopPropagation()">
@@ -2098,8 +5653,12 @@ strong{color:var(--fg);font-weight:600}
   </main>
 </div>
 
+
+<script type="application/json" id="sections-json">${sectionsJsonString}</script>
 <script>
-const SECTIONS   = ${sectionsJson};
+// Robustly parse all section HTML from a JSON script tag
+const SECTIONS_JSON = document.getElementById('sections-json').textContent;
+const SECTIONS = JSON.parse(SECTIONS_JSON);
 const NAV        = ${NAV_STRUCTURE};
 const SUB_LABELS = ${SUB_LABELS};
 
@@ -2161,7 +5720,13 @@ function navToSub(sectionId, subId) {
   buildSidebar();
   setTimeout(function() {
     var el = document.getElementById(subId);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    var main = document.getElementById('main');
+    if (el && main) {
+      // Manual scrollTop instead of scrollIntoView to keep sidebar independent
+      var elTop = el.getBoundingClientRect().top;
+      var mainTop = main.getBoundingClientRect().top;
+      main.scrollTop += (elTop - mainTop) - 24;
+    }
   }, 80);
   updateBreadcrumbs(sectionId, subId);
 }
@@ -2215,6 +5780,82 @@ function copyCode(btn) {
   });
 }
 
+// ── Docker Run modal ─────────────────────────────────────────────
+function showRun(cbId) {
+  var cb   = document.getElementById(cbId);
+  var code = cb ? cb.querySelector('code').innerText : '';
+  var deps = (cb && cb.dataset.deps) ? cb.dataset.deps.split(',') : ['@weaveintel/core'];
+  var pkgs = deps.join(' ');
+  // Escape code for shell heredoc
+  var escaped = code.replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "'\\''");
+
+  var dockerCmd = "docker run --rm -it \\\n" +
+    "  -e OPENAI_API_KEY=\"$OPENAI_API_KEY\" \\\n" +
+    "  -e ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\" \\\n" +
+    "  -e GOOGLE_API_KEY=\"$GOOGLE_API_KEY\" \\\n" +
+    "  node:20-slim bash -c '\\\n" +
+    "    mkdir /app && cd /app && npm init -y -q && \\\n" +
+    "    npm install --save-dev tsx " + pkgs + " && \\\n" +
+    "    cat > example.ts << '\"'\"'EOF'\"'\"'\n" +
+    escaped + "\n" +
+    "EOF\n" +
+    "    npx tsx example.ts'";
+
+  var altCmd = "# OR: save example.ts locally then:\n" +
+    "docker run --rm -it \\\n" +
+    "  -v \"$(pwd)/example.ts:/app/example.ts\" \\\n" +
+    "  -e OPENAI_API_KEY=\"$OPENAI_API_KEY\" \\\n" +
+    "  -e ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\" \\\n" +
+    "  node:20-slim bash -c '\\\n" +
+    "    cd /app && npm init -y -q && \\\n" +
+    "    npm install --save-dev tsx " + pkgs + " && \\\n" +
+    "    npx tsx example.ts'";
+
+  document.getElementById('dockerBody').innerHTML =
+    '<div class="docker-step">' +
+    '<div class="docker-step-label">Dependencies</div>' +
+    '<div class="docker-note">The following npm packages will be installed inside the container: ' +
+    deps.map(function(d) { return '<code>' + d + '</code>'; }).join(', ') + '</div>' +
+    '</div>' +
+    '<div class="docker-step">' +
+    '<div class="docker-step-label">Option A — inline (copies code into the container)</div>' +
+    '<div class="docker-cmd" id="dockerCmdA">' + escHtml(dockerCmd) +
+    '<button class="docker-copy" onclick="copyDockerCmd(\'dockerCmdA\')">Copy</button></div>' +
+    '</div>' +
+    '<div class="docker-step">' +
+    '<div class="docker-step-label">Option B — mount local file</div>' +
+    '<div class="docker-note">Save the snippet as <code>example.ts</code> in your working directory first, then run:</div>' +
+    '<div class="docker-cmd" id="dockerCmdB">' + escHtml(altCmd) +
+    '<button class="docker-copy" onclick="copyDockerCmd(\'dockerCmdB\')">Copy</button></div>' +
+    '</div>' +
+    '<div class="docker-note" style="margin-top:12px">Set your API keys as environment variables before running. The container is ephemeral — no data persists after it exits.</div>';
+
+  document.getElementById('dockerOverlay').classList.add('open');
+}
+
+function closeRun(e) {
+  if (e && e.target !== document.getElementById('dockerOverlay')) return;
+  document.getElementById('dockerOverlay').classList.remove('open');
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function copyDockerCmd(id) {
+  var el = document.getElementById(id);
+  var text = el.innerText.replace(/Copy$/,'').trim();
+  navigator.clipboard.writeText(text).then(function() {
+    var btn = el.querySelector('.docker-copy');
+    btn.textContent = '✓';
+    setTimeout(function() { btn.textContent = 'Copy'; }, 1800);
+  });
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeRun({ target: document.getElementById('dockerOverlay') });
+});
+
 // ── Theme toggle ─────────────────────────────────────────────────
 function toggleTheme() {
   var html = document.documentElement;
@@ -2229,35 +5870,157 @@ function toggleTheme() {
 
 // ── Search ───────────────────────────────────────────────────────
 var SEARCH_IDX = [
+  // Agents
   {s:'agents',    t:'weaveAgent — Creating an Agent',   k:'weaveagent agent tool calling model tools system prompt'},
   {s:'agents',    t:'Supervisor Mode',                  k:'supervisor workers delegate delegation hierarchy multi-agent', sub:'supervisor'},
   {s:'agents',    t:'Tool Binding',                     k:'tool register weavetool tool registry execute', sub:'agent-tools'},
   {s:'agents',    t:'Memory Integration',               k:'memory agent cross-session context semantic', sub:'agent-memory'},
+  // Workflows
   {s:'workflows', t:'Workflow Engine Setup',            k:'workflow engine defaultworkflowengine setup checkpoint run repository'},
   {s:'workflows', t:'Step Types',                       k:'deterministic agentic condition switch foreach parallel fork join wait human-task dynamic', sub:'wf-steps'},
   {s:'workflows', t:'Handler Resolvers',                k:'resolver noop script tool prompt agent mcp subworkflow plan', sub:'wf-resolvers'},
   {s:'workflows', t:'Dynamic Graphs (W7)',              k:'dynamic expansion planner sub-graph w7 dynamicexpansion', sub:'step-dynamic'},
   {s:'workflows', t:'WorkflowPolicy',                   k:'policy maxsteps costceiling concurrency expansion', sub:'wf-policy'},
+  // A2A
+  {s:'a2a',       t:'In-Process A2A',                   k:'a2a agent to agent message bus in-process local', sub:'a2a-local'},
+  {s:'a2a',       t:'A2A HTTP Transport',               k:'a2a http distributed remote agent server client', sub:'a2a-http'},
+  // Providers
+  {s:'providers', t:'Anthropic — Claude Models',        k:'anthropic claude haiku sonnet opus model api key', sub:'prov-anthropic'},
+  {s:'providers', t:'OpenAI — GPT Models',              k:'openai gpt gpt-4o embedding tool calling api key', sub:'prov-openai'},
+  {s:'providers', t:'Google — Gemini Models',           k:'google gemini flash pro embedding api key', sub:'prov-google'},
+  {s:'providers', t:'Ollama — Local Models',            k:'ollama local llama mistral phi3 on-prem offline', sub:'prov-ollama'},
+  {s:'providers', t:'llama.cpp — GGUF Local Models',    k:'llamacpp llama.cpp gguf local server offline', sub:'prov-llamacpp'},
+  {s:'providers', t:'Provider Resilience Defaults',     k:'resilience defaults provider circuit breaker retry 429', sub:'prov-resilience'},
+  // Models
   {s:'models',    t:'Model Registration',               k:'register model weaveregistermodel weavegetmodel anthropic openai'},
   {s:'models',    t:'Smart Routing',                    k:'routing smart model router capability cost'},
+  // Prompts
   {s:'prompts',   t:'Prompt Registry & Versioning',     k:'prompt registry version render template variables'},
   {s:'prompts',   t:'Output Contracts',                 k:'contract validate json schema repair output'},
+  // Resilience (expanded)
+  {s:'resilience', t:'Durable Endpoint Registry',   k:'endpoint registry durable circuit breaker KV restart persist', sub:'resilience-durable'},
+  {s:'resilience', t:'Resilient External API Call',  k:'resilient callable provider defaults SSRF hardened fetch', sub:'resilience-e2e'},
+  // Prompts (expanded)
+  {s:'prompts',    t:'Prompt Execution Pipeline',    k:'resolve prompt execution record version experiment variant', sub:'prompts-execution'},
+  {s:'prompts',    t:'A/B Prompt Experiments',       k:'experiment ab test variant weight promote winner prompt', sub:'prompts-ab'},
+  // MCP (expanded)
+  {s:'mcp',        t:'End-to-End MCP Agent',         k:'mcp agent filesystem tools e2e client agent run', sub:'mcp-e2e'},
+  // Contracts
+  {s:'contracts',  t:'Emitting Contracts from Workflows', k:'contract evidence ledger workflow output signed append', sub:'contracts-emit'},
+  {s:'contracts',  t:'Querying the Evidence Ledger', k:'contract query ledger list verify chain integrity', sub:'contracts-query'},
+  // Artifacts
+  {s:'artifacts',  t:'Storing & Retrieving Artifacts', k:'artifact file blob storage versioned s3 gcs local', sub:'artifacts-store'},
+  {s:'artifacts',  t:'Agent Artifact Tool',           k:'artifact agent tool save chart svg pdf generated output', sub:'artifacts-agent'},
+  // Replay
+  {s:'replay',     t:'Recording a Run for Replay',   k:'replay record workflow run durable checkpoint reproducible', sub:'replay-record'},
+  {s:'replay',     t:'Re-executing a Workflow Run',   k:'replay rerun from step override deterministic reproduce eval', sub:'replay-replay'},
+  // Trace Tools
+  {s:'trace-tools', t:'Live Agents Trace Tools Setup', k:'trace tools live agent mesh state monitor admin supervisor', sub:'trace-tools-setup'},
+  {s:'trace-tools', t:'Available Trace Tools',         k:'trace tools list agents contracts events backlog mesh summary', sub:'trace-tools-list'},
+  // Skills
+  {s:'skills',    t:'Defining Skills',                  k:'skill bundle system prompt tools instructions capability key', sub:'skills-define'},
+  {s:'skills',    t:'Invoking a Skill',                 k:'skill invoke agent get registry toAgent', sub:'skills-invoke'},
+  // Routing
+  {s:'routing',   t:'Model Routing & Health Tracking',  k:'routing smart model router capability cost failover health', sub:'routing-setup'},
+  // Memory
+  {s:'memory',    t:'Runtime-Backed Memory Store',      k:'memory runtime kv store durable weaveRuntimeMemoryStore', sub:'memory-runtime'},
   {s:'memory',    t:'Memory Types',                     k:'semantic conversation entity working memory store'},
   {s:'memory',    t:'Automatic Extraction',             k:'extract memory conversation turn rules llm'},
+  // Tools
+  {s:'tools',     t:'Defining Tools with Risk Levels',  k:'tool define risk level read write destructive requires capability', sub:'tools-define'},
+  {s:'tools',     t:'Approval Gates',                   k:'approval gate human review tool send email side effect queue', sub:'tools-approval'},
+  // Retrieval
   {s:'retrieval', t:'Hybrid Search',                    k:'hybrid rag retrieval dense sparse bm25 rrf rerank'},
   {s:'retrieval', t:'Embedding Pipeline',               k:'embedding pipeline index vector store chunk'},
+  // Tools
+  {s:'tools',     t:'Policy-Enforced Registry',         k:'tool policy audit approval gate rate limit network'},
+  {s:'tools-time',t:'Time Tools',                       k:'time datetime timezone timer stopwatch reminder'},
+  // Sandbox
+  {s:'sandbox',   t:'Sandbox Setup',                    k:'sandbox docker container code execution python javascript setup', sub:'sandbox-setup'},
+  {s:'sandbox',   t:'Ephemeral Code Execution',         k:'sandbox execute python code run ephemeral container', sub:'sandbox-ephemeral'},
+  {s:'sandbox',   t:'Session REPL',                     k:'sandbox session repl stateful persistent container chat', sub:'sandbox-session'},
+  {s:'sandbox',   t:'Code-Interpreter Agent',           k:'code interpreter agent sandbox tool run python', sub:'sandbox-agent'},
+  // MCP
+  {s:'mcp',       t:'MCP Client',                       k:'mcp client stdio http transport tools protocol', sub:'mcp-client'},
+  {s:'mcp',       t:'MCP Server',                       k:'mcp server expose tools host claude desktop', sub:'mcp-server'},
+  // Evals / Guardrails / Resilience / Observability
   {s:'evals',     t:'Eval Runner',                      k:'eval evaluation rubric judge score accuracy'},
   {s:'guardrails',t:'Guardrails Pipeline',              k:'guardrail safety risk pii injection confidence'},
   {s:'resilience',t:'runResilient',                     k:'resilient retry circuit breaker rate limit token bucket concurrency'},
   {s:'cost-governor',t:'8 Cost Levers',                 k:'cost governor lever model cascade tool subset prompt cache'},
-  {s:'tools',     t:'Policy-Enforced Registry',         k:'tool policy audit approval gate rate limit network'},
-  {s:'tools-time',t:'Time Tools',                       k:'time datetime timezone timer stopwatch reminder'},
-  {s:'mcp',       t:'MCP Client',                       k:'mcp client stdio http transport tools protocol', sub:'mcp-client'},
-  {s:'mcp',       t:'MCP Server',                       k:'mcp server expose tools host claude desktop', sub:'mcp-server'},
-  {s:'observability',t:'Tracing & Budget',              k:'trace span usage budget tracker observability'},
+  {s:'observability',t:'Tracing Setup',                  k:'trace span console memory tracer observability ambient', sub:'obs-tracer'},
+  {s:'observability',t:'Budget Tracking & Alerts',       k:'budget tracker monthly spend alert threshold token cost', sub:'obs-budget'},
+  {s:'observability',t:'OpenTelemetry Export',           k:'opentelemetry otel jaeger tempo honeycomb span export', sub:'obs-otel'},
+  // Tenancy
+  {s:'tenancy',     t:'Tenant Context',              k:'tenant context tenantid propagation multi-tenant isolation', sub:'ten-context'},
+  {s:'tenancy',     t:'Per-Tenant Budget Enforcement',k:'budget tenant spend USD cap monthly enforcement', sub:'ten-budget'},
+  {s:'tenancy',     t:'Capability Bindings',          k:'capability binding tool policy subscription tier agent mesh', sub:'ten-caps'},
+  // Compliance
+  {s:'compliance',  t:'Durable Compliance Stores',    k:'compliance legal hold consent residency retention deletion gdpr', sub:'comp-setup'},
+  {s:'compliance',  t:'Consent Management',           k:'consent gdpr purpose grant revoke subject', sub:'comp-consent'},
+  {s:'compliance',  t:'GDPR Right to Erasure',        k:'gdpr deletion erasure right subject legal hold', sub:'comp-gdpr'},
+  // Triggers
+  {s:'triggers',    t:'Defining a Trigger',           k:'trigger cron webhook event dispatch workflow agent', sub:'trig-setup'},
+  {s:'triggers',    t:'Firing & Monitoring',          k:'trigger fire manual monitor invocation history status', sub:'trig-fire'},
+  // Browser Tools
+  {s:'tools-browser',t:'Browser Tools Setup',         k:'browser fetch page extract content scrape screenshot tool', sub:'browser-setup'},
+  {s:'tools-browser',t:'Playwright Automation',       k:'playwright browser automation screenshot form click dynamic', sub:'browser-playwright'},
+  // Search Tools
+  {s:'tools-search', t:'Search Tools Setup',          k:'search tavily brave bing serpapi web multi-provider failover', sub:'search-setup'},
+  {s:'tools-search', t:'Research Agent (Search+Browser)',k:'research agent search browser combined deep extract', sub:'search-e2e'},
+  // Evals
+  {s:'evals',        t:'Model Comparison',            k:'eval compare baseline candidate regression score delta', sub:'evals-compare'},
+  {s:'evals',        t:'CI Quality Gate',             k:'eval CI gate vitest jest quality threshold fail build', sub:'evals-ci'},
+  // Redaction
+  {s:'redaction',    t:'PII Redaction Setup',         k:'redaction pii email phone ssn credit card regex builtin', sub:'red-setup'},
+  {s:'redaction',    t:'Model Middleware',            k:'redaction model middleware transparent create wrap reversible', sub:'red-model-middleware'},
+  {s:'redaction',    t:'Audit Auto-Redaction',        k:'redaction audit write path auto automatic strip pii', sub:'red-audit'},
+  // Live Agents
+  {s:'live-agents', t:'Provisioning a Mesh',           k:'live agent mesh provision role agentid heartbeat', sub:'la-mesh'},
+  {s:'live-agents', t:'Heartbeat Supervisor',           k:'supervisor heartbeat tick interval workers live agent', sub:'la-supervisor'},
+  {s:'live-agents', t:'State Store Backends',           k:'state store sqlite postgres redis mongodb dynamodb live agent', sub:'la-state-stores'},
+  // Durability
+  {s:'durability',  t:'Dead-Letter Queue',              k:'dlq dead letter queue failed operation retry recover', sub:'dur-dlq'},
+  {s:'durability',  t:'Idempotency Keys',               k:'idempotency key duplicate prevent retry TTL', sub:'dur-idempotency'},
+  {s:'durability',  t:'Retry Budget',                   k:'retry budget shared process hot path exhausted', sub:'dur-retry-budget'},
+  {s:'durability',  t:'Health Checks',                  k:'health check liveness readiness probe status', sub:'dur-health'},
+  // Persistence
+  {s:'persistence', t:'RuntimePersistenceSlot',         k:'persistence slot sqlite kv runtime weavesqlitepersistence', sub:'pers-slot'},
+  {s:'persistence', t:'Direct KV Access',               k:'kv key value get set delete list prefix persistence', sub:'pers-kv'},
+  {s:'persistence', t:'Workflow Store Adapters',        k:'workflow checkpoint run repository sqlite postgres adapter', sub:'pers-adapters'},
+  // Encryption
+  {s:'encryption',  t:'Per-Tenant Field Encryption',    k:'encryption aes-256-gcm tenant field column key rotation', sub:'enc-setup'},
+  {s:'encryption',  t:'Encrypted DB Proxy',             k:'proxy db column transparent encrypt decrypt', sub:'enc-proxy'},
+  {s:'encryption',  t:'Blind Indexes',                  k:'blind index hmac equality search encrypted column', sub:'enc-blind-index'},
+  // Security
+  {s:'security',  t:'Hardened Egress — SSRF Protection',k:'ssrf fetch hardened egress url validation metadata private network redirect', sub:'sec-egress'},
+  {s:'security',  t:'TLS Floor',                        k:'tls ssl certificate verification node tls reject unauthorized', sub:'sec-tls'},
+  {s:'security',  t:'Durable Audit Logger',             k:'audit logger durable persistence kv entry weaveaudit', sub:'sec-audit'},
+  {s:'security',  t:'Auto-Redaction on Audit',          k:'redact pii email phone ssn audit write path automatic', sub:'sec-redaction'},
+  {s:'security',  t:'Guardrails Slot',                  k:'guardrails check tool call output deny allow runtime slot', sub:'sec-guardrails'},
+  {s:'security',  t:'Sandbox Egress Allowlist',         k:'sandbox network allowlist egress docker bridge none', sub:'sec-sandbox-egress'},
+  {s:'security',  t:'Secret Resolution',                k:'secret resolver process.env vault kms api key runtime', sub:'sec-runtime-secrets'},
+  // Retrieval (expanded)
+  {s:'retrieval', t:'End-to-End RAG Agent',             k:'rag agent chunking embedding hybrid bm25 retrieval search', sub:'retrieval-e2e'},
+  // Extraction
+  {s:'extraction', t:'Schema-Driven Extraction',        k:'extract schema json llm structured repair confidence', sub:'extraction-schema'},
+  {s:'extraction', t:'Batch Document Extraction',       k:'extraction batch documents parallel streaming concurrency', sub:'extraction-batch'},
+  {s:'extraction', t:'Research → Extract → Store',      k:'extraction agent browser research end-to-end pipeline', sub:'extraction-e2e'},
+  // OAuth
+  {s:'oauth',     t:'OAuth Flow Setup',                 k:'oauth google calendar gmail dropbox pkce token refresh authorize', sub:'oauth-setup'},
+  {s:'oauth',     t:'OAuth as Agent Tool',              k:'oauth agent tool check auth authorize token calendar', sub:'oauth-tool'},
+  // Live Agents (expanded)
+  {s:'live-agents', t:'DB-Backed Boot',                 k:'live agent db boot weaveLiveMeshFromDb weaveLiveAgentFromDb production', sub:'la-db-boot'},
+  {s:'live-agents', t:'Full Production Setup',          k:'live agent full production mesh supervisor runtime boot', sub:'la-e2e'},
+  // Guardrails (expanded)
+  {s:'guardrails', t:'Runtime Slot — Ambient Guardrails', k:'guardrails runtime slot ambient weaveruntime automatic every agent', sub:'guardrails-runtime'},
+  // Core (expanded)
+  {s:'core',      t:'weaveRuntime — The Composition Root', k:'weaveruntime runtime composition root options tracer secrets persistence', sub:'core-runtime'},
+  {s:'core',      t:'RuntimeCapabilities Reference',    k:'runtime capabilities net egress audit persistence guardrails encryption', sub:'core-capabilities'},
   {s:'core',      t:'ExecutionContext',                  k:'context userid sessionid traceid metadata', sub:'core-context'},
   {s:'core',      t:'Tool Interfaces',                  k:'weavetool toolregistry toolschema execute parameters', sub:'core-tools'},
   {s:'core',      t:'EventBus',                         k:'eventbus events subscribe agent model call step', sub:'core-events'},
+  {s:'core',      t:'AuditEntry Reference',             k:'audit entry fields action outcome resource details timestamp', sub:'core-audit'},
 ];
 
 function openSearch() {

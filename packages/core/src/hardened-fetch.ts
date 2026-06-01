@@ -58,22 +58,52 @@ async function createSafeDispatcher(
     return undefined; // undici unavailable — graceful degradation
   }
 
-  // Undici's connect.lookup has the same shape as dns.lookup but the options
-  // arg may carry `all: true` which changes the callback signature. To avoid
-  // the overload ambiguity we always perform our own single-address lookup
-  // (ignoring undici's options) so the callback always receives a string.
+  // Undici's connect.lookup may ask for either a single resolved address or
+  // all candidates (`all:true`). Handle both callback shapes and validate each
+  // candidate so we never pass an undefined/unsafe address to the socket layer.
   const lookup = (
     hostname: string,
-    _options: unknown,
-    callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
+    options: unknown,
+    callback: (...args: unknown[]) => void,
   ): void => {
+    const wantsAll =
+      typeof options === 'object' &&
+      options !== null &&
+      'all' in options &&
+      (options as { all?: boolean }).all === true;
+
+    if (wantsAll) {
+      dns.lookup(hostname, { all: true }, (err, addresses) => {
+        if (err) {
+          callback(err);
+          return;
+        }
+        try {
+          for (const entry of addresses) {
+            validateResolvedAddress(entry.address, policy);
+          }
+          callback(null, addresses);
+        } catch (e) {
+          callback(e as NodeJS.ErrnoException);
+        }
+      });
+      return;
+    }
+
     dns.lookup(hostname, (err, address, family) => {
-      if (err) return callback(err, '', 0);
+      if (err) {
+        callback(err);
+        return;
+      }
+      if (!address || typeof address !== 'string') {
+        callback(new TypeError(`invalid DNS lookup result for host "${hostname}"`) as NodeJS.ErrnoException);
+        return;
+      }
       try {
         validateResolvedAddress(address, policy);
         callback(null, address, family);
       } catch (e) {
-        callback(e as NodeJS.ErrnoException, '', 0);
+        callback(e as NodeJS.ErrnoException);
       }
     });
   };
