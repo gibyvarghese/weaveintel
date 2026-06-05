@@ -11,18 +11,17 @@
  * what GeneWeave has materialized.
  */
 import { newUUIDv7 } from '@weaveintel/core';
-import { createIdempotencyStore } from '@weaveintel/reliability';
 import type { DatabaseAdapter } from '../../db.js';
 import type { KglCompetitionRunRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 import { materializeKaggleRun, replayKaggleRun, type MaterializeKaggleRunInput } from '../../lib/kaggle.js';
+import { createDbBackedIdempotencyStore } from '../../lib/durable-idempotency-store.js';
 import type { ExecutionContext, RunLog } from '@weaveintel/core';
 
-// 24h idempotency window for Kaggle run creation. POST /api/admin/kaggle-runs
-// is the entry point for replays of the kernel-push + submit workflow, so
-// duplicate requests with the same Idempotency-Key must return the original
-// row instead of creating a second run.
-const kaggleRunIdempotency = createIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000 });
+// Phase B (Durable consumers): admin Kaggle run replays now share the
+// `idempotency_records` table, so duplicate requests with the same
+// Idempotency-Key return the original row across process restarts.
+// 24h window matches the original ttlMs.
 
 const COMP_BASE = '/api/admin/kaggle-competitions';
 const APP_BASE  = '/api/admin/kaggle-approaches';
@@ -201,6 +200,7 @@ export function registerKaggleRunRoutes(
   helpers: AdminHelpers,
 ): void {
   const { json, readBody } = helpers;
+  const kaggleRunIdempotency = createDbBackedIdempotencyStore(db);
 
   router.get(RUN_BASE, async (req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
@@ -229,7 +229,7 @@ export function registerKaggleRunRoutes(
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const idempotencyKey = (req.headers['idempotency-key'] as string | undefined) ?? null;
     if (idempotencyKey) {
-      const cached = kaggleRunIdempotency.check(`kaggle-runs:${idempotencyKey}`);
+      const cached = await kaggleRunIdempotency.check(`kaggle-runs:${idempotencyKey}`);
       if (cached.isDuplicate) {
         json(res, 201, cached.previousResult);
         return;
@@ -263,7 +263,7 @@ export function registerKaggleRunRoutes(
     const item = await db.getKaggleRun(id);
     const payload = { 'kaggle-run': item };
     if (idempotencyKey) {
-      kaggleRunIdempotency.record(`kaggle-runs:${idempotencyKey}`, payload);
+      await kaggleRunIdempotency.record(`kaggle-runs:${idempotencyKey}`, payload);
     }
     json(res, 201, payload);
   }, { auth: true, csrf: true });

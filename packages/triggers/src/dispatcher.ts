@@ -442,7 +442,18 @@ export class CallbackTargetAdapter implements TargetAdapter {
 
 // ─── Rate limiter (per-trigger 1-min tumbling window, in-process) ────────
 
-class RateLimiter {
+/**
+ * Pluggable rate-limiter interface. The default in-process limiter
+ * matches this shape with a sync `check`. The durable variant from
+ * `./durable-rate-limit.ts` returns a Promise — the dispatcher awaits
+ * either form. `reset` is optional.
+ */
+export interface TriggerRateLimiter {
+  check(triggerId: string, perMinute: number): boolean | Promise<boolean>;
+  reset?(triggerId: string): void | Promise<void>;
+}
+
+class RateLimiter implements TriggerRateLimiter {
   private windows = new Map<string, { startedAt: number; count: number }>();
   /** Returns true if dispatch is allowed; false if over budget. */
   check(triggerId: string, perMinute: number): boolean {
@@ -474,6 +485,11 @@ export interface TriggerDispatcherOptions {
   newId?: () => string;
   /** Optional logger; defaults to console.warn for failures. */
   logger?: { warn: (...args: unknown[]) => void; debug?: (...args: unknown[]) => void };
+  /** Phase G — optional pluggable rate limiter. Defaults to the
+   *  in-process tumbling-window limiter. Pass
+   *  `createDurableTriggerRateLimiter({ runtime })` to survive
+   *  restart and coordinate quotas across nodes. */
+  rateLimiter?: TriggerRateLimiter;
 }
 
 export interface TriggerDispatcher {
@@ -497,7 +513,7 @@ export function createTriggerDispatcher(opts: TriggerDispatcherOptions): Trigger
     return `trg_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   });
   const logger = opts.logger ?? { warn: (...a: unknown[]) => console.warn('[triggers]', ...a) };
-  const limiter = new RateLimiter();
+  const limiter: TriggerRateLimiter = opts.rateLimiter ?? new RateLimiter();
   let triggers: Trigger[] = [];
   const cronAdapters: CronSourceAdapter[] = [];
   let started = false;
@@ -537,7 +553,7 @@ export function createTriggerDispatcher(opts: TriggerDispatcherOptions): Trigger
       const ok = evaluateFilter(trg.filter.expression, { payload: event.payload, meta: { sourceId: event.sourceId, observedAt: event.observedAt } });
       if (!ok) return record({ ...baseInv, status: 'filtered' });
     }
-    if (trg.rateLimit && !limiter.check(trg.id, trg.rateLimit.perMinute)) {
+    if (trg.rateLimit && !(await limiter.check(trg.id, trg.rateLimit.perMinute))) {
       return record({ ...baseInv, status: 'rate_limited' });
     }
     const adapter = targetAdapters.get(trg.target.kind);

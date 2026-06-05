@@ -24,14 +24,16 @@
  */
 
 import type { Server } from 'node:http';
-import { weaveSetDefaultTracer, weaveRuntime, envSecretResolver, type WeaveRuntime } from '@weaveintel/core';
+import { weaveSetDefaultTracer, weaveRuntime, envSecretResolver, weaveInMemoryPersistence, type WeaveRuntime, type RuntimePersistenceSlot } from '@weaveintel/core';
 import { weaveConsoleTracer } from '@weaveintel/observability';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
+import { weaveRedactor } from '@weaveintel/redaction';
 import { createDatabaseAdapter, type DatabaseAdapter, type DatabaseConfig } from './db.js';
 import { ChatEngine, type ProviderConfig } from './chat.js';
 import { createGeneWeaveServer } from './server.js';
 import { syncModelPricing, type PricingSyncReport } from './pricing-sync.js';
 import { syncToolCatalog } from './tools.js';
-import { BUILTIN_TOOLS } from './tools.js';
+import { BUILTIN_TOOLS, setWorkflowEngineForTools } from './tools.js';
 import {
   createGeneweaveWorkflowEngine,
   syncWorkflowHandlerKindsToDb,
@@ -40,11 +42,14 @@ import {
 import { startToolHealthJob } from './tool-health-job.js';
 import {
   createTriggerDispatcher,
+  createDurableTriggerRateLimiter,
   ManualSourceAdapter,
   MeshContractSourceAdapter,
   WebhookOutTargetAdapter,
   type TriggerDispatcher,
 } from '@weaveintel/triggers';
+import { OAuthClient, createDurableOAuthStateStore } from '@weaveintel/oauth';
+import { setOAuthClient } from './server-core.js';
 import { createDbTriggerStore } from './triggers/db-trigger-store.js';
 import { createWorkflowTargetAdapter, createContractTargetAdapter } from './triggers/target-adapters.js';
 import { DbContractEmitter } from './contracts/db-contract-emitter.js';
@@ -105,6 +110,13 @@ export interface GeneWeaveApp {
    * coherent set of cross-cutting concerns.
    */
   runtime: WeaveRuntime;
+  /**
+   * Workflow engine handle: registry, run repository, checkpoint store,
+   * cost meter, and span emitter. Phase B exposes this so consumers and
+   * tests can introspect cost totals (durable when runtime persistence is
+   * configured) without reaching into server internals.
+   */
+  workflows: WorkflowEngineHandle;
   /** Sync model pricing from provider APIs into the database */
   syncPricing(): Promise<PricingSyncReport>;
   /** Gracefully stop the server and close the database */
@@ -127,6 +139,8 @@ import type {
   TenantKeyManager,
 } from '@weaveintel/encryption';
 import { withTenantEncryptedMessages } from './encryption/db-encrypted-adapter.js';
+import { geneweaveGuardrailsSlot } from './guardrails-slot.js';
+import { geneweaveEncryptionSlot, type GeneweaveEncryptionSlot } from './encryption-slot.js';
 export let geneweaveEncryptionManager: TenantKeyManager | null = null;
 /** Phase 7: KMS provider registry exposed for admin endpoints (list/health-check). */
 export let geneweaveKmsRegistry: KmsProviderRegistry | null = null;
@@ -163,14 +177,67 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // back-compat with packages that read the process-wide default; the
   // runtime tracer is the same instance so the two never disagree.
   const consoleTracer = weaveConsoleTracer();
+
+  // Phase A: durable persistence slot. When the configured database is
+  // SQLite we share its path so the runtime KV table (`runtime_kv`) lives
+  // alongside the app's other tables and survives restarts. For custom
+  // adapters (Postgres / Mongo / etc.) we fall back to the in-memory slot
+  // — adopters can override by supplying their own runtime in future.
+  const dbConfig = config.database ?? { type: 'sqlite' as const, path: './geneweave.db' };
+  const persistenceSlot: RuntimePersistenceSlot = dbConfig.type === 'sqlite'
+    ? weaveSqlitePersistence({ path: dbConfig.path ?? './geneweave.db' })
+    : weaveInMemoryPersistence();
+
+  // Phase A: default redactor with built-in PII patterns. Wired into the
+  // runtime so the auto-attached durable audit logger redacts entries
+  // before they hit the KV store — no call site needs to opt in.
+  const defaultRedactor = weaveRedactor({
+    patterns: [
+      { name: 'email', type: 'builtin', builtinType: 'email' },
+      { name: 'phone', type: 'builtin', builtinType: 'phone' },
+      { name: 'ssn', type: 'builtin', builtinType: 'ssn' },
+      { name: 'credit_card', type: 'builtin', builtinType: 'credit_card' },
+    ],
+    reversible: false,
+  });
+
+  // Phase E: build the database adapter BEFORE the runtime so the
+  // ambient guardrails slot can close over it. The slot reads enabled
+  // rows from the `guardrails` table on each call, so operator edits
+  // take effect without restart. Encryption wrapper still uses the
+  // module-level live binding (assigned later in this function).
+  const rawDb = await createDatabaseAdapter(config.database ?? { type: 'sqlite', path: './geneweave.db' });
+  const db = withTenantEncryptedMessages(rawDb, () => geneweaveEncryptionManager);
+  const guardrailsSlot = geneweaveGuardrailsSlot(db);
+
+  // Phase F: encryption slot with a mutable internal ref. Constructed BEFORE
+  // the runtime so `runtime.has('runtime.encryption')` advertises at boot;
+  // the underlying TenantKeyManager is assigned post-bootstrap below.
+  // Consumers retrieve the live manager via `ctx.runtime?.encryption?.getManager()`.
+  const encryptionSlot: GeneweaveEncryptionSlot = geneweaveEncryptionSlot();
+
   const runtime = weaveRuntime({
     tracer: consoleTracer,
     secrets: envSecretResolver(),
+    persistence: persistenceSlot,
+    redactor: defaultRedactor,
+    guardrails: guardrailsSlot,
+    encryption: encryptionSlot,
     installDefaultTracer: true,
   });
   // `installDefaultTracer: true` already wired the runtime's tracer as the
   // process default; explicit call here documents intent for readers.
   weaveSetDefaultTracer(consoleTracer);
+
+  console.log(
+    '[runtime] weaveRuntime ready — capabilities:',
+    Array.from(runtime.capabilities).join(', '),
+  );
+
+  // Phase G — swap the module-level OAuth client for one backed by the
+  // durable state store so pending authorization-code exchanges survive a
+  // restart. ESM live binding propagates the swap to `routes/auth.ts`.
+  setOAuthClient(new OAuthClient(createDurableOAuthStateStore({ runtime, namespace: 'oauth-flow' })));
 
   const activeProviders = Object.fromEntries(
     Object.entries(config.providers).filter(([key, provider]) => {
@@ -189,21 +256,13 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   const port = config.port ?? 3500;
   const host = config.host ?? '0.0.0.0';
 
-  // 1. Database
-  const rawDb = await createDatabaseAdapter(config.database ?? { type: 'sqlite', path: './geneweave.db' });
-
-  // 1a. Wrap the adapter with the tenant-scoped message encryption layer.
-  //     Reads `geneweaveEncryptionManager` lazily through a getter so it
-  //     picks up the post-bootstrap live binding (assigned below).
-  //     When encryption is not configured the wrapper is a pass-through.
-  const db = withTenantEncryptedMessages(rawDb, () => geneweaveEncryptionManager);
-
   // 2. Chat engine
   const chatEngine = new ChatEngine(
     {
       providers: activeProviders,
       defaultProvider: config.defaultProvider,
       defaultModel: config.defaultModel,
+      runtime,
     },
     db,
   );
@@ -245,6 +304,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     const result = bootstrapEncryption(db);
     if (result) {
       geneweaveEncryptionManager = result.manager;
+      encryptionSlot.setManager(result.manager);
       geneweaveKmsRegistry = result.registry;
       geneweaveKmsResolver = result.resolver;
       geneweaveEncryptionMetrics = result.metrics as typeof geneweaveEncryptionMetrics;
@@ -346,16 +406,68 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   const contractBus = new EventEmitter();
   contractBus.setMaxListeners(0);
   const contractEmitter = new DbContractEmitter(db, contractBus);
+  // Wire `prompt:<key>` resolver: render-only execution. Looks up the prompt
+  // by id or name, renders the template via `executePromptRecord`, and
+  // returns `{ promptKey, content, strategy }`. A future iteration may
+  // forward the rendered text to a model client; for now this gives
+  // workflows a deterministic templating step backed by the live prompt
+  // registry, including fragment expansion and strategy overlays.
+  const promptDeps = {
+    async executePrompt(
+      promptKey: string,
+      variables: Record<string, unknown>,
+      _config: Record<string, unknown>,
+    ): Promise<unknown> {
+      const { executePromptRecord, resolvePromptRecordForExecution } = await import(
+        '@weaveintel/prompts'
+      );
+      const rows = await db.listPrompts();
+      const match = rows.find(
+        (r) => r.enabled && (r.id === promptKey || r.name === promptKey),
+      );
+      if (!match) throw new Error(`prompt resolver: no prompt found for key "${promptKey}"`);
+      const versions = await db.listPromptVersions(match.id);
+      const experiments = await db.listPromptExperiments(match.id);
+      const resolved = resolvePromptRecordForExecution({
+        prompt: match,
+        versions,
+        experiments,
+        options: { assignmentKey: match.id },
+      });
+      const executed = executePromptRecord(resolved.record, variables);
+      return {
+        promptKey,
+        promptId: match.id,
+        version: resolved.meta.resolvedVersion,
+        content: executed.content,
+        strategy: executed.strategy.resolvedKey,
+      };
+    },
+  };
+
   const workflowEngineHandle: WorkflowEngineHandle = createGeneweaveWorkflowEngine({
     db,
     toolGetter: (key: string) => BUILTIN_TOOLS[key],
     contractEmitter,
-  });
-  try {
+    runtime,
+    promptDeps,
+  });  try {
     await syncWorkflowHandlerKindsToDb(db, workflowEngineHandle.registry);
   } catch (err) {
     console.warn('[workflow-engine] failed to sync handler kinds:', err);
   }
+  // Wire the `workflow_run` built-in tool so any agent / chat session can
+  // start a workflow run by id or name. Tool definition lives in
+  // `tools.ts`; the engine reference is published here once available.
+  setWorkflowEngineForTools({
+    startRun: (id, input) => workflowEngineHandle.engine.startRun(id, input),
+    async resolveByKey(key) {
+      const direct = await db.getWorkflowDef(key);
+      if (direct) return direct.id;
+      const all = await db.listWorkflowDefs();
+      return all.find((row) => row.name === key)?.id;
+    },
+  });
 
   // 5-TR. Phase 3 Unified Triggers: build the singleton dispatcher with
   // a DB-backed store, in-process manual + cron sources (cron sources
@@ -367,6 +479,10 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   const triggerStore = createDbTriggerStore(db);
   const manualSource = new ManualSourceAdapter();
   const meshContractSource = new MeshContractSourceAdapter(contractBus);
+  // Phase G — durable per-trigger rate-limit windows. Backed by
+  // `runtime.persistence.kv` so quotas survive process restart and
+  // coordinate across nodes.
+  const triggerRateLimiter = createDurableTriggerRateLimiter({ runtime, namespace: 'trigger-rate' });
   const triggerDispatcher: TriggerDispatcher = createTriggerDispatcher({
     store: triggerStore,
     sourceAdapters: [manualSource, meshContractSource],
@@ -375,6 +491,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
       createWorkflowTargetAdapter(workflowEngineHandle),
       createContractTargetAdapter(contractEmitter),
     ],
+    rateLimiter: triggerRateLimiter,
   });
   try {
     await triggerDispatcher.start();
@@ -447,6 +564,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     db,
     chatEngine,
     runtime,
+    workflows: workflowEngineHandle,
     async syncPricing() {
       return syncModelPricing(db, activeProviders);
     },

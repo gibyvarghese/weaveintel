@@ -229,10 +229,15 @@ export function createOAuthProvider(
 /*  OAuth Client (authorization code flow)                           */
 /* ================================================================== */
 
-export class OAuthClient {
-  private stateStore: OAuthStateStore;
+import type { AsyncOAuthStateStore } from './durable.js';
 
-  constructor(stateStore?: OAuthStateStore) {
+/** Either the legacy sync store or the durable async store from `./durable.js`. */
+export type AnyOAuthStateStore = OAuthStateStore | AsyncOAuthStateStore;
+
+export class OAuthClient {
+  private stateStore: AnyOAuthStateStore;
+
+  constructor(stateStore?: AnyOAuthStateStore) {
     this.stateStore = stateStore ?? new InMemoryOAuthStateStore();
   }
 
@@ -246,7 +251,7 @@ export class OAuthClient {
     const nonce = this.requiresNonce(provider) ? randomUUID() : undefined;
 
     // Store for later validation
-    this.stateStore.set(state, {
+    await this.stateStore.set(state, {
       codeVerifier,
       expiresAt: Date.now() + 10 * 60 * 1000, // 10 minutes
       provider: provider.name,
@@ -280,19 +285,19 @@ export class OAuthClient {
     code: string,
     state: string,
   ): Promise<{ token: OAuthTokenResponse; codeVerifier: string }> {
-    const stored = this.stateStore.get(state);
+    const stored = await this.stateStore.get(state);
     if (!stored) throw new Error('Invalid or expired OAuth state');
     if (stored.provider !== provider.name) {
-      this.stateStore.delete(state);
+      await this.stateStore.delete(state);
       throw new Error('OAuth state/provider mismatch');
     }
     if (stored.redirectUri !== provider.redirectUri) {
-      this.stateStore.delete(state);
+      await this.stateStore.delete(state);
       throw new Error('OAuth state/redirect mismatch');
     }
 
     const { codeVerifier } = stored;
-    this.stateStore.delete(state); // One-time use
+    await this.stateStore.delete(state); // One-time use
 
     const params = new URLSearchParams({
       client_id: provider.clientId,

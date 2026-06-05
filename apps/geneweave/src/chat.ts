@@ -255,6 +255,8 @@ export class ChatEngine {
       approvalGate: new DbToolApprovalGate(db),
       // Phase 4: credential and catalog injection
       credentialResolver: (id: string) => db.getToolCredential(id),
+      // Phase D: runtime propagation for capability requires assertion
+      ...(config.runtime ? { runtime: config.runtime } : {}),
     };
   }
 

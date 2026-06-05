@@ -1,4 +1,4 @@
-import type { Model } from '@weaveintel/core';
+import type { Model, WeaveRuntime } from '@weaveintel/core';
 import type { ChatSettingsRow } from './db.js';
 import { normalizePersona } from './rbac.js';
 import { getDefaultToolsByMode } from './chat-policies.js';
@@ -48,6 +48,13 @@ export interface ChatEngineConfig {
   providers: Record<string, ProviderConfig>;
   defaultProvider: string;
   defaultModel: string;
+  /**
+   * Phase D — the host's `weaveRuntime` instance, propagated into
+   * `ToolRegistryOptions.runtime` so tool registration asserts each
+   * tool's declared `requires:[...]` against the runtime's advertised
+   * capabilities. Optional for back-compat.
+   */
+  runtime?: WeaveRuntime;
 }
 
 const modelCache = new Map<string, Model>();

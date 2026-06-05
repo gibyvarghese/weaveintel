@@ -43,6 +43,7 @@ export {
   type RuntimeKvStore,
   type RuntimeResilienceSlot,
   type RuntimeGuardrailsSlot,
+  type RuntimeEncryptionSlot,
   RuntimeCapabilities,
   weaveRuntime,
   assertRuntimeRequires,

@@ -2,6 +2,8 @@
  * geneWeave — Developer Documentation HTML
  * Served at GET /docs. Full geneWeave branding, independent scroll, hierarchical nav.
  */
+// no-raw-fetch: allow (reason: fetch occurrences are inside HTML/JS code
+// samples shown in the documentation, never executed by the server)
 
 // ── Build-time helpers ────────────────────────────────────────────────────
 

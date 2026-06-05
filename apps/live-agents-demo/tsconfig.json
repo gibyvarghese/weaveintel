@@ -7,6 +7,7 @@
   "include": ["src"],
   "references": [
     { "path": "../../packages/core" },
-    { "path": "../../packages/live-agents" }
+    { "path": "../../packages/live-agents" },
+    { "path": "../../packages/persistence" }
   ]
 }

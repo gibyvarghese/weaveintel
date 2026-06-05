@@ -142,6 +142,7 @@ const arxivSearch = weaveTool({
   },
   tags: ['scientific', 'evidence', 'literature', 'external'],
   riskLevel: 'external-side-effect',
+  requires: ['runtime.net.egress'],
 });
 
 // ─── pubmed_search ───────────────────────────────────────────────────────────
@@ -164,9 +165,14 @@ const pubmedSearch = weaveTool({
     },
     required: ['query'],
   },
-  execute: async (args: { query: string; max_results?: number }) => {
+  execute: async (args: { query: string; max_results?: number }, ctx) => {
     const maxResults = Math.min(20, Math.max(1, args.max_results ?? 5));
-    const apiKey = process.env['NCBI_API_KEY'];
+    // Phase C — resolve NCBI key via runtime.secrets when reachable, so
+    // vault / per-tenant overrides compose. Env fallback preserves the
+    // zero-config DX for tests + scripts.
+    const apiKey = ctx?.runtime?.secrets
+      ? (await ctx.runtime.secrets.resolve('NCBI_API_KEY').catch(() => undefined)) ?? process.env['NCBI_API_KEY']
+      : process.env['NCBI_API_KEY'];
     const baseParams: Record<string, string> = {
       db: 'pubmed',
       term: args.query,
@@ -266,6 +272,7 @@ const pubmedSearch = weaveTool({
   },
   tags: ['scientific', 'evidence', 'literature', 'external'],
   riskLevel: 'external-side-effect',
+  requires: ['runtime.net.egress', 'runtime.secrets'],
 });
 
 // ─── semanticscholar_search ──────────────────────────────────────────────────
@@ -293,9 +300,11 @@ const semanticscholarSearch = weaveTool({
     },
     required: ['query'],
   },
-  execute: async (args: { query: string; max_results?: number; fields?: string[] }) => {
+  execute: async (args: { query: string; max_results?: number; fields?: string[] }, ctx) => {
     const maxResults = Math.min(20, Math.max(1, args.max_results ?? 5));
-    const apiKey = process.env['SEMANTIC_SCHOLAR_API_KEY'];
+    const apiKey = ctx?.runtime?.secrets
+      ? (await ctx.runtime.secrets.resolve('SEMANTIC_SCHOLAR_API_KEY').catch(() => undefined)) ?? process.env['SEMANTIC_SCHOLAR_API_KEY']
+      : process.env['SEMANTIC_SCHOLAR_API_KEY'];
     const defaultFields = ['paperId', 'title', 'authors', 'year', 'venue', 'citationCount',
       'externalIds', 'abstract'];
     const requestedFields = args.fields
@@ -366,6 +375,7 @@ const semanticscholarSearch = weaveTool({
   },
   tags: ['scientific', 'evidence', 'literature', 'external'],
   riskLevel: 'external-side-effect',
+  requires: ['runtime.net.egress', 'runtime.secrets'],
 });
 
 // ─── openalex_search ─────────────────────────────────────────────────────────
@@ -469,6 +479,7 @@ const openalexSearch = weaveTool({
   },
   tags: ['scientific', 'evidence', 'literature', 'external'],
   riskLevel: 'external-side-effect',
+  requires: ['runtime.net.egress'],
 });
 
 // ─── crossref_resolve ─────────────────────────────────────────────────────────
@@ -549,6 +560,7 @@ const crossrefResolve = weaveTool({
   },
   tags: ['scientific', 'evidence', 'literature', 'external'],
   riskLevel: 'external-side-effect',
+  requires: ['runtime.net.egress'],
 });
 
 // ─── europepmc_search ────────────────────────────────────────────────────────
@@ -638,6 +650,7 @@ const europepmcSearch = weaveTool({
   },
   tags: ['scientific', 'evidence', 'literature', 'external'],
   riskLevel: 'external-side-effect',
+  requires: ['runtime.net.egress'],
 });
 
 // ─── Exports ────────────────────────────────────────────────────────────────

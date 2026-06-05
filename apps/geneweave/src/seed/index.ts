@@ -27,6 +27,7 @@
 import type { DatabaseAdapter } from '../db-types.js';
 import { seedFramework } from './framework.js';
 import { seedAppSpecific } from './app-specific.js';
+import { seedExampleWorkflows } from './workflows.js';
 
 export async function applySeed(db: DatabaseAdapter): Promise<void> {
   // Phase 4: call the existing seedDefaultData() first to preserve the
@@ -38,4 +39,5 @@ export async function applySeed(db: DatabaseAdapter): Promise<void> {
 
   await seedFramework(db);
   await seedAppSpecific(db);
+  await seedExampleWorkflows(db);
 }

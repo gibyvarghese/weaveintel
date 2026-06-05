@@ -14,6 +14,14 @@ import {
   type SqliteStateStore,
   weaveSqliteStateStore,
 } from '@weaveintel/live-agents';
+import {
+  weaveRuntime,
+  weaveInMemoryPersistence,
+  envSecretResolver,
+  type RuntimePersistenceSlot,
+  type WeaveRuntime,
+} from '@weaveintel/core';
+import { weaveSqlitePersistence } from '@weaveintel/persistence';
 
 export interface LiveAgentsDemoOptions {
   host?: string;
@@ -29,11 +37,24 @@ export interface LiveAgentsDemoOptions {
   dynamoDbEndpoint?: string;
   dynamoDbRegion?: string;
   dynamoDbTableName?: string;
+  /**
+   * Phase H — caller-supplied ambient runtime. When omitted, the demo
+   * builds one with `weaveSqlitePersistence` (when
+   * `LIVE_AGENTS_DEMO_RUNTIME_SQLITE_PATH` is set) or
+   * `weaveInMemoryPersistence`, plus `envSecretResolver()` and
+   * `weaveConsoleTracer()`. The runtime is propagated to every
+   * `ExecutionContext` the server constructs (e.g. heartbeat ticks).
+   */
+  runtime?: WeaveRuntime;
+  /** Override the default runtime persistence path. Falls back to
+   * `LIVE_AGENTS_DEMO_RUNTIME_SQLITE_PATH`; in-memory when neither set. */
+  runtimePersistencePath?: string;
 }
 
 export interface LiveAgentsDemoHandle {
   server: Server;
   stateStore: StateStore;
+  runtime: WeaveRuntime;
   stop(): Promise<void>;
 }
 
@@ -121,10 +142,28 @@ export async function createLiveAgentsDemo(options: LiveAgentsDemoOptions = {}):
     store = await createInMemoryDemoStateStore();
   }
 
+  // Phase H — ambient runtime. Default: durable SQLite KV when a path is
+  // configured (env or option), in-memory KV otherwise. Caller can pass a
+  // fully-built `runtime` for full control.
+  const runtime: WeaveRuntime = options.runtime ?? (() => {
+    const persistencePath =
+      options.runtimePersistencePath ?? process.env['LIVE_AGENTS_DEMO_RUNTIME_SQLITE_PATH'];
+    const persistence: RuntimePersistenceSlot = persistencePath
+      ? weaveSqlitePersistence({ path: persistencePath })
+      : weaveInMemoryPersistence();
+    return weaveRuntime({
+      tracer: 'noop',
+      secrets: envSecretResolver(),
+      persistence,
+      installDefaultTracer: false,
+    });
+  })();
+
   const app = createLiveAgentsDemoServer({
     stateStore: store,
     host: options.host,
     port: options.port,
+    runtime,
   });
 
   if (!app.server.listening) {
@@ -137,6 +176,7 @@ export async function createLiveAgentsDemo(options: LiveAgentsDemoOptions = {}):
   return {
     server: app.server,
     stateStore: app.stateStore,
+    runtime,
     async stop() {
       await app.stop();
       const close = (store as { close?: () => Promise<void> }).close;

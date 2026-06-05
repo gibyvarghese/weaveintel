@@ -351,7 +351,18 @@ export async function ensureAtLeastOneTenantAdmin(db: DatabaseAdapter, preferred
   await db.updateUserPersona(fallback.id, 'tenant_admin');
 }
 
-export const oauthClient = new OAuthClient();
+/**
+ * Default OAuth client (in-memory state store). Phase G: replaced at boot
+ * by `setOAuthClient(...)` with a runtime-backed durable state store so
+ * pending authorization-code exchanges survive a restart. ESM live
+ * binding propagates the swap to all importers (e.g. `routes/auth.ts`).
+ */
+export let oauthClient = new OAuthClient();
+
+/** Phase G — swap the module-level `oauthClient` in once the runtime is ready. */
+export function setOAuthClient(client: OAuthClient): void {
+  oauthClient = client;
+}
 
 export function normalizePublicOrigin(value: string): string {
   const parsed = new URL(value);

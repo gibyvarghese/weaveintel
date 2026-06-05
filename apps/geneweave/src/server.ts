@@ -289,9 +289,16 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       return;
     }
 
-    // Developer documentation
+    // Developer documentation — served from apps/geneweave/docs/weaveintel-docs.html
+    // when present (operator-authored), with a fall-back to the generated docsHtml.
     if (method === 'GET' && (pathname === '/docs' || pathname === '/docs/')) {
-      html(res, 200, docsHtml);
+      const staticDocsPath = join(__dirname, '..', 'docs', 'weaveintel-docs.html');
+      try {
+        const body = await fsReadFile(staticDocsPath, 'utf8');
+        html(res, 200, body);
+      } catch {
+        html(res, 200, docsHtml);
+      }
       return;
     }
 

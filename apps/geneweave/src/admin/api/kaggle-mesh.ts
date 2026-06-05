@@ -11,15 +11,13 @@
  * geneweave.db. Source of truth for live-agent topology stays in @weaveintel/live-agents.
  */
 
-import { createIdempotencyStore } from '@weaveintel/reliability';
 import type { Account, AccountBinding, AgentContract, CrossMeshBridge, DelegationEdge, LiveAgent, Mesh, StateStore } from '@weaveintel/live-agents';
 import { provisionMesh } from '@weaveintel/live-agents-runtime';
 import type { DatabaseAdapter } from '../../db.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 import { newUUIDv7 } from '../../lib/uuid.js';
 import { getKaggleLiveStore } from '../../live-agents/kaggle/store.js';
-
-const provisionIdempotency = createIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000 });
+import { createDbBackedIdempotencyStore } from '../../lib/durable-idempotency-store.js';
 
 /** Resolve the StateStore: tests inject via helpers.providers, prod uses singleton. */
 async function resolveStore(helpers: AdminHelpers & { liveStore?: StateStore }): Promise<StateStore> {
@@ -42,6 +40,7 @@ export function registerKaggleMeshRoutes(
   helpers: AdminHelpers & { liveStore?: StateStore },
 ): void {
   const { json, readBody } = helpers;
+  const provisionIdempotency = createDbBackedIdempotencyStore(db);
 
   // ─── List meshes ────────────────────────────────────────────────────
   router.get('/api/admin/kaggle-meshes', async (_req, res, _params, auth) => {
@@ -148,7 +147,7 @@ export function registerKaggleMeshRoutes(
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const idemKey = (req.headers['idempotency-key'] as string | undefined)?.trim();
     if (idemKey) {
-      const cached = provisionIdempotency.check(`kaggle-mesh:${idemKey}`);
+      const cached = await provisionIdempotency.check(`kaggle-mesh:${idemKey}`);
       if (cached.isDuplicate) { json(res, 200, cached.previousResult); return; }
     }
     const raw = await readBody(req);
@@ -205,7 +204,7 @@ export function registerKaggleMeshRoutes(
       delegationEdgeCount: result.delegationEdgeIds.length,
     };
     if (idemKey) {
-      provisionIdempotency.record(`kaggle-mesh:${idemKey}`, summary);
+      await provisionIdempotency.record(`kaggle-mesh:${idemKey}`, summary);
     }
     json(res, 201, summary);
   }, { auth: true, csrf: true });

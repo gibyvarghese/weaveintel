@@ -27,6 +27,7 @@
   "dependencies": {
     "@weaveintel/core": "*",
     "@weaveintel/live-agents": "*",
+    "@weaveintel/persistence": "*",
     "pg": "^8.14.1"
   },
   "devDependencies": {

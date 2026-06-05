@@ -16,28 +16,54 @@
  * workflow runs from DB definitions.
  */
 
-import { newUUIDv7 } from '@weaveintel/core';
+import { newUUIDv7, type WeaveRuntime } from '@weaveintel/core';
 import {
   DefaultWorkflowEngine,
   HandlerResolverRegistry,
   InMemoryCostMeter,
   InMemoryWorkflowDefinitionStore,
+  createDurableCostMeter,
   createNoopResolver,
   createScriptResolver,
   createToolResolver,
+  createPromptResolver,
+  createAgentResolver,
+  createMcpResolver,
+  createSubWorkflowResolver,
   describeHandlerKinds,
+  weaveSqliteIdempotencyStore,
   type CostMeter,
   type HandlerKindDescriptor,
   type WorkflowDefinitionStore,
   type WorkflowRunRepository,
   type CheckpointStore,
   type WorkflowSpanEmitter,
+  type PayloadStore,
+  type StepLockStore,
+  type WorkflowRateLimiter,
+  type WorkflowRunQueue,
+  type StepIdempotencyStore,
+  type PromptResolverDeps,
+  type AgentResolverDeps,
+  type McpResolverDeps,
+  type SubWorkflowResolverDeps,
 } from '@weaveintel/workflows';
-import type { WorkflowDefinition, WorkflowStep } from '@weaveintel/core';
+import type {
+  WorkflowDefinition,
+  WorkflowStep,
+  DurableSleepStore,
+  WorkflowAuditLog,
+} from '@weaveintel/core';
 import type { DatabaseAdapter } from './db.js';
 import { DbWorkflowRunRepository } from './workflows/db-workflow-run-repository.js';
 import { DbCheckpointStore } from './workflows/db-checkpoint-store.js';
 import { DbSpanEmitter } from './workflows/db-span-emitter.js';
+import { DbPayloadStore } from './workflows/db-payload-store.js';
+import { DbStepLockStore } from './workflows/db-step-lock-store.js';
+import { DbSleepStore } from './workflows/db-sleep-store.js';
+import { DbAuditLog } from './workflows/db-audit-log.js';
+import { DbWorkflowRateLimiter } from './workflows/db-rate-limiter.js';
+import { DbRunQueue } from './workflows/db-run-queue.js';
 
 /**
  * DB-backed `WorkflowDefinitionStore` adapter.
@@ -162,6 +188,14 @@ export function buildWorkflowResolverRegistry(opts: {
   // both shapes into the `(input) => Promise<result>` contract that
   // `@weaveintel/workflows`'s `createToolResolver` expects.
   toolGetter?: (key: string) => unknown;
+  /** Optional: wire `prompt:<key>` steps. */
+  promptDeps?: PromptResolverDeps;
+  /** Optional: wire `agent:<key>` steps. */
+  agentDeps?: AgentResolverDeps;
+  /** Optional: wire `mcp:<server>:<method>` steps. */
+  mcpDeps?: McpResolverDeps;
+  /** Optional: wire `subworkflow:<key>` steps. */
+  subworkflowDeps?: SubWorkflowResolverDeps;
 }): HandlerResolverRegistry {
   const reg = new HandlerResolverRegistry();
   reg.register(createNoopResolver());
@@ -201,6 +235,10 @@ export function buildWorkflowResolverRegistry(opts: {
       }),
     );
   }
+  if (opts.promptDeps) reg.register(createPromptResolver(opts.promptDeps));
+  if (opts.agentDeps) reg.register(createAgentResolver(opts.agentDeps));
+  if (opts.mcpDeps) reg.register(createMcpResolver(opts.mcpDeps));
+  if (opts.subworkflowDeps) reg.register(createSubWorkflowResolver(opts.subworkflowDeps));
   return reg;
 }
 
@@ -250,6 +288,20 @@ export interface WorkflowEngineHandle {
   checkpointStore: CheckpointStore;
   /** Phase W6: DB-backed span emitter for observability. */
   spanEmitter: WorkflowSpanEmitter;
+  /** Phase W3: DB-backed payload store for large step outputs. */
+  payloadStore: PayloadStore;
+  /** Phase W4: DB-backed step lock store for exactly-once execution. */
+  stepLockStore: StepLockStore;
+  /** Phase W4: DB-backed durable sleep store for `wait` steps. */
+  sleepStore: DurableSleepStore;
+  /** Phase W4: DB-backed immutable audit log. */
+  auditLog: WorkflowAuditLog;
+  /** Phase W5: DB-backed token-bucket rate limiter. */
+  rateLimiter: WorkflowRateLimiter;
+  /** Phase W5: DB-backed run queue for concurrency buffering. */
+  runQueue: WorkflowRunQueue;
+  /** Phase W2: SQLite-backed step idempotency store (shared connection). */
+  idempotencyStore: StepIdempotencyStore;
 }
 
 /**
@@ -263,10 +315,20 @@ export function createGeneweaveWorkflowEngine(opts: {
   db: DatabaseAdapter;
   toolGetter?: (key: string) => unknown;
   contractEmitter?: import('@weaveintel/workflows').ContractEmitter;
+  /**
+   * Phase B (Durable consumers): when supplied and the runtime carries a
+   * `persistence` slot, workflow run cost totals survive process
+   * restarts via `createDurableCostMeter`. Falls back to the legacy
+   * in-memory meter when omitted.
+   */
+  runtime?: WeaveRuntime;
+  /** Wire `prompt:<key>` resolver. Caller supplies the executor. */
+  promptDeps?: PromptResolverDeps;
+  /** Wire `agent:<key>` resolver. Caller supplies the executor. */
+  agentDeps?: AgentResolverDeps;
+  /** Wire `mcp:<server>:<method>` resolver. Caller supplies the gateway. */
+  mcpDeps?: McpResolverDeps;
 }): WorkflowEngineHandle {
-  const registry = buildWorkflowResolverRegistry({
-    ...(opts.toolGetter ? { toolGetter: opts.toolGetter } : {}),
-  });
   const store = new DbWorkflowDefinitionStore(opts.db);
   // We also wire an in-memory cache layer as the primary store: the
   // engine's built-in cache plus the DB fallback gives us the right
@@ -291,10 +353,56 @@ export function createGeneweaveWorkflowEngine(opts: {
       await memCache.delete(id);
     },
   };
-  const costMeter = new InMemoryCostMeter();
+  const costMeter: CostMeter = opts.runtime
+    ? createDurableCostMeter({ runtime: opts.runtime, namespace: 'cost-meter' })
+    : new InMemoryCostMeter();
   const runRepository = new DbWorkflowRunRepository(opts.db);
   const checkpointStore = new DbCheckpointStore(opts.db);
   const spanEmitter = new DbSpanEmitter(opts.db);
+  const payloadStore = new DbPayloadStore(opts.db);
+  const stepLockStore = new DbStepLockStore(opts.db);
+  const sleepStore = new DbSleepStore(opts.db);
+  const auditLog = new DbAuditLog(opts.db);
+  const rateLimiter = new DbWorkflowRateLimiter(opts.db);
+  const runQueue = new DbRunQueue(opts.db);
+  // Phase W2: share the geneweave SQLite connection so the idempotency
+  // table lives in the same DB file as the rest of workflow state.
+  // The workflows package creates `wf_idempotency` on first use.
+  const rawSqlite = (opts.db as unknown as { d?: unknown }).d;
+  const idempotencyStore = weaveSqliteIdempotencyStore(
+    rawSqlite ? { database: rawSqlite as never } : {},
+  );
+
+  // Forward-reference: subworkflow resolver needs a handle to the engine
+  // we are about to construct. Use a mutable holder + closure so the
+  // resolver can be registered before the engine exists.
+  let engineRef: DefaultWorkflowEngine | undefined;
+  const subworkflowDeps: SubWorkflowResolverDeps = {
+    async resolveWorkflowKey(key: string): Promise<string | undefined> {
+      // Allow either workflow id (PK) or `name` lookup. The
+      // definition store treats both as a get-by-id alias.
+      const direct = await opts.db.getWorkflowDef(key);
+      if (direct) return direct.id;
+      const all = await opts.db.listWorkflowDefs();
+      const byName = all.find((row) => row.name === key);
+      return byName?.id;
+    },
+    async startRun(workflowId: string, input?: Record<string, unknown>) {
+      if (!engineRef) {
+        throw new Error('subworkflow resolver: engine not yet constructed');
+      }
+      return engineRef.startRun(workflowId, input ?? {});
+    },
+  };
+
+  const registry = buildWorkflowResolverRegistry({
+    ...(opts.toolGetter ? { toolGetter: opts.toolGetter } : {}),
+    ...(opts.promptDeps ? { promptDeps: opts.promptDeps } : {}),
+    ...(opts.agentDeps ? { agentDeps: opts.agentDeps } : {}),
+    ...(opts.mcpDeps ? { mcpDeps: opts.mcpDeps } : {}),
+    subworkflowDeps,
+  });
+
   const engine = new DefaultWorkflowEngine({
     resolverRegistry: registry,
     definitionStore: layered,
@@ -302,9 +410,32 @@ export function createGeneweaveWorkflowEngine(opts: {
     checkpointStore,
     costMeter,
     spanEmitter,
+    payloadStore,
+    stepLockStore,
+    sleepStore,
+    auditLog,
+    rateLimiter,
+    runQueue,
+    idempotencyStore,
     ...(opts.contractEmitter ? { contractEmitter: opts.contractEmitter } : {}),
   });
-  return { engine, registry, store: layered, costMeter, runRepository, checkpointStore, spanEmitter };
+  engineRef = engine;
+  return {
+    engine,
+    registry,
+    store: layered,
+    costMeter,
+    runRepository,
+    checkpointStore,
+    spanEmitter,
+    payloadStore,
+    stepLockStore,
+    sleepStore,
+    auditLog,
+    rateLimiter,
+    runQueue,
+    idempotencyStore,
+  };
 }
 
 export { DbWorkflowDefinitionStore };

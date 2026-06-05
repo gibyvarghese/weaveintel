@@ -13,17 +13,28 @@ import {
   type Message,
   type StateStore,
 } from '@weaveintel/live-agents';
-import { weaveContext, type Model, type ExecutionContext, type ModelRequest, type ModelResponse } from '@weaveintel/core';
+import { weaveContext, type Model, type ExecutionContext, type ModelRequest, type ModelResponse, type WeaveRuntime } from '@weaveintel/core';
 
 export interface LiveAgentsDemoConfig {
   stateStore: StateStore;
   host?: string;
   port?: number;
+  /**
+   * Phase H — ambient cross-cutting runtime. When provided, the demo
+   * server propagates it into every `ExecutionContext` it builds (e.g.
+   * the heartbeat tick) so observability + secrets + audit + persistence
+   * are inherited by anything the live-agents loop reaches. The host is
+   * responsible for constructing one (see `createLiveAgentsDemo` in
+   * `index.ts` for the default wiring).
+   */
+  runtime?: WeaveRuntime;
 }
 
 export interface LiveAgentsDemoApp {
   server: Server;
   stateStore: StateStore;
+  /** Phase H — the runtime the server is propagating, when configured. */
+  runtime?: WeaveRuntime;
   stop(): Promise<void>;
 }
 
@@ -538,7 +549,12 @@ export function createLiveAgentsDemoServer(config: LiveAgentsDemoConfig): LiveAg
       }
 
       if (req.method === 'POST' && req.url === '/api/heartbeat/run-once') {
-        const result = await heartbeat.tick(weaveContext({ userId: 'human:ops-admin-1' }));
+        const result = await heartbeat.tick(
+          weaveContext({
+            userId: 'human:ops-admin-1',
+            ...(config.runtime ? { runtime: config.runtime } : {}),
+          }),
+        );
         json(res, 200, result);
         return;
       }
@@ -567,6 +583,7 @@ export function createLiveAgentsDemoServer(config: LiveAgentsDemoConfig): LiveAg
   return {
     server,
     stateStore: config.stateStore,
+    ...(config.runtime ? { runtime: config.runtime } : {}),
     async stop() {
       await heartbeat.stop();
       await new Promise<void>((resolve, reject) => {

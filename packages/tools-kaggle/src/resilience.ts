@@ -8,6 +8,9 @@
  * Phase 5 — the bespoke BreakerState Map is replaced by `createCircuitBreaker`
  * from the canonical resilience package, removing the local duplicate implementation.
  */
+// no-adhoc-resilience: allow (reason: this file is a thin wrapper that composes
+// `createRetryBudget` + `createCircuitBreaker` from the canonical packages — no
+// local re-implementation; basename triggers the lint, hence the per-file allow.)
 
 import { createRetryBudget } from '@weaveintel/reliability';
 import { createCircuitBreaker } from '@weaveintel/resilience';

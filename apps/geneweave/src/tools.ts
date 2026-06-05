@@ -5,7 +5,7 @@
  * a helper to create a ToolRegistry from selected tool names.
  */
 
-import type { Tool, ToolRegistry } from '@weaveintel/core';
+import type { Tool, ToolRegistry, WeaveRuntime } from '@weaveintel/core';
 import { weaveTool, weaveToolRegistry, newUUIDv7 } from '@weaveintel/core';
 import { createPolicyEnforcedRegistry, type ToolPolicyResolver, type ToolAuditEmitter, type ToolRateLimiter, noopAuditEmitter } from '@weaveintel/tools';
 import { Buffer } from 'node:buffer';
@@ -25,6 +25,59 @@ import {
 import { weaveA2AClient } from '@weaveintel/a2a';
 import { createSVToolMap } from './features/scientific-validation/tools/index.js';
 import { createKaggleToolMap } from './live-agents/kaggle/kaggle-tools.js';
+
+/**
+ * Module-level holder for the workflow engine reference. Populated at
+ * startup by `index.ts` after `createGeneweaveWorkflowEngine()` runs.
+ * The `workflow_run` built-in tool reads this so any agent can start a
+ * workflow run by id or name. Best-effort: if not yet set, the tool
+ * returns a clear `isError` envelope rather than crashing.
+ */
+let workflowEngineRef: {
+  startRun(workflowId: string, input: Record<string, unknown>): Promise<unknown>;
+  resolveByKey(key: string): Promise<string | undefined>;
+} | undefined;
+
+export function setWorkflowEngineForTools(handle: {
+  startRun(workflowId: string, input: Record<string, unknown>): Promise<unknown>;
+  resolveByKey(key: string): Promise<string | undefined>;
+}): void {
+  workflowEngineRef = handle;
+}
+
+const workflowRunTool = weaveTool({
+  name: 'workflow_run',
+  description:
+    'Start a workflow run by id or name. Forwards the supplied `variables` as initial run input. Returns the terminal run state (`completed` or `failed`) including history and variables. Use this to compose multi-step automations from chat.',
+  parameters: {
+    type: 'object',
+    properties: {
+      workflow: {
+        type: 'string',
+        description: 'Workflow id (UUID) or human-readable `name` field from `workflow_defs`.',
+      },
+      variables: {
+        type: 'object',
+        description: 'Initial workflow input variables. Forwarded as `state.variables` to step 1.',
+        additionalProperties: true,
+      },
+    },
+    required: ['workflow'],
+  },
+  execute: async (args: { workflow: string; variables?: Record<string, unknown> }) => {
+    if (!workflowEngineRef) {
+      return JSON.stringify({ error: 'workflow engine not initialised yet', workflow: args.workflow });
+    }
+    const id = await workflowEngineRef.resolveByKey(args.workflow).catch(() => undefined);
+    if (!id) {
+      return JSON.stringify({ error: 'workflow not found', workflow: args.workflow });
+    }
+    const run = await workflowEngineRef.startRun(id, args.variables ?? {});
+    return JSON.stringify({ workflow: args.workflow, workflowId: id, run }, null, 2);
+  },
+  tags: ['workflow', 'orchestration'],
+  riskLevel: 'write',
+});
 
 interface RuntimeAttachment {
   name: string;
@@ -170,9 +223,30 @@ function evaluateExpression(expression: string): number {
   return values[0]!;
 }
 
-function buildSearchProviderConfigs(): Record<string, SearchProviderConfig> {
-  const tavilyApiKey = process.env['TAVILY_API_KEY'];
-  const braveApiKey = process.env['BRAVE_SEARCH_API_KEY'] ?? process.env['BRAVE_API_KEY'];
+/**
+ * Phase C — Resolve search-provider secrets through `runtime.secrets`
+ * when an `ExecutionContext` is available, so vault / per-tenant /
+ * chained resolvers compose. Falls back to `process.env` only when no
+ * runtime is reachable (tests, scripts) — preserving the zero-config DX.
+ */
+async function buildSearchProviderConfigs(
+  runtime?: WeaveRuntime | undefined,
+): Promise<Record<string, SearchProviderConfig>> {
+  const resolveSecret = async (key: string): Promise<string | undefined> => {
+    if (runtime?.secrets) {
+      try {
+        const v = await runtime.secrets.resolve(key);
+        if (v !== undefined) return v;
+      } catch {
+        // resolver throw → fall back to env (graceful by construction)
+      }
+    }
+    return process.env[key];
+  };
+  const tavilyApiKey = await resolveSecret('TAVILY_API_KEY');
+  const braveApiKey =
+    (await resolveSecret('BRAVE_SEARCH_API_KEY')) ??
+    (await resolveSecret('BRAVE_API_KEY'));
 
   return {
     // Default free provider with no API key requirement.
@@ -252,8 +326,8 @@ const webSearchTool = weaveTool({
     },
     required: ['query'],
   },
-  execute: async (args: { query: string; limit?: number; provider?: string; language?: string; safeSearch?: boolean }) => {
-    const configs = buildSearchProviderConfigs();
+  execute: async (args: { query: string; limit?: number; provider?: string; language?: string; safeSearch?: boolean }, ctx) => {
+    const configs = await buildSearchProviderConfigs(ctx?.runtime);
     const hasEnabledProvider = Object.values(configs).some((cfg) => cfg.enabled);
     if (!hasEnabledProvider) {
       return JSON.stringify({
@@ -298,6 +372,12 @@ const webSearchTool = weaveTool({
     }, null, 2);
   },
   tags: ['search', 'external'],
+  // Phase D — declares the runtime capabilities this tool needs so the
+  // tool registry can assert them at registration time when constructed
+  // with `weaveToolRegistry({ runtime })`. Egress for outbound HTTP to
+  // search providers; secrets for resolving TAVILY/BRAVE keys via
+  // `runtime.secrets` (Phase C).
+  requires: ['runtime.net.egress', 'runtime.secrets'],
 });
 
 const jsonFormatterTool = weaveTool({
@@ -637,6 +717,7 @@ export const BUILTIN_TOOLS: Record<string, Tool> = {
   social_insights_read: socialInsightsReadTool,
   social_comments_read: socialCommentsReadTool,
   social_post: socialPostTool,
+  workflow_run: workflowRunTool,
   ...browserToolMap(),
   ...cseToolMap(),
   ...statsNzToolMap(),
@@ -673,6 +754,9 @@ export async function syncToolCatalog(db: DatabaseAdapter): Promise<void> {
         source: 'builtin',
         credential_id: null,
         allocation_class: allocationClass,
+        requires: tool.schema.requires && tool.schema.requires.length > 0
+          ? JSON.stringify(tool.schema.requires)
+          : null,
       });
     } else {
       // Upsert risk_level, side_effects, name, and description so code-side changes propagate.
@@ -682,6 +766,9 @@ export async function syncToolCatalog(db: DatabaseAdapter): Promise<void> {
         side_effects: hasSideEffects,
         name: tool.schema.name,
         description: tool.schema.description,
+        requires: tool.schema.requires && tool.schema.requires.length > 0
+          ? JSON.stringify(tool.schema.requires)
+          : null,
       };
       if (!existing.allocation_class && allocationClass) {
         upsertFields['allocation_class'] = allocationClass;
@@ -749,7 +836,17 @@ export interface ToolRegistryOptions {
    * Phase 6: Active skill's tool_policy_key, propagated from the top-matched skill
    * via discoverSkillsForInput(). Overrides the global tool policy when set.
    */
-  skillPolicyKey?: string;}
+  skillPolicyKey?: string;
+  /**
+   * Phase D — the host's `weaveRuntime` instance. When supplied,
+   * `weaveToolRegistry({ runtime })` asserts every tool's
+   * `schema.requires` against the runtime's advertised capabilities at
+   * `register()` time, so misconfigurations surface at boot rather than
+   * on first invocation. Optional for back-compat; without it the
+   * registry falls back to invocation-time `runtime.require(...)` checks.
+   */
+  runtime?: WeaveRuntime;
+}
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
   return toolNames.filter((toolName) => canUseTool(persona, toolName));
@@ -822,7 +919,7 @@ function buildA2ATool(toolKey: string, description: string, agentUrl: string): i
  * plus any custom tools provided.
  */
 export async function createToolRegistry(toolNames: string[], customTools?: Tool[], opts?: ToolRegistryOptions): Promise<ToolRegistry> {
-  const registry = weaveToolRegistry();
+  const registry = weaveToolRegistry(opts?.runtime ? { runtime: opts.runtime } : undefined);
   const actorPersona = opts?.actorPersona;
   const memoryRecallTool = weaveTool({
     name: 'memory_recall',

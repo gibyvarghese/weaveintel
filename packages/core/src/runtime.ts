@@ -91,6 +91,29 @@ export interface RuntimeResilienceSlot {
 }
 
 /**
+ * Structural slot for tenant-scoped encryption (Phase F). The concrete
+ * implementation comes from `@weaveintel/encryption` (`weaveTenantKeyManager`),
+ * but core stays dep-free — consumers that need to encrypt/decrypt retrieve
+ * the slot via `ctx.runtime?.encryption` and cast to the concrete
+ * `TenantKeyManager` shape they expect. Marker-only by design (no methods)
+ * so core takes no dependency on the encryption package.
+ */
+export interface RuntimeEncryptionSlot {
+  readonly kind: string;
+  /**
+   * Lazy accessor for the underlying key manager. Returns `null` while
+   * encryption is disabled (no master key configured) or before the
+   * adopter's bootstrap has completed. Callers cast the return value to
+   * the concrete `TenantKeyManager` from `@weaveintel/encryption`.
+   *
+   * The accessor pattern lets adopters construct the runtime BEFORE the
+   * manager is ready, then mutate the underlying ref once bootstrap
+   * completes — without changing the runtime object.
+   */
+  getManager(): unknown;
+}
+
+/**
  * Structural slot for ambient guardrails (Phase 3). The agent loop, workflow
  * engine, and tool registry all consult `runtime.guardrails?.checkToolCall`
  * before invoking a tool and `runtime.guardrails?.checkOutput` before
@@ -145,6 +168,7 @@ export interface WeaveRuntime {
   readonly persistence: RuntimePersistenceSlot | undefined;
   readonly resilience: RuntimeResilienceSlot | undefined;
   readonly guardrails: RuntimeGuardrailsSlot | undefined;
+  readonly encryption: RuntimeEncryptionSlot | undefined;
   readonly metadata: Readonly<Record<string, unknown>>;
 
   has(cap: CapabilityId): boolean;
@@ -171,6 +195,7 @@ export interface WeaveRuntimeOptions {
   readonly persistence?: RuntimePersistenceSlot;
   readonly resilience?: RuntimeResilienceSlot;
   readonly guardrails?: RuntimeGuardrailsSlot;
+  readonly encryption?: RuntimeEncryptionSlot;
   /**
    * Phase 5 — optional `Redactor`. When supplied, every audit entry's
    * `details` object is serialised → redacted → re-parsed before the entry
@@ -388,6 +413,7 @@ export function weaveRuntime(opts: WeaveRuntimeOptions = {}): WeaveRuntime {
   if (opts.persistence) caps.add(RuntimeCapabilities.Persistence);
   if (opts.resilience) caps.add(RuntimeCapabilities.Resilience);
   if (opts.guardrails) caps.add(RuntimeCapabilities.Guardrails);
+  if (opts.encryption) caps.add(RuntimeCapabilities.Encryption);
   for (const c of opts.extraCapabilities ?? []) caps.add(c);
 
   const rt: WeaveRuntime = {
@@ -399,6 +425,7 @@ export function weaveRuntime(opts: WeaveRuntimeOptions = {}): WeaveRuntime {
     persistence: opts.persistence,
     resilience: opts.resilience,
     guardrails: opts.guardrails,
+    encryption: opts.encryption,
     metadata: opts.metadata ?? {},
     has(cap) {
       return caps.has(cap);

@@ -273,7 +273,7 @@
       <a href="#compliance">Compliance</a>
       <a href="#sandbox">Sandbox</a>
       <a href="#resilience">Resilience</a>
-      <a href="#reliability">Reliability</a>
+      <a href="#reliability">Durability</a>
     </div>
     <div class="navgroup">
       <div class="navhead"><span class="dot"></span>Observability &amp; eval</div>
@@ -418,6 +418,12 @@ console.<span class="tk-f">log</span>(result.output);   <span class="tk-c">// �
     <div class="ct">Reading the snippets</div>
     <p>Every code block has a Copy button in its title bar. Snippets use real, current signatures. Where a call takes the context, it is always the first argument — this is one of the most common things older examples get backwards.</p>
   </div>
+
+  <h4>The curated entry point</h4>
+  <p>Most adopters need roughly eight packages out of the ~78 the monorepo ships, and importing them one by one is an onboarding cliff. <code>@weaveintel/weaveintel</code> is a meta-package that re-exports the golden-path surface — the runtime, execution context, hardened egress, secret resolution, audit, the agent and tool constructors — behind one import. There is no hidden behaviour in it, only re-exports; anything beyond the curated set still lives in its specific package.</p>
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">curated-import.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-c">// One import for the common case, instead of reaching into many packages.</span>
+<span class="tk-k">import</span> { weaveRuntime, weaveContext, weaveAgent, defineTool } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/weaveintel'</span>;</pre></div>
 </section>
 
 <!-- ===================== CORE ===================== -->
@@ -513,7 +519,7 @@ runtime.<span class="tk-f">require</span>(RuntimeCapabilities.<span class="tk-f"
 
   <div class="call security"><span class="ic">🔐</span>
     <div class="ct">Default outcome — safe egress &amp; secret hygiene</div>
-    <p>The hardened egress client blocks requests to cloud metadata endpoints and RFC-1918 private ranges, follows redirects manually so each hop is re-validated, and caps response size and time. Resolving secrets through the runtime means a credential never has to be read from the environment inside a leaf package — a prerequisite for per-tenant vaults.</p>
+    <p>The hardened egress client blocks requests to cloud metadata endpoints, RFC-1918 private ranges and DNS-rebinding bypasses, enforces an HTTPS/TLS floor (plain <code>http://</code> only for loopback when explicitly allowed), follows redirects manually so each hop is re-validated, and caps response size and wall-clock time. Resolving secrets through the runtime means a credential never has to be read from the environment inside a leaf package — a prerequisite for per-tenant vaults.</p>
   </div>
 </section>
 
@@ -1156,7 +1162,7 @@ log.<span class="tk-f">record</span>(<span class="tk-f">createDecision</span>({ 
 
   <div class="grid2">
     <div class="card"><h4>Productivity &amp; mail</h4><p><code>tools-gmail</code> (<code>createGmailMCPServer</code>), <code>tools-gcal</code>, <code>tools-gdrive</code>, <code>tools-outlook</code>, <code>tools-outlook-cal</code>, <code>tools-onedrive</code>, <code>tools-dropbox</code>, <code>tools-slack</code>, <code>tools-imap</code> — each with a live and fixture adapter.</p></div>
-    <div class="card"><h4>Enterprise</h4><p><code>tools-enterprise</code> via <code>createEnterpriseTools()</code> — a large catalog led by ServiceNow and Jira, with Salesforce, Confluence, Notion and Canva. This is the deepest connector, with hundreds of typed operations.</p></div>
+    <div class="card"><h4>Enterprise</h4><p><code>tools-enterprise</code> via <code>createEnterpriseTools()</code> / <code>createEnterpriseToolGroups()</code> — a provider-based connector (<code>ServiceNowProvider</code>, <code>JiraFullProvider</code>, <code>SalesforceProvider</code>, <code>ConfluenceProvider</code>, <code>NotionProvider</code>, <code>CanvaProvider</code>) with named auth helpers (basic / OAuth2 / client-credentials) and an <code>AuthManager</code>. The deepest connector in the family.</p></div>
     <div class="card"><h4>Social &amp; news</h4><p><code>tools-social</code> (<code>createSocialTools()</code>) across many platforms, and <code>tools-news</code> (<code>createNewsMCPServer</code>, Finnhub adapter).</p></div>
     <div class="card"><h4>Markets &amp; research</h4><p><code>tools-marketdata</code> (Alpha&nbsp;Vantage + composite), <code>tools-broker</code> (paper, Alpaca, IBKR), <code>tools-altdata</code>, and <code>tools-kaggle</code> (<code>createKaggleMCPServer</code>, local tools, fixture adapter).</p></div>
   </div>
@@ -1440,6 +1446,17 @@ bus.<span class="tk-f">register</span>(<span class="tk-s">'billing'</span>, <spa
   <div class="meta-row"><span class="pkgtag">@weaveintel/sandbox</span></div>
   <p><strong>What it does.</strong> Runs untrusted or model-generated code under resource limits and a policy, returning a structured result with captured output and artifacts. <code>createSandbox</code> gives an executor; <code>createSimulatedSandbox</code> a dry-run form for tests; and a container executor isolates execution at the OS level for stronger boundaries. The CSE (code-sandbox-execution) layer is what a supervisor's code tools and data-analysis features run against.</p>
   <p><strong>When to use it.</strong> Whenever an agent generates and runs code — data analysis, computation, file transforms. The sandbox enforces CPU/memory/time limits and a network/filesystem policy so a generated script can't exhaust the host or reach where it shouldn't. The <code>createSafeExecutionAgent</code> recipe pairs an agent with a sandbox. See <code>examples/19-compliance-sandbox.ts</code>.</p>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">sandbox.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> { createSandbox, createSandboxPolicy, createDefaultLimits } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/sandbox'</span>;
+
+<span class="tk-k">const</span> sandbox = <span class="tk-f">createSandbox</span>();          <span class="tk-c">// or createSimulatedSandbox() for tests</span>
+<span class="tk-k">const</span> policy = <span class="tk-f">createSandboxPolicy</span>({ limits: <span class="tk-f">createDefaultLimits</span>() });
+
+<span class="tk-k">const</span> result = <span class="tk-k">await</span> sandbox.<span class="tk-f">execute</span>(<span class="tk-s">'print(2 + 2)'</span>, policy);
+console.<span class="tk-f">log</span>(result.status, result.output);   <span class="tk-c">// status: 'success'|'error'|'timeout'|'killed', plus output + resourceUsage</span></pre></div>
+
+  <p>For OS-level isolation — the path geneWeave's Compute Sandbox Engine uses — <code>weaveContainerExecutor(...)</code> runs code in a hardened container (read-only rootfs, dropped capabilities, no network, non-root user, memory/CPU/pids caps) against a prebuilt image. The CSE layer also exposes itself as tools (<code>createCSETools</code>) and an MCP server (<code>createCSEMCPServer</code>) so agents and workflows can request code execution as a governed capability.</p>
 </section>
 
 <!-- ===================== RESILIENCE ===================== -->
@@ -1474,9 +1491,13 @@ bus.<span class="tk-f">register</span>(<span class="tk-s">'billing'</span>, <spa
 
 <!-- ===================== RELIABILITY ===================== -->
 <section id="reliability">
-  <h3>@weaveintel/reliability — idempotency, DLQ, health</h3>
-  <div class="meta-row"><span class="pkgtag">@weaveintel/reliability</span></div>
-  <p><strong>What it does.</strong> The durability primitives for at-least-once systems: an idempotency store so a retried operation runs once (<code>createIdempotencyStore</code> / durable variant), a dead-letter queue for failed work (<code>createDeadLetterQueue</code>), retry budgets that cap total retry spend, concurrency control, backpressure signals, and health checks (<code>createHealthChecker</code>) that surface a service's state.</p>
+  <h3>@weaveintel/durability — idempotency, DLQ, health</h3>
+  <div class="meta-row"><span class="pkgtag">@weaveintel/durability</span><span class="pkgtag">canonical</span><span class="pkgtag">@weaveintel/reliability (alias)</span></div>
+  <p><strong>What it does.</strong> The durability primitives for at-least-once systems: an idempotency store so a retried operation runs once (<code>createIdempotencyStore</code> / <code>createDurableIdempotencyStore</code>), a dead-letter queue for failed work (<code>createDeadLetterQueue</code>), retry budgets that cap total retry spend (<code>createRetryBudget</code>), a concurrency limiter, a backpressure monitor (<code>createBackpressureMonitor</code>), and health checks (<code>createHealthChecker</code>) that surface a service's state.</p>
+  <div class="call note"><span class="ic">🧵</span>
+    <div class="ct">Naming — durability vs reliability</div>
+    <p><code>@weaveintel/durability</code> is the <strong>canonical</strong> package; <code>@weaveintel/reliability</code> is its original name and is kept as an alias that re-exports everything, so existing imports keep working. New code should import from <code>@weaveintel/durability</code>. Note the deliberate split from <a href="#resilience">@weaveintel/resilience</a>: resilience is the live per-call guard pipeline (token bucket, breaker, retry), while durability is operational at-least-once machinery that <em>uses</em> resilience internally but addresses a different concern.</p>
+  </div>
   <p><strong>When to use it.</strong> Around triggers, webhooks, queues and long-running workflows — anywhere a message might be delivered twice or a job might fail and need parking. Idempotency keys keep double-delivery safe; the DLQ keeps failures inspectable rather than lost; health checks feed your orchestrator. geneWeave exposes health snapshots in its admin dashboard built on these. See <code>examples/125-durable-runtime.ts</code> and <code>126-durable-subsystems.ts</code>.</p>
 </section>
 
@@ -1567,7 +1588,13 @@ console.<span class="tk-f">log</span>(<span class="tk-s">`${result.passed}/${res
 <section id="replay">
   <h3>@weaveintel/replay — deterministic re-execution</h3>
   <div class="meta-row"><span class="pkgtag">@weaveintel/replay</span></div>
-  <p><strong>What it does.</strong> Captures a run as a scenario and re-executes it deterministically, so you can debug a production incident, compare two versions on the same input, build golden-case suites, and detect regressions. It exposes a replay engine, scenarios, golden cases, comparison runs and regression detection.</p>
+  <p><strong>What it does.</strong> Captures a run as a scenario and re-executes it deterministically, so you can debug a production incident, compare two versions on the same input, build golden-case suites, and detect regressions. <code>createReplayEngine(opts?)</code> returns a <code>ReplayEngine</code> whose <code>replay(ctx, runLog)</code> re-runs a recorded <code>RunLog</code> and returns a <code>ReplayResult</code>; the package also exports scenarios, golden cases, comparison runs and regression detection (the <code>engine</code>, <code>scenario</code>, <code>golden</code>, <code>comparison</code> and <code>regression</code> modules).</p>
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">replay.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> { createReplayEngine } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/replay'</span>;
+
+<span class="tk-k">const</span> engine = <span class="tk-f">createReplayEngine</span>();
+<span class="tk-k">const</span> result = <span class="tk-k">await</span> engine.<span class="tk-f">replay</span>(ctx, recordedRunLog);   <span class="tk-c">// re-executes a captured RunLog deterministically</span>
+console.<span class="tk-f">log</span>(result);   <span class="tk-c">// → ReplayResult: what matched, what diverged</span></pre></div>
   <p><strong>When to use it.</strong> When "it behaved differently in production" needs a reproducible answer. Record the run, replay it locally against a code change, and compare — or freeze a known-good run as a golden case and fail CI if behaviour drifts. Live-agent runs have their own replay path (<code>replayLiveAgentsRun</code>) since their state evolves over many ticks. See <code>examples/62</code> and <code>78-kaggle-replay-roundtrip.ts</code>.</p>
 </section>
 
