@@ -1,5 +1,16 @@
 /** Guardrails, routing policies, model pricing, and anyWeave task-aware routing row types. */
 
+export interface GuardrailRevisionRow {
+  id: string;
+  guardrail_id: string;
+  version: number;
+  snapshot: string;      // JSON: full Guardrail object after the change
+  before: string | null; // JSON: Guardrail state before the change (null on create)
+  actor: string;
+  reason: string;
+  created_at: string;
+}
+
 export interface GuardrailRow {
   id: string;
   name: string;

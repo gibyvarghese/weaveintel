@@ -51,6 +51,8 @@ export interface ServerConfig {
    * used (for tests or embedded callers that have not seeded the catalog).
    */
   gatewayConfig?: LoadedGatewayConfig;
+  /** App-wide runtime — threaded into admin routes so weaveAudit writes to durable KV. */
+  runtime?: import('@weaveintel/core').WeaveRuntime;
   /**
    * Workflow Platform Phase 1: optional handle to the singleton
    * `DefaultWorkflowEngine` constructed at startup. When supplied, the
@@ -110,7 +112,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerSettingsRoutes(router, db);
   registerTraceRoutes(router, db, dashboard);
   registerChatRoutes(router, db, chatEngine, dashboard, workflowEngine as { getStatus?: () => unknown } | undefined);
-  registerAdminWiringRoutes(router, db, { providers, publicBaseUrl, gatewayConfig, workflowEngine, triggerDispatcher, chatEngine });
+  registerAdminWiringRoutes(router, db, { providers, publicBaseUrl, gatewayConfig, workflowEngine, triggerDispatcher, chatEngine, runtime: config.runtime });
 
   // ── Avatar static files ────────────────────────────────────
 

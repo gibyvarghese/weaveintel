@@ -5,6 +5,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { GuardrailRevisionStore, WeaveRuntime } from '@weaveintel/core';
 import type { DatabaseAdapter } from './db.js';
 import { validateDetailedDescription } from './admin/api/admin-route-helpers.js';
 import {
@@ -15,6 +16,12 @@ import {
 } from './admin/routes/index.js';
 import type { RouterLike } from './admin/api/types.js';
 
+export interface AdminRouteExtras {
+  guardrailRevisionStore?: GuardrailRevisionStore;
+  /** App-wide runtime — carries durable KV so weaveAudit writes persist. */
+  runtime?: WeaveRuntime;
+}
+
 export function registerAdminRoutes(
   router: RouterLike,
   db: DatabaseAdapter,
@@ -22,6 +29,7 @@ export function registerAdminRoutes(
   readBody: (req: IncomingMessage) => Promise<string>,
   providers?: Record<string, { apiKey?: string }>,
   html?: (res: ServerResponse, status: number, body: string) => void,
+  extras?: AdminRouteExtras,
 ): void {
   function requireDetailedDescription(
     description: unknown,
@@ -39,6 +47,6 @@ export function registerAdminRoutes(
 
   registerAdminUserRoutes(router, db, json, readBody);
   registerAdminPromptRoutes(router, db, json, readBody);
-  registerAdminRoutingRoutes(router, db, json, readBody, providers);
+  registerAdminRoutingRoutes(router, db, json, readBody, providers, extras?.guardrailRevisionStore, extras?.runtime);
   registerAdminConnectorRoutes(router, db, json, readBody, providers, html);
 }

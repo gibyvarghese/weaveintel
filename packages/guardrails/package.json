@@ -16,12 +16,14 @@
     "build": "tsc -b",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "guardrails:eval": "npx tsx src/eval/runner.ts"
   },
   "dependencies": {
     "@weaveintel/core": "*"
   },
   "devDependencies": {
+    "@weaveintel/testing": "*",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }

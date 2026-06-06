@@ -1,22 +1,46 @@
-import { newUUIDv7 } from '@weaveintel/core';
+import { newUUIDv7, weaveContext, weaveRuntime } from '@weaveintel/core';
+import type { ExecutionContext, Guardrail, GuardrailRevisionStore, GuardrailStage, GuardrailType, WeaveRuntime } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
 import type { GuardrailRow } from '../../db-types.js';
 import type { RouterLike, AdminHelpers } from './types.js';
+import { recordGuardrailChange } from '../../guardrail-revision-store.js';
+
+// Use the app's runtime when available so weaveAudit writes to durable KV.
+function makeAdminCtx(runtime?: WeaveRuntime): ExecutionContext {
+  return weaveContext({ runtime: runtime ?? weaveRuntime() });
+}
+
+function rowToGuardrail(g: GuardrailRow): Guardrail {
+  return {
+    id: g.id,
+    name: g.name,
+    description: g.description ?? undefined,
+    type: g.type as GuardrailType,
+    stage: g.stage as GuardrailStage,
+    config: g.config ? JSON.parse(g.config) as Record<string, unknown> : {},
+    priority: g.priority,
+    enabled: g.enabled === 1,
+  };
+}
 
 /**
- * Register guardrail admin routes
+ * Register guardrail admin routes.
+ * All create / update / delete mutations are tracked in guardrail_revisions.
  *
  * Routes:
- * - GET /api/admin/guardrails
- * - GET /api/admin/guardrails/:id
+ * - GET  /api/admin/guardrails
+ * - GET  /api/admin/guardrails/:id
+ * - GET  /api/admin/guardrails/:id/revisions
  * - POST /api/admin/guardrails
- * - PUT /api/admin/guardrails/:id
- * - DEL /api/admin/guardrails/:id
+ * - PUT  /api/admin/guardrails/:id
+ * - DEL  /api/admin/guardrails/:id
  */
 export function registerGuardrailRoutes(
   router: RouterLike,
   db: DatabaseAdapter,
-  helpers: AdminHelpers
+  helpers: AdminHelpers,
+  revisionStore?: GuardrailRevisionStore,
+  runtime?: WeaveRuntime,
 ): void {
   const { json, readBody } = helpers;
 
@@ -33,6 +57,14 @@ export function registerGuardrailRoutes(
     json(res, 200, { guardrail: g });
   }, { auth: true });
 
+  // New: revision history endpoint
+  router.get('/api/admin/guardrails/:id/revisions', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    if (!revisionStore) { json(res, 200, { revisions: [] }); return; }
+    const revisions = await revisionStore.list(params['id']!);
+    json(res, 200, { revisions });
+  }, { auth: true });
+
   router.post('/api/admin/guardrails', async (req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const raw = await readBody(req);
@@ -47,6 +79,15 @@ export function registerGuardrailRoutes(
       priority: (body['priority'] as number) ?? 0, enabled: body['enabled'] !== false ? 1 : 0,
     });
     const guardrail = await db.getGuardrail(id);
+    if (guardrail && revisionStore) {
+      const ctx = makeAdminCtx(runtime);
+      await recordGuardrailChange(revisionStore, ctx, {
+        guardrailId: id,
+        actor: typeof auth === 'object' && auth !== null && 'userId' in auth ? String((auth as { userId: string }).userId) : 'admin',
+        reason: 'Created via admin API',
+        snapshot: rowToGuardrail(guardrail),
+      });
+    }
     json(res, 201, { guardrail });
   }, { auth: true, csrf: true });
 
@@ -67,11 +108,32 @@ export function registerGuardrailRoutes(
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
     await db.updateGuardrail(params['id']!, fields as Partial<Omit<GuardrailRow, 'id' | 'created_at' | 'updated_at'>>);
     const guardrail = await db.getGuardrail(params['id']!);
+    if (guardrail && revisionStore) {
+      const ctx = makeAdminCtx(runtime);
+      await recordGuardrailChange(revisionStore, ctx, {
+        guardrailId: params['id']!,
+        actor: typeof auth === 'object' && auth !== null && 'userId' in auth ? String((auth as { userId: string }).userId) : 'admin',
+        reason: (body['reason'] as string) ?? 'Updated via admin API',
+        snapshot: rowToGuardrail(guardrail),
+        before: rowToGuardrail(existing),
+      });
+    }
     json(res, 200, { guardrail });
   }, { auth: true, csrf: true });
 
   router.del('/api/admin/guardrails/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const existing = await db.getGuardrail(params['id']!);
+    if (existing && revisionStore) {
+      const ctx = makeAdminCtx(runtime);
+      await recordGuardrailChange(revisionStore, ctx, {
+        guardrailId: params['id']!,
+        actor: typeof auth === 'object' && auth !== null && 'userId' in auth ? String((auth as { userId: string }).userId) : 'admin',
+        reason: 'Deleted via admin API',
+        snapshot: { ...rowToGuardrail(existing), enabled: false },
+        before: rowToGuardrail(existing),
+      });
+    }
     await db.deleteGuardrail(params['id']!);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });

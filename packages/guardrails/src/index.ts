@@ -2,6 +2,9 @@
  * @weaveintel/guardrails — Public API
  */
 
+// ── Side-effect: register built-in async evaluators into defaultRegistry ──
+import './evaluators/register.js';
+
 // Pipeline
 export {
   DefaultGuardrailPipeline,
@@ -12,12 +15,68 @@ export {
   type PipelineOptions,
 } from './pipeline.js';
 
-// Built-in guardrails
+// Built-in sync guardrail evaluators + cognitive check summariser
 export {
   evaluateGuardrail,
   summarizeGuardrailResults,
   type GuardrailCategorySummary,
 } from './guardrail.js';
+
+// W1 — Async evaluation foundation
+export {
+  AsyncEvaluatorRegistry,
+  defaultRegistry,
+  evaluateGuardrailAsync,
+  type AsyncGuardrailEvaluatorFn,
+} from './async-evaluator.js';
+
+// W2 — Model-graded evaluator factories (for custom registration)
+export { createModerationEvaluator } from './evaluators/moderation.js';
+export { createLlmJudgeEvaluator } from './evaluators/llm-judge.js';
+export { createInjectionEvaluator } from './evaluators/injection.js';
+export { createSycophancyEvaluator } from './evaluators/sycophancy.js';
+
+// W3 — Semantic grounding evaluator factory
+export { createSemanticGroundingEvaluator } from './evaluators/semantic-grounding.js';
+
+// W4 — Escalation policy
+export {
+  evaluateEscalation,
+  type EscalationContext,
+  type EscalationTaskHandler,
+} from './escalation.js';
+
+// W5 — Streaming output screening
+export {
+  createStreamingGuardrail,
+  type StreamingGuardrailOptions,
+  type StreamGuardrailHandle,
+  type StreamCheckResult,
+} from './streaming.js';
+
+// W6 — Per-tenant resolver
+export {
+  InMemoryGuardrailResolver,
+  createGuardrailResolver,
+} from './resolver.js';
+
+// W7 — Revision store
+export {
+  InMemoryRevisionStore,
+  createRevisionStore,
+  trackGuardrailChange,
+  type TrackGuardrailChangeOptions,
+} from './revision-store.js';
+
+// W8 — Eval corpus (for external harnesses)
+export { CORPUS, type CorpusCase } from './eval/corpus.js';
+
+// W10 — Input normaliser
+export {
+  normalizeInput,
+  type NormalizeOptions,
+  type NormalizeResult,
+} from './normalizer.js';
 
 // Risk classification
 export {

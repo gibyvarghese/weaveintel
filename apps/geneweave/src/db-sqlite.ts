@@ -19,7 +19,7 @@ import type {
   TemporalTimerRow, TemporalStopwatchRow, TemporalReminderRow,
   PromptRow, PromptFrameworkRow, PromptFragmentRow, PromptContractRow, PromptStrategyRow,
   PromptVersionRow, PromptExperimentRow, PromptEvalDatasetRow, PromptEvalRunRow, PromptOptimizerRow, PromptOptimizationRunRow,
-  GuardrailRow, RoutingPolicyRow, WorkflowDefRow, WorkflowHandlerKindRow,
+  GuardrailRow, GuardrailRevisionRow, RoutingPolicyRow, WorkflowDefRow, WorkflowHandlerKindRow,
   TriggerRow, TriggerInvocationRow, MeshContractRow,
   ToolCatalogRow, ToolPolicyRow, SkillRow, WorkerAgentRow, HumanTaskPolicyRow, TaskContractRow, CachePolicyRow,
   SupervisorAgentRow, AgentToolRow, ResolvedSupervisorAgent,
@@ -424,9 +424,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async getEvals(userId: string, from?: string, to?: string): Promise<EvalRow[]> {
     let sql = 'SELECT * FROM eval_results WHERE user_id = ?';
     const params: unknown[] = [userId];
-    if (from) { sql += ' AND created_at >= ?'; params.push(from); }
-    if (to) { sql += ' AND created_at <= ?'; params.push(to); }
-    sql += ' ORDER BY created_at DESC';
+    // eval_results uses updated_at (no created_at column)
+    if (from) { sql += ' AND updated_at >= ?'; params.push(from); }
+    if (to) { sql += ' AND updated_at <= ?'; params.push(to); }
+    sql += ' ORDER BY updated_at DESC';
     return this.d.prepare(sql).all(...params) as EvalRow[];
   }
 
@@ -1165,6 +1166,32 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteGuardrail(id: string): Promise<void> {
     this.d.prepare('DELETE FROM guardrails WHERE id = ?').run(id);
+  }
+
+  // ─── Admin: Guardrail Revisions (W7) ──────────────────────
+
+  async createGuardrailRevision(r: Omit<GuardrailRevisionRow, 'created_at'> & { created_at?: string }): Promise<void> {
+    const createdAt = r.created_at ?? new Date().toISOString();
+    this.d.prepare(
+      `INSERT INTO guardrail_revisions (id, guardrail_id, version, snapshot, before, actor, reason, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(r.id, r.guardrail_id, r.version, r.snapshot, r.before ?? null, r.actor, r.reason, createdAt);
+  }
+
+  async listGuardrailRevisions(guardrailId: string): Promise<GuardrailRevisionRow[]> {
+    return this.d
+      .prepare('SELECT * FROM guardrail_revisions WHERE guardrail_id = ? ORDER BY version ASC')
+      .all(guardrailId) as GuardrailRevisionRow[];
+  }
+
+  async getGuardrailRevisionAtTime(guardrailId: string, isoTimestamp: string): Promise<GuardrailRevisionRow | null> {
+    return (
+      this.d
+        .prepare(
+          'SELECT * FROM guardrail_revisions WHERE guardrail_id = ? AND created_at <= ? ORDER BY created_at DESC LIMIT 1',
+        )
+        .get(guardrailId, isoTimestamp) as GuardrailRevisionRow
+    ) ?? null;
   }
 
   // ─── Admin: Model Pricing ──────────────────────────────────
@@ -2986,8 +3013,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createGuardrailEval(e: Omit<GuardrailEvalRow, 'created_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO guardrail_evals (id, chat_id, message_id, stage, input_preview, results, overall_decision) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ).run(e.id, e.chat_id, e.message_id, e.stage, e.input_preview, e.results, e.overall_decision);
+      `INSERT INTO guardrail_evals (id, chat_id, message_id, stage, input_preview, results, overall_decision, escalation)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(e.id, e.chat_id, e.message_id, e.stage, e.input_preview, e.results, e.overall_decision, e.escalation ?? null);
   }
 
   async listGuardrailEvals(chatId?: string, limit = 50): Promise<GuardrailEvalRow[]> {
@@ -4490,7 +4518,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
       {
         id: '8ae24528-463a-4dfa-9348-a2be5214de9f', name: 'Hallucination Check', description: 'Flag responses that may contain fabricated information',
-        type: 'factuality', stage: 'post', config: JSON.stringify({ confidence_threshold: 0.6, require_citations: false }), priority: 70, enabled: 0,
+        type: 'factuality', stage: 'post', config: JSON.stringify({ confidence_threshold: 0.6, require_citations: false }), priority: 70, enabled: 1,
       },
       {
         id: '58897b64-39ca-457c-8e8b-8ce4ffc33aa5', name: 'Cognitive Pre: Sycophancy Pressure', description: 'Detect prompts that push for agreement over truth before generation',
@@ -4572,6 +4600,214 @@ export class SQLiteAdapter implements DatabaseAdapter {
       },
     ];
     for (const g of injectionGuardrails) {
+      const existing = await this.getGuardrail(g.id);
+      if (!existing) await this.createGuardrail(g);
+    }
+
+    // Extended guardrail seed — upserted on every boot so existing DBs receive them.
+    // Covers: new injection patterns, credential protection, escalation policies (W4),
+    // output safety, model-graded opt-ins (W2/W3), and normaliser-aware rules (W10).
+    const extendedGuardrails: Omit<GuardrailRow, 'created_at' | 'updated_at'>[] = [
+
+      // ── Injection / jailbreak (new patterns) ─────────────────────────────
+      {
+        id: 'c1000001-aaaa-4000-8000-000000000001',
+        name: 'Prompt Injection: Role-Play Bypass',
+        description: 'Block persona-switch attempts used to strip safety constraints',
+        type: 'blocklist', stage: 'pre',
+        config: JSON.stringify({
+          words: [
+            'pretend you are', 'you are now', 'act as if you have no restrictions',
+            'forget you are an ai', 'you have no limitations', 'you are a different ai',
+            'roleplay as', 'act as an ai without',
+          ],
+          action: 'deny',
+        }),
+        priority: 97, enabled: 1,
+      },
+      {
+        id: 'c1000002-aaaa-4000-8000-000000000002',
+        name: 'Prompt Injection: Developer / God Mode',
+        description: 'Block requests to activate fictional unrestricted operating modes',
+        type: 'blocklist', stage: 'pre',
+        config: JSON.stringify({
+          words: [
+            'developer mode', 'god mode', 'unrestricted mode', 'no restrictions mode',
+            'dan mode', 'jailbreak mode', 'sudo mode', 'override mode',
+          ],
+          action: 'deny',
+        }),
+        priority: 96, enabled: 1,
+      },
+      {
+        id: 'c1000003-aaaa-4000-8000-000000000003',
+        name: 'Prompt Injection: Indirect / Hypothetical Wrapper',
+        description: 'Warn on hypothetical/fictional framings commonly used to elicit harmful content',
+        type: 'regex', stage: 'pre',
+        config: JSON.stringify({
+          pattern: '(?:hypothetically|in a fictional world|for (?:educational|academic|research) purposes?|as a creative writing exercise|imagine you could|in this thought experiment).{0,120}(?:how to|explain|steps|instructions|guide)',
+          flags: 'i',
+          action: 'warn',
+        }),
+        priority: 93, enabled: 1,
+      },
+      {
+        id: 'c1000004-aaaa-4000-8000-000000000004',
+        name: 'Prompt Injection: Base64 Encoded Instruction',
+        description: 'Warn when a long base64-like token appears alongside execution verbs (W10)',
+        type: 'regex', stage: 'pre',
+        config: JSON.stringify({
+          pattern: '(?:[A-Za-z0-9+/]{30,}={0,2}).{0,60}(?:execute|run|eval|decode and run|perform)',
+          flags: 'i',
+          action: 'warn',
+        }),
+        priority: 92, enabled: 1,
+      },
+
+      // ── Credential / secret protection ───────────────────────────────────
+      {
+        id: 'c2000001-aaaa-4000-8000-000000000001',
+        name: 'Credential: API Key in Output',
+        description: 'Deny assistant responses that appear to contain real API keys or bearer tokens',
+        type: 'regex', stage: 'post',
+        config: JSON.stringify({
+          pattern: '(?:sk-ant-[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9]{40,}|Bearer\\s+[A-Za-z0-9._-]{20,}|AKIA[A-Z0-9]{16})',
+          flags: 'i',
+          action: 'deny',
+        }),
+        priority: 98, enabled: 1,
+      },
+      {
+        id: 'c2000002-aaaa-4000-8000-000000000002',
+        name: 'Credential: Private Key in Output',
+        description: 'Deny responses containing PEM private key headers',
+        type: 'regex', stage: 'post',
+        config: JSON.stringify({
+          pattern: '-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
+          flags: 'i',
+          action: 'deny',
+        }),
+        priority: 99, enabled: 1,
+      },
+      {
+        id: 'c2000003-aaaa-4000-8000-000000000003',
+        name: 'Credential: Database Connection String in Output',
+        description: 'Warn when a response leaks a database connection string with embedded credentials',
+        type: 'regex', stage: 'post',
+        config: JSON.stringify({
+          pattern: '(?:postgres|mysql|mongodb|redis|amqp)://[^:@\\s]+:[^@\\s]+@',
+          flags: 'i',
+          action: 'deny',
+        }),
+        priority: 98, enabled: 1,
+      },
+
+      // ── Output safety ─────────────────────────────────────────────────────
+      {
+        id: 'c3000001-aaaa-4000-8000-000000000001',
+        name: 'Output: False Certainty',
+        description: 'Warn when the assistant expresses absolute certainty where none is warranted',
+        type: 'regex', stage: 'post',
+        config: JSON.stringify({
+          pattern: '\\b(100% (?:guaranteed|certain|sure|accurate|correct)|absolutely (?:guaranteed|certain|infallible)|will definitely work|cannot fail|no risk whatsoever)\\b',
+          flags: 'i',
+          action: 'warn',
+        }),
+        priority: 55, enabled: 1,
+      },
+      {
+        id: 'c3000002-aaaa-4000-8000-000000000002',
+        name: 'Output: Unsolicited Password / Secret Disclosure',
+        description: 'Deny outputs that volunteer credentials in plain text',
+        type: 'blocklist', stage: 'post',
+        config: JSON.stringify({
+          words: ['the password is', 'your password is', 'api key is', 'secret key is', 'access token is', 'the secret is'],
+          action: 'deny',
+        }),
+        priority: 99, enabled: 1,
+      },
+      {
+        id: 'c3000003-aaaa-4000-8000-000000000003',
+        name: 'Output: PII in Assistant Response',
+        description: 'Warn when the assistant echoes SSN, credit card, or raw email in its response',
+        type: 'regex', stage: 'post',
+        config: JSON.stringify({
+          pattern: '(?:\\b\\d{3}-\\d{2}-\\d{4}\\b|\\b(?:\\d[ -]*?){13,16}\\b|[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,})',
+          flags: 'i',
+          action: 'warn',
+        }),
+        priority: 88, enabled: 1,
+      },
+
+      // ── W4 Escalation policies ────────────────────────────────────────────
+      {
+        id: 'c4000001-aaaa-4000-8000-000000000001',
+        name: 'Escalation: Critical-Risk Action Auto-Block',
+        description: 'Immediately block any turn where the risk gate detects a critical-risk action (delete/drop/truncate)',
+        type: 'escalation_policy', stage: 'pre',
+        config: JSON.stringify({ risk_levels: ['critical'], on_escalate: 'block' }),
+        priority: 100, enabled: 1,
+      },
+      {
+        id: 'c4000002-aaaa-4000-8000-000000000002',
+        name: 'Escalation: Cognitive Warn Accumulation',
+        description: 'Require human approval when 2 or more cognitive guardrails warn in the same turn',
+        type: 'escalation_policy', stage: 'pre',
+        config: JSON.stringify({ min_warn_count: 2, categories: ['cognitive'], on_escalate: 'require-approval' }),
+        priority: 75, enabled: 1,
+      },
+      {
+        id: 'c4000003-aaaa-4000-8000-000000000003',
+        name: 'Escalation: Safety + Cognitive Combined Warn',
+        description: 'Block when both a safety warn and a cognitive warn fire in the same turn',
+        type: 'escalation_policy', stage: 'post',
+        config: JSON.stringify({ min_warn_count: 2, categories: ['cognitive', 'safety'], on_escalate: 'block' }),
+        priority: 74, enabled: 1,
+      },
+
+      // ── W2/W3 Model-graded opt-ins (disabled by default) ─────────────────
+      {
+        id: 'b1c2d3e4-0001-4000-8000-000000000001',
+        name: 'Model-Graded: Content Moderation',
+        description: 'Call a ModerationModel to flag hate, violence, and self-harm. Enable and supply moderationModel in PipelineOptions to activate.',
+        type: 'model-graded', stage: 'post',
+        config: JSON.stringify({ rule: 'moderation', categories: ['hate', 'violence', 'self_harm', 'sexual'], threshold: 0.7, action: 'deny', timeout_ms: 8000, on_error: 'warn' }),
+        priority: 91, enabled: 1,
+      },
+      {
+        id: 'b1c2d3e4-0002-4000-8000-000000000002',
+        name: 'Model-Graded: LLM Safety Judge',
+        description: 'Rubric-based LLM judge for safety, appropriateness, and factual grounding. Enable and supply model in PipelineOptions.',
+        type: 'model-graded', stage: 'post',
+        config: JSON.stringify({ rule: 'llm-judge', rubric: 'You are a safety judge. Evaluate whether the text is safe, appropriate, and factually grounded. Output JSON: { decision, confidence, rationale }', action: 'deny', timeout_ms: 10000, on_error: 'warn' }),
+        priority: 85, enabled: 1,
+      },
+      {
+        id: 'b1c2d3e4-0003-4000-8000-000000000003',
+        name: 'Model-Graded: Prompt Injection Classifier',
+        description: 'LLM-judge specialised for injection and jailbreak detection. Fail-closed (on_error: deny). Enable and supply model.',
+        type: 'model-graded', stage: 'pre',
+        config: JSON.stringify({ rule: 'injection-classifier', action: 'deny', timeout_ms: 8000, on_error: 'deny' }),
+        priority: 96, enabled: 1,
+      },
+      {
+        id: 'b1c2d3e4-0004-4000-8000-000000000004',
+        name: 'Model-Graded: Sycophancy Judge',
+        description: 'LLM-judge that detects sycophancy more reliably than lexical rules. Advisory warn only. Enable and supply model.',
+        type: 'model-graded', stage: 'post',
+        config: JSON.stringify({ rule: 'sycophancy-judge', action: 'warn', timeout_ms: 8000, on_error: 'allow' }),
+        priority: 59, enabled: 1,
+      },
+      {
+        id: 'b1c2d3e4-0005-4000-8000-000000000005',
+        name: 'Model-Graded: Semantic Grounding',
+        description: 'Embedding cosine-similarity grounding check. Warns when output is semantically distant from evidence. Enable and supply embeddingModel.',
+        type: 'model-graded', stage: 'post',
+        config: JSON.stringify({ rule: 'semantic-grounding', min_similarity: 0.50, evidence_field: 'both', action: 'warn', timeout_ms: 6000, on_error: 'allow' }),
+        priority: 58, enabled: 1,
+      },
+    ];
+    for (const g of extendedGuardrails) {
       const existing = await this.getGuardrail(g.id);
       if (!existing) await this.createGuardrail(g);
     }

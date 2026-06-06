@@ -70,6 +70,8 @@ export function registerAdminRoutingRoutes(
   json: (res: ServerResponse, status: number, data: unknown) => void,
   readBody: (req: IncomingMessage) => Promise<string>,
   providers?: Record<string, { apiKey?: string }>,
+  guardrailRevisionStore?: import('@weaveintel/core').GuardrailRevisionStore,
+  runtime?: import('@weaveintel/core').WeaveRuntime,
 ): void {
   function requireDetailedDescription(
     description: unknown,
@@ -97,7 +99,7 @@ export function registerAdminRoutingRoutes(
 
   const adminHelpers = { json, readBody, requireDetailedDescription };
   const adminHelpersWithProviders = { ...adminHelpers, providers };
-  registerGuardrailRoutes(router, db, adminHelpers);
+  registerGuardrailRoutes(router, db, adminHelpers, guardrailRevisionStore, runtime);
   registerRoutingRoutes(router, db, adminHelpers);
   registerModelPricingRoutes(router, db, adminHelpersWithProviders);
   registerWorkflowRoutes(router, db, adminHelpers);

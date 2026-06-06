@@ -7,6 +7,7 @@ import type { ChatEngine } from '../chat.js';
 import { getOrCreateModel } from '../chat.js';
 import { isValidPersona, normalizePersona, canPersonaAccess, personaPermissions } from '../rbac.js';
 import { registerAdminRoutes } from '../server-admin.js';
+import { createSqliteRevisionStore } from '../guardrail-revision-store.js';
 import { registerWorkflowPlatformRoutes } from '../admin/api/workflow-platform.js';
 import { registerTriggerRoutes, type TriggerDispatcherHandle } from '../admin/api/triggers.js';
 import { registerMeshContractRoutes } from '../admin/api/mesh-contracts.js';
@@ -50,9 +51,10 @@ export function registerAdminWiringRoutes(
     workflowEngine?: import('../workflow-engine.js').WorkflowEngineHandle;
     triggerDispatcher?: TriggerDispatcherHandle;
     chatEngine: ChatEngine;
+    runtime?: import('@weaveintel/core').WeaveRuntime;
   },
 ): void {
-  const { providers, publicBaseUrl: _publicBaseUrl, gatewayConfig, workflowEngine, triggerDispatcher, chatEngine: _chatEngine } = config;
+  const { providers, publicBaseUrl: _publicBaseUrl, gatewayConfig, workflowEngine, triggerDispatcher, chatEngine: _chatEngine, runtime } = config;
   void _publicBaseUrl; void _chatEngine;
 
   // ── Admin routes (extracted to server-admin.ts) ─────────
@@ -62,35 +64,36 @@ export function registerAdminWiringRoutes(
   const adminRouter = {
     get: (path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }) => {
       router.get(path, async (req, res, params, auth) => {
-        const gate = ensurePermission(auth, permissionForAdminRoute(path));
+        const gate = ensurePermission(auth, permissionForAdminRoute(path, 'GET'));
         if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
         await handler(req, res, params, auth);
       }, opts);
     },
     post: (path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }) => {
       router.post(path, async (req, res, params, auth) => {
-        const gate = ensurePermission(auth, permissionForAdminRoute(path));
+        const gate = ensurePermission(auth, permissionForAdminRoute(path, 'POST'));
         if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
         await handler(req, res, params, auth);
       }, opts);
     },
     put: (path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }) => {
       router.put(path, async (req, res, params, auth) => {
-        const gate = ensurePermission(auth, permissionForAdminRoute(path));
+        const gate = ensurePermission(auth, permissionForAdminRoute(path, 'PUT'));
         if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
         await handler(req, res, params, auth);
       }, opts);
     },
     del: (path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }) => {
       router.del(path, async (req, res, params, auth) => {
-        const gate = ensurePermission(auth, permissionForAdminRoute(path));
+        const gate = ensurePermission(auth, permissionForAdminRoute(path, 'DELETE'));
         if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
         await handler(req, res, params, auth);
       }, opts);
     },
   };
 
-  registerAdminRoutes(adminRouter, db, json, readBody, providers, html);
+  const guardrailRevisionStore = createSqliteRevisionStore(db);
+  registerAdminRoutes(adminRouter, db, json, readBody, providers, html, { guardrailRevisionStore, runtime });
 
   // These modules expose `/api/admin/*` endpoints and must pass through
   // the same RBAC gate as other admin routes.
@@ -508,7 +511,14 @@ export function registerAdminWiringRoutes(
       }
     }
 
-    const cse = await getCSE();
+    let cse: Awaited<ReturnType<typeof getCSE>>;
+    try {
+      cse = await getCSE();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      json(res, 503, { status: 'error', error: 'Sandbox backend unavailable', stderr: msg });
+      return;
+    }
     if (!cse) { json(res, 503, { error: 'CSE unavailable' }); return; }
 
     const languageValue =
@@ -520,18 +530,30 @@ export function registerAdminWiringRoutes(
         ? language
         : undefined;
 
-    const result = await cse.run({
-      code,
-      language: languageValue,
-      userId: auth.userId,
-      chatId: typeof chatId === 'string' ? chatId : undefined,
-      sessionId: typeof sessionId === 'string' ? sessionId : undefined,
-      files: Array.isArray(files) ? files as Array<{ name: string; content: string; binary?: boolean }> : undefined,
-      env: safeEnv,
-      timeoutMs: typeof timeoutMs === 'number' ? timeoutMs : undefined,
-      networkAccess: typeof networkAccess === 'boolean' ? networkAccess : undefined,
-      withBrowser: typeof withBrowser === 'boolean' ? withBrowser : false,
-    });
+    let result: Awaited<ReturnType<typeof cse.run>>;
+    try {
+      result = await cse.run({
+        code,
+        language: languageValue,
+        userId: auth.userId,
+        chatId: typeof chatId === 'string' ? chatId : undefined,
+        sessionId: typeof sessionId === 'string' ? sessionId : undefined,
+        files: Array.isArray(files) ? files as Array<{ name: string; content: string; binary?: boolean }> : undefined,
+        env: safeEnv,
+        timeoutMs: typeof timeoutMs === 'number' ? timeoutMs : undefined,
+        networkAccess: typeof networkAccess === 'boolean' ? networkAccess : undefined,
+        withBrowser: typeof withBrowser === 'boolean' ? withBrowser : false,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const isUnavailable = msg.includes('ECONNREFUSED') || msg.includes('ENOTFOUND') || msg.includes('connect');
+      json(res, isUnavailable ? 503 : 422, {
+        status: 'error',
+        error: isUnavailable ? 'Sandbox backend unavailable' : 'Sandbox execution failed',
+        stderr: msg,
+      });
+      return;
+    }
 
     json(res, result.status === 'success' ? 200 : 422, result);
   }, { auth: true, csrf: true });

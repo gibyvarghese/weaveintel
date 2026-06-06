@@ -135,7 +135,7 @@ function envInt(name: string, fallback: number): number {
 const AUTH_WINDOW_MS = envInt('GENEWEAVE_AUTH_RATE_WINDOW_MS', 10 * 60_000);
 const REGISTER_IP_LIMIT = envInt('GENEWEAVE_REGISTER_IP_LIMIT', IS_TEST_ENV ? 1_000 : 10);
 const REGISTER_EMAIL_LIMIT = envInt('GENEWEAVE_REGISTER_EMAIL_LIMIT', IS_TEST_ENV ? 500 : 5);
-const LOGIN_IP_LIMIT = envInt('GENEWEAVE_LOGIN_IP_LIMIT', IS_TEST_ENV ? 2_000 : 25);
+const LOGIN_IP_LIMIT = envInt('GENEWEAVE_LOGIN_IP_LIMIT', IS_TEST_ENV ? 2_000 : 10);
 const LOGIN_EMAIL_LIMIT = envInt('GENEWEAVE_LOGIN_EMAIL_LIMIT', IS_TEST_ENV ? 1_000 : 10);
 const LOGIN_MAX_BACKOFF_MS = envInt('GENEWEAVE_LOGIN_MAX_BACKOFF_MS', IS_TEST_ENV ? 0 : 5 * 60_000);
 const DEFAULT_REQUEST_BODY_BYTES = envInt('GENEWEAVE_DEFAULT_REQUEST_BODY_BYTES', IS_TEST_ENV ? 20 * 1024 * 1024 : 2 * 1024 * 1024);
@@ -309,12 +309,14 @@ export function html(res: ServerResponse, status: number, body: string): void {
   res.end(body);
 }
 
-export function permissionForAdminRoute(path: string): string {
+export function permissionForAdminRoute(path: string, method = 'POST'): string {
   if (path === '/api/admin/upgrade' || path.startsWith('/api/admin/tenants')) {
     return 'admin:platform:write';
   }
   if (path.startsWith('/api/admin/rbac')) {
-    return 'admin:platform:write';
+    // Read-only RBAC operations (listing users/personas) are tenant-admin safe.
+    // Mutations (assigning personas, managing roles) require platform-admin write.
+    return (method === 'GET' || method === 'HEAD') ? 'admin:tenant:read' : 'admin:platform:write';
   }
   return 'admin:tenant:write';
 }

@@ -119,7 +119,7 @@ export function registerAuthRoutes(
     if (loginRate.limited) {
       const retryAfterSec = Math.ceil(loginRate.retryAfterMs / 1_000);
       res.setHeader('Retry-After', String(retryAfterSec));
-      json(res, 429, { error: 'Too many login attempts. Please retry later.' });
+      json(res, 429, { error: 'Too many login attempts. Please retry later.', correlationId: newUUIDv7() });
       return;
     }
 
@@ -129,7 +129,7 @@ export function registerAuthRoutes(
       : { ok: false, needsRehash: false };
     if (!user || !verification.ok) {
       recordLoginFailure(clientIp, email);
-      json(res, 401, { error: 'Invalid credentials' });
+      json(res, 401, { error: 'Invalid credentials', correlationId: newUUIDv7() });
       return;
     }
 

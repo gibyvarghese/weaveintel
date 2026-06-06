@@ -29,7 +29,7 @@
  * tick. The agent loop's own fail-closed semantics still apply if THIS
  * function throws — but it does not.
  */
-import type { ExecutionContext, RiskLevel, RuntimeGuardrailsSlot } from '@weaveintel/core';
+import type { ExecutionContext, RiskLevel, RuntimeGuardrailsSlot, Model, ModerationModel, EmbeddingModel } from '@weaveintel/core';
 import type { Guardrail, GuardrailResult } from '@weaveintel/core';
 import { createGuardrailPipeline, hasDeny, getDenyReason, createRiskClassifier, type RiskRule } from '@weaveintel/guardrails';
 import { normalizeGuardrail, stageMatches } from './chat-guardrail-utils.js';
@@ -77,6 +77,16 @@ export interface SlotOptions {
    * and denies if the resolved level appears in `riskGate.denyOn`.
    */
   readonly riskGate?: RiskGateOptions;
+  /**
+   * Optional model references for model-graded guardrail evaluators (W2/W3).
+   * Use lazy getters so they can be wired after bootstrap resolves the models.
+   * Only guards with `type: 'model-graded'` and the matching rule use these.
+   */
+  readonly getModel?: () => Model | undefined;
+  readonly getModerationModel?: () => ModerationModel | undefined;
+  readonly getEmbeddingModel?: () => EmbeddingModel | undefined;
+  /** Pipeline budget in ms — skip remaining model-graded checks if exceeded (W9). */
+  readonly budgetMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +125,7 @@ export function geneweaveGuardrailsSlot(
     try {
       const rows = await db.listGuardrails();
       return rows
-        .filter((r) => r.enabled && stageMatches(r.stage, stage))
+        .filter((r) => r.enabled && r.type !== 'escalation_policy' && stageMatches(r.stage, stage))
         .map((r) => normalizeGuardrail(r, stage));
     } catch {
       return [];
@@ -129,7 +139,13 @@ export function geneweaveGuardrailsSlot(
   ): Promise<GuardrailResult[]> {
     if (guardrails.length === 0) return [];
     try {
-      const pipeline = createGuardrailPipeline(guardrails, { shortCircuitOnDeny: true });
+      const pipeline = createGuardrailPipeline(guardrails, {
+        shortCircuitOnDeny: true,
+        model: opts.getModel?.(),
+        moderationModel: opts.getModerationModel?.(),
+        embeddingModel: opts.getEmbeddingModel?.(),
+        budgetMs: opts.budgetMs,
+      });
       return await pipeline.evaluate(input, stage, {
         userInput: input,
         action: input,

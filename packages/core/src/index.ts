@@ -499,6 +499,7 @@ export {
   type GuardrailType,
   type GuardrailResult,
   type GuardrailEvaluationContext,
+  type AsyncGuardrailContext,
   type Guardrail,
   type GuardrailPipeline,
   type RiskLevel,
@@ -508,6 +509,13 @@ export {
   type GovernanceRule,
   type GovernanceContext,
   type RuntimePolicy,
+  type EscalationTrigger,
+  type EscalationPolicy,
+  type EscalationResult,
+  type GuardrailResolverContext,
+  type GuardrailResolver,
+  type GuardrailRevision,
+  type GuardrailRevisionStore,
 } from './guardrails.js';
 
 // Human-in-the-loop contracts

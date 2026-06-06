@@ -4,6 +4,7 @@
  */
 import type { Guardrail, GuardrailDecision, GuardrailEvaluationContext, GuardrailResult, GuardrailStage, RiskLevel } from '@weaveintel/core';
 import { createConfidenceGate } from './confidence-gate.js';
+import { normalizeInput } from './normalizer.js';
 
 export interface GuardrailCategorySummary {
   confidence: number;
@@ -49,11 +50,20 @@ function evaluateRegex(g: Guardrail, text: string): GuardrailResult {
   const action = (g.config['action'] as 'deny' | 'warn') ?? 'deny';
   if (!pattern) return { decision: 'allow', guardrailId: g.id, explanation: 'No regex pattern configured' };
 
+  // W10: normalise unless the guardrail explicitly opts out.
+  const skipNorm = g.config['normalize'] === false;
+  const { text: normalized, flags: normFlags } = skipNorm ? { text, flags: {} } : normalizeInput(text);
+
   try {
     const flags = (g.config['flags'] as string) ?? 'i';
     const re = new RegExp(pattern, flags);
-    if (re.test(text)) {
-      return { decision: action, guardrailId: g.id, explanation: `Matched regex pattern: ${pattern}` };
+    if (re.test(normalized)) {
+      return {
+        decision: action,
+        guardrailId: g.id,
+        explanation: `Matched regex pattern: ${pattern}`,
+        metadata: normFlags.likelyBase64 ? { likelyBase64: true } : normFlags.likelyUrlEncoded ? { likelyUrlEncoded: true } : undefined,
+      };
     }
     return { decision: 'allow', guardrailId: g.id };
   } catch {
@@ -66,7 +76,11 @@ function evaluateBlocklist(g: Guardrail, text: string): GuardrailResult {
   const action = (g.config['action'] as 'deny' | 'warn') ?? 'deny';
   if (!words?.length) return { decision: 'allow', guardrailId: g.id, explanation: 'No blocklist words configured' };
 
-  const lower = text.toLowerCase();
+  // W10: normalise before matching so homoglyphs and zero-width obfuscation are caught.
+  const skipNorm = g.config['normalize'] === false;
+  const { text: normalized } = skipNorm ? { text } : normalizeInput(text);
+
+  const lower = normalized.toLowerCase();
   const matched = words.filter(w => lower.includes(w.toLowerCase()));
   if (matched.length > 0) {
     return { decision: action, guardrailId: g.id, explanation: `Blocked words found: ${matched.join(', ')}` };

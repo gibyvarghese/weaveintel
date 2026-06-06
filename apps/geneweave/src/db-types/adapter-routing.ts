@@ -1,4 +1,4 @@
-import type { GuardrailRow, RoutingPolicyRow, TaskTypeDefinitionRow, ModelCapabilityScoreRow, TaskTypeTenantOverrideRow, ProviderToolAdapterRow, RoutingDecisionTraceRow, RoutingCapabilitySignalRow, MessageFeedbackRow, RoutingSurfaceItemRow, RoutingExperimentRow } from './routing.js';
+import type { GuardrailRow, GuardrailRevisionRow, RoutingPolicyRow, TaskTypeDefinitionRow, ModelCapabilityScoreRow, TaskTypeTenantOverrideRow, ProviderToolAdapterRow, RoutingDecisionTraceRow, RoutingCapabilitySignalRow, MessageFeedbackRow, RoutingSurfaceItemRow, RoutingExperimentRow } from './routing.js';
 
 export interface IRoutingStore {
   // Guardrails
@@ -7,6 +7,12 @@ export interface IRoutingStore {
   listGuardrails(): Promise<GuardrailRow[]>;
   updateGuardrail(id: string, fields: Partial<Omit<GuardrailRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteGuardrail(id: string): Promise<void>;
+
+  // Guardrail revisions (W7 — append-only audit trail)
+  createGuardrailRevision(r: Omit<GuardrailRevisionRow, 'created_at'> & { created_at?: string }): Promise<void>;
+  listGuardrailRevisions(guardrailId: string): Promise<GuardrailRevisionRow[]>;
+  /** Returns the latest revision whose created_at <= isoTimestamp, or null if none. */
+  getGuardrailRevisionAtTime(guardrailId: string, isoTimestamp: string): Promise<GuardrailRevisionRow | null>;
 
   // Routing policies
   createRoutingPolicy(r: Omit<RoutingPolicyRow, 'created_at' | 'updated_at'>): Promise<void>;

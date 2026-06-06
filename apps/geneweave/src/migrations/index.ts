@@ -8,6 +8,10 @@ import { applyM25WorkflowW4 } from './m25-workflow-w4.js';
 import { applyM26WorkflowW5 } from './m26-workflow-w5.js';
 import { applyM27WorkflowW6 } from './m27-workflow-w6.js';
 import { applyM28ToolRequires } from './m28-tool-requires.js';
+import { applyM29GuardrailRevisions } from './m29-guardrail-revisions.js';
+import { applyM30GuardrailSecurity } from './m30-guardrail-security.js';
+import { applyM31PiiGuardrails } from './m31-pii-guardrails.js';
+import { applyM32GuardrailTimeouts } from './m32-guardrail-timeouts.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -24,6 +28,10 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm26-workflow-w5', description: 'Workflow W5: priority, cost_breakdown, run queue, rate limit tables', run: applyM26WorkflowW5 },
   { id: 'm27-workflow-w6', description: 'Workflow W6: workflow_spans table for structured observability', run: applyM27WorkflowW6 },
   { id: 'm28-tool-requires', description: 'Phase D: tool_catalog.requires column for capability requirements', run: applyM28ToolRequires },
+  { id: 'm29-guardrail-revisions', description: 'Guardrail W7: append-only revision/audit table for rule changes', run: applyM29GuardrailRevisions },
+  { id: 'm30-guardrail-security', description: 'Security: input credential detection + localhost SSRF deny guardrails (C2+H4)', run: applyM30GuardrailSecurity },
+  { id: 'm31-pii-guardrails', description: 'Privacy: input PII deny guardrails for SSN + credit card (P4.1/C1.2)', run: applyM31PiiGuardrails },
+  { id: 'm32-guardrail-timeouts', description: 'Guardrails: raise model-graded timeouts to 15s; injection-classifier on_error → warn', run: applyM32GuardrailTimeouts },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

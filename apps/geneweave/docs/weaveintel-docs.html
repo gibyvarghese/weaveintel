@@ -316,7 +316,7 @@
 
   <div class="call note"><span class="ic">📌</span>
     <div class="ct">A note on accuracy</div>
-    <p>Every signature and option in this guide was read directly from the package source and the runnable examples in the repository, not from the project README (which describes an earlier API in several places). Where the live API differs from older documentation, this guide follows the code.</p>
+    <p>Every signature and option in this guide is taken directly from the package source and the runnable examples in the repository, and the snippets have been executed against the library to confirm they run. Where a call takes an execution context, it is the first argument throughout.</p>
   </div>
 
   <h3>What you can build</h3>
@@ -359,7 +359,7 @@ npx tsx examples/52-live-agents-basic.ts    <span class="tk-c"># a long-running 
   <p>The fastest way to see everything wired together is the reference application, <a href="#geneweave">geneWeave</a>, which is built only from <code>@weaveintel/*</code> packages and run with <code>./scripts/start-geneweave.sh</code>. But you do not need it to use the library — the snippets throughout this guide are self-contained.</p>
 
   <h3>Your first program: a tool-calling agent</h3>
-  <p>This is the smallest interesting weaveIntel program. It creates an execution context, registers one tool, builds a ReAct agent over a model, and runs it. Note the two signatures that older docs get wrong and which this guide always shows correctly: the model factory takes the <em>model id first</em> (<code>weaveOpenAIModel('gpt-4o-mini', { apiKey })</code>), and <code>agent.run</code> takes the <em>context first</em> (<code>agent.run(ctx, input)</code>).</p>
+  <p>This is the smallest interesting weaveIntel program. It creates an execution context, registers one tool, builds a ReAct agent over a model, and runs it. Two signatures to internalise from the start: the model factory takes the model id first (<code>weaveOpenAIModel('gpt-4o-mini', { apiKey })</code>), and <code>agent.run</code> takes the context first (<code>agent.run(ctx, input)</code>).</p>
 
   <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">first-agent.ts</span><button class="copybtn">Copy</button></div>
 <pre><span class="tk-k">import</span> { weaveContext, weaveToolRegistry, weaveTool } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/core'</span>;
@@ -416,7 +416,7 @@ console.<span class="tk-f">log</span>(result.output);   <span class="tk-c">// �
   <p>A few more conventions worth knowing up front. IDs that may be persisted are minted with time-ordered UUIDv7 (<code>newUUIDv7()</code>) rather than random UUIDs. Outbound HTTP goes through a hardened, SSRF-checked fetch rather than raw <code>fetch</code>. And the framework is "DB-driven, not code-driven" wherever it can be: tool catalogs, policies, prompts, skills, models and routing are designed to live in database rows that admin UIs and runtime resolvers read, so product behaviour can change without a code deploy.</p>
   <div class="call note"><span class="ic">🧵</span>
     <div class="ct">Reading the snippets</div>
-    <p>Every code block has a Copy button in its title bar. Snippets use real, current signatures. Where a call takes the context, it is always the first argument — this is one of the most common things older examples get backwards.</p>
+    <p>Every code block has a Copy button in its title bar. Snippets use the library's current signatures and have been run against it. Where a call takes the execution context, it is always the first argument.</p>
   </div>
 
   <h4>The curated entry point</h4>
@@ -607,7 +607,7 @@ console.<span class="tk-f">log</span>(res.content);   <span class="tk-c">// "Par
 <!-- ===================== PROVIDERS ===================== -->
 <section id="providers">
   <h3>Provider adapters</h3>
-  <p>Each provider package is a thin adapter implementing the core <code>Model</code> (and where relevant <code>EmbeddingModel</code>, <code>ImageModel</code>, <code>AudioModel</code>, <code>ModerationModel</code>, <code>ResponseModel</code>) interfaces. They all follow the same constructor shape: <strong>model id first, options second</strong>. This is the single most common signature older docs get wrong.</p>
+  <p>Each provider package is a thin adapter implementing the core <code>Model</code> (and where relevant <code>EmbeddingModel</code>, <code>ImageModel</code>, <code>AudioModel</code>, <code>ModerationModel</code>, <code>ResponseModel</code>) interfaces. They all follow the same constructor shape: <strong>model id first, options second</strong>.</p>
 
   <div class="pkgcard"><span class="pkgname">@weaveintel/provider-openai</span><div class="pkgrole">Chat, embeddings, image generation, audio (TTS/STT), the Responses API agentic loop, managed vector stores, file storage, moderation and fine-tuning. The broadest adapter.</div></div>
   <div class="pkgcard"><span class="pkgname">@weaveintel/provider-anthropic</span><div class="pkgrole">Chat, streaming, tool use, vision, PDF input, extended thinking, citations, message batches, and computer use.</div></div>
@@ -966,7 +966,7 @@ runtime.<span class="tk-f">registerHandler</span>(<span class="tk-s">'agentic.re
     <tr><td>.parallel</td><td>Run several steps concurrently.</td></tr>
     <tr><td>.wait(id, name, { wakeAfterMs })</td><td>Durable sleep — the run is checkpointed and resumes after the delay.</td></tr>
     <tr><td>.humanTask</td><td>Pause for a human decision (wired to <a href="#human-tasks">human-tasks</a>).</td></tr>
-    <tr><td>.dynamic</td><td>Expand the graph at runtime (Phase W7) — steps decided while running.</td></tr>
+    <tr><td>.dynamic</td><td>Expand the graph at runtime — steps decided while the workflow runs.</td></tr>
     <tr><td>.setPolicy / .addCompensation / .setEntry</td><td>Attach a governance policy, register compensation (saga rollback) steps, and set the entry node.</td></tr>
   </table>
 
@@ -999,7 +999,7 @@ console.<span class="tk-f">log</span>(run.status);   <span class="tk-c">// → '
 
   <div class="call obs"><span class="ic">🛰</span>
     <div class="ct">Default outcome — durability, governance &amp; replay</div>
-    <p>Runs checkpoint at every step so they survive process restarts; a durable sleep store backs <code>.wait</code>. Phase W5 governance enforces input validation, concurrency limits (<code>WorkflowConcurrencyError</code>), rate limits (<code>WorkflowRateLimitError</code>) and cost ceilings. Phase W6 emits spans and a lint result for the graph, and a run can be replayed deterministically from its trace — the definition snapshot is stored with the run so replay is faithful. Secrets in step output are masked via <code>maskStepOutput</code>.</p>
+    <p>Runs checkpoint at every step so they survive process restarts, and a durable sleep store backs <code>.wait</code>. The governance layer enforces input validation, concurrency limits (<code>WorkflowConcurrencyError</code>), rate limits (<code>WorkflowRateLimitError</code>) and cost ceilings. Every step emits a span and the graph can be linted, and a run replays deterministically from its trace — the definition snapshot is stored with the run so replay is faithful. Secrets in step output are masked via <code>maskStepOutput</code>.</p>
   </div>
 </section>
 
@@ -1356,7 +1356,58 @@ bus.<span class="tk-f">register</span>(<span class="tk-s">'billing'</span>, <spa
 
   <div class="call guard"><span class="ic">🛡</span>
     <div class="ct">Default outcome — fail-closed enforcement</div>
-    <p>When the runtime carries guardrails, every agent checks tool calls and final output through them. A denial blocks and audits; an erroring check is treated as a denial, never a pass. The legacy per-agent <code>policy.approveToolCall</code> hook is still honoured for backwards compatibility, but runtime guardrails are the uniform, process-wide mechanism.</p>
+    <p>When the runtime carries guardrails, every agent checks tool calls and final output through them. A denial blocks and audits; an erroring check is treated as a denial, never a pass. There are two complementary hooks: the runtime guardrails slot is the uniform, process-wide mechanism, while the per-agent <code>policy.approveToolCall</code> hook lets a single agent apply its own tool-call policy. Both run; either can deny.</p>
+  </div>
+
+  <h3>Built-in guardrail types &amp; cognitive checks</h3>
+  <p>A <code>Guardrail</code> is a declarative row with a <code>type</code> the evaluator knows how to run. Five types evaluate synchronously today — <code>regex</code>, <code>blocklist</code>, <code>length</code>, <code>schema</code> and <code>custom</code> — and a sixth, <code>model-graded</code>, is reserved for asynchronous model-scored checks. The interesting behaviour lives under <code>custom</code>, whose <code>config.rule</code> selects a named check. Several of these implement <em>cognitive</em> safeguards aimed at reasoning quality rather than content filtering:</p>
+  <table class="params">
+    <tr><th>custom rule</th><th>What it checks</th></tr>
+    <tr><td>input-pattern</td><td>Agreement-pressure ("sycophancy") phrasing in the user prompt — e.g. "just agree", "don't challenge me" — and warns so the model prioritises truth over agreement.</td></tr>
+    <tr><td>output-pattern</td><td>Overly-validating phrasing in the answer ("you are absolutely right", "100% correct") that may indicate sycophancy.</td></tr>
+    <tr><td>grounding-overlap</td><td>Lexical overlap between question and answer; warns on weak grounding. Bypassed when the response was backed by tool evidence (then it is grounded by construction).</td></tr>
+    <tr><td>decision-balance</td><td>Devil's-advocate check: decision-style questions ("should I…", "best…", "recommend") should surface counterpoints or trade-offs in the answer.</td></tr>
+    <tr><td>risk-confidence-gate</td><td>Classifies the action's risk by verb (read / write / modify / destructive) and applies a risk-scaled confidence threshold via a confidence gate.</td></tr>
+    <tr><td>aggregate-confidence-gate</td><td>Combines prior cognitive results into one confidence score, penalised by risk level, and gates on it.</td></tr>
+  </table>
+  <p>The package also ships <code>DEFAULT_GUARDRAILS</code> — twelve seed rows covering PII redaction, a toxicity filter, two prompt-injection guards, a token budget, a hallucination check, and the six cognitive checks above — as plain typed objects you load into your own store. Cognitive checks emit <code>warn</code> (advisory), not <code>deny</code>: they shape and flag rather than block, and the consuming application decides how to surface or act on a warning.</p>
+
+  <div class="call note"><span class="ic">🧵</span>
+    <div class="ct">How geneWeave uses this</div>
+    <p>geneWeave consumes these checks <strong>from the package</strong> rather than re-implementing them. It stores guardrails as DB rows, maps its row types (<code>cognitive_check</code>, <code>content_filter</code>, <code>factuality</code>, <code>budget</code>, <code>redaction</code>) onto the package's <code>custom</code>/<code>rule</code> and built-in types with a small adapter, then runs them through <code>createGuardrailPipeline</code> in both its runtime guardrails slot and its chat pipeline. The sycophancy, grounding and devil's-advocate <em>logic</em> is the package's; geneWeave supplies the configuration (patterns and thresholds as data) and the orchestration that persists evaluations and surfaces warnings.</p>
+  </div>
+
+  <h3>Current capabilities vs. enterprise hardening</h3>
+  <p>The guardrails available today are fast, deterministic and operator-configurable, which makes them dependable and cheap to run. Their detection is, by design, lexical and rule-based. The following is an honest map of what ships now against what a thorough enterprise deployment would add — useful both for setting expectations and for planning extensions.</p>
+
+  <h4>What ships today</h4>
+  <ul>
+    <li>Synchronous <code>regex</code>, <code>blocklist</code>, <code>length</code> and <code>schema</code> guardrails, plus the named <code>custom</code> cognitive rules above.</li>
+    <li>A priority-ordered pipeline that short-circuits on the first <code>deny</code>, with <code>allow</code> / <code>warn</code> / <code>deny</code> decisions and per-check confidence.</li>
+    <li>A runtime guardrails slot consulted <strong>fail-closed</strong> by the agent loop on every tool call and final output, with denials audited.</li>
+    <li>A built-in verb-based risk classifier and a confidence gate, plus runtime-policy evaluation for cost ceilings, token limits, rate limits and tool restrictions.</li>
+    <li>Twelve-row default seed (PII, toxicity, prompt-injection, token budget, hallucination, six cognitive checks).</li>
+  </ul>
+
+  <h4>Enterprise hardening roadmap</h4>
+  <p>These are extensions to reach thorough enterprise-grade assurance; they are <em>not</em> currently implemented in the package. Ordered roughly by impact.</p>
+  <table class="params">
+    <tr><th>Area</th><th>Gap today</th><th>Hardening</th></tr>
+    <tr><td>Model-graded checks</td><td><code>model-graded</code> returns allow as a placeholder; no async path.</td><td>Wire an asynchronous evaluator so guardrails can call an LLM-as-judge or a classifier for toxicity, jailbreak, PII and sycophancy detection.</td></tr>
+    <tr><td>Semantic grounding</td><td><code>grounding-overlap</code> uses token-set overlap, defeated by paraphrase.</td><td>Score grounding with embedding similarity against retrieved evidence (reuse <code>@weaveintel/retrieval</code> + embeddings).</td></tr>
+    <tr><td>Toxicity / content safety</td><td>The toxicity guardrail reduces to a keyword blocklist of category names.</td><td>Use a real moderation model (providers expose <code>ModerationModel</code>) with calibrated category thresholds.</td></tr>
+    <tr><td>Prompt-injection coverage</td><td>Fixed English phrase list and one regex.</td><td>Handle encoding/obfuscation (base64, homoglyphs, role-play framing) and add a model-graded injection classifier.</td></tr>
+    <tr><td>Warn → action policy</td><td>Cognitive warnings never gate; they are advisory only.</td><td>Allow policies that escalate accumulated warnings to a block or a human-task approval (e.g. two cognitive warns on a financial action → approval).</td></tr>
+    <tr><td>Streaming output checks</td><td><code>checkOutput</code> runs on the terminal text, after streaming.</td><td>Add incremental, chunk-level output screening with the ability to halt a stream mid-generation.</td></tr>
+    <tr><td>Per-tenant policy</td><td>Guardrail rows are global.</td><td>Resolve guardrail sets per tenant / persona via <code>@weaveintel/tenancy</code>.</td></tr>
+    <tr><td>Rule governance</td><td>Decisions are audited; changes to the rules are not.</td><td>Version guardrail definitions with change audit ("who changed which rule, when, prior version").</td></tr>
+    <tr><td>Effectiveness assurance</td><td>No measured false-positive / false-negative rates.</td><td>A labelled red-team corpus scored in CI via <code>@weaveintel/evals</code>, tracking precision/recall per guardrail.</td></tr>
+    <tr><td>Latency &amp; cost telemetry</td><td>Per-guardrail cost/latency is not surfaced.</td><td>Track p95 latency and trip rate per guardrail, with a budget — important once model-graded checks run every turn.</td></tr>
+    <tr><td>Localisation &amp; encoding</td><td>Patterns are English-only, case-normalised.</td><td>Multilingual rule sets and unicode-normalisation before matching.</td></tr>
+  </table>
+  <div class="call note"><span class="ic">🧵</span>
+    <div class="ct">Where to start</div>
+    <p>For a first enterprise pilot, the highest-leverage additions are the asynchronous <code>model-graded</code> path, semantic grounding, a warn-to-escalation policy, and a guardrail evaluation harness. The remainder is hardening that can follow once those are in place.</p>
   </div>
 </section>
 
@@ -1492,11 +1543,11 @@ console.<span class="tk-f">log</span>(result.status, result.output);   <span cla
 <!-- ===================== RELIABILITY ===================== -->
 <section id="reliability">
   <h3>@weaveintel/durability — idempotency, DLQ, health</h3>
-  <div class="meta-row"><span class="pkgtag">@weaveintel/durability</span><span class="pkgtag">canonical</span><span class="pkgtag">@weaveintel/reliability (alias)</span></div>
+  <div class="meta-row"><span class="pkgtag">@weaveintel/durability</span><span class="pkgtag">also: @weaveintel/reliability</span></div>
   <p><strong>What it does.</strong> The durability primitives for at-least-once systems: an idempotency store so a retried operation runs once (<code>createIdempotencyStore</code> / <code>createDurableIdempotencyStore</code>), a dead-letter queue for failed work (<code>createDeadLetterQueue</code>), retry budgets that cap total retry spend (<code>createRetryBudget</code>), a concurrency limiter, a backpressure monitor (<code>createBackpressureMonitor</code>), and health checks (<code>createHealthChecker</code>) that surface a service's state.</p>
   <div class="call note"><span class="ic">🧵</span>
     <div class="ct">Naming — durability vs reliability</div>
-    <p><code>@weaveintel/durability</code> is the <strong>canonical</strong> package; <code>@weaveintel/reliability</code> is its original name and is kept as an alias that re-exports everything, so existing imports keep working. New code should import from <code>@weaveintel/durability</code>. Note the deliberate split from <a href="#resilience">@weaveintel/resilience</a>: resilience is the live per-call guard pipeline (token bucket, breaker, retry), while durability is operational at-least-once machinery that <em>uses</em> resilience internally but addresses a different concern.</p>
+    <p>This package is available under two import names: <code>@weaveintel/durability</code> is the primary name and the one to use; <code>@weaveintel/reliability</code> resolves to the same surface. Note the deliberate split from <a href="#resilience">@weaveintel/resilience</a>: resilience is the live per-call guard pipeline (token bucket, breaker, retry), while durability is operational at-least-once machinery that <em>uses</em> resilience internally but addresses a different concern.</p>
   </div>
   <p><strong>When to use it.</strong> Around triggers, webhooks, queues and long-running workflows — anywhere a message might be delivered twice or a job might fail and need parking. Idempotency keys keep double-delivery safe; the DLQ keeps failures inspectable rather than lost; health checks feed your orchestrator. geneWeave exposes health snapshots in its admin dashboard built on these. See <code>examples/125-durable-runtime.ts</code> and <code>126-durable-subsystems.ts</code>.</p>
 </section>
@@ -1828,7 +1879,7 @@ skills.<span class="tk-f">register</span>({ key: <span class="tk-s">'billing'</s
 
   <h4>Encryption (13–16 "phase" series)</h4>
   <ul>
-    <li><strong>13–16 encryption-phase1…6</strong> and <code>examples/packages/encryption.ts</code> — the KMS hierarchy, field policy, rotation and blind index built up phase by phase.</li>
+    <li><strong>encryption examples</strong> (the <code>encryption-*</code> series) and <code>examples/packages/encryption.ts</code> — the KMS hierarchy, field policy, rotation and blind index, each demonstrated in a focused file.</li>
   </ul>
 
   <h4>Routing, skills, cost &amp; prompts (30–37, 70–74, 103–109)</h4>
@@ -1902,7 +1953,7 @@ skills.<span class="tk-f">register</span>({ key: <span class="tk-s">'billing'</s
 
 
 <div class="footer" style="border-top:1px solid var(--bg4);margin-top:60px">
-  <p>weaveIntel · MIT licensed · This adopter's guide was generated from a full read of the package sources and runnable examples in the repository. Signatures reflect the code as cloned, not earlier README revisions.</p>
+  <p>weaveIntel · MIT licensed · This adopter's guide is written from the package sources and the runnable examples in the repository; the signatures and snippets reflect the code as it stands and have been executed against the library.</p>
 </div>
 
 </div><!-- /content -->

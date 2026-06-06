@@ -33,7 +33,14 @@ export function registerChatRoutes(
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const raw = await readBody(req);
     let body: { title?: string; model?: string; provider?: string };
-    try { body = JSON.parse(raw); } catch { body = {}; }
+    try {
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        json(res, 400, { error: 'Request body must be a JSON object' });
+        return;
+      }
+      body = parsed;
+    } catch { body = {}; }
 
     const chatId = newUUIDv7();
     const chat = {
@@ -124,13 +131,28 @@ export function registerChatRoutes(
     if (body.stream) {
       await chatEngine.streamMessage(res, auth.userId, chat.id, normalizedContent, opts);
     } else {
-      const result = await chatEngine.sendMessage(auth.userId, chat.id, normalizedContent, opts);
-      json(res, 200, result);
+      try {
+        const result = await chatEngine.sendMessage(auth.userId, chat.id, normalizedContent, opts);
+        json(res, 200, result);
+      } catch (err) {
+        // Agent/supervisor mode can fail under transient load; return structured error
+        // rather than letting the uncaught exception become a raw 500.
+        const msg = err instanceof Error ? err.message : String(err);
+        const isOverload = msg.includes('ECONNRESET') || msg.includes('timeout') || msg.includes('429');
+        json(res, isOverload ? 503 : 422, {
+          error: isOverload ? 'Service temporarily overloaded — retry shortly' : 'Message processing failed',
+          detail: msg.slice(0, 200),
+          correlationId: newUUIDv7(),
+        });
+      }
     }
   }, { auth: true, csrf: true });
 
   router.del('/api/chats/:chatId', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    // Ownership check: getChat scopes by userId, so a cross-user chatId returns null
+    const chat = await db.getChat(params['chatId']!, auth.userId);
+    if (!chat) { json(res, 404, { error: 'Chat not found' }); return; }
     await db.deleteChat(params['chatId']!, auth.userId);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });

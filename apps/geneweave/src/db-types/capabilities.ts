@@ -49,5 +49,7 @@ export interface GuardrailEvalRow {
   input_preview: string | null;
   results: string;
   overall_decision: string;
+  /** JSON: EscalationResult | null — set when at least one escalation policy was evaluated. */
+  escalation: string | null;
   created_at: string;
 }

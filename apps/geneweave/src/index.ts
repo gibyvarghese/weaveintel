@@ -140,6 +140,11 @@ import type {
 } from '@weaveintel/encryption';
 import { withTenantEncryptedMessages } from './encryption/db-encrypted-adapter.js';
 import { geneweaveGuardrailsSlot } from './guardrails-slot.js';
+import {
+  getGuardrailJudgeModel, setActiveGuardrailJudgeModel,
+  getGuardrailModerationModel, setActiveGuardrailModerationModel,
+  getGuardrailEmbeddingModel, setActiveGuardrailEmbeddingModel,
+} from './guardrail-judge.js';
 import { geneweaveEncryptionSlot, type GeneweaveEncryptionSlot } from './encryption-slot.js';
 export let geneweaveEncryptionManager: TenantKeyManager | null = null;
 /** Phase 7: KMS provider registry exposed for admin endpoints (list/health-check). */
@@ -208,7 +213,47 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // module-level live binding (assigned later in this function).
   const rawDb = await createDatabaseAdapter(config.database ?? { type: 'sqlite', path: './geneweave.db' });
   const db = withTenantEncryptedMessages(rawDb, () => geneweaveEncryptionManager);
-  const guardrailsSlot = geneweaveGuardrailsSlot(db);
+
+  // Resolve the guardrail judge model once at boot. Uses a cheap/fast model
+  // (claude-haiku or gpt-4o-mini) by default, or GUARDRAIL_JUDGE_MODEL env var.
+  // Stored as a mutable ref so it can be lazily replaced without restarting.
+  // Resolve the guardrail judge model. Sets the module-level singleton so
+  // chat-guardrail-eval-utils.ts picks it up without threading through deps.
+  const guardrailJudgeModel = await getGuardrailJudgeModel({
+    providers: config.providers,
+    defaultProvider: config.defaultProvider,
+    defaultModel: config.defaultModel,
+  }).catch(() => undefined);
+  setActiveGuardrailJudgeModel(guardrailJudgeModel);
+  if (guardrailJudgeModel) {
+    console.log(`[guardrails] judge model ready — ${guardrailJudgeModel.info.provider}:${guardrailJudgeModel.info.modelId}`);
+  } else {
+    console.log('[guardrails] no judge model available — model-graded checks will skip (set ANTHROPIC_API_KEY or OPENAI_API_KEY)');
+  }
+
+  // R2: Moderation model — OpenAI omni-moderation-latest
+  const guardrailModerationModel = await getGuardrailModerationModel(config.providers).catch(() => undefined);
+  setActiveGuardrailModerationModel(guardrailModerationModel);
+  if (guardrailModerationModel) {
+    console.log('[guardrails] moderation model ready — openai:omni-moderation-latest');
+  } else {
+    console.log('[guardrails] no moderation model — content moderation check will skip (set OPENAI_API_KEY)');
+  }
+
+  // R3: Embedding model — OpenAI text-embedding-3-small for semantic grounding
+  const guardrailEmbeddingModel = await getGuardrailEmbeddingModel(config.providers).catch(() => undefined);
+  setActiveGuardrailEmbeddingModel(guardrailEmbeddingModel);
+  if (guardrailEmbeddingModel) {
+    console.log('[guardrails] embedding model ready — openai:text-embedding-3-small (semantic grounding active)');
+  } else {
+    console.log('[guardrails] no embedding model — semantic grounding will use lexical fallback (set OPENAI_API_KEY)');
+  }
+
+  const guardrailsSlot = geneweaveGuardrailsSlot(db, {
+    getModel: () => guardrailJudgeModel,
+    getModerationModel: () => guardrailModerationModel,
+    getEmbeddingModel: () => guardrailEmbeddingModel,
+  });
 
   // Phase F: encryption slot with a mutable internal ref. Constructed BEFORE
   // the runtime so `runtime.has('runtime.encryption')` advertises at boot;
@@ -548,6 +593,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     gatewayConfig,
     workflowEngine: workflowEngineHandle,
     triggerDispatcher: { dispatcher: triggerDispatcher, manualSource },
+    runtime, // thread real runtime so admin weaveAudit writes to durable KV
   });
 
   // 5. Listen

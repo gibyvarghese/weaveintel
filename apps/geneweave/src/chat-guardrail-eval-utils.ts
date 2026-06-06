@@ -2,16 +2,62 @@
  * GeneWeave chat — guardrail evaluation and human-task policy helpers
  *
  * Extracted from ChatEngine to keep chat.ts focused on orchestration.
+ *
+ * evaluateGuardrails now also:
+ *   - Passes an optional Model to the pipeline so model-graded guardrails
+ *     can run when a model reference is available.
+ *   - Loads escalation_policy rows from the DB, evaluates them after the
+ *     pipeline run, and persists the EscalationResult alongside the eval row.
  */
 
 import { newUUIDv7 } from '@weaveintel/core';
-import type { AgentStep, Guardrail, GuardrailResult, GuardrailStage } from '@weaveintel/core';
-import { createGuardrailPipeline, hasDeny, hasWarning, getDenyReason, summarizeGuardrailResults, type GuardrailCategorySummary } from '@weaveintel/guardrails';
+import type { AgentStep, EscalationPolicy, Guardrail, GuardrailResult, GuardrailStage, Model } from '@weaveintel/core';
+import { getActiveGuardrailJudgeModel, getActiveGuardrailModerationModel, getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
+import {
+  createGuardrailPipeline,
+  evaluateEscalation,
+  hasDeny,
+  hasWarning,
+  getDenyReason,
+  summarizeGuardrailResults,
+  type GuardrailCategorySummary,
+  type EscalationContext,
+} from '@weaveintel/guardrails';
 import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
 import { normalizeGuardrail, stageMatches } from './chat-guardrail-utils.js';
 import type { DatabaseAdapter } from './db.js';
 
+// ── Escalation policy loading ───────────────────────────────
+
+function parseEscalationPolicy(row: { id: string; name: string; description: string | null; config: string | null; enabled: number }): EscalationPolicy | null {
+  if (!row.config) return null;
+  try {
+    const cfg = JSON.parse(row.config) as Record<string, unknown>;
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description ?? undefined,
+      enabled: row.enabled === 1,
+      trigger: {
+        minWarnCount: typeof cfg['min_warn_count'] === 'number' ? cfg['min_warn_count'] : undefined,
+        categories: Array.isArray(cfg['categories']) ? cfg['categories'] as string[] : undefined,
+        riskLevels: Array.isArray(cfg['risk_levels']) ? cfg['risk_levels'] as EscalationPolicy['trigger']['riskLevels'] : undefined,
+      },
+      onEscalate: cfg['on_escalate'] === 'require-approval' ? 'require-approval' : 'block',
+    };
+  } catch {
+    return null;
+  }
+}
+
 // ── Guardrail evaluation ────────────────────────────────────
+
+export interface EvaluateGuardrailsOpts {
+  /** Optional model to pass into PipelineOptions for model-graded evaluators (W2/W3). */
+  model?: Model;
+  /** Optional pipeline budget in ms — skip model-graded checks if exceeded (W9). */
+  budgetMs?: number;
+}
 
 export async function evaluateGuardrails(
   db: DatabaseAdapter,
@@ -20,27 +66,65 @@ export async function evaluateGuardrails(
   input: string,
   stage: GuardrailStage,
   refs?: { userInput?: string; assistantOutput?: string; toolEvidence?: string },
-): Promise<{ decision: 'allow' | 'deny' | 'warn'; reason?: string; results: GuardrailResult[]; cognitive?: GuardrailCategorySummary; error?: string }> {
+  opts?: EvaluateGuardrailsOpts,
+): Promise<{
+  decision: 'allow' | 'deny' | 'warn';
+  reason?: string;
+  results: GuardrailResult[];
+  cognitive?: GuardrailCategorySummary;
+  escalation?: ReturnType<typeof evaluateEscalation> extends Promise<infer T> ? T : never;
+  error?: string;
+}> {
   try {
     const rows = await db.listGuardrails();
-    const enabledRows = rows.filter(r => r.enabled && stageMatches(r.stage, stage));
-    const guardrails: Guardrail[] = enabledRows.map(r => normalizeGuardrail(r, stage));
+    const guardrailRows = rows.filter(r => r.enabled && r.type !== 'escalation_policy' && stageMatches(r.stage, stage));
+    const escalationRows = rows.filter(r => r.enabled && r.type === 'escalation_policy');
 
-    const pipeline = createGuardrailPipeline(guardrails, { shortCircuitOnDeny: true });
+    const guardrails: Guardrail[] = guardrailRows.map(r => normalizeGuardrail(r, stage));
+    const escalationPolicies: EscalationPolicy[] = escalationRows
+      .map(r => parseEscalationPolicy(r))
+      .filter((p): p is EscalationPolicy => p !== null);
+
+    // Truncate before pipeline so neither the normalizer nor the LLM judge
+    // ever processes a pathologically large input (e.g. 100K-char flood inputs).
+    // 8 000 chars is well above any realistic message and covers all attack patterns.
+    const MAX_GUARDRAIL_INPUT = 8_000;
+    const guardedInput = input.length > MAX_GUARDRAIL_INPUT ? input.slice(0, MAX_GUARDRAIL_INPUT) : input;
+    const guardedUserInput = (refs?.userInput ?? input).slice(0, MAX_GUARDRAIL_INPUT);
+
+    const judgeModel: Model | undefined = opts?.model ?? getActiveGuardrailJudgeModel();
+
+    const pipeline = createGuardrailPipeline(guardrails, {
+      shortCircuitOnDeny: true,
+      model: judgeModel,
+      moderationModel: getActiveGuardrailModerationModel(),
+      embeddingModel: getActiveGuardrailEmbeddingModel(),
+      budgetMs: opts?.budgetMs,
+    });
+
     const results = guardrails.length > 0
-      ? await pipeline.evaluate(input, stage, {
-          userInput: refs?.userInput ?? input,
+      ? await pipeline.evaluate(guardedInput, stage, {
+          userInput: guardedUserInput,
           assistantOutput: refs?.assistantOutput,
           toolEvidence: refs?.toolEvidence,
-          action: refs?.userInput ?? input,
+          action: guardedUserInput,
         })
       : [];
+
     const cognitive = summarizeGuardrailResults(results, 'cognitive') ?? undefined;
 
-    const decision = hasDeny(results) ? 'deny' as const : hasWarning(results) ? 'warn' as const : 'allow' as const;
-    const reason = getDenyReason(results);
+    // Evaluate escalation policies (W4)
+    const escalationCtx: EscalationContext = { action: refs?.userInput ?? input, results };
+    const escalation = await evaluateEscalation(results, escalationPolicies, escalationCtx);
 
-    // Persist evaluation
+    const decision = hasDeny(results) || escalation.decision === 'deny'
+      ? 'deny' as const
+      : hasWarning(results)
+        ? 'warn' as const
+        : 'allow' as const;
+    const reason = getDenyReason(results) ?? (escalation.escalated ? escalation.reason : undefined);
+
+    // Persist evaluation (includes escalation result)
     await db.createGuardrailEval({
       id: newUUIDv7(),
       chat_id: chatId,
@@ -49,9 +133,10 @@ export async function evaluateGuardrails(
       input_preview: input.slice(0, 100),
       results: JSON.stringify(results),
       overall_decision: decision,
+      escalation: escalation.escalated ? JSON.stringify(escalation) : null,
     });
 
-    return { decision, reason, results, cognitive };
+    return { decision, reason, results, cognitive, escalation };
   } catch {
     const reason = stage === 'pre-execution'
       ? 'Guardrail evaluation failed before execution; request blocked.'
@@ -82,11 +167,11 @@ export async function evaluateTaskPolicies(
         name: row.name,
         description: row.description ?? undefined,
         trigger: row.trigger,
-        taskType: row.task_type as any,
-        defaultPriority: row.default_priority as any,
+        taskType: row.task_type as Parameters<typeof createPolicy>[0]['taskType'],
+        defaultPriority: row.default_priority as Parameters<typeof createPolicy>[0]['defaultPriority'],
         slaHours: row.sla_hours ?? undefined,
         autoEscalateAfterHours: row.auto_escalate_after_hours ?? undefined,
-        assignmentStrategy: row.assignment_strategy as any,
+        assignmentStrategy: row.assignment_strategy as Parameters<typeof createPolicy>[0]['assignmentStrategy'],
         assignTo: row.assign_to ?? undefined,
         enabled: true,
       }));

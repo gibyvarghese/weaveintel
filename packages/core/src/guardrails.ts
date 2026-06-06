@@ -1,6 +1,8 @@
 /**
  * @weaveintel/core — Guardrail & governance contracts
  */
+import type { Model, EmbeddingModel } from './models.js';
+import type { ModerationModel } from './moderation.js';
 
 // ─── Guardrail ───────────────────────────────────────────────
 
@@ -99,4 +101,79 @@ export interface RuntimePolicy {
   type: 'cost-ceiling' | 'token-limit' | 'rate-limit' | 'content-filter' | 'tool-restriction';
   config: Record<string, unknown>;
   enabled: boolean;
+}
+
+// ─── Async evaluation context (W1) ───────────────────────────
+
+/** Extended evaluation context that carries optional model references for
+ *  async (model-graded) guardrail evaluators. Backward-compatible superset of
+ *  `GuardrailEvaluationContext`; sync evaluators ignore the extra fields. */
+export interface AsyncGuardrailContext extends GuardrailEvaluationContext {
+  /** LLM used for llm-judge and similar verdict-generation evaluators. */
+  readonly model?: Model;
+  /** Moderation API client for content-safety classification. */
+  readonly moderationModel?: ModerationModel;
+  /** Embedding model for semantic-grounding similarity checks. */
+  readonly embeddingModel?: EmbeddingModel;
+}
+
+// ─── Escalation policy (W4) ──────────────────────────────────
+
+export interface EscalationTrigger {
+  /** Minimum accumulated warn-decision count to trigger escalation. */
+  readonly minWarnCount?: number;
+  /** Guardrail category names (e.g. 'cognitive') that count toward the threshold. */
+  readonly categories?: readonly string[];
+  /** Risk levels that trigger escalation regardless of warn count. */
+  readonly riskLevels?: readonly RiskLevel[];
+}
+
+export interface EscalationPolicy {
+  readonly id: string;
+  readonly name: string;
+  readonly description?: string;
+  readonly enabled: boolean;
+  readonly trigger: EscalationTrigger;
+  /** 'block' halts the turn. 'require-approval' blocks pending a human task. */
+  readonly onEscalate: 'block' | 'require-approval';
+}
+
+export interface EscalationResult {
+  readonly escalated: boolean;
+  readonly decision: GuardrailDecision;
+  readonly policy?: EscalationPolicy;
+  readonly taskId?: string;
+  readonly reason?: string;
+}
+
+// ─── Per-tenant resolver (W6) ────────────────────────────────
+
+export interface GuardrailResolverContext {
+  readonly tenantId?: string;
+  readonly persona?: string;
+  readonly stage: GuardrailStage;
+}
+
+export interface GuardrailResolver {
+  resolve(ctx: GuardrailResolverContext): Promise<Guardrail[]>;
+}
+
+// ─── Revision store (W7) ─────────────────────────────────────
+
+export interface GuardrailRevision {
+  readonly id: string;
+  readonly guardrailId: string;
+  readonly version: number;
+  readonly snapshot: Guardrail;
+  readonly before?: Guardrail;
+  readonly actor: string;
+  readonly reason: string;
+  readonly timestamp: string;
+}
+
+export interface GuardrailRevisionStore {
+  record(revision: GuardrailRevision): Promise<void>;
+  list(guardrailId: string): Promise<GuardrailRevision[]>;
+  /** Returns the revision active at or before the given ISO timestamp. */
+  atTime(guardrailId: string, timestamp: string): Promise<GuardrailRevision | undefined>;
 }
