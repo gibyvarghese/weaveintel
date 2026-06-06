@@ -202,6 +202,7 @@ export class LocalDockerProvider implements ContainerProvider {
       const timeoutMs = request.timeoutMs ?? config.timeoutMs ?? 30_000;
       const memoryMb = config.memoryMb ?? 512;
       const cpuCount = config.cpuCount ?? 1;
+      const pidsLimit = config.pidsLimit ?? 256;
       // Phase 5: networkAccess alone is insufficient — an explicit allowlist
       // must be provided (per-request or provider-level) to open the bridge.
       // Without one, the container's network stays 'none' to prevent
@@ -223,6 +224,7 @@ export class LocalDockerProvider implements ContainerProvider {
         `--memory=${memoryMb}m`,
         `--memory-swap=${memoryMb}m`,     // disable swap
         `--cpus=${cpuCount}`,
+        `--pids-limit=${pidsLimit}`,
         '--user=65534',                    // nobody
         '--cap-drop=ALL',
         '--security-opt', 'no-new-privileges',
@@ -277,6 +279,7 @@ export class LocalDockerProvider implements ContainerProvider {
 
     const memoryMb = config.memoryMb ?? 512;
     const cpuCount = config.cpuCount ?? 1;
+    const pidsLimit = config.pidsLimit ?? 256;
     // Phase 5: same allowlist gate as one-shot execution — sessions require an
     // explicit networkAllowlist to enable the bridge; networkAccess alone is
     // not sufficient.
@@ -290,6 +293,7 @@ export class LocalDockerProvider implements ContainerProvider {
       `--memory=${memoryMb}m`,
       `--memory-swap=${memoryMb}m`,
       `--cpus=${cpuCount}`,
+      `--pids-limit=${pidsLimit}`,
       '--user=65534',
       '--cap-drop=ALL',
       '--security-opt', 'no-new-privileges',

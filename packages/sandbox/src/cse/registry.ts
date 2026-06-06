@@ -61,6 +61,7 @@ export function buildCSEConfig(): CSEConfig {
     timeoutMs: env['CSE_TIMEOUT_MS'] ? parseInt(env['CSE_TIMEOUT_MS'], 10) : undefined,
     memoryMb: env['CSE_MEMORY_MB'] ? parseInt(env['CSE_MEMORY_MB'], 10) : undefined,
     cpuCount: env['CSE_CPU_COUNT'] ? parseFloat(env['CSE_CPU_COUNT']) : undefined,
+    pidsLimit: env['CSE_PIDS_LIMIT'] ? parseInt(env['CSE_PIDS_LIMIT'], 10) : undefined,
     networkAccess: env['CSE_NETWORK_ACCESS'] === 'true',
     kubeconfig: env['CSE_KUBECONFIG'] ?? env['KUBECONFIG'],
     namespace: env['CSE_NAMESPACE'],

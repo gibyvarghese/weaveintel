@@ -35,6 +35,8 @@ export interface CSEConfig {
   memoryMb?: number;
   /** CPU cores allocated per container. Default: 1. */
   cpuCount?: number;
+  /** Max processes/threads inside the container. Default: 256. Prevents fork bombs. */
+  pidsLimit?: number;
   /** Allow outbound network from the container. Default: false. */
   networkAccess?: boolean;
   /**
