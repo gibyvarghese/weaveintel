@@ -7,7 +7,7 @@
  */
 
 import { ADMIN_TAB_GROUPS, ADMIN_TABS } from './admin-schema.js';
-import { STYLES } from './ui/styles.js';
+import { STYLES } from '@weaveintel/geneweave-ui/styles';
 
 export function getHTML(): string {
   // Embed admin schema and styles as inline content

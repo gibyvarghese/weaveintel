@@ -23,7 +23,7 @@ import type {
   LiveAgentRow,
   LiveMeshRow,
   LiveMeshMessageView,
-} from '../db-types.js';
+} from './types.js';
 
 // ── Per-detail-panel state (single active record at a time) ─────────────
 

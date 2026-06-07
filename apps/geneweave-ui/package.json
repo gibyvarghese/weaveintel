@@ -1,0 +1,32 @@
+{
+  "name": "@weaveintel/geneweave-ui",
+  "version": "1.0.0",
+  "description": "geneWeave UI — client-side TypeScript application shell for the geneWeave platform",
+  "type": "module",
+  "main": "./dist/ui-client.js",
+  "types": "./dist/ui-client.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/ui-client.d.ts",
+      "import": "./dist/ui-client.js",
+      "default": "./dist/ui-client.js"
+    },
+    "./styles": {
+      "types": "./dist/ui/styles.d.ts",
+      "import": "./dist/ui/styles.js",
+      "default": "./dist/ui/styles.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@weaveintel/ui-primitives": "*"
+  },
+  "license": "MIT"
+}

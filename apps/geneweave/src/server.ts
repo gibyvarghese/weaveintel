@@ -8,6 +8,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { newUUIDv7 } from '@weaveintel/core';
 import { readFile as fsReadFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join, dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseAdapter } from './db.js';
@@ -125,8 +126,25 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     join(process.cwd(), 'avatar'),
     join(process.cwd(), 'avatars'),
   ];
+  // API dist (for any API-owned static files)
   const distDir = join(__dirname, '..', 'dist');
   const distDirResolved = resolve(distDir);
+  // UI dist — geneweave-ui is a sibling workspace package; its compiled output
+  // is served for all /ui.js, /ui/*, and /features/* paths.
+  // Resolution order: workspace sibling → node_modules symlink → API dist (fallback).
+  const uiDistDir = (() => {
+    const candidates = [
+      // Monorepo workspace sibling (dev with tsx or after tsc -b)
+      resolve(join(__dirname, '..', '..', 'geneweave-ui', 'dist')),
+      // npm install creates a symlink in node_modules
+      resolve(join(__dirname, '..', 'node_modules', '@weaveintel', 'geneweave-ui', 'dist')),
+    ];
+    for (const c of candidates) {
+      if (existsSync(c)) return c;
+    }
+    // Fallback: old monolithic dist (works before first split build or for existing deployments)
+    return distDirResolved;
+  })();
   const staticModuleExtensions = new Set(['.js', '.css', '.map']);
 
   // ── HTTP server ────────────────────────────────────────────
@@ -169,8 +187,10 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
         return;
       }
 
-      const filepath = resolve(distDirResolved, decodedFilename);
-      if (!filepath.startsWith(distDirResolved + sep)) {
+      // UI files are served from geneweave-ui's dist; the security check uses that base.
+      const uiDistDirResolved = resolve(uiDistDir);
+      const filepath = resolve(uiDistDirResolved, decodedFilename);
+      if (!filepath.startsWith(uiDistDirResolved + sep)) {
         json(res, 404, { error: 'Not found' });
         return;
       }

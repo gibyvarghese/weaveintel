@@ -1,7 +1,7 @@
 {
-  "name": "@weaveintel/geneweave",
+  "name": "@weaveintel/geneweave-api",
   "version": "1.0.0",
-  "description": "geneWeave — AI chatbot application with streaming, auth, observability dashboard, built on weaveIntel",
+  "description": "geneWeave API — server, database, chat engine and all backend services for the geneWeave platform",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -71,7 +71,8 @@
     "@weaveintel/live-agents": "*",
     "@weaveintel/live-agents-runtime": "*",
     "@weaveintel/live-agents-trace-tools": "*",
-    "better-sqlite3": "^11.9.1"
+    "better-sqlite3": "^11.9.1",
+    "@weaveintel/geneweave-ui": "*"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
