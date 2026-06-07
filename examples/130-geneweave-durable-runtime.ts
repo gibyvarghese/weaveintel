@@ -20,7 +20,7 @@ import {
   RuntimeCapabilities,
   type RuntimeKvStore,
 } from '@weaveintel/core';
-import { createGeneWeave } from '@weaveintel/geneweave';
+import { createGeneWeave } from '@weaveintel/geneweave-api';
 
 async function listAuditEntries(kv: RuntimeKvStore): Promise<unknown[]> {
   const rows = await kv.list('audit:');

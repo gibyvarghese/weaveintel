@@ -81,7 +81,7 @@
  *      tool_call.delegate_to_worker spans.
  */
 
-import { createGeneWeave } from '@weaveintel/geneweave';
+import { createGeneWeave } from '@weaveintel/geneweave-api';
 import { shutdownCSE } from '../apps/geneweave/src/cse.js';
 
 async function main() {
