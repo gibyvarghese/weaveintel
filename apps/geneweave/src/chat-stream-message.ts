@@ -42,6 +42,7 @@ type StreamMessageDeps = {
   healthTracker: {
     listHealth: () => ModelHealth[];
     getBlockedProviders: () => Set<string>;
+    blockProvider: (providerId: string, durationMs?: number) => void;
   };
   getAvailableModels: () => Promise<Array<{ id: string; provider: string }>>;
   withResponseCardFormatPolicy: (basePrompt: string | undefined) => Promise<string | undefined>;
@@ -192,7 +193,8 @@ export async function streamMessageImpl(
   let modelId = opts?.model ?? deps.config.defaultModel;
   let providerCfg = deps.config.providers[provider];
 
-  const routed = await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), { ...opts, prompt: content }, deps.healthTracker.getBlockedProviders());
+  const blocked = deps.healthTracker.getBlockedProviders();
+  const routed = await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), { ...opts, prompt: content }, blocked);
   if (routed && deps.config.providers[routed.provider]) {
     provider = routed.provider;
     modelId = routed.modelId;
@@ -474,6 +476,10 @@ export async function streamMessageImpl(
   const cost = calculateCost(modelId, finalUsage.promptTokens, finalUsage.completionTokens, streamDbPricing.get(modelId));
 
   deps.recordModelOutcome(modelId, provider, latencyMs, !streamErrored && !clientDisconnected, streamErrored ? streamErrorMessage : undefined);
+  // Block the provider immediately on rate limit — account-level 429s apply to all models.
+  if (streamErrored && streamErrorMessage && /rate.?limit|quota|too many requests|429/i.test(streamErrorMessage)) {
+    deps.healthTracker.blockProvider(provider, 5 * 60_000);
+  }
 
   if (clientDisconnected) {
     return;
