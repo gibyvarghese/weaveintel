@@ -41,6 +41,7 @@ type StreamMessageDeps = {
   db: DatabaseAdapter;
   healthTracker: {
     listHealth: () => ModelHealth[];
+    getBlockedProviders: () => Set<string>;
   };
   getAvailableModels: () => Promise<Array<{ id: string; provider: string }>>;
   withResponseCardFormatPolicy: (basePrompt: string | undefined) => Promise<string | undefined>;
@@ -191,7 +192,7 @@ export async function streamMessageImpl(
   let modelId = opts?.model ?? deps.config.defaultModel;
   let providerCfg = deps.config.providers[provider];
 
-  const routed = await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), { ...opts, prompt: content });
+  const routed = await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), { ...opts, prompt: content }, deps.healthTracker.getBlockedProviders());
   if (routed && deps.config.providers[routed.provider]) {
     provider = routed.provider;
     modelId = routed.modelId;

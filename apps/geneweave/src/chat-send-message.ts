@@ -118,7 +118,7 @@ export async function sendMessageImpl(
   let providerCfg = deps.config.providers[provider];
   let routingInfo: { provider: string; model: string; reason: string } | undefined;
 
-  const routed = await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), { ...opts, prompt: content });
+  const routed = await routeModel(deps.db, await deps.getAvailableModels(), deps.healthTracker.listHealth(), { ...opts, prompt: content }, deps.healthTracker.getBlockedProviders());
   if (routed && deps.config.providers[routed.provider]) {
     provider = routed.provider;
     modelId = routed.modelId;

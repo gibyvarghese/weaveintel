@@ -99,8 +99,10 @@ export class ModelHealthTracker {
   /** Check whether a specific model is available (respects provider-level blocks). */
   isAvailable(modelId: string, providerId: string): boolean {
     const blockUntil = this.blockedProviders.get(providerId);
-    if (blockUntil && blockUntil > Date.now()) return false;
-    if (blockUntil) this.blockedProviders.delete(providerId); // expired — clean up
+    if (blockUntil) {
+      if (blockUntil > Date.now()) return false;
+      this.blockedProviders.delete(providerId); // expired — clean up
+    }
     const h = this.getHealth(modelId, providerId);
     return h ? h.available : true;
   }
@@ -112,9 +114,20 @@ export class ModelHealthTracker {
     return this.toModelHealth(e);
   }
 
-  /** Get health for all tracked models. */
+  /** Get health for all tracked models. Provider blocks are reflected in available=false. */
   listHealth(): ModelHealth[] {
     return [...this.entries.values()].map(e => this.toModelHealth(e));
+  }
+
+  /** Returns the set of currently active (not yet expired) provider-level blocks. */
+  getBlockedProviders(): Set<string> {
+    const now = Date.now();
+    const active = new Set<string>();
+    for (const [providerId, until] of this.blockedProviders) {
+      if (until > now) active.add(providerId);
+      else this.blockedProviders.delete(providerId);
+    }
+    return active;
   }
 
   // ── Internals ───────────────────────────────────────────────
@@ -146,10 +159,14 @@ export class ModelHealthTracker {
     const errors = recent.filter(s => !s.success).length;
     const oneMinuteAgo = Date.now() - 60_000;
     const rpm = recent.filter(s => s.ts >= oneMinuteAgo).length;
+    // Propagate provider-level block into the per-model available flag so
+    // that snapshots passed to SmartModelRouter also carry the blocked state.
+    const providerBlockUntil = this.blockedProviders.get(e.providerId);
+    const providerBlocked = !!providerBlockUntil && providerBlockUntil > Date.now();
     return {
       modelId: e.modelId,
       providerId: e.providerId,
-      available: e.available,
+      available: providerBlocked ? false : e.available,
       avgLatencyMs: Math.round(avg),
       errorRate: total > 0 ? errors / total : 0,
       lastChecked: e.lastChecked,

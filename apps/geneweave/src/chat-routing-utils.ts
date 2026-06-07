@@ -50,13 +50,19 @@ export async function routeModel(
   candidates: Array<{ id: string; provider: string }>,
   healthList: ModelHealth[],
   opts?: RouteModelOpts,
+  blockedProviders?: Set<string>,
 ): Promise<{ provider: string; modelId: string; taskKey?: string; inferenceSource?: string; experimentId?: string; experimentName?: string } | null> {
   try {
     const policies = await db.listRoutingPolicies();
     const active = policies.find(p => p.enabled);
     if (!active) return null;
 
-    const routerCandidates = candidates.map(m => ({
+    // Pre-filter candidates from providers blocked at the account level (e.g. rate limited).
+    const filteredCandidates = blockedProviders?.size
+      ? candidates.filter(c => !blockedProviders.has(c.provider))
+      : candidates;
+
+    const routerCandidates = filteredCandidates.map(m => ({
       modelId: m.id,
       providerId: m.provider,
     }));
