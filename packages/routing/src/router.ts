@@ -112,11 +112,8 @@ export class SmartModelRouter implements IModelRouter {
     // 1. Filter by constraints
     let eligible = filterByConstraints(this.candidates, mergedConstraints, healthMap);
 
-    // 2. Remove unhealthy
-    eligible = eligible.filter(c => {
-      const h = healthMap.get(`${c.providerId}:${c.modelId}`);
-      return !h || h.available;
-    });
+    // 2. Remove unhealthy — respects both per-model health and provider-level blocks.
+    eligible = eligible.filter(c => this.healthTracker.isAvailable(c.modelId, c.providerId));
 
     // 2.5 Phase 2: task-aware filters
     const exclusionReasons: Array<{ modelId: string; providerId: string; reason: string }> = [];

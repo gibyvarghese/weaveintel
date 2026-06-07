@@ -23,6 +23,8 @@ export class ModelHealthTracker {
   private entries = new Map<string, HealthEntry>();
   private windowSize: number;
   private recentWindowMs: number;
+  /** Provider-level blocks — any model from a blocked provider is unavailable. */
+  private blockedProviders = new Map<string, number>(); // providerId → unblock-at timestamp
 
   constructor(opts?: { windowSize?: number; recentWindowMs?: number }) {
     this.windowSize = opts?.windowSize ?? 100;
@@ -79,6 +81,28 @@ export class ModelHealthTracker {
     const e = this.getOrCreate(modelId, providerId);
     e.available = available;
     e.lastChecked = new Date().toISOString();
+  }
+
+  /**
+   * Block an entire provider for a window (default 5 minutes).
+   * Every model from this provider will be treated as unavailable regardless
+   * of individual health entries. Used for account-level errors like rate limits.
+   */
+  blockProvider(providerId: string, durationMs = 5 * 60_000): void {
+    this.blockedProviders.set(providerId, Date.now() + durationMs);
+    // Also mark all currently-tracked models for this provider unavailable.
+    for (const e of this.entries.values()) {
+      if (e.providerId === providerId) e.available = false;
+    }
+  }
+
+  /** Check whether a specific model is available (respects provider-level blocks). */
+  isAvailable(modelId: string, providerId: string): boolean {
+    const blockUntil = this.blockedProviders.get(providerId);
+    if (blockUntil && blockUntil > Date.now()) return false;
+    if (blockUntil) this.blockedProviders.delete(providerId); // expired — clean up
+    const h = this.getHealth(modelId, providerId);
+    return h ? h.available : true;
   }
 
   /** Get health snapshot for one model. */

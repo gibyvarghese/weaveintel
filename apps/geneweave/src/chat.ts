@@ -1038,7 +1038,9 @@ export class ChatEngine {
   recordModelOutcome(modelId: string, providerId: string, latencyMs: number, success: boolean, errorMessage?: string): void {
     this.healthTracker.record(modelId, providerId, { latencyMs, success });
     if (!success && errorMessage && isRateLimitError(errorMessage)) {
-      this.healthTracker.setAvailable(modelId, providerId, false);
+      // Block the entire provider for 5 minutes — rate limits are account-wide,
+      // so all models from this provider will be unavailable, not just this one.
+      this.healthTracker.blockProvider(providerId, 5 * 60_000);
     }
   }
 }
