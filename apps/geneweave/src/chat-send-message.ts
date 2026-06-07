@@ -102,7 +102,7 @@ export type SendMessageDeps = {
     tenantId?: string | null,
   ) => Promise<AgentRunTelemetry>;
   loadPricing: () => Promise<Map<string, ModelPricing>>;
-  recordModelOutcome: (modelId: string, providerId: string, latencyMs: number, success: boolean) => void;
+  recordModelOutcome: (modelId: string, providerId: string, latencyMs: number, success: boolean, errorMessage?: string) => void;
   safeParseJson: (text: string) => unknown;
 };
 

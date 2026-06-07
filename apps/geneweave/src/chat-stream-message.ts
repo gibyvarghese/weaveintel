@@ -60,7 +60,7 @@ type StreamMessageDeps = {
   writeSseEvent: (res: ServerResponse, payload: Record<string, unknown>) => Promise<boolean>;
   endSse: (res: ServerResponse) => void;
   loadPricing: () => Promise<Map<string, ModelPricing>>;
-  recordModelOutcome: (modelId: string, providerId: string, latencyMs: number, success: boolean) => void;
+  recordModelOutcome: (modelId: string, providerId: string, latencyMs: number, success: boolean, errorMessage?: string) => void;
   safeParseJson: (text: string) => unknown;
 };
 
@@ -472,14 +472,17 @@ export async function streamMessageImpl(
   const streamDbPricing = await deps.loadPricing();
   const cost = calculateCost(modelId, finalUsage.promptTokens, finalUsage.completionTokens, streamDbPricing.get(modelId));
 
-  deps.recordModelOutcome(modelId, provider, latencyMs, !streamErrored && !clientDisconnected);
+  deps.recordModelOutcome(modelId, provider, latencyMs, !streamErrored && !clientDisconnected, streamErrored ? streamErrorMessage : undefined);
 
   if (clientDisconnected) {
     return;
   }
 
   if (streamErrored && !fullText.trim()) {
-    const errorContent = `[Stream interrupted] ${streamErrorMessage || 'The model did not return a response.'} Please retry; if this persists, the request may exceed the model's context window or per-request timeout.`;
+    const isRateLimit = streamErrorMessage && /rate.?limit|quota|too many requests|429/i.test(streamErrorMessage);
+    const errorContent = isRateLimit
+      ? `[Rate limited] ${provider} is currently rate limited. Your next message will be automatically routed to an available provider. (${streamErrorMessage})`
+      : `[Stream interrupted] ${streamErrorMessage || 'The model did not return a response.'} Please retry; if this persists, the request may exceed the model's context window or per-request timeout.`;
     await deps.writeSseEvent(res, { type: 'text', text: errorContent });
     await deps.writeSseEvent(res, {
       type: 'done',

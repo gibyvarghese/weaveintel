@@ -499,8 +499,8 @@ export class ChatEngine {
       runAgent: (ctx, model, userIdArg, chatIdArg, userPersona, messages, userContent, settings, attachments, tenantIdArg) =>
         this.runAgent(ctx, model, userIdArg, chatIdArg, userPersona, messages, userContent, settings, attachments, tenantIdArg),
       loadPricing: () => this.loadPricing(),
-      recordModelOutcome: (modelIdArg, providerIdArg, latencyMsArg, successArg) =>
-        this.recordModelOutcome(modelIdArg, providerIdArg, latencyMsArg, successArg),
+      recordModelOutcome: (modelIdArg, providerIdArg, latencyMsArg, successArg, errMsg) =>
+        this.recordModelOutcome(modelIdArg, providerIdArg, latencyMsArg, successArg, errMsg),
       safeParseJson: (text) => this.safeParseJson(text),
     };
 
@@ -1032,13 +1032,25 @@ export class ChatEngine {
 
   /**
    * Record model outcome for health tracking.
+   * When errorMessage indicates a rate limit (429), immediately marks the
+   * provider unavailable so the next request routes away from it.
    */
-  recordModelOutcome(modelId: string, providerId: string, latencyMs: number, success: boolean): void {
+  recordModelOutcome(modelId: string, providerId: string, latencyMs: number, success: boolean, errorMessage?: string): void {
     this.healthTracker.record(modelId, providerId, { latencyMs, success });
+    if (!success && errorMessage && isRateLimitError(errorMessage)) {
+      this.healthTracker.setAvailable(modelId, providerId, false);
+    }
   }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
+
+function isRateLimitError(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return lower.includes('rate limit') || lower.includes('rate_limit') ||
+         lower.includes('quota') || lower.includes('too many requests') ||
+         lower.includes('429');
+}
 
 function historyToMessages(rows: MessageRow[]): Message[] {
   return rows.map((r) => ({
