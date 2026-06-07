@@ -161,7 +161,8 @@ export async function getGuardrailModerationModel(
     const fn = (mod as unknown as Record<string, unknown>)['weaveOpenAIModerationModel']
       ?? (mod as unknown as Record<string, unknown>)['weaveOpenAIModeration'];
     if (typeof fn !== 'function') return undefined;
-    return fn({ apiKey }) as ModerationModel;
+    // First arg is modelId (string), second is provider options — pass them separately.
+    return fn('omni-moderation-latest', { apiKey }) as ModerationModel;
   } catch {
     return undefined;
   }
