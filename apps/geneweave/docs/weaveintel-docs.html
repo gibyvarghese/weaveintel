@@ -1360,7 +1360,7 @@ bus.<span class="tk-f">register</span>(<span class="tk-s">'billing'</span>, <spa
   </div>
 
   <h3>Built-in guardrail types &amp; cognitive checks</h3>
-  <p>A <code>Guardrail</code> is a declarative row with a <code>type</code> the evaluator knows how to run. Five types evaluate synchronously today — <code>regex</code>, <code>blocklist</code>, <code>length</code>, <code>schema</code> and <code>custom</code> — and a sixth, <code>model-graded</code>, is reserved for asynchronous model-scored checks. The interesting behaviour lives under <code>custom</code>, whose <code>config.rule</code> selects a named check. Several of these implement <em>cognitive</em> safeguards aimed at reasoning quality rather than content filtering:</p>
+  <p>A <code>Guardrail</code> is a declarative row with a <code>type</code> the evaluator knows how to run. Five types evaluate synchronously — <code>regex</code>, <code>blocklist</code>, <code>length</code>, <code>schema</code> and <code>custom</code> — and a sixth, <code>model-graded</code>, routes to the asynchronous evaluator, which can back a check with an LLM judge, a provider moderation API, or any custom async function. The interesting behaviour lives under <code>custom</code>, whose <code>config.rule</code> selects a named check. Several of these implement <em>cognitive</em> safeguards aimed at reasoning quality rather than content filtering:</p>
   <table class="params">
     <tr><th>custom rule</th><th>What it checks</th></tr>
     <tr><td>input-pattern</td><td>Agreement-pressure ("sycophancy") phrasing in the user prompt — e.g. "just agree", "don't challenge me" — and warns so the model prioritises truth over agreement.</td></tr>
@@ -1377,37 +1377,45 @@ bus.<span class="tk-f">register</span>(<span class="tk-s">'billing'</span>, <spa
     <p>geneWeave consumes these checks <strong>from the package</strong> rather than re-implementing them. It stores guardrails as DB rows, maps its row types (<code>cognitive_check</code>, <code>content_filter</code>, <code>factuality</code>, <code>budget</code>, <code>redaction</code>) onto the package's <code>custom</code>/<code>rule</code> and built-in types with a small adapter, then runs them through <code>createGuardrailPipeline</code> in both its runtime guardrails slot and its chat pipeline. The sycophancy, grounding and devil's-advocate <em>logic</em> is the package's; geneWeave supplies the configuration (patterns and thresholds as data) and the orchestration that persists evaluations and surfaces warnings.</p>
   </div>
 
-  <h3>Current capabilities vs. enterprise hardening</h3>
-  <p>The guardrails available today are fast, deterministic and operator-configurable, which makes them dependable and cheap to run. Their detection is, by design, lexical and rule-based. The following is an honest map of what ships now against what a thorough enterprise deployment would add — useful both for setting expectations and for planning extensions.</p>
+  <h3>Full guardrail capabilities</h3>
+  <p>The package ships a layered stack that spans fast synchronous rules through to asynchronous model-graded checks, with operational controls for streaming, escalation, per-tenant resolution and auditability.</p>
 
-  <h4>What ships today</h4>
+  <h4>Synchronous pipeline</h4>
   <ul>
-    <li>Synchronous <code>regex</code>, <code>blocklist</code>, <code>length</code> and <code>schema</code> guardrails, plus the named <code>custom</code> cognitive rules above.</li>
-    <li>A priority-ordered pipeline that short-circuits on the first <code>deny</code>, with <code>allow</code> / <code>warn</code> / <code>deny</code> decisions and per-check confidence.</li>
-    <li>A runtime guardrails slot consulted <strong>fail-closed</strong> by the agent loop on every tool call and final output, with denials audited.</li>
-    <li>A built-in verb-based risk classifier and a confidence gate, plus runtime-policy evaluation for cost ceilings, token limits, rate limits and tool restrictions.</li>
-    <li>Twelve-row default seed (PII, toxicity, prompt-injection, token budget, hallucination, six cognitive checks).</li>
+    <li><code>regex</code>, <code>blocklist</code>, <code>length</code>, <code>schema</code> and named <code>custom</code> cognitive rules — priority-ordered, short-circuits on the first <code>deny</code>.</li>
+    <li>Fail-closed runtime slot: the agent loop consults it on every tool call and final output; a throwing check resolves to <code>deny</code>, never a pass.</li>
+    <li>Verb-based risk classifier and confidence gate, plus runtime-policy evaluation for cost ceilings, token limits, rate limits and tool restrictions.</li>
+    <li>Twelve-row default seed covering PII, toxicity, prompt-injection, token budget, hallucination and the six cognitive checks.</li>
   </ul>
 
-  <h4>Enterprise hardening roadmap</h4>
-  <p>These are extensions to reach thorough enterprise-grade assurance; they are <em>not</em> currently implemented in the package. Ordered roughly by impact.</p>
+  <h4>Asynchronous model-graded evaluation</h4>
+  <p><code>evaluateGuardrailAsync</code> and <code>createAsyncGuardrailPipeline</code> dispatch <code>model-graded</code> guardrails to a registry of async evaluators with per-guardrail timeout and fail-closed error handling. Four evaluators ship out of the box:</p>
   <table class="params">
-    <tr><th>Area</th><th>Gap today</th><th>Hardening</th></tr>
-    <tr><td>Model-graded checks</td><td><code>model-graded</code> returns allow as a placeholder; no async path.</td><td>Wire an asynchronous evaluator so guardrails can call an LLM-as-judge or a classifier for toxicity, jailbreak, PII and sycophancy detection.</td></tr>
-    <tr><td>Semantic grounding</td><td><code>grounding-overlap</code> uses token-set overlap, defeated by paraphrase.</td><td>Score grounding with embedding similarity against retrieved evidence (reuse <code>@weaveintel/retrieval</code> + embeddings).</td></tr>
-    <tr><td>Toxicity / content safety</td><td>The toxicity guardrail reduces to a keyword blocklist of category names.</td><td>Use a real moderation model (providers expose <code>ModerationModel</code>) with calibrated category thresholds.</td></tr>
-    <tr><td>Prompt-injection coverage</td><td>Fixed English phrase list and one regex.</td><td>Handle encoding/obfuscation (base64, homoglyphs, role-play framing) and add a model-graded injection classifier.</td></tr>
-    <tr><td>Warn → action policy</td><td>Cognitive warnings never gate; they are advisory only.</td><td>Allow policies that escalate accumulated warnings to a block or a human-task approval (e.g. two cognitive warns on a financial action → approval).</td></tr>
-    <tr><td>Streaming output checks</td><td><code>checkOutput</code> runs on the terminal text, after streaming.</td><td>Add incremental, chunk-level output screening with the ability to halt a stream mid-generation.</td></tr>
-    <tr><td>Per-tenant policy</td><td>Guardrail rows are global.</td><td>Resolve guardrail sets per tenant / persona via <code>@weaveintel/tenancy</code>.</td></tr>
-    <tr><td>Rule governance</td><td>Decisions are audited; changes to the rules are not.</td><td>Version guardrail definitions with change audit ("who changed which rule, when, prior version").</td></tr>
-    <tr><td>Effectiveness assurance</td><td>No measured false-positive / false-negative rates.</td><td>A labelled red-team corpus scored in CI via <code>@weaveintel/evals</code>, tracking precision/recall per guardrail.</td></tr>
-    <tr><td>Latency &amp; cost telemetry</td><td>Per-guardrail cost/latency is not surfaced.</td><td>Track p95 latency and trip rate per guardrail, with a budget — important once model-graded checks run every turn.</td></tr>
-    <tr><td>Localisation &amp; encoding</td><td>Patterns are English-only, case-normalised.</td><td>Multilingual rule sets and unicode-normalisation before matching.</td></tr>
+    <tr><th>Evaluator</th><th>What it does</th></tr>
+    <tr><td>LLM judge</td><td>Sends the input to any <code>Model</code> with a configurable rubric prompt and parses a structured <code>{ decision, confidence, rationale }</code> verdict. Covers toxicity, sycophancy, injection and custom safety criteria. Fails closed when the model response is malformed and the guardrail is blocking.</td></tr>
+    <tr><td>Semantic grounding</td><td>Embeds the assistant output and available evidence (tool results, user input) and computes cosine similarity. Warns when similarity falls below <code>config.min_similarity</code>. Falls back gracefully to lexical overlap when no embedding model is configured.</td></tr>
+    <tr><td>Moderation model</td><td>Calls a <code>ModerationModel</code> (e.g. the OpenAI Moderation API) and maps flagged categories to <code>deny</code> or <code>warn</code> based on per-category thresholds in the guardrail config.</td></tr>
+    <tr><td>Injection classifier</td><td>Async prompt-injection detection that handles encoding variants (base64, homoglyphs, role-play framing) that the synchronous phrase list cannot match.</td></tr>
   </table>
+
+  <h4>Streaming output screening</h4>
+  <p><code>createStreamingGuardrail</code> runs the cheap synchronous guardrails incrementally over a growing buffer as chunks arrive and signals <code>halt</code> the moment a <code>deny</code> fires — allowing the stream to be aborted before generation completes. The terminal <code>checkOutput</code> call in the agent loop still runs alongside; streaming screening is an early-halt layer, not a replacement.</p>
+
+  <h4>Warn → escalation policy</h4>
+  <p><code>evaluateEscalation</code> evaluates accumulated <code>warn</code> results against operator-defined <code>EscalationPolicy</code> rules and either blocks the turn or triggers a human-approval task via a caller-provided handler. Policies are configurable: for example, two cognitive warnings on a high-risk financial action can be routed to the approval queue rather than silently passing through.</p>
+
+  <h4>Per-tenant policy resolution</h4>
+  <p><code>GuardrailResolver</code> resolves the applicable guardrail set for a context in three layers — global → tenant → persona. A tenant row with the same ID as a global row replaces it; setting <code>enabled: false</code> on a tenant row effectively disables a global rule for that tenant only.</p>
+
+  <h4>Rule governance &amp; audit trail</h4>
+  <p>The revision store (<code>InMemoryRevisionStore</code>, with a durable SQLite-backed variant in geneWeave) appends a snapshot every time a guardrail is created, updated or disabled. <code>trackGuardrailChange</code> records the change and emits a <code>weaveAudit</code> entry in the same call, so the history of "who changed which rule, when, and what the prior version was" is complete and queryable.</p>
+
+  <h4>Evaluation harness</h4>
+  <p>The eval runner (<code>packages/guardrails/src/eval/</code>) runs a labelled corpus of allow / warn / deny cases through the real pipeline and reports per-category precision, recall, false-positive and false-negative rates. It exits non-zero when any metric falls below its configured threshold, making it suitable as a CI gate.</p>
+
   <div class="call note"><span class="ic">🧵</span>
-    <div class="ct">Where to start</div>
-    <p>For a first enterprise pilot, the highest-leverage additions are the asynchronous <code>model-graded</code> path, semantic grounding, a warn-to-escalation policy, and a guardrail evaluation harness. The remainder is hardening that can follow once those are in place.</p>
+    <div class="ct">Remaining gaps</div>
+    <p>Three areas are not yet fully addressed: per-guardrail latency and cost telemetry (async checks add meaningful overhead per turn once model-graded evaluators are live); multilingual and unicode-normalised matching (patterns today are English-only, case-normalised); and prompt-injection detection for exotic obfuscation beyond what the injection classifier currently covers. These are good next investments once the async path is in regular use.</p>
   </div>
 </section>
 
@@ -1507,7 +1515,7 @@ bus.<span class="tk-f">register</span>(<span class="tk-s">'billing'</span>, <spa
 <span class="tk-k">const</span> result = <span class="tk-k">await</span> sandbox.<span class="tk-f">execute</span>(<span class="tk-s">'print(2 + 2)'</span>, policy);
 console.<span class="tk-f">log</span>(result.status, result.output);   <span class="tk-c">// status: 'success'|'error'|'timeout'|'killed', plus output + resourceUsage</span></pre></div>
 
-  <p>For OS-level isolation — the path geneWeave's Compute Sandbox Engine uses — <code>weaveContainerExecutor(...)</code> runs code in a hardened container (read-only rootfs, dropped capabilities, no network, non-root user, memory/CPU/pids caps) against a prebuilt image. The CSE layer also exposes itself as tools (<code>createCSETools</code>) and an MCP server (<code>createCSEMCPServer</code>) so agents and workflows can request code execution as a governed capability.</p>
+  <p>For OS-level isolation — the path geneWeave's Compute Sandbox Engine uses — containers run with a hardened profile: read-only root filesystem, all Linux capabilities dropped, no outbound network by default (<code>networkAccess</code> requires an explicit <code>networkAllowlist</code>), non-root user (<code>nobody</code>, uid 65534), and hard cgroup limits on memory (<code>CSE_MEMORY_MB</code>), CPU (<code>CSE_CPU_COUNT</code>), and process count (<code>CSE_PIDS_LIMIT</code>, default 256 — prevents fork bombs and thread exhaustion). Sessions use a long-running container with <code>docker exec</code> for successive turns, sharing the same isolation profile. The CSE layer also exposes itself as tools (<code>createCSETools</code>) and an MCP server (<code>createCSEMCPServer</code>) so agents and workflows can request code execution as a governed capability.</p>
 </section>
 
 <!-- ===================== RESILIENCE ===================== -->
@@ -1909,6 +1917,14 @@ skills.<span class="tk-f">register</span>({ key: <span class="tk-s">'billing'</s
     <li><strong>65–69 MCP</strong> — streamable HTTP, progressive discovery/compose/stream, resumable progress, gateway token rotation.</li>
     <li><strong>123 runtime-golden-path · 124 ambient-agent · 125 durable-runtime · 126 durable-subsystems · 127 phase5-security</strong> — the production runtime path.</li>
   </ul>
+
+  <h4>Guardrails &amp; safety hardening (134–137)</h4>
+  <ul>
+    <li><strong>134 model-graded-toxicity</strong> — wires an LLM judge as an async <code>model-graded</code> evaluator; shows how to configure a rubric, parse structured verdicts and handle fail-closed errors.</li>
+    <li><strong>135 semantic-grounding</strong> — embedding-based grounding check using <code>evaluators/semantic-grounding</code>; demonstrates cosine-similarity thresholds and the fallback to lexical overlap when no embedding model is present.</li>
+    <li><strong>136 warn-escalation</strong> — shows the warn → escalation pipeline: accumulate cognitive warnings and route them to a human-approval task when a policy threshold is crossed.</li>
+    <li><strong>137 streaming-halt</strong> — incremental output screening with <code>createStreamingGuardrail</code>; demonstrates aborting a stream mid-generation on a <code>deny</code> before the turn completes.</li>
+  </ul>
   <p>When in doubt, start with the example whose number is closest to the section you just read here; the two are organised along the same spine.</p>
 </section>
 
@@ -1932,9 +1948,9 @@ skills.<span class="tk-f">register</span>({ key: <span class="tk-s">'billing'</s
   <h3>What's inside</h3>
   <p>The <code>apps/geneweave/src</code> tree reads like an index of this guide. A few highlights:</p>
   <ul>
-    <li><strong>Chat</strong> — direct, agent and supervisor modes, all streaming, assembled from a family of <code>chat-*</code> utilities (runtime, send/stream, routing, skills, memory, eval, intent, guardrail and output-guard helpers). This is the clearest worked example of composing models, tools, memory, routing and guardrails into one request path.</li>
+    <li><strong>Chat</strong> — direct, agent and supervisor modes, all streaming, assembled from a family of <code>chat-*</code> utilities (runtime, send/stream, routing, skills, memory, eval, intent, guardrail and output-guard helpers). Guardrail evaluation runs on both the input and the output of every chat turn, with cognitive checks, model-graded async evaluation and the escalation policy all wired into the same pipeline. This is the clearest worked example of composing models, tools, memory, routing and multi-layer safety into one request path.</li>
     <li><strong>Auth &amp; RBAC</strong> — email/password with JWT, OAuth, persona-based RBAC and an encrypted credential vault, built on <code>identity</code>, <code>oauth</code> and <code>encryption</code>.</li>
-    <li><strong>Admin dashboard</strong> — CRUD over prompts, frameworks, fragments, output contracts, strategies, skills, the tool catalog, tool policies, approvals, models, routing experiments, cost-by-task, audit and health snapshots. This is "DB-driven, not code-driven" made visible: product behaviour is rows an operator edits.</li>
+    <li><strong>Admin dashboard</strong> — CRUD over prompts, frameworks, fragments, output contracts, strategies, skills, the tool catalog, tool policies, approvals, models, routing experiments, cost-by-task, audit and health snapshots. Guardrail management includes full revision history: every rule change is versioned with a before/after snapshot and a <code>weaveAudit</code> entry. This is "DB-driven, not code-driven" made visible: product behaviour is rows an operator edits.</li>
     <li><strong>Tool platform</strong> — a database-backed tool catalog with policy, approval, audit, health and a simulation harness — the governed registry from the <a href="#tools">tools</a> section, operationalised.</li>
     <li><strong>Scientific Validation</strong> — a multi-agent pipeline (literature, statistical, mechanistic, simulation, synthesis, critique) that streams over SSE and produces a verdict bundle backed by completion contracts and evals. It has its own <code>sv:eval</code> corpus runner and <code>sv:cost-gate</code> script.</li>
     <li><strong>Live agents</strong> — both a generic mesh and a Kaggle-competition supervisor, on the DB-driven runtime.</li>
