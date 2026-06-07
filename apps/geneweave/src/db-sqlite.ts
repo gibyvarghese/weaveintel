@@ -3481,6 +3481,14 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return (this.d.prepare('SELECT * FROM tenant_configs WHERE id = ?').get(id) as TenantConfigRow) ?? null;
   }
 
+  async getGlobalTenantConfig(): Promise<TenantConfigRow | null> {
+    return (this.d.prepare("SELECT * FROM tenant_configs WHERE scope = 'global' ORDER BY created_at ASC LIMIT 1").get() as TenantConfigRow) ?? null;
+  }
+
+  async getTenantConfigForTenant(tenantId: string): Promise<TenantConfigRow | null> {
+    return (this.d.prepare("SELECT * FROM tenant_configs WHERE tenant_id = ? AND scope != 'global' AND enabled = 1 ORDER BY created_at ASC LIMIT 1").get(tenantId) as TenantConfigRow) ?? null;
+  }
+
   async listTenantConfigs(): Promise<TenantConfigRow[]> {
     return this.d.prepare('SELECT * FROM tenant_configs ORDER BY tenant_id ASC, name ASC').all() as TenantConfigRow[];
   }

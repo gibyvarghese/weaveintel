@@ -99,6 +99,7 @@ export type SendMessageDeps = {
     userContent: string,
     settings: ChatSettings,
     attachments?: ChatAttachment[],
+    tenantId?: string | null,
   ) => Promise<AgentRunTelemetry>;
   loadPricing: () => Promise<Map<string, ModelPricing>>;
   recordModelOutcome: (modelId: string, providerId: string, latencyMs: number, success: boolean) => void;
@@ -140,6 +141,7 @@ export async function sendMessageImpl(
   const model = await getOrCreateModel(provider, modelId, providerCfg);
   const actor = await deps.db.getUserById(userId);
   const userPersona = normalizePersona(actor?.persona, 'user');
+  const tenantId = actor?.tenant_id ?? null;
   const settings = settingsFromRow(await deps.db.getChatSettings(chatId));
   const resolvedSystemPrompt = await resolveSystemPrompt(deps.db, settings);
   const resolvedPrompt = await deps.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
@@ -317,7 +319,7 @@ export async function sendMessageImpl(
 
   if (!cacheHit) {
     if (settings.mode === 'agent' || settings.mode === 'supervisor') {
-      telemetry = await deps.runAgent(ctx, model, userId, chatId, userPersona, messages, processedContent, memorySettings, attachments);
+      telemetry = await deps.runAgent(ctx, model, userId, chatId, userPersona, messages, processedContent, memorySettings, attachments, tenantId);
       assistantContent = telemetry.result.output ?? '';
       usage = {
         promptTokens: telemetry.result.usage.totalTokens,

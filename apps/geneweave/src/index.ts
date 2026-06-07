@@ -140,6 +140,7 @@ import type {
 } from '@weaveintel/encryption';
 import { withTenantEncryptedMessages } from './encryption/db-encrypted-adapter.js';
 import { geneweaveGuardrailsSlot } from './guardrails-slot.js';
+import { resolveLimits } from './platform-limits.js';
 import {
   getGuardrailJudgeModel, setActiveGuardrailJudgeModel,
   getGuardrailModerationModel, setActiveGuardrailModerationModel,
@@ -249,10 +250,12 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     console.log('[guardrails] no embedding model — semantic grounding will use lexical fallback (set OPENAI_API_KEY)');
   }
 
+  const startupLimits = await resolveLimits(db);
   const guardrailsSlot = geneweaveGuardrailsSlot(db, {
     getModel: () => guardrailJudgeModel,
     getModerationModel: () => guardrailModerationModel,
     getEmbeddingModel: () => guardrailEmbeddingModel,
+    maxActionLen: startupLimits.guardrail_action_max_chars,
   });
 
   // Phase F: encryption slot with a mutable internal ref. Constructed BEFORE

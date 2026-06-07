@@ -12,6 +12,7 @@ import { applyM29GuardrailRevisions } from './m29-guardrail-revisions.js';
 import { applyM30GuardrailSecurity } from './m30-guardrail-security.js';
 import { applyM31PiiGuardrails } from './m31-pii-guardrails.js';
 import { applyM32GuardrailTimeouts } from './m32-guardrail-timeouts.js';
+import { applyM33PlatformLimits } from './m33-platform-limits.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -32,6 +33,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm30-guardrail-security', description: 'Security: input credential detection + localhost SSRF deny guardrails (C2+H4)', run: applyM30GuardrailSecurity },
   { id: 'm31-pii-guardrails', description: 'Privacy: input PII deny guardrails for SSN + credit card (P4.1/C1.2)', run: applyM31PiiGuardrails },
   { id: 'm32-guardrail-timeouts', description: 'Guardrails: raise model-graded timeouts to 15s; injection-classifier on_error → warn', run: applyM32GuardrailTimeouts },
+  { id: 'm33-platform-limits', description: 'Platform limits: initialise config_overrides.limits on global tenant_configs row', run: applyM33PlatformLimits },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

@@ -55,6 +55,7 @@ type StreamMessageDeps = {
     userContent: string,
     settings: ChatSettings,
     attachments?: ChatAttachment[],
+    tenantId?: string | null,
   ) => Promise<AgentRunTelemetry>;
   writeSseEvent: (res: ServerResponse, payload: Record<string, unknown>) => Promise<boolean>;
   endSse: (res: ServerResponse) => void;
@@ -212,6 +213,7 @@ export async function streamMessageImpl(
   const model = await getOrCreateModel(provider, modelId, providerCfg);
   const actor = await deps.db.getUserById(userId);
   const userPersona = normalizePersona(actor?.persona, 'user');
+  const tenantId = actor?.tenant_id ?? null;
   const settings = settingsFromRow(await deps.db.getChatSettings(chatId));
   const resolvedSystemPrompt = await resolveSystemPrompt(deps.db, settings);
   const resolvedPrompt = await deps.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
@@ -412,7 +414,7 @@ export async function streamMessageImpl(
 
   try {
     if (settings.mode === 'agent' || settings.mode === 'supervisor') {
-      streamTelemetry = await deps.streamAgent(res, ctx, model, userId, chatId, userPersona, messages, processedContent, streamMemorySettings, attachments);
+      streamTelemetry = await deps.streamAgent(res, ctx, model, userId, chatId, userPersona, messages, processedContent, streamMemorySettings, attachments, tenantId);
       fullText = streamTelemetry.result.output ?? '';
       finalUsage = { promptTokens: streamTelemetry.result.usage.totalTokens, completionTokens: 0, totalTokens: streamTelemetry.result.usage.totalTokens };
       steps = [...streamTelemetry.result.steps];

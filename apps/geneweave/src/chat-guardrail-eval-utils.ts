@@ -26,6 +26,7 @@ import {
 import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
 import { normalizeGuardrail, stageMatches } from './chat-guardrail-utils.js';
 import type { DatabaseAdapter } from './db.js';
+import { resolveLimits } from './platform-limits.js';
 
 // ── Escalation policy loading ───────────────────────────────
 
@@ -57,6 +58,10 @@ export interface EvaluateGuardrailsOpts {
   model?: Model;
   /** Optional pipeline budget in ms — skip model-graded checks if exceeded (W9). */
   budgetMs?: number;
+  /** Max chars of input passed to the guardrail pipeline. Defaults to platform limit (8000). */
+  maxInputChars?: number;
+  /** Tenant ID used to resolve per-tenant limits. */
+  tenantId?: string | null;
 }
 
 export async function evaluateGuardrails(
@@ -87,10 +92,10 @@ export async function evaluateGuardrails(
 
     // Truncate before pipeline so neither the normalizer nor the LLM judge
     // ever processes a pathologically large input (e.g. 100K-char flood inputs).
-    // 8 000 chars is well above any realistic message and covers all attack patterns.
-    const MAX_GUARDRAIL_INPUT = 8_000;
-    const guardedInput = input.length > MAX_GUARDRAIL_INPUT ? input.slice(0, MAX_GUARDRAIL_INPUT) : input;
-    const guardedUserInput = (refs?.userInput ?? input).slice(0, MAX_GUARDRAIL_INPUT);
+    const limits = await resolveLimits(db, opts?.tenantId);
+    const maxInputChars = opts?.maxInputChars ?? limits.guardrail_input_max_chars;
+    const guardedInput = input.length > maxInputChars ? input.slice(0, maxInputChars) : input;
+    const guardedUserInput = (refs?.userInput ?? input).slice(0, maxInputChars);
 
     const judgeModel: Model | undefined = opts?.model ?? getActiveGuardrailJudgeModel();
 

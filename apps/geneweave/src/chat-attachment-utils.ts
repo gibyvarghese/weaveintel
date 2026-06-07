@@ -41,9 +41,9 @@ export function normalizeAttachments(input: ChatAttachment[] | undefined): ChatA
   return sanitized;
 }
 
-export function buildAttachmentContext(attachments: ChatAttachment[]): string {
+export function buildAttachmentContext(attachments: ChatAttachment[], opts?: { maxInlineChars?: number }): string {
   const lines: string[] = [];
-  const maxInlineChars = 12_000;
+  const maxInlineChars = opts?.maxInlineChars ?? 12_000;
 
   for (const attachment of attachments) {
     lines.push(`- ${attachment.name} (${attachment.mimeType}, ${attachment.size} bytes)`);

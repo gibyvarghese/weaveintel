@@ -96,6 +96,10 @@ export interface IAdminStore {
   // Tenant Configs
   createTenantConfig(c: Omit<TenantConfigRow, 'created_at' | 'updated_at'>): Promise<void>;
   getTenantConfig(id: string): Promise<TenantConfigRow | null>;
+  /** Returns the platform-level config row (scope='global'). Used by PlatformLimitsResolver. */
+  getGlobalTenantConfig(): Promise<TenantConfigRow | null>;
+  /** Returns the first enabled config row matching a specific tenant_id (non-global). */
+  getTenantConfigForTenant(tenantId: string): Promise<TenantConfigRow | null>;
   listTenantConfigs(): Promise<TenantConfigRow[]>;
   updateTenantConfig(id: string, fields: Partial<Omit<TenantConfigRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteTenantConfig(id: string): Promise<void>;

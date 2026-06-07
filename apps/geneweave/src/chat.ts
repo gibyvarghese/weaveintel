@@ -137,6 +137,7 @@ import {
   type SendMessageResult,
 } from './chat-send-message.js';
 import { streamMessageImpl } from './chat-stream-message.js';
+import { resolveLimits } from './platform-limits.js';
 
 export { calculateCost, getOrCreateModel, settingsFromRow } from './chat-runtime.js';
 export type { ChatAttachment, ProviderConfig, ChatEngineConfig, ChatSettings, WorkerDef } from './chat-runtime.js';
@@ -495,8 +496,8 @@ export class ChatEngine {
       cacheKeyBuilder: this.cacheKeyBuilder,
       getAvailableModels: () => this.getAvailableModels(),
       withResponseCardFormatPolicy: (basePrompt) => this.withResponseCardFormatPolicy(basePrompt),
-      runAgent: (ctx, model, userIdArg, chatIdArg, userPersona, messages, userContent, settings, attachments) =>
-        this.runAgent(ctx, model, userIdArg, chatIdArg, userPersona, messages, userContent, settings, attachments),
+      runAgent: (ctx, model, userIdArg, chatIdArg, userPersona, messages, userContent, settings, attachments, tenantIdArg) =>
+        this.runAgent(ctx, model, userIdArg, chatIdArg, userPersona, messages, userContent, settings, attachments, tenantIdArg),
       loadPricing: () => this.loadPricing(),
       recordModelOutcome: (modelIdArg, providerIdArg, latencyMsArg, successArg) =>
         this.recordModelOutcome(modelIdArg, providerIdArg, latencyMsArg, successArg),
@@ -522,8 +523,8 @@ export class ChatEngine {
         healthTracker: this.healthTracker,
         getAvailableModels: () => this.getAvailableModels(),
         withResponseCardFormatPolicy: (basePrompt) => this.withResponseCardFormatPolicy(basePrompt),
-        streamAgent: (resArg, ctx, model, userIdArg, chatIdArg, userPersona, messages, userContent, settings, attachments) =>
-          this.streamAgent(resArg, ctx, model, userIdArg, chatIdArg, userPersona, messages, userContent, settings, attachments),
+        streamAgent: (resArg, ctx, model, userIdArg, chatIdArg, userPersona, messages, userContent, settings, attachments, tenantIdArg) =>
+          this.streamAgent(resArg, ctx, model, userIdArg, chatIdArg, userPersona, messages, userContent, settings, attachments, tenantIdArg),
         writeSseEvent: (resArg, payload) => this.writeSseEvent(resArg, payload),
         endSse: (resArg) => this.endSse(resArg),
         loadPricing: () => this.loadPricing(),
@@ -553,7 +554,9 @@ export class ChatEngine {
     userContent: string,
     settings: ChatSettings,
     attachments?: ChatAttachment[],
+    tenantId?: string | null,
   ): Promise<AgentRunTelemetry> {
+    const limits = await resolveLimits(this.db, tenantId);
     const enterpriseToolGroups = await loadEnterpriseToolGroups(this.db);
     const hasEnterprise = enterpriseToolGroups.length > 0;
     const [disabledToolKeys, catalogEntries] = await Promise.all([
@@ -679,7 +682,7 @@ export class ChatEngine {
         agent = weaveAgent({
           model,
           workers: allWorkers,
-          maxSteps: 20,
+          maxSteps: limits.chat_max_steps,
           name: resolvedSupervisor?.agent.name ?? 'geneweave-supervisor',
           systemPrompt: supervisorInstructions,
           defaultTimezone: resolvedSupervisor?.agent.default_timezone ?? settings.timezone,
@@ -698,7 +701,7 @@ export class ChatEngine {
           model,
           tools,
           systemPrompt: policyPrompt,
-          maxSteps: 15,
+          maxSteps: limits.chat_max_steps,
           name: 'geneweave-agent',
           bus: agentBus,
         });
@@ -731,7 +734,9 @@ export class ChatEngine {
     userContent: string,
     settings: ChatSettings,
     attachments?: ChatAttachment[],
+    tenantId?: string | null,
   ): Promise<AgentRunTelemetry> {
+    const limits = await resolveLimits(this.db, tenantId);
     const enterpriseToolGroups = await loadEnterpriseToolGroups(this.db);
     const hasEnterprise = enterpriseToolGroups.length > 0;
     const enterpriseTools = hasEnterprise ? await loadEnterpriseTools(this.db) : [];
@@ -852,7 +857,7 @@ export class ChatEngine {
         agent = weaveAgent({
           model,
           workers: allWorkers,
-          maxSteps: 20,
+          maxSteps: limits.chat_max_steps,
           name: resolvedSupervisor?.agent.name ?? 'geneweave-supervisor',
           systemPrompt: supervisorInstructions,
           defaultTimezone: resolvedSupervisor?.agent.default_timezone ?? settings.timezone,
@@ -870,7 +875,7 @@ export class ChatEngine {
           model,
           tools,
           systemPrompt: policyPrompt,
-          maxSteps: 15,
+          maxSteps: limits.chat_max_steps,
           name: 'geneweave-agent',
           bus: agentBus,
         });

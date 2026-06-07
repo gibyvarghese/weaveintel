@@ -40,6 +40,10 @@ import {
   LARGE_REQUEST_BODY_BYTES,
 } from '../server-core.js';
 import type { Router, Handler } from '../server-core.js';
+import {
+  resolveLimits, invalidateLimitsCache, mergeLimitsIntoOverrides,
+  CODE_DEFAULTS, type PlatformLimits,
+} from '../platform-limits.js';
 
 export function registerAdminWiringRoutes(
   router: Router,
@@ -476,7 +480,7 @@ export function registerAdminWiringRoutes(
       json(res, 200, { enabled: false, message: 'CSE is not configured. Set CSE_PROVIDER or cloud credentials.' });
       return;
     }
-    const cse = await getCSE();
+    const cse = await getCSE(db);
     if (!cse) { json(res, 503, { error: 'CSE unavailable' }); return; }
     const health = await cse.healthCheck();
     json(res, health.healthy ? 200 : 503, { enabled: true, ...health });
@@ -513,7 +517,7 @@ export function registerAdminWiringRoutes(
 
     let cse: Awaited<ReturnType<typeof getCSE>>;
     try {
-      cse = await getCSE();
+      cse = await getCSE(db);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       json(res, 503, { status: 'error', error: 'Sandbox backend unavailable', stderr: msg });
@@ -562,7 +566,7 @@ export function registerAdminWiringRoutes(
     if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
     const { getCSE, isCSEEnabled } = await import('../cse.js');
     if (!isCSEEnabled()) { json(res, 200, { sessions: [] }); return; }
-    const cse = await getCSE();
+    const cse = await getCSE(db);
     if (!cse) { json(res, 200, { sessions: [] }); return; }
     json(res, 200, { sessions: cse.listSessions() });
   });
@@ -570,12 +574,86 @@ export function registerAdminWiringRoutes(
   router.del('/api/sandbox/sessions/:sessionId', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
     const { getCSE } = await import('../cse.js');
-    const cse = await getCSE();
+    const cse = await getCSE(db);
     if (!cse) { json(res, 404, { error: 'No active CSE' }); return; }
     const sessionId = params['sessionId'];
     if (!sessionId) { json(res, 400, { error: 'sessionId required' }); return; }
     await cse.terminateSession(sessionId);
     json(res, 200, { terminated: true, sessionId });
+  }, { auth: true, csrf: true });
+
+  // ── Platform limits ──��─────────────────────────────────────
+  // GET  /api/admin/platform-limits          — effective platform limits
+  // PATCH /api/admin/platform-limits         — update platform overrides
+  // GET  /api/admin/platform-limits/:tenantId — effective limits for tenant
+  // PATCH /api/admin/platform-limits/:tenantId — update tenant overrides
+
+  router.get('/api/admin/platform-limits', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    if (!canPersonaAccess(auth.persona, 'admin:platform:read')) {
+      json(res, 403, { error: 'Missing permission: admin:platform:read' }); return;
+    }
+    const effective = await resolveLimits(db);
+    const globalRow = await db.getGlobalTenantConfig();
+    let overrides: Partial<PlatformLimits> = {};
+    if (globalRow?.config_overrides) {
+      try { overrides = (JSON.parse(globalRow.config_overrides) as Record<string, unknown>)['limits'] as Partial<PlatformLimits> ?? {}; } catch { /* ignore */ }
+    }
+    json(res, 200, { codeDefaults: CODE_DEFAULTS, platformOverrides: overrides, effective });
+  }, { auth: true });
+
+  router.put('/api/admin/platform-limits', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    if (!canPersonaAccess(auth.persona, 'admin:platform:write')) {
+      json(res, 403, { error: 'Missing permission: admin:platform:write' }); return;
+    }
+    const raw = await readBody(req);
+    let body: Partial<PlatformLimits>;
+    try { body = JSON.parse(raw) as Partial<PlatformLimits>; } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const globalRow = await db.getGlobalTenantConfig();
+    if (!globalRow) { json(res, 404, { error: 'Platform config row not found — run migrations' }); return; }
+
+    const updatedOverrides = mergeLimitsIntoOverrides(globalRow.config_overrides, body);
+    await db.updateTenantConfig(globalRow.id, { config_overrides: updatedOverrides });
+    invalidateLimitsCache();
+    const effective = await resolveLimits(db);
+    json(res, 200, { ok: true, effective });
+  }, { auth: true, csrf: true });
+
+  router.get('/api/admin/platform-limits/:tenantId', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    if (!canPersonaAccess(auth.persona, 'admin:platform:read')) {
+      json(res, 403, { error: 'Missing permission: admin:platform:read' }); return;
+    }
+    const { tenantId } = params as { tenantId: string };
+    const tenantRow = await db.getTenantConfigForTenant(tenantId);
+    let overrides: Partial<PlatformLimits> = {};
+    if (tenantRow?.config_overrides) {
+      try { overrides = (JSON.parse(tenantRow.config_overrides) as Record<string, unknown>)['limits'] as Partial<PlatformLimits> ?? {}; } catch { /* ignore */ }
+    }
+    const effective = await resolveLimits(db, tenantId);
+    json(res, 200, { tenantId, tenantOverrides: overrides, effective });
+  }, { auth: true });
+
+  router.put('/api/admin/platform-limits/:tenantId', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    if (!canPersonaAccess(auth.persona, 'admin:platform:write')) {
+      json(res, 403, { error: 'Missing permission: admin:platform:write' }); return;
+    }
+    const { tenantId } = params as { tenantId: string };
+    const raw = await readBody(req);
+    let body: Partial<PlatformLimits>;
+    try { body = JSON.parse(raw) as Partial<PlatformLimits>; } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const tenantRow = await db.getTenantConfigForTenant(tenantId);
+    if (!tenantRow) { json(res, 404, { error: `No tenant config found for tenant '${tenantId}'` }); return; }
+
+    const updatedOverrides = mergeLimitsIntoOverrides(tenantRow.config_overrides, body);
+    await db.updateTenantConfig(tenantRow.id, { config_overrides: updatedOverrides });
+    invalidateLimitsCache(tenantId);
+    const effective = await resolveLimits(db, tenantId);
+    json(res, 200, { ok: true, tenantId, effective });
   }, { auth: true, csrf: true });
 
   router.get('/health', async (_req, res) => {
