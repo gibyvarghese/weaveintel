@@ -809,6 +809,15 @@ export interface ToolRegistryOptions {
     semantic: Array<{ content: string; source: string }>;
     entities: Array<{ entityType: string; entityName: string; facts: Record<string, unknown> }>;
   }>;
+  memorySearch?: (args: { userId: string; query: string; limit?: number }) => Promise<{
+    semantic: Array<{ content: string; source: string; memoryType: string }>;
+    entities: Array<{ entityType: string; entityName: string; facts: Record<string, unknown> }>;
+  }>;
+  memoryRemember?: (args: { userId: string; content: string; memoryType?: string; source?: string }) => Promise<{ id: string }>;
+  memoryForget?: (args: { userId: string; entityName: string }) => Promise<{ ok: boolean }>;
+  memoryListEntities?: (args: { userId: string }) => Promise<{
+    entities: Array<{ entityType: string; entityName: string; facts: Record<string, unknown>; confidence: number }>;
+  }>;
   /** Tool keys disabled in the operator-managed catalog. Populated from db.listEnabledToolCatalog(). */
   disabledToolKeys?: ReadonlySet<string>;
   /** Policy resolver for Phase 2 enforcement (rate limits, approval gates, risk level gates). */
@@ -956,11 +965,111 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     tags: ['memory', 'personalization'],
   });
 
+  const memorySearchTool = weaveTool({
+    name: 'memory_search',
+    description: 'Perform a targeted search of the user\'s long-term memory using natural language. Returns ranked semantic memories and matching entity facts.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'What to search for in memory' },
+        limit: { type: 'number', description: 'Max results to return (default: 5, max: 20)' },
+      },
+      required: ['query'],
+    },
+    execute: async (args: { query: string; limit?: number }) => {
+      if (!opts?.memorySearch || !opts.currentUserId) {
+        return { content: 'Memory search is unavailable in this execution context.', isError: true };
+      }
+      const limit = Math.max(1, Math.min(20, Number(args.limit ?? 5)));
+      const results = await opts.memorySearch({ userId: opts.currentUserId, query: args.query, limit });
+      return JSON.stringify({
+        query: args.query,
+        semanticCount: results.semantic.length,
+        entityCount: results.entities.length,
+        semantic: results.semantic,
+        entities: results.entities,
+      }, null, 2);
+    },
+    tags: ['memory', 'search'],
+  });
+
+  const memoryRememberTool = weaveTool({
+    name: 'memory_remember',
+    description: 'Explicitly save a fact or note to the user\'s long-term memory. Use when the user asks you to remember something specific.',
+    parameters: {
+      type: 'object',
+      properties: {
+        content: { type: 'string', description: 'The fact or note to remember' },
+        memoryType: {
+          type: 'string',
+          description: 'Category: user_fact, preference, or summary (default: user_fact)',
+          enum: ['user_fact', 'preference', 'summary'],
+        },
+      },
+      required: ['content'],
+    },
+    execute: async (args: { content: string; memoryType?: string }) => {
+      if (!opts?.memoryRemember || !opts.currentUserId) {
+        return { content: 'Memory remember is unavailable in this execution context.', isError: true };
+      }
+      const result = await opts.memoryRemember({
+        userId: opts.currentUserId,
+        content: args.content,
+        memoryType: args.memoryType ?? 'user_fact',
+        source: 'user_requested',
+      });
+      return JSON.stringify({ ok: true, id: result.id });
+    },
+    tags: ['memory', 'remember'],
+  });
+
+  const memoryForgetTool = weaveTool({
+    name: 'memory_forget',
+    description: 'Remove a specific entity or fact from the user\'s long-term memory. Only use when the user explicitly asks you to forget something.',
+    parameters: {
+      type: 'object',
+      properties: {
+        entityName: { type: 'string', description: 'The entity name or subject to forget' },
+      },
+      required: ['entityName'],
+    },
+    execute: async (args: { entityName: string }) => {
+      if (!opts?.memoryForget || !opts.currentUserId) {
+        return { content: 'Memory forget is unavailable in this execution context.', isError: true };
+      }
+      const result = await opts.memoryForget({ userId: opts.currentUserId, entityName: args.entityName });
+      return JSON.stringify({ ok: result.ok, entityName: args.entityName });
+    },
+    tags: ['memory', 'forget'],
+  });
+
+  const memoryListEntitiesTool = weaveTool({
+    name: 'memory_list_entities',
+    description: 'List all known facts about the current user from the entity memory store — name, location, job, preferences, and other extracted attributes.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    execute: async () => {
+      if (!opts?.memoryListEntities || !opts.currentUserId) {
+        return { content: 'Memory list entities is unavailable in this execution context.', isError: true };
+      }
+      const result = await opts.memoryListEntities({ userId: opts.currentUserId });
+      return JSON.stringify({ entityCount: result.entities.length, entities: result.entities }, null, 2);
+    },
+    tags: ['memory', 'profile'],
+  });
+
   const scopedTools: Record<string, Tool> = {
     ...BUILTIN_TOOLS,
     ...createTimeToolMap(opts?.defaultTimezone, opts?.temporalStore ?? defaultTemporalStore),
     ...cseToolMap(opts),
     memory_recall: memoryRecallTool,
+    memory_search: memorySearchTool,
+    memory_remember: memoryRememberTool,
+    memory_forget: memoryForgetTool,
+    memory_list_entities: memoryListEntitiesTool,
   };
   for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {
     // Skip tools disabled in the operator-managed tool catalog

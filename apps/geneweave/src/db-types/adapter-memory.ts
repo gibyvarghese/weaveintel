@@ -17,11 +17,14 @@ export interface IMemoryStore {
   deleteSSOLinkedAccount(userId: string, identityProvider: string): Promise<void>;
 
   // Semantic Memory
-  saveSemanticMemory(m: { id: string; userId: string; chatId?: string; tenantId?: string; content: string; memoryType?: string; source?: string }): Promise<void>;
-  searchSemanticMemory(opts: { userId: string; query: string; limit?: number }): Promise<SemanticMemoryRow[]>;
+  saveSemanticMemory(m: { id: string; userId: string; chatId?: string; tenantId?: string; content: string; memoryType?: string; source?: string; embedding?: number[] }): Promise<void>;
+  searchSemanticMemory(opts: { userId: string; query: string; limit?: number; queryEmbedding?: number[] }): Promise<SemanticMemoryRow[]>;
   listSemanticMemory(userId: string, limit?: number): Promise<SemanticMemoryRow[]>;
   deleteSemanticMemory(id: string, userId: string): Promise<void>;
   clearUserSemanticMemory(userId: string): Promise<void>;
+  trimSemanticMemoryForUser(userId: string, maxEntries: number): Promise<void>;
+  purgeSemanticMemoryOlderThan(userId: string, cutoffMs: number): Promise<void>;
+  listAllSemanticMemory(opts: { userId?: string; limit?: number; offset?: number }): Promise<SemanticMemoryRow[]>;
 
   // Entity Memory
   upsertEntity(e: { userId: string; entityName: string; entityType?: string; facts: Record<string, unknown>; confidence?: number; source?: string; chatId?: string; tenantId?: string }): Promise<void>;
@@ -30,7 +33,10 @@ export interface IMemoryStore {
   listEntities(userId: string): Promise<EntityMemoryRow[]>;
   deleteEntity(userId: string, entityName: string): Promise<void>;
   clearUserEntityMemory(userId: string): Promise<void>;
+  trimEntityMemoryForUser(userId: string, maxEntries: number): Promise<void>;
+  listAllEntityMemory(opts: { userId?: string; limit?: number; offset?: number }): Promise<EntityMemoryRow[]>;
   recordMemoryExtractionEvent(e: { id: string; userId: string; chatId?: string; tenantId?: string; selfDisclosure: boolean; regexEntitiesCount: number; llmEntitiesCount: number; mergedEntitiesCount: number; events?: string }): Promise<void>;
   getMemoryExtractionEvent(id: string): Promise<MemoryExtractionEventRow | null>;
   listMemoryExtractionEvents(chatId?: string, limit?: number): Promise<MemoryExtractionEventRow[]>;
+  listAllMemoryExtractionEvents(opts: { userId?: string; limit?: number; offset?: number }): Promise<MemoryExtractionEventRow[]>;
 }

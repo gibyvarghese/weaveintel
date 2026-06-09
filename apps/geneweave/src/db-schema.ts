@@ -351,6 +351,8 @@ CREATE TABLE IF NOT EXISTS guardrails (
   config TEXT,
   priority INTEGER NOT NULL DEFAULT 0,
   enabled INTEGER NOT NULL DEFAULT 1,
+  trigger_conditions TEXT,              -- JSON ConditionNode; NULL = always run
+  trigger_description TEXT,             -- human-readable summary of the condition
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

@@ -6,6 +6,7 @@ export { registerTaskPolicyRoutes } from './task-policies.js';
 export { registerTaskContractRoutes } from './task-contracts.js';
 export { registerIdentityRuleRoutes } from './identity-rules.js';
 export { registerMemoryGovernanceRoutes } from './memory-governance.js';
+export { registerMemoryViewRoutes } from './memory-views.js';
 export { registerComplianceRuleRoutes } from './compliance-rules.js';
 export { registerToolRoutes } from './tools.js';
 export { registerToolPolicyRoutes } from './tool-policies.js';

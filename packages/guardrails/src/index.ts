@@ -111,3 +111,13 @@ export {
 
 // Seed utilities
 export { DEFAULT_GUARDRAILS, type GuardrailSeedRow } from './seed.js';
+
+// Conditional trigger system (Phase 1)
+export {
+  buildInputSignals,
+  buildOutputSignals,
+  type InputSignals,
+  type OutputSignals,
+  type GuardrailConditionContext,
+} from './condition-context.js';
+export { evaluateCondition } from './condition-evaluator.js';

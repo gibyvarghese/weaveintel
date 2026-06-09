@@ -5,6 +5,7 @@ export {
   createConfiguredConversationMemory,
   createConfiguredMemoryStore,
   weavePostgresMemoryStore,
+  weavePgVectorMemoryStore,
   weaveRedisMemoryStore,
   weaveSqliteMemoryStore,
   weaveMongoDbMemoryStore,
@@ -16,6 +17,7 @@ export {
 export type {
   ConfiguredConversationMemory,
   ConfiguredMemoryStoreOptions,
+  PgVectorMemoryStoreOptions,
   RuntimeMemoryStoreOptions,
 } from './memory.js';
 

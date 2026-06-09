@@ -146,6 +146,7 @@ import {
   getGuardrailModerationModel, setActiveGuardrailModerationModel,
   getGuardrailEmbeddingModel, setActiveGuardrailEmbeddingModel,
 } from './guardrail-judge.js';
+import { initPgVectorSemanticMemory } from './memory-pgvector.js';
 import { geneweaveEncryptionSlot, type GeneweaveEncryptionSlot } from './encryption-slot.js';
 export let geneweaveEncryptionManager: TenantKeyManager | null = null;
 /** Phase 7: KMS provider registry exposed for admin endpoints (list/health-check). */
@@ -248,6 +249,14 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     console.log('[guardrails] embedding model ready — openai:text-embedding-3-small (semantic grounding active)');
   } else {
     console.log('[guardrails] no embedding model — semantic grounding will use lexical fallback (set OPENAI_API_KEY)');
+  }
+
+  // Semantic memory backend — pgvector when PGVECTOR_URL is set, SQLite otherwise
+  const pgVectorActive = initPgVectorSemanticMemory(db);
+  if (pgVectorActive) {
+    console.log(`[memory] pgvector backend active — table: geneweave_memory_vec (${process.env['PGVECTOR_DIMENSIONS'] ?? 1536}d)`);
+  } else {
+    console.log('[memory] SQLite semantic memory backend active (set PGVECTOR_URL to use pgvector)');
   }
 
   const startupLimits = await resolveLimits(db);

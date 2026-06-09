@@ -19,6 +19,8 @@ import type {
   ModerationModel,
 } from '@weaveintel/core';
 import { evaluateGuardrailAsync, type AsyncEvaluatorRegistry } from './async-evaluator.js';
+import { type GuardrailConditionContext } from './condition-context.js';
+import { evaluateCondition } from './condition-evaluator.js';
 
 export interface PipelineOptions {
   id?: string;
@@ -39,6 +41,14 @@ export interface PipelineOptions {
    * run. Default: no budget.
    */
   budgetMs?: number;
+  /**
+   * Condition context for conditional trigger evaluation (Phase 1/2).
+   * When provided, each guardrail's triggerConditions tree is evaluated against
+   * this context before invocation. A guardrail whose condition is not met is
+   * skipped and recorded with metadata.skipped: 'condition_not_met'.
+   * When absent, all guardrails run regardless of their triggerConditions.
+   */
+  conditionContext?: GuardrailConditionContext;
 }
 
 export class DefaultGuardrailPipeline implements IPipeline {
@@ -74,6 +84,19 @@ export class DefaultGuardrailPipeline implements IPipeline {
     };
 
     for (const guardrail of applicableGuardrails) {
+      // Phase 2: skip guardrails whose trigger condition is not met.
+      if (this.opts.conditionContext !== undefined) {
+        if (!evaluateCondition(guardrail.triggerConditions, this.opts.conditionContext)) {
+          results.push({
+            decision: 'allow',
+            guardrailId: guardrail.id,
+            explanation: 'skipped — condition not met',
+            metadata: { skipped: 'condition_not_met', durationMs: 0 },
+          });
+          continue;
+        }
+      }
+
       // W9: skip model-graded guardrails when the pipeline budget is exceeded.
       const elapsed = Date.now() - pipelineStart;
       if (this.opts.budgetMs !== undefined && elapsed >= this.opts.budgetMs && guardrail.type === 'model-graded') {

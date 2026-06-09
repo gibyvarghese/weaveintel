@@ -62,6 +62,19 @@ import type {
   TaskTypeTenantOverrideRow,
 } from './db-types.js';
 
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length || a.length === 0) return 0;
+  let dot = 0, normA = 0, normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    const ai = a[i] ?? 0;
+    const bi = b[i] ?? 0;
+    dot += ai * bi;
+    normA += ai * ai;
+    normB += bi * bi;
+  }
+  const denom = Math.sqrt(normA) * Math.sqrt(normB);
+  return denom > 0 ? dot / denom : 0;
+}
 
 export class SQLiteAdapter implements DatabaseAdapter {
   private db: import('better-sqlite3').Database | null = null;
@@ -1139,8 +1152,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createGuardrail(g: Omit<GuardrailRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO guardrails (id, name, description, type, stage, config, priority, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(g.id, g.name, g.description ?? null, g.type, g.stage, g.config ?? null, g.priority, g.enabled);
+      `INSERT INTO guardrails (id, name, description, type, stage, config, priority, enabled, trigger_conditions, trigger_description)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(g.id, g.name, g.description ?? null, g.type, g.stage, g.config ?? null, g.priority, g.enabled,
+      g.trigger_conditions ?? null, g.trigger_description ?? null);
   }
 
   async getGuardrail(id: string): Promise<GuardrailRow | null> {
@@ -3904,13 +3919,18 @@ export class SQLiteAdapter implements DatabaseAdapter {
     content: string;
     memoryType?: string;
     source?: string;
+    embedding?: number[];
   }): Promise<void> {
+    const embeddingJson = m.embedding && m.embedding.length > 0
+      ? JSON.stringify(m.embedding)
+      : null;
     this.d.prepare(
-      `INSERT INTO semantic_memory (id, user_id, chat_id, tenant_id, content, memory_type, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO semantic_memory (id, user_id, chat_id, tenant_id, content, memory_type, source, embedding)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       m.id, m.userId, m.chatId ?? null, m.tenantId ?? null,
       m.content, m.memoryType ?? 'semantic', m.source ?? 'assistant',
+      embeddingJson,
     );
   }
 
@@ -3918,15 +3938,39 @@ export class SQLiteAdapter implements DatabaseAdapter {
     userId: string;
     query: string;
     limit?: number;
+    queryEmbedding?: number[];
   }): Promise<SemanticMemoryRow[]> {
-    // Keyword-based search: rank entries containing the most query words first
+    const limit = opts.limit ?? 5;
+
+    // ── Vector search: when a query embedding is supplied and the user has
+    // stored embeddings, rank by cosine similarity instead of keyword score.
+    if (opts.queryEmbedding && opts.queryEmbedding.length > 0) {
+      const rows = this.d.prepare(
+        'SELECT * FROM semantic_memory WHERE user_id = ? AND embedding IS NOT NULL ORDER BY created_at DESC LIMIT 200',
+      ).all(opts.userId) as SemanticMemoryRow[];
+
+      if (rows.length > 0) {
+        const qVec = opts.queryEmbedding;
+        const scored = rows.map((row) => {
+          let sim = 0;
+          try {
+            const vec = JSON.parse(row.embedding!) as number[];
+            sim = cosineSimilarity(qVec, vec);
+          } catch { /* skip malformed */ }
+          return { row, sim };
+        });
+        scored.sort((a, b) => b.sim - a.sim);
+        return scored.slice(0, limit).map((s) => s.row);
+      }
+    }
+
+    // ── Keyword fallback ───────────────────────────────────────────────────
     const words = opts.query.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length > 2);
     if (words.length === 0) {
       return this.d.prepare(
         'SELECT * FROM semantic_memory WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
-      ).all(opts.userId, opts.limit ?? 5) as SemanticMemoryRow[];
+      ).all(opts.userId, limit) as SemanticMemoryRow[];
     }
-    // Build CASE score: one point per word match, then order by score DESC, recency DESC
     const scoreParts = words.map(() => `CASE WHEN LOWER(content) LIKE ? THEN 1 ELSE 0 END`).join(' + ');
     const likeParams = words.map(w => `%${w}%`);
     const sql = `
@@ -3937,7 +3981,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
       LIMIT ?
     `;
     return this.d.prepare(sql).all(
-      ...likeParams, opts.userId, ...likeParams, opts.limit ?? 5,
+      ...likeParams, opts.userId, ...likeParams, limit,
     ) as SemanticMemoryRow[];
   }
 
@@ -3953,6 +3997,37 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async clearUserSemanticMemory(userId: string): Promise<void> {
     this.d.prepare('DELETE FROM semantic_memory WHERE user_id = ?').run(userId);
+  }
+
+  async trimSemanticMemoryForUser(userId: string, maxEntries: number): Promise<void> {
+    const count = (this.d.prepare(
+      'SELECT COUNT(*) AS n FROM semantic_memory WHERE user_id = ?',
+    ).get(userId) as { n: number }).n;
+    if (count <= maxEntries) return;
+    const excess = count - maxEntries;
+    this.d.prepare(
+      `DELETE FROM semantic_memory WHERE id IN (
+         SELECT id FROM semantic_memory WHERE user_id = ? ORDER BY created_at ASC LIMIT ?
+       )`,
+    ).run(userId, excess);
+  }
+
+  async purgeSemanticMemoryOlderThan(userId: string, cutoffMs: number): Promise<void> {
+    const cutoffSec = Math.floor(cutoffMs / 1000);
+    this.d.prepare(
+      `DELETE FROM semantic_memory WHERE user_id = ? AND strftime('%s', created_at) < ?`,
+    ).run(userId, cutoffSec.toString());
+  }
+
+  async listAllSemanticMemory(opts: { userId?: string; limit?: number; offset?: number }): Promise<SemanticMemoryRow[]> {
+    if (opts.userId) {
+      return this.d.prepare(
+        'SELECT * FROM semantic_memory WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      ).all(opts.userId, opts.limit ?? 50, opts.offset ?? 0) as SemanticMemoryRow[];
+    }
+    return this.d.prepare(
+      'SELECT * FROM semantic_memory ORDER BY created_at DESC LIMIT ? OFFSET ?',
+    ).all(opts.limit ?? 50, opts.offset ?? 0) as SemanticMemoryRow[];
   }
 
   // ─── Entity Memory ─────────────────────────────────────────
@@ -4024,6 +4099,30 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM entity_memory WHERE user_id = ?').run(userId);
   }
 
+  async trimEntityMemoryForUser(userId: string, maxEntries: number): Promise<void> {
+    const count = (this.d.prepare(
+      'SELECT COUNT(*) AS n FROM entity_memory WHERE user_id = ?',
+    ).get(userId) as { n: number }).n;
+    if (count <= maxEntries) return;
+    const excess = count - maxEntries;
+    this.d.prepare(
+      `DELETE FROM entity_memory WHERE id IN (
+         SELECT id FROM entity_memory WHERE user_id = ? ORDER BY updated_at ASC LIMIT ?
+       )`,
+    ).run(userId, excess);
+  }
+
+  async listAllEntityMemory(opts: { userId?: string; limit?: number; offset?: number }): Promise<EntityMemoryRow[]> {
+    if (opts.userId) {
+      return this.d.prepare(
+        'SELECT * FROM entity_memory WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?',
+      ).all(opts.userId, opts.limit ?? 50, opts.offset ?? 0) as EntityMemoryRow[];
+    }
+    return this.d.prepare(
+      'SELECT * FROM entity_memory ORDER BY updated_at DESC LIMIT ? OFFSET ?',
+    ).all(opts.limit ?? 50, opts.offset ?? 0) as EntityMemoryRow[];
+  }
+
   async recordMemoryExtractionEvent(e: {
     id: string;
     userId: string;
@@ -4061,6 +4160,17 @@ export class SQLiteAdapter implements DatabaseAdapter {
       return this.d.prepare('SELECT * FROM memory_extraction_events WHERE chat_id = ? ORDER BY created_at DESC LIMIT ?').all(chatId, limit) as MemoryExtractionEventRow[];
     }
     return this.d.prepare('SELECT * FROM memory_extraction_events ORDER BY created_at DESC LIMIT ?').all(limit) as MemoryExtractionEventRow[];
+  }
+
+  async listAllMemoryExtractionEvents(opts: { userId?: string; limit?: number; offset?: number }): Promise<MemoryExtractionEventRow[]> {
+    if (opts.userId) {
+      return this.d.prepare(
+        'SELECT * FROM memory_extraction_events WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      ).all(opts.userId, opts.limit ?? 50, opts.offset ?? 0) as MemoryExtractionEventRow[];
+    }
+    return this.d.prepare(
+      'SELECT * FROM memory_extraction_events ORDER BY created_at DESC LIMIT ? OFFSET ?',
+    ).all(opts.limit ?? 50, opts.offset ?? 0) as MemoryExtractionEventRow[];
   }
 
   // ─── Website Credentials (Browser Auth Vault) ──────────────
@@ -4773,7 +4883,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
         priority: 74, enabled: 1,
       },
 
-      // ── W2/W3 Model-graded opt-ins (disabled by default) ─────────────────
+      // ── W2/W3 Model-graded opt-ins ────────────────────────────────────────
       {
         id: 'b1c2d3e4-0001-4000-8000-000000000001',
         name: 'Model-Graded: Content Moderation',
@@ -4781,22 +4891,28 @@ export class SQLiteAdapter implements DatabaseAdapter {
         type: 'model-graded', stage: 'post',
         config: JSON.stringify({ rule: 'moderation', categories: ['hate', 'violence', 'self_harm', 'sexual'], threshold: 0.7, action: 'deny', timeout_ms: 8000, on_error: 'warn' }),
         priority: 91, enabled: 1,
+        trigger_conditions: JSON.stringify({ any: [{ persona: ['tenant_user', 'anonymous'] }, { prior_has_warn: true }] }),
+        trigger_description: 'Non-admin user or prior warn — skip for internal admin-only sessions',
       },
       {
         id: 'b1c2d3e4-0002-4000-8000-000000000002',
         name: 'Model-Graded: LLM Safety Judge',
         description: 'Rubric-based LLM judge for safety, appropriateness, and factual grounding. Enable and supply model in PipelineOptions.',
         type: 'model-graded', stage: 'post',
-        config: JSON.stringify({ rule: 'llm-judge', rubric: 'You are a safety judge. Evaluate whether the text is safe, appropriate, and factually grounded. Output JSON: { decision, confidence, rationale }', action: 'deny', timeout_ms: 10000, on_error: 'warn' }),
+        config: JSON.stringify({ rule: 'llm-judge', rubric: 'You are a safety judge. Evaluate whether the text is safe, appropriate, and factually grounded. Output JSON: { decision, confidence, rationale }', action: 'deny', timeout_ms: 15000, on_error: 'warn' }),
         priority: 85, enabled: 1,
+        trigger_conditions: JSON.stringify({ any: [{ chat_mode: ['agent', 'supervisor'] }, { turn_has_tool_calls: true }, { risk_level: ['high', 'critical'] }, { output_length_gt: 500 }, { prior_has_warn: true }, { persona: ['anonymous'] }] }),
+        trigger_description: 'Agent/supervisor mode, tool calls, high risk, long output, prior warn, or anonymous user',
       },
       {
         id: 'b1c2d3e4-0003-4000-8000-000000000003',
         name: 'Model-Graded: Prompt Injection Classifier',
         description: 'LLM-judge specialised for injection and jailbreak detection. Fail-closed (on_error: deny). Enable and supply model.',
         type: 'model-graded', stage: 'pre',
-        config: JSON.stringify({ rule: 'injection-classifier', action: 'deny', timeout_ms: 8000, on_error: 'deny' }),
+        config: JSON.stringify({ rule: 'injection-classifier', action: 'deny', timeout_ms: 15000, on_error: 'warn' }),
         priority: 96, enabled: 1,
+        trigger_conditions: JSON.stringify({ any: [{ input_has_code: true }, { input_has_base64: true }, { input_has_structured_data: true }, { input_has_urls: true }, { input_has_instruction_override: true }, { persona: ['anonymous'] }, { prior_has_injection_warn: true }, { input_length_gt: 300 }] }),
+        trigger_description: 'Code / base64 / URLs / override phrase / anonymous user / long input / prior injection warn',
       },
       {
         id: 'b1c2d3e4-0004-4000-8000-000000000004',
@@ -4805,6 +4921,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
         type: 'model-graded', stage: 'post',
         config: JSON.stringify({ rule: 'sycophancy-judge', action: 'warn', timeout_ms: 8000, on_error: 'allow' }),
         priority: 59, enabled: 1,
+        trigger_conditions: JSON.stringify({ any: [{ input_has_validation_seeking: true }, { all: [{ turn_number_gt: 3 }, { prior_has_cognitive_warn: true }] }] }),
+        trigger_description: 'Validation-seeking phrasing, or long session with prior cognitive warn',
       },
       {
         id: 'b1c2d3e4-0005-4000-8000-000000000005',
@@ -4813,6 +4931,8 @@ export class SQLiteAdapter implements DatabaseAdapter {
         type: 'model-graded', stage: 'post',
         config: JSON.stringify({ rule: 'semantic-grounding', min_similarity: 0.50, evidence_field: 'both', action: 'warn', timeout_ms: 6000, on_error: 'allow' }),
         priority: 58, enabled: 1,
+        trigger_conditions: JSON.stringify({ all: [{ output_has_factual_claims: true }, { output_has_tool_evidence: false }] }),
+        trigger_description: 'Factual claims in output AND no tool evidence (tool-grounded answers skip this)',
       },
     ];
     for (const g of extendedGuardrails) {

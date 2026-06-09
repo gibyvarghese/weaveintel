@@ -305,7 +305,15 @@ export async function streamMessageImpl(
     : undefined;
   await deps.db.addMessage({ id: userMsgId, chatId, role: 'user', content, metadata: userMetadata });
 
-  const preGuardrail = await evaluateGuardrails(deps.db, chatId, userMsgId, processedContent, 'pre-execution');
+  // Load history now so turn number is available for condition context.
+  const history = await deps.db.getMessages(chatId);
+  const turnNumber = Math.ceil(history.length / 2);
+
+  const preGuardrail = await evaluateGuardrails(
+    deps.db, chatId, userMsgId, processedContent, 'pre-execution',
+    undefined,
+    { persona: userPersona, chatMode: settings.mode, turnNumber, tenantId },
+  );
   if (preGuardrail.decision === 'deny') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
     const denyContent = preGuardrail.reason || 'Your message was blocked by a guardrail policy.';
@@ -378,7 +386,6 @@ export async function streamMessageImpl(
     return;
   }
 
-  const history = await deps.db.getMessages(chatId);
   const messages = historyToMessages(history);
   patchLatestUserMessage(messages, processedContent);
 
@@ -557,11 +564,17 @@ export async function streamMessageImpl(
     })
     .map(s => (s.toolCall?.result ?? s.delegation?.result ?? '') as string)
     .join(' ') || undefined;
-  const postGuardrail = await evaluateGuardrails(deps.db, chatId, null, fullText, 'post-execution', {
-    userInput: processedContent,
-    assistantOutput: fullText,
-    toolEvidence: streamToolEvidence,
-  });
+  const postGuardrail = await evaluateGuardrails(deps.db, chatId, null, fullText, 'post-execution',
+    { userInput: processedContent, assistantOutput: fullText, toolEvidence: streamToolEvidence },
+    {
+      persona: userPersona,
+      chatMode: settings.mode,
+      turnNumber,
+      tenantId,
+      steps,
+      priorGuardrailResults: preGuardrail.results,
+    },
+  );
   if (postGuardrail.cognitive) {
     await deps.writeSseEvent(res, { type: 'cognitive', ...postGuardrail.cognitive });
   }

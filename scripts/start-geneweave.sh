@@ -13,7 +13,7 @@
 #
 # Env overrides:
 #   PORT, DATABASE_PATH, OPENAI_API_KEY, ANTHROPIC_API_KEY,
-#   JWT_SECRET, VAULT_KEY
+#   JWT_SECRET, VAULT_KEY, PGVECTOR_URL
 
 set -euo pipefail
 
@@ -141,6 +141,14 @@ for k in OPENAI_API_KEY ANTHROPIC_API_KEY GEMINI_API_KEY GOOGLE_API_KEY OLLAMA_B
   fi
 done
 
+# Honor inline env override for PGVECTOR_URL (optional — falls back to SQLite if unset).
+pgv_inline="${PGVECTOR_URL:-}"
+pgv_cur="$(get_env_value PGVECTOR_URL)"
+if [ -n "$pgv_inline" ] && { [ -z "$pgv_cur" ] || is_placeholder "$pgv_cur"; }; then
+  set_env PGVECTOR_URL "$pgv_inline"
+  info "Set PGVECTOR_URL from environment"
+fi
+
 # Validate at least one real provider is present (cloud key OR reachable local endpoint).
 have_provider=0
 openai_val="$(get_env_value OPENAI_API_KEY)"
@@ -181,6 +189,39 @@ set -a
 source .env
 set +a
 info "PORT=${PORT:-3500}  DATABASE_PATH=${DATABASE_PATH:-./geneweave.db}"
+
+# ─── 5b. pgvector connectivity check ─────────────────────────────────────────
+pgv_url="$(get_env_value PGVECTOR_URL)"
+if [ -n "$pgv_url" ] && ! is_placeholder "$pgv_url"; then
+  step "Checking pgvector connection"
+  if ! command -v psql >/dev/null 2>&1; then
+    warn "psql not found — cannot verify pgvector. Install: brew install postgresql@15"
+    warn "geneWeave will attempt to connect at runtime (falling back to SQLite on failure)."
+  elif ! psql "$pgv_url" -c "SELECT 1;" >/dev/null 2>&1; then
+    warn "PostgreSQL not reachable at: $pgv_url"
+    warn "Start PostgreSQL (e.g. brew services start postgresql@15) or update PGVECTOR_URL."
+    warn "geneWeave will fall back to SQLite semantic memory backend."
+  else
+    # Check whether the vector extension is installed; try to install it if not.
+    vec_ver=$(psql "$pgv_url" -tAc "SELECT extversion FROM pg_extension WHERE extname='vector';" 2>/dev/null || true)
+    if [ -n "$vec_ver" ]; then
+      info "pgvector ${vec_ver} ready — $(psql "$pgv_url" -tAc "SELECT current_database();" 2>/dev/null)"
+    else
+      info "vector extension missing — attempting CREATE EXTENSION vector ..."
+      if psql "$pgv_url" -c "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null 2>&1; then
+        vec_ver=$(psql "$pgv_url" -tAc "SELECT extversion FROM pg_extension WHERE extname='vector';" 2>/dev/null || true)
+        info "pgvector ${vec_ver} installed and ready"
+      else
+        warn "Could not install vector extension automatically."
+        warn "Run as a superuser: psql \"$pgv_url\" -c 'CREATE EXTENSION vector;'"
+        warn "Or install pgvector for your PostgreSQL version (see README)."
+        warn "geneWeave will fall back to SQLite semantic memory backend."
+      fi
+    fi
+  fi
+else
+  info "PGVECTOR_URL not set — using SQLite semantic memory backend"
+fi
 
 # ─── 6. Start ────────────────────────────────────────────────────────────────
 if [ "$START" = "0" ]; then

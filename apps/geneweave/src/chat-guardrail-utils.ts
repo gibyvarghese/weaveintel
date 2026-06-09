@@ -1,5 +1,16 @@
-import type { Guardrail, GuardrailStage } from '@weaveintel/core';
+import type { ConditionNode, Guardrail, GuardrailStage } from '@weaveintel/core';
 import type { GuardrailRow } from './db.js';
+
+function parseTriggerFields(row: GuardrailRow): { triggerConditions?: ConditionNode | null; triggerDescription?: string } {
+  let triggerConditions: ConditionNode | null = null;
+  if (row.trigger_conditions) {
+    try { triggerConditions = JSON.parse(row.trigger_conditions) as ConditionNode; } catch { /* ignore */ }
+  }
+  return {
+    triggerConditions,
+    ...(row.trigger_description != null ? { triggerDescription: row.trigger_description } : {}),
+  };
+}
 
 export function parseGuardrailConfig(raw: string | null): Record<string, unknown> {
   if (!raw) return {};
@@ -70,6 +81,7 @@ export function normalizeGuardrail(row: GuardrailRow, stage: GuardrailStage): Gu
         rule: inferRuleName(row, config),
         pattern_target: typeof config['check'] === 'string' && String(config['check']).includes('post_') ? 'output' : 'input',
       },
+      ...parseTriggerFields(row),
     };
   }
 
@@ -88,6 +100,7 @@ export function normalizeGuardrail(row: GuardrailRow, stage: GuardrailStage): Gu
         rule: 'grounding-overlap',
         min_overlap: typeof config['confidence_threshold'] === 'number' ? Number(config['confidence_threshold']) / 10 : config['min_overlap'],
       },
+      ...parseTriggerFields(row),
     };
   }
 
@@ -106,6 +119,7 @@ export function normalizeGuardrail(row: GuardrailRow, stage: GuardrailStage): Gu
         maxLength: typeof config['maxLength'] === 'number' ? config['maxLength'] : maxInputTokens ? maxInputTokens * 4 : undefined,
         action: config['action'] === 'deny' || config['action'] === 'warn' ? config['action'] : 'warn',
       },
+      ...parseTriggerFields(row),
     };
   }
 
@@ -122,6 +136,7 @@ export function normalizeGuardrail(row: GuardrailRow, stage: GuardrailStage): Gu
         ...patternConfigFromNames(config['patterns']),
         ...config,
       },
+      ...parseTriggerFields(row),
     };
   }
 
@@ -139,6 +154,7 @@ export function normalizeGuardrail(row: GuardrailRow, stage: GuardrailStage): Gu
         words: Array.isArray(config['words']) ? config['words'] : Array.isArray(config['categories']) ? config['categories'] : [],
         action: config['action'] === 'deny' || config['action'] === 'warn' ? config['action'] : 'warn',
       },
+      ...parseTriggerFields(row),
     };
   }
 
@@ -151,5 +167,6 @@ export function normalizeGuardrail(row: GuardrailRow, stage: GuardrailStage): Gu
     enabled: !!row.enabled,
     config,
     priority: row.priority,
+    ...parseTriggerFields(row),
   };
 }

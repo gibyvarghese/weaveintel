@@ -12,6 +12,37 @@
 
 import { newUUIDv7 } from '@weaveintel/core';
 import type { AgentStep, EscalationPolicy, Guardrail, GuardrailResult, GuardrailStage, Model } from '@weaveintel/core';
+
+// ── Tool-category extraction ────────────────────────────────────────────────
+// Maps tool call names → the canonical category string used in condition trees.
+// Categories mirror the design doc signal space: cse, web_search, api, file, external.
+
+export function extractToolCategories(steps: AgentStep[]): string[] {
+  const cats = new Set<string>();
+  for (const s of steps) {
+    const name = (s.toolCall?.name ?? '').toLowerCase();
+    if (!name) continue;
+    if (name.includes('cse')) cats.add('cse');
+    else if (name.includes('search') || name.includes('web')) cats.add('web_search');
+    else if (name.includes('file') || name.includes('read_file') || name.includes('write_file') || name.includes('fs_')) cats.add('file');
+    else if (name.includes('http') || name.includes('fetch') || name.includes('request') || name.includes('api')) cats.add('api');
+    else cats.add('external');
+  }
+  return [...cats];
+}
+
+// ── Injection guardrail ID registry ────────────────────────────────────────
+// Used to detect prior injection warns without relying on fragile string matching
+// in explanations. Add new injection guardrail IDs here as they are seeded.
+const INJECTION_GUARDRAIL_IDS = new Set([
+  'b1c2d3e4-0003-4000-8000-000000000003', // Prompt Injection Classifier (model-graded)
+  'c1000001-aaaa-4000-8000-000000000001', // Prompt Injection: Role-Play Bypass
+  'c1000002-aaaa-4000-8000-000000000002', // Prompt Injection: God-Mode Bypass
+  'c1000003-aaaa-4000-8000-000000000003', // Indirect/Hypothetical Wrapper
+  'c1000004-aaaa-4000-8000-000000000004', // Base64 Encoded Instruction
+  '7c8988ba-b7c9-4e52-8139-732e5c922a25', // Prompt Injection: Directive Override
+  '0eb8ae21-e411-4dae-921f-3f91651619d9', // Prompt Injection: Prompt Exfiltration
+]);
 import { getActiveGuardrailJudgeModel, getActiveGuardrailModerationModel, getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
 import {
   createGuardrailPipeline,
@@ -20,7 +51,10 @@ import {
   hasWarning,
   getDenyReason,
   summarizeGuardrailResults,
+  buildInputSignals,
+  buildOutputSignals,
   type GuardrailCategorySummary,
+  type GuardrailConditionContext,
   type EscalationContext,
 } from '@weaveintel/guardrails';
 import { PolicyEvaluator, createPolicy } from '@weaveintel/human-tasks';
@@ -62,6 +96,25 @@ export interface EvaluateGuardrailsOpts {
   maxInputChars?: number;
   /** Tenant ID used to resolve per-tenant limits. */
   tenantId?: string | null;
+  // ── Condition context fields (used for conditional trigger evaluation) ──────
+  /** User persona (e.g. 'tenant_user', 'anonymous', 'platform_admin'). Defaults to 'tenant_user'. */
+  persona?: string;
+  /** Whether the user account is newly created. Defaults to false. */
+  isNewUser?: boolean;
+  /** Chat mode (e.g. 'chat', 'agent', 'supervisor'). Defaults to 'chat'. */
+  chatMode?: string;
+  /** Turn number within the current conversation (1-based). Defaults to 1. */
+  turnNumber?: number;
+  /** Whether this turn contains tool calls. Defaults to false. */
+  hasToolCalls?: boolean;
+  /** Tool categories present in this turn (derived from steps if steps is provided). */
+  toolCategories?: string[];
+  /** Risk level from routing (e.g. 'low', 'medium', 'high', 'critical'). Defaults to 'low'. */
+  riskLevel?: string;
+  /** Prior guardrail results from the pre-stage run — drives the prior.* cascade into the post-stage context. */
+  priorGuardrailResults?: GuardrailResult[];
+  /** Agent steps from this turn. When provided, hasToolCalls and toolCategories are derived automatically. */
+  steps?: AgentStep[];
 }
 
 export async function evaluateGuardrails(
@@ -99,12 +152,45 @@ export async function evaluateGuardrails(
 
     const judgeModel: Model | undefined = opts?.model ?? getActiveGuardrailJudgeModel();
 
+    // Build condition context so trigger conditions gate guardrail execution.
+    const prior = opts?.priorGuardrailResults ?? [];
+    // Derive tool info: steps opt takes precedence over individual hasToolCalls/toolCategories opts.
+    const resolvedSteps = opts?.steps;
+    const hasToolCalls = resolvedSteps != null
+      ? resolvedSteps.some(s => !!s.toolCall)
+      : (opts?.hasToolCalls ?? false);
+    const toolCategories = resolvedSteps != null
+      ? extractToolCategories(resolvedSteps)
+      : (opts?.toolCategories ?? []);
+
+    // A result counts as a real warn/deny only if it was not skipped by condition evaluation.
+    const activeWarns = prior.filter(r =>
+      (r.decision === 'warn' || r.decision === 'deny') && !r.metadata?.['skipped'],
+    );
+
+    const conditionContext: GuardrailConditionContext = {
+      user: { persona: opts?.persona ?? 'tenant_user', isNew: opts?.isNewUser ?? false },
+      chat: { mode: opts?.chatMode ?? 'direct' },
+      turn: { number: opts?.turnNumber ?? 1, hasToolCalls, toolCategories },
+      risk: { level: opts?.riskLevel ?? 'low', verb: opts?.chatMode ?? 'direct' },
+      prior: {
+        hasWarn: activeWarns.length > 0,
+        hasCognitiveWarn: activeWarns.some(r => String(r.metadata?.['category'] ?? '') === 'cognitive'),
+        hasInjectionWarn: activeWarns.some(r => INJECTION_GUARDRAIL_IDS.has(r.guardrailId ?? '')),
+      },
+      input: buildInputSignals(guardedInput),
+      output: refs?.assistantOutput != null
+        ? buildOutputSignals(refs.assistantOutput, !!refs.toolEvidence)
+        : null,
+    };
+
     const pipeline = createGuardrailPipeline(guardrails, {
       shortCircuitOnDeny: true,
       model: judgeModel,
       moderationModel: getActiveGuardrailModerationModel(),
       embeddingModel: getActiveGuardrailEmbeddingModel(),
       budgetMs: opts?.budgetMs,
+      conditionContext,
     });
 
     const results = guardrails.length > 0

@@ -13,6 +13,8 @@ import { applyM30GuardrailSecurity } from './m30-guardrail-security.js';
 import { applyM31PiiGuardrails } from './m31-pii-guardrails.js';
 import { applyM32GuardrailTimeouts } from './m32-guardrail-timeouts.js';
 import { applyM33PlatformLimits } from './m33-platform-limits.js';
+import { applyM34GuardrailConditions } from './m34-guardrail-conditions.js';
+import { applyM35MemoryVectors } from './m35-memory-vectors.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -34,6 +36,8 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm31-pii-guardrails', description: 'Privacy: input PII deny guardrails for SSN + credit card (P4.1/C1.2)', run: applyM31PiiGuardrails },
   { id: 'm32-guardrail-timeouts', description: 'Guardrails: raise model-graded timeouts to 15s; injection-classifier on_error → warn', run: applyM32GuardrailTimeouts },
   { id: 'm33-platform-limits', description: 'Platform limits: initialise config_overrides.limits on global tenant_configs row', run: applyM33PlatformLimits },
+  { id: 'm34-guardrail-conditions', description: 'Guardrail conditional triggers: trigger_conditions + trigger_description columns, seed default conditions for model-graded and context-sensitive guardrails', run: applyM34GuardrailConditions },
+  { id: 'm35-memory-vectors', description: 'Memory: embedding column on semantic_memory, memory tool catalog seeds, governance rule seeds, additional extraction rules', run: applyM35MemoryVectors },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

@@ -30,6 +30,44 @@ export interface GuardrailEvaluationContext {
   metadata?: Record<string, unknown>;
 }
 
+// ─── Condition system ────────────────────────────────────────
+
+/**
+ * JSON-serialisable condition tree that controls when a guardrail fires.
+ * null / absent means "always run" (backward-compatible default).
+ * Composition nodes short-circuit: `any` stops on first true, `all` stops on first false.
+ */
+export type ConditionNode =
+  | { all: ConditionNode[] }
+  | { any: ConditionNode[] }
+  | { not: ConditionNode }
+  | { chat_mode: string[] }
+  | { persona: string[] }
+  | { risk_level: string[] }
+  | { prior_has_warn: boolean }
+  | { prior_has_cognitive_warn: boolean }
+  | { prior_has_injection_warn: boolean }
+  | { turn_has_tool_calls: boolean }
+  | { turn_number_gt: number }
+  | { input_length_gt: number }
+  | { input_has_code: boolean }
+  | { input_has_urls: boolean }
+  | { input_has_base64: boolean }
+  | { input_has_structured_data: boolean }
+  | { input_has_decision_language: boolean }
+  | { input_has_validation_seeking: boolean }
+  | { input_has_factual_question: boolean }
+  | { input_has_instruction_override: boolean }
+  | { input_has_sensitive_pattern: boolean }
+  | { output_length_gt: number }
+  | { output_has_code_blocks: boolean }
+  | { output_has_factual_claims: boolean }
+  | { output_has_advice: boolean }
+  | { output_has_credential_patterns: boolean }
+  | { output_has_tool_evidence: boolean }
+  | { output_has_urls: boolean }
+  | { tool_category_in: string[] };
+
 export interface Guardrail {
   id: string;
   name: string;
@@ -39,6 +77,10 @@ export interface Guardrail {
   enabled: boolean;
   config: Record<string, unknown>;
   priority?: number;
+  /** JSON condition tree. null/absent = always run. */
+  triggerConditions?: ConditionNode | null;
+  /** Human-readable summary of the condition shown in the admin panel. */
+  triggerDescription?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }

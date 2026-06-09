@@ -52,6 +52,10 @@ function boolEnv(k, d) { const v = process.env[k]; if (!v) return d; return v ==
 const REASONING_USERS   = intEnv('REASONING_USERS', 5);
 const CSE_PENTEST       = boolEnv('CSE_PENTEST', true);
 const SKIP_LLM          = boolEnv('SKIP_LLM', false);
+// When false (default), guardrail conditional triggers are active and expensive
+// checks only fire when their trigger_conditions are met. Set to true to disable
+// all conditions server-side (via admin API) and measure baseline latency.
+const SKIP_GUARDRAIL_CONDITIONS = boolEnv('SKIP_GUARDRAIL_CONDITIONS', false);
 const LLM_TIMEOUT       = intEnv('LLM_TIMEOUT', 120000);
 const NODE_SAMPLE_MS    = intEnv('NODE_SAMPLE_MS', 500);
 const MAX_TOOL_DEPTH    = intEnv('MAX_TOOL_DEPTH', 8);
@@ -1533,13 +1537,99 @@ function writeReport() {
 // MAIN
 // ═══════════════════════════════════════════════════════════════════════════
 
+// ── S12b: Guardrail condition profiling ───────────────────────────────────────
+// Measures guardrail evaluation latency on simple direct-mode queries that should
+// hit only cheap checks when SKIP_GUARDRAIL_CONDITIONS=false (default).
+// Set SKIP_GUARDRAIL_CONDITIONS=true to baseline latency with all conditions disabled.
+//
+// To compare:
+//   node scripts/geneweave-stress-cse-reasoning.mjs   # conditions active
+//   SKIP_GUARDRAIL_CONDITIONS=true node scripts/...    # all guardrails run (baseline)
+
+async function guardrailConditionProfiling() {
+  const suite = 'GuardrailConditions';
+  if (!ADMIN_EMAIL || !BASE || BASE.includes('localhost') === false) {
+    info(suite, 'Skipped', 'Requires running server — set BASE, ADMIN_EMAIL, ADMIN_PASSWORD');
+    return;
+  }
+
+  // Log the mode so the report is self-documenting.
+  info(suite, `Mode: ${SKIP_GUARDRAIL_CONDITIONS ? 'ALL CONDITIONS DISABLED (baseline)' : 'CONDITIONS ACTIVE'}`,
+    SKIP_GUARDRAIL_CONDITIONS
+      ? 'All guardrails run unconditionally — measuring baseline overhead'
+      : 'Expensive checks gated by trigger_conditions — measuring optimised path');
+
+  if (SKIP_GUARDRAIL_CONDITIONS) {
+    // Temporarily disable trigger_conditions on all guardrails so all checks run.
+    // This lets us measure the un-gated baseline.
+    const listR = await http('GET', '/api/admin/guardrails', null, adminSid, { timeout: 5000 });
+    const guardrails = listR?.data?.guardrails ?? [];
+    const cleared = [];
+    for (const g of guardrails) {
+      if (g.trigger_conditions) {
+        await http('PUT', `/api/admin/guardrails/${g.id}`, { trigger_conditions: null }, adminSid, { timeout: 5000 });
+        cleared.push(g.id);
+      }
+    }
+    info(suite, `Cleared trigger_conditions from ${cleared.length} guardrails`, 'Baseline mode active');
+  }
+
+  // Simple direct-mode queries that should use only cheap checks when gated.
+  const simpleQueries = [
+    'What day is it today?',
+    'Summarize the following: The quick brown fox.',
+    'What is 2 + 2?',
+    'List the files in a typical Node.js project.',
+    'What is the capital of France?',
+  ];
+
+  // Create a test chat
+  const loginR = await http('POST', '/api/auth/login', { email: ADMIN_EMAIL, password: ADMIN_PASSWORD });
+  const sid = loginR?.data?.session?.id;
+  if (!sid) { warn(suite, 'Could not obtain session for profiling', 'Check ADMIN_EMAIL/PASSWORD'); return; }
+
+  const chatR = await http('POST', '/api/chats', { title: 'Condition profiling' }, sid);
+  const chatId = chatR?.data?.chat?.id;
+  if (!chatId) { warn(suite, 'Could not create profiling chat', ''); return; }
+
+  const times = [];
+  for (const q of simpleQueries) {
+    const r = await http('POST', `/api/chats/${chatId}/messages`,
+      { content: q, stream: false, maxTokens: 20 }, sid, { timeout: 30000 });
+    if (r.status < 300) {
+      times.push(r.ms);
+      track('guardrail_condition_query', r.ms);
+    } else {
+      warn(suite, `Query failed: ${q.slice(0, 40)}`, `HTTP ${r.status}`);
+    }
+  }
+
+  if (times.length > 0) {
+    const s = stats(times);
+    const mode = SKIP_GUARDRAIL_CONDITIONS ? 'baseline (all checks)' : 'optimised (conditions active)';
+    pass(suite, `Simple query latency — ${mode}`,
+      `p50=${s.p50}ms p95=${s.p95}ms avg=${s.avg}ms (${times.length} samples)`);
+
+    // Target: optimised path (conditions active) should be ≥60% faster than baseline.
+    // We can't enforce this in a single run, but we report the numbers so a subsequent
+    // baseline run can be compared manually from the JSON report.
+    if (!SKIP_GUARDRAIL_CONDITIONS) {
+      info(suite, 'Optimised path numbers recorded',
+        `Compare against SKIP_GUARDRAIL_CONDITIONS=true run — target ≥60% latency reduction on simple queries`);
+    } else {
+      info(suite, 'Baseline numbers recorded',
+        `Re-run without SKIP_GUARDRAIL_CONDITIONS to see optimised numbers`);
+    }
+  }
+}
+
 async function main() {
   const started = Date.now();
   console.log('\n╔══════════════════════════════════════════════════════════════════════╗');
   console.log('║   GeneWeave Stress · CSE Pentest · Deep Reasoning · Docker Isolation ║');
   console.log('╚══════════════════════════════════════════════════════════════════════╝');
   console.log(`Run: ${RUN_ID}`);
-  console.log(`LLM: ${SKIP_LLM ? 'SKIP' : 'ENABLED'} · CSEPentest: ${CSE_PENTEST} · ReasoningUsers: ${REASONING_USERS} · Docker: ${DOCKER_AVAILABLE}`);
+  console.log(`LLM: ${SKIP_LLM ? 'SKIP' : 'ENABLED'} · CSEPentest: ${CSE_PENTEST} · ReasoningUsers: ${REASONING_USERS} · Docker: ${DOCKER_AVAILABLE} · GuardrailConditions: ${SKIP_GUARDRAIL_CONDITIONS ? 'DISABLED (baseline)' : 'ACTIVE'}`);
   console.log(`Outputs: ${JSON_OUT}\n`);
 
   await section('Bootstrap & Login', bootstrapAndLogin);
@@ -1554,6 +1644,7 @@ async function main() {
   await section(`Concurrent Reasoning Stress (${REASONING_USERS} users, real LLM)`, concurrentReasoningStress);
   await section('Memory Pressure Profiling (50 chats, 10 concurrent messages)', memoryPressureTests);
   await section('API Latency Breakdown (per operation type)', apiLatencyBreakdown);
+  await section('Guardrail Condition Profiling', guardrailConditionProfiling);
   await section('Node.js Post-Stress Metrics & Comparison', nodePostStress);
 
   writeReport();

@@ -516,6 +516,7 @@ export {
   type GuardrailResolver,
   type GuardrailRevision,
   type GuardrailRevisionStore,
+  type ConditionNode,
 } from './guardrails.js';
 
 // Human-in-the-loop contracts

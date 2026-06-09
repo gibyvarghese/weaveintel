@@ -63,7 +63,7 @@ export type ConfiguredConversationMemory = AgentMemory & {
 };
 
 export interface ConfiguredMemoryStoreOptions {
-  backend: 'in-memory' | 'runtime' | 'postgres' | 'redis' | 'sqlite' | 'mongodb' | 'cloud-nosql';
+  backend: 'in-memory' | 'runtime' | 'postgres' | 'pgvector' | 'redis' | 'sqlite' | 'mongodb' | 'cloud-nosql';
   /** Phase 4 — when `backend: 'runtime'`, entries are stored via
    *  `runtime.persistence.kv`. Falls back to in-memory when omitted. */
   runtime?: WeaveRuntime;
@@ -80,6 +80,63 @@ export interface ConfiguredMemoryStoreOptions {
   dynamoDbEndpoint?: string;
   dynamoDbRegion?: string;
   dynamoDbTableName?: string;
+  // ── pgvector options ────────────────────────────────────────
+  /** Connection URL for the pgvector backend. */
+  pgvectorUrl?: string;
+  /** Embedding vector dimensions. Must match your model. Defaults to 1536. */
+  pgvectorDimensions?: number;
+  /** Table name for the pgvector backend. Defaults to 'memory_vec'. */
+  pgvectorTableName?: string;
+  /** ANN index type. Defaults to 'hnsw'. */
+  pgvectorIndexType?: 'hnsw' | 'ivfflat' | 'none';
+  /** Distance metric. Defaults to 'cosine'. */
+  pgvectorDistanceMetric?: 'cosine' | 'l2' | 'inner';
+}
+
+// ── pgvector store ────────────────────────────────────────────
+
+/**
+ * Options for the pgvector-backed memory store.
+ */
+export interface PgVectorMemoryStoreOptions {
+  /** PostgreSQL connection URL. */
+  url: string;
+  /**
+   * Embedding vector dimensions — must match the model you use.
+   *   - OpenAI text-embedding-3-small / ada-002 → 1536
+   *   - OpenAI text-embedding-3-large           → 3072
+   *   - Cohere embed-v3                          → 1024
+   * Defaults to 1536.
+   */
+  dimensions?: number;
+  /**
+   * Table name. Defaults to `'memory_vec'`.
+   * Use a custom name to avoid clashing with the JSON-only `weavePostgresMemoryStore`
+   * which creates a table called `memory_entries`.
+   */
+  tableName?: string;
+  /**
+   * ANN index type created on the embedding column.
+   *  - `'hnsw'`    — recommended; best recall, no list-count tuning needed (pgvector ≥ 0.5.0)
+   *  - `'ivfflat'` — faster to build; tune `ivfLists` to √(row count) for best performance
+   *  - `'none'`    — exact KNN scan; fine for < 100 k vectors per partition
+   * Defaults to `'hnsw'`.
+   */
+  indexType?: 'hnsw' | 'ivfflat' | 'none';
+  /**
+   * Number of IVFFlat lists. Only used when `indexType='ivfflat'`.
+   * Rule of thumb: √(expected row count). Defaults to 100.
+   */
+  ivfLists?: number;
+  /**
+   * Distance / similarity metric. Determines the index operator class
+   * and the SQL search operator.
+   *  - `'cosine'` (`<=>`) — recommended for unit-normalised embeddings (OpenAI, Cohere, etc.)
+   *  - `'l2'`     (`<->`) — Euclidean distance; good for non-normalised models
+   *  - `'inner'`  (`<#>`) — inner-product / dot-product; equivalent to cosine on unit vectors
+   * Defaults to `'cosine'`.
+   */
+  distanceMetric?: 'cosine' | 'l2' | 'inner';
 }
 
 function matchesFilter(entry: MemoryEntry, filter?: MemoryFilter): boolean {
@@ -298,6 +355,17 @@ export function createConfiguredMemoryStore(options: ConfiguredMemoryStoreOption
         throw new Error('postgresUrl is required when backend is postgres');
       }
       return weavePostgresMemoryStore({ url: options.postgresUrl });
+    case 'pgvector':
+      if (!options.pgvectorUrl) {
+        throw new Error('pgvectorUrl is required when backend is pgvector');
+      }
+      return weavePgVectorMemoryStore({
+        url: options.pgvectorUrl,
+        dimensions: options.pgvectorDimensions,
+        tableName: options.pgvectorTableName,
+        indexType: options.pgvectorIndexType,
+        distanceMetric: options.pgvectorDistanceMetric,
+      });
     case 'redis':
       if (!options.redisUrl) {
         throw new Error('redisUrl is required when backend is redis');
@@ -663,6 +731,329 @@ export function weaveCloudNoSqlMemoryStore(opts: {
     },
     async close(): Promise<void> {
       await client.destroy();
+    },
+  };
+}
+
+// ─── pgvector memory store ────────────────────────────────────
+
+/** Internal helpers for pgvector distance operators and index ops classes. */
+function pgVectorMetricConfig(metric: 'cosine' | 'l2' | 'inner'): {
+  operator: string;
+  indexOps: string;
+  toScore: (distanceExpr: string) => string;
+} {
+  switch (metric) {
+    case 'cosine':
+      // <=> returns cosine distance [0, 2]; similarity = 1 - distance
+      return { operator: '<=>', indexOps: 'vector_cosine_ops', toScore: (d) => `(1.0 - ${d})` };
+    case 'l2':
+      // <-> returns L2 distance [0, ∞]; map to (0, 1] with 1/(1+d)
+      return { operator: '<->', indexOps: 'vector_l2_ops', toScore: (d) => `(1.0 / (1.0 + ${d}))` };
+    case 'inner':
+      // <#> returns negative inner product; negate to get raw dot product
+      return { operator: '<#>', indexOps: 'vector_ip_ops', toScore: (d) => `(-(${d}))` };
+  }
+}
+
+/** Encode a JS number array as the PostgreSQL vector literal `[f1,f2,...,fn]`. */
+function toVectorLiteral(embedding: readonly number[]): string {
+  return `[${Array.from(embedding).join(',')}]`;
+}
+
+/** Parse the PostgreSQL vector string `[f1,f2,...,fn]` back to a number array. */
+function fromVectorLiteral(s: string): readonly number[] {
+  return JSON.parse(s) as number[];
+}
+
+/** Build a SQL WHERE fragment and corresponding parameter values from a MemoryQuery. */
+function buildFilterSQL(
+  query: MemoryQuery,
+  startIdx: number,
+): { sql: string; params: unknown[] } {
+  const conditions: string[] = ['(expires_at IS NULL OR expires_at > NOW())'];
+  const params: unknown[] = [];
+  let idx = startIdx;
+
+  if (query.type) {
+    conditions.push(`type = $${idx++}`);
+    params.push(query.type);
+  }
+  const f = query.filter;
+  if (f?.tenantId) { conditions.push(`tenant_id = $${idx++}`); params.push(f.tenantId); }
+  if (f?.userId)   { conditions.push(`user_id = $${idx++}`);   params.push(f.userId); }
+  if (f?.sessionId){ conditions.push(`session_id = $${idx++}`); params.push(f.sessionId); }
+  if (f?.types && f.types.length > 0) {
+    conditions.push(`type = ANY($${idx++}::text[])`);
+    params.push(f.types);
+  }
+  if (f?.after)  { conditions.push(`created_at > $${idx++}`); params.push(f.after); }
+  if (f?.before) { conditions.push(`created_at < $${idx++}`); params.push(f.before); }
+
+  return { sql: conditions.join(' AND '), params };
+}
+
+/** Map a raw postgres query row to a MemoryEntry. */
+function pgRowToMemoryEntry(row: Record<string, unknown>): MemoryEntry {
+  return {
+    id: row['id'] as string,
+    type: row['type'] as MemoryType,
+    content: row['content'] as string,
+    metadata: row['metadata'] as Record<string, unknown>,
+    embedding: row['embedding'] != null ? fromVectorLiteral(row['embedding'] as string) : undefined,
+    createdAt: (row['created_at'] instanceof Date
+      ? (row['created_at'] as Date).toISOString()
+      : String(row['created_at'])),
+    expiresAt: row['expires_at'] != null
+      ? (row['expires_at'] instanceof Date
+        ? (row['expires_at'] as Date).toISOString()
+        : String(row['expires_at']))
+      : undefined,
+    tenantId:  row['tenant_id']  as string | undefined,
+    userId:    row['user_id']    as string | undefined,
+    sessionId: row['session_id'] as string | undefined,
+    score:     row['_score']     as number | undefined,
+  };
+}
+
+/**
+ * A `MemoryStore` backed by PostgreSQL + pgvector.
+ *
+ * Delegates vector similarity search to the database using the `<=>` / `<->` /
+ * `<#>` operators so cosine (or L2 / inner-product) ranking never leaves the DB.
+ * All filter predicates (type, userId, tenantId, before/after) are pushed down
+ * to SQL WHERE clauses — only the final `topK` rows are transferred.
+ *
+ * Prerequisites
+ * -------------
+ * 1. PostgreSQL 12+ with the `pgvector` extension installed:
+ *    ```sql
+ *    CREATE EXTENSION IF NOT EXISTS vector;
+ *    ```
+ *    Or via Docker: `ankane/pgvector` / `pgvector/pgvector` images include it.
+ *
+ * 2. The `pg` package is already a dependency of `@weaveintel/memory`; no extra
+ *    package is needed.
+ *
+ * Schema
+ * ------
+ * On first use the store creates:
+ * - Table `memory_vec` (configurable via `tableName`)
+ * - Optional HNSW or IVFFlat index on the `embedding` column
+ *
+ * Adopting in geneWeave
+ * ---------------------
+ * Pass `weavePgVectorMemoryStore` as the `store` argument to `weaveSemanticMemory`:
+ * ```typescript
+ * const pgVec = weavePgVectorMemoryStore({ url: process.env.PG_URL! });
+ * const semanticMem = weaveSemanticMemory(embeddingModel, pgVec);
+ * ```
+ * Or use the configured factory:
+ * ```typescript
+ * const store = createConfiguredMemoryStore({
+ *   backend: 'pgvector',
+ *   pgvectorUrl: process.env.PG_URL!,
+ *   pgvectorDimensions: 1536,
+ * });
+ * ```
+ */
+export function weavePgVectorMemoryStore(opts: PgVectorMemoryStoreOptions): DurableMemoryStore {
+  const pool = new Pool({ connectionString: opts.url });
+  const dims   = opts.dimensions     ?? 1536;
+  const table  = opts.tableName      ?? 'memory_vec';
+  const metric = opts.distanceMetric ?? 'cosine';
+  const idxType = opts.indexType     ?? 'hnsw';
+  const { operator, indexOps, toScore } = pgVectorMetricConfig(metric);
+
+  let schemaReady = false;
+
+  async function ensureSchema(): Promise<void> {
+    if (schemaReady) return;
+    const client = await pool.connect();
+    try {
+      // Install the extension (requires superuser or pg_extension_owner; idempotent).
+      await client.query('CREATE EXTENSION IF NOT EXISTS vector');
+
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS ${table} (
+          id          TEXT PRIMARY KEY,
+          type        TEXT NOT NULL,
+          content     TEXT NOT NULL,
+          metadata    JSONB NOT NULL DEFAULT '{}',
+          embedding   vector(${dims}),
+          created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          expires_at  TIMESTAMPTZ,
+          tenant_id   TEXT,
+          user_id     TEXT,
+          session_id  TEXT
+        )
+      `);
+
+      // Support partial text search on content.
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS ${table}_content_idx
+          ON ${table} USING gin(to_tsvector('english', content))
+      `);
+
+      if (idxType === 'hnsw') {
+        // HNSW: best recall, self-tuning, no list count needed. Requires pgvector ≥ 0.5.0.
+        await client.query(`
+          CREATE INDEX IF NOT EXISTS ${table}_embedding_hnsw_idx
+            ON ${table}
+            USING hnsw (embedding ${indexOps})
+        `);
+      } else if (idxType === 'ivfflat') {
+        const lists = opts.ivfLists ?? 100;
+        await client.query(`
+          CREATE INDEX IF NOT EXISTS ${table}_embedding_ivfflat_idx
+            ON ${table}
+            USING ivfflat (embedding ${indexOps})
+            WITH (lists = ${lists})
+        `);
+      }
+
+      schemaReady = true;
+    } finally {
+      client.release();
+    }
+  }
+
+  return {
+    // ── write ──────────────────────────────────────────────────────────────
+    async write(_ctx, entries): Promise<void> {
+      await ensureSchema();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const entry of entries) {
+          const embLiteral = entry.embedding ? toVectorLiteral(entry.embedding) : null;
+          await client.query(
+            `INSERT INTO ${table}
+               (id, type, content, metadata, embedding,
+                created_at, expires_at, tenant_id, user_id, session_id)
+             VALUES ($1, $2, $3, $4::jsonb,
+                     $5::vector,
+                     $6, $7, $8, $9, $10)
+             ON CONFLICT (id) DO UPDATE SET
+               type       = EXCLUDED.type,
+               content    = EXCLUDED.content,
+               metadata   = EXCLUDED.metadata,
+               embedding  = EXCLUDED.embedding,
+               expires_at = EXCLUDED.expires_at,
+               tenant_id  = EXCLUDED.tenant_id,
+               user_id    = EXCLUDED.user_id,
+               session_id = EXCLUDED.session_id`,
+            [
+              entry.id,
+              entry.type,
+              entry.content,
+              JSON.stringify(entry.metadata ?? {}),
+              embLiteral,
+              entry.createdAt,
+              entry.expiresAt ?? null,
+              entry.tenantId  ?? null,
+              entry.userId    ?? null,
+              entry.sessionId ?? null,
+            ],
+          );
+        }
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+
+    // ── query ──────────────────────────────────────────────────────────────
+    async query(_ctx, options): Promise<MemoryEntry[]> {
+      await ensureSchema();
+      const topK  = options.topK ?? 10;
+      const client = await pool.connect();
+      try {
+        // ── Vector similarity search ──────────────────────────────────────
+        if (options.embedding && options.embedding.length > 0) {
+          const qVec = toVectorLiteral(options.embedding);
+          const { sql: filterSQL, params: filterParams } = buildFilterSQL(options, 3);
+          const minScore = options.minScore;
+          const scoreExpr = toScore(`(embedding ${operator} $1::vector)`);
+
+          let sql = `
+            SELECT *, ${scoreExpr} AS _score
+            FROM ${table}
+            WHERE embedding IS NOT NULL
+              AND ${filterSQL}
+          `;
+          const params: unknown[] = [qVec, topK, ...filterParams];
+
+          if (minScore !== undefined) {
+            sql += ` AND ${scoreExpr} >= ${minScore}`;
+          }
+          sql += ` ORDER BY embedding ${operator} $1::vector LIMIT $2`;
+
+          const result = await client.query(sql, params);
+          return result.rows.map(pgRowToMemoryEntry);
+        }
+
+        // ── Full-text / keyword search ────────────────────────────────────
+        if (options.query) {
+          const { sql: filterSQL, params: filterParams } = buildFilterSQL(options, 3);
+          const result = await client.query(
+            `SELECT *
+             FROM ${table}
+             WHERE LOWER(content) LIKE LOWER($1)
+               AND ${filterSQL}
+             ORDER BY created_at DESC
+             LIMIT $2`,
+            [`%${options.query}%`, topK, ...filterParams],
+          );
+          return result.rows.map(pgRowToMemoryEntry);
+        }
+
+        // ── Recency / filter-only scan ─────────────────────────────────────
+        const { sql: filterSQL, params: filterParams } = buildFilterSQL(options, 2);
+        const result = await client.query(
+          `SELECT * FROM ${table} WHERE ${filterSQL} ORDER BY created_at DESC LIMIT $1`,
+          [topK, ...filterParams],
+        );
+        return result.rows.map(pgRowToMemoryEntry);
+      } finally {
+        client.release();
+      }
+    },
+
+    // ── delete ─────────────────────────────────────────────────────────────
+    async delete(_ctx, ids): Promise<void> {
+      if (ids.length === 0) return;
+      await ensureSchema();
+      const client = await pool.connect();
+      try {
+        await client.query(`DELETE FROM ${table} WHERE id = ANY($1)`, [ids]);
+      } finally {
+        client.release();
+      }
+    },
+
+    // ── clear ──────────────────────────────────────────────────────────────
+    async clear(_ctx, filter): Promise<void> {
+      await ensureSchema();
+      const client = await pool.connect();
+      try {
+        if (!filter) {
+          await client.query(`DELETE FROM ${table}`);
+          return;
+        }
+        const { sql: filterSQL, params } = buildFilterSQL({ filter }, 1);
+        await client.query(`DELETE FROM ${table} WHERE ${filterSQL}`, params);
+      } finally {
+        client.release();
+      }
+    },
+
+    // ── close ──────────────────────────────────────────────────────────────
+    async close(): Promise<void> {
+      await pool.end();
     },
   };
 }

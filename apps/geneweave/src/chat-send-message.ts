@@ -221,7 +221,16 @@ export async function sendMessageImpl(
     : undefined;
   await deps.db.addMessage({ id: userMsgId, chatId, role: 'user', content, metadata: userMetadata });
 
-  const preGuardrail = await evaluateGuardrails(deps.db, chatId, userMsgId, processedContent, 'pre-execution');
+  // Load history now so turn number is available for condition context.
+  // (This is the same query made later for model context; moved up to avoid drift.)
+  const history = await deps.db.getMessages(chatId);
+  const turnNumber = Math.ceil(history.length / 2);
+
+  const preGuardrail = await evaluateGuardrails(
+    deps.db, chatId, userMsgId, processedContent, 'pre-execution',
+    undefined,
+    { persona: userPersona, chatMode: settings.mode, turnNumber, tenantId },
+  );
   if (preGuardrail.decision === 'deny') {
     const denyContent = preGuardrail.reason || 'Your message was blocked by a guardrail policy.';
     const assistMsgId = newUUIDv7();
@@ -281,7 +290,6 @@ export async function sendMessageImpl(
     };
   }
 
-  const history = await deps.db.getMessages(chatId);
   const messages = historyToMessages(history);
   patchLatestUserMessage(messages, processedContent);
 
@@ -375,11 +383,17 @@ export async function sendMessageImpl(
     })
     .map(s => (s.toolCall?.result ?? s.delegation?.result ?? '') as string)
     .join(' ') || undefined;
-  const postGuardrail = await evaluateGuardrails(deps.db, chatId, null, assistantContent, 'post-execution', {
-    userInput: processedContent,
-    assistantOutput: assistantContent,
-    toolEvidence,
-  });
+  const postGuardrail = await evaluateGuardrails(deps.db, chatId, null, assistantContent, 'post-execution',
+    { userInput: processedContent, assistantOutput: assistantContent, toolEvidence },
+    {
+      persona: userPersona,
+      chatMode: settings.mode,
+      turnNumber,
+      tenantId,
+      steps: steps ?? [],
+      priorGuardrailResults: preGuardrail.results,
+    },
+  );
   const guardrailInfo = preGuardrail.decision !== 'allow'
     ? { decision: preGuardrail.decision as 'allow' | 'deny' | 'warn', reason: preGuardrail.reason }
     : postGuardrail.decision !== 'allow'

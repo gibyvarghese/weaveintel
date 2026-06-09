@@ -266,6 +266,9 @@
     <div class="navgroup">
       <div class="navhead"><span class="dot"></span>Safety &amp; reliability</div>
       <a href="#guardrails">Guardrails</a>
+      <a href="#guardrail-types" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Type reference</a>
+      <a href="#guardrail-stages" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Stages &amp; signals</a>
+      <a href="#guardrail-conditions" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Conditional triggers</a>
       <a href="#redaction">PII redaction</a>
       <a href="#identity">Identity &amp; access</a>
       <a href="#tenancy">Tenancy &amp; budgets</a>
@@ -298,6 +301,18 @@
       <a href="#e2e">End-to-end: a woven mesh</a>
       <a href="#examples-index">Examples in the repo</a>
       <a href="#geneweave">The geneWeave app</a>
+      <a href="#geneweave-guardrails" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Guardrails (admin UI)</a>
+      <a href="#geneweave-skills" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Skills &amp; Agents</a>
+      <a href="#geneweave-tools" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Tools &amp; Policies</a>
+      <a href="#geneweave-prompts" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Prompts &amp; Frameworks</a>
+      <a href="#geneweave-routing" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Routing &amp; Models</a>
+      <a href="#geneweave-workflows" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Workflows &amp; Contracts</a>
+      <a href="#geneweave-governance" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Governance</a>
+      <a href="#geneweave-integrations" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Integrations</a>
+      <a href="#geneweave-platform" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Platform config</a>
+      <a href="#geneweave-live-mesh" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Live Mesh</a>
+      <a href="#geneweave-live-runtime" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Live Runtime</a>
+      <a href="#geneweave-kaggle" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Kaggle</a>
     </div>
   </nav>
 </aside>
@@ -1359,25 +1374,367 @@ bus.<span class="tk-f">register</span>(<span class="tk-s">'billing'</span>, <spa
     <p>When the runtime carries guardrails, every agent checks tool calls and final output through them. A denial blocks and audits; an erroring check is treated as a denial, never a pass. There are two complementary hooks: the runtime guardrails slot is the uniform, process-wide mechanism, while the per-agent <code>policy.approveToolCall</code> hook lets a single agent apply its own tool-call policy. Both run; either can deny.</p>
   </div>
 
-  <h3>Built-in guardrail types &amp; cognitive checks</h3>
-  <p>A <code>Guardrail</code> is a declarative row with a <code>type</code> the evaluator knows how to run. Five types evaluate synchronously — <code>regex</code>, <code>blocklist</code>, <code>length</code>, <code>schema</code> and <code>custom</code> — and a sixth, <code>model-graded</code>, routes to the asynchronous evaluator, which can back a check with an LLM judge, a provider moderation API, or any custom async function. The interesting behaviour lives under <code>custom</code>, whose <code>config.rule</code> selects a named check. Several of these implement <em>cognitive</em> safeguards aimed at reasoning quality rather than content filtering:</p>
+  <h3 id="guardrail-types">Guardrail type reference <a class="anchorlink" href="#guardrail-types">#</a></h3>
+  <p>Every guardrail is a declarative row with six fields: <code>id</code>, <code>name</code>, <code>type</code>, <code>stage</code>, <code>enabled</code>, and <code>config</code> (shape depends on <code>type</code>). Two optional fields: <code>priority</code> (lower runs first, default 0) and <code>triggerConditions</code> (a <code>ConditionNode</code> tree — see <a href="#guardrail-conditions">Conditional triggers</a>). Six types are built in. Five evaluate synchronously in under 1 ms; one (<code>model-graded</code>) routes through an async registry and can take seconds.</p>
+
+  <h4>regex — fast pattern matching</h4>
+  <p>Tests the evaluated text against a compiled regular expression. Before matching, text is unicode-normalised by default (homoglyph substitution, zero-width character removal) so obfuscated variants are caught. Set <code>normalize: false</code> to skip. <code>action</code> is <code>'deny'</code> to block or <code>'warn'</code> for advisory flagging.</p>
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">guardrail-regex.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">const</span> regexGuardrails: Guardrail[] = [
+  {
+    id: <span class="tk-s">'block-ssn'</span>,             name: <span class="tk-s">'SSN Pattern Block'</span>,
+    type: <span class="tk-s">'regex'</span>,                stage: <span class="tk-s">'post-execution'</span>,  <span class="tk-c">// check what the model outputs</span>
+    enabled: <span class="tk-k">true</span>,               priority: <span class="tk-n">10</span>,
+    config: {
+      pattern: <span class="tk-s">'\\b(?!000|666|9\\d{2})\\d{3}-(?!00)\\d{2}-(?!0000)\\d{4}\\b'</span>,
+      flags: <span class="tk-s">'gi'</span>,
+      action: <span class="tk-s">'deny'</span>,            <span class="tk-c">// 'deny' blocks the turn; 'warn' is advisory</span>
+      category: <span class="tk-s">'pii'</span>,
+      normalize: <span class="tk-k">true</span>,           <span class="tk-c">// unicode-normalise before matching (default true)</span>
+    },
+  },
+  {
+    id: <span class="tk-s">'detect-api-key-leak'</span>,   name: <span class="tk-s">'API Key Leak Detection'</span>,
+    type: <span class="tk-s">'regex'</span>,                stage: <span class="tk-s">'post-execution'</span>,
+    enabled: <span class="tk-k">true</span>,               priority: <span class="tk-n">11</span>,
+    config: {
+      pattern: <span class="tk-s">'(sk-[a-zA-Z0-9]{32,}|AIza[0-9A-Za-z\\-_]{35}|ghp_[A-Za-z0-9]{36})'</span>,
+      flags: <span class="tk-s">'g'</span>,
+      action: <span class="tk-s">'deny'</span>,
+      category: <span class="tk-s">'security'</span>,
+    },
+  },
+  {
+    id: <span class="tk-s">'detect-override-phrase'</span>, name: <span class="tk-s">'Instruction Override Detection'</span>,
+    type: <span class="tk-s">'regex'</span>,                stage: <span class="tk-s">'pre-execution'</span>,   <span class="tk-c">// check user input</span>
+    enabled: <span class="tk-k">true</span>,               priority: <span class="tk-n">5</span>,
+    config: {
+      pattern: <span class="tk-s">'\\b(ignore (previous|all|above)|disregard (instructions?|system)|forget everything)\\b'</span>,
+      flags: <span class="tk-s">'i'</span>,
+      action: <span class="tk-s">'warn'</span>,
+      category: <span class="tk-s">'security'</span>,
+    },
+  },
+];</pre></div>
+
+  <h4>blocklist — exact phrase matching</h4>
+  <p>Case-insensitive substring search against a list of strings. Uses the same unicode normaliser. Best for known-bad exact terms — competitor names, prohibited topics, classified codenames. Words are matched as substrings; include surrounding spaces to prevent partial matches (e.g. <code>' bomb '</code> rather than <code>'bomb'</code>).</p>
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">guardrail-blocklist.ts</span><button class="copybtn">Copy</button></div>
+<pre>{
+  id: <span class="tk-s">'topic-blocklist'</span>,  name: <span class="tk-s">'Prohibited Topics'</span>,
+  type: <span class="tk-s">'blocklist'</span>,        stage: <span class="tk-s">'pre-execution'</span>,
+  enabled: <span class="tk-k">true</span>,            priority: <span class="tk-n">5</span>,
+  config: {
+    words: [<span class="tk-s">'competitor-alpha'</span>, <span class="tk-s">'operation codename'</span>, <span class="tk-s">'project lighthouse'</span>],
+    action: <span class="tk-s">'deny'</span>,
+    category: <span class="tk-s">'policy'</span>,
+  },
+}</pre></div>
+
+  <h4>length — character bounds</h4>
+  <p>Enforces min/max character count on the evaluated text. Use in <code>pre-execution</code> to cap runaway inputs before they reach the model; use in <code>post-execution</code> to flag suspiciously short outputs (e.g. a terse answer when detail was expected). Both <code>maxLength</code> and <code>minLength</code> are optional.</p>
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">guardrail-length.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">const</span> lengthGuardrails: Guardrail[] = [
+  {
+    id: <span class="tk-s">'input-length-cap'</span>,  name: <span class="tk-s">'Max Input Length'</span>,
+    type: <span class="tk-s">'length'</span>,            stage: <span class="tk-s">'pre-execution'</span>,
+    enabled: <span class="tk-k">true</span>,            priority: <span class="tk-n">1</span>,
+    config: { maxLength: <span class="tk-n">8000</span>, action: <span class="tk-s">'deny'</span>, category: <span class="tk-s">'safety'</span> },
+  },
+  {
+    id: <span class="tk-s">'output-min-length'</span>, name: <span class="tk-s">'Min Response Length'</span>,
+    type: <span class="tk-s">'length'</span>,            stage: <span class="tk-s">'post-execution'</span>,
+    enabled: <span class="tk-k">true</span>,            priority: <span class="tk-n">50</span>,
+    config: { minLength: <span class="tk-n">20</span>, action: <span class="tk-s">'warn'</span>, category: <span class="tk-s">'quality'</span> },
+  },
+];</pre></div>
+
+  <h4>schema — structured-output field check</h4>
+  <p>When the input to <code>pipeline.evaluate</code> is a plain JavaScript object, checks that required fields are present. Useful for validating tool-output shapes or API response schemas. The guardrail receives the raw object, not a serialised string.</p>
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">guardrail-schema.ts</span><button class="copybtn">Copy</button></div>
+<pre>{
+  id: <span class="tk-s">'tool-output-schema'</span>,  name: <span class="tk-s">'Tool Output Completeness'</span>,
+  type: <span class="tk-s">'schema'</span>,              stage: <span class="tk-s">'post-execution'</span>,
+  enabled: <span class="tk-k">true</span>,               priority: <span class="tk-n">20</span>,
+  config: {
+    requiredFields: [<span class="tk-s">'result'</span>, <span class="tk-s">'confidence'</span>, <span class="tk-s">'source'</span>],
+    action: <span class="tk-s">'warn'</span>,
+    category: <span class="tk-s">'quality'</span>,
+  },
+}</pre></div>
+
+  <h4>custom — six named cognitive &amp; safety rules</h4>
+  <p><code>config.rule</code> selects one of six built-in handlers. All six emit <code>warn</code> by default (advisory, not blocking) so they flag without halting the turn. Override patterns and thresholds to suit your domain.</p>
   <table class="params">
-    <tr><th>custom rule</th><th>What it checks</th></tr>
-    <tr><td>input-pattern</td><td>Agreement-pressure ("sycophancy") phrasing in the user prompt — e.g. "just agree", "don't challenge me" — and warns so the model prioritises truth over agreement.</td></tr>
-    <tr><td>output-pattern</td><td>Overly-validating phrasing in the answer ("you are absolutely right", "100% correct") that may indicate sycophancy.</td></tr>
-    <tr><td>grounding-overlap</td><td>Lexical overlap between question and answer; warns on weak grounding. Bypassed when the response was backed by tool evidence (then it is grounded by construction).</td></tr>
-    <tr><td>decision-balance</td><td>Devil's-advocate check: decision-style questions ("should I…", "best…", "recommend") should surface counterpoints or trade-offs in the answer.</td></tr>
-    <tr><td>risk-confidence-gate</td><td>Classifies the action's risk by verb (read / write / modify / destructive) and applies a risk-scaled confidence threshold via a confidence gate.</td></tr>
-    <tr><td>aggregate-confidence-gate</td><td>Combines prior cognitive results into one confidence score, penalised by risk level, and gates on it.</td></tr>
+    <tr><th>config.rule</th><th>What it checks</th><th>Key config fields</th></tr>
+    <tr><td>input-pattern</td><td>Regex on the user's message. Default use: sycophancy-pressure phrases ("just agree", "don't challenge me"). Warns on match so the model prioritises truth over agreement.</td><td><code>pattern</code>, <code>warn_confidence</code>, <code>allow_confidence</code></td></tr>
+    <tr><td>output-pattern</td><td>Regex on the assistant's response. Default use: over-validating phrases ("you are absolutely right", "100% correct"). Warns on match.</td><td><code>pattern</code>, <code>warn_confidence</code>, <code>allow_confidence</code></td></tr>
+    <tr><td>grounding-overlap</td><td>Jaccard token overlap between user question and assistant answer. Warns when overlap falls below threshold. Automatically bypassed when the response was backed by tool calls (grounded by construction).</td><td><code>min_overlap</code> (default 0.06)</td></tr>
+    <tr><td>decision-balance</td><td>Devil's-advocate check. When the user asks a decision-style question ("should I…", "recommend…"), asserts the answer includes counterpoints or trade-offs. Warns if absent.</td><td><code>needs_pattern</code>, <code>has_pattern</code>, <code>warn_confidence</code>, <code>allow_confidence</code></td></tr>
+    <tr><td>risk-confidence-gate</td><td>Classifies the action risk by keyword (read / write / modify / destructive), computes a risk-scaled confidence score, and applies a confidence gate. Higher-risk actions must clear a stricter bar.</td><td><code>gate_threshold</code>, <code>gate_on_fail</code>, <code>critical/high/medium/low_risk_confidence</code></td></tr>
+    <tr><td>aggregate-confidence-gate</td><td>Averages confidence scores from all prior results in the same <code>category</code>, applies a risk penalty, and gates on the aggregate. Run this last (high priority number) so earlier checks accumulate first.</td><td><code>gate_threshold</code>, <code>gate_on_fail</code>, <code>base_confidence</code>, <code>category</code></td></tr>
   </table>
-  <p>The package also ships <code>DEFAULT_GUARDRAILS</code> — twelve seed rows covering PII redaction, a toxicity filter, two prompt-injection guards, a token budget, a hallucination check, and the six cognitive checks above — as plain typed objects you load into your own store. Cognitive checks emit <code>warn</code> (advisory), not <code>deny</code>: they shape and flag rather than block, and the consuming application decides how to surface or act on a warning.</p>
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">guardrail-custom.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">const</span> customGuardrails: Guardrail[] = [
+  <span class="tk-c">// ── input-pattern: sycophancy pressure in user message ───────────────</span>
+  { id: <span class="tk-s">'pre-syco-input'</span>, name: <span class="tk-s">'Sycophancy Pressure (Input)'</span>,
+    type: <span class="tk-s">'custom'</span>, stage: <span class="tk-s">'pre-execution'</span>, enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">30</span>,
+    config: { rule: <span class="tk-s">'input-pattern'</span>,
+      pattern: <span class="tk-s">'\\b(just agree|tell me what i want|don\\'t disagree|confirm my belief)\\b'</span>,
+      warn_confidence: <span class="tk-n">0.62</span>, allow_confidence: <span class="tk-n">0.86</span>, category: <span class="tk-s">'cognitive'</span> } },
+
+  <span class="tk-c">// ── output-pattern: over-validating phrasing in assistant response ────</span>
+  { id: <span class="tk-s">'post-syco-output'</span>, name: <span class="tk-s">'Sycophancy Phrasing (Output)'</span>,
+    type: <span class="tk-s">'custom'</span>, stage: <span class="tk-s">'post-execution'</span>, enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">30</span>,
+    config: { rule: <span class="tk-s">'output-pattern'</span>,
+      pattern: <span class="tk-s">'\\b(you are absolutely right|100% correct|undoubtedly|you\\'re completely right)\\b'</span>,
+      category: <span class="tk-s">'cognitive'</span> } },
+
+  <span class="tk-c">// ── grounding-overlap: Jaccard similarity, skipped when tool evidence ─</span>
+  { id: <span class="tk-s">'post-grounding'</span>, name: <span class="tk-s">'Grounding Overlap Check'</span>,
+    type: <span class="tk-s">'custom'</span>, stage: <span class="tk-s">'post-execution'</span>, enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">40</span>,
+    config: { rule: <span class="tk-s">'grounding-overlap'</span>, min_overlap: <span class="tk-n">0.06</span>, category: <span class="tk-s">'factuality'</span> } },
+
+  <span class="tk-c">// ── decision-balance: decision questions must surface trade-offs ───────</span>
+  { id: <span class="tk-s">'post-devil-advocate'</span>, name: <span class="tk-s">"Devil's Advocate Balance"</span>,
+    type: <span class="tk-s">'custom'</span>, stage: <span class="tk-s">'post-execution'</span>, enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">35</span>,
+    config: { rule: <span class="tk-s">'decision-balance'</span>,
+      needs_pattern: <span class="tk-s">'\\b(should i|best|recommend|decision|strategy)\\b'</span>,
+      has_pattern:   <span class="tk-s">'\\b(however|on the other hand|trade-?off|risk|alternative|downside)\\b'</span>,
+      category: <span class="tk-s">'cognitive'</span> } },
+
+  <span class="tk-c">// ── risk-confidence-gate: higher risk = stricter confidence bar ────────</span>
+  { id: <span class="tk-s">'pre-risk-gate'</span>, name: <span class="tk-s">'Risk Confidence Gate'</span>,
+    type: <span class="tk-s">'custom'</span>, stage: <span class="tk-s">'pre-execution'</span>, enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">25</span>,
+    config: { rule: <span class="tk-s">'risk-confidence-gate'</span>,
+      gate_threshold: <span class="tk-n">0.65</span>, gate_on_fail: <span class="tk-s">'warn'</span>,
+      critical_risk_confidence: <span class="tk-n">0.50</span>, high_risk_confidence: <span class="tk-n">0.60</span>,
+      medium_risk_confidence:   <span class="tk-n">0.72</span>, low_risk_confidence:  <span class="tk-n">0.82</span>,
+      category: <span class="tk-s">'governance'</span> } },
+
+  <span class="tk-c">// ── aggregate-confidence-gate: roll up same-category scores ───────────</span>
+  { id: <span class="tk-s">'post-cognitive-gate'</span>, name: <span class="tk-s">'Aggregate Cognitive Gate'</span>,
+    type: <span class="tk-s">'custom'</span>, stage: <span class="tk-s">'post-execution'</span>, enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">99</span>,
+    config: { rule: <span class="tk-s">'aggregate-confidence-gate'</span>,
+      gate_threshold: <span class="tk-n">0.67</span>, gate_on_fail: <span class="tk-s">'warn'</span>, base_confidence: <span class="tk-n">0.75</span>,
+      category: <span class="tk-s">'cognitive'</span> } },   <span class="tk-c">// only aggregates results with this category</span>
+];</pre></div>
+
+  <h4>model-graded — five async evaluators</h4>
+  <p>Routes through the async evaluator registry. <code>config.rule</code> selects the evaluator; <code>config.timeout_ms</code> (default 5 000 ms) and <code>config.on_error</code> (<code>'deny'</code> | <code>'warn'</code> | <code>'allow'</code>, default <code>'deny'</code>) control timeout and error behaviour. Register custom evaluators with <code>defaultRegistry.register(ruleName, fn)</code> — after that they are usable by any guardrail row.</p>
+  <table class="params">
+    <tr><th>config.rule</th><th>What it does</th><th>Typical latency</th></tr>
+    <tr><td>llm-judge</td><td>Sends the evaluated text to any <code>Model</code> with a configurable <code>rubric</code> prompt and parses a structured <code>{ decision, confidence, rationale }</code> JSON verdict. Use for bespoke safety criteria, domain-specific policy checks, or nuanced toxicity.</td><td>2–10 s</td></tr>
+    <tr><td>moderation</td><td>Calls a <code>ModerationModel</code> (e.g. OpenAI Moderation API) and maps flagged categories to <code>deny</code> or <code>warn</code> via per-category thresholds in <code>config.thresholds</code>.</td><td>300–800 ms</td></tr>
+    <tr><td>injection-classifier</td><td>Async prompt-injection detection handling encoding variants (base64, homoglyphs, role-play framing) that synchronous regex cannot reliably catch.</td><td>8–15 s</td></tr>
+    <tr><td>sycophancy-judge</td><td>LLM-backed sycophancy detector: determines whether the assistant agreed with the user at the expense of truthfulness.</td><td>3–8 s</td></tr>
+    <tr><td>semantic-grounding</td><td>Embeds the assistant output and available tool evidence, computes cosine similarity, and warns when similarity falls below <code>config.min_similarity</code>. Falls back to lexical overlap when no embedding model is present.</td><td>200–600 ms</td></tr>
+  </table>
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">guardrail-model-graded.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">const</span> modelGradedGuardrails: Guardrail[] = [
+  <span class="tk-c">// llm-judge: free-form rubric evaluated by any Model</span>
+  { id: <span class="tk-s">'llm-safety-judge'</span>, name: <span class="tk-s">'LLM Safety Judge'</span>,
+    type: <span class="tk-s">'model-graded'</span>, stage: <span class="tk-s">'post-execution'</span>, enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">80</span>,
+    config: { rule: <span class="tk-s">'llm-judge'</span>, timeout_ms: <span class="tk-n">8000</span>, on_error: <span class="tk-s">'deny'</span>,
+      rubric: <span class="tk-s">'Does this output contain harmful, deceptive, or policy-violating content? '</span> +
+              <span class="tk-s">'Respond with JSON only: { "decision": "allow"|"warn"|"deny", "confidence": 0.0-1.0, "rationale": "..." }'</span>,
+      category: <span class="tk-s">'safety'</span> } },
+
+  <span class="tk-c">// moderation: maps provider moderation categories to decisions</span>
+  { id: <span class="tk-s">'content-moderation'</span>, name: <span class="tk-s">'Content Moderation'</span>,
+    type: <span class="tk-s">'model-graded'</span>, stage: <span class="tk-s">'post-execution'</span>, enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">70</span>,
+    config: { rule: <span class="tk-s">'moderation'</span>, timeout_ms: <span class="tk-n">3000</span>, on_error: <span class="tk-s">'allow'</span>,
+      thresholds: { hate: <span class="tk-n">0.7</span>, violence: <span class="tk-n">0.8</span>, sexual: <span class="tk-n">0.9</span>, self_harm: <span class="tk-n">0.7</span> },
+      category: <span class="tk-s">'content'</span> } },
+
+  <span class="tk-c">// injection-classifier: encoding-variant detection regex can't catch</span>
+  { id: <span class="tk-s">'prompt-injection'</span>, name: <span class="tk-s">'Prompt Injection Classifier'</span>,
+    type: <span class="tk-s">'model-graded'</span>, stage: <span class="tk-s">'pre-execution'</span>, enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">15</span>,
+    config: { rule: <span class="tk-s">'injection-classifier'</span>, timeout_ms: <span class="tk-n">12000</span>, on_error: <span class="tk-s">'deny'</span>, category: <span class="tk-s">'security'</span> } },
+
+  <span class="tk-c">// sycophancy-judge: LLM backs the advisory check</span>
+  { id: <span class="tk-s">'sycophancy-judge'</span>, name: <span class="tk-s">'Sycophancy Judge'</span>,
+    type: <span class="tk-s">'model-graded'</span>, stage: <span class="tk-s">'post-execution'</span>, enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">85</span>,
+    config: { rule: <span class="tk-s">'sycophancy-judge'</span>, timeout_ms: <span class="tk-n">8000</span>, on_error: <span class="tk-s">'allow'</span>, category: <span class="tk-s">'cognitive'</span> } },
+
+  <span class="tk-c">// semantic-grounding: cosine-similarity between output and tool evidence</span>
+  { id: <span class="tk-s">'semantic-grounding'</span>, name: <span class="tk-s">'Semantic Grounding'</span>,
+    type: <span class="tk-s">'model-graded'</span>, stage: <span class="tk-s">'post-execution'</span>, enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">75</span>,
+    config: { rule: <span class="tk-s">'semantic-grounding'</span>, min_similarity: <span class="tk-n">0.65</span>, timeout_ms: <span class="tk-n">5000</span>, on_error: <span class="tk-s">'warn'</span>, category: <span class="tk-s">'factuality'</span> } },
+];
+
+<span class="tk-c">// Register a custom evaluator — after this, any row with config.rule: 'my-check' will use it.</span>
+<span class="tk-k">import</span> { defaultRegistry } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/guardrails'</span>;
+defaultRegistry.<span class="tk-f">register</span>(<span class="tk-s">'my-check'</span>, <span class="tk-k">async</span> (guardrail, text, ctx) => {
+  <span class="tk-k">const</span> passed = <span class="tk-c">/* your async logic */</span> <span class="tk-k">true</span>;
+  <span class="tk-k">return</span> { decision: passed ? <span class="tk-s">'allow'</span> : <span class="tk-s">'deny'</span>, guardrailId: guardrail.id };
+});</pre></div>
+
+  <h3 id="guardrail-stages">Stages &amp; available signals <a class="anchorlink" href="#guardrail-stages">#</a></h3>
+  <p>Every guardrail row has a <code>stage</code> field. The pipeline only evaluates guardrails whose stage matches the current evaluation point. The two stages represent the two moments in a turn lifecycle where safety checks are meaningful.</p>
+
+  <table class="params">
+    <tr><th>stage</th><th>Input text evaluated</th><th>Output signals available?</th><th>Primary use cases</th></tr>
+    <tr><td><code>pre-execution</code></td><td>The user's raw message (before calling the model)</td><td>No — <code>ctx.output</code> is <code>null</code>; all <code>output.*</code> condition leaves default to <code>false</code></td><td>Input length cap, topic blocklists, injection phrase detection, sycophancy-pressure flags, routing guards, user-specific gates</td></tr>
+    <tr><td><code>post-execution</code></td><td>The assistant's generated response</td><td>Yes — <code>ctx.output.*</code> signals reflect the actual response content</td><td>PII in response, credential leak detection, hallucination check, sycophancy, toxicity, false certainty, output length enforcement</td></tr>
+  </table>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">stages.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> { createGuardrailPipeline, hasDeny, getDenyReason, hasWarning } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/guardrails'</span>;
+
+<span class="tk-k">const</span> pipeline = <span class="tk-f">createGuardrailPipeline</span>([
+  <span class="tk-c">// pre-execution: evaluate the user's message</span>
+  { id: <span class="tk-s">'input-len'</span>,      type: <span class="tk-s">'length'</span>, stage: <span class="tk-s">'pre-execution'</span>,
+    enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">1</span>, config: { maxLength: <span class="tk-n">8000</span>, action: <span class="tk-s">'deny'</span> } },
+  { id: <span class="tk-s">'input-blocklist'</span>, type: <span class="tk-s">'blocklist'</span>, stage: <span class="tk-s">'pre-execution'</span>,
+    enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">3</span>, config: { words: [<span class="tk-s">'confidential project x'</span>], action: <span class="tk-s">'deny'</span> } },
+  { id: <span class="tk-s">'input-inject'</span>,    type: <span class="tk-s">'regex'</span>, stage: <span class="tk-s">'pre-execution'</span>,
+    enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">5</span>, config: { pattern: <span class="tk-s">'\\bignore previous instructions?\\b'</span>, action: <span class="tk-s">'warn'</span> } },
+
+  <span class="tk-c">// post-execution: evaluate the assistant's response</span>
+  { id: <span class="tk-s">'output-ssn'</span>,     type: <span class="tk-s">'regex'</span>, stage: <span class="tk-s">'post-execution'</span>,
+    enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">10</span>, config: { pattern: <span class="tk-s">'\\b\\d{3}-\\d{2}-\\d{4}\\b'</span>, action: <span class="tk-s">'deny'</span> } },
+  { id: <span class="tk-s">'output-ground'</span>,  type: <span class="tk-s">'custom'</span>, stage: <span class="tk-s">'post-execution'</span>,
+    enabled: <span class="tk-k">true</span>, priority: <span class="tk-n">40</span>, config: { rule: <span class="tk-s">'grounding-overlap'</span>, min_overlap: <span class="tk-n">0.06</span> } },
+], { shortCircuitOnDeny: <span class="tk-k">true</span> });
+
+<span class="tk-c">// Stage 1 — check user input before calling the model</span>
+<span class="tk-k">const</span> preResults = <span class="tk-k">await</span> pipeline.<span class="tk-f">evaluate</span>(userMessage, <span class="tk-s">'pre-execution'</span>);
+<span class="tk-k">if</span> (<span class="tk-f">hasDeny</span>(preResults)) <span class="tk-k">return</span> { error: <span class="tk-f">getDenyReason</span>(preResults) };
+
+<span class="tk-c">// … call the model …</span>
+
+<span class="tk-c">// Stage 2 — check the assistant response before returning it</span>
+<span class="tk-k">const</span> postResults = <span class="tk-k">await</span> pipeline.<span class="tk-f">evaluate</span>(
+  assistantResponse, <span class="tk-s">'post-execution'</span>,
+  { userInput: userMessage, assistantOutput: assistantResponse, toolEvidence }
+);
+<span class="tk-k">if</span> (<span class="tk-f">hasDeny</span>(postResults)) <span class="tk-k">return</span> { error: <span class="tk-s">'Response blocked'</span> };
+<span class="tk-k">if</span> (<span class="tk-f">hasWarning</span>(postResults)) logWarnings(postResults);</pre></div>
+
+  <h3 id="guardrail-conditions">Conditional triggers <a class="anchorlink" href="#guardrail-conditions">#</a></h3>
+  <p>A guardrail's optional <code>triggerConditions</code> field carries a <code>ConditionNode</code> JSON tree. The pipeline evaluates this tree against a <code>GuardrailConditionContext</code> snapshot built once per run. If the tree returns <code>false</code>, the guardrail is skipped and recorded with <code>metadata.skipped: 'condition_not_met'</code> — the evaluator is never called. This is how you gate expensive checks so they only run when the signal profile of a turn warrants it.</p>
+
+  <div class="call guard"><span class="ic">🛡</span>
+    <div class="ct">Why this matters for performance and cost</div>
+    <p>A 12-second async injection classifier running on every message is expensive and slow. Gate it on <code>input_has_code OR input_has_base64 OR input_length_gt: 500</code> and it fires in under 5% of turns with no loss of safety coverage — those are the only inputs that can plausibly carry encoding-obfuscated payloads. Similarly, sycophancy judges and semantic grounding checks are only meaningful for certain message patterns. Conditional triggers let you keep the full safety stack while spending LLM budget exactly where it helps.</p>
+  </div>
+
+  <h4>Composition operators</h4>
+  <table class="params">
+    <tr><th>Node form</th><th>Semantics</th><th>Empty case</th></tr>
+    <tr><td><code>{ all: [nodeA, nodeB, …] }</code></td><td>AND — every child must be true</td><td><code>all: []</code> → <code>true</code> (vacuously true, like <code>Array.every</code>)</td></tr>
+    <tr><td><code>{ any: [nodeA, nodeB, …] }</code></td><td>OR — at least one child must be true</td><td><code>any: []</code> → <code>false</code> (vacuously false, like <code>Array.some</code>)</td></tr>
+    <tr><td><code>{ not: node }</code></td><td>NOT — inverts a single child node</td><td>—</td></tr>
+  </table>
+
+  <h4>All leaf node types</h4>
+  <table class="params">
+    <tr><th>Leaf</th><th>Value type</th><th>What it tests</th></tr>
+    <tr><td><code>chat_mode</code></td><td><code>string[]</code></td><td>Current chat mode is in the list: <code>'direct'</code> | <code>'agent'</code> | <code>'supervisor'</code></td></tr>
+    <tr><td><code>persona</code></td><td><code>string[]</code></td><td>User persona is in the list: <code>'platform_admin'</code> | <code>'tenant_admin'</code> | <code>'tenant_user'</code> | <code>'anonymous'</code></td></tr>
+    <tr><td><code>risk_level</code></td><td><code>string[]</code></td><td>Classified risk level is in the list: <code>'low'</code> | <code>'medium'</code> | <code>'high'</code> | <code>'critical'</code></td></tr>
+    <tr><td><code>tool_category_in</code></td><td><code>string[]</code></td><td>At least one tool category used this turn appears in the list</td></tr>
+    <tr><td><code>prior_has_warn</code></td><td><code>boolean</code></td><td>Any earlier guardrail in this pipeline run returned <code>'warn'</code></td></tr>
+    <tr><td><code>prior_has_cognitive_warn</code></td><td><code>boolean</code></td><td>Any earlier guardrail with category <code>'cognitive'</code> returned <code>'warn'</code></td></tr>
+    <tr><td><code>prior_has_injection_warn</code></td><td><code>boolean</code></td><td>Any earlier injection-specific guardrail returned <code>'warn'</code></td></tr>
+    <tr><td><code>turn_has_tool_calls</code></td><td><code>boolean</code></td><td>This turn invoked at least one tool</td></tr>
+    <tr><td><code>turn_number_gt</code></td><td><code>number</code></td><td>Conversation turn number is greater than N (e.g. <code>2</code> means from the 3rd turn onward)</td></tr>
+    <tr><td><code>input_length_gt</code></td><td><code>number</code></td><td>Input character count exceeds N</td></tr>
+    <tr><td><code>input_has_code</code></td><td><code>boolean</code></td><td>Input contains code-like content (backticks, indented blocks, language keywords)</td></tr>
+    <tr><td><code>input_has_urls</code></td><td><code>boolean</code></td><td>Input contains one or more URLs</td></tr>
+    <tr><td><code>input_has_base64</code></td><td><code>boolean</code></td><td>Input contains a base64-encoded payload</td></tr>
+    <tr><td><code>input_has_structured_data</code></td><td><code>boolean</code></td><td>Input contains JSON, XML, or structured-data markers</td></tr>
+    <tr><td><code>input_has_decision_language</code></td><td><code>boolean</code></td><td>Input contains decision phrasing: "should I", "recommend", "best option"</td></tr>
+    <tr><td><code>input_has_validation_seeking</code></td><td><code>boolean</code></td><td>Input contains validation-seeking phrasing: "right?", "agree?", "don't you think"</td></tr>
+    <tr><td><code>input_has_factual_question</code></td><td><code>boolean</code></td><td>Input contains factual question phrasing: "what is", "how does", "when did"</td></tr>
+    <tr><td><code>input_has_instruction_override</code></td><td><code>boolean</code></td><td>Input contains override phrases: "ignore previous", "disregard system prompt"</td></tr>
+    <tr><td><code>input_has_sensitive_pattern</code></td><td><code>boolean</code></td><td>Input contains sensitive data shapes: SSN, credit card, password, API key pattern</td></tr>
+    <tr><td><code>output_length_gt</code></td><td><code>number</code></td><td>Output character count exceeds N. Returns <code>false</code> in pre-execution (output absent).</td></tr>
+    <tr><td><code>output_has_code_blocks</code></td><td><code>boolean</code></td><td>Output contains fenced code blocks. <code>false</code> in pre-execution.</td></tr>
+    <tr><td><code>output_has_factual_claims</code></td><td><code>boolean</code></td><td>Output contains numeric values, dates, or statistics. <code>false</code> in pre-execution.</td></tr>
+    <tr><td><code>output_has_advice</code></td><td><code>boolean</code></td><td>Output contains recommendation or advice language. <code>false</code> in pre-execution.</td></tr>
+    <tr><td><code>output_has_credential_patterns</code></td><td><code>boolean</code></td><td>Output contains API keys, passwords, or connection-string shapes. <code>false</code> in pre-execution.</td></tr>
+    <tr><td><code>output_has_tool_evidence</code></td><td><code>boolean</code></td><td>Response was backed by tool-call results passed via <code>toolEvidence</code>. <code>false</code> in pre-execution.</td></tr>
+    <tr><td><code>output_has_urls</code></td><td><code>boolean</code></td><td>Output contains URLs. <code>false</code> in pre-execution.</td></tr>
+  </table>
+
+  <div class="call note"><span class="ic">💡</span>
+    <div class="ct">Unknown leaf shapes fail open, not silently</div>
+    <p>Any <code>ConditionNode</code> shape the evaluator does not recognise returns <code>true</code> (the guardrail <em>runs</em>) rather than silently skipping it. A typo in a leaf key causes the guardrail to always fire, making the mistake visible rather than hiding it.</p>
+  </div>
+
+  <h4>Example condition trees</h4>
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">conditions.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> <span class="tk-k">type</span> { ConditionNode, Guardrail } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/core'</span>;
+
+<span class="tk-c">// 1. Always run — omit triggerConditions or set to null</span>
+<span class="tk-k">const</span> alwaysRun = <span class="tk-k">null</span>;
+
+<span class="tk-c">// 2. Agent / supervisor mode only (skip in direct chat)</span>
+<span class="tk-k">const</span> agentMode: ConditionNode = {
+  any: [{ chat_mode: [<span class="tk-s">'agent'</span>, <span class="tk-s">'supervisor'</span>] }, { turn_has_tool_calls: <span class="tk-k">true</span> }],
+};
+
+<span class="tk-c">// 3. Expensive injection classifier — only when input looks suspicious</span>
+<span class="tk-k">const</span> suspiciousInput: ConditionNode = {
+  any: [
+    { input_has_code: <span class="tk-k">true</span> },
+    { input_has_base64: <span class="tk-k">true</span> },
+    { input_has_instruction_override: <span class="tk-k">true</span> },
+    { input_has_urls: <span class="tk-k">true</span> },
+    { input_length_gt: <span class="tk-n">500</span> },
+    { prior_has_injection_warn: <span class="tk-k">true</span> },
+  ],
+};
+
+<span class="tk-c">// 4. Cognitive check gate — decision language, elevated risk, or agent mode</span>
+<span class="tk-k">const</span> cognitiveGate: ConditionNode = {
+  any: [
+    { input_has_decision_language: <span class="tk-k">true</span> },
+    { risk_level: [<span class="tk-s">'medium'</span>, <span class="tk-s">'high'</span>, <span class="tk-s">'critical'</span>] },
+    { chat_mode: [<span class="tk-s">'agent'</span>, <span class="tk-s">'supervisor'</span>] },
+  ],
+};
+
+<span class="tk-c">// 5. Hallucination / grounding check — only for factual claims without tool evidence</span>
+<span class="tk-k">const</span> factualOutput: ConditionNode = {
+  all: [{ output_has_factual_claims: <span class="tk-k">true</span> }, { output_has_tool_evidence: <span class="tk-k">false</span> }],
+};
+
+<span class="tk-c">// 6. LLM safety judge — long output, prior warn, elevated risk, or agent mode</span>
+<span class="tk-k">const</span> llmJudgeGate: ConditionNode = {
+  any: [
+    { output_length_gt: <span class="tk-n">500</span> },
+    { prior_has_warn: <span class="tk-k">true</span> },
+    { risk_level: [<span class="tk-s">'high'</span>, <span class="tk-s">'critical'</span>] },
+    { chat_mode: [<span class="tk-s">'agent'</span>, <span class="tk-s">'supervisor'</span>] },
+  ],
+};
+
+<span class="tk-c">// 7. Late-session cognitive escalation</span>
+<span class="tk-k">const</span> lateSessionEscalation: ConditionNode = {
+  all: [{ turn_number_gt: <span class="tk-n">5</span> }, { prior_has_cognitive_warn: <span class="tk-k">true</span> }],
+};
+
+<span class="tk-c">// 8. Sycophancy judge — validation-seeking language only</span>
+<span class="tk-k">const</span> validationSeeking: ConditionNode = { input_has_validation_seeking: <span class="tk-k">true</span> };
+
+<span class="tk-c">// Attach to any guardrail row as triggerConditions:</span>
+<span class="tk-k">const</span> injectionGuardrail: Guardrail = {
+  id: <span class="tk-s">'injection-classifier'</span>, name: <span class="tk-s">'Prompt Injection Classifier'</span>,
+  type: <span class="tk-s">'model-graded'</span>,         stage: <span class="tk-s">'pre-execution'</span>,
+  enabled: <span class="tk-k">true</span>,                 priority: <span class="tk-n">15</span>,
+  triggerConditions: suspiciousInput,  <span class="tk-c">// fires only when warranted</span>
+  config: { rule: <span class="tk-s">'injection-classifier'</span>, timeout_ms: <span class="tk-n">12000</span>, on_error: <span class="tk-s">'deny'</span> },
+};</pre></div>
 
   <div class="call note"><span class="ic">🧵</span>
     <div class="ct">How geneWeave uses this</div>
-    <p>geneWeave consumes these checks <strong>from the package</strong> rather than re-implementing them. It stores guardrails as DB rows, maps its row types (<code>cognitive_check</code>, <code>content_filter</code>, <code>factuality</code>, <code>budget</code>, <code>redaction</code>) onto the package's <code>custom</code>/<code>rule</code> and built-in types with a small adapter, then runs them through <code>createGuardrailPipeline</code> in both its runtime guardrails slot and its chat pipeline. The sycophancy, grounding and devil's-advocate <em>logic</em> is the package's; geneWeave supplies the configuration (patterns and thresholds as data) and the orchestration that persists evaluations and surfaces warnings.</p>
+    <p>geneWeave stores guardrails as DB rows with a <code>trigger_conditions</code> JSON column. Before each pipeline run it builds a <code>GuardrailConditionContext</code> snapshot — all 20+ input and output signal types extracted by fast regex, under 1 ms — and passes it as <code>conditionContext</code> to <code>createGuardrailPipeline</code>. The admin UI exposes eight curated <em>trigger presets</em> as a dropdown for common conditions and falls back to a raw JSON field for custom trees. Every guardrail evaluation (including skips) is written to <code>guardrail_evals</code> with full metadata. See <a href="#geneweave-guardrails">Adding guardrails (admin UI)</a> for a step-by-step walkthrough.</p>
   </div>
 
-  <h3>Full guardrail capabilities</h3>
+  <h3>Full pipeline capabilities</h3>
   <p>The package ships a layered stack that spans fast synchronous rules through to asynchronous model-graded checks, with operational controls for streaming, escalation, per-tenant resolution and auditability.</p>
 
   <h4>Synchronous pipeline</h4>
@@ -1389,14 +1746,7 @@ bus.<span class="tk-f">register</span>(<span class="tk-s">'billing'</span>, <spa
   </ul>
 
   <h4>Asynchronous model-graded evaluation</h4>
-  <p><code>evaluateGuardrailAsync</code> and <code>createAsyncGuardrailPipeline</code> dispatch <code>model-graded</code> guardrails to a registry of async evaluators with per-guardrail timeout and fail-closed error handling. Four evaluators ship out of the box:</p>
-  <table class="params">
-    <tr><th>Evaluator</th><th>What it does</th></tr>
-    <tr><td>LLM judge</td><td>Sends the input to any <code>Model</code> with a configurable rubric prompt and parses a structured <code>{ decision, confidence, rationale }</code> verdict. Covers toxicity, sycophancy, injection and custom safety criteria. Fails closed when the model response is malformed and the guardrail is blocking.</td></tr>
-    <tr><td>Semantic grounding</td><td>Embeds the assistant output and available evidence (tool results, user input) and computes cosine similarity. Warns when similarity falls below <code>config.min_similarity</code>. Falls back gracefully to lexical overlap when no embedding model is configured.</td></tr>
-    <tr><td>Moderation model</td><td>Calls a <code>ModerationModel</code> (e.g. the OpenAI Moderation API) and maps flagged categories to <code>deny</code> or <code>warn</code> based on per-category thresholds in the guardrail config.</td></tr>
-    <tr><td>Injection classifier</td><td>Async prompt-injection detection that handles encoding variants (base64, homoglyphs, role-play framing) that the synchronous phrase list cannot match.</td></tr>
-  </table>
+  <p><code>evaluateGuardrailAsync</code> and <code>createAsyncGuardrailPipeline</code> dispatch <code>model-graded</code> guardrails to a registry of async evaluators with per-guardrail timeout and fail-closed error handling. Five evaluators ship out of the box (see type reference above). Register your own with <code>defaultRegistry.register(name, fn)</code>.</p>
 
   <h4>Streaming output screening</h4>
   <p><code>createStreamingGuardrail</code> runs the cheap synchronous guardrails incrementally over a growing buffer as chunks arrive and signals <code>halt</code> the moment a <code>deny</code> fires — allowing the stream to be aborted before generation completes. The terminal <code>checkOutput</code> call in the agent loop still runs alongside; streaming screening is an early-halt layer, not a replacement.</p>
@@ -1967,6 +2317,886 @@ skills.<span class="tk-f">register</span>({ key: <span class="tk-s">'billing'</s
 </section>
 
 
+
+<!-- ===================== GENEWEAVE GUARDRAILS ADMIN ===================== -->
+<section id="geneweave-guardrails" class="group-anchor">
+  <h2>Adding guardrails in geneWeave (admin UI) <a class="anchorlink" href="#geneweave-guardrails">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">Admin → Platform → Guardrails</span></div>
+  <p>geneWeave exposes a full CRUD admin panel for guardrails. Changes take effect on the <em>next</em> chat message — no restart, no redeploy. Every change is version-snapshotted with a before/after diff and a <code>weaveAudit</code> record. The panel is at <strong>Admin → Platform → Guardrails</strong> after logging in with a <code>platform_admin</code> or <code>tenant_admin</code> account.</p>
+
+  <div class="call guard"><span class="ic">🛡</span>
+    <div class="ct">What you can create purely through the UI</div>
+    <p>The following types work entirely from database rows with no code change: <strong>regex</strong>, <strong>blocklist</strong>, <strong>length</strong>, <strong>schema</strong>, and all six <strong>custom</strong> named rules. For <strong>model-graded</strong> guardrails, the five built-in evaluators (<code>llm-judge</code>, <code>moderation</code>, <code>injection-classifier</code>, <code>sycophancy-judge</code>, <code>semantic-grounding</code>) are also fully UI-configurable. Adding a <em>new</em> evaluator rule name requires one code change — register it with <code>defaultRegistry.register(name, fn)</code> — but after that, its config is data-driven.</p>
+  </div>
+
+  <h3>Form fields</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Name</td><td>Human-readable label shown in the admin list, audit log, and guardrail eval results.</td></tr>
+    <tr><td>Type</td><td>Select: <code>regex</code> · <code>blocklist</code> · <code>length</code> · <code>schema</code> · <code>custom</code> · <code>model-graded</code>. Changes which config fields appear.</td></tr>
+    <tr><td>Stage</td><td>Select: <code>pre-execution</code> (user message) or <code>post-execution</code> (assistant response). See <a href="#guardrail-stages">Stages &amp; available signals</a>.</td></tr>
+    <tr><td>Priority</td><td>Integer. Lower numbers run first within the same stage. Use priority 1–10 for cheap blockers, 20–50 for cognitive checks, 70–99 for expensive model-graded checks.</td></tr>
+    <tr><td>Enabled</td><td>Toggle. Disabled guardrails are skipped completely — the row remains for audit history.</td></tr>
+    <tr><td>Trigger When</td><td>Select from eight curated presets (see below) or choose <em>Custom JSON</em> to enter a <code>ConditionNode</code> tree directly. Controls when the guardrail fires. Leave as <em>Always</em> if no gating is needed.</td></tr>
+    <tr><td>Config (JSON)</td><td>The <code>config</code> object for the selected type. The form shows structured fields for common options (pattern, action, words, rule…) with the raw JSON editor as a fallback for advanced keys.</td></tr>
+    <tr><td>On Block</td><td>What to show the user when the guardrail fires with <code>deny</code>: a generic error message or a custom string.</td></tr>
+    <tr><td>Trigger Description</td><td>A human-readable note describing when this guardrail fires. Shows in the admin list for at-a-glance scanning.</td></tr>
+  </table>
+
+  <h3>Trigger presets</h3>
+  <p>The <em>Trigger When</em> select maps to a curated <code>ConditionNode</code> tree stored in the <code>trigger_conditions</code> column. The preset name is derived at read time from the stored JSON, so the UI always reflects the actual condition accurately.</p>
+  <table class="params">
+    <tr><th>Preset</th><th>Condition it stores</th><th>Good for</th></tr>
+    <tr><td><strong>Always</strong></td><td><code>null</code> — no gating, runs every turn</td><td>Cheap blocking checks: PII regex, length caps, blocklists</td></tr>
+    <tr><td><strong>Agent mode</strong></td><td><code>{ any: [{ chat_mode: ['agent','supervisor'] }, { turn_has_tool_calls: true }] }</code></td><td>Tool-call-specific safety, elevated agentic risk checks</td></tr>
+    <tr><td><strong>Elevated situation</strong></td><td><code>{ any: [{ risk_level: ['high','critical'] }, { prior_has_warn: true }] }</code></td><td>Extra scrutiny when risk is already elevated or a prior check flagged a warning</td></tr>
+    <tr><td><strong>Anonymous user</strong></td><td><code>{ persona: ['anonymous'] }</code></td><td>Rate-limit or harsher content filters for unauthenticated requests</td></tr>
+    <tr><td><strong>Factual output</strong></td><td><code>{ all: [{ output_has_factual_claims: true }, { output_has_tool_evidence: false }] }</code></td><td>Hallucination / grounding checks — only fire when the model made factual claims it didn't tool-verify</td></tr>
+    <tr><td><strong>Validation seeking</strong></td><td><code>{ input_has_validation_seeking: true }</code></td><td>Sycophancy-pressure checks — only when the user phrased their message as seeking validation ("right?", "agree?")</td></tr>
+    <tr><td><strong>Long input</strong></td><td><code>{ input_length_gt: 300 }</code></td><td>Injection classifiers and complex-input checks that don't need to run on short messages</td></tr>
+    <tr><td><strong>Suspicious input</strong></td><td><code>{ any: [{ input_has_code: true }, { input_has_base64: true }, { input_has_urls: true }, { input_has_instruction_override: true }] }</code></td><td>The expensive async injection classifier — gate it here to skip the 12-second LLM call on most turns</td></tr>
+    <tr><td><strong>Custom JSON</strong></td><td>Any valid <code>ConditionNode</code> tree you write</td><td>Any combination of the 20+ signal types; compose <code>all</code> / <code>any</code> / <code>not</code> freely</td></tr>
+  </table>
+
+  <h3>Walkthrough: creating three common guardrails</h3>
+
+  <h4>1. Regex — block phone numbers in output</h4>
+  <ol>
+    <li>Click <strong>Add Guardrail</strong>.</li>
+    <li>Set <strong>Name</strong>: <code>Phone Number Leak Block</code>.</li>
+    <li>Set <strong>Type</strong>: <code>regex</code>.</li>
+    <li>Set <strong>Stage</strong>: <code>post-execution</code> (check what the model outputs).</li>
+    <li>Set <strong>Priority</strong>: <code>12</code>.</li>
+    <li>Set <strong>Trigger When</strong>: <em>Always</em> (cheap regex, no reason to gate it).</li>
+    <li>In the config panel set <strong>Pattern</strong>: <code>(\+?1[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}</code>, <strong>Flags</strong>: <code>g</code>, <strong>Action</strong>: <code>deny</code>.</li>
+    <li>Set <strong>Trigger Description</strong>: <code>Always — blocks phone numbers in responses</code>.</li>
+    <li>Click <strong>Save</strong>. Takes effect immediately on the next chat message.</li>
+  </ol>
+
+  <h4>2. Blocklist — disallow competitor mentions</h4>
+  <ol>
+    <li>Click <strong>Add Guardrail</strong>.</li>
+    <li>Set <strong>Name</strong>: <code>Competitor Mention Block</code>.</li>
+    <li>Set <strong>Type</strong>: <code>blocklist</code>.</li>
+    <li>Set <strong>Stage</strong>: <code>pre-execution</code> (block before reaching the model).</li>
+    <li>Set <strong>Priority</strong>: <code>5</code>.</li>
+    <li>Set <strong>Trigger When</strong>: <em>Always</em>.</li>
+    <li>In the config panel, add words one per line: <code>acme-corp-competitor</code>, <code>rival-product</code>. Set <strong>Action</strong>: <code>deny</code>.</li>
+    <li>Set <strong>On Block</strong>: <code>I'm not able to discuss that topic.</code></li>
+    <li>Click <strong>Save</strong>.</li>
+  </ol>
+
+  <h4>3. Model-graded — LLM safety judge (gated on long or high-risk output)</h4>
+  <ol>
+    <li>Click <strong>Add Guardrail</strong>.</li>
+    <li>Set <strong>Name</strong>: <code>LLM Safety Judge</code>.</li>
+    <li>Set <strong>Type</strong>: <code>model-graded</code>.</li>
+    <li>Set <strong>Stage</strong>: <code>post-execution</code>.</li>
+    <li>Set <strong>Priority</strong>: <code>80</code> (run after cheaper checks).</li>
+    <li>Set <strong>Trigger When</strong>: <em>Custom JSON</em>, and paste:
+      <div class="code" style="margin:8px 0"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">condition</span><button class="copybtn">Copy</button></div>
+<pre>{ "any": [
+  { "output_length_gt": 500 },
+  { "prior_has_warn": true },
+  { "risk_level": ["high", "critical"] },
+  { "chat_mode": ["agent", "supervisor"] }
+] }</pre></div>
+      This skips the 8-second LLM call on short, low-risk, direct-mode messages where it adds no value.</li>
+    <li>In the config panel set <strong>Rule</strong>: <code>llm-judge</code>, <strong>Timeout (ms)</strong>: <code>8000</code>, <strong>On Error</strong>: <code>deny</code>.</li>
+    <li>Set <strong>Rubric</strong> (in the config JSON): <code>"Does this output contain harmful, deceptive, or policy-violating content? Respond with JSON: { \"decision\": \"allow\"|\"warn\"|\"deny\", \"confidence\": 0.0-1.0, \"rationale\": \"...\" }"</code></li>
+    <li>Set <strong>Trigger Description</strong>: <code>Long/risky/agent output — LLM safety check</code>.</li>
+    <li>Click <strong>Save</strong>.</li>
+  </ol>
+
+  <h3>What happens under the hood</h3>
+  <p>When you save, the admin API writes the row to the <code>guardrails</code> SQLite table, snapshots the change to <code>guardrail_revisions</code>, and emits a <code>weaveAudit</code> record. The next chat message builds a fresh <code>GuardrailConditionContext</code> (all signals extracted in under 1 ms) and passes it alongside the updated guardrail list to <code>createGuardrailPipeline</code>. Every guardrail's condition tree is evaluated, and guardrails whose condition is not met are recorded in <code>guardrail_evals.results</code> with <code>metadata.skipped: 'condition_not_met'</code> — so the audit trail is complete even for guardrails that didn't fire.</p>
+
+  <div class="call note"><span class="ic">🧵</span>
+    <div class="ct">Editing existing seeded guardrails</div>
+    <p>The thirty-five guardrails seeded by the migrations are fully editable in the UI. You can change their trigger conditions, tighten patterns, adjust timeouts, or disable them entirely. The <strong>Revision History</strong> tab on each guardrail shows every change with a before/after diff and the timestamp and user who made it. To reset a guardrail to its seeded state, check the revision history and copy the original config back in.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- SKILLS & AGENTS                                             -->
+<!-- ============================================================ -->
+<section id="geneweave-skills" class="group-anchor">
+  <h2>Skills &amp; Agents in geneWeave (admin UI) <a class="anchorlink" href="#geneweave-skills">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">Admin → Callable → Skills / Agents / Worker Agents</span></div>
+  <p>Skills are the central unit of task specialisation. The skill router compares the user's message semantically against all enabled skills and injects the best-matching skill's playbook into the system prompt. Multiple skills can co-activate; their instruction blocks are merged in priority order. Supervisor Agents are the orchestrators that receive the assembled context and produce the final response. Worker Agents are specialist sub-agents dispatched in multi-agent mode.</p>
+
+  <h3>Skills — Admin → Callable → Skills</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Name</td><td>Identifier shown in audit logs and the skill-selector UI.</td></tr>
+    <tr><td>Description (Purpose &amp; Summary)</td><td>Model-facing: used for semantic matching. Write this as a clear summary of what this skill does and the kinds of tasks it handles.</td></tr>
+    <tr><td>Category</td><td>retrieval / computation / communication / data-processing / planning / analysis / code / web / general. Used for grouping and capability routing.</td></tr>
+    <tr><td>Instructions (Skill Playbook)</td><td>The primary prompt engineering surface: when to use this skill, when not to, reasoning approach, execution steps, and completion criteria. Injected verbatim into the system prompt when the skill is activated.</td></tr>
+    <tr><td>Domain Sub-Playbooks</td><td>JSON array of <code>&#123;key, label?, content, tags?&#125;</code>. Domain-specific variants (e.g. sales / finance / operations). Only the sections whose tags match the user query are injected, keeping the context window lean.</td></tr>
+    <tr><td>Execution Contract</td><td>JSON: <code>&#123;minDelegations?, requiredOutputSubstrings?, requiredOutputPatterns?&#125;</code>. Machine-enforced output requirements; failures trigger automatic retries with concrete delta instructions.</td></tr>
+    <tr><td>Examples</td><td>JSON array of few-shot examples. Helps the model pattern-match the expected input/output style.</td></tr>
+    <tr><td>Allowed Tool Guidance</td><td>JSON array of tool names the model is encouraged (not forced) to use within this skill.</td></tr>
+    <tr><td>Semantic Hints (Tags)</td><td>JSON array of strings used by the router's semantic matching.</td></tr>
+    <tr><td>Trigger Patterns (Legacy)</td><td>Optional legacy hint patterns. Semantic activation via the description is now primary.</td></tr>
+    <tr><td>Priority</td><td>When multiple skills match, higher-priority skills win conflict resolution. Default 0.</td></tr>
+    <tr><td>Version</td><td>Semantic version string for audit tracking.</td></tr>
+    <tr><td>Prompt ID / Version / Strategy / Variables</td><td>Optional: bind a versioned prompt from the Prompts table instead of using the inline Instructions field. Enables A/B experiments and version-pinning.</td></tr>
+    <tr><td>Contract Key</td><td>Links to a Contracts row; the skill's outputs are machine-validated against that contract.</td></tr>
+    <tr><td>Eval Policy Key</td><td>Links to an eval policy that runs automated skill quality checks.</td></tr>
+    <tr><td>Tool Policy Key</td><td>Links to a Tool Policy that governs which tools and risk levels are accessible within this skill.</td></tr>
+    <tr><td>Supervisor Agent ID</td><td>Pin a specific supervisor agent for this skill (overrides tenant+category resolution). Leave blank for automatic resolution.</td></tr>
+    <tr><td>Enabled</td><td>Toggle. Disabled skills are completely invisible to the router.</td></tr>
+  </table>
+
+  <h3>Supervisor Agents — Admin → Callable → Agents</h3>
+  <p>One supervisor agent is resolved per request via tenant + category lookup (or by direct pin from the skill). It owns the system prompt and the top-level tool list for the conversation.</p>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Name</td><td>Machine identifier (e.g. <code>geneweave-supervisor</code>).</td></tr>
+    <tr><td>Display Name</td><td>Optional human-readable label.</td></tr>
+    <tr><td>Description</td><td>Model-facing: purpose, scope, and when this supervisor applies.</td></tr>
+    <tr><td>Category</td><td>general / analytics / research / code / communication / planning / data / web. Used for tenant+category resolution.</td></tr>
+    <tr><td>Tenant ID</td><td>Scope to a specific tenant. Blank = global default for this category.</td></tr>
+    <tr><td>System Prompt</td><td>The persona-level system prompt. Overrides <code>settings.systemPrompt</code> when this agent is resolved.</td></tr>
+    <tr><td>Default Timezone</td><td>Passed to utility tools (datetime / math_eval / unit_convert). E.g. <code>America/New_York</code>.</td></tr>
+    <tr><td>Include Utility Tools</td><td>Boolean. Automatically adds datetime / math_eval / unit_convert to the tool list when enabled.</td></tr>
+    <tr><td>Is Default</td><td>Resolved when no tenant+category match exists. Only one agent per category should have this flag.</td></tr>
+    <tr><td>Tool Allocations</td><td>JSON array of <code>&#123;tool_name, allocation&#125;</code> — the tools available to this agent and their allocation class hints.</td></tr>
+    <tr><td>Enabled</td><td>Toggle.</td></tr>
+  </table>
+
+  <h3>Worker Agents — Admin → Callable → Worker Agents</h3>
+  <p>Worker agents are specialist sub-agents dispatched by the supervisor in multi-agent (agent_mode) conversations. Each has its own persona, tool set, and job profile.</p>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Identifier Name / Display Name</td><td>Internal identifier and human-readable label.</td></tr>
+    <tr><td>Job Profile</td><td>Free-text description of what job this worker does; shown to the dispatching supervisor.</td></tr>
+    <tr><td>Description</td><td>Model-facing: capabilities, focus area, constraints.</td></tr>
+    <tr><td>System Prompt</td><td>Persona-level prompt injected when this worker is executing.</td></tr>
+    <tr><td>Tool Names</td><td>JSON array of tool keys available to this worker.</td></tr>
+    <tr><td>Persona</td><td>agent_worker / agent_researcher / agent_supervisor. Controls which tool policies and identity rules apply.</td></tr>
+    <tr><td>Trigger Patterns</td><td>JSON array: patterns that trigger dispatch to this worker (supervisor uses these as hints).</td></tr>
+    <tr><td>Task Contract ID</td><td>Optional contract binding for this worker's outputs.</td></tr>
+    <tr><td>Max Retries</td><td>How many times to retry this worker on failure before escalating.</td></tr>
+    <tr><td>Priority</td><td>Dispatch priority when multiple workers match.</td></tr>
+    <tr><td>Enabled</td><td>Toggle.</td></tr>
+  </table>
+
+  <div class="call note"><span class="ic">🧠</span>
+    <div class="ct">Skill activation is semantic, not keyword-based</div>
+    <p>The router embeds the user message and compares it against each skill's description and tags using vector similarity. Adding exact keywords to the description helps, but the primary signal is semantic. The <code>domain_sections</code> field lets one skill serve multiple use cases (e.g. a finance skill with separate sections for budgeting, tax, and compliance) without duplicating the full playbook.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- TOOLS & POLICIES                                             -->
+<!-- ============================================================ -->
+<section id="geneweave-tools" class="group-anchor">
+  <h2>Tools &amp; Policies in geneWeave (admin UI) <a class="anchorlink" href="#geneweave-tools">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">Admin → Callable → Tool Catalog / Tool Policies / Tool Credentials</span></div>
+  <p>The Tool Catalog is the central registry of every capability geneWeave can invoke — builtins (datetime, search, code exec), custom HTTP tools, MCP-bridged tools, and plugin tools. Tool Policies govern rate limits, approval requirements, persona scoping, and allowed risk levels. Tool Credentials store secrets as env var references so no plaintext key ever enters the database.</p>
+
+  <h3>Tool Catalog — Admin → Callable → Tool Catalog</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Name</td><td>Display name in admin lists and error messages.</td></tr>
+    <tr><td>Detailed Description</td><td>Model-facing: what the tool does, when to use it, and what inputs it expects. Write this as if explaining to the model how to decide whether to call it.</td></tr>
+    <tr><td>Tool Key</td><td>Unique identifier referenced by skills (<code>tool_names</code>), agents (<code>tool_allocations</code>), and tool policies. Read-only for builtins.</td></tr>
+    <tr><td>Category</td><td>UI grouping label (free text).</td></tr>
+    <tr><td>Risk Level</td><td>read-only / write / destructive / privileged / financial / external-side-effect. Used by tool policies to gate by risk class.</td></tr>
+    <tr><td>Has Side Effects</td><td>Boolean: does calling this tool change external state? Drives approval requirements.</td></tr>
+    <tr><td>Requires Approval</td><td>Boolean: if true, a human must approve before execution regardless of tool policy settings.</td></tr>
+    <tr><td>Version</td><td>Semver string for audit history.</td></tr>
+    <tr><td>Source</td><td>builtin / custom / mcp / plugin. Determines how the tool is invoked at runtime.</td></tr>
+    <tr><td>Tags</td><td>JSON array used for semantic tool selection and grouping.</td></tr>
+    <tr><td>Allocation Class</td><td>utility / web / social / search / cse / http / enterprise / code / data / communication. Governs how the tool appears in agent tool lists.</td></tr>
+    <tr><td>Max Execution (ms)</td><td>Hard timeout; calls exceeding this are killed and counted as errors.</td></tr>
+    <tr><td>Rate Limit / min</td><td>Maximum calls per minute across all users.</td></tr>
+    <tr><td>Credential ID</td><td>References a Tool Credential row; the credential is injected into the tool call headers at runtime.</td></tr>
+    <tr><td>Enabled</td><td>Toggle. Disabled tools cannot be called and are excluded from agent tool lists.</td></tr>
+  </table>
+
+  <h3>Tool Policies — Admin → Callable → Tool Policies</h3>
+  <p>A policy is linked to skills via <code>tool_policy_key</code>. When a skill runs, its active tool policy gates every tool call.</p>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Policy Key</td><td>Unique identifier referenced in skill's <code>tool_policy_key</code> field.</td></tr>
+    <tr><td>Applies To</td><td>JSON array of tool names or wildcards. E.g. <code>["web_search","*_write"]</code>.</td></tr>
+    <tr><td>Applies To Risk Levels</td><td>JSON array: policy applies when the tool's risk_level is in this list.</td></tr>
+    <tr><td>Allowed Risk Levels</td><td>JSON array: only tools whose risk_level is in this list may be called under this policy.</td></tr>
+    <tr><td>Approval Required</td><td>Boolean override: all calls under this policy need human approval.</td></tr>
+    <tr><td>Rate Limit / min</td><td>Per-policy rate limit (overrides tool-level limit when stricter).</td></tr>
+    <tr><td>Max Execution (ms)</td><td>Policy-level timeout override.</td></tr>
+    <tr><td>Max Concurrent</td><td>Maximum parallel calls allowed under this policy.</td></tr>
+    <tr><td>Require Dry Run</td><td>Boolean: forces a dry-run pass before actual execution.</td></tr>
+    <tr><td>Log I/O</td><td>Boolean: log full input and output (default true). Disable for high-frequency read-only tools to reduce noise.</td></tr>
+    <tr><td>Persona Scope</td><td>JSON array: only users with these personas can trigger tools under this policy.</td></tr>
+    <tr><td>Active Hours UTC</td><td><code>&#123;"start":"HH:MM","end":"HH:MM"&#125;</code>: restrict execution to UTC business hours.</td></tr>
+    <tr><td>Expires At</td><td>ISO datetime: policy auto-deactivates after this timestamp.</td></tr>
+    <tr><td>Enabled</td><td>Toggle.</td></tr>
+  </table>
+
+  <h3>Tool Credentials — Admin → Callable → Tool Credentials</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Credential Type</td><td>api_key / oauth_token / basic_auth / jwt / custom.</td></tr>
+    <tr><td>Tool Names</td><td>JSON array of <code>tool_key</code> strings this credential grants access to.</td></tr>
+    <tr><td>Env Var Name</td><td>The environment variable that holds the actual secret. Never store secrets in the DB row — set the env var in your deployment config and reference it here.</td></tr>
+    <tr><td>Config</td><td>JSON: <code>&#123;headerName, prefix, ...&#125;</code> — how to attach the credential to requests (e.g. <code>&#123;"headerName":"Authorization","prefix":"Bearer "&#125;</code>).</td></tr>
+    <tr><td>Rotation Due At</td><td>ISO datetime reminder. The UI highlights overdue credentials but does not auto-rotate.</td></tr>
+    <tr><td>Validation Status</td><td>Read-only. Set by the credential validation check that runs on save.</td></tr>
+    <tr><td>Enabled</td><td>Toggle.</td></tr>
+  </table>
+
+  <div class="call note"><span class="ic">📋</span>
+    <div class="ct">Read-only monitoring tabs</div>
+    <p><strong>Tool Audit</strong> — every invocation: outcome, duration, input/output preview, violation reason, and chat/user/skill context. <strong>Tool Health</strong> — 24-hour rolling statistics per tool (invocations, success/error/denied counts, avg latency, availability). <strong>Endpoint Health</strong> — circuit-breaker state per HTTP endpoint (consecutive failures, 429 history, circuit open/close timestamps, EMA latency α=0.2). <strong>Tool Approval Requests</strong> — pending human-in-the-loop approvals for tools with <code>requires_approval</code>. <strong>MCP Gateway Clients / Activity</strong> — registered MCP clients and per-client call log; use the custom view to approve or revoke clients. <strong>Tool Simulation</strong> — interactive sandbox to run any tool with test inputs and inspect the output before enabling it in production.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- PROMPTS & FRAMEWORKS                                         -->
+<!-- ============================================================ -->
+<section id="geneweave-prompts" class="group-anchor">
+  <h2>Prompts &amp; Frameworks in geneWeave (admin UI) <a class="anchorlink" href="#geneweave-prompts">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">Admin → Prompts</span></div>
+  <p>The Prompts system is geneWeave's version-controlled, multi-variant prompt store. Skills reference a prompt by <code>prompt_id</code> + <code>prompt_version</code> instead of embedding instructions inline, enabling A/B experiments, gradual rollout, and a full audit trail of who changed what and when.</p>
+
+  <h3>Prompts — Admin → Prompts → Prompts</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Key</td><td>Machine identifier referenced by skills (<code>prompt_id</code>) and agents.</td></tr>
+    <tr><td>Prompt Type</td><td>template / structured / fewShot / chain / router / judge / optimizer / modalityPreset. Governs how the prompt runtime processes and applies the template.</td></tr>
+    <tr><td>Status</td><td>draft / published / retired. Only <code>published</code> prompts are resolved at runtime.</td></tr>
+    <tr><td>Template</td><td>The prompt text. Use <code>&#123;&#123;variable&#125;&#125;</code> for interpolation and <code>&#123;&#123;&gt;fragment_key&#125;&#125;</code> to include a Prompt Fragment.</td></tr>
+    <tr><td>Variables</td><td>JSON array or comma-separated list of variable names the template requires.</td></tr>
+    <tr><td>Model Compatibility</td><td>JSON: which model IDs or providers this prompt is optimised for. Used by the router as a routing hint.</td></tr>
+    <tr><td>Execution Defaults</td><td>JSON: <code>&#123;temperature, maxTokens, strategy, ...&#125;</code> — defaults applied when this prompt is used by a skill.</td></tr>
+    <tr><td>Framework</td><td>JSON: references a Prompt Framework that defines how the system prompt is structured into sections.</td></tr>
+    <tr><td>Is Default</td><td>Boolean: resolved when no version is explicitly pinned.</td></tr>
+    <tr><td>Enabled</td><td>Toggle.</td></tr>
+  </table>
+
+  <h3>Prompt Versions — Admin → Prompts → Prompt Versions</h3>
+  <p>Snapshots of a prompt at a specific version string. Only one version can have <code>is_active = true</code> at a time — this is the version resolved at runtime. To roll out a new version: create it as a draft, test via Prompt Experiments, then set <code>is_active</code> true (automatically clears the flag on the previous active version).</p>
+
+  <h3>Prompt Experiments — Admin → Prompts → Prompt Experiments</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Prompt ID</td><td>Which prompt this experiment runs on.</td></tr>
+    <tr><td>Variants</td><td>JSON array: <code>[&#123;version, weight, label&#125;]</code>. Traffic split across versions. Weights are relative (e.g. <code>[&#123;"version":"1.0","weight":80&#125;,&#123;"version":"1.1","weight":20&#125;]</code> routes 20% to the candidate).</td></tr>
+    <tr><td>Assignment Key Template</td><td>Optional: template for deterministic user-to-variant assignment (ensures the same user always sees the same variant).</td></tr>
+    <tr><td>Status</td><td>draft / active / completed. Only <code>active</code> experiments influence routing.</td></tr>
+  </table>
+
+  <h3>Prompt Eval Datasets &amp; Eval Runs</h3>
+  <p>Datasets hold test cases (<code>cases_json</code>: input/expected output pairs) and a rubric (<code>rubric_json</code>: scoring criteria) plus a <code>pass_threshold</code> (0–1). Eval Runs are the results: avg score, pass/fail counts, and per-case JSON results. Use these to gate promotion of a new prompt version: create a dataset, run an eval, and only flip <code>is_active</code> if the run passes the threshold.</p>
+
+  <h3>Prompt Frameworks — Admin → Prompts → Prompt Frameworks</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Key</td><td>Unique identifier (e.g. <code>rtce</code>); referenced in a prompt's <code>framework</code> JSON.</td></tr>
+    <tr><td>Sections</td><td>JSON array of <code>PromptFrameworkSectionDef</code>: defines how the system prompt is composed from named sections (role, context, tools, examples, output format, etc.).</td></tr>
+    <tr><td>Section Separator</td><td>String inserted between sections (default <code>\n\n</code>).</td></tr>
+  </table>
+
+  <h3>Prompt Fragments — Admin → Prompts → Prompt Fragments</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Key</td><td>Referenced in templates as <code>&#123;&#123;&gt;key&#125;&#125;</code>. Lets you share boilerplate (safety notices, output format instructions, persona snippets) across multiple prompts.</td></tr>
+    <tr><td>Category</td><td>safety / personas / output / etc. — grouping only.</td></tr>
+    <tr><td>Content</td><td>The fragment text. May itself reference variables.</td></tr>
+    <tr><td>Variables</td><td>JSON array of variables the fragment exposes to the parent template.</td></tr>
+  </table>
+
+  <h3>Prompt Output Contracts — Admin → Prompts → Prompt Contracts</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Contract Type</td><td>json / markdown / code / max_length / forbidden_content / structured.</td></tr>
+    <tr><td>Schema</td><td>JSON Schema for <code>json</code> / <code>structured</code> types.</td></tr>
+    <tr><td>Config</td><td>Type-specific JSON: max character count for <code>max_length</code>, forbidden strings list for <code>forbidden_content</code>, etc.</td></tr>
+  </table>
+
+  <h3>Prompt Strategies — Admin → Prompts → Prompt Strategies</h3>
+  <p>Strategies are referenced via <code>execution_defaults.strategy</code> in a prompt or skill. They inject a prefix and/or suffix around the assembled prompt and carry a config JSON for strategy-specific parameters (e.g. chain-of-thought depth, output formatting rules).</p>
+
+  <h3>Prompt Optimizers &amp; Optimization Runs</h3>
+  <p>Optimizers automate iterative prompt improvement (implementation_kind: rule / llm / hybrid). Optimization Runs hold before/after template snapshots, eval baseline vs candidate scores, and diff metadata — providing a complete audit of how prompts evolved over time.</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- ROUTING & MODELS                                             -->
+<!-- ============================================================ -->
+<section id="geneweave-routing" class="group-anchor">
+  <h2>Routing &amp; Models in geneWeave (admin UI) <a class="anchorlink" href="#geneweave-routing">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">Admin → Routing + Admin → Platform → Routing / Model Pricing</span></div>
+  <p>geneWeave's routing layer selects the best model for each request using a weighted capability score across cost, speed, quality, and capability dimensions. The routing tables configure scoring criteria, per-tenant overrides, A/B experiments, and provider-specific tool format adapters.</p>
+
+  <h3>Routing Policies — Admin → Platform → Routing</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Strategy</td><td>balanced / cost_optimized / latency_optimized / quality_first / custom. The overall weighting preset.</td></tr>
+    <tr><td>Weights</td><td>JSON weight vector (<code>&#123;cost, speed, quality, capability&#125;</code>) overriding the strategy preset.</td></tr>
+    <tr><td>Constraints</td><td>JSON hard constraints applied before scoring (e.g. max cost per call, required modality support).</td></tr>
+    <tr><td>Fallback Model / Provider</td><td>Used when no model satisfies the policy constraints.</td></tr>
+  </table>
+
+  <h3>Model Pricing — Admin → Platform → Model Pricing</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Model ID</td><td>Provider's model identifier (e.g. <code>gpt-4o</code>, <code>claude-opus-4-8</code>).</td></tr>
+    <tr><td>Provider</td><td>openai / anthropic.</td></tr>
+    <tr><td>Input Cost / 1M tokens</td><td>USD. Used by the cost-by-task ledger and the cost dimension of routing scores.</td></tr>
+    <tr><td>Output Cost / 1M tokens</td><td>USD.</td></tr>
+    <tr><td>Quality Score</td><td>0.0–1.0; fed into the capability matrix weighted score. Increase this for models you trust more on quality-sensitive tasks.</td></tr>
+    <tr><td>Enabled</td><td>Toggle. Disabled models are excluded from all routing candidates.</td></tr>
+  </table>
+
+  <h3>Task Types — Admin → Routing → Task Types</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Task Key</td><td>Unique identifier; the router's task inference maps incoming requests to a task key.</td></tr>
+    <tr><td>Output Modality</td><td>text / code / image / audio / video / embedding / multimodal. Used to filter models that don't support the required modality.</td></tr>
+    <tr><td>Default Strategy</td><td>cost / speed / quality / capability / balanced. Override per tenant via Tenant Routing Overrides.</td></tr>
+    <tr><td>Default Weights</td><td>JSON <code>&#123;cost, speed, quality, capability&#125;</code> — how the four dimensions are weighted for this task type.</td></tr>
+    <tr><td>Inference Hints</td><td>JSON hints passed to the task type inference model to improve classification accuracy.</td></tr>
+  </table>
+
+  <h3>Tenant Routing Overrides — Admin → Routing → Tenant Routing Overrides</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Tenant ID + Task Key</td><td>Scopes this override to a specific tenant × task combination.</td></tr>
+    <tr><td>Preferred Model / Provider</td><td>Boosted by <code>preferred_boost_pct</code>% in the capability score calculation.</td></tr>
+    <tr><td>Weights</td><td>Optional JSON weight override for this tenant+task (replaces the task-type default).</td></tr>
+    <tr><td>Cost Ceiling per Call</td><td>Hard USD limit; calls estimated to exceed this are routed away from expensive models.</td></tr>
+    <tr><td>Optimisation Strategy</td><td>Override the task-level default strategy for this tenant.</td></tr>
+  </table>
+
+  <h3>Provider Tool Adapters — Admin → Routing → Provider Tool Adapters</h3>
+  <p>Maps tool definitions to provider-specific wire formats so geneWeave can call any provider with any tool.</p>
+  <table class="params">
+    <tr><th>Field</th><th>Values</th></tr>
+    <tr><td>Tool Format</td><td>anthropic_xml / openai_json / google_function / mistral_function / custom.</td></tr>
+    <tr><td>Tool Call Response Format</td><td>tool_use_block / function_call / tool_calls_array.</td></tr>
+    <tr><td>Tool Result Format</td><td>tool_result_block / tool_message / function_response.</td></tr>
+    <tr><td>System Prompt Location</td><td>system_message / first_user_message / separate_field.</td></tr>
+    <tr><td>Max Tool Count</td><td>Per-call tool limit (default 128).</td></tr>
+    <tr><td>Tool Name Regex</td><td>Regex that tool names must match for this provider. Names violating it are rewritten automatically.</td></tr>
+  </table>
+
+  <h3>Routing Experiments — Admin → Routing → Routing Experiments</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Baseline / Candidate</td><td>Provider + model ID for the control and treatment arms.</td></tr>
+    <tr><td>Traffic % to Candidate</td><td>0–100; percentage of matching requests routed to the candidate model.</td></tr>
+    <tr><td>Task Key / Tenant ID</td><td>Scope: blank = all tasks / all tenants.</td></tr>
+    <tr><td>Status</td><td>active / paused / completed.</td></tr>
+  </table>
+
+  <div class="call note"><span class="ic">📊</span>
+    <div class="ct">Read-only routing tabs</div>
+    <p><strong>Capability Matrix</strong> — heatmap of capability scores per model × task × tenant; auto-updated by the feedback loop. <strong>Routing Decision Traces</strong> — per-request audit showing selected model, weights used, full candidate breakdown, and estimated cost. <strong>Routing Capability Signals</strong> — raw signals from evals, user feedback, and human ratings (value 0–100, sample size, source). <strong>Message Feedback</strong> — thumbs-up/down and comment signals from chat users. <strong>Routing Surface Items</strong> — auto-detected regressions; use Status + Resolution Note to acknowledge or resolve (check <code>auto_disabled</code> flag — a severely regressing model may be auto-disabled). <strong>Cost by Task</strong> — aggregate cost ledger grouped by task_key + provider + model. <strong>Routing Simulator</strong> — interactive tool to preview which model would be selected for a given task and tenant without sending a real request.</p>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- WORKFLOWS & CONTRACTS                                        -->
+<!-- ============================================================ -->
+<section id="geneweave-workflows" class="group-anchor">
+  <h2>Workflows &amp; Contracts in geneWeave (admin UI) <a class="anchorlink" href="#geneweave-workflows">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">Admin → Platform → Workflows / Contracts / Task Policies</span></div>
+
+  <h3>Workflows — Admin → Platform → Workflows</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Name / Description / Version</td><td>Admin metadata. Version is semantic (e.g. <code>1.0</code>) and tracked in audit history.</td></tr>
+    <tr><td>Steps</td><td>JSON array of workflow step definitions. Each step has a type (model, tool, condition, loop, parallel, wait), model/prompt config, and transition rules.</td></tr>
+    <tr><td>Entry Step ID</td><td>Which step ID starts execution when the workflow is triggered.</td></tr>
+    <tr><td>Metadata</td><td>Free JSON for tags, owner, environment labels, and integration references.</td></tr>
+    <tr><td>Enabled</td><td>Toggle. Disabled workflows cannot be triggered by any trigger definition or API call.</td></tr>
+  </table>
+  <p><strong>Workflow Runs</strong> (read-only) — shows run ID, workflow ID, status, cost (USD), state JSON, input JSON, error message, and start/end timestamps. Use to debug stuck or failed executions.</p>
+
+  <h3>Contracts — Admin → Platform → Contracts</h3>
+  <p>Contracts define machine-enforced acceptance criteria for agent outputs. Skills and worker agents reference a contract via <code>contract_key</code>; the runtime retries with concrete delta instructions until the output satisfies all criteria or <code>max_attempts</code> is exhausted.</p>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Input Schema</td><td>JSON Schema: validates inputs before the agent runs.</td></tr>
+    <tr><td>Output Schema</td><td>JSON Schema: the agent's output must conform to this.</td></tr>
+    <tr><td>Acceptance Criteria</td><td>JSON array: additional criteria (e.g. required fields, forbidden strings, confidence thresholds).</td></tr>
+    <tr><td>Max Attempts</td><td>How many retries before the contract fails and returns an error.</td></tr>
+    <tr><td>Timeout (ms)</td><td>Wall-clock timeout across all attempts.</td></tr>
+    <tr><td>Evidence Required</td><td>Description of what evidence must accompany the output (e.g. tool-call results, citations).</td></tr>
+    <tr><td>Min Confidence</td><td>Minimum confidence score (0.0–1.0) from the model's output.</td></tr>
+    <tr><td>Human Review</td><td>Boolean: contract only closes after explicit human approval via the Task Policies flow.</td></tr>
+  </table>
+
+  <h3>Task Policies — Admin → Platform → Task Policies</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Task Type</td><td>approval / review / generation / classification. Determines which queue the generated task lands in.</td></tr>
+    <tr><td>Default Priority</td><td>low / normal / high / critical. Affects queue ordering.</td></tr>
+    <tr><td>SLA Hours</td><td>Target completion time; the UI highlights overdue tasks.</td></tr>
+    <tr><td>Auto-escalate (hours)</td><td>Automatically escalate to the next priority tier after this many hours without action.</td></tr>
+    <tr><td>Assignment Strategy</td><td>round-robin / least-busy / manual.</td></tr>
+    <tr><td>Assign To</td><td>For manual assignment: specific user email or queue name.</td></tr>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+<!-- GOVERNANCE                                                   -->
+<!-- ============================================================ -->
+<section id="geneweave-governance" class="group-anchor">
+  <h2>Governance in geneWeave (admin UI) <a class="anchorlink" href="#geneweave-governance">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">Admin → Platform → Users / Identity Rules / Memory / Compliance / Policies</span></div>
+
+  <h3>Users — Admin → Platform → Users</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Email / Name</td><td>User identity.</td></tr>
+    <tr><td>Persona</td><td>platform_admin / tenant_admin / tenant_user / agent_worker / agent_researcher / agent_supervisor. Controls access to admin routes, tool risk levels, and which identity rules apply.</td></tr>
+    <tr><td>Tenant ID</td><td>Scopes the user to a tenant. <code>platform_admin</code> users require no tenant.</td></tr>
+    <tr><td>Password</td><td>Set on create or update (hashed server-side; never stored in plaintext).</td></tr>
+  </table>
+
+  <h3>Identity Rules — Admin → Platform → Identity Rules</h3>
+  <p>ACL-style rules evaluated in priority order. First match wins.</p>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Resource</td><td>API resource path pattern (default <code>*</code>).</td></tr>
+    <tr><td>Action</td><td>HTTP method or action name (default <code>*</code>).</td></tr>
+    <tr><td>Roles</td><td>JSON array of persona strings this rule applies to.</td></tr>
+    <tr><td>Scopes</td><td>JSON array of OAuth-style scope strings.</td></tr>
+    <tr><td>Result</td><td>allow / deny.</td></tr>
+    <tr><td>Priority</td><td>Lower numbers are evaluated first. Use negative values to express global denies that override tenant-level allows.</td></tr>
+  </table>
+
+  <h3>Memory Governance — Admin → Platform → Memory Governance</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Memory Types</td><td>JSON array: which memory types (episodic, semantic, working, etc.) this rule governs.</td></tr>
+    <tr><td>Block Patterns</td><td>JSON array of regex patterns: matching memory content is not stored at all.</td></tr>
+    <tr><td>Redact Patterns</td><td>JSON array of regex patterns: matching text is redacted (replaced with <code>[REDACTED]</code>) before storage.</td></tr>
+    <tr><td>Max Age</td><td>ISO 8601 duration string (e.g. <code>P90D</code>): memories older than this are auto-purged.</td></tr>
+    <tr><td>Max Entries</td><td>Maximum memories retained per user/tenant. Oldest entries pruned first.</td></tr>
+  </table>
+
+  <h3>Memory Extraction Rules — Admin → Platform → Memory Extraction Rules</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Rule Type</td><td>self_disclosure (user mentions preferences or facts about themselves) / entity_extraction (named entities).</td></tr>
+    <tr><td>Entity Type</td><td>person / location / organization / preference / topic / general.</td></tr>
+    <tr><td>Pattern / Flags</td><td>Regex pattern and flags (default <code>i</code>) that trigger extraction on match.</td></tr>
+    <tr><td>Facts Template</td><td>JSON template: how extracted matches are stored as memory facts. E.g. <code>&#123;"type":"preference","value":"$1"&#125;</code>.</td></tr>
+    <tr><td>Priority</td><td>Lower numbers run first. Higher-priority rules can prevent lower-priority rules from re-extracting the same entity.</td></tr>
+  </table>
+
+  <h3>Compliance Rules — Admin → Platform → Compliance Rules</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Rule Type</td><td>retention / deletion / legal-hold / consent / residency.</td></tr>
+    <tr><td>Target Resource</td><td>Resource pattern this rule applies to (default <code>*</code>).</td></tr>
+    <tr><td>Retention Days</td><td>For retention rules: how long to keep records before the action fires.</td></tr>
+    <tr><td>Region</td><td>For residency rules: geographic region where data must reside.</td></tr>
+    <tr><td>Consent Purpose</td><td>For consent rules: what purpose consent covers.</td></tr>
+    <tr><td>Action</td><td>archive / delete / notify / block / encrypt.</td></tr>
+  </table>
+
+  <h3>Capability Policy Bindings — Admin → Platform → Capability Policy Bindings</h3>
+  <p>Binds a policy (tool policy, guardrail, routing policy, memory rule, sandbox policy, cost policy) to a scope (agent, mesh, workflow, or tenant). Higher-precedence bindings win when multiple overlap.</p>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Binding Kind</td><td>agent / mesh / workflow / tenant — what type of entity is being bound.</td></tr>
+    <tr><td>Binding Ref</td><td>The ID of the agent/mesh/workflow/tenant being bound.</td></tr>
+    <tr><td>Policy Kind</td><td>tool_policy / guardrail / routing / memory / sandbox / cost_policy.</td></tr>
+    <tr><td>Policy Ref</td><td>The ID of the policy row.</td></tr>
+    <tr><td>Precedence</td><td>agent=100 / mesh=50 / workflow=10 / tenant=5. Higher wins when multiple bindings overlap for the same request.</td></tr>
+  </table>
+
+  <h3>Cost Policies — Admin → Platform → Cost Policies</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Key</td><td>Unique identifier referenced in capability policy bindings and tenant configs.</td></tr>
+    <tr><td>Tier</td><td>economy / balanced / performance / max / custom. Sets a sensible baseline configuration.</td></tr>
+    <tr><td>Levers JSON</td><td>Partial <code>CostPolicy</code> override merged on top of the tier. Controls budget limits, preferred providers, retry budget, model allowlists, etc.</td></tr>
+  </table>
+
+  <h3>Tenant Encryption Policies — Admin → Platform → Tenant Encryption Policies</h3>
+  <p>One row per tenant. Enabling auto-bootstraps KEK + DEK + BIK (key encryption key, data encryption key, blind index key).</p>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>KMS Provider</td><td>local / aws-kms / gcp-kms / azure-kv / vault.</td></tr>
+    <tr><td>KMS Config</td><td>Provider-specific JSON (e.g. <code>&#123;"keyArn":"arn:aws:kms:..."&#125;</code>).</td></tr>
+    <tr><td>Rotation Schedule</td><td>manual / monthly / quarterly / annual.</td></tr>
+    <tr><td>Blind Index Enabled</td><td>Boolean: creates HMAC-SHA-256 sibling columns for equality search on encrypted fields without decrypting.</td></tr>
+    <tr><td>Field Policy</td><td>JSON specifying which (table, column) pairs to encrypt.</td></tr>
+    <tr><td>Enabled</td><td>Flipping false→true auto-bootstraps all keys. Flipping true→false does NOT decrypt data — use the shred API for that.</td></tr>
+  </table>
+
+  <h3>Tenant Configs — Admin → Platform → Tenant Configs</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Tenant ID / Scope</td><td>tenant / user / team — how narrowly the config applies.</td></tr>
+    <tr><td>Allowed / Denied Models</td><td>JSON arrays: model IDs the tenant can or cannot use.</td></tr>
+    <tr><td>Allowed Tools</td><td>JSON array: tool keys available to this tenant.</td></tr>
+    <tr><td>Budget caps</td><td><code>max_tokens_daily</code>, <code>max_cost_daily</code>, <code>max_tokens_monthly</code>, <code>max_cost_monthly</code> — hard limits; requests that would exceed the cap are rejected.</td></tr>
+    <tr><td>Features</td><td>JSON feature flag overrides for this tenant.</td></tr>
+    <tr><td>Config Overrides</td><td>Arbitrary JSON config overrides merged into the tenant's runtime settings.</td></tr>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+<!-- INTEGRATIONS                                                 -->
+<!-- ============================================================ -->
+<section id="geneweave-integrations" class="group-anchor">
+  <h2>Integrations in geneWeave (admin UI) <a class="anchorlink" href="#geneweave-integrations">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">Admin → Platform → Search Providers / HTTP Endpoints / Social Accounts / Enterprise Connectors / Trigger Definitions</span></div>
+
+  <h3>Search Providers</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Provider Type</td><td>duckduckgo / google / bing / brave / custom.</td></tr>
+    <tr><td>API Key / Base URL</td><td>Credentials and endpoint. For DuckDuckGo (free) leave API Key blank.</td></tr>
+    <tr><td>Priority</td><td>When multiple providers are enabled, lower priority is tried first; others serve as fallback.</td></tr>
+    <tr><td>Options</td><td>JSON: provider-specific options (safe search level, language, region, result count, etc.).</td></tr>
+  </table>
+
+  <h3>HTTP Endpoints</h3>
+  <p>Custom webhook / REST endpoints that agent tools can call. Each endpoint is a named, auth-configured, rate-limited HTTP target that tools reference by name.</p>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>URL / Method</td><td>Target URL and HTTP method (GET / POST / PUT / PATCH / DELETE).</td></tr>
+    <tr><td>Auth Type / Auth Config</td><td>none / bearer / basic / api-key / oauth + JSON config containing credentials.</td></tr>
+    <tr><td>Headers</td><td>JSON: additional HTTP headers always sent with requests.</td></tr>
+    <tr><td>Body Template</td><td>Template string for POST/PUT body; supports <code>&#123;&#123;variable&#125;&#125;</code> interpolation from tool call parameters.</td></tr>
+    <tr><td>Response Transform</td><td>JSONPath or transform expression to extract the relevant portion of the response.</td></tr>
+    <tr><td>Retry Count</td><td>Number of retries on transient failure (5xx, timeout).</td></tr>
+    <tr><td>Rate Limit RPM</td><td>Requests per minute (default 60).</td></tr>
+  </table>
+
+  <h3>Social Accounts</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Platform</td><td>slack / discord / telegram / twitter / mastodon / linkedin / instagram / facebook / tiktok / medium / blogger.</td></tr>
+    <tr><td>API Key / Secret / Base URL</td><td>Platform credentials. Store secrets in env vars and reference via the credential system when possible.</td></tr>
+    <tr><td>Options</td><td>JSON: platform-specific config (channel IDs, workspace slugs, posting limits, etc.).</td></tr>
+  </table>
+
+  <h3>Enterprise Connectors</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Connector Type</td><td>jira / confluence / sharepoint / salesforce / servicenow / custom.</td></tr>
+    <tr><td>Base URL</td><td>Root URL of the enterprise system.</td></tr>
+    <tr><td>Auth Type / Auth Config</td><td>bearer / basic / oauth / api-key + JSON credentials.</td></tr>
+    <tr><td>Options</td><td>JSON: connector-specific config (project keys, field mappings, sync rules, etc.).</td></tr>
+  </table>
+
+  <h3>Trigger Definitions</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Trigger Type</td><td>cron / webhook / event / manual.</td></tr>
+    <tr><td>Expression</td><td>For <code>cron</code>: cron expression. For <code>webhook</code>: path suffix. For <code>event</code>: event name.</td></tr>
+    <tr><td>Config</td><td>JSON: trigger-type-specific options (timezone for cron, secret for webhook verification, event filter for event triggers).</td></tr>
+    <tr><td>Target Workflow</td><td>Workflow name or ID to execute when the trigger fires.</td></tr>
+    <tr><td>Status</td><td>active / paused / disabled. Paused triggers can be resumed; disabled triggers must be re-enabled.</td></tr>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+<!-- PLATFORM CONFIG                                              -->
+<!-- ============================================================ -->
+<section id="geneweave-platform" class="group-anchor">
+  <h2>Platform config in geneWeave (admin UI) <a class="anchorlink" href="#geneweave-platform">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">Admin → Platform → (many tabs)</span></div>
+
+  <h3>Cache Policies</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Scope</td><td>global / model / prompt / user — how narrowly the cache applies.</td></tr>
+    <tr><td>TTL (ms)</td><td>Time-to-live. Default 300 000 ms (5 min).</td></tr>
+    <tr><td>Max Entries</td><td>Maximum cached items; oldest evicted first.</td></tr>
+    <tr><td>Bypass Patterns</td><td>JSON: request patterns that skip the cache (e.g. requests containing personal data).</td></tr>
+    <tr><td>Invalidate On</td><td>JSON: events that trigger cache invalidation (e.g. skill update, model pricing change).</td></tr>
+  </table>
+
+  <h3>Reliability Policies</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Policy Type</td><td>retry / circuit-breaker / bulkhead / timeout / fallback.</td></tr>
+    <tr><td>Max Retries / Initial Delay / Max Delay / Backoff Multiplier</td><td>Exponential backoff parameters for <code>retry</code> policies.</td></tr>
+    <tr><td>Max Concurrent / Queue Size</td><td>Bulkhead parameters: concurrent execution cap and overflow queue depth.</td></tr>
+  </table>
+
+  <h3>Sandbox Policies</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Max CPU (ms) / Max Memory (MB) / Max Duration (ms)</td><td>Hard resource limits for sandboxed code execution.</td></tr>
+    <tr><td>Max Output Bytes</td><td>Truncates sandbox stdout/stderr beyond this limit.</td></tr>
+    <tr><td>Allowed / Denied Modules</td><td>JSON arrays of Node.js module names permitted or forbidden in the sandbox.</td></tr>
+    <tr><td>Network Access</td><td>Boolean: whether sandboxed code may make outbound network calls.</td></tr>
+    <tr><td>Filesystem Access</td><td>none / readonly / readwrite.</td></tr>
+  </table>
+
+  <h3>Extraction Pipelines</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Stages</td><td>JSON array of processing stages: parse, chunk, embed, index, etc. Each stage has a type, config, and output mapping.</td></tr>
+    <tr><td>Input MIME Types</td><td>JSON array of accepted MIME types (e.g. <code>["application/pdf","text/plain"]</code>).</td></tr>
+    <tr><td>Max Input Size (bytes)</td><td>File size limit; larger files are rejected at intake.</td></tr>
+  </table>
+
+  <h3>Artifact Policies</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Max Size (bytes)</td><td>Per-artifact storage limit.</td></tr>
+    <tr><td>Allowed Types</td><td>JSON array of permitted MIME types or file extensions.</td></tr>
+    <tr><td>Retention Days</td><td>Days before auto-deletion.</td></tr>
+    <tr><td>Require Versioning</td><td>Boolean: artifacts must be versioned; overwriting without incrementing the version is rejected.</td></tr>
+  </table>
+
+  <h3>Capability Packs — Admin → Platform → Capability Packs</h3>
+  <p>A pack bundles skills, tools, prompts, guardrails, and other entities into a single installable unit. Installing via <code>POST /api/admin/capability-packs/install</code> creates all rows atomically.</p>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Pack Key</td><td>Unique identifier (e.g. <code>acme.support</code>).</td></tr>
+    <tr><td>Version</td><td>Semver string. Installing an already-installed version is a no-op unless you explicitly uninstall first.</td></tr>
+    <tr><td>Status</td><td>draft / published / retired. Only <code>published</code> packs can be installed.</td></tr>
+    <tr><td>Manifest</td><td>JSON: <code>&#123;meta, contents, dependencies?, preconditions?&#125;</code>. <code>contents</code> lists all entities in the pack (type + payload for each). <code>dependencies</code> lists other packs that must be installed first. <code>preconditions</code> lists capability checks that must pass before installation.</td></tr>
+  </table>
+  <p><strong>Capability Pack Installations</strong> (read-only) — audit log of pack installs and uninstalls with the full ledger JSON showing exactly which rows were created.</p>
+
+  <h3>Plugin Configs</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Plugin Type</td><td>core / community / private / enterprise.</td></tr>
+    <tr><td>Package Name / Version</td><td>npm package reference. The plugin host loads this package at startup.</td></tr>
+    <tr><td>Trust Level</td><td>trusted (runs without sandbox) / community (sandboxed, full capabilities) / sandboxed (sandboxed, restricted capabilities).</td></tr>
+    <tr><td>Capabilities</td><td>JSON: capabilities the plugin exposes to the runtime.</td></tr>
+    <tr><td>Config</td><td>Plugin-specific JSON config passed to the plugin's initialiser.</td></tr>
+  </table>
+
+  <h3>Scaffold Templates</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Template Type</td><td>basic-agent / tool-calling-agent / rag-pipeline / workflow / multi-agent / mcp-server / full-stack.</td></tr>
+    <tr><td>Files</td><td>JSON: the template file tree (path → content pairs).</td></tr>
+    <tr><td>Dependencies / Dev Dependencies</td><td>JSON: npm package dependencies.</td></tr>
+    <tr><td>Variables</td><td>JSON: template variables that are interpolated when the template is applied.</td></tr>
+    <tr><td>Post Install</td><td>Shell command run after <code>npx create</code> applies the template.</td></tr>
+  </table>
+
+  <h3>Recipe Configs</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Recipe Type</td><td>workflow / governed / approval / acl-rag / multi-tenant / eval-routed / memory / event-driven / safe-exec.</td></tr>
+    <tr><td>Model / Provider</td><td>Default model for this recipe. Can be overridden per-request.</td></tr>
+    <tr><td>Tools / Guardrails</td><td>JSON arrays: tool names and guardrail IDs baked into this recipe.</td></tr>
+    <tr><td>Max Steps</td><td>Maximum agent steps before the recipe fails with a step-limit error.</td></tr>
+  </table>
+
+  <h3>Widget Configs</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Widget Type</td><td>table / chart / form / code / timeline / image.</td></tr>
+    <tr><td>Default Options</td><td>JSON: default render options (colours, pagination size, chart axes, etc.).</td></tr>
+    <tr><td>Allowed Contexts</td><td>JSON: which chat contexts (chat_mode, persona, etc.) can render this widget.</td></tr>
+    <tr><td>Max Data Points</td><td>Hard limit to prevent oversized renders crashing the UI.</td></tr>
+    <tr><td>Refresh Interval (ms)</td><td>For live-updating widgets; 0 = no refresh.</td></tr>
+  </table>
+
+  <h3>Other platform tabs</h3>
+  <table class="params">
+    <tr><th>Tab</th><th>What it manages</th></tr>
+    <tr><td>Graph Configs</td><td>entity / timeline / knowledge / dependency graphs: max traversal depth, entity/relationship type allowlists, auto-link behaviour, and scoring weights.</td></tr>
+    <tr><td>Collaboration Sessions</td><td>pair / team / broadcast / review sessions: max participants, presence TTL, idle auto-close, and handoff behaviour.</td></tr>
+    <tr><td>Validation Rules</td><td>required / range / pattern / custom rules applied to agent-config, workflow-config, or tool-config entities. Severity: error / warning / info.</td></tr>
+    <tr><td>Replay Scenarios</td><td>Golden prompt/response pairs with acceptance criteria. Used to catch regressions when models or prompts change.</td></tr>
+    <tr><td>Guardrail Evals (read-only)</td><td>Raw guardrail evaluation results from every chat turn.</td></tr>
+    <tr><td>Memory Extraction Events (read-only)</td><td>Per-message extraction metrics: entity counts, self-disclosure flags, merged entity counts.</td></tr>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+<!-- LIVE MESH                                                    -->
+<!-- ============================================================ -->
+<section id="geneweave-live-mesh" class="group-anchor">
+  <h2>Live Mesh in geneWeave (admin UI) <a class="anchorlink" href="#geneweave-live-mesh">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">Admin → Live Mesh → Mesh Definitions / Agent Definitions / Delegation Edges</span></div>
+  <p>A live-agent mesh is a named group of AI agents with defined roles, relationships, and a shared charter. The three Live Mesh tables are <em>blueprints</em> — they define the shape of a mesh type. Provisioned running instances of a blueprint live in the <a href="#geneweave-live-runtime">Live Runtime</a> tables. The runtime (<code>bootKaggleMesh</code>, or a generic <code>bootMesh</code>) loads a snapshot keyed by <code>mesh_key</code> and uses these rows instead of hard-coded constants.</p>
+
+  <h3>Live Mesh Definitions</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Mesh Key</td><td>Unique identifier (e.g. <code>kaggle</code>). Referenced by <code>bootKaggleMesh</code> and the provisioning API.</td></tr>
+    <tr><td>Charter Prose</td><td>Mesh-wide instructions injected into every agent's context. Describes the shared mission, rules, and communication norms for the whole mesh.</td></tr>
+    <tr><td>Dual-Control Tools</td><td>JSON array of tool keys that require two-agent consensus before execution. Any agent attempting a tool in this list blocks until a second agent confirms.</td></tr>
+    <tr><td>Enabled</td><td>Toggle. Disabled meshes cannot be provisioned.</td></tr>
+  </table>
+
+  <h3>Live Agent Definitions</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Mesh Definition ID</td><td>FK to the parent mesh blueprint.</td></tr>
+    <tr><td>Role Key</td><td>Unique role identifier within the mesh (e.g. <code>discoverer</code>, <code>implementer</code>, <code>reviewer</code>).</td></tr>
+    <tr><td>Role Label</td><td>Model-facing label for this role (shown to other agents when they reference this role).</td></tr>
+    <tr><td>Persona</td><td>Model-facing system prompt for this role. Defines the agent's behaviour, communication style, and decision criteria.</td></tr>
+    <tr><td>Objectives</td><td>What this role is trying to achieve — fed into the agent's context.</td></tr>
+    <tr><td>Success Indicators</td><td>What "done" looks like for this role — used for contract validation.</td></tr>
+    <tr><td>Ordering</td><td>Rendering/execution order within the mesh.</td></tr>
+    <tr><td>Default Model Capability Spec</td><td>JSON: <code>&#123;task, toolUse, minContextTokens&#125;</code>. Resolved via <code>@weaveintel/routing</code>. Overridden per runtime agent in Live Agents.</td></tr>
+    <tr><td>Default Routing Policy Key</td><td>Optional routing policy override for this role's model selection.</td></tr>
+    <tr><td>Default Pinned Model ID</td><td>Escape hatch: bypasses routing and always uses this model for reproducibility. Use sparingly.</td></tr>
+  </table>
+
+  <h3>Delegation Edges</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>From Role Key / To Role Key</td><td>The roles this edge connects.</td></tr>
+    <tr><td>Relationship</td><td>DIRECTS / COLLABORATES_WITH / REPORTS_TO. Controls how the supervisor constructs delegation messages and how the receiving agent interprets instructions.</td></tr>
+    <tr><td>Prose</td><td>Model-facing description of what this relationship means (shown to both roles when the delegation fires).</td></tr>
+    <tr><td>Ordering</td><td>Order in which edges are presented in the mesh charter summary.</td></tr>
+  </table>
+</section>
+
+<!-- ============================================================ -->
+<!-- LIVE RUNTIME                                                 -->
+<!-- ============================================================ -->
+<section id="geneweave-live-runtime" class="group-anchor">
+  <h2>Live Runtime in geneWeave (admin UI) <a class="anchorlink" href="#geneweave-live-runtime">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">Admin → Live Runtime → Live Meshes / Live Agents / Handlers / Runs</span></div>
+  <p>The Live Runtime tables are provisioned instances of mesh blueprints. A live mesh is one running copy of a blueprint, scoped to a tenant and carrying instance-specific config, tool bindings, and agent overrides. Each live agent within the mesh can override the blueprint's model routing and persona, and binds to a handler that defines how it processes messages.</p>
+
+  <h3>Live Meshes</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Mesh Definition ID</td><td>FK to the blueprint in Live Mesh Definitions.</td></tr>
+    <tr><td>Tenant ID</td><td>Optional tenant scoping. Blank = shared across tenants.</td></tr>
+    <tr><td>Status</td><td>ACTIVE / PAUSED / ARCHIVED. Only ACTIVE meshes can receive new runs.</td></tr>
+    <tr><td>Domain</td><td>Optional domain label (e.g. <code>kaggle</code>).</td></tr>
+    <tr><td>Dual-Control Tools</td><td>JSON array: instance-level override of the blueprint's dual-control tool list.</td></tr>
+    <tr><td>Owner Human ID</td><td>Optional: human operator owning this mesh instance.</td></tr>
+    <tr><td>MCP Server Ref</td><td>Optional: MCP server reference bound to this mesh.</td></tr>
+    <tr><td>Account ID</td><td>Optional: external account binding (e.g. a Kaggle account).</td></tr>
+    <tr><td>Runtime Context</td><td>Arbitrary JSON context injected into every agent's prepare config (e.g. competition metadata, team settings).</td></tr>
+  </table>
+
+  <h3>Live Agents</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Mesh ID</td><td>FK to the parent live mesh.</td></tr>
+    <tr><td>Agent Definition ID</td><td>Optional FK to a Live Agent Definition blueprint. When set, the blueprint's fields are used as defaults for any field left blank here.</td></tr>
+    <tr><td>Role Key</td><td>Unique per mesh; identifies this agent in delegation edges and tool call logs.</td></tr>
+    <tr><td>Persona / Objectives / Success Indicators</td><td>Instance-level overrides of the blueprint values.</td></tr>
+    <tr><td>Attention Policy Key</td><td>FK to a Live Attention Policy. Controls when this agent wakes up and processes incoming messages.</td></tr>
+    <tr><td>Contract Version ID</td><td>Optional contract binding; the agent's outputs must satisfy this contract.</td></tr>
+    <tr><td>Status</td><td>ACTIVE / PAUSED / ARCHIVED.</td></tr>
+    <tr><td>Model Capability Spec</td><td>JSON: <code>&#123;task, toolUse, minContextTokens&#125;</code>. Instance-level override of the blueprint spec.</td></tr>
+    <tr><td>Routing Policy Key</td><td>Instance-level routing policy override.</td></tr>
+    <tr><td>Pinned Model ID</td><td>Bypass routing and always use this model. Use for reproducibility in evals; avoid in production to preserve cost/quality flexibility.</td></tr>
+    <tr><td>Prepare Config</td><td>Declarative prepare recipe JSON: <code>&#123;"systemPrompt":&#123;"promptKey":"live-agent.observer"&#125;,"tools":"$auto","userGoal":&#123;"from":"inbound.body"&#125;&#125;</code>. The runtime synthesises the agent's <code>prepare()</code> function from this instead of hard-coding it in a handler.</td></tr>
+  </table>
+
+  <h3>Agent Handler Bindings</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Handler Kind</td><td>Must match a registered Live Handler Kind (e.g. <code>agentic.react</code>, <code>deterministic.forward</code>).</td></tr>
+    <tr><td>Config JSON</td><td>Handler-specific config. The shape is defined by the handler kind's <code>config_schema_json</code> — check that tab first.</td></tr>
+  </table>
+
+  <h3>Agent Tool Bindings</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Tool Catalog ID</td><td>FK to a tool catalog row. Set this OR <code>mcp_server_url</code>, not both.</td></tr>
+    <tr><td>MCP Server URL</td><td>Direct MCP server URL. Synthesised into an inline catalog row at runtime.</td></tr>
+    <tr><td>Capability Keys</td><td>JSON array: which tool capabilities are allowed (<code>[]</code> = all capabilities from the bound tool).</td></tr>
+  </table>
+
+  <h3>Live Handler Kinds (read-only)</h3>
+  <p>Registered handler implementations. <strong>Do not create rows here directly</strong> — they are registered by the runtime on startup. Use the <code>config_schema_json</code> field to understand what config to provide in Agent Handler Bindings.</p>
+
+  <h3>Live Attention Policies</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Key</td><td>Unique identifier referenced by live agents (e.g. <code>heuristic.inbox-first</code>).</td></tr>
+    <tr><td>Kind</td><td>heuristic / cron / model. Determines how the agent decides when to act.</td></tr>
+    <tr><td>Config JSON</td><td>Policy config: heuristic rules for <code>heuristic</code>, a cron expression for <code>cron</code>, or a model prompt + threshold for <code>model</code>.</td></tr>
+  </table>
+
+  <h3>Live Runs</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Mesh ID / Run Key</td><td>Identifies the mesh this run belongs to and the unique run key within that mesh.</td></tr>
+    <tr><td>Status</td><td>RUNNING / COMPLETED / FAILED / CANCELLED. Use to pause or cancel a run.</td></tr>
+    <tr><td>Context JSON</td><td>Run-level context injected as the initial goal/input (e.g. competition slug, objective, user goal).</td></tr>
+  </table>
+  <p><strong>Live Run Steps</strong> (read-only) — per-role execution steps with payload JSON and timestamps. <strong>Live Run Events</strong> (read-only) — fine-grained event stream within a run (tool calls, messages, errors, delegation events).</p>
+</section>
+
+<!-- ============================================================ -->
+<!-- KAGGLE                                                       -->
+<!-- ============================================================ -->
+<section id="geneweave-kaggle" class="group-anchor">
+  <h2>Kaggle in geneWeave (admin UI) <a class="anchorlink" href="#geneweave-kaggle">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">Admin → Kaggle</span></div>
+  <p>The Kaggle section manages geneWeave's Kaggle competition agent system. A live-agent mesh researches competitions, proposes ML approaches, generates and validates kernels, submits predictions, and optionally posts discussion summaries. The admin tabs let you curate the competition watchlist, review and approve approaches, monitor runs, and configure per-tenant discussion permissions.</p>
+
+  <h3>Tracked Competitions — Admin → Kaggle → Competitions</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Competition Ref</td><td>Kaggle competition slug (the unique identifier in the competition URL).</td></tr>
+    <tr><td>Title / Category / Deadline / Reward / URL</td><td>Competition metadata; populated by the sync agent, editable by operators.</td></tr>
+    <tr><td>Status</td><td>watching (monitoring but not active) / active (agent is working on it) / paused / archived.</td></tr>
+    <tr><td>Notes</td><td>Operator notes: strategy decisions, known issues, context for the agent.</td></tr>
+    <tr><td>Tenant ID</td><td>Optional scoping to a specific tenant.</td></tr>
+  </table>
+
+  <h3>Approaches — Admin → Kaggle → Approaches</h3>
+  <p>Candidate ML approaches proposed by the ideator agent. Operators review and approve/reject before the implementer agent builds a kernel.</p>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Summary</td><td>Short model-facing description of the proposed approach; shown to the implementer when building the kernel.</td></tr>
+    <tr><td>Expected Metric</td><td>Expected leaderboard metric (e.g. <code>AUC=0.83</code>). Used as a success target in the contract.</td></tr>
+    <tr><td>Model Family</td><td>ML model family (e.g. <code>lightgbm</code>, <code>transformer</code>, <code>xgboost+blending</code>).</td></tr>
+    <tr><td>Source Kernel Refs</td><td>JSON array of Kaggle kernels this approach was inspired by.</td></tr>
+    <tr><td>Status</td><td>draft / approved / rejected / implemented. Only <code>approved</code> approaches are sent to the implementer. Flip to <code>approved</code> after reviewing.</td></tr>
+  </table>
+
+  <h3>Kaggle Runs — Admin → Kaggle → Runs</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Kernel Ref / Submission ID</td><td>Kaggle identifiers for the generated kernel and submission.</td></tr>
+    <tr><td>Public / Private Score</td><td>Leaderboard scores returned by Kaggle after submission.</td></tr>
+    <tr><td>CV/LB Gap</td><td>Difference between cross-validation score and leaderboard score; large gaps indicate overfitting.</td></tr>
+    <tr><td>Is Final Pick</td><td>Boolean: marks the submission selected for final scoring. Toggle once you're confident in the result.</td></tr>
+    <tr><td>Validator Report</td><td>JSON from the submission validator: schema check, distribution check, baseline check results.</td></tr>
+    <tr><td>Status</td><td>queued / running / validated / submitted / completed / failed.</td></tr>
+  </table>
+
+  <h3>Competition Rubrics — Admin → Kaggle → Rubrics</h3>
+  <p>Auto-inferred per-competition validation rubrics; operator-editable. The submission validator uses these to check that a kernel's output conforms to the expected format before submitting.</p>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Metric Name / Metric Direction</td><td>The primary evaluation metric (e.g. <code>accuracy</code>, <code>rmse</code>) and whether to maximize or minimize it.</td></tr>
+    <tr><td>Baseline Score / Target Score</td><td>Median LB score (baseline) and top LB score (target). The agent uses these for self-assessment of approach quality.</td></tr>
+    <tr><td>Row Count / ID Column / Target Column / Target Type</td><td>Expected submission schema. The validator checks these before Kaggle submission.</td></tr>
+    <tr><td>Expected Distribution</td><td>JSON: expected class or value distribution. Used to catch degenerate predictions (e.g. all-zero submissions).</td></tr>
+    <tr><td>Sample Submission SHA-256</td><td>Checksum of the official sample submission. The validator verifies the format matches.</td></tr>
+    <tr><td>Auto Generated</td><td>0/1: whether this rubric was inferred by the agent or written by an operator. Set to 0 after manual editing to prevent agent overwrites.</td></tr>
+  </table>
+
+  <h3>Kaggle Discussion Settings — Admin → Kaggle → Discussion Settings</h3>
+  <table class="params">
+    <tr><th>Field</th><th>What it controls</th></tr>
+    <tr><td>Tenant ID</td><td>Which tenant this kill switch applies to.</td></tr>
+    <tr><td>Discussion Enabled (0/1)</td><td>Per-tenant kill switch. Even when the discussion tool, policy, and skill are all enabled, the runtime silently no-ops if this is 0 for the requester's tenant.</td></tr>
+    <tr><td>Notes</td><td>Operator memo explaining the current setting.</td></tr>
+  </table>
+
+  <div class="call note"><span class="ic">📋</span>
+    <div class="ct">Read-only Kaggle tabs</div>
+    <p><strong>Competition Runs</strong> — live-agent run instances scoped to a competition; the custom record view shows the step timeline. <strong>Kaggle Run Artifacts</strong> — contract and replay trace links for each completed run (links to <code>@weaveintel/contracts</code> and <code>@weaveintel/replay</code> stores). <strong>Kaggle Meshes / Mesh Agents / Mesh Bindings / Mesh Bridges</strong> — read-only views over the live-agents StateStore (source of truth is the <code>la_entities</code> SQLite file); use <code>POST /api/admin/kaggle-mesh-provision</code> and <code>POST /api/admin/kaggle-mesh-bindings/:id/revoke</code> for changes. <strong>Discussion Posts</strong> — log of all Kaggle discussion posts made by the agent, with contract and replay trace links. <strong>Validation Results</strong> — schema check, distribution check, baseline check, and CV scores per submission. <strong>Leaderboard Scores</strong> — public/private scores, rank estimates, percentile estimates, and CV/LB delta per submission.</p>
+  </div>
+</section>
 
 <div class="footer" style="border-top:1px solid var(--bg4);margin-top:60px">
   <p>weaveIntel · MIT licensed · This adopter's guide is written from the package sources and the runnable examples in the repository; the signatures and snippets reflect the code as it stands and have been executed against the library.</p>

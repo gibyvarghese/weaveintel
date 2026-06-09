@@ -47,6 +47,7 @@ import {
   registerTaskContractRoutes,
   registerIdentityRuleRoutes,
   registerMemoryGovernanceRoutes,
+  registerMemoryViewRoutes,
   registerComplianceRuleRoutes,
   registerTaskTypeRoutes,
   registerCapabilityScoreRoutes,
@@ -107,6 +108,7 @@ export function registerAdminRoutingRoutes(
   registerTaskContractRoutes(router, db, adminHelpers);
   registerIdentityRuleRoutes(router, db, adminHelpers);
   registerMemoryGovernanceRoutes(router, db, adminHelpers);
+  registerMemoryViewRoutes(router, db, adminHelpers);
   registerComplianceRuleRoutes(router, db, adminHelpers);
   registerToolRoutes(router, db, adminHelpers);
   registerToolPolicyRoutes(router, db, adminHelpers);

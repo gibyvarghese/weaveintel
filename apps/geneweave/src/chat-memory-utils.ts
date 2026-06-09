@@ -1,7 +1,9 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import type { ExecutionContext, Model, ModelRequest } from '@weaveintel/core';
-import { runHybridMemoryExtraction, type ExtractedEntity, type MemoryExtractionRule } from '@weaveintel/memory';
+import { runHybridMemoryExtraction, weaveGovernancePolicy, type ExtractedEntity, type MemoryExtractionRule, type GovernanceRule } from '@weaveintel/memory';
 import type { DatabaseAdapter } from './db.js';
+import { getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
+import { getActiveSemanticMemoryBackend } from './memory-pgvector.js';
 
 // Local JSON parse helper (mirrors chat.ts safeParseJson, kept internal to this module)
 function safeParseJson(text: string): unknown {
@@ -144,9 +146,10 @@ export async function resolveIdentityRecallFromMemory(
 ): Promise<string | null> {
   if (!isIdentityRecallQuery(query)) return null;
 
+  const backend = getActiveSemanticMemoryBackend();
   const [entities, semanticRows] = await Promise.all([
     db.listEntities(userId),
-    db.listSemanticMemory(userId, 24),
+    backend ? backend.list(userId, 24) : db.listSemanticMemory(userId, 24),
   ]);
 
   let name: string | null = null;
@@ -201,10 +204,28 @@ export async function buildMemoryContext(
     const entityPromise = identityQuery
       ? db.listEntities(userId).then((rows) => rows.slice(0, 10))
       : db.searchEntities(userId, query);
+    // Generate a query embedding for vector-aware semantic search when available
+    const embeddingModel = getActiveGuardrailEmbeddingModel();
+    let queryEmbedding: number[] | undefined;
+    if (embeddingModel) {
+      try {
+        const res = await embeddingModel.embed(ctx, { input: [query.slice(0, 2000)] });
+        queryEmbedding = res.embeddings[0] as number[] | undefined;
+      } catch { /* fallback to keyword search */ }
+    }
+
+    const memoryBackend = getActiveSemanticMemoryBackend();
+    const semanticSearchP = memoryBackend
+      ? memoryBackend.search(ctx, { userId, query, limit: 5, queryEmbedding })
+      : db.searchSemanticMemory({ userId, query, limit: 5, queryEmbedding });
+    const recentSemanticP = identityQuery
+      ? (memoryBackend ? memoryBackend.list(userId, 12) : db.listSemanticMemory(userId, 12))
+      : Promise.resolve([] as Array<{ content: string; memory_type: string; source: string }>);
+
     const [semanticMatches, entityMatches, recentSemantic] = await Promise.all([
-      db.searchSemanticMemory({ userId, query, limit: 5 }),
+      semanticSearchP,
       entityPromise,
-      identityQuery ? db.listSemanticMemory(userId, 12) : Promise.resolve([]),
+      recentSemanticP,
     ]);
 
     const semanticForContext = semanticMatches.length > 0
@@ -263,6 +284,46 @@ export async function buildMemoryContext(
   }
 }
 
+/** Convert MemoryGovernanceRow fields to the GovernanceRule expected by weaveGovernancePolicy. */
+function toGovernanceRules(rows: Awaited<ReturnType<DatabaseAdapter['listMemoryGovernance']>>): GovernanceRule[] {
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    types: r.memory_types ? tryParseJson<string[]>(r.memory_types) ?? undefined : undefined,
+    tenantId: r.tenant_id ?? undefined,
+    blockPatterns: r.block_patterns ? tryParseJson<string[]>(r.block_patterns) ?? undefined : undefined,
+    redactPatterns: r.redact_patterns ? tryParseJson<string[]>(r.redact_patterns) ?? undefined : undefined,
+    maxAge: r.max_age ?? undefined,
+    maxEntries: r.max_entries ?? undefined,
+    enabled: r.enabled === 1,
+  }));
+}
+
+function tryParseJson<T>(s: string): T | null {
+  try { return JSON.parse(s) as T; } catch { return null; }
+}
+
+/** Parse ISO 8601 duration (e.g. P180D) to milliseconds. Returns undefined if unparseable. */
+function parseIsoDurationMs(duration: string | undefined): number | undefined {
+  if (!duration) return undefined;
+  const match = /P(?:(\d+)Y)?(?:(\d+)M)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?/.exec(duration);
+  if (!match) return undefined;
+  const years = Number(match[1] ?? 0);
+  const months = Number(match[2] ?? 0);
+  const days = Number(match[3] ?? 0);
+  const hours = Number(match[4] ?? 0);
+  const minutes = Number(match[5] ?? 0);
+  const seconds = Number(match[6] ?? 0);
+  return (
+    years * 365.25 * 24 * 3600 * 1000 +
+    months * 30.437 * 24 * 3600 * 1000 +
+    days * 24 * 3600 * 1000 +
+    hours * 3600 * 1000 +
+    minutes * 60 * 1000 +
+    seconds * 1000
+  );
+}
+
 export async function saveToMemory(
   db: DatabaseAdapter,
   ctx: ExecutionContext,
@@ -272,7 +333,17 @@ export async function saveToMemory(
   userContent: string,
   assistantContent: string,
 ): Promise<void> {
-  const rules = await loadExtractionRules(db);
+  const memBackend = getActiveSemanticMemoryBackend();
+
+  // ── Load extraction rules and governance policy ──────────────────────────
+  const [rules, govRows] = await Promise.all([
+    loadExtractionRules(db),
+    db.listMemoryGovernance(),
+  ]);
+
+  const govRules = toGovernanceRules(govRows);
+  const policy = weaveGovernancePolicy(govRules);
+
   const extraction = await runHybridMemoryExtraction({
     ctx,
     input: { userContent, assistantContent },
@@ -281,25 +352,49 @@ export async function saveToMemory(
       extractEntitiesWithModel(innerCtx, model, input.userContent, input.assistantContent ?? ''),
   });
 
+  // ── Embedding model — optional, may not be configured ───────────────────
+  const embeddingModel = getActiveGuardrailEmbeddingModel();
+
+  async function genEmbedding(text: string): Promise<number[] | undefined> {
+    if (!embeddingModel) return undefined;
+    try {
+      const res = await embeddingModel.embed(ctx, { input: [text.slice(0, 2000)] });
+      return res.embeddings[0] as number[] | undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // ── Save semantic memories with governance gating ────────────────────────
+  // MemoryEntry.type must be a core MemoryType; governance rules seeded with
+  // null memory_types (global) will match regardless of type value.
   if (extraction.selfDisclosure && userContent.length > 5) {
-    await db.saveSemanticMemory({
-      id: newUUIDv7(),
-      userId,
-      chatId,
-      content: userContent.slice(0, 600),
-      memoryType: 'user_fact',
-      source: 'user',
-    });
+    const rawContent = userContent.slice(0, 600);
+    const entryId = newUUIDv7();
+    const govEntry = { id: entryId, type: 'semantic' as const, content: rawContent, metadata: {}, createdAt: new Date().toISOString(), userId };
+    const allowed = await policy.shouldStore(ctx, govEntry);
+    if (allowed) {
+      const finalContent = policy.beforeStore
+        ? (await policy.beforeStore(ctx, govEntry)).content
+        : rawContent;
+      const embedding = await genEmbedding(finalContent);
+      const saveOpts = { id: entryId, userId, chatId, content: finalContent, memoryType: 'user_fact', source: 'user', embedding };
+      await (memBackend ? memBackend.save(ctx, saveOpts) : db.saveSemanticMemory(saveOpts));
+    }
   }
   if (assistantContent.length > 100) {
-    await db.saveSemanticMemory({
-      id: newUUIDv7(),
-      userId,
-      chatId,
-      content: assistantContent.slice(0, 600),
-      memoryType: 'summary',
-      source: 'assistant',
-    });
+    const rawContent = assistantContent.slice(0, 600);
+    const entryId = newUUIDv7();
+    const govEntry = { id: entryId, type: 'episodic' as const, content: rawContent, metadata: {}, createdAt: new Date().toISOString(), userId };
+    const allowed = await policy.shouldStore(ctx, govEntry);
+    if (allowed) {
+      const finalContent = policy.beforeStore
+        ? (await policy.beforeStore(ctx, govEntry)).content
+        : rawContent;
+      const embedding = await genEmbedding(finalContent);
+      const saveOpts = { id: entryId, userId, chatId, content: finalContent, memoryType: 'summary', source: 'assistant', embedding };
+      await (memBackend ? memBackend.save(ctx, saveOpts) : db.saveSemanticMemory(saveOpts));
+    }
   }
 
   for (const e of extraction.entities) {
@@ -326,4 +421,22 @@ export async function saveToMemory(
     mergedEntitiesCount: extraction.entities.length,
     events: JSON.stringify(extraction.events),
   });
+
+  // ── Enforce retention limits (async, non-blocking on errors) ─────────────
+  const retentionPolicy = policy.retentionPolicy;
+  if (retentionPolicy) {
+    try {
+      if (retentionPolicy.maxEntries) {
+        await db.trimSemanticMemoryForUser(userId, retentionPolicy.maxEntries);
+        await db.trimEntityMemoryForUser(userId, retentionPolicy.maxEntries);
+      }
+      if (retentionPolicy.maxAge) {
+        const cutoffMs = parseIsoDurationMs(retentionPolicy.maxAge);
+        if (cutoffMs !== undefined) {
+          const cutoff = Date.now() - cutoffMs;
+          await db.purgeSemanticMemoryOlderThan(userId, cutoff);
+        }
+      }
+    } catch { /* retention enforcement is best-effort */ }
+  }
 }

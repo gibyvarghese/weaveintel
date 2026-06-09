@@ -60,6 +60,8 @@ import {
   buildMemoryContext,
   saveToMemory,
 } from './chat-memory-utils.js';
+import { getActiveSemanticMemoryBackend } from './memory-pgvector.js';
+import { getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
 import { normalizePersona } from './rbac.js';
 import {
   TEMPORAL_TOOL_POLICY,
@@ -574,8 +576,19 @@ export class ChatEngine {
       actorPersona: userPersona,
       memoryRecall: async ({ userId: recallUserId, query, limit }) => {
         const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
+        const memBackend = getActiveSemanticMemoryBackend();
+        let queryEmbedding: number[] | undefined;
+        try {
+          const embModel = getActiveGuardrailEmbeddingModel();
+          if (embModel) {
+            const embRes = await embModel.embed(ctx, { input: [query.slice(0, 2000)] });
+            queryEmbedding = embRes.embeddings[0] as number[] | undefined;
+          }
+        } catch { /* embedding is best-effort */ }
         const [semantic, entityRows] = await Promise.all([
-          this.db.searchSemanticMemory({ userId: recallUserId, query, limit: boundedLimit }),
+          memBackend
+            ? memBackend.search(ctx, { userId: recallUserId, query, limit: boundedLimit, queryEmbedding })
+            : this.db.searchSemanticMemory({ userId: recallUserId, query, limit: boundedLimit, queryEmbedding }),
           this.db.searchEntities(recallUserId, query),
         ]);
         return {
@@ -584,6 +597,67 @@ export class ChatEngine {
             entityType: e.entity_type,
             entityName: e.entity_name,
             facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
+          })),
+        };
+      },
+      memorySearch: async ({ userId: searchUserId, query, limit }) => {
+        const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
+        const memBackend = getActiveSemanticMemoryBackend();
+        let queryEmbedding: number[] | undefined;
+        try {
+          const embModel = getActiveGuardrailEmbeddingModel();
+          if (embModel) {
+            const embRes = await embModel.embed(ctx, { input: [query.slice(0, 2000)] });
+            queryEmbedding = embRes.embeddings[0] as number[] | undefined;
+          }
+        } catch { /* embedding is best-effort */ }
+        const [semantic, entityRows] = await Promise.all([
+          memBackend
+            ? memBackend.search(ctx, { userId: searchUserId, query, limit: boundedLimit, queryEmbedding })
+            : this.db.searchSemanticMemory({ userId: searchUserId, query, limit: boundedLimit, queryEmbedding }),
+          this.db.searchEntities(searchUserId, query),
+        ]);
+        return {
+          semantic: semantic.map((m) => ({ content: m.content, source: m.source, memoryType: m.memory_type })),
+          entities: entityRows.map((e) => ({
+            entityType: e.entity_type,
+            entityName: e.entity_name,
+            facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
+          })),
+        };
+      },
+      memoryRemember: async ({ userId: rememberUserId, content, memoryType, source }) => {
+        const { newUUIDv7 } = await import('@weaveintel/core');
+        const id = newUUIDv7();
+        const memBackend = getActiveSemanticMemoryBackend();
+        const trimmedContent = content.slice(0, 600);
+        let embedding: number[] | undefined;
+        try {
+          const embModel = getActiveGuardrailEmbeddingModel();
+          if (embModel) {
+            const embRes = await embModel.embed(ctx, { input: [trimmedContent] });
+            embedding = Array.from(embRes.embeddings[0] ?? []) as number[];
+            if (embedding.length === 0) embedding = undefined;
+          }
+        } catch (embErr) {
+          console.warn('[memory] memory_remember embedding failed:', String(embErr));
+        }
+        const saveOpts = { id, userId: rememberUserId, content: trimmedContent, memoryType: memoryType ?? 'user_fact', source: source ?? 'user_requested', embedding };
+        await (memBackend ? memBackend.save(ctx, saveOpts) : this.db.saveSemanticMemory(saveOpts));
+        return { id };
+      },
+      memoryForget: async ({ userId: forgetUserId, entityName }) => {
+        await this.db.deleteEntity(forgetUserId, entityName);
+        return { ok: true };
+      },
+      memoryListEntities: async ({ userId: listUserId }) => {
+        const rows = await this.db.listEntities(listUserId);
+        return {
+          entities: rows.map((e) => ({
+            entityType: e.entity_type,
+            entityName: e.entity_name,
+            facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
+            confidence: e.confidence,
           })),
         };
       },
@@ -753,8 +827,19 @@ export class ChatEngine {
       actorPersona: userPersona,
       memoryRecall: async ({ userId: recallUserId, query, limit }) => {
         const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
+        const memBackend = getActiveSemanticMemoryBackend();
+        let queryEmbedding: number[] | undefined;
+        try {
+          const embModel = getActiveGuardrailEmbeddingModel();
+          if (embModel) {
+            const embRes = await embModel.embed(ctx, { input: [query.slice(0, 2000)] });
+            queryEmbedding = embRes.embeddings[0] as number[] | undefined;
+          }
+        } catch { /* embedding is best-effort */ }
         const [semantic, entityRows] = await Promise.all([
-          this.db.searchSemanticMemory({ userId: recallUserId, query, limit: boundedLimit }),
+          memBackend
+            ? memBackend.search(ctx, { userId: recallUserId, query, limit: boundedLimit, queryEmbedding })
+            : this.db.searchSemanticMemory({ userId: recallUserId, query, limit: boundedLimit, queryEmbedding }),
           this.db.searchEntities(recallUserId, query),
         ]);
         return {
@@ -763,6 +848,67 @@ export class ChatEngine {
             entityType: e.entity_type,
             entityName: e.entity_name,
             facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
+          })),
+        };
+      },
+      memorySearch: async ({ userId: searchUserId, query, limit }) => {
+        const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
+        const memBackend = getActiveSemanticMemoryBackend();
+        let queryEmbedding: number[] | undefined;
+        try {
+          const embModel = getActiveGuardrailEmbeddingModel();
+          if (embModel) {
+            const embRes = await embModel.embed(ctx, { input: [query.slice(0, 2000)] });
+            queryEmbedding = embRes.embeddings[0] as number[] | undefined;
+          }
+        } catch { /* embedding is best-effort */ }
+        const [semantic, entityRows] = await Promise.all([
+          memBackend
+            ? memBackend.search(ctx, { userId: searchUserId, query, limit: boundedLimit, queryEmbedding })
+            : this.db.searchSemanticMemory({ userId: searchUserId, query, limit: boundedLimit, queryEmbedding }),
+          this.db.searchEntities(searchUserId, query),
+        ]);
+        return {
+          semantic: semantic.map((m) => ({ content: m.content, source: m.source, memoryType: m.memory_type })),
+          entities: entityRows.map((e) => ({
+            entityType: e.entity_type,
+            entityName: e.entity_name,
+            facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
+          })),
+        };
+      },
+      memoryRemember: async ({ userId: rememberUserId, content, memoryType, source }) => {
+        const { newUUIDv7 } = await import('@weaveintel/core');
+        const id = newUUIDv7();
+        const memBackend = getActiveSemanticMemoryBackend();
+        const trimmedContent = content.slice(0, 600);
+        let embedding: number[] | undefined;
+        try {
+          const embModel = getActiveGuardrailEmbeddingModel();
+          if (embModel) {
+            const embRes = await embModel.embed(ctx, { input: [trimmedContent] });
+            embedding = Array.from(embRes.embeddings[0] ?? []) as number[];
+            if (embedding.length === 0) embedding = undefined;
+          }
+        } catch (embErr) {
+          console.warn('[memory] memory_remember embedding failed:', String(embErr));
+        }
+        const saveOpts = { id, userId: rememberUserId, content: trimmedContent, memoryType: memoryType ?? 'user_fact', source: source ?? 'user_requested', embedding };
+        await (memBackend ? memBackend.save(ctx, saveOpts) : this.db.saveSemanticMemory(saveOpts));
+        return { id };
+      },
+      memoryForget: async ({ userId: forgetUserId, entityName }) => {
+        await this.db.deleteEntity(forgetUserId, entityName);
+        return { ok: true };
+      },
+      memoryListEntities: async ({ userId: listUserId }) => {
+        const rows = await this.db.listEntities(listUserId);
+        return {
+          entities: rows.map((e) => ({
+            entityType: e.entity_type,
+            entityName: e.entity_name,
+            facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
+            confidence: e.confidence,
           })),
         };
       },

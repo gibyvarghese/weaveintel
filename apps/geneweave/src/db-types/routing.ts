@@ -17,9 +17,11 @@ export interface GuardrailRow {
   description: string | null;
   type: string;
   stage: string;
-  config: string | null;          // JSON object
+  config: string | null;                  // JSON object
   priority: number;
   enabled: number;
+  trigger_conditions?: string | null;     // JSON ConditionNode — null/absent = always run
+  trigger_description?: string | null;    // human-readable summary of the condition
   created_at: string;
   updated_at: string;
 }

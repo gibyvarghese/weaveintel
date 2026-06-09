@@ -6,8 +6,9 @@ export interface SemanticMemoryRow {
   chat_id: string | null;
   tenant_id: string | null;
   content: string;
-  memory_type: string;   // 'semantic' | 'user_fact' | 'preference' | 'summary'
-  source: string;        // 'user' | 'assistant'
+  memory_type: string;         // 'semantic' | 'user_fact' | 'preference' | 'summary'
+  source: string;              // 'user' | 'assistant'
+  embedding: string | null;    // JSON-serialised number[] for cosine similarity search
   created_at: string;
   updated_at: string;
 }
