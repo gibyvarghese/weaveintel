@@ -30,7 +30,7 @@ export type { ProvenanceInfo } from './provenance.js';
 export { deduplicateExact, deduplicateByKey } from './dedup.js';
 export type { DeduplicationStrategy } from './dedup.js';
 
-export { recordCorrection, getCorrections, applyCorrection } from './correction.js';
+export { recordCorrection, getCorrections, applyCorrection, supersede } from './correction.js';
 export type { Correction } from './correction.js';
 
 export { isExpired, filterExpired, enforceRetention, forgetUser, forgetSession } from './expiry.js';
@@ -64,3 +64,22 @@ export type {
   AssembledContext,
   ContextAssembler,
 } from './working.js';
+
+export { weaveMemoryConsolidator } from './consolidation.js';
+export type { MemoryConsolidatorOptions } from './consolidation.js';
+
+export {
+  createProceduralEntry,
+  isProceduralEntry,
+  proposeProceduralUpdate,
+  applyApprovedProcedural,
+  runProceduralCurator,
+} from './procedural.js';
+export type {
+  ProceduralMemoryMetadata,
+  ProceduralMemoryEntry,
+  ProposeProceduralUpdateOptions,
+  ApplyApprovedProceduralOptions,
+  CuratorOptions,
+  CuratorResult,
+} from './procedural.js';

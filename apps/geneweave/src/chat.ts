@@ -62,6 +62,7 @@ import {
 } from './chat-memory-utils.js';
 import { getActiveSemanticMemoryBackend } from './memory-pgvector.js';
 import { getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
+import { triggerConsolidationForUser } from './memory-consolidation.js';
 import { normalizePersona } from './rbac.js';
 import {
   TEMPORAL_TOOL_POLICY,

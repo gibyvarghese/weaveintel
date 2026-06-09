@@ -23,9 +23,15 @@ export interface MemoryEntry {
   readonly userId?: string;
   readonly sessionId?: string;
   readonly score?: number;
+  /** Salience weight 0–1 used for importance-based compaction and ranking. */
+  readonly importance?: number;
+  /** Bi-temporal: when this fact became true (ISO 8601). Defaults to createdAt. */
+  readonly validAt?: string;
+  /** Bi-temporal: when this fact was superseded / invalidated (ISO 8601). Null means still valid. */
+  readonly invalidAt?: string;
 }
 
-export type MemoryType = 'conversation' | 'semantic' | 'episodic' | 'entity' | 'working';
+export type MemoryType = 'conversation' | 'semantic' | 'episodic' | 'entity' | 'working' | 'procedural';
 
 // ─── Memory store (backend-agnostic persistence) ─────────────
 
@@ -43,6 +49,9 @@ export interface MemoryQuery {
   readonly topK?: number;
   readonly filter?: MemoryFilter;
   readonly minScore?: number;
+  /** Bi-temporal: return only facts that were valid at this ISO 8601 timestamp.
+   *  Entries where validAt <= asOf AND (invalidAt is null OR invalidAt > asOf). */
+  readonly asOf?: string;
 }
 
 export interface MemoryFilter {
@@ -160,4 +169,30 @@ export interface ContextCompressor {
     tokenBudget: number,
     ctx: ExecutionContext,
   ): Promise<string>;
+}
+
+// ─── Memory consolidation ─────────────────────────────────────
+
+export interface ConsolidationInput {
+  readonly userId?: string;
+  readonly sessionId?: string;
+  readonly tenantId?: string;
+  /** How many episodic entries to process per run. Defaults to 50. */
+  readonly batchSize?: number;
+}
+
+export interface ConsolidationResult {
+  readonly episodicRead: number;
+  readonly factsExtracted: number;
+  readonly factsDeduped: number;
+  readonly factsWritten: number;
+  readonly errors: readonly string[];
+}
+
+/**
+ * Runs on the cold path (session-end, cron) to distil ephemeral episodic
+ * entries into durable semantic facts via extraction → dedup → provenance.
+ */
+export interface MemoryConsolidator {
+  consolidate(ctx: ExecutionContext, input: ConsolidationInput): Promise<ConsolidationResult>;
 }

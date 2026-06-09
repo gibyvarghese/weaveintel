@@ -3,6 +3,10 @@
  *
  * Supports correcting, superseding, and annotating existing memory entries
  * while preserving the original for audit purposes.
+ *
+ * Bi-temporal supersession: instead of overwriting contradicting facts,
+ * `supersede()` sets `invalidAt` on the old entry so the full fact history
+ * is queryable via `MemoryQuery.asOf`.
  */
 
 import type { MemoryEntry, MemoryStore, ExecutionContext } from '@weaveintel/core';
@@ -77,4 +81,62 @@ export async function applyCorrection(
   });
 
   return correctedEntry;
+}
+
+/**
+ * Bi-temporal supersession: a contradicting fact invalidates the old entry
+ * (sets `invalidAt`) rather than overwriting it. Both versions remain in the
+ * store and are queryable via `MemoryQuery.asOf`.
+ *
+ * Use `applyCorrection` when you want to fix an error (audit trail only).
+ * Use `supersede` when the world changed and the old fact was previously true.
+ */
+export async function supersede(
+  store: MemoryStore,
+  ctx: ExecutionContext,
+  original: MemoryEntry,
+  newContent: string,
+  supersededBy: string,
+  reason?: string,
+): Promise<MemoryEntry> {
+  const now = new Date().toISOString();
+
+  // Close out the old entry by setting invalidAt
+  const invalidated: MemoryEntry = {
+    ...original,
+    invalidAt: now,
+    metadata: {
+      ...original.metadata,
+      _supersededBy: `${original.id}_successor_${Date.now()}`,
+      _supersededAt: now,
+      _supersessionReason: reason ?? 'fact superseded',
+    },
+  };
+
+  const successor: MemoryEntry = {
+    ...original,
+    id: `${original.id}_successor_${Date.now()}`,
+    content: newContent,
+    createdAt: now,
+    validAt: now,
+    invalidAt: undefined,
+    metadata: {
+      ...original.metadata,
+      _supersedes: original.id,
+      _supersededBy: supersededBy,
+      _supersessionReason: reason ?? 'fact superseded',
+    },
+  };
+
+  await store.write(ctx, [invalidated, successor]);
+
+  recordCorrection({
+    originalId: original.id,
+    correctedContent: newContent,
+    reason: reason ?? 'bi-temporal supersession',
+    correctedBy: supersededBy,
+    correctedAt: now,
+  });
+
+  return successor;
 }

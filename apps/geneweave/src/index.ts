@@ -147,6 +147,7 @@ import {
   getGuardrailEmbeddingModel, setActiveGuardrailEmbeddingModel,
 } from './guardrail-judge.js';
 import { initPgVectorSemanticMemory } from './memory-pgvector.js';
+import { initMemoryConsolidation } from './memory-consolidation.js';
 import { geneweaveEncryptionSlot, type GeneweaveEncryptionSlot } from './encryption-slot.js';
 export let geneweaveEncryptionManager: TenantKeyManager | null = null;
 /** Phase 7: KMS provider registry exposed for admin endpoints (list/health-check). */
@@ -258,6 +259,9 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   } else {
     console.log('[memory] SQLite semantic memory backend active (set PGVECTOR_URL to use pgvector)');
   }
+
+  // Memory consolidation — cold-path pipeline: episodic → semantic
+  initMemoryConsolidation({ db });
 
   const startupLimits = await resolveLimits(db);
   const guardrailsSlot = geneweaveGuardrailsSlot(db, {

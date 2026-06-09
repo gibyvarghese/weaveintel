@@ -270,6 +270,9 @@ export {
   type CompressionInput,
   type CompressionArtefact,
   type ContextCompressor,
+  type ConsolidationInput,
+  type ConsolidationResult,
+  type MemoryConsolidator,
 } from './memory.js';
 
 // Security contracts

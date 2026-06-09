@@ -85,7 +85,12 @@ function sortByStrategy(
 ): MemoryEntry[] {
   switch (strategy) {
     case 'drop_lowest_score':
-      return [...entries].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+      // Prefer importance field (salience at write time) over transient score
+      return [...entries].sort((a, b) => {
+        const ia = a.importance ?? a.score ?? 0;
+        const ib = b.importance ?? b.score ?? 0;
+        return ib - ia;
+      });
     case 'summarize':
     case 'drop_oldest':
     default:

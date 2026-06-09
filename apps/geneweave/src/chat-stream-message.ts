@@ -35,6 +35,7 @@ import {
   resolveIdentityRecallFromMemory,
   saveToMemory,
 } from './chat-memory-utils.js';
+import { triggerConsolidationForUser } from './memory-consolidation.js';
 
 type StreamMessageDeps = {
   config: ChatEngineConfig;
@@ -653,6 +654,7 @@ export async function streamMessageImpl(
 
   try {
     await saveToMemory(deps.db, ctx, model, userId, chatId, processedContent, fullText);
+    triggerConsolidationForUser(userId, chatId);
   } catch {
     // Keep chat success path resilient when memory persistence fails.
   }

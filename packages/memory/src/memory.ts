@@ -22,6 +22,7 @@ import type {
   Message,
   WeaveRuntime,
 } from '@weaveintel/core';
+import type { GraphRetriever } from '@weaveintel/graph';
 import { weaveInMemoryPersistence } from '@weaveintel/core';
 import Database from 'better-sqlite3';
 import { Pool } from 'pg';
@@ -137,6 +138,12 @@ export interface PgVectorMemoryStoreOptions {
    * Defaults to `'cosine'`.
    */
   distanceMetric?: 'cosine' | 'l2' | 'inner';
+  /**
+   * Optional graph retriever. When supplied, `query()` runs an entity graph
+   * traversal in parallel with vector + FTS passes and fuses the three result
+   * sets via Reciprocal Rank Fusion (RRF).
+   */
+  graphRetriever?: GraphRetriever;
 }
 
 function matchesFilter(entry: MemoryEntry, filter?: MemoryFilter): boolean {
@@ -157,6 +164,20 @@ function applyMemoryQuery(entries: MemoryEntry[], options: MemoryQuery): MemoryE
   }
   results = results.filter((entry) => matchesFilter(entry, options.filter));
 
+  // Bi-temporal asOf filter: exclude entries invalidated before asOf
+  if (options.asOf) {
+    const asOfTs = new Date(options.asOf).getTime();
+    results = results.filter((entry) => {
+      const validAt = entry.validAt ? new Date(entry.validAt).getTime() : new Date(entry.createdAt).getTime();
+      if (validAt > asOfTs) return false;
+      if (entry.invalidAt && new Date(entry.invalidAt).getTime() <= asOfTs) return false;
+      return true;
+    });
+  } else {
+    // Default: filter out currently-invalid entries
+    results = results.filter((entry) => !entry.invalidAt);
+  }
+
   if (options.embedding) {
     const queryEmb = options.embedding;
     results = results
@@ -175,6 +196,21 @@ function applyMemoryQuery(entries: MemoryEntry[], options: MemoryQuery): MemoryE
   }
 
   return results.slice(0, options.topK ?? 10);
+}
+
+/** Heuristic importance score (0–1) for an entry at write time. */
+function computeImportance(entry: MemoryEntry): number {
+  if (entry.importance !== undefined) return entry.importance;
+  let score = 0.4;
+  const words = entry.content.trim().split(/\s+/).length;
+  if (words >= 5 && words <= 60) score += 0.15;
+  if (entry.type === 'semantic' || entry.type === 'procedural') score += 0.2;
+  if (entry.type === 'episodic') score += 0.05;
+  const src = entry.metadata['source'] as string | undefined;
+  if (src === 'user') score += 0.15;
+  if (/[A-Z][a-z]/.test(entry.content)) score += 0.05;
+  if (/\d/.test(entry.content)) score += 0.05;
+  return Math.min(1.0, Math.max(0.0, score));
 }
 
 // ─── In-memory store ─────────────────────────────────────────
@@ -790,6 +826,17 @@ function buildFilterSQL(
   if (f?.after)  { conditions.push(`created_at > $${idx++}`); params.push(f.after); }
   if (f?.before) { conditions.push(`created_at < $${idx++}`); params.push(f.before); }
 
+  // Bi-temporal asOf: entries valid at the given timestamp
+  if (query.asOf) {
+    conditions.push(`(valid_at IS NULL OR valid_at <= $${idx++})`);
+    params.push(query.asOf);
+    conditions.push(`(invalid_at IS NULL OR invalid_at > $${idx++})`);
+    params.push(query.asOf);
+  } else {
+    // Default: exclude invalidated entries
+    conditions.push('invalid_at IS NULL');
+  }
+
   return { sql: conditions.join(' AND '), params };
 }
 
@@ -813,6 +860,17 @@ function pgRowToMemoryEntry(row: Record<string, unknown>): MemoryEntry {
     userId:    row['user_id']    as string | undefined,
     sessionId: row['session_id'] as string | undefined,
     score:     row['_score']     as number | undefined,
+    importance: row['importance'] != null ? Number(row['importance']) : undefined,
+    validAt:   row['valid_at'] != null
+      ? (row['valid_at'] instanceof Date
+        ? (row['valid_at'] as Date).toISOString()
+        : String(row['valid_at']))
+      : undefined,
+    invalidAt: row['invalid_at'] != null
+      ? (row['invalid_at'] instanceof Date
+        ? (row['invalid_at'] as Date).toISOString()
+        : String(row['invalid_at']))
+      : undefined,
   };
 }
 
@@ -863,6 +921,7 @@ export function weavePgVectorMemoryStore(opts: PgVectorMemoryStoreOptions): Dura
   const table  = opts.tableName      ?? 'memory_vec';
   const metric = opts.distanceMetric ?? 'cosine';
   const idxType = opts.indexType     ?? 'hnsw';
+  const graphRetriever = opts.graphRetriever;
   const { operator, indexOps, toScore } = pgVectorMetricConfig(metric);
 
   let schemaReady = false;
@@ -871,7 +930,6 @@ export function weavePgVectorMemoryStore(opts: PgVectorMemoryStoreOptions): Dura
     if (schemaReady) return;
     const client = await pool.connect();
     try {
-      // Install the extension (requires superuser or pg_extension_owner; idempotent).
       await client.query('CREATE EXTENSION IF NOT EXISTS vector');
 
       await client.query(`
@@ -885,18 +943,32 @@ export function weavePgVectorMemoryStore(opts: PgVectorMemoryStoreOptions): Dura
           expires_at  TIMESTAMPTZ,
           tenant_id   TEXT,
           user_id     TEXT,
-          session_id  TEXT
+          session_id  TEXT,
+          importance  REAL,
+          valid_at    TIMESTAMPTZ,
+          invalid_at  TIMESTAMPTZ
         )
       `);
 
-      // Support partial text search on content.
+      // Idempotent column migrations — adds new columns to pre-existing tables
+      await client.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS importance  REAL`);
+      await client.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS valid_at    TIMESTAMPTZ`);
+      await client.query(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS invalid_at  TIMESTAMPTZ`);
+
+      // GIN full-text index on content
       await client.query(`
         CREATE INDEX IF NOT EXISTS ${table}_content_idx
           ON ${table} USING gin(to_tsvector('english', content))
       `);
 
+      // Index on invalid_at for fast "currently valid" scans
+      await client.query(`
+        CREATE INDEX IF NOT EXISTS ${table}_invalid_at_idx
+          ON ${table} (invalid_at)
+          WHERE invalid_at IS NULL
+      `);
+
       if (idxType === 'hnsw') {
-        // HNSW: best recall, self-tuning, no list count needed. Requires pgvector ≥ 0.5.0.
         await client.query(`
           CREATE INDEX IF NOT EXISTS ${table}_embedding_hnsw_idx
             ON ${table}
@@ -927,13 +999,16 @@ export function weavePgVectorMemoryStore(opts: PgVectorMemoryStoreOptions): Dura
         await client.query('BEGIN');
         for (const entry of entries) {
           const embLiteral = entry.embedding ? toVectorLiteral(entry.embedding) : null;
+          const importance = computeImportance(entry);
           await client.query(
             `INSERT INTO ${table}
                (id, type, content, metadata, embedding,
-                created_at, expires_at, tenant_id, user_id, session_id)
+                created_at, expires_at, tenant_id, user_id, session_id,
+                importance, valid_at, invalid_at)
              VALUES ($1, $2, $3, $4::jsonb,
                      $5::vector,
-                     $6, $7, $8, $9, $10)
+                     $6, $7, $8, $9, $10,
+                     $11, $12, $13)
              ON CONFLICT (id) DO UPDATE SET
                type       = EXCLUDED.type,
                content    = EXCLUDED.content,
@@ -942,7 +1017,10 @@ export function weavePgVectorMemoryStore(opts: PgVectorMemoryStoreOptions): Dura
                expires_at = EXCLUDED.expires_at,
                tenant_id  = EXCLUDED.tenant_id,
                user_id    = EXCLUDED.user_id,
-               session_id = EXCLUDED.session_id`,
+               session_id = EXCLUDED.session_id,
+               importance = EXCLUDED.importance,
+               valid_at   = EXCLUDED.valid_at,
+               invalid_at = EXCLUDED.invalid_at`,
             [
               entry.id,
               entry.type,
@@ -950,10 +1028,13 @@ export function weavePgVectorMemoryStore(opts: PgVectorMemoryStoreOptions): Dura
               JSON.stringify(entry.metadata ?? {}),
               embLiteral,
               entry.createdAt,
-              entry.expiresAt ?? null,
-              entry.tenantId  ?? null,
-              entry.userId    ?? null,
-              entry.sessionId ?? null,
+              entry.expiresAt  ?? null,
+              entry.tenantId   ?? null,
+              entry.userId     ?? null,
+              entry.sessionId  ?? null,
+              importance,
+              entry.validAt    ?? null,
+              entry.invalidAt  ?? null,
             ],
           );
         }
@@ -969,55 +1050,141 @@ export function weavePgVectorMemoryStore(opts: PgVectorMemoryStoreOptions): Dura
     // ── query ──────────────────────────────────────────────────────────────
     async query(_ctx, options): Promise<MemoryEntry[]> {
       await ensureSchema();
-      const topK  = options.topK ?? 10;
+      const topK = options.topK ?? 10;
+      const candidate = topK * 3; // over-fetch before RRF re-ranking
       const client = await pool.connect();
+
       try {
-        // ── Vector similarity search ──────────────────────────────────────
-        if (options.embedding && options.embedding.length > 0) {
-          const qVec = toVectorLiteral(options.embedding);
-          const { sql: filterSQL, params: filterParams } = buildFilterSQL(options, 3);
-          const minScore = options.minScore;
-          const scoreExpr = toScore(`(embedding ${operator} $1::vector)`);
+        const hasVector = options.embedding && options.embedding.length > 0;
+        const hasText   = !!options.query;
 
-          let sql = `
-            SELECT *, ${scoreExpr} AS _score
-            FROM ${table}
-            WHERE embedding IS NOT NULL
-              AND ${filterSQL}
-          `;
-          const params: unknown[] = [qVec, topK, ...filterParams];
-
-          if (minScore !== undefined) {
-            sql += ` AND ${scoreExpr} >= ${minScore}`;
-          }
-          sql += ` ORDER BY embedding ${operator} $1::vector LIMIT $2`;
-
-          const result = await client.query(sql, params);
-          return result.rows.map(pgRowToMemoryEntry);
-        }
-
-        // ── Full-text / keyword search ────────────────────────────────────
-        if (options.query) {
-          const { sql: filterSQL, params: filterParams } = buildFilterSQL(options, 3);
+        // ── Recency / filter-only scan (no signals) ───────────────────────
+        if (!hasVector && !hasText) {
+          const { sql: filterSQL, params: filterParams } = buildFilterSQL(options, 2);
           const result = await client.query(
-            `SELECT *
-             FROM ${table}
-             WHERE LOWER(content) LIKE LOWER($1)
-               AND ${filterSQL}
-             ORDER BY created_at DESC
-             LIMIT $2`,
-            [`%${options.query}%`, topK, ...filterParams],
+            `SELECT * FROM ${table}
+             WHERE ${filterSQL}
+             ORDER BY created_at DESC LIMIT $1`,
+            [topK, ...filterParams],
           );
           return result.rows.map(pgRowToMemoryEntry);
         }
 
-        // ── Recency / filter-only scan ─────────────────────────────────────
-        const { sql: filterSQL, params: filterParams } = buildFilterSQL(options, 2);
-        const result = await client.query(
-          `SELECT * FROM ${table} WHERE ${filterSQL} ORDER BY created_at DESC LIMIT $1`,
-          [topK, ...filterParams],
+        // ── RRF fusion: run vector + FTS in parallel, merge scores ────────
+        const RRF_K = 60;
+
+        // Collect ranked id lists from each retrieval pass
+        const vectorIds: string[] = [];
+        const ftsIds:    string[] = [];
+
+        if (hasVector) {
+          const qVec = toVectorLiteral(options.embedding!);
+          const { sql: filterSQL, params: filterParams } = buildFilterSQL(options, 3);
+          const scoreExpr = toScore(`(embedding ${operator} $1::vector)`);
+          let sql = `
+            SELECT id, ${scoreExpr} AS _score
+            FROM ${table}
+            WHERE embedding IS NOT NULL
+              AND ${filterSQL}
+          `;
+          const params: unknown[] = [qVec, candidate, ...filterParams];
+          if (options.minScore !== undefined) {
+            sql += ` AND ${scoreExpr} >= ${options.minScore}`;
+          }
+          sql += ` ORDER BY embedding ${operator} $1::vector LIMIT $2`;
+          const vRes = await client.query<{ id: string }>(sql, params);
+          for (const row of vRes.rows) vectorIds.push(row.id);
+        }
+
+        if (hasText) {
+          const queryText = options.query!;
+          const { sql: filterSQL, params: filterParams } = buildFilterSQL(options, 3);
+          // Try FTS first; fall back to ILIKE if tsquery parse fails
+          const ftsSQL = `
+            SELECT id
+            FROM ${table}
+            WHERE to_tsvector('english', content) @@ plainto_tsquery('english', $1)
+              AND ${filterSQL}
+            ORDER BY ts_rank(to_tsvector('english', content), plainto_tsquery('english', $1)) DESC
+            LIMIT $2
+          `;
+          try {
+            const fRes = await client.query<{ id: string }>(
+              ftsSQL,
+              [queryText, candidate, ...filterParams],
+            );
+            for (const row of fRes.rows) ftsIds.push(row.id);
+          } catch {
+            // Fallback: ILIKE
+            const { sql: f2SQL, params: f2Params } = buildFilterSQL(options, 3);
+            const ilikeRes = await client.query<{ id: string }>(
+              `SELECT id FROM ${table}
+               WHERE LOWER(content) LIKE LOWER($1) AND ${f2SQL}
+               ORDER BY created_at DESC LIMIT $2`,
+              [`%${queryText}%`, candidate, ...f2Params],
+            );
+            for (const row of ilikeRes.rows) ftsIds.push(row.id);
+          }
+        }
+
+        // ── Graph entity-match pass (optional third signal) ───────────────
+        const graphIds: string[] = [];
+        if (graphRetriever && hasText) {
+          try {
+            const graphResults = graphRetriever.retrieve(options.query!, candidate);
+            for (const gr of graphResults) {
+              // Map graph node name to memory content via a keyword search
+              const { sql: gFilterSQL, params: gFilterParams } = buildFilterSQL(options, 3);
+              const gRes = await client.query<{ id: string }>(
+                `SELECT id FROM ${table}
+                 WHERE LOWER(content) LIKE LOWER($1) AND ${gFilterSQL}
+                 ORDER BY created_at DESC LIMIT $2`,
+                [`%${gr.node.name}%`, 5, ...gFilterParams],
+              );
+              for (const row of gRes.rows) graphIds.push(row.id);
+            }
+          } catch {
+            // Graph retrieval is best-effort
+          }
+        }
+
+        // ── RRF scoring ───────────────────────────────────────────────────
+        const rrfScores = new Map<string, number>();
+
+        for (const [rank, id] of vectorIds.entries()) {
+          rrfScores.set(id, (rrfScores.get(id) ?? 0) + 1 / (RRF_K + rank + 1));
+        }
+        for (const [rank, id] of ftsIds.entries()) {
+          rrfScores.set(id, (rrfScores.get(id) ?? 0) + 1 / (RRF_K + rank + 1));
+        }
+        for (const [rank, id] of graphIds.entries()) {
+          rrfScores.set(id, (rrfScores.get(id) ?? 0) + 0.5 / (RRF_K + rank + 1));
+        }
+
+        // Sort by RRF score descending; take top topK IDs
+        const ranked = [...rrfScores.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, topK)
+          .map(([id]) => id);
+
+        if (ranked.length === 0) return [];
+
+        // ── Fetch full rows for ranked IDs ────────────────────────────────
+        const placeholders = ranked.map((_, i) => `$${i + 1}`).join(', ');
+        const fullRows = await client.query(
+          `SELECT * FROM ${table} WHERE id = ANY(ARRAY[${placeholders}])`,
+          ranked,
         );
-        return result.rows.map(pgRowToMemoryEntry);
+
+        // Rehydrate and attach RRF score
+        const byId = new Map(fullRows.rows.map((r: Record<string, unknown>) => [r['id'] as string, r]));
+        const ranked_entries: MemoryEntry[] = [];
+        for (const id of ranked) {
+          const row = byId.get(id);
+          if (!row) continue;
+          ranked_entries.push({ ...pgRowToMemoryEntry(row), score: rrfScores.get(id) ?? 0 });
+        }
+        return ranked_entries;
       } finally {
         client.release();
       }
@@ -1044,8 +1211,24 @@ export function weavePgVectorMemoryStore(opts: PgVectorMemoryStoreOptions): Dura
           await client.query(`DELETE FROM ${table}`);
           return;
         }
-        const { sql: filterSQL, params } = buildFilterSQL({ filter }, 1);
-        await client.query(`DELETE FROM ${table} WHERE ${filterSQL}`, params);
+        // Build filter without asOf / expiry guard — we want to delete all matching rows
+        const conditions: string[] = [];
+        const params: unknown[] = [];
+        let idx = 1;
+        if (filter.tenantId)  { conditions.push(`tenant_id = $${idx++}`);  params.push(filter.tenantId); }
+        if (filter.userId)    { conditions.push(`user_id = $${idx++}`);    params.push(filter.userId); }
+        if (filter.sessionId) { conditions.push(`session_id = $${idx++}`); params.push(filter.sessionId); }
+        if (filter.types && filter.types.length > 0) {
+          conditions.push(`type = ANY($${idx++}::text[])`);
+          params.push(filter.types);
+        }
+        if (filter.after)  { conditions.push(`created_at > $${idx++}`); params.push(filter.after); }
+        if (filter.before) { conditions.push(`created_at < $${idx++}`); params.push(filter.before); }
+        if (conditions.length === 0) {
+          await client.query(`DELETE FROM ${table}`);
+        } else {
+          await client.query(`DELETE FROM ${table} WHERE ${conditions.join(' AND ')}`, params);
+        }
       } finally {
         client.release();
       }

@@ -47,6 +47,7 @@ import {
   resolveIdentityRecallFromMemory,
   saveToMemory,
 } from './chat-memory-utils.js';
+import { triggerConsolidationForUser } from './memory-consolidation.js';
 
 export type CognitiveCheckSummary = GuardrailCategorySummary;
 
@@ -445,6 +446,7 @@ export async function sendMessageImpl(
 
   try {
     await saveToMemory(deps.db, ctx, model, userId, chatId, processedContent, assistantContent);
+    triggerConsolidationForUser(userId, chatId);
   } catch {
     // Keep chat success path resilient when memory persistence fails.
   }
