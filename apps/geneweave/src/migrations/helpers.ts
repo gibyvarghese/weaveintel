@@ -101,14 +101,14 @@ export function safeExec(db: BetterSqlite3.Database, sql: string): void {
       'kgl00000-0000-4000-8002-000000000010',
       'kaggle_iterator',
       'Runs hyperparameter search using Optuna in a Kaggle kernel. Collaborates with implementer; spawns search jobs between approach generation and submission.',
-      JSON.stringify(['hyperparameter search', 'optimize model', 'run optuna', 'search params', 'find best params']),
+      JSON.stringify(['hyperparameter search kaggle', 'optimize kaggle model', 'run optuna', 'tune kaggle hyperparameters', 'kaggle kernel optimize']),
       [
         'When to use: after approach generation, before submission, when the user or strategist requests hyperparameter optimization.',
         'When NOT to use: if the approach is already optimized, or the user declines search.',
         'Reasoning: hyperparameter search can yield significant performance gains with minimal manual effort.',
       ].join('\n'),
       JSON.stringify(['kaggle.kernel.optimize_hyperparams']),
-      JSON.stringify(['kaggle', 'data-science', 'iterator', 'search', 'optuna']),
+      JSON.stringify(['kaggle', 'data-science', 'iterator', 'search', 'optuna', 'requires-intent-match']),
       'kaggle_read_only',
       JSON.stringify({ requiredOutputSubstrings: ['bestParams', 'searchHistory', 'kernelRef'] }),
     );
@@ -154,7 +154,7 @@ export function safeExec(db: BetterSqlite3.Database, sql: string): void {
         'Completion: report the chosen run ids, their CV/LB scores, and the rationale for each pick. State explicitly which is the "trust your CV" and which is the "diverse swing" choice.',
       ].join('\n'),
       JSON.stringify(['kaggle.local.adversarial_validation']),
-      JSON.stringify(['kaggle', 'data-science', 'finalizer', 'selection']),
+      JSON.stringify(['kaggle', 'data-science', 'finalizer', 'selection', 'requires-intent-match']),
       'kaggle_read_only',
       JSON.stringify({ requiredOutputSubstrings: ['is_final_pick', 'cv_lb_gap', 'finalized_at'] }),
     );

@@ -1,5 +1,6 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
+import { getActiveSemanticMemoryBackend } from '../../memory-pgvector.js';
 import type { RouterLike, AdminHelpers } from './types.js';
 
 /**
@@ -22,6 +23,27 @@ export function registerMemoryViewRoutes(
     const userId = url.searchParams.get('userId') ?? undefined;
     const limit = Math.min(200, parseInt(url.searchParams.get('limit') ?? '50', 10));
     const offset = parseInt(url.searchParams.get('offset') ?? '0', 10);
+    // Prefer the active semantic memory backend (pgvector when configured) so
+    // operators see the same rows the runtime actually reads/writes. Falls back
+    // to the SQLite mirror when no backend is active or when the lookup fails.
+    const backend = getActiveSemanticMemoryBackend();
+    if (backend && userId) {
+      try {
+        const entries = await backend.list(userId, limit + offset);
+        const items = entries.slice(offset, offset + limit).map((e) => ({
+          id: e.id,
+          user_id: userId,
+          content: e.content,
+          memory_type: e.memory_type,
+          source: e.source,
+          created_at: e.created_at,
+        }));
+        json(res, 200, { 'semantic-memory': items });
+        return;
+      } catch (err) {
+        console.warn('[admin] semantic-memory backend list failed, falling back to db:', String(err));
+      }
+    }
     const items = await db.listAllSemanticMemory({ userId, limit, offset });
     json(res, 200, { 'semantic-memory': items });
   }, { auth: true });

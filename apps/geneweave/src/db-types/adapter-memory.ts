@@ -31,7 +31,7 @@ export interface IMemoryStore {
   getEntity(userId: string, entityName: string): Promise<EntityMemoryRow | null>;
   searchEntities(userId: string, query: string): Promise<EntityMemoryRow[]>;
   listEntities(userId: string): Promise<EntityMemoryRow[]>;
-  deleteEntity(userId: string, entityName: string): Promise<void>;
+  deleteEntity(userId: string, entityName: string): Promise<number>;
   clearUserEntityMemory(userId: string): Promise<void>;
   trimEntityMemoryForUser(userId: string, maxEntries: number): Promise<void>;
   listAllEntityMemory(opts: { userId?: string; limit?: number; offset?: number }): Promise<EntityMemoryRow[]>;

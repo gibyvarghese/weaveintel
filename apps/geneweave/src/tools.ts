@@ -814,7 +814,7 @@ export interface ToolRegistryOptions {
     entities: Array<{ entityType: string; entityName: string; facts: Record<string, unknown> }>;
   }>;
   memoryRemember?: (args: { userId: string; content: string; memoryType?: string; source?: string }) => Promise<{ id: string }>;
-  memoryForget?: (args: { userId: string; entityName: string }) => Promise<{ ok: boolean }>;
+  memoryForget?: (args: { userId: string; entityName: string }) => Promise<{ ok: boolean; deletedEntities?: number; deletedSemantic?: number }>;
   memoryListEntities?: (args: { userId: string }) => Promise<{
     entities: Array<{ entityType: string; entityName: string; facts: Record<string, unknown>; confidence: number }>;
   }>;
@@ -1040,11 +1040,11 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
 
   const memoryForgetTool = weaveTool({
     name: 'memory_forget',
-    description: 'Remove a specific entity or fact from the user\'s long-term memory. Only use when the user explicitly asks you to forget something.',
+    description: 'Remove memories about a subject from the user\'s long-term memory. Removes the named entity from entity memory AND any semantic memory entry whose stored text contains the given string (case-insensitive substring match). Only use when the user explicitly asks you to forget something.',
     parameters: {
       type: 'object',
       properties: {
-        entityName: { type: 'string', description: 'The entity name or subject to forget' },
+        entityName: { type: 'string', description: 'The entity name, subject, or short content snippet identifying memories to forget' },
       },
       required: ['entityName'],
     },
@@ -1053,7 +1053,12 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         return { content: 'Memory forget is unavailable in this execution context.', isError: true };
       }
       const result = await opts.memoryForget({ userId: opts.currentUserId, entityName: args.entityName });
-      return JSON.stringify({ ok: result.ok, entityName: args.entityName });
+      return JSON.stringify({
+        ok: result.ok,
+        entityName: args.entityName,
+        deletedEntities: result.deletedEntities ?? 0,
+        deletedSemantic: result.deletedSemantic ?? 0,
+      });
     },
     tags: ['memory', 'forget'],
   });

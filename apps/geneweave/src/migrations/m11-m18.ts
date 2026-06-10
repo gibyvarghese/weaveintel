@@ -79,7 +79,7 @@ export function applyM11_M18(db: BetterSqlite3.Database): void {
       created_at, updated_at
     ) VALUES (?, ?, ?, 'data', ?, ?, ?, NULL, ?, ?, '1.0', ?, 1, NULL, NULL, ?, datetime('now'), datetime('now'))`,
   );
-  const KAGGLE_SKILL_TAGS = JSON.stringify(['kaggle', 'data-science', 'competition']);
+  const KAGGLE_SKILL_TAGS = JSON.stringify(['kaggle', 'data-science', 'competition', 'requires-intent-match']);
 
   type KaggleSkillSeed = {
     id: string;
@@ -115,7 +115,7 @@ export function applyM11_M18(db: BetterSqlite3.Database): void {
       id: 'kgl00000-0000-4000-8002-000000000002',
       name: 'kaggle_ideator',
       description: 'Drafts candidate modeling approaches for a chosen Kaggle competition by reading public kernels and dataset metadata. Read-only; does not push kernels or submit.',
-      triggers: ['kaggle approach', 'ideate kaggle', 'how should i tackle', 'kaggle strategy', 'what model', 'kaggle plan'],
+      triggers: ['kaggle approach', 'ideate kaggle', 'kaggle strategy', 'kaggle plan', 'draft kaggle approach'],
       instructions: [
         'When to use: the user has a competition in mind and wants modeling approaches.',
         'When NOT to use: there is no competition ref in scope (then trigger kaggle_discoverer first).',

@@ -3961,7 +3961,21 @@ export class SQLiteAdapter implements DatabaseAdapter {
           return { row, sim };
         });
         scored.sort((a, b) => b.sim - a.sim);
-        return scored.slice(0, limit).map((s) => s.row);
+        // Relevance gate: drop noise so unrelated facts don't surface for an
+        // off-topic query. Without this, top-K returns even when nothing matches.
+        // Absolute floor + relative cutoff against the best score; tunable via env.
+        const absFloor = (() => {
+          const raw = Number.parseFloat(process.env['SEMANTIC_MEMORY_MIN_SIM'] ?? '');
+          return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 0.20;
+        })();
+        const relFloor = (() => {
+          const raw = Number.parseFloat(process.env['SEMANTIC_MEMORY_REL_FLOOR'] ?? '');
+          return Number.isFinite(raw) && raw > 0 && raw <= 1 ? raw : 0.60;
+        })();
+        const topSim = scored[0]?.sim ?? 0;
+        const cutoff = Math.max(absFloor, topSim * relFloor);
+        const filtered = scored.filter((s) => s.sim >= cutoff);
+        return filtered.slice(0, limit).map((s) => s.row);
       }
     }
 
@@ -4092,8 +4106,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
     ).all(userId) as EntityMemoryRow[];
   }
 
-  async deleteEntity(userId: string, entityName: string): Promise<void> {
-    this.d.prepare('DELETE FROM entity_memory WHERE user_id = ? AND entity_name = ?').run(userId, entityName);
+  async deleteEntity(userId: string, entityName: string): Promise<number> {
+    const res = this.d.prepare('DELETE FROM entity_memory WHERE user_id = ? AND entity_name = ?').run(userId, entityName);
+    return res.changes ?? 0;
   }
 
   async clearUserEntityMemory(userId: string): Promise<void> {

@@ -14,7 +14,9 @@ import type BetterSqlite3 from 'better-sqlite3';
  * are on in the tenant's memory_settings row (checked at runtime).
  */
 export function applyM39MemoryToolsExtended(db: BetterSqlite3.Database): void {
-  const existing = (db.prepare('SELECT key FROM tool_catalog').all() as Array<{ key: string }>).map((r) => r.key);
+  const existing = (db.prepare('SELECT tool_key FROM tool_catalog').all() as Array<{ tool_key: string }>)
+    .map((r) => r.tool_key)
+    .filter((k): k is string => typeof k === 'string');
 
   const tools: Array<{
     id: string;
@@ -75,9 +77,9 @@ export function applyM39MemoryToolsExtended(db: BetterSqlite3.Database): void {
 
   const insert = db.prepare(`
     INSERT OR IGNORE INTO tool_catalog
-      (id, key, name, description, category, tags, parameters_schema, enabled, require_auth, source)
+      (id, tool_key, name, description, category, tags, config, enabled, source)
     VALUES
-      (?, ?, ?, ?, ?, ?, ?, 1, 1, 'builtin')
+      (?, ?, ?, ?, ?, ?, ?, 1, 'builtin')
   `);
 
   for (const tool of tools) {

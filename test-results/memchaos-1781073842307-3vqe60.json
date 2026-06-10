@@ -1,0 +1,285 @@
+{
+  "runId": "memchaos-1781073842307-3vqe60",
+  "base": "http://localhost:3500",
+  "model": "anthropic/claude-haiku-4-5-20251001",
+  "strict": false,
+  "startedAt": "2026-06-10T06:44:02.307Z",
+  "endedAt": "2026-06-10T06:52:38.862Z",
+  "durationMs": 516555,
+  "totals": {
+    "total": 52,
+    "pass": 39,
+    "fail": 9,
+    "warn": 4,
+    "skip": 0
+  },
+  "results": [
+    {
+      "status": "pass",
+      "name": "Server responds to /api/auth/me",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "Admin session available"
+    },
+    {
+      "status": "pass",
+      "name": "memory_settings row exists",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "semantic/entity/episodic/procedural/working enabled by default",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "GET /api/user/memory exposes expected buckets",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "agent turn returns 200",
+      "ms": 0
+    },
+    {
+      "status": "warn",
+      "name": "episodic capture poll timed out",
+      "detail": "Last value: [{\"id\":\"019eb046-414f-7875-846d-751330fa4ee4\",\"user_id\":\"019eb046-115f-7262-80b3-e2d9b34509de\",\"chat_id\":\"019eb046-1545-7ca2-be99-999a9b83341a\",\"tenant_id\":null,\"message_role\":\"user\",\"content\":\"For memory capture testing, the unique episodic sentinel is memchaos-178[REDACTED]-3vqe60-EPISODIC-SENTINE"
+    },
+    {
+      "status": "fail",
+      "name": "user + assistant episodic entries captured and include sentinel",
+      "detail": "before=0",
+      "ms": 0
+    },
+    {
+      "status": "fail",
+      "name": "captured episodic rows are scoped to correct chat",
+      "detail": "[]",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "memory_remember returns 200",
+      "ms": 0
+    },
+    {
+      "status": "fail",
+      "name": "memory_search returns exact sentinel and core fields",
+      "detail": "[Execution guard failure] The skill execution contract was not satisfied after retry:\n1. [kgl00000-0000-4000-8002-000000000010] final response is missing required text \"bestParams\"\n2. [kgl00000-0000-4000-8002-000000000010] final response is missing required text \"searchHistory\"\n3. [kgl00000-0000-4000-8002-000000000010] final response is missing required text \"kernelRef\"\n4. [kgl00000-0000-4000-8002-000000000001] final response is missing required text \"competition\"\n5. [kgl00000-0000-4000-8002-000",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "memory_forget returns 200",
+      "ms": 0
+    },
+    {
+      "status": "fail",
+      "name": "forgotten sentinel not returned by memory_search",
+      "detail": "The search for \"memchaos-1781073842307-3vqe60-SEMANTIC-PHOENIX\" returned four semantic memories. The specific project fact you wanted to delete is still present, despite the prior deletion request. Here are the relevant details:\n\n1. **Project Fact**: \"Project Phoenix-memchaos-1781073842307-3vqe60 has go-live date 2027-03-15, budget NZD 2.4M, risk owner Mira Patel, sentinel memchaos-1781073842307-3vqe60-SEMANTIC-PHOENIX\"\n2. **Assistant Confirmation**: The project fact has been successfully stored",
+      "ms": 0
+    },
+    {
+      "status": "fail",
+      "name": "stored fact influences a fresh chat without explicit search directive",
+      "detail": "[Execution guard failure] The skill execution contract was not satisfied after retry:\n1. [kgl00000-0000-4000-8002-000000000002] final response is missing required text \"approach\"\n2. [kgl00000-0000-4000-8002-000000000002] final response is missing required text \"expected metric\"\n3. [kgl00000-0000-4000-8002-000000000001] final response is missing required text \"competition\"\n4. [kgl00000-0000-4000-8002-000000000001] final response is missing required text \"deadline\"",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "User B cannot recall User A semantic secret",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "User B /api/user/memory does not contain User A token",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "Admin-filtered User B buckets contain no User A token",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "tenant user blocked from admin memory endpoints",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "current corrected fact is recalled",
+      "ms": 1
+    },
+    {
+      "status": "pass",
+      "name": "old fact is not presented as current",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "semantic search retrieves the relevant needle from noisy memories",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "retrieval answer is not dominated by unrelated noise facts",
+      "ms": 1
+    },
+    {
+      "status": "pass",
+      "name": "PII-containing user turn does not crash agent",
+      "ms": 0
+    },
+    {
+      "status": "warn",
+      "name": "PII episodic redaction poll timed out",
+      "detail": "Last value: [{\"id\":\"019eb04a-d374-7650-b8c8-88cfad3ba609\",\"user_id\":\"019eb046-115f-7262-80b3-e2d9b34509de\",\"chat_id\":\"019eb04a-cb35-736c-9e4d-5bf8cf63ba2e\",\"tenant_id\":null,\"message_role\":\"user\",\"content\":\"Governance test memchaos-178[REDACTED]-3vqe60-PII-MARKER. SSN [REDACTED]. Card [REDACTED]. [REDACTED] Pres"
+    },
+    {
+      "status": "fail",
+      "name": "raw SSN/card/API key absent from episodic memory",
+      "detail": "",
+      "ms": 0
+    },
+    {
+      "status": "fail",
+      "name": "non-sensitive context preserved with redaction token",
+      "detail": "",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "raw SSN not persisted in semantic memory",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "semantic memory endpoint remains healthy after blocked content",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "disable episodic setting accepted",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "no episodic capture while enable_episodic=false",
+      "ms": 0
+    },
+    {
+      "status": "warn",
+      "name": "episodic re-enable capture poll timed out",
+      "detail": "Last value: [{\"id\":\"019eb04b-7d89-7552-a451-c38869fdbb52\",\"user_id\":\"019eb046-13f9-71b7-9b77-0b88f80832bd\",\"chat_id\":\"019eb04b-1d8a-7239-8aa3-51a3b46784b5\",\"tenant_id\":null,\"message_role\":\"user\",\"content\":\"This should be captured after episodic re-enabled: memchaos-178[REDACTED]-3vqe60-CAPTURED-AGAIN\",\"importan"
+    },
+    {
+      "status": "fail",
+      "name": "capture resumes after enable_episodic=true",
+      "detail": "settingsBefore={\"id\":\"mem-settings-global\",\"tenant_id\":null,\"enable_semantic\":1,\"enable_entity\":1,\"enable_episodic\":1,\"enable_procedural\":1,\"enable_working\":1,\"auto_extract_on_turn\":1,\"consolidation_enabled\":1,\"consolidation_interval_min\":60,\"max_episodic_per_user\":200,\"max_semantic_per_user\":500,\"max_entity_per_user\":100,\"updated_at\":\"2026-06-10 04:47:00\"}",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "episodic rows trimmed to configured cap",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "trim does not wipe all rows",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "5 concurrent turns all return 200",
+      "ms": 0
+    },
+    {
+      "status": "warn",
+      "name": "concurrent episodic capture poll timed out",
+      "detail": "Last value: 6"
+    },
+    {
+      "status": "fail",
+      "name": "concurrent turns capture expected user+assistant episodic entries",
+      "detail": "before=54, after=null",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "create procedural entry returns 201/proposed",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "apply before approve is rejected",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "approve proposed procedural entry",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "apply approved procedural entry",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "apply twice is rejected",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "applied procedural memory influences later agent behaviour",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "User C has some memory before wipe",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "DELETE /api/user/memory/all returns 200",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "full wipe removes the wipe sentinel from user-visible memory",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "full wipe removes token from admin-visible memory buckets",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "invalid JSON does not return 500",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "procedural create missing required fields returns 400",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "approve nonexistent procedural id returns 400/404",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "fabricated admin route does not leak JSON memory/settings data",
+      "ms": 0
+    },
+    {
+      "status": "pass",
+      "name": "restore memory settings snapshot"
+    }
+  ]
+}

@@ -61,12 +61,23 @@ export interface SemanticMemoryBackend {
     },
   ): Promise<SemanticMemoryEntry[]>;
 
-  /**
-   * Return the most recent entries for a user (no query scoring).
+  /** Return the most recent entries for a user (no query scoring).
    * Used by identity-recall and context injection code paths that need
    * recent facts regardless of relevance to the current message.
    */
   list(userId: string, limit: number): Promise<SemanticMemoryEntry[]>;
+
+  /**
+   * Delete every semantic memory entry for a user whose `content` contains
+   * `needle` (case-insensitive substring match). Powers the `memory_forget`
+   * tool so the agent can erase a fact the user no longer wants stored.
+   * Returns the number of rows removed (best-effort; backends may not be
+   * able to count exactly).
+   */
+  forget(
+    ctx: ExecutionContext,
+    opts: { userId: string; needle: string },
+  ): Promise<{ deleted: number }>;
 
   /** Release resources (e.g. close the DB connection pool). */
   close(): Promise<void>;
@@ -118,6 +129,22 @@ export function createSQLiteSemanticMemoryBackend(db: DatabaseAdapter): Semantic
         source: r.source,
         created_at: r.created_at,
       }));
+    },
+
+    async forget(_ctx, opts) {
+      // List up to a generous window and substring-match client-side; lets
+      // us reuse a single delete path regardless of how the row was saved.
+      const rows = await db.listSemanticMemory(opts.userId, 1000);
+      const needle = opts.needle.toLowerCase();
+      const victims = rows.filter((r) => r.content.toLowerCase().includes(needle));
+      let deleted = 0;
+      for (const v of victims) {
+        try {
+          await db.deleteSemanticMemory(v.id, opts.userId);
+          deleted += 1;
+        } catch { /* best-effort */ }
+      }
+      return { deleted };
     },
 
     async close() { /* SQLite adapter lifecycle managed elsewhere */ },
@@ -191,6 +218,25 @@ export function createPgVectorSemanticMemoryBackend(
         topK: limit,
       });
       return entries.map(toEntry);
+    },
+
+    async forget(ctx, opts) {
+      // Fetch a generous recent window, substring-match content client-side,
+      // then delete by id. Avoids relying on FTS for arbitrary sentinels and
+      // works uniformly with vector-only writes.
+      const entries = await store.query(ctx, {
+        type: 'semantic',
+        filter: { userId: opts.userId },
+        topK: 1000,
+      });
+      const needle = opts.needle.toLowerCase();
+      const victimIds = entries
+        .filter((e) => e.content.toLowerCase().includes(needle))
+        .map((e) => e.id);
+      if (victimIds.length > 0) {
+        await store.delete(ctx, victimIds);
+      }
+      return { deleted: victimIds.length };
     },
 
     async close() {

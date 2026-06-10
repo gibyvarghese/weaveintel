@@ -39,7 +39,35 @@ export async function loadExtractionRules(db: DatabaseAdapter): Promise<MemoryEx
   });
 }
 
-function sanitizeExtractedEntities(raw: unknown): Array<{ name: string; type: string; facts: Record<string, unknown> }> {
+// Role / title / profession tokens that must never be stored as a person's
+// NAME. The LLM extractor sometimes returns rows like
+// { name: "Solution Architect", type: "person" } for utterances like
+// "I am a solution architect from Fonterra". Drop those at the sanitizer
+// boundary regardless of what the model claims.
+const ROLE_TITLE_TOKENS = new Set<string>([
+  'architect', 'engineer', 'manager', 'consultant', 'developer', 'designer',
+  'analyst', 'scientist', 'lead', 'director', 'officer', 'specialist',
+  'researcher', 'doctor', 'nurse', 'teacher', 'professor', 'student',
+  'intern', 'associate', 'principal', 'senior', 'junior', 'staff',
+  'founder', 'partner', 'owner', 'admin', 'administrator', 'operator',
+  'vp', 'ceo', 'cto', 'cfo', 'coo', 'cmo', 'cio', 'svp', 'evp',
+  'devops', 'sre', 'qa', 'pm',
+  'head', 'chief', 'president', 'vice',
+]);
+
+function nameLooksLikeRoleTitle(name: string): boolean {
+  const lower = name.toLowerCase().trim();
+  if (!lower) return true;
+  // Reject leading article ("a solution architect", "the VP").
+  if (/^(?:a|an|the)\s+/i.test(lower)) return true;
+  // Reject names that begin with a lowercase letter — real person names are
+  // proper nouns. This catches "solution architect" but not "Sarah".
+  if (!/^[A-Z]/.test(name.trim())) return true;
+  const tokens = lower.split(/[\s\-]+/).filter(Boolean);
+  return tokens.some((t) => ROLE_TITLE_TOKENS.has(t));
+}
+
+export function sanitizeExtractedEntities(raw: unknown): Array<{ name: string; type: string; facts: Record<string, unknown> }> {
   if (!Array.isArray(raw)) return [];
   const allowedTypes = new Set(['person', 'location', 'organization', 'preference', 'topic', 'general']);
   const out: Array<{ name: string; type: string; facts: Record<string, unknown> }> = [];
@@ -49,7 +77,14 @@ function sanitizeExtractedEntities(raw: unknown): Array<{ name: string; type: st
     const name = typeof row.name === 'string' ? row.name.trim() : '';
     if (!name || name.length > 120) continue;
     const typeRaw = typeof row.type === 'string' ? row.type.toLowerCase().trim() : 'general';
-    const type = allowedTypes.has(typeRaw) ? typeRaw : 'general';
+    let type = allowedTypes.has(typeRaw) ? typeRaw : 'general';
+    // Reclassify obvious role-title rows that came back as person/organization/location.
+    // "Solution Architect" is a role, not a person; demote to topic so it's still
+    // remembered as a fact about the user without polluting identity recall.
+    if ((type === 'person' || type === 'organization' || type === 'location') && nameLooksLikeRoleTitle(name)) {
+      if (type === 'person') type = 'general';
+      else continue; // drop a role-shaped name claiming to be an org/location
+    }
     const facts = (row.facts && typeof row.facts === 'object' && !Array.isArray(row.facts))
       ? (row.facts as Record<string, unknown>)
       : {};
@@ -72,6 +107,11 @@ export async function extractEntitiesWithModel(
           'You extract durable user profile entities from a conversation turn.',
           'Think carefully about stable facts, but output JSON only.',
           'Return a JSON array, each item as: {"name": string, "type": "person|location|organization|preference|topic|general", "facts": object}.',
+          'IMPORTANT distinctions:',
+          '- type=person is ONLY for a real human NAME (a proper noun like "Alice", "John Smith"). NEVER use type=person for job titles, roles, or professions.',
+          '- Job titles, roles, and professions (e.g. "solution architect", "VP of Engineering", "data scientist", "doctor", "consultant", "backend engineer") are NOT names. If you want to remember them, use type=topic or type=general — never type=person.',
+          '- type=organization is for companies / institutions / teams (proper-noun org names like "Fonterra", "Google"). Not for job titles.',
+          '- A self-introduction "I am a <role> from <company>" discloses an organization and an occupation, but does NOT disclose the user\'s personal name. Do not invent one.',
           'Only include entities that are explicitly stated or strongly implied by the user.',
           'Do not include temporary tasks or speculative details.',
           'If nothing durable is present, return [].',
@@ -156,7 +196,7 @@ export async function resolveIdentityRecallFromMemory(
   let location: string | null = null;
 
   const personEntity = entities.find((e) => e.entity_type.toLowerCase() === 'person');
-  if (personEntity?.entity_name) {
+  if (personEntity?.entity_name && !nameLooksLikeRoleTitle(personEntity.entity_name)) {
     name = personEntity.entity_name.trim();
   }
   const locationEntity = entities.find((e) => e.entity_type.toLowerCase() === 'location');
@@ -170,8 +210,20 @@ export async function resolveIdentityRecallFromMemory(
 
   for (const m of semanticPriority) {
     if (!name) {
-      const nm = m.content.match(/\b(?:my\s+name\s+is|i\s+am|i'?m\s+called|call\s+me)\s+([A-Za-z][A-Za-z\-']{1,39})\b/i);
-      if (nm?.[1]) name = nm[1].trim();
+      // Two regexes feed a uniform `nameLooksLikeRoleTitle` post-filter that
+      // rejects lowercase tokens, leading articles ("a"/"an"/"the"), and
+      // role/title words. This prevents "I am a solution architect ..." from
+      // yielding name="a" and "I am the VP" from yielding name="the", while
+      // still capturing "I am Sarah, ..." and "My name is John ...". The
+      // optional second-word capture skips conjunctions ("and"/"but") so
+      // "My name is John and ..." captures "John", not "John and".
+      const nm = m.content.match(/\b(?:my\s+name\s+is|i'?m\s+called|call\s+me)\s+([A-Za-z][A-Za-z\-']{1,39}(?:\s+(?!and\b|but\b|or\b)[A-Za-z][A-Za-z\-']{1,39})?)\b/i);
+      if (nm?.[1] && !nameLooksLikeRoleTitle(nm[1])) {
+        name = nm[1].trim();
+      } else {
+        const nm2 = m.content.match(/\bi\s+am\s+([A-Za-z][A-Za-z\-']{1,39}(?:\s+(?!and\b|but\b|or\b)[A-Za-z][A-Za-z\-']{1,39})?)(?=[\s,.!?]|\s+and\b|$)/i);
+        if (nm2?.[1] && !nameLooksLikeRoleTitle(nm2[1])) name = nm2[1].trim();
+      }
     }
     if (!location) {
       const lm = m.content.match(/\b(?:i\s+live\s+in|i'?m\s+from|i\s+am\s+from|i\s+reside\s+in)\s+([A-Za-z][A-Za-z\s\-']{1,50}?)(?=\s+(?:and|but)\b|[,.!?]|$)/i);

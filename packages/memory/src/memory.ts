@@ -1088,8 +1088,18 @@ export function weavePgVectorMemoryStore(opts: PgVectorMemoryStoreOptions): Dura
               AND ${filterSQL}
           `;
           const params: unknown[] = [qVec, candidate, ...filterParams];
-          if (options.minScore !== undefined) {
-            sql += ` AND ${scoreExpr} >= ${options.minScore}`;
+          // Relevance floor: callers can pass `minScore` explicitly (0 disables);
+          // otherwise apply an env-tunable absolute floor so off-topic queries
+          // don't surface unrelated rows via the RRF fusion downstream.
+          const defaultMinSim = (() => {
+            const raw = Number.parseFloat(process.env['SEMANTIC_MEMORY_MIN_SIM'] ?? '');
+            return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 0.20;
+          })();
+          const effectiveMinScore = options.minScore !== undefined
+            ? options.minScore
+            : defaultMinSim;
+          if (effectiveMinScore > 0) {
+            sql += ` AND ${scoreExpr} >= ${effectiveMinScore}`;
           }
           sql += ` ORDER BY embedding ${operator} $1::vector LIMIT $2`;
           const vRes = await client.query<{ id: string }>(sql, params);

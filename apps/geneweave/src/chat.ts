@@ -484,6 +484,42 @@ export class ChatEngine {
     return result.pricing;
   }
 
+  /**
+   * Shared implementation for the `memory_forget` tool callback.
+   * Removes the named entity from entity memory AND any semantic memory
+   * entry whose stored text contains `entityName` (case-insensitive
+   * substring). Returns per-store deletion counts; never throws.
+   */
+  private async forgetMemoryForUser(
+    ctx: ExecutionContext,
+    userId: string,
+    entityName: string,
+  ): Promise<{ ok: true; deletedEntities: number; deletedSemantic: number }> {
+    let deletedEntities = 0;
+    try { deletedEntities = await this.db.deleteEntity(userId, entityName); }
+    catch (err) { console.warn('[memory] memory_forget entity delete failed:', String(err)); }
+    let deletedSemantic = 0;
+    try {
+      const memBackend = getActiveSemanticMemoryBackend();
+      if (memBackend) {
+        const r = await memBackend.forget(ctx, { userId, needle: entityName });
+        deletedSemantic = r.deleted;
+      } else {
+        const rows = await this.db.listSemanticMemory(userId, 1000);
+        const needle = entityName.toLowerCase();
+        for (const row of rows) {
+          if (row.content.toLowerCase().includes(needle)) {
+            try { await this.db.deleteSemanticMemory(row.id, userId); deletedSemantic += 1; }
+            catch { /* best-effort */ }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[memory] memory_forget semantic delete failed:', String(err));
+    }
+    return { ok: true, deletedEntities, deletedSemantic };
+  }
+
   // ── Direct mode: send ───────────────────────────────────────
 
   async sendMessage(
@@ -655,8 +691,7 @@ export class ChatEngine {
         return { id };
       },
       memoryForget: async ({ userId: forgetUserId, entityName }) => {
-        await this.db.deleteEntity(forgetUserId, entityName);
-        return { ok: true };
+        return await this.forgetMemoryForUser(ctx, forgetUserId, entityName);
       },
       memoryListEntities: async ({ userId: listUserId }) => {
         const rows = await this.db.listEntities(listUserId);
@@ -972,8 +1007,7 @@ export class ChatEngine {
         return { id };
       },
       memoryForget: async ({ userId: forgetUserId, entityName }) => {
-        await this.db.deleteEntity(forgetUserId, entityName);
-        return { ok: true };
+        return await this.forgetMemoryForUser(ctx, forgetUserId, entityName);
       },
       memoryListEntities: async ({ userId: listUserId }) => {
         const rows = await this.db.listEntities(listUserId);
