@@ -26,6 +26,10 @@ export interface AdminFieldDef {
   default?: unknown;
   /** When true the field is displayed read-only in the admin form (no editable input). */
   readonly?: boolean;
+  /** HTML placeholder text shown in the input when the field is empty. */
+  placeholder?: string;
+  /** Short helper text rendered below the input to guide the admin user. */
+  helpText?: string;
 }
 
 export interface AdminTabDef {

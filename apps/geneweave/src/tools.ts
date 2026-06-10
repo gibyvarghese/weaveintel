@@ -827,6 +827,12 @@ export interface ToolRegistryOptions {
     episodic: Array<{ messageRole: string; content: string; createdAt: string }>;
     procedural: Array<{ instructionDelta: string; appliedAt: string }>;
   }>;
+  /** Save a JSON state blob to the working-memory store (agent scratch state). */
+  memorySaveSnapshot?: (args: { userId: string; chatId?: string; agentId?: string; state: Record<string, unknown> }) => Promise<{ id: string }>;
+  /** Load the latest working-memory snapshot for the current session. */
+  memoryLoadSnapshot?: (args: { userId: string; agentId?: string }) => Promise<{ snapshot: Record<string, unknown> | null; id: string | null; savedAt: string | null }>;
+  /** Propose a procedural instruction delta for human review and approval. */
+  memoryProposeInstruction?: (args: { userId: string; agentId: string; instruction: string; reason?: string; confidence?: number }) => Promise<{ id: string }>;
   /** Tool keys disabled in the operator-managed catalog. Populated from db.listEnabledToolCatalog(). */
   disabledToolKeys?: ReadonlySet<string>;
   /** Policy resolver for Phase 2 enforcement (rate limits, approval gates, risk level gates). */
@@ -1109,6 +1115,96 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     tags: ['memory', 'profile', 'identity'],
   });
 
+  const memorySnapshotTool = weaveTool({
+    name: 'memory_snapshot',
+    description: 'Save the current working state as a JSON snapshot to working memory. Use this to checkpoint progress during multi-step tasks so it can be resumed if the conversation continues later. Only call this when you have meaningful intermediate state worth preserving.',
+    parameters: {
+      type: 'object',
+      properties: {
+        state: {
+          type: 'object',
+          description: 'Arbitrary JSON object representing the current working state (task progress, intermediate results, next steps, etc.)',
+        },
+        label: {
+          type: 'string',
+          description: 'Optional human-readable label for this snapshot (e.g. "after step 2 of 5")',
+        },
+      },
+      required: ['state'],
+    },
+    execute: async (args: { state: Record<string, unknown>; label?: string }) => {
+      if (!opts?.memorySaveSnapshot || !opts.currentUserId) {
+        return { content: 'Working memory is unavailable in this execution context.', isError: true };
+      }
+      const stateWithLabel = args.label ? { ...args.state, _label: args.label } : args.state;
+      const result = await opts.memorySaveSnapshot({
+        userId: opts.currentUserId,
+        chatId: opts.currentChatId,
+        state: stateWithLabel,
+      });
+      return JSON.stringify({ ok: true, snapshotId: result.id, label: args.label ?? null });
+    },
+    tags: ['memory', 'working', 'state'],
+  });
+
+  const memoryLoadStateTool = weaveTool({
+    name: 'memory_load_state',
+    description: 'Load the most recent working memory snapshot for this user. Use this at the start of a resumed multi-step task to restore the agent\'s previous intermediate state rather than starting from scratch.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    execute: async () => {
+      if (!opts?.memoryLoadSnapshot || !opts.currentUserId) {
+        return { content: 'Working memory is unavailable in this execution context.', isError: true };
+      }
+      const result = await opts.memoryLoadSnapshot({ userId: opts.currentUserId });
+      if (!result.snapshot) {
+        return JSON.stringify({ found: false, snapshot: null });
+      }
+      return JSON.stringify({ found: true, snapshotId: result.id, savedAt: result.savedAt, snapshot: result.snapshot });
+    },
+    tags: ['memory', 'working', 'state'],
+  });
+
+  const memoryProposeInstructionTool = weaveTool({
+    name: 'memory_propose_instruction',
+    description: 'Propose a persistent behavioural adjustment for how the agent should interact with this user in future conversations. The proposal is submitted for human review and must be approved before it takes effect. Only use this when you have strong evidence that a change would improve the user\'s experience — for example, the user has expressed a consistent preference that should always be applied.',
+    parameters: {
+      type: 'object',
+      properties: {
+        instruction: {
+          type: 'string',
+          description: 'The behavioural change to propose (e.g. "Always respond with bullet points instead of paragraphs for this user")',
+        },
+        reason: {
+          type: 'string',
+          description: 'Brief justification — what evidence led to this proposal',
+        },
+        confidence: {
+          type: 'number',
+          description: 'Confidence in this proposal (0.0–1.0, default 0.75)',
+        },
+      },
+      required: ['instruction'],
+    },
+    execute: async (args: { instruction: string; reason?: string; confidence?: number }) => {
+      if (!opts?.memoryProposeInstruction || !opts.currentUserId) {
+        return { content: 'Procedural memory proposals are unavailable in this execution context.', isError: true };
+      }
+      const result = await opts.memoryProposeInstruction({
+        userId: opts.currentUserId,
+        agentId: 'default',
+        instruction: args.instruction,
+        reason: args.reason,
+        confidence: args.confidence ?? 0.75,
+      });
+      return JSON.stringify({ ok: true, proposalId: result.id, status: 'proposed', message: 'Proposal submitted for human review. It will take effect only after an admin approves and applies it.' });
+    },
+    tags: ['memory', 'procedural', 'proposal'],
+  });
+
   const scopedTools: Record<string, Tool> = {
     ...BUILTIN_TOOLS,
     ...createTimeToolMap(opts?.defaultTimezone, opts?.temporalStore ?? defaultTemporalStore),
@@ -1120,6 +1216,9 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     memory_list_entities: memoryListEntitiesTool,
     memory_list_episodes: memoryListEpisodesTool,
     memory_get_profile: memoryGetProfileTool,
+    memory_snapshot: memorySnapshotTool,
+    memory_load_state: memoryLoadStateTool,
+    memory_propose_instruction: memoryProposeInstructionTool,
   };
   for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {
     // Skip tools disabled in the operator-managed tool catalog

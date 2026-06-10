@@ -536,6 +536,29 @@ export async function saveToMemory(
 }
 
 /**
+ * Load the latest working memory snapshot for a user+agent and format it for
+ * system-prompt injection. Working memory is per-chat scratch state written by
+ * the agent's memory_snapshot tool during multi-step tasks. Loading it at the
+ * start of each turn gives the agent continuity across tool-call boundaries.
+ */
+export async function buildWorkingMemoryContext(
+  db: DatabaseAdapter,
+  userId: string,
+  agentId = 'default',
+): Promise<string | null> {
+  try {
+    const snapshot = await db.getLatestWorkingMemory(userId, agentId);
+    if (!snapshot) return null;
+    let parsed: unknown;
+    try { parsed = JSON.parse(snapshot.content); } catch { parsed = snapshot.content; }
+    const preview = JSON.stringify(parsed, null, 2).slice(0, 1200);
+    return `[Working memory — agent scratch state from previous step]\nSnapshot ID: ${snapshot.id}\nSaved: ${snapshot.created_at}\n${preview}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Load applied procedural memory instruction deltas for a user+agent.
  * Returns a string to prepend to the system prompt, or null if none.
  */

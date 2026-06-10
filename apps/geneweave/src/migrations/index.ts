@@ -18,6 +18,7 @@ import { applyM35MemoryVectors } from './m35-memory-vectors.js';
 import { applyM36MemoryComplete } from './m36-memory-complete.js';
 import { applyM37MemoryGuardrails } from './m37-memory-guardrails.js';
 import { applyM38ExtendedPiiPatterns } from './m38-extended-pii-patterns.js';
+import { applyM39MemoryToolsExtended } from './m39-memory-tools-extended.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -44,6 +45,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm36-memory-complete', description: 'Memory: episodic_memory, procedural_memory, working_memory_snapshots, memory_settings tables; seed memory_list_episodes and memory_get_profile tool catalog entries', run: applyM36MemoryComplete },
   { id: 'm37-memory-guardrails', description: 'Memory guardrails: episodic PII redaction rule (SSN/card/JWT/email/phone/credential) + entity PII block rule (SSN/card in entity facts)', run: applyM37MemoryGuardrails },
   { id: 'm38-extended-pii-patterns', description: 'Extended PII patterns: DB URI credentials, JWT signing key values, broad SSN fallback (catches 9xx numbers)', run: applyM38ExtendedPiiPatterns },
+  { id: 'm39-memory-tools-extended', description: 'Memory tools: seed memory_snapshot, memory_load_state, memory_propose_instruction in tool catalog', run: applyM39MemoryToolsExtended },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

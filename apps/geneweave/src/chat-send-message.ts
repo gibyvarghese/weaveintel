@@ -48,6 +48,7 @@ import {
   saveToMemory,
   loadProceduralInstructions,
   buildEpisodicContext,
+  buildWorkingMemoryContext,
 } from './chat-memory-utils.js';
 import { triggerConsolidationForUser } from './memory-consolidation.js';
 
@@ -301,14 +302,16 @@ export async function sendMessageImpl(
   const messages = historyToMessages(history);
   patchLatestUserMessage(messages, processedContent);
 
-  const [memoryContext, proceduralInstructions, episodicContext] = await Promise.all([
+  const [memoryContext, proceduralInstructions, episodicContext, workingMemoryContext] = await Promise.all([
     buildMemoryContext(deps.db, ctx, model, userId, processedContent),
     loadProceduralInstructions(deps.db, userId),
     buildEpisodicContext(deps.db, userId, 6),
+    buildWorkingMemoryContext(deps.db, userId),
   ]);
   const contextParts: string[] = [];
   if (skillPrompt) contextParts.push(skillPrompt);
   if (proceduralInstructions) contextParts.push(proceduralInstructions);
+  if (workingMemoryContext) contextParts.push(workingMemoryContext);
   if (memoryContext) contextParts.push(memoryContext);
   if (episodicContext) contextParts.push(episodicContext);
   const augmentedPrompt = contextParts.length > 0 ? contextParts.join('\n\n---\n') : undefined;

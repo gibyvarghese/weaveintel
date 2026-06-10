@@ -36,6 +36,7 @@ import {
   saveToMemory,
   loadProceduralInstructions,
   buildEpisodicContext,
+  buildWorkingMemoryContext,
 } from './chat-memory-utils.js';
 import { triggerConsolidationForUser } from './memory-consolidation.js';
 
@@ -397,14 +398,16 @@ export async function streamMessageImpl(
   const messages = historyToMessages(history);
   patchLatestUserMessage(messages, processedContent);
 
-  const [streamMemoryContext, streamProceduralInstructions, streamEpisodicContext] = await Promise.all([
+  const [streamMemoryContext, streamProceduralInstructions, streamEpisodicContext, streamWorkingMemoryContext] = await Promise.all([
     buildMemoryContext(deps.db, ctx, model, userId, processedContent),
     loadProceduralInstructions(deps.db, userId),
     buildEpisodicContext(deps.db, userId, 6),
+    buildWorkingMemoryContext(deps.db, userId),
   ]);
   const streamContextParts: string[] = [];
   if (streamSkillPrompt) streamContextParts.push(streamSkillPrompt);
   if (streamProceduralInstructions) streamContextParts.push(streamProceduralInstructions);
+  if (streamWorkingMemoryContext) streamContextParts.push(streamWorkingMemoryContext);
   if (streamMemoryContext) streamContextParts.push(streamMemoryContext);
   if (streamEpisodicContext) streamContextParts.push(streamEpisodicContext);
   const streamAugmentedPrompt = streamContextParts.length > 0 ? streamContextParts.join('\n\n---\n') : undefined;

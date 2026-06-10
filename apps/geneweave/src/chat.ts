@@ -700,6 +700,35 @@ export class ChatEngine {
           procedural: proceduralRows.map((p) => ({ instructionDelta: p.instruction_delta, appliedAt: p.applied_at ?? '' })),
         };
       },
+      memorySaveSnapshot: async ({ userId: snapUserId, chatId: snapChatId, agentId: snapAgentId, state }) => {
+        const { newUUIDv7 } = await import('@weaveintel/core');
+        const id = newUUIDv7();
+        await this.db.saveWorkingMemorySnapshot({ id, userId: snapUserId, chatId: snapChatId, agentId: snapAgentId ?? 'default', content: state });
+        return { id };
+      },
+      memoryLoadSnapshot: async ({ userId: snapUserId, agentId: snapAgentId }) => {
+        const snapshot = await this.db.getLatestWorkingMemory(snapUserId, snapAgentId ?? 'default');
+        if (!snapshot) return { snapshot: null, id: null, savedAt: null };
+        let parsed: Record<string, unknown>;
+        try { parsed = JSON.parse(snapshot.content) as Record<string, unknown>; } catch { parsed = { raw: snapshot.content }; }
+        return { snapshot: parsed, id: snapshot.id, savedAt: snapshot.created_at };
+      },
+      memoryProposeInstruction: async ({ userId: propUserId, agentId: propAgentId, instruction, reason, confidence }) => {
+        const { newUUIDv7 } = await import('@weaveintel/core');
+        const id = `proc-${newUUIDv7().slice(-8)}`;
+        await this.db.createProceduralMemory({
+          id,
+          user_id: propUserId,
+          agent_id: propAgentId ?? 'default',
+          instruction_delta: reason ? `${instruction}\n\nReason: ${reason}` : instruction,
+          proposed_by: 'agent',
+          status: 'proposed',
+          confidence: confidence ?? 0.75,
+          human_task_id: null,
+          applied_at: null,
+        });
+        return { id };
+      },
       disabledToolKeys,
       catalogEntries,
       // Phase 6: apply active skill's tool policy key for scoped policy enforcement
@@ -987,6 +1016,35 @@ export class ChatEngine {
           episodic: episodicRows.map((ep) => ({ messageRole: ep.message_role, content: ep.content, createdAt: ep.created_at })),
           procedural: proceduralRows.map((p) => ({ instructionDelta: p.instruction_delta, appliedAt: p.applied_at ?? '' })),
         };
+      },
+      memorySaveSnapshot: async ({ userId: snapUserId, chatId: snapChatId, agentId: snapAgentId, state }) => {
+        const { newUUIDv7 } = await import('@weaveintel/core');
+        const id = newUUIDv7();
+        await this.db.saveWorkingMemorySnapshot({ id, userId: snapUserId, chatId: snapChatId, agentId: snapAgentId ?? 'default', content: state });
+        return { id };
+      },
+      memoryLoadSnapshot: async ({ userId: snapUserId, agentId: snapAgentId }) => {
+        const snapshot = await this.db.getLatestWorkingMemory(snapUserId, snapAgentId ?? 'default');
+        if (!snapshot) return { snapshot: null, id: null, savedAt: null };
+        let parsed: Record<string, unknown>;
+        try { parsed = JSON.parse(snapshot.content) as Record<string, unknown>; } catch { parsed = { raw: snapshot.content }; }
+        return { snapshot: parsed, id: snapshot.id, savedAt: snapshot.created_at };
+      },
+      memoryProposeInstruction: async ({ userId: propUserId, agentId: propAgentId, instruction, reason, confidence }) => {
+        const { newUUIDv7 } = await import('@weaveintel/core');
+        const id = `proc-${newUUIDv7().slice(-8)}`;
+        await this.db.createProceduralMemory({
+          id,
+          user_id: propUserId,
+          agent_id: propAgentId ?? 'default',
+          instruction_delta: reason ? `${instruction}\n\nReason: ${reason}` : instruction,
+          proposed_by: 'agent',
+          status: 'proposed',
+          confidence: confidence ?? 0.75,
+          human_task_id: null,
+          applied_at: null,
+        });
+        return { id };
       },
       disabledToolKeys,
       catalogEntries,

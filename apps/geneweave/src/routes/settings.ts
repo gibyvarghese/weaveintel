@@ -99,11 +99,12 @@ export function registerSettingsRoutes(
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const url = new URL(req.url ?? '', 'http://localhost');
     const limit = Math.min(100, parseInt(url.searchParams.get('limit') ?? '50', 10));
-    const [entities, semantic, episodic, procedural] = await Promise.all([
+    const [entities, semantic, episodic, procedural, working] = await Promise.all([
       db.listEntities(auth.userId),
       db.listSemanticMemory(auth.userId, limit),
       db.listEpisodicMemory(auth.userId, limit),
-      db.listAppliedProcedural(auth.userId),
+      db.listProceduralMemory(auth.userId),
+      db.listWorkingMemorySnapshots(auth.userId, Math.min(20, limit)),
     ]);
     json(res, 200, {
       entities: entities.map((e) => ({
@@ -137,8 +138,16 @@ export function registerSettingsRoutes(
         instructionDelta: p.instruction_delta,
         status: p.status,
         confidence: p.confidence,
+        proposedBy: p.proposed_by,
         appliedAt: p.applied_at,
         createdAt: p.created_at,
+      })),
+      working: working.map((w) => ({
+        id: w.id,
+        chatId: w.chat_id,
+        agentId: w.agent_id,
+        content: (() => { try { return JSON.parse(w.content) as Record<string, unknown>; } catch { return {}; } })(),
+        savedAt: w.created_at,
       })),
     });
   });
@@ -161,6 +170,13 @@ export function registerSettingsRoutes(
   router.del('/api/user/memory/episodic/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     await db.deleteEpisodicMemory(params['id']!, auth.userId);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // DELETE /api/user/memory/working/:id — user deletes a working memory snapshot
+  router.del('/api/user/memory/working/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteWorkingMemorySnapshot(params['id']!, auth.userId);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 
