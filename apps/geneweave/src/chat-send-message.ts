@@ -46,6 +46,8 @@ import {
   buildMemoryContext,
   resolveIdentityRecallFromMemory,
   saveToMemory,
+  loadProceduralInstructions,
+  buildEpisodicContext,
 } from './chat-memory-utils.js';
 import { triggerConsolidationForUser } from './memory-consolidation.js';
 
@@ -245,6 +247,11 @@ export async function sendMessageImpl(
         cognitive: preGuardrail.cognitive,
       }),
     });
+    // Episodic logging: always capture the turn even when guardrail blocks LLM processing.
+    // Memory governance will redact any PII before the entry is persisted.
+    try {
+      await saveToMemory(deps.db, ctx, model, userId, chatId, processedContent, denyContent, tenantId ?? undefined);
+    } catch { /* episodic capture is best-effort */ }
     return {
       assistantContent: denyContent,
       usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
@@ -294,10 +301,17 @@ export async function sendMessageImpl(
   const messages = historyToMessages(history);
   patchLatestUserMessage(messages, processedContent);
 
-  const memoryContext = await buildMemoryContext(deps.db, ctx, model, userId, processedContent);
-  const augmentedPrompt = memoryContext
-    ? (skillPrompt ? `${skillPrompt}\n\n---\n${memoryContext}` : memoryContext)
-    : skillPrompt;
+  const [memoryContext, proceduralInstructions, episodicContext] = await Promise.all([
+    buildMemoryContext(deps.db, ctx, model, userId, processedContent),
+    loadProceduralInstructions(deps.db, userId),
+    buildEpisodicContext(deps.db, userId, 6),
+  ]);
+  const contextParts: string[] = [];
+  if (skillPrompt) contextParts.push(skillPrompt);
+  if (proceduralInstructions) contextParts.push(proceduralInstructions);
+  if (memoryContext) contextParts.push(memoryContext);
+  if (episodicContext) contextParts.push(episodicContext);
+  const augmentedPrompt = contextParts.length > 0 ? contextParts.join('\n\n---\n') : undefined;
   const memorySettings = {
     ...settings,
     enabledTools,
@@ -445,7 +459,7 @@ export async function sendMessageImpl(
   });
 
   try {
-    await saveToMemory(deps.db, ctx, model, userId, chatId, processedContent, assistantContent);
+    await saveToMemory(deps.db, ctx, model, userId, chatId, processedContent, assistantContent, tenantId ?? undefined);
     triggerConsolidationForUser(userId, chatId);
   } catch {
     // Keep chat success path resilient when memory persistence fails.

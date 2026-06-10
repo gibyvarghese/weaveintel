@@ -48,6 +48,9 @@ import {
   registerIdentityRuleRoutes,
   registerMemoryGovernanceRoutes,
   registerMemoryViewRoutes,
+  registerMemoryEpisodicRoutes,
+  registerMemoryProceduralRoutes,
+  registerMemorySettingsRoutes,
   registerComplianceRuleRoutes,
   registerTaskTypeRoutes,
   registerCapabilityScoreRoutes,
@@ -109,6 +112,9 @@ export function registerAdminRoutingRoutes(
   registerIdentityRuleRoutes(router, db, adminHelpers);
   registerMemoryGovernanceRoutes(router, db, adminHelpers);
   registerMemoryViewRoutes(router, db, adminHelpers);
+  registerMemoryEpisodicRoutes(router, db, adminHelpers);
+  registerMemoryProceduralRoutes(router, db, adminHelpers);
+  registerMemorySettingsRoutes(router, db, adminHelpers);
   registerComplianceRuleRoutes(router, db, adminHelpers);
   registerToolRoutes(router, db, adminHelpers);
   registerToolPolicyRoutes(router, db, adminHelpers);

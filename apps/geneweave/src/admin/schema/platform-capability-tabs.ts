@@ -202,6 +202,107 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'created_at', label: 'Created At', readonly: true },
     ],
   },
+  'episodic-memory': {
+    singular: 'Episodic Memory Event', apiPath: 'admin/episodic-memory', listKey: 'episodic-memory',
+    readOnly: true,
+    cols: ['user_id', 'message_role', 'importance', 'consolidated', 'content', 'created_at'],
+    fields: [
+      { key: 'user_id', label: 'User ID', readonly: true },
+      { key: 'chat_id', label: 'Chat ID', readonly: true },
+      { key: 'message_role', label: 'Message Role', readonly: true },
+      { key: 'importance', label: 'Importance (0–1)', readonly: true },
+      { key: 'consolidated', label: 'Consolidated', readonly: true },
+      { key: 'tags', label: 'Tags (JSON)', readonly: true },
+      { key: 'content', label: 'Content', textarea: true, rows: 4, readonly: true },
+      { key: 'created_at', label: 'Created At', readonly: true },
+    ],
+  },
+  'procedural-memory': {
+    singular: 'Procedural Memory Entry', apiPath: 'admin/procedural-memory', listKey: 'procedural-memory',
+    cols: ['user_id', 'agent_id', 'status', 'proposed_by', 'confidence', 'created_at'],
+    fields: [
+      { key: 'user_id', label: 'User ID' },
+      { key: 'agent_id', label: 'Agent ID (use "default" for the global agent)', default: 'default' },
+      {
+        key: 'instruction_delta',
+        label: 'Instruction Delta — what the agent should learn (e.g. "User prefers concise bullet-point answers")',
+        textarea: true, rows: 4,
+      },
+      {
+        key: 'proposed_by', label: 'Proposed By',
+        options: ['admin', 'consolidation-curator', 'user-feedback'],
+        default: 'admin',
+      },
+      {
+        key: 'status', label: 'Status',
+        options: ['proposed', 'approved', 'rejected', 'applied'],
+        default: 'proposed',
+      },
+      { key: 'confidence', label: 'Confidence (0–1)', type: 'number', save: 'float', default: 0.8 },
+      { key: 'applied_at', label: 'Applied At', readonly: true },
+      { key: 'created_at', label: 'Created At', readonly: true },
+    ],
+  },
+  'working-memory': {
+    singular: 'Working Memory Snapshot', apiPath: 'admin/working-memory', listKey: 'working-memory',
+    readOnly: true,
+    cols: ['user_id', 'agent_id', 'chat_id', 'created_at'],
+    fields: [
+      { key: 'user_id', label: 'User ID', readonly: true },
+      { key: 'chat_id', label: 'Chat ID', readonly: true },
+      { key: 'agent_id', label: 'Agent ID', readonly: true },
+      { key: 'content', label: 'Working State (JSON)', textarea: true, rows: 8, readonly: true },
+      { key: 'created_at', label: 'Created At', readonly: true },
+    ],
+  },
+  'memory-settings': {
+    singular: 'Memory Settings', apiPath: 'admin/memory-settings', listKey: 'memory-settings',
+    cols: ['tenant_id', 'enable_semantic', 'enable_episodic', 'enable_procedural', 'auto_extract_on_turn', 'consolidation_enabled'],
+    fields: [
+      {
+        key: 'tenant_id',
+        label: 'Tenant ID (blank = global default — applies to all tenants without a specific override)',
+        default: '',
+      },
+      {
+        key: 'enable_semantic', label: 'Enable Semantic Memory',
+        type: 'checkbox', save: 'bool', default: true,
+      },
+      {
+        key: 'enable_entity', label: 'Enable Entity Memory (structured profile facts)',
+        type: 'checkbox', save: 'bool', default: true,
+      },
+      {
+        key: 'enable_episodic', label: 'Enable Episodic Memory (per-turn conversation events)',
+        type: 'checkbox', save: 'bool', default: true,
+      },
+      {
+        key: 'enable_procedural', label: 'Enable Procedural Memory (agent instruction deltas)',
+        type: 'checkbox', save: 'bool', default: true,
+      },
+      {
+        key: 'enable_working', label: 'Enable Working Memory (in-session agent scratch state)',
+        type: 'checkbox', save: 'bool', default: true,
+      },
+      {
+        key: 'auto_extract_on_turn', label: 'Auto-Extract on Every Turn (run extraction pipeline after each message)',
+        type: 'checkbox', save: 'bool', default: true,
+      },
+      {
+        key: 'consolidation_enabled', label: 'Consolidation Enabled (background episodic → semantic distillation)',
+        type: 'checkbox', save: 'bool', default: true,
+      },
+      {
+        key: 'consolidation_interval_min', label: 'Consolidation Interval (minutes)',
+        type: 'number', save: 'int', default: 60,
+        options: ['15', '30', '60', '120', '360', '720', '1440'],
+      },
+      { key: 'max_episodic_per_user', label: 'Max Episodic Entries per User', type: 'number', save: 'int', default: 200 },
+      { key: 'max_semantic_per_user', label: 'Max Semantic Entries per User', type: 'number', save: 'int', default: 500 },
+      { key: 'max_entity_per_user', label: 'Max Entity Entries per User', type: 'number', save: 'int', default: 100 },
+      { key: 'updated_at', label: 'Last Updated', readonly: true },
+    ],
+  },
   'compliance-rules': {
     singular: 'Compliance Rule', apiPath: 'admin/compliance-rules', listKey: 'compliance-rules',
     cols: ['name', 'rule_type', 'target_resource', 'action', 'enabled'],

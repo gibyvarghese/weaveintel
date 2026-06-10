@@ -31,6 +31,7 @@ import type {
   CollaborationSessionRow, ComplianceRuleRow, GraphConfigRow, PluginConfigRow,
   ScaffoldTemplateRow, RecipeConfigRow, WidgetConfigRow, ValidationRuleRow,
   SemanticMemoryRow, EntityMemoryRow,
+  EpisodicMemoryRow, ProceduralMemoryRow, WorkingMemorySnapshotRow, MemorySettingsRow,
   IdempotencyRecordRow,
   OAuthFlowStateRow,
   MemoryExtractionEventRow,
@@ -4171,6 +4172,227 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare(
       'SELECT * FROM memory_extraction_events ORDER BY created_at DESC LIMIT ? OFFSET ?',
     ).all(opts.limit ?? 50, opts.offset ?? 0) as MemoryExtractionEventRow[];
+  }
+
+  // ─── Episodic Memory ────────────────────────────────────────
+
+  async saveEpisodicMemory(e: { id: string; userId: string; chatId?: string; tenantId?: string; messageRole?: string; content: string; importance?: number; tags?: string[] }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO episodic_memory (id, user_id, chat_id, tenant_id, message_role, content, importance, tags, consolidated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+    ).run(
+      e.id, e.userId, e.chatId ?? null, e.tenantId ?? null,
+      e.messageRole ?? 'user', e.content,
+      e.importance ?? 0.5,
+      e.tags && e.tags.length > 0 ? JSON.stringify(e.tags) : null,
+    );
+  }
+
+  async listEpisodicMemory(userId: string, limit = 50): Promise<EpisodicMemoryRow[]> {
+    return this.d.prepare(
+      'SELECT * FROM episodic_memory WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
+    ).all(userId, limit) as EpisodicMemoryRow[];
+  }
+
+  async listUnconsolidatedEpisodic(userId: string, limit = 100): Promise<EpisodicMemoryRow[]> {
+    return this.d.prepare(
+      'SELECT * FROM episodic_memory WHERE user_id = ? AND consolidated = 0 ORDER BY created_at ASC LIMIT ?',
+    ).all(userId, limit) as EpisodicMemoryRow[];
+  }
+
+  async markEpisodicConsolidated(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const placeholders = ids.map(() => '?').join(',');
+    this.d.prepare(`UPDATE episodic_memory SET consolidated = 1 WHERE id IN (${placeholders})`).run(...ids);
+  }
+
+  async deleteEpisodicMemory(id: string, userId: string): Promise<void> {
+    this.d.prepare('DELETE FROM episodic_memory WHERE id = ? AND user_id = ?').run(id, userId);
+  }
+
+  async clearUserEpisodicMemory(userId: string): Promise<void> {
+    this.d.prepare('DELETE FROM episodic_memory WHERE user_id = ?').run(userId);
+  }
+
+  async trimEpisodicMemoryForUser(userId: string, maxEntries: number): Promise<void> {
+    const count = (this.d.prepare('SELECT COUNT(*) AS n FROM episodic_memory WHERE user_id = ?').get(userId) as { n: number }).n;
+    if (count <= maxEntries) return;
+    const excess = count - maxEntries;
+    const oldest = this.d.prepare(
+      'SELECT id FROM episodic_memory WHERE user_id = ? ORDER BY created_at ASC LIMIT ?',
+    ).all(userId, excess) as { id: string }[];
+    const stmt = this.d.prepare('DELETE FROM episodic_memory WHERE id = ?');
+    for (const row of oldest) stmt.run(row.id);
+  }
+
+  async listAllEpisodicMemory(opts: { userId?: string; limit?: number; offset?: number }): Promise<EpisodicMemoryRow[]> {
+    if (opts.userId) {
+      return this.d.prepare(
+        'SELECT * FROM episodic_memory WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      ).all(opts.userId, opts.limit ?? 50, opts.offset ?? 0) as EpisodicMemoryRow[];
+    }
+    return this.d.prepare(
+      'SELECT * FROM episodic_memory ORDER BY created_at DESC LIMIT ? OFFSET ?',
+    ).all(opts.limit ?? 50, opts.offset ?? 0) as EpisodicMemoryRow[];
+  }
+
+  // ─── Procedural Memory ──────────────────────────────────────
+
+  async createProceduralMemory(p: Omit<ProceduralMemoryRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO procedural_memory
+         (id, user_id, agent_id, instruction_delta, proposed_by, status, confidence, human_task_id, applied_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.user_id, p.agent_id, p.instruction_delta, p.proposed_by, p.status, p.confidence, p.human_task_id ?? null, p.applied_at ?? null);
+  }
+
+  async getProceduralMemory(id: string): Promise<ProceduralMemoryRow | null> {
+    return this.d.prepare('SELECT * FROM procedural_memory WHERE id = ?').get(id) as ProceduralMemoryRow | null;
+  }
+
+  async listProceduralMemory(userId: string, status?: string): Promise<ProceduralMemoryRow[]> {
+    if (status) {
+      return this.d.prepare(
+        'SELECT * FROM procedural_memory WHERE user_id = ? AND status = ? ORDER BY created_at DESC',
+      ).all(userId, status) as ProceduralMemoryRow[];
+    }
+    return this.d.prepare(
+      'SELECT * FROM procedural_memory WHERE user_id = ? ORDER BY created_at DESC',
+    ).all(userId) as ProceduralMemoryRow[];
+  }
+
+  async listAllProceduralMemory(opts: { userId?: string; status?: string; limit?: number; offset?: number }): Promise<ProceduralMemoryRow[]> {
+    const parts: string[] = [];
+    const vals: unknown[] = [];
+    if (opts.userId) { parts.push('user_id = ?'); vals.push(opts.userId); }
+    if (opts.status) { parts.push('status = ?'); vals.push(opts.status); }
+    const where = parts.length > 0 ? `WHERE ${parts.join(' AND ')}` : '';
+    vals.push(opts.limit ?? 50, opts.offset ?? 0);
+    return this.d.prepare(
+      `SELECT * FROM procedural_memory ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    ).all(...vals) as ProceduralMemoryRow[];
+  }
+
+  async updateProceduralMemoryStatus(id: string, status: string, appliedAt?: string): Promise<void> {
+    if (appliedAt) {
+      this.d.prepare(
+        "UPDATE procedural_memory SET status = ?, applied_at = ?, updated_at = datetime('now') WHERE id = ?",
+      ).run(status, appliedAt, id);
+    } else {
+      this.d.prepare(
+        "UPDATE procedural_memory SET status = ?, updated_at = datetime('now') WHERE id = ?",
+      ).run(status, id);
+    }
+  }
+
+  async deleteProceduralMemory(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM procedural_memory WHERE id = ?').run(id);
+  }
+
+  async listAppliedProcedural(userId: string, agentId?: string): Promise<ProceduralMemoryRow[]> {
+    if (agentId) {
+      return this.d.prepare(
+        "SELECT * FROM procedural_memory WHERE user_id = ? AND agent_id = ? AND status = 'applied' ORDER BY applied_at DESC",
+      ).all(userId, agentId) as ProceduralMemoryRow[];
+    }
+    return this.d.prepare(
+      "SELECT * FROM procedural_memory WHERE user_id = ? AND status = 'applied' ORDER BY applied_at DESC",
+    ).all(userId) as ProceduralMemoryRow[];
+  }
+
+  // ─── Working Memory Snapshots ────────────────────────────────
+
+  async saveWorkingMemorySnapshot(s: { id: string; userId: string; chatId?: string; agentId?: string; content: Record<string, unknown> }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO working_memory_snapshots (id, user_id, chat_id, agent_id, content)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(s.id, s.userId, s.chatId ?? null, s.agentId ?? 'default', JSON.stringify(s.content));
+  }
+
+  async getLatestWorkingMemory(userId: string, agentId?: string): Promise<WorkingMemorySnapshotRow | null> {
+    if (agentId) {
+      return this.d.prepare(
+        'SELECT * FROM working_memory_snapshots WHERE user_id = ? AND agent_id = ? ORDER BY created_at DESC LIMIT 1',
+      ).get(userId, agentId) as WorkingMemorySnapshotRow | null;
+    }
+    return this.d.prepare(
+      'SELECT * FROM working_memory_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT 1',
+    ).get(userId) as WorkingMemorySnapshotRow | null;
+  }
+
+  async listWorkingMemorySnapshots(userId: string, limit = 20): Promise<WorkingMemorySnapshotRow[]> {
+    return this.d.prepare(
+      'SELECT * FROM working_memory_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
+    ).all(userId, limit) as WorkingMemorySnapshotRow[];
+  }
+
+  async listAllWorkingMemorySnapshots(opts: { userId?: string; limit?: number; offset?: number }): Promise<WorkingMemorySnapshotRow[]> {
+    if (opts.userId) {
+      return this.d.prepare(
+        'SELECT * FROM working_memory_snapshots WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
+      ).all(opts.userId, opts.limit ?? 50, opts.offset ?? 0) as WorkingMemorySnapshotRow[];
+    }
+    return this.d.prepare(
+      'SELECT * FROM working_memory_snapshots ORDER BY created_at DESC LIMIT ? OFFSET ?',
+    ).all(opts.limit ?? 50, opts.offset ?? 0) as WorkingMemorySnapshotRow[];
+  }
+
+  async deleteWorkingMemorySnapshot(id: string, userId: string): Promise<void> {
+    this.d.prepare('DELETE FROM working_memory_snapshots WHERE id = ? AND user_id = ?').run(id, userId);
+  }
+
+  async clearUserWorkingMemory(userId: string): Promise<void> {
+    this.d.prepare('DELETE FROM working_memory_snapshots WHERE user_id = ?').run(userId);
+  }
+
+  // ─── Memory Settings ────────────────────────────────────────
+
+  async getMemorySettings(tenantId?: string): Promise<MemorySettingsRow | null> {
+    // Try tenant-specific first; fall back to global (tenant_id IS NULL)
+    if (tenantId) {
+      const row = this.d.prepare(
+        'SELECT * FROM memory_settings WHERE tenant_id = ?',
+      ).get(tenantId) as MemorySettingsRow | null;
+      if (row) return row;
+    }
+    return this.d.prepare(
+      'SELECT * FROM memory_settings WHERE tenant_id IS NULL LIMIT 1',
+    ).get() as MemorySettingsRow | null;
+  }
+
+  async upsertMemorySettings(s: Omit<MemorySettingsRow, 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO memory_settings
+         (id, tenant_id, enable_semantic, enable_entity, enable_episodic,
+          enable_procedural, enable_working, auto_extract_on_turn,
+          consolidation_enabled, consolidation_interval_min,
+          max_episodic_per_user, max_semantic_per_user, max_entity_per_user,
+          updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(id) DO UPDATE SET
+         enable_semantic = excluded.enable_semantic,
+         enable_entity = excluded.enable_entity,
+         enable_episodic = excluded.enable_episodic,
+         enable_procedural = excluded.enable_procedural,
+         enable_working = excluded.enable_working,
+         auto_extract_on_turn = excluded.auto_extract_on_turn,
+         consolidation_enabled = excluded.consolidation_enabled,
+         consolidation_interval_min = excluded.consolidation_interval_min,
+         max_episodic_per_user = excluded.max_episodic_per_user,
+         max_semantic_per_user = excluded.max_semantic_per_user,
+         max_entity_per_user = excluded.max_entity_per_user,
+         updated_at = datetime('now')`,
+    ).run(
+      s.id, s.tenant_id ?? null,
+      s.enable_semantic ? 1 : 0, s.enable_entity ? 1 : 0, s.enable_episodic ? 1 : 0,
+      s.enable_procedural ? 1 : 0, s.enable_working ? 1 : 0, s.auto_extract_on_turn ? 1 : 0,
+      s.consolidation_enabled ? 1 : 0, s.consolidation_interval_min,
+      s.max_episodic_per_user, s.max_semantic_per_user, s.max_entity_per_user,
+    );
+  }
+
+  async listMemorySettings(): Promise<MemorySettingsRow[]> {
+    return this.d.prepare('SELECT * FROM memory_settings ORDER BY tenant_id ASC NULLS FIRST').all() as MemorySettingsRow[];
   }
 
   // ─── Website Credentials (Browser Auth Vault) ──────────────

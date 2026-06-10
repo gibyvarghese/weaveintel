@@ -818,6 +818,15 @@ export interface ToolRegistryOptions {
   memoryListEntities?: (args: { userId: string }) => Promise<{
     entities: Array<{ entityType: string; entityName: string; facts: Record<string, unknown>; confidence: number }>;
   }>;
+  memoryListEpisodes?: (args: { userId: string; limit?: number }) => Promise<{
+    episodes: Array<{ id: string; messageRole: string; content: string; importance: number; createdAt: string }>;
+  }>;
+  memoryGetProfile?: (args: { userId: string }) => Promise<{
+    entities: Array<{ entityType: string; entityName: string; facts: Record<string, unknown>; confidence: number }>;
+    semantic: Array<{ content: string; memoryType: string; source: string }>;
+    episodic: Array<{ messageRole: string; content: string; createdAt: string }>;
+    procedural: Array<{ instructionDelta: string; appliedAt: string }>;
+  }>;
   /** Tool keys disabled in the operator-managed catalog. Populated from db.listEnabledToolCatalog(). */
   disabledToolKeys?: ReadonlySet<string>;
   /** Policy resolver for Phase 2 enforcement (rate limits, approval gates, risk level gates). */
@@ -1061,6 +1070,45 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     tags: ['memory', 'profile'],
   });
 
+  const memoryListEpisodesTool = weaveTool({
+    name: 'memory_list_episodes',
+    description: 'List the most recent episodic memory events for the current user — a timestamped log of what was said in past conversation turns. Useful for recalling context from previous sessions.',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: { type: 'number', description: 'Max events to return (default: 10, max: 30)' },
+      },
+      required: [],
+    },
+    execute: async (args: { limit?: number }) => {
+      if (!opts?.memoryListEpisodes || !opts.currentUserId) {
+        return { content: 'Episodic memory is unavailable in this execution context.', isError: true };
+      }
+      const limit = Math.max(1, Math.min(30, Number(args.limit ?? 10)));
+      const result = await opts.memoryListEpisodes({ userId: opts.currentUserId, limit });
+      return JSON.stringify({ episodeCount: result.episodes.length, episodes: result.episodes }, null, 2);
+    },
+    tags: ['memory', 'episodic', 'history'],
+  });
+
+  const memoryGetProfileTool = weaveTool({
+    name: 'memory_get_profile',
+    description: 'Return a comprehensive profile of the current user assembled from all memory stores — entity facts, semantic memories, recent episodes, and applied procedural instructions. Use this to build a full picture of who the user is before personalising a response.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+    },
+    execute: async () => {
+      if (!opts?.memoryGetProfile || !opts.currentUserId) {
+        return { content: 'User profile memory is unavailable in this execution context.', isError: true };
+      }
+      const profile = await opts.memoryGetProfile({ userId: opts.currentUserId });
+      return JSON.stringify(profile, null, 2);
+    },
+    tags: ['memory', 'profile', 'identity'],
+  });
+
   const scopedTools: Record<string, Tool> = {
     ...BUILTIN_TOOLS,
     ...createTimeToolMap(opts?.defaultTimezone, opts?.temporalStore ?? defaultTemporalStore),
@@ -1070,6 +1118,8 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     memory_remember: memoryRememberTool,
     memory_forget: memoryForgetTool,
     memory_list_entities: memoryListEntitiesTool,
+    memory_list_episodes: memoryListEpisodesTool,
+    memory_get_profile: memoryGetProfileTool,
   };
   for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {
     // Skip tools disabled in the operator-managed tool catalog

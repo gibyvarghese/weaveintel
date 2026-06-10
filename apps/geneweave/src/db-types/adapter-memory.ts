@@ -1,4 +1,4 @@
-import type { SemanticMemoryRow, EntityMemoryRow, MemoryExtractionEventRow, WebsiteCredentialRow, SSOLinkedAccountRow } from './memory.js';
+import type { SemanticMemoryRow, EntityMemoryRow, MemoryExtractionEventRow, WebsiteCredentialRow, SSOLinkedAccountRow, EpisodicMemoryRow, ProceduralMemoryRow, WorkingMemorySnapshotRow, MemorySettingsRow } from './memory.js';
 
 export interface IMemoryStore {
   // Website Credentials
@@ -39,4 +39,36 @@ export interface IMemoryStore {
   getMemoryExtractionEvent(id: string): Promise<MemoryExtractionEventRow | null>;
   listMemoryExtractionEvents(chatId?: string, limit?: number): Promise<MemoryExtractionEventRow[]>;
   listAllMemoryExtractionEvents(opts: { userId?: string; limit?: number; offset?: number }): Promise<MemoryExtractionEventRow[]>;
+
+  // Episodic Memory
+  saveEpisodicMemory(e: { id: string; userId: string; chatId?: string; tenantId?: string; messageRole?: string; content: string; importance?: number; tags?: string[] }): Promise<void>;
+  listEpisodicMemory(userId: string, limit?: number): Promise<EpisodicMemoryRow[]>;
+  listUnconsolidatedEpisodic(userId: string, limit?: number): Promise<EpisodicMemoryRow[]>;
+  markEpisodicConsolidated(ids: string[]): Promise<void>;
+  deleteEpisodicMemory(id: string, userId: string): Promise<void>;
+  clearUserEpisodicMemory(userId: string): Promise<void>;
+  trimEpisodicMemoryForUser(userId: string, maxEntries: number): Promise<void>;
+  listAllEpisodicMemory(opts: { userId?: string; limit?: number; offset?: number }): Promise<EpisodicMemoryRow[]>;
+
+  // Procedural Memory
+  createProceduralMemory(p: Omit<ProceduralMemoryRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getProceduralMemory(id: string): Promise<ProceduralMemoryRow | null>;
+  listProceduralMemory(userId: string, status?: string): Promise<ProceduralMemoryRow[]>;
+  listAllProceduralMemory(opts: { userId?: string; status?: string; limit?: number; offset?: number }): Promise<ProceduralMemoryRow[]>;
+  updateProceduralMemoryStatus(id: string, status: string, appliedAt?: string): Promise<void>;
+  deleteProceduralMemory(id: string): Promise<void>;
+  listAppliedProcedural(userId: string, agentId?: string): Promise<ProceduralMemoryRow[]>;
+
+  // Working Memory Snapshots
+  saveWorkingMemorySnapshot(s: { id: string; userId: string; chatId?: string; agentId?: string; content: Record<string, unknown> }): Promise<void>;
+  getLatestWorkingMemory(userId: string, agentId?: string): Promise<WorkingMemorySnapshotRow | null>;
+  listWorkingMemorySnapshots(userId: string, limit?: number): Promise<WorkingMemorySnapshotRow[]>;
+  listAllWorkingMemorySnapshots(opts: { userId?: string; limit?: number; offset?: number }): Promise<WorkingMemorySnapshotRow[]>;
+  deleteWorkingMemorySnapshot(id: string, userId: string): Promise<void>;
+  clearUserWorkingMemory(userId: string): Promise<void>;
+
+  // Memory Settings
+  getMemorySettings(tenantId?: string): Promise<MemorySettingsRow | null>;
+  upsertMemorySettings(s: Omit<MemorySettingsRow, 'updated_at'>): Promise<void>;
+  listMemorySettings(): Promise<MemorySettingsRow[]>;
 }

@@ -303,6 +303,37 @@ function tryParseJson<T>(s: string): T | null {
   try { return JSON.parse(s) as T; } catch { return null; }
 }
 
+/**
+ * Run `content` through the memory governance policy for `memType`.
+ *
+ * - Calls `shouldStore()` unless `redactOnly` is true (episodic turns must
+ *   always be captured — only redaction is applied there).
+ * - Calls `beforeStore()` to scrub any redact-pattern matches.
+ *
+ * Returns `{ blocked: true }` when a block rule matched, or
+ * `{ blocked: false, content: redactedContent }` otherwise.
+ */
+export async function applyGovernanceCheck(
+  db: DatabaseAdapter,
+  ctx: ExecutionContext,
+  content: string,
+  memType: 'semantic' | 'episodic' | 'entity' | 'working' | 'procedural' | 'conversation',
+  options?: { redactOnly?: boolean },
+): Promise<{ blocked: boolean; content: string }> {
+  const govRows = await db.listMemoryGovernance();
+  const govRules = toGovernanceRules(govRows);
+  const policy = weaveGovernancePolicy(govRules);
+  const entry = { id: 'gov-check', type: memType as 'semantic', content, metadata: {} as Record<string, unknown>, createdAt: new Date().toISOString() };
+  if (!options?.redactOnly) {
+    const allowed = await policy.shouldStore(ctx, entry);
+    if (!allowed) return { blocked: true, content };
+  }
+  const redacted = policy.beforeStore
+    ? (await policy.beforeStore(ctx, entry)).content
+    : content;
+  return { blocked: false, content: redacted };
+}
+
 /** Parse ISO 8601 duration (e.g. P180D) to milliseconds. Returns undefined if unparseable. */
 function parseIsoDurationMs(duration: string | undefined): number | undefined {
   if (!duration) return undefined;
@@ -332,17 +363,67 @@ export async function saveToMemory(
   chatId: string,
   userContent: string,
   assistantContent: string,
+  tenantId?: string,
 ): Promise<void> {
   const memBackend = getActiveSemanticMemoryBackend();
 
-  // ── Load extraction rules and governance policy ──────────────────────────
-  const [rules, govRows] = await Promise.all([
+  // ── Load settings, extraction rules and governance policy ───────────────
+  const [settings, rules, govRows] = await Promise.all([
+    db.getMemorySettings(tenantId),
     loadExtractionRules(db),
     db.listMemoryGovernance(),
   ]);
 
+  // Short-circuit if all extraction is disabled for this tenant
+  if (settings && !settings.auto_extract_on_turn) return;
+
   const govRules = toGovernanceRules(govRows);
   const policy = weaveGovernancePolicy(govRules);
+
+  // ── Save episodic events (raw turn log) ──────────────────────────────────
+  if (!settings || settings.enable_episodic) {
+    try {
+      if (userContent.length > 2) {
+        // Redact PII/secrets before persisting — never block episodic turns
+        const rawUser = userContent.slice(0, 1200);
+        const userEntry = { id: 'ep', type: 'episodic' as const, content: rawUser, metadata: {} as Record<string, unknown>, createdAt: new Date().toISOString() };
+        const redactedUser = policy.beforeStore ? (await policy.beforeStore(ctx, userEntry)).content : rawUser;
+        await db.saveEpisodicMemory({
+          id: newUUIDv7(),
+          userId,
+          chatId,
+          tenantId,
+          messageRole: 'user',
+          content: redactedUser,
+          importance: 0.5,
+          tags: ['turn'],
+        });
+      }
+      if (assistantContent.length > 10) {
+        const rawAssistant = assistantContent.slice(0, 1200);
+        const assistantEntry = { id: 'ep', type: 'episodic' as const, content: rawAssistant, metadata: {} as Record<string, unknown>, createdAt: new Date().toISOString() };
+        const redactedAssistant = policy.beforeStore ? (await policy.beforeStore(ctx, assistantEntry)).content : rawAssistant;
+        await db.saveEpisodicMemory({
+          id: newUUIDv7(),
+          userId,
+          chatId,
+          tenantId,
+          messageRole: 'assistant',
+          content: redactedAssistant,
+          importance: 0.4,
+          tags: ['turn'],
+        });
+      }
+      // Enforce episodic retention cap
+      const maxEpisodic = settings?.max_episodic_per_user ?? 200;
+      await db.trimEpisodicMemoryForUser(userId, maxEpisodic);
+    } catch { /* episodic save is non-critical */ }
+  }
+
+  // Skip entity + semantic extraction if disabled
+  if (settings && (!settings.enable_semantic && !settings.enable_entity)) {
+    return;
+  }
 
   const extraction = await runHybridMemoryExtraction({
     ctx,
@@ -366,47 +447,58 @@ export async function saveToMemory(
   }
 
   // ── Save semantic memories with governance gating ────────────────────────
-  // MemoryEntry.type must be a core MemoryType; governance rules seeded with
-  // null memory_types (global) will match regardless of type value.
-  if (extraction.selfDisclosure && userContent.length > 5) {
-    const rawContent = userContent.slice(0, 600);
-    const entryId = newUUIDv7();
-    const govEntry = { id: entryId, type: 'semantic' as const, content: rawContent, metadata: {}, createdAt: new Date().toISOString(), userId };
-    const allowed = await policy.shouldStore(ctx, govEntry);
-    if (allowed) {
-      const finalContent = policy.beforeStore
-        ? (await policy.beforeStore(ctx, govEntry)).content
-        : rawContent;
-      const embedding = await genEmbedding(finalContent);
-      const saveOpts = { id: entryId, userId, chatId, content: finalContent, memoryType: 'user_fact', source: 'user', embedding };
-      await (memBackend ? memBackend.save(ctx, saveOpts) : db.saveSemanticMemory(saveOpts));
+  if (!settings || settings.enable_semantic) {
+    if (extraction.selfDisclosure && userContent.length > 5) {
+      const rawContent = userContent.slice(0, 600);
+      const entryId = newUUIDv7();
+      const govEntry = { id: entryId, type: 'semantic' as const, content: rawContent, metadata: {}, createdAt: new Date().toISOString(), userId };
+      const allowed = await policy.shouldStore(ctx, govEntry);
+      if (allowed) {
+        const finalContent = policy.beforeStore
+          ? (await policy.beforeStore(ctx, govEntry)).content
+          : rawContent;
+        const embedding = await genEmbedding(finalContent);
+        const saveOpts = { id: entryId, userId, chatId, content: finalContent, memoryType: 'user_fact', source: 'user', embedding };
+        await (memBackend ? memBackend.save(ctx, saveOpts) : db.saveSemanticMemory(saveOpts));
+      }
     }
-  }
-  if (assistantContent.length > 100) {
-    const rawContent = assistantContent.slice(0, 600);
-    const entryId = newUUIDv7();
-    const govEntry = { id: entryId, type: 'episodic' as const, content: rawContent, metadata: {}, createdAt: new Date().toISOString(), userId };
-    const allowed = await policy.shouldStore(ctx, govEntry);
-    if (allowed) {
-      const finalContent = policy.beforeStore
-        ? (await policy.beforeStore(ctx, govEntry)).content
-        : rawContent;
-      const embedding = await genEmbedding(finalContent);
-      const saveOpts = { id: entryId, userId, chatId, content: finalContent, memoryType: 'summary', source: 'assistant', embedding };
-      await (memBackend ? memBackend.save(ctx, saveOpts) : db.saveSemanticMemory(saveOpts));
+    if (assistantContent.length > 100) {
+      const rawContent = assistantContent.slice(0, 600);
+      const entryId = newUUIDv7();
+      const govEntry = { id: entryId, type: 'episodic' as const, content: rawContent, metadata: {}, createdAt: new Date().toISOString(), userId };
+      const allowed = await policy.shouldStore(ctx, govEntry);
+      if (allowed) {
+        const finalContent = policy.beforeStore
+          ? (await policy.beforeStore(ctx, govEntry)).content
+          : rawContent;
+        const embedding = await genEmbedding(finalContent);
+        const saveOpts = { id: entryId, userId, chatId, content: finalContent, memoryType: 'summary', source: 'assistant', embedding };
+        await (memBackend ? memBackend.save(ctx, saveOpts) : db.saveSemanticMemory(saveOpts));
+      }
     }
   }
 
-  for (const e of extraction.entities) {
-    await db.upsertEntity({
-      userId,
-      entityName: e.name,
-      entityType: e.type,
-      facts: e.facts,
-      confidence: e.confidence,
-      source: e.source,
-      chatId,
-    });
+  // ── Save entity memories ─────────────────────────────────────────────────
+  if (!settings || settings.enable_entity) {
+    for (const e of extraction.entities) {
+      // Governance block check: skip entities whose content matches block rules
+      // (e.g. "No Secrets in Entity Memory" blocks api_key/password/bearer patterns;
+      // "Entity PII Block" blocks SSN/credit-card patterns seeded by m37).
+      const entityContent = `${e.name} ${e.type} ${JSON.stringify(e.facts ?? {})}`;
+      const entityEntry = { id: 'eg', type: 'entity' as const, content: entityContent, metadata: {} as Record<string, unknown>, createdAt: new Date().toISOString() };
+      const entityAllowed = await policy.shouldStore(ctx, entityEntry);
+      if (!entityAllowed) continue;
+
+      await db.upsertEntity({
+        userId,
+        entityName: e.name,
+        entityType: e.type,
+        facts: e.facts,
+        confidence: e.confidence,
+        source: e.source,
+        chatId,
+      });
+    }
   }
 
   const regexEntitiesCount = extraction.entities.filter((e) => e.source === 'regex').length;
@@ -424,19 +516,64 @@ export async function saveToMemory(
 
   // ── Enforce retention limits (async, non-blocking on errors) ─────────────
   const retentionPolicy = policy.retentionPolicy;
-  if (retentionPolicy) {
-    try {
-      if (retentionPolicy.maxEntries) {
-        await db.trimSemanticMemoryForUser(userId, retentionPolicy.maxEntries);
-        await db.trimEntityMemoryForUser(userId, retentionPolicy.maxEntries);
+  const maxSemantic = settings?.max_semantic_per_user;
+  const maxEntity = settings?.max_entity_per_user;
+  try {
+    if (retentionPolicy?.maxEntries || maxSemantic) {
+      const cap = Math.min(retentionPolicy?.maxEntries ?? Infinity, maxSemantic ?? Infinity);
+      if (isFinite(cap)) {
+        await db.trimSemanticMemoryForUser(userId, cap);
+        await db.trimEntityMemoryForUser(userId, maxEntity ?? 100);
       }
-      if (retentionPolicy.maxAge) {
-        const cutoffMs = parseIsoDurationMs(retentionPolicy.maxAge);
-        if (cutoffMs !== undefined) {
-          const cutoff = Date.now() - cutoffMs;
-          await db.purgeSemanticMemoryOlderThan(userId, cutoff);
-        }
+    }
+    if (retentionPolicy?.maxAge) {
+      const cutoffMs = parseIsoDurationMs(retentionPolicy.maxAge);
+      if (cutoffMs !== undefined) {
+        await db.purgeSemanticMemoryOlderThan(userId, Date.now() - cutoffMs);
       }
-    } catch { /* retention enforcement is best-effort */ }
+    }
+  } catch { /* retention enforcement is best-effort */ }
+}
+
+/**
+ * Load applied procedural memory instruction deltas for a user+agent.
+ * Returns a string to prepend to the system prompt, or null if none.
+ */
+export async function loadProceduralInstructions(
+  db: DatabaseAdapter,
+  userId: string,
+  agentId = 'default',
+): Promise<string | null> {
+  try {
+    const entries = await db.listAppliedProcedural(userId, agentId);
+    if (entries.length === 0) return null;
+    const deltas = entries.map((e) => `• ${e.instruction_delta}`).join('\n');
+    return `[Personalised agent instructions for this user]\n${deltas}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Build a compact episodic context snippet for inclusion in the system prompt.
+ * Returns the N most recent episodes as a brief timeline.
+ */
+export async function buildEpisodicContext(
+  db: DatabaseAdapter,
+  userId: string,
+  limit = 6,
+): Promise<string | null> {
+  try {
+    const episodes = await db.listEpisodicMemory(userId, limit * 2);
+    if (episodes.length === 0) return null;
+    // Take the most recent episodes up to limit
+    const recent = episodes.slice(0, limit);
+    const lines = recent.reverse().map((ep) => {
+      const role = ep.message_role === 'user' ? 'User' : 'Assistant';
+      return `  [${ep.created_at.slice(0, 16)}] ${role}: ${ep.content.slice(0, 120)}${ep.content.length > 120 ? '…' : ''}`;
+    });
+    return `[Recent conversation history]\n${lines.join('\n')}`;
+  } catch {
+    return null;
   }
 }

@@ -59,6 +59,7 @@ import {
   resolveIdentityRecallFromMemory,
   buildMemoryContext,
   saveToMemory,
+  applyGovernanceCheck,
 } from './chat-memory-utils.js';
 import { getActiveSemanticMemoryBackend } from './memory-pgvector.js';
 import { getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
@@ -629,21 +630,27 @@ export class ChatEngine {
       },
       memoryRemember: async ({ userId: rememberUserId, content, memoryType, source }) => {
         const { newUUIDv7 } = await import('@weaveintel/core');
-        const id = newUUIDv7();
         const memBackend = getActiveSemanticMemoryBackend();
         const trimmedContent = content.slice(0, 600);
+        // Governance gate: block prohibited content, redact PII before saving
+        const govResult = await applyGovernanceCheck(this.db, ctx, trimmedContent, 'semantic');
+        if (govResult.blocked) {
+          throw new Error('Memory governance policy blocked this content from being stored.');
+        }
+        const safeContent = govResult.content;
+        const id = newUUIDv7();
         let embedding: number[] | undefined;
         try {
           const embModel = getActiveGuardrailEmbeddingModel();
           if (embModel) {
-            const embRes = await embModel.embed(ctx, { input: [trimmedContent] });
+            const embRes = await embModel.embed(ctx, { input: [safeContent] });
             embedding = Array.from(embRes.embeddings[0] ?? []) as number[];
             if (embedding.length === 0) embedding = undefined;
           }
         } catch (embErr) {
           console.warn('[memory] memory_remember embedding failed:', String(embErr));
         }
-        const saveOpts = { id, userId: rememberUserId, content: trimmedContent, memoryType: memoryType ?? 'user_fact', source: source ?? 'user_requested', embedding };
+        const saveOpts = { id, userId: rememberUserId, content: safeContent, memoryType: memoryType ?? 'user_fact', source: source ?? 'user_requested', embedding };
         await (memBackend ? memBackend.save(ctx, saveOpts) : this.db.saveSemanticMemory(saveOpts));
         return { id };
       },
@@ -660,6 +667,37 @@ export class ChatEngine {
             facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
             confidence: e.confidence,
           })),
+        };
+      },
+      memoryListEpisodes: async ({ userId: epUserId, limit }) => {
+        const rows = await this.db.listEpisodicMemory(epUserId, Math.min(30, limit ?? 10));
+        return {
+          episodes: rows.map((r) => ({
+            id: r.id,
+            messageRole: r.message_role,
+            content: r.content,
+            importance: r.importance,
+            createdAt: r.created_at,
+          })),
+        };
+      },
+      memoryGetProfile: async ({ userId: profUserId }) => {
+        const [entityRows, semanticRows, episodicRows, proceduralRows] = await Promise.all([
+          this.db.listEntities(profUserId),
+          this.db.listSemanticMemory(profUserId, 20),
+          this.db.listEpisodicMemory(profUserId, 10),
+          this.db.listAppliedProcedural(profUserId),
+        ]);
+        return {
+          entities: entityRows.map((e) => ({
+            entityType: e.entity_type,
+            entityName: e.entity_name,
+            facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
+            confidence: e.confidence,
+          })),
+          semantic: semanticRows.map((m) => ({ content: m.content, memoryType: m.memory_type, source: m.source })),
+          episodic: episodicRows.map((ep) => ({ messageRole: ep.message_role, content: ep.content, createdAt: ep.created_at })),
+          procedural: proceduralRows.map((p) => ({ instructionDelta: p.instruction_delta, appliedAt: p.applied_at ?? '' })),
         };
       },
       disabledToolKeys,
@@ -880,21 +918,27 @@ export class ChatEngine {
       },
       memoryRemember: async ({ userId: rememberUserId, content, memoryType, source }) => {
         const { newUUIDv7 } = await import('@weaveintel/core');
-        const id = newUUIDv7();
         const memBackend = getActiveSemanticMemoryBackend();
         const trimmedContent = content.slice(0, 600);
+        // Governance gate: block prohibited content, redact PII before saving
+        const govResult = await applyGovernanceCheck(this.db, ctx, trimmedContent, 'semantic');
+        if (govResult.blocked) {
+          throw new Error('Memory governance policy blocked this content from being stored.');
+        }
+        const safeContent = govResult.content;
+        const id = newUUIDv7();
         let embedding: number[] | undefined;
         try {
           const embModel = getActiveGuardrailEmbeddingModel();
           if (embModel) {
-            const embRes = await embModel.embed(ctx, { input: [trimmedContent] });
+            const embRes = await embModel.embed(ctx, { input: [safeContent] });
             embedding = Array.from(embRes.embeddings[0] ?? []) as number[];
             if (embedding.length === 0) embedding = undefined;
           }
         } catch (embErr) {
           console.warn('[memory] memory_remember embedding failed:', String(embErr));
         }
-        const saveOpts = { id, userId: rememberUserId, content: trimmedContent, memoryType: memoryType ?? 'user_fact', source: source ?? 'user_requested', embedding };
+        const saveOpts = { id, userId: rememberUserId, content: safeContent, memoryType: memoryType ?? 'user_fact', source: source ?? 'user_requested', embedding };
         await (memBackend ? memBackend.save(ctx, saveOpts) : this.db.saveSemanticMemory(saveOpts));
         return { id };
       },
@@ -911,6 +955,37 @@ export class ChatEngine {
             facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
             confidence: e.confidence,
           })),
+        };
+      },
+      memoryListEpisodes: async ({ userId: epUserId, limit }) => {
+        const rows = await this.db.listEpisodicMemory(epUserId, Math.min(30, limit ?? 10));
+        return {
+          episodes: rows.map((r) => ({
+            id: r.id,
+            messageRole: r.message_role,
+            content: r.content,
+            importance: r.importance,
+            createdAt: r.created_at,
+          })),
+        };
+      },
+      memoryGetProfile: async ({ userId: profUserId }) => {
+        const [entityRows, semanticRows, episodicRows, proceduralRows] = await Promise.all([
+          this.db.listEntities(profUserId),
+          this.db.listSemanticMemory(profUserId, 20),
+          this.db.listEpisodicMemory(profUserId, 10),
+          this.db.listAppliedProcedural(profUserId),
+        ]);
+        return {
+          entities: entityRows.map((e) => ({
+            entityType: e.entity_type,
+            entityName: e.entity_name,
+            facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
+            confidence: e.confidence,
+          })),
+          semantic: semanticRows.map((m) => ({ content: m.content, memoryType: m.memory_type, source: m.source })),
+          episodic: episodicRows.map((ep) => ({ messageRole: ep.message_role, content: ep.content, createdAt: ep.created_at })),
+          procedural: proceduralRows.map((p) => ({ instructionDelta: p.instruction_delta, appliedAt: p.applied_at ?? '' })),
         };
       },
       disabledToolKeys,

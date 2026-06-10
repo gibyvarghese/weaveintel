@@ -72,7 +72,7 @@ export function registerSettingsRoutes(
       // For now, we replicate the policy here; ideally this would be imported
       const DEFAULT_TOOLS: Record<string, string[]> = {
         direct: [],
-        agent: ['datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'memory_recall', 'web_search', 'cse_run_code', 'cse_run_data_analysis', 'cse_session_status', 'cse_end_session', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume'],
+        agent: ['datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'memory_recall', 'memory_search', 'memory_remember', 'memory_forget', 'memory_list_entities', 'memory_list_episodes', 'memory_get_profile', 'web_search', 'cse_run_code', 'cse_run_data_analysis', 'cse_session_status', 'cse_end_session', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume'],
         supervisor: ['datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis'],
       };
       return DEFAULT_TOOLS[mode] ?? [];
@@ -89,6 +89,90 @@ export function registerSettingsRoutes(
       workers: body['workers'] ? JSON.stringify(body['workers']) : undefined,
     });
 
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // ── User memory routes — users manage their own memory ────
+
+  // GET /api/user/memory — returns all memory types for the authenticated user
+  router.get('/api/user/memory', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const url = new URL(req.url ?? '', 'http://localhost');
+    const limit = Math.min(100, parseInt(url.searchParams.get('limit') ?? '50', 10));
+    const [entities, semantic, episodic, procedural] = await Promise.all([
+      db.listEntities(auth.userId),
+      db.listSemanticMemory(auth.userId, limit),
+      db.listEpisodicMemory(auth.userId, limit),
+      db.listAppliedProcedural(auth.userId),
+    ]);
+    json(res, 200, {
+      entities: entities.map((e) => ({
+        id: e.id,
+        entityName: e.entity_name,
+        entityType: e.entity_type,
+        facts: (() => { try { return JSON.parse(e.facts) as Record<string, unknown>; } catch { return {}; } })(),
+        confidence: e.confidence,
+        source: e.source,
+        updatedAt: e.updated_at,
+      })),
+      semantic: semantic.map((m) => ({
+        id: m.id,
+        content: m.content,
+        memoryType: m.memory_type,
+        source: m.source,
+        createdAt: m.created_at,
+      })),
+      episodic: episodic.map((ep) => ({
+        id: ep.id,
+        messageRole: ep.message_role,
+        content: ep.content,
+        importance: ep.importance,
+        tags: (() => { try { return ep.tags ? JSON.parse(ep.tags) as string[] : []; } catch { return []; } })(),
+        consolidated: ep.consolidated === 1,
+        createdAt: ep.created_at,
+      })),
+      procedural: procedural.map((p) => ({
+        id: p.id,
+        agentId: p.agent_id,
+        instructionDelta: p.instruction_delta,
+        status: p.status,
+        confidence: p.confidence,
+        appliedAt: p.applied_at,
+        createdAt: p.created_at,
+      })),
+    });
+  });
+
+  // DELETE /api/user/memory/semantic/:id — user deletes a single semantic memory
+  router.del('/api/user/memory/semantic/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteSemanticMemory(params['id']!, auth.userId);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // DELETE /api/user/memory/entity/:entityName — user forgets an entity
+  router.del('/api/user/memory/entity/:entityName', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteEntity(auth.userId, decodeURIComponent(params['entityName']!));
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // DELETE /api/user/memory/episodic/:id — user removes an episodic event
+  router.del('/api/user/memory/episodic/:id', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await db.deleteEpisodicMemory(params['id']!, auth.userId);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
+
+  // DELETE /api/user/memory/all — full memory wipe (all types) for the user
+  router.del('/api/user/memory/all', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await Promise.all([
+      db.clearUserSemanticMemory(auth.userId),
+      db.clearUserEntityMemory(auth.userId),
+      db.clearUserEpisodicMemory(auth.userId),
+      db.clearUserWorkingMemory(auth.userId),
+    ]);
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 

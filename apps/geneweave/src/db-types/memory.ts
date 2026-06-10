@@ -1,4 +1,4 @@
-/** Semantic memory, entity memory, website credentials, and SSO linked account row types. */
+/** Semantic, entity, episodic, procedural, working, and credential memory row types. */
 
 export interface SemanticMemoryRow {
   id: string;
@@ -63,5 +63,58 @@ export interface SSOLinkedAccountRow {
   encryption_iv: string;
   status: string;                // active | expired | needs_reauth
   linked_at: string;
+  updated_at: string;
+}
+
+export interface EpisodicMemoryRow {
+  id: string;
+  user_id: string;
+  chat_id: string | null;
+  tenant_id: string | null;
+  message_role: string;   // 'user' | 'assistant'
+  content: string;
+  importance: number;     // 0–1 salience score
+  tags: string | null;    // JSON string[]
+  consolidated: number;   // 0 = pending consolidation, 1 = done
+  created_at: string;
+}
+
+export interface ProceduralMemoryRow {
+  id: string;
+  user_id: string;
+  agent_id: string;
+  instruction_delta: string;
+  proposed_by: string;          // 'consolidation-curator' | 'user-feedback' | 'admin'
+  status: string;               // 'proposed' | 'approved' | 'rejected' | 'applied'
+  confidence: number;
+  human_task_id: string | null;
+  applied_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkingMemorySnapshotRow {
+  id: string;
+  user_id: string;
+  chat_id: string | null;
+  agent_id: string;
+  content: string;    // JSON — the agent's scratch state
+  created_at: string;
+}
+
+export interface MemorySettingsRow {
+  id: string;
+  tenant_id: string | null;       // NULL = global default
+  enable_semantic: number;
+  enable_entity: number;
+  enable_episodic: number;
+  enable_procedural: number;
+  enable_working: number;
+  auto_extract_on_turn: number;
+  consolidation_enabled: number;
+  consolidation_interval_min: number;
+  max_episodic_per_user: number;
+  max_semantic_per_user: number;
+  max_entity_per_user: number;
   updated_at: string;
 }

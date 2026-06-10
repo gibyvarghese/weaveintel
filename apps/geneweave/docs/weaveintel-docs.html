@@ -258,6 +258,14 @@
       <div class="navhead"><span class="dot"></span>Knowledge &amp; retrieval</div>
       <a href="#retrieval">RAG &amp; retrieval</a>
       <a href="#memory">Memory</a>
+      <a href="#memory-types" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Types &amp; when to use</a>
+      <a href="#memory-episodic" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Episodic &amp; consolidation</a>
+      <a href="#memory-bitemporal" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Bi-temporal facts</a>
+      <a href="#memory-importance" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Importance &amp; compaction</a>
+      <a href="#memory-hybrid" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Hybrid retrieval (RRF)</a>
+      <a href="#memory-procedural" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Procedural memory</a>
+      <a href="#memory-graph" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Graph-backed retrieval</a>
+      <a href="#memory-governance" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Governance &amp; retention</a>
       <a href="#graph">Knowledge graph</a>
       <a href="#extraction">Document extraction</a>
       <a href="#cache">Semantic cache</a>
@@ -310,6 +318,13 @@
       <a href="#geneweave-governance" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Governance</a>
       <a href="#geneweave-integrations" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Integrations</a>
       <a href="#geneweave-platform" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Platform config</a>
+      <a href="#geneweave-memory" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Memory system</a>
+      <a href="#geneweave-memory-types" style="font-size:11.8px;padding-left:36px;color:var(--fg3)">· Types &amp; DB schema</a>
+      <a href="#geneweave-memory-pipeline" style="font-size:11.8px;padding-left:36px;color:var(--fg3)">· Save pipeline</a>
+      <a href="#geneweave-memory-governance" style="font-size:11.8px;padding-left:36px;color:var(--fg3)">· Governance &amp; defense-in-depth</a>
+      <a href="#geneweave-memory-tools" style="font-size:11.8px;padding-left:36px;color:var(--fg3)">· Agent tools</a>
+      <a href="#geneweave-memory-api" style="font-size:11.8px;padding-left:36px;color:var(--fg3)">· Admin &amp; user APIs</a>
+      <a href="#geneweave-memory-settings" style="font-size:11.8px;padding-left:36px;color:var(--fg3)">· Settings &amp; pgvector</a>
       <a href="#geneweave-live-mesh" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Live Mesh</a>
       <a href="#geneweave-live-runtime" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Live Runtime</a>
       <a href="#geneweave-kaggle" style="font-size:12.8px;padding-left:22px;color:var(--fg3)">↳ Kaggle</a>
@@ -1276,24 +1291,523 @@ bus.<span class="tk-f">register</span>(<span class="tk-s">'billing'</span>, <spa
 
 <!-- ===================== MEMORY ===================== -->
 <section id="memory">
-  <h3>@weaveintel/memory — conversation, semantic, entity</h3>
-  <div class="meta-row"><span class="pkgtag">@weaveintel/memory</span></div>
-  <p><strong>What it does.</strong> Three complementary memory types plus a governance layer. <code>weaveConversationMemory({ maxHistory })</code> is a sliding window of chat messages. <code>weaveSemanticMemory(embeddingModel)</code> stores and recalls by embedding similarity for long-term recall. <code>weaveEntityMemory()</code> is a structured key/value store of facts about named entities. On top sit provenance tracking, deduplication, correction, expiry/retention (with <code>forgetUser</code> / <code>forgetSession</code> for GDPR-style deletion), working memory with context compressors, and a hybrid LLM+rules extraction pass. Persistent backends ship for SQLite, Postgres, Redis, MongoDB and cloud NoSQL.</p>
-  <p><strong>When to use which.</strong> Conversation memory for "remember this chat." Semantic memory for "remember everything this user ever told me and surface what's relevant." Entity memory for "remember that Acme's renewal date is March." They compose — a real assistant often uses all three, governed by retention rules so memory doesn't become an unbounded liability.</p>
+  <h3>@weaveintel/memory — the complete memory system</h3>
+  <div class="meta-row"><span class="pkgtag">@weaveintel/memory</span><span class="pkgtag">@weaveintel/graph</span><span class="pkgtag">@weaveintel/human-tasks</span></div>
+  <p><strong>What it does.</strong> A multi-layered, production-ready memory system that spans six complementary types — conversation, episodic, semantic, entity, working, and procedural — backed by in-memory, SQLite, pgvector, Redis, MongoDB and cloud-NoSQL stores. On top of basic read/write sit: a <strong>consolidation pipeline</strong> that promotes raw episodic events into durable semantic facts; <strong>bi-temporal fact modeling</strong> so facts carry both when they became true and when they were superseded; an <strong>importance scoring</strong> heuristic that salience-ranks every entry at write time; a <strong>hybrid retrieval engine</strong> that fuses dense-vector, full-text and graph signals via Reciprocal Rank Fusion; <strong>procedural memory</strong> for human-approved instruction deltas; and <strong>graph-backed retrieval</strong> that traverses entity relationships to supplement vector recall. Governance — provenance, deduplication, correction, per-user and per-session forget — is built into every layer.</p>
 
-  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">memory.ts</span><button class="copybtn">Copy</button></div>
-<pre><span class="tk-k">import</span> { weaveConversationMemory, weaveSemanticMemory, weaveEntityMemory } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/memory'</span>;
+  <!-- ─── § TYPES ─────────────────────────────────────────────────────── -->
+  <h4 id="memory-types">Memory types — what to use when <a class="anchorlink" href="#memory-types">#</a></h4>
 
-<span class="tk-k">const</span> conversation = <span class="tk-f">weaveConversationMemory</span>({ maxHistory: <span class="tk-n">50</span> });   <span class="tk-c">// sliding window</span>
-<span class="tk-k">const</span> semantic     = <span class="tk-f">weaveSemanticMemory</span>(embeddingModel);            <span class="tk-c">// similarity recall (positional arg)</span>
-<span class="tk-k">const</span> entities     = <span class="tk-f">weaveEntityMemory</span>();                          <span class="tk-c">// structured facts</span>
+  <div class="grid2">
+    <div class="card">
+      <h4>conversation</h4>
+      <p>A sliding window of <code>ChatMessage</code> turns. Use as the in-context history passed to every model call. Bounded by <code>maxHistory</code> so it never exceeds your context budget. Use it when: the agent needs to recall what was said <em>in this session</em>.</p>
+    </div>
+    <div class="card">
+      <h4>episodic</h4>
+      <p>Raw, time-stamped events — user utterances, assistant responses, tool calls. Written on the hot path as each message completes. Not retrieved directly by agents; the consolidation pipeline promotes relevant entries into semantic memory asynchronously. Use it when: you need a full audit log of interactions.</p>
+    </div>
+    <div class="card">
+      <h4>semantic</h4>
+      <p>Durable facts recalled by embedding similarity (dense vector search), full-text search, or both (RRF-fused). The long-term knowledge base. Use it when: you need "surface what this user told me that is relevant to the current question."</p>
+    </div>
+    <div class="card">
+      <h4>entity</h4>
+      <p>Structured key/value facts keyed by a named entity — "Acme's renewal is March," "Alice's timezone is UTC+5:30." Point-lookup and update. Use it when: there are specific named things you need to track precisely, not by similarity.</p>
+    </div>
+    <div class="card">
+      <h4>working</h4>
+      <p>Scratchpad state within a single run — reasoning steps, partial results, agent-internal notes. Discarded after the session unless explicitly promoted. Use it when: the agent needs ephemeral state that should not pollute long-term memory.</p>
+    </div>
+    <div class="card">
+      <h4>procedural</h4>
+      <p>Agent instruction deltas — proposed changes to an agent's default behaviour derived from observed user preferences. Human-approval gated via <code>@weaveintel/human-tasks</code>. Applied deltas are appended to the agent's system prompt or skill instructions. Use it when: agents should <em>learn</em> how to work with a specific user over time, with a human signing off each adaptation.</p>
+    </div>
+  </div>
 
-<span class="tk-c">// Hand conversation memory to an agent — history loads before the run, appends after.</span>
-<span class="tk-k">const</span> agent = <span class="tk-f">weaveAgent</span>({ model, tools, memory: conversation });</pre></div>
+  <table class="params">
+    <tr><th>Type</th><th>Written by</th><th>Read by</th><th>Lifetime</th><th>Backend suited</th></tr>
+    <tr><td><code>conversation</code></td><td>chat turn handler</td><td>model context builder</td><td>session</td><td>in-memory / SQLite</td></tr>
+    <tr><td><code>episodic</code></td><td>hot-path after each message</td><td>consolidator (async)</td><td>until consolidated</td><td>SQLite / pgvector</td></tr>
+    <tr><td><code>semantic</code></td><td>consolidator, explicit writes</td><td>retrieval tool, agent context</td><td>indefinite (governed)</td><td>pgvector (production)</td></tr>
+    <tr><td><code>entity</code></td><td>extraction pass, explicit writes</td><td>agent tools, direct lookup</td><td>indefinite (governed)</td><td>any key-value store</td></tr>
+    <tr><td><code>working</code></td><td>agent reasoning steps</td><td>same agent within the run</td><td>single run</td><td>in-memory</td></tr>
+    <tr><td><code>procedural</code></td><td>curator + human approval</td><td>system-prompt builder</td><td>indefinite (versioned)</td><td>SQLite / pgvector</td></tr>
+  </table>
+
+  <!-- basic usage -->
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">basic-memory.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> {
+  weaveConversationMemory, weaveSemanticMemory, weaveEntityMemory,
+  weaveMemoryStore,
+} <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/memory'</span>;
+<span class="tk-k">import</span> { weaveAgent } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/agents'</span>;
+<span class="tk-k">import</span> { weaveContext } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/core'</span>;
+
+<span class="tk-k">const</span> ctx          = <span class="tk-f">weaveContext</span>({ userId: <span class="tk-s">'alice'</span> });
+<span class="tk-k">const</span> conversation = <span class="tk-f">weaveConversationMemory</span>({ maxHistory: <span class="tk-n">50</span> }); <span class="tk-c">// sliding chat window</span>
+<span class="tk-k">const</span> semantic     = <span class="tk-f">weaveSemanticMemory</span>(embeddingModel);           <span class="tk-c">// similarity recall</span>
+<span class="tk-k">const</span> entities     = <span class="tk-f">weaveEntityMemory</span>();                          <span class="tk-c">// named-entity facts</span>
+
+<span class="tk-c">// Agents take a single `memory` slot — pass conversation for in-context history.</span>
+<span class="tk-k">const</span> agent = <span class="tk-f">weaveAgent</span>({ model, tools, memory: conversation });
+
+<span class="tk-c">// Write semantic facts explicitly (or let consolidation do it from episodic events).</span>
+<span class="tk-k">const</span> store = <span class="tk-f">weaveMemoryStore</span>();    <span class="tk-c">// in-memory backend; swap for pgvector in prod</span>
+<span class="tk-k">await</span> store.<span class="tk-f">write</span>(ctx, [{
+  id: <span class="tk-s">'pref-ts'</span>, type: <span class="tk-s">'semantic'</span>,
+  content: <span class="tk-s">'User prefers TypeScript for all backend work.'</span>,
+  metadata: { source: <span class="tk-s">'user'</span> },
+  createdAt: <span class="tk-k">new</span> <span class="tk-f">Date</span>().<span class="tk-f">toISOString</span>(),
+  userId: ctx.userId,
+}]);
+
+<span class="tk-c">// Recall by semantic similarity.</span>
+<span class="tk-k">const</span> hits = <span class="tk-k">await</span> store.<span class="tk-f">query</span>(ctx, { type: <span class="tk-s">'semantic'</span>, query: <span class="tk-s">'language preference'</span>, topK: <span class="tk-n">3</span> });</pre></div>
+
+  <!-- ─── § BACKENDS ─────────────────────────────────────────────────── -->
+  <h4>Backends</h4>
+  <p><code>weaveMemoryStore()</code> is the in-memory backend — great for tests and examples, no configuration. For production, swap it for a persistent backend that matches your infrastructure:</p>
+
+  <div class="pkgcard"><span class="pkgname">In-memory</span><div class="pkgrole"><code>weaveMemoryStore()</code> — zero config. Survives the process; lost on restart. Right for tests and prototypes.</div></div>
+  <div class="pkgcard"><span class="pkgname">SQLite</span><div class="pkgrole"><code>weaveSQLiteMemoryStore(db)</code> — local durable persistence. Used internally by geneWeave for episodic events and the agent's working/entity stores.</div></div>
+  <div class="pkgcard"><span class="pkgname">pgvector (recommended for semantic)</span><div class="pkgrole"><code>weavePgVectorMemoryStore({ pool, table, embeddingModel })</code> — HNSW vector index + GIN full-text index in one PostgreSQL table. Fuses both passes via RRF. Supports importance, bi-temporal columns, and an optional graph retriever.</div></div>
+  <div class="pkgcard"><span class="pkgname">Redis / MongoDB / cloud NoSQL</span><div class="pkgrole">Adapters for cloud and distributed deployments. Each implements the same <code>MemoryStore</code> interface so swapping backends is a one-line change.</div></div>
+
+  <!-- ─── § WEAVEAGENT INTEGRATION ──────────────────────────────────── -->
+  <h4>Full weaveAgent + memory pipeline</h4>
+  <p>The pattern below shows how all layers compose in geneWeave: episodic writes on the hot path, consolidation fires async, and the agent retrieves from semantic memory as a tool.</p>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">agent-with-memory.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> { weaveAgent } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/agents'</span>;
+<span class="tk-k">import</span> { weaveConversationMemory, weaveMemoryStore, weaveMemoryConsolidator } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/memory'</span>;
+<span class="tk-k">import</span> { weaveTool, weaveContext } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/core'</span>;
+
+<span class="tk-k">const</span> ctx           = <span class="tk-f">weaveContext</span>({ userId: <span class="tk-s">'alice'</span>, sessionId: <span class="tk-s">'s1'</span> });
+<span class="tk-k">const</span> episodicStore = <span class="tk-f">weaveMemoryStore</span>();   <span class="tk-c">// raw event log</span>
+<span class="tk-k">const</span> semanticStore = <span class="tk-f">weaveMemoryStore</span>();   <span class="tk-c">// durable facts (pgvector in production)</span>
+<span class="tk-k">const</span> conversation  = <span class="tk-f">weaveConversationMemory</span>({ maxHistory: <span class="tk-n">40</span> });
+
+<span class="tk-c">// Background consolidator: promotes episodic → semantic after each message.</span>
+<span class="tk-k">const</span> consolidator = <span class="tk-f">weaveMemoryConsolidator</span>({ episodicStore, semanticStore, minConfidence: <span class="tk-n">0.6</span> });
+
+<span class="tk-c">// Tool that lets the agent recall semantic memories.</span>
+<span class="tk-k">const</span> recallTool = <span class="tk-f">weaveTool</span>({
+  name: <span class="tk-s">'recall_memory'</span>,
+  description: <span class="tk-s">'Recall facts about the user relevant to the current question.'</span>,
+  parameters: { query: { type: <span class="tk-s">'string'</span> } },
+  execute: <span class="tk-k">async</span> ({ query }) =&gt; {
+    <span class="tk-k">const</span> hits = <span class="tk-k">await</span> semanticStore.<span class="tk-f">query</span>(ctx, { type: <span class="tk-s">'semantic'</span>, query, topK: <span class="tk-n">5</span> });
+    <span class="tk-k">return</span> hits.<span class="tk-f">map</span>((h) =&gt; h.content).<span class="tk-f">join</span>(<span class="tk-s">'\n'</span>);
+  },
+});
+
+<span class="tk-k">const</span> agent = <span class="tk-f">weaveAgent</span>({ model, tools: [recallTool], memory: conversation });
+
+<span class="tk-c">// After each user message: write episodic event, fire consolidation.</span>
+<span class="tk-k">async</span> <span class="tk-k">function</span> <span class="tk-f">onMessage</span>(userText: <span class="tk-t">string</span>) {
+  <span class="tk-k">await</span> episodicStore.<span class="tk-f">write</span>(ctx, [{
+    id: <span class="tk-k">crypto</span>.<span class="tk-f">randomUUID</span>(), type: <span class="tk-s">'episodic'</span>,
+    content: userText, metadata: { source: <span class="tk-s">'user'</span> },
+    createdAt: <span class="tk-k">new</span> <span class="tk-f">Date</span>().<span class="tk-f">toISOString</span>(), userId: ctx.userId,
+  }]);
+
+  <span class="tk-c">// Fire-and-forget: consolidation runs async, does not block the response.</span>
+  consolidator.<span class="tk-f">consolidate</span>(ctx, { userId: ctx.userId, batchSize: <span class="tk-n">20</span> }).<span class="tk-f">catch</span>(console.error);
+
+  <span class="tk-k">const</span> response = <span class="tk-k">await</span> agent.<span class="tk-f">run</span>(ctx, userText);
+  <span class="tk-k">return</span> response.content;
+}</pre></div>
+
+  <!-- ─── § EPISODIC + CONSOLIDATION ────────────────────────────────── -->
+  <h4 id="memory-episodic">Episodic memory &amp; the consolidation pipeline <a class="anchorlink" href="#memory-episodic">#</a></h4>
+  <p>Every chat message, tool call, and assistant response is written as an <em>episodic</em> entry immediately — lightweight, no extraction, no embedding. The consolidation pipeline reads these entries asynchronously, extracts durable facts (via heuristic rules or an optional LLM extractor), deduplicates them, scores importance, stamps provenance, and writes the survivors to the semantic store. Entries are marked <code>_consolidated: true</code> so they are not re-processed.</p>
+
+  <p>In geneWeave, consolidation fires as a fire-and-forget after every call to <code>saveToMemory</code>. A cron-triggered variant is available for higher-volume deployments via <code>MEMORY_CONSOLIDATION_CRON=true</code>.</p>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">consolidation.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> { weaveMemoryConsolidator } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/memory'</span>;
+<span class="tk-k">import</span> { weaveContext } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/core'</span>;
+
+<span class="tk-k">const</span> consolidator = <span class="tk-f">weaveMemoryConsolidator</span>({
+  episodicStore,   <span class="tk-c">// source: reads type='episodic', skips _consolidated=true</span>
+  semanticStore,   <span class="tk-c">// destination: writes type='semantic' durable facts</span>
+  minConfidence: <span class="tk-n">0.6</span>,                  <span class="tk-c">// discard low-confidence extractions</span>
+  sourceTag: <span class="tk-s">'geneweave-consolidation'</span>, <span class="tk-c">// stamped on metadata._sourceTag of each fact</span>
+
+  <span class="tk-c">// Optional: replace rule-based extraction with an LLM pass.</span>
+  llmExtractor: <span class="tk-k">async</span> (ctx, text) =&gt; {
+    <span class="tk-k">const</span> raw = <span class="tk-k">await</span> model.<span class="tk-f">generate</span>(ctx, {
+      messages: [{ role: <span class="tk-s">'user'</span>, content:
+        <span class="tk-s">`Extract durable facts from this text as JSON: [{"content":"...","confidence":0.0-1.0}]\n${text}`</span> }],
+    });
+    <span class="tk-k">return</span> <span class="tk-f">JSON</span>.<span class="tk-f">parse</span>(raw.content);
+  },
+});
+
+<span class="tk-k">const</span> result = <span class="tk-k">await</span> consolidator.<span class="tk-f">consolidate</span>(ctx, {
+  userId: <span class="tk-s">'alice'</span>, batchSize: <span class="tk-n">20</span>,
+});
+<span class="tk-c">// result: { episodicRead, factsExtracted, factsDeduped, factsWritten, errors }</span></pre></div>
+
+  <table class="params">
+    <tr><th>Option</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>episodicStore</code></td><td><code>MemoryStore</code></td><td>Source store. Entries of type <code>'episodic'</code> without <code>metadata._consolidated</code> are processed.</td></tr>
+    <tr><td><code>semanticStore</code></td><td><code>MemoryStore</code></td><td>Destination store. Extracted facts are written here as type <code>'semantic'</code>.</td></tr>
+    <tr><td><code>llmExtractor</code></td><td><code>(ctx, text) =&gt; Promise&lt;...&gt;</code></td><td>Optional LLM-based extraction. If omitted, a rule-based extractor fires.</td></tr>
+    <tr><td><code>extractionRules</code></td><td><code>MemoryExtractionRule[]</code></td><td>Custom rule overrides for rule-based extraction.</td></tr>
+    <tr><td><code>minConfidence</code></td><td><code>number</code></td><td>Minimum extraction confidence (0–1). Default <code>0.6</code>. Lower accepts more facts; higher means fewer but more reliable.</td></tr>
+    <tr><td><code>sourceTag</code></td><td><code>string</code></td><td>Stamped as <code>metadata._sourceTag</code> on every written fact for auditability.</td></tr>
+  </table>
+
+  <!-- ─── § BI-TEMPORAL ─────────────────────────────────────────────── -->
+  <h4 id="memory-bitemporal">Bi-temporal facts <a class="anchorlink" href="#memory-bitemporal">#</a></h4>
+  <p>Every <code>MemoryEntry</code> carries two optional ISO-8601 timestamps: <code>validAt</code> (when the fact became true in the world) and <code>invalidAt</code> (when it was superseded — null means still valid). This decouples <em>knowledge time</em> from <em>storage time</em> so you can ask "what did we know about Alice at this point in time?" independently of when it was recorded.</p>
+
+  <p>Default queries (no <code>asOf</code>) filter to <code>invalidAt IS NULL</code> — only currently-valid facts. Point-in-time queries with <code>asOf</code> return facts that were valid at that timestamp, including ones since superseded.</p>
+
+  <p>Use <code>supersede()</code> to correct a fact: it sets <code>invalidAt</code> on the original and writes a successor with <code>validAt = now</code>. Both versions remain in the store for auditing.</p>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">bitemporal.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> { weaveMemoryStore, supersede } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/memory'</span>;
+<span class="tk-k">import</span> { weaveContext } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/core'</span>;
+<span class="tk-k">import</span> <span class="tk-k">type</span> { <span class="tk-t">MemoryEntry</span> } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/core'</span>;
+
+<span class="tk-k">const</span> ctx   = <span class="tk-f">weaveContext</span>({ userId: <span class="tk-s">'alice'</span> });
+<span class="tk-k">const</span> store = <span class="tk-f">weaveMemoryStore</span>();
+<span class="tk-k">const</span> t0    = <span class="tk-k">new</span> <span class="tk-f">Date</span>().<span class="tk-f">toISOString</span>();
+
+<span class="tk-c">// Write initial fact with validAt so it is time-stamped correctly.</span>
+<span class="tk-k">const</span> original: <span class="tk-t">MemoryEntry</span> = {
+  id: <span class="tk-s">'role-alice'</span>, type: <span class="tk-s">'semantic'</span>,
+  content: <span class="tk-s">'Alice is an intern at Acme Corp'</span>,
+  metadata: { source: <span class="tk-s">'hr-system'</span> },
+  createdAt: t0, validAt: t0, userId: ctx.userId,
+};
+<span class="tk-k">await</span> store.<span class="tk-f">write</span>(ctx, [original]);
+
+<span class="tk-c">// One year later — Alice is promoted. supersede() invalidates the old entry</span>
+<span class="tk-c">// and writes a successor with validAt = now.</span>
+<span class="tk-k">const</span> successor = <span class="tk-k">await</span> <span class="tk-f">supersede</span>(
+  store, ctx, original,
+  <span class="tk-s">'Alice is a Senior Engineer at Acme Corp'</span>,
+  <span class="tk-s">'hr-system'</span>,      <span class="tk-c">// supersededBy — provenance</span>
+  <span class="tk-s">'annual promotion'</span>, <span class="tk-c">// reason</span>
+);
+
+<span class="tk-c">// Query at t0 → sees the old 'intern' fact (invalidAt is after t0).</span>
+<span class="tk-k">const</span> atT0  = <span class="tk-k">await</span> store.<span class="tk-f">query</span>(ctx, { type: <span class="tk-s">'semantic'</span>, asOf: t0, topK: <span class="tk-n">5</span> });
+
+<span class="tk-c">// Default query (no asOf) → sees only the 'Senior Engineer' fact.</span>
+<span class="tk-k">const</span> now   = <span class="tk-k">await</span> store.<span class="tk-f">query</span>(ctx, { type: <span class="tk-s">'semantic'</span>, topK: <span class="tk-n">5</span> });</pre></div>
+
+  <table class="params">
+    <tr><th>Field / parameter</th><th>Type</th><th>Meaning</th></tr>
+    <tr><td><code>MemoryEntry.validAt</code></td><td><code>string</code> (ISO 8601)</td><td>When this fact became true in the world. Null means "from the beginning of recorded time."</td></tr>
+    <tr><td><code>MemoryEntry.invalidAt</code></td><td><code>string</code> (ISO 8601)</td><td>When this fact was superseded. Null means currently valid. Set by <code>supersede()</code>.</td></tr>
+    <tr><td><code>MemoryQuery.asOf</code></td><td><code>string</code> (ISO 8601)</td><td>Point-in-time filter. Returns entries where <code>validAt &lt;= asOf AND (invalidAt IS NULL OR invalidAt &gt; asOf)</code>.</td></tr>
+    <tr><td><code>supersede(store, ctx, original, newContent, supersededBy, reason?)</code></td><td></td><td>Sets <code>invalidAt = now</code> on the original; writes a new entry with <code>validAt = now</code>. Returns the successor entry.</td></tr>
+  </table>
+
+  <!-- ─── § IMPORTANCE ─────────────────────────────────────────────── -->
+  <h4 id="memory-importance">Importance scoring &amp; salience-based compaction <a class="anchorlink" href="#memory-importance">#</a></h4>
+  <p>Every <code>MemoryEntry</code> carries an <code>importance</code> field (0–1). At write time, the store runs <code>computeImportance(entry)</code> — a fast heuristic that scores: base 0.4, +0.15 for well-formed word count (5–60 words), +0.2 for semantic/procedural type, +0.15 for <code>source=user</code>, +0.1 for entries containing proper nouns. The result is stored alongside the entry and used when the <code>drop_lowest_score</code> compaction strategy fires.</p>
+
+  <p>This means trivial entries ("ok", "hmm") score near 0, while user-stated preferences about named entities score near 1. Compaction discards low-importance entries first, preserving the information that matters most.</p>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">importance.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> { weaveMemoryStore, enforceRetention } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/memory'</span>;
+<span class="tk-k">import</span> <span class="tk-k">type</span> { <span class="tk-t">MemoryEntry</span> } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/core'</span>;
+
+<span class="tk-k">const</span> entries: <span class="tk-t">MemoryEntry</span>[] = [
+  { id: <span class="tk-s">'h1'</span>, type: <span class="tk-s">'semantic'</span>, importance: <span class="tk-n">0.95</span>,
+    content: <span class="tk-s">'Alice is CTO at Acme Corp leading 200 engineers.'</span>, <span class="tk-c">/* ... */</span> },
+  { id: <span class="tk-s">'h2'</span>, type: <span class="tk-s">'semantic'</span>, importance: <span class="tk-n">0.80</span>,
+    content: <span class="tk-s">'Alice prefers TypeScript for all backend services.'</span>, <span class="tk-c">/* ... */</span> },
+  { id: <span class="tk-s">'m1'</span>, type: <span class="tk-s">'semantic'</span>, importance: <span class="tk-n">0.40</span>,
+    content: <span class="tk-s">'The meeting is tomorrow at 3pm.'</span>, <span class="tk-c">/* ... */</span> },
+  { id: <span class="tk-s">'l1'</span>, type: <span class="tk-s">'semantic'</span>, importance: <span class="tk-n">0.05</span>, content: <span class="tk-s">'ok'</span>, <span class="tk-c">/* ... */</span> },
+] <span class="tk-k">as</span> <span class="tk-t">MemoryEntry</span>[];
+
+<span class="tk-c">// Keep only the 2 most important entries; drop the rest.</span>
+<span class="tk-k">const</span> { keep, drop } = <span class="tk-f">enforceRetention</span>(entries, {
+  maxEntries: <span class="tk-n">2</span>,
+  compactionStrategy: <span class="tk-s">'drop_lowest_score'</span>, <span class="tk-c">// uses importance ?? score</span>
+});
+<span class="tk-c">// keep: [h1 (0.95), h2 (0.80)]   drop: [m1, l1]</span>
+
+<span class="tk-c">// You can also set importance manually at write time.</span>
+<span class="tk-k">await</span> store.<span class="tk-f">write</span>(ctx, [{
+  <span class="tk-c">/* ... */</span> importance: <span class="tk-n">0.9</span>,  <span class="tk-c">// override the automatic heuristic</span>
+}]);</pre></div>
+
+  <!-- ─── § HYBRID RETRIEVAL ─────────────────────────────────────────── -->
+  <h4 id="memory-hybrid">Hybrid retrieval — Reciprocal Rank Fusion <a class="anchorlink" href="#memory-hybrid">#</a></h4>
+  <p>The pgvector backend runs up to three retrieval passes in parallel and merges them via <strong>Reciprocal Rank Fusion (RRF)</strong> with k=60. The final score for each result is the sum of <code>1/(60 + rank + 1)</code> across whichever passes found it. A result appearing in all three passes ranks much higher than one found by only one.</p>
+
+  <ol>
+    <li><strong>Vector pass</strong> — cosine similarity via the HNSW index on <code>embedding</code>. Finds semantically similar entries even when they use different words.</li>
+    <li><strong>Full-text pass</strong> — <code>plainto_tsquery</code> against a GIN-indexed <code>tsvector</code> column, with an <code>ILIKE</code> fallback for short queries. Finds exact-term matches and phrase overlap.</li>
+    <li><strong>Graph entity-match pass</strong> — optional. When a <code>graphRetriever</code> is configured, entity names from the graph that match the query are used to boost memory entries whose content mentions those entities. Applied at 0.5× weight.</li>
+  </ol>
+
+  <p>The in-memory backend applies the same fusion logic in-process. The pgvector backend runs the vector and FTS passes as SQL queries, merges via RRF, then fetches the top-K rows by id in a final SELECT.</p>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">hybrid-retrieval.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> { weavePgVectorMemoryStore } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/memory'</span>;
+<span class="tk-k">import</span> { createGraphRetriever, createGraphMemoryStore } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/graph'</span>;
+
+<span class="tk-k">const</span> graphStore   = <span class="tk-f">createGraphMemoryStore</span>();
+<span class="tk-k">const</span> graphRetriever = <span class="tk-f">createGraphRetriever</span>(graphStore);
+
+<span class="tk-c">// Pass graphRetriever to fuse graph entity signals into RRF.</span>
+<span class="tk-k">const</span> memStore = <span class="tk-f">weavePgVectorMemoryStore</span>({
+  pool: pgPool,
+  table: <span class="tk-s">'agent_memory'</span>,
+  embeddingModel,
+  graphRetriever,  <span class="tk-c">// optional — adds 3rd RRF pass at 0.5× weight</span>
+});
+
+<span class="tk-c">// All three passes run automatically when you call query().</span>
+<span class="tk-c">// The embedding field is optional — omit it and only FTS + graph fire.</span>
+<span class="tk-k">const</span> hits = <span class="tk-k">await</span> memStore.<span class="tk-f">query</span>(ctx, {
+  type: <span class="tk-s">'semantic'</span>,
+  query: <span class="tk-s">'Alice engineering work'</span>,     <span class="tk-c">// drives FTS and graph passes</span>
+  embedding: queryEmbedding,             <span class="tk-c">// drives vector pass</span>
+  topK: <span class="tk-n">10</span>,
+});
+<span class="tk-c">// hits are sorted by RRF score descending — each hit.score = fused RRF value</span></pre></div>
+
+  <div class="call note"><span class="ic">💡</span>
+    <div class="ct">RRF in the in-memory store</div>
+    <p>You don't need pgvector to benefit from hybrid retrieval. The in-memory store's <code>query()</code> applies the same RRF fusion logic — it runs the vector pass (cosine over <code>embedding</code> fields), a keyword pass, and optionally graph entity matches, all in-process. The scores are comparable across backends.</p>
+  </div>
+
+  <!-- ─── § PROCEDURAL ─────────────────────────────────────────────── -->
+  <h4 id="memory-procedural">Procedural memory &amp; human-approved instruction deltas <a class="anchorlink" href="#memory-procedural">#</a></h4>
+  <p>Procedural memory stores proposed changes to an agent's default behaviour — instruction deltas derived by the curator from observed user preferences. Every delta goes through a human-approval gate via <code>@weaveintel/human-tasks</code> before it is applied. This keeps agents from silently drifting; a human explicitly signs off each adaptation.</p>
+
+  <p><strong>Lifecycle:</strong> (1) The curator scans semantic memories for repeated preference patterns. (2) <code>proposeProceduralUpdate()</code> creates a <code>ProceduralMemoryEntry</code> (status: <code>'proposed'</code>) and submits an <code>ApprovalTask</code> to the human-tasks queue. (3) A human approves via the admin UI; the task is updated to <code>status: 'completed'</code>. (4) <code>applyApprovedProcedural()</code> marks the entry <code>'applied'</code> and returns the delta for the caller to append to the agent's system prompt. (5) If rejected, the entry is marked <code>'rejected'</code> and ignored.</p>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">procedural.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> {
+  proposeProceduralUpdate, applyApprovedProcedural,
+  runProceduralCurator, createProceduralEntry,
+} <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/memory'</span>;
+<span class="tk-k">import</span> { <span class="tk-t">InMemoryHumanTaskRepository</span> } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/human-tasks'</span>;
+<span class="tk-k">import</span> { weaveContext } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/core'</span>;
+
+<span class="tk-k">const</span> ctx      = <span class="tk-f">weaveContext</span>({ userId: <span class="tk-s">'alice'</span> });
+<span class="tk-k">const</span> store    = procMemoryStore;  <span class="tk-c">// any MemoryStore</span>
+<span class="tk-k">const</span> taskRepo = <span class="tk-k">new</span> <span class="tk-f">InMemoryHumanTaskRepository</span>();
+
+<span class="tk-c">// ── 1. Propose (curator or explicit call) ─────────────────────────────</span>
+<span class="tk-k">const</span> { entry, task } = <span class="tk-k">await</span> <span class="tk-f">proposeProceduralUpdate</span>({
+  store, taskRepo, ctx,
+  agentId: <span class="tk-s">'geneweave-agent'</span>,
+  instructionDelta: <span class="tk-s">'When writing code for this user, always default to TypeScript.'</span>,
+  proposedBy: <span class="tk-s">'consolidation-curator'</span>,
+  confidence: <span class="tk-n">0.82</span>,
+  slaHours: <span class="tk-n">24</span>,   <span class="tk-c">// task expires after 24 h if not actioned</span>
+});
+<span class="tk-c">// entry.metadata.status = 'proposed',  entry.metadata.humanTaskId = task.id</span>
+
+<span class="tk-c">// ── 2. Human approves (in the admin UI or programmatically) ───────────</span>
+<span class="tk-k">const</span> pending = <span class="tk-k">await</span> taskRepo.<span class="tk-f">get</span>(task.id);
+<span class="tk-k">await</span> taskRepo.<span class="tk-f">save</span>({
+  ...pending!,
+  status: <span class="tk-s">'completed'</span>,
+  completedAt: <span class="tk-k">new</span> <span class="tk-f">Date</span>().<span class="tk-f">toISOString</span>(),
+  result: { decision: <span class="tk-s">'approved'</span>, reason: <span class="tk-s">'Makes sense for this user'</span> },
+});
+
+<span class="tk-c">// ── 3. Apply — returns the delta string to prepend to the system prompt ─</span>
+<span class="tk-k">const</span> delta = <span class="tk-k">await</span> <span class="tk-f">applyApprovedProcedural</span>({ store, taskRepo, ctx, entryId: entry.id });
+<span class="tk-c">// delta = 'When writing code for this user, always default to TypeScript.'</span>
+
+<span class="tk-c">// ── Automatic curator pass ────────────────────────────────────────────</span>
+<span class="tk-c">// Scans semantic memories for repeated preference patterns (≥ 2 occurrences)</span>
+<span class="tk-c">// and proposes one ApprovalTask per discovered pattern.</span>
+<span class="tk-k">const</span> result = <span class="tk-k">await</span> <span class="tk-f">runProceduralCurator</span>({
+  store: semanticMemStore, taskRepo, ctx,
+  agentId: <span class="tk-s">'geneweave-agent'</span>, maxProposals: <span class="tk-n">3</span>,
+});
+<span class="tk-c">// result: { proposed: 1, proposals: [{ delta, confidence }] }</span></pre></div>
+
+  <table class="params">
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>ProceduralMemoryEntry.metadata.status</code></td><td><code>'proposed' | 'approved' | 'rejected' | 'applied'</code></td><td>Workflow state of the delta.</td></tr>
+    <tr><td><code>ProceduralMemoryEntry.metadata.instructionDelta</code></td><td><code>string</code></td><td>The actual instruction text to be appended to the agent's system prompt once applied.</td></tr>
+    <tr><td><code>ProceduralMemoryEntry.metadata.humanTaskId</code></td><td><code>string</code></td><td>ID of the <code>ApprovalTask</code> in the human-tasks queue.</td></tr>
+    <tr><td><code>ProceduralMemoryEntry.importance</code></td><td><code>0.9</code></td><td>Procedural entries are fixed at 0.9 — high salience, never dropped by compaction.</td></tr>
+  </table>
 
   <div class="call security"><span class="ic">🔐</span>
-    <div class="ct">Default outcome — governable memory</div>
-    <p>Memory ships with provenance (where a fact came from and its confidence), deduplication, correction (override a stale fact), and retention enforcement including per-user / per-session forget. Treat memory as data under policy, not an opaque blob — the package is built so you can prove what you stored and delete it on request.</p>
+    <div class="ct">Human-in-the-loop for behavioural changes</div>
+    <p>Agents cannot silently adapt their own behaviour. Every proposed instruction delta lands in the human-tasks queue with a configurable SLA deadline. Only after a human explicitly approves does <code>applyApprovedProcedural()</code> mark the entry applied. This means you get personalisation — the agent genuinely learns user preferences — without giving up control over what those preferences actually modify.</p>
+  </div>
+
+  <!-- ─── § GRAPH RETRIEVAL ─────────────────────────────────────────── -->
+  <h4 id="memory-graph">Graph-backed retrieval <a class="anchorlink" href="#memory-graph">#</a></h4>
+  <p>When a <code>GraphRetriever</code> from <code>@weaveintel/graph</code> is wired into the memory store, entity names resolved from the graph are used as a third RRF pass. After the vector and FTS passes rank their candidates, the store queries the graph retriever for entities matching the search query, then boosts memory entries whose content mentions those entities. Graph-derived scores are applied at 0.5× weight so they supplement rather than override vector recall.</p>
+
+  <p>This means a query for "who does Alice report to?" benefits from both the vector similarity of stored facts and the graph's explicit relationship edges between Alice, her manager, and their shared project nodes.</p>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">graph-retrieval.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> { createGraphMemoryStore, createEntityLinker, createGraphRetriever } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/graph'</span>;
+<span class="tk-k">import</span> { weaveMemoryStore } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/memory'</span>;
+<span class="tk-k">import</span> { weaveContext } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/core'</span>;
+
+<span class="tk-k">const</span> ctx          = <span class="tk-f">weaveContext</span>({ userId: <span class="tk-s">'demo'</span> });
+<span class="tk-k">const</span> graphStore   = <span class="tk-f">createGraphMemoryStore</span>();
+<span class="tk-k">const</span> linker       = <span class="tk-f">createEntityLinker</span>();
+<span class="tk-k">const</span> retriever    = <span class="tk-f">createGraphRetriever</span>(graphStore);
+
+<span class="tk-c">// Link entities from source text into the graph.</span>
+<span class="tk-k">const</span> { entities, relationships } = linker.<span class="tk-f">extractAndLink</span>(
+  <span class="tk-s">'doc-01'</span>,
+  <span class="tk-s">'Dr. Sarah Kim is VP of Engineering at DataFlow Inc. She mentors James Lee.'</span>,
+);
+<span class="tk-k">for</span> (<span class="tk-k">const</span> node <span class="tk-k">of</span> entities)       graphStore.<span class="tk-f">addNode</span>(node);
+<span class="tk-k">for</span> (<span class="tk-k">const</span> edge <span class="tk-k">of</span> relationships)  graphStore.<span class="tk-f">addEdge</span>(edge);
+
+<span class="tk-c">// Retrieve graph results directly — node name, score, connected edges.</span>
+<span class="tk-k">const</span> graphResults = retriever.<span class="tk-f">retrieve</span>(<span class="tk-s">'Sarah'</span>, <span class="tk-n">5</span>);
+<span class="tk-c">// [{ node: {name:'Dr. Sarah Kim', type:'person', ...}, score, connectedEdges }]</span>
+
+<span class="tk-c">// Traverse by entity id — find all neighbors within depth 2.</span>
+<span class="tk-k">const</span> sarah     = entities.<span class="tk-f">find</span>((e) =&gt; e.name.<span class="tk-f">includes</span>(<span class="tk-s">'Sarah'</span>))!;
+<span class="tk-k">const</span> neighbors = retriever.<span class="tk-f">retrieveByEntity</span>(sarah.id, <span class="tk-n">2</span>, <span class="tk-n">10</span>);
+
+<span class="tk-c">// Wire into the memory store for automatic RRF fusion at query time.</span>
+<span class="tk-c">// (weavePgVectorMemoryStore only — pass graphRetriever in options)</span>
+<span class="tk-k">const</span> memStore = <span class="tk-f">weavePgVectorMemoryStore</span>({ pool, table, embeddingModel, graphRetriever: retriever });
+<span class="tk-k">const</span> results  = <span class="tk-k">await</span> memStore.<span class="tk-f">query</span>(ctx, { type: <span class="tk-s">'semantic'</span>, query: <span class="tk-s">'Sarah engineering'</span>, topK: <span class="tk-n">5</span> });
+<span class="tk-c">// scores reflect vector + FTS + graph fusion</span></pre></div>
+
+  <!-- ─── § GOVERNANCE ─────────────────────────────────────────────── -->
+  <h4 id="memory-governance">Governance, provenance &amp; retention <a class="anchorlink" href="#memory-governance">#</a></h4>
+  <p><strong>What it does.</strong> Every memory write passes through a <em>governance policy</em> before it touches the store. A policy is a set of database-driven rules (patterns, age limits, entry caps, per-type scope) evaluated in two ordered hooks:</p>
+  <ul>
+    <li><strong><code>shouldStore(ctx, entry)</code></strong> — returns <code>false</code> if the content matches a <em>block</em> pattern. Used for semantic and entity types: SSN or credit-card in a semantic fact → drop it entirely.</li>
+    <li><strong><code>beforeStore(ctx, entry)</code></strong> — returns a mutated copy with <em>redact</em> patterns replaced by <code>[REDACTED]</code>. Used for episodic turns: the conversation must always be logged, but raw PII must be scrubbed first.</li>
+  </ul>
+  <p><strong>Why two hooks?</strong> Episodic entries are a conversation audit log — dropping them would leave gaps in the timeline, making it impossible to know a turn happened. So <code>shouldStore</code> is skipped for episodic; only <code>beforeStore</code> fires, redacting sensitive tokens in place. Semantic and entity facts are structured knowledge. A fact that <em>is</em> a credit-card number has no legitimate use in long-term memory, so the whole entry is blocked.</p>
+
+  <p><strong>How to wire it.</strong> Call <code>weaveGovernancePolicy(rules)</code> with an array of <code>GovernanceRule</code> objects loaded from the database. The returned <code>MemoryPolicy</code> exposes <code>shouldStore</code>, <code>beforeStore</code>, and <code>retentionPolicy</code>:</p>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">governance-policy.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> { weaveGovernancePolicy } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/memory'</span>;
+<span class="tk-k">import</span> <span class="tk-k">type</span> { <span class="tk-t">GovernanceRule</span>, <span class="tk-t">MemoryEntry</span> } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/memory'</span>;
+<span class="tk-k">import</span> { weaveContext } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/core'</span>;
+
+<span class="tk-k">const</span> ctx = <span class="tk-f">weaveContext</span>({ userId: <span class="tk-s">'alice'</span> });
+
+<span class="tk-k">const</span> rules: <span class="tk-t">GovernanceRule</span>[] = [
+  {
+    id: <span class="tk-s">'pii-block'</span>,
+    name: <span class="tk-s">'PII Block — credit cards &amp; SSNs'</span>,
+    <span class="tk-c">// types: undefined → applies to ALL memory types</span>
+    blockPatterns: [
+      <span class="tk-s">'\\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14})\\b'</span>,  <span class="tk-c">// Visa/MC</span>
+      <span class="tk-s">'\\b(?!000|666|9\\d{2})\\d{3}-(?!00)\\d{2}-(?!0000)\\d{4}\\b'</span>, <span class="tk-c">// SSN</span>
+    ],
+    redactPatterns: [],
+    enabled: <span class="tk-k">true</span>,
+  },
+  {
+    id: <span class="tk-s">'episodic-redact'</span>,
+    name: <span class="tk-s">'Episodic PII Redaction'</span>,
+    types: [<span class="tk-s">'episodic'</span>],   <span class="tk-c">// only fires for episodic entries</span>
+    blockPatterns: [],     <span class="tk-c">// never block episodic — turns must always be logged</span>
+    redactPatterns: [
+      <span class="tk-s">'(?:password|api[_-]?key|secret)\\s*[=:]\\s*\\S+'</span>,
+      <span class="tk-s">'\\b\\d{3}-\\d{2}-\\d{4}\\b'</span>,
+    ],
+    enabled: <span class="tk-k">true</span>,
+  },
+];
+
+<span class="tk-k">const</span> policy = <span class="tk-f">weaveGovernancePolicy</span>(rules);
+
+<span class="tk-k">const</span> entry: <span class="tk-t">MemoryEntry</span> = {
+  id: <span class="tk-s">'e1'</span>, type: <span class="tk-s">'semantic'</span>,
+  content: <span class="tk-s">'my SSN is 123-45-6789'</span>,
+  metadata: {}, createdAt: <span class="tk-k">new</span> <span class="tk-f">Date</span>().<span class="tk-f">toISOString</span>(),
+};
+
+<span class="tk-c">// shouldStore → false: SSN matches a block pattern → drop this semantic entry</span>
+<span class="tk-k">const</span> ok = <span class="tk-k">await</span> policy.<span class="tk-f">shouldStore</span>(ctx, entry); <span class="tk-c">// false</span>
+
+<span class="tk-k">const</span> episode: <span class="tk-t">MemoryEntry</span> = {
+  id: <span class="tk-s">'ep1'</span>, type: <span class="tk-s">'episodic'</span>,
+  content: <span class="tk-s">'My card is 4111111111111111 and password=s3cr3t!'</span>,
+  metadata: {}, createdAt: <span class="tk-k">new</span> <span class="tk-f">Date</span>().<span class="tk-f">toISOString</span>(),
+};
+<span class="tk-c">// beforeStore → content scrubbed, entry still written to the episodic log</span>
+<span class="tk-k">const</span> scrubbed = <span class="tk-k">await</span> policy.<span class="tk-f">beforeStore</span>!(ctx, episode);
+<span class="tk-c">// scrubbed.content = 'My card is [REDACTED] and [REDACTED]'</span></pre></div>
+
+  <h4>GovernanceRule schema</h4>
+  <table class="params">
+    <tr><th>Field</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>id</code></td><td><code>string</code></td><td>Unique rule identifier (UUIDv7 in geneWeave's DB).</td></tr>
+    <tr><td><code>name</code></td><td><code>string</code></td><td>Human-readable label shown in the admin UI.</td></tr>
+    <tr><td><code>types</code></td><td><code>string[] | undefined</code></td><td>Which memory types this rule applies to. <code>undefined</code> = all types (global rule).</td></tr>
+    <tr><td><code>tenantId</code></td><td><code>string | undefined</code></td><td>Optional tenant scope. <code>undefined</code> = applies to every tenant.</td></tr>
+    <tr><td><code>blockPatterns</code></td><td><code>string[]</code></td><td>Regex patterns. If any matches the entry content, <code>shouldStore</code> returns <code>false</code> and the entry is discarded.</td></tr>
+    <tr><td><code>redactPatterns</code></td><td><code>string[]</code></td><td>Regex patterns. All matches in the entry content are replaced with <code>[REDACTED]</code> by <code>beforeStore</code>.</td></tr>
+    <tr><td><code>maxAge</code></td><td><code>string</code> (ISO 8601 duration)</td><td>Retention horizon, e.g. <code>P180D</code> = 180 days. Entries older than this are eligible for purge.</td></tr>
+    <tr><td><code>maxEntries</code></td><td><code>number</code></td><td>Per-user cap on the number of entries. Triggers compaction (drop lowest importance first) when exceeded.</td></tr>
+    <tr><td><code>enabled</code></td><td><code>boolean</code></td><td>Toggle. Disabled rules are loaded but skipped entirely.</td></tr>
+  </table>
+
+  <h4>Seeded governance rules in geneWeave</h4>
+  <p>geneWeave ships eight governance rules seeded by migrations m35, m37, and m38. All are live on a fresh database — no code change required to activate them:</p>
+  <table class="params">
+    <tr><th>ID suffix</th><th>Name</th><th>Scope</th><th>Type</th><th>What it enforces</th></tr>
+    <tr><td><code>…0001</code></td><td>PII Block — credit cards &amp; SSNs</td><td>global</td><td>block</td><td>Visa/MC/Amex/Discover card numbers and SSNs blocked from <em>all</em> memory types.</td></tr>
+    <tr><td><code>…0002</code></td><td>No Credentials in Memory</td><td>global</td><td>redact</td><td>Inline credentials (<code>password=…</code>, <code>api_key=…</code>, <code>secret=…</code>) and raw JWTs replaced with <code>[REDACTED]</code>.</td></tr>
+    <tr><td><code>…0003</code></td><td>No Secrets in Entity Memory</td><td>entity</td><td>block</td><td>Entity facts containing <code>password</code>, <code>api_key</code>, or bearer-token patterns are dropped.</td></tr>
+    <tr><td><code>…0004</code></td><td>Semantic Memory Size Cap</td><td>semantic</td><td>retention</td><td>Per-user cap of 500 semantic entries; compacts by dropping lowest importance first.</td></tr>
+    <tr><td><code>…0005</code></td><td>Semantic Memory Age Limit</td><td>semantic</td><td>retention</td><td>Semantic facts older than 180 days (<code>P180D</code>) are purged.</td></tr>
+    <tr><td><code>…0006</code></td><td>Entity Size Cap</td><td>entity</td><td>retention</td><td>Per-user cap of 100 entity entries; oldest removed first.</td></tr>
+    <tr><td><code>…0007</code></td><td>Episodic PII Redaction</td><td>episodic</td><td>redact-only</td><td>SSNs, credit cards, JWTs, inline credentials, emails, and phone numbers scrubbed from episodic turn logs. Never blocks — turns are always logged.</td></tr>
+    <tr><td><code>…0008</code></td><td>Entity PII Block</td><td>entity</td><td>block</td><td>Entity facts containing SSNs or card numbers dropped entirely (complements rule 0003).</td></tr>
+  </table>
+  <p>Migration m38 extends rule <code>…0007</code> with three additional redact patterns: database/service URI credentials (<code>postgresql://user:pass@host</code>), JWT signing key values in variable-name form (<code>jwt_secret_key_XXXX</code>), and a broad SSN fallback that also catches 9xx-prefix numbers.</p>
+
+  <h4>Provenance, correction, and forget APIs</h4>
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">governance.ts</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">import</span> { forgetUser, forgetSession, enforceRetention, supersede } <span class="tk-k">from</span> <span class="tk-s">'@weaveintel/memory'</span>;
+
+<span class="tk-c">// GDPR-style deletion — purge all memory for a user or session.</span>
+<span class="tk-k">await</span> <span class="tk-f">forgetUser</span>(store, ctx, <span class="tk-s">'alice'</span>);
+<span class="tk-k">await</span> <span class="tk-f">forgetSession</span>(store, ctx, <span class="tk-s">'session-42'</span>);
+
+<span class="tk-c">// Retention policy — keep the 200 most important entries per user.</span>
+<span class="tk-k">const</span> all          = <span class="tk-k">await</span> store.<span class="tk-f">query</span>(ctx, { type: <span class="tk-s">'semantic'</span>, topK: <span class="tk-n">9999</span> });
+<span class="tk-k">const</span> { keep, drop } = <span class="tk-f">enforceRetention</span>(all, {
+  maxEntries: <span class="tk-n">200</span>,
+  compactionStrategy: <span class="tk-s">'drop_lowest_score'</span>,  <span class="tk-c">// uses importance ?? score</span>
+});
+<span class="tk-k">for</span> (<span class="tk-k">const</span> e <span class="tk-k">of</span> drop) <span class="tk-k">await</span> store.<span class="tk-f">delete</span>(ctx, e.id);
+
+<span class="tk-c">// Correct a stale fact. The original is not deleted — it is soft-invalidated</span>
+<span class="tk-c">// with invalidAt = now so asOf queries still see the original state.</span>
+<span class="tk-k">const</span> successor = <span class="tk-k">await</span> <span class="tk-f">supersede</span>(store, ctx, original, <span class="tk-s">'Updated content'</span>, <span class="tk-s">'admin'</span>);</pre></div>
+
+  <table class="params">
+    <tr><th>API</th><th>Description</th></tr>
+    <tr><td><code>forgetUser(store, ctx, userId)</code></td><td>Deletes all entries for the given user. Hard delete — irreversible.</td></tr>
+    <tr><td><code>forgetSession(store, ctx, sessionId)</code></td><td>Deletes all entries for the given session. Scoped deletion for session-level compliance.</td></tr>
+    <tr><td><code>enforceRetention(entries, policy)</code></td><td>Returns <code>{ keep, drop }</code> partitions. Does not delete — caller decides what to do with <code>drop</code>.</td></tr>
+    <tr><td><code>supersede(store, ctx, original, newContent, supersededBy, reason?)</code></td><td>Soft-invalidates the original (sets <code>invalidAt</code>), writes a successor. Both entries remain.</td></tr>
+  </table>
+
+  <div class="call security"><span class="ic">🔐</span>
+    <div class="ct">Memory as governed data</div>
+    <p>Memory ships with the assumption that every stored fact is data under policy. Provenance (<code>source</code>, <code>_sourceTag</code>, <code>validAt</code>) lets you prove where a fact came from and when it was valid. Bi-temporal modeling means corrections never silently overwrite history. Retention enforcement and the <code>forgetUser</code> / <code>forgetSession</code> APIs let you delete on request. Treat the memory system as a governed knowledge store, not an opaque blob.</p>
   </div>
 </section>
 
@@ -3014,6 +3528,389 @@ skills.<span class="tk-f">register</span>({ key: <span class="tk-s">'billing'</s
     <tr><td>Guardrail Evals (read-only)</td><td>Raw guardrail evaluation results from every chat turn.</td></tr>
     <tr><td>Memory Extraction Events (read-only)</td><td>Per-message extraction metrics: entity counts, self-disclosure flags, merged entity counts.</td></tr>
   </table>
+</section>
+
+<!-- ============================================================ -->
+<!-- GENEWEAVE MEMORY                                            -->
+<!-- ============================================================ -->
+<section id="geneweave-memory" class="group-anchor">
+  <h2>Memory system in geneWeave <a class="anchorlink" href="#geneweave-memory">#</a></h2>
+  <div class="meta-row"><span class="pkgtag">apps/geneweave</span><span class="pkgtag">chat-memory-utils.ts</span><span class="pkgtag">tools.ts</span><span class="pkgtag">migrations m35–m38</span></div>
+
+  <p><strong>What it does.</strong> geneWeave gives every conversation a persistent, governed memory system. When a user sends a message, the assistant's reply arrives <em>and</em> the turn is silently stored in five complementary stores: episodic (the raw turn log), semantic (extracted facts), entity (structured key/value profile), procedural (agent instruction proposals), and working (transient scratch state). The agent can read these stores back at any point using seven built-in memory tools, and a governance policy silently redacts or blocks PII before anything is persisted.</p>
+
+  <p><strong>Why five types?</strong> Each type serves a different retrieval pattern. Episodic answers "what happened at 14:23 yesterday?" Semantic answers "what are this user's dietary restrictions?" Entity answers "who is their manager?" Procedural answers "should I adjust how I respond to this user, and did a human approve that adjustment?" Working answers "what intermediate state does the current task chain need?" Conflating them into a single blob forces every query to scan everything; separating them lets each type be queried, compacted, and governed independently.</p>
+
+  <p><strong>How to trigger it.</strong> Memory is fully automatic. Calling <code>POST /api/chats/:id/messages</code> runs the save pipeline in the background — no extra configuration. You can tune or disable individual types per tenant through the admin memory-settings API.</p>
+
+  <!-- ─── TYPES & SCHEMA ──────────────────────────────────────────── -->
+  <h3 id="geneweave-memory-types">Memory types and DB schema <a class="anchorlink" href="#geneweave-memory-types">#</a></h3>
+
+  <p>Eight SQLite tables underpin the memory system, seeded by migrations m35 and m36. The entity/episodic/procedural/working tables always live in SQLite. Semantic memory can optionally mirror embeddings into a remote pgvector database (see <a href="#geneweave-memory-settings">Settings &amp; pgvector</a>).</p>
+
+  <h4>episodic_memory</h4>
+  <p>An append-only turn log. One row per message role (user or assistant) per chat. Entries are truncated to 1 200 characters before storage and capped at <code>max_episodic_per_user</code> (default 200). Content is redact-only under governance — episodes are never blocked, only scrubbed.</p>
+  <table class="params">
+    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+    <tr><td><code>id</code></td><td>TEXT PK</td><td>UUIDv7</td></tr>
+    <tr><td><code>user_id</code></td><td>TEXT</td><td>Authenticated user.</td></tr>
+    <tr><td><code>chat_id</code></td><td>TEXT</td><td>Chat session the turn belongs to.</td></tr>
+    <tr><td><code>tenant_id</code></td><td>TEXT</td><td>Optional tenant scope.</td></tr>
+    <tr><td><code>message_role</code></td><td>TEXT</td><td><code>user</code> | <code>assistant</code></td></tr>
+    <tr><td><code>content</code></td><td>TEXT</td><td>Turn text, truncated to 1 200 chars; PII redacted by governance.</td></tr>
+    <tr><td><code>importance</code></td><td>REAL</td><td>Default 0.5; raised by self-disclosure signals.</td></tr>
+    <tr><td><code>tags</code></td><td>TEXT JSON</td><td>Array of tags set during extraction.</td></tr>
+    <tr><td><code>consolidated</code></td><td>INTEGER</td><td>1 if this turn has been merged into a consolidation summary.</td></tr>
+    <tr><td><code>created_at</code></td><td>DATETIME</td><td>Wall-clock write time.</td></tr>
+  </table>
+
+  <h4>semantic_memory</h4>
+  <p>Long-lived facts extracted from conversation (e.g. "prefers Python over Ruby"). Each fact carries an optional vector embedding for similarity search. The extraction pipeline runs LLM + regex in parallel and merges results.</p>
+  <table class="params">
+    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+    <tr><td><code>id</code></td><td>TEXT PK</td><td>UUIDv7</td></tr>
+    <tr><td><code>user_id</code></td><td>TEXT</td><td></td></tr>
+    <tr><td><code>tenant_id</code></td><td>TEXT</td><td></td></tr>
+    <tr><td><code>content</code></td><td>TEXT</td><td>The fact in natural-language form.</td></tr>
+    <tr><td><code>embedding</code></td><td>BLOB</td><td>Float32 vector (1 536-dim for OpenAI text-embedding-3-small). Null until first embed.</td></tr>
+    <tr><td><code>source</code></td><td>TEXT</td><td><code>llm_extraction</code> | <code>rule_extraction</code> | <code>explicit</code> (tool call)</td></tr>
+    <tr><td><code>importance</code></td><td>REAL</td><td>Default 0.5; used for compaction ordering.</td></tr>
+    <tr><td><code>created_at</code></td><td>DATETIME</td><td></td></tr>
+    <tr><td><code>expires_at</code></td><td>DATETIME</td><td>Null = never; set by retention rules.</td></tr>
+  </table>
+
+  <h4>entity_memory</h4>
+  <p>Structured, searchable profile facts keyed by <code>entity_name</code> + <code>fact_type</code>. The agent queries this for person/location/preference/topic lookups via <code>memory_list_entities</code> and <code>memory_get_profile</code>.</p>
+  <table class="params">
+    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+    <tr><td><code>id</code></td><td>TEXT PK</td><td>UUIDv7</td></tr>
+    <tr><td><code>user_id</code></td><td>TEXT</td><td></td></tr>
+    <tr><td><code>tenant_id</code></td><td>TEXT</td><td></td></tr>
+    <tr><td><code>entity_name</code></td><td>TEXT</td><td>The entity being described (max 120 chars).</td></tr>
+    <tr><td><code>fact_type</code></td><td>TEXT</td><td><code>person</code> | <code>location</code> | <code>organization</code> | <code>preference</code> | <code>topic</code> | <code>general</code></td></tr>
+    <tr><td><code>fact_value</code></td><td>TEXT</td><td>Natural-language description of the fact.</td></tr>
+    <tr><td><code>source</code></td><td>TEXT</td><td>Which extraction path created this row.</td></tr>
+    <tr><td><code>confidence</code></td><td>REAL</td><td>Default 1.0; LLM-assigned confidence when available.</td></tr>
+    <tr><td><code>created_at</code></td><td>DATETIME</td><td></td></tr>
+    <tr><td><code>updated_at</code></td><td>DATETIME</td><td></td></tr>
+  </table>
+
+  <h4>procedural_memory</h4>
+  <p>Proposed changes to how the agent should behave with a specific user. Each row is an <em>instruction delta</em> — a natural-language suggestion from the agent or supervisor — that must go through a <code>proposed → approved → applied</code> workflow before it takes effect. Human approval is enforced by geneWeave's human-task system.</p>
+  <table class="params">
+    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+    <tr><td><code>id</code></td><td>TEXT PK</td><td>UUIDv7</td></tr>
+    <tr><td><code>user_id</code></td><td>TEXT</td><td></td></tr>
+    <tr><td><code>agent_id</code></td><td>TEXT</td><td>Which agent proposed this delta.</td></tr>
+    <tr><td><code>instruction_delta</code></td><td>TEXT</td><td>The proposed behaviour change in plain English.</td></tr>
+    <tr><td><code>proposed_by</code></td><td>TEXT</td><td>User or system role that initiated the proposal.</td></tr>
+    <tr><td><code>status</code></td><td>TEXT</td><td><code>proposed</code> | <code>approved</code> | <code>applied</code> | <code>rejected</code></td></tr>
+    <tr><td><code>confidence</code></td><td>REAL</td><td>Model confidence in the delta (0–1).</td></tr>
+    <tr><td><code>human_task_id</code></td><td>TEXT</td><td>FK to the human-task review record, if applicable.</td></tr>
+    <tr><td><code>applied_at</code></td><td>DATETIME</td><td>Null until status = applied.</td></tr>
+    <tr><td><code>created_at</code></td><td>DATETIME</td><td></td></tr>
+  </table>
+
+  <h4>working_memory_snapshots</h4>
+  <p>Per-chat scratch state for multi-step tasks. Agents write intermediate reasoning, partial results, or task-local context here as a JSON blob. Working memory is never carried across sessions — it is scoped to a single <code>chat_id</code>.</p>
+  <table class="params">
+    <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+    <tr><td><code>id</code></td><td>TEXT PK</td><td>UUIDv7</td></tr>
+    <tr><td><code>user_id</code></td><td>TEXT</td><td></td></tr>
+    <tr><td><code>chat_id</code></td><td>TEXT</td><td>Scoped to this chat session only.</td></tr>
+    <tr><td><code>agent_id</code></td><td>TEXT</td><td>Which agent wrote this snapshot.</td></tr>
+    <tr><td><code>content</code></td><td>TEXT JSON</td><td>Free-form JSON blob.</td></tr>
+    <tr><td><code>created_at</code></td><td>DATETIME</td><td></td></tr>
+  </table>
+
+  <h4>Supporting tables</h4>
+  <table class="params">
+    <tr><th>Table</th><th>Purpose</th></tr>
+    <tr><td><code>memory_settings</code></td><td>Per-tenant toggles and caps for all five memory types. One row per tenant; a global default row (<code>tenant_id = NULL</code>) is seeded at boot.</td></tr>
+    <tr><td><code>memory_governance</code></td><td>DB-driven governance rules: block/redact patterns, max-age, max-entries, per-type scope. Eight rules seeded by m35/m37/m38.</td></tr>
+    <tr><td><code>memory_extraction_rules</code></td><td>Regex + LLM extraction hints used by the hybrid extraction pipeline.</td></tr>
+  </table>
+
+  <!-- ─── SAVE PIPELINE ──────────────────────────────────────────── -->
+  <h3 id="geneweave-memory-pipeline">The <code>saveToMemory()</code> pipeline <a class="anchorlink" href="#geneweave-memory-pipeline">#</a></h3>
+
+  <p><strong>What it does.</strong> <code>saveToMemory()</code> in <a href="apps/geneweave/src/chat-memory-utils.ts">chat-memory-utils.ts</a> is the single hot-path called after every chat turn (including turns that are denied by a content guardrail). It runs entirely in the background — the HTTP response is not blocked on it.</p>
+
+  <p><strong>Step-by-step flow:</strong></p>
+  <ol>
+    <li><strong>Load in parallel</strong> — memory settings row, extraction rules, and all governance rows for the user's tenant are fetched in a single <code>Promise.all</code>.</li>
+    <li><strong>Save episodic</strong> — content is truncated to 1 200 chars; <code>applyGovernanceCheck(…, {redactOnly: true})</code> scrubs PII; the row is inserted. After insert, the per-user episodic cap is enforced (oldest entries beyond <code>max_episodic_per_user</code> are deleted).</li>
+    <li><strong>Hybrid extraction</strong> — <code>runHybridMemoryExtraction()</code> runs regex rules and <code>extractEntitiesWithModel()</code> in parallel. The model call uses a structured prompt returning up to 8 entities of the six fact types. Results are merged: rule-based entities first, then LLM-extracted ones, deduplicating by <code>entity_name</code>.</li>
+    <li><strong>Save semantic facts</strong> — for each extracted text fact, <code>shouldStore()</code> is checked (block pass), then <code>beforeStore()</code> runs redaction. Passing entries are embedded (via OpenAI text-embedding-3-small or pgvector path) and inserted. The per-user semantic cap (<code>max_semantic_per_user</code>) is enforced after insert.</li>
+    <li><strong>Save entity facts</strong> — for each structured entity, <code>shouldStore()</code> is checked; blocked entities are dropped silently. Passing entities are upserted into <code>entity_memory</code>. The per-user entity cap (<code>max_entity_per_user</code>) is enforced.</li>
+    <li><strong>Record extraction event</strong> — a row is written to <code>memory_extraction_events</code> with per-turn metrics (entity counts, self-disclosure flags, merged counts). Visible in Admin → Platform → Memory Extraction Events.</li>
+  </ol>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">chat-memory-utils.ts — simplified hot path</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">export async function</span> <span class="tk-f">saveToMemory</span>(
+  db: <span class="tk-t">BetterSqlite3.Database</span>,
+  ctx: <span class="tk-t">MemoryContext</span>,
+  userMessage: <span class="tk-t">string</span>,
+  assistantResponse: <span class="tk-t">string</span>,
+  model: <span class="tk-t">Model</span>,
+): <span class="tk-k">Promise</span>&lt;<span class="tk-k">void</span>&gt; {
+  <span class="tk-c">// Step 1 — load settings, rules, and governance rows in one round-trip</span>
+  <span class="tk-k">const</span> [settings, rules, govRows] = <span class="tk-k">await</span> <span class="tk-t">Promise</span>.<span class="tk-f">all</span>([
+    <span class="tk-f">loadMemorySettings</span>(db, ctx.tenantId),
+    <span class="tk-f">loadExtractionRules</span>(db),
+    <span class="tk-f">loadGovernanceRows</span>(db, ctx.tenantId),
+  ]);
+  <span class="tk-k">const</span> policy = <span class="tk-f">weaveGovernancePolicy</span>(govRows);
+
+  <span class="tk-c">// Step 2 — episodic (redact-only; never block)</span>
+  <span class="tk-k">if</span> (settings.enable_episodic) {
+    <span class="tk-k">const</span> truncated = userMessage.<span class="tk-f">slice</span>(<span class="tk-n">0</span>, <span class="tk-n">1200</span>);
+    <span class="tk-k">const</span> { content } = <span class="tk-k">await</span> <span class="tk-f">applyGovernanceCheck</span>(db, ctx, truncated, <span class="tk-s">'episodic'</span>, { redactOnly: <span class="tk-k">true</span> });
+    <span class="tk-f">insertEpisodic</span>(db, ctx, content);
+    <span class="tk-f">enforceEpisodicCap</span>(db, ctx.userId, settings.max_episodic_per_user);
+  }
+
+  <span class="tk-c">// Step 3 — hybrid extraction</span>
+  <span class="tk-k">const</span> { semanticFacts, entities } = <span class="tk-k">await</span> <span class="tk-f">runHybridMemoryExtraction</span>(
+    db, ctx, userMessage, assistantResponse, rules, model,
+  );
+
+  <span class="tk-c">// Step 4 — semantic facts (block + redact)</span>
+  <span class="tk-k">if</span> (settings.enable_semantic) {
+    <span class="tk-k">for</span> (<span class="tk-k">const</span> fact <span class="tk-k">of</span> semanticFacts) {
+      <span class="tk-k">const</span> { blocked, content } = <span class="tk-k">await</span> <span class="tk-f">applyGovernanceCheck</span>(db, ctx, fact.content, <span class="tk-s">'semantic'</span>);
+      <span class="tk-k">if</span> (!blocked) <span class="tk-k">await</span> <span class="tk-f">insertSemanticFact</span>(db, ctx, { ...fact, content });
+    }
+    <span class="tk-f">enforceSemanticCap</span>(db, ctx.userId, settings.max_semantic_per_user);
+  }
+
+  <span class="tk-c">// Step 5 — entity facts (block only; entity content is already structured)</span>
+  <span class="tk-k">if</span> (settings.enable_entity) {
+    <span class="tk-k">for</span> (<span class="tk-k">const</span> entity <span class="tk-k">of</span> entities) {
+      <span class="tk-k">const</span> { blocked } = <span class="tk-k">await</span> <span class="tk-f">applyGovernanceCheck</span>(db, ctx, entity.fact_value, <span class="tk-s">'entity'</span>);
+      <span class="tk-k">if</span> (!blocked) <span class="tk-f">upsertEntity</span>(db, ctx, entity);
+    }
+    <span class="tk-f">enforceEntityCap</span>(db, ctx.userId, settings.max_entity_per_user);
+  }
+
+  <span class="tk-c">// Step 6 — record extraction metrics</span>
+  <span class="tk-f">recordExtractionEvent</span>(db, ctx, { semanticFacts, entities });
+}</pre></div>
+
+  <p><strong>When content guardrails deny a message:</strong> <code>chat-send-message.ts</code> calls <code>saveToMemory()</code> for episodic capture <em>before</em> the early return. This ensures the conversation audit log is always complete, even for denied turns. Semantic and entity extraction do not run for blocked turns — only the episodic log entry is written (and PII is still redacted from it).</p>
+
+  <h4>Hybrid extraction pipeline</h4>
+  <p><code>runHybridMemoryExtraction()</code> runs two extraction paths in parallel and merges their results:</p>
+  <ul>
+    <li><strong>Rule-based</strong> — <code>loadExtractionRules()</code> fetches regex patterns and category labels from <code>memory_extraction_rules</code>. Each rule is tested against the turn text; matches produce structured entities with <code>source = 'rule_extraction'</code>.</li>
+    <li><strong>LLM-based</strong> — <code>extractEntitiesWithModel()</code> calls the model with a structured extraction prompt requesting up to 8 entities across six fact types: <code>person</code>, <code>location</code>, <code>organization</code>, <code>preference</code>, <code>topic</code>, <code>general</code>. Entity names are capped at 120 chars; entities with invalid types are filtered out. Source is <code>llm_extraction</code>.</li>
+  </ul>
+  <p>The merge strategy gives priority to rule-based results (they are deterministic and auditable). LLM entities whose <code>entity_name</code> does not collide with an existing rule entity are appended. The merged list is capped at 8 entities total before governance is applied.</p>
+
+  <!-- ─── GOVERNANCE ──────────────────────────────────────────────── -->
+  <h3 id="geneweave-memory-governance">Governance &amp; defense-in-depth <a class="anchorlink" href="#geneweave-memory-governance">#</a></h3>
+
+  <p><strong>What it does.</strong> Two complementary layers protect memory from sensitive data:</p>
+  <ol>
+    <li><strong>Content guardrails (outer layer)</strong> — evaluated before the LLM sees the message. If a guardrail denies the message (e.g. credit-card number in input), the assistant never processes it and no structured extraction runs. The episodic turn log still receives a redacted copy (see above).</li>
+    <li><strong>Memory governance (inner layer)</strong> — applied by <code>applyGovernanceCheck()</code> inside the save pipeline, regardless of whether the outer layer acted. Every semantic fact and entity fact is checked with <code>shouldStore()</code> before being written; every episodic entry passes through <code>beforeStore()</code> for redaction.</li>
+  </ol>
+  <p>The inner layer provides defense-in-depth: if a user constructs a message that slips past the outer guardrails (e.g. an obfuscated credential), governance patterns still catch and redact it from the stored record. The outer layer's deny action is an optimisation, not the last line of defense.</p>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">chat-memory-utils.ts — applyGovernanceCheck()</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-k">export async function</span> <span class="tk-f">applyGovernanceCheck</span>(
+  db: <span class="tk-t">BetterSqlite3.Database</span>,
+  ctx: <span class="tk-t">MemoryContext</span>,
+  content: <span class="tk-t">string</span>,
+  memType: <span class="tk-t">string</span>,
+  options?: { redactOnly?: <span class="tk-k">boolean</span> },
+): <span class="tk-k">Promise</span>&lt;{ blocked: <span class="tk-k">boolean</span>; content: <span class="tk-k">string</span> }&gt; {
+  <span class="tk-k">const</span> govRows = <span class="tk-k">await</span> <span class="tk-f">loadGovernanceRows</span>(db, ctx.tenantId);
+  <span class="tk-k">const</span> policy  = <span class="tk-f">weaveGovernancePolicy</span>(govRows);
+
+  <span class="tk-k">if</span> (!options?.redactOnly) {
+    <span class="tk-k">const</span> ok = <span class="tk-k">await</span> policy.<span class="tk-f">shouldStore</span>(ctx, { type: memType, content });
+    <span class="tk-k">if</span> (!ok) <span class="tk-k">return</span> { blocked: <span class="tk-k">true</span>, content };
+  }
+
+  <span class="tk-k">const</span> after = policy.beforeStore
+    ? <span class="tk-k">await</span> policy.<span class="tk-f">beforeStore</span>(ctx, { type: memType, content })
+    : { content };
+
+  <span class="tk-k">return</span> { blocked: <span class="tk-k">false</span>, content: after.content };
+}</pre></div>
+
+  <p>The function is exported from <code>chat-memory-utils.ts</code> and reused in the <code>memory_remember</code> tool, so explicit "remember this" tool calls pass through the same governance pipeline as automatic extraction.</p>
+
+  <h4>Seeded governance rules reference</h4>
+  <p>Eight rules are active on every fresh geneWeave database. The table below maps each rule to its migration, type, and the pattern families it uses. For the full <code>GovernanceRule</code> schema, see <a href="#memory-governance">Governance, provenance &amp; retention</a>.</p>
+  <table class="params">
+    <tr><th>Rule (short)</th><th>Migration</th><th>Scope</th><th>Hook</th><th>Pattern families</th></tr>
+    <tr><td>PII Block</td><td>m35</td><td>global</td><td><code>shouldStore</code></td><td>Visa/MC/Amex/Discover card numbers; SSNs (strict ISS range)</td></tr>
+    <tr><td>No Credentials</td><td>m35</td><td>global</td><td><code>beforeStore</code></td><td><code>password=…</code>, <code>api_key=…</code>, <code>secret=…</code> inline assignments; raw JWTs</td></tr>
+    <tr><td>No Secrets in Entity</td><td>m35</td><td>entity</td><td><code>shouldStore</code></td><td><code>password</code>/<code>api_key</code> keywords; bearer tokens</td></tr>
+    <tr><td>Semantic Size Cap</td><td>m35</td><td>semantic</td><td>retention</td><td>500 entries/user; drop lowest importance</td></tr>
+    <tr><td>Semantic Age Limit</td><td>m35</td><td>semantic</td><td>retention</td><td>P180D (180 days)</td></tr>
+    <tr><td>Entity Size Cap</td><td>m35</td><td>entity</td><td>retention</td><td>100 entries/user; oldest first</td></tr>
+    <tr><td>Episodic PII Redact (mgov-0007)</td><td>m37+m38</td><td>episodic</td><td><code>beforeStore</code></td><td>SSNs (strict + broad 9xx fallback); credit cards; JWTs; inline credentials; DB URI credentials; JWT signing key values; emails; phone numbers</td></tr>
+    <tr><td>Entity PII Block (mgov-0008)</td><td>m37</td><td>entity</td><td><code>shouldStore</code></td><td>SSNs; credit card numbers</td></tr>
+  </table>
+
+  <!-- ─── TOOLS ───────────────────────────────────────────────────── -->
+  <h3 id="geneweave-memory-tools">Memory agent tools <a class="anchorlink" href="#geneweave-memory-tools">#</a></h3>
+
+  <p><strong>What they do.</strong> Seven tools are registered in <code>tools.ts</code> and made available to both the primary agent and the supervisor. The agent calls them autonomously when it needs to look something up or store a new fact. All read paths check governance before returning content; <code>memory_remember</code> runs <code>applyGovernanceCheck()</code> before persisting.</p>
+
+  <table class="params">
+    <tr><th>Tool name</th><th>Input parameters</th><th>What it returns</th></tr>
+    <tr>
+      <td><code>memory_recall</code></td>
+      <td><code>query: string</code> — natural-language question<br><code>limit?: number</code> — max results (default 5)</td>
+      <td>Combines semantic similarity search + entity lookup. Returns matching facts and entities as a formatted list.</td>
+    </tr>
+    <tr>
+      <td><code>memory_search</code></td>
+      <td><code>query: string</code> — search string<br><code>type?: 'semantic'|'entity'|'all'</code></td>
+      <td>Full-text search across semantic and/or entity stores. Returns top matching rows with relevance scores.</td>
+    </tr>
+    <tr>
+      <td><code>memory_remember</code></td>
+      <td><code>content: string</code> — the fact to store<br><code>importance?: number</code> — 0–1 (default 0.5)</td>
+      <td>Explicitly stores a semantic fact. Runs <code>applyGovernanceCheck()</code>; embeds the content; inserts into <code>semantic_memory</code>. Returns the new entry ID or a governance-blocked notice.</td>
+    </tr>
+    <tr>
+      <td><code>memory_forget</code></td>
+      <td><code>id: string</code> — entry ID to delete<br><code>type: 'semantic'|'entity'</code></td>
+      <td>Hard-deletes the specified entry. Returns confirmation or a not-found error.</td>
+    </tr>
+    <tr>
+      <td><code>memory_list_entities</code></td>
+      <td><code>entity_name?: string</code> — filter by entity<br><code>fact_type?: string</code> — filter by type<br><code>limit?: number</code></td>
+      <td>Lists all entity facts for the current user, optionally filtered. Returns entity rows as a structured list.</td>
+    </tr>
+    <tr>
+      <td><code>memory_list_episodes</code></td>
+      <td><code>limit?: number</code> — recent turns to fetch (default 10)<br><code>chat_id?: string</code> — scope to one chat</td>
+      <td>Returns recent episodic turn entries. Content is already PII-redacted at write time.</td>
+    </tr>
+    <tr>
+      <td><code>memory_get_profile</code></td>
+      <td>(no required parameters)</td>
+      <td>Returns a formatted full user profile: all entity facts grouped by type, plus top semantic facts, providing the agent with a rich context summary.</td>
+    </tr>
+  </table>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">agent using memory tools (example turn)</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-c">// User says: "Can you recommend a book for me?"</span>
+<span class="tk-c">// Agent automatically calls memory_get_profile to load context:</span>
+
+<span class="tk-c">// Tool: memory_get_profile → returns:</span>
+<span class="tk-c">// Entities:</span>
+<span class="tk-c">//   preference → "non-fiction, history and science"</span>
+<span class="tk-c">//   preference → "Kindle format preferred"</span>
+<span class="tk-c">//   preference → "budget around £15"</span>
+<span class="tk-c">// Semantic facts:</span>
+<span class="tk-c">//   "User mentioned enjoying 'Sapiens' by Yuval Harari"</span>
+<span class="tk-c">//   "User reads on commute — short chapters preferred"</span>
+
+<span class="tk-c">// Agent now recommends with full context — no need for the user to repeat preferences</span></pre></div>
+
+  <!-- ─── API REFERENCE ───────────────────────────────────────────── -->
+  <h3 id="geneweave-memory-api">Admin &amp; user-facing APIs <a class="anchorlink" href="#geneweave-memory-api">#</a></h3>
+
+  <h4>Admin APIs (require admin session)</h4>
+  <table class="params">
+    <tr><th>Method + Path</th><th>What it does</th></tr>
+    <tr><td><code>GET /api/admin/episodic-memory</code></td><td>List episodic entries. Query params: <code>userId</code>, <code>limit</code> (default 50), <code>chatId</code>.</td></tr>
+    <tr><td><code>DELETE /api/admin/episodic-memory/:userId/:id</code></td><td>Delete a single episodic entry by ID.</td></tr>
+    <tr><td><code>DELETE /api/admin/episodic-memory/:userId</code></td><td>Delete all episodic entries for a user (GDPR wipe).</td></tr>
+    <tr><td><code>GET /api/admin/semantic-memory</code></td><td>List semantic facts from SQLite. Query params: <code>userId</code>, <code>limit</code>. Note: does not query pgvector — use <code>memory_search</code> tool for similarity search across both backends.</td></tr>
+    <tr><td><code>DELETE /api/admin/semantic-memory/:userId/:id</code></td><td>Delete a single semantic fact.</td></tr>
+    <tr><td><code>GET /api/admin/entity-memory</code></td><td>List entity facts. Query params: <code>userId</code>, <code>entityName</code>, <code>factType</code>, <code>limit</code>.</td></tr>
+    <tr><td><code>DELETE /api/admin/entity-memory/:userId/:id</code></td><td>Delete a single entity fact.</td></tr>
+    <tr><td><code>GET /api/admin/procedural-memory</code></td><td>List procedural memory proposals. Query params: <code>userId</code>, <code>status</code>, <code>agentId</code>.</td></tr>
+    <tr><td><code>GET /api/admin/procedural-memory/:id</code></td><td>Fetch a single procedural entry.</td></tr>
+    <tr><td><code>POST /api/admin/procedural-memory</code></td><td>Create a procedural proposal. Body: <code>{ user_id, agent_id, instruction_delta, proposed_by, confidence? }</code>.</td></tr>
+    <tr><td><code>POST /api/admin/procedural-memory/:id/approve</code></td><td>Approve a proposed instruction delta (sets status → <code>approved</code>).</td></tr>
+    <tr><td><code>POST /api/admin/procedural-memory/:id/apply</code></td><td>Apply an approved delta (sets status → <code>applied</code>, stamps <code>applied_at</code>).</td></tr>
+    <tr><td><code>POST /api/admin/procedural-memory/:id/reject</code></td><td>Reject a proposal (sets status → <code>rejected</code>).</td></tr>
+    <tr><td><code>DELETE /api/admin/procedural-memory/:id</code></td><td>Hard-delete a procedural entry.</td></tr>
+    <tr><td><code>GET /api/admin/working-memory</code></td><td>List working-memory snapshots. Query params: <code>userId</code>, <code>chatId</code>, <code>agentId</code>.</td></tr>
+    <tr><td><code>DELETE /api/admin/working-memory/:userId/:id</code></td><td>Delete a working-memory snapshot.</td></tr>
+    <tr><td><code>GET /api/admin/memory-governance</code></td><td>List all governance rules.</td></tr>
+    <tr><td><code>POST /api/admin/memory-governance</code></td><td>Create a new governance rule.</td></tr>
+    <tr><td><code>PUT /api/admin/memory-governance/:id</code></td><td>Update a governance rule (e.g. add a new redact pattern).</td></tr>
+    <tr><td><code>DELETE /api/admin/memory-governance/:id</code></td><td>Delete a governance rule.</td></tr>
+    <tr><td><code>GET /api/admin/memory-settings</code></td><td>List all memory-settings rows.</td></tr>
+    <tr><td><code>GET /api/admin/memory-settings/:tenantId</code></td><td>Get the settings row for a specific tenant (or <code>global</code> for the default).</td></tr>
+    <tr><td><code>PUT /api/admin/memory-settings/:tenantId</code></td><td>Update settings for a tenant. All toggle and cap fields are patchable.</td></tr>
+  </table>
+
+  <h4>User-facing APIs (require user session)</h4>
+  <p>These endpoints are called by the geneWeave UI's Settings → Memory panel. They are scoped to the authenticated user — users can only read and delete their own memory.</p>
+  <table class="params">
+    <tr><th>Method + Path</th><th>What it returns / does</th></tr>
+    <tr><td><code>GET /api/user/memory</code></td><td>Returns all memory for the current user as <code>{ entities, semantic, episodic, procedural }</code> buckets. Each bucket is a flat array of entries.</td></tr>
+    <tr><td><code>DELETE /api/user/memory/semantic/:id</code></td><td>Deletes one semantic fact.</td></tr>
+    <tr><td><code>DELETE /api/user/memory/entity/:entityName</code></td><td>Deletes all entity facts for the given entity name (e.g. deleting all facts about "Alice").</td></tr>
+    <tr><td><code>DELETE /api/user/memory/episodic/:id</code></td><td>Deletes one episodic turn entry.</td></tr>
+    <tr><td><code>DELETE /api/user/memory/all</code></td><td>Deletes all memory for the current user across all types. Used by Settings → "Forget everything".</td></tr>
+  </table>
+
+  <!-- ─── SETTINGS & PGVECTOR ─────────────────────────────────────── -->
+  <h3 id="geneweave-memory-settings">Memory settings &amp; pgvector backend <a class="anchorlink" href="#geneweave-memory-settings">#</a></h3>
+
+  <h4>memory_settings table</h4>
+  <p>One row per tenant (<code>tenant_id UNIQUE</code>); a global default row with <code>tenant_id = NULL</code> is seeded by migration m36. Tenant-specific rows inherit all defaults from the global row if not present. Managed via <code>PUT /api/admin/memory-settings/:tenantId</code>.</p>
+  <table class="params">
+    <tr><th>Column</th><th>Default</th><th>Meaning</th></tr>
+    <tr><td><code>enable_semantic</code></td><td>1</td><td>Master toggle for semantic fact extraction and storage.</td></tr>
+    <tr><td><code>enable_entity</code></td><td>1</td><td>Master toggle for entity extraction and storage.</td></tr>
+    <tr><td><code>enable_episodic</code></td><td>1</td><td>Master toggle for episodic turn logging.</td></tr>
+    <tr><td><code>enable_procedural</code></td><td>1</td><td>Master toggle for procedural memory proposals.</td></tr>
+    <tr><td><code>enable_working</code></td><td>1</td><td>Master toggle for working-memory snapshots.</td></tr>
+    <tr><td><code>auto_extract_on_turn</code></td><td>1</td><td>Whether to run the extraction pipeline automatically after each turn. Set to 0 to disable background extraction while keeping the toggle types active for tool-triggered writes.</td></tr>
+    <tr><td><code>consolidation_enabled</code></td><td>1</td><td>Whether older episodic entries are periodically merged into summary entries.</td></tr>
+    <tr><td><code>consolidation_interval_min</code></td><td>60</td><td>Interval in minutes between consolidation runs.</td></tr>
+    <tr><td><code>max_episodic_per_user</code></td><td>200</td><td>Hard cap on episodic entries per user. Oldest entries pruned on exceed.</td></tr>
+    <tr><td><code>max_semantic_per_user</code></td><td>500</td><td>Hard cap on semantic facts. Lowest-importance entries pruned on exceed.</td></tr>
+    <tr><td><code>max_entity_per_user</code></td><td>100</td><td>Hard cap on entity facts. Oldest entries pruned on exceed.</td></tr>
+  </table>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">disable episodic logging for one tenant</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-c">// Disable episodic turn logging for a specific tenant, keep everything else</span>
+curl -X PUT https://your-geneweave/api/admin/memory-settings/tenant-abc \
+  -H <span class="tk-s">'Content-Type: application/json'</span> \
+  -d <span class="tk-s">'{"enable_episodic": 0}'</span></pre></div>
+
+  <h4>pgvector backend</h4>
+  <p><strong>What it does.</strong> By default, semantic memory embeddings are stored as BLOB columns in SQLite and searched via dot-product comparison in JavaScript. For deployments that need true ANN (approximate nearest-neighbour) search at scale, geneWeave can mirror semantic embeddings into a remote pgvector database.</p>
+  <p><strong>How to enable.</strong> Set the <code>PGVECTOR_URL</code> environment variable to a PostgreSQL connection string. On startup, the pgvector backend initialises a <code>semantic_memory</code> table in the remote database. All embedding writes go to both SQLite (metadata) and pgvector (vector search). Similarity queries are routed to pgvector; admin API queries and metadata lookups stay in SQLite.</p>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">.env</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-c"># Enable pgvector for semantic memory embedding search</span>
+PGVECTOR_URL=postgresql://user:password@db.example.com:5432/geneweave_memory
+
+<span class="tk-c"># OpenAI API key used for text-embedding-3-small embeddings</span>
+OPENAI_API_KEY=sk-...</pre></div>
+
+  <div class="call note"><span class="ic">ℹ</span>
+    <div class="ct">Admin API vs pgvector</div>
+    <p><code>GET /api/admin/semantic-memory</code> queries the SQLite metadata table only. It will not return entries whose embeddings were written exclusively to pgvector. To search across both backends, use the <code>memory_search</code> agent tool, which routes the query through the active backend.</p>
+  </div>
+
+  <h4>Running the memory stress test</h4>
+  <p>The repository ships a comprehensive end-to-end stress test covering all five memory types, governance redaction/block, entity extraction, semantic search, recall tool, episodic logging, and the pgvector split. Run it against a live geneWeave server:</p>
+
+  <div class="code"><div class="bar"><span class="dots"><i></i><i></i><i></i></span><span class="fname">terminal</span><button class="copybtn">Copy</button></div>
+<pre><span class="tk-c"># Start the server (from workspace root)</span>
+npx tsx examples/12-geneweave.ts
+
+<span class="tk-c"># In another terminal — run all 32 test groups (136 assertions)</span>
+npx tsx scripts/memory-stress.ts</pre></div>
+
+  <p>The test covers 32 groups including multi-turn entity accumulation, implicit recall via system-prompt injection, fact correction and update, semantic vocabulary gap (store "concise", recall with "brief"), embedded PII in narrative prose (DB URI passwords, JWT signing keys, 9xx SSNs), compound multi-hop search, and preference-driven recommendations. A passing run shows <strong>135/136 assertions pass, 0 fail, 1 structural skip</strong> (the skip is the pgvector/admin-API split — by design, not a bug).</p>
+
 </section>
 
 <!-- ============================================================ -->

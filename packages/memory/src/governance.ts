@@ -43,9 +43,9 @@ export function weaveGovernancePolicy(rules: GovernanceRule[]): MemoryPolicy {
       for (const rule of applicableRules(entry)) {
         if (rule.blockPatterns) {
           for (const pattern of rule.blockPatterns) {
-            if (new RegExp(pattern, 'i').test(entry.content)) {
-              return false;
-            }
+            let re: RegExp;
+            try { re = new RegExp(pattern, 'i'); } catch { continue; }
+            if (re.test(entry.content)) return false;
           }
         }
       }
@@ -57,7 +57,9 @@ export function weaveGovernancePolicy(rules: GovernanceRule[]): MemoryPolicy {
       for (const rule of applicableRules(entry)) {
         if (rule.redactPatterns) {
           for (const pattern of rule.redactPatterns) {
-            content = content.replace(new RegExp(pattern, 'gi'), '[REDACTED]');
+            let re: RegExp;
+            try { re = new RegExp(pattern, 'gi'); } catch { continue; }
+            content = content.replace(re, '[REDACTED]');
           }
         }
       }

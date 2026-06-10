@@ -15,6 +15,9 @@ import { applyM32GuardrailTimeouts } from './m32-guardrail-timeouts.js';
 import { applyM33PlatformLimits } from './m33-platform-limits.js';
 import { applyM34GuardrailConditions } from './m34-guardrail-conditions.js';
 import { applyM35MemoryVectors } from './m35-memory-vectors.js';
+import { applyM36MemoryComplete } from './m36-memory-complete.js';
+import { applyM37MemoryGuardrails } from './m37-memory-guardrails.js';
+import { applyM38ExtendedPiiPatterns } from './m38-extended-pii-patterns.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -38,6 +41,9 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm33-platform-limits', description: 'Platform limits: initialise config_overrides.limits on global tenant_configs row', run: applyM33PlatformLimits },
   { id: 'm34-guardrail-conditions', description: 'Guardrail conditional triggers: trigger_conditions + trigger_description columns, seed default conditions for model-graded and context-sensitive guardrails', run: applyM34GuardrailConditions },
   { id: 'm35-memory-vectors', description: 'Memory: embedding column on semantic_memory, memory tool catalog seeds, governance rule seeds, additional extraction rules', run: applyM35MemoryVectors },
+  { id: 'm36-memory-complete', description: 'Memory: episodic_memory, procedural_memory, working_memory_snapshots, memory_settings tables; seed memory_list_episodes and memory_get_profile tool catalog entries', run: applyM36MemoryComplete },
+  { id: 'm37-memory-guardrails', description: 'Memory guardrails: episodic PII redaction rule (SSN/card/JWT/email/phone/credential) + entity PII block rule (SSN/card in entity facts)', run: applyM37MemoryGuardrails },
+  { id: 'm38-extended-pii-patterns', description: 'Extended PII patterns: DB URI credentials, JWT signing key values, broad SSN fallback (catches 9xx numbers)', run: applyM38ExtendedPiiPatterns },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

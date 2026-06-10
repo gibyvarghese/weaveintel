@@ -34,6 +34,8 @@ import {
   buildMemoryContext,
   resolveIdentityRecallFromMemory,
   saveToMemory,
+  loadProceduralInstructions,
+  buildEpisodicContext,
 } from './chat-memory-utils.js';
 import { triggerConsolidationForUser } from './memory-consolidation.js';
 
@@ -332,6 +334,11 @@ export async function streamMessageImpl(
       content: denyContent,
       metadata: JSON.stringify({ guardrail: { decision: 'deny', reason: preGuardrail.reason }, cognitive: preGuardrail.cognitive }),
     });
+    // Episodic logging: always capture the turn even when guardrail blocks LLM processing.
+    // Memory governance will redact any PII before the entry is persisted.
+    try {
+      await saveToMemory(deps.db, ctx, model, userId, chatId, processedContent, denyContent, tenantId ?? undefined);
+    } catch { /* episodic capture is best-effort */ }
     return;
   }
 
@@ -390,10 +397,17 @@ export async function streamMessageImpl(
   const messages = historyToMessages(history);
   patchLatestUserMessage(messages, processedContent);
 
-  const streamMemoryContext = await buildMemoryContext(deps.db, ctx, model, userId, processedContent);
-  const streamAugmentedPrompt = streamMemoryContext
-    ? (streamSkillPrompt ? `${streamSkillPrompt}\n\n---\n${streamMemoryContext}` : streamMemoryContext)
-    : streamSkillPrompt;
+  const [streamMemoryContext, streamProceduralInstructions, streamEpisodicContext] = await Promise.all([
+    buildMemoryContext(deps.db, ctx, model, userId, processedContent),
+    loadProceduralInstructions(deps.db, userId),
+    buildEpisodicContext(deps.db, userId, 6),
+  ]);
+  const streamContextParts: string[] = [];
+  if (streamSkillPrompt) streamContextParts.push(streamSkillPrompt);
+  if (streamProceduralInstructions) streamContextParts.push(streamProceduralInstructions);
+  if (streamMemoryContext) streamContextParts.push(streamMemoryContext);
+  if (streamEpisodicContext) streamContextParts.push(streamEpisodicContext);
+  const streamAugmentedPrompt = streamContextParts.length > 0 ? streamContextParts.join('\n\n---\n') : undefined;
   const streamMemorySettings = {
     ...settings,
     enabledTools: streamEnabledTools,
@@ -653,7 +667,7 @@ export async function streamMessageImpl(
   });
 
   try {
-    await saveToMemory(deps.db, ctx, model, userId, chatId, processedContent, fullText);
+    await saveToMemory(deps.db, ctx, model, userId, chatId, processedContent, fullText, tenantId ?? undefined);
     triggerConsolidationForUser(userId, chatId);
   } catch {
     // Keep chat success path resilient when memory persistence fails.
