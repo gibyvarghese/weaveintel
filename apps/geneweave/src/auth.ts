@@ -251,7 +251,10 @@ export async function authenticateRequest(
   jwtSecret: string,
 ): Promise<AuthContext | null> {
   const cookies = parseCookies(req);
-  const token = cookies['gw_token'];
+  // Accept cookie-based JWT (browser) or Bearer token (A2A / machine-to-machine).
+  const bearerHeader = req.headers['authorization'] ?? '';
+  const bearerToken = bearerHeader.startsWith('Bearer ') ? bearerHeader.slice(7).trim() : undefined;
+  const token = cookies['gw_token'] ?? bearerToken;
   if (!token) return null;
 
   const payload = verifyJWT(token, jwtSecret);

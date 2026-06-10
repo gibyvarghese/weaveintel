@@ -195,7 +195,7 @@ export async function discoverSkillsForInput(
   userContent: string,
   model: Model,
   ctx: ExecutionContext,
-  mode: 'direct' | 'agent' | 'supervisor',
+  mode: 'direct' | 'agent' | 'supervisor' | 'ensemble',
   parseJson: (text: string) => unknown,
   runtimeHints?: { hasTabularAttachment?: boolean },
 ): Promise<{ matches: SkillMatch[]; toolNames: string[] }> {

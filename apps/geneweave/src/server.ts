@@ -37,6 +37,7 @@ import {
   registerTraceRoutes,
   registerChatRoutes,
   registerAdminWiringRoutes,
+  registerA2ARoutes,
 } from './routes/index.js';
 
 export interface ServerConfig {
@@ -114,6 +115,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerTraceRoutes(router, db, dashboard);
   registerChatRoutes(router, db, chatEngine, dashboard, workflowEngine as { getStatus?: () => unknown } | undefined);
   registerAdminWiringRoutes(router, db, { providers, publicBaseUrl, gatewayConfig, workflowEngine, triggerDispatcher, chatEngine, runtime: config.runtime });
+  registerA2ARoutes(router, db, chatEngine, { baseUrl: publicBaseUrl ?? 'http://localhost:3000' });
 
   // ── Avatar static files ────────────────────────────────────
 

@@ -250,6 +250,13 @@ export {
   type AgentRuntime,
   type AgentMemory,
   type AgentPolicy,
+  // Reasoning-quality strategies (W1–W5)
+  type CritiqueResult,
+  type Critic,
+  type VerifyResult,
+  type Verifier,
+  type EnsembleCandidate,
+  type ConflictResolver,
 } from './agents.js';
 
 // Memory contracts

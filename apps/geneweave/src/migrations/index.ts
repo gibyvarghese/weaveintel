@@ -19,6 +19,7 @@ import { applyM36MemoryComplete } from './m36-memory-complete.js';
 import { applyM37MemoryGuardrails } from './m37-memory-guardrails.js';
 import { applyM38ExtendedPiiPatterns } from './m38-extended-pii-patterns.js';
 import { applyM39MemoryToolsExtended } from './m39-memory-tools-extended.js';
+import { applyM40AgentStrategies } from './m40-agent-strategies.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -46,6 +47,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm37-memory-guardrails', description: 'Memory guardrails: episodic PII redaction rule (SSN/card/JWT/email/phone/credential) + entity PII block rule (SSN/card in entity facts)', run: applyM37MemoryGuardrails },
   { id: 'm38-extended-pii-patterns', description: 'Extended PII patterns: DB URI credentials, JWT signing key values, broad SSN fallback (catches 9xx numbers)', run: applyM38ExtendedPiiPatterns },
   { id: 'm39-memory-tools-extended', description: 'Memory tools: seed memory_snapshot, memory_load_state, memory_propose_instruction in tool catalog', run: applyM39MemoryToolsExtended },
+  { id: 'm40-agent-strategies', description: 'Agent Reasoning Strategies W1–W5: reflection, verify, supervisor re-plan, parallel delegation, ensemble mode columns on chat_settings; agent_strategy_settings table for global/tenant defaults', run: applyM40AgentStrategies },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

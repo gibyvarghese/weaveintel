@@ -68,6 +68,16 @@ describe('GeneWeave identity/persona auth for agents + tools', () => {
         { name: 'r1', description: 'Research worker', tools: ['web_search', 'browser_open'], persona: 'bad_persona' },
       ]),
       updated_at: new Date().toISOString(),
+      reflect_enabled: 0,
+      reflect_max_revisions: 1,
+      reflect_criteria: null,
+      verify_enabled: 0,
+      verify_min_score: 0.7,
+      verify_max_attempts: 1,
+      supervisor_replan_on_failure: 0,
+      supervisor_parallel_delegation: 0,
+      ensemble_agents: null,
+      ensemble_resolver: null,
     };
 
     const settings = settingsFromRow(row);

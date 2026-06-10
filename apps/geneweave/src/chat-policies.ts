@@ -126,7 +126,7 @@ export const SUPERVISOR_TEMPORAL_POLICY = [
   '  • Do NOT try to calculate elapsed time using raw timestamps or message metadata — always use the stopwatch tools',
 ].join('\n');
 
-export type ChatMode = 'direct' | 'agent' | 'supervisor';
+export type ChatMode = 'direct' | 'agent' | 'supervisor' | 'ensemble';
 
 const TOOL_POLICIES: Record<ChatMode, string[]> = {
   direct: [],
@@ -141,6 +141,16 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
   ],
   supervisor: [
     'datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis',
+  ],
+  // Ensemble agents each use the same agent-mode tool policy.
+  ensemble: [
+    'datetime', 'timezone_info',
+    'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
+    'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',
+    'reminder_create', 'reminder_list', 'reminder_cancel',
+    'calculator', 'json_format', 'text_analysis', 'memory_recall',
+    'web_search',
+    'cse_run_code', 'cse_session_status', 'cse_end_session',
   ],
 };
 

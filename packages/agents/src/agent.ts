@@ -20,6 +20,8 @@ import type {
   AgentUsage,
   AgentMemory,
   AgentPolicy,
+  Critic,
+  Verifier,
   Model,
   Message,
   ToolCall,
@@ -103,6 +105,59 @@ export interface ToolCallingAgentOptions {
    * Defaults to `maxSteps` when omitted.
    */
   maxDelegations?: number;
+  /**
+   * W3 — Re-plan on failure. Only meaningful when `workers` is set.
+   * When true, failed worker results include a REPLAN_REQUIRED signal so the
+   * supervisor LLM knows to revise its plan rather than give up.
+   */
+  replanOnFailure?: boolean;
+  /**
+   * W3 — Parallel delegation. Only meaningful when `workers` is set.
+   * When true, a `delegate_to_workers_parallel` batch tool is registered so
+   * the supervisor can dispatch independent sub-tasks concurrently.
+   */
+  parallelDelegation?: boolean;
+  /**
+   * W1 — Reflection mode: self-correction loop at each terminal response.
+   * When set, the agent critiques its own output before returning. If the
+   * critique rejects, feedback is appended as a new user turn and the loop
+   * continues. Consumes from the shared `maxSteps` budget.
+   * Default: not set (reflection disabled).
+   */
+  reflect?: {
+    /** Maximum number of revision cycles before accepting as-is. Default 1. */
+    maxRevisions?: number;
+    /** Criteria text describing what "good" means. Fed to the critic prompt. */
+    criteria?: string;
+    /** Critic implementation. Defaults to a self-critic using the same model. */
+    critic?: Critic;
+    /** For scored critics: accept when score >= minScore. Default 0.7. */
+    minScore?: number;
+  };
+  /**
+   * W2 — Evaluator-optimizer mode: verify→regenerate loop at each terminal
+   * response. When set, the verifier runs after guardrails; if it returns
+   * `passed: false`, the output is appended as "failed verification" and the
+   * loop regenerates. Shares the `maxSteps` budget.
+   * Default: not set (verify disabled).
+   */
+  verify?: {
+    /** Verifier implementation. */
+    verifier: Verifier;
+    /** Maximum regeneration attempts. Default 1. */
+    maxAttempts?: number;
+  };
+}
+
+// ─── Reflection / verify shared helper ───────────────────────
+
+/**
+ * Lazily build the default self-critic (loaded only when reflect is used).
+ * Dynamic import keeps reflect.ts out of the critical path for non-reflect agents.
+ */
+async function buildDefaultCritic(model: Model, criteria?: string): Promise<Critic> {
+  const { createSelfCritic } = await import('./reflect.js');
+  return createSelfCritic({ model, criteria });
 }
 
 export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
@@ -126,6 +181,8 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         cseCodeToolNames: opts.cseCodeToolNames,
         includeUtilityTools: opts.includeUtilityTools,
         defaultTimezone: opts.defaultTimezone,
+        replanOnFailure: opts.replanOnFailure,
+        parallelDelegation: opts.parallelDelegation,
       })
     : undefined;
 
@@ -155,6 +212,11 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
       let totalPromptTokens = 0;
       let totalCompletionTokens = 0;
       let toolCallCount = 0;
+      // W1/W2 — track revision/verify budgets across the loop
+      let revisionCount = 0;
+      let verifyAttemptCount = 0;
+      // Lazily resolved default critic (only when reflect is used without explicit critic)
+      let resolvedCritic: Critic | undefined;
 
       eventBus?.emit(weaveEvent(EventTypes.AgentRunStart, { agent: config.name, goal: input.goal }, ctx));
       void weaveAudit(ctx, { action: 'agent.run.start', outcome: 'success', resource: config.name, details: { goal: input.goal } });
@@ -277,6 +339,89 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             }
           }
 
+          // ── W2: Verify →regenerate ────────────────────────────────────────
+          if (opts.verify && !isExpired(ctx)) {
+            const maxAttempts = opts.verify.maxAttempts ?? 1;
+            if (verifyAttemptCount < maxAttempts) {
+              let verifyResult: { passed: boolean; reason?: string; score?: number };
+              try {
+                verifyResult = await opts.verify.verifier.verify(ctx, finalContent, { userInput: lastUserMessage(messages) });
+              } catch (err) {
+                verifyResult = { passed: false, reason: `verifier error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              if (!verifyResult.passed) {
+                verifyAttemptCount++;
+                void weaveAudit(ctx, {
+                  action: 'agent.verify.failed',
+                  outcome: 'failure',
+                  resource: config.name,
+                  details: { attempt: verifyAttemptCount, reason: verifyResult.reason, score: verifyResult.score },
+                });
+                const verifyFeedbackStep: AgentStep = {
+                  index: steps.length,
+                  type: 'thinking',
+                  content: `[verify:failed attempt=${verifyAttemptCount}] ${verifyResult.reason ?? 'did not pass'}`,
+                  durationMs: Date.now() - stepStart,
+                  tokenUsage: { prompt: response.usage.promptTokens, completion: response.usage.completionTokens },
+                };
+                steps.push(verifyFeedbackStep);
+                // Append failed output + regeneration request as new user turn
+                messages.push({ role: 'assistant', content: finalContent });
+                messages.push({
+                  role: 'user',
+                  content: `Your previous response did not pass verification (${verifyResult.reason ?? 'quality check failed'}). Please regenerate a better response.`,
+                });
+                continue;
+              }
+            }
+          }
+
+          // ── W1: Reflect →revise ───────────────────────────────────────────
+          if (opts.reflect && !isExpired(ctx)) {
+            const maxRevisions = opts.reflect.maxRevisions ?? 1;
+            if (revisionCount < maxRevisions) {
+              if (!resolvedCritic) {
+                resolvedCritic = opts.reflect.critic ?? await buildDefaultCritic(model, opts.reflect.criteria);
+              }
+              let critiqueResult: { accepted: boolean; feedback?: string; score?: number };
+              try {
+                critiqueResult = await resolvedCritic.critique(ctx, lastUserMessage(messages), finalContent);
+              } catch (err) {
+                critiqueResult = { accepted: false, feedback: `critic error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              if (!critiqueResult.accepted) {
+                revisionCount++;
+                void weaveAudit(ctx, {
+                  action: 'agent.reflect.revise',
+                  outcome: 'success',
+                  resource: config.name,
+                  details: { revision: revisionCount, score: critiqueResult.score, feedback: critiqueResult.feedback },
+                });
+                const reflectStep: AgentStep = {
+                  index: steps.length,
+                  type: 'thinking',
+                  content: `[reflect:revision=${revisionCount}] ${critiqueResult.feedback ?? 'critique requested revision'}`,
+                  durationMs: Date.now() - stepStart,
+                  tokenUsage: { prompt: response.usage.promptTokens, completion: response.usage.completionTokens },
+                };
+                steps.push(reflectStep);
+                // Append draft + critique feedback as new user turn
+                messages.push({ role: 'assistant', content: finalContent });
+                messages.push({
+                  role: 'user',
+                  content: `Please revise your response based on this feedback: ${critiqueResult.feedback ?? 'Improve the quality of your answer.'}`,
+                });
+                continue;
+              }
+              void weaveAudit(ctx, {
+                action: 'agent.reflect.accepted',
+                outcome: 'success',
+                resource: config.name,
+                details: { revision: revisionCount, score: critiqueResult.score },
+              });
+            }
+          }
+
           const responseStep: AgentStep = {
             index: steps.length,
             type: 'response',
@@ -329,6 +474,10 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
       let totalPromptTokens = 0;
       let totalCompletionTokens = 0;
       let toolCallCount = 0;
+      // W1/W2 — reflect/verify budgets for runStream
+      let streamRevisionCount = 0;
+      let streamVerifyAttemptCount = 0;
+      let streamResolvedCritic: Critic | undefined;
 
       const messages: Message[] = [];
       if (config.instructions) {
@@ -423,6 +572,55 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
               streamFinalContent = outputDecision.redactedText;
             }
           }
+          // ── W2: verify →regenerate (stream path) ─────────────────────────
+          if (opts.verify && !isExpired(ctx)) {
+            const maxAttempts = opts.verify.maxAttempts ?? 1;
+            if (streamVerifyAttemptCount < maxAttempts) {
+              let vr: { passed: boolean; reason?: string; score?: number };
+              try {
+                vr = await opts.verify.verifier.verify(ctx, streamFinalContent, { userInput: lastUserMessage(messages) });
+              } catch (err) {
+                vr = { passed: false, reason: `verifier error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              if (!vr.passed) {
+                streamVerifyAttemptCount++;
+                void weaveAudit(ctx, { action: 'agent.verify.failed', outcome: 'failure', resource: config.name, details: { attempt: streamVerifyAttemptCount, reason: vr.reason, score: vr.score } });
+                const vStep: AgentStep = { index: steps.length, type: 'thinking', content: `[verify:failed attempt=${streamVerifyAttemptCount}] ${vr.reason ?? 'did not pass'}`, durationMs: Date.now() - stepStart, tokenUsage: finalUsage };
+                steps.push(vStep);
+                yield { type: 'tool_start', step: vStep };
+                messages.push({ role: 'assistant', content: streamFinalContent });
+                messages.push({ role: 'user', content: `Your previous response did not pass verification (${vr.reason ?? 'quality check failed'}). Please regenerate a better response.` });
+                continue;
+              }
+            }
+          }
+          // ── W1: reflect →revise (stream path) ────────────────────────────
+          if (opts.reflect && !isExpired(ctx)) {
+            const maxRevisions = opts.reflect.maxRevisions ?? 1;
+            if (streamRevisionCount < maxRevisions) {
+              if (!streamResolvedCritic) {
+                streamResolvedCritic = opts.reflect.critic ?? await buildDefaultCritic(model, opts.reflect.criteria);
+              }
+              let cr: { accepted: boolean; feedback?: string; score?: number };
+              try {
+                cr = await streamResolvedCritic.critique(ctx, lastUserMessage(messages), streamFinalContent);
+              } catch (err) {
+                cr = { accepted: false, feedback: `critic error: ${err instanceof Error ? err.message : String(err)}` };
+              }
+              if (!cr.accepted) {
+                streamRevisionCount++;
+                void weaveAudit(ctx, { action: 'agent.reflect.revise', outcome: 'success', resource: config.name, details: { revision: streamRevisionCount, score: cr.score, feedback: cr.feedback } });
+                const rStep: AgentStep = { index: steps.length, type: 'thinking', content: `[reflect:revision=${streamRevisionCount}] ${cr.feedback ?? 'critique requested revision'}`, durationMs: Date.now() - stepStart, tokenUsage: finalUsage };
+                steps.push(rStep);
+                yield { type: 'tool_start', step: rStep };
+                messages.push({ role: 'assistant', content: streamFinalContent });
+                messages.push({ role: 'user', content: `Please revise your response based on this feedback: ${cr.feedback ?? 'Improve the quality of your answer.'}` });
+                continue;
+              }
+              void weaveAudit(ctx, { action: 'agent.reflect.accepted', outcome: 'success', resource: config.name, details: { revision: streamRevisionCount, score: cr.score } });
+            }
+          }
+
           const responseStep: AgentStep = {
             index: steps.length,
             type: 'response',
@@ -470,10 +668,47 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           continue;
         }
 
+        // ── W2/W1: fallback terminal — share stream counters ───────────────
+        let fallbackFinal = response.content;
+        if (opts.verify && !isExpired(ctx)) {
+          const maxAttempts = opts.verify.maxAttempts ?? 1;
+          if (streamVerifyAttemptCount < maxAttempts) {
+            let vr: { passed: boolean; reason?: string; score?: number };
+            try {
+              vr = await opts.verify.verifier.verify(ctx, fallbackFinal, { userInput: lastUserMessage(messages) });
+            } catch (err) {
+              vr = { passed: false, reason: `verifier error: ${err instanceof Error ? err.message : String(err)}` };
+            }
+            if (!vr.passed) {
+              streamVerifyAttemptCount++;
+              void weaveAudit(ctx, { action: 'agent.verify.failed', outcome: 'failure', resource: config.name, details: { attempt: streamVerifyAttemptCount } });
+              messages.push({ role: 'assistant', content: fallbackFinal });
+              messages.push({ role: 'user', content: `Your previous response did not pass verification (${vr.reason ?? 'quality check failed'}). Please regenerate a better response.` });
+              continue;
+            }
+          }
+        }
+        if (opts.reflect && !isExpired(ctx)) {
+          const maxRevisions = opts.reflect.maxRevisions ?? 1;
+          if (streamRevisionCount < maxRevisions) {
+            if (!streamResolvedCritic) streamResolvedCritic = opts.reflect.critic ?? await buildDefaultCritic(model, opts.reflect.criteria);
+            let cr: { accepted: boolean; feedback?: string; score?: number };
+            try { cr = await streamResolvedCritic.critique(ctx, lastUserMessage(messages), fallbackFinal); }
+            catch (err) { cr = { accepted: false, feedback: `critic error: ${err instanceof Error ? err.message : String(err)}` }; }
+            if (!cr.accepted) {
+              streamRevisionCount++;
+              void weaveAudit(ctx, { action: 'agent.reflect.revise', outcome: 'success', resource: config.name, details: { revision: streamRevisionCount } });
+              messages.push({ role: 'assistant', content: fallbackFinal });
+              messages.push({ role: 'user', content: `Please revise your response: ${cr.feedback ?? 'Improve the quality.'}` });
+              continue;
+            }
+          }
+        }
+
         const responseStep: AgentStep = {
           index: steps.length,
           type: 'response',
-          content: response.content,
+          content: fallbackFinal,
           durationMs: Date.now() - stepStart,
           tokenUsage: { prompt: response.usage.promptTokens, completion: response.usage.completionTokens },
         };
@@ -635,4 +870,12 @@ function buildResult(
     usage: buildUsage(steps, promptTokens, completionTokens, toolCallCount, startTime),
     status,
   };
+}
+
+/** Extract the most recent user-role message content from the conversation. */
+function lastUserMessage(messages: Message[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]!.role === 'user') return String(messages[i]!.content);
+  }
+  return '';
 }

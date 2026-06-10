@@ -475,20 +475,44 @@ export class SQLiteAdapter implements DatabaseAdapter {
     timezone?: string;
     enabledTools?: string; redactionEnabled?: boolean;
     redactionPatterns?: string; workers?: string;
+    // W1
+    reflectEnabled?: boolean; reflectMaxRevisions?: number; reflectCriteria?: string;
+    // W2
+    verifyEnabled?: boolean; verifyMinScore?: number; verifyMaxAttempts?: number;
+    // W3
+    supervisorReplanOnFailure?: boolean; supervisorParallelDelegation?: boolean;
+    // W5
+    ensembleAgents?: string; ensembleResolver?: string;
   }): Promise<void> {
     this.d.prepare(
-      `INSERT INTO chat_settings (chat_id, mode, system_prompt, timezone, enabled_tools, redaction_enabled, redaction_patterns, workers)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO chat_settings
+         (chat_id, mode, system_prompt, timezone, enabled_tools, redaction_enabled, redaction_patterns, workers,
+          reflect_enabled, reflect_max_revisions, reflect_criteria,
+          verify_enabled, verify_min_score, verify_max_attempts,
+          supervisor_replan_on_failure, supervisor_parallel_delegation,
+          ensemble_agents, ensemble_resolver)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(chat_id) DO UPDATE SET
          mode=excluded.mode, system_prompt=excluded.system_prompt, timezone=excluded.timezone,
          enabled_tools=excluded.enabled_tools, redaction_enabled=excluded.redaction_enabled,
          redaction_patterns=excluded.redaction_patterns, workers=excluded.workers,
+         reflect_enabled=excluded.reflect_enabled, reflect_max_revisions=excluded.reflect_max_revisions,
+         reflect_criteria=excluded.reflect_criteria,
+         verify_enabled=excluded.verify_enabled, verify_min_score=excluded.verify_min_score,
+         verify_max_attempts=excluded.verify_max_attempts,
+         supervisor_replan_on_failure=excluded.supervisor_replan_on_failure,
+         supervisor_parallel_delegation=excluded.supervisor_parallel_delegation,
+         ensemble_agents=excluded.ensemble_agents, ensemble_resolver=excluded.ensemble_resolver,
          updated_at=datetime('now')`,
     ).run(
       s.chatId, s.mode, s.systemPrompt ?? null,
       s.timezone ?? null,
       s.enabledTools ?? null, s.redactionEnabled ? 1 : 0,
       s.redactionPatterns ?? null, s.workers ?? null,
+      s.reflectEnabled ? 1 : 0, s.reflectMaxRevisions ?? 1, s.reflectCriteria ?? null,
+      s.verifyEnabled ? 1 : 0, s.verifyMinScore ?? 0.7, s.verifyMaxAttempts ?? 1,
+      s.supervisorReplanOnFailure ? 1 : 0, s.supervisorParallelDelegation ? 1 : 0,
+      s.ensembleAgents ?? null, s.ensembleResolver ?? null,
     );
   }
 

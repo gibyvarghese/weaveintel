@@ -65,6 +65,20 @@ export interface SupervisorRuntimeOptions {
   includeUtilityTools?: boolean;
   /** Default timezone passed to the `datetime` utility tool. */
   defaultTimezone?: string;
+  /**
+   * W3 — Re-plan on failure: when a delegated worker returns a failed/empty
+   * result, inject an explicit re-plan instruction back into the supervisor's
+   * conversation so it can revise its plan and re-delegate. When false (default),
+   * the raw failure result is surfaced to the supervisor without special handling.
+   */
+  replanOnFailure?: boolean;
+  /**
+   * W3 — Parallel delegation: registers a `delegate_to_workers_parallel` batch
+   * tool that dispatches multiple sub-tasks concurrently via `Promise.all`.
+   * Results are aggregated and returned together. When false (default), only
+   * the sequential `delegate_to_worker` tool is available.
+   */
+  parallelDelegation?: boolean;
 }
 
 export interface SupervisorRuntime {
@@ -241,6 +255,26 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
       });
 
       const baseOutput = result.output || '(Worker returned no output)';
+
+      // W3 — Re-plan on failure: if the worker failed or returned empty output,
+      // surface a structured failure signal so the supervisor knows to revise.
+      const workerFailed = result.status === 'failed' || result.status === 'cancelled' || !result.output;
+      if (opts.replanOnFailure && workerFailed) {
+        bus?.emit(weaveEvent(EventTypes.AgentDelegation, {
+          supervisor: supervisorName,
+          worker: args.worker,
+          goal: args.goal,
+          outcome: 'failed',
+        }, ctx));
+        return [
+          `[WORKER_FAILED] Worker "${args.worker}" could not complete the task.`,
+          `Status: ${result.status}`,
+          `Output: ${baseOutput}`,
+          '',
+          'REPLAN_REQUIRED: Please revise your plan. Consider a different approach, a different worker, or breaking the task into smaller sub-tasks.',
+        ].join('\n');
+      }
+
       const workerToolTrace = result.steps
         .filter((s) => s.type === 'tool_call' && s.toolCall?.name)
         .map((s) => ({
@@ -257,6 +291,61 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
       return `${baseOutput}\n\n[WorkerToolTrace]\n${JSON.stringify(workerToolTrace)}`;
     },
   }));
+
+  // W3 — Parallel fan-out tool (only registered when parallelDelegation is enabled)
+  if (opts.parallelDelegation) {
+    tools.register(weaveTool<{ tasks: Array<{ worker: string; goal: string }> }>({
+      name: 'delegate_to_workers_parallel',
+      description: `Dispatch multiple independent sub-tasks to workers concurrently. All tasks run in parallel via Promise.all and results are returned together. Use this when tasks are independent and can be done simultaneously. Available workers: ${[...workersMap.keys()].join(', ')}.`,
+      parameters: {
+        type: 'object',
+        properties: {
+          tasks: {
+            type: 'array',
+            description: 'Array of { worker, goal } pairs to dispatch concurrently.',
+            items: {
+              type: 'object',
+              properties: {
+                worker: { type: 'string', enum: [...workersMap.keys()], description: 'Worker name' },
+                goal: { type: 'string', description: 'Task description for this worker' },
+              },
+              required: ['worker', 'goal'],
+            },
+          },
+        },
+        required: ['tasks'],
+      },
+      async execute(args, ctx) {
+        if (!Array.isArray(args.tasks) || args.tasks.length === 0) {
+          return 'Error: tasks array must be non-empty.';
+        }
+        if (delegationResults.length + args.tasks.length > maxDelegations) {
+          return `Error: Parallel dispatch of ${args.tasks.length} tasks would exceed maxDelegations (${maxDelegations}).`;
+        }
+
+        const results = await Promise.all(args.tasks.map(async (task) => {
+          const w = workersMap.get(task.worker);
+          if (!w) return { worker: task.worker, goal: task.goal, output: `Error: Worker "${task.worker}" not found.`, status: 'failed' };
+          const childCtx = weaveChildContext(ctx, { metadata: { delegatedBy: supervisorName, delegatedTo: task.worker, parallel: true } });
+          const delegateStart = Date.now();
+          bus?.emit(weaveEvent(EventTypes.AgentDelegation, { supervisor: supervisorName, worker: task.worker, goal: task.goal, parallel: true }, ctx));
+          try {
+            const result = await w.run(childCtx, { messages: [{ role: 'user', content: task.goal }], goal: task.goal });
+            delegationResults.push({ agent: task.worker, result, durationMs: Date.now() - delegateStart });
+            const failed = result.status === 'failed' || result.status === 'cancelled' || !result.output;
+            const output = opts.replanOnFailure && failed
+              ? `[WORKER_FAILED] ${task.worker}: ${result.output || 'no output'} — REPLAN_REQUIRED`
+              : (result.output || '(no output)');
+            return { worker: task.worker, goal: task.goal, output, status: result.status };
+          } catch (err) {
+            return { worker: task.worker, goal: task.goal, output: `Error: ${err instanceof Error ? err.message : String(err)}`, status: 'failed' };
+          }
+        }));
+
+        return results.map(r => `[${r.worker}] ${r.output}`).join('\n\n---\n\n');
+      },
+    }));
+  }
 
   // Compose the supervisor instruction prompt.
   // The utility section lists supervisor-safe pure helpers (datetime, math_eval,

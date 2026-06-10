@@ -119,6 +119,90 @@ export interface AgentMemory {
   clear(ctx: ExecutionContext): Promise<void>;
 }
 
+// ─── Reasoning-quality strategies ───────────────────────────
+
+/**
+ * Result returned by a Critic after reviewing a draft response.
+ * `accepted` true → the draft is good enough; `feedback` is set on rejection
+ * and appended to the conversation as a new user turn so the agent revises.
+ */
+export interface CritiqueResult {
+  /** True when the draft meets the quality bar; false to trigger a revision. */
+  accepted: boolean;
+  /** Human-readable feedback injected as a new user turn on rejection. */
+  feedback?: string;
+  /** Optional numeric score in [0,1] for observability. */
+  score?: number;
+}
+
+/**
+ * Evaluates a draft response and decides whether to accept or request revision.
+ * Implemented by self-critique (prompts the same model) and rubric critics.
+ * W1 reflection uses this directly; W2 Verifier shares the same contract.
+ */
+export interface Critic {
+  /**
+   * Evaluate `draft` (produced in response to `input`) and return whether
+   * it should be accepted or revised. `ctx` carries the execution context.
+   */
+  critique(
+    ctx: ExecutionContext,
+    input: string,
+    draft: string,
+  ): Promise<CritiqueResult>;
+}
+
+/**
+ * Result returned by a Verifier after checking an output.
+ */
+export interface VerifyResult {
+  /** True when the output passes; false to trigger regeneration. */
+  passed: boolean;
+  /** Optional reason logged in the audit trail. */
+  reason?: string;
+  /** Optional numeric score in [0,1] for observability. */
+  score?: number;
+}
+
+/**
+ * Verifies an agent output against an external quality criterion.
+ * `Critic` is a specialisation of this interface (adds `feedback` text).
+ * W2 evaluator-optimizer uses Verifier; W1 reflection uses Critic.
+ */
+export interface Verifier {
+  verify(
+    ctx: ExecutionContext,
+    output: string,
+    context?: Record<string, unknown>,
+  ): Promise<VerifyResult>;
+}
+
+/**
+ * A single candidate in a multi-agent ensemble — one agent's answer together
+ * with provenance metadata so resolvers can rank or synthesise.
+ */
+export interface EnsembleCandidate {
+  /** Which agent produced this output. */
+  agentName: string;
+  /** The agent's final response text. */
+  output: string;
+  /** Optional score from a prior verifier/rubric judge. */
+  score?: number;
+  /** Raw AgentResult for resolvers that need step/usage data. */
+  result: AgentResult;
+}
+
+/**
+ * Resolves a set of disagreeing candidates into a single authoritative answer.
+ * Implementations: vote (majority), judge (rubric-scored), arbiter (model-picked).
+ */
+export interface ConflictResolver {
+  resolve(
+    ctx: ExecutionContext,
+    candidates: EnsembleCandidate[],
+  ): Promise<{ output: string; rationale?: string; winner?: string }>;
+}
+
 // ─── Agent policy ────────────────────────────────────────────
 
 export interface AgentPolicy {

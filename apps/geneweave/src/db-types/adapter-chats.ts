@@ -28,7 +28,18 @@ export interface IChatStore {
 
   // Chat settings
   getChatSettings(chatId: string): Promise<ChatSettingsRow | null>;
-  saveChatSettings(settings: { chatId: string; mode: string; systemPrompt?: string; timezone?: string; enabledTools?: string; redactionEnabled?: boolean; redactionPatterns?: string; workers?: string }): Promise<void>;
+  saveChatSettings(settings: {
+    chatId: string; mode: string; systemPrompt?: string; timezone?: string;
+    enabledTools?: string; redactionEnabled?: boolean; redactionPatterns?: string; workers?: string;
+    // W1
+    reflectEnabled?: boolean; reflectMaxRevisions?: number; reflectCriteria?: string;
+    // W2
+    verifyEnabled?: boolean; verifyMinScore?: number; verifyMaxAttempts?: number;
+    // W3
+    supervisorReplanOnFailure?: boolean; supervisorParallelDelegation?: boolean;
+    // W5
+    ensembleAgents?: string; ensembleResolver?: string;
+  }): Promise<void>;
 
   // Traces
   saveTrace(trace: { id: string; userId: string; chatId?: string; messageId?: string; traceId: string; spanId: string; parentSpanId?: string; name: string; startTime: number; endTime?: number; status?: string; attributes?: string; events?: string }): Promise<void>;

@@ -57,8 +57,8 @@ export function registerSettingsRoutes(
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
 
     const mode = (body['mode'] as string) || 'direct';
-    if (!['direct', 'agent', 'supervisor'].includes(mode)) {
-      json(res, 400, { error: 'mode must be "direct", "agent", or "supervisor"' }); return;
+    if (!['direct', 'agent', 'supervisor', 'ensemble'].includes(mode)) {
+      json(res, 400, { error: 'mode must be "direct", "agent", "supervisor", or "ensemble"' }); return;
     }
 
     // Apply tool policy: if enabledTools not provided, apply defaults for the mode
@@ -87,6 +87,20 @@ export function registerSettingsRoutes(
       redactionEnabled: !!body['redactionEnabled'],
       redactionPatterns: body['redactionPatterns'] ? JSON.stringify(body['redactionPatterns']) : undefined,
       workers: body['workers'] ? JSON.stringify(body['workers']) : undefined,
+      // W1 — reflection
+      reflectEnabled: body['reflectEnabled'] != null ? !!body['reflectEnabled'] : undefined,
+      reflectMaxRevisions: body['reflectMaxRevisions'] != null ? Number(body['reflectMaxRevisions']) : undefined,
+      reflectCriteria: (body['reflectCriteria'] as string) ?? undefined,
+      // W2 — verify
+      verifyEnabled: body['verifyEnabled'] != null ? !!body['verifyEnabled'] : undefined,
+      verifyMinScore: body['verifyMinScore'] != null ? Number(body['verifyMinScore']) : undefined,
+      verifyMaxAttempts: body['verifyMaxAttempts'] != null ? Number(body['verifyMaxAttempts']) : undefined,
+      // W3 — supervisor
+      supervisorReplanOnFailure: body['supervisorReplanOnFailure'] != null ? !!body['supervisorReplanOnFailure'] : undefined,
+      supervisorParallelDelegation: body['supervisorParallelDelegation'] != null ? !!body['supervisorParallelDelegation'] : undefined,
+      // W5 — ensemble
+      ensembleAgents: body['ensembleAgents'] ? JSON.stringify(body['ensembleAgents']) : undefined,
+      ensembleResolver: (body['ensembleResolver'] as string) ?? undefined,
     });
 
     json(res, 200, { ok: true });

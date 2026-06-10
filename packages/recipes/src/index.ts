@@ -1,4 +1,5 @@
 // @weaveintel/recipes — Public API
+export { weaveWorkflowTool, type WorkflowToolOptions, type WorkflowToolResult } from './createWorkflowTool.js';
 export { createWorkflowAgent, type WorkflowAgentOptions } from './createWorkflowAgent.js';
 export { createGovernedAssistant, type GovernedAssistantOptions } from './createGovernedAssistant.js';
 export { createApprovalDrivenAgent, type ApprovalDrivenAgentOptions } from './createApprovalDrivenAgent.js';

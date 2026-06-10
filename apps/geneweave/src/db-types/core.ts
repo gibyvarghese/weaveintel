@@ -105,6 +105,20 @@ export interface ChatSettingsRow {
   redaction_patterns: string | null;
   workers: string | null;
   updated_at: string;
+  // W1 — Reflection (m40)
+  reflect_enabled: number;
+  reflect_max_revisions: number;
+  reflect_criteria: string | null;
+  // W2 — Verify/regenerate (m40)
+  verify_enabled: number;
+  verify_min_score: number;
+  verify_max_attempts: number;
+  // W3 — Supervisor (m40)
+  supervisor_replan_on_failure: number;
+  supervisor_parallel_delegation: number;
+  // W5 — Ensemble (m40)
+  ensemble_agents: string | null;
+  ensemble_resolver: string | null;
 }
 
 export interface TraceRow {

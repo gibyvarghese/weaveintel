@@ -20,7 +20,9 @@
   },
   "dependencies": {
     "@weaveintel/core": "*",
-    "@weaveintel/models": "*"
+    "@weaveintel/models": "*",
+    "@weaveintel/evals": "*",
+    "@weaveintel/prompts": "*"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

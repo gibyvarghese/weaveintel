@@ -26,10 +26,10 @@ import { newUUIDv7 } from '@weaveintel/core';
 import type { ServerResponse } from 'node:http';
 import type {
   Model, ModelRequest, ModelResponse, StreamChunk, ExecutionContext, Message,
-  ToolRegistry, AgentStepEvent, AgentStep, AgentResult, EventBus,
+  ToolRegistry, AgentStepEvent, AgentStep, AgentResult, EventBus, Agent,
 } from '@weaveintel/core';
 import { weaveContext, weaveEventBus, EventTypes } from '@weaveintel/core';
-import { weaveAgent } from '@weaveintel/agents';
+import { weaveAgent, weaveEnsemble, createVoteResolver, createArbiterResolver } from '@weaveintel/agents';
 import {
   weaveInMemoryTracer,
   weaveUsageTracker,
@@ -802,9 +802,9 @@ export class ChatEngine {
       const routedGoal = effectiveGoal;
 
       // Auto-upgrade to supervisor when enterprise tools are available
-      let agent;
+      let agent: Agent;
       let systemPromptSha256: string = '';
-      
+
       if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
         const baseWorkers = settings.workers.length > 0
           ? await Promise.all(settings.workers.map(async (w) => ({
@@ -866,6 +866,14 @@ export class ChatEngine {
           includeUtilityTools: resolvedSupervisor ? resolvedSupervisor.agent.include_utility_tools !== 0 : true,
           additionalTools: supervisorAdditionalTools,
           bus: agentBus,
+          replanOnFailure: settings.supervisorReplanOnFailure,
+          parallelDelegation: settings.supervisorParallelDelegation,
+          ...(settings.reflectEnabled && {
+            reflect: {
+              maxRevisions: settings.reflectMaxRevisions,
+              criteria: settings.reflectCriteria,
+            },
+          }),
         });
       } else {
         const policyPrompt = await this.withResponseCardFormatPolicy(applyTemporalToolPolicy({
@@ -874,14 +882,46 @@ export class ChatEngine {
           temporalToolPolicy: TEMPORAL_TOOL_POLICY,
         }));
         systemPromptSha256 = computePromptFingerprint(policyPrompt);
-        agent = weaveAgent({
-          model,
-          tools,
-          systemPrompt: policyPrompt,
-          maxSteps: limits.chat_max_steps,
-          name: 'geneweave-agent',
-          bus: agentBus,
-        });
+        if (settings.mode === 'ensemble' && settings.ensembleAgents?.length) {
+          const ensembleAgents = await Promise.all(
+            settings.ensembleAgents.map(async (def) => {
+              const agentModel = def.model
+                ? await getOrCreateModel(
+                    this.config.defaultProvider,
+                    def.model,
+                    this.config.providers[this.config.defaultProvider] ?? {},
+                  )
+                : model;
+              return weaveAgent({
+                model: agentModel,
+                tools,
+                systemPrompt: def.systemPrompt ?? policyPrompt,
+                maxSteps: limits.chat_max_steps,
+                name: def.name,
+                bus: agentBus,
+              });
+            }),
+          );
+          const resolver = settings.ensembleResolver === 'arbiter'
+            ? createArbiterResolver({ model })
+            : createVoteResolver();
+          agent = weaveEnsemble({ agents: ensembleAgents, resolver, parallel: true }) as unknown as Agent;
+        } else {
+          agent = weaveAgent({
+            model,
+            tools,
+            systemPrompt: policyPrompt,
+            maxSteps: limits.chat_max_steps,
+            name: 'geneweave-agent',
+            bus: agentBus,
+            ...(settings.reflectEnabled && {
+              reflect: {
+                maxRevisions: settings.reflectMaxRevisions,
+                criteria: settings.reflectCriteria,
+              },
+            }),
+          });
+        }
       }
 
       const result = await this.runWithCseSuccessGuard(
@@ -1122,7 +1162,7 @@ export class ChatEngine {
         ? await this.db.listEnabledWorkerAgents()
         : [];
       const routedGoal = effectiveGoal;
-      let agent;
+      let agent: Agent;
       if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
         const baseWorkers = settings.workers.length > 0
           ? await Promise.all(settings.workers.map(async (w) => ({
@@ -1178,6 +1218,14 @@ export class ChatEngine {
           includeUtilityTools: resolvedSupervisor ? resolvedSupervisor.agent.include_utility_tools !== 0 : true,
           additionalTools: supervisorAdditionalTools,
           bus: agentBus,
+          replanOnFailure: settings.supervisorReplanOnFailure,
+          parallelDelegation: settings.supervisorParallelDelegation,
+          ...(settings.reflectEnabled && {
+            reflect: {
+              maxRevisions: settings.reflectMaxRevisions,
+              criteria: settings.reflectCriteria,
+            },
+          }),
         });
       } else {
         const policyPrompt = await this.withResponseCardFormatPolicy(applyTemporalToolPolicy({
@@ -1185,14 +1233,46 @@ export class ChatEngine {
           toolNames: settings.enabledTools,
           temporalToolPolicy: TEMPORAL_TOOL_POLICY,
         }));
-        agent = weaveAgent({
-          model,
-          tools,
-          systemPrompt: policyPrompt,
-          maxSteps: limits.chat_max_steps,
-          name: 'geneweave-agent',
-          bus: agentBus,
-        });
+        if (settings.mode === 'ensemble' && settings.ensembleAgents?.length) {
+          const ensembleAgents = await Promise.all(
+            settings.ensembleAgents.map(async (def) => {
+              const agentModel = def.model
+                ? await getOrCreateModel(
+                    this.config.defaultProvider,
+                    def.model,
+                    this.config.providers[this.config.defaultProvider] ?? {},
+                  )
+                : model;
+              return weaveAgent({
+                model: agentModel,
+                tools,
+                systemPrompt: def.systemPrompt ?? policyPrompt,
+                maxSteps: limits.chat_max_steps,
+                name: def.name,
+                bus: agentBus,
+              });
+            }),
+          );
+          const resolver = settings.ensembleResolver === 'arbiter'
+            ? createArbiterResolver({ model })
+            : createVoteResolver();
+          agent = weaveEnsemble({ agents: ensembleAgents, resolver, parallel: true }) as unknown as Agent;
+        } else {
+          agent = weaveAgent({
+            model,
+            tools,
+            systemPrompt: policyPrompt,
+            maxSteps: limits.chat_max_steps,
+            name: 'geneweave-agent',
+            bus: agentBus,
+            ...(settings.reflectEnabled && {
+              reflect: {
+                maxRevisions: settings.reflectMaxRevisions,
+                criteria: settings.reflectCriteria,
+              },
+            }),
+          });
+        }
       }
 
     if (forceWorkerDataAnalysis) {

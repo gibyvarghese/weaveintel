@@ -122,7 +122,7 @@ export async function getOrCreateModel(
 }
 
 export interface ChatSettings {
-  mode: 'direct' | 'agent' | 'supervisor';
+  mode: 'direct' | 'agent' | 'supervisor' | 'ensemble';
   systemPrompt?: string;
   timezone?: string;
   enabledTools: string[];
@@ -138,6 +138,20 @@ export interface ChatSettings {
    * delegation. Purely data-driven from the `skills.tool_names` column.
    */
   skillContributedTools?: string[];
+  // W1 — Reflection
+  reflectEnabled?: boolean;
+  reflectMaxRevisions?: number;
+  reflectCriteria?: string;
+  // W2 — Verify/regenerate
+  verifyEnabled?: boolean;
+  verifyMinScore?: number;
+  verifyMaxAttempts?: number;
+  // W3 — Supervisor options
+  supervisorReplanOnFailure?: boolean;
+  supervisorParallelDelegation?: boolean;
+  // W5 — Ensemble mode
+  ensembleAgents?: Array<{ name: string; model?: string; systemPrompt?: string }>;
+  ensembleResolver?: 'vote' | 'judge' | 'arbiter';
 }
 
 export interface WorkerDef {
@@ -176,5 +190,19 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
           persona: normalizePersona(worker.persona, 'agent'),
         }))
       : [],
+    // W1 — Reflection
+    reflectEnabled: row.reflect_enabled ? !!row.reflect_enabled : undefined,
+    reflectMaxRevisions: row.reflect_max_revisions || undefined,
+    reflectCriteria: row.reflect_criteria ?? undefined,
+    // W2 — Verify/regenerate
+    verifyEnabled: row.verify_enabled ? !!row.verify_enabled : undefined,
+    verifyMinScore: row.verify_min_score || undefined,
+    verifyMaxAttempts: row.verify_max_attempts || undefined,
+    // W3 — Supervisor
+    supervisorReplanOnFailure: row.supervisor_replan_on_failure ? !!row.supervisor_replan_on_failure : undefined,
+    supervisorParallelDelegation: row.supervisor_parallel_delegation ? !!row.supervisor_parallel_delegation : undefined,
+    // W5 — Ensemble
+    ensembleAgents: row.ensemble_agents ? JSON.parse(row.ensemble_agents) : undefined,
+    ensembleResolver: (row.ensemble_resolver as ChatSettings['ensembleResolver']) ?? undefined,
   };
 }
