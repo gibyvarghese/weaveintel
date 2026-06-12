@@ -90,7 +90,7 @@ export type SendMessageDeps = {
     get: (key: string) => Promise<unknown>;
     set: (key: string, value: unknown, ttlMs: number) => Promise<void>;
   };
-  cacheKeyBuilder: { build: (input: { model: string; prompt: string }) => string };
+  cacheKeyBuilder: { build: (input: { model: string; prompt: string; userId?: string }) => string };
   getAvailableModels: () => Promise<Array<{ id: string; provider: string }>>;
   withResponseCardFormatPolicy: (basePrompt: string | undefined) => Promise<string | undefined>;
   runAgent: (
@@ -150,7 +150,7 @@ export async function sendMessageImpl(
   const resolvedSystemPrompt = await resolveSystemPrompt(deps.db, settings);
   const resolvedPrompt = await deps.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
   const traceId = newUUIDv7();
-  const ctx = weaveContext({ userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
+  const ctx = weaveContext({ runtime: deps.config.runtime, userId, deadline: Date.now() + 120_000, metadata: { traceId, chatId } });
   const startMs = Date.now();
 
   const attachments = normalizeAttachments(opts?.attachments);
@@ -333,7 +333,9 @@ export async function sendMessageImpl(
 
   const allowResponseCache = attachments.length === 0;
   const cachePolicy = allowResponseCache ? await resolveActiveCache(deps.db, settings.mode) : null;
-  const cacheKey = deps.cacheKeyBuilder.build({ model: modelId, prompt: processedContent });
+  // Include userId in the cache key so personalised answers (e.g. "what did I
+  // say earlier?") are never served to a different user from the cache.
+  const cacheKey = deps.cacheKeyBuilder.build({ model: modelId, prompt: processedContent, userId });
   if (cachePolicy && !shouldBypass(cachePolicy, processedContent)) {
     const cached = await deps.responseCache.get(cacheKey);
     if (cached) {

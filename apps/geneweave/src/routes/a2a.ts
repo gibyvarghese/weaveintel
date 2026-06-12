@@ -66,12 +66,19 @@ export function registerA2ARoutes(
 
   // ── Well-known discovery ──────────────────────────────────────────────────
 
+  // Standard A2A path per current A2A spec.
+  router.get('/.well-known/agent-card.json', async (_req, res) => {
+    json(res, 200, buildAgentCard(baseUrl));
+  });
+
+  // Legacy path — kept for backward compatibility.
   router.get('/.well-known/agent.json', async (_req, res) => {
     json(res, 200, buildAgentCard(baseUrl));
   });
 
   // ── Task submission ───────────────────────────────────────────────────────
 
+  // Bearer-authenticated machine-to-machine endpoint — CSRF not required.
   router.post('/api/a2a/tasks', async (req, res, _params, auth) => {
     if (!auth) {
       json(res, 401, { error: 'Bearer token required' });
@@ -115,26 +122,36 @@ export function registerA2ARoutes(
         settings.mode = 'agent';
       }
 
-      // Resolve model from the task metadata or fall back to engine defaults.
+      // Resolve model: honour a `model` hint in task metadata (e.g. "openai/gpt-4o-mini"),
+      // otherwise fall back to the engine's configured default.
       const engineConfig = (chatEngine as unknown as { config: { defaultProvider: string; defaultModel: string; providers: Record<string, unknown> } }).config;
-      const model = await getOrCreateModel(
-        engineConfig.defaultProvider,
-        engineConfig.defaultModel,
-        (engineConfig.providers[engineConfig.defaultProvider] ?? {}) as Record<string, unknown>,
-      );
+      const modelHint = task.metadata?.['model'] as string | undefined;
+      let resolvedProvider = engineConfig.defaultProvider;
+      let resolvedModel = engineConfig.defaultModel;
+      if (modelHint && modelHint.includes('/')) {
+        const slashIdx = modelHint.indexOf('/');
+        resolvedProvider = modelHint.slice(0, slashIdx);
+        resolvedModel = modelHint.slice(slashIdx + 1);
+      }
+      const providerCfg = (engineConfig.providers[resolvedProvider] ?? {}) as Record<string, unknown>;
+      const model = await getOrCreateModel(resolvedProvider, resolvedModel, providerCfg);
 
       // Delegate to the ChatEngine's runAgent method via the internal API.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const internalEngine = chatEngine as any;
 
       const syntheticChatId = task.metadata?.['chatId'] as string | undefined ?? `a2a-${task.id}`;
+      // Pass the user message in the messages array so the agent has at least
+      // one message to send to the model (the regular chat flow injects this
+      // via patchLatestUserMessage on the DB-loaded history).
+      const a2aMessages = [{ role: 'user' as const, content: userContent }];
       const { result } = await internalEngine.runAgent(
         ctx,
         model,
         auth.userId,
         syntheticChatId,
         'agent_worker',
-        [],
+        a2aMessages,
         userContent,
         settings,
       );
@@ -157,7 +174,7 @@ export function registerA2ARoutes(
       };
       json(res, 500, taskResult);
     }
-  });
+  }, { csrf: false });
 
   // ── Task status (stub — geneWeave tasks are synchronous) ─────────────────
 

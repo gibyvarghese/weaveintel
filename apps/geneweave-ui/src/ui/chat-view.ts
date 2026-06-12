@@ -11,35 +11,134 @@ export function renderSettingsDropdown(options: { render: () => void; saveChatSe
   const settings = state.chatSettings;
   if (!settings) return h('div', null);
 
+  const save = () => { void options.saveChatSettings(); options.render(); };
+  const saveOnly = () => { void options.saveChatSettings(); };
+
   const modes = [
-    { id: 'direct', icon: '💬', title: 'Direct', desc: 'Simple model chat without orchestration' },
-    { id: 'agent', icon: '🤖', title: 'Agent', desc: 'Autonomous tool-calling with reasoning loop' },
-    { id: 'supervisor', icon: '🧠', title: 'Supervisor', desc: 'Multi-agent delegation to specialists' },
+    { id: 'direct',     icon: '💬', title: 'Direct',     desc: 'Simple chat, no orchestration' },
+    { id: 'agent',      icon: '🤖', title: 'Agent',      desc: 'Tool-calling reasoning loop' },
+    { id: 'supervisor', icon: '🧠', title: 'Supervisor', desc: 'Delegates to specialist workers' },
+    { id: 'ensemble',   icon: '🎭', title: 'Ensemble',   desc: 'Multiple models vote on answer' },
   ];
 
   const modeCards = modes.map((mode) =>
     h('div', {
       className: 'mode-card' + (settings.mode === mode.id ? ' selected' : ''),
-      onClick: () => {
-        settings.mode = mode.id;
-        void options.saveChatSettings();
-        options.render();
-      },
+      onClick: () => { settings.mode = mode.id; save(); },
     },
       h('div', { className: 'mc-icon' }, mode.icon),
       h('div', null,
         h('div', { className: 'mc-title' }, mode.title),
-        h('div', { style: 'font-size:12px;color:var(--fg3);margin-top:2px;' }, mode.desc)
+        h('div', { className: 'mc-desc' }, mode.desc),
       )
     )
   );
 
+  const settingRow = (icon: string, label: string, desc: string, enabled: boolean, onToggle: () => void) =>
+    h('div', { className: 'setting-row', onClick: () => { onToggle(); save(); } },
+      h('div', { style: 'flex:1' },
+        h('div', { className: 'setting-row-label' }, icon + ' ' + label),
+        h('div', { className: 'setting-row-desc' }, desc),
+      ),
+      h('div', { className: 'toggle-switch' + (enabled ? ' on' : '') })
+    );
+
+  const numInput = (label: string, value: number, min: number, max: number, step: number, onChange: (v: number) => void) =>
+    h('div', { className: 'setting-sub' },
+      h('span', null, label),
+      h('input', {
+        type: 'number',
+        value: String(value),
+        min: String(min),
+        max: String(max),
+        step: String(step),
+        onClick: (e: Event) => e.stopPropagation(),
+        onChange: (e: Event) => {
+          const v = parseFloat((e.target as HTMLInputElement).value);
+          if (!isNaN(v) && v >= min && v <= max) { onChange(v); saveOnly(); }
+        },
+      })
+    );
+
+  const sectionLabel = (text: string) => h('div', { className: 'setting-section-label' }, text);
+  const sep = () => h('div', { className: 'setting-sep' });
+
+  const isAdvanced = settings.mode && settings.mode !== 'direct';
+  const rows: HTMLElement[] = [];
+
+  rows.push(sectionLabel('AI Mode'));
+  rows.push(h('div', { className: 'mode-grid' }, ...modeCards));
+
+  if (isAdvanced) {
+    rows.push(sep());
+    rows.push(sectionLabel('Enhancements'));
+
+    rows.push(settingRow(
+      '🔁', 'Reflection',
+      'Self-critique and revise before responding',
+      !!settings.reflectEnabled,
+      () => { settings.reflectEnabled = !settings.reflectEnabled; }
+    ));
+    if (settings.reflectEnabled) {
+      rows.push(numInput('Max revisions', settings.reflectMaxRevisions ?? 2, 1, 5, 1, (v) => { settings.reflectMaxRevisions = v; }));
+    }
+
+    rows.push(settingRow(
+      '✅', 'Evaluator',
+      'Score output and retry until quality threshold met',
+      !!settings.verifyEnabled,
+      () => { settings.verifyEnabled = !settings.verifyEnabled; }
+    ));
+    if (settings.verifyEnabled) {
+      rows.push(numInput('Min quality score (0–1)', settings.verifyMinScore ?? 0.7, 0.1, 1.0, 0.1, (v) => { settings.verifyMinScore = v; }));
+    }
+  }
+
+  if (settings.mode === 'supervisor') {
+    rows.push(sep());
+    rows.push(sectionLabel('Supervisor Options'));
+    rows.push(settingRow(
+      '🔄', 'Re-plan on failure',
+      'Revise the plan and retry when a worker fails',
+      !!settings.supervisorReplanOnFailure,
+      () => { settings.supervisorReplanOnFailure = !settings.supervisorReplanOnFailure; }
+    ));
+    rows.push(settingRow(
+      '⚡', 'Parallel delegation',
+      'Run independent worker tasks concurrently',
+      !!settings.supervisorParallelDelegation,
+      () => { settings.supervisorParallelDelegation = !settings.supervisorParallelDelegation; }
+    ));
+  }
+
+  if (settings.mode === 'ensemble') {
+    rows.push(sep());
+    rows.push(sectionLabel('Ensemble Options'));
+    const resolvers = [
+      { value: 'majority_vote', label: 'Majority vote' },
+      { value: 'arbiter_llm',   label: 'Arbiter LLM'  },
+      { value: 'best_of',       label: 'Best of N'    },
+    ];
+    const current = settings.ensembleResolver ?? 'majority_vote';
+    rows.push(
+      h('div', { style: 'padding:10px 12px;border-radius:var(--radius);border:1px solid var(--bg4);background:var(--bg2)' },
+        h('div', { style: 'font-size:11px;color:var(--fg3);margin-bottom:8px;font-weight:600' }, 'Resolver strategy'),
+        ...resolvers.map((r) =>
+          h('div', {
+            className: 'resolver-option',
+            onClick: (e: Event) => { e.stopPropagation(); settings.ensembleResolver = r.value; save(); },
+          },
+            h('div', { className: 'resolver-dot' + (current === r.value ? ' active' : '') }),
+            h('span', null, r.label),
+          )
+        )
+      )
+    );
+  }
+
   return h('div', { className: 'dropdown settings-dd', onClick: (e: Event) => e.stopPropagation() },
     h('h3', null, h('span', null, '⚙'), ' Agentic AI Settings'),
-    h('div', { style: 'display:flex;flex-direction:column;gap:10px;' },
-      h('div', { style: 'font-size:11px;color:var(--fg3);font-weight:700;text-transform:uppercase;letter-spacing:.4px;' }, 'AI Mode'),
-      ...modeCards
-    )
+    h('div', { style: 'display:flex;flex-direction:column;gap:8px;' }, ...rows)
   );
 }
 

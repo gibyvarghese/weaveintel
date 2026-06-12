@@ -425,7 +425,9 @@ export function weaveOpenAIModel(
         }
       }
       if (request.temperature != null) body['temperature'] = request.temperature;
-      if (request.maxTokens != null) body['max_tokens'] = request.maxTokens;
+      // Use max_completion_tokens (the current OpenAI parameter name — max_tokens was
+      // deprecated Nov 2024 and is rejected by gpt-4o-mini and newer models).
+      if (request.maxTokens != null) body['max_completion_tokens'] = request.maxTokens;
       if (request.topP != null) body['top_p'] = request.topP;
       if (request.stop) body['stop'] = request.stop;
 
@@ -486,7 +488,7 @@ export function weaveOpenAIModel(
       };
       if (request.tools) body['tools'] = buildOpenAITools(request.tools);
       if (request.temperature != null) body['temperature'] = request.temperature;
-      if (request.maxTokens != null) body['max_tokens'] = request.maxTokens;
+      if (request.maxTokens != null) body['max_completion_tokens'] = request.maxTokens;
 
       // Phase 3 — prompt caching (lever L2). Forward `prompt_cache_key`
       // for streaming requests too.

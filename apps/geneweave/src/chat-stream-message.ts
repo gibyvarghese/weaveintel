@@ -234,6 +234,7 @@ export async function streamMessageImpl(
   res.once('close', onClientClose);
 
   const ctx = weaveContext({
+    runtime: deps.config.runtime,
     userId,
     deadline: Date.now() + 120_000,
     signal: abortController.signal,
@@ -440,13 +441,25 @@ export async function streamMessageImpl(
   let streamErrorMessage: string | undefined;
   let streamTelemetry: AgentRunTelemetry | undefined;
 
+  let ensembleMeta: { candidates: Array<{ agentName: string; output: string }>; rationale?: string; winner?: string } | undefined;
+
   try {
-    if (settings.mode === 'agent' || settings.mode === 'supervisor') {
+    if (settings.mode === 'agent' || settings.mode === 'supervisor' || settings.mode === 'ensemble') {
       streamTelemetry = await deps.streamAgent(res, ctx, model, userId, chatId, userPersona, messages, processedContent, streamMemorySettings, attachments, tenantId);
       fullText = streamTelemetry.result.output ?? '';
       finalUsage = { promptTokens: streamTelemetry.result.usage.totalTokens, completionTokens: 0, totalTokens: streamTelemetry.result.usage.totalTokens };
       steps = [...streamTelemetry.result.steps];
       toolCallEvents = streamTelemetry.toolCallEvents;
+      // Extract ensemble-specific fields when present
+      const ensResult = streamTelemetry.result as any;
+      if (Array.isArray(ensResult.candidates) && ensResult.candidates.length) {
+        ensembleMeta = {
+          candidates: ensResult.candidates.map((c: any) => ({ agentName: String(c.agentName ?? ''), output: String(c.output ?? '') })),
+          rationale: ensResult.rationale ? String(ensResult.rationale) : undefined,
+          winner: ensResult.winner ? String(ensResult.winner) : undefined,
+        };
+        await deps.writeSseEvent(res, { type: 'ensemble_result', ...ensembleMeta });
+      }
     } else {
       const request: ModelRequest = {
         messages: streamAugmentedPrompt
@@ -639,6 +652,9 @@ export async function streamMessageImpl(
     streamInterrupted: streamErrored || undefined,
     title: autoTitle ?? undefined,
     traceId,
+    ensembleCandidates: ensembleMeta?.candidates,
+    ensembleRationale: ensembleMeta?.rationale,
+    ensembleWinner: ensembleMeta?.winner,
   });
 
   const assistMsgId = newUUIDv7();
@@ -654,6 +670,9 @@ export async function streamMessageImpl(
       skillPromptApplied: streamActiveSkills.length > 0 ? true : undefined,
       redactionEnabled: settings.redactionEnabled || undefined,
       steps: steps.length ? steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })) : undefined,
+      ensembleCandidates: ensembleMeta?.candidates,
+      ensembleRationale: ensembleMeta?.rationale,
+      ensembleWinner: ensembleMeta?.winner,
       eval: evalInfo,
       evalError,
       guardrail: postGuardrail.decision !== 'allow' ? { decision: postGuardrail.decision, reason: postGuardrail.reason } : undefined,

@@ -113,6 +113,13 @@ export function normalizeServerMessage(message: any) {
         : [],
     skillPromptApplied: message?.skillPromptApplied ?? !!meta['skillPromptApplied'],
     mode: message?.mode ?? meta['mode'] ?? null,
+    ensembleCandidates: Array.isArray(message?.ensembleCandidates)
+      ? message.ensembleCandidates
+      : Array.isArray(meta['ensembleCandidates'])
+        ? meta['ensembleCandidates']
+        : undefined,
+    ensembleRationale: message?.ensembleRationale ?? meta['ensembleRationale'] ?? undefined,
+    ensembleWinner: message?.ensembleWinner ?? meta['ensembleWinner'] ?? undefined,
   };
 }
 
@@ -289,6 +296,15 @@ export async function loadChatSettings(chatId: string) {
           redactionEnabled: !!settings.redaction_enabled,
           redactionPatterns: settings.redaction_patterns ? JSON.parse(settings.redaction_patterns) : ['email', 'phone', 'ssn', 'credit_card'],
           workers: settings.workers ? JSON.parse(settings.workers) : [],
+          reflectEnabled: !!settings.reflect_enabled,
+          reflectMaxRevisions: settings.reflect_max_revisions ?? 2,
+          verifyEnabled: !!settings.verify_enabled,
+          verifyMinScore: settings.verify_min_score ?? 0.7,
+          verifyMaxAttempts: settings.verify_max_attempts ?? 3,
+          supervisorReplanOnFailure: !!settings.supervisor_replan_on_failure,
+          supervisorParallelDelegation: !!settings.supervisor_parallel_delegation,
+          ensembleAgents: settings.ensemble_agents ? JSON.parse(settings.ensemble_agents) : [],
+          ensembleResolver: settings.ensemble_resolver || 'majority_vote',
         }
       : {
           mode: state.defaultMode || 'direct',
@@ -298,6 +314,15 @@ export async function loadChatSettings(chatId: string) {
           redactionEnabled: false,
           redactionPatterns: ['email', 'phone', 'ssn', 'credit_card'],
           workers: [],
+          reflectEnabled: false,
+          reflectMaxRevisions: 2,
+          verifyEnabled: false,
+          verifyMinScore: 0.7,
+          verifyMaxAttempts: 3,
+          supervisorReplanOnFailure: false,
+          supervisorParallelDelegation: false,
+          ensembleAgents: [],
+          ensembleResolver: 'majority_vote',
         };
     triggerRender();
   } catch (e) {
@@ -310,6 +335,15 @@ export async function loadChatSettings(chatId: string) {
       redactionEnabled: false,
       redactionPatterns: ['email', 'phone', 'ssn', 'credit_card'],
       workers: [],
+      reflectEnabled: false,
+      reflectMaxRevisions: 2,
+      verifyEnabled: false,
+      verifyMinScore: 0.7,
+      verifyMaxAttempts: 3,
+      supervisorReplanOnFailure: false,
+      supervisorParallelDelegation: false,
+      ensembleAgents: [],
+      ensembleResolver: 'majority_vote',
     };
     triggerRender();
   }

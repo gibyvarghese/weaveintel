@@ -259,6 +259,11 @@ async function sendMessage(text: string) {
           state.handoffRequest = d;
           render();
         }
+        else if (d.type === 'ensemble_result') {
+          if (Array.isArray(d.candidates)) assistantMsg.ensembleCandidates = d.candidates;
+          if (d.rationale) assistantMsg.ensembleRationale = d.rationale;
+          if (d.winner) assistantMsg.ensembleWinner = d.winner;
+        }
         else if (d.type === 'done') {
           assistantMsg.usage = d.usage;
           assistantMsg.cost = d.cost;
@@ -272,6 +277,9 @@ async function sendMessage(text: string) {
           assistantMsg.skillPromptApplied = !!d.skillPromptApplied;
           if (d.redaction) assistantMsg.redaction = d.redaction;
           if (d.guardrail) assistantMsg.guardrail = d.guardrail;
+          if (Array.isArray(d.ensembleCandidates)) assistantMsg.ensembleCandidates = d.ensembleCandidates;
+          if (d.ensembleRationale) assistantMsg.ensembleRationale = d.ensembleRationale;
+          if (d.ensembleWinner) assistantMsg.ensembleWinner = d.ensembleWinner;
           assistantMsg.processState = 'completed';
           assistantMsg.processExpanded = false;
           touchChat(chatId, d.title || undefined);
@@ -1159,6 +1167,15 @@ function renderHomeWorkspace() {
           redactionEnabled: false,
           redactionPatterns: ['email', 'phone', 'ssn', 'credit_card'],
           workers: [],
+          reflectEnabled: false,
+          reflectMaxRevisions: 2,
+          verifyEnabled: false,
+          verifyMinScore: 0.7,
+          verifyMaxAttempts: 3,
+          supervisorReplanOnFailure: false,
+          supervisorParallelDelegation: false,
+          ensembleAgents: [],
+          ensembleResolver: 'majority_vote',
         };
       }
       state.showSettings = !state.showSettings;

@@ -187,6 +187,7 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
     workers: row.workers
       ? (JSON.parse(row.workers) as WorkerDef[]).map((worker) => ({
           ...worker,
+          tools: worker.tools ?? [],
           persona: normalizePersona(worker.persona, 'agent'),
         }))
       : [],

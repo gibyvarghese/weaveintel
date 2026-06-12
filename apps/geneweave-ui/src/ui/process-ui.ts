@@ -164,10 +164,28 @@ function buildProcessViewModel(msg: any, isStreamingCurrent: boolean) {
   const skills = Array.isArray(msg.activeSkills) ? msg.activeSkills : [];
   const skillEffects: string[] = [];
   const validations: any[] = [];
+  const reflectRevisions: Array<{ revision: number; feedback: string }> = [];
+  const verifyAttempts: Array<{ attempt: number; reason: string }> = [];
 
   steps.forEach((s: any, idx: number) => {
     const stepType = s?.type || s?.kind || 'step';
     const thoughtText = extractThoughtText(s);
+
+    // Classify thinking steps: reflection revision, verify failure, or regular thought
+    if (stepType === 'thinking') {
+      const raw = String(s?.content || s?.text || '').trim();
+      const reflectMatch = raw.match(/^\[reflect:revision=(\d+)\]\s*([\s\S]*)/);
+      const verifyMatch = raw.match(/^\[verify:failed attempt=(\d+)\]\s*([\s\S]*)/);
+      if (reflectMatch) {
+        reflectRevisions.push({ revision: parseInt(reflectMatch[1]!, 10), feedback: reflectMatch[2]!.trim() });
+        return;
+      }
+      if (verifyMatch) {
+        verifyAttempts.push({ attempt: parseInt(verifyMatch[1]!, 10), reason: verifyMatch[2]!.trim() });
+        return;
+      }
+    }
+
     if (thoughtText) {
       thoughtHistory.push({ text: thoughtText, idx: idx + 1 });
       timeline.push({
@@ -339,6 +357,10 @@ function buildProcessViewModel(msg: any, isStreamingCurrent: boolean) {
   else if (validations.length) stage = 'validating';
   else if (timeline.length) stage = 'tools';
 
+  const ensembleCandidates: Array<{ agentName: string; output: string }> = Array.isArray(msg.ensembleCandidates) ? msg.ensembleCandidates : [];
+  const ensembleWinner: string = msg.ensembleWinner ?? '';
+  const ensembleRationale: string = msg.ensembleRationale ?? '';
+
   const toolCount = [...timeline, ...workerTimeline].filter((item: any) => item.kind === 'tool' || item.kind === 'delegation').length;
   const validationTone = validations.length
     ? validations.some((item: any) => processStatusTone(item.status) === 'deny')
@@ -352,12 +374,15 @@ function buildProcessViewModel(msg: any, isStreamingCurrent: boolean) {
   if (skills.length) summaryChips.push({ label: 'Skills: ' + skills.length, tone: 'ok' });
   if (toolCount) summaryChips.push({ label: 'Tools: ' + toolCount, tone: 'ok' });
   if (workerTimeline.length) summaryChips.push({ label: 'Worker Trace: ' + workerTimeline.length, tone: 'warn' });
+  if (ensembleCandidates.length) summaryChips.push({ label: 'Ensemble: ' + ensembleCandidates.length + ' agents', tone: 'ok' });
+  if (reflectRevisions.length) summaryChips.push({ label: 'Revised: ' + reflectRevisions.length + 'x', tone: 'warn' });
+  if (verifyAttempts.length) summaryChips.push({ label: 'Evaluator: ' + (verifyAttempts.length + 1) + ' attempt' + (verifyAttempts.length + 1 === 1 ? '' : 's'), tone: 'warn' });
   if (cseBadges.length) summaryChips.push({ label: 'CSE', tone: 'ok' });
   if (validations.length) summaryChips.push({ label: 'Checks: ' + validationTone, tone: validationTone });
   if (msg?.latency_ms) summaryChips.push({ label: 'Duration: ' + msg.latency_ms + 'ms', tone: 'ok' });
   if (!summaryChips.length) summaryChips.push({ label: 'Events: ' + (timeline.length + workerTimeline.length), tone: 'ok' });
 
-  const hasProcess = isStreamingCurrent || thoughtHistory.length > 0 || timeline.length > 0 || workerTimeline.length > 0 || skills.length > 0 || validations.length > 0;
+  const hasProcess = isStreamingCurrent || thoughtHistory.length > 0 || timeline.length > 0 || workerTimeline.length > 0 || skills.length > 0 || validations.length > 0 || ensembleCandidates.length > 0 || reflectRevisions.length > 0 || verifyAttempts.length > 0;
   const cseSessions = Array.from(cseSessionMap.values()).map((session) => ({
     ...session,
     shortSession: session.sessionId.slice(0, 8),
@@ -377,6 +402,11 @@ function buildProcessViewModel(msg: any, isStreamingCurrent: boolean) {
     skillEffects,
     validations,
     summaryChips,
+    reflectRevisions,
+    verifyAttempts,
+    ensembleCandidates,
+    ensembleWinner,
+    ensembleRationale,
     expanded: typeof msg.processExpanded === 'boolean' ? msg.processExpanded : isStreamingCurrent,
   };
 }
@@ -420,6 +450,62 @@ export function renderAssistantProcess(
     );
   });
 
+  const ensembleSection = process.ensembleCandidates.length
+    ? h('div', { className: 'process-section ensemble-section' },
+        h('div', { className: 'process-section-title' }, '🎭 Ensemble Debate'),
+        process.ensembleRationale ? h('div', { className: 'ensemble-rationale' }, process.ensembleRationale) : null,
+        h('div', { className: 'ensemble-candidates' },
+          ...process.ensembleCandidates.map((c: any) => {
+            const isWinner = process.ensembleWinner && c.agentName === process.ensembleWinner;
+            return h('div', { className: 'ensemble-candidate' + (isWinner ? ' winner' : '') },
+              h('div', { className: 'ensemble-candidate-hdr' },
+                h('span', { className: 'ensemble-agent-name' }, c.agentName || 'Agent'),
+                isWinner ? h('span', { className: 'ensemble-winner-badge' }, '✓ Selected') : null,
+              ),
+              h('div', { className: 'ensemble-candidate-output' }, summarizeForDisplay(c.output, 300)),
+            );
+          })
+        )
+      )
+    : null;
+
+  const reflectSection = process.reflectRevisions.length
+    ? h('div', { className: 'process-section reflect-section' },
+        h('div', { className: 'process-section-title' }, '🔁 Reflection Revisions'),
+        h('div', { className: 'reflect-list' },
+          ...process.reflectRevisions.map((r: any) =>
+            h('div', { className: 'reflect-item' },
+              h('div', { className: 'reflect-item-hdr' }, 'Revision ' + r.revision),
+              h('div', { className: 'reflect-feedback' }, r.feedback),
+            )
+          )
+        )
+      )
+    : null;
+
+  const verifySection = process.verifyAttempts.length
+    ? h('div', { className: 'process-section verify-section' },
+        h('div', { className: 'process-section-title' }, '✅ Evaluator Attempts'),
+        h('div', { className: 'verify-list' },
+          ...process.verifyAttempts.map((v: any) =>
+            h('div', { className: 'verify-item' },
+              h('div', { className: 'verify-item-hdr' },
+                h('span', null, 'Attempt ' + v.attempt),
+                h('span', { className: 'timeline-badge deny' }, 'Failed'),
+              ),
+              h('div', { className: 'verify-reason' }, v.reason || 'Did not pass quality threshold'),
+            )
+          ),
+          h('div', { className: 'verify-item' },
+            h('div', { className: 'verify-item-hdr' },
+              h('span', null, 'Attempt ' + (process.verifyAttempts.length + 1)),
+              h('span', { className: 'timeline-badge ok' }, 'Passed'),
+            ),
+          )
+        )
+      )
+    : null;
+
   const processBody = h('div', { className: 'process-body' },
     process.cseBadges.length ? h('div', { className: 'process-badge-row' },
       ...process.cseBadges.map((badge: any) => h('span', { className: 'summary-chip ' + (badge.tone || 'ok') }, badge.label))
@@ -436,6 +522,9 @@ export function renderAssistantProcess(
         ))
       )
     ) : null,
+    ensembleSection,
+    reflectSection,
+    verifySection,
     h('div', { className: 'live-thought' },
       h('div', { className: 'lbl' }, 'Current thought'),
       h('div', { className: 'txt' }, process.liveThought || (isStreamingCurrent ? 'Thinking...' : 'No thought trace captured.'))

@@ -148,6 +148,25 @@ export function registerChatRoutes(
     }
   }, { auth: true, csrf: true });
 
+  // Dedicated SSE streaming endpoint — always streams, no JSON fallback.
+  router.post('/api/chats/:chatId/messages/stream', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const chat = await db.getChat(params['chatId']!, auth.userId);
+    if (!chat) { json(res, 404, { error: 'Chat not found' }); return; }
+    const raw = await readBody(req, { maxBytes: LARGE_REQUEST_BODY_BYTES });
+    let body: { content?: string; model?: string; provider?: string; maxTokens?: number; temperature?: number };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const normalizedContent = typeof body.content === 'string' ? body.content.trim() : '';
+    if (!normalizedContent) { json(res, 400, { error: 'content required' }); return; }
+    const opts = {
+      model: body.model ?? chat.model,
+      provider: body.provider ?? chat.provider,
+      maxTokens: body.maxTokens,
+      temperature: body.temperature,
+    };
+    await chatEngine.streamMessage(res, auth.userId, chat.id, normalizedContent, opts);
+  }, { auth: true, csrf: true });
+
   router.del('/api/chats/:chatId', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     // Ownership check: getChat scopes by userId, so a cross-user chatId returns null

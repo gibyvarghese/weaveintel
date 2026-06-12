@@ -38,6 +38,9 @@ export interface Message {
   processUi?: any;
   usage?: any;
   screenshots?: Screenshot[];
+  ensembleCandidates?: Array<{ agentName: string; output: string }>;
+  ensembleRationale?: string;
+  ensembleWinner?: string;
 }
 
 export interface Attachment {
@@ -103,6 +106,20 @@ export interface ChatSettings {
   redactionEnabled?: boolean;
   redactionPatterns?: string[];
   workers?: string[];
+  // W1 — Reflection
+  reflectEnabled?: boolean;
+  reflectMaxRevisions?: number;
+  reflectCriteria?: string;
+  // W2 — Evaluator-Optimizer
+  verifyEnabled?: boolean;
+  verifyMinScore?: number;
+  verifyMaxAttempts?: number;
+  // W3 — Supervisor
+  supervisorReplanOnFailure?: boolean;
+  supervisorParallelDelegation?: boolean;
+  // W5 — Ensemble
+  ensembleAgents?: unknown[];
+  ensembleResolver?: string;
 }
 
 // ── DB row types used by the Kaggle admin UI ─────────────────────────────────
