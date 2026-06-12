@@ -1,14 +1,19 @@
 /**
- * @geneweave/tokens — geneWeave mobile brand design tokens.
+ * @geneweave/tokens — geneWeave mobile brand design system.
  *
- * Framework-agnostic, zero runtime dependencies (no React import). The full
- * brand system — dark/light palettes with verified WCAG-AA contrast,
- * typography scale (Fraunces / Plus Jakarta Sans / DM Mono), 4-pt spacing,
- * radii, elevation, motion, and the weave-shimmer spec — is filled in by M1.
+ * Framework-agnostic, zero runtime dependencies (no React import, no DB, no
+ * fetch). Exports the full brand system as typed constants:
  *
- * M0 ships only the scaffold: the package builds via `tsc -b`, exports a
- * stable schema-version marker, and has a green test so the design-token
- * pipeline is wired end-to-end before M1 populates it.
+ *  - dark/light color palettes with WCAG-AA contrast verified for every
+ *    text-on-surface pair (see {@link auditThemeContrast});
+ *  - a typography scale (Fraunces / Plus Jakarta Sans / DM Mono);
+ *  - a 4-pt spacing grid, radii, and per-theme elevation;
+ *  - motion durations / easings and the weave-shimmer spec;
+ *  - assembled {@link themes} (`dark` / `light`); and
+ *  - per-tenant theming: {@link TenantThemeOverride}, {@link resolveTenantTheme},
+ *    and {@link applyTenantTheme}, so a tenant can re-brand colors / fonts /
+ *    corner style while accessibility is enforced (a failing override degrades
+ *    gracefully to the base theme rather than shipping an inaccessible UI).
  */
 
 /**
@@ -18,5 +23,69 @@
  */
 export const TOKENS_SCHEMA_VERSION = 1 as const;
 
-/** Base spacing unit (points). The 4-pt grid M1 builds the spacing scale on. */
-export const SPACING_BASE_UNIT = 4 as const;
+// Color math + contrast helpers.
+export {
+  AA_CONTRAST_NORMAL,
+  AA_CONTRAST_LARGE,
+  parseHex,
+  relativeLuminance,
+  contrastRatio,
+  meetsAA,
+  roundRatio,
+  type Rgb,
+} from './color.js';
+
+// Color palettes.
+export { darkColors, lightColors, type ColorTokens } from './palette.js';
+
+// Typography.
+export {
+  fontFamilies,
+  fontWeights,
+  typeScale,
+  typography,
+  type FontFamilies,
+  type FontWeights,
+  type TextStyleToken,
+  type TypeScale,
+  type TypographyTokens,
+} from './typography.js';
+
+// Spacing, radii, elevation.
+export {
+  SPACING_BASE_UNIT,
+  spacing,
+  radii,
+  darkElevation,
+  lightElevation,
+  type SpacingScale,
+  type RadiiScale,
+  type ElevationLevel,
+  type ElevationScale,
+} from './spacing.js';
+
+// Motion + weave-shimmer.
+export {
+  durations,
+  easings,
+  weaveShimmer,
+  motion,
+  type MotionDurations,
+  type MotionEasings,
+  type EasingBezier,
+  type WeaveShimmerSpec,
+  type MotionTokens,
+} from './motion.js';
+
+// Assembled themes + per-tenant theming + contrast audit.
+export {
+  themes,
+  resolveTenantTheme,
+  applyTenantTheme,
+  auditThemeContrast,
+  type Theme,
+  type ThemeName,
+  type TenantThemeOverride,
+  type ContrastPairResult,
+  type ThemeContrastAudit,
+} from './theme.js';
