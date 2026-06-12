@@ -1,0 +1,146 @@
+/**
+ * composer.tsx — the message input bar.
+ *
+ * Device-gated. A growing `TextInput` plus a single trailing affordance that is
+ * the heart of the M4 accept criteria: while a run is producing it is a **Stop**
+ * button (cancels in well under 500ms via the controller's `stop()`), otherwise
+ * a **Send** button. The leading ＋ opens the attachment menu — currently
+ * surfaced as "coming soon" because no user-scoped upload route exists yet
+ * (flagged, not silently stubbed). The ⚙ opens the options sheet.
+ */
+import { useState } from 'react';
+import { Pressable, Text, TextInput, View } from 'react-native';
+import type { ChatPhase } from '../../../lib';
+import { useTheme } from '../../providers/theme-provider';
+
+export interface ComposerProps {
+  text: string;
+  phase: ChatPhase;
+  onChangeText: (t: string) => void;
+  onSend: () => void;
+  onStop: () => void;
+  onOpenOptions: () => void;
+}
+
+export function Composer({ text, phase, onChangeText, onSend, onStop, onOpenOptions }: ComposerProps) {
+  const { theme } = useTheme();
+  const producing = phase !== 'idle';
+  const canSend = text.trim().length > 0;
+  const [attachNotice, setAttachNotice] = useState(false);
+
+  return (
+    <View
+      style={{
+        borderTopWidth: 1,
+        borderTopColor: theme.colors.surfaceElevated,
+        backgroundColor: theme.colors.background,
+        paddingHorizontal: theme.spacing.md,
+        paddingTop: theme.spacing.sm,
+        paddingBottom: theme.spacing.md,
+        gap: theme.spacing.xs,
+      }}
+    >
+      {attachNotice ? (
+        <Text
+          style={{
+            color: theme.colors.textMuted,
+            fontFamily: theme.typography.families.body,
+            fontSize: theme.typography.scale.caption.fontSize,
+            paddingHorizontal: theme.spacing.sm,
+          }}
+        >
+          Attachments are coming soon.
+        </Text>
+      ) : null}
+
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: theme.spacing.sm }}>
+        {/* Attachment menu — flagged: no upload route yet. */}
+        <Pressable
+          accessibilityLabel="Add attachment"
+          onPress={() => setAttachNotice((v) => !v)}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: theme.radii.pill,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: theme.colors.surface,
+          }}
+        >
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 22, lineHeight: 26 }}>＋</Text>
+        </Pressable>
+
+        <TextInput
+          value={text}
+          onChangeText={onChangeText}
+          placeholder="Message weaveIntel"
+          placeholderTextColor={theme.colors.textMuted}
+          multiline
+          editable
+          style={{
+            flex: 1,
+            maxHeight: 120,
+            minHeight: 40,
+            color: theme.colors.text,
+            backgroundColor: theme.colors.surface,
+            borderRadius: theme.radii.lg,
+            paddingHorizontal: theme.spacing.md,
+            paddingTop: theme.spacing.sm,
+            paddingBottom: theme.spacing.sm,
+            fontFamily: theme.typography.families.body,
+            fontSize: theme.typography.scale.body.fontSize,
+          }}
+        />
+
+        <Pressable
+          accessibilityLabel="Options"
+          onPress={onOpenOptions}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: theme.radii.pill,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: theme.colors.surface,
+          }}
+        >
+          <Text style={{ color: theme.colors.textSecondary, fontSize: 18 }}>⚙</Text>
+        </Pressable>
+
+        {producing ? (
+          <Pressable
+            accessibilityLabel="Stop"
+            onPress={onStop}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: theme.radii.pill,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: theme.colors.danger,
+            }}
+          >
+            <View style={{ width: 14, height: 14, borderRadius: 3, backgroundColor: theme.colors.onAccent }} />
+          </Pressable>
+        ) : (
+          <Pressable
+            accessibilityLabel="Send"
+            disabled={!canSend}
+            onPress={onSend}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: theme.radii.pill,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: canSend ? theme.colors.accent : theme.colors.surfaceElevated,
+              opacity: canSend ? 1 : 0.6,
+            }}
+          >
+            <Text style={{ color: theme.colors.onAccent, fontSize: 18, fontWeight: '700' }}>↑</Text>
+          </Pressable>
+        )}
+      </View>
+    </View>
+  );
+}

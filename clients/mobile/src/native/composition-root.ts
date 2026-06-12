@@ -23,9 +23,9 @@ import {
   type AuthController,
   type AuthStore,
   type ClientFactory,
-} from '../../lib';
-import { createSecureStoreKv } from '../adapters/expo-secure-store';
-import { createExpoBiometric } from '../adapters/expo-biometric';
+} from '../lib';
+import { createSecureStoreKv } from './adapters/expo-secure-store';
+import { createExpoBiometric } from './adapters/expo-biometric';
 
 /** A client version tag sent on every request for server-side telemetry. */
 const CLIENT_VERSION = 'geneweave-mobile/0.0.1';

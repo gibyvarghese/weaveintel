@@ -68,6 +68,8 @@ export {
 // consumers configure the client without importing @weaveintel/client directly.
 export {
   MemoryStorage,
+  streamReducer,
+  emptyRunViewModel,
   type OutboxStorage,
   type RunOutbox,
   type OutboxFlushResult,

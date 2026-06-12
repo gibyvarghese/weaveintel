@@ -75,3 +75,27 @@ export {
   type SystemColorScheme,
   type ResolvedAppTheme,
 } from './theme/tenant-theme.js';
+
+// Chat session (M4)
+export {
+  CHAT_SESSION_SCHEMA_VERSION,
+  DETACH_BACKGROUND_MS,
+  isTerminalStatus,
+  createChatSession,
+  emptyChatSessionState,
+  type ChatSession,
+  type ChatSessionOptions,
+  type ChatSessionState,
+  type ChatSessionListener,
+  type ChatPhase,
+  type ChatEntry,
+  type UserEntry,
+  type AssistantEntry,
+  type ChatRunClient,
+} from './chat/chat-session.js';
+export {
+  parseMarkdown,
+  parseInline,
+  type MarkdownBlock,
+  type InlineSpan,
+} from './chat/markdown.js';
