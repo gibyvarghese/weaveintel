@@ -92,7 +92,7 @@ describe('completeActionItem', () => {
     await completeActionItem(task.id, { repository: repo, bus, tenantId: 'tenant-a' });
     expect(emitted).toHaveLength(1);
     expect(emitted[0]?.type).toBe('task.completed');
-    expect((emitted[0]?.data?.provenance as Record<string, string>)?.sourceRunId).toBe('run-42');
+    expect((emitted[0]?.data['provenance'] as Record<string, string>)?.['sourceRunId']).toBe('run-42');
   });
 
   it('throws if task not found', async () => {

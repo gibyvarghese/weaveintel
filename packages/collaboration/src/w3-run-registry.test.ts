@@ -110,7 +110,7 @@ describe('RunRegistry', () => {
     const handle = makeHandle();
 
     const emitted: string[] = [];
-    bus.onAll((e) => emitted.push(e.type));
+    bus.onAll((e) => { emitted.push(e.type); });
 
     await registry.register(ctx, handle); // emits run.started
     await registry.updateStatus(ctx, handle.runId, 'completed');

@@ -138,7 +138,17 @@ describe('createSurfaceCatalogResolver', () => {
     const tracer = {
       startSpan: vi.fn((_, name, attrs) => {
         spans.push({ name, attributes: attrs });
-        return { end: vi.fn(), spanId: 'sp1', traceId: 'tr1' };
+        return {
+          end: vi.fn(),
+          spanId: 'sp1',
+          traceId: 'tr1',
+          name,
+          startTime: Date.now(),
+          attributes: attrs ?? {},
+          setAttribute: vi.fn(),
+          addEvent: vi.fn(),
+          setError: vi.fn(),
+        };
       }),
       withSpan: vi.fn(),
     };
