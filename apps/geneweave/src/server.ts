@@ -40,6 +40,7 @@ import {
   registerA2ARoutes,
   registerMemoryRoutes,
   registerLiveAgentRoutes,
+  registerMeRoutes,
 } from './routes/index.js';
 
 export interface ServerConfig {
@@ -120,6 +121,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerA2ARoutes(router, db, chatEngine, { baseUrl: publicBaseUrl ?? 'http://localhost:3000' });
   registerMemoryRoutes(router, db);
   registerLiveAgentRoutes(router, db);
+  registerMeRoutes(router, db);
 
   // ── Avatar static files ────────────────────────────────────
 

@@ -14,6 +14,7 @@ import type { IAdminStore } from './adapter-admin.js';
 import type { IMemoryStore } from './adapter-memory.js';
 import type { IKaggleStore } from './adapter-kaggle.js';
 import type { ILiveAgentsStore } from './adapter-live-agents.js';
+import type { IMeStore } from './adapter-me.js';
 
 export type { IUserStore } from './adapter-users.js';
 export type { IChatStore } from './adapter-chats.js';
@@ -29,6 +30,7 @@ export type { IAdminStore } from './adapter-admin.js';
 export type { IMemoryStore } from './adapter-memory.js';
 export type { IKaggleStore } from './adapter-kaggle.js';
 export type { ILiveAgentsStore } from './adapter-live-agents.js';
+export type { IMeStore } from './adapter-me.js';
 
 export interface DatabaseAdapter extends
   IUserStore,
@@ -44,7 +46,8 @@ export interface DatabaseAdapter extends
   IAdminStore,
   IMemoryStore,
   IKaggleStore,
-  ILiveAgentsStore {
+  ILiveAgentsStore,
+  IMeStore {
   initialize(): Promise<void>;
   close(): Promise<void>;
 }

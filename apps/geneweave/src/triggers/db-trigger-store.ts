@@ -133,5 +133,11 @@ export function createDbTriggerStore(db: DatabaseAdapter): TriggerStore {
       });
       return rows.map(rowToInvocation);
     },
+    async listByOwner(principalId: string): Promise<Trigger[]> {
+      const all = await db.listTriggers();
+      return all
+        .map(rowToTrigger)
+        .filter((t) => t.ownerPrincipalId === principalId);
+    },
   };
 }

@@ -8086,6 +8086,84 @@ export class SQLiteAdapter implements DatabaseAdapter {
     ).run(row.id, row.run_id, row.step_id, row.kind, row.agent_id, row.tool_key, row.summary, row.payload_json);
     return this.d.prepare('SELECT * FROM live_run_events WHERE id = ?').get(row.id) as LiveRunEventRow;
   }
+
+  // ── IMeStore ────────────────────────────────────────────────────────────────
+
+  async createUserRun(run: { id: string; user_id: string; status: 'pending'|'running'|'completed'|'failed'|'cancelled'; tenant_id?: string; surface?: string; metadata?: string }): Promise<void> {
+    this.d.prepare(
+      'INSERT INTO user_runs (id, user_id, tenant_id, status, surface, metadata) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(run.id, run.user_id, run.tenant_id ?? null, run.status, run.surface ?? null, run.metadata ?? null);
+  }
+
+  async getUserRun(id: string, userId: string): Promise<import('./db-types/adapter-me.js').UserRunRow | null> {
+    return (this.d.prepare('SELECT * FROM user_runs WHERE id = ? AND user_id = ?').get(id, userId) as import('./db-types/adapter-me.js').UserRunRow | undefined) ?? null;
+  }
+
+  async listUserRuns(userId: string, filter: { status?: 'pending'|'running'|'completed'|'failed'|'cancelled'; limit?: number; offset?: number } = {}): Promise<import('./db-types/adapter-me.js').UserRunRow[]> {
+    const limit = filter.limit ?? 50;
+    const offset = filter.offset ?? 0;
+    if (filter.status) {
+      return this.d.prepare('SELECT * FROM user_runs WHERE user_id = ? AND status = ? ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?').all(userId, filter.status, limit, offset) as import('./db-types/adapter-me.js').UserRunRow[];
+    }
+    return this.d.prepare('SELECT * FROM user_runs WHERE user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?').all(userId, limit, offset) as import('./db-types/adapter-me.js').UserRunRow[];
+  }
+
+  async updateUserRunStatus(id: string, userId: string, status: 'pending'|'running'|'completed'|'failed'|'cancelled'): Promise<void> {
+    this.d.prepare("UPDATE user_runs SET status = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?").run(status, id, userId);
+  }
+
+  async appendUserRunEvent(event: { id: string; run_id: string; sequence: number; kind: string; payload: string }): Promise<void> {
+    this.d.prepare(
+      'INSERT OR IGNORE INTO user_run_events (id, run_id, sequence, kind, payload) VALUES (?, ?, ?, ?, ?)'
+    ).run(event.id, event.run_id, event.sequence, event.kind, event.payload);
+  }
+
+  async listUserRunEvents(runId: string, afterSequence = -1): Promise<import('./db-types/adapter-me.js').UserRunEventRow[]> {
+    return this.d.prepare('SELECT * FROM user_run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence ASC').all(runId, afterSequence) as import('./db-types/adapter-me.js').UserRunEventRow[];
+  }
+
+  async registerDevice(device: { id: string; user_id: string; channel: 'web-push'|'apns'|'fcm'; token: string; tenant_id?: string; label?: string }): Promise<void> {
+    this.d.prepare(
+      'INSERT OR REPLACE INTO user_devices (id, user_id, tenant_id, channel, token, label) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(device.id, device.user_id, device.tenant_id ?? null, device.channel, device.token, device.label ?? null);
+  }
+
+  async removeDevice(userId: string, token: string): Promise<void> {
+    this.d.prepare('DELETE FROM user_devices WHERE user_id = ? AND token = ?').run(userId, token);
+  }
+
+  async listDevices(userId: string): Promise<import('./db-types/adapter-me.js').UserDeviceRow[]> {
+    return this.d.prepare('SELECT * FROM user_devices WHERE user_id = ? ORDER BY created_at DESC').all(userId) as import('./db-types/adapter-me.js').UserDeviceRow[];
+  }
+
+  async getNotificationPrefs(userId: string): Promise<import('./db-types/adapter-me.js').NotificationPrefsRow | null> {
+    return (this.d.prepare('SELECT * FROM notification_preferences WHERE user_id = ?').get(userId) as import('./db-types/adapter-me.js').NotificationPrefsRow | undefined) ?? null;
+  }
+
+  async upsertNotificationPrefs(userId: string, prefs: { id: string; enabled?: boolean; categories?: string[]; quiet_hours?: string | null }): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO notification_preferences (id, user_id, enabled, categories, quiet_hours)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        enabled = excluded.enabled,
+        categories = excluded.categories,
+        quiet_hours = excluded.quiet_hours,
+        updated_at = datetime('now')
+    `).run(
+      prefs.id, userId,
+      prefs.enabled !== false ? 1 : 0,
+      JSON.stringify(prefs.categories ?? []),
+      prefs.quiet_hours ?? null,
+    );
+  }
+
+  async listModeLabels(surfaceId: string): Promise<import('./db-types/adapter-me.js').ModeLabel[]> {
+    return this.d.prepare('SELECT * FROM mode_labels WHERE surface_id = ? AND enabled = 1 ORDER BY sort_order ASC, rowid ASC').all(surfaceId) as import('./db-types/adapter-me.js').ModeLabel[];
+  }
+
+  async listStarterPrompts(surfaceId: string): Promise<import('./db-types/adapter-me.js').StarterPrompt[]> {
+    return this.d.prepare('SELECT * FROM starter_prompts WHERE surface_id = ? AND enabled = 1 ORDER BY sort_order ASC, rowid ASC').all(surfaceId) as import('./db-types/adapter-me.js').StarterPrompt[];
+  }
 }
 
 // ─── Factory ─────────────────────────────────────────────────
