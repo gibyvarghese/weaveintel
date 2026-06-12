@@ -11,24 +11,40 @@ import { useCallback, useMemo } from 'react';
 import { FlatList, type ListRenderItemInfo } from 'react-native';
 import type { AssistantEntry, ChatEntry, UserEntry } from '../../../lib';
 import { useTheme } from '../../providers/theme-provider';
-import { MessageBubble } from './message-bubble';
+import { MessageBubble, type WidgetActionHandler } from './message-bubble';
 
 export interface MessageListProps {
   entries: ChatEntry[];
   onEditUser: (entry: UserEntry) => void;
   onAssistantActions: (entry: AssistantEntry) => void;
+  /** Posts an interactive widget action for the run that owns the widget. */
+  onWidgetAction?: WidgetActionHandler;
+  /** Widget ids with an action in flight → the submitted action id. */
+  pendingWidgetActions?: Record<string, string>;
 }
 
-export function MessageList({ entries, onEditUser, onAssistantActions }: MessageListProps) {
+export function MessageList({
+  entries,
+  onEditUser,
+  onAssistantActions,
+  onWidgetAction,
+  pendingWidgetActions,
+}: MessageListProps) {
   const { theme } = useTheme();
   // Inverted axis renders newest-first; reverse the chronological entries.
   const data = useMemo(() => [...entries].reverse(), [entries]);
 
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<ChatEntry>) => (
-      <MessageBubble entry={item} onEditUser={onEditUser} onAssistantActions={onAssistantActions} />
+      <MessageBubble
+        entry={item}
+        onEditUser={onEditUser}
+        onAssistantActions={onAssistantActions}
+        {...(onWidgetAction !== undefined ? { onWidgetAction } : {})}
+        {...(pendingWidgetActions !== undefined ? { pendingWidgetActions } : {})}
+      />
     ),
-    [onEditUser, onAssistantActions],
+    [onEditUser, onAssistantActions, onWidgetAction, pendingWidgetActions],
   );
 
   return (

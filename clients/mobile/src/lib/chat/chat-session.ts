@@ -102,6 +102,13 @@ export interface ChatSessionState {
   runningInBackground: boolean;
   /** Last user-facing error message, if any. */
   error: string | null;
+  /**
+   * Widget ids with an in-flight action (optimistic). Keyed by widget id →
+   * the submitted action id, so a renderer can disable the card and show which
+   * choice is pending. Cleared when the server re-emits that widget (reconcile)
+   * or the post fails.
+   */
+  pendingWidgetActions: Record<string, string>;
 }
 
 export function emptyChatSessionState(): ChatSessionState {
@@ -112,6 +119,7 @@ export function emptyChatSessionState(): ChatSessionState {
     phase: 'idle',
     runningInBackground: false,
     error: null,
+    pendingWidgetActions: {},
   };
 }
 
@@ -128,6 +136,14 @@ export interface ChatRunClient {
     metadata?: Record<string, unknown>;
   }): Promise<{ id: string; status: RunStatus }>;
   cancelRun(id: string): Promise<RunStatus>;
+  /**
+   * Post an out-of-band event into a run — a widget action tap ("a tap is a
+   * turn"). The server folds it into the run and may resume producing.
+   */
+  postEvent(
+    runId: string,
+    event: { kind?: string; payload?: Record<string, unknown> },
+  ): Promise<{ sequence: number }>;
   attachRun(
     runId: string,
     opts: {
@@ -189,6 +205,20 @@ export interface ChatSession {
 
   /** Cancel the active run (the Stop affordance). Idempotent. */
   stop(): Promise<void>;
+
+  /**
+   * Submit a widget action (e.g. an approval tap) for a run. Optimistically
+   * marks the widget pending (the card disables), posts a `widget.action`
+   * event, and reconciles when the server re-emits the widget. No-op when the
+   * widget already has an action in flight. On post failure the optimistic
+   * state rolls back and `error` is surfaced.
+   */
+  submitWidgetAction(
+    runId: string,
+    widgetId: string,
+    actionId: string,
+    value?: unknown,
+  ): Promise<void>;
 
   /**
    * Edit a previous user message and resend it as a *new* run. The original
@@ -277,6 +307,19 @@ export function createChatSession(opts: ChatSessionOptions): ChatSession {
     handle = opts.client.attachRun(runId, {
       afterSequence,
       onEvent(envelope) {
+        // Reconcile optimistic widget actions: once the server re-emits a
+        // widget we had marked pending, drop the pending flag so the card
+        // reflects server truth on the next render.
+        if (envelope.kind === 'widget.update') {
+          const wid =
+            typeof envelope.payload?.['id'] === 'string'
+              ? (envelope.payload['id'] as string)
+              : undefined;
+          if (wid && state.pendingWidgetActions[wid] !== undefined) {
+            const { [wid]: _resolved, ...rest } = state.pendingWidgetActions;
+            state = { ...state, pendingWidgetActions: rest };
+          }
+        }
         const entry = currentAssistant(runId);
         const base = entry?.model ?? withSequence(emptyRunViewModel(), afterSequence);
         applyModel(runId, streamReducer(base, envelope));
@@ -368,6 +411,27 @@ export function createChatSession(opts: ChatSessionOptions): ChatSession {
           : e,
       );
       emit({ ...state, entries, activeRunId: null, phase: 'idle', runningInBackground: false });
+    },
+
+    async submitWidgetAction(runId, widgetId, actionId, value) {
+      // Ignore a double-tap while the same widget has an action in flight.
+      if (state.pendingWidgetActions[widgetId] !== undefined) return;
+      // Optimistic: disable the card and remember the chosen action.
+      emit({
+        ...state,
+        error: null,
+        pendingWidgetActions: { ...state.pendingWidgetActions, [widgetId]: actionId },
+      });
+      try {
+        await opts.client.postEvent(runId, {
+          kind: 'widget.action',
+          payload: { widgetId, actionId, ...(value !== undefined ? { value } : {}) },
+        });
+      } catch (err) {
+        // Roll back the optimistic flag and surface the failure.
+        const { [widgetId]: _failed, ...rest } = state.pendingWidgetActions;
+        emit({ ...state, pendingWidgetActions: rest, error: (err as Error).message });
+      }
     },
 
     async editAndResend(userEntryId, newText) {

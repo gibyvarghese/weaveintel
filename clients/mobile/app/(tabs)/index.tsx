@@ -70,6 +70,13 @@ export default function ChatScreen() {
     [session],
   );
 
+  const handleWidgetAction = useCallback(
+    (runId: string, widgetId: string, actionId: string, value?: unknown) => {
+      void session.submitWidgetAction(runId, widgetId, actionId, value);
+    },
+    [session],
+  );
+
   const hasMessages = state.entries.length > 0;
 
   return (
@@ -86,6 +93,8 @@ export default function ChatScreen() {
               entries={state.entries}
               onEditUser={handleEditUser}
               onAssistantActions={handleAssistantActions}
+              onWidgetAction={handleWidgetAction}
+              pendingWidgetActions={state.pendingWidgetActions}
             />
           ) : (
             <EmptyState starters={catalog?.starterPrompts ?? []} onPick={handleStarter} />

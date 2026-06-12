@@ -30,6 +30,8 @@ function fakeClient() {
   const attachments: Attachment[] = [];
   const cancelled: string[] = [];
   const startCalls: Array<{ idempotencyKey: string; input?: Record<string, unknown> }> = [];
+  const postedEvents: Array<{ runId: string; kind?: string; payload?: Record<string, unknown> }> = [];
+  let postEventImpl: (runId: string) => Promise<{ sequence: number }> = async () => ({ sequence: 1 });
 
   const client: ChatRunClient = {
     async startRun(input) {
@@ -40,6 +42,10 @@ function fakeClient() {
     async cancelRun(id) {
       cancelled.push(id);
       return 'cancelled' as RunStatus;
+    },
+    async postEvent(runId, event) {
+      postedEvents.push({ runId, ...event });
+      return postEventImpl(runId);
     },
     attachRun(runId, opts) {
       const att: Attachment = {
@@ -63,7 +69,12 @@ function fakeClient() {
   const liveAttach = (runId: string): Attachment | undefined =>
     [...attachments].reverse().find((a) => a.runId === runId && !a.detached);
 
-  return { client, attachments, cancelled, startCalls, liveAttach };
+  /** Override the postEvent resolution (e.g. to reject). */
+  const setPostEventImpl = (fn: (runId: string) => Promise<{ sequence: number }>): void => {
+    postEventImpl = fn;
+  };
+
+  return { client, attachments, cancelled, startCalls, postedEvents, liveAttach, setPostEventImpl };
 }
 
 const ev = (runId: string, sequence: number, kind: string, payload: Record<string, unknown> = {}): RunEventEnvelope => ({
@@ -300,3 +311,62 @@ describe('chat session', () => {
     expect(armed).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Widget actions (M5)
+// ---------------------------------------------------------------------------
+
+describe('chat session — widget actions', () => {
+  async function streamingSession() {
+    const f = fakeClient();
+    const s = createChatSession({ client: f.client, idempotencyKey: () => 'k', newId: idFactory(), now: () => 1 });
+    await s.send('approve please');
+    const a = f.liveAttach('run-1')!;
+    a.onEvent(ev('run-1', 0, 'run.started'));
+    a.onEvent(ev('run-1', 1, 'widget.update', { id: 'w1', type: 'approval', data: { description: 'do it' } }));
+    return { f, s, a };
+  }
+
+  it('optimistically marks a widget pending and posts a widget.action event', async () => {
+    const { f, s } = await streamingSession();
+
+    await s.submitWidgetAction('run-1', 'w1', 'approve', { note: 'ok' });
+
+    expect(s.getState().pendingWidgetActions).toEqual({ w1: 'approve' });
+    expect(f.postedEvents).toEqual([
+      { runId: 'run-1', kind: 'widget.action', payload: { widgetId: 'w1', actionId: 'approve', value: { note: 'ok' } } },
+    ]);
+    expect(s.getState().error).toBeNull();
+  });
+
+  it('ignores a second action while one is in flight for the same widget', async () => {
+    const { f, s } = await streamingSession();
+    await s.submitWidgetAction('run-1', 'w1', 'approve');
+    await s.submitWidgetAction('run-1', 'w1', 'deny');
+    expect(f.postedEvents).toHaveLength(1);
+    expect(s.getState().pendingWidgetActions).toEqual({ w1: 'approve' });
+  });
+
+  it('reconciles (clears pending) when the server re-emits the widget', async () => {
+    const { s, a } = await streamingSession();
+    await s.submitWidgetAction('run-1', 'w1', 'approve');
+    expect(s.getState().pendingWidgetActions).toEqual({ w1: 'approve' });
+
+    a.onEvent(ev('run-1', 2, 'widget.update', { id: 'w1', type: 'approval', data: { description: 'approved', resolved: true } }));
+
+    expect(s.getState().pendingWidgetActions).toEqual({});
+  });
+
+  it('rolls back the optimistic flag and surfaces the error when the post fails', async () => {
+    const { f, s } = await streamingSession();
+    f.setPostEventImpl(async () => {
+      throw new Error('network down');
+    });
+
+    await s.submitWidgetAction('run-1', 'w1', 'approve');
+
+    expect(s.getState().pendingWidgetActions).toEqual({});
+    expect(s.getState().error).toBe('network down');
+  });
+});
+

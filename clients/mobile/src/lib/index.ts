@@ -106,3 +106,16 @@ export {
   type SseFrameParser,
   type SseFrameParserOptions,
 } from './net/sse-frames.js';
+
+// Widget render specs (M5) — the pure brain behind the native widget surface.
+export {
+  buildWidgetSpec,
+  WIDGET_RENDER_KINDS,
+  SUPPORTED_SCHEMA_VERSION,
+  type WidgetInput,
+  type WidgetViewSpec,
+  type WidgetRenderKind,
+  type ActionSpec,
+  type FormFieldSpec,
+} from './widgets/widget-spec.js';
+export { widgetFixtures, type WidgetFixture } from './widgets/widget-fixtures.js';

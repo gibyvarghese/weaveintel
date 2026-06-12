@@ -64,6 +64,8 @@ function RootNavigator() {
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
+      {/* Dev-only widget gallery (renders every render kind from fixtures). */}
+      <Stack.Screen name="widget-gallery" options={{ presentation: 'modal' }} />
     </Stack>
   );
 }
