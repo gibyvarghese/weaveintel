@@ -43,7 +43,8 @@ export type TriggerTargetKind =
   | 'agent_tick'
   | 'mesh_message'
   | 'contract'
-  | 'webhook_out';
+  | 'webhook_out'
+  | 'reminder_bus';
 
 export interface TriggerSourceRef {
   kind: TriggerSourceKind;
@@ -53,6 +54,11 @@ export interface TriggerSourceRef {
 export interface TriggerTargetRef {
   kind: TriggerTargetKind;
   config: Record<string, unknown>;
+}
+
+export interface TriggerProvenance {
+  sourceRunId?: string;
+  sourceRef?: string;
 }
 
 export interface Trigger {
@@ -77,6 +83,12 @@ export interface Trigger {
   inputMap?: Record<string, string>;
   rateLimit?: { perMinute: number };
   metadata?: Record<string, unknown>;
+  /** Principal that owns / created this trigger. Used for `listByOwner`. */
+  ownerPrincipalId?: string;
+  /** Tenant this trigger belongs to. Used for multi-tenant isolation. */
+  tenantId?: string;
+  /** Origin of this trigger (e.g. from a run or workflow step). */
+  provenance?: TriggerProvenance;
 }
 
 export interface TriggerEvent {
@@ -126,6 +138,8 @@ export interface TriggerStore {
   /** Append-only audit row writer. */
   recordInvocation(invocation: TriggerInvocation): Promise<void>;
   listInvocations(filter?: ListInvocationsFilter): Promise<TriggerInvocation[]>;
+  /** List triggers owned by the given principal. */
+  listByOwner(principalId: string): Promise<Trigger[]>;
 }
 
 export type TriggerInvocationStatus =
@@ -178,6 +192,9 @@ export class InMemoryTriggerStore implements TriggerStore {
     const offset = filter?.offset ?? 0;
     const limit = filter?.limit ?? out.length;
     return out.slice(offset, offset + limit);
+  }
+  async listByOwner(principalId: string): Promise<Trigger[]> {
+    return [...this.rows.values()].filter((t) => t.ownerPrincipalId === principalId);
   }
 }
 

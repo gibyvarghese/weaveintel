@@ -155,5 +155,9 @@ export function weaveDynamoDbTriggerStore(opts: WeaveDynamoDbTriggerStoreOptions
       }
       return items.slice(offset, offset + limit).map(itemToInvocation);
     },
+    async listByOwner(principalId) {
+      const all = await this.list();
+      return all.filter((t) => t.ownerPrincipalId === principalId);
+    },
   };
 }

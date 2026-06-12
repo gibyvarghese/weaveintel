@@ -177,5 +177,9 @@ export async function weavePostgresTriggerStore(
       );
       return r.rows.map(rowToInvocation);
     },
+    async listByOwner(principalId: string) {
+      const result = await pool.query<TriggerRow>('SELECT * FROM triggers ORDER BY key ASC');
+      return result.rows.map(rowToTrigger).filter((t) => t.ownerPrincipalId === principalId);
+    },
   };
 }

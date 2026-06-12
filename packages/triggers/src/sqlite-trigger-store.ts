@@ -81,7 +81,10 @@ function parseJson<T>(s: string | null | undefined): T | undefined {
 function rowToTrigger(row: TriggerRow): Trigger {
   const filter = parseJson<{ expression?: unknown }>(row.filter_expr);
   const inputMap = parseJson<Record<string, string>>(row.input_map);
-  const metadata = parseJson<Record<string, unknown>>(row.metadata);
+  const rawMeta = parseJson<Record<string, unknown>>(row.metadata);
+  // Extract new W6 fields stored inside metadata for zero-schema-change compat
+  const { __ownerPrincipalId, __tenantId, __provenance, ...restMeta } = (rawMeta ?? {}) as Record<string, unknown>;
+  const metadata = Object.keys(restMeta).length > 0 ? restMeta : undefined;
   return {
     id: row.id,
     key: row.key,
@@ -98,6 +101,9 @@ function rowToTrigger(row: TriggerRow): Trigger {
     ...(inputMap ? { inputMap } : {}),
     ...(row.rate_limit_per_minute != null ? { rateLimit: { perMinute: row.rate_limit_per_minute } } : {}),
     ...(metadata ? { metadata } : {}),
+    ...(__ownerPrincipalId ? { ownerPrincipalId: __ownerPrincipalId as string } : {}),
+    ...(__tenantId ? { tenantId: __tenantId as string } : {}),
+    ...(__provenance ? { provenance: __provenance as { sourceRunId?: string; sourceRef?: string } } : {}),
   };
 }
 
@@ -149,6 +155,12 @@ export function weaveSqliteTriggerStore(opts: WeaveSqliteTriggerStoreOptions = {
     async get(id) { const r = selectById.get(id) as TriggerRow | undefined; return r ? rowToTrigger(r) : null; },
     async getByKey(key) { const r = selectByKey.get(key) as TriggerRow | undefined; return r ? rowToTrigger(r) : null; },
     async save(t) {
+      const metaObj = {
+        ...(t.metadata ?? {}),
+        ...(t.ownerPrincipalId ? { __ownerPrincipalId: t.ownerPrincipalId } : {}),
+        ...(t.tenantId ? { __tenantId: t.tenantId } : {}),
+        ...(t.provenance ? { __provenance: t.provenance } : {}),
+      };
       upsertStmt.run(
         t.id,
         t.key,
@@ -160,7 +172,7 @@ export function weaveSqliteTriggerStore(opts: WeaveSqliteTriggerStoreOptions = {
         JSON.stringify(t.target.config ?? {}),
         t.inputMap ? JSON.stringify(t.inputMap) : null,
         t.rateLimit?.perMinute ?? null,
-        t.metadata ? JSON.stringify(t.metadata) : null,
+        Object.keys(metaObj).length > 0 ? JSON.stringify(metaObj) : null,
       );
     },
     async delete(id) { deleteById.run(id); },
@@ -189,6 +201,10 @@ export function weaveSqliteTriggerStore(opts: WeaveSqliteTriggerStoreOptions = {
       );
       const rows = stmt.all(...params, limit, offset) as InvocationRow[];
       return rows.map(rowToInvocation);
+    },
+    async listByOwner(principalId: string): Promise<Trigger[]> {
+      const all = (selectAll.all() as TriggerRow[]).map(rowToTrigger);
+      return all.filter((t) => t.ownerPrincipalId === principalId);
     },
   };
 }

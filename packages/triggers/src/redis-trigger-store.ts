@@ -109,5 +109,9 @@ export function weaveRedisTriggerStore(opts: WeaveRedisTriggerStoreOptions): Tri
       }
       return out;
     },
+    async listByOwner(principalId) {
+      const all = await this.list();
+      return all.filter((t) => t.ownerPrincipalId === principalId);
+    },
   };
 }

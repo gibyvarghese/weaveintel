@@ -27,3 +27,11 @@ export {
   type DurableTriggerRateLimiterOptions,
   createDurableTriggerRateLimiter,
 } from './durable-rate-limit.js';
+
+// W6 — Reminder ergonomics
+export {
+  createReminderTrigger,
+  rescheduleReminder,
+  ReminderBusTargetAdapter,
+  type CreateReminderTriggerInput,
+} from './reminders.js';

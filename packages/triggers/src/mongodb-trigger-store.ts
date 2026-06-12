@@ -87,5 +87,9 @@ export async function weaveMongoDbTriggerStore(
         .toArray();
       return docs.map(docToInvocation);
     },
+    async listByOwner(principalId: string) {
+      const docs = await triggers.find({}).toArray();
+      return docs.map(docToTrigger).filter((t) => t.ownerPrincipalId === principalId);
+    },
   };
 }
