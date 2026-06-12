@@ -157,6 +157,75 @@ export function registerAuthRoutes(
     });
   }, { csrf: false });
 
+  // Bearer-token issuance for non-browser clients (mobile, CLI, machine-to-machine).
+  //
+  // Unlike /api/auth/login (which delivers the JWT via an HttpOnly Set-Cookie),
+  // this route returns the raw token in the response body so native clients that
+  // do not run a cookie jar can store it (e.g. expo-secure-store) and send it as
+  // `Authorization: Bearer <token>`. The same JWT + DB session is minted, so the
+  // token is honoured by authenticateRequest(). CSRF is still enforced on mutating
+  // routes, so the returned csrfToken must be sent as `X-CSRF-Token`.
+  router.post('/api/auth/token', async (req, res) => {
+    const raw = await readBody(req);
+    let body: { email?: string; password?: string };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const { email, password } = body;
+    if (!email || !password) { json(res, 400, { error: 'email and password required' }); return; }
+
+    const clientIp = readClientIp(req);
+    const lockedMs = getLoginBackoffMs(clientIp, email);
+    if (lockedMs > 0) {
+      const retryAfterSec = Math.ceil(lockedMs / 1_000);
+      res.setHeader('Retry-After', String(retryAfterSec));
+      json(res, 429, { error: 'Too many login attempts. Please retry later.' });
+      return;
+    }
+
+    const tokenRate = checkAuthRateLimits('login', req, email);
+    if (tokenRate.limited) {
+      const retryAfterSec = Math.ceil(tokenRate.retryAfterMs / 1_000);
+      res.setHeader('Retry-After', String(retryAfterSec));
+      json(res, 429, { error: 'Too many login attempts. Please retry later.', correlationId: newUUIDv7() });
+      return;
+    }
+
+    const user = await db.getUserByEmail(email);
+    const verification = user
+      ? await verifyPasswordDetailed(password, user.password_hash)
+      : { ok: false, needsRehash: false };
+    if (!user || !verification.ok) {
+      recordLoginFailure(clientIp, email);
+      json(res, 401, { error: 'Invalid credentials', correlationId: newUUIDv7() });
+      return;
+    }
+
+    clearLoginFailures(clientIp, email);
+
+    if (verification.needsRehash) {
+      const upgradedHash = await hashPassword(password);
+      await db.updateUser(user.id, { passwordHash: upgradedHash });
+    }
+
+    await ensureAtLeastOneTenantAdmin(db, user.id);
+    const effectiveUser = (await db.getUserById(user.id)) ?? user;
+
+    const sessionId = newUUIDv7();
+    const csrfToken = generateCSRFToken();
+    const expiresAtMs = Date.now() + 86400_000;
+    const expiresAt = new Date(expiresAtMs).toISOString();
+    await db.createSession({ id: sessionId, userId: effectiveUser.id, csrfToken, expiresAt });
+
+    const token = signJWT({ userId: effectiveUser.id, email: effectiveUser.email, sessionId }, jwtSecret);
+    json(res, 200, {
+      token,
+      csrfToken,
+      expiresAt,
+      user: { id: effectiveUser.id, email: effectiveUser.email, name: effectiveUser.name, persona: effectiveUser.persona, tenantId: effectiveUser.tenant_id },
+      permissions: personaPermissions(effectiveUser.persona),
+    });
+  }, { csrf: false });
+
   router.post('/api/auth/logout', async (_req, _res, _params, auth) => {
     if (auth) await db.deleteSession(auth.sessionId);
     clearAuthCookie(_res);

@@ -27,6 +27,7 @@ export async function jfetch(method, path, opts = {}) {
       'content-type': 'application/json',
       ...(opts.cookie ? { cookie: opts.cookie } : {}),
       ...(opts.csrf ? { 'x-csrf-token': opts.csrf } : {}),
+      ...(opts.bearer ? { authorization: `Bearer ${opts.bearer}` } : {}),
     },
     ...(opts.body !== undefined ? { body: JSON.stringify(opts.body) } : {}),
   });
