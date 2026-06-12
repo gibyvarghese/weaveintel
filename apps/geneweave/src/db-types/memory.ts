@@ -9,6 +9,7 @@ export interface SemanticMemoryRow {
   memory_type: string;         // 'semantic' | 'user_fact' | 'preference' | 'summary'
   source: string;              // 'user' | 'assistant'
   embedding: string | null;    // JSON-serialised number[] for cosine similarity search
+  metadata: string | null;     // JSON — correction/supersede lineage markers (W9b)
   created_at: string;
   updated_at: string;
 }

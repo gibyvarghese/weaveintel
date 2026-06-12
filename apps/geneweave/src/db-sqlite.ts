@@ -3945,18 +3945,34 @@ export class SQLiteAdapter implements DatabaseAdapter {
     memoryType?: string;
     source?: string;
     embedding?: number[];
+    metadata?: string;
   }): Promise<void> {
     const embeddingJson = m.embedding && m.embedding.length > 0
       ? JSON.stringify(m.embedding)
       : null;
+    // Upsert so the @weaveintel/memory correction/supersede round-trip can
+    // rewrite an existing entry (same id) in place while preserving lineage.
     this.d.prepare(
-      `INSERT INTO semantic_memory (id, user_id, chat_id, tenant_id, content, memory_type, source, embedding)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO semantic_memory (id, user_id, chat_id, tenant_id, content, memory_type, source, embedding, metadata)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         content    = excluded.content,
+         memory_type = excluded.memory_type,
+         source     = excluded.source,
+         embedding  = excluded.embedding,
+         metadata   = excluded.metadata,
+         updated_at = datetime('now')`,
     ).run(
       m.id, m.userId, m.chatId ?? null, m.tenantId ?? null,
       m.content, m.memoryType ?? 'semantic', m.source ?? 'assistant',
-      embeddingJson,
+      embeddingJson, m.metadata ?? null,
     );
+  }
+
+  async getSemanticMemoryById(id: string, userId: string): Promise<SemanticMemoryRow | null> {
+    return (this.d.prepare(
+      'SELECT * FROM semantic_memory WHERE id = ? AND user_id = ?',
+    ).get(id, userId) as SemanticMemoryRow | undefined) ?? null;
   }
 
   async searchSemanticMemory(opts: {
@@ -8140,20 +8156,22 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return (this.d.prepare('SELECT * FROM notification_preferences WHERE user_id = ?').get(userId) as import('./db-types/adapter-me.js').NotificationPrefsRow | undefined) ?? null;
   }
 
-  async upsertNotificationPrefs(userId: string, prefs: { id: string; enabled?: boolean; categories?: string[]; quiet_hours?: string | null }): Promise<void> {
+  async upsertNotificationPrefs(userId: string, prefs: { id: string; enabled?: boolean; categories?: string[]; quiet_hours?: string | null; timezone?: string | null }): Promise<void> {
     this.d.prepare(`
-      INSERT INTO notification_preferences (id, user_id, enabled, categories, quiet_hours)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO notification_preferences (id, user_id, enabled, categories, quiet_hours, timezone)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(user_id) DO UPDATE SET
         enabled = excluded.enabled,
         categories = excluded.categories,
         quiet_hours = excluded.quiet_hours,
+        timezone = excluded.timezone,
         updated_at = datetime('now')
     `).run(
       prefs.id, userId,
       prefs.enabled !== false ? 1 : 0,
       JSON.stringify(prefs.categories ?? []),
       prefs.quiet_hours ?? null,
+      prefs.timezone ?? null,
     );
   }
 

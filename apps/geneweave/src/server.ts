@@ -41,6 +41,7 @@ import {
   registerMemoryRoutes,
   registerLiveAgentRoutes,
   registerMeRoutes,
+  registerMeMemoryRoutes,
 } from './routes/index.js';
 
 export interface ServerConfig {
@@ -122,6 +123,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerMemoryRoutes(router, db);
   registerLiveAgentRoutes(router, db);
   registerMeRoutes(router, db);
+  registerMeMemoryRoutes(router, db);
 
   // ── Avatar static files ────────────────────────────────────
 

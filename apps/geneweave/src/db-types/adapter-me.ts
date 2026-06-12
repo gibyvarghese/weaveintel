@@ -38,6 +38,7 @@ export interface NotificationPrefsRow {
   enabled: number;
   categories: string;
   quiet_hours: string | null;
+  timezone: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -92,7 +93,7 @@ export interface IMeStore {
   // Notification preferences
   getNotificationPrefs(userId: string): Promise<NotificationPrefsRow | null>;
   upsertNotificationPrefs(userId: string, prefs: {
-    id: string; enabled?: boolean; categories?: string[]; quiet_hours?: string | null;
+    id: string; enabled?: boolean; categories?: string[]; quiet_hours?: string | null; timezone?: string | null;
   }): Promise<void>;
 
   // Catalog support

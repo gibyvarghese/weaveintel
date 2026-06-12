@@ -17,7 +17,8 @@ export interface IMemoryStore {
   deleteSSOLinkedAccount(userId: string, identityProvider: string): Promise<void>;
 
   // Semantic Memory
-  saveSemanticMemory(m: { id: string; userId: string; chatId?: string; tenantId?: string; content: string; memoryType?: string; source?: string; embedding?: number[] }): Promise<void>;
+  saveSemanticMemory(m: { id: string; userId: string; chatId?: string; tenantId?: string; content: string; memoryType?: string; source?: string; embedding?: number[]; metadata?: string }): Promise<void>;
+  getSemanticMemoryById(id: string, userId: string): Promise<SemanticMemoryRow | null>;
   searchSemanticMemory(opts: { userId: string; query: string; limit?: number; queryEmbedding?: number[] }): Promise<SemanticMemoryRow[]>;
   listSemanticMemory(userId: string, limit?: number): Promise<SemanticMemoryRow[]>;
   deleteSemanticMemory(id: string, userId: string): Promise<void>;
