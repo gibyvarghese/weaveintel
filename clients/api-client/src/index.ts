@@ -1,46 +1,80 @@
 /**
  * @geneweave/api-client — typed client for the geneWeave /api/me surface.
  *
- * Wraps @weaveintel/client's run client with bearer-token + CSRF injection
- * from a pluggable TokenStore, and exposes zod-validated typed methods for the
- * verified mobile surface (runs, catalog, tasks, reminders, memories, devices,
- * notification prefs/actions, conversations). The full client is built in M2.
+ * Wraps an injectable transport with bearer-token + CSRF injection from a
+ * pluggable {@link TokenStore}, and exposes zod-validated typed methods for the
+ * verified mobile surface (auth, runs, catalog, tasks, reminders, memories,
+ * devices, notification prefs/actions, conversations).
  *
- * M0 ships only the scaffold: it builds via `tsc -b`, proves the dependency
- * wiring to @weaveintel/client and zod resolves, and has a green test — so the
- * client pipeline is verified end-to-end before M2 fills it in. No React or
- * React Native imports ever (this package stays runtime-agnostic).
+ * Per-tenant: each {@link createGeneweaveClient} call is an independent
+ * instance (host + token store + outbox storage are all injected; no
+ * module-level singletons), so one device can run a client per tenant/host.
+ *
+ * No React or React Native imports — this package stays runtime-agnostic.
  */
 
 import { z } from 'zod';
-import { sseTransport } from '@weaveintel/client';
 
-/** Schema version of the client surface; M2 consumers pin against this. */
+/** Schema version of the client surface; consumers pin against this. */
 export const API_CLIENT_SCHEMA_VERSION = 1 as const;
 
-/**
- * Pluggable, async token storage. The mobile app backs this with
- * `expo-secure-store`; tests and Node clients can back it with memory. The
- * real client (M2) reads the bearer token + CSRF token through this and
- * triggers a single refresh on 401.
- */
-export interface TokenStore {
-  get(): Promise<{ token: string; csrfToken: string } | null>;
-  set(value: { token: string; csrfToken: string }): Promise<void>;
-  clear(): Promise<void>;
-}
-
-/** Connection config for the client (M2 expands this). */
+/** Connection config for the client. */
 export const HostConfigSchema = z.object({
   /** Base origin of the geneWeave server, e.g. `https://api.example.com`. */
   host: z.string().url(),
 });
 export type HostConfig = z.infer<typeof HostConfigSchema>;
 
-/**
- * M0 wiring smoke check: confirms the @weaveintel/client transport factory is
- * importable from this package. Replaced by `createGeneweaveClient` in M2.
- *
- * @internal
- */
-export const __sseTransportRef: typeof sseTransport = sseTransport;
+// Errors
+export {
+  GeneweaveApiError,
+  AuthExpiredError,
+  ManagedByOrgError,
+  ResponseShapeError,
+} from './errors.js';
+
+// Token storage
+export {
+  MemoryTokenStore,
+  namespacedTokenStore,
+  type AuthTokens,
+  type TokenStore,
+  type KeyValueStore,
+} from './token-store.js';
+
+// Transport seam
+export {
+  createHttpTransport,
+  type GeneweaveTransport,
+  type RawResponse,
+  type StreamHandlers,
+  type TransportRequest,
+  type CreateHttpTransportOptions,
+} from './http.js';
+
+// Client
+export {
+  createGeneweaveClient,
+  type GeneweaveClient,
+  type CreateGeneweaveClientOptions,
+  type AttachRunOptions,
+  type AttachHandle,
+  type ListRunsFilter,
+  type ListConversationsFilter,
+} from './client.js';
+
+// Run primitives re-exported from @weaveintel/client that appear in this
+// package's public surface (outbox storage, view model, start input), so
+// consumers configure the client without importing @weaveintel/client directly.
+export {
+  MemoryStorage,
+  type OutboxStorage,
+  type RunOutbox,
+  type OutboxFlushResult,
+  type RunViewModel,
+  type StreamItem,
+  type StartRunInput,
+} from '@weaveintel/client';
+
+// Surface schemas + inferred types
+export * from './schemas.js';
