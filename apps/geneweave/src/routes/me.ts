@@ -49,35 +49,35 @@ import { createMeCatalogResolver } from '../me-catalog.js';
 import type { SurfaceCatalogResolver } from '@weaveintel/core';
 import type { NotificationsHub } from '../notifications-wiring.js';
 import { meTaskRepo as taskRepo, meTriggerStore as triggerStore } from './me-stores.js';
-
-// Tracks live SSE subscribers per run id so terminal-run notifications are
-// only sent when nobody is actively watching the stream ("detached").
-const runSubscribers = new Map<string, number>();
-function addRunSubscriber(runId: string): void {
-  runSubscribers.set(runId, (runSubscribers.get(runId) ?? 0) + 1);
-}
-function removeRunSubscriber(runId: string): void {
-  const n = (runSubscribers.get(runId) ?? 1) - 1;
-  if (n <= 0) runSubscribers.delete(runId); else runSubscribers.set(runId, n);
-}
-function runHasSubscriber(runId: string): boolean {
-  return (runSubscribers.get(runId) ?? 0) > 0;
-}
+import { MeRunExecutor, isTerminalRunStatus } from '../me-run-executor.js';
 
 /**
  * Register all /api/me routes on the provided router.
  *
  * @param router   The server Router instance
  * @param db       DatabaseAdapter (for runs, devices, prefs)
+ * @param opts.runExecutor  Optional run executor. When supplied, `POST
+ *   /api/me/runs` dispatches the run (producing live events) and the SSE
+ *   stream live-tails appended events. When omitted, the run surface degrades
+ *   to the historical record-only behaviour (create + manual events) so tests
+ *   and embedded callers keep working with no executor wired.
  */
 export function registerMeRoutes(
   router: Router,
   db: DatabaseAdapter,
-  opts: { catalogResolver?: SurfaceCatalogResolver; notifications?: NotificationsHub } = {},
+  opts: {
+    catalogResolver?: SurfaceCatalogResolver;
+    notifications?: NotificationsHub;
+    runExecutor?: MeRunExecutor;
+  } = {},
 ): void {
 
   const catalogResolver = opts.catalogResolver ?? createMeCatalogResolver(db);
   const notifications = opts.notifications;
+  // A no-producing executor still provides the per-run SSE bus + serialized
+  // append path, so the live-tail + resumable contract holds even when no
+  // agent is wired (e.g. unit tests, embedded callers).
+  const runExecutor = opts.runExecutor ?? new MeRunExecutor({ db });
 
   // ─── Runs ───────────────────────────────────────────────────────────────
 
@@ -104,6 +104,7 @@ export function registerMeRoutes(
       id: runId,
       user_id: auth.userId,
       status: 'pending',
+      ...(auth.tenantId ? { tenant_id: auth.tenantId } : {}),
       ...(typeof body['surface'] === 'string' ? { surface: body['surface'] } : {}),
       ...(body['metadata'] !== undefined ? { metadata: JSON.stringify(body['metadata']) } : {}),
     });
@@ -119,6 +120,27 @@ export function registerMeRoutes(
     }
 
     const run = await db.getUserRun(runId, auth.userId);
+
+    // SP3: dispatch the run through the executor (non-blocking). The response
+    // returns immediately; the run produces events + flips status in the
+    // background. When no producing agent is wired the executor is a no-op and
+    // the run stays `pending` (record-only behaviour preserved).
+    if (runExecutor.canProduce) {
+      runExecutor.start({
+        runId,
+        userId: auth.userId,
+        ...(auth.tenantId ? { tenantId: auth.tenantId } : {}),
+        ...(auth.persona !== undefined ? { persona: auth.persona } : {}),
+        ...(typeof body['surface'] === 'string' ? { surface: body['surface'] } : {}),
+        input: (typeof body['input'] === 'object' && body['input'] !== null)
+          ? (body['input'] as Record<string, unknown>)
+          : {},
+        ...(typeof body['metadata'] === 'object' && body['metadata'] !== null
+          ? { metadata: body['metadata'] as Record<string, unknown> }
+          : {}),
+      });
+    }
+
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(run));
   }, { auth: true });
@@ -161,25 +183,40 @@ export function registerMeRoutes(
       'X-Accel-Buffering': 'no',
     });
 
-    // Flush all events after the cursor, then keepalive
-    const events = await db.listUserRunEvents(params['runId']!, afterSeq);
+    // Subscribe FIRST so any event appended during the replay window is
+    // buffered (not lost). The subscriber dedups by sequence, so the
+    // replay→live handoff is gap-free and duplicate-free.
+    const { subscriber, detach } = runExecutor.subscribe(run.id, res, afterSeq);
+
+    // Replay all persisted events after the cursor.
+    const events = await db.listUserRunEvents(run.id, afterSeq);
     for (const ev of events) {
-      const envelope = { runId: run.id, sequence: ev.sequence, kind: ev.kind, payload: JSON.parse(ev.payload) };
-      res.write(`data: ${JSON.stringify(envelope)}\n\n`);
+      subscriber.replay({
+        runId: run.id,
+        sequence: ev.sequence,
+        kind: ev.kind,
+        payload: JSON.parse(ev.payload),
+        timestamp: Date.parse(ev.created_at ?? '') || Date.now(),
+      });
     }
 
-    // For terminal runs, close immediately
-    if (['completed', 'failed', 'cancelled'].includes(run.status)) {
-      res.end();
+    // For terminal runs with nothing more coming, close after replay.
+    if (isTerminalRunStatus(run.status)) {
+      detach();
+      if (!res.writableEnded) res.end();
       return;
     }
 
-    // Keepalive comment every 15s; stream stays open until client disconnects
-    addRunSubscriber(run.id);
+    // Flush buffered live events, then live-tail until the client disconnects
+    // or a terminal event closes the stream.
+    subscriber.activate();
     const keepalive = setInterval(() => {
-      try { res.write(': keepalive\n\n'); } catch { clearInterval(keepalive); }
+      try {
+        if (res.writableEnded) { clearInterval(keepalive); return; }
+        res.write(': keepalive\n\n');
+      } catch { clearInterval(keepalive); }
     }, 15_000);
-    req.socket?.on('close', () => { clearInterval(keepalive); removeRunSubscriber(run.id); });
+    req.socket?.on('close', () => { clearInterval(keepalive); detach(); });
   }, { auth: true });
 
   router.post('/api/me/runs/:runId/events', async (req, res, params, auth) => {
@@ -188,16 +225,13 @@ export function registerMeRoutes(
     if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
 
-    // Append event — sequence is derived from count of existing events + 1
-    const existing = await db.listUserRunEvents(params['runId']!);
-    const sequence = existing.length;
-    await db.appendUserRunEvent({
-      id: newUUIDv7(),
-      run_id: run.id,
-      sequence,
-      kind: typeof body['kind'] === 'string' ? body['kind'] : 'client.event',
-      payload: JSON.stringify(body['payload'] ?? body),
-    });
+    // Append + broadcast through the executor so client-originated events are
+    // serialized with executor writes (gap-free sequence) and fanned out live.
+    const kind = typeof body['kind'] === 'string' ? body['kind'] : 'client.event';
+    const payload = (typeof body['payload'] === 'object' && body['payload'] !== null)
+      ? (body['payload'] as Record<string, unknown>)
+      : body;
+    const sequence = await runExecutor.appendEvent(run.id, kind, payload);
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ sequence }));
   }, { auth: true });
@@ -206,14 +240,21 @@ export function registerMeRoutes(
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const run = await db.getUserRun(params['runId']!, auth.userId);
     if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
-    if (['completed', 'failed', 'cancelled'].includes(run.status)) {
+    if (isTerminalRunStatus(run.status)) {
       res.writeHead(409); res.end(JSON.stringify({ error: 'Run already in terminal state' })); return;
     }
+    // Cooperatively abort the in-flight agent (if any). When a producing run
+    // is active its loop emits the terminal `run.cancelled` event; otherwise
+    // we flip status + append the terminal event ourselves.
+    const wasActive = runExecutor.cancel(params['runId']!);
     await db.updateUserRunStatus(params['runId']!, auth.userId, 'cancelled');
+    if (!wasActive) {
+      await runExecutor.appendEvent(params['runId']!, 'run.cancelled', {}).catch(() => {});
+    }
     if (notifications) {
       const updated = await db.getUserRun(params['runId']!, auth.userId);
       if (updated) {
-        void notifications.notifyRunTerminal(updated, { attached: runHasSubscriber(updated.id) }).catch(() => {});
+        void notifications.notifyRunTerminal(updated, { attached: runExecutor.hasSubscriber(updated.id) }).catch(() => {});
       }
     }
     res.writeHead(200, { 'Content-Type': 'application/json' });

@@ -250,8 +250,7 @@ export class ChatEngine {
   constructor(
     private readonly config: ChatEngineConfig,
     private readonly db: DatabaseAdapter,
-  ) {
-    this.toolOptions = {
+  ) {    this.toolOptions = {
       temporalStore: createTemporalStore(db),
       policyResolver: new DbToolPolicyResolver(db),
       rateLimiter: new DbToolRateLimiter(db),
@@ -263,6 +262,15 @@ export class ChatEngine {
       // Phase D: runtime propagation for capability requires assertion
       ...(config.runtime ? { runtime: config.runtime } : {}),
     };
+  }
+
+  /**
+   * Public, read-only view of the model configuration (providers + default
+   * provider/model + runtime). Consumed by the `/api/me/runs` executor to
+   * resolve the default model without re-deriving provider wiring.
+   */
+  get modelConfig(): ChatEngineConfig {
+    return this.config;
   }
 
   private async getDisabledBuiltinToolKeys(): Promise<Set<string>> {

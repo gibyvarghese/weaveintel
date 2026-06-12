@@ -657,3 +657,14 @@ export { DashboardService } from './dashboard.js';
 export type { AuthContext, JWTPayload } from './auth.js';
 export { signJWT, verifyJWT, hashPassword, verifyPassword, generateCSRFToken } from './auth.js';
 export { BUILTIN_TOOLS, createToolRegistry, getAvailableTools } from './tools.js';
+export {
+  MeRunExecutor,
+  isTerminalRunStatus,
+  type RunEventEnvelope,
+  type MeRunEmitter,
+  type MeRunAgent,
+  type MeRunAgentArgs,
+  type MeRunStartArgs,
+  type MeRunExecutorOptions,
+} from './me-run-executor.js';
+export { createDefaultMeRunAgent } from './me-run-agent.js';
