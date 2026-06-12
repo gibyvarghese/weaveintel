@@ -39,13 +39,15 @@
  * in this file's public API surface.
  */
 
-import { newUUIDv7 } from '@weaveintel/core';
+import { newUUIDv7, weaveContext } from '@weaveintel/core';
 import { createActionItem, completeActionItem, cancelActionItem } from '@weaveintel/human-tasks';
 import { InMemoryHumanTaskRepository } from '@weaveintel/human-tasks';
 import { InMemoryTriggerStore, createReminderTrigger, rescheduleReminder } from '@weaveintel/triggers';
 import type { Router } from '../server-core.js';
 import { readBody } from '../server-core.js';
 import type { DatabaseAdapter } from '../db-types.js';
+import { createMeCatalogResolver } from '../me-catalog.js';
+import type { SurfaceCatalogResolver } from '@weaveintel/core';
 
 // Module-level state — these are in-memory stores that persist for the
 // process lifetime.  Production deployments should replace these with
@@ -59,7 +61,13 @@ const triggerStore = new InMemoryTriggerStore();
  * @param router   The server Router instance
  * @param db       DatabaseAdapter (for runs, devices, prefs)
  */
-export function registerMeRoutes(router: Router, db: DatabaseAdapter): void {
+export function registerMeRoutes(
+  router: Router,
+  db: DatabaseAdapter,
+  opts: { catalogResolver?: SurfaceCatalogResolver } = {},
+): void {
+
+  const catalogResolver = opts.catalogResolver ?? createMeCatalogResolver(db);
 
   // ─── Runs ───────────────────────────────────────────────────────────────
 
@@ -201,22 +209,20 @@ export function registerMeRoutes(router: Router, db: DatabaseAdapter): void {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const url = new URL(req.url ?? '/', 'http://x');
     const surfaceId = url.searchParams.get('surface') ?? 'web';
-    const [modes, starters] = await Promise.all([
-      db.listModeLabels(surfaceId),
+    const ctx = weaveContext({
+      userId: auth.userId,
+      ...(auth.tenantId ? { tenantId: auth.tenantId } : {}),
+      metadata: { persona: auth.persona },
+    });
+    const [catalog, starters] = await Promise.all([
+      catalogResolver.resolve(ctx, { surfaceId }),
       db.listStarterPrompts(surfaceId),
     ]);
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
-      surfaceId,
-      resolvedAt: new Date().toISOString(),
-      entries: modes.map((m) => ({
-        id: m.id,
-        kind: 'mode',
-        label: m.label,
-        ...(m.description ? { description: m.description } : {}),
-        ...(m.is_default ? { default: true } : {}),
-        ...(m.metadata ? { metadata: JSON.parse(m.metadata) } : {}),
-      })),
+      surfaceId: catalog.surfaceId,
+      resolvedAt: catalog.resolvedAt,
+      entries: catalog.entries,
       starterPrompts: starters.map((s) => ({
         id: s.id,
         label: s.label,
