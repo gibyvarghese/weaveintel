@@ -1,0 +1,16 @@
+{
+  "name": "geneweave-mobile",
+  "version": "0.0.1",
+  "private": true,
+  "description": "geneWeave mobile app (React Native + Expo, Expo Router, new architecture). M0 scaffolds the project structure; the Expo/RN dependency install and the runnable app land in M3.",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "lint": "expo lint",
+    "install:m3": "echo 'M3 installs the Expo/RN dependency tree — see README.md'"
+  },
+  "license": "MIT"
+}

@@ -76,6 +76,8 @@
     { "path": "packages/live-agents-runtime" },
     { "path": "packages/live-agents-trace-tools" },
     { "path": "apps/geneweave" },
-    { "path": "apps/live-agents-demo" }
+    { "path": "apps/live-agents-demo" },
+    { "path": "clients/tokens" },
+    { "path": "clients/api-client" }
   ]
 }

@@ -11,7 +11,8 @@
   },
   "workspaces": [
     "packages/*",
-    "apps/*"
+    "apps/*",
+    "clients/*"
   ],
   "scripts": {
     "build": "turbo build",

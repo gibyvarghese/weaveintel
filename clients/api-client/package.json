@@ -1,7 +1,7 @@
 {
-  "name": "@weaveintel/tools-kaggle",
-  "version": "0.1.0",
-  "description": "Kaggle MCP tool server — competitions, datasets, kernels, leaderboard, submissions",
+  "name": "@geneweave/api-client",
+  "version": "0.0.1",
+  "description": "geneWeave typed API client — bearer-token /api/me surface over @weaveintel/client (runs, catalog, tasks, reminders, memories, devices, notifications, conversations). No React Native imports.",
   "type": "module",
   "exports": {
     ".": {
@@ -12,23 +12,21 @@
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -b",
-    "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
+    "@weaveintel/client": "*",
     "@weaveintel/core": "*",
-    "@weaveintel/mcp-server": "*",
-    "@weaveintel/reliability": "*",
-    "@weaveintel/resilience": "*",
-    "@weaveintel/sandbox": "*",
-    "@weaveintel/tools": "*"
+    "zod": "^3.23.0"
   },
   "devDependencies": {
-    "@weaveintel/mcp-client": "*",
-    "@weaveintel/testing": "*",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
