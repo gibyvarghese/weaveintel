@@ -36,3 +36,6 @@ export type {
 } from './rbac.js';
 
 export { weaveInMemoryTokenResolver } from './secrets.js';
+
+export { createSurfaceCatalogResolver } from './surface-catalog-resolver.js';
+export type { CatalogSource, AccessCheck, CatalogCache, SurfaceCatalogResolverOptions } from './surface-catalog-resolver.js';
