@@ -99,3 +99,10 @@ export {
   type MarkdownBlock,
   type InlineSpan,
 } from './chat/markdown.js';
+
+// SSE frame parsing (shared by the RN XHR stream transport)
+export {
+  createSseFrameParser,
+  type SseFrameParser,
+  type SseFrameParserOptions,
+} from './net/sse-frames.js';

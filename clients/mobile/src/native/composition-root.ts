@@ -26,6 +26,7 @@ import {
 } from '../lib';
 import { createSecureStoreKv } from './adapters/expo-secure-store';
 import { createExpoBiometric } from './adapters/expo-biometric';
+import { createRnSseTransport } from './adapters/rn-sse-transport';
 
 /** A client version tag sent on every request for server-side telemetry. */
 const CLIENT_VERSION = 'geneweave-mobile/0.0.1';
@@ -46,12 +47,17 @@ export function createAppAuth(): AppAuth {
   const kv = createSecureStoreKv();
   const store = createAuthStore();
 
-  const makeClient: ClientFactory = ({ host, tokenStore }): GeneweaveClient =>
-    createGeneweaveClient({
+  const makeClient: ClientFactory = ({ host, tokenStore }): GeneweaveClient => {
+    const extraHeaders = { 'X-Client-Version': CLIENT_VERSION };
+    return createGeneweaveClient({
       host,
       tokenStore,
-      extraHeaders: { 'X-Client-Version': CLIENT_VERSION },
+      extraHeaders,
+      // React Native's fetch has no streaming `response.body`, so resumable SSE
+      // needs an XHR-based transport. The default transport handles `request`.
+      transport: createRnSseTransport({ host, tokenStore, extraHeaders }),
     });
+  };
 
   const controller = createAuthController({
     store,
