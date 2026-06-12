@@ -39,3 +39,19 @@ export {
   type DurableRunSubscriptionManager,
   createDurableRunSubscriptionManager,
 } from './durable.js';
+
+// W3 — Durable run registry (persists RunHandle, tenant-isolated, lifecycle events).
+export {
+  createRunRegistry,
+  type RunRegistry,
+  type RunRegistryOptions,
+  type RunListFilter,
+} from './run-registry.js';
+
+// W3 — Run event journal (append-only, resumable via RunEventCursor).
+export {
+  createRunJournal,
+  type RunJournal,
+  type RunJournalOptions,
+} from './run-journal.js';
+
