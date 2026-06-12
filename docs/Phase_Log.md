@@ -701,4 +701,48 @@ packages and is consumed by apps as thin wiring — no app-local reimplementatio
   banned interaction-model terms (`conversation`, `chatHistory`, `chatSession`,
   `messageHistory`, `turnHistory`). Run via `npm run check:vocab-w9`.
 - All 3 examples type-clean and execute (`npx tsx examples/139-...` etc.).
+
+### W9b — Audit-gap closure (user surface fully wired)
+Source-level audit of `main` found four W9 gaps where capabilities existed in
+shared packages but were not wired through geneWeave. All four are now closed,
+additive-only, each with package-consistent unit tests plus one live-server e2e.
+
+- **Gap 1 — user-authored memory** (commit `2c10694`). `registerMeMemoriesRoutes`
+  (`apps/geneweave/src/routes/me-memories.ts`): `GET/POST/PATCH/DELETE
+  /api/me/memories`, reusing the existing `semantic_memory` + `entity_memory`
+  tables (Option A). Corrections supersede the prior row (lineage preserved);
+  superseded originals are hidden from the active list. Migration `m42` adds
+  `semantic_memory.metadata` + `notification_preferences.timezone`. 10 tests
+  (`w9b-me-memories.test.ts`).
+- **Gap 2 — surface catalog** (commit `746bc02`). `createMeCatalogResolver`
+  (`apps/geneweave/src/me-catalog.ts`) wires `@weaveintel/identity`’s
+  `createSurfaceCatalogResolver` over four fail-soft sources (mode-labels,
+  live-agents, models, skills). `GET /api/me/catalog` now resolves via the
+  shared resolver with a fail-closed `accessCheck` (tenant_user does not see the
+  `agent` kind; tenant_admin does). 6 tests (`w9b-catalog.test.ts`).
+- **Gap 3 — notification dispatcher** (commit `063de8a`). `createNotificationsHub`
+  (`apps/geneweave/src/notifications-wiring.ts`) wires `@weaveintel/notifications`:
+  preference-backed `SuppressionPolicy` (master toggle, category allow-list,
+  quiet hours evaluated in the stored timezone, fail-closed), device-backed
+  `TargetStore`, and lifecycle helpers (`notifyRunTerminal` detached-only,
+  `notifyTask` high-priority approve/deny for actionable items, `notifyReminderDue`).
+  New `POST /api/me/notifications/actions` resolves a task decision idempotently
+  (terminal → `alreadyResolved`; cross-principal → 404). Deep links are opaque
+  `geneweave://` URIs. 17 tests (`w9b-notifications.test.ts`).
+- **Gap 4 — admin catalog CRUD** (commit `b56007d`). `registerAdminCatalogRoutes`
+  (`apps/geneweave/src/admin/routes/catalog.ts`): `GET/POST/PUT/DELETE
+  /api/admin/mode-labels` and `/api/admin/starter-prompts`, on the admin router
+  (`admin:tenant:write` RBAC gate). New adapter methods enforce the unique
+  `(surface_id, mode_key)` constraint and the at-most-one-default-per-surface
+  invariant transactionally. Validation: surface allow-list `web|desktop|mobile`,
+  `label ≤ 80`, `mode_key ≤ 40`, `prompt_text ≤ 500`. 9 tests
+  (`w9b-admin-catalog.test.ts`).
+- **Live e2e** (commit `95b32ea`): `scripts/e2e-w9b-user-surface.mjs` — 32
+  assertions against a running server exercising all four gaps through the real
+  SQLite adapter, router, and RBAC gate.
+- Validation: full `npx turbo build` clean (83/83); the four new suites (42 tests)
+  plus the W9 suite (21) all green; `check:vocab-w9`, `check:no-adhoc-resilience`
+  clean. The 47 remaining suite failures and the 8 `check:no-raw-fetch` violations
+  in `packages/client` + `packages/notifications` are pre-existing on `main`
+  (identical at base `13a8e06`), unrelated to W9b.
 - W1-W10 packages pass vocab lint with zero violations.
