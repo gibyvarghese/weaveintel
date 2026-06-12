@@ -534,6 +534,7 @@ export {
   type HumanTaskStatus,
   type HumanTaskType,
   type HumanTaskPriority,
+  type TaskProvenance,
   type HumanTask,
   type ApprovalTask,
   type ReviewTask,
@@ -800,5 +801,33 @@ export {
   type CitationPayload,
   type ArtifactPayload,
   type WidgetType,
+  type WidgetFallback,
   type WidgetPayload,
 } from './ui-events.js';
+
+// Run handle contracts (W1 — platform foundation)
+export {
+  type RunStatus,
+  type RunOrigin,
+  type RunHandle,
+  type RunEventCursor,
+} from './runs.js';
+
+// Notification channel contracts (W1 — platform foundation)
+export {
+  type NotificationCategory,
+  type NotificationMessage,
+  type NotificationDelivery,
+  type ChannelTarget,
+  type NotificationChannel,
+} from './notifications.js';
+
+// Surface catalog contracts (W1 — platform foundation)
+export {
+  type SurfaceCatalogRequest,
+  type CatalogEntry,
+  type SurfaceCatalog,
+  type SurfaceCatalogResolver,
+} from './surface-catalog.js';
+
+

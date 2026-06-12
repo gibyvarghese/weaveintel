@@ -1,6 +1,9 @@
 // @weaveintel/collaboration — Live run subscriptions
-
-export type RunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+//
+// RunStatus has been promoted to @weaveintel/core (W1 platform foundation).
+// Re-exported here for backward compatibility.
+export type { RunStatus } from '@weaveintel/core';
+import type { RunStatus } from '@weaveintel/core';
 
 export interface RunSubscription {
   readonly runId: string;
