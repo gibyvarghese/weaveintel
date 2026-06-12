@@ -17,6 +17,7 @@ import { DashboardService } from './dashboard.js';
 import { getHTML } from './ui-server.js';
 import { getDocsHTML } from './docs-html.js';
 import { authenticateRequest, verifyCSRF } from './auth.js';
+import { createNotificationsHub } from './notifications-wiring.js';
 import { type TriggerDispatcherHandle } from './admin/api/triggers.js';
 import { type LoadedGatewayConfig } from './mcp-gateway.js';
 import { type OAuthProviderName } from '@weaveintel/oauth';
@@ -122,7 +123,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerA2ARoutes(router, db, chatEngine, { baseUrl: publicBaseUrl ?? 'http://localhost:3000' });
   registerMemoryRoutes(router, db);
   registerLiveAgentRoutes(router, db);
-  registerMeRoutes(router, db);
+  registerMeRoutes(router, db, { notifications: createNotificationsHub({ db }) });
   registerMeMemoryRoutes(router, db);
 
   // ── Avatar static files ────────────────────────────────────

@@ -48,12 +48,27 @@ import { readBody } from '../server-core.js';
 import type { DatabaseAdapter } from '../db-types.js';
 import { createMeCatalogResolver } from '../me-catalog.js';
 import type { SurfaceCatalogResolver } from '@weaveintel/core';
+import type { NotificationsHub } from '../notifications-wiring.js';
 
 // Module-level state — these are in-memory stores that persist for the
 // process lifetime.  Production deployments should replace these with
 // durable backends via @weaveintel/persistence.
 const taskRepo = new InMemoryHumanTaskRepository();
 const triggerStore = new InMemoryTriggerStore();
+
+// Tracks live SSE subscribers per run id so terminal-run notifications are
+// only sent when nobody is actively watching the stream ("detached").
+const runSubscribers = new Map<string, number>();
+function addRunSubscriber(runId: string): void {
+  runSubscribers.set(runId, (runSubscribers.get(runId) ?? 0) + 1);
+}
+function removeRunSubscriber(runId: string): void {
+  const n = (runSubscribers.get(runId) ?? 1) - 1;
+  if (n <= 0) runSubscribers.delete(runId); else runSubscribers.set(runId, n);
+}
+function runHasSubscriber(runId: string): boolean {
+  return (runSubscribers.get(runId) ?? 0) > 0;
+}
 
 /**
  * Register all /api/me routes on the provided router.
@@ -64,10 +79,11 @@ const triggerStore = new InMemoryTriggerStore();
 export function registerMeRoutes(
   router: Router,
   db: DatabaseAdapter,
-  opts: { catalogResolver?: SurfaceCatalogResolver } = {},
+  opts: { catalogResolver?: SurfaceCatalogResolver; notifications?: NotificationsHub } = {},
 ): void {
 
   const catalogResolver = opts.catalogResolver ?? createMeCatalogResolver(db);
+  const notifications = opts.notifications;
 
   // ─── Runs ───────────────────────────────────────────────────────────────
 
@@ -165,10 +181,11 @@ export function registerMeRoutes(
     }
 
     // Keepalive comment every 15s; stream stays open until client disconnects
+    addRunSubscriber(run.id);
     const keepalive = setInterval(() => {
       try { res.write(': keepalive\n\n'); } catch { clearInterval(keepalive); }
     }, 15_000);
-    req.socket?.on('close', () => clearInterval(keepalive));
+    req.socket?.on('close', () => { clearInterval(keepalive); removeRunSubscriber(run.id); });
   }, { auth: true });
 
   router.post('/api/me/runs/:runId/events', async (req, res, params, auth) => {
@@ -199,6 +216,12 @@ export function registerMeRoutes(
       res.writeHead(409); res.end(JSON.stringify({ error: 'Run already in terminal state' })); return;
     }
     await db.updateUserRunStatus(params['runId']!, auth.userId, 'cancelled');
+    if (notifications) {
+      const updated = await db.getUserRun(params['runId']!, auth.userId);
+      if (updated) {
+        void notifications.notifyRunTerminal(updated, { attached: runHasSubscriber(updated.id) }).catch(() => {});
+      }
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'cancelled' }));
   }, { auth: true });
@@ -253,6 +276,12 @@ export function registerMeRoutes(
         : { sourceRef: 'api', createdBy: 'principal' as const },
     });
     await taskRepo.save(task);
+    if (notifications) {
+      void notifications.notifyTask(
+        { id: task.id, assignee: task.assignee, title: task.title, ...(auth.tenantId ? { tenantId: auth.tenantId } : {}) },
+        { actionable: body['actionable'] === true },
+      ).catch(() => {});
+    }
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(task));
   }, { auth: true });
@@ -280,6 +309,34 @@ export function registerMeRoutes(
       res.writeHead(404); res.end(JSON.stringify({ error: String(err) }));
     }
   }, { auth: true });
+
+  // ─── Notification actions ─────────────────────────────────────────────────
+
+  router.post('/api/me/notifications/actions', async (req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
+    const taskId = typeof body['taskId'] === 'string' ? body['taskId'] : '';
+    const actionId = typeof body['actionId'] === 'string' ? body['actionId'] : '';
+    if (!taskId || !['approve', 'deny'].includes(actionId)) {
+      res.writeHead(400); res.end(JSON.stringify({ error: 'taskId and actionId (approve|deny) are required' })); return;
+    }
+    const task = await taskRepo.get(taskId);
+    // Hide cross-principal tasks behind a 404 (no existence disclosure).
+    if (!task || task.assignee !== auth.userId) {
+      res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return;
+    }
+    // Idempotent: a task already in a terminal state returns the prior outcome.
+    if (task.status === 'completed' || task.status === 'rejected' || task.status === 'expired') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ alreadyResolved: true, status: task.status }));
+      return;
+    }
+    const resolved = actionId === 'approve'
+      ? await completeActionItem(taskId, { repository: taskRepo })
+      : await cancelActionItem(taskId, { repository: taskRepo });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ resolved: true, status: resolved.status }));
+  }, { auth: true, csrf: true });
 
   // ─── Reminders ──────────────────────────────────────────────────────────
 

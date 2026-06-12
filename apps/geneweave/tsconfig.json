@@ -20,6 +20,7 @@
     { "path": "../../packages/encryption" },
     { "path": "../../packages/guardrails" },
     { "path": "../../packages/human-tasks" },
+    { "path": "../../packages/notifications" },
     { "path": "../../packages/contracts" },
     { "path": "../../packages/prompts" },
     { "path": "../../packages/skills" },

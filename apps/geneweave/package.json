@@ -38,6 +38,7 @@
     "@weaveintel/cost-governor": "*",
     "@weaveintel/encryption": "*",
     "@weaveintel/human-tasks": "*",
+    "@weaveintel/notifications": "*",
     "@weaveintel/contracts": "*",
     "@weaveintel/prompts": "*",
     "@weaveintel/skills": "*",
