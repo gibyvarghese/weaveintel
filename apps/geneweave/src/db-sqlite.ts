@@ -8182,6 +8182,106 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async listStarterPrompts(surfaceId: string): Promise<import('./db-types/adapter-me.js').StarterPrompt[]> {
     return this.d.prepare('SELECT * FROM starter_prompts WHERE surface_id = ? AND enabled = 1 ORDER BY sort_order ASC, rowid ASC').all(surfaceId) as import('./db-types/adapter-me.js').StarterPrompt[];
   }
+
+  // ── catalog administration (include disabled rows) ─────────────────────────
+  async adminListModeLabels(surfaceId?: string): Promise<import('./db-types/adapter-me.js').ModeLabel[]> {
+    if (surfaceId) {
+      return this.d.prepare('SELECT * FROM mode_labels WHERE surface_id = ? ORDER BY surface_id ASC, sort_order ASC, rowid ASC').all(surfaceId) as import('./db-types/adapter-me.js').ModeLabel[];
+    }
+    return this.d.prepare('SELECT * FROM mode_labels ORDER BY surface_id ASC, sort_order ASC, rowid ASC').all() as import('./db-types/adapter-me.js').ModeLabel[];
+  }
+
+  async getModeLabel(id: string): Promise<import('./db-types/adapter-me.js').ModeLabel | null> {
+    return (this.d.prepare('SELECT * FROM mode_labels WHERE id = ?').get(id) as import('./db-types/adapter-me.js').ModeLabel | undefined) ?? null;
+  }
+
+  async createModeLabel(row: Pick<import('./db-types/adapter-me.js').ModeLabel, 'id' | 'surface_id' | 'mode_key' | 'label'> & {
+    description?: string | null; icon?: string | null; is_default?: number; sort_order?: number; enabled?: number; metadata?: string | null;
+  }): Promise<void> {
+    const isDefault = row.is_default === 1 ? 1 : 0;
+    const tx = this.d.transaction(() => {
+      if (isDefault === 1) {
+        this.d.prepare('UPDATE mode_labels SET is_default = 0 WHERE surface_id = ?').run(row.surface_id);
+      }
+      this.d.prepare(`INSERT INTO mode_labels (id, surface_id, mode_key, label, description, icon, is_default, sort_order, enabled, metadata)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        row.id, row.surface_id, row.mode_key, row.label,
+        row.description ?? null, row.icon ?? null, isDefault,
+        row.sort_order ?? 0, row.enabled === 0 ? 0 : 1, row.metadata ?? null,
+      );
+    });
+    tx();
+  }
+
+  async updateModeLabel(id: string, patch: Partial<Pick<import('./db-types/adapter-me.js').ModeLabel,
+    'label' | 'mode_key' | 'description' | 'icon' | 'is_default' | 'sort_order' | 'enabled' | 'metadata'>>): Promise<void> {
+    const tx = this.d.transaction(() => {
+      const existing = this.d.prepare('SELECT surface_id FROM mode_labels WHERE id = ?').get(id) as { surface_id: string } | undefined;
+      if (!existing) return;
+      if (patch.is_default === 1) {
+        this.d.prepare('UPDATE mode_labels SET is_default = 0 WHERE surface_id = ?').run(existing.surface_id);
+      }
+      const fields: string[] = [];
+      const values: unknown[] = [];
+      const set = (col: string, val: unknown) => { fields.push(`${col} = ?`); values.push(val); };
+      if (patch.label !== undefined) set('label', patch.label);
+      if (patch.mode_key !== undefined) set('mode_key', patch.mode_key);
+      if (patch.description !== undefined) set('description', patch.description);
+      if (patch.icon !== undefined) set('icon', patch.icon);
+      if (patch.is_default !== undefined) set('is_default', patch.is_default === 1 ? 1 : 0);
+      if (patch.sort_order !== undefined) set('sort_order', patch.sort_order);
+      if (patch.enabled !== undefined) set('enabled', patch.enabled === 0 ? 0 : 1);
+      if (patch.metadata !== undefined) set('metadata', patch.metadata);
+      if (fields.length === 0) return;
+      values.push(id);
+      this.d.prepare(`UPDATE mode_labels SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    });
+    tx();
+  }
+
+  async deleteModeLabel(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM mode_labels WHERE id = ?').run(id);
+  }
+
+  async adminListStarterPrompts(surfaceId?: string): Promise<import('./db-types/adapter-me.js').StarterPrompt[]> {
+    if (surfaceId) {
+      return this.d.prepare('SELECT * FROM starter_prompts WHERE surface_id = ? ORDER BY surface_id ASC, sort_order ASC, rowid ASC').all(surfaceId) as import('./db-types/adapter-me.js').StarterPrompt[];
+    }
+    return this.d.prepare('SELECT * FROM starter_prompts ORDER BY surface_id ASC, sort_order ASC, rowid ASC').all() as import('./db-types/adapter-me.js').StarterPrompt[];
+  }
+
+  async getStarterPrompt(id: string): Promise<import('./db-types/adapter-me.js').StarterPrompt | null> {
+    return (this.d.prepare('SELECT * FROM starter_prompts WHERE id = ?').get(id) as import('./db-types/adapter-me.js').StarterPrompt | undefined) ?? null;
+  }
+
+  async createStarterPrompt(row: Pick<import('./db-types/adapter-me.js').StarterPrompt, 'id' | 'surface_id' | 'label' | 'prompt_text'> & {
+    sort_order?: number; enabled?: number; metadata?: string | null;
+  }): Promise<void> {
+    this.d.prepare(`INSERT INTO starter_prompts (id, surface_id, label, prompt_text, sort_order, enabled, metadata)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+      row.id, row.surface_id, row.label, row.prompt_text,
+      row.sort_order ?? 0, row.enabled === 0 ? 0 : 1, row.metadata ?? null,
+    );
+  }
+
+  async updateStarterPrompt(id: string, patch: Partial<Pick<import('./db-types/adapter-me.js').StarterPrompt,
+    'label' | 'prompt_text' | 'sort_order' | 'enabled' | 'metadata'>>): Promise<void> {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    const set = (col: string, val: unknown) => { fields.push(`${col} = ?`); values.push(val); };
+    if (patch.label !== undefined) set('label', patch.label);
+    if (patch.prompt_text !== undefined) set('prompt_text', patch.prompt_text);
+    if (patch.sort_order !== undefined) set('sort_order', patch.sort_order);
+    if (patch.enabled !== undefined) set('enabled', patch.enabled === 0 ? 0 : 1);
+    if (patch.metadata !== undefined) set('metadata', patch.metadata);
+    if (fields.length === 0) return;
+    values.push(id);
+    this.d.prepare(`UPDATE starter_prompts SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  }
+
+  async deleteStarterPrompt(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM starter_prompts WHERE id = ?').run(id);
+  }
 }
 
 // ─── Factory ─────────────────────────────────────────────────

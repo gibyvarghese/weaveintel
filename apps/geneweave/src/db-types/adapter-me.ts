@@ -99,4 +99,23 @@ export interface IMeStore {
   // Catalog support
   listModeLabels(surfaceId: string): Promise<ModeLabel[]>;
   listStarterPrompts(surfaceId: string): Promise<StarterPrompt[]>;
+
+  // Catalog administration (operator CRUD; include disabled rows)
+  adminListModeLabels(surfaceId?: string): Promise<ModeLabel[]>;
+  getModeLabel(id: string): Promise<ModeLabel | null>;
+  createModeLabel(row: Pick<ModeLabel, 'id' | 'surface_id' | 'mode_key' | 'label'> & {
+    description?: string | null; icon?: string | null; is_default?: number; sort_order?: number; enabled?: number; metadata?: string | null;
+  }): Promise<void>;
+  updateModeLabel(id: string, patch: Partial<Pick<ModeLabel,
+    'label' | 'mode_key' | 'description' | 'icon' | 'is_default' | 'sort_order' | 'enabled' | 'metadata'>>): Promise<void>;
+  deleteModeLabel(id: string): Promise<void>;
+
+  adminListStarterPrompts(surfaceId?: string): Promise<StarterPrompt[]>;
+  getStarterPrompt(id: string): Promise<StarterPrompt | null>;
+  createStarterPrompt(row: Pick<StarterPrompt, 'id' | 'surface_id' | 'label' | 'prompt_text'> & {
+    sort_order?: number; enabled?: number; metadata?: string | null;
+  }): Promise<void>;
+  updateStarterPrompt(id: string, patch: Partial<Pick<StarterPrompt,
+    'label' | 'prompt_text' | 'sort_order' | 'enabled' | 'metadata'>>): Promise<void>;
+  deleteStarterPrompt(id: string): Promise<void>;
 }
