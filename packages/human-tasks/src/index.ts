@@ -39,3 +39,13 @@ export { DecisionLog, createDecision, type DecisionRecord } from './decision.js'
 
 // Policy
 export { PolicyEvaluator, createPolicy, type PolicyCheckContext, type PolicyCheckResult } from './policy.js';
+
+// Action items (W5)
+export {
+  createActionItem,
+  completeActionItem,
+  cancelActionItem,
+  type CreateActionItemInput,
+  type ActionItemLifecycleOptions,
+} from './action-items.js';
+

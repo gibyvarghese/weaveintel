@@ -12,6 +12,8 @@ export interface HumanTaskRepository {
   list(filter?: HumanTaskFilter): Promise<HumanTask[]>;
   delete(taskId: string): Promise<void>;
   claimNextPending(assignee: string): Promise<HumanTask | null>;
+  /** Convenience: list all tasks for a given assignee principal. */
+  listByAssignee(principalId: string, filter?: HumanTaskFilter): Promise<HumanTask[]>;
 }
 
 export class InMemoryHumanTaskRepository implements HumanTaskRepository {
@@ -63,6 +65,9 @@ export class InMemoryHumanTaskRepository implements HumanTaskRepository {
     };
     this.tasks.set(claimed.id, structuredClone(claimed));
     return claimed;
+  }
+  async listByAssignee(principalId: string, filter?: HumanTaskFilter): Promise<HumanTask[]> {
+    return this.list({ ...filter, assignee: principalId });
   }
 }
 
@@ -154,5 +159,9 @@ export class JsonFileHumanTaskRepository implements HumanTaskRepository {
     const tmp = `${this.filePath}.tmp`;
     await writeFile(tmp, JSON.stringify(tasks, null, 2), 'utf8');
     await rename(tmp, this.filePath);
+  }
+
+  async listByAssignee(principalId: string, filter?: HumanTaskFilter): Promise<HumanTask[]> {
+    return this.list({ ...filter, assignee: principalId });
   }
 }

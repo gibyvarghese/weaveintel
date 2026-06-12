@@ -76,5 +76,11 @@ export function createDurableHumanTaskRepository(
       await kv.set(`${ns}:${claimed.id}`, JSON.stringify(claimed));
       return claimed;
     },
+    async listByAssignee(principalId, filter) {
+      // Delegate to list with assignee filter merged
+      const merged: HumanTaskFilter = { ...(filter ?? {}), assignee: principalId };
+      const rows = await this.list(merged);
+      return rows;
+    },
   };
 }
