@@ -35,6 +35,94 @@ interface AuthRouteOptions {
   consumeOAuthState: (state: string) => Promise<{ userId: string | null; provider: OAuthProviderName; expiresAt: number } | null>;
 }
 
+/** A freshly minted JWT + DB session for an authenticated principal. */
+interface MintedSession {
+  token: string;
+  csrfToken: string;
+  expiresAt: string;
+  user: { id: string; email: string; name: string; persona: string; tenantId: string | null };
+  permissions: string[];
+}
+
+/**
+ * Shared credential-verification + session-mint path for the login (cookie) and
+ * token (bearer) routes. Performs the identical security pipeline — login backoff,
+ * rate limiting, password verification, lazy rehash, tenant-admin guarantee — then
+ * creates a DB session and signs a JWT. On any failure it writes the appropriate
+ * error response (400 / 401 / 429) and returns null; the caller only decides how to
+ * deliver the resulting token (HttpOnly cookie vs response body).
+ */
+async function authenticateAndMintSession(
+  req: IncomingMessage,
+  res: ServerResponse,
+  db: DatabaseAdapter,
+  jwtSecret: string,
+): Promise<MintedSession | null> {
+  const raw = await readBody(req);
+  let body: { email?: string; password?: string };
+  try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return null; }
+
+  const { email, password } = body;
+  if (!email || !password) { json(res, 400, { error: 'email and password required' }); return null; }
+
+  const clientIp = readClientIp(req);
+  const lockedMs = getLoginBackoffMs(clientIp, email);
+  if (lockedMs > 0) {
+    const retryAfterSec = Math.ceil(lockedMs / 1_000);
+    res.setHeader('Retry-After', String(retryAfterSec));
+    json(res, 429, { error: 'Too many login attempts. Please retry later.' });
+    return null;
+  }
+
+  const loginRate = checkAuthRateLimits('login', req, email);
+  if (loginRate.limited) {
+    const retryAfterSec = Math.ceil(loginRate.retryAfterMs / 1_000);
+    res.setHeader('Retry-After', String(retryAfterSec));
+    json(res, 429, { error: 'Too many login attempts. Please retry later.', correlationId: newUUIDv7() });
+    return null;
+  }
+
+  const user = await db.getUserByEmail(email);
+  const verification = user
+    ? await verifyPasswordDetailed(password, user.password_hash)
+    : { ok: false, needsRehash: false };
+  if (!user || !verification.ok) {
+    recordLoginFailure(clientIp, email);
+    json(res, 401, { error: 'Invalid credentials', correlationId: newUUIDv7() });
+    return null;
+  }
+
+  clearLoginFailures(clientIp, email);
+
+  if (verification.needsRehash) {
+    const upgradedHash = await hashPassword(password);
+    await db.updateUser(user.id, { passwordHash: upgradedHash });
+  }
+
+  await ensureAtLeastOneTenantAdmin(db, user.id);
+  const effectiveUser = (await db.getUserById(user.id)) ?? user;
+
+  const sessionId = newUUIDv7();
+  const csrfToken = generateCSRFToken();
+  const expiresAt = new Date(Date.now() + 86400_000).toISOString();
+  await db.createSession({ id: sessionId, userId: effectiveUser.id, csrfToken, expiresAt });
+
+  const token = signJWT({ userId: effectiveUser.id, email: effectiveUser.email, sessionId }, jwtSecret);
+  return {
+    token,
+    csrfToken,
+    expiresAt,
+    user: {
+      id: effectiveUser.id,
+      email: effectiveUser.email,
+      name: effectiveUser.name,
+      persona: effectiveUser.persona,
+      tenantId: effectiveUser.tenant_id,
+    },
+    permissions: personaPermissions(effectiveUser.persona),
+  };
+}
+
 export function registerAuthRoutes(
   router: Router,
   db: DatabaseAdapter,
@@ -99,61 +187,14 @@ export function registerAuthRoutes(
   }, { csrf: false });
 
   router.post('/api/auth/login', async (req, res) => {
-    const raw = await readBody(req);
-    let body: { email?: string; password?: string };
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const minted = await authenticateAndMintSession(req, res, db, jwtSecret);
+    if (!minted) return; // error response already written
 
-    const { email, password } = body;
-    if (!email || !password) { json(res, 400, { error: 'email and password required' }); return; }
-
-    const clientIp = readClientIp(req);
-    const lockedMs = getLoginBackoffMs(clientIp, email);
-    if (lockedMs > 0) {
-      const retryAfterSec = Math.ceil(lockedMs / 1_000);
-      res.setHeader('Retry-After', String(retryAfterSec));
-      json(res, 429, { error: 'Too many login attempts. Please retry later.' });
-      return;
-    }
-
-    const loginRate = checkAuthRateLimits('login', req, email);
-    if (loginRate.limited) {
-      const retryAfterSec = Math.ceil(loginRate.retryAfterMs / 1_000);
-      res.setHeader('Retry-After', String(retryAfterSec));
-      json(res, 429, { error: 'Too many login attempts. Please retry later.', correlationId: newUUIDv7() });
-      return;
-    }
-
-    const user = await db.getUserByEmail(email);
-    const verification = user
-      ? await verifyPasswordDetailed(password, user.password_hash)
-      : { ok: false, needsRehash: false };
-    if (!user || !verification.ok) {
-      recordLoginFailure(clientIp, email);
-      json(res, 401, { error: 'Invalid credentials', correlationId: newUUIDv7() });
-      return;
-    }
-
-    clearLoginFailures(clientIp, email);
-
-    if (verification.needsRehash) {
-      const upgradedHash = await hashPassword(password);
-      await db.updateUser(user.id, { passwordHash: upgradedHash });
-    }
-
-    await ensureAtLeastOneTenantAdmin(db, user.id);
-    const effectiveUser = (await db.getUserById(user.id)) ?? user;
-
-    const sessionId = newUUIDv7();
-    const csrfToken = generateCSRFToken();
-    const expiresAt = new Date(Date.now() + 86400_000).toISOString();
-    await db.createSession({ id: sessionId, userId: effectiveUser.id, csrfToken, expiresAt });
-
-    const token = signJWT({ userId: effectiveUser.id, email: effectiveUser.email, sessionId }, jwtSecret);
-    setAuthCookie(res, token);
+    setAuthCookie(res, minted.token);
     json(res, 200, {
-      user: { id: effectiveUser.id, email: effectiveUser.email, name: effectiveUser.name, persona: effectiveUser.persona, tenantId: effectiveUser.tenant_id },
-      csrfToken,
-      permissions: personaPermissions(effectiveUser.persona),
+      user: minted.user,
+      csrfToken: minted.csrfToken,
+      permissions: minted.permissions,
     });
   }, { csrf: false });
 
@@ -166,63 +207,15 @@ export function registerAuthRoutes(
   // token is honoured by authenticateRequest(). CSRF is still enforced on mutating
   // routes, so the returned csrfToken must be sent as `X-CSRF-Token`.
   router.post('/api/auth/token', async (req, res) => {
-    const raw = await readBody(req);
-    let body: { email?: string; password?: string };
-    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const minted = await authenticateAndMintSession(req, res, db, jwtSecret);
+    if (!minted) return; // error response already written
 
-    const { email, password } = body;
-    if (!email || !password) { json(res, 400, { error: 'email and password required' }); return; }
-
-    const clientIp = readClientIp(req);
-    const lockedMs = getLoginBackoffMs(clientIp, email);
-    if (lockedMs > 0) {
-      const retryAfterSec = Math.ceil(lockedMs / 1_000);
-      res.setHeader('Retry-After', String(retryAfterSec));
-      json(res, 429, { error: 'Too many login attempts. Please retry later.' });
-      return;
-    }
-
-    const tokenRate = checkAuthRateLimits('login', req, email);
-    if (tokenRate.limited) {
-      const retryAfterSec = Math.ceil(tokenRate.retryAfterMs / 1_000);
-      res.setHeader('Retry-After', String(retryAfterSec));
-      json(res, 429, { error: 'Too many login attempts. Please retry later.', correlationId: newUUIDv7() });
-      return;
-    }
-
-    const user = await db.getUserByEmail(email);
-    const verification = user
-      ? await verifyPasswordDetailed(password, user.password_hash)
-      : { ok: false, needsRehash: false };
-    if (!user || !verification.ok) {
-      recordLoginFailure(clientIp, email);
-      json(res, 401, { error: 'Invalid credentials', correlationId: newUUIDv7() });
-      return;
-    }
-
-    clearLoginFailures(clientIp, email);
-
-    if (verification.needsRehash) {
-      const upgradedHash = await hashPassword(password);
-      await db.updateUser(user.id, { passwordHash: upgradedHash });
-    }
-
-    await ensureAtLeastOneTenantAdmin(db, user.id);
-    const effectiveUser = (await db.getUserById(user.id)) ?? user;
-
-    const sessionId = newUUIDv7();
-    const csrfToken = generateCSRFToken();
-    const expiresAtMs = Date.now() + 86400_000;
-    const expiresAt = new Date(expiresAtMs).toISOString();
-    await db.createSession({ id: sessionId, userId: effectiveUser.id, csrfToken, expiresAt });
-
-    const token = signJWT({ userId: effectiveUser.id, email: effectiveUser.email, sessionId }, jwtSecret);
     json(res, 200, {
-      token,
-      csrfToken,
-      expiresAt,
-      user: { id: effectiveUser.id, email: effectiveUser.email, name: effectiveUser.name, persona: effectiveUser.persona, tenantId: effectiveUser.tenant_id },
-      permissions: personaPermissions(effectiveUser.persona),
+      token: minted.token,
+      csrfToken: minted.csrfToken,
+      expiresAt: minted.expiresAt,
+      user: minted.user,
+      permissions: minted.permissions,
     });
   }, { csrf: false });
 
