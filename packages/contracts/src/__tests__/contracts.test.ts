@@ -174,7 +174,7 @@ describe('DefaultCompletionValidator', () => {
     expect(report.results[1]!.passed).toBe(false);
   });
 
-  it('handles custom / model-graded / human-review as auto-pass', async () => {
+  it('auto-passes custom but fails closed on model-graded / human-review without registered evaluators', async () => {
     const contract = createContract({
       name: 'Custom',
       acceptanceCriteria: [
@@ -185,8 +185,13 @@ describe('DefaultCompletionValidator', () => {
     });
     const validator = new DefaultCompletionValidator();
     const report = await validator.validate({}, contract);
-    expect(report.status).toBe('fulfilled');
-    expect(report.confidence).toBe(1);
+    // custom auto-passes; model-graded & human-review fail closed (safety) until an
+    // evaluator is registered. They are optional, so the overall status is 'partial'.
+    expect(report.status).toBe('partial');
+    expect(report.results[0]!.passed).toBe(true);
+    expect(report.results[1]!.passed).toBe(false);
+    expect(report.results[2]!.passed).toBe(false);
+    expect(report.confidence).toBeCloseTo(1 / 3, 5);
   });
 
   it('registerChecker overrides built-in', async () => {

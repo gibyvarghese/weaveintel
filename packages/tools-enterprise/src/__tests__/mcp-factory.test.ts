@@ -33,25 +33,25 @@ describe('createEnterpriseTools', () => {
     const tools = createEnterpriseTools(configs);
     // 3 base (query, get, create) + 25 extended = 28
     expect(tools.length).toBe(28);
-    // All should have the correct prefix
+    // All should have the correct prefix (dots normalized to underscores for MCP-safe names)
     for (const t of tools) {
-      expect(t.schema.name).toMatch(/^enterprise\.jira-prod\./);
+      expect(t.schema.name).toMatch(/^enterprise_jira-prod_/);
     }
     // Check some specific tool names
     const names = tools.map(t => t.schema.name);
-    expect(names).toContain('enterprise.jira-prod.query');
-    expect(names).toContain('enterprise.jira-prod.get');
-    expect(names).toContain('enterprise.jira-prod.create');
-    expect(names).toContain('enterprise.jira-prod.update');
-    expect(names).toContain('enterprise.jira-prod.delete');
-    expect(names).toContain('enterprise.jira-prod.transitions');
-    expect(names).toContain('enterprise.jira-prod.comments');
-    expect(names).toContain('enterprise.jira-prod.projects');
-    expect(names).toContain('enterprise.jira-prod.boards');
-    expect(names).toContain('enterprise.jira-prod.sprints');
-    expect(names).toContain('enterprise.jira-prod.myself');
-    expect(names).toContain('enterprise.jira-prod.fields');
-    expect(names).toContain('enterprise.jira-prod.labels');
+    expect(names).toContain('enterprise_jira-prod_query');
+    expect(names).toContain('enterprise_jira-prod_get');
+    expect(names).toContain('enterprise_jira-prod_create');
+    expect(names).toContain('enterprise_jira-prod_update');
+    expect(names).toContain('enterprise_jira-prod_delete');
+    expect(names).toContain('enterprise_jira-prod_transitions');
+    expect(names).toContain('enterprise_jira-prod_comments');
+    expect(names).toContain('enterprise_jira-prod_projects');
+    expect(names).toContain('enterprise_jira-prod_boards');
+    expect(names).toContain('enterprise_jira-prod_sprints');
+    expect(names).toContain('enterprise_jira-prod_myself');
+    expect(names).toContain('enterprise_jira-prod_fields');
+    expect(names).toContain('enterprise_jira-prod_labels');
   });
 
   it('generates ServiceNow tools (17)', () => {
@@ -61,20 +61,21 @@ describe('createEnterpriseTools', () => {
       authConfig: { username: 'a', password: 'b' },
     }];
     const tools = createEnterpriseTools(configs);
-    expect(tools.length).toBe(17);
+    // 17 base/inline tools + ~266 extended (Phases 0-13) = 283
+    expect(tools.length).toBe(283);
     const names = tools.map(t => t.schema.name);
-    expect(names).toContain('enterprise.snow-prod.query');
-    expect(names).toContain('enterprise.snow-prod.get');
-    expect(names).toContain('enterprise.snow-prod.create');
-    expect(names).toContain('enterprise.snow-prod.update');
-    expect(names).toContain('enterprise.snow-prod.patch');
-    expect(names).toContain('enterprise.snow-prod.delete');
-    expect(names).toContain('enterprise.snow-prod.incidents');
-    expect(names).toContain('enterprise.snow-prod.createIncident');
-    expect(names).toContain('enterprise.snow-prod.changeRequests');
-    expect(names).toContain('enterprise.snow-prod.knowledge');
-    expect(names).toContain('enterprise.snow-prod.catalog');
-    expect(names).toContain('enterprise.snow-prod.aggregate');
+    expect(names).toContain('enterprise_snow-prod_query');
+    expect(names).toContain('enterprise_snow-prod_get');
+    expect(names).toContain('enterprise_snow-prod_create');
+    expect(names).toContain('enterprise_snow-prod_update');
+    expect(names).toContain('enterprise_snow-prod_patch');
+    expect(names).toContain('enterprise_snow-prod_delete');
+    expect(names).toContain('enterprise_snow-prod_incidents');
+    expect(names).toContain('enterprise_snow-prod_createIncident');
+    expect(names).toContain('enterprise_snow-prod_changeRequests');
+    expect(names).toContain('enterprise_snow-prod_knowledge');
+    expect(names).toContain('enterprise_snow-prod_catalog');
+    expect(names).toContain('enterprise_snow-prod_aggregate');
   });
 
   it('generates Canva tools (21)', () => {
@@ -86,27 +87,27 @@ describe('createEnterpriseTools', () => {
     const tools = createEnterpriseTools(configs);
     expect(tools.length).toBe(21);
     const names = tools.map(t => t.schema.name);
-    expect(names).toContain('enterprise.canva-team.query');
-    expect(names).toContain('enterprise.canva-team.get');
-    expect(names).toContain('enterprise.canva-team.create');
-    expect(names).toContain('enterprise.canva-team.designs');
-    expect(names).toContain('enterprise.canva-team.export');
-    expect(names).toContain('enterprise.canva-team.getExport');
-    expect(names).toContain('enterprise.canva-team.assets');
-    expect(names).toContain('enterprise.canva-team.getAsset');
-    expect(names).toContain('enterprise.canva-team.uploadAsset');
-    expect(names).toContain('enterprise.canva-team.deleteAsset');
-    expect(names).toContain('enterprise.canva-team.folders');
-    expect(names).toContain('enterprise.canva-team.getFolder');
-    expect(names).toContain('enterprise.canva-team.createFolder');
-    expect(names).toContain('enterprise.canva-team.updateFolder');
-    expect(names).toContain('enterprise.canva-team.deleteFolder');
-    expect(names).toContain('enterprise.canva-team.comments');
-    expect(names).toContain('enterprise.canva-team.addComment');
-    expect(names).toContain('enterprise.canva-team.replyComment');
-    expect(names).toContain('enterprise.canva-team.brandTemplates');
-    expect(names).toContain('enterprise.canva-team.getBrandTemplate');
-    expect(names).toContain('enterprise.canva-team.user');
+    expect(names).toContain('enterprise_canva-team_query');
+    expect(names).toContain('enterprise_canva-team_get');
+    expect(names).toContain('enterprise_canva-team_create');
+    expect(names).toContain('enterprise_canva-team_designs');
+    expect(names).toContain('enterprise_canva-team_export');
+    expect(names).toContain('enterprise_canva-team_getExport');
+    expect(names).toContain('enterprise_canva-team_assets');
+    expect(names).toContain('enterprise_canva-team_getAsset');
+    expect(names).toContain('enterprise_canva-team_uploadAsset');
+    expect(names).toContain('enterprise_canva-team_deleteAsset');
+    expect(names).toContain('enterprise_canva-team_folders');
+    expect(names).toContain('enterprise_canva-team_getFolder');
+    expect(names).toContain('enterprise_canva-team_createFolder');
+    expect(names).toContain('enterprise_canva-team_updateFolder');
+    expect(names).toContain('enterprise_canva-team_deleteFolder');
+    expect(names).toContain('enterprise_canva-team_comments');
+    expect(names).toContain('enterprise_canva-team_addComment');
+    expect(names).toContain('enterprise_canva-team_replyComment');
+    expect(names).toContain('enterprise_canva-team_brandTemplates');
+    expect(names).toContain('enterprise_canva-team_getBrandTemplate');
+    expect(names).toContain('enterprise_canva-team_user');
   });
 
   it('generates combined tools from multiple configs', () => {
@@ -116,8 +117,8 @@ describe('createEnterpriseTools', () => {
       { name: 'canva-1', type: 'canva', enabled: true, baseUrl: 'https://api.canva.com/rest/v1', authType: 'bearer', authConfig: {} },
     ];
     const tools = createEnterpriseTools(configs);
-    // 28 + 17 + 21 = 66
-    expect(tools.length).toBe(66);
+    // 28 (jira) + 283 (servicenow) + 21 (canva) = 332
+    expect(tools.length).toBe(332);
   });
 
   it('generates legacy tools for confluence', () => {
@@ -130,9 +131,9 @@ describe('createEnterpriseTools', () => {
     // Legacy: 3 tools (query, get, create)
     expect(tools.length).toBe(3);
     const names = tools.map(t => t.schema.name);
-    expect(names).toContain('enterprise.conf-1.query');
-    expect(names).toContain('enterprise.conf-1.get');
-    expect(names).toContain('enterprise.conf-1.create');
+    expect(names).toContain('enterprise_conf-1_query');
+    expect(names).toContain('enterprise_conf-1_get');
+    expect(names).toContain('enterprise_conf-1_create');
   });
 
   it('all tools have schema with name, description, and parameters', () => {

@@ -194,10 +194,29 @@ describe('W4 — Escalation policies from DB evaluated in chat pipeline', () => 
   });
 
   it('escalation_policy rows are excluded from pipeline evaluation', async () => {
-    await seedEscalation(1, 'block');
-    // No guardrails except the policy — pipeline should produce no results
+    // The schema seeds baseline security guardrails (PII/SSRF/secret regex) at
+    // init, so capture them first to prove the escalation policy is NOT added to
+    // the evaluated set.
+    const baselineIds = new Set((await db.listGuardrails()).map((g) => g.id));
+
+    const escId = newUUIDv7();
+    await db.createGuardrail({
+      id: escId,
+      name: 'Escalation: excluded from pipeline',
+      description: null,
+      type: 'escalation_policy',
+      stage: 'pre',
+      config: JSON.stringify({ min_warn_count: 1, categories: ['cognitive'], on_escalate: 'block' }),
+      priority: 50,
+      enabled: 1,
+    });
+
     const result = await evaluateGuardrails(db, 'chat-x', null, 'safe input', 'pre-execution');
-    expect(result.results).toHaveLength(0);
+    // The escalation policy must NOT appear among the evaluated guardrail results.
+    expect(result.results.map((r) => r.guardrailId)).not.toContain(escId);
+    // Only baseline (non-escalation) guardrails were evaluated.
+    expect(result.results.every((r) => baselineIds.has(r.guardrailId ?? ''))).toBe(true);
+    // Safe input passes every baseline regex guardrail.
     expect(result.decision).toBe('allow');
   });
 });

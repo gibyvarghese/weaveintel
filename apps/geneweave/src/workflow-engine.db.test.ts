@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SQLiteAdapter } from './db-sqlite.js';
 import {
   createGeneweaveWorkflowEngine,
@@ -26,6 +26,18 @@ const stubExecute = {
 };
 
 describe('geneweave workflow-engine integration', () => {
+  // The `script:` resolver is gated behind an explicit operator opt-in
+  // (arbitrary in-process code execution). This suite exercises a
+  // tool→script→noop pipeline, so enable the opt-in for the file.
+  const prevScriptFlag = process.env['GENEWEAVE_ENABLE_SCRIPT_RESOLVER'];
+  beforeAll(() => {
+    process.env['GENEWEAVE_ENABLE_SCRIPT_RESOLVER'] = '1';
+  });
+  afterAll(() => {
+    if (prevScriptFlag === undefined) delete process.env['GENEWEAVE_ENABLE_SCRIPT_RESOLVER'];
+    else process.env['GENEWEAVE_ENABLE_SCRIPT_RESOLVER'] = prevScriptFlag;
+  });
+
   it('syncs handler kinds into workflow_handler_kinds and runs a tool→script→noop pipeline E2E', async () => {
     const db = new SQLiteAdapter(makeTempDbPath());
     await db.initialize();

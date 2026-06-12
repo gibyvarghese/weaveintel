@@ -9,6 +9,8 @@
  * VOCABULARY: platform-layer only — no "chat", "conversation", "message" (HTTP sense
  * of the word) to avoid conflating with framework networking.
  */
+// no-raw-fetch: allow (reason: every `fetch` here is the hardened closure destructured
+// from createHardenedFetch — a local symbol, not the global fetch)
 
 import { createHardenedFetch, newUUIDv7, type ExecutionContext, type CapabilityId } from '@weaveintel/core';
 import type { NotificationChannel, NotificationMessage, ChannelTarget, NotificationDelivery } from '@weaveintel/core';

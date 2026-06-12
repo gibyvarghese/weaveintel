@@ -254,16 +254,20 @@ export async function hardenedFetch(
     ? await followRedirectsSafely(resp0, init, signal, policy)
     : resp0;
 
-  if (maxBytes > 0) {
-    const cl = resp.headers.get('content-length');
-    if (cl) {
-      const n = Number(cl);
-      if (Number.isFinite(n) && n > maxBytes) {
-        try { await resp.body?.cancel(); } catch { /* ignore */ }
-        throw new Error(
-          `${errorTag}: response Content-Length ${n} exceeds limit ${maxBytes}`,
-        );
-      }
+  // When no size cap is requested (maxBytes <= 0 — the streaming / escape-hatch
+  // path), return the response untouched. Re-wrapping exists only to install the
+  // size-cap stream; doing it here would needlessly disturb/lock the body and
+  // drop the original Response's methods.
+  if (maxBytes <= 0) return resp;
+
+  const cl = resp.headers.get('content-length');
+  if (cl) {
+    const n = Number(cl);
+    if (Number.isFinite(n) && n > maxBytes) {
+      try { await resp.body?.cancel(); } catch { /* ignore */ }
+      throw new Error(
+        `${errorTag}: response Content-Length ${n} exceeds limit ${maxBytes}`,
+      );
     }
   }
 

@@ -221,15 +221,14 @@ describe('AuthManager — buildAuthorizationUrl', () => {
 
 describe('AuthManager — exchangeCode', () => {
   it('exchanges auth code for tokens', async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({
         access_token: 'at-123',
         refresh_token: 'rt-456',
         expires_in: 3600,
         token_type: 'Bearer',
-      }),
-    });
+      }), { status: 200 }),
+    );
 
     const mgr = new AuthManager([oauthProfile()]);
     const state = await mgr.exchangeCode('test-oauth', 'auth-code-xyz');
@@ -253,14 +252,13 @@ describe('AuthManager — exchangeCode', () => {
 
 describe('AuthManager — acquireClientCredentials', () => {
   it('acquires token with client credentials', async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({
         access_token: 'cc-token-789',
         expires_in: 7200,
         token_type: 'Bearer',
-      }),
-    });
+      }), { status: 200 }),
+    );
 
     const mgr = new AuthManager([clientCredentialsProfile()]);
     const state = await mgr.acquireClientCredentials('test-cc');
@@ -279,14 +277,13 @@ describe('AuthManager — acquireClientCredentials', () => {
 
 describe('AuthManager — refreshToken', () => {
   it('refreshes expired tokens', async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({
         access_token: 'new-at-999',
         expires_in: 3600,
         token_type: 'Bearer',
-      }),
-    });
+      }), { status: 200 }),
+    );
 
     const mgr = new AuthManager([oauthProfile({
       tokenState: {
@@ -304,13 +301,12 @@ describe('AuthManager — refreshToken', () => {
 
   it('fires onTokenRefreshed event', async () => {
     const onRefreshed = vi.fn();
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({
         access_token: 'refreshed-at',
         expires_in: 3600,
-      }),
-    });
+      }), { status: 200 }),
+    );
 
     const mgr = new AuthManager(
       [oauthProfile({ tokenState: { accessToken: 'old', refreshToken: 'rt' } })],
@@ -353,13 +349,12 @@ describe('AuthManager — setTokenState', () => {
 describe('AuthManager — auto-refresh on getHeaders', () => {
   it('refreshes expired OAuth token automatically', async () => {
     // First call: refresh token exchange
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({
         access_token: 'auto-refreshed',
         expires_in: 3600,
-      }),
-    });
+      }), { status: 200 }),
+    );
 
     const mgr = new AuthManager([oauthProfile({
       tokenState: {
@@ -374,13 +369,12 @@ describe('AuthManager — auto-refresh on getHeaders', () => {
   });
 
   it('auto-acquires for client_credentials when no token', async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({
         access_token: 'cc-auto',
         expires_in: 3600,
-      }),
-    });
+      }), { status: 200 }),
+    );
 
     const mgr = new AuthManager([clientCredentialsProfile()]);
     const headers = await mgr.getHeaders('test-cc');
@@ -399,11 +393,9 @@ describe('AuthManager — auto-refresh on getHeaders', () => {
   });
 
   it('fails closed when refresh fails and emits onTokenError', async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: false,
-      status: 401,
-      text: async () => 'invalid_grant',
-    });
+    fetchSpy.mockResolvedValueOnce(
+      new Response('invalid_grant', { status: 401 }),
+    );
 
     const onTokenError = vi.fn();
     const mgr = new AuthManager([oauthProfile({

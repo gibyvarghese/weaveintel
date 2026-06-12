@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 
 const BASE_URL = process.env['API_URL'] ?? 'http://localhost:3500';
+// These are live integration tests: they require a running geneweave server at
+// BASE_URL *and* a working OpenAI model (the sycophancy/grounding guardrails only
+// fire on a real model response). Gated behind an env flag and skipped by default
+// so the unit suite stays deterministic. Run with RUN_GROUNDING_LIVE_TESTS=true.
+const RUN_LIVE = process.env['RUN_GROUNDING_LIVE_TESTS'] === 'true';
+const describeLive = RUN_LIVE ? describe : describe.skip;
 
 let cookie = '';
 let csrfToken = '';
@@ -93,7 +99,7 @@ function parseEvalResults(row: Record<string, unknown>) {
   }
 }
 
-describe('Grounding Guardrails API', () => {
+describeLive('Grounding Guardrails API', () => {
   it('records a pre-execution sycophancy warning in guardrail evals', async () => {
     await registerTestUser();
     const chatId = await createChat('Pre Guardrail Test');

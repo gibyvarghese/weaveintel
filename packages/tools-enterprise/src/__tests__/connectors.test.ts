@@ -51,13 +51,13 @@ function canvaConfig(overrides?: Partial<EnterpriseConnectorConfig>): Enterprise
 let fetchSpy: ReturnType<typeof vi.fn>;
 
 function mockFetch(data: unknown, status = 200) {
-  fetchSpy.mockResolvedValueOnce({
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: status === 200 ? 'OK' : 'Error',
-    json: async () => data,
-    text: async () => JSON.stringify(data),
-  });
+  fetchSpy.mockResolvedValueOnce(
+    new Response(JSON.stringify(data), {
+      status,
+      statusText: status === 200 ? 'OK' : 'Error',
+      headers: { 'content-type': 'application/json' },
+    }),
+  );
 }
 
 beforeEach(() => {
@@ -241,18 +241,18 @@ describe('ServiceNowProvider', () => {
 
   describe('get', () => {
     it('gets a record by sys_id', async () => {
-      mockFetch({ result: { sys_id: 'inc-1', short_description: 'Issue' } });
-      const result = await snow.get('inc-1', snowConfig());
+      mockFetch({ result: { sys_id: '1234567890abcdef1234567890abcdef', short_description: 'Issue' } });
+      const result = await snow.get('1234567890abcdef1234567890abcdef', snowConfig());
       expect(result).not.toBeNull();
-      expect(result!.id).toBe('inc-1');
+      expect(result!.id).toBe('1234567890abcdef1234567890abcdef');
 
       const [url] = fetchSpy.mock.calls[0]!;
-      expect(url).toContain('/api/now/table/incident/inc-1');
+      expect(url).toContain('/api/now/table/incident/1234567890abcdef1234567890abcdef');
     });
 
     it('returns null on error', async () => {
       mockFetch({}, 404);
-      const result = await snow.get('bad-id', snowConfig());
+      const result = await snow.get('1234567890abcdef1234567890abcdef', snowConfig());
       expect(result).toBeNull();
     });
   });

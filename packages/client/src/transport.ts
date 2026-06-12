@@ -4,6 +4,8 @@
  *
  * NOTE: No Node.js imports — this module must stay browser-safe.
  */
+// no-raw-fetch: allow (reason: browser-safe client SDK transport — uses the browser
+// fetch + ReadableStream for SSE; exempt like ui-client.ts / ui/api.ts)
 
 import type { RunEventEnvelope } from './run-client.js';
 
