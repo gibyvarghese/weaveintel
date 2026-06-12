@@ -1,4 +1,24 @@
-import type { ChatRow, MessageRow, MetricRow, EvalRow, UserPreferencesRow, ChatSettingsRow, TraceRow, TemporalTimerRow, TemporalStopwatchRow, TemporalReminderRow, MetricsSummary } from './core.js';
+import type { ChatRow, MessageRow, MetricRow, EvalRow, UserPreferencesRow, ChatSettingsRow, TraceRow, TemporalTimerRow, TemporalStopwatchRow, TemporalReminderRow, MetricsSummary, ConversationRow } from './core.js';
+
+/** Filter for the user-scoped conversation list (SP2). */
+export type ConversationListFilter = 'active' | 'archived' | 'pinned' | 'all';
+
+/** Query options for listUserConversations. */
+export interface ConversationListOptions {
+  /** Case-insensitive substring matched against title and message content. */
+  query?: string;
+  /** active (default, excludes archived) | archived | pinned | all. */
+  filter?: ConversationListFilter;
+  limit?: number;
+  offset?: number;
+}
+
+/** Mutable flags for setConversationFlags. */
+export interface ConversationFlags {
+  pinned?: boolean;
+  archived?: boolean;
+  title?: string;
+}
 
 export interface IChatStore {
   // Chats
@@ -8,6 +28,12 @@ export interface IChatStore {
   getUserChats(userId: string): Promise<ChatRow[]>;
   updateChatTitle(id: string, userId: string, title: string): Promise<void>;
   deleteChat(id: string, userId: string): Promise<void>;
+
+  // Conversations (user-scoped list/search + pin/archive — SP2, mobile)
+  listUserConversations(userId: string, opts?: ConversationListOptions): Promise<ConversationRow[]>;
+  getUserConversation(id: string, userId: string): Promise<ConversationRow | null>;
+  setConversationFlags(id: string, userId: string, flags: ConversationFlags): Promise<ConversationRow | null>;
+
 
   // Messages
   addMessage(msg: { id: string; chatId: string; role: string; content: string; metadata?: string; tokensUsed?: number; cost?: number; latencyMs?: number }): Promise<void>;

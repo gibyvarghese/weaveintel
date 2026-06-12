@@ -22,6 +22,7 @@ import { applyM39MemoryToolsExtended } from './m39-memory-tools-extended.js';
 import { applyM40AgentStrategies } from './m40-agent-strategies.js';
 import { applyM41PlatformFoundation } from './m41-platform-foundation.js';
 import { applyM42UserMemoryAndTz } from './m42-user-memory-and-tz.js';
+import { applyM43ConversationFlags } from './m43-conversation-flags.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -52,6 +53,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm40-agent-strategies', description: 'Agent Reasoning Strategies W1–W5: reflection, verify, supervisor re-plan, parallel delegation, ensemble mode columns on chat_settings; agent_strategy_settings table for global/tenant defaults', run: applyM40AgentStrategies },
   { id: 'm41-platform-foundation', description: 'Platform Foundation W9: user_runs, user_run_events, user_devices, notification_preferences, mode_labels, starter_prompts tables', run: applyM41PlatformFoundation },
   { id: 'm42-user-memory-and-tz', description: 'W9b: semantic_memory.metadata (correction trail) + notification_preferences.timezone (quiet-hours tz)', run: applyM42UserMemoryAndTz },
+  { id: 'm43-conversation-flags', description: 'SP2 (mobile): chats.pinned + chats.archived for the user-scoped conversation list', run: applyM43ConversationFlags },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

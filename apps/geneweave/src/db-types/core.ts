@@ -42,6 +42,28 @@ export interface ChatRow {
   title: string;
   model: string;
   provider: string;
+  pinned: number;
+  archived: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Denormalised conversation summary for the user-scoped conversation list
+ * (SP2). Joins a chat with its derived snippet (most-recent message content)
+ * and its chat-settings mode. Used by listUserConversations / getUserConversation.
+ */
+export interface ConversationRow {
+  id: string;
+  title: string;
+  /** Most-recent message content, truncated by the route layer. Null when empty. */
+  snippet: string | null;
+  /** chat_settings.mode, coalesced to 'agent' when no settings row exists. */
+  mode: string;
+  model: string;
+  provider: string;
+  pinned: number;
+  archived: number;
   created_at: string;
   updated_at: string;
 }

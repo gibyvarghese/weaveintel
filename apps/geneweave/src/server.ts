@@ -42,6 +42,7 @@ import {
   registerMemoryRoutes,
   registerLiveAgentRoutes,
   registerMeRoutes,
+  registerMeConversationsRoutes,
   registerMeMemoryRoutes,
 } from './routes/index.js';
 
@@ -124,6 +125,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerMemoryRoutes(router, db);
   registerLiveAgentRoutes(router, db);
   registerMeRoutes(router, db, { notifications: createNotificationsHub({ db }) });
+  registerMeConversationsRoutes(router, db);
   registerMeMemoryRoutes(router, db);
 
   // ── Avatar static files ────────────────────────────────────

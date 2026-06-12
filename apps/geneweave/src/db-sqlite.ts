@@ -345,6 +345,83 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM chats WHERE id = ? AND user_id = ?').run(id, userId);
   }
 
+  // ── Conversations (user-scoped list/search + pin/archive — SP2) ─────────────
+
+  async listUserConversations(
+    userId: string,
+    opts: import('./db-types.js').ConversationListOptions = {},
+  ): Promise<import('./db-types.js').ConversationRow[]> {
+    const filter = opts.filter ?? 'active';
+    const limit = Math.min(Math.max(Number(opts.limit ?? 50), 1), 200);
+    const offset = Math.max(Number(opts.offset ?? 0), 0);
+
+    const where: string[] = ['c.user_id = ?'];
+    const params: unknown[] = [userId];
+
+    if (filter === 'active') where.push('c.archived = 0');
+    else if (filter === 'archived') where.push('c.archived = 1');
+    else if (filter === 'pinned') where.push('c.pinned = 1 AND c.archived = 0');
+    // 'all' adds no archived/pinned constraint.
+
+    const query = (opts.query ?? '').trim();
+    if (query) {
+      // Escape LIKE wildcards so user input is matched literally.
+      const escaped = query.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+      const like = `%${escaped}%`;
+      where.push(
+        "(c.title LIKE ? ESCAPE '\\' OR EXISTS (SELECT 1 FROM messages m2 WHERE m2.chat_id = c.id AND m2.content LIKE ? ESCAPE '\\'))",
+      );
+      params.push(like, like);
+    }
+
+    params.push(limit, offset);
+
+    const sql = `
+      SELECT
+        c.id, c.title, c.model, c.provider, c.pinned, c.archived, c.created_at, c.updated_at,
+        COALESCE(cs.mode, 'agent') AS mode,
+        (SELECT m.content FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS snippet
+      FROM chats c
+      LEFT JOIN chat_settings cs ON cs.chat_id = c.id
+      WHERE ${where.join(' AND ')}
+      ORDER BY c.pinned DESC, c.updated_at DESC, c.rowid DESC
+      LIMIT ? OFFSET ?`;
+
+    return this.d.prepare(sql).all(...params) as import('./db-types.js').ConversationRow[];
+  }
+
+  async getUserConversation(id: string, userId: string): Promise<import('./db-types.js').ConversationRow | null> {
+    const sql = `
+      SELECT
+        c.id, c.title, c.model, c.provider, c.pinned, c.archived, c.created_at, c.updated_at,
+        COALESCE(cs.mode, 'agent') AS mode,
+        (SELECT m.content FROM messages m WHERE m.chat_id = c.id ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS snippet
+      FROM chats c
+      LEFT JOIN chat_settings cs ON cs.chat_id = c.id
+      WHERE c.id = ? AND c.user_id = ?`;
+    return (this.d.prepare(sql).get(id, userId) as import('./db-types.js').ConversationRow | undefined) ?? null;
+  }
+
+  async setConversationFlags(
+    id: string,
+    userId: string,
+    flags: import('./db-types.js').ConversationFlags,
+  ): Promise<import('./db-types.js').ConversationRow | null> {
+    const sets: string[] = [];
+    const params: unknown[] = [];
+    if (flags.pinned !== undefined) { sets.push('pinned = ?'); params.push(flags.pinned ? 1 : 0); }
+    if (flags.archived !== undefined) { sets.push('archived = ?'); params.push(flags.archived ? 1 : 0); }
+    if (flags.title !== undefined) { sets.push('title = ?'); params.push(flags.title); }
+
+    if (sets.length > 0) {
+      // Flag/title changes deliberately do NOT bump updated_at so pin/archive
+      // never reorders the recency-sorted list.
+      params.push(id, userId);
+      this.d.prepare(`UPDATE chats SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).run(...params);
+    }
+    return this.getUserConversation(id, userId);
+  }
+
   // ── Messages ───────────────────────────────────────────────
 
   async addMessage(m: {

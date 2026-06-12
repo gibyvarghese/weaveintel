@@ -8,4 +8,5 @@ export { registerA2ARoutes } from './a2a.js';
 export { registerMemoryRoutes } from './memory.js';
 export { registerLiveAgentRoutes } from './live-agents.js';
 export { registerMeRoutes } from './me.js';
+export { registerMeConversationsRoutes } from './me-conversations.js';
 export { registerMeMemoryRoutes } from './me-memories.js';

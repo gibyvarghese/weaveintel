@@ -17,7 +17,7 @@ import type { ILiveAgentsStore } from './adapter-live-agents.js';
 import type { IMeStore } from './adapter-me.js';
 
 export type { IUserStore } from './adapter-users.js';
-export type { IChatStore } from './adapter-chats.js';
+export type { IChatStore, ConversationListFilter, ConversationListOptions, ConversationFlags } from './adapter-chats.js';
 export type { IPromptStore } from './adapter-prompts.js';
 export type { IRoutingStore } from './adapter-routing.js';
 export type { IWorkflowStore } from './adapter-workflows.js';

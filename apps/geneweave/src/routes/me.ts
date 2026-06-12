@@ -41,20 +41,14 @@
 
 import { newUUIDv7, weaveContext } from '@weaveintel/core';
 import { createActionItem, completeActionItem, cancelActionItem } from '@weaveintel/human-tasks';
-import { InMemoryHumanTaskRepository } from '@weaveintel/human-tasks';
-import { InMemoryTriggerStore, createReminderTrigger, rescheduleReminder } from '@weaveintel/triggers';
+import { createReminderTrigger, rescheduleReminder } from '@weaveintel/triggers';
 import type { Router } from '../server-core.js';
 import { readBody } from '../server-core.js';
 import type { DatabaseAdapter } from '../db-types.js';
 import { createMeCatalogResolver } from '../me-catalog.js';
 import type { SurfaceCatalogResolver } from '@weaveintel/core';
 import type { NotificationsHub } from '../notifications-wiring.js';
-
-// Module-level state — these are in-memory stores that persist for the
-// process lifetime.  Production deployments should replace these with
-// durable backends via @weaveintel/persistence.
-const taskRepo = new InMemoryHumanTaskRepository();
-const triggerStore = new InMemoryTriggerStore();
+import { meTaskRepo as taskRepo, meTriggerStore as triggerStore } from './me-stores.js';
 
 // Tracks live SSE subscribers per run id so terminal-run notifications are
 // only sent when nobody is actively watching the stream ("detached").
