@@ -3,6 +3,7 @@
   "references": [
     { "path": "packages/core" },
     { "path": "packages/models" },
+    { "path": "packages/notifications" },
     { "path": "packages/agents" },
     { "path": "packages/memory" },
     { "path": "packages/retrieval" },
