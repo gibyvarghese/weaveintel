@@ -54,3 +54,21 @@ export {
   type CreateProgressOptions,
   type ProgressTracker,
 } from './progress.js';
+
+// W2 — Inbound widget action helpers
+export {
+  widgetActionEvent,
+  parseWidgetAction,
+  type WidgetActionPayload,
+  type ParseWidgetActionResult,
+  type ParseWidgetActionError,
+  type ParseWidgetActionOutcome,
+} from './widget-actions.js';
+
+// W2 — Widget renderer registry (interface + in-memory reference impl)
+export {
+  createWidgetRendererRegistry,
+  type WidgetRenderer,
+  type WidgetRendererRegistry,
+} from './widget-registry.js';
+
