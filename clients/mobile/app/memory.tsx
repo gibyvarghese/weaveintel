@@ -10,7 +10,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, Text, View } from 'react-native';
-import { router } from 'expo-router';
+import { goBack } from '../src/native/navigation/go-back';
 import type { MemoryItem } from '@geneweave/api-client';
 import {
   CLEAR_ALL_CONFIRM_PHRASE,
@@ -85,7 +85,7 @@ export default function MemoryScreen() {
 
   return (
     <ListScreen>
-      <ScreenHeader title="Memory" onBack={() => router.back()} />
+      <ScreenHeader title="Memory" onBack={goBack} />
 
       {managedByOrg ? (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.spacing.sm, backgroundColor: theme.colors.surface, borderRadius: theme.radii.md, borderWidth: 1, borderColor: theme.colors.surfaceElevated, padding: theme.spacing.md }}>

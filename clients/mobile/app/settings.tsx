@@ -11,6 +11,7 @@
 import { useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { router } from 'expo-router';
+import { goBack } from '../src/native/navigation/go-back';
 import {
   NOTIFICATION_CATEGORIES,
   isCategoryEnabled,
@@ -36,7 +37,7 @@ export default function SettingsScreen() {
 
   return (
     <ListScreen>
-      <ScreenHeader title="Settings" onBack={() => router.back()} />
+      <ScreenHeader title="Settings" onBack={goBack} />
 
       {error ? <ErrorText>{error}</ErrorText> : null}
 
