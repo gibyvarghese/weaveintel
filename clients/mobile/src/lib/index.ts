@@ -57,6 +57,19 @@ export {
   type ClientFactory,
 } from './auth/auth-controller.js';
 
+// OAuth / social sign-in catalog + parsers
+export {
+  OAUTH_PROVIDER_IDS,
+  type OAuthProviderId,
+  oauthProviderLabel,
+  isOAuthProviderId,
+  parseAuthProviders,
+  parseNativeOAuthCallback,
+  isNativeOAuthError,
+  type NativeOAuthResult,
+  type NativeOAuthError,
+} from './auth/oauth-providers.js';
+
 // Navigation
 export {
   DEEP_LINK_SCHEME,

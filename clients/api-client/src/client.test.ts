@@ -145,6 +145,45 @@ describe('auth', () => {
 });
 
 // ---------------------------------------------------------------------------
+// OAuth / social sign-in
+// ---------------------------------------------------------------------------
+
+describe('oauth', () => {
+  it('getAuthProviders() returns the server provider list', async () => {
+    const transport = fakeTransport({
+      routes: {
+        'GET /api/oauth/providers': () => ({ status: 200, body: { providers: ['google', 'github'] } }),
+      },
+    });
+    const client = createGeneweaveClient({ host: 'https://x', tokenStore: new MemoryTokenStore(), transport });
+    expect(await client.getAuthProviders()).toEqual(['google', 'github']);
+  });
+
+  it('getOAuthAuthorizeUrl() posts the provider and returns the auth url', async () => {
+    const transport = fakeTransport({
+      routes: {
+        'POST /api/oauth/authorize-url': () => ({ status: 200, body: { authUrl: 'https://accounts.google.com/o/oauth2/v2/auth?x=1' } }),
+      },
+    });
+    const client = createGeneweaveClient({ host: 'https://x', tokenStore: new MemoryTokenStore(), transport });
+    const { authUrl } = await client.getOAuthAuthorizeUrl('google');
+    expect(authUrl).toContain('accounts.google.com');
+  });
+
+  it('getOAuthAuthorizeUrl() forwards a native redirect uri', async () => {
+    const transport = fakeTransport({
+      routes: {
+        'POST /api/oauth/authorize-url': () => ({ status: 200, body: { authUrl: 'https://accounts.google.com/auth' } }),
+      },
+    });
+    const client = createGeneweaveClient({ host: 'https://x', tokenStore: new MemoryTokenStore(), transport });
+    await client.getOAuthAuthorizeUrl('google', { native: 'geneweave://oauth' });
+    const call = transport.calls.find((c) => c.path === '/api/oauth/authorize-url');
+    expect(call?.body).toEqual({ provider: 'google', redirectUri: 'geneweave://oauth' });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Runs: start → stream → terminal, and zero-gap resume
 // ---------------------------------------------------------------------------
 

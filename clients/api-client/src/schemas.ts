@@ -40,6 +40,23 @@ export const AuthSessionSchema = z
 export type AuthSession = z.infer<typeof AuthSessionSchema>;
 
 // ---------------------------------------------------------------------------
+// OAuth — GET /api/oauth/providers, POST /api/oauth/authorize-url
+// The provider list is intentionally an open string array: the server is the
+// source of truth for *which* providers are configured, and the client narrows
+// it to the ids it knows how to render.
+// ---------------------------------------------------------------------------
+
+export const OAuthProvidersSchema = z
+  .object({ providers: z.array(z.string()).default([]) })
+  .passthrough();
+export type OAuthProviders = z.infer<typeof OAuthProvidersSchema>;
+
+export const OAuthAuthorizeUrlSchema = z
+  .object({ authUrl: z.string() })
+  .passthrough();
+export type OAuthAuthorizeUrl = z.infer<typeof OAuthAuthorizeUrlSchema>;
+
+// ---------------------------------------------------------------------------
 // Runs — POST/GET /api/me/runs, /:id, /cancel, /events
 // ---------------------------------------------------------------------------
 

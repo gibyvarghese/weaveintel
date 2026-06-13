@@ -389,6 +389,25 @@ export function resolveAllowedOAuthOrigins(publicBaseUrl: string): Set<string> {
   return new Set([configured, ...extras]);
 }
 
+/** Every OAuth provider the server knows how to talk to, in canonical display order. */
+export const OAUTH_PROVIDER_NAMES: readonly OAuthProviderName[] = ['google', 'github', 'microsoft', 'apple', 'facebook'];
+
+/**
+ * The OAuth providers that are currently configured (both client id and secret
+ * present in the environment). This is the single source of truth the mobile and
+ * web clients use to decide which social sign-in buttons to render — only
+ * configured providers are returned, in canonical order.
+ *
+ * Global (env-driven) today; structured so a future per-tenant override can
+ * intersect this list with a tenant's enabled set without changing callers.
+ */
+export function listConfiguredOAuthProviders(env: NodeJS.ProcessEnv = process.env): OAuthProviderName[] {
+  return OAUTH_PROVIDER_NAMES.filter((provider) => {
+    const upper = provider.toUpperCase();
+    return Boolean(env[`OAUTH_${upper}_CLIENT_ID`] && env[`OAUTH_${upper}_CLIENT_SECRET`]);
+  });
+}
+
 export function buildOAuthProviderFromRequest(provider: OAuthProviderName, req: IncomingMessage, publicBaseUrl?: string) {
   const isProduction = process.env['NODE_ENV'] === 'production';
   if (isProduction && !publicBaseUrl) {

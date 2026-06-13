@@ -24,8 +24,15 @@ import {
   ensureAtLeastOneTenantAdmin,
   oauthClient,
   buildOAuthProviderFromRequest,
+  listConfiguredOAuthProviders,
 } from '../server-core.js';
 import type { Router } from '../server-core.js';
+import {
+  encodeNativeOAuthState,
+  parseNativeOAuthState,
+  isAllowedNativeRedirect,
+  buildNativeOAuthRedirect,
+} from '../oauth-native.js';
 
 interface AuthRouteOptions {
   jwtSecret: string;
@@ -52,6 +59,41 @@ interface MintedSession {
  * error response (400 / 401 / 429) and returns null; the caller only decides how to
  * deliver the resulting token (HttpOnly cookie vs response body).
  */
+/**
+ * Mint a fresh DB session + signed JWT for an already-resolved principal. Shared
+ * by credential login (after password verification) and OAuth sign-in (after the
+ * provider identity is resolved). Returns null only when the user vanished.
+ */
+async function mintSessionForUserId(
+  db: DatabaseAdapter,
+  jwtSecret: string,
+  userId: string,
+): Promise<MintedSession | null> {
+  await ensureAtLeastOneTenantAdmin(db, userId);
+  const user = await db.getUserById(userId);
+  if (!user) return null;
+
+  const sessionId = newUUIDv7();
+  const csrfToken = generateCSRFToken();
+  const expiresAt = new Date(Date.now() + 86400_000).toISOString();
+  await db.createSession({ id: sessionId, userId: user.id, csrfToken, expiresAt });
+
+  const token = signJWT({ userId: user.id, email: user.email, sessionId }, jwtSecret);
+  return {
+    token,
+    csrfToken,
+    expiresAt,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      persona: user.persona,
+      tenantId: user.tenant_id,
+    },
+    permissions: personaPermissions(user.persona),
+  };
+}
+
 async function authenticateAndMintSession(
   req: IncomingMessage,
   res: ServerResponse,
@@ -99,28 +141,7 @@ async function authenticateAndMintSession(
     await db.updateUser(user.id, { passwordHash: upgradedHash });
   }
 
-  await ensureAtLeastOneTenantAdmin(db, user.id);
-  const effectiveUser = (await db.getUserById(user.id)) ?? user;
-
-  const sessionId = newUUIDv7();
-  const csrfToken = generateCSRFToken();
-  const expiresAt = new Date(Date.now() + 86400_000).toISOString();
-  await db.createSession({ id: sessionId, userId: effectiveUser.id, csrfToken, expiresAt });
-
-  const token = signJWT({ userId: effectiveUser.id, email: effectiveUser.email, sessionId }, jwtSecret);
-  return {
-    token,
-    csrfToken,
-    expiresAt,
-    user: {
-      id: effectiveUser.id,
-      email: effectiveUser.email,
-      name: effectiveUser.name,
-      persona: effectiveUser.persona,
-      tenantId: effectiveUser.tenant_id,
-    },
-    permissions: personaPermissions(effectiveUser.persona),
-  };
+  return mintSessionForUserId(db, jwtSecret, user.id);
 }
 
 export function registerAuthRoutes(
@@ -298,11 +319,21 @@ export function registerAuthRoutes(
     json(res, 200, { ok: true });
   });
 
+  // List the OAuth providers currently configured on this server (client id +
+  // secret present). The mobile/web client calls this to decide which social
+  // sign-in buttons to render — only configured providers are returned.
+  router.get('/api/oauth/providers', async (_req, res) => {
+    json(res, 200, { providers: listConfiguredOAuthProviders() });
+  }, { auth: false });
+
   // Generate OAuth authorization URL for a provider
-  // Expected body: { provider: 'google' | 'github' | 'microsoft' | 'apple' | 'facebook' }
+  // Expected body: { provider: 'google' | ..., redirectUri?: string }
+  // A `redirectUri` (an app scheme) switches to the native flow: the callback
+  // mints a bearer session and 302-redirects to that URI instead of returning
+  // the browser popup HTML.
   router.post('/api/oauth/authorize-url', async (req, res, _params, auth) => {
     const raw = await readBody(req);
-    let body: { provider?: string };
+    let body: { provider?: string; redirectUri?: string };
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
 
     const provider = body.provider?.toLowerCase() as OAuthProviderName | undefined;
@@ -311,8 +342,16 @@ export function registerAuthRoutes(
       json(res, 400, { error: 'Invalid provider' }); return;
     }
 
+    const nativeRedirect = typeof body.redirectUri === 'string' && body.redirectUri.length > 0
+      ? body.redirectUri
+      : null;
+    if (nativeRedirect && !isAllowedNativeRedirect(nativeRedirect)) {
+      json(res, 400, { error: 'Invalid redirectUri' }); return;
+    }
+
     try {
-      const state = newUUIDv7();
+      const nonce = newUUIDv7();
+      const state = nativeRedirect ? encodeNativeOAuthState(nativeRedirect, nonce) : nonce;
       const oauthProvider = buildOAuthProviderFromRequest(provider, req, publicBaseUrl);
       const { authUrl } = await oauthClient.generateAuthorizationUrl(oauthProvider, state);
       await setOAuthState(state, { userId: auth?.userId ?? null, provider, expiresAt: Date.now() + 600_000 });
@@ -379,6 +418,19 @@ export function registerAuthRoutes(
         picture_url: oauthProfile.picture || null,
         last_used_at: new Date().toISOString(),
       });
+
+      // Native (mobile) flow: the redirect URI was encoded into the state. Mint a
+      // bearer session and 302 it back to the app scheme, which the in-app auth
+      // session captures and persists. No cookie/popup HTML for native.
+      const { native, redirectUri } = parseNativeOAuthState(state);
+      if (native && redirectUri && isAllowedNativeRedirect(redirectUri)) {
+        const minted = await mintSessionForUserId(db, jwtSecret, resolvedUserId);
+        if (!minted) throw new Error('User not found after OAuth sign-in');
+        res.statusCode = 302;
+        res.setHeader('Location', buildNativeOAuthRedirect(redirectUri, minted));
+        res.end();
+        return;
+      }
 
       // For OAuth sign-in from logged-out state, establish a session cookie.
       if (!stateUserId) {

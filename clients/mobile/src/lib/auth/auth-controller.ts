@@ -62,6 +62,11 @@ export interface AuthController {
   setHost(rawHost: string): Promise<HostValidation>;
   /** Credential sign-in against the active host. */
   signIn(email: string, password: string): Promise<void>;
+  /**
+   * Complete a native OAuth sign-in: persist the bearer session minted by the
+   * server callback, fetch the user, and transition to `authenticated`.
+   */
+  completeOAuthSignIn(tokens: { token: string; csrfToken: string }): Promise<void>;
   /** Run the biometric prompt; on success transition `locked` → `authenticated`. */
   unlock(): Promise<boolean>;
   /** Force the biometric gate on (no-op when the gate is inactive). */
@@ -177,6 +182,16 @@ export function createAuthController(opts: AuthControllerOptions): AuthControlle
       const session = await client.authenticate(email, password);
       user = session.user;
       // A fresh sign-in is an explicit unlock — do not re-prompt biometrics now.
+      backgroundedAt = null;
+      settleAuthenticated(/* coldStart */ false);
+    },
+
+    async completeOAuthSignIn(tokens: { token: string; csrfToken: string }) {
+      if (!host) throw new Error('No host configured');
+      await createTenantTokenStore(kv, host, tenantId).set(tokens);
+      if (!client) client = buildClient(host);
+      user = await client.getCurrentUser();
+      // A fresh OAuth sign-in is an explicit unlock — do not re-prompt biometrics now.
       backgroundedAt = null;
       settleAuthenticated(/* coldStart */ false);
     },

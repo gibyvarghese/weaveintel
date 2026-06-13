@@ -35,6 +35,8 @@ import { AuthExpiredError, GeneweaveApiError, ManagedByOrgError, ResponseShapeEr
 import {
   AuthSessionSchema,
   MeUserSchema,
+  OAuthProvidersSchema,
+  OAuthAuthorizeUrlSchema,
   RunRecordSchema,
   RunListSchema,
   PostEventResultSchema,
@@ -153,6 +155,15 @@ export interface GeneweaveClient {
   authenticate(email: string, password: string): Promise<AuthSession>;
   getCurrentUser(): Promise<MeUser>;
   signOut(): Promise<void>;
+
+  // OAuth / social sign-in
+  /** The OAuth providers configured on the server, narrowed to the given allowlist order. */
+  getAuthProviders(): Promise<string[]>;
+  /**
+   * Begin a provider OAuth flow. Pass `native` with the app's redirect URI to
+   * get the mobile flow (the callback 302s the session back to that URI).
+   */
+  getOAuthAuthorizeUrl(provider: string, opts?: { native?: string }): Promise<{ authUrl: string }>;
 
   // Runs
   startRun(input: StartRunInput): Promise<RunRecord>;
@@ -302,6 +313,28 @@ export function createGeneweaveClient(opts: CreateGeneweaveClientOptions): Genew
       } finally {
         await opts.tokenStore.clear();
       }
+    },
+
+    // ── OAuth / social sign-in ───────────────────────────────────────────────
+    async getAuthProviders() {
+      const req = { method: 'GET' as const, path: '/api/oauth/providers' };
+      const raw = await send(req);
+      if (!ok(raw.status)) fail(raw, req);
+      return parse(OAuthProvidersSchema, raw, req).providers;
+    },
+
+    async getOAuthAuthorizeUrl(provider, oauthOpts) {
+      const req = { method: 'POST' as const, path: '/api/oauth/authorize-url' };
+      const raw = await send({
+        ...req,
+        body: {
+          provider,
+          ...(oauthOpts?.native ? { redirectUri: oauthOpts.native } : {}),
+        },
+      });
+      if (!ok(raw.status)) fail(raw, req);
+      const { authUrl } = parse(OAuthAuthorizeUrlSchema, raw, req);
+      return { authUrl };
     },
 
     // ── Runs ────────────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@
 import {
   Archive,
   ArrowUp,
+  Apple,
   Bell,
   BellRing,
   Brain,
@@ -27,13 +28,17 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Chrome,
   CircleAlert,
   CircleUser,
   Database,
   Ellipsis,
   ExternalLink,
+  Facebook,
+  Github,
   Inbox,
   Info,
+  LayoutGrid,
   ListChecks,
   ListTodo,
   LoaderCircle,
@@ -117,7 +122,13 @@ export type IconName =
   | 'settings'
   | 'info'
   | 'quiet'
-  | 'back';
+  | 'back'
+  // OAuth / social sign-in providers (lucide outline brand glyphs)
+  | 'oauthGoogle'
+  | 'oauthGithub'
+  | 'oauthMicrosoft'
+  | 'oauthApple'
+  | 'oauthFacebook';
 
 const ICONS: Record<IconName, LucideIcon> = {
   chat: MessageSquare,
@@ -165,6 +176,13 @@ const ICONS: Record<IconName, LucideIcon> = {
   info: Info,
   quiet: Moon,
   back: ChevronLeft,
+  // OAuth providers — lucide has outline brand glyphs for these; Microsoft has
+  // no brand glyph, so a neutral grid mark stands in (still outline/monochrome).
+  oauthGoogle: Chrome,
+  oauthGithub: Github,
+  oauthMicrosoft: LayoutGrid,
+  oauthApple: Apple,
+  oauthFacebook: Facebook,
 };
 
 /** Icon sizes snap to the 4pt grid. */
