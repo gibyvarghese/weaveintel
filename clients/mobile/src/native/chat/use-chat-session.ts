@@ -53,6 +53,9 @@ export function useChatSession(): UseChatSession {
   const sessionRef = useRef<{ client: typeof client; session: ChatSession } | null>(null);
   if (!sessionRef.current || sessionRef.current.client !== client) {
     sessionRef.current?.session.dispose();
+    // One stable conversation token per session lifetime, so multi-turn history
+    // resolves to the same server-side chat across runs.
+    const conversationId = makeId('chat');
     sessionRef.current = {
       client,
       session: createChatSession({
@@ -62,7 +65,9 @@ export function useChatSession(): UseChatSession {
         newId: () => makeId('e'),
         runMetadata: () => {
           const sel = selectionRef.current;
-          return Object.keys(sel).length > 0 ? { options: sel } : undefined;
+          return Object.keys(sel).length > 0
+            ? { chatId: conversationId, options: sel }
+            : { chatId: conversationId };
         },
       }),
     };

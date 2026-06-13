@@ -19,7 +19,7 @@ import { getDocsHTML } from './docs-html.js';
 import { authenticateRequest, verifyCSRF } from './auth.js';
 import { createNotificationsHub } from './notifications-wiring.js';
 import { MeRunExecutor } from './me-run-executor.js';
-import { createDefaultMeRunAgent } from './me-run-agent.js';
+import { createChatPipelineMeRunAgent } from './me-run-agent.js';
 import { type TriggerDispatcherHandle } from './admin/api/triggers.js';
 import { type LoadedGatewayConfig } from './mcp-gateway.js';
 import { type OAuthProviderName } from '@weaveintel/oauth';
@@ -130,7 +130,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     notifications: createNotificationsHub({ db }),
     runExecutor: new MeRunExecutor({
       db,
-      runAgent: createDefaultMeRunAgent(chatEngine.modelConfig),
+      runAgent: createChatPipelineMeRunAgent(chatEngine, db),
     }),
   });
   registerMeConversationsRoutes(router, db);

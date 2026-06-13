@@ -68,7 +68,7 @@ export const RunEventEnvelopeSchema = z
     runId: z.string(),
     sequence: z.number(),
     kind: z.string(),
-    payload: z.record(z.unknown()).default({}),
+    payload: z.record(z.string(), z.unknown()).default({}),
     timestamp: z.number().optional(),
   })
   .passthrough();
@@ -93,7 +93,7 @@ export const CatalogSchema = z
   .object({
     surfaceId: z.string(),
     resolvedAt: z.union([z.string(), z.number()]).optional(),
-    entries: z.array(z.record(z.unknown())).default([]),
+    entries: z.array(z.record(z.string(), z.unknown())).default([]),
     starterPrompts: z.array(StarterPromptSchema).default([]),
   })
   .passthrough();
@@ -113,7 +113,7 @@ export const TaskSchema = z
     dueAt: z.string().nullable().optional(),
     createdAt: z.string().optional(),
     completedAt: z.string().nullable().optional(),
-    provenance: z.record(z.unknown()).optional(),
+    provenance: z.record(z.string(), z.unknown()).optional(),
   })
   .passthrough();
 export type Task = z.infer<typeof TaskSchema>;
@@ -189,7 +189,7 @@ export const MemoryItemSchema = z
     content: z.string(),
     kind: z.string(),
     createdAt: z.string().optional(),
-    provenance: z.record(z.unknown()).optional(),
+    provenance: z.record(z.string(), z.unknown()).optional(),
   })
   .passthrough();
 export type MemoryItem = z.infer<typeof MemoryItemSchema>;
@@ -201,7 +201,7 @@ export const MemoriesSchema = z
       entity: z.array(MemoryItemSchema).default([]),
       'user-authored': z.array(MemoryItemSchema).default([]),
     }),
-    counts: z.record(z.number()).optional(),
+    counts: z.record(z.string(), z.number()).optional(),
   })
   .passthrough();
 export type Memories = z.infer<typeof MemoriesSchema>;
