@@ -5239,11 +5239,19 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
       // ── W2/W3 Model-graded opt-ins ────────────────────────────────────────
       {
+        id: 'b1c2d3e4-0006-4000-8000-000000000006',
+        name: 'Input Safety: Content Moderation',
+        description: 'Screen the user message before the model runs. Calls a ModerationModel (OpenAI omni-moderation) and denies on any flagged category (hate, harassment, violence, self-harm, sexual, illicit/weapons). Always-on input safety gate.',
+        type: 'model-graded', stage: 'pre',
+        config: JSON.stringify({ rule: 'moderation', threshold: 0.5, action: 'deny', timeout_ms: 4000, on_error: 'warn' }),
+        priority: 100, enabled: 1,
+      },
+      {
         id: 'b1c2d3e4-0001-4000-8000-000000000001',
         name: 'Model-Graded: Content Moderation',
-        description: 'Call a ModerationModel to flag hate, violence, and self-harm. Enable and supply moderationModel in PipelineOptions to activate.',
+        description: 'Call a ModerationModel to flag hate, violence, self-harm, sexual, and illicit content in the assistant output. Enable and supply moderationModel in PipelineOptions to activate.',
         type: 'model-graded', stage: 'post',
-        config: JSON.stringify({ rule: 'moderation', categories: ['hate', 'violence', 'self_harm', 'sexual'], threshold: 0.7, action: 'deny', timeout_ms: 8000, on_error: 'warn' }),
+        config: JSON.stringify({ rule: 'moderation', categories: ['hate', 'hate/threatening', 'harassment', 'harassment/threatening', 'violence', 'violence/graphic', 'self-harm', 'self-harm/intent', 'self-harm/instructions', 'sexual', 'sexual/minors', 'illicit', 'illicit/violent'], threshold: 0.7, action: 'deny', timeout_ms: 8000, on_error: 'warn' }),
         priority: 91, enabled: 1,
         trigger_conditions: JSON.stringify({ any: [{ persona: ['tenant_user', 'anonymous'] }, { prior_has_warn: true }] }),
         trigger_description: 'Non-admin user or prior warn — skip for internal admin-only sessions',
