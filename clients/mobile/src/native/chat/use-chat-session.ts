@@ -68,7 +68,11 @@ export function useChatSession(options: UseChatSessionOptions = {}): UseChatSess
     sessionRef.current.client !== client ||
     (resumeId !== undefined && resumeId !== sessionRef.current.conversationId);
   if (needsRebuild) {
-    sessionRef.current?.session.dispose();
+    // NOTE: do NOT dispose the previous session here — disposing during render is
+    // an unsafe side effect (it can abort an in-flight stream mid-render and
+    // throws under StrictMode / concurrent rendering). The `[session]` cleanup
+    // effect below disposes the previous session at commit time instead.
+    //
     // A stable conversation token for this session lifetime, so multi-turn
     // history resolves to the same server-side chat across runs. When resuming,
     // adopt the caller-supplied id instead of minting a fresh one.

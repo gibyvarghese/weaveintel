@@ -30,7 +30,10 @@ export default function ChatsScreen() {
 
   const handlePressRow = useCallback(
     (conversation: Conversation) => {
-      router.push({ pathname: '/(tabs)', params: { conversationId: conversation.id } });
+      // Switch to the Chat tab (the `(tabs)` index) carrying the conversation id.
+      // `navigate` (not `push`) so we reuse the existing tab navigator instead of
+      // stacking a second one on every row tap.
+      router.navigate({ pathname: '/(tabs)', params: { conversationId: conversation.id } });
     },
     [router],
   );
