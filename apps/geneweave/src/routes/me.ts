@@ -14,6 +14,9 @@
  *   Catalog:
  *     GET    /api/me/catalog?surface=<id>        surface catalog for the caller
  *
+ *   Theme:
+ *     GET    /api/me/theme                       per-tenant design tokens
+ *
  *   Tasks:
  *     GET    /api/me/tasks                       list action-item tasks
  *     POST   /api/me/tasks                       create action-item
@@ -46,6 +49,7 @@ import type { Router } from '../server-core.js';
 import { readBody } from '../server-core.js';
 import type { DatabaseAdapter } from '../db-types.js';
 import { createMeCatalogResolver } from '../me-catalog.js';
+import { resolveTenantThemeTokens } from '../tenant-theme.js';
 import type { SurfaceCatalogResolver } from '@weaveintel/core';
 import type { NotificationsHub } from '../notifications-wiring.js';
 import { meTaskRepo as taskRepo, meTriggerStore as triggerStore } from './me-stores.js';
@@ -287,6 +291,23 @@ export function registerMeRoutes(
         promptText: s.prompt_text,
       })),
     }));
+  }, { auth: true });
+
+  // ─── Theme ──────────────────────────────────────────────────────────────
+  // Per-tenant design tokens (colors / font families / radii) for the caller's
+  // tenant. Fail-soft: any error degrades to `{ theme: null }` so the client
+  // renders the base brand theme. WCAG-AA enforcement happens client-side.
+
+  router.get('/api/me/theme', async (_req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    let theme = null;
+    try {
+      theme = await resolveTenantThemeTokens(db, auth.tenantId ?? null);
+    } catch {
+      theme = null;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ theme }));
   }, { auth: true });
 
   // ─── Tasks ──────────────────────────────────────────────────────────────

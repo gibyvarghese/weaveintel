@@ -44,6 +44,10 @@ import {
   resolveLimits, invalidateLimitsCache, mergeLimitsIntoOverrides,
   CODE_DEFAULTS, type PlatformLimits,
 } from '../platform-limits.js';
+import {
+  resolveTenantThemeTokens, invalidateThemeCache, setThemeInOverrides,
+  parseThemeFromOverrides, sanitizeTheme, type TenantThemeTokens,
+} from '../tenant-theme.js';
 
 export function registerAdminWiringRoutes(
   router: Router,
@@ -654,6 +658,83 @@ export function registerAdminWiringRoutes(
     invalidateLimitsCache(tenantId);
     const effective = await resolveLimits(db, tenantId);
     json(res, 200, { ok: true, tenantId, effective });
+  }, { auth: true, csrf: true });
+
+  // ── Tenant theme (per-tenant design tokens) ────────────────
+  // GET /api/admin/tenant-theme            — platform override + effective
+  // PUT /api/admin/tenant-theme            — set/clear platform theme
+  // GET /api/admin/tenant-theme/:tenantId  — tenant override + effective
+  // PUT /api/admin/tenant-theme/:tenantId  — set/clear tenant theme
+  // Body shape: a TenantThemeTokens object ({ colors?, typography?, radii? }).
+  // An empty body / {} clears the override. The server validates + stores the
+  // tokens; WCAG-AA enforcement happens client-side in @geneweave/tokens.
+
+  router.get('/api/admin/tenant-theme', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    if (!canPersonaAccess(auth.persona, 'admin:platform:read')) {
+      json(res, 403, { error: 'Missing permission: admin:platform:read' }); return;
+    }
+    const globalRow = await db.getGlobalTenantConfig();
+    const override = parseThemeFromOverrides(globalRow?.config_overrides);
+    const effective = await resolveTenantThemeTokens(db);
+    json(res, 200, { platformOverride: override, effective });
+  }, { auth: true });
+
+  router.put('/api/admin/tenant-theme', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    if (!canPersonaAccess(auth.persona, 'admin:platform:write')) {
+      json(res, 403, { error: 'Missing permission: admin:platform:write' }); return;
+    }
+    const raw = await readBody(req);
+    let body: unknown;
+    try { body = raw.trim() ? JSON.parse(raw) : {}; } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const globalRow = await db.getGlobalTenantConfig();
+    if (!globalRow) { json(res, 404, { error: 'Platform config row not found — run migrations' }); return; }
+
+    const theme: TenantThemeTokens | null = sanitizeTheme(body);
+    const updatedOverrides = setThemeInOverrides(globalRow.config_overrides, theme);
+    await db.updateTenantConfig(globalRow.id, { config_overrides: updatedOverrides });
+    invalidateThemeCache();
+    const effective = await resolveTenantThemeTokens(db);
+    json(res, 200, { ok: true, platformOverride: theme, effective });
+  }, { auth: true, csrf: true });
+
+  router.get('/api/admin/tenant-theme/:tenantId', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    const { tenantId } = params as { tenantId: string };
+    // A platform admin reads any tenant; a tenant admin reads only their own.
+    const allowed =
+      canPersonaAccess(auth.persona, 'admin:platform:read') ||
+      (canPersonaAccess(auth.persona, 'admin:tenant:read') && auth.tenantId === tenantId);
+    if (!allowed) { json(res, 403, { error: 'Missing permission to read this tenant theme' }); return; }
+    const tenantRow = await db.getTenantConfigForTenant(tenantId);
+    const override = parseThemeFromOverrides(tenantRow?.config_overrides);
+    const effective = await resolveTenantThemeTokens(db, tenantId);
+    json(res, 200, { tenantId, tenantOverride: override, effective });
+  }, { auth: true });
+
+  router.put('/api/admin/tenant-theme/:tenantId', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Authentication required' }); return; }
+    const { tenantId } = params as { tenantId: string };
+    // A platform admin writes any tenant; a tenant admin writes only their own.
+    const allowed =
+      canPersonaAccess(auth.persona, 'admin:platform:write') ||
+      (canPersonaAccess(auth.persona, 'admin:tenant:write') && auth.tenantId === tenantId);
+    if (!allowed) { json(res, 403, { error: 'Missing permission to write this tenant theme' }); return; }
+    const raw = await readBody(req);
+    let body: unknown;
+    try { body = raw.trim() ? JSON.parse(raw) : {}; } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const tenantRow = await db.getTenantConfigForTenant(tenantId);
+    if (!tenantRow) { json(res, 404, { error: `No tenant config found for tenant '${tenantId}'` }); return; }
+
+    const theme: TenantThemeTokens | null = sanitizeTheme(body);
+    const updatedOverrides = setThemeInOverrides(tenantRow.config_overrides, theme);
+    await db.updateTenantConfig(tenantRow.id, { config_overrides: updatedOverrides });
+    invalidateThemeCache(tenantId);
+    const effective = await resolveTenantThemeTokens(db, tenantId);
+    json(res, 200, { ok: true, tenantId, tenantOverride: theme, effective });
   }, { auth: true, csrf: true });
 
   router.get('/health', async (_req, res) => {

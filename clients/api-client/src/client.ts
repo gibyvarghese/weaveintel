@@ -40,6 +40,7 @@ import {
   PostEventResultSchema,
   CancelRunResultSchema,
   CatalogSchema,
+  TenantThemeResponseSchema,
   TaskSchema,
   TaskListSchema,
   NotificationActionResultSchema,
@@ -58,6 +59,7 @@ import {
   type RunStatus,
   type PostEventResult,
   type Catalog,
+  type TenantThemeTokens,
   type Task,
   type NotificationAction,
   type NotificationActionResult,
@@ -164,6 +166,9 @@ export interface GeneweaveClient {
 
   // Catalog
   getCatalog(surface?: string): Promise<Catalog>;
+
+  // Theme — per-tenant design tokens, or null when no override is configured.
+  getTenantTheme(): Promise<TenantThemeTokens | null>;
 
   // Tasks
   listTasks(): Promise<Task[]>;
@@ -419,6 +424,14 @@ export function createGeneweaveClient(opts: CreateGeneweaveClientOptions): Genew
       const raw = await send(req);
       if (!ok(raw.status)) fail(raw, req);
       return parse(CatalogSchema, raw, req);
+    },
+
+    // ── Theme ──────────────────────────────────────────────────────────────
+    async getTenantTheme() {
+      const req = { method: 'GET' as const, path: '/api/me/theme' };
+      const raw = await send(req);
+      if (!ok(raw.status)) fail(raw, req);
+      return parse(TenantThemeResponseSchema, raw, req).theme;
     },
 
     // ── Tasks ────────────────────────────────────────────────────────────────

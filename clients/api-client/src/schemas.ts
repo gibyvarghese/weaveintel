@@ -100,6 +100,26 @@ export const CatalogSchema = z
 export type Catalog = z.infer<typeof CatalogSchema>;
 
 // ---------------------------------------------------------------------------
+// Tenant theme — GET /api/me/theme
+// Per-tenant design tokens (colors / font families / corner radii). Lenient by
+// design: the brand token names are open maps, and a missing/cleared theme is
+// `null`. WCAG-AA enforcement happens client-side in @geneweave/tokens.
+// ---------------------------------------------------------------------------
+
+export const TenantThemeTokensSchema = z
+  .object({
+    colors: z.record(z.string(), z.string()).optional(),
+    typography: z.object({ families: z.record(z.string(), z.string()).optional() }).passthrough().optional(),
+    radii: z.record(z.string(), z.number()).optional(),
+  })
+  .passthrough();
+export type TenantThemeTokens = z.infer<typeof TenantThemeTokensSchema>;
+
+export const TenantThemeResponseSchema = z
+  .object({ theme: TenantThemeTokensSchema.nullable().default(null) })
+  .passthrough();
+
+// ---------------------------------------------------------------------------
 // Tasks — GET/POST /api/me/tasks, complete, cancel
 // ---------------------------------------------------------------------------
 

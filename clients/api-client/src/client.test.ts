@@ -278,6 +278,34 @@ describe('tasks', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Theme: per-tenant design tokens
+// ---------------------------------------------------------------------------
+
+describe('theme', () => {
+  it('getTenantTheme unwraps { theme } into the token object', async () => {
+    const transport = fakeTransport({
+      routes: {
+        'GET /api/me/theme': () => ({
+          status: 200,
+          body: { theme: { colors: { accent: '#1FB6A5' }, radii: { md: 12 } } },
+        }),
+      },
+    });
+    const client = createGeneweaveClient({ host: 'https://x', tokenStore: new MemoryTokenStore(), transport });
+    const theme = await client.getTenantTheme();
+    expect(theme).toEqual({ colors: { accent: '#1FB6A5' }, radii: { md: 12 } });
+  });
+
+  it('getTenantTheme returns null when no override is configured', async () => {
+    const transport = fakeTransport({
+      routes: { 'GET /api/me/theme': () => ({ status: 200, body: { theme: null } }) },
+    });
+    const client = createGeneweaveClient({ host: 'https://x', tokenStore: new MemoryTokenStore(), transport });
+    expect(await client.getTenantTheme()).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Memories: CRUD + managed-by-org
 // ---------------------------------------------------------------------------
 
