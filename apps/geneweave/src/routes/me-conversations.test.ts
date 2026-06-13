@@ -91,6 +91,7 @@ interface StoredChat extends ConversationRow { user_id: string; _seq: number }
 
 function buildDb() {
   const chats = new Map<string, StoredChat>();
+  const messages = new Map<string, any[]>();
   let seq = 0;
 
   function seed(c: { id: string; userId: string; title: string; snippet?: string; mode?: string; pinned?: boolean; archived?: boolean; updatedAt?: string }) {
@@ -116,9 +117,29 @@ function buildDb() {
     return row;
   }
 
+  function seedMessage(m: { id: string; chatId: string; role: string; content: string; createdAt?: string }) {
+    const list = messages.get(m.chatId) ?? [];
+    list.push({
+      id: m.id,
+      chat_id: m.chatId,
+      role: m.role,
+      content: m.content,
+      metadata: null,
+      tokens_used: 0,
+      cost: 0,
+      latency_ms: 0,
+      created_at: m.createdAt ?? '2026-01-01T00:00:00.000Z',
+    });
+    messages.set(m.chatId, list);
+  }
+
   const db = {
     _seed: seed,
+    _seedMessage: seedMessage,
     _chats: chats,
+    async getMessages(chatId: string): Promise<any[]> {
+      return messages.get(chatId) ?? [];
+    },
     async listUserConversations(userId: string, opts: ConversationListOptions = {}): Promise<ConversationRow[]> {
       const filter = opts.filter ?? 'active';
       let rows = [...chats.values()].filter((c) => c.user_id === userId);
@@ -147,6 +168,7 @@ function buildDb() {
   };
   return db as unknown as DatabaseAdapter & {
     _seed: typeof seed;
+    _seedMessage: typeof seedMessage;
     _chats: Map<string, StoredChat>;
   };
 }
@@ -270,5 +292,59 @@ describe('SP2 /api/me/conversations', () => {
     const byId = Object.fromEntries(res.json().conversations.map((c: any) => [c.id, c.hasPendingAction]));
     expect(byId[convId]).toBe(true);
     expect(byId['c-clean']).toBe(false);
+  });
+});
+
+describe('SP2 GET /api/me/conversations/:id/messages', () => {
+  let router: ReturnType<typeof buildRouter>;
+  let db: ReturnType<typeof buildDb>;
+
+  beforeEach(() => {
+    router = buildRouter();
+    db = buildDb();
+    registerMeConversationsRoutes(router as any, db as any, {
+      pendingActionResolver: async () => new Set<string>(),
+    });
+  });
+
+  it('returns the visible transcript in chronological order', async () => {
+    db._seed({ id: 'c1', userId: 'user-1', title: 'Chat' });
+    db._seedMessage({ id: 'm1', chatId: 'c1', role: 'user', content: 'Who are you?', createdAt: '2026-01-01T00:00:01.000Z' });
+    db._seedMessage({ id: 'm2', chatId: 'c1', role: 'assistant', content: 'I am GeneWeave.', createdAt: '2026-01-01T00:00:02.000Z' });
+    const res = await router.dispatch('GET', '/api/me/conversations/c1/messages', '{}', AUTH);
+    expect(res.status).toBe(200);
+    const { messages } = res.json();
+    expect(messages).toEqual([
+      { id: 'm1', role: 'user', content: 'Who are you?', createdAt: '2026-01-01T00:00:01.000Z' },
+      { id: 'm2', role: 'assistant', content: 'I am GeneWeave.', createdAt: '2026-01-01T00:00:02.000Z' },
+    ]);
+  });
+
+  it('omits system and tool rows from the transcript', async () => {
+    db._seed({ id: 'c1', userId: 'user-1', title: 'Chat' });
+    db._seedMessage({ id: 'sys', chatId: 'c1', role: 'system', content: 'You are helpful.' });
+    db._seedMessage({ id: 'm1', chatId: 'c1', role: 'user', content: 'Hi' });
+    db._seedMessage({ id: 'tool', chatId: 'c1', role: 'tool', content: '{"result":1}' });
+    db._seedMessage({ id: 'm2', chatId: 'c1', role: 'assistant', content: 'Hello' });
+    const res = await router.dispatch('GET', '/api/me/conversations/c1/messages', '{}', AUTH);
+    expect(res.json().messages.map((m: any) => m.id)).toEqual(['m1', 'm2']);
+  });
+
+  it('hides cross-principal conversations behind a 404', async () => {
+    db._seed({ id: 'c1', userId: 'someone-else', title: 'Not yours' });
+    db._seedMessage({ id: 'm1', chatId: 'c1', role: 'user', content: 'secret' });
+    const res = await router.dispatch('GET', '/api/me/conversations/c1/messages', '{}', AUTH);
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 404 for an unknown conversation', async () => {
+    const res = await router.dispatch('GET', '/api/me/conversations/missing/messages', '{}', AUTH);
+    expect(res.status).toBe(404);
+  });
+
+  it('returns 401 when unauthenticated', async () => {
+    db._seed({ id: 'c1', userId: 'user-1', title: 'Chat' });
+    const res = await router.dispatch('GET', '/api/me/conversations/c1/messages', '{}', undefined);
+    expect(res.status).toBe(401);
   });
 });

@@ -236,6 +236,14 @@ export interface ChatSession {
    */
   attachExisting(runId: string, afterSequence?: number): void;
 
+  /**
+   * Seed the transcript with prior turns when re-opening a saved conversation.
+   * No-op unless the session is empty and idle, so it can never clobber an
+   * in-progress conversation or a turn the user already started. Safe to call
+   * after an async history fetch resolves.
+   */
+  hydrateHistory(entries: ChatEntry[]): void;
+
   /** OS app-state hooks for the detach window. */
   onBackground(): void;
   onForeground(): void;
@@ -383,6 +391,14 @@ export function createChatSession(opts: ChatSessionOptions): ChatSession {
 
     setComposerText(text) {
       patch({ composerText: text });
+    },
+
+    hydrateHistory(entries) {
+      if (entries.length === 0) return;
+      // Only seed an untouched, idle session — never overwrite a live or
+      // already-started conversation.
+      if (state.entries.length > 0 || state.activeRunId !== null || state.phase !== 'idle') return;
+      patch({ entries });
     },
 
     async send(text) {

@@ -94,6 +94,9 @@ export {
   type ChatRunClient,
 } from './chat/chat-session.js';
 export {
+  messagesToEntries,
+} from './chat/history.js';
+export {
   parseMarkdown,
   parseInline,
   type MarkdownBlock,

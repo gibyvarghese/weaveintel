@@ -52,6 +52,7 @@ import {
   CreatedMemorySchema,
   ConversationListSchema,
   ConversationPatchResultSchema,
+  ConversationMessagesSchema,
   RunEventEnvelopeSchema,
   type AuthSession,
   type MeUser,
@@ -69,6 +70,7 @@ import {
   type Memories,
   type CreatedMemory,
   type Conversation,
+  type ConversationMessage,
   type ConversationFilter,
   type RunEventEnvelope,
 } from './schemas.js';
@@ -201,6 +203,8 @@ export interface GeneweaveClient {
   // Conversations (SP2)
   listConversations(filter?: ListConversationsFilter): Promise<Conversation[]>;
   updateConversation(id: string, patch: { pinned?: boolean; archived?: boolean; title?: string }): Promise<Conversation>;
+  /** Transcript history for one of the caller's conversations (chronological). */
+  getConversationMessages(id: string): Promise<ConversationMessage[]>;
 }
 
 /** Wrap an outbox storage so its keys are isolated under `namespace`. */
@@ -565,6 +569,12 @@ export function createGeneweaveClient(opts: CreateGeneweaveClientOptions): Genew
       const raw = await send({ ...req, csrf: true, body: patch });
       if (!ok(raw.status)) fail(raw, req);
       return parse(ConversationPatchResultSchema, raw, req).conversation;
+    },
+    async getConversationMessages(id) {
+      const req = { method: 'GET' as const, path: `/api/me/conversations/${id}/messages` };
+      const raw = await send(req);
+      if (!ok(raw.status)) fail(raw, req);
+      return parse(ConversationMessagesSchema, raw, req).messages;
     },
   };
 

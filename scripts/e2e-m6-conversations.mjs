@@ -7,8 +7,7 @@
 //   4. PATCH pinned:true                      pins (round-trips into ?filter=pinned)
 //   5. PATCH archived:true                    hides from default view, shows in ?filter=archived
 //   6. PATCH title                            renames
-//   7. PATCH validation                       rejects bad bodies / cross-user ids (404)
-//
+//   7. PATCH validation                       rejects bad bodies / cross-user ids (404)//   8. GET  /:id/messages                     hydrates the saved transcript (history)//
 // Self-contained: seeds a handful of chats (+ a snippet message each) directly
 // into SQLite for the test user, exercises the authenticated API, then deletes
 // exactly what it seeded. No persona change required (a plain tenant_user owns
@@ -54,6 +53,31 @@ function seed() {
     sql(
       `INSERT INTO messages (id, chat_id, role, content, created_at) ` +
         `VALUES ('${id}-m', '${id}', 'assistant', ${JSON.stringify(s.snippet)}, ${ts});`,
+    );
+  }
+  // A dedicated multi-turn transcript for the history endpoint (user → assistant,
+  // plus a system row that must be filtered out of the visible transcript).
+  // Seeded archived so it stays out of the active-list assertions above; the
+  // messages endpoint serves it regardless of the archived flag.
+  const convId = `${TAG}-history`;
+  ids.history = convId;
+  const baseTs = `datetime('now', '-10 minutes')`;
+  sql(
+    `INSERT INTO chats (id, user_id, title, model, provider, pinned, archived, created_at, updated_at) ` +
+      `VALUES ('${convId}', '${userId}', ${JSON.stringify(`${TAG} history thread`)}, 'gpt', 'openai', 0, 1, ${baseTs}, ${baseTs});`,
+  );
+  const turns = [
+    { id: `${convId}-sys`, role: 'system', content: 'You are helpful.', off: 0 },
+    { id: `${convId}-u1`, role: 'user', content: 'Who are you?', off: 1 },
+    { id: `${convId}-a1`, role: 'assistant', content: 'I am GeneWeave.', off: 2 },
+    { id: `${convId}-u2`, role: 'user', content: 'What can you do?', off: 3 },
+    { id: `${convId}-a2`, role: 'assistant', content: 'Lots of things.', off: 4 },
+  ];
+  for (const t of turns) {
+    const ts = `datetime('now', '-10 minutes', '+${t.off} seconds')`;
+    sql(
+      `INSERT INTO messages (id, chat_id, role, content, created_at) ` +
+        `VALUES ('${t.id}', '${convId}', '${t.role}', ${JSON.stringify(t.content)}, ${ts});`,
     );
   }
   return { userId, ids };
@@ -145,6 +169,19 @@ async function main() {
     assert(badType.status === 400, `non-boolean pinned rejected (${badType.status})`);
     const missing = await req(`/api/me/conversations/does-not-exist-${randomUUID()}`, { method: 'PATCH', body: JSON.stringify({ pinned: true }) });
     assert(missing.status === 404, `unknown id is 404 (${missing.status})`);
+
+    // ── 8. transcript history (the empty-chat-window fix) ────────────────────
+    console.log('\n[8] GET /:id/messages (transcript hydration)');
+    const hist = await req(`/api/me/conversations/${ids.history}/messages`);
+    assert(hist.status === 200, `messages ok (${hist.status})`);
+    const msgs = hist.body.messages;
+    assert(Array.isArray(msgs) && msgs.length === 4, `only the 4 visible turns returned (got ${msgs?.length})`);
+    assert(msgs.every((m) => m.role === 'user' || m.role === 'assistant'), 'system row filtered out of transcript');
+    assert(msgs[0].role === 'user' && msgs[0].content === 'Who are you?', 'first turn is the user question (chronological)');
+    assert(msgs[1].role === 'assistant' && msgs[1].content === 'I am GeneWeave.', 'assistant reply follows in order');
+    assert(msgs.every((m) => typeof m.id === 'string' && typeof m.createdAt === 'string'), 'each message carries id + createdAt');
+    const histMissing = await req(`/api/me/conversations/does-not-exist-${randomUUID()}/messages`);
+    assert(histMissing.status === 404, `unknown conversation messages is 404 (${histMissing.status})`);
 
     console.log('\n✅ M6 conversations e2e passed');
   } finally {

@@ -263,3 +263,17 @@ export type Conversation = z.infer<typeof ConversationSchema>;
 
 export const ConversationListSchema = z.object({ conversations: z.array(ConversationSchema) });
 export const ConversationPatchResultSchema = z.object({ conversation: ConversationSchema });
+
+// A single transcript message (GET /api/me/conversations/:id/messages). Only
+// user/assistant turns are surfaced; role is left open for forward-compat.
+export const ConversationMessageSchema = z
+  .object({
+    id: z.string(),
+    role: z.string(),
+    content: z.string(),
+    createdAt: z.string(),
+  })
+  .passthrough();
+export type ConversationMessage = z.infer<typeof ConversationMessageSchema>;
+
+export const ConversationMessagesSchema = z.object({ messages: z.array(ConversationMessageSchema) });

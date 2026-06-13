@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import type { Catalog } from '@geneweave/api-client';
-import { createChatSession, type ChatSession, type ChatSessionState } from '../../lib';
+import { createChatSession, messagesToEntries, type ChatSession, type ChatSessionState } from '../../lib';
 import { useClient } from '../providers/auth-provider';
 
 /** Surface id sent on every run and used to resolve the catalog. */
@@ -42,9 +42,10 @@ export interface UseChatSession {
 export interface UseChatSessionOptions {
   /**
    * Resume an existing server-side conversation. When provided, runs target this
-   * chat id so new turns append to that conversation. NOTE (M6): this rebinds the
-   * session to the existing chat but does not hydrate prior messages into the
-   * transcript — full history replay + live re-attach is tracked separately.
+   * chat id so new turns append to that conversation, and the saved transcript
+   * is hydrated into the session on open (see the history-load effect below).
+   * Historical assistant turns are seeded as completed runs; only a still-live
+   * run (if any) is re-attached for streaming.
    */
   conversationId?: string;
 }
@@ -109,6 +110,29 @@ export function useChatSession(options: UseChatSessionOptions = {}): UseChatSess
 
   // Dispose the session when the client (tenant) goes away for good.
   useEffect(() => () => session.dispose(), [session]);
+
+  // Hydrate the saved transcript when resuming an existing conversation, so
+  // re-opening a chat shows its prior turns instead of an empty window. Keyed on
+  // [session, resumeId] — the session is itself rebuilt when resumeId changes, so
+  // each resumed conversation fetches its own history exactly once. Best-effort:
+  // a failed fetch leaves the (empty) transcript untouched and the chat still
+  // works for new turns. `hydrateHistory` no-ops if the user already started a
+  // turn before the fetch resolved.
+  useEffect(() => {
+    if (resumeId === undefined) return;
+    let cancelled = false;
+    client
+      .getConversationMessages(resumeId)
+      .then((messages) => {
+        if (!cancelled) session.hydrateHistory(messagesToEntries(messages));
+      })
+      .catch(() => {
+        // Graceful: history is optional — the conversation still accepts new turns.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session, resumeId, client]);
 
   // Load the surface catalog once per client.
   const [catalog, setCatalog] = useState<Catalog | null>(null);

@@ -149,4 +149,32 @@ export function registerMeConversationsRoutes(
     const pending = await resolvePending(auth.userId, [updated.id]);
     json(res, 200, { conversation: toConversationResponse(updated, auth.userId, pending.has(updated.id)) });
   }, { auth: true, csrf: true });
+
+  // GET /api/me/conversations/:id/messages — message history for one of the
+  // caller's conversations (transcript hydration when a chat is re-opened).
+  // Ownership is verified with getUserConversation, so a cross-principal or
+  // unknown id is hidden behind a 404 (no existence disclosure, matching PATCH).
+  router.get('/api/me/conversations/:id/messages', async (req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Unauthorized' }); return; }
+
+    const id = params['id']!;
+    const conversation = await db.getUserConversation(id, auth.userId);
+    if (!conversation) { json(res, 404, { error: 'Not found' }); return; }
+
+    const url = new URL(req.url ?? '', 'http://localhost');
+    const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? '500') || 500, 1), 1000);
+
+    const rows = await db.getMessages(id);
+    // Only user/assistant turns are part of the visible transcript; system and
+    // tool rows are internal. getMessages is already ASC by created_at.
+    const visible = rows.filter((m) => m.role === 'user' || m.role === 'assistant');
+    const messages = visible.slice(0, limit).map((m) => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      createdAt: m.created_at,
+    }));
+
+    json(res, 200, { messages });
+  }, { auth: true });
 }
