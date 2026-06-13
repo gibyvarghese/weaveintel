@@ -20,6 +20,8 @@
 import {
   Archive,
   ArrowUp,
+  BellRing,
+  CalendarClock,
   Check,
   ChevronRight,
   CircleAlert,
@@ -27,6 +29,7 @@ import {
   Ellipsis,
   Inbox,
   ListChecks,
+  ListTodo,
   LoaderCircle,
   MessageSquare,
   MessagesSquare,
@@ -35,8 +38,12 @@ import {
   PinOff,
   Plus,
   RefreshCw,
+  Repeat,
   Search,
+  ShieldCheck,
   SlidersHorizontal,
+  Clock,
+  Trash2,
   TriangleAlert,
   X,
   type LucideIcon,
@@ -63,6 +70,14 @@ export type IconName =
   | 'pending'
   | 'refresh'
   | 'empty'
+  // actions tab
+  | 'approval'
+  | 'task'
+  | 'reminder'
+  | 'snooze'
+  | 'delete'
+  | 'recurring'
+  | 'due'
   // shared chrome
   | 'check'
   | 'close'
@@ -87,6 +102,13 @@ const ICONS: Record<IconName, LucideIcon> = {
   pending: CircleAlert,
   refresh: RefreshCw,
   empty: Inbox,
+  approval: ShieldCheck,
+  task: ListTodo,
+  reminder: BellRing,
+  snooze: Clock,
+  delete: Trash2,
+  recurring: Repeat,
+  due: CalendarClock,
   check: Check,
   close: X,
   send: ArrowUp,

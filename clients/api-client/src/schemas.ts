@@ -134,6 +134,7 @@ export const TaskSchema = z
     createdAt: z.string().optional(),
     completedAt: z.string().nullable().optional(),
     provenance: z.record(z.string(), z.unknown()).optional(),
+    data: z.record(z.string(), z.unknown()).nullable().optional(),
   })
   .passthrough();
 export type Task = z.infer<typeof TaskSchema>;
@@ -170,6 +171,22 @@ export const ReminderSchema = z
     id: z.string(),
     label: z.string().optional(),
     ownerPrincipalId: z.string().optional(),
+    enabled: z.boolean().optional(),
+    source: z
+      .object({
+        kind: z.string().optional(),
+        config: z
+          .object({ fireAt: z.string().optional(), rrule: z.string().optional() })
+          .passthrough()
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
+    metadata: z
+      .object({ oneShot: z.boolean().optional(), label: z.string().optional() })
+      .passthrough()
+      .optional(),
+    provenance: z.record(z.string(), z.unknown()).nullable().optional(),
   })
   .passthrough();
 export type Reminder = z.infer<typeof ReminderSchema>;

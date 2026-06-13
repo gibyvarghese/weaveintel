@@ -138,3 +138,27 @@ export {
   type ConversationFlagPatch,
 } from './conversations/conversation-list.js';
 export { widgetFixtures, type WidgetFixture } from './widgets/widget-fixtures.js';
+
+// Actions tab logic (M7) — the pure brain behind Approvals / Tasks / Reminders.
+export {
+  isOpenTask,
+  isApproval,
+  isDueToday,
+  buildApprovals,
+  buildActionItems,
+  buildReminders,
+  reminderFireAt,
+  reminderIsRecurring,
+  reminderLabel,
+  reminderIsEnabled,
+  countActionsBadge,
+  removeTask,
+  removeReminder,
+  applyReminderReschedule,
+  snoozeTargetIso,
+  formatDueLabel,
+  taskConversationId,
+  reminderConversationId,
+  type ActionSegment,
+  type SnoozeChoice,
+} from './actions/action-list.js';

@@ -322,11 +322,17 @@ export function registerMeRoutes(
   router.post('/api/me/tasks', async (req, res, _params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
+    // `actionable` marks a task that requires an explicit approve/deny decision
+    // (an "approval") versus a plain to-do ("action item"). It is persisted on
+    // the task so the Approvals vs Action-items split is grounded in real data,
+    // not a client-side heuristic.
+    const actionable = body['actionable'] === true;
     const task = createActionItem({
       assignee: auth.userId,
       title: String(body['title'] ?? 'Untitled task'),
       description: typeof body['description'] === 'string' ? body['description'] : undefined,
       dueAt: typeof body['dueAt'] === 'string' ? body['dueAt'] : undefined,
+      data: { actionable },
       provenance: typeof body['provenance'] === 'object' && body['provenance'] !== null
         ? body['provenance'] as { sourceRunId?: string; sourceRef?: string; createdBy: 'agent'|'principal'|'system' }
         : { sourceRef: 'api', createdBy: 'principal' as const },
@@ -335,7 +341,7 @@ export function registerMeRoutes(
     if (notifications) {
       void notifications.notifyTask(
         { id: task.id, assignee: task.assignee, title: task.title, ...(auth.tenantId ? { tenantId: auth.tenantId } : {}) },
-        { actionable: body['actionable'] === true },
+        { actionable },
       ).catch(() => {});
     }
     res.writeHead(201, { 'Content-Type': 'application/json' });
