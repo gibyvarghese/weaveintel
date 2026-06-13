@@ -12,6 +12,7 @@ import { useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import type { ChatPhase } from '../../../lib';
 import { useTheme } from '../../providers/theme-provider';
+import { useVoice } from '../../voice/use-voice';
 import { Icon } from '../icon';
 
 export interface ComposerProps {
@@ -28,6 +29,16 @@ export function Composer({ text, phase, onChangeText, onSend, onStop, onOpenOpti
   const producing = phase !== 'idle';
   const canSend = text.trim().length > 0;
   const [attachNotice, setAttachNotice] = useState(false);
+  const voice = useVoice({ onText: onChangeText });
+
+  function onMicPress() {
+    if (!voice.isSupported) {
+      // Surface the friendly "needs a dev build" hint rather than failing.
+      voice.start(text);
+      return;
+    }
+    voice.toggle(text);
+  }
 
   return (
     <View
@@ -51,6 +62,19 @@ export function Composer({ text, phase, onChangeText, onSend, onStop, onOpenOpti
           }}
         >
           Attachments are coming soon.
+        </Text>
+      ) : null}
+
+      {voice.message ? (
+        <Text
+          style={{
+            color: theme.colors.textMuted,
+            fontFamily: theme.typography.families.body,
+            fontSize: theme.typography.scale.caption.fontSize,
+            paddingHorizontal: theme.spacing.sm,
+          }}
+        >
+          {voice.message}
         </Text>
       ) : null}
 
@@ -107,6 +131,25 @@ export function Composer({ text, phase, onChangeText, onSend, onStop, onOpenOpti
         >
           <Icon name="options" size="sm" tone="inactive" />
         </Pressable>
+
+        {/* Voice dictation. Default engine is unsupported in Expo Go and shows a
+            hint; a dev build wires the real recognizer via the registry. */}
+        {producing ? null : (
+          <Pressable
+            accessibilityLabel={voice.isActive ? 'Stop dictation' : 'Dictate message'}
+            onPress={onMicPress}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: theme.radii.pill,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: voice.isActive ? theme.colors.accentSoft : theme.colors.surface,
+            }}
+          >
+            <Icon name={voice.isActive ? 'mic' : 'micOff'} size="sm" tone={voice.isActive ? 'accent' : 'inactive'} />
+          </Pressable>
+        )}
 
         {producing ? (
           <Pressable

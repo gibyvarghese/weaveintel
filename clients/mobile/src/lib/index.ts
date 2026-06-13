@@ -162,3 +162,70 @@ export {
   type ActionSegment,
   type SnoozeChoice,
 } from './actions/action-list.js';
+
+// Profile logic (M8) — the pure brain behind the Profile tree.
+export {
+  canManageOnWeb,
+  buildManageUrl,
+  displayName,
+  avatarInitials,
+  personaLabel,
+} from './profile/profile-view.js';
+
+// Memory logic (M8) — the pure brain behind the Memory screens.
+export {
+  MEMORY_KIND_ORDER,
+  MEMORY_CONTENT_MAX,
+  CLEAR_ALL_CONFIRM_PHRASE,
+  memoryKindLabel,
+  memoryKindIcon,
+  memoriesForKind,
+  countMemories,
+  provenanceLabel,
+  memoryConversationId,
+  memoryIsLocked,
+  validateMemoryContent,
+  isClearAllConfirmed,
+  removeMemoryItem,
+  addAuthoredMemory,
+  applyCorrection,
+  clearAllMemories,
+  type MemoryKind,
+  type MemoryGroups,
+  type MemoryContentValidation,
+} from './memory/memory-list.js';
+
+// Settings logic (M8) — notification preferences + quiet hours (tz-encoded).
+export {
+  NOTIFICATION_CATEGORIES,
+  defaultNotificationPreferences,
+  normalizeNotificationPreferences,
+  isCategoryEnabled,
+  toggleCategory,
+  encodeQuietHours,
+  decodeQuietHours,
+  quietHoursLabel,
+  isWithinQuietHours,
+  shouldSuppressPush,
+  type NotificationCategory,
+  type QuietHours,
+} from './settings/notification-prefs.js';
+
+// Voice dictation logic (M8) — the pure brain behind mic-to-composer.
+export {
+  VOICE_SESSION_SCHEMA_VERSION,
+  emptyVoiceState,
+  startVoice,
+  voiceGranted,
+  voicePartial,
+  voiceFinal,
+  stopVoice,
+  failVoice,
+  markVoiceUnsupported,
+  resetVoice,
+  isVoiceActive,
+  voiceTranscript,
+  composedText,
+  type VoiceStatus,
+  type VoiceState,
+} from './voice/voice-session.js';

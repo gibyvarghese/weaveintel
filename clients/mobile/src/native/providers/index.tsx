@@ -44,3 +44,4 @@ export function AppProviders({ children, themePreference, tenantTheme }: AppProv
 
 export { useTheme } from './theme-provider';
 export { useAuth, useClient } from './auth-provider';
+export { AppearanceProvider, useAppearance } from './appearance-provider';

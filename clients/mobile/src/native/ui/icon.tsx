@@ -20,28 +20,43 @@
 import {
   Archive,
   ArrowUp,
+  Bell,
   BellRing,
+  Brain,
   CalendarClock,
   Check,
+  ChevronLeft,
   ChevronRight,
   CircleAlert,
   CircleUser,
+  Database,
   Ellipsis,
+  ExternalLink,
   Inbox,
+  Info,
   ListChecks,
   ListTodo,
   LoaderCircle,
+  Lock,
+  LogOut,
   MessageSquare,
   MessagesSquare,
+  Mic,
+  MicOff,
+  Moon,
+  Palette,
   Pencil,
   Pin,
   PinOff,
   Plus,
+  Quote,
   RefreshCw,
   Repeat,
   Search,
+  Settings,
   ShieldCheck,
   SlidersHorizontal,
+  Tag,
   Clock,
   Trash2,
   TriangleAlert,
@@ -84,7 +99,25 @@ export type IconName =
   | 'send'
   | 'add'
   | 'options'
-  | 'error';
+  | 'error'
+  // M8 — profile / memory / settings / voice
+  | 'account'
+  | 'web'
+  | 'locked'
+  | 'memory'
+  | 'entity'
+  | 'authored'
+  | 'notifications'
+  | 'appearance'
+  | 'security'
+  | 'data'
+  | 'mic'
+  | 'micOff'
+  | 'signout'
+  | 'settings'
+  | 'info'
+  | 'quiet'
+  | 'back';
 
 const ICONS: Record<IconName, LucideIcon> = {
   chat: MessageSquare,
@@ -115,6 +148,23 @@ const ICONS: Record<IconName, LucideIcon> = {
   add: Plus,
   options: SlidersHorizontal,
   error: TriangleAlert,
+  account: CircleUser,
+  web: ExternalLink,
+  locked: Lock,
+  memory: Brain,
+  entity: Tag,
+  authored: Quote,
+  notifications: Bell,
+  appearance: Palette,
+  security: ShieldCheck,
+  data: Database,
+  mic: Mic,
+  micOff: MicOff,
+  signout: LogOut,
+  settings: Settings,
+  info: Info,
+  quiet: Moon,
+  back: ChevronLeft,
 };
 
 /** Icon sizes snap to the 4pt grid. */

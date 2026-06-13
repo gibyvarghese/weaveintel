@@ -20,7 +20,7 @@ import { Fraunces_400Regular } from '@expo-google-fonts/fraunces';
 import { PlusJakartaSans_400Regular } from '@expo-google-fonts/plus-jakarta-sans';
 import { DMMono_400Regular } from '@expo-google-fonts/dm-mono';
 import { ActivityIndicator, View } from 'react-native';
-import { AppProviders, useAuth, useTheme } from '../src/native/providers';
+import { AppProviders, AppearanceProvider, useAppearance, useAuth, useTheme } from '../src/native/providers';
 import { useProtectedRoute } from '../src/native/navigation/use-protected-route';
 
 void SplashScreen.preventAutoHideAsync();
@@ -41,7 +41,17 @@ export default function RootLayout() {
   if (!fontsLoaded) return null;
 
   return (
-    <AppProviders>
+    <AppearanceProvider>
+      <ThemedApp />
+    </AppearanceProvider>
+  );
+}
+
+/** Reads the local appearance preference and feeds it into the theme tree. */
+function ThemedApp() {
+  const { preference } = useAppearance();
+  return (
+    <AppProviders themePreference={preference}>
       <RootNavigator />
     </AppProviders>
   );
@@ -64,6 +74,9 @@ function RootNavigator() {
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.colors.background } }}>
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
+      {/* Pushed account sub-screens (slide over the tabs). */}
+      <Stack.Screen name="memory" />
+      <Stack.Screen name="settings" />
       {/* Dev-only widget gallery (renders every render kind from fixtures). */}
       <Stack.Screen name="widget-gallery" options={{ presentation: 'modal' }} />
     </Stack>

@@ -1,20 +1,23 @@
 /**
- * (tabs)/profile.tsx — account + security settings.
+ * (tabs)/profile.tsx — the account hub (M8).
  *
- * Shows the signed-in user and the connected server, lets the user toggle the
- * biometric gate (persisted via the controller), and signs out. All actions
- * delegate to the pure auth controller.
+ * Identity card + entry points to Memory and Settings, plus inline security
+ * controls (biometric gate, sign-out) and a persona-gated "Manage on web →"
+ * link. Identity/persona derivation lives in {@link useProfile}; biometric +
+ * sign-out delegate to the pure auth controller. Memory/Settings are pushed as
+ * root Stack screens so they slide over the tab bar.
  */
 import { useState } from 'react';
-import { Switch, View } from 'react-native';
-import { useAuth, useTheme } from '../../src/native/providers';
-import { Screen, Heading, Body, PrimaryButton } from '../../src/native/ui/primitives';
+import { Linking } from 'react-native';
+import { router } from 'expo-router';
+import { useAuth } from '../../src/native/providers';
+import { useProfile } from '../../src/native/profile/use-profile';
+import { ProfileHeader } from '../../src/native/ui/profile/profile-header';
+import { ListScreen, ScreenHeader, Section, NavRow, SwitchRow, RowDivider, SectionNote } from '../../src/native/ui/list';
 
 export default function ProfileScreen() {
-  const { controller, state } = useAuth();
-  const { theme } = useTheme();
-  const user = state.status === 'authenticated' ? state.user : undefined;
-  const host = state.status === 'authenticated' ? state.host : undefined;
+  const { controller } = useAuth();
+  const { name, initials, persona, host, canManageWeb, manageUrl } = useProfile();
 
   const biometricAvailable = controller.isBiometricAvailable();
   const [biometricOn, setBiometricOn] = useState(controller.isBiometricEnabled());
@@ -24,25 +27,41 @@ export default function ProfileScreen() {
     await controller.setBiometricEnabled(next);
   }
 
-  return (
-    <Screen>
-      <Heading>Profile</Heading>
-      {user ? <Body>{user.name || user.email}</Body> : null}
-      {user ? <Body muted>{user.email}</Body> : null}
-      {host ? <Body muted>{host}</Body> : null}
+  function openManageWeb() {
+    if (manageUrl) void Linking.openURL(manageUrl);
+  }
 
-      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: theme.spacing.lg }}>
-        <Body>Require biometric unlock</Body>
-        <Switch
+  return (
+    <ListScreen>
+      <ScreenHeader title="Profile" />
+      <ProfileHeader name={name} initials={initials} persona={persona} host={host} />
+
+      <Section>
+        <NavRow icon="memory" label="Memory" sublabel="What the assistant remembers" onPress={() => router.push('/memory')} />
+        <RowDivider />
+        <NavRow icon="settings" label="Settings" sublabel="Notifications, appearance, privacy" onPress={() => router.push('/settings')} />
+      </Section>
+
+      {canManageWeb ? (
+        <Section title="Organization">
+          <NavRow icon="web" iconTone="accent" label="Manage on web" labelTone="accent" sublabel="Admin console" onPress={openManageWeb} />
+        </Section>
+      ) : null}
+
+      <Section title="Security">
+        <SwitchRow
+          icon="security"
+          label="Require biometric unlock"
+          {...(biometricAvailable ? {} : { sublabel: 'No biometrics enrolled on this device' })}
           value={biometricOn}
           onValueChange={(v) => void onToggleBiometric(v)}
           disabled={!biometricAvailable}
-          trackColor={{ true: theme.colors.accent, false: theme.colors.surfaceElevated }}
         />
-      </View>
-      {!biometricAvailable ? <Body muted>No biometrics enrolled on this device.</Body> : null}
+        <RowDivider />
+        <NavRow icon="signout" iconTone="danger" label="Sign out" labelTone="danger" onPress={() => void controller.signOut()} />
+      </Section>
 
-      <PrimaryButton label="Sign out" onPress={() => void controller.signOut()} />
-    </Screen>
+      <SectionNote>Signed in as {persona}. Memory and notification preferences sync to your account.</SectionNote>
+    </ListScreen>
   );
 }
