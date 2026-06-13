@@ -181,6 +181,7 @@ export {
   memoryKindIcon,
   memoriesForKind,
   countMemories,
+  defaultMemoryKind,
   provenanceLabel,
   memoryConversationId,
   memoryIsLocked,

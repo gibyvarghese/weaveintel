@@ -65,6 +65,16 @@ export function countMemories(groups: MemoryGroups): number {
   return MEMORY_KIND_ORDER.reduce((sum, kind) => sum + (groups[kind]?.length ?? 0), 0);
 }
 
+/**
+ * The kind a freshly-loaded Memory screen should open on: the first kind (in
+ * display order) that actually has rows, so a user whose only memory is an
+ * extracted entity or a learned insight lands on a populated tab instead of an
+ * empty "Your notes". Falls back to 'user-authored' when everything is empty.
+ */
+export function defaultMemoryKind(groups: MemoryGroups): MemoryKind {
+  return MEMORY_KIND_ORDER.find((kind) => (groups[kind]?.length ?? 0) > 0) ?? 'user-authored';
+}
+
 // ---------------------------------------------------------------------------
 // Provenance
 // ---------------------------------------------------------------------------

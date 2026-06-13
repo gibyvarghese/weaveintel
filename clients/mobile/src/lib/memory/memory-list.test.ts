@@ -11,6 +11,7 @@ import {
   applyCorrection,
   clearAllMemories,
   countMemories,
+  defaultMemoryKind,
   isClearAllConfirmed,
   memoriesForKind,
   memoryConversationId,
@@ -58,6 +59,27 @@ describe('memoriesForKind / countMemories', () => {
     expect(memoriesForKind(g, 'entity').map((m) => m.id)).toEqual(['e1', 'e2']);
     expect(memoriesForKind(g, 'entity')).not.toBe(g.entity);
     expect(countMemories(g)).toBe(4);
+  });
+});
+
+describe('defaultMemoryKind', () => {
+  it('falls back to user-authored when everything is empty', () => {
+    expect(defaultMemoryKind(groups())).toBe('user-authored');
+  });
+
+  it('prefers user-authored when notes exist', () => {
+    const g = groups({
+      'user-authored': [item({ id: 'u1', kind: 'user-authored' })],
+      entity: [item({ id: 'e1', kind: 'entity' })],
+    });
+    expect(defaultMemoryKind(g)).toBe('user-authored');
+  });
+
+  it('opens on the first populated tab when notes are empty', () => {
+    const entityOnly = groups({ entity: [item({ id: 'e1', kind: 'entity' })] });
+    expect(defaultMemoryKind(entityOnly)).toBe('entity');
+    const learnedOnly = groups({ semantic: [item({ id: 's1' })] });
+    expect(defaultMemoryKind(learnedOnly)).toBe('semantic');
   });
 });
 

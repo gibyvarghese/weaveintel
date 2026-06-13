@@ -8,12 +8,13 @@
  * grouping/provenance/validation lives in the pure brain; mutations + optimistic
  * state live in {@link useMemory}. This screen is a thin renderer.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Pressable, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import type { MemoryItem } from '@geneweave/api-client';
 import {
   CLEAR_ALL_CONFIRM_PHRASE,
+  defaultMemoryKind,
   isClearAllConfirmed,
   memoriesForKind,
   memoryKindLabel,
@@ -37,6 +38,20 @@ export default function MemoryScreen() {
   const [editing, setEditing] = useState<MemoryItem | null>(null);
   const [clearOpen, setClearOpen] = useState(false);
   const [confirmText, setConfirmText] = useState('');
+
+  // Once memory first loads, open on the first populated tab so an extracted
+  // entity or learned insight is visible immediately — but never override a
+  // tab the user has tapped themselves.
+  const userPicked = useRef(false);
+  useEffect(() => {
+    if (isLoading || userPicked.current) return;
+    setActiveKind(defaultMemoryKind(groups));
+  }, [isLoading, groups]);
+
+  function selectKind(kind: MemoryKind) {
+    userPicked.current = true;
+    setActiveKind(kind);
+  }
 
   const counts: Record<MemoryKind, number> = useMemo(
     () => ({
@@ -81,7 +96,7 @@ export default function MemoryScreen() {
         </View>
       ) : null}
 
-      <MemoryKindTabs active={activeKind} onChange={setActiveKind} counts={counts} />
+      <MemoryKindTabs active={activeKind} onChange={selectKind} counts={counts} />
 
       {error ? <ErrorText>{error}</ErrorText> : null}
 
