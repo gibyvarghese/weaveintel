@@ -39,8 +39,19 @@ export interface UseChatSession {
   setOption: (kind: string, id: string) => void;
 }
 
-export function useChatSession(): UseChatSession {
+export interface UseChatSessionOptions {
+  /**
+   * Resume an existing server-side conversation. When provided, runs target this
+   * chat id so new turns append to that conversation. NOTE (M6): this rebinds the
+   * session to the existing chat but does not hydrate prior messages into the
+   * transcript — full history replay + live re-attach is tracked separately.
+   */
+  conversationId?: string;
+}
+
+export function useChatSession(options: UseChatSessionOptions = {}): UseChatSession {
   const client = useClient();
+  const resumeId = options.conversationId;
 
   // The current option selection. A ref mirrors it so the session's
   // `runMetadata` closure (created once) always reads the latest selection.
@@ -48,16 +59,23 @@ export function useChatSession(): UseChatSession {
   const selectionRef = useRef(selectedOptions);
   selectionRef.current = selectedOptions;
 
-  // One session per client instance (i.e. per tenant/host). Rebuilt only if the
-  // composition root hands us a different client.
-  const sessionRef = useRef<{ client: typeof client; session: ChatSession } | null>(null);
-  if (!sessionRef.current || sessionRef.current.client !== client) {
+  // One session per client instance (i.e. per tenant/host), rebuilt when the
+  // composition root hands us a different client OR a different conversation to
+  // resume.
+  const sessionRef = useRef<{ client: typeof client; conversationId: string; session: ChatSession } | null>(null);
+  const needsRebuild =
+    !sessionRef.current ||
+    sessionRef.current.client !== client ||
+    (resumeId !== undefined && resumeId !== sessionRef.current.conversationId);
+  if (needsRebuild) {
     sessionRef.current?.session.dispose();
-    // One stable conversation token per session lifetime, so multi-turn history
-    // resolves to the same server-side chat across runs.
-    const conversationId = makeId('chat');
+    // A stable conversation token for this session lifetime, so multi-turn
+    // history resolves to the same server-side chat across runs. When resuming,
+    // adopt the caller-supplied id instead of minting a fresh one.
+    const conversationId = resumeId ?? makeId('chat');
     sessionRef.current = {
       client,
+      conversationId,
       session: createChatSession({
         client,
         surface: SURFACE,
@@ -72,7 +90,7 @@ export function useChatSession(): UseChatSession {
       }),
     };
   }
-  const session = sessionRef.current.session;
+  const session = sessionRef.current!.session;
 
   const state = useSyncExternalStore(session.subscribe, session.getState, session.getState);
 

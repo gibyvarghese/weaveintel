@@ -75,6 +75,7 @@ export {
   type OutboxFlushResult,
   type RunViewModel,
   type StreamItem,
+  type ToolCallView,
   type StartRunInput,
 } from '@weaveintel/client';
 

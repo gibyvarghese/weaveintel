@@ -118,4 +118,20 @@ export {
   type ActionSpec,
   type FormFieldSpec,
 } from './widgets/widget-spec.js';
+
+// Conversation list logic (M6) — the pure brain behind the Chats tab.
+export {
+  isActiveRunStatus,
+  filterConversations,
+  sectionizeConversations,
+  buildConversationView,
+  applyConversationPatch,
+  countConversations,
+  formatRelativeTimestamp,
+  type ConversationSection,
+  type ConversationSectionId,
+  type ConversationChip,
+  type ConversationQuery,
+  type ConversationFlagPatch,
+} from './conversations/conversation-list.js';
 export { widgetFixtures, type WidgetFixture } from './widgets/widget-fixtures.js';

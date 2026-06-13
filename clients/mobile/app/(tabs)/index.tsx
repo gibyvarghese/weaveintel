@@ -15,6 +15,7 @@
 import { useCallback, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useLocalSearchParams } from 'expo-router';
 import { useChatSession } from '../../src/native/chat/use-chat-session';
 import { useTheme } from '../../src/native/providers/theme-provider';
 import { Composer } from '../../src/native/ui/chat/composer';
@@ -25,7 +26,12 @@ import type { AssistantEntry, UserEntry } from '../../src/lib';
 
 export default function ChatScreen() {
   const { theme } = useTheme();
-  const { state, session, catalog, selectedOptions, setOption } = useChatSession();
+  // Optional `?conversationId=` set when resuming from the Chats tab. Binds the
+  // session to that server-side chat (history hydration is a known M6 follow-up).
+  const params = useLocalSearchParams<{ conversationId?: string }>();
+  const { state, session, catalog, selectedOptions, setOption } = useChatSession(
+    params.conversationId ? { conversationId: params.conversationId } : {},
+  );
 
   const [optionsOpen, setOptionsOpen] = useState(false);
   // When set, the composer's text is an edit of a prior user message; sending

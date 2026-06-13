@@ -12,6 +12,7 @@
 import { Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import type { Catalog } from '@geneweave/api-client';
 import { useTheme } from '../../providers/theme-provider';
+import { Icon } from '../icon';
 
 /** A single catalog entry, narrowed from the loosely-typed catalog payload. */
 interface Entry {
@@ -151,7 +152,7 @@ export function OptionsSheet({ visible, catalog, selected, onSelect, onClose }: 
                         ) : null}
                       </View>
                       {isSelected ? (
-                        <Text style={{ color: theme.colors.accent, fontSize: 16 }}>{'\u2713'}</Text>
+                        <Icon name="check" size="sm" tone="accent" />
                       ) : null}
                     </Pressable>
                   );

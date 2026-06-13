@@ -1,16 +1,60 @@
 /**
- * (tabs)/chats.tsx — conversation history (placeholder).
+ * (tabs)/chats.tsx — the M6 Chats surface.
  *
- * The conversation list (consuming `listConversations` / `updateConversation`)
- * is built in a later milestone; M3 ships the navigation shell.
+ * Device-gated screen holding **no** list logic: it composes the
+ * {@link useConversations} hook (debounced server search + optimistic mutations)
+ * with the presentational {@link ConversationList} and {@link ConversationActionsSheet}.
+ * Sectioning/filtering is computed by the pure brain in `src/lib`. Tapping a row
+ * resumes the conversation on the Chat tab via a `conversationId` route param;
+ * long-press opens pin / archive / rename actions.
  */
-import { Screen, Heading, Body } from '../../src/native/ui/primitives';
+import { useCallback, useState } from 'react';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import type { Conversation } from '@geneweave/api-client';
+import { useTheme } from '../../src/native/providers/theme-provider';
+import { useConversations } from '../../src/native/chat/use-conversations';
+import { ConversationList } from '../../src/native/ui/conversations/conversation-list';
+import { ConversationActionsSheet } from '../../src/native/ui/conversations/conversation-actions-sheet';
+import type { ConversationChip } from '../../src/lib';
 
 export default function ChatsScreen() {
+  const { theme } = useTheme();
+  const router = useRouter();
+
+  const [query, setQuery] = useState('');
+  const [chip, setChip] = useState<ConversationChip>('all');
+  const [actionTarget, setActionTarget] = useState<Conversation | null>(null);
+
+  const { sections, isLoading, isRefetching, isError, refetch, setFlags } = useConversations({ query, chip });
+
+  const handlePressRow = useCallback(
+    (conversation: Conversation) => {
+      router.push({ pathname: '/(tabs)', params: { conversationId: conversation.id } });
+    },
+    [router],
+  );
+
   return (
-    <Screen>
-      <Heading>Chats</Heading>
-      <Body muted>Past conversations will appear here.</Body>
-    </Screen>
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.background }}>
+      <ConversationList
+        sections={sections}
+        isLoading={isLoading}
+        isRefetching={isRefetching}
+        isError={isError}
+        query={query}
+        chip={chip}
+        onQueryChange={setQuery}
+        onChipChange={setChip}
+        onRefresh={refetch}
+        onPressRow={handlePressRow}
+        onLongPressRow={setActionTarget}
+      />
+      <ConversationActionsSheet
+        conversation={actionTarget}
+        onClose={() => setActionTarget(null)}
+        onApply={setFlags}
+      />
+    </SafeAreaView>
   );
 }

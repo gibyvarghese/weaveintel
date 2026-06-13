@@ -8,6 +8,7 @@
  */
 import { Tabs } from 'expo-router';
 import { useTheme } from '../../src/native/providers';
+import { Icon } from '../../src/native/ui/icon';
 
 export default function TabsLayout() {
   const { theme } = useTheme();
@@ -15,8 +16,10 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        // Active = accent (the one sanctioned accent use for tab indication);
+        // inactive = secondary text per the monochrome icon rules.
         tabBarActiveTintColor: theme.colors.accent,
-        tabBarInactiveTintColor: theme.colors.textMuted,
+        tabBarInactiveTintColor: theme.colors.textSecondary,
         tabBarStyle: {
           backgroundColor: theme.colors.surface,
           borderTopColor: theme.colors.surfaceElevated,
@@ -24,10 +27,22 @@ export default function TabsLayout() {
         tabBarLabelStyle: { fontFamily: theme.typography.families.body },
       }}
     >
-      <Tabs.Screen name="index" options={{ title: 'Chat' }} />
-      <Tabs.Screen name="chats" options={{ title: 'Chats' }} />
-      <Tabs.Screen name="actions" options={{ title: 'Actions' }} />
-      <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
+      <Tabs.Screen
+        name="index"
+        options={{ title: 'Chat', tabBarIcon: ({ color }) => <Icon name="chat" size="lg" color={color} /> }}
+      />
+      <Tabs.Screen
+        name="chats"
+        options={{ title: 'Chats', tabBarIcon: ({ color }) => <Icon name="chats" size="lg" color={color} /> }}
+      />
+      <Tabs.Screen
+        name="actions"
+        options={{ title: 'Actions', tabBarIcon: ({ color }) => <Icon name="actions" size="lg" color={color} /> }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{ title: 'Profile', tabBarIcon: ({ color }) => <Icon name="profile" size="lg" color={color} /> }}
+      />
     </Tabs>
   );
 }

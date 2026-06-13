@@ -6,12 +6,13 @@
  * button (cancels in well under 500ms via the controller's `stop()`), otherwise
  * a **Send** button. The leading ＋ opens the attachment menu — currently
  * surfaced as "coming soon" because no user-scoped upload route exists yet
- * (flagged, not silently stubbed). The ⚙ opens the options sheet.
+ * (flagged, not silently stubbed). The options affordance opens the options sheet.
  */
 import { useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
 import type { ChatPhase } from '../../../lib';
 import { useTheme } from '../../providers/theme-provider';
+import { Icon } from '../icon';
 
 export interface ComposerProps {
   text: string;
@@ -67,7 +68,7 @@ export function Composer({ text, phase, onChangeText, onSend, onStop, onOpenOpti
             backgroundColor: theme.colors.surface,
           }}
         >
-          <Text style={{ color: theme.colors.textSecondary, fontSize: 22, lineHeight: 26 }}>＋</Text>
+          <Icon name="add" size="md" tone="inactive" />
         </Pressable>
 
         <TextInput
@@ -104,7 +105,7 @@ export function Composer({ text, phase, onChangeText, onSend, onStop, onOpenOpti
             backgroundColor: theme.colors.surface,
           }}
         >
-          <Text style={{ color: theme.colors.textSecondary, fontSize: 18 }}>⚙</Text>
+          <Icon name="options" size="sm" tone="inactive" />
         </Pressable>
 
         {producing ? (
@@ -137,7 +138,7 @@ export function Composer({ text, phase, onChangeText, onSend, onStop, onOpenOpti
               opacity: canSend ? 1 : 0.6,
             }}
           >
-            <Text style={{ color: theme.colors.onAccent, fontSize: 18, fontWeight: '700' }}>↑</Text>
+            <Icon name="send" size="sm" tone="onAccent" />
           </Pressable>
         )}
       </View>
