@@ -28,7 +28,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  Chrome,
   CircleAlert,
   CircleUser,
   Database,
@@ -123,8 +122,9 @@ export type IconName =
   | 'info'
   | 'quiet'
   | 'back'
-  // OAuth / social sign-in providers (lucide outline brand glyphs)
-  | 'oauthGoogle'
+  // OAuth / social sign-in providers (lucide outline brand glyphs).
+  // Google is intentionally absent: its logo is a locked 4-color brand mark
+  // rendered by ProviderMark, not a monochrome glyph.
   | 'oauthGithub'
   | 'oauthMicrosoft'
   | 'oauthApple'
@@ -178,7 +178,7 @@ const ICONS: Record<IconName, LucideIcon> = {
   back: ChevronLeft,
   // OAuth providers — lucide has outline brand glyphs for these; Microsoft has
   // no brand glyph, so a neutral grid mark stands in (still outline/monochrome).
-  oauthGoogle: Chrome,
+  // Google is not here: its official 4-color logo is rendered by ProviderMark.
   oauthGithub: Github,
   oauthMicrosoft: LayoutGrid,
   oauthApple: Apple,

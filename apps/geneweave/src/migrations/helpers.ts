@@ -37,15 +37,18 @@ export function createMigrationRunner(batches: MigrationBatch[]): {
 export function safeExec(db: BetterSqlite3.Database, sql: string): void {
   try {
     db.exec(sql);
-  } catch {
-    // Ignore migration errors so existing databases can continue bootstrapping.
+  } catch (err) {
+    // Log but continue — lets existing databases bootstrap past already-applied statements.
+    console.warn('[migration] safeExec skipped statement:', (err as Error).message);
   }
-  // ─── M16 — Phase K7b: Adversarial validation, finalizer, CV/LB gap ──────
-  // Design doc: docs/KAGGLE_AGENT_DESIGN.md §8b.3 (Phase K7b).
-  //
-  // (1) ALTER kaggle_runs: add private_score, is_final_pick, finalized_at, cv_lb_gap
-  // (2) Seed kaggle.local.adversarial_validation tool_catalog row (disabled)
-  // (3) Seed kaggle_finalizer skill (enabled=1, priority 80)
+}
+
+// ── M16/M17 — Kaggle Phase K7b + K7c ────────────────────────────────────────
+// Extracted from safeExec (where it was erroneously embedded and firing on every
+// call). Call once at the end of applyM11_M18, after kaggle_runs exists.
+
+export function applyKagglePhaseK7bK7c(db: BetterSqlite3.Database): void {
+  // M16 — Phase K7b: add private_score, is_final_pick, finalized_at, cv_lb_gap
   const k7bAlters = [
     `ALTER TABLE kaggle_runs ADD COLUMN private_score REAL`,
     `ALTER TABLE kaggle_runs ADD COLUMN is_final_pick INTEGER NOT NULL DEFAULT 0`,
@@ -56,11 +59,7 @@ export function safeExec(db: BetterSqlite3.Database, sql: string): void {
     try { db.exec(sql); } catch { /* column already exists */ }
   }
 
-  // ─── M17 — Phase K7c: kernel-based hyperparameter search, iterator ──────
-  // Design doc: docs/KAGGLE_AGENT_DESIGN.md §8b.4 (Phase K7c).
-  // (1) ALTER kaggle_runs: add kernel_ref, kernel_outputs, search_results
-  // (2) Seed kaggle.kernel.optimize_hyperparams tool_catalog row (disabled)
-  // (3) Seed kaggle_iterator skill (enabled=1, priority 60)
+  // M17 — Phase K7c: add kernel_ref, kernel_outputs, search_results
   const k7cAlters = [
     `ALTER TABLE kaggle_runs ADD COLUMN kernel_ref TEXT`,
     `ALTER TABLE kaggle_runs ADD COLUMN kernel_outputs TEXT`,

@@ -41,9 +41,9 @@ describe('parseAuthProviders', () => {
 });
 
 describe('parseNativeOAuthCallback', () => {
-  it('extracts the session from an app-scheme redirect', () => {
+  it('extracts the session from a fragment-encoded redirect (primary path)', () => {
     const result = parseNativeOAuthCallback(
-      'geneweave://oauth?token=tok&csrfToken=csrf&expiresAt=2030-01-01T00:00:00.000Z',
+      'geneweave://oauth#token=tok&csrfToken=csrf&expiresAt=2030-01-01T00:00:00.000Z',
     );
     expect(isNativeOAuthError(result)).toBe(false);
     if (!isNativeOAuthError(result)) {
@@ -53,8 +53,18 @@ describe('parseNativeOAuthCallback', () => {
     }
   });
 
-  it('parses an Expo Go redirect', () => {
-    const result = parseNativeOAuthCallback('exp://192.168.1.5:8081/--/oauth?token=t&csrfToken=c');
+  it('falls back to query-string for backward compat during rolling deploys', () => {
+    const result = parseNativeOAuthCallback(
+      'geneweave://oauth?token=tok&csrfToken=csrf&expiresAt=2030-01-01T00:00:00.000Z',
+    );
+    expect(isNativeOAuthError(result)).toBe(false);
+    if (!isNativeOAuthError(result)) {
+      expect(result.token).toBe('tok');
+    }
+  });
+
+  it('parses an Expo Go fragment redirect', () => {
+    const result = parseNativeOAuthCallback('exp://192.168.1.5:8081/--/oauth#token=t&csrfToken=c');
     expect(isNativeOAuthError(result)).toBe(false);
     if (!isNativeOAuthError(result)) {
       expect(result.token).toBe('t');
@@ -62,7 +72,13 @@ describe('parseNativeOAuthCallback', () => {
     }
   });
 
-  it('surfaces a provider error', () => {
+  it('surfaces a provider error (fragment)', () => {
+    const result = parseNativeOAuthCallback('geneweave://oauth#error=access_denied');
+    expect(isNativeOAuthError(result)).toBe(true);
+    if (isNativeOAuthError(result)) expect(result.error).toBe('access_denied');
+  });
+
+  it('surfaces a provider error (query string, backward compat)', () => {
     const result = parseNativeOAuthCallback('geneweave://oauth?error=access_denied');
     expect(isNativeOAuthError(result)).toBe(true);
     if (isNativeOAuthError(result)) expect(result.error).toBe('access_denied');

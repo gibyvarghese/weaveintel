@@ -11,6 +11,7 @@
  */
 import type { ReactNode } from 'react';
 import { Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../providers/theme-provider';
 import { Icon, type IconName } from './icon';
 
@@ -18,14 +19,14 @@ import { Icon, type IconName } from './icon';
 export function ListScreen({ children }: { children: ReactNode }) {
   const { theme } = useTheme();
   return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.background }}>
+    <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.colors.background }}>
       <ScrollView
         contentContainerStyle={{ padding: theme.spacing.lg, gap: theme.spacing.xl, paddingBottom: theme.spacing.xxxl }}
         keyboardShouldPersistTaps="handled"
       >
         {children}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 

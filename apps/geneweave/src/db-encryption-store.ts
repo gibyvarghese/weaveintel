@@ -296,7 +296,7 @@ export class SqliteEncryptionStore {
   async updateBreakGlassRequest(id: string, patch: Partial<Omit<TenantBreakGlassRequestRow, 'id' | 'tenant_id' | 'created_at'>>): Promise<boolean> {
     const sets: string[] = [];
     const params: unknown[] = [];
-    const allowed: (keyof typeof patch)[] = ['status', 'customer_approver', 'approved_at', 'expires_at', 'consume_count', 'denial_reason', 'requested_by', 'reason'];
+    const allowed: (keyof typeof patch)[] = ['status', 'customer_approver', 'approved_at', 'expires_at', 'consume_count', 'denial_reason'];
     for (const k of allowed) {
       if (k in patch && patch[k] !== undefined) {
         sets.push(`${k} = ?`);

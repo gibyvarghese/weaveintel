@@ -38,10 +38,13 @@ export function evaluateGuardrail(
     case 'custom':
       return evaluateCustom(guardrail, text, context);
     case 'model-graded':
-      // Model-graded guardrails require async model call; return allow as placeholder
-      return { decision: 'allow', guardrailId: guardrail.id, explanation: 'Model-graded guardrails require async evaluation' };
+      // Model-graded guardrails require an async model call; return warn so the
+      // turn is not silently allowed — the caller should schedule async evaluation.
+      return { decision: 'warn', guardrailId: guardrail.id, explanation: 'Model-graded guardrails require async evaluation' };
     default:
-      return { decision: 'allow', guardrailId: guardrail.id, explanation: `Unknown guardrail type: ${guardrail.type}` };
+      // Unknown/unimplemented type: warn rather than silently allow so misconfigured
+      // guardrails surface in escalation reports instead of being invisible.
+      return { decision: 'warn', guardrailId: guardrail.id, explanation: `Unimplemented guardrail type: ${guardrail.type}` };
   }
 }
 

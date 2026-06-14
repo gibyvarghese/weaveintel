@@ -1,5 +1,5 @@
 import type BetterSqlite3 from 'better-sqlite3';
-import { safeExec } from './helpers.js';
+import { safeExec, applyKagglePhaseK7bK7c } from './helpers.js';
 
 export function applyM11_M18(db: BetterSqlite3.Database): void {
   // ─── M11 — Phase K3: Kaggle tool policies, skills, and projection tables ──
@@ -681,4 +681,6 @@ export function applyM11_M18(db: BetterSqlite3.Database): void {
   safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_kaggle_lb_competition_ref ON kaggle_leaderboard_scores(competition_ref)');
   safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_kaggle_lb_submission_id ON kaggle_leaderboard_scores(submission_id)');
 
+  // M16 + M17 column additions and seed data for kaggle_runs (K7b/K7c).
+  applyKagglePhaseK7bK7c(db);
 }

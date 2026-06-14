@@ -76,7 +76,10 @@ export async function evaluateEscalation(
     }
 
     if (triggered) {
-      const decision: GuardrailDecision = policy.onEscalate === 'block' ? 'deny' : 'deny';
+      // 'block' → deny immediately.
+      // 'require-approval' → warn (hold); caller should await human approval
+      //   rather than hard-blocking. The approval task is created below.
+      const decision: GuardrailDecision = policy.onEscalate === 'block' ? 'deny' : 'warn';
       let taskId: string | undefined;
 
       if (handler && policy.onEscalate === 'require-approval') {
@@ -84,7 +87,7 @@ export async function evaluateEscalation(
           const task = await handler(policy, ctx);
           taskId = task.taskId;
         } catch {
-          // Handler failure does not prevent the block.
+          // Handler failure does not prevent the hold — the turn stays at warn.
         }
       }
 

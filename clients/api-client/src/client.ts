@@ -153,6 +153,8 @@ export interface GeneweaveClient {
 
   // Auth
   authenticate(email: string, password: string): Promise<AuthSession>;
+  /** Create a new account, then store the minted bearer session (mobile/CLI flow). */
+  register(input: { name: string; email: string; password: string }): Promise<AuthSession>;
   getCurrentUser(): Promise<MeUser>;
   signOut(): Promise<void>;
 
@@ -290,6 +292,15 @@ export function createGeneweaveClient(opts: CreateGeneweaveClientOptions): Genew
     async authenticate(email, password) {
       const req = { method: 'POST' as const, path: '/api/auth/token' };
       const raw = await send({ ...req, body: { email, password } });
+      if (!ok(raw.status)) fail(raw, req);
+      const session = parse(AuthSessionSchema, raw, req);
+      await opts.tokenStore.set({ token: session.token, csrfToken: session.csrfToken });
+      return session;
+    },
+
+    async register({ name, email, password }) {
+      const req = { method: 'POST' as const, path: '/api/auth/register' };
+      const raw = await send({ ...req, body: { name, email, password } });
       if (!ok(raw.status)) fail(raw, req);
       const session = parse(AuthSessionSchema, raw, req);
       await opts.tokenStore.set({ token: session.token, csrfToken: session.csrfToken });

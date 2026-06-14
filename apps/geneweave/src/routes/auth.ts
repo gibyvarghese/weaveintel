@@ -33,6 +33,9 @@ import {
   isAllowedNativeRedirect,
   buildNativeOAuthRedirect,
 } from '../oauth-native.js';
+import { consumeInvitation, markInvitationUsed, PRIVILEGED_PERSONAS, INVITATION_EXPIRY_HOURS } from '../auth-invitations.js';
+import { issueVerificationToken, consumeVerificationToken, canResendVerification, VERIFICATION_EXPIRY_HOURS } from '../auth-email-verify.js';
+import { getEmailNotifier } from '../email-notifier.js';
 
 interface AuthRouteOptions {
   jwtSecret: string;
@@ -136,6 +139,16 @@ async function authenticateAndMintSession(
 
   clearLoginFailures(clientIp, email);
 
+  // Block sign-in until email is verified. email_verified is undefined for rows
+  // that predate m44 — those are grandfathered (undefined !== 0 so they pass).
+  if (user.email_verified === 0) {
+    json(res, 403, {
+      error: 'Please verify your email address before signing in.',
+      requiresEmailVerification: true,
+    });
+    return null;
+  }
+
   if (verification.needsRehash) {
     const upgradedHash = await hashPassword(password);
     await db.updateUser(user.id, { passwordHash: upgradedHash });
@@ -161,10 +174,10 @@ export function registerAuthRoutes(
 
   router.post('/api/auth/register', async (req, res) => {
     const raw = await readBody(req);
-    let body: { name?: string; email?: string; password?: string };
+    let body: { name?: string; email?: string; password?: string; invitationToken?: string };
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
 
-    const { name, email, password } = body;
+    const { name, email, password, invitationToken } = body;
     if (!name || !email || !password) { json(res, 400, { error: 'name, email, and password required' }); return; }
     if (password.length < 8) { json(res, 400, { error: 'Password must be at least 8 characters' }); return; }
 
@@ -176,11 +189,30 @@ export function registerAuthRoutes(
       return;
     }
 
+    // ── Invitation validation ─────────────────────────────────────────────────
+    // Privileged personas (tenant_admin, platform_admin) may only be assigned
+    // via a valid admin-issued invitation. tenant_user may self-register or use
+    // an invitation. The invitation is validated first (before user creation)
+    // but marked used only after the user row is committed, to prevent TOCTOU.
+    let invitationRow: Awaited<ReturnType<typeof consumeInvitation>> = null;
+    let assignedPersona = 'tenant_user';
+
+    if (invitationToken) {
+      invitationRow = await consumeInvitation(db, invitationToken, email);
+      if (!invitationRow) {
+        json(res, 400, { error: 'Invitation is invalid, expired, or does not match this email address.' });
+        return;
+      }
+      assignedPersona = invitationRow.persona;
+    }
+
+    if (PRIVILEGED_PERSONAS.has(assignedPersona) && !invitationRow) {
+      json(res, 403, { error: 'An admin invitation is required to register with a privileged role.' });
+      return;
+    }
+
     const existing = await db.getUserByEmail(email);
     if (existing) { json(res, 409, { error: 'Email already registered' }); return; }
-
-    const users = await db.listUsers();
-    const assignedPersona = users.length === 0 ? 'tenant_admin' : 'tenant_user';
 
     const userId = newUUIDv7();
     const passwordHash = await hashPassword(password);
@@ -194,8 +226,32 @@ export function registerAuthRoutes(
       }
       throw error;
     }
-    await ensureAtLeastOneTenantAdmin(db, userId);
 
+    // Mark the invitation used atomically with user creation to prevent replay.
+    if (invitationRow) {
+      await markInvitationUsed(db, invitationRow.id, userId);
+    }
+
+    // For tenant_user without an invitation: promote to tenant_admin if no admin
+    // exists yet. TOCTOU-safe because SQLite is single-writer and the function is
+    // idempotent (promotes the earliest created_at user).
+    if (!PRIVILEGED_PERSONAS.has(assignedPersona)) {
+      await ensureAtLeastOneTenantAdmin(db, userId);
+    }
+
+    // Issue an email verification token. The raw token travels via email link;
+    // only SHA-256(token) is stored in the DB (pre-image resistant).
+    const rawVerificationToken = await issueVerificationToken(db, userId);
+    const verifyUrl = `${publicBaseUrl ?? ''}/auth/verify-email?token=${rawVerificationToken}`;
+    await getEmailNotifier().sendVerificationEmail({
+      to: email,
+      name,
+      verificationUrl: verifyUrl,
+      expiresInHours: VERIFICATION_EXPIRY_HOURS,
+    });
+
+    // Issue a session immediately so the client can use the app right away.
+    // Subsequent sign-ins (after session expiry / logout) require email verification.
     const sessionId = newUUIDv7();
     const csrfToken = generateCSRFToken();
     const expiresAt = new Date(Date.now() + 86400_000).toISOString();
@@ -204,7 +260,15 @@ export function registerAuthRoutes(
     const token = signJWT({ userId, email, sessionId }, jwtSecret);
     setAuthCookie(res, token);
     const created = await db.getUserById(userId);
-    json(res, 201, { user: { id: userId, email, name, persona: created?.persona ?? assignedPersona }, csrfToken });
+    const persona = created?.persona ?? assignedPersona;
+    json(res, 201, {
+      token,
+      expiresAt,
+      user: { id: userId, email, name, persona },
+      csrfToken,
+      permissions: personaPermissions(persona),
+      requiresEmailVerification: true,
+    });
   }, { csrf: false });
 
   router.post('/api/auth/login', async (req, res) => {
@@ -406,22 +470,29 @@ export function registerAuthRoutes(
           name: fallbackName,
           passwordHash: await hashPassword(newUUIDv7()),
         });
+        // OAuth provider asserts the email — no need for a separate verification step.
+        await db.markUserEmailVerified(resolvedUserId);
       }
 
-      await db.createOAuthLinkedAccount({
-        id: newUUIDv7(),
-        user_id: resolvedUserId,
-        provider,
-        provider_user_id: oauthProfile.id,
-        email: oauthProfile.email || `${provider}-${oauthProfile.id}@oauth.local`,
-        name: oauthProfile.name || 'User',
-        picture_url: oauthProfile.picture || null,
-        last_used_at: new Date().toISOString(),
-      });
+      if (!existingLinked) {
+        await db.createOAuthLinkedAccount({
+          id: newUUIDv7(),
+          user_id: resolvedUserId,
+          provider,
+          provider_user_id: oauthProfile.id,
+          email: oauthProfile.email || `${provider}-${oauthProfile.id}@oauth.local`,
+          name: oauthProfile.name || 'User',
+          picture_url: oauthProfile.picture || null,
+          last_used_at: new Date().toISOString(),
+        });
+      } else {
+        await db.updateOAuthAccountLastUsed(resolvedUserId, provider);
+      }
 
       // Native (mobile) flow: the redirect URI was encoded into the state. Mint a
-      // bearer session and 302 it back to the app scheme, which the in-app auth
-      // session captures and persists. No cookie/popup HTML for native.
+      // bearer session and 302 it back to the app scheme as a URL fragment (#),
+      // which the in-app auth session captures and persists. Nonce integrity is
+      // guaranteed by consumeOAuthState above (full state string used as key).
       const { native, redirectUri } = parseNativeOAuthState(state);
       if (native && redirectUri && isAllowedNativeRedirect(redirectUri)) {
         const minted = await mintSessionForUserId(db, jwtSecret, resolvedUserId);
@@ -471,6 +542,50 @@ export function registerAuthRoutes(
     const params: Record<string, string> = {};
     for (const [key, value] of body.entries()) params[key] = value;
     await handleOAuthCallback(req, res, params);
+  }, { auth: false, csrf: false });
+
+  // ── Email verification ─────────────────────────────────────────────────────
+
+  // Consume a verification token and mark the user's email as verified.
+  // The same non-enumerable error is returned whether the token was never
+  // issued, already used, or expired (OWASP A07:2021 prevents enumeration).
+  router.post('/api/auth/verify-email', async (req, res) => {
+    const raw = await readBody(req);
+    let body: { token?: string };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const token = typeof body.token === 'string' ? body.token.trim() : '';
+    const userId = await consumeVerificationToken(db, token);
+    if (!userId) {
+      json(res, 400, { error: 'Verification link is invalid or has expired. Please request a new one.' });
+      return;
+    }
+    json(res, 200, { ok: true, message: 'Email address verified. You can now sign in.' });
+  }, { auth: false, csrf: false });
+
+  // Resend a verification email. Always returns 200 regardless of whether the
+  // email exists or is already verified — prevents user enumeration.
+  router.post('/api/auth/resend-verification', async (req, res) => {
+    const raw = await readBody(req);
+    let body: { email?: string };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    if (!email) { json(res, 400, { error: 'email required' }); return; }
+
+    const user = await db.getUserByEmail(email);
+    if (user && user.email_verified !== 1) {
+      const allowed = await canResendVerification(db, user.id);
+      if (allowed) {
+        const rawToken = await issueVerificationToken(db, user.id);
+        const verifyUrl = `${publicBaseUrl ?? ''}/auth/verify-email?token=${rawToken}`;
+        await getEmailNotifier().sendVerificationEmail({
+          to: email,
+          name: user.name,
+          verificationUrl: verifyUrl,
+          expiresInHours: VERIFICATION_EXPIRY_HOURS,
+        });
+      }
+    }
+    json(res, 200, { ok: true, message: 'If this email is registered and unverified, a verification link has been sent.' });
   }, { auth: false, csrf: false });
 
 }

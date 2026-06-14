@@ -1,6 +1,27 @@
 import type { UserRow, SessionRow, OAuthLinkedAccountRow } from './core.js';
 import type { IdempotencyRecordRow, OAuthFlowStateRow } from './agents.js';
 
+export interface EmailVerificationRow {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  expires_at: string;
+  used_at: string | null;
+  created_at: string;
+}
+
+export interface UserInvitationRow {
+  id: string;
+  email: string;
+  persona: string;
+  token_hash: string;
+  invited_by: string;
+  expires_at: string;
+  used_at: string | null;
+  used_by: string | null;
+  created_at: string;
+}
+
 export interface IUserStore {
   // Users
   createUser(user: { id: string; email: string; name: string; passwordHash: string; persona?: string; tenantId?: string | null; emailBidx?: string | null }): Promise<void>;
@@ -40,4 +61,20 @@ export interface IUserStore {
   listOAuthLinkedAccounts(userId: string): Promise<OAuthLinkedAccountRow[]>;
   updateOAuthAccountLastUsed(userId: string, provider: string): Promise<void>;
   deleteOAuthLinkedAccount(userId: string, provider: string): Promise<void>;
+
+  // Email verification
+  createEmailVerification(v: { id: string; userId: string; tokenHash: string; expiresAt: string }): Promise<void>;
+  getEmailVerificationByTokenHash(tokenHash: string): Promise<EmailVerificationRow | null>;
+  getLatestEmailVerification(userId: string): Promise<EmailVerificationRow | null>;
+  markEmailVerificationUsed(verificationId: string, userId: string): Promise<void>;
+  markUserEmailVerified(userId: string): Promise<void>;
+  deleteExpiredEmailVerifications(nowIso?: string): Promise<void>;
+
+  // User invitations
+  createUserInvitation(inv: { id: string; email: string; persona: string; tokenHash: string; invitedBy: string; expiresAt: string }): Promise<void>;
+  getInvitationByTokenHash(tokenHash: string): Promise<UserInvitationRow | null>;
+  getInvitationById(id: string): Promise<UserInvitationRow | null>;
+  markInvitationUsed(invitationId: string, usedBy: string): Promise<void>;
+  listInvitations(opts?: { limit?: number }): Promise<UserInvitationRow[]>;
+  deleteExpiredInvitations(nowIso?: string): Promise<void>;
 }

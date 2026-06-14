@@ -68,6 +68,8 @@ type StreamMessageDeps = {
   loadPricing: () => Promise<Map<string, ModelPricing>>;
   recordModelOutcome: (modelId: string, providerId: string, latencyMs: number, success: boolean, errorMessage?: string) => void;
   safeParseJson: (text: string) => unknown;
+  /** Optional hook: called after policy checks are evaluated (best-effort, never blocks the stream). */
+  onPolicyChecks?: (userId: string, checks: Array<{ tool: string; policy: string; taskType: string; priority: string }>) => Promise<void>;
 };
 
 /**
@@ -573,6 +575,9 @@ export async function streamMessageImpl(
   const policyChecks = steps.length ? await evaluateTaskPolicies(deps.db, steps) : undefined;
   if (policyChecks?.length) {
     await deps.writeSseEvent(res, { type: 'policy_checks', checks: policyChecks });
+    if (deps.onPolicyChecks) {
+      await deps.onPolicyChecks(userId, policyChecks).catch(() => {});
+    }
   }
 
   if (!fullText.trim()) {

@@ -8,6 +8,9 @@ export interface UserRow {
   tenant_id: string | null;
   password_hash: string;
   created_at: string;
+  /** 1 = verified, 0 = pending verification. Existing rows grandfathered to 1 by m44. */
+  email_verified?: number;
+  email_verified_at?: string | null;
   /**
    * Phase 8 blind index — `HMAC-SHA-256(BIK, "users|email|<email>")` truncated
    * to 24 hex chars. Tenant-scoped, populated only when the resolved tenant

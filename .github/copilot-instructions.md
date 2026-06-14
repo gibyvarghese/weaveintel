@@ -913,6 +913,47 @@ Condensed durable facts per platform. Full build history → `docs/PHASE_LOG.md`
 
 ---
 
+## Security & Auth Patterns (permanent law)
+
+These decisions were made during a security audit. Do not regress them.
+
+### First-user admin assignment
+Never pre-assign `tenant_admin` at registration time based on a user-count check — that pattern has a TOCTOU race. Instead:
+- Always register users as `tenant_user`.
+- Call `ensureAtLeastOneTenantAdmin(db, userId)` after every successful registration and OAuth sign-up. It promotes the earliest user (by `created_at`) to `tenant_admin` if no admin yet exists.
+- This is safe because `ensureAtLeastOneTenantAdmin` is a safe-default function (does nothing when an admin already exists).
+
+### OAuth linked account deduplication
+When an OAuth callback fires for a provider identity that is already linked, **never call `createOAuthLinkedAccount`** — it mutates the `linked_at` timestamp and changes the row `id`.
+- When `existingLinked` is truthy: call `updateOAuthAccountLastUsed(userId, provider)`.
+- When `existingLinked` is null: call `createOAuthLinkedAccount(...)`.
+
+### Native OAuth redirect format: URL fragments
+The server delivers the bearer token to the mobile app via a URL **fragment** (`#token=...&csrfToken=...`), not a query string. Fragments are not transmitted in HTTP requests, so the token does not appear in server logs or `Referer` headers.
+- `buildNativeOAuthRedirect` and `buildNativeOAuthError` use `#` in `apps/geneweave/src/oauth-native.ts`.
+- `parseNativeOAuthCallback` in the mobile client reads the fragment first, falls back to query string for backward compat during rolling deploys.
+- Do not regress this to `?` query-string delivery.
+
+### Migration code placement
+Migration code (schema changes, seed inserts) belongs **only** inside migration batch functions. Never embed schema changes or seed data in shared helpers like `safeExec`. `safeExec` is a DDL catch-ignoring wrapper — adding non-DDL code inside it causes that code to fire on every `safeExec` call, potentially hundreds of times per boot.
+
+### Dev-only API fields in production
+API fields that accept secrets for development/testing (e.g., `privateKeyPemDev` in the BYOK endpoint) must be **rejected in production** (`process.env['NODE_ENV'] === 'production'`). Guard at the route level before reaching any service/DB call. Return HTTP 400 with a clear message.
+
+### Break-glass request immutability
+`requested_by` and `reason` on `tenant_break_glass_request` rows are **write-once** — they must not appear in the `allowed` array for `updateBreakGlassRequest`. Only workflow/status fields (`status`, `customer_approver`, `approved_at`, `expires_at`, `consume_count`, `denial_reason`) may be updated after creation.
+
+### Admin route isolation
+SV and Kaggle routes must be registered on `adminRouter`, not the bare `router`. `adminRouter` wraps every handler with `ensurePermission(auth, permissionForAdminRoute(path, method))`. Registering on `router` bypasses RBAC entirely.
+
+### Guardrail unknown-type default
+Unknown or unimplemented guardrail types must return `warn`, **not `allow`**. A silently-allowed misconfigured guardrail is invisible to operators. `warn` surfaces the issue in escalation reports and can trigger approval workflows.
+
+### Escalation `require-approval` decision
+An escalation policy with `onEscalate === 'require-approval'` produces decision `warn` (hold pending human review), not `deny` (hard block). The caller must hold the turn and await task completion, not immediately reject it. `block` policies produce `deny`.
+
+---
+
 ## Known pre-existing issues (do not fix unless asked)
 
 Pre-existing tsc errors in `examples/86, 92, 95, 97` and

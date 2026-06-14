@@ -20,6 +20,12 @@ describe('oauth-native redirect allowlist', () => {
     expect(isAllowedNativeRedirect('//evil.example')).toBe(false);
     expect(isAllowedNativeRedirect('not a uri')).toBe(false);
   });
+
+  it('rejects exp:// in production', () => {
+    const prod = { NODE_ENV: 'production' } as NodeJS.ProcessEnv;
+    expect(isAllowedNativeRedirect('exp://127.0.0.1:8081/--/oauth', prod)).toBe(false);
+    expect(isAllowedNativeRedirect('geneweave://oauth', prod)).toBe(true);
+  });
 });
 
 describe('oauth-native state round-trip', () => {
@@ -40,31 +46,38 @@ describe('oauth-native state round-trip', () => {
 });
 
 describe('oauth-native redirect building', () => {
-  it('appends the session as query params', () => {
+  it('appends the session as a URL fragment (not query string)', () => {
     const url = buildNativeOAuthRedirect('geneweave://oauth', {
       token: 'tok',
       csrfToken: 'csrf',
       expiresAt: '2030-01-01T00:00:00.000Z',
     });
-    const parsed = new URL(url);
-    expect(parsed.searchParams.get('token')).toBe('tok');
-    expect(parsed.searchParams.get('csrfToken')).toBe('csrf');
-    expect(parsed.searchParams.get('expiresAt')).toBe('2030-01-01T00:00:00.000Z');
+    const hashIdx = url.indexOf('#');
+    expect(hashIdx).toBeGreaterThan(0);
+    expect(url.indexOf('?')).toBe(-1); // no query string
+    const fragment = new URLSearchParams(url.slice(hashIdx + 1));
+    expect(fragment.get('token')).toBe('tok');
+    expect(fragment.get('csrfToken')).toBe('csrf');
+    expect(fragment.get('expiresAt')).toBe('2030-01-01T00:00:00.000Z');
   });
 
-  it('preserves an existing query string', () => {
-    const url = buildNativeOAuthRedirect('exp://host/--/oauth?foo=1', {
+  it('strips any existing fragment before appending the new one', () => {
+    const url = buildNativeOAuthRedirect('exp://host/--/oauth', {
       token: 't',
       csrfToken: 'c',
       expiresAt: 'x',
     });
-    expect(url).toContain('foo=1');
-    expect(url).toContain('&token=t');
+    expect(url.indexOf('#')).toBeGreaterThan(0);
+    const fragment = new URLSearchParams(url.slice(url.indexOf('#') + 1));
+    expect(fragment.get('token')).toBe('t');
   });
 
-  it('builds an error redirect', () => {
+  it('builds an error redirect as a URL fragment', () => {
     const url = buildNativeOAuthError('geneweave://oauth', 'access_denied');
-    expect(new URL(url).searchParams.get('error')).toBe('access_denied');
+    const hashIdx = url.indexOf('#');
+    expect(hashIdx).toBeGreaterThan(0);
+    const fragment = new URLSearchParams(url.slice(hashIdx + 1));
+    expect(fragment.get('error')).toBe('access_denied');
   });
 });
 

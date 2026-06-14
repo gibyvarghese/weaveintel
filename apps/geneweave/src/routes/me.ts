@@ -404,7 +404,27 @@ export function registerMeRoutes(
 
   router.get('/api/me/reminders', async (_req, res, _params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const reminders = await triggerStore.listByOwner(auth.userId);
+    // Merge trigger-store reminders (created via POST /api/me/reminders) with
+    // temporal reminders the agent wrote via temporal tools. Both paths are
+    // valid; the trigger-store set is keyed by id so DB rows with the same id
+    // are deduplicated.
+    const [storeReminders, temporalRows] = await Promise.all([
+      triggerStore.listByOwner(auth.userId),
+      db.listTemporalRemindersByUserId(auth.userId),
+    ]);
+    const seenIds = new Set(storeReminders.map((r) => r.id));
+    const temporalAsReminders = temporalRows
+      .filter((row) => !seenIds.has(row.id))
+      .map((row) => ({
+        id: row.id,
+        key: row.id,
+        enabled: row.status === 'scheduled',
+        ownerPrincipalId: row.scope_id.split(':')[0],
+        source: { kind: 'schedule', config: { fireAt: row.due_at, timezone: row.timezone } },
+        target: { kind: 'reminder_bus', config: { label: row.text } },
+        metadata: { oneShot: true, label: row.text },
+      }));
+    const reminders = [...storeReminders, ...temporalAsReminders];
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ reminders }));
   }, { auth: true });
@@ -448,12 +468,21 @@ export function registerMeRoutes(
 
   router.del('/api/me/reminders/:reminderId', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const reminder = await triggerStore.get(params['reminderId']!);
-    if (!reminder) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
-    if (reminder.ownerPrincipalId !== auth.userId) {
-      res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return;
+    const reminderId = params['reminderId']!;
+    // Try trigger store first (reminders created via POST /api/me/reminders).
+    const storeReminder = await triggerStore.get(reminderId);
+    if (storeReminder) {
+      if (storeReminder.ownerPrincipalId !== auth.userId) {
+        res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return;
+      }
+      await triggerStore.delete?.(reminderId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ deleted: true }));
+      return;
     }
-    await triggerStore.delete?.(params['reminderId']!);
+    // Fall back to temporal_reminders (agent-created via temporal tools).
+    const deleted = await db.deleteTemporalReminderById(reminderId, auth.userId);
+    if (!deleted) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ deleted: true }));
   }, { auth: true });

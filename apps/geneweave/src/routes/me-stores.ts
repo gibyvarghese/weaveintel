@@ -11,11 +11,14 @@
  * @weaveintel/persistence (durable human-task repository + trigger store).
  */
 
-import { InMemoryHumanTaskRepository } from '@weaveintel/human-tasks';
+import { JsonFileHumanTaskRepository } from '@weaveintel/human-tasks';
 import { InMemoryTriggerStore } from '@weaveintel/triggers';
+import { join } from 'node:path';
 
 /** Shared action-item / human-task repository for the /api/me surface. */
-export const meTaskRepo = new InMemoryHumanTaskRepository();
+export const meTaskRepo = new JsonFileHumanTaskRepository(
+  join(process.cwd(), 'geneweave-tasks.json'),
+);
 
 /** Shared reminder/trigger store for the /api/me surface. */
 export const meTriggerStore = new InMemoryTriggerStore();

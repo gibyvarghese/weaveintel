@@ -6,6 +6,24 @@ import { DashboardService } from '../dashboard.js';
 import { recordChatFeedbackSignal } from '../routing-feedback.js';
 import { json, html, readBody, LARGE_REQUEST_BODY_BYTES } from '../server-core.js';
 import type { Router } from '../server-core.js';
+import { createActionItem } from '@weaveintel/human-tasks';
+import { meTaskRepo } from './me-stores.js';
+
+type PolicyCheck = { tool: string; policy: string; taskType: string; priority: string };
+
+async function createTasksFromPolicyChecks(userId: string, checks: PolicyCheck[]): Promise<void> {
+  for (const check of checks) {
+    const task = createActionItem({
+      assignee: userId,
+      title: `Review: ${check.policy}`,
+      description: `Agent used tool "${check.tool}" — policy "${check.policy}" requires your review.`,
+      priority: check.priority as Parameters<typeof createActionItem>[0]['priority'],
+      data: { actionable: check.taskType === 'approval', policyName: check.policy, toolName: check.tool },
+      provenance: { sourceRef: 'policy', createdBy: 'system' as const },
+    });
+    await meTaskRepo.save(task);
+  }
+}
 
 export function registerChatRoutes(
   router: Router,
@@ -14,6 +32,7 @@ export function registerChatRoutes(
   dashboard: DashboardService,
   workflowEngine?: { getStatus?: () => unknown },
 ): void {
+  chatEngine.onPolicyChecks = createTasksFromPolicyChecks;
 
   // ── Chat routes ────────────────────────────────────────
 
@@ -133,6 +152,9 @@ export function registerChatRoutes(
     } else {
       try {
         const result = await chatEngine.sendMessage(auth.userId, chat.id, normalizedContent, opts);
+        if (result.policyChecks?.length) {
+          await createTasksFromPolicyChecks(auth.userId, result.policyChecks).catch(() => {});
+        }
         json(res, 200, result);
       } catch (err) {
         // Agent/supervisor mode can fail under transient load; return structured error

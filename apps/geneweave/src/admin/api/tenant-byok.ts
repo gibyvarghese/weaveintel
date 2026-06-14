@@ -22,6 +22,10 @@ import {
   buildAttestationForTenant,
   getAttestationPublicKey,
 } from '../../encryption/byok-service.js';
+import {
+  createByokImportSession,
+  consumeByokImportSession,
+} from '../../byok-import-session.js';
 import type { RouterLike } from './types.js';
 
 export interface ByokRouteHelpers {
@@ -52,6 +56,26 @@ export function registerTenantByokRoutes(
     if (!publicKeyPem) { json(res, 400, { error: 'public_key_pem required' }); return; }
     const modeRaw = asStr(body['mode']);
     const mode = modeRaw === 'hyok' || modeRaw === 'byok' ? modeRaw : undefined;
+
+    // ── Reject legacy dev-only field in production ───────────────────────────
+    const rawDevKey = body['private_key_pem_dev'] ?? body['privateKeyPemDev'];
+    if (rawDevKey !== undefined && rawDevKey !== null && rawDevKey !== '' && process.env['NODE_ENV'] === 'production') {
+      json(res, 400, { error: 'private_key_pem_dev is not permitted in production. Use POST /api/admin/byok/import-session to obtain a wrapped key import ceremony instead.' });
+      return;
+    }
+
+    // ── Production import: unwrap the private key from a key-import session ──
+    let unwrappedPrivateKeyPem: string | null = null;
+    const importSessionId = asStr(body['import_session_id'] ?? body['importSessionId']);
+    const wrappedPrivateKey = asStr(body['wrapped_private_key'] ?? body['wrappedPrivateKey']);
+    if (importSessionId && wrappedPrivateKey) {
+      unwrappedPrivateKeyPem = consumeByokImportSession(importSessionId, wrappedPrivateKey);
+      if (!unwrappedPrivateKeyPem) {
+        json(res, 400, { error: 'Invalid, expired, or already-used import session. Request a new session via POST /api/admin/byok/import-session.' });
+        return;
+      }
+    }
+
     try {
       const out = await upsertByokConfig(db, {
         tenantId,
@@ -60,13 +84,39 @@ export function registerTenantByokRoutes(
         hyokEndpoint: asStr(body['hyok_endpoint'] ?? body['hyokEndpoint']),
         hyokBearerSecretId: asStr(body['hyok_bearer_secret_id'] ?? body['hyokBearerSecretId']),
         hyokTimeoutMs: typeof body['hyok_timeout_ms'] === 'number' ? (body['hyok_timeout_ms'] as number) : null,
-        privateKeyPemDev: asStr(body['private_key_pem_dev'] ?? body['privateKeyPemDev']),
+        // privateKeyPemDev is accepted only in non-production. In production, use
+        // the import session flow above (unwrappedPrivateKeyPem takes precedence).
+        privateKeyPemDev: unwrappedPrivateKeyPem ?? (process.env['NODE_ENV'] !== 'production' ? asStr(rawDevKey) : undefined),
         createdBy: auth.userId ?? null,
       });
       json(res, 200, out);
     } catch (err) {
       json(res, 400, { error: err instanceof Error ? err.message : String(err) });
     }
+  }, { auth: true, csrf: true });
+
+  // ── Key-import ceremony ───────────────────────────────────────────────────
+  // Step 1: obtain an ephemeral public key to wrap the BYOK private key client-side.
+  // Step 2: POST /api/admin/byok/config with { importSessionId, wrappedPrivateKey }.
+  router.post('/api/admin/byok/import-session', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    // RSA-4096 key generation is CPU-bound (~200–400ms). This is acceptable for a
+    // privileged, rare operation. Do not call this on a hot path.
+    const session = createByokImportSession();
+    json(res, 200, {
+      sessionId: session.sessionId,
+      ephemeralPublicKeyPem: session.ephemeralPublicKeyPem,
+      algorithm: session.algorithm,
+      modulusLengthBits: session.modulusLengthBits,
+      expiresAt: session.expiresAt,
+      instructions: [
+        '1. Encrypt your BYOK private key (PEM bytes, UTF-8) with the ephemeralPublicKeyPem',
+        '   using RSA-OAEP with SHA-256 as the hash function.',
+        '2. Base64-encode the ciphertext → wrappedPrivateKey.',
+        '3. POST /api/admin/byok/config with { importSessionId, wrappedPrivateKey, publicKeyPem, tenantId }.',
+        '   The session expires in 15 minutes and is single-use.',
+      ],
+    });
   }, { auth: true, csrf: true });
 
   router.get('/api/admin/byok/config', async (_req, res, _params, auth) => {

@@ -59,13 +59,30 @@ export interface NativeOAuthError {
 
 /**
  * Parse the redirect URL the server sends back to the app scheme after a native
- * OAuth flow, e.g. `geneweave://oauth?token=...&csrfToken=...&expiresAt=...` or
- * the Expo Go equivalent `exp://host/--/oauth?...`.
+ * OAuth flow.
+ *
+ * The server encodes the session as a URL fragment (`#`) so the bearer token
+ * does not appear in server logs or Referer headers. The fragment is only
+ * visible to the app receiving the redirect — never transmitted over HTTP.
+ *
+ * Example: `geneweave://oauth#token=...&csrfToken=...&expiresAt=...`
+ *
+ * Falls back to query-string parsing for backward compatibility with any
+ * in-flight requests during a rolling deploy.
  */
 export function parseNativeOAuthCallback(url: string): NativeOAuthResult | NativeOAuthError {
+  const hashStart = url.indexOf('#');
   const queryStart = url.indexOf('?');
-  const query = queryStart >= 0 ? url.slice(queryStart + 1) : '';
-  const params = new URLSearchParams(query);
+
+  // Prefer fragment; fall back to query string.
+  let paramStr = '';
+  if (hashStart >= 0) {
+    paramStr = url.slice(hashStart + 1);
+  } else if (queryStart >= 0) {
+    paramStr = url.slice(queryStart + 1);
+  }
+
+  const params = new URLSearchParams(paramStr);
 
   const error = params.get('error');
   if (error) return { error };

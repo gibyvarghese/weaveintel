@@ -62,6 +62,8 @@ export interface AuthController {
   setHost(rawHost: string): Promise<HostValidation>;
   /** Credential sign-in against the active host. */
   signIn(email: string, password: string): Promise<void>;
+  /** Create a new account against the active host, then transition to `authenticated`. */
+  register(name: string, email: string, password: string): Promise<void>;
   /**
    * Complete a native OAuth sign-in: persist the bearer session minted by the
    * server callback, fetch the user, and transition to `authenticated`.
@@ -186,11 +188,27 @@ export function createAuthController(opts: AuthControllerOptions): AuthControlle
       settleAuthenticated(/* coldStart */ false);
     },
 
+    async register(name: string, email: string, password: string) {
+      if (!host) throw new Error('No host configured');
+      if (!client) client = buildClient(host);
+      const session = await client.register({ name, email, password });
+      user = session.user;
+      // A fresh registration is an explicit unlock — do not re-prompt biometrics now.
+      backgroundedAt = null;
+      settleAuthenticated(/* coldStart */ false);
+    },
+
     async completeOAuthSignIn(tokens: { token: string; csrfToken: string }) {
       if (!host) throw new Error('No host configured');
-      await createTenantTokenStore(kv, host, tenantId).set(tokens);
+      const tokenStore = createTenantTokenStore(kv, host, tenantId);
+      await tokenStore.set(tokens);
       if (!client) client = buildClient(host);
-      user = await client.getCurrentUser();
+      try {
+        user = await client.getCurrentUser();
+      } catch (err) {
+        await tokenStore.clear().catch(() => {});
+        throw err;
+      }
       // A fresh OAuth sign-in is an explicit unlock — do not re-prompt biometrics now.
       backgroundedAt = null;
       settleAuthenticated(/* coldStart */ false);

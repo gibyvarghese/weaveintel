@@ -557,6 +557,9 @@ export class ChatEngine {
 
   // ── Stream mode ─────────────────────────────────────────────
 
+  /** Optional hook registered by the routes layer to react to policy checks post-stream. */
+  onPolicyChecks?: (userId: string, checks: Array<{ tool: string; policy: string; taskType: string; priority: string }>) => Promise<void>;
+
   async streamMessage(
     res: ServerResponse,
     userId: string,
@@ -579,6 +582,7 @@ export class ChatEngine {
         recordModelOutcome: (modelIdArg, providerIdArg, latencyMsArg, successArg) =>
           this.recordModelOutcome(modelIdArg, providerIdArg, latencyMsArg, successArg),
         safeParseJson: (text) => this.safeParseJson(text),
+        onPolicyChecks: this.onPolicyChecks,
       },
       res,
       userId,

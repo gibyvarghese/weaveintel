@@ -16,8 +16,11 @@
 
 const NATIVE_STATE_PREFIX = 'native:';
 
-/** App schemes we are willing to 302 a freshly minted session back to. */
-const ALLOWED_NATIVE_SCHEMES = new Set(['geneweave', 'exp']);
+/** The single production app scheme registered to this app. */
+const PRODUCTION_APP_SCHEME = 'geneweave';
+
+/** Expo Go scheme — only valid outside production (dev/test builds). */
+const EXPO_GO_SCHEME = 'exp';
 
 function toBase64Url(value: string): string {
   return Buffer.from(value, 'utf8').toString('base64url');
@@ -36,10 +39,19 @@ function schemeOf(uri: string): string | null {
 /**
  * Whether a redirect URI targets one of our app schemes. This is the open-redirect
  * guard: a `https://evil.example` redirect URI is rejected before any 302.
+ *
+ * The `exp://` Expo Go scheme is only permitted outside production so development
+ * builds can use it without widening the attack surface in production deployments.
  */
-export function isAllowedNativeRedirect(redirectUri: string): boolean {
+export function isAllowedNativeRedirect(
+  redirectUri: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
   const scheme = schemeOf(redirectUri);
-  return scheme !== null && ALLOWED_NATIVE_SCHEMES.has(scheme);
+  if (scheme === null) return false;
+  if (scheme === PRODUCTION_APP_SCHEME) return true;
+  if (scheme === EXPO_GO_SCHEME && env['NODE_ENV'] !== 'production') return true;
+  return false;
 }
 
 /**
@@ -51,18 +63,19 @@ export function encodeNativeOAuthState(redirectUri: string, nonce: string): stri
   return `${NATIVE_STATE_PREFIX}${toBase64Url(redirectUri)}:${nonce}`;
 }
 
-/** Decode an OAuth `state`: identify a native flow and recover its redirect URI. */
-export function parseNativeOAuthState(state: string): { native: boolean; redirectUri?: string } {
+/** Decode an OAuth `state`: identify a native flow and recover its redirect URI and nonce. */
+export function parseNativeOAuthState(state: string): { native: boolean; redirectUri?: string; nonce?: string } {
   if (!state.startsWith(NATIVE_STATE_PREFIX)) return { native: false };
   const rest = state.slice(NATIVE_STATE_PREFIX.length);
   const sep = rest.indexOf(':');
   const encoded = sep >= 0 ? rest.slice(0, sep) : rest;
+  const nonce = sep >= 0 ? rest.slice(sep + 1) : undefined;
   try {
     const redirectUri = fromBase64Url(encoded);
-    if (!redirectUri) return { native: true };
-    return { native: true, redirectUri };
+    if (!redirectUri) return { native: true, nonce };
+    return { native: true, redirectUri, nonce };
   } catch {
-    return { native: true };
+    return { native: true, nonce };
   }
 }
 
@@ -74,9 +87,10 @@ export interface NativeOAuthSession {
 }
 
 /**
- * Append the freshly minted session to the app's redirect URI as query params.
- * The app receives this URL directly from the in-app auth session (no proxy),
- * parses it, and persists the bearer token.
+ * Append the freshly minted session to the app's redirect URI as a URL fragment.
+ * Fragments are not transmitted in HTTP requests, so the bearer token does not
+ * appear in server logs or Referer headers. The in-app auth session returns the
+ * full URL (including fragment) directly to the app without a server round-trip.
  */
 export function buildNativeOAuthRedirect(redirectUri: string, session: NativeOAuthSession): string {
   const params = new URLSearchParams({
@@ -84,13 +98,13 @@ export function buildNativeOAuthRedirect(redirectUri: string, session: NativeOAu
     csrfToken: session.csrfToken,
     expiresAt: session.expiresAt,
   });
-  const sep = redirectUri.includes('?') ? '&' : '?';
-  return `${redirectUri}${sep}${params.toString()}`;
+  const base = redirectUri.split('#')[0]!;
+  return `${base}#${params.toString()}`;
 }
 
 /** Build a native error redirect so the app can surface a readable message. */
 export function buildNativeOAuthError(redirectUri: string, error: string): string {
   const params = new URLSearchParams({ error });
-  const sep = redirectUri.includes('?') ? '&' : '?';
-  return `${redirectUri}${sep}${params.toString()}`;
+  const base = redirectUri.split('#')[0]!;
+  return `${base}#${params.toString()}`;
 }

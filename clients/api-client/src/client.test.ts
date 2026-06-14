@@ -97,6 +97,28 @@ describe('auth', () => {
     expect(await tokenStore.get()).toEqual({ token: 'jwt-1', csrfToken: 'csrf-1' });
   });
 
+  it('register() creates an account and stores the bearer + CSRF tokens', async () => {
+    const tokenStore = new MemoryTokenStore();
+    const transport = fakeTransport({
+      routes: {
+        'POST /api/auth/register': () => ({
+          status: 201,
+          body: {
+            token: 'jwt-r',
+            csrfToken: 'csrf-r',
+            expiresAt: '2099-01-01T00:00:00Z',
+            user: { id: 'u2', email: 'new@b.co', name: 'New Person' },
+            permissions: ['me:read'],
+          },
+        }),
+      },
+    });
+    const client = createGeneweaveClient({ host: 'https://x', tokenStore, transport });
+    const session = await client.register({ name: 'New Person', email: 'new@b.co', password: 'password1' });
+    expect(session.user.id).toBe('u2');
+    expect(await tokenStore.get()).toEqual({ token: 'jwt-r', csrfToken: 'csrf-r' });
+  });
+
   it('refreshes once on 401 then retries; persists the new token', async () => {
     const tokenStore = new MemoryTokenStore({ token: 'stale', csrfToken: 'c' });
     let attempt = 0;

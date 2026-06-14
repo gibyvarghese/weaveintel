@@ -48,6 +48,8 @@ import {
   resolveTenantThemeTokens, invalidateThemeCache, setThemeInOverrides,
   parseThemeFromOverrides, sanitizeTheme, type TenantThemeTokens,
 } from '../tenant-theme.js';
+import { createInvitation, INVITATION_EXPIRY_HOURS } from '../auth-invitations.js';
+import { getEmailNotifier } from '../email-notifier.js';
 
 export function registerAdminWiringRoutes(
   router: Router,
@@ -62,8 +64,8 @@ export function registerAdminWiringRoutes(
     runtime?: import('@weaveintel/core').WeaveRuntime;
   },
 ): void {
-  const { providers, publicBaseUrl: _publicBaseUrl, gatewayConfig, workflowEngine, triggerDispatcher, chatEngine: _chatEngine, runtime } = config;
-  void _publicBaseUrl; void _chatEngine;
+  const { providers, publicBaseUrl, gatewayConfig, workflowEngine, triggerDispatcher, chatEngine: _chatEngine, runtime } = config;
+  void _chatEngine;
 
   // ── Admin routes (extracted to server-admin.ts) ─────────
   // Admin CRUD for guardrails, routing policies, prompts, tools,
@@ -178,10 +180,10 @@ export function registerAdminWiringRoutes(
     policyResolver: new DbToolPolicyResolver(db),
     auditEmitter: new DbToolAuditEmitter(db),
   });
-  registerSVRoutes(router, db, json, readBody, svRunner);
+  registerSVRoutes(adminRouter, db, json, readBody, svRunner);
 
   const kaggleRunner = new KaggleCompetitionRunner(db);
-  registerKaggleCompetitionRoutes(router, db, json, readBody, kaggleRunner);
+  registerKaggleCompetitionRoutes(adminRouter, db, json, readBody, kaggleRunner);
 
   adminRouter.get('/api/admin/rbac/personas', async (_req, res) => {
     json(res, 200, {
@@ -227,6 +229,54 @@ export function registerAdminWiringRoutes(
       },
     });
   }, { auth: true, csrf: true });
+
+  // ── Admin invitations ────────────────────────────────────────────────────────
+  // POST /api/admin/invitations — create an invitation and send it via email.
+  // GET  /api/admin/invitations — list all invitations (admin visibility only).
+  //
+  // Privileged personas (tenant_admin, platform_admin) may only be registered
+  // via an invitation issued here. The invitation token is SHA-256 stored;
+  // the plaintext token travels exclusively in the email link.
+
+  adminRouter.post('/api/admin/invitations', async (req, res, _params, auth) => {
+    const raw = await readBody(req);
+    let body: { email?: string; persona?: string };
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const persona = typeof body.persona === 'string' ? body.persona.trim().toLowerCase() : 'tenant_user';
+    if (!email || !email.includes('@')) { json(res, 400, { error: 'A valid email is required' }); return; }
+    if (!isValidPersona(persona)) { json(res, 400, { error: 'Invalid persona' }); return; }
+
+    const inviter = await db.getUserById(auth!.userId);
+    const inviterName = inviter?.name ?? 'Platform Admin';
+
+    const { invitationId, rawToken } = await createInvitation(db, {
+      email,
+      persona,
+      invitedBy: auth!.userId,
+    });
+
+    const inviteUrl = `${publicBaseUrl ?? ''}/auth/accept-invitation?token=${rawToken}`;
+    await getEmailNotifier().sendInvitationEmail({
+      to: email,
+      inviterName,
+      invitationUrl: inviteUrl,
+      persona,
+      expiresInHours: INVITATION_EXPIRY_HOURS,
+    });
+
+    json(res, 201, { invitationId, email, persona, expiresInHours: INVITATION_EXPIRY_HOURS });
+  }, { auth: true, csrf: true });
+
+  adminRouter.get('/api/admin/invitations', async (req, res) => {
+    const url = new URL(req.url ?? '/', 'http://_');
+    const limit = Number(url.searchParams.get('limit') ?? '50');
+    const invitations = await db.listInvitations({ limit: Number.isFinite(limit) ? limit : 50 });
+    // Strip token_hash from the response (never expose the stored hash externally)
+    const sanitized = invitations.map(({ token_hash: _th, ...rest }) => rest);
+    json(res, 200, { invitations: sanitized });
+  }, { auth: true });
 
   // ── Website Credentials (Browser Auth Vault) ───────────────
 

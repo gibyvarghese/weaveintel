@@ -1,6 +1,7 @@
 /**
  * DB adapter — /api/me/ user-scope tables
  */
+import type { TemporalReminderRow } from './core.js';
 
 export interface UserRunRow {
   id: string;
@@ -118,4 +119,8 @@ export interface IMeStore {
   updateStarterPrompt(id: string, patch: Partial<Pick<StarterPrompt,
     'label' | 'prompt_text' | 'sort_order' | 'enabled' | 'metadata'>>): Promise<void>;
   deleteStarterPrompt(id: string): Promise<void>;
+
+  // Temporal reminders — cross-chat user view (Actions tab)
+  listTemporalRemindersByUserId(userId: string): Promise<TemporalReminderRow[]>;
+  deleteTemporalReminderById(reminderId: string, userId: string): Promise<boolean>;
 }

@@ -26,6 +26,7 @@ interface FakeSpies {
   removeDevice: ReturnType<typeof vi.fn>;
   getCurrentUser: ReturnType<typeof vi.fn>;
   authenticate: ReturnType<typeof vi.fn>;
+  register: ReturnType<typeof vi.fn>;
 }
 
 /** A client factory whose clients persist tokens into their injected token store. */
@@ -38,6 +39,7 @@ function fakeFactory(behavior: { getCurrentUser?: () => Promise<MeUser> } = {}):
     removeDevice: vi.fn(),
     getCurrentUser: vi.fn(behavior.getCurrentUser ?? (async () => USER)),
     authenticate: vi.fn(),
+    register: vi.fn(),
   };
   const factory = (opts: { host: string; tokenStore: TokenStore }): GeneweaveClient => {
     const { tokenStore } = opts;
@@ -45,11 +47,16 @@ function fakeFactory(behavior: { getCurrentUser?: () => Promise<MeUser> } = {}):
       await tokenStore.set({ token: 'jwt', csrfToken: 'csrf' });
       return { token: 'jwt', csrfToken: 'csrf', expiresAt: 'soon', user: { ...USER, email }, permissions: [] };
     });
+    spies.register.mockImplementation(async ({ email, name }: { email: string; name: string }) => {
+      await tokenStore.set({ token: 'jwt', csrfToken: 'csrf' });
+      return { token: 'jwt', csrfToken: 'csrf', expiresAt: 'soon', user: { ...USER, email, name }, permissions: [] };
+    });
     spies.signOut.mockImplementation(async () => {
       await tokenStore.clear();
     });
     return {
       authenticate: spies.authenticate,
+      register: spies.register,
       getCurrentUser: spies.getCurrentUser,
       signOut: spies.signOut,
       removeDevice: spies.removeDevice,
@@ -212,6 +219,25 @@ describe('createAuthController — host + sign-in', () => {
     await c.initialize();
     await c.signIn('a@example.com', 'pw');
     expect(spies.authenticate).toHaveBeenCalledOnce();
+    expect(store.getState().status).toBe('authenticated');
+    expect(await createTenantTokenStore(kv, HOST).get()).toEqual({ token: 'jwt', csrfToken: 'csrf' });
+  });
+
+  it('register creates an account and persists tokens', async () => {
+    const store = createAuthStore();
+    const kv = memoryKv();
+    const { factory, spies } = fakeFactory();
+    const c = createAuthController({
+      store,
+      kv,
+      makeClient: factory,
+      biometric: noBiometric,
+      hostProbe: async () => ({ reachable: true }),
+      env: { defaultHost: HOST, biometricEnabledByDefault: false },
+    });
+    await c.initialize();
+    await c.register('New Person', 'new@example.com', 'password1');
+    expect(spies.register).toHaveBeenCalledOnce();
     expect(store.getState().status).toBe('authenticated');
     expect(await createTenantTokenStore(kv, HOST).get()).toEqual({ token: 'jwt', csrfToken: 'csrf' });
   });

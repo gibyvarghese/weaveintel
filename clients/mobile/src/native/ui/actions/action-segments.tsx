@@ -62,7 +62,38 @@ export function ActionSegments({ active, onChange, counts }: ActionSegmentsProps
               backgroundColor: isActive ? theme.colors.accentSoft : 'transparent',
             }}
           >
-            <Icon name={s.icon} size="sm" tone={isActive ? 'accent' : 'inactive'} />
+            {/* Badge overlaid on the icon so it never overflows the pill */}
+            <View style={{ position: 'relative' }}>
+              <Icon name={s.icon} size="sm" tone={isActive ? 'accent' : 'inactive'} />
+              {count > 0 ? (
+                <View
+                  style={{
+                    position: 'absolute',
+                    top: -5,
+                    right: -7,
+                    minWidth: 16,
+                    height: 16,
+                    paddingHorizontal: 4,
+                    borderRadius: 8,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: theme.colors.warning,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: theme.colors.background,
+                      fontFamily: theme.typography.families.body,
+                      fontSize: 10,
+                      fontWeight: '700',
+                      lineHeight: 13,
+                    }}
+                  >
+                    {count > 99 ? '99+' : count}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
             <Text
               style={{
                 color: isActive ? theme.colors.accent : theme.colors.textSecondary,
@@ -73,30 +104,6 @@ export function ActionSegments({ active, onChange, counts }: ActionSegmentsProps
             >
               {s.label}
             </Text>
-            {count > 0 ? (
-              <View
-                style={{
-                  minWidth: 18,
-                  height: 18,
-                  paddingHorizontal: 5,
-                  borderRadius: 9,
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: theme.colors.warning,
-                }}
-              >
-                <Text
-                  style={{
-                    color: theme.colors.background,
-                    fontFamily: theme.typography.families.body,
-                    fontSize: theme.typography.scale.caption.fontSize,
-                    fontWeight: '700',
-                  }}
-                >
-                  {count > 99 ? '99+' : count}
-                </Text>
-              </View>
-            ) : null}
           </Pressable>
         );
       })}
