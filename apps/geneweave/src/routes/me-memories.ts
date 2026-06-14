@@ -161,9 +161,7 @@ export function createSemanticMemoryStore(db: DatabaseAdapter, userId: string, t
   };
 }
 
-function mapTypeToColumn(type: MemoryType): string {
-  // semantic_memory.memory_type accepts: semantic | user_fact | preference | summary
-  if (type === 'semantic' || type === 'entity') return 'user_fact';
+function mapTypeToColumn(_type: MemoryType): string {
   return 'user_fact';
 }
 

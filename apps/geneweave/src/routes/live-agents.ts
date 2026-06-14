@@ -37,15 +37,20 @@ export function registerLiveAgentRoutes(router: Router, _db: DatabaseAdapter): v
   });
 
   // Stop a live-agent run.
+  // NOTE: this updates the in-process status map only. A signal to the running agent
+  // loop is not yet wired (the loop must poll run.status or a channel). Cross-process
+  // or restart-safe stop requires the in-memory store to be replaced with a DB-backed one.
   router.post('/api/live-agents/runs/:runId/stop', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const run = liveAgentRuns.get(params['runId']!);
     if (!run || run.userId !== auth.userId) { json(res, 404, { error: 'Run not found' }); return; }
     run.status = 'stopped';
+    console.warn(`[live-agents] stop requested for run ${params['runId']} — status updated in-process only; cross-process propagation requires a DB-backed store`);
     json(res, 200, { runId: params['runId'], status: 'stopped' });
   }, { auth: true, csrf: true });
 
   // Resume a live-agent run (idempotent — running runs stay running).
+  // Same caveat as stop: in-process state only.
   router.post('/api/live-agents/runs/:runId/resume', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const run = liveAgentRuns.get(params['runId']!);

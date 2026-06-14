@@ -140,13 +140,15 @@ export function createAuthController(opts: AuthControllerOptions): AuthControlle
       if (storedPref !== null) biometricEnabled = storedPref;
 
       // Resolve effective host: env default wins, else last validated host.
+      const hostFromEnv = !!host;
       if (!host) host = await getStoredHost(kv);
       if (!host) {
         store.setState({ status: 'needs-host' });
         return;
       }
-      // Env-provided default host is trusted; a persisted host was validated before save.
-      await setStoredHost(kv, host);
+      // Only persist when the host came from the environment config. A user-chosen
+      // host was already saved by setHost() and must not be overwritten on every launch.
+      if (hostFromEnv) await setStoredHost(kv, host);
 
       client = buildClient(host);
       const tokens = await createTenantTokenStore(kv, host, tenantId).get();

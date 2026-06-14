@@ -124,7 +124,7 @@ export async function recordTraceSpans(
           id: newUUIDv7(), userId, chatId, messageId,
           traceId, spanId: newUUIDv7(), parentSpanId: rootSpanId,
           name: `step.${step.type}${step.toolCall ? `.${step.toolCall.name}` : ''}`,
-          startTime: offset, endTime: offset + step.durationMs,
+          startTime: offset, endTime: offset + Math.max(0, step.durationMs ?? 0),
           status: 'ok',
           attributes: JSON.stringify({
             stepIndex: step.index,

@@ -34,11 +34,10 @@ import { getActiveSemanticMemoryBackend } from './memory-pgvector.js';
 function createEpisodicStore(db: DatabaseAdapter): MemoryStore {
   return {
     async write(_ctx: ExecutionContext, entries: MemoryEntry[]): Promise<void> {
-      // Persist _consolidated markers so we don't re-process the same entries
       for (const entry of entries) {
         if (entry.metadata['_consolidated'] && entry.type === 'episodic') {
+          // Write a tiny marker row so future queries know this episodic entry was processed.
           try {
-            // Write a tiny marker row so future queries can filter it out
             await db.saveSemanticMemory({
               id: `${entry.id}:consolidated_marker`,
               userId: entry.userId ?? 'unknown',
@@ -49,6 +48,31 @@ function createEpisodicStore(db: DatabaseAdapter): MemoryStore {
             });
           } catch {
             // Non-critical — worst case we re-process the entry next run
+          }
+        } else if (entry.type !== 'episodic') {
+          // Persist consolidated semantic facts to the active backend (or SQLite fallback).
+          const semanticBackend = getActiveSemanticMemoryBackend();
+          try {
+            if (semanticBackend) {
+              await semanticBackend.save(_ctx, {
+                id: entry.id,
+                userId: entry.userId ?? _ctx.userId ?? 'unknown',
+                content: entry.content,
+                memoryType: (entry.type as string) || 'semantic',
+                source: (entry.metadata['source'] as string) || 'consolidation',
+              });
+            } else {
+              await db.saveSemanticMemory({
+                id: entry.id,
+                userId: entry.userId ?? _ctx.userId ?? 'unknown',
+                content: entry.content,
+                memoryType: (entry.type as string) || 'semantic',
+                source: (entry.metadata['source'] as string) || 'consolidation',
+                embedding: undefined,
+              });
+            }
+          } catch (err) {
+            console.error(`[memory-consolidation] failed to persist consolidated entry ${entry.id}`, err);
           }
         }
       }

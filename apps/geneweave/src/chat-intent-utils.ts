@@ -7,7 +7,7 @@ export function shouldForceWorkerDataAnalysis(userContent: string, attachments?:
 
   if (hasAttachments && analysisIntent) return true;
 
-  const codeExecutionIntent = /\b(run|execute|execut(e|ing)|python|script|code)\b/.test(lower);
+  const codeExecutionIntent = /\b(run(?!\s+me\b)|execut(e|ing)|python|script|code)\b/.test(lower);
   const dataRetrievalIntent = /\b(data|extracted|retrieve|retrieval|economy|gdp|spending|region|age|ethnicity|historical|trend|stats|statistics|stats\s*nz|new zealand)\b/.test(lower);
   return codeExecutionIntent && dataRetrievalIntent;
 }

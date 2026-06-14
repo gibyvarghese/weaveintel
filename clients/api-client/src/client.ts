@@ -278,11 +278,11 @@ export function createGeneweaveClient(opts: CreateGeneweaveClientOptions): Genew
   }
 
   // Internal RunClient adapter so the shared outbox can flush through our typed startRun.
-  const outboxRunClientAdapter = {
-    async startRun(input: StartRunInput): Promise<unknown> {
+  const outboxRunClientAdapter: Pick<RunClient, 'startRun'> = {
+    async startRun(input: StartRunInput): Promise<RunRecord> {
       return api.startRun(input);
     },
-  } as unknown as RunClient;
+  };
 
   const api: GeneweaveClient = {
     host: opts.host,

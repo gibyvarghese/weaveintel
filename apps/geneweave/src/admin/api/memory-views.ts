@@ -99,8 +99,7 @@ export function registerMemoryViewRoutes(
 
   router.get('/api/admin/memory-extraction-rules/:id', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const rules = await db.listMemoryExtractionRules();
-    const rule = rules.find((r) => r.id === params['id']);
+    const rule = await db.getMemoryExtractionRule(params['id']!);
     if (!rule) { json(res, 404, { error: 'Rule not found' }); return; }
     json(res, 200, { 'memory-extraction-rule': rule });
   }, { auth: true });

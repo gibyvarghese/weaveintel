@@ -332,7 +332,8 @@ export async function buildMemoryContext(
       }
     }
     return parts.join('\n');
-  } catch {
+  } catch (err) {
+    console.warn('[chat-memory] buildMemoryContext failed — skipping memory context', err);
     return null;
   }
 }
@@ -576,8 +577,11 @@ export async function saveToMemory(
       const cap = Math.min(retentionPolicy?.maxEntries ?? Infinity, maxSemantic ?? Infinity);
       if (isFinite(cap)) {
         await db.trimSemanticMemoryForUser(userId, cap);
-        await db.trimEntityMemoryForUser(userId, maxEntity ?? 100);
       }
+    }
+    // Entity trimming is independent of semantic cap: run whenever a per-user entity limit is set.
+    if (maxEntity) {
+      await db.trimEntityMemoryForUser(userId, maxEntity);
     }
     if (retentionPolicy?.maxAge) {
       const cutoffMs = parseIsoDurationMs(retentionPolicy.maxAge);
@@ -606,7 +610,8 @@ export async function buildWorkingMemoryContext(
     try { parsed = JSON.parse(snapshot.content); } catch { parsed = snapshot.content; }
     const preview = JSON.stringify(parsed, null, 2).slice(0, 1200);
     return `[Working memory — agent scratch state from previous step]\nSnapshot ID: ${snapshot.id}\nSaved: ${snapshot.created_at}\n${preview}`;
-  } catch {
+  } catch (err) {
+    console.warn('[chat-memory] buildWorkingMemoryContext failed — skipping', err);
     return null;
   }
 }
@@ -625,7 +630,8 @@ export async function loadProceduralInstructions(
     if (entries.length === 0) return null;
     const deltas = entries.map((e) => `• ${e.instruction_delta}`).join('\n');
     return `[Personalised agent instructions for this user]\n${deltas}`;
-  } catch {
+  } catch (err) {
+    console.warn('[chat-memory] loadProceduralInstructions failed — skipping', err);
     return null;
   }
 }
@@ -649,7 +655,8 @@ export async function buildEpisodicContext(
       return `  [${ep.created_at.slice(0, 16)}] ${role}: ${ep.content.slice(0, 120)}${ep.content.length > 120 ? '…' : ''}`;
     });
     return `[Recent conversation history]\n${lines.join('\n')}`;
-  } catch {
+  } catch (err) {
+    console.warn('[chat-memory] buildEpisodicContext failed — skipping', err);
     return null;
   }
 }

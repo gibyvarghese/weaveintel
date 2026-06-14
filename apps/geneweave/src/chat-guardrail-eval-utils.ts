@@ -284,7 +284,8 @@ export async function evaluateTaskPolicies(
     }
 
     return checks;
-  } catch {
+  } catch (err) {
+    console.error('[chat-guardrail-eval] evaluateTaskPolicies error — returning empty checks', err);
     return [];
   }
 }

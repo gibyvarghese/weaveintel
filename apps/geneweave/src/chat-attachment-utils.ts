@@ -30,7 +30,7 @@ export function normalizeAttachments(input: ChatAttachment[] | undefined): ChatA
 
     const isAudio = rawMime.toLowerCase().startsWith('audio/');
     sanitized.push({
-      name: rawName.slice(0, 180),
+      name: rawName.replace(/[/\\]/g, '_').replace(/\0/g, '').replace(/\.\./g, '_').slice(0, 180),
       mimeType: rawMime.slice(0, 120),
       size: approximateSize,
       dataBase64: isAudio ? undefined : normalizedBase64,
@@ -111,12 +111,13 @@ export function hasTabularDataAttachments(attachments: ChatAttachment[]): boolea
   });
 }
 
-export function patchLatestUserMessage(messages: Message[], content: string): void {
+export function patchLatestUserMessage(messages: Message[], content: string): boolean {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg?.role === 'user') {
       messages[i] = { ...msg, content };
-      return;
+      return true;
     }
   }
+  return false;
 }

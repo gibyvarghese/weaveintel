@@ -798,6 +798,9 @@ export function registerAdminWiringRoutes(
   // protocol with bearer-token auth. Phase 4: exposure classes and the
   // enable toggle come from the DB so admin changes survive restart.
   const mcpGatewayToken = process.env['GENEWEAVE_MCP_GATEWAY_TOKEN'] ?? '';
+  if (gatewayConfig?.enabled && !mcpGatewayToken) {
+    console.warn('[mcp-gateway] GENEWEAVE_MCP_GATEWAY_TOKEN is not set — gateway will run without bearer-token authentication');
+  }
   const gatewayEnabled = gatewayConfig?.enabled ?? true;
   const gatewayClasses = gatewayConfig?.exposedClasses ?? DEFAULT_EXPOSED_ALLOCATION_CLASSES;
   const gatewayEndpoint = gatewayConfig?.endpoint ?? '/api/mcp/gateway';
@@ -880,7 +883,4 @@ export function registerAdminWiringRoutes(
     join(process.cwd(), 'avatar'),
     join(process.cwd(), 'avatars'),
   ];
-  const distDir = join(__dirname, '..', 'dist');
-  const distDirResolved = resolve(distDir);
-  const staticModuleExtensions = new Set(['.js', '.css', '.map']);
 }

@@ -121,10 +121,16 @@ export function createPrefsSuppressionPolicy(
  * targets (channelId = device channel, address = device token). Registration
  * happens via POST /api/me/devices; this store only reads.
  */
-export function createDeviceTargetStore(db: Pick<DatabaseAdapter, 'listDevices'>): TargetStore {
+export function createDeviceTargetStore(db: Pick<DatabaseAdapter, 'listDevices' | 'getDeviceById'>): TargetStore {
   return {
     async upsert() { throw new Error('device target store is read-only (register via /api/me/devices)'); },
-    async getById() { return undefined; },
+    async getById(id: string) {
+      try {
+        const d = await db.getDeviceById(id);
+        if (!d) return undefined;
+        return { id: d.id, tenantId: d.tenant_id ?? GLOBAL_TENANT, principalId: d.user_id, channelId: d.channel, target: { kind: d.channel, address: d.token }, createdAt: d.created_at, updatedAt: d.created_at };
+      } catch { return undefined; }
+    },
     async listByPrincipal(_tenantId, principalId) {
       let devices: UserDeviceRow[] = [];
       try { devices = await db.listDevices(principalId); } catch { devices = []; }

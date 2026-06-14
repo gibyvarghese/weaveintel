@@ -105,8 +105,8 @@ export async function resolveAgentAttentionPolicy(
           resolved_policy_key: policy.key,
         }),
       });
-    } catch {
-      // Non-fatal — audit failure must never break the scheduling loop.
+    } catch (err) {
+      console.warn('[agent-attention-resolver] audit emit failed (non-fatal)', err);
     }
   }
 
@@ -114,10 +114,13 @@ export async function resolveAgentAttentionPolicy(
 }
 
 /**
- * Convenience wrapper: resolves the attention policy from a plain key string.
+ * Compatibility shim: delegates directly to `resolveAttentionPolicyFromDb`.
  *
  * Use this when you have already loaded the key from somewhere other than
- * a `live_agents` row (e.g. a one-off CLI script, a test).
+ * a `live_agents` row (e.g. a one-off CLI script, a test). It exists so
+ * call sites that only have the key string don't need to import
+ * `resolveAttentionPolicyFromDb` directly — the two functions are identical
+ * in behaviour.
  *
  * @example
  * const policy = await resolveAttentionPolicyByKey(db, 'cron.rest-only', {});

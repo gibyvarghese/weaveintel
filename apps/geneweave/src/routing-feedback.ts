@@ -222,6 +222,9 @@ export async function runRoutingRegressionPass(db: DatabaseAdapter): Promise<Reg
   const cutoff30 = new Date(now.getTime() - 30 * DAY_MS).toISOString();
 
   const rows = await db.listRoutingCapabilitySignals({ afterIso: cutoff30, limit: 5000 });
+  if (rows.length >= 5000) {
+    console.warn('[routing-feedback] signal query returned 5000 rows (limit hit) — regression window may be operating on incomplete data. Consider raising the limit or purging old signals.');
+  }
   const groups = groupSignals(rows);
 
   let emitted = 0;

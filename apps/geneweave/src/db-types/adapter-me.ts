@@ -89,6 +89,7 @@ export interface IMeStore {
     tenant_id?: string; label?: string;
   }): Promise<void>;
   removeDevice(userId: string, token: string): Promise<void>;
+  getDeviceById(deviceId: string): Promise<UserDeviceRow | null>;
   listDevices(userId: string): Promise<UserDeviceRow[]>;
 
   // Notification preferences

@@ -25,7 +25,7 @@ import {
   type PromptContractValidationReport,
 } from './chat-prompt-contract-utils.js';
 import { discoverSkillsForInput } from './chat-skills-utils.js';
-import { applyRedaction, runPostEval } from './chat-eval-utils.js';
+import { applyRedaction, runPostEval, SUPERVISOR_INTERNAL_TOOLS } from './chat-eval-utils.js';
 import { recordTraceSpans, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
 import { evaluateGuardrails, evaluateTaskPolicies } from './chat-guardrail-eval-utils.js';
 import { resolveSystemPrompt, buildCapabilityTelemetrySnapshots } from './chat-system-prompt-utils.js';
@@ -195,6 +195,7 @@ export async function streamMessageImpl(
   content: string,
   opts?: { provider?: string; model?: string; maxTokens?: number; temperature?: number; attachments?: ChatAttachment[] },
 ): Promise<void> {
+  const requestStartMs = Date.now();
   let provider = opts?.provider ?? deps.config.defaultProvider;
   let modelId = opts?.model ?? deps.config.defaultModel;
   let providerCfg = deps.config.providers[provider];
@@ -348,7 +349,7 @@ export async function streamMessageImpl(
 
   const identityRecall = await resolveIdentityRecallFromMemory(deps.db, userId, processedContent);
   if (identityRecall) {
-    const latencyMs = 0;
+    const latencyMs = Date.now() - requestStartMs;
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -588,14 +589,13 @@ export async function streamMessageImpl(
     await deps.writeSseEvent(res, { type: 'text', text: fullText });
   }
 
-  const STREAM_SUPERVISOR_INTERNAL_TOOLS = new Set(['think', 'plan', 'synthesize', 'reflect', 'log']);
   const streamToolEvidence = steps
     ?.filter(s => {
       if (s.type !== 'tool_call' && s.type !== 'delegation') return false;
       const result = (s.toolCall?.result ?? s.delegation?.result ?? '') as string;
       if (!result || result === '(Worker returned no output)') return false;
       if (/^\[(PLANNING|REASONING|SYNTHESIS|REFLECTION)\]/.test(result)) return false;
-      if (s.type === 'tool_call' && STREAM_SUPERVISOR_INTERNAL_TOOLS.has(s.toolCall?.name ?? '')) return false;
+      if (s.type === 'tool_call' && SUPERVISOR_INTERNAL_TOOLS.has(s.toolCall?.name ?? '')) return false;
       return true;
     })
     .map(s => (s.toolCall?.result ?? s.delegation?.result ?? '') as string)

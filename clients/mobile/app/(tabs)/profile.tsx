@@ -23,8 +23,12 @@ export default function ProfileScreen() {
   const [biometricOn, setBiometricOn] = useState(controller.isBiometricEnabled());
 
   async function onToggleBiometric(next: boolean) {
-    setBiometricOn(next);
-    await controller.setBiometricEnabled(next);
+    try {
+      await controller.setBiometricEnabled(next);
+      setBiometricOn(next);
+    } catch {
+      // Secure store write failed — leave UI showing the current persisted state.
+    }
   }
 
   function openManageWeb() {

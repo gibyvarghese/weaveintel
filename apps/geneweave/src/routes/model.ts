@@ -8,11 +8,10 @@ import type { Router } from '../server-core.js';
 
 export function registerModelRoutes(
   router: Router,
-  db: DatabaseAdapter,
+  _db: DatabaseAdapter,
   chatEngine: ChatEngine,
-  providers?: Record<string, { apiKey?: string }>,
+  _providers?: Record<string, { apiKey?: string }>,
 ): void {
-  void db; void providers;
 
   // ── Model routes ───────────────────────────────────────────
 

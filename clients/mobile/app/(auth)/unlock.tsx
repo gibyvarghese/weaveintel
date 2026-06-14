@@ -6,7 +6,7 @@
  * Face ID / Touch ID prompt via the controller; `signOut` provides an escape
  * hatch. The gate decision lives in `src/lib/auth/biometric-gate.ts`.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../../src/native/providers';
 import { Screen, Heading, Body, PrimaryButton, ErrorText } from '../../src/native/ui/primitives';
 
@@ -17,15 +17,22 @@ export default function UnlockScreen() {
   const [error, setError] = useState<string | null>(null);
 
   async function onUnlock() {
+    if (!mounted.current) return;
     setBusy(true);
     setError(null);
     try {
       const ok = await controller.unlock();
-      if (!ok) setError('Could not verify. Try again, or sign out.');
+      if (mounted.current && !ok) setError('Could not verify. Try again, or sign out.');
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
+
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
 
   // Prompt automatically on mount for a smooth return-to-app experience.
   useEffect(() => {

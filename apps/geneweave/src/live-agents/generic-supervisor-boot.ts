@@ -182,6 +182,12 @@ export async function startGenericSupervisorIfEnabled(
   // instance is safe.
   const cachedCostPolicyResolver = new DbCostPolicyResolver(opts.db);
 
+  // Cost enforcement status: Phase 3 (prompt caching) + Phase 4 (model cascade)
+  // are active. Phases 5-7 levers (tool subset filter, prompt shaping, history
+  // compaction, per-run budget gate) remain no-op stubs — cost_policies rows
+  // that set these levers will have no effect until those phases land.
+  console.log('[cost-governor] supervisor boot: prompt-caching (Phase 3) + model cascade (Phase 4) active; tool-filter / prompt-shaper / history-compactor levers are stubs');
+
   // ─── Cost Governor Phase 4 — cascade tracker (per-supervisor) ──
   // One in-memory tracker shared across all ticks of all agents in
   // this supervisor. Per-agent state is keyed by `agent.id` (used as

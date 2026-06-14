@@ -279,7 +279,7 @@ export async function discoverSkillsForInput(
           Array.isArray(match.skill.triggerPatterns) ? match.skill.triggerPatterns.join(' ') : '',
           Array.isArray(match.skill.tags) ? match.skill.tags.join(' ') : '',
         ].filter(Boolean).join(' ');
-        return semanticIntentScore(userContent, corpus) >= 0.14;
+        return semanticIntentScore(userContent, corpus) >= INTENT_MATCH_THRESHOLD;
       });
     }
 

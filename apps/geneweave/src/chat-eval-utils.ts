@@ -10,6 +10,9 @@ import { weaveRedactor } from '@weaveintel/redaction';
 import { weaveEvalRunner } from '@weaveintel/evals';
 import type { DatabaseAdapter } from './db.js';
 
+/** Tool names whose output is for internal reasoning only and should be excluded from tool-evidence filters. */
+export const SUPERVISOR_INTERNAL_TOOLS = new Set(['think', 'plan', 'synthesize', 'reflect', 'log']);
+
 // ── Redaction ───────────────────────────────────────────────
 
 export async function applyRedaction(
@@ -52,6 +55,11 @@ export async function runPostEval(
   guardrailDecision?: 'allow' | 'warn' | 'deny',
 ): Promise<{ passed: number; failed: number; total: number; score: number } | { error: string }> {
   try {
+    // The executor here is a pass-through: it re-surfaces the pre-computed
+    // output from the call context so the assertion runner can score it.
+    // A model-judge executor (calling an LLM to grade semantic quality) is
+    // not yet wired — assertions are limited to structural checks (regex,
+    // latency, cost, guardrail decision) until that is added.
     const runner = weaveEvalRunner({
       executor: async (_ctx, inp) => ({
         output: inp['output'] as string,

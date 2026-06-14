@@ -148,6 +148,13 @@ export const SERVER_KEEP_ALIVE_TIMEOUT_MS = envInt('GENEWEAVE_SERVER_KEEPALIVE_T
 export const SERVER_MAX_HEADERS_COUNT = envInt('GENEWEAVE_SERVER_MAX_HEADERS_COUNT', 100);
 export const SERVER_MAX_REQUESTS_PER_SOCKET = envInt('GENEWEAVE_SERVER_MAX_REQUESTS_PER_SOCKET', 100);
 
+// Auth rate-limiting state is in-process only — not shared across cluster
+// workers or multiple Node.js processes. If running behind a load-balancer
+// with multiple processes, consider moving to a Redis-backed limiter so
+// limits are enforced globally rather than per-process.
+if (!IS_TEST_ENV && (process.env['CLUSTER_WORKERS'] || process.env['WEB_CONCURRENCY'])) {
+  console.warn('[auth-rate-limit] in-process rate limiter detected in a multi-worker environment — each worker enforces limits independently. Set CLUSTER_WORKERS/WEB_CONCURRENCY=1 or migrate to a shared-store limiter.');
+}
 const authRateStates = new Map<string, AuthRateState>();
 const loginFailureStates = new Map<string, LoginFailureState>();
 let activeBodyReads = 0;
@@ -194,13 +201,17 @@ function normalizeIpAddress(value: string): string {
   return trimmed.startsWith('::ffff:') ? trimmed.slice(7) : trimmed;
 }
 
+const _trustedProxyCache: { set: Set<string> | null } = { set: null };
+
 function loadTrustedProxySet(): Set<string> {
+  if (_trustedProxyCache.set) return _trustedProxyCache.set;
   const raw = process.env['TRUSTED_PROXY_IPS'] ?? '';
   const values = raw
     .split(',')
     .map((part) => normalizeIpAddress(part))
     .filter(Boolean);
-  return new Set(values);
+  _trustedProxyCache.set = new Set(values);
+  return _trustedProxyCache.set;
 }
 
 function isTrustedProxy(ip: string, trusted: Set<string>): boolean {

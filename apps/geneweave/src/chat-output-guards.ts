@@ -23,7 +23,5 @@ export function hasRenderableAttachmentAnalysisOutput(result: AgentResult, goal:
   const expectsRenderableChart = /\b(chart|charts|graph|graphs|visuali[sz]ation|plot|plots)\b/i.test(goal);
   if (!expectsRenderableChart) return true;
 
-  return output.includes('"chart"')
-    || output.includes('```json')
-    || !containsSandboxArtifactPath(output);
+  return output.includes('"chart"') || output.includes('```json');
 }

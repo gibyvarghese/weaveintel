@@ -10,7 +10,7 @@ import {
   clearAuthCookie,
 } from '../auth.js';
 import { isValidPersona, personaPermissions } from '../rbac.js';
-import { OAuthClient, type OAuthProviderName } from '@weaveintel/oauth';
+import type { OAuthProviderName } from '@weaveintel/oauth';
 import {
   readBody,
   json,
@@ -175,7 +175,6 @@ export function registerAuthRoutes(
   options: AuthRouteOptions,
 ): void {
   const { jwtSecret, corsOrigin, publicBaseUrl, setOAuthState, consumeOAuthState } = options;
-  void OAuthClient; // imported via server-core.oauthClient
 
   // ── Auth routes ────────────────────────────────────────
 
@@ -441,8 +440,9 @@ export function registerAuthRoutes(
   // OAuth callback handler (handles redirect from providers)
   const handleOAuthCallback = async (req: IncomingMessage, res: ServerResponse, callbackParams: Record<string, string>) => {
     const { code, state, error } = callbackParams;
+    const errorDescription = callbackParams['error_description'];
 
-    if (error) { json(res, 400, { error: `OAuth error: ${error}` }); return; }
+    if (error) { json(res, 400, { error: `OAuth error: ${error}`, ...(errorDescription ? { error_description: errorDescription } : {}) }); return; }
     if (!code || !state) { json(res, 400, { error: 'Missing code or state' }); return; }
 
     const stateData = await consumeOAuthState(state);

@@ -134,7 +134,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   async listUsers(): Promise<UserRow[]> {
-    return this.d.prepare('SELECT * FROM users ORDER BY created_at ASC').all() as UserRow[];
+    return this.d.prepare(
+      'SELECT id, email, name, persona, tenant_id, email_bidx, created_at FROM users ORDER BY created_at ASC',
+    ).all() as UserRow[];
   }
 
   async listUsersForBidxRebuild(limit: number, afterId: string | null): Promise<Array<{ id: string; email: string }>> {
@@ -8333,6 +8335,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async removeDevice(userId: string, token: string): Promise<void> {
     this.d.prepare('DELETE FROM user_devices WHERE user_id = ? AND token = ?').run(userId, token);
+  }
+
+  async getDeviceById(deviceId: string): Promise<import('./db-types/adapter-me.js').UserDeviceRow | null> {
+    return (this.d.prepare('SELECT * FROM user_devices WHERE id = ?').get(deviceId) as import('./db-types/adapter-me.js').UserDeviceRow | undefined) ?? null;
   }
 
   async listDevices(userId: string): Promise<import('./db-types/adapter-me.js').UserDeviceRow[]> {

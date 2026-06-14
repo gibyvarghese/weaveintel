@@ -26,7 +26,21 @@ import type {
 type Db = import('better-sqlite3').Database;
 
 export class SqliteEncryptionStore {
+  // better-sqlite3 caches prepared statements internally, but dynamic SQL
+  // (e.g. UPDATE ... SET status = ?, ${col} = ? ...) generates multiple
+  // SQL strings at runtime. This cache avoids repeated prepare() overhead
+  // for the fixed set of column-variant UPDATE statements.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly _stmtCache = new Map<string, import('better-sqlite3').Statement<any[]>>();
+
   constructor(private readonly db: Db) {}
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private stmt(sql: string): import('better-sqlite3').Statement<any[]> {
+    let s = this._stmtCache.get(sql);
+    if (!s) { s = this.db.prepare(sql) as import('better-sqlite3').Statement<any[]>; this._stmtCache.set(sql, s); }
+    return s;
+  }
 
   // ── Policies ──────────────────────────────────────────────
 
@@ -80,9 +94,9 @@ export class SqliteEncryptionStore {
   async updateTenantKekStatus(id: string, status: string, ts: number): Promise<void> {
     const col = status === 'rotated' ? 'rotated_at' : status === 'revoked' ? 'revoked_at' : null;
     if (col) {
-      this.db.prepare(`UPDATE tenant_keks SET status = ?, ${col} = ? WHERE id = ?`).run(status, ts, id);
+      this.stmt(`UPDATE tenant_keks SET status = ?, ${col} = ? WHERE id = ?`).run(status, ts, id);
     } else {
-      this.db.prepare('UPDATE tenant_keks SET status = ? WHERE id = ?').run(status, id);
+      this.stmt('UPDATE tenant_keks SET status = ? WHERE id = ?').run(status, id);
     }
   }
 
@@ -99,9 +113,9 @@ export class SqliteEncryptionStore {
   async updateTenantDekStatus(id: string, status: string, ts: number): Promise<void> {
     const col = status === 'rotated' ? 'rotated_at' : status === 'revoked' ? 'revoked_at' : null;
     if (col) {
-      this.db.prepare(`UPDATE tenant_deks SET status = ?, ${col} = ? WHERE id = ?`).run(status, ts, id);
+      this.stmt(`UPDATE tenant_deks SET status = ?, ${col} = ? WHERE id = ?`).run(status, ts, id);
     } else {
-      this.db.prepare('UPDATE tenant_deks SET status = ? WHERE id = ?').run(status, id);
+      this.stmt('UPDATE tenant_deks SET status = ? WHERE id = ?').run(status, id);
     }
   }
 
@@ -117,9 +131,9 @@ export class SqliteEncryptionStore {
 
   async updateTenantBikStatus(id: string, status: string, ts: number): Promise<void> {
     if (status === 'revoked') {
-      this.db.prepare('UPDATE tenant_biks SET status = ?, revoked_at = ? WHERE id = ?').run(status, ts, id);
+      this.stmt('UPDATE tenant_biks SET status = ?, revoked_at = ? WHERE id = ?').run(status, ts, id);
     } else {
-      this.db.prepare('UPDATE tenant_biks SET status = ? WHERE id = ?').run(status, id);
+      this.stmt('UPDATE tenant_biks SET status = ? WHERE id = ?').run(status, id);
     }
   }
 
@@ -281,7 +295,7 @@ export class SqliteEncryptionStore {
   async insertBreakGlassRequest(r: Omit<TenantBreakGlassRequestRow, 'updated_at'>): Promise<void> {
     this.db.prepare(
       `INSERT INTO tenant_break_glass_request (id, tenant_id, requested_by, reason, status, customer_approver, approved_at, expires_at, consume_count, denial_reason, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(r.id, r.tenant_id, r.requested_by, r.reason, r.status, r.customer_approver, r.approved_at, r.expires_at, r.consume_count, r.denial_reason, r.created_at, r.created_at);
+    ).run(r.id, r.tenant_id, r.requested_by, r.reason, r.status, r.customer_approver, r.approved_at, r.expires_at, r.consume_count, r.denial_reason, r.created_at, new Date().toISOString());
   }
 
   async getBreakGlassRequest(id: string): Promise<TenantBreakGlassRequestRow | null> {

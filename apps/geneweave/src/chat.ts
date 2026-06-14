@@ -294,7 +294,8 @@ export class ChatEngine {
   ): Promise<Array<{ name: string; description: string; systemPrompt?: string; model: Model; tools?: ToolRegistry }>> {
     const sorted = [...workerRows].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
     return Promise.all(sorted.map(async (row) => {
-      const toolNames = (this.safeParseJson(row.tool_names) as string[]) ?? [];
+      const toolNamesRaw = this.safeParseJson(row.tool_names);
+      const toolNames = Array.isArray(toolNamesRaw) ? (toolNamesRaw as string[]) : [];
       const displayName = (row.display_name?.trim() || row.name).trim();
       const jobProfile = (row.job_profile?.trim() || 'Worker Agent').trim();
       const workerDescription = [
@@ -424,11 +425,20 @@ export class ChatEngine {
    * Workers' tool allocations are NOT included here (workers manage their own
    * tools). Returns `undefined` when there are no allocations or all fail.
    */
-  private async buildSupervisorAdditionalTools(
-    resolved: import('./db-types.js').ResolvedSupervisorAgent | null,
-    toolOptions: ToolRegistryOptions,
-  ): Promise<ToolRegistry | undefined> {
-    return buildSupervisorAdditionalTools(resolved, toolOptions);
+  /** Public entry-point for A2A task execution — delegates to the internal agent runner. */
+  async runAgentTask(
+    ctx: ExecutionContext,
+    model: Model,
+    userId: string,
+    chatId: string,
+    userPersona: string,
+    messages: Message[],
+    userContent: string,
+    settings: ChatSettings,
+    attachments?: ChatAttachment[],
+    tenantId?: string | null,
+  ): Promise<AgentRunTelemetry> {
+    return this.runAgent(ctx, model, userId, chatId, userPersona, messages, userContent, settings, attachments, tenantId);
   }
 
   private async runWithCseSuccessGuard(
@@ -502,10 +512,12 @@ export class ChatEngine {
     ctx: ExecutionContext,
     userId: string,
     entityName: string,
-  ): Promise<{ ok: true; deletedEntities: number; deletedSemantic: number }> {
+  ): Promise<{ ok: boolean; deletedEntities: number; deletedSemantic: number }> {
+    let entityError = false;
     let deletedEntities = 0;
     try { deletedEntities = await this.db.deleteEntity(userId, entityName); }
-    catch (err) { console.warn('[memory] memory_forget entity delete failed:', String(err)); }
+    catch (err) { console.warn('[memory] memory_forget entity delete failed:', String(err)); entityError = true; }
+    let semanticError = false;
     let deletedSemantic = 0;
     try {
       const memBackend = getActiveSemanticMemoryBackend();
@@ -524,8 +536,9 @@ export class ChatEngine {
       }
     } catch (err) {
       console.warn('[memory] memory_forget semantic delete failed:', String(err));
+      semanticError = true;
     }
-    return { ok: true, deletedEntities, deletedSemantic };
+    return { ok: !(entityError && semanticError), deletedEntities, deletedSemantic };
   }
 
   // ── Direct mode: send ───────────────────────────────────────
@@ -594,30 +607,19 @@ export class ChatEngine {
 
   // ── Enterprise tools loader ─────────────────────────────────
 
-  // ── Agent execution (non-streaming) ─────────────────────────
+  // ── Shared tool options builder (R-2: deduplicates runAgent / streamAgent) ──
 
-  private async runAgent(
+  private buildAgentToolOptions(
     ctx: ExecutionContext,
-    model: Model,
     userId: string,
     chatId: string,
     userPersona: string,
-    messages: Message[],
-    userContent: string,
     settings: ChatSettings,
-    attachments?: ChatAttachment[],
-    tenantId?: string | null,
-  ): Promise<AgentRunTelemetry> {
-    const limits = await resolveLimits(this.db, tenantId);
-    const enterpriseToolGroups = await loadEnterpriseToolGroups(this.db);
-    const hasEnterprise = enterpriseToolGroups.length > 0;
-    const [disabledToolKeys, catalogEntries] = await Promise.all([
-      this.getDisabledBuiltinToolKeys(),
-      this.db.listEnabledToolCatalog(),
-    ]);
-    // Flat enterprise tools for backward compat (base tools only, no extended)
-    const enterpriseTools = hasEnterprise ? await loadEnterpriseTools(this.db) : [];
-    const toolOptions: ToolRegistryOptions = {
+    attachments: ChatAttachment[] | undefined,
+    disabledToolKeys: ReadonlySet<string>,
+    catalogEntries: import('./db-types.js').ToolCatalogRow[],
+  ): ToolRegistryOptions {
+    return {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
       currentUserId: userId,
@@ -680,7 +682,6 @@ export class ChatEngine {
         const { newUUIDv7 } = await import('@weaveintel/core');
         const memBackend = getActiveSemanticMemoryBackend();
         const trimmedContent = content.slice(0, 600);
-        // Governance gate: block prohibited content, redact PII before saving
         const govResult = await applyGovernanceCheck(this.db, ctx, trimmedContent, 'semantic');
         if (govResult.blocked) {
           throw new Error('Memory governance policy blocked this content from being stored.');
@@ -778,9 +779,34 @@ export class ChatEngine {
       },
       disabledToolKeys,
       catalogEntries,
-      // Phase 6: apply active skill's tool policy key for scoped policy enforcement
       skillPolicyKey: settings.skillPolicyKey,
     };
+  }
+
+  // ── Agent execution (non-streaming) ─────────────────────────
+
+  private async runAgent(
+    ctx: ExecutionContext,
+    model: Model,
+    userId: string,
+    chatId: string,
+    userPersona: string,
+    messages: Message[],
+    userContent: string,
+    settings: ChatSettings,
+    attachments?: ChatAttachment[],
+    tenantId?: string | null,
+  ): Promise<AgentRunTelemetry> {
+    const limits = await resolveLimits(this.db, tenantId);
+    const enterpriseToolGroups = await loadEnterpriseToolGroups(this.db);
+    const hasEnterprise = enterpriseToolGroups.length > 0;
+    const [disabledToolKeys, catalogEntries] = await Promise.all([
+      this.getDisabledBuiltinToolKeys(),
+      this.db.listEnabledToolCatalog(),
+    ]);
+    // Flat enterprise tools for backward compat (base tools only, no extended)
+    const enterpriseTools = hasEnterprise ? await loadEnterpriseTools(this.db) : [];
+    const toolOptions = this.buildAgentToolOptions(ctx, userId, chatId, userPersona, settings, attachments, disabledToolKeys, catalogEntries);
     const customTools = enterpriseTools.length > 0 ? enterpriseTools : undefined;
     const tools = settings.enabledTools.length
       ? await createToolRegistry(settings.enabledTools, customTools, toolOptions)
@@ -865,7 +891,7 @@ export class ChatEngine {
           settings.systemPrompt,
         ].filter((value): value is string => Boolean(value && value.trim())).join('\n\n');
         const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
-        const supervisorAdditionalTools = await this.buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions);
+        const supervisorAdditionalTools = await buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions);
         systemPromptSha256 = computePromptFingerprint(supervisorInstructions);
 
         agent = weaveAgent({
@@ -973,170 +999,7 @@ export class ChatEngine {
       this.getDisabledBuiltinToolKeys(),
       this.db.listEnabledToolCatalog(),
     ]);
-    const toolOptions: ToolRegistryOptions = {
-      ...this.toolOptions,
-      defaultTimezone: settings.timezone,
-      currentUserId: userId,
-      currentChatId: chatId,
-      currentAttachments: attachments,
-      actorPersona: userPersona,
-      memoryRecall: async ({ userId: recallUserId, query, limit }) => {
-        const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
-        const memBackend = getActiveSemanticMemoryBackend();
-        let queryEmbedding: number[] | undefined;
-        try {
-          const embModel = getActiveGuardrailEmbeddingModel();
-          if (embModel) {
-            const embRes = await embModel.embed(ctx, { input: [query.slice(0, 2000)] });
-            queryEmbedding = embRes.embeddings[0] as number[] | undefined;
-          }
-        } catch { /* embedding is best-effort */ }
-        const [semantic, entityRows] = await Promise.all([
-          memBackend
-            ? memBackend.search(ctx, { userId: recallUserId, query, limit: boundedLimit, queryEmbedding })
-            : this.db.searchSemanticMemory({ userId: recallUserId, query, limit: boundedLimit, queryEmbedding }),
-          this.db.searchEntities(recallUserId, query),
-        ]);
-        return {
-          semantic: semantic.map((m) => ({ content: m.content, source: m.source })),
-          entities: entityRows.map((e) => ({
-            entityType: e.entity_type,
-            entityName: e.entity_name,
-            facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
-          })),
-        };
-      },
-      memorySearch: async ({ userId: searchUserId, query, limit }) => {
-        const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
-        const memBackend = getActiveSemanticMemoryBackend();
-        let queryEmbedding: number[] | undefined;
-        try {
-          const embModel = getActiveGuardrailEmbeddingModel();
-          if (embModel) {
-            const embRes = await embModel.embed(ctx, { input: [query.slice(0, 2000)] });
-            queryEmbedding = embRes.embeddings[0] as number[] | undefined;
-          }
-        } catch { /* embedding is best-effort */ }
-        const [semantic, entityRows] = await Promise.all([
-          memBackend
-            ? memBackend.search(ctx, { userId: searchUserId, query, limit: boundedLimit, queryEmbedding })
-            : this.db.searchSemanticMemory({ userId: searchUserId, query, limit: boundedLimit, queryEmbedding }),
-          this.db.searchEntities(searchUserId, query),
-        ]);
-        return {
-          semantic: semantic.map((m) => ({ content: m.content, source: m.source, memoryType: m.memory_type })),
-          entities: entityRows.map((e) => ({
-            entityType: e.entity_type,
-            entityName: e.entity_name,
-            facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
-          })),
-        };
-      },
-      memoryRemember: async ({ userId: rememberUserId, content, memoryType, source }) => {
-        const { newUUIDv7 } = await import('@weaveintel/core');
-        const memBackend = getActiveSemanticMemoryBackend();
-        const trimmedContent = content.slice(0, 600);
-        // Governance gate: block prohibited content, redact PII before saving
-        const govResult = await applyGovernanceCheck(this.db, ctx, trimmedContent, 'semantic');
-        if (govResult.blocked) {
-          throw new Error('Memory governance policy blocked this content from being stored.');
-        }
-        const safeContent = govResult.content;
-        const id = newUUIDv7();
-        let embedding: number[] | undefined;
-        try {
-          const embModel = getActiveGuardrailEmbeddingModel();
-          if (embModel) {
-            const embRes = await embModel.embed(ctx, { input: [safeContent] });
-            embedding = Array.from(embRes.embeddings[0] ?? []) as number[];
-            if (embedding.length === 0) embedding = undefined;
-          }
-        } catch (embErr) {
-          console.warn('[memory] memory_remember embedding failed:', String(embErr));
-        }
-        const saveOpts = { id, userId: rememberUserId, content: safeContent, memoryType: memoryType ?? 'user_fact', source: source ?? 'user_requested', embedding };
-        await (memBackend ? memBackend.save(ctx, saveOpts) : this.db.saveSemanticMemory(saveOpts));
-        return { id };
-      },
-      memoryForget: async ({ userId: forgetUserId, entityName }) => {
-        return await this.forgetMemoryForUser(ctx, forgetUserId, entityName);
-      },
-      memoryListEntities: async ({ userId: listUserId }) => {
-        const rows = await this.db.listEntities(listUserId);
-        return {
-          entities: rows.map((e) => ({
-            entityType: e.entity_type,
-            entityName: e.entity_name,
-            facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
-            confidence: e.confidence,
-          })),
-        };
-      },
-      memoryListEpisodes: async ({ userId: epUserId, limit }) => {
-        const rows = await this.db.listEpisodicMemory(epUserId, Math.min(30, limit ?? 10));
-        return {
-          episodes: rows.map((r) => ({
-            id: r.id,
-            messageRole: r.message_role,
-            content: r.content,
-            importance: r.importance,
-            createdAt: r.created_at,
-          })),
-        };
-      },
-      memoryGetProfile: async ({ userId: profUserId }) => {
-        const [entityRows, semanticRows, episodicRows, proceduralRows] = await Promise.all([
-          this.db.listEntities(profUserId),
-          this.db.listSemanticMemory(profUserId, 20),
-          this.db.listEpisodicMemory(profUserId, 10),
-          this.db.listAppliedProcedural(profUserId),
-        ]);
-        return {
-          entities: entityRows.map((e) => ({
-            entityType: e.entity_type,
-            entityName: e.entity_name,
-            facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
-            confidence: e.confidence,
-          })),
-          semantic: semanticRows.map((m) => ({ content: m.content, memoryType: m.memory_type, source: m.source })),
-          episodic: episodicRows.map((ep) => ({ messageRole: ep.message_role, content: ep.content, createdAt: ep.created_at })),
-          procedural: proceduralRows.map((p) => ({ instructionDelta: p.instruction_delta, appliedAt: p.applied_at ?? '' })),
-        };
-      },
-      memorySaveSnapshot: async ({ userId: snapUserId, chatId: snapChatId, agentId: snapAgentId, state }) => {
-        const { newUUIDv7 } = await import('@weaveintel/core');
-        const id = newUUIDv7();
-        await this.db.saveWorkingMemorySnapshot({ id, userId: snapUserId, chatId: snapChatId, agentId: snapAgentId ?? 'default', content: state });
-        return { id };
-      },
-      memoryLoadSnapshot: async ({ userId: snapUserId, agentId: snapAgentId }) => {
-        const snapshot = await this.db.getLatestWorkingMemory(snapUserId, snapAgentId ?? 'default');
-        if (!snapshot) return { snapshot: null, id: null, savedAt: null };
-        let parsed: Record<string, unknown>;
-        try { parsed = JSON.parse(snapshot.content) as Record<string, unknown>; } catch { parsed = { raw: snapshot.content }; }
-        return { snapshot: parsed, id: snapshot.id, savedAt: snapshot.created_at };
-      },
-      memoryProposeInstruction: async ({ userId: propUserId, agentId: propAgentId, instruction, reason, confidence }) => {
-        const { newUUIDv7 } = await import('@weaveintel/core');
-        const id = `proc-${newUUIDv7().slice(-8)}`;
-        await this.db.createProceduralMemory({
-          id,
-          user_id: propUserId,
-          agent_id: propAgentId ?? 'default',
-          instruction_delta: reason ? `${instruction}\n\nReason: ${reason}` : instruction,
-          proposed_by: 'agent',
-          status: 'proposed',
-          confidence: confidence ?? 0.75,
-          human_task_id: null,
-          applied_at: null,
-        });
-        return { id };
-      },
-      disabledToolKeys,
-      catalogEntries,
-      // Phase 6: apply active skill's tool policy key for scoped policy enforcement
-      skillPolicyKey: settings.skillPolicyKey,
-    };
+    const toolOptions = this.buildAgentToolOptions(ctx, userId, chatId, userPersona, settings, attachments, disabledToolKeys, catalogEntries);
     const customTools = enterpriseTools.length > 0 ? enterpriseTools : undefined;
     const tools = settings.enabledTools.length
       ? await createToolRegistry(settings.enabledTools, customTools, toolOptions)
@@ -1219,7 +1082,7 @@ export class ChatEngine {
           settings.systemPrompt,
         ].filter((value): value is string => Boolean(value && value.trim())).join('\n\n');
         const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
-        const supervisorAdditionalTools = await this.buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions);
+        const supervisorAdditionalTools = await buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions);
         agent = weaveAgent({
           model,
           workers: allWorkers,
@@ -1461,9 +1324,3 @@ function isRateLimitError(msg: string): boolean {
          lower.includes('429');
 }
 
-function historyToMessages(rows: MessageRow[]): Message[] {
-  return rows.map((r) => ({
-    role: r.role as Message['role'],
-    content: r.content,
-  }));
-}

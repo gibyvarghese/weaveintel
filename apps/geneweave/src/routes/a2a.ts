@@ -136,16 +136,12 @@ export function registerA2ARoutes(
       const providerCfg = (engineConfig.providers[resolvedProvider] ?? {}) as Record<string, unknown>;
       const model = await getOrCreateModel(resolvedProvider, resolvedModel, providerCfg);
 
-      // Delegate to the ChatEngine's runAgent method via the internal API.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const internalEngine = chatEngine as any;
-
       const syntheticChatId = task.metadata?.['chatId'] as string | undefined ?? `a2a-${task.id}`;
       // Pass the user message in the messages array so the agent has at least
       // one message to send to the model (the regular chat flow injects this
       // via patchLatestUserMessage on the DB-loaded history).
       const a2aMessages = [{ role: 'user' as const, content: userContent }];
-      const { result } = await internalEngine.runAgent(
+      const { result } = await chatEngine.runAgentTask(
         ctx,
         model,
         auth.userId,

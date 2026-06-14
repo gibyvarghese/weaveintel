@@ -42,7 +42,8 @@ export default function SignInScreen() {
       .then((raw) => {
         if (active) setProviders(parseAuthProviders(raw));
       })
-      .catch(() => {
+      .catch((err: unknown) => {
+        console.warn('[sign-in] getAuthProviders failed — social sign-in buttons will be hidden', err);
         if (active) setProviders([]);
       });
     return () => {

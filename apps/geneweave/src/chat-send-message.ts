@@ -33,7 +33,7 @@ import {
 } from './chat-prompt-contract-utils.js';
 import { shouldForceWorkerDataAnalysis } from './chat-intent-utils.js';
 import { discoverSkillsForInput } from './chat-skills-utils.js';
-import { applyRedaction, runPostEval } from './chat-eval-utils.js';
+import { applyRedaction, runPostEval, SUPERVISOR_INTERNAL_TOOLS } from './chat-eval-utils.js';
 import { recordTraceSpans, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
 import { evaluateGuardrails, evaluateTaskPolicies } from './chat-guardrail-eval-utils.js';
 import {
@@ -391,7 +391,6 @@ export async function sendMessageImpl(
       : 'I could not produce a response text for this request. Please retry.';
   }
 
-  const SUPERVISOR_INTERNAL_TOOLS = new Set(['think', 'plan', 'synthesize', 'reflect', 'log']);
   const toolEvidence = steps
     ?.filter(s => {
       if (s.type !== 'tool_call' && s.type !== 'delegation') return false;

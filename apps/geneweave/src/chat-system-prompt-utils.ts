@@ -167,8 +167,8 @@ export async function resolveSystemPrompt(
         resolution: resolved.meta,
       };
     }
-  } catch {
-    // Fall through to plain text
+  } catch (err) {
+    console.warn('[chat] resolveSystemPrompt error — falling back to raw systemPrompt string', err);
   }
 
   return { content: settings.systemPrompt };
