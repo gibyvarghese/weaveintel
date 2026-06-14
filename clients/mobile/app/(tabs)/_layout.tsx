@@ -2,16 +2,19 @@
  * (tabs) group layout — the primary authenticated navigation.
  *
  * Four tabs: Chat (the home surface), Chats (conversation history), Actions
- * (tasks + reminders), and Profile. M3 ships the navigation shell + theming;
- * the feature content of each tab lands in later milestones (M4+). The tab bar
- * is themed from `@geneweave/tokens` via {@link useTheme}.
+ * (tasks + reminders + approvals), and Profile. The Actions tab shows a live
+ * badge count (pending approvals + tasks due today) read from the query cache.
+ * The tab bar is themed from `@geneweave/tokens` via {@link useTheme}.
  */
 import { Tabs } from 'expo-router';
 import { useTheme } from '../../src/native/providers';
 import { Icon } from '../../src/native/ui/icon';
+import { useActions } from '../../src/native/actions/use-actions';
 
 export default function TabsLayout() {
   const { theme } = useTheme();
+  const { badgeCount } = useActions();
+
   return (
     <Tabs
       screenOptions={{
@@ -37,7 +40,19 @@ export default function TabsLayout() {
       />
       <Tabs.Screen
         name="actions"
-        options={{ title: 'Actions', tabBarIcon: ({ color }) => <Icon name="actions" size="lg" color={color} /> }}
+        options={{
+          title: 'Actions',
+          tabBarIcon: ({ color }) => <Icon name="actions" size="lg" color={color} />,
+          tabBarBadge: badgeCount > 0 ? badgeCount : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: theme.colors.accent,
+            color: '#fff',
+            fontSize: 10,
+            minWidth: 16,
+            height: 16,
+            lineHeight: 14,
+          },
+        }}
       />
       <Tabs.Screen
         name="profile"

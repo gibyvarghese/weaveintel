@@ -243,3 +243,16 @@ export {
   type VoiceStatus,
   type VoiceState,
 } from './voice/voice-session.js';
+
+// Push notification logic (M9) — device token storage + channel resolution.
+export {
+  PUSH_TOKEN_STORE_KEY,
+  getStoredPushToken,
+  setStoredPushToken,
+  clearStoredPushToken,
+  channelForPlatform,
+  type PushChannel,
+  type PushDevice,
+  type PushPermissionStatus,
+  type StoredPushToken,
+} from './push/push-token.js';

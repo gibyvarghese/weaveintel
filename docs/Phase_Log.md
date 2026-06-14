@@ -746,3 +746,122 @@ additive-only, each with package-consistent unit tests plus one live-server e2e.
   in `packages/client` + `packages/notifications` are pre-existing on `main`
   (identical at base `13a8e06`), unrelated to W9b.
 - W1-W10 packages pass vocab lint with zero violations.
+
+---
+
+## geneWeave Mobile (clients/mobile)
+
+### M0 — Repo scaffold
+- Monorepo workspace entry `clients/mobile` with Expo SDK 52, React Native 0.76,
+  Expo Router 4, new architecture enabled.
+- `@geneweave/api-client` and `@geneweave/tokens` as workspace peers.
+- Pure lib layer `src/lib/` testable in Node via vitest (no RN imports).
+- Device layer `src/native/` + Expo Router screens `app/` are device-gated.
+
+### M1 — Server picker
+- `app/(auth)/server.tsx` — host validation + friendly error messages.
+- `src/lib/auth/host.ts` + `host-probe.ts` — normalise URL, probe catalog endpoint.
+- `src/lib/config/env.ts` — `EXPO_PUBLIC_DEFAULT_HOST`, `EXPO_PUBLIC_TENANT_ID`.
+
+### M2 — Biometric gate
+- `src/lib/auth/biometric-gate.ts` — cold-start lock + re-lock window logic.
+- `src/native/adapters/expo-biometric.ts` — `BiometricAuthenticator` over
+  `expo-local-authentication` (Face ID / Touch ID).
+- `app/(auth)/unlock.tsx` — biometric prompt screen.
+
+### M3 — Auth + navigation shell
+- Full auth state machine: `createAuthController` + `AuthStore` (observable).
+- Per-tenant token namespacing in SecureStore (`tenant@host` scope).
+- `app/(tabs)/_layout.tsx` — four-tab navigator themed from `@geneweave/tokens`.
+- `useProtectedRoute` — auth-state → route-group switching.
+- `src/native/composition-root.ts` — single assembly point for native adapters.
+- 4 test files; `e2e-m3-mobile-auth.ts` live-server E2E.
+
+### M4 — Chat surface
+- `app/(tabs)/index.tsx` — composer + inverted streaming transcript.
+- `src/lib/chat/chat-session.ts` — streaming run lifecycle (send, stop, edit, regen,
+  20s background-detach window).
+- `src/native/adapters/rn-sse-transport.ts` — XHR-based SSE transport (no
+  streaming `response.body` on RN).
+- Markdown rendering + tool-call line components.
+
+### M5 — Memory management
+- `app/memory.tsx` — memory list with CRUD (create, correct, delete, clear all).
+- `src/lib/memory/memory-list.ts` — kind segmentation, provenance labels, validation.
+- Widget render spec parser + fixtures for dev gallery (`app/widget-gallery.tsx`).
+
+### M6 — Conversation history
+- `app/(tabs)/chats.tsx` — searchable, sortable list (pin / archive / rename).
+- `src/lib/conversations/conversation-list.ts` — filter, section, sort, relative timestamps.
+
+### M7 — Actions tab (tasks, reminders, approvals)
+- `app/(tabs)/actions.tsx` — segmented Approvals / Action Items / Reminders.
+- Optimistic mutations with rollback for all task/reminder operations.
+- `src/lib/actions/action-list.ts` — badge math, snooze targets, due-today predicate.
+
+### M8 — Profile, settings, voice
+- `app/(tabs)/profile.tsx` — user profile header with manage-on-web link.
+- `app/settings.tsx` — notification preferences, quiet hours (IANA timezone encoded).
+- `src/lib/settings/notification-prefs.ts` — pure quiet-hours predicate + category helpers.
+- `src/native/voice/` — `expo-speech-recognition` adapter + `useVoice` hook.
+- Social sign-in (OAuth): `expo-web-browser` adapter, server-discovered providers,
+  `SocialSignInButtons`, `useOAuthSignIn` hook. Server: open-redirect guard on native
+  callback URI, shared `mintSessionForUserId` helper.
+
+### M9 — Push notifications & background
+- **expo-notifications** permission flow: lazy request (post sign-in, not on cold start).
+- **Device registration**: `POST /api/me/devices` (`channel:'apns'|'fcm'`); token
+  persisted in SecureStore; deregistered on sign-out via `controller.getDeviceToken`.
+- **Interactive notification categories**: Approve / Deny action buttons registered with
+  `APPROVAL_CATEGORY_ID` — buttons do not foreground the app.
+- **Background action handler** (`background-action-handler.ts`): defined at module level
+  via `TaskManager.defineTask` so it runs before React renders. Reads credentials from
+  SecureStore, calls `resolveNotificationAction`, refreshes badge. On failure: schedules
+  a local "open app" notification.
+- **Foreground banners**: OS alert suppressed; in-app `ForegroundBanner` slides in
+  from the top with a 4s auto-dismiss. Tapping navigates to the deep-link target.
+- **Deep-link tap-through** (all 3 kinds: `geneweave://run/`, `task/`, `reminder/`):
+  cold-start via `getLastNotificationResponse`; warm-start via response listener;
+  URL-scheme cold-start via `Linking.getInitialURL`.
+- **Background-fetch badge refresh** (15 min): `expo-background-fetch` +
+  `expo-task-manager` task queries `listTasks()` and updates the iOS/Android badge.
+- **Actions tab badge**: live count from `useActions().badgeCount` shown on the tab icon.
+- **PushProvider**: orchestrates all of the above; exposes `requestPushPermission()` for
+  the settings screen to trigger the permission prompt at the right moment.
+- Key files: `src/lib/push/push-token.ts`, `src/native/adapters/expo-notifications-adapter.ts`,
+  `src/native/push/notification-categories.ts`, `src/native/push/background-action-handler.ts`,
+  `src/native/push/use-push-registration.ts`, `src/native/push/use-background-fetch.ts`,
+  `src/native/ui/push/foreground-banner.tsx`, `src/native/providers/push-provider.tsx`.
+
+### M10 — Offline, polish, release engineering
+- **SQLite offline outbox** (`expo-sqlite-outbox.ts`): implements `OutboxStorage`
+  interface backed by WAL-mode SQLite, namespaced per `tenant@host`. Flushes
+  automatically on reconnect via `OfflineProvider`.
+- **Network state** (`offline-state.ts`): `@react-native-community/netinfo` observer;
+  treats `isInternetReachable === false` as offline (captive-portal-aware); fails open
+  on null (simulator/dev).
+- **OfflineProvider**: subscribes to NetInfo, auto-flushes outbox on reconnect, polls
+  queued count every 10s while offline.
+- **Offline banner** (`offline-banner.tsx`): slides in from the bottom of safe area
+  showing queued count and a Retry button; interactive widgets are disabled while offline.
+- **Error / retry states** (`error-retry.tsx`): full-screen `ErrorRetry` + inline
+  `InlineError` components used by list screens when queries fail.
+- **Haptics** (`expo-haptics-adapter.ts`): typed API (`light/medium/heavy/selection/
+  success/warning/error`) with reduced-motion suppression via `AccessibilityInfo`.
+- **Sentry** (`src/sentry.ts`): crash reporting + performance monitoring; `initSentry()`
+  called before any component renders; `withSentryWrapper` wraps root component.
+  No-op when `EXPO_PUBLIC_SENTRY_DSN` is unset (safe in development).
+- **EAS profiles** (`eas.json`): `development` (simulator, `developmentClient`),
+  `preview` (internal distribution, APK/IPA), `production` (auto-increment, AAB/IPA,
+  App Store submit config).
+- **app.json** updates: `version: "1.0.0"`, `runtimeVersion`, `icon`/`splash` asset
+  references, `supportsTablet: true` (iPad single-column — capped-width layout via
+  `maxWidth` in screen styles), `associatedDomains` placeholder, Android
+  `googleServicesFile`, `expo-sqlite` + `@sentry/react-native` plugins.
+- **CI** (`.github/workflows/mobile-ci.yml`): unit tests + typecheck on every PR;
+  EAS iOS + Android preview builds on push to main (non-blocking `--no-wait`).
+  Scoped to `clients/mobile`, `clients/api-client`, `clients/tokens` path triggers.
+- Key files added: `eas.json`, `src/sentry.ts`, `src/native/adapters/expo-sqlite-outbox.ts`,
+  `src/native/adapters/expo-haptics-adapter.ts`, `src/native/offline/offline-state.ts`,
+  `src/native/providers/offline-provider.tsx`, `src/native/ui/offline-banner.tsx`,
+  `src/native/ui/error-retry.tsx`, `.github/workflows/mobile-ci.yml`.

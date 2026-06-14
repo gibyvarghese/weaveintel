@@ -13,6 +13,10 @@
  * Per-tenant tokens: `env.tenantId` (from `EXPO_PUBLIC_TENANT_ID`) flows into
  * the controller, which namespaces the SecureStore token store per
  * `tenant@host`, so one device can hold isolated sessions for several tenants.
+ *
+ * Push token: `getDeviceToken` is injected into the controller so sign-out can
+ * call `client.removeDevice(token)` as a best-effort deregistration step without
+ * pulling expo-notifications into the pure auth layer.
  */
 import { createGeneweaveClient, type GeneweaveClient } from '@geneweave/api-client';
 import {
@@ -27,9 +31,10 @@ import {
 import { createSecureStoreKv } from './adapters/expo-secure-store';
 import { createExpoBiometric } from './adapters/expo-biometric';
 import { createRnSseTransport } from './adapters/rn-sse-transport';
+import { getStoredPushToken } from '../lib/push/push-token';
 
 /** A client version tag sent on every request for server-side telemetry. */
-const CLIENT_VERSION = 'geneweave-mobile/0.0.1';
+const CLIENT_VERSION = 'geneweave-mobile/1.0.0';
 
 /** The assembled auth surface shared by the app via {@link AuthProvider}. */
 export interface AppAuth {
@@ -69,6 +74,11 @@ export function createAppAuth(): AppAuth {
       ...(env.defaultHost !== undefined ? { defaultHost: env.defaultHost } : {}),
       ...(env.tenantId !== undefined ? { tenantId: env.tenantId } : {}),
       biometricEnabledByDefault: env.biometricEnabledByDefault,
+    },
+    // Provide the push token getter so sign-out can deregister the device.
+    getDeviceToken: async () => {
+      const stored = await getStoredPushToken(kv);
+      return stored?.token ?? null;
     },
   });
 
