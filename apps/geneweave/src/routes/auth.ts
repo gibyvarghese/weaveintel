@@ -37,6 +37,18 @@ import { consumeInvitation, markInvitationUsed, PRIVILEGED_PERSONAS, INVITATION_
 import { issueVerificationToken, consumeVerificationToken, canResendVerification, VERIFICATION_EXPIRY_HOURS } from '../auth-email-verify.js';
 import { getEmailNotifier } from '../email-notifier.js';
 
+/** Read the allow_expo_go_scheme flag from global platform config_overrides. */
+async function isExpoGoSchemeAllowed(db: DatabaseAdapter): Promise<boolean> {
+  try {
+    const globalRow = await db.getGlobalTenantConfig();
+    if (!globalRow?.config_overrides) return false;
+    const overrides = JSON.parse(globalRow.config_overrides) as Record<string, unknown>;
+    return overrides['allow_expo_go_scheme'] === true;
+  } catch {
+    return false;
+  }
+}
+
 interface AuthRouteOptions {
   jwtSecret: string;
   corsOrigin?: string;
@@ -409,7 +421,7 @@ export function registerAuthRoutes(
     const nativeRedirect = typeof body.redirectUri === 'string' && body.redirectUri.length > 0
       ? body.redirectUri
       : null;
-    if (nativeRedirect && !isAllowedNativeRedirect(nativeRedirect)) {
+    if (nativeRedirect && !isAllowedNativeRedirect(nativeRedirect, await isExpoGoSchemeAllowed(db))) {
       json(res, 400, { error: 'Invalid redirectUri' }); return;
     }
 
@@ -494,7 +506,7 @@ export function registerAuthRoutes(
       // which the in-app auth session captures and persists. Nonce integrity is
       // guaranteed by consumeOAuthState above (full state string used as key).
       const { native, redirectUri } = parseNativeOAuthState(state);
-      if (native && redirectUri && isAllowedNativeRedirect(redirectUri)) {
+      if (native && redirectUri && isAllowedNativeRedirect(redirectUri, await isExpoGoSchemeAllowed(db))) {
         const minted = await mintSessionForUserId(db, jwtSecret, resolvedUserId);
         if (!minted) throw new Error('User not found after OAuth sign-in');
         res.statusCode = 302;

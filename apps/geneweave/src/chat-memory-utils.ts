@@ -315,7 +315,8 @@ export async function buildMemoryContext(
     if (entityMatches.length > 0) {
       parts.push('Known facts about this user:');
       for (const e of entityMatches) {
-        const factsObj = JSON.parse(e.facts) as Record<string, unknown>;
+        let factsObj: Record<string, unknown> = {};
+        try { factsObj = JSON.parse(e.facts) as Record<string, unknown>; } catch { /* malformed row — skip facts */ }
         const factsStr = Object.entries(factsObj)
           .filter(([k]) => !k.startsWith('noted_'))
           .map(([k, v]) => `${k}: ${v}`)

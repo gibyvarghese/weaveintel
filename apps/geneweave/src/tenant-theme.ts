@@ -204,9 +204,10 @@ export async function resolveTenantThemeTokens(
     const merged = mergeThemeTokens(platformTheme, tenantTheme);
     cacheSet(cacheKey, merged);
     return merged;
-  } catch {
+  } catch (err) {
     // Never let a theme lookup break a request — degrade to the base theme.
-    cacheSet(cacheKey, null);
+    // Do NOT cache the error state: let the next request retry the DB.
+    console.error('[tenant-theme] DB lookup failed, returning base theme', err);
     return null;
   }
 }

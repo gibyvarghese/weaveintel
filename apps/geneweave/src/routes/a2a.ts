@@ -176,11 +176,15 @@ export function registerA2ARoutes(
     }
   }, { csrf: false });
 
-  // ── Task status (stub — geneWeave tasks are synchronous) ─────────────────
+  // ── Task status ───────────────────────────────────────────────────────────
 
-  router.get('/api/a2a/tasks/:taskId', async (_req, res, _params, auth) => {
+  router.get('/api/a2a/tasks/:taskId', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Bearer token required' }); return; }
-    // Synchronous A2A server — no persistent task state.
-    json(res, 404, { error: 'Task not found. geneWeave A2A tasks are synchronous.' });
+    const taskId = params['taskId'];
+    // geneWeave A2A tasks are synchronous: the POST /api/a2a/tasks response
+    // already contains the completed result. Any task queried via GET has
+    // already completed; we return 200 with status:'completed' to let callers
+    // that poll for status (following the A2A spec) proceed correctly.
+    json(res, 200, { id: taskId, status: 'completed', message: 'geneWeave A2A tasks are synchronous — the final result was delivered in the POST response.' });
   });
 }

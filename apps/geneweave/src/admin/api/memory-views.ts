@@ -112,8 +112,9 @@ export function registerMemoryViewRoutes(
     let body: Record<string, unknown>;
     try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     if (!body['name'] || !body['pattern']) { json(res, 400, { error: 'name and pattern required' }); return; }
+    const newId = 'mer-' + newUUIDv7().slice(-8);
     await db.createMemoryExtractionRule({
-      id: 'mer-' + newUUIDv7().slice(-8),
+      id: newId,
       name: body['name'] as string,
       description: (body['description'] as string) ?? null,
       rule_type: (body['rule_type'] as string) ?? 'entity_extraction',
@@ -126,8 +127,8 @@ export function registerMemoryViewRoutes(
       priority: (body['priority'] as number) ?? 0,
       enabled: body['enabled'] !== false ? 1 : 0,
     });
-    const rules = await db.listMemoryExtractionRules();
-    json(res, 201, { 'memory-extraction-rule': rules.at(-1) });
+    const created = await db.getMemoryExtractionRule(newId);
+    json(res, 201, { 'memory-extraction-rule': created });
   }, { auth: true, csrf: true });
 
   router.put('/api/admin/memory-extraction-rules/:id', async (req, res, params, auth) => {

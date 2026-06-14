@@ -71,12 +71,16 @@ export class DashboardService {
       return { avgLatency: 0, p50Latency: 0, p95Latency: 0, totalRequests: 0, errorRate: 0, byModel: [] };
     }
 
-    const latencies = metrics.map((m) => m.latency_ms).sort((a, b) => a - b);
+    const latencies = metrics
+      .map((m) => m.latency_ms)
+      .filter((v): v is number => typeof v === 'number' && v >= 0)
+      .sort((a, b) => a - b);
     const errorCount = metrics.filter((m) => m.type === 'error').length;
 
-    // Group by model
+    // Group by model — skip entries with null latency to keep averages meaningful
     const modelMap = new Map<string, { total: number; count: number }>();
     for (const m of metrics) {
+      if (typeof m.latency_ms !== 'number' || m.latency_ms < 0) continue;
       const key = m.model ?? 'unknown';
       const entry = modelMap.get(key) ?? { total: 0, count: 0 };
       entry.total += m.latency_ms;
@@ -85,7 +89,7 @@ export class DashboardService {
     }
 
     return {
-      avgLatency: Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length),
+      avgLatency: latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : 0,
       p50Latency: latencies[Math.floor(latencies.length * 0.5)] ?? 0,
       p95Latency: latencies[Math.floor(latencies.length * 0.95)] ?? 0,
       totalRequests: metrics.length,

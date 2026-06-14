@@ -34,6 +34,8 @@ export interface IRoutingStore {
   getCapabilityScore(id: string): Promise<ModelCapabilityScoreRow | null>;
   upsertCapabilityScore(row: Omit<ModelCapabilityScoreRow, 'created_at' | 'updated_at'>): Promise<void>;
   updateCapabilityScore(id: string, fields: Partial<Omit<ModelCapabilityScoreRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  /** Atomically disable all capability scores with the given ids (is_active = 0). */
+  bulkDisableCapabilityScores(ids: string[]): Promise<void>;
   deleteCapabilityScore(id: string): Promise<void>;
 
   // Provider tool adapters

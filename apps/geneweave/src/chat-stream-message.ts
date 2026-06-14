@@ -658,7 +658,6 @@ export async function streamMessageImpl(
     title: autoTitle ?? undefined,
     traceId,
     ensembleCandidates: ensembleMeta?.candidates,
-    ensembleRationale: ensembleMeta?.rationale,
     ensembleWinner: ensembleMeta?.winner,
   });
 
@@ -668,7 +667,7 @@ export async function streamMessageImpl(
     metadata: JSON.stringify({
       model: modelId, provider, streamed: true, mode: settings.mode,
       agentName: settings.mode === 'supervisor' ? 'geneweave-supervisor' : settings.mode === 'agent' ? 'geneweave-agent' : undefined,
-      systemPrompt: streamMemorySettings.systemPrompt || undefined,
+      systemPromptSha256: streamTelemetry?.systemPromptSha256,
       enabledTools: streamMemorySettings.enabledTools.length ? streamMemorySettings.enabledTools : undefined,
       activeSkills: streamActiveSkills.length ? streamActiveSkills : undefined,
       skillTools: streamSkillTools.length ? streamSkillTools : undefined,
@@ -676,7 +675,9 @@ export async function streamMessageImpl(
       redactionEnabled: settings.redactionEnabled || undefined,
       steps: steps.length ? steps.map(s => ({ type: s.type, content: s.content, toolCall: s.toolCall, delegation: s.delegation, durationMs: s.durationMs })) : undefined,
       ensembleCandidates: ensembleMeta?.candidates,
-      ensembleRationale: ensembleMeta?.rationale,
+      ensembleRationale: ensembleMeta?.rationale
+        ? ensembleMeta.rationale.replace(/[^\x20-\x7E]/g, '').slice(0, 500) || undefined
+        : undefined,
       ensembleWinner: ensembleMeta?.winner,
       eval: evalInfo,
       evalError,

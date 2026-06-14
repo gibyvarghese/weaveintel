@@ -531,7 +531,7 @@ export function registerMeRoutes(
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
       enabled: prefs.enabled === 1,
-      categories: JSON.parse(prefs.categories) as string[],
+      categories: prefs.categories ? ((): string[] => { try { return JSON.parse(prefs.categories) as string[]; } catch { return []; } })() : [],
       quietHours: prefs.quiet_hours ?? null,
     }));
   }, { auth: true });

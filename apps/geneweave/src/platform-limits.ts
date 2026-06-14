@@ -37,6 +37,10 @@ export interface PlatformLimits {
   /** Max chars of attachment content inlined into the model context. Default: 12000. */
   attachment_inline_max_chars: number;
 
+  // Chat input
+  /** Max chars for a user-supplied systemPrompt. Default: 32000. */
+  system_prompt_max_chars: number;
+
   // CSE / sandbox
   /** Execution wall-clock timeout ms. Default: 30000. */
   cse_timeout_ms: number;
@@ -60,6 +64,7 @@ export const CODE_DEFAULTS: Readonly<PlatformLimits> = {
   guardrail_input_max_chars: 8_000,
   guardrail_action_max_chars: 4_000,
   attachment_inline_max_chars: 12_000,
+  system_prompt_max_chars: 32_000,
   cse_timeout_ms: 30_000,
   cse_memory_mb: 512,
   cse_cpu_count: 1,
@@ -75,6 +80,7 @@ const HARD_FLOORS: Readonly<Partial<PlatformLimits>> = {
   guardrail_input_max_chars: 512,
   guardrail_action_max_chars: 256,
   attachment_inline_max_chars: 256,
+  system_prompt_max_chars: 256,
   cse_timeout_ms: 1_000,
   cse_memory_mb: 64,
   cse_cpu_count: 0.1,

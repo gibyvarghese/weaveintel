@@ -37,8 +37,16 @@ export async function getLlmEndpointPressure(
   let rows: Awaited<ReturnType<DatabaseAdapter['listEndpointHealth']>> = [];
   try {
     rows = await db.listEndpointHealth({ limit: 50 });
-  } catch {
-    return { openEndpoints: [], rateLimitedUntil: null, rateLimitedEndpoint: null };
+  } catch (err) {
+    // DB failure: assume ALL tracked endpoints may be pressured rather than
+    // returning "all clear" — failing open would let schedulers hammer a
+    // potentially-degraded provider. Callers should treat this as "unknown".
+    console.error('[endpoint-pressure] DB lookup failed, assuming full endpoint pressure', err);
+    return {
+      openEndpoints: LLM_ENDPOINT_IDS,
+      rateLimitedUntil: new Date(Date.now() + 60_000),
+      rateLimitedEndpoint: null,
+    };
   }
   const open: string[] = [];
   let rlUntil: Date | null = null;

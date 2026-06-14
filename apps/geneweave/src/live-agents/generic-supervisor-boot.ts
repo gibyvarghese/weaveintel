@@ -147,17 +147,14 @@ export async function startGenericSupervisorIfEnabled(
   });
 
   // Pinned fallback so handlers that read `ctx.model` (instead of
-  // `ctx.modelResolver`) still work. Returns the configured default
-  // model on best-effort basis; `undefined` puts handlers in
-  // deterministic mode.
-  const modelFactory = async (): Promise<Model | undefined> => {
+  // `ctx.modelResolver`) still work. Throws on failure so that the
+  // mesh-startup path surfaces mis-configuration immediately rather than
+  // silently returning `undefined` and letting handlers fail cryptically
+  // at runtime when they read `ctx.model`.
+  const modelFactory = async (): Promise<Model> => {
     const cfg = opts.providers[opts.defaultProvider];
-    if (!cfg) return undefined;
-    try {
-      return await getOrCreateModel(opts.defaultProvider, opts.defaultModel, cfg);
-    } catch {
-      return undefined;
-    }
+    if (!cfg) throw new Error(`[generic-supervisor] No provider config for default provider '${opts.defaultProvider}'`);
+    return getOrCreateModel(opts.defaultProvider, opts.defaultModel, cfg);
   };
 
   // DB-backed system-prompt resolver — looks up enabled prompts by key

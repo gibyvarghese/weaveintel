@@ -9,6 +9,10 @@
  * No React / React Native / Expo imports — testable in plain Node.
  */
 
+/** Schemes that may carry a native OAuth callback. Must be kept in sync with the
+ *  server-side `isAllowedNativeRedirect` allowlist in apps/geneweave. */
+const ALLOWED_OAUTH_CALLBACK_SCHEMES = ['geneweave:', 'exp:'] as const;
+
 /** Every OAuth provider the app can render, in canonical display order. */
 export const OAUTH_PROVIDER_IDS = ['google', 'github', 'microsoft', 'apple', 'facebook'] as const;
 
@@ -71,6 +75,18 @@ export interface NativeOAuthError {
  * in-flight requests during a rolling deploy.
  */
 export function parseNativeOAuthCallback(url: string): NativeOAuthResult | NativeOAuthError {
+  // Guard: only accept URLs with a known app scheme. Rejects web URLs (https://)
+  // and protocol-relative strings (//evil.example) that could reach this parser
+  // through deep-link spoofing.
+  try {
+    const parsed = new URL(url);
+    if (!(ALLOWED_OAUTH_CALLBACK_SCHEMES as readonly string[]).includes(parsed.protocol)) {
+      return { error: 'OAuth callback URL has unexpected scheme' };
+    }
+  } catch {
+    return { error: 'OAuth callback URL is not a valid URL' };
+  }
+
   const hashStart = url.indexOf('#');
   const queryStart = url.indexOf('?');
 

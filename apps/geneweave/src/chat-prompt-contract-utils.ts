@@ -29,6 +29,8 @@ interface PromptContractValidationSummary {
 export interface PromptContractValidationReport {
   summary: PromptContractValidationSummary;
   results: PromptContractCheckResult[];
+  /** Set when the validation pipeline itself errored (e.g. DB failure). */
+  validationError?: string;
 }
 
 export async function validatePromptContractsAgainstDb(
@@ -96,7 +98,13 @@ export async function validatePromptContractsAgainstDb(
     };
 
     return { summary, results };
-  } catch {
-    return undefined;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error('[chat-prompt-contracts] validation pipeline error', err);
+    return {
+      summary: { total: 0, passed: 0, failed: 0, error: 0, warning: 0, info: 0 },
+      results: [],
+      validationError: msg,
+    };
   }
 }

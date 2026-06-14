@@ -30,7 +30,7 @@ export async function applyRedaction(
     };
   } catch {
     return {
-      redacted: '',
+      redacted: text,
       wasModified: false,
       detections: [],
       error: 'redaction_failed',

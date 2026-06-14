@@ -1355,6 +1355,9 @@ export class ChatEngine {
       }
 
       if (finalResult) return { result: finalResult, toolCallEvents: toolCallObserver.events };
+      // Stream ended without a 'done' event — log and fall through to the
+      // non-streaming path rather than silently returning undefined output.
+      console.warn('[chat] stream agent ended without done event, falling back to agent.run()');
     }
 
     // Fallback: non-streaming agent run, send result as single text event

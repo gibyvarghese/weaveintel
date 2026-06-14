@@ -4,6 +4,11 @@ import type { DatabaseAdapter } from '../db.js';
 import { json, readBody } from '../server-core.js';
 import type { Router } from '../server-core.js';
 
+// Allowlists for memory metadata fields. Values outside these sets are
+// silently normalised to the safe default to prevent injection / enumeration.
+const ALLOWED_MEMORY_TYPES = new Set(['fact', 'preference', 'episode', 'entity', 'relationship', 'goal']);
+const ALLOWED_MEMORY_SOURCES = new Set(['api', 'chat', 'user', 'system', 'import', 'skill']);
+
 export function registerMemoryRoutes(router: Router, db: DatabaseAdapter): void {
 
   // ── Memory API ─────────────────────────────────────────────────────────────
@@ -23,8 +28,10 @@ export function registerMemoryRoutes(router: Router, db: DatabaseAdapter): void 
       userId: auth.userId,
       chatId: body.chatId,
       content,
-      memoryType: body.memoryType ?? body.scope ?? 'fact',
-      source: body.key ?? body.source ?? 'api',
+      memoryType: ALLOWED_MEMORY_TYPES.has(body.memoryType ?? '') ? (body.memoryType ?? 'fact')
+        : ALLOWED_MEMORY_TYPES.has(body.scope ?? '') ? (body.scope ?? 'fact') : 'fact',
+      source: ALLOWED_MEMORY_SOURCES.has(body.key ?? '') ? (body.key ?? 'api')
+        : ALLOWED_MEMORY_SOURCES.has(body.source ?? '') ? (body.source ?? 'api') : 'api',
     });
     json(res, 200, { id, ok: true });
   }, { auth: true, csrf: true });

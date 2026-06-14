@@ -251,9 +251,14 @@ export class MeRunExecutor {
 
   async #withRunLock<T>(runId: string, fn: () => Promise<T>): Promise<T> {
     const prev = this.#locks.get(runId) ?? Promise.resolve();
+    // Run fn after prev settles (regardless of prev outcome) to keep the chain
+    // moving. Errors in fn propagate to the caller; the lock chain itself only
+    // sees the settled promise so one failure doesn't poison subsequent appends.
     const run = prev.then(fn, fn);
-    // Chain swallows errors so one failed append doesn't poison the lock chain.
-    this.#locks.set(runId, run.then(() => {}, () => {}));
+    this.#locks.set(runId, run.then(
+      () => {},
+      (err) => { console.error(`[me-run-executor] lock chain error for run ${runId}`, err); },
+    ));
     return run;
   }
 
@@ -298,6 +303,14 @@ export class MeRunExecutor {
     const { runId, userId } = args;
     const runAgent = this.#runAgent!;
     try {
+      // Re-verify ownership at execution time. The run may have been created
+      // by a different principal or the runId may have been tampered with
+      // between dispatch and execution in the background queue.
+      const ownedRun = await this.#db.getUserRun(runId, userId);
+      if (!ownedRun) {
+        console.error(`[me-run-executor] run ${runId} not found for user ${userId} — aborting`);
+        return;
+      }
       await this.#db.updateUserRunStatus(runId, userId, 'running');
       await this.appendEvent(runId, 'run.started', {
         ...(args.surface !== undefined ? { surface: args.surface } : {}),

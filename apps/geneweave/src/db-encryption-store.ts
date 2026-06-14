@@ -212,6 +212,12 @@ export class SqliteEncryptionStore {
   }
 
   async listDueTenantPurges(nowMs: number): Promise<TenantDeletionRequestRow[]> {
+    const realNow = Date.now();
+    // Guard against seconds-vs-milliseconds bugs and large clock skew: reject
+    // values that deviate from the real wall clock by more than one hour.
+    if (Math.abs(nowMs - realNow) > 3_600_000) {
+      throw new Error(`listDueTenantPurges: nowMs (${nowMs}) deviates from Date.now() (${realNow}) by more than 1 hour — possible seconds/ms unit mismatch`);
+    }
     return this.db.prepare(
       `SELECT * FROM tenant_deletion_requests WHERE status = 'pending' AND retention_until <= ? ORDER BY retention_until ASC, rowid ASC`,
     ).all(nowMs) as TenantDeletionRequestRow[];

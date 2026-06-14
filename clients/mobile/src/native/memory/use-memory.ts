@@ -62,7 +62,7 @@ export interface UseMemoryResult {
   /** Delete a single memory row. */
   remove: (id: string) => void;
   /** Clear every memory (typed double-confirm enforced by the screen). */
-  clearAll: () => void;
+  clearAll: () => Promise<void>;
 }
 
 export function useMemory(): UseMemoryResult {
@@ -180,6 +180,6 @@ export function useMemory(): UseMemoryResult {
     addNote: (content) => addMutation.mutate(content),
     correct: (id, content, reason) => correctMutation.mutate({ id, content, ...(reason !== undefined ? { reason } : {}) }),
     remove: (id) => deleteMutation.mutate(id),
-    clearAll: () => clearMutation.mutate(),
+    clearAll: () => clearMutation.mutateAsync(),
   };
 }

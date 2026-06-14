@@ -40,17 +40,19 @@ function schemeOf(uri: string): string | null {
  * Whether a redirect URI targets one of our app schemes. This is the open-redirect
  * guard: a `https://evil.example` redirect URI is rejected before any 302.
  *
- * The `exp://` Expo Go scheme is only permitted outside production so development
- * builds can use it without widening the attack surface in production deployments.
+ * `allowExpoGo` must be explicitly set to `true` to permit the `exp://` scheme.
+ * It defaults to `false` — callers must opt in via DB config, not code constants.
+ * This replaces the prior `NODE_ENV !== 'production'` check so the flag is
+ * controllable at runtime without a code deploy.
  */
 export function isAllowedNativeRedirect(
   redirectUri: string,
-  env: NodeJS.ProcessEnv = process.env,
+  allowExpoGo: boolean = false,
 ): boolean {
   const scheme = schemeOf(redirectUri);
   if (scheme === null) return false;
   if (scheme === PRODUCTION_APP_SCHEME) return true;
-  if (scheme === EXPO_GO_SCHEME && env['NODE_ENV'] !== 'production') return true;
+  if (scheme === EXPO_GO_SCHEME && allowExpoGo) return true;
   return false;
 }
 

@@ -26,7 +26,8 @@ describe('chat eval helper fail-safe behavior', () => {
     const result = await applyRedaction({} as any, 'secret', ['email']);
 
     expect(result.error).toBe('redaction_failed');
-    expect(result.redacted).toBe('');
+    // M-3 fix: on failure, original text is returned (not empty string)
+    expect(result.redacted).toBe('secret');
     expect(result.wasModified).toBe(false);
   });
 

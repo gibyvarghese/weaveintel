@@ -9,9 +9,16 @@ import {
 import { listConfiguredOAuthProviders } from './server-core.js';
 
 describe('oauth-native redirect allowlist', () => {
-  it('accepts app schemes', () => {
+  it('accepts the production app scheme unconditionally', () => {
     expect(isAllowedNativeRedirect('geneweave://oauth')).toBe(true);
-    expect(isAllowedNativeRedirect('exp://127.0.0.1:8081/--/oauth')).toBe(true);
+    expect(isAllowedNativeRedirect('geneweave://oauth', false)).toBe(true);
+    expect(isAllowedNativeRedirect('geneweave://oauth', true)).toBe(true);
+  });
+
+  it('accepts exp:// only when allowExpoGo is true', () => {
+    expect(isAllowedNativeRedirect('exp://127.0.0.1:8081/--/oauth', true)).toBe(true);
+    expect(isAllowedNativeRedirect('exp://127.0.0.1:8081/--/oauth')).toBe(false);
+    expect(isAllowedNativeRedirect('exp://127.0.0.1:8081/--/oauth', false)).toBe(false);
   });
 
   it('rejects open-redirect targets', () => {
@@ -19,12 +26,6 @@ describe('oauth-native redirect allowlist', () => {
     expect(isAllowedNativeRedirect('http://localhost/oauth')).toBe(false);
     expect(isAllowedNativeRedirect('//evil.example')).toBe(false);
     expect(isAllowedNativeRedirect('not a uri')).toBe(false);
-  });
-
-  it('rejects exp:// in production', () => {
-    const prod = { NODE_ENV: 'production' } as NodeJS.ProcessEnv;
-    expect(isAllowedNativeRedirect('exp://127.0.0.1:8081/--/oauth', prod)).toBe(false);
-    expect(isAllowedNativeRedirect('geneweave://oauth', prod)).toBe(true);
   });
 });
 

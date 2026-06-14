@@ -99,7 +99,7 @@ export function createMeCatalogSources(db: DatabaseAdapter): CatalogSource[] {
         try {
           const skills = await db.listSkills();
           return skills
-            .filter((s) => (s as { enabled?: number }).enabled !== 0)
+            .filter((s) => s.enabled === 1)
             .map((s) => ({
               id: s.id,
               kind: 'skill' as const,

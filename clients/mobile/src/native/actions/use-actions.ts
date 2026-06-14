@@ -12,6 +12,7 @@
  * The screen stays a thin renderer over the returned segments + handlers.
  */
 import { useCallback, useMemo, useRef } from 'react';
+import type React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { NotificationAction, Reminder, Task } from '@geneweave/api-client';
 import { useAuth } from '../providers/auth-provider';
@@ -82,23 +83,37 @@ export function useActions(): UseActionsResult {
   const badgeCount = useMemo(() => countActionsBadge(tasks), [tasks]);
 
   // ── Task mutations (approve/deny/complete/cancel all optimistically drop the row) ──
-  const taskRollback = useRef<Task[] | null>(null);
-  const optimisticallyDropTask = useCallback(
-    async (taskId: string) => {
-      await qc.cancelQueries({ queryKey: TASKS_KEY });
-      taskRollback.current = qc.getQueryData<Task[]>(TASKS_KEY) ?? [];
-      qc.setQueryData<Task[]>(TASKS_KEY, (prev) => removeTask(prev ?? [], taskId));
-    },
+  // M-15: Each mutation gets its own rollback ref so concurrent mutations don't
+  // overwrite each other's snapshot (shared ref would let the last onMutate win).
+  const approveRollback = useRef<Task[] | null>(null);
+  const completeRollback = useRef<Task[] | null>(null);
+  const cancelRollback = useRef<Task[] | null>(null);
+
+  const makeOptimisticDrop = useCallback(
+    (rollback: React.MutableRefObject<Task[] | null>) =>
+      async (taskId: string) => {
+        await qc.cancelQueries({ queryKey: TASKS_KEY });
+        rollback.current = qc.getQueryData<Task[]>(TASKS_KEY) ?? [];
+        qc.setQueryData<Task[]>(TASKS_KEY, (prev) => removeTask(prev ?? [], taskId));
+      },
     [qc],
   );
-  const rollbackTasks = useCallback(() => {
-    if (taskRollback.current) qc.setQueryData<Task[]>(TASKS_KEY, taskRollback.current);
-    taskRollback.current = null;
-  }, [qc]);
-  const settleTasks = useCallback(() => {
-    taskRollback.current = null;
-    void qc.invalidateQueries({ queryKey: TASKS_KEY });
-  }, [qc]);
+  const makeRollback = useCallback(
+    (rollback: React.MutableRefObject<Task[] | null>) =>
+      () => {
+        if (rollback.current) qc.setQueryData<Task[]>(TASKS_KEY, rollback.current);
+        rollback.current = null;
+      },
+    [qc],
+  );
+  const makeSettle = useCallback(
+    (rollback: React.MutableRefObject<Task[] | null>) =>
+      () => {
+        rollback.current = null;
+        void qc.invalidateQueries({ queryKey: TASKS_KEY });
+      },
+    [qc],
+  );
 
   const approveMutation = useMutation({
     mutationFn: async (vars: { taskId: string; actionId: NotificationAction }) => {
@@ -107,9 +122,9 @@ export function useActions(): UseActionsResult {
       // row is already gone optimistically, so there is nothing more to do.
       return client.resolveNotificationAction(vars);
     },
-    onMutate: (vars) => optimisticallyDropTask(vars.taskId),
-    onError: rollbackTasks,
-    onSettled: settleTasks,
+    onMutate: (vars) => makeOptimisticDrop(approveRollback)(vars.taskId),
+    onError: makeRollback(approveRollback),
+    onSettled: makeSettle(approveRollback),
   });
 
   const completeMutation = useMutation({
@@ -117,9 +132,9 @@ export function useActions(): UseActionsResult {
       if (!client) throw new Error('Not connected');
       return client.completeTask(taskId);
     },
-    onMutate: optimisticallyDropTask,
-    onError: rollbackTasks,
-    onSettled: settleTasks,
+    onMutate: makeOptimisticDrop(completeRollback),
+    onError: makeRollback(completeRollback),
+    onSettled: makeSettle(completeRollback),
   });
 
   const cancelMutation = useMutation({
@@ -127,9 +142,9 @@ export function useActions(): UseActionsResult {
       if (!client) throw new Error('Not connected');
       return client.cancelTask(taskId);
     },
-    onMutate: optimisticallyDropTask,
-    onError: rollbackTasks,
-    onSettled: settleTasks,
+    onMutate: makeOptimisticDrop(cancelRollback),
+    onError: makeRollback(cancelRollback),
+    onSettled: makeSettle(cancelRollback),
   });
 
   // ── Reminder mutations ──────────────────────────────────────────────────

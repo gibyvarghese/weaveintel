@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DatabaseAdapter } from '../db.js';
 import { json, readBody } from '../server-core.js';
 import type { Router } from '../server-core.js';
+import { resolveLimits } from '../platform-limits.js';
 
 export function registerSettingsRoutes(
   router: Router,
@@ -78,10 +79,18 @@ export function registerSettingsRoutes(
       return DEFAULT_TOOLS[mode] ?? [];
     })();
 
+    const rawSystemPrompt = typeof body['systemPrompt'] === 'string' ? body['systemPrompt'] : undefined;
+    if (rawSystemPrompt !== undefined) {
+      const limits = await resolveLimits(db);
+      if (rawSystemPrompt.length > limits.system_prompt_max_chars) {
+        json(res, 400, { error: `systemPrompt exceeds maximum allowed length of ${limits.system_prompt_max_chars} characters` }); return;
+      }
+    }
+
     await db.saveChatSettings({
       chatId: chat.id,
       mode,
-      systemPrompt: (body['systemPrompt'] as string) ?? undefined,
+      systemPrompt: rawSystemPrompt,
       timezone: (body['timezone'] as string) ?? undefined,
       enabledTools: JSON.stringify(toolPolicy),
       redactionEnabled: !!body['redactionEnabled'],

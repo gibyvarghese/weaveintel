@@ -71,8 +71,20 @@ function createEpisodicStore(db: DatabaseAdapter): MemoryStore {
         }));
     },
 
-    async delete(_ctx: ExecutionContext, _ids: string[]): Promise<void> { /* unused */ },
-    async clear(_ctx: ExecutionContext, _filter?: MemoryFilter): Promise<void> { /* unused */ },
+    async delete(_ctx: ExecutionContext, ids: string[]): Promise<void> {
+      const userId = _ctx.userId ?? 'unknown';
+      await Promise.all(ids.map((id) => db.deleteSemanticMemory(id, userId).catch((err) => {
+        console.error(`[memory-consolidation] episodic delete failed for ${id}`, err);
+      })));
+    },
+    async clear(_ctx: ExecutionContext, filter?: MemoryFilter): Promise<void> {
+      const userId = filter?.userId ?? _ctx.userId ?? 'unknown';
+      const rows = await db.listSemanticMemory(userId, 10_000);
+      const episodic = rows.filter((r) => r.source === 'user' || r.memory_type === 'episodic');
+      await Promise.all(episodic.map((r) => db.deleteSemanticMemory(r.id, userId).catch((err) => {
+        console.error(`[memory-consolidation] episodic clear failed for ${r.id}`, err);
+      })));
+    },
   };
 }
 
@@ -109,8 +121,30 @@ function createSemanticStore(): MemoryStore {
       }));
     },
 
-    async delete(_ctx: ExecutionContext, _ids: string[]): Promise<void> { /* unused */ },
-    async clear(_ctx: ExecutionContext, _filter?: MemoryFilter): Promise<void> { /* unused */ },
+    async delete(_ctx: ExecutionContext, ids: string[]): Promise<void> {
+      const backend = getActiveSemanticMemoryBackend();
+      if (!backend) return;
+      const userId = _ctx.userId ?? 'unknown';
+      await Promise.all(ids.map(async (id) => {
+        try {
+          // The semantic backend doesn't expose a delete-by-id API; ask the
+          // local DB fallback so that SQLite-backed deployments still work.
+          const fallbackDb = _consolidatorDb;
+          if (fallbackDb) await fallbackDb.deleteSemanticMemory(id, userId);
+        } catch (err) {
+          console.error(`[memory-consolidation] semantic delete failed for ${id}`, err);
+        }
+      }));
+    },
+    async clear(_ctx: ExecutionContext, filter?: MemoryFilter): Promise<void> {
+      const userId = filter?.userId ?? _ctx.userId ?? 'unknown';
+      const fallbackDb = _consolidatorDb;
+      if (!fallbackDb) return;
+      const rows = await fallbackDb.listSemanticMemory(userId, 10_000);
+      await Promise.all(rows.map((r) => fallbackDb.deleteSemanticMemory(r.id, userId).catch((err) => {
+        console.error(`[memory-consolidation] semantic clear failed for ${r.id}`, err);
+      })));
+    },
   };
 }
 
@@ -127,7 +161,12 @@ export function initMemoryConsolidation(opts: {
   db: DatabaseAdapter;
   llmExtractor?: MemoryConsolidatorOptions['llmExtractor'];
 }): void {
-  if (_consolidatorDb) return; // already initialised
+  if (_consolidatorDb) {
+    if (_consolidatorDb !== opts.db) {
+      console.warn('[memory-consolidation] initMemoryConsolidation called with a different DatabaseAdapter — re-initialisation is ignored. Call resetMemoryConsolidation() first if you need to swap the DB instance.');
+    }
+    return;
+  }
   _consolidatorDb = opts.db;
 
   const consolidator = weaveMemoryConsolidator({

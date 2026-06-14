@@ -766,10 +766,13 @@ describe('C-5 — OAuth native redirect uses fragment, not query string', () => 
     expect(isAllowedNativeRedirect('javascript:alert(1)')).toBe(false);
   });
 
-  it('open-redirect allowlist accepts app schemes and Expo dev URIs', () => {
+  it('open-redirect allowlist accepts app schemes and Expo dev URIs (when allowExpoGo=true)', () => {
+    // M-23 fix: exp:// now requires explicit allowExpoGo=true (DB-configurable flag)
     expect(isAllowedNativeRedirect('geneweave://oauth')).toBe(true);
-    expect(isAllowedNativeRedirect('exp://127.0.0.1:8081/--/oauth')).toBe(true);
-    expect(isAllowedNativeRedirect('exp://192.168.1.100:8081/--/oauth')).toBe(true);
+    expect(isAllowedNativeRedirect('exp://127.0.0.1:8081/--/oauth', true)).toBe(true);
+    expect(isAllowedNativeRedirect('exp://192.168.1.100:8081/--/oauth', true)).toBe(true);
+    // Without flag, exp:// is rejected (default deny for Expo Go in production)
+    expect(isAllowedNativeRedirect('exp://127.0.0.1:8081/--/oauth')).toBe(false);
   });
 
   it('encodeNativeOAuthState / parseNativeOAuthState round-trips correctly', () => {

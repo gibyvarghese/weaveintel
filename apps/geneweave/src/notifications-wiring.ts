@@ -138,7 +138,7 @@ export function createDeviceTargetStore(db: Pick<DatabaseAdapter, 'listDevices'>
         updatedAt: d.created_at,
       }));
     },
-    async remove() { /* registrations are managed via /api/me/devices */ },
+    async remove(id) { console.warn(`[device-target-store] remove(${id}) called — device registrations are managed via DELETE /api/me/devices/:deviceId, not through the target store`); },
   };
 }
 

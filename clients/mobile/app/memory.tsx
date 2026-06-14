@@ -76,11 +76,17 @@ export default function MemoryScreen() {
     if (editing) correct(editing.id, content);
     else addNote(content);
   }
-  function confirmClear() {
+  async function confirmClear() {
     if (!isClearAllConfirmed(confirmText)) return;
-    clearAll();
-    setClearOpen(false);
-    setConfirmText('');
+    try {
+      await clearAll();
+      setClearOpen(false);
+      setConfirmText('');
+    } catch {
+      // onError in useMemory rolls back the optimistic update and sets the
+      // error state shown as <ErrorText> on the screen. Just keep the dialog
+      // open so the user knows the action did not succeed.
+    }
   }
 
   return (

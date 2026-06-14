@@ -150,7 +150,11 @@ export function createHttpTransport(opts: CreateHttpTransportOptions): Geneweave
         }
         if (!resp.ok || !resp.body) {
           handlers.onError?.(new Error(`stream open failed → ${resp.status}`));
-          handlers.onClose?.();
+          // M-13: Do NOT call onClose for permanent client errors (4xx) so that
+          // callers can distinguish transient failures (network drop → reconnect)
+          // from permanent ones (404 endpoint gone, 403 forbidden → stop retrying).
+          const isPermanent = resp.status >= 400 && resp.status < 500;
+          if (!isPermanent) handlers.onClose?.();
           return;
         }
 
@@ -158,6 +162,10 @@ export function createHttpTransport(opts: CreateHttpTransportOptions): Geneweave
         const decoder = new TextDecoder();
         let buf = '';
         let dataLines: string[] = [];
+
+        // M-14: stall timeout — if no chunk arrives within this window, tear down
+        // the stream so the caller can reconnect rather than hanging forever.
+        const STALL_TIMEOUT_MS = 60_000;
 
         const flush = () => {
           if (dataLines.length === 0) return;
@@ -173,9 +181,18 @@ export function createHttpTransport(opts: CreateHttpTransportOptions): Geneweave
 
         try {
           while (!input.signal?.aborted) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const stall = new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error('SSE stream stalled — no data received within timeout')), STALL_TIMEOUT_MS);
+            });
+            let chunk: ReadableStreamReadResult<Uint8Array>;
+            try {
+              chunk = await Promise.race([reader.read(), stall]);
+            } finally {
+              clearTimeout(timer);
+            }
+            if (chunk.done) break;
+            buf += decoder.decode(chunk.value, { stream: true });
             const lines = buf.split('\n');
             buf = lines.pop() ?? '';
             for (const line of lines) {

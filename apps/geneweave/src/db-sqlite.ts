@@ -1838,6 +1838,16 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM model_capability_scores WHERE id = ?').run(id);
   }
 
+  async bulkDisableCapabilityScores(ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    const now = new Date().toISOString();
+    const stmt = this.d.prepare('UPDATE model_capability_scores SET is_active = 0, updated_at = ? WHERE id = ?');
+    const tx = this.d.transaction((rowIds: string[]) => {
+      for (const id of rowIds) stmt.run(now, id);
+    });
+    tx(ids);
+  }
+
   async getProviderToolAdapterById(id: string): Promise<ProviderToolAdapterRow | null> {
     return (this.d.prepare('SELECT * FROM provider_tool_adapters WHERE id = ?').get(id) as ProviderToolAdapterRow) ?? null;
   }

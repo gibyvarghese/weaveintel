@@ -219,7 +219,8 @@ export async function routeModel(
       taskKey: decision.taskMeta?.taskKey,
       inferenceSource: decision.taskMeta?.inferenceSource,
     };
-  } catch {
+  } catch (err) {
+    console.error('[chat-routing] model routing failed, falling back to null', err);
     return null;
   }
 }

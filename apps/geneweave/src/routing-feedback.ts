@@ -240,7 +240,8 @@ export async function runRoutingRegressionPass(db: DatabaseAdapter): Promise<Reg
     const severity = dropPct >= CRITICAL_DROP_PCT ? 'critical' : 'warning';
     const autoDisable = dropPct >= CRITICAL_DROP_PCT;
 
-    // Auto-disable if critical: flip is_active=0 on the capability row.
+    // Auto-disable if critical: atomically flip is_active=0 on all matching
+    // capability rows in a single DB transaction (M-9: non-atomic loop fix).
     if (autoDisable) {
       const caps = await db.listCapabilityScores({
         tenantId: key.tenantId,
@@ -248,9 +249,9 @@ export async function runRoutingRegressionPass(db: DatabaseAdapter): Promise<Reg
         provider: key.provider,
         taskKey: key.taskKey,
       });
-      for (const c of caps) {
-        await db.updateCapabilityScore(c.id, { is_active: 0 });
-        disabled++;
+      if (caps.length > 0) {
+        await db.bulkDisableCapabilityScores(caps.map((c) => c.id));
+        disabled += caps.length;
       }
     }
 

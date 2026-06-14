@@ -440,7 +440,7 @@ export async function sendMessageImpl(
       model: modelId, provider,
       mode: settings.mode,
       agentName: settings.mode === 'supervisor' ? 'geneweave-supervisor' : settings.mode === 'agent' ? 'geneweave-agent' : undefined,
-      systemPrompt: memorySettings.systemPrompt || undefined,
+      systemPromptSha256: telemetry?.systemPromptSha256,
       enabledTools: memorySettings.enabledTools.length ? memorySettings.enabledTools : undefined,
       activeSkills: activeSkills.length ? activeSkills : undefined,
       skillTools: skillTools.length ? skillTools : undefined,
