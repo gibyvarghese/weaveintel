@@ -104,4 +104,8 @@ export interface IKaggleStore {
 
   // Live mesh messages
   listLiveMeshMessages(meshId: string, opts?: { limit?: number }): Promise<LiveMeshMessageView[]>;
+
+  // Role capability matrix (DB-configurable, fallback to code constants)
+  getKaggleRoleCapabilityMatrix(): Promise<Record<string, string[]>>;
+  upsertKaggleRoleCapability(role: string, capabilities: string[], updatedBy: string | null): Promise<void>;
 }

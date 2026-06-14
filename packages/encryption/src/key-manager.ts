@@ -340,7 +340,7 @@ export class TenantKeyManager {
     return newDek;
   }
 
-  /** Mint a new KEK (version+1) and re-wrap the active DEK under it. */
+  /** Mint a new KEK (version+1), re-wrap the active DEK and active BIK under it. */
   async rotateKek(tenantId: string, actor: string | null = null): Promise<KekRecord> {
     const policy = await this.#requirePolicy(tenantId);
     const keks = await this.#store.listKeks(tenantId);
@@ -365,11 +365,12 @@ export class TenantKeyManager {
 
     // Re-wrap the currently-active DEK under the new KEK so future encrypts
     // can be unwrapped via the new KEK alone.
+    let newDekId = policy.activeDekId;
     if (policy.activeDekId) {
       const dek = await this.#getDekRow(tenantId, policy.activeDekId);
       const dekPlain = await this.#unwrapDek(tenantId, dek);
       const rewrapped = await this.#wrapUnderKek(newKekPlain, dekPlain, tenantId);
-      const newDekId = newUUIDv7();
+      newDekId = newUUIDv7();
       await this.#store.insertDek({
         ...dek,
         id: newDekId,
@@ -381,11 +382,45 @@ export class TenantKeyManager {
         revokedAt: null,
       });
       await this.#store.updateDekStatus(dek.id, 'previous', now);
-      await this.#store.upsertPolicy({ ...policy, activeKekId: id, activeDekId: newDekId });
       this.#dekCache.set(newDekId, { key: dekPlain, expiresAt: now + this.#ttl });
-    } else {
-      await this.#store.upsertPolicy({ ...policy, activeKekId: id });
     }
+
+    // Re-wrap the active BIK under the new KEK so the old KEK can be fully
+    // retired without losing blind-index capability. Without this, existing BIKs
+    // remain bound to the old KEK indefinitely, blocking its revocation.
+    let newBikId = policy.activeBikId;
+    if (policy.activeBikId && policy.blindIndexEnabled) {
+      const bikRow = await this.#getBikRow(tenantId, policy.activeBikId);
+      const bikPlain = await this.#unwrapBik(tenantId, bikRow);
+      const rewrappedBik = await this.#wrapUnderKek(newKekPlain, bikPlain, tenantId);
+      newBikId = newUUIDv7();
+      const biks = await this.#store.listBiks(tenantId);
+      const maxEpoch = biks.reduce((m, b) => (b.epoch > m ? b.epoch : m), 0);
+      await this.#store.insertBik({
+        id: newBikId,
+        tenantId,
+        epoch: maxEpoch + 1,
+        status: 'active',
+        wrapped: rewrappedBik,
+        createdAt: now,
+        revokedAt: null,
+        kekId: id,
+      });
+      await this.#store.updateBikStatus(bikRow.id, 'previous', now);
+      this.#bikCache.set(newBikId, { key: bikPlain, expiresAt: now + this.#ttl });
+      await this.#emit(tenantId, 'bik_rotate', actor, {
+        bikId: newBikId,
+        epoch: maxEpoch + 1,
+        reason: 'kek_rotation',
+      });
+    }
+
+    await this.#store.upsertPolicy({
+      ...policy,
+      activeKekId: id,
+      ...(newDekId !== policy.activeDekId ? { activeDekId: newDekId ?? null } : {}),
+      ...(newBikId !== policy.activeBikId ? { activeBikId: newBikId ?? null } : {}),
+    });
 
     if (policy.activeKekId) {
       await this.#store.updateKekStatus(policy.activeKekId, 'previous', now);

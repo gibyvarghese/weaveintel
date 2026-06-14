@@ -1,4 +1,5 @@
 import type { Tool } from '@weaveintel/core';
+import { assertSafeForEgress } from '@weaveintel/core';
 import {
   createEnterpriseTools,
   createEnterpriseToolGroups,
@@ -25,6 +26,14 @@ export async function refreshTokenIfNeeded(
   const clientId = authConfig['clientId'] ?? authConfig['client_id'];
   const clientSecret = authConfig['clientSecret'] ?? authConfig['client_secret'];
   if (!clientId || !clientSecret || !row.base_url) return;
+
+  // SSRF guard: reject cloud-metadata endpoints, RFC-1918 ranges, loopback, and
+  // plain HTTP before handing the operator-supplied base_url to the OAuth provider.
+  // allowLoopback: false — no legitimate external OAuth server lives at 127.0.0.1.
+  await assertSafeForEgress(row.base_url, {
+    errorTag: 'enterprise-oauth-refresh',
+    policy: { allowLoopback: false },
+  });
 
   const provider = new ServiceNowProvider();
   const result = await provider.refreshOAuthToken(row.base_url, clientId, clientSecret, row.refresh_token);
@@ -62,7 +71,12 @@ function buildConnectorConfigs(enabled: EnterpriseConnectorRow[]): EnterpriseCon
   });
 }
 
-export async function loadEnterpriseTools(db: DatabaseAdapter): Promise<Tool[]> {
+export type SimpleLogger = { error: (msg: string, meta?: unknown) => void };
+
+export async function loadEnterpriseTools(
+  db: DatabaseAdapter,
+  log?: SimpleLogger,
+): Promise<Tool[]> {
   try {
     const rows = await db.listEnterpriseConnectors();
     const enabled = rows.filter((r) => r.enabled === 1 && r.status === 'connected');
@@ -72,12 +86,15 @@ export async function loadEnterpriseTools(db: DatabaseAdapter): Promise<Tool[]> 
     const configs = buildConnectorConfigs(enabled);
     return createEnterpriseTools(configs, undefined, { includeExtended: false });
   } catch (err) {
-    console.error('[chat] Failed to load enterprise tools:', err);
+    (log ?? console).error('[chat] Failed to load enterprise tools', err);
     return [];
   }
 }
 
-export async function loadEnterpriseToolGroups(db: DatabaseAdapter): Promise<EnterpriseToolGroup[]> {
+export async function loadEnterpriseToolGroups(
+  db: DatabaseAdapter,
+  log?: SimpleLogger,
+): Promise<EnterpriseToolGroup[]> {
   try {
     const rows = await db.listEnterpriseConnectors();
     const enabled = rows.filter((r) => r.enabled === 1 && r.status === 'connected');
@@ -87,7 +104,7 @@ export async function loadEnterpriseToolGroups(db: DatabaseAdapter): Promise<Ent
     const configs = buildConnectorConfigs(enabled);
     return createEnterpriseToolGroups(configs);
   } catch (err) {
-    console.error('[chat] Failed to load enterprise tool groups:', err);
+    (log ?? console).error('[chat] Failed to load enterprise tool groups', err);
     return [];
   }
 }

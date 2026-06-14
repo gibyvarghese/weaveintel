@@ -6,6 +6,10 @@
  * is the platform's authoritative gate (separate from tool policies, defense in
  * depth). Revoking a single capability immediately stops that agent's next
  * tick — no redeploy.
+ *
+ * DB-first: capabilities are loaded from `kaggle_role_capabilities` (m45) at
+ * mesh startup. `KAGGLE_CAPABILITY_MATRIX` is the hard code-level fallback for
+ * rows not present in DB (e.g. custom roles) or on pre-m45 schemas.
  */
 
 export type KaggleAgentRole =
@@ -48,4 +52,28 @@ export function resolveCapabilitiesFor(
  *  catch-all playbook can rewrite the constraint prose without touching code. */
 export function bindingConstraintsForCaps(caps: readonly string[]): string {
   return `Capabilities: ${caps.join(', ')}. Capability revocation takes effect on next tick.`;
+}
+
+/**
+ * Load the effective capability matrix from DB (m45 table), merging DB values
+ * over the hardcoded defaults. The code constant acts as a safe fallback for
+ * roles that have no DB row (custom roles, pre-m45 schemas).
+ *
+ * Should be called once at Kaggle mesh startup and the result passed to
+ * `resolveCapabilitiesFor(role, dbMatrix)` so capability changes take effect
+ * without a code deploy.
+ */
+export async function loadKaggleCapabilityMatrix(
+  db: { getKaggleRoleCapabilityMatrix(): Promise<Record<string, string[]>> },
+): Promise<Record<KaggleAgentRole, readonly string[]>> {
+  try {
+    const dbMatrix = await db.getKaggleRoleCapabilityMatrix();
+    return {
+      ...KAGGLE_CAPABILITY_MATRIX,
+      ...dbMatrix,
+    } as Record<KaggleAgentRole, readonly string[]>;
+  } catch {
+    // If the table hasn't been created yet (pre-m45 schema), return code defaults.
+    return { ...KAGGLE_CAPABILITY_MATRIX };
+  }
 }

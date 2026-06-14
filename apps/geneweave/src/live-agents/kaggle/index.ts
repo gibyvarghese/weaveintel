@@ -17,6 +17,7 @@ export {
   bindingConstraintsFor,
   bindingConstraintsForCaps,
   resolveCapabilitiesFor,
+  loadKaggleCapabilityMatrix,
   type KaggleAgentRole,
 } from './account-bindings.js';
 export {

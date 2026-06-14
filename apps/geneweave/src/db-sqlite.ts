@@ -102,6 +102,11 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.db;
   }
 
+  /** Expose the underlying better-sqlite3 instance for stores that need direct DB access (e.g. weaveSqliteTriggerStore). */
+  getRawDb(): import('better-sqlite3').Database {
+    return this.d;
+  }
+
   // ── Users ──────────────────────────────────────────────────
 
   async createUser(u: { id: string; email: string; name: string; passwordHash: string; persona?: string; tenantId?: string | null; emailBidx?: string | null }): Promise<void> {
@@ -317,6 +322,62 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteOAuthLinkedAccount(userId: string, provider: string): Promise<void> {
     this.d.prepare('DELETE FROM oauth_linked_accounts WHERE user_id = ? AND provider = ?').run(userId, provider);
+  }
+
+  // ── Email verification ──────────────────────────────────────
+
+  async createEmailVerification(v: { id: string; userId: string; tokenHash: string; expiresAt: string }): Promise<void> {
+    this.d.prepare('INSERT INTO email_verifications (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)').run(v.id, v.userId, v.tokenHash, v.expiresAt);
+  }
+
+  async getEmailVerificationByTokenHash(tokenHash: string): Promise<import('./db-types/adapter-users.js').EmailVerificationRow | null> {
+    return (this.d.prepare('SELECT * FROM email_verifications WHERE token_hash = ?').get(tokenHash) as import('./db-types/adapter-users.js').EmailVerificationRow | undefined) ?? null;
+  }
+
+  async getLatestEmailVerification(userId: string): Promise<import('./db-types/adapter-users.js').EmailVerificationRow | null> {
+    return (this.d.prepare('SELECT * FROM email_verifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 1').get(userId) as import('./db-types/adapter-users.js').EmailVerificationRow | undefined) ?? null;
+  }
+
+  async markEmailVerificationUsed(verificationId: string, userId: string): Promise<void> {
+    this.d.prepare("UPDATE email_verifications SET used_at = datetime('now') WHERE id = ?").run(verificationId);
+    this.d.prepare("UPDATE users SET email_verified = 1, email_verified_at = datetime('now') WHERE id = ?").run(userId);
+  }
+
+  async markUserEmailVerified(userId: string): Promise<void> {
+    this.d.prepare("UPDATE users SET email_verified = 1, email_verified_at = datetime('now') WHERE id = ?").run(userId);
+  }
+
+  async deleteExpiredEmailVerifications(nowIso?: string): Promise<void> {
+    const cutoff = nowIso ?? new Date().toISOString();
+    this.d.prepare("DELETE FROM email_verifications WHERE expires_at < ? AND used_at IS NULL").run(cutoff);
+  }
+
+  // ── User invitations ────────────────────────────────────────
+
+  async createUserInvitation(inv: { id: string; email: string; persona: string; tokenHash: string; invitedBy: string; expiresAt: string }): Promise<void> {
+    this.d.prepare('INSERT INTO user_invitations (id, email, persona, token_hash, invited_by, expires_at) VALUES (?, ?, ?, ?, ?, ?)').run(inv.id, inv.email, inv.persona, inv.tokenHash, inv.invitedBy, inv.expiresAt);
+  }
+
+  async getInvitationByTokenHash(tokenHash: string): Promise<import('./db-types/adapter-users.js').UserInvitationRow | null> {
+    return (this.d.prepare('SELECT * FROM user_invitations WHERE token_hash = ?').get(tokenHash) as import('./db-types/adapter-users.js').UserInvitationRow | undefined) ?? null;
+  }
+
+  async getInvitationById(id: string): Promise<import('./db-types/adapter-users.js').UserInvitationRow | null> {
+    return (this.d.prepare('SELECT * FROM user_invitations WHERE id = ?').get(id) as import('./db-types/adapter-users.js').UserInvitationRow | undefined) ?? null;
+  }
+
+  async markInvitationUsed(invitationId: string, usedBy: string): Promise<void> {
+    this.d.prepare("UPDATE user_invitations SET used_at = datetime('now'), used_by = ? WHERE id = ?").run(usedBy, invitationId);
+  }
+
+  async listInvitations(opts?: { limit?: number }): Promise<import('./db-types/adapter-users.js').UserInvitationRow[]> {
+    const limit = Math.min(opts?.limit ?? 100, 500);
+    return this.d.prepare('SELECT * FROM user_invitations ORDER BY created_at DESC LIMIT ?').all(limit) as import('./db-types/adapter-users.js').UserInvitationRow[];
+  }
+
+  async deleteExpiredInvitations(nowIso?: string): Promise<void> {
+    const cutoff = nowIso ?? new Date().toISOString();
+    this.d.prepare("DELETE FROM user_invitations WHERE expires_at < ? AND used_at IS NULL").run(cutoff);
   }
 
   // ── Chats ──────────────────────────────────────────────────
@@ -765,6 +826,19 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async listTemporalReminders(scopeId: string): Promise<TemporalReminderRow[]> {
     return this.d.prepare('SELECT * FROM temporal_reminders WHERE scope_id = ? ORDER BY due_at ASC').all(scopeId) as TemporalReminderRow[];
+  }
+
+  async listTemporalRemindersByUserId(userId: string): Promise<TemporalReminderRow[]> {
+    return this.d.prepare(
+      "SELECT * FROM temporal_reminders WHERE scope_id LIKE ? ORDER BY due_at ASC",
+    ).all(`${userId}:%`) as TemporalReminderRow[];
+  }
+
+  async deleteTemporalReminderById(reminderId: string, userId: string): Promise<boolean> {
+    const result = this.d.prepare(
+      "DELETE FROM temporal_reminders WHERE id = ? AND scope_id LIKE ?",
+    ).run(reminderId, `${userId}:%`);
+    return result.changes > 0;
   }
 
   async getAgentActivity(userId: string, limit?: number): Promise<Array<MessageRow & { chat_title: string; chat_model: string; chat_provider: string }>> {
@@ -7814,6 +7888,24 @@ export class SQLiteAdapter implements DatabaseAdapter {
     }
     out.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
     return out;
+  }
+
+  // ─── Kaggle role capability matrix (M45) ─────────────────────
+
+  async getKaggleRoleCapabilityMatrix(): Promise<Record<string, string[]>> {
+    const rows = this.d.prepare('SELECT role, capabilities FROM kaggle_role_capabilities').all() as Array<{ role: string; capabilities: string }>;
+    const result: Record<string, string[]> = {};
+    for (const row of rows) {
+      try { result[row.role] = JSON.parse(row.capabilities) as string[]; } catch { /* skip malformed */ }
+    }
+    return result;
+  }
+
+  async upsertKaggleRoleCapability(role: string, capabilities: string[], updatedBy: string | null): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO kaggle_role_capabilities (role, capabilities, updated_at, updated_by) VALUES (?, ?, datetime('now'), ?)
+       ON CONFLICT(role) DO UPDATE SET capabilities = excluded.capabilities, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
+    ).run(role, JSON.stringify(capabilities), updatedBy);
   }
 
   // ─── Live mesh / agent definitions (M21) ─────────────────────

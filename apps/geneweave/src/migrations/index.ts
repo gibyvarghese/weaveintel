@@ -23,6 +23,8 @@ import { applyM40AgentStrategies } from './m40-agent-strategies.js';
 import { applyM41PlatformFoundation } from './m41-platform-foundation.js';
 import { applyM42UserMemoryAndTz } from './m42-user-memory-and-tz.js';
 import { applyM43ConversationFlags } from './m43-conversation-flags.js';
+import { applyM44AuthHardening } from './m44-auth-hardening.js';
+import { applyM45KaggleRoleCapabilities } from './m45-kaggle-role-capabilities.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -54,6 +56,8 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm41-platform-foundation', description: 'Platform Foundation W9: user_runs, user_run_events, user_devices, notification_preferences, mode_labels, starter_prompts tables', run: applyM41PlatformFoundation },
   { id: 'm42-user-memory-and-tz', description: 'W9b: semantic_memory.metadata (correction trail) + notification_preferences.timezone (quiet-hours tz)', run: applyM42UserMemoryAndTz },
   { id: 'm43-conversation-flags', description: 'SP2 (mobile): chats.pinned + chats.archived for the user-scoped conversation list', run: applyM43ConversationFlags },
+  { id: 'm44-auth-hardening', description: 'Auth hardening: users.email_verified, email_verifications table, user_invitations table', run: applyM44AuthHardening },
+  { id: 'm45-kaggle-role-capabilities', description: 'Kaggle role capability matrix: DB-configurable defaults table seeded from KAGGLE_CAPABILITY_MATRIX', run: applyM45KaggleRoleCapabilities },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

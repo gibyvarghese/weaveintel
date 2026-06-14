@@ -178,20 +178,31 @@ export function registerToolSimulationRoutes(
 ): void {
   const { json, readBody } = helpers;
 
-  /** List all tools available for simulation (builtins + enabled custom catalog entries). */
+  /** List all tools available for simulation — builtins that are enabled in the catalog + custom. */
   router.get('/api/admin/tool-simulation/tools', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
 
-    const builtinTools = Object.entries(BUILTIN_TOOLS).map(([key, tool]) => ({
-      key,
-      name: tool.schema.name,
-      description: tool.schema.description,
-      tags: tool.schema.tags ?? [],
-      source: 'builtin',
-      sampleInputJson: buildSampleInputJson(key, tool),
-    }));
-
+    // Only show builtin tools that are present AND enabled in the tool catalog.
+    // This prevents operators seeing tools they cannot actually simulate due to
+    // catalog policy, and keeps the list consistent with what simulation will permit.
     const catalogEntries = await db.listEnabledToolCatalog();
+    const enabledBuiltinKeys = new Set(
+      catalogEntries
+        .filter(e => e.source === 'builtin' && e.enabled)
+        .map(e => e.tool_key ?? e.name),
+    );
+
+    const builtinTools = Object.entries(BUILTIN_TOOLS)
+      .filter(([key]) => enabledBuiltinKeys.has(key))
+      .map(([key, tool]) => ({
+        key,
+        name: tool.schema.name,
+        description: tool.schema.description,
+        tags: tool.schema.tags ?? [],
+        source: 'builtin',
+        sampleInputJson: buildSampleInputJson(key, tool),
+      }));
+
     const customTools = catalogEntries
       .filter(e => e.source !== 'builtin' && e.enabled)
       .map(e => ({
@@ -357,10 +368,12 @@ export function registerToolSimulationRoutes(
     let errorMessage: string | undefined;
 
     if (allowed && !dryRun) {
-      // Defense-in-depth: re-verify catalog-enabled state before execution.
-      // policy.enabled (step 1) may reflect a cached or stale read; catalogEntry
-      // is always a fresh DB fetch performed above during the risk-level check.
-      if (!catalogEntry?.enabled) {
+      // Defense-in-depth: always do a fresh catalog fetch at execution time, independent
+      // of the stale `catalogEntry` variable from the risk-level check above.
+      // `policy.enabled` (step 1) may lag a DB write by the time execution is reached;
+      // this ensures we see the current enabled state before touching any tool.
+      const execCatalogEntry = await db.getToolCatalogByKey(toolName);
+      if (!execCatalogEntry?.enabled) {
         json(res, 403, { error: `Tool '${toolName}' is not enabled in the tool catalog.` });
         return;
       }
