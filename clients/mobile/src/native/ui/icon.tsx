@@ -25,6 +25,7 @@ import {
   BellRing,
   Brain,
   CalendarClock,
+  CalendarDays,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -48,6 +49,7 @@ import {
   Mic,
   MicOff,
   Moon,
+  NotebookPen,
   Palette,
   Pencil,
   Pin,
@@ -122,6 +124,9 @@ export type IconName =
   | 'info'
   | 'quiet'
   | 'back'
+  // calendar + notes tabs (WC5 / WC10)
+  | 'calendar'
+  | 'notes'
   // OAuth / social sign-in providers (lucide outline brand glyphs).
   // Google is intentionally absent: its logo is a locked 4-color brand mark
   // rendered by ProviderMark, not a monochrome glyph.
@@ -179,6 +184,8 @@ const ICONS: Record<IconName, LucideIcon> = {
   // OAuth providers — lucide has outline brand glyphs for these; Microsoft has
   // no brand glyph, so a neutral grid mark stands in (still outline/monochrome).
   // Google is not here: its official 4-color logo is rendered by ProviderMark.
+  calendar: CalendarDays,
+  notes: NotebookPen,
   oauthGithub: Github,
   oauthMicrosoft: LayoutGrid,
   oauthApple: Apple,

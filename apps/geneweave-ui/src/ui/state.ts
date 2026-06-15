@@ -1,6 +1,69 @@
 // Global UI state object
 import type { User, Chat, Message, Model, ChatSettings } from './types.js';
 
+/** Merged action-feed entry combining tasks, reminders, and proposed agenda items. */
+export interface ActionFeedItem {
+  id: string;
+  type: 'approval' | 'task' | 'reminder' | 'agenda';
+  title: string;
+  sub: string;
+  urgency: 'overdue' | 'due-soon' | 'proposed' | 'normal';
+  /** For approvals: route to tool-approval-ui. For others: agenda or reminder link. */
+  conversationId?: string;
+  dueAt?: string;
+  categoryColor?: string;
+}
+
+/** Agenda item from /api/me/agenda */
+export interface AgendaItem {
+  id: string;
+  user_id: string;
+  title: string;
+  kind: string;
+  category_id: string | null;
+  start_at: string | null;
+  end_at: string | null;
+  all_day: number;
+  location: string | null;
+  description: string | null;
+  status: string;
+  sensitivity: string;
+  amount: string | null;
+  currency: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Agenda category */
+export interface AgendaCategory {
+  id: string;
+  name: string;
+  color: string;
+  icon: string;
+  template_key: string | null;
+}
+
+/** Note list item (no doc_json — fetched separately on open) */
+export interface NoteListItem {
+  id: string;
+  owner_user_id: string;
+  title: string;
+  icon: string | null;
+  parent_note_id: string | null;
+  sensitivity: string;
+  is_template: number;
+  template_key: string | null;
+  favorite: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Full note with document content */
+export interface NoteDoc extends NoteListItem {
+  doc_json: string;
+  cover: string | null;
+}
+
 export const state: any = {
   // Auth & user
   user: null as User | null,
@@ -42,10 +105,34 @@ export const state: any = {
   sidebarCollapsed: false,
   sidebarScrollTop: 0,
 
-  // Calendar
+  // Calendar (widget)
   calendarTab: 'meetings',
   calendarShowAll: false,
   calendarFocusDate: new Date(),
+
+  // Action feed (WC1)
+  actionFeed: [] as ActionFeedItem[],
+  actionFeedFilter: 'all' as string,
+  actionFeedLoading: false,
+
+  // Calendar extended (WC2-WC4)
+  calendarItems: [] as AgendaItem[],
+  calendarCategories: [] as AgendaCategory[],
+  calendarLoading: false,
+  calendarView: 'agenda' as string,          // 'agenda' | 'week' | 'month'
+  calendarCategoryFilter: null as string | null,
+  calendarQuickAdd: '' as string,
+  calendarQuickAddLoading: false,
+
+  // Notes (WC6-WC9)
+  notesItems: [] as NoteListItem[],
+  notesLoading: false,
+  notesSearch: '' as string,
+  currentNoteId: null as string | null,
+  currentNote: null as NoteDoc | null,
+  notesView: 'list' as string,               // 'list' | 'editor' | 'templates'
+  noteTemplates: [] as NoteListItem[],
+  noteDatabases: [] as any[],
 
   // Admin
   adminTab: 'prompts',

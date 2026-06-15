@@ -25,6 +25,7 @@ import { applyM42UserMemoryAndTz } from './m42-user-memory-and-tz.js';
 import { applyM43ConversationFlags } from './m43-conversation-flags.js';
 import { applyM44AuthHardening } from './m44-auth-hardening.js';
 import { applyM45KaggleRoleCapabilities } from './m45-kaggle-role-capabilities.js';
+import { applyM46AgendaNotes } from './m46-agenda-notes.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -58,6 +59,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm43-conversation-flags', description: 'SP2 (mobile): chats.pinned + chats.archived for the user-scoped conversation list', run: applyM43ConversationFlags },
   { id: 'm44-auth-hardening', description: 'Auth hardening: users.email_verified, email_verifications table, user_invitations table', run: applyM44AuthHardening },
   { id: 'm45-kaggle-role-capabilities', description: 'Kaggle role capability matrix: DB-configurable defaults table seeded from KAGGLE_CAPABILITY_MATRIX', run: applyM45KaggleRoleCapabilities },
+  { id: 'm46-agenda-notes', description: 'WC1-WC9: agenda_categories, agenda_items, notes, note_links, note_databases, note_db_rows; persona-seeded categories + note templates', run: applyM46AgendaNotes },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

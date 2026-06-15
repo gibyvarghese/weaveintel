@@ -8475,6 +8475,320 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async deleteStarterPrompt(id: string): Promise<void> {
     this.d.prepare('DELETE FROM starter_prompts WHERE id = ?').run(id);
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // IAgendaNotesStore (m46)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // ── Agenda categories ──────────────────────────────────────────────────────
+
+  async listAgendaCategories(userId: string): Promise<import('./db-types/adapter-agenda-notes.js').AgendaCategoryRow[]> {
+    return this.d.prepare(
+      `SELECT * FROM agenda_categories
+       WHERE user_id = ? OR user_id IS NULL
+       ORDER BY user_id NULLS FIRST, name ASC`,
+    ).all(userId) as import('./db-types/adapter-agenda-notes.js').AgendaCategoryRow[];
+  }
+
+  async getAgendaCategory(id: string): Promise<import('./db-types/adapter-agenda-notes.js').AgendaCategoryRow | null> {
+    return (this.d.prepare('SELECT * FROM agenda_categories WHERE id = ?').get(id) as import('./db-types/adapter-agenda-notes.js').AgendaCategoryRow | undefined) ?? null;
+  }
+
+  async createAgendaCategory(row: Pick<import('./db-types/adapter-agenda-notes.js').AgendaCategoryRow, 'id' | 'name'> & {
+    tenant_id?: string | null; user_id?: string | null;
+    color?: string; icon?: string; template_key?: string | null;
+  }): Promise<void> {
+    this.d.prepare(`INSERT INTO agenda_categories (id, tenant_id, user_id, name, color, icon, template_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+      row.id, row.tenant_id ?? null, row.user_id ?? null, row.name,
+      row.color ?? '#7C5CFC', row.icon ?? '◆', row.template_key ?? null,
+    );
+  }
+
+  async updateAgendaCategory(id: string, patch: Partial<Pick<import('./db-types/adapter-agenda-notes.js').AgendaCategoryRow, 'name' | 'color' | 'icon'>>): Promise<void> {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    const set = (col: string, val: unknown) => { fields.push(`${col} = ?`); values.push(val); };
+    if (patch.name !== undefined) set('name', patch.name);
+    if (patch.color !== undefined) set('color', patch.color);
+    if (patch.icon !== undefined) set('icon', patch.icon);
+    if (fields.length === 0) return;
+    values.push(id);
+    this.d.prepare(`UPDATE agenda_categories SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  }
+
+  async deleteAgendaCategory(id: string, userId: string): Promise<void> {
+    this.d.prepare('DELETE FROM agenda_categories WHERE id = ? AND user_id = ?').run(id, userId);
+  }
+
+  // ── Agenda items ───────────────────────────────────────────────────────────
+
+  async listAgendaItems(userId: string, filter?: import('./db-types/adapter-agenda-notes.js').AgendaListFilter): Promise<import('./db-types/adapter-agenda-notes.js').AgendaItemRow[]> {
+    const conditions = ['user_id = ?'];
+    const params: unknown[] = [userId];
+    if (filter?.startAt) { conditions.push('(start_at >= ? OR start_at IS NULL)'); params.push(filter.startAt); }
+    if (filter?.endAt) {
+      // Extend date-only strings to end of day so events on that day are included
+      const endBound = /^\d{4}-\d{2}-\d{2}$/.test(filter.endAt) ? `${filter.endAt}T23:59:59` : filter.endAt;
+      conditions.push('(start_at <= ? OR start_at IS NULL)');
+      params.push(endBound);
+    }
+    if (filter?.kind) { conditions.push('kind = ?'); params.push(filter.kind); }
+    if (filter?.status) { conditions.push('status = ?'); params.push(filter.status); }
+    if (filter?.categoryId) { conditions.push('category_id = ?'); params.push(filter.categoryId); }
+    if (filter?.search) { conditions.push('LOWER(title) LIKE ?'); params.push(`%${filter.search.toLowerCase()}%`); }
+    const limit = filter?.limit ?? 50;
+    return this.d.prepare(
+      `SELECT * FROM agenda_items WHERE ${conditions.join(' AND ')}
+       ORDER BY COALESCE(start_at, created_at) ASC LIMIT ?`,
+    ).all(...params, limit) as import('./db-types/adapter-agenda-notes.js').AgendaItemRow[];
+  }
+
+  async findSimilarAgendaItems(userId: string, title: string, dateBucket?: string): Promise<import('./db-types/adapter-agenda-notes.js').AgendaItemRow[]> {
+    const normalized = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').replace(/\b(a|an|the|my|for|at|on|with|and|or|to|in)\b/g, '').trim();
+    const tokens = (s: string) => new Set(normalized(s).split(/\s+/).filter(Boolean));
+    const jaccard = (a: Set<string>, b: Set<string>) => {
+      const inter = [...a].filter(x => b.has(x)).length;
+      const union = new Set([...a, ...b]).size;
+      return union === 0 ? 0 : inter / union;
+    };
+    const incomingTokens = tokens(title);
+    const windowStart = dateBucket ? `${dateBucket.slice(0, 10)}T00:00:00` : undefined;
+    const windowEnd = dateBucket ? `${dateBucket.slice(0, 10)}T23:59:59` : undefined;
+    const candidates = await this.listAgendaItems(userId, {
+      startAt: windowStart,
+      endAt: windowEnd,
+      limit: 100,
+    });
+    return candidates.filter(item => jaccard(incomingTokens, tokens(item.title)) >= 0.5);
+  }
+
+  async getAgendaItem(id: string, userId: string): Promise<import('./db-types/adapter-agenda-notes.js').AgendaItemRow | null> {
+    return (this.d.prepare('SELECT * FROM agenda_items WHERE id = ? AND user_id = ?').get(id, userId) as import('./db-types/adapter-agenda-notes.js').AgendaItemRow | undefined) ?? null;
+  }
+
+  async createAgendaItem(row: Pick<import('./db-types/adapter-agenda-notes.js').AgendaItemRow, 'id' | 'user_id' | 'title'> & {
+    tenant_id?: string | null; kind?: string; category_id?: string | null;
+    start_at?: string | null; end_at?: string | null; all_day?: number;
+    location?: string | null; description?: string | null; recurrence_rule?: string | null;
+    status?: string; sensitivity?: string;
+    amount?: string | null; currency?: string | null; provenance?: string | null;
+    linked_task_id?: string | null; linked_run_id?: string | null; linked_note_id?: string | null;
+    parent_item_id?: string | null;
+  }): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO agenda_items
+        (id, user_id, tenant_id, title, kind, category_id, start_at, end_at, all_day,
+         location, description, recurrence_rule, status, sensitivity,
+         amount, currency, provenance, linked_task_id, linked_run_id, linked_note_id, parent_item_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.id, row.user_id, row.tenant_id ?? null, row.title,
+      row.kind ?? 'event', row.category_id ?? null,
+      row.start_at ?? null, row.end_at ?? null, row.all_day ?? 0,
+      row.location ?? null, row.description ?? null, row.recurrence_rule ?? null,
+      row.status ?? 'confirmed', row.sensitivity ?? 'normal',
+      row.amount ?? null, row.currency ?? null, row.provenance ?? null,
+      row.linked_task_id ?? null, row.linked_run_id ?? null,
+      row.linked_note_id ?? null, row.parent_item_id ?? null,
+    );
+  }
+
+  async updateAgendaItem(id: string, userId: string, patch: Partial<Pick<import('./db-types/adapter-agenda-notes.js').AgendaItemRow,
+    'title' | 'kind' | 'category_id' | 'start_at' | 'end_at' | 'all_day' |
+    'location' | 'description' | 'recurrence_rule' | 'status' | 'sensitivity' |
+    'amount' | 'currency' | 'linked_task_id' | 'linked_run_id' | 'linked_note_id'
+  >>): Promise<void> {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    const set = (col: string, val: unknown) => { fields.push(`${col} = ?`); values.push(val); };
+    if (patch.title !== undefined) set('title', patch.title);
+    if (patch.kind !== undefined) set('kind', patch.kind);
+    if (patch.category_id !== undefined) set('category_id', patch.category_id);
+    if (patch.start_at !== undefined) set('start_at', patch.start_at);
+    if (patch.end_at !== undefined) set('end_at', patch.end_at);
+    if (patch.all_day !== undefined) set('all_day', patch.all_day);
+    if (patch.location !== undefined) set('location', patch.location);
+    if (patch.description !== undefined) set('description', patch.description);
+    if (patch.recurrence_rule !== undefined) set('recurrence_rule', patch.recurrence_rule);
+    if (patch.status !== undefined) set('status', patch.status);
+    if (patch.sensitivity !== undefined) set('sensitivity', patch.sensitivity);
+    if (patch.amount !== undefined) set('amount', patch.amount);
+    if (patch.currency !== undefined) set('currency', patch.currency);
+    if (patch.linked_task_id !== undefined) set('linked_task_id', patch.linked_task_id);
+    if (patch.linked_run_id !== undefined) set('linked_run_id', patch.linked_run_id);
+    if (patch.linked_note_id !== undefined) set('linked_note_id', patch.linked_note_id);
+    if (fields.length === 0) return;
+    fields.push('updated_at = datetime(\'now\')');
+    values.push(id, userId);
+    this.d.prepare(`UPDATE agenda_items SET ${fields.join(', ')} WHERE id = ? AND user_id = ?`).run(...values);
+  }
+
+  async deleteAgendaItem(id: string, userId: string): Promise<boolean> {
+    const r = this.d.prepare('DELETE FROM agenda_items WHERE id = ? AND user_id = ?').run(id, userId);
+    return r.changes > 0;
+  }
+
+  // ── Notes ──────────────────────────────────────────────────────────────────
+
+  async listNotes(userId: string, filter?: import('./db-types/adapter-agenda-notes.js').NoteListFilter): Promise<import('./db-types/adapter-agenda-notes.js').NoteRow[]> {
+    const conditions = ['owner_user_id = ?', 'is_template = 0'];
+    const params: unknown[] = [userId];
+    if (filter?.parentNoteId !== undefined) {
+      if (filter.parentNoteId === null) {
+        conditions.push('parent_note_id IS NULL');
+      } else {
+        conditions.push('parent_note_id = ?');
+        params.push(filter.parentNoteId);
+      }
+    }
+    if (filter?.favorite) { conditions.push('favorite = 1'); }
+    if (filter?.search) {
+      conditions.push('(title LIKE ? OR doc_json LIKE ?)');
+      const q = `%${filter.search}%`;
+      params.push(q, q);
+    }
+    const limit = filter?.limit ?? 100;
+    return this.d.prepare(
+      `SELECT id, owner_user_id, tenant_id, title, icon, cover, parent_note_id,
+              sensitivity, is_template, template_key, favorite, created_at, updated_at
+       FROM notes WHERE ${conditions.join(' AND ')}
+       ORDER BY favorite DESC, updated_at DESC LIMIT ?`,
+    ).all(...params, limit) as import('./db-types/adapter-agenda-notes.js').NoteRow[];
+  }
+
+  async listNoteTemplates(): Promise<import('./db-types/adapter-agenda-notes.js').NoteRow[]> {
+    return this.d.prepare(
+      `SELECT * FROM notes WHERE is_template = 1 ORDER BY title ASC`,
+    ).all() as import('./db-types/adapter-agenda-notes.js').NoteRow[];
+  }
+
+  async getNote(id: string, userId: string): Promise<import('./db-types/adapter-agenda-notes.js').NoteRow | null> {
+    const row = this.d.prepare(
+      `SELECT * FROM notes WHERE id = ? AND (owner_user_id = ? OR owner_user_id = '_system')`,
+    ).get(id, userId) as import('./db-types/adapter-agenda-notes.js').NoteRow | undefined;
+    return row ?? null;
+  }
+
+  async createNote(row: Pick<import('./db-types/adapter-agenda-notes.js').NoteRow, 'id' | 'owner_user_id' | 'title'> & {
+    tenant_id?: string | null; icon?: string | null; cover?: string | null;
+    parent_note_id?: string | null; sensitivity?: string;
+    doc_json?: string; is_template?: number; template_key?: string | null; favorite?: number;
+  }): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO notes
+        (id, owner_user_id, tenant_id, title, icon, cover, parent_note_id,
+         sensitivity, doc_json, is_template, template_key, favorite)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.id, row.owner_user_id, row.tenant_id ?? null, row.title,
+      row.icon ?? null, row.cover ?? null, row.parent_note_id ?? null,
+      row.sensitivity ?? 'normal',
+      row.doc_json ?? '{"type":"doc","content":[]}',
+      row.is_template ?? 0, row.template_key ?? null, row.favorite ?? 0,
+    );
+  }
+
+  async updateNote(id: string, userId: string, patch: Partial<Pick<import('./db-types/adapter-agenda-notes.js').NoteRow,
+    'title' | 'icon' | 'cover' | 'parent_note_id' | 'sensitivity' | 'doc_json' | 'favorite'
+  >>): Promise<void> {
+    const fields: string[] = [];
+    const values: unknown[] = [];
+    const set = (col: string, val: unknown) => { fields.push(`${col} = ?`); values.push(val); };
+    if (patch.title !== undefined) set('title', patch.title);
+    if (patch.icon !== undefined) set('icon', patch.icon);
+    if (patch.cover !== undefined) set('cover', patch.cover);
+    if (patch.parent_note_id !== undefined) set('parent_note_id', patch.parent_note_id);
+    if (patch.sensitivity !== undefined) set('sensitivity', patch.sensitivity);
+    if (patch.doc_json !== undefined) set('doc_json', patch.doc_json);
+    if (patch.favorite !== undefined) set('favorite', patch.favorite);
+    if (fields.length === 0) return;
+    fields.push('updated_at = datetime(\'now\')');
+    values.push(id, userId);
+    this.d.prepare(`UPDATE notes SET ${fields.join(', ')} WHERE id = ? AND owner_user_id = ?`).run(...values);
+  }
+
+  async deleteNote(id: string, userId: string): Promise<boolean> {
+    const tx = this.d.transaction(() => {
+      // Delete sub-pages recursively (one level; production would use recursive CTE)
+      const subIds = (this.d.prepare('SELECT id FROM notes WHERE parent_note_id = ? AND owner_user_id = ?').all(id, userId) as Array<{ id: string }>).map((r) => r.id);
+      for (const subId of subIds) {
+        this.d.prepare('DELETE FROM note_links WHERE note_id = ?').run(subId);
+        this.d.prepare('DELETE FROM notes WHERE id = ? AND owner_user_id = ?').run(subId, userId);
+      }
+      this.d.prepare('DELETE FROM note_links WHERE note_id = ?').run(id);
+      const r = this.d.prepare('DELETE FROM notes WHERE id = ? AND owner_user_id = ?').run(id, userId);
+      return r.changes;
+    });
+    return tx() > 0;
+  }
+
+  // ── Note links ─────────────────────────────────────────────────────────────
+
+  async listNoteLinks(noteId: string): Promise<import('./db-types/adapter-agenda-notes.js').NoteLinkRow[]> {
+    return this.d.prepare('SELECT * FROM note_links WHERE note_id = ? ORDER BY created_at ASC').all(noteId) as import('./db-types/adapter-agenda-notes.js').NoteLinkRow[];
+  }
+
+  async listNoteBacklinks(targetKind: string, targetId: string): Promise<import('./db-types/adapter-agenda-notes.js').NoteLinkRow[]> {
+    return this.d.prepare('SELECT * FROM note_links WHERE target_kind = ? AND target_id = ? ORDER BY created_at DESC').all(targetKind, targetId) as import('./db-types/adapter-agenda-notes.js').NoteLinkRow[];
+  }
+
+  async createNoteLink(row: Pick<import('./db-types/adapter-agenda-notes.js').NoteLinkRow, 'id' | 'note_id' | 'target_kind' | 'target_id'>): Promise<void> {
+    this.d.prepare(`INSERT OR IGNORE INTO note_links (id, note_id, target_kind, target_id) VALUES (?, ?, ?, ?)`)
+      .run(row.id, row.note_id, row.target_kind, row.target_id);
+  }
+
+  async deleteNoteLink(id: string, noteId: string): Promise<void> {
+    this.d.prepare('DELETE FROM note_links WHERE id = ? AND note_id = ?').run(id, noteId);
+  }
+
+  // ── Note databases ─────────────────────────────────────────────────────────
+
+  async listNoteDatabases(userId: string): Promise<import('./db-types/adapter-agenda-notes.js').NoteDatabaseRow[]> {
+    return this.d.prepare('SELECT * FROM note_databases WHERE owner_user_id = ? ORDER BY name ASC').all(userId) as import('./db-types/adapter-agenda-notes.js').NoteDatabaseRow[];
+  }
+
+  async getNoteDatabase(id: string, userId: string): Promise<import('./db-types/adapter-agenda-notes.js').NoteDatabaseRow | null> {
+    return (this.d.prepare('SELECT * FROM note_databases WHERE id = ? AND owner_user_id = ?').get(id, userId) as import('./db-types/adapter-agenda-notes.js').NoteDatabaseRow | undefined) ?? null;
+  }
+
+  async createNoteDatabase(row: Pick<import('./db-types/adapter-agenda-notes.js').NoteDatabaseRow, 'id' | 'owner_user_id' | 'name'> & {
+    tenant_id?: string | null; source?: string; view_type?: string;
+    filter_json?: string; sort_json?: string; columns_json?: string;
+  }): Promise<void> {
+    this.d.prepare(`INSERT INTO note_databases (id, owner_user_id, tenant_id, name, source, view_type, filter_json, sort_json, columns_json)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      row.id, row.owner_user_id, row.tenant_id ?? null, row.name,
+      row.source ?? 'generic', row.view_type ?? 'table',
+      row.filter_json ?? '{}', row.sort_json ?? '[]', row.columns_json ?? '[]',
+    );
+  }
+
+  async deleteNoteDatabase(id: string, userId: string): Promise<void> {
+    const tx = this.d.transaction(() => {
+      this.d.prepare('DELETE FROM note_db_rows WHERE database_id = ?').run(id);
+      this.d.prepare('DELETE FROM note_databases WHERE id = ? AND owner_user_id = ?').run(id, userId);
+    });
+    tx();
+  }
+
+  // ── Note database rows ─────────────────────────────────────────────────────
+
+  async listNoteDbRows(databaseId: string): Promise<import('./db-types/adapter-agenda-notes.js').NoteDbRowRow[]> {
+    return this.d.prepare('SELECT * FROM note_db_rows WHERE database_id = ? ORDER BY created_at ASC').all(databaseId) as import('./db-types/adapter-agenda-notes.js').NoteDbRowRow[];
+  }
+
+  async createNoteDbRow(row: Pick<import('./db-types/adapter-agenda-notes.js').NoteDbRowRow, 'id' | 'database_id'> & { fields_json?: string }): Promise<void> {
+    this.d.prepare('INSERT INTO note_db_rows (id, database_id, fields_json) VALUES (?, ?, ?)').run(row.id, row.database_id, row.fields_json ?? '{}');
+  }
+
+  async updateNoteDbRow(id: string, databaseId: string, fieldsJson: string): Promise<void> {
+    this.d.prepare('UPDATE note_db_rows SET fields_json = ? WHERE id = ? AND database_id = ?').run(fieldsJson, id, databaseId);
+  }
+
+  async deleteNoteDbRow(id: string, databaseId: string): Promise<void> {
+    this.d.prepare('DELETE FROM note_db_rows WHERE id = ? AND database_id = ?').run(id, databaseId);
+  }
 }
 
 // ─── Factory ─────────────────────────────────────────────────

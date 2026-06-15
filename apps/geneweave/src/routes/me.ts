@@ -348,9 +348,8 @@ export function registerMeRoutes(
     res.end(JSON.stringify(task));
   }, { auth: true });
 
-  router.post('/api/me/tasks/:taskId/complete', async (req, res, params, auth) => {
+  router.post('/api/me/tasks/:taskId/complete', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
     try {
       const task = await completeActionItem(params['taskId']!, { repository: taskRepo });
       res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -360,9 +359,8 @@ export function registerMeRoutes(
     }
   }, { auth: true });
 
-  router.post('/api/me/tasks/:taskId/cancel', async (req, res, params, auth) => {
+  router.post('/api/me/tasks/:taskId/cancel', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
-    const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
     try {
       const task = await cancelActionItem(params['taskId']!, { repository: taskRepo });
       res.writeHead(200, { 'Content-Type': 'application/json' });

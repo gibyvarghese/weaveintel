@@ -777,6 +777,75 @@ export class ChatEngine {
         });
         return { id };
       },
+      agendaList: async ({ userId: agendaUserId, startAt, endAt, kind, limit, search }) => {
+        const items = await this.db.listAgendaItems(agendaUserId, {
+          startAt,
+          endAt,
+          kind: kind as import('./db-types/adapter-agenda-notes.js').AgendaItemKind | undefined,
+          limit: limit ?? 10,
+          search,
+        });
+        return items.map((item) => ({
+          id: item.id,
+          title: item.title,
+          kind: item.kind,
+          status: item.status,
+          start_at: item.start_at,
+          end_at: item.end_at,
+          all_day: item.all_day,
+          location: item.location,
+          description: item.description,
+          created_at: item.created_at,
+        }));
+      },
+      agendaFindSimilar: async ({ userId: agendaUserId, title, dateBucket }) => {
+        const similar = await this.db.findSimilarAgendaItems(agendaUserId, title, dateBucket);
+        return similar.map(item => ({ id: item.id, title: item.title, kind: item.kind, start_at: item.start_at }));
+      },
+      agendaCreate: async ({ userId: agendaUserId, title, kind, startAt, endAt, allDay, location, description }) => {
+        const { newUUIDv7 } = await import('@weaveintel/core');
+        const id = newUUIDv7();
+        await this.db.createAgendaItem({
+          id,
+          user_id: agendaUserId,
+          tenant_id: null,
+          title,
+          kind: (kind ?? 'event') as import('./db-types/adapter-agenda-notes.js').AgendaItemKind,
+          category_id: null,
+          start_at: startAt ?? null,
+          end_at: endAt ?? null,
+          all_day: allDay ? 1 : 0,
+          location: location ?? null,
+          description: description ?? null,
+          recurrence_rule: null,
+          status: 'confirmed',
+          sensitivity: 'normal',
+          amount: null,
+          currency: null,
+          provenance: JSON.stringify({ source: 'agent' }),
+        });
+        const item = await this.db.getAgendaItem(id, agendaUserId);
+        return { id, title: item?.title ?? title, kind: item?.kind ?? (kind ?? 'event'), start_at: item?.start_at ?? startAt ?? null };
+      },
+      agendaUpdate: async ({ userId: agendaUserId, id, title, kind, startAt, endAt, allDay, location, description, status }) => {
+        const patch: Record<string, unknown> = {};
+        if (title !== undefined) patch['title'] = title;
+        if (kind !== undefined) patch['kind'] = kind;
+        if (startAt !== undefined) patch['start_at'] = startAt;
+        if (endAt !== undefined) patch['end_at'] = endAt;
+        if (allDay !== undefined) patch['all_day'] = allDay ? 1 : 0;
+        if (location !== undefined) patch['location'] = location;
+        if (description !== undefined) patch['description'] = description;
+        if (status !== undefined) patch['status'] = status;
+        await this.db.updateAgendaItem(id, agendaUserId, patch as Parameters<typeof this.db.updateAgendaItem>[2]);
+        const item = await this.db.getAgendaItem(id, agendaUserId);
+        if (!item) return null;
+        return { id: item.id, title: item.title, start_at: item.start_at };
+      },
+      agendaDelete: async ({ userId: agendaUserId, id }) => {
+        const deleted = await this.db.deleteAgendaItem(id, agendaUserId);
+        return { deleted: !!deleted };
+      },
       disabledToolKeys,
       catalogEntries,
       skillPolicyKey: settings.skillPolicyKey,
@@ -891,7 +960,9 @@ export class ChatEngine {
           settings.systemPrompt,
         ].filter((value): value is string => Boolean(value && value.trim())).join('\n\n');
         const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
-        const supervisorAdditionalTools = await buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions);
+        // Fall back to the enabledTools registry so tools like agenda_list reach the supervisor
+        // when no DB-configured supervisor agent_tools are present.
+        const supervisorAdditionalTools = (await buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions)) ?? tools;
         systemPromptSha256 = computePromptFingerprint(supervisorInstructions);
 
         agent = weaveAgent({
@@ -1082,7 +1153,7 @@ export class ChatEngine {
           settings.systemPrompt,
         ].filter((value): value is string => Boolean(value && value.trim())).join('\n\n');
         const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
-        const supervisorAdditionalTools = await buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions);
+        const supervisorAdditionalTools = (await buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions)) ?? tools;
         agent = weaveAgent({
           model,
           workers: allWorkers,

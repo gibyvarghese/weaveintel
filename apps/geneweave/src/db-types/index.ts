@@ -12,4 +12,5 @@ export * from './cost-governor.js';
 export * from './encryption.js';
 export * from './kaggle.js';
 export * from './live-agents.js';
+export * from './adapter-agenda-notes.js';
 export * from './adapter.js';

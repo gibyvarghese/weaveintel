@@ -61,6 +61,12 @@ export {
   type AttachHandle,
   type ListRunsFilter,
   type ListConversationsFilter,
+  // Agenda + Calendar (WC2-WC5)
+  type AgendaItem,
+  type AgendaCategory,
+  // Notes (WC6-WC10)
+  type NoteListItem,
+  type NoteDoc,
 } from './client.js';
 
 // Run primitives re-exported from @weaveintel/client that appear in this

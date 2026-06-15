@@ -6,17 +6,22 @@ import {
   shiftCalendarMonth,
   toYMD,
   getTodayLabel,
+  type ActionFeedItem,
+  type AgendaItem,
 } from './state.js';
 import { getUserAvatarUrl } from './utils.js';
 import { pushAdminHash } from './admin-ui.js';
+import { bucketItems, bucketLabel, BUCKET_ORDER, itemCategoryColor, formatItemTime, quickAddAgendaItem } from './agenda-api.js';
 import type { Chat } from './types.js';
 
-function renderSidebarIcon(kind: 'home' | 'connectors' | 'admin' | 'dashboard') {
+function renderSidebarIcon(kind: 'home' | 'connectors' | 'admin' | 'dashboard' | 'calendar' | 'notes') {
   const iconMap: Record<string, string> = {
     home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.8V21h13V9.8"/><path d="M9.5 21v-6h5v6"/></svg>',
     connectors: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h4a2 2 0 0 1 2 2v0"/><path d="M17 17h-4a2 2 0 0 1-2-2v0"/><rect x="3" y="4" width="4" height="6" rx="1.2"/><rect x="17" y="14" width="4" height="6" rx="1.2"/></svg>',
     admin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a1.7 1.7 0 1 1-2.4 2.4l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a1.7 1.7 0 1 1-3.4 0v-.2a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a1.7 1.7 0 1 1-2.4-2.4l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a1.7 1.7 0 1 1 0-3.4h.2a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a1.7 1.7 0 1 1 2.4-2.4l.1.1a1 1 0 0 0 1.1.2h0a1 1 0 0 0 .6-.9V4a1.7 1.7 0 1 1 3.4 0v.2a1 1 0 0 0 .6.9h0a1 1 0 0 0 1.1-.2l.1-.1a1.7 1.7 0 1 1 2.4 2.4l-.1.1a1 1 0 0 0-.2 1.1v0a1 1 0 0 0 .9.6H20a1.7 1.7 0 1 1 0 3.4h-.2a1 1 0 0 0-.9.6z"/></svg>',
     dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.2"/><rect x="13" y="3" width="8" height="5" rx="1.2"/><rect x="13" y="10" width="8" height="11" rx="1.2"/><rect x="3" y="13" width="8" height="8" rx="1.2"/></svg>',
+    calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+    notes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>',
   };
   return h('span', { className: 'side-icon', innerHTML: iconMap[kind] || iconMap['home'] });
 }
@@ -106,6 +111,14 @@ export function renderWorkspaceNav(options: {
   menu.appendChild(h('button', { className: state.view === 'chat' ? 'active' : '', title: 'Home', onClick: () => { state.view = 'chat'; options.render(); } },
     renderSidebarIcon('home'),
     h('span', { className: 'nav-label' }, 'Home')
+  ));
+  menu.appendChild(h('button', { className: state.view === 'calendar' ? 'active' : '', title: 'Calendar', onClick: () => { state.view = 'calendar'; options.render(); } },
+    renderSidebarIcon('calendar'),
+    h('span', { className: 'nav-label' }, 'Calendar')
+  ));
+  menu.appendChild(h('button', { className: state.view === 'notes' ? 'active' : '', title: 'Notes', onClick: () => { state.view = 'notes'; options.render(); } },
+    renderSidebarIcon('notes'),
+    h('span', { className: 'nav-label' }, 'Notes')
   ));
   menu.appendChild(h('button', { className: state.view === 'dashboard' ? 'active' : '', title: 'Dashboard', onClick: () => { state.view = 'dashboard'; void options.loadDashboard(); } },
     renderSidebarIcon('dashboard'),
@@ -367,18 +380,18 @@ export function renderCalendarWidget(render: () => void): HTMLElement {
   const month = focus.getMonth();
   const selectedYMD = toYMD(focus);
 
-  const counts: Record<number, number> = {};
-  state.chats.forEach((chat: Chat) => {
-    const d = new Date(chat.updated_at || chat.created_at || Date.now());
-    if (d.getFullYear() === year && d.getMonth() === month) {
-      counts[d.getDate()] = (counts[d.getDate()] || 0) + 1;
+  // Dot counts per calendar day from real agenda items
+  const items: AgendaItem[] = state.calendarItems ?? [];
+  const counts: Record<string, number> = {};
+  for (const item of items) {
+    if (item.start_at) {
+      const ymd = item.start_at.slice(0, 10);
+      counts[ymd] = (counts[ymd] ?? 0) + 1;
     }
-  });
+  }
 
   const focusDays: Date[] = [];
-  for (let i = -1; i <= 3; i++) {
-    focusDays.push(new Date(year, month, focus.getDate() + i));
-  }
+  for (let i = -1; i <= 3; i++) focusDays.push(new Date(year, month, focus.getDate() + i));
 
   const monthFirst = new Date(year, month, 1);
   const monthLast = new Date(year, month + 1, 0);
@@ -387,51 +400,69 @@ export function renderCalendarWidget(render: () => void): HTMLElement {
   for (let day = 1; day <= monthLast.getDate(); day++) {
     const d = new Date(year, month, day);
     const dYMD = toYMD(d);
-    monthCells.push(
-      h(
-        'div',
-        {
-          className: `md${counts[day] ? ' has' : ''}${dYMD === selectedYMD ? ' active' : ''}`,
-          onClick: () => {
-            setCalendarFocusDate(d);
-            render();
-          },
-        },
-        String(day)
+    monthCells.push(h('div', {
+      className: `md${counts[dYMD] ? ' has' : ''}${dYMD === selectedYMD ? ' active' : ''}`,
+      onClick: () => { setCalendarFocusDate(d); render(); },
+    }, String(day)));
+  }
+
+  // Bucket view: items for the selected day and nearby (agenda-first)
+  const focusYMD = toYMD(focus);
+  const dayItems = items.filter((it) => it.start_at?.slice(0, 10) === focusYMD);
+  const upcomingItems = items.filter((it) => {
+    const ymd = it.start_at?.slice(0, 10);
+    return ymd && ymd > focusYMD;
+  }).slice(0, 5);
+  const allDayItems = [...dayItems, ...upcomingItems];
+  const bucketed = bucketItems(allDayItems.length > 0 ? allDayItems : items.slice(0, 20));
+
+  const categories: import('./state.js').AgendaCategory[] = state.calendarCategories ?? [];
+
+  const renderItemChip = (item: AgendaItem) => {
+    const color = itemCategoryColor(item, categories);
+    const timeLabel = formatItemTime(item);
+    return h('div', { className: 'cal-item-chip', style: `border-left:3px solid ${color}` },
+      h('div', { className: 'cal-item-title' }, item.title),
+      timeLabel ? h('div', { className: 'cal-item-time' }, timeLabel) : null,
+    );
+  };
+
+  const bucketSections: HTMLElement[] = [];
+  for (const bucket of BUCKET_ORDER) {
+    const list = bucketed.get(bucket);
+    if (!list || list.length === 0) continue;
+    bucketSections.push(
+      h('div', { className: 'cal-bucket' },
+        h('div', { className: 'cal-bucket-label' }, bucket),
+        ...list.map(renderItemChip)
       )
     );
   }
 
-  const meetingsBody = [
-    h('div', { className: 'meet-card peach' },
-      h('div', { className: 'meet-title' }, 'Agent Review and Approval'),
-      h('div', { className: 'meet-time' }, `${focus.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: '2-digit' })} • 08:00 - 08:45 (UTC)`)
-    ),
-    h('div', { className: 'meet-card blue' },
-      h('div', { className: 'meet-title' }, 'Chat Follow-up Actions'),
-      h('div', { className: 'meet-time' }, `${focus.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: '2-digit' })} • 09:00 - 09:45 (UTC)`)
-    ),
-  ];
-
-  const eventsBody = state.chats.slice(0, 2).map((chat: Chat) =>
-    h('div', { className: 'meet-card blue' },
-      h('div', { className: 'meet-title' }, chat.title || 'Chat Event'),
-      h('div', { className: 'meet-time' }, `${new Date(chat.updated_at || chat.created_at || Date.now()).toLocaleDateString()} • Model activity`)
-    )
+  // Quick-add input (WC4)
+  const quickAdd = h('div', { className: 'cal-quick-add' },
+    h('input', {
+      className: 'cal-qa-input',
+      type: 'text',
+      placeholder: 'Quick add… "dentist tomorrow at 3pm"',
+      value: state.calendarQuickAdd as string,
+      onInput: (e: Event) => { state.calendarQuickAdd = (e.target as HTMLInputElement).value; },
+      onKeyDown: (e: KeyboardEvent) => {
+        if (e.key === 'Enter' && (state.calendarQuickAdd as string).trim()) {
+          void quickAddAgendaItem({ nlText: (state.calendarQuickAdd as string).trim() }).then(() => render());
+        }
+      },
+    }),
+    h('button', {
+      className: 'cal-qa-btn',
+      disabled: state.calendarQuickAddLoading as boolean,
+      onClick: () => {
+        if ((state.calendarQuickAdd as string).trim()) {
+          void quickAddAgendaItem({ nlText: (state.calendarQuickAdd as string).trim() }).then(() => render());
+        }
+      },
+    }, state.calendarQuickAddLoading ? '…' : '+')
   );
-
-  const holidayBody = [
-    h('div', { className: 'meet-card peach' },
-      h('div', { className: 'meet-title' }, 'No scheduled holidays'),
-      h('div', { className: 'meet-time' }, 'Use this tab for OOO and downtime events')
-    ),
-  ];
-
-  const tabContent = state.calendarTab === 'events'
-    ? eventsBody
-    : state.calendarTab === 'holiday'
-      ? holidayBody
-      : meetingsBody;
 
   return h('div', { className: 'side-card schedule-card' },
     h('div', { className: 'schedule-head' },
@@ -441,18 +472,19 @@ export function renderCalendarWidget(render: () => void): HTMLElement {
         h('div', { className: 'month-pill' }, focus.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })),
         h('button', { className: 'icon-btn-sm', title: 'Next month', onClick: () => { shiftCalendarMonth(1); render(); } }, '›')
       ),
-      h('button', { className: 'see-all', title: 'Toggle full month', onClick: () => { state.calendarShowAll = !state.calendarShowAll; render(); } }, state.calendarShowAll ? 'Hide' : 'See all')
+      h('button', {
+        className: 'see-all',
+        title: 'Open full calendar',
+        onClick: () => { state.view = 'calendar'; render(); },
+      }, 'Full view')
     ),
     !state.calendarShowAll
       ? h('div', { className: 'day-strip' },
           ...focusDays.map((d) =>
             h('div', {
               className: `day-chip${toYMD(d) === selectedYMD ? ' active' : ''}`,
-              title: `${counts[d.getDate()] || 0} actions`,
-              onClick: () => {
-                setCalendarFocusDate(d);
-                render();
-              },
+              title: `${counts[toYMD(d)] ?? 0} items`,
+              onClick: () => { setCalendarFocusDate(d); render(); },
             },
             h('div', { className: 'dw' }, d.toLocaleDateString(undefined, { weekday: 'short' })),
             h('div', { className: 'dn' }, String(d.getDate()).padStart(2, '0'))
@@ -463,37 +495,99 @@ export function renderCalendarWidget(render: () => void): HTMLElement {
           ...['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((x) => h('div', { className: 'mh' }, x)),
           ...monthCells
         ),
-    h('div', { className: 'schedule-search' },
-      h('div', { className: 'search-row' }, '🔍', ' Search...', h('span', { style: 'margin-left:auto' }, '☰'))
+    quickAdd,
+    h('div', { className: 'cal-bucket-list' },
+      ...bucketSections,
+      bucketSections.length === 0
+        ? h('div', { className: 'cal-empty' }, state.calendarLoading ? 'Loading…' : 'No upcoming items')
+        : null
     ),
-    h('div', { className: 'schedule-tabs' },
-      h('div', { className: `schedule-tab${state.calendarTab === 'meetings' ? ' active' : ''}`, onClick: () => { state.calendarTab = 'meetings'; render(); } }, 'Meetings'),
-      h('div', { className: `schedule-tab${state.calendarTab === 'events' ? ' active' : ''}`, onClick: () => { state.calendarTab = 'events'; render(); } }, 'Events'),
-      h('div', { className: `schedule-tab${state.calendarTab === 'holiday' ? ' active' : ''}`, onClick: () => { state.calendarTab = 'holiday'; render(); } }, 'Holiday')
-    ),
-    h('div', { className: 'schedule-meetings' }, ...tabContent)
+    h('div', { className: 'schedule-view-toggle' },
+      h('button', { className: 'see-all', onClick: () => { state.calendarShowAll = !state.calendarShowAll; render(); } },
+        state.calendarShowAll ? 'Hide month' : 'Month view')
+    )
   );
 }
 
-export function renderActionsWidget(selectChat: (chatId: string) => Promise<void>): HTMLElement {
-  const actions = state.chats.slice(0, 8).map((chat: Chat) => ({
-    id: chat.id,
-    title: chat.title || 'New Chat',
-    sub: `Updated ${new Date(chat.updated_at || chat.created_at || Date.now()).toLocaleString()}`,
-  }));
+const ACTION_BADGE_COLORS: Record<ActionFeedItem['type'], { bg: string; fg: string; label: string }> = {
+  approval: { bg: '#3B82F6', fg: '#fff', label: 'Approve' },
+  task:     { bg: '#8B5CF6', fg: '#fff', label: 'Task' },
+  reminder: { bg: '#F59E0B', fg: '#fff', label: 'Remind' },
+  agenda:   { bg: '#10B981', fg: '#fff', label: 'Agenda' },
+};
 
-  return h('div', { className: 'side-card actions-card' },
-    h('h3', null, 'My Actions'),
-    h('div', { className: 'action-list' },
-      ...actions.map((action: { id: string; title: string; sub: string }) =>
-        h('div', { className: `action-item selectable${state.currentChatId === action.id ? ' active' : ''}`, onClick: () => { void selectChat(action.id); } },
-          h('div', { className: 'at' }, action.title),
-          h('div', { className: 'as' }, action.sub)
-        )
-      ),
-      !actions.length ? h('div', { className: 'action-item' }, h('div', { className: 'as' }, 'No actions yet')) : null
+const URGENCY_BORDER: Record<ActionFeedItem['urgency'], string> = {
+  overdue:  '#EF4444',
+  'due-soon': '#F59E0B',
+  proposed: '#3B82F6',
+  normal:   'transparent',
+};
+
+export function renderActionsWidget(selectChat: (chatId: string) => Promise<void>, render: () => void): HTMLElement {
+  const feed = state.actionFeed as ActionFeedItem[];
+  const filter = state.actionFeedFilter as string;
+
+  const filtered = filter === 'all'
+    ? feed
+    : feed.filter((a) => a.type === filter);
+
+  const filterBtn = (label: string, key: string) =>
+    h('button', {
+      className: `af-filter${filter === key ? ' active' : ''}`,
+      onClick: () => { state.actionFeedFilter = key; render(); },
+    }, label);
+
+  const header = h('div', { className: 'af-header' },
+    h('div', { className: 'af-title-row' },
+      h('span', { className: 'af-title' }, 'My Actions'),
+      state.actionFeedLoading
+        ? h('span', { className: 'af-loading' }, '…')
+        : h('span', { className: 'af-count' }, String(feed.length) + (feed.length === 1 ? ' item' : ' items'))
+    ),
+    h('div', { className: 'af-filters' },
+      filterBtn('All', 'all'),
+      filterBtn('Approvals', 'approval'),
+      filterBtn('Tasks', 'task'),
+      filterBtn('Reminders', 'reminder'),
     )
   );
+
+  const list = h('div', { className: 'action-list' },
+    ...filtered.slice(0, 10).map((item: ActionFeedItem) => {
+      const badge = ACTION_BADGE_COLORS[item.type];
+      const borderColor = URGENCY_BORDER[item.urgency];
+      const isActive = state.currentChatId === item.conversationId;
+
+      return h('div', {
+        className: `action-item selectable${isActive ? ' active' : ''}`,
+        style: `border-left:3px solid ${borderColor}`,
+        onClick: () => {
+          if (item.type === 'approval' && item.conversationId) {
+            void selectChat(item.conversationId);
+          }
+        },
+      },
+        h('div', { className: 'af-row' },
+          h('span', {
+            className: 'af-badge',
+            style: `background:${badge.bg};color:${badge.fg}`,
+          }, badge.label),
+          h('div', { className: 'af-body' },
+            h('div', { className: 'at' }, item.title),
+            h('div', { className: 'as' }, item.sub),
+          )
+        )
+      );
+    }),
+    filtered.length === 0
+      ? h('div', { className: 'action-item' }, h('div', { className: 'as' }, state.actionFeedLoading ? 'Loading…' : 'No actions'))
+      : null,
+    filtered.length > 10
+      ? h('div', { className: 'af-more', onClick: () => { state.view = 'actions'; render(); } }, `+${filtered.length - 10} more`)
+      : null,
+  );
+
+  return h('div', { className: 'side-card actions-card' }, header, list);
 }
 
 export function renderProfileDropdown(options: {

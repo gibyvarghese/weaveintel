@@ -144,6 +144,49 @@ export interface ListConversationsFilter {
   offset?: number;
 }
 
+/** Minimal agenda item shape returned by GET /api/me/agenda. */
+export interface AgendaItem {
+  id: string;
+  title: string;
+  kind: string;
+  status: string;
+  start_at: string | null;
+  end_at: string | null;
+  all_day: boolean;
+  category_id: string | null;
+  location: string | null;
+  notes: string | null;
+  amount: number | null;
+  currency: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Minimal agenda category shape. */
+export interface AgendaCategory {
+  id: string;
+  name: string;
+  color: string;
+  icon: string | null;
+}
+
+/** Minimal note list item shape returned by GET /api/me/notes. */
+export interface NoteListItem {
+  id: string;
+  title: string;
+  icon: string | null;
+  favorite: number;
+  sensitivity: string;
+  parent_note_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Full note with doc_json, returned by GET /api/me/notes/:id. */
+export interface NoteDoc extends NoteListItem {
+  doc_json: string;
+}
+
 /** The typed geneWeave client surface. */
 export interface GeneweaveClient {
   /** The host this client targets. */
@@ -218,6 +261,19 @@ export interface GeneweaveClient {
   updateConversation(id: string, patch: { pinned?: boolean; archived?: boolean; title?: string }): Promise<Conversation>;
   /** Transcript history for one of the caller's conversations (chronological). */
   getConversationMessages(id: string): Promise<ConversationMessage[]>;
+
+  // Agenda / Calendar (WC2-WC5)
+  listAgendaItems(opts?: { after?: string; before?: string; kind?: string }): Promise<AgendaItem[]>;
+  listAgendaCategories(): Promise<AgendaCategory[]>;
+  createAgendaItem(input: { title: string; kind?: string; start_at?: string; end_at?: string; all_day?: boolean; category_id?: string; location?: string; nlText?: string }): Promise<AgendaItem>;
+  deleteAgendaItem(id: string): Promise<void>;
+
+  // Notes (WC6-WC10)
+  listNotes(opts?: { search?: string; parent?: string }): Promise<NoteListItem[]>;
+  getNote(id: string): Promise<NoteDoc>;
+  createNote(input?: { title?: string; template_id?: string }): Promise<NoteListItem>;
+  updateNote(id: string, patch: { title?: string; doc_json?: string; icon?: string; favorite?: number }): Promise<NoteListItem>;
+  deleteNote(id: string): Promise<void>;
 }
 
 /** Wrap an outbox storage so its keys are isolated under `namespace`. */
@@ -619,6 +675,80 @@ export function createGeneweaveClient(opts: CreateGeneweaveClientOptions): Genew
       const raw = await send(req);
       if (!ok(raw.status)) fail(raw, req);
       return parse(ConversationMessagesSchema, raw, req).messages;
+    },
+
+    // ── Agenda / Calendar ───────────────────────────────────────────────────
+    async listAgendaItems(opts) {
+      const params = new URLSearchParams();
+      if (opts?.after) params.set('after', opts.after);
+      if (opts?.before) params.set('before', opts.before);
+      if (opts?.kind) params.set('kind', opts.kind);
+      const path = `/api/me/agenda${params.toString() ? `?${params}` : ''}`;
+      const req = { method: 'GET' as const, path };
+      const raw = await send(req);
+      if (!ok(raw.status)) fail(raw, req);
+      return ((raw.body as { items?: AgendaItem[] })?.items ?? []) as AgendaItem[];
+    },
+
+    async listAgendaCategories() {
+      const req = { method: 'GET' as const, path: '/api/me/agenda/categories' };
+      const raw = await send(req);
+      if (!ok(raw.status)) fail(raw, req);
+      return ((raw.body as { categories?: AgendaCategory[] })?.categories ?? []) as AgendaCategory[];
+    },
+
+    async createAgendaItem(input) {
+      const req = { method: 'POST' as const, path: '/api/me/agenda' };
+      const raw = await send({ ...req, body: input });
+      if (!ok(raw.status)) fail(raw, req);
+      // POST /api/me/agenda returns the item directly
+      return raw.body as AgendaItem;
+    },
+
+    async deleteAgendaItem(id) {
+      const req = { method: 'DELETE' as const, path: `/api/me/agenda/${id}` };
+      const raw = await send(req);
+      if (!ok(raw.status)) fail(raw, req);
+    },
+
+    // ── Notes ────────────────────────────────────────────────────────────────
+    async listNotes(opts) {
+      const params = new URLSearchParams({ parent: opts?.parent ?? 'null' });
+      if (opts?.search) params.set('search', opts.search);
+      const req = { method: 'GET' as const, path: `/api/me/notes?${params}` };
+      const raw = await send(req);
+      if (!ok(raw.status)) fail(raw, req);
+      return ((raw.body as { notes?: NoteListItem[] })?.notes ?? []) as NoteListItem[];
+    },
+
+    async getNote(id) {
+      const req = { method: 'GET' as const, path: `/api/me/notes/${id}` };
+      const raw = await send(req);
+      if (!ok(raw.status)) fail(raw, req);
+      // GET /api/me/notes/:id returns the note object directly (not wrapped)
+      return raw.body as NoteDoc;
+    },
+
+    async createNote(input = {}) {
+      const req = { method: 'POST' as const, path: '/api/me/notes' };
+      const raw = await send({ ...req, body: { title: 'Untitled', ...input } });
+      if (!ok(raw.status)) fail(raw, req);
+      // POST /api/me/notes returns the note object directly
+      return raw.body as NoteListItem;
+    },
+
+    async updateNote(id, patch) {
+      const req = { method: 'PATCH' as const, path: `/api/me/notes/${id}` };
+      const raw = await send({ ...req, body: patch });
+      if (!ok(raw.status)) fail(raw, req);
+      // PATCH /api/me/notes/:id returns the note object directly
+      return raw.body as NoteListItem;
+    },
+
+    async deleteNote(id) {
+      const req = { method: 'DELETE' as const, path: `/api/me/notes/${id}` };
+      const raw = await send(req);
+      if (!ok(raw.status)) fail(raw, req);
     },
   };
 

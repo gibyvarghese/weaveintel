@@ -87,6 +87,49 @@ export const RESPONSE_CARD_FORMAT_POLICY = [
   '- Keep values accurate and grounded in computed or tool-derived outputs.',
 ].join('\n');
 
+export const SUPERVISOR_AGENDA_POLICY = [
+  'CALENDAR & AGENDA TOOL USAGE (CRITICAL — DIRECT SUPERVISOR TOOLS):',
+  '',
+  'FUNDAMENTAL RULE: You have ZERO inherent knowledge of the user\'s calendar.',
+  'You cannot guess, infer, or assume ANY event dates, titles, or details.',
+  'The ONLY way to know anything about the user\'s schedule is to call agenda_list first.',
+  'Never answer a calendar question without having called agenda_list in this conversation.',
+  '',
+  'Available tools (call directly — no delegation needed):',
+  '  • `agenda_list`   — query events from the database. MUST be called before any calendar answer.',
+  '  • `agenda_create` — create a new event. Automatically checks for duplicates.',
+  '  • `agenda_update` — update/reschedule an existing item (requires id from agenda_list).',
+  '  • `agenda_delete` — permanently delete an item (prefer status="cancelled" for soft-cancel).',
+  '',
+  'SMART agenda_list FILTERING (always scope the time window, never unbounded):',
+  '  • "when is my dentist" → search="dentist", start_at=TODAY, limit=5',
+  '  • "what do I have today/tomorrow" → start_at=TARGET_DATE, end_at=TARGET_DATE, limit=10',
+  '  • "this week" → start_at=TODAY, end_at=THIS_SUNDAY, limit=15',
+  '  • "next month" → start_at=NEXT_MONTH_FIRST, end_at=NEXT_MONTH_LAST, limit=20',
+  '  • "am I free Friday" → start_at=FRIDAY_DATE, end_at=FRIDAY_DATE, limit=20',
+  '  • "upcoming deadlines" → kind="deadline", start_at=TODAY, limit=10',
+  '',
+  'WHEN TO CREATE (agenda_create):',
+  '  • User says "add", "schedule", "book", "create", or "block" + a date/time',
+  '  • If agenda_create returns { duplicate: true, existing: [...] }:',
+  '    → Tell the user: "You already have [existing title] on that date. Want me to update it instead?"',
+  '    → Do NOT create a second entry. Call agenda_update with the existing id if they confirm.',
+  '',
+  'WHEN TO UPDATE (agenda_update):',
+  '  • User says "move", "reschedule", "change", or "update" an existing event',
+  '  • First call agenda_list with search= to find the item ID, then call agenda_update.',
+  '  • Only pass fields that should change — other fields are preserved.',
+  '',
+  'WHEN TO DELETE (agenda_delete):',
+  '  • User says "delete" or "remove" (hard delete)',
+  '  • For "cancel" prefer agenda_update with status="cancelled" (event stays visible as cancelled)',
+  '  • Always call agenda_list first to get the correct item ID before deleting.',
+  '',
+  'If agenda_list returns no items, say "Nothing found" — do NOT say you lack calendar access.',
+].join('\n');
+
+export const POLICY_PROMPT_SUPERVISOR_AGENDA = 'Runtime: Supervisor Agenda Policy';
+
 export const SUPERVISOR_TEMPORAL_POLICY = [
   'TEMPORAL QUESTION HANDLING (CRITICAL):',
   '- If the user asks about current day/date/time/timestamp or anything time-dependent:',
@@ -135,12 +178,14 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
     'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',
     'reminder_create', 'reminder_list', 'reminder_cancel',
+    'agenda_list',
     'calculator', 'json_format', 'text_analysis', 'memory_recall',
     'web_search',
     'cse_run_code', 'cse_session_status', 'cse_end_session',
   ],
   supervisor: [
     'datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis',
+    'agenda_list', 'agenda_create', 'agenda_update', 'agenda_delete',
   ],
   // Ensemble agents each use the same agent-mode tool policy.
   ensemble: [
@@ -148,6 +193,7 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
     'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',
     'reminder_create', 'reminder_list', 'reminder_cancel',
+    'agenda_list',
     'calculator', 'json_format', 'text_analysis', 'memory_recall',
     'web_search',
     'cse_run_code', 'cse_session_status', 'cse_end_session',

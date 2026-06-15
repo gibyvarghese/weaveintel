@@ -15,6 +15,7 @@ import type { IMemoryStore } from './adapter-memory.js';
 import type { IKaggleStore } from './adapter-kaggle.js';
 import type { ILiveAgentsStore } from './adapter-live-agents.js';
 import type { IMeStore } from './adapter-me.js';
+import type { IAgendaNotesStore } from './adapter-agenda-notes.js';
 
 export type { IUserStore } from './adapter-users.js';
 export type { IChatStore, ConversationListFilter, ConversationListOptions, ConversationFlags } from './adapter-chats.js';
@@ -31,6 +32,12 @@ export type { IMemoryStore } from './adapter-memory.js';
 export type { IKaggleStore } from './adapter-kaggle.js';
 export type { ILiveAgentsStore } from './adapter-live-agents.js';
 export type { IMeStore } from './adapter-me.js';
+export type {
+  IAgendaNotesStore,
+  AgendaCategoryRow, AgendaItemRow, AgendaItemKind, AgendaItemStatus, AgendaItemSensitivity, AgendaListFilter,
+  NoteRow, NoteLinkRow, NoteLinkTargetKind, NoteDatabaseRow, NoteDbRowRow, NoteDatabaseSource, NoteDatabaseViewType,
+  NoteSensitivity, NoteListFilter,
+} from './adapter-agenda-notes.js';
 
 export interface DatabaseAdapter extends
   IUserStore,
@@ -47,7 +54,8 @@ export interface DatabaseAdapter extends
   IMemoryStore,
   IKaggleStore,
   ILiveAgentsStore,
-  IMeStore {
+  IMeStore,
+  IAgendaNotesStore {
   initialize(): Promise<void>;
   close(): Promise<void>;
 }

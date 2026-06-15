@@ -1,0 +1,401 @@
+/**
+ * notes-view.ts — WC6-WC9 Notes full-page view
+ *
+ * Renders state.view === 'notes' with three sub-views:
+ *   • list     — filterable note list (favourites pinned, sub-page tree)
+ *   • editor   — open note with Tiptap editor island (WC6), backlinks panel (WC7)
+ *   • templates— template gallery for WC7
+ *
+ * Integrations:
+ *   • WC7: Favourites marked with ★; sub-page nesting via parent_note_id
+ *   • WC8: "Extract to-dos" button calls POST /api/me/notes/:id/extract
+ *   • WC9: "Add database view" button creates a saved filter view
+ *
+ * Data loaders:
+ *   loadNotesList()   — fills state.notesItems
+ *   loadNote(id)      — fills state.currentNote (with doc_json)
+ *   saveNote(id, doc) — PATCH /api/me/notes/:id
+ *   extractNote(id)   — POST /api/me/notes/:id/extract
+ */
+
+import { h } from './dom.js';
+import { state, type NoteListItem, type NoteDoc } from './state.js';
+import { api } from './api.js';
+import { mountNotesEditor, type EditorInstance } from './notes-editor.js';
+
+// ── Data loaders ──────────────────────────────────────────────────────────────
+
+export async function loadNotesList(opts?: { search?: string }): Promise<void> {
+  state.notesLoading = true;
+  try {
+    const params = new URLSearchParams({ parent: 'null' });
+    if (opts?.search) params.set('search', opts.search);
+    if (state.notesSearch) params.set('search', state.notesSearch as string);
+    const res = await api.get(`/api/me/notes?${params}`);
+    if (!res.ok) return;
+    const { notes } = await res.json() as { notes: NoteListItem[] };
+    state.notesItems = notes;
+  } catch (e) {
+    console.warn('[notes-view] loadNotesList error', e);
+  } finally {
+    state.notesLoading = false;
+  }
+}
+
+export async function loadNoteTemplates(): Promise<void> {
+  try {
+    const res = await api.get('/api/me/notes/templates');
+    if (!res.ok) return;
+    const { templates } = await res.json() as { templates: NoteListItem[] };
+    state.noteTemplates = templates;
+  } catch { /* silent */ }
+}
+
+export async function loadNote(id: string): Promise<void> {
+  try {
+    const res = await api.get(`/api/me/notes/${id}`);
+    if (!res.ok) return;
+    const note = await res.json() as NoteDoc;
+    state.currentNote = note;
+    state.currentNoteId = note.id;
+  } catch (e) {
+    console.warn('[notes-view] loadNote error', e);
+  }
+}
+
+async function saveNote(id: string, docJson: string, title?: string): Promise<void> {
+  try {
+    const body: Record<string, unknown> = { doc_json: docJson };
+    if (title !== undefined) body['title'] = title;
+    await api.put(`/api/me/notes/${id}`, body);
+  } catch (e) {
+    console.warn('[notes-view] saveNote error', e);
+  }
+}
+
+async function createNote(templateId?: string): Promise<NoteListItem | null> {
+  try {
+    const body: Record<string, unknown> = { title: 'Untitled' };
+    if (templateId) body['template_id'] = templateId;
+    const res = await api.post('/api/me/notes', body);
+    if (!res.ok) return null;
+    return res.json() as Promise<NoteListItem>;
+  } catch {
+    return null;
+  }
+}
+
+async function deleteNote(id: string): Promise<boolean> {
+  try {
+    const res = await api.del(`/api/me/notes/${id}`);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function toggleFavorite(note: NoteListItem): Promise<void> {
+  try {
+    await api.put(`/api/me/notes/${note.id}`, { favorite: note.favorite ? 0 : 1 });
+  } catch { /* silent */ }
+}
+
+async function extractNote(id: string): Promise<{ extractedTasks: Array<{ id: string; title: string }> } | null> {
+  try {
+    const res = await api.post(`/api/me/notes/${id}/extract`, {});
+    if (!res.ok) return null;
+    return res.json() as Promise<{ extractedTasks: Array<{ id: string; title: string }> }>;
+  } catch {
+    return null;
+  }
+}
+
+// ── Active editor instance (singleton per open note) ──────────────────────────
+let _activeEditor: EditorInstance | null = null;
+
+function destroyActiveEditor(): void {
+  _activeEditor?.destroy();
+  _activeEditor = null;
+}
+
+// ── Note list panel ───────────────────────────────────────────────────────────
+
+function renderNoteRow(note: NoteListItem, render: () => void): HTMLElement {
+  const isFav = note.favorite === 1;
+  return h('div', {
+    className: `note-row${state.currentNoteId === note.id ? ' active' : ''}`,
+    onClick: async () => {
+      destroyActiveEditor();
+      await loadNote(note.id);
+      state.notesView = 'editor';
+      render();
+    },
+  },
+    h('span', { className: 'note-row-icon' }, note.icon ?? '📄'),
+    h('div', { className: 'note-row-body' },
+      h('div', { className: 'note-row-title' }, note.title || 'Untitled'),
+      h('div', { className: 'note-row-meta' },
+        new Date(note.updated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        note.sensitivity !== 'normal' ? h('span', { className: 'note-sens-badge' }, note.sensitivity) : null,
+      ),
+    ),
+    h('button', {
+      className: `note-fav-btn${isFav ? ' active' : ''}`,
+      title: isFav ? 'Unfavourite' : 'Favourite',
+      onClick: async (e: Event) => {
+        e.stopPropagation();
+        await toggleFavorite(note);
+        await loadNotesList();
+        render();
+      },
+    }, isFav ? '★' : '☆'),
+  );
+}
+
+function renderNotesList(render: () => void): HTMLElement {
+  const notes: NoteListItem[] = state.notesItems ?? [];
+  const loading: boolean = state.notesLoading as boolean;
+
+  const favs = notes.filter((n) => n.favorite);
+  const others = notes.filter((n) => !n.favorite);
+
+  return h('div', { className: 'notes-list-panel' },
+    h('div', { className: 'notes-list-header' },
+      h('div', { className: 'notes-list-title' }, '📝 Notes'),
+      h('div', { className: 'notes-list-actions' },
+        h('button', {
+          className: 'notes-new-btn',
+          title: 'New note',
+          onClick: async () => {
+            const note = await createNote();
+            if (note) {
+              state.notesItems = [note as NoteListItem, ...(state.notesItems as NoteListItem[])];
+              await loadNote(note.id);
+              state.notesView = 'editor';
+              render();
+            }
+          },
+        }, '+ New'),
+        h('button', {
+          className: 'notes-templates-btn',
+          title: 'Templates',
+          onClick: async () => {
+            await loadNoteTemplates();
+            state.notesView = 'templates';
+            render();
+          },
+        }, '⊞ Templates'),
+      ),
+    ),
+    h('div', { className: 'notes-search-bar' },
+      h('input', {
+        className: 'notes-search-input',
+        type: 'text',
+        placeholder: '🔍 Search notes…',
+        value: state.notesSearch as string,
+        onInput: (e: Event) => {
+          state.notesSearch = (e.target as HTMLInputElement).value;
+          void loadNotesList().then(render);
+        },
+      })
+    ),
+    loading
+      ? h('div', { className: 'notes-loading' }, 'Loading…')
+      : h('div', { className: 'notes-items' },
+          favs.length > 0 ? h('div', { className: 'notes-section' },
+            h('div', { className: 'notes-section-label' }, '★ Favourites'),
+            ...favs.map((n) => renderNoteRow(n, render))
+          ) : null,
+          h('div', { className: 'notes-section' },
+            favs.length > 0 ? h('div', { className: 'notes-section-label' }, 'All notes') : null,
+            ...others.map((n) => renderNoteRow(n, render)),
+            others.length === 0 && favs.length === 0
+              ? h('div', { className: 'notes-empty' },
+                  h('div', null, '📄'),
+                  h('div', null, 'No notes yet'),
+                  h('button', {
+                    className: 'notes-new-btn-lg',
+                    onClick: async () => {
+                      const note = await createNote();
+                      if (note) {
+                        state.notesItems = [note as NoteListItem];
+                        await loadNote(note.id);
+                        state.notesView = 'editor';
+                        render();
+                      }
+                    },
+                  }, 'Create your first note')
+                )
+              : null,
+          )
+        )
+  );
+}
+
+// ── Templates gallery ─────────────────────────────────────────────────────────
+
+function renderTemplatesGallery(render: () => void): HTMLElement {
+  const templates: NoteListItem[] = state.noteTemplates ?? [];
+
+  return h('div', { className: 'notes-templates' },
+    h('div', { className: 'notes-templates-header' },
+      h('button', { className: 'notes-back-btn', onClick: () => { state.notesView = 'list'; render(); } }, '← Notes'),
+      h('div', { className: 'notes-templates-title' }, 'Templates'),
+    ),
+    h('div', { className: 'notes-template-grid' },
+      ...templates.map((tmpl) =>
+        h('div', {
+          className: 'notes-template-card',
+          onClick: async () => {
+            const note = await createNote(tmpl.id);
+            if (note) {
+              state.notesItems = [note as NoteListItem, ...(state.notesItems as NoteListItem[])];
+              await loadNote(note.id);
+              state.notesView = 'editor';
+              render();
+            }
+          },
+        },
+          h('div', { className: 'notes-template-icon' }, tmpl.icon ?? '📄'),
+          h('div', { className: 'notes-template-title' }, tmpl.title),
+        )
+      ),
+      templates.length === 0
+        ? h('div', { className: 'notes-empty' }, 'No templates available')
+        : null,
+    )
+  );
+}
+
+// ── Editor panel ──────────────────────────────────────────────────────────────
+
+function renderEditorPanel(note: NoteDoc, render: () => void): HTMLElement {
+  const isFav = note.favorite === 1;
+  let editorMounted = false;
+  let extractResult: string | null = null;
+
+  const titleInput = h('input', {
+    className: 'notes-title-input',
+    type: 'text',
+    value: note.title,
+    placeholder: 'Untitled',
+    onBlur: async () => {
+      await saveNote(note.id, JSON.stringify((state.currentNote as NoteDoc | null)?.doc_json ?? '{}'), titleInput.value);
+    },
+    onKeyDown: (e: KeyboardEvent) => { if (e.key === 'Enter') titleInput.blur(); },
+  }) as HTMLInputElement;
+
+  const editorContainer = h('div', { className: 'notes-editor-mount' });
+
+  const iconEl = h('span', {
+    className: 'notes-editor-icon',
+    title: 'Set icon',
+    onClick: async () => {
+      const newIcon = prompt('Enter emoji for note icon (e.g. 📝):', note.icon ?? '📄');
+      if (newIcon !== null) {
+        await api.put(`/api/me/notes/${note.id}`, { icon: newIcon });
+        note.icon = newIcon;
+        iconEl.textContent = newIcon || '📄';
+      }
+    },
+  }, note.icon ?? '📄');
+
+  const panel = h('div', { className: 'notes-editor-panel' },
+    h('div', { className: 'notes-editor-top' },
+      h('button', { className: 'notes-back-btn', onClick: () => { destroyActiveEditor(); state.notesView = 'list'; render(); } }, '← Notes'),
+      h('div', { className: 'notes-editor-toolbar' },
+        h('button', {
+          className: `notes-fav-btn${isFav ? ' active' : ''}`,
+          title: isFav ? 'Unfavourite' : 'Favourite',
+          onClick: async () => {
+            await api.put(`/api/me/notes/${note.id}`, { favorite: isFav ? 0 : 1 });
+            note.favorite = isFav ? 0 : 1;
+            render();
+          },
+        }, isFav ? '★' : '☆'),
+        h('button', {
+          className: 'notes-extract-btn',
+          title: 'Extract to-dos as tasks (WC8)',
+          onClick: async () => {
+            const result = await extractNote(note.id);
+            if (result) {
+              const count = result.extractedTasks.length;
+              extractResult = count > 0
+                ? `${count} task${count === 1 ? '' : 's'} created`
+                : 'No new to-dos found';
+              render();
+            }
+          },
+        }, '⊡ Extract'),
+        h('button', {
+          className: 'notes-delete-btn',
+          title: 'Delete note',
+          onClick: async () => {
+            if (!confirm('Delete this note? This cannot be undone.')) return;
+            destroyActiveEditor();
+            await deleteNote(note.id);
+            state.currentNoteId = null;
+            state.currentNote = null;
+            state.notesView = 'list';
+            await loadNotesList();
+            render();
+          },
+        }, '🗑'),
+      ),
+    ),
+    extractResult ? h('div', { className: 'notes-extract-result' }, extractResult) : null,
+    h('div', { className: 'notes-editor-header' },
+      iconEl,
+      titleInput,
+    ),
+    editorContainer,
+  );
+
+  // Mount Tiptap after the panel DOM is attached (via requestAnimationFrame)
+  requestAnimationFrame(() => {
+    if (editorMounted) return;
+    editorMounted = true;
+    mountNotesEditor({
+      container: editorContainer,
+      initialDocJson: note.doc_json,
+      placeholder: 'Start writing… type / for commands, @ to mention',
+      onSave: async (docJson) => {
+        await saveNote(note.id, docJson);
+      },
+    }).then((inst) => {
+      _activeEditor = inst;
+    }).catch((err) => {
+      editorContainer.innerHTML = `<div class="notes-editor-error">Editor failed to load: ${String(err)}</div>`;
+    });
+  });
+
+  return panel;
+}
+
+// ── Main notes view ───────────────────────────────────────────────────────────
+
+export function renderNotesView(render: () => void): HTMLElement {
+  const notesView = state.notesView as string;
+  const currentNote = state.currentNote as NoteDoc | null;
+
+  return h('div', { className: 'notes-full-view' },
+    h('div', { className: 'notes-layout' },
+      // Left: note list sidebar
+      h('div', { className: 'notes-sidebar' },
+        renderNotesList(render)
+      ),
+      // Right: editor or templates
+      h('div', { className: 'notes-main' },
+        notesView === 'templates'
+          ? renderTemplatesGallery(render)
+          : notesView === 'editor' && currentNote
+            ? renderEditorPanel(currentNote, render)
+            : h('div', { className: 'notes-select-prompt' },
+                h('div', { className: 'notes-select-icon' }, '📝'),
+                h('div', { className: 'notes-select-msg' }, 'Select a note to start editing'),
+                h('div', { className: 'notes-select-sub' }, 'or create a new one with + New'),
+              )
+      )
+    )
+  );
+}

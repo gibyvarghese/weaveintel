@@ -10,3 +10,5 @@ export { registerLiveAgentRoutes } from './live-agents.js';
 export { registerMeRoutes } from './me.js';
 export { registerMeConversationsRoutes } from './me-conversations.js';
 export { registerMeMemoryRoutes } from './me-memories.js';
+export { registerMeAgendaRoutes } from './me-agenda.js';
+export { registerMeNotesRoutes } from './me-notes.js';

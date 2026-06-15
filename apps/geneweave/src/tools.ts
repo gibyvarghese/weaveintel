@@ -833,6 +833,16 @@ export interface ToolRegistryOptions {
   memoryLoadSnapshot?: (args: { userId: string; agentId?: string }) => Promise<{ snapshot: Record<string, unknown> | null; id: string | null; savedAt: string | null }>;
   /** Propose a procedural instruction delta for human review and approval. */
   memoryProposeInstruction?: (args: { userId: string; agentId: string; instruction: string; reason?: string; confidence?: number }) => Promise<{ id: string }>;
+  /** List the user's agenda items (calendar events, deadlines, reminders). */
+  agendaList?: (args: { userId: string; startAt?: string; endAt?: string; kind?: string; limit?: number; search?: string }) => Promise<Array<{ id: string; title: string; kind: string; status: string; start_at: string | null; end_at: string | null; all_day: number; location: string | null; description: string | null; created_at: string }>>;
+  /** Find agenda items with similar titles within a date window for duplicate detection. */
+  agendaFindSimilar?: (args: { userId: string; title: string; dateBucket?: string }) => Promise<Array<{ id: string; title: string; kind: string; start_at: string | null }>>;
+  /** Create a new agenda item for the user. */
+  agendaCreate?: (args: { userId: string; title: string; kind?: string; startAt?: string; endAt?: string; allDay?: boolean; location?: string; description?: string }) => Promise<{ id: string; title: string; kind: string; start_at: string | null }>;
+  /** Update an existing agenda item. Only provided fields are changed. */
+  agendaUpdate?: (args: { userId: string; id: string; title?: string; kind?: string; startAt?: string; endAt?: string; allDay?: boolean; location?: string; description?: string; status?: string }) => Promise<{ id: string; title: string; start_at: string | null } | null>;
+  /** Delete an agenda item by ID. Returns true if deleted, false if not found. */
+  agendaDelete?: (args: { userId: string; id: string }) => Promise<{ deleted: boolean }>;
   /** Tool keys disabled in the operator-managed catalog. Populated from db.listEnabledToolCatalog(). */
   disabledToolKeys?: ReadonlySet<string>;
   /** Policy resolver for Phase 2 enforcement (rate limits, approval gates, risk level gates). */
@@ -1210,6 +1220,176 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     tags: ['memory', 'procedural', 'proposal'],
   });
 
+  const agendaListTool = weaveTool({
+    name: 'agenda_list',
+    description: "Retrieve the user's calendar events, appointments, deadlines, and reminders from the database. ALWAYS call this tool before answering any calendar question — you have no inherent knowledge of the user's events. Use 'search' to filter by keyword (e.g. 'dentist'), 'kind' to filter by type, and date params to bound the window. Default limit is 10; always set start_at to scope the query.",
+    parameters: {
+      type: 'object',
+      properties: {
+        start_at: { type: 'string', description: "ISO date lower bound (e.g. '2026-06-15'). Use today's date for future-focused queries. Defaults to today if omitted." },
+        end_at: { type: 'string', description: "ISO date upper bound (e.g. '2026-06-21'). Required for bounded queries like 'this week' or 'free on Friday'." },
+        kind: {
+          type: 'string',
+          description: "Filter by item type.",
+          enum: ['event', 'deadline', 'reminder', 'appointment', 'recurring', 'follow-up'],
+        },
+        search: { type: 'string', description: "Case-insensitive keyword filter on event title. Use for 'when is my X' queries (e.g. search='dentist')." },
+        limit: { type: 'number', description: 'Max items to return (default 10, max 50). Increase only for wide date ranges or explicit "show all" requests.' },
+      },
+      required: [],
+    },
+    execute: async (args: { start_at?: string; end_at?: string; kind?: string; search?: string; limit?: number }) => {
+      if (!opts?.agendaList || !opts.currentUserId) {
+        return { content: 'Calendar data is unavailable in this execution context.', isError: true };
+      }
+      const today = new Date().toISOString().slice(0, 10);
+      const startAt = args.start_at ?? today;
+      const limit = Math.max(1, Math.min(50, Number(args.limit ?? 10)));
+      const items = await opts.agendaList({
+        userId: opts.currentUserId,
+        startAt,
+        endAt: args.end_at,
+        kind: args.kind,
+        search: args.search,
+        limit,
+      });
+      if (!items.length) {
+        return JSON.stringify({ count: 0, items: [], message: 'No agenda items found for the given filter.' });
+      }
+      return JSON.stringify({ count: items.length, items }, null, 2);
+    },
+    tags: ['calendar', 'agenda', 'personal'],
+    riskLevel: 'read-only',
+  });
+
+  const agendaCreateTool = weaveTool({
+    name: 'agenda_create',
+    description: "Create a new calendar event, appointment, deadline, or reminder. IMPORTANT: This tool automatically checks for near-duplicate events on the same date before creating. If a similar event already exists, it returns a 'duplicate' response instead of creating — inform the user and ask if they want to update the existing one instead.",
+    parameters: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Title or name of the event (required).' },
+        kind: { type: 'string', enum: ['event', 'appointment', 'deadline', 'reminder', 'recurring', 'follow-up'], description: "Type of item. Use 'appointment' for doctor/dentist/meetings, 'deadline' for due dates, 'reminder' for nudges, 'event' for general." },
+        start_at: { type: 'string', description: "ISO datetime or date string (e.g. '2026-07-01T10:00' or '2026-07-01'). Required for timed items." },
+        end_at: { type: 'string', description: 'ISO datetime for when the event ends (optional).' },
+        all_day: { type: 'boolean', description: 'True for all-day events. Defaults to false if start_at includes a time.' },
+        location: { type: 'string', description: 'Location or meeting link (optional).' },
+        description: { type: 'string', description: 'Additional notes or description (optional).' },
+      },
+      required: ['title'],
+    },
+    execute: async (args: { title: string; kind?: string; start_at?: string; end_at?: string; all_day?: boolean; location?: string; description?: string }) => {
+      if (!opts?.agendaCreate || !opts.currentUserId) {
+        return JSON.stringify({ error: 'Calendar creation is unavailable in this context.' });
+      }
+      try {
+        // Dedup check: find semantically similar events on the same date before inserting
+        if (opts.agendaFindSimilar && args.start_at) {
+          const dateBucket = args.start_at.slice(0, 10);
+          const similar = await opts.agendaFindSimilar({
+            userId: opts.currentUserId,
+            title: args.title,
+            dateBucket,
+          });
+          if (similar.length > 0) {
+            return JSON.stringify({
+              duplicate: true,
+              message: `A similar event already exists on ${dateBucket}. Did you mean to update it instead?`,
+              existing: similar.map(s => ({ id: s.id, title: s.title, kind: s.kind, start_at: s.start_at })),
+            });
+          }
+        }
+        const item = await opts.agendaCreate({
+          userId: opts.currentUserId,
+          title: args.title,
+          kind: args.kind,
+          startAt: args.start_at,
+          endAt: args.end_at,
+          allDay: args.all_day,
+          location: args.location,
+          description: args.description,
+        });
+        return JSON.stringify({ ok: true, id: item.id, title: item.title, kind: item.kind, start_at: item.start_at, message: 'Calendar item created.' });
+      } catch (e) {
+        return JSON.stringify({ error: String(e) });
+      }
+    },
+    tags: ['calendar', 'agenda', 'personal'],
+    riskLevel: 'write',
+  });
+
+  const agendaUpdateTool = weaveTool({
+    name: 'agenda_update',
+    description: "Update an existing calendar event or agenda item. Use this to reschedule, rename, change location, or update status. First use agenda_list to find the item ID, then call this tool. Only the fields you provide will be changed.",
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'ID of the agenda item to update (from agenda_list results).' },
+        title: { type: 'string', description: 'New title (optional).' },
+        kind: { type: 'string', enum: ['event', 'appointment', 'deadline', 'reminder', 'recurring', 'follow-up'], description: 'New kind (optional).' },
+        start_at: { type: 'string', description: 'New start datetime in ISO format (optional).' },
+        end_at: { type: 'string', description: 'New end datetime in ISO format (optional).' },
+        all_day: { type: 'boolean', description: 'Set to true/false to change all-day status (optional).' },
+        location: { type: 'string', description: 'New location (optional).' },
+        description: { type: 'string', description: 'New description (optional).' },
+        status: { type: 'string', enum: ['confirmed', 'tentative', 'cancelled'], description: "New status (optional). Use 'cancelled' to cancel without deleting." },
+      },
+      required: ['id'],
+    },
+    execute: async (args: { id: string; title?: string; kind?: string; start_at?: string; end_at?: string; all_day?: boolean; location?: string; description?: string; status?: string }) => {
+      if (!opts?.agendaUpdate || !opts.currentUserId) {
+        return JSON.stringify({ error: 'Calendar update is unavailable in this context.' });
+      }
+      try {
+        const item = await opts.agendaUpdate({
+          userId: opts.currentUserId,
+          id: args.id,
+          title: args.title,
+          kind: args.kind,
+          startAt: args.start_at,
+          endAt: args.end_at,
+          allDay: args.all_day,
+          location: args.location,
+          description: args.description,
+          status: args.status,
+        });
+        if (!item) return JSON.stringify({ error: 'Item not found or not owned by user.' });
+        return JSON.stringify({ ok: true, id: item.id, title: item.title, start_at: item.start_at, message: 'Calendar item updated.' });
+      } catch (e) {
+        return JSON.stringify({ error: String(e) });
+      }
+    },
+    tags: ['calendar', 'agenda', 'personal'],
+    riskLevel: 'write',
+  });
+
+  const agendaDeleteTool = weaveTool({
+    name: 'agenda_delete',
+    description: "Delete a calendar event or agenda item permanently. Use this when the user asks to 'remove', 'delete', or 'cancel and delete' an event. First use agenda_list to confirm the correct item ID. Prefer setting status='cancelled' via agenda_update for soft-cancel.",
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'ID of the agenda item to delete (from agenda_list results).' },
+      },
+      required: ['id'],
+    },
+    execute: async (args: { id: string }) => {
+      if (!opts?.agendaDelete || !opts.currentUserId) {
+        return JSON.stringify({ error: 'Calendar deletion is unavailable in this context.' });
+      }
+      try {
+        const result = await opts.agendaDelete({ userId: opts.currentUserId, id: args.id });
+        return result.deleted
+          ? JSON.stringify({ ok: true, message: 'Calendar item deleted.' })
+          : JSON.stringify({ error: 'Item not found or not owned by user.' });
+      } catch (e) {
+        return JSON.stringify({ error: String(e) });
+      }
+    },
+    tags: ['calendar', 'agenda', 'personal'],
+    riskLevel: 'destructive',
+  });
+
   const scopedTools: Record<string, Tool> = {
     ...BUILTIN_TOOLS,
     ...createTimeToolMap(opts?.defaultTimezone, opts?.temporalStore ?? defaultTemporalStore),
@@ -1224,6 +1404,10 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     memory_snapshot: memorySnapshotTool,
     memory_load_state: memoryLoadStateTool,
     memory_propose_instruction: memoryProposeInstructionTool,
+    agenda_list: agendaListTool,
+    agenda_create: agendaCreateTool,
+    agenda_update: agendaUpdateTool,
+    agenda_delete: agendaDeleteTool,
   };
   for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {
     // Skip tools disabled in the operator-managed tool catalog

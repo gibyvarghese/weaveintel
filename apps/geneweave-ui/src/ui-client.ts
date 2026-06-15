@@ -110,6 +110,10 @@ import {
   renderWorkspaceNav,
   renderWorkspaceTopCard,
 } from './ui/workspace-shell.js';
+import { renderCalendarView } from './ui/calendar-view.js';
+import { renderNotesView, loadNotesList } from './ui/notes-view.js';
+import { loadActionFeed } from './ui/action-feed.js';
+import { loadCalendarItems, loadCalendarCategories } from './ui/agenda-api.js';
 import {
   hydrateWizardFromPrompt,
   renderPromptSetupWizard as renderPromptSetupWizardView,
@@ -1231,7 +1235,7 @@ function renderHomeWorkspace() {
 
   const rightRail = h('aside', { className: 'right-rail' },
     renderCalendarWidget(render),
-    renderActionsWidget(selectChat)
+    renderActionsWidget(selectChat, render)
   );
 
   return h('div', {className:'workspace-home'},
@@ -1295,6 +1299,10 @@ function renderApp() {
     } else {
       main.appendChild(renderKaggleListView({ render }));
     }
+  } else if (state.view === 'calendar') {
+    main.appendChild(renderCalendarView(render));
+  } else if (state.view === 'notes') {
+    main.appendChild(renderNotesView(render));
   } else {
     main.appendChild(renderHomeWorkspace());
   }
@@ -1312,7 +1320,7 @@ function restoreUiStateFromStorage() {
     const raw = window.localStorage.getItem(UI_STATE_KEY);
     if (!raw) return;
     const saved = JSON.parse(raw) as any;
-    const allowedViews = new Set(['chat', 'connectors', 'admin', 'dashboard', 'preferences', 'scientific-validation', 'kaggle-competition']);
+    const allowedViews = new Set(['chat', 'connectors', 'admin', 'dashboard', 'preferences', 'scientific-validation', 'kaggle-competition', 'calendar', 'notes']);
 
     if (typeof saved?.view === 'string' && allowedViews.has(saved.view)) {
       state.view = saved.view;
@@ -1458,9 +1466,17 @@ export function initialize() {
         state.csrfToken = d.csrfToken;
         await loadChats();
         await Promise.all([loadModels(), loadActiveRoutingPolicy(), loadTools(), loadUserPreferences()]);
+        // Load action feed + calendar data eagerly (they populate the right rail widgets)
+        void loadActionFeed();
+        void loadCalendarCategories();
+        void loadCalendarItems();
 
         if (state.view === 'dashboard') {
           await loadDashboard();
+        } else if (state.view === 'calendar') {
+          await loadCalendarItems();
+        } else if (state.view === 'notes') {
+          await loadNotesList();
         } else if (state.view === 'connectors') {
           await openConnectorsView(render);
         } else if (state.view === 'admin') {

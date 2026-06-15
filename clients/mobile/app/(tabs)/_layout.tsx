@@ -1,9 +1,9 @@
 /**
  * (tabs) group layout — the primary authenticated navigation.
  *
- * Four tabs: Chat (the home surface), Chats (conversation history), Actions
- * (tasks + reminders + approvals), and Profile. The Actions tab shows a live
- * badge count (pending approvals + tasks due today) read from the query cache.
+ * Six tabs: Chat, Chats, Actions, Calendar, Notes, Profile.
+ * The Actions tab shows a live badge count (pending approvals + tasks due today).
+ * Calendar (WC5) and Notes (WC10) are the new agenda + notes surfaces.
  * The tab bar is themed from `@geneweave/tokens` via {@link useTheme}.
  */
 import { Tabs } from 'expo-router';
@@ -53,6 +53,14 @@ export default function TabsLayout() {
             lineHeight: 14,
           },
         }}
+      />
+      <Tabs.Screen
+        name="calendar"
+        options={{ title: 'Calendar', tabBarIcon: ({ color }) => <Icon name="calendar" size="lg" color={color} /> }}
+      />
+      <Tabs.Screen
+        name="notes"
+        options={{ title: 'Notes', tabBarIcon: ({ color }) => <Icon name="notes" size="lg" color={color} /> }}
       />
       <Tabs.Screen
         name="profile"
