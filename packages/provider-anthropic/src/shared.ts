@@ -25,7 +25,7 @@ export interface AnthropicProviderOptions {
 
 export const DEFAULT_BASE_URL = 'https://api.anthropic.com';
 export const DEFAULT_API_VERSION = '2023-06-01';
-const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 
 // ─── Auth & headers ──────────────────────────────────────────
 

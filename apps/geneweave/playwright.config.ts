@@ -33,6 +33,7 @@ export default defineConfig({
       ...process.env,
       PORT: String(managedPort),
       DATABASE_PATH: managedDbPath,
+      NODE_ENV: 'test',
       PLAYWRIGHT_E2E: '1',
       GENEWEAVE_AUTH_RATE_WINDOW_MS: '600000',
       GENEWEAVE_REGISTER_IP_LIMIT: '100000',
@@ -47,5 +48,15 @@ export default defineConfig({
         ?? (process.env['ANTHROPIC_API_KEY'] ? 'claude-sonnet-4-6' : process.env['OPENAI_API_KEY'] ? 'gpt-4o-mini' : 'mock-model'),
     },
   } : undefined,
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  projects: [{
+    name: 'chromium',
+    use: {
+      browserName: 'chromium',
+      // Fake mic/speaker so getUserMedia succeeds in headless mode
+      launchOptions: {
+        args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+      },
+      permissions: ['microphone'],
+    },
+  }],
 });

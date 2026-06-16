@@ -13,6 +13,7 @@ import { join, dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseAdapter } from './db.js';
 import type { ChatEngine } from './chat.js';
+import type { VoiceEngine } from './voice-engine.js';
 import { DashboardService } from './dashboard.js';
 import { getHTML } from './ui-server.js';
 import { getDocsHTML } from './docs-html.js';
@@ -48,11 +49,14 @@ import {
   registerMeMemoryRoutes,
   registerMeAgendaRoutes,
   registerMeNotesRoutes,
+  registerVoiceRoutes,
 } from './routes/index.js';
 
 export interface ServerConfig {
   db: DatabaseAdapter;
   chatEngine: ChatEngine;
+  /** Voice agent engine — undefined when OpenAI key is not configured */
+  voiceEngine?: VoiceEngine;
   jwtSecret: string;
   corsOrigin?: string;
   providers?: Record<string, { apiKey?: string }>;
@@ -84,7 +88,7 @@ export interface ServerConfig {
 }
 
 export function createGeneWeaveServer(config: ServerConfig): Server {
-  const { db, chatEngine, jwtSecret, corsOrigin, providers, publicBaseUrl, gatewayConfig, workflowEngine, triggerDispatcher } = config;
+  const { db, chatEngine, voiceEngine, jwtSecret, corsOrigin, providers, publicBaseUrl, gatewayConfig, workflowEngine, triggerDispatcher } = config;
   const dashboard = new DashboardService(db);
   const router = new Router();
   const uiHtml = getHTML();
@@ -139,6 +143,11 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerMeMemoryRoutes(router, db);
   registerMeAgendaRoutes(router, db);
   registerMeNotesRoutes(router, db);
+
+  // Voice agent routes — registered only when audio provider is configured
+  if (voiceEngine) {
+    registerVoiceRoutes(router, db, voiceEngine);
+  }
 
   // ── Avatar static files ────────────────────────────────────
 
@@ -302,6 +311,8 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
             json(res, 413, { error: 'Request body too large' });
           } else if (msg === 'Too many concurrent request bodies') {
             json(res, 503, { error: 'Server is busy reading other requests. Please retry shortly.' });
+          } else if (err instanceof SyntaxError && (msg.toLowerCase().includes('json') || msg.toLowerCase().includes('unexpected token') || msg.toLowerCase().includes('unexpected end'))) {
+            json(res, 400, { error: 'Invalid JSON in request body' });
           } else {
             json(res, 500, { error: 'Internal server error', correlationId });
           }
@@ -363,6 +374,59 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   server.keepAliveTimeout = SERVER_KEEP_ALIVE_TIMEOUT_MS;
   server.maxHeadersCount = SERVER_MAX_HEADERS_COUNT;
   server.maxRequestsPerSocket = SERVER_MAX_REQUESTS_PER_SOCKET;
+
+  // ── WebSocket upgrade — voice sessions ─────────────────────────────────────
+  // Path: /api/voice/sessions/:sessionId/ws
+  // We use dynamic import so `ws` is only loaded when the upgrade event fires.
+  if (voiceEngine) {
+    server.on('upgrade', async (req: IncomingMessage, socket, head: Buffer) => {
+      const url = req.url ?? '';
+      const wsMatch = url.match(/^\/api\/voice\/sessions\/([^/?#]+)\/(ws|realtime)/);
+      if (!wsMatch) {
+        socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      const sessionId = wsMatch[1]!;
+
+      // Authenticate from the query-string token (WS clients can't set headers easily)
+      const qs = new URL(url, 'http://localhost').searchParams;
+      const tokenParam = qs.get('token');
+      if (tokenParam) {
+        // Inject as Authorization header so authenticateRequest picks it up
+        (req.headers as Record<string, string>)['authorization'] = `Bearer ${tokenParam}`;
+      }
+
+      const auth = await authenticateRequest(req, db, jwtSecret);
+      if (!auth) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      try {
+        const { WebSocketServer } = await import('ws');
+        const wss = new WebSocketServer({ noServer: true });
+        const isRealtime = !!url.match(/\/realtime$/);
+        wss.handleUpgrade(req, socket, head, async (ws) => {
+          try {
+            if (isRealtime) {
+              await voiceEngine!.handleRealtimeWebSocket({ sessionId, userId: auth.userId, ws });
+            } else {
+              await voiceEngine!.handleWebSocket({ sessionId, userId: auth.userId, ws, req });
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            console.error(`[voice-ws][${sessionId}] Error:`, msg);
+          }
+        });
+      } catch (err) {
+        console.error('[voice-ws] Failed to handle upgrade:', err);
+        socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
+        socket.destroy();
+      }
+    });
+  }
 
   return server;
 }

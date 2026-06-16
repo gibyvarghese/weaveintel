@@ -6,6 +6,15 @@ import {
   queueFiles,
   removePendingAttachment,
 } from './utils.js';
+import {
+  initVoiceSession,
+  endVoiceSession,
+  togglePause,
+  toggleVoiceSettings,
+  loadVoiceConfig,
+  saveVoiceConfig,
+  VOICE_BAR_COUNT,
+} from './voice-agent.js';
 
 export function renderSettingsDropdown(options: { render: () => void; saveChatSettings: () => Promise<void> }): HTMLElement {
   const settings = state.chatSettings;
@@ -136,6 +145,96 @@ export function renderSettingsDropdown(options: { render: () => void; saveChatSe
     );
   }
 
+  // ── Voice pipeline settings ────────────────────────────────
+  rows.push(sep());
+  rows.push(sectionLabel('Voice Pipeline'));
+
+  const vcfg = (state as any).voiceConfig as null | {
+    pipelineMode: 'chained' | 'realtime';
+    realtimeModel: string;
+    ttsVoice: string;
+    ttsSpeed: number;
+    sttLanguage: string | null;
+    ttsModel: string;
+  };
+
+  const voices = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const;
+  const pMode: 'chained' | 'realtime' = vcfg?.pipelineMode ?? 'chained';
+
+  // Pipeline mode toggle
+  rows.push(
+    h('div', { style: 'display:flex;gap:4px' },
+      ...(['chained', 'realtime'] as const).map((m) =>
+        h('button', {
+          className: 'vs-mode-btn' + (pMode === m ? ' active' : ''),
+          title: m === 'chained'
+            ? 'Whisper STT → LLM → tts-1 TTS — full guardrails & cost tracking'
+            : 'OpenAI Realtime API — native speech-to-speech, lowest latency',
+          onClick: (e: Event) => {
+            e.stopPropagation();
+            void saveVoiceConfig({ pipelineMode: m }).then(options.render);
+          },
+        }, m === 'chained' ? '🔗 Chained (Whisper + TTS)' : '⚡ Realtime (GPT-4o)')
+      )
+    )
+  );
+
+  if (vcfg) {
+    // Voice selector
+    rows.push(
+      h('div', { className: 'setting-sub' },
+        h('span', null, 'Voice'),
+        h('select', {
+          value: vcfg.ttsVoice,
+          onClick: (e: Event) => e.stopPropagation(),
+          onChange: (e: Event) => {
+            void saveVoiceConfig({ ttsVoice: (e.target as HTMLSelectElement).value }).then(options.render);
+          },
+        },
+          ...voices.map((v) => h('option', { value: v, selected: v === vcfg.ttsVoice ? 'true' : null }, v))
+        )
+      )
+    );
+
+    if (pMode === 'chained') {
+      // TTS model
+      rows.push(
+        h('div', { className: 'setting-sub' },
+          h('span', null, 'TTS model'),
+          h('select', {
+            value: vcfg.ttsModel,
+            onClick: (e: Event) => e.stopPropagation(),
+            onChange: (e: Event) => {
+              void saveVoiceConfig({ ttsModel: (e.target as HTMLSelectElement).value }).then(options.render);
+            },
+          },
+            h('option', { value: 'tts-1', selected: vcfg.ttsModel === 'tts-1' ? 'true' : null }, 'tts-1 (faster)'),
+            h('option', { value: 'tts-1-hd', selected: vcfg.ttsModel === 'tts-1-hd' ? 'true' : null }, 'tts-1-hd (higher quality)'),
+          )
+        )
+      );
+    } else {
+      // Realtime model
+      rows.push(
+        h('div', { className: 'setting-sub' },
+          h('span', null, 'Realtime model'),
+          h('select', {
+            value: vcfg.realtimeModel,
+            onClick: (e: Event) => e.stopPropagation(),
+            onChange: (e: Event) => {
+              void saveVoiceConfig({ realtimeModel: (e.target as HTMLSelectElement).value }).then(options.render);
+            },
+          },
+            h('option', { value: 'gpt-realtime-2', selected: vcfg.realtimeModel === 'gpt-realtime-2' ? 'true' : null }, 'gpt-realtime-2'),
+            h('option', { value: 'gpt-4o-mini-realtime-preview', selected: vcfg.realtimeModel === 'gpt-4o-mini-realtime-preview' ? 'true' : null }, 'gpt-4o-mini-realtime-preview'),
+          )
+        )
+      );
+    }
+  } else {
+    rows.push(h('div', { style: 'font-size:11px;color:var(--fg3);padding:4px 0' }, 'Loading voice config…'));
+  }
+
   return h('div', { className: 'dropdown settings-dd', onClick: (e: Event) => e.stopPropagation() },
     h('h3', null, h('span', null, '⚙'), ' Agentic AI Settings'),
     h('div', { style: 'display:flex;flex-direction:column;gap:8px;' }, ...rows)
@@ -217,6 +316,74 @@ export function renderChatView(options: {
     fileInput.value = '';
   });
 
+  // Voice agent bar (shown when voice agent is active)
+  const STATUS_LABEL: Record<string, string> = {
+    idle:       'Ready — click mic to start',
+    listening:  'Listening...',
+    recording:  'Hearing you...',
+    processing: 'Thinking...',
+    playing:    'Agent speaking...',
+    paused:     'Paused',
+  };
+
+  // Voice bar: IDs on every mutable element so voice-agent.ts can patch them
+  // directly without triggering a full re-render.
+  const waveBars: HTMLElement[] = [];
+  for (let i = 0; i < VOICE_BAR_COUNT; i++) {
+    waveBars.push(h('div', { className: 'va-wave-bar' }));
+  }
+
+  const voiceBar = state.voiceAgentActive
+    ? h('div', { className: 'voice-bar' },
+        h('div', { className: 'voice-bar-top' },
+          h('div', { id: 'va-dot', className: 'voice-status-indicator voice-status-' + state.voiceStatus }),
+          h('span', { id: 'va-label', className: 'voice-status-label' }, STATUS_LABEL[state.voiceStatus] || 'Ready'),
+          h('div', { style: 'flex:1' }),
+          h('button', {
+            id: 'va-pause-btn',
+            className: 'voice-pause-btn',
+            title: 'Pause conversation',
+            innerHTML: '&#9646;&#9646; Pause',
+            onClick: () => { togglePause(); },
+          }),
+          h('button', {
+            id: 'va-settings-btn',
+            className: 'voice-settings-btn' + (state.voiceSettingsOpen ? ' active' : ''),
+            title: 'Voice settings',
+            innerHTML: '&#9881;',
+            onClick: () => {
+              toggleVoiceSettings();
+              if (state.voiceSettingsOpen && !state.voiceConfig) void loadVoiceConfig();
+            },
+          }),
+          h('button', {
+            className: 'voice-end-btn',
+            title: 'End voice session',
+            onClick: () => { void endVoiceSession(); },
+          }, '✕'),
+        ),
+        h('div', { id: 'va-waveform', className: 'va-waveform' }, ...waveBars),
+        // Exchange + error: always in DOM, shown/hidden directly by voice-agent.ts
+        h('div', { id: 'va-exchange', className: 'voice-exchange', style: 'display:none' },
+          h('div', { id: 'va-you', className: 'voice-you', style: 'display:none' },
+            h('span', { className: 'voice-label' }, 'You '),
+            h('span', { id: 'va-you-text' }),
+          ),
+          h('div', { id: 'va-agent', className: 'voice-agent-line', style: 'display:none' },
+            h('span', { className: 'voice-label' }, 'Agent '),
+            h('span', { id: 'va-agent-text' }),
+          ),
+        ),
+        h('div', { id: 'va-error', className: 'voice-error', style: 'display:none' }),
+        // Settings panel — always in DOM when voice bar is shown, shown/hidden by toggleVoiceSettings()
+        h('div', {
+          id: 'va-settings',
+          className: 'va-settings-panel',
+          style: state.voiceSettingsOpen ? '' : 'display:none',
+        }),
+      )
+    : null;
+
   view.appendChild(h('div', { className: 'input-bar' },
     fileInput,
     h('div', { className: 'input-tools' },
@@ -234,7 +401,27 @@ export function renderChatView(options: {
             '<line x1="8" y1="22" x2="16" y2="22"></line>' +
           '</svg>',
         onClick: () => toggleAudioRecording(),
-      })
+      }),
+      h('button', {
+        className: 'tool-btn voice-agent-btn' + (state.voiceAgentActive ? ' active' : ''),
+        title: state.voiceAgentActive ? 'End voice agent session' : 'Start voice agent (Whisper + Claude + TTS)',
+        'aria-label': state.voiceAgentActive ? 'End voice agent' : 'Start voice agent',
+        'aria-pressed': state.voiceAgentActive ? 'true' : 'false',
+        innerHTML:
+          '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"></path>' +
+            '<path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>' +
+            '<path d="M8 21h8"></path><path d="M12 17v4"></path>' +
+            '<circle cx="18" cy="5" r="3" fill="var(--accent)" stroke="none"></circle>' +
+          '</svg>',
+        onClick: () => {
+          if (state.voiceAgentActive) {
+            void endVoiceSession();
+          } else {
+            void initVoiceSession();
+          }
+        },
+      }),
     ),
     h('div', { className: 'composer-wrap' },
       state.pendingAttachments?.length
@@ -251,6 +438,7 @@ export function renderChatView(options: {
             )
           )
         : null,
+      voiceBar,
       textarea
     ),
     h('button', {

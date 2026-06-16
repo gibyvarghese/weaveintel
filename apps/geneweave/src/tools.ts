@@ -872,6 +872,12 @@ export interface ToolRegistryOptions {
    */
   skillPolicyKey?: string;
   /**
+   * Tools explicitly enabled at the chat level (settings.enabledTools). Passed
+   * into the policy resolution context so that skill policies cannot block tools
+   * the operator intentionally granted access to.
+   */
+  explicitEnabledTools?: string[];
+  /**
    * Phase D — the host's `weaveRuntime` instance. When supplied,
    * `weaveToolRegistry({ runtime })` asserts every tool's
    * `schema.requires` against the runtime's advertised capabilities at
@@ -1474,6 +1480,7 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
         chatId: opts.currentChatId,
         userId: opts.currentUserId,
         skillPolicyKey: opts.skillPolicyKey,
+        explicitEnabledTools: opts.explicitEnabledTools,
       },
       // Phase 3 of RESILIENCE_PLAN — every tool invocation flows through
       // the shared resilience pipeline so MCP/A2A/HTTP tool failures emit

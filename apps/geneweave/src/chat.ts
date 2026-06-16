@@ -849,6 +849,7 @@ export class ChatEngine {
       disabledToolKeys,
       catalogEntries,
       skillPolicyKey: settings.skillPolicyKey,
+      explicitEnabledTools: settings.enabledTools,
     };
   }
 

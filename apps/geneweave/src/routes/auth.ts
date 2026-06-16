@@ -250,16 +250,22 @@ export function registerAuthRoutes(
       await ensureAtLeastOneTenantAdmin(db, userId);
     }
 
-    // Issue an email verification token. The raw token travels via email link;
-    // only SHA-256(token) is stored in the DB (pre-image resistant).
-    const rawVerificationToken = await issueVerificationToken(db, userId);
-    const verifyUrl = `${publicBaseUrl ?? ''}/auth/verify-email?token=${rawVerificationToken}`;
-    await getEmailNotifier().sendVerificationEmail({
-      to: email,
-      name,
-      verificationUrl: verifyUrl,
-      expiresInHours: VERIFICATION_EXPIRY_HOURS,
-    });
+    // In test environments, auto-verify email so stress tests can re-login without
+    // waiting for an email link. Controlled by NODE_ENV=test only — never in prod.
+    if (process.env['NODE_ENV'] === 'test') {
+      await db.markUserEmailVerified(userId);
+    } else {
+      // Issue an email verification token. The raw token travels via email link;
+      // only SHA-256(token) is stored in the DB (pre-image resistant).
+      const rawVerificationToken = await issueVerificationToken(db, userId);
+      const verifyUrl = `${publicBaseUrl ?? ''}/auth/verify-email?token=${rawVerificationToken}`;
+      await getEmailNotifier().sendVerificationEmail({
+        to: email,
+        name,
+        verificationUrl: verifyUrl,
+        expiresInHours: VERIFICATION_EXPIRY_HOURS,
+      });
+    }
 
     // Issue a session immediately so the client can use the app right away.
     // Subsequent sign-ins (after session expiry / logout) require email verification.

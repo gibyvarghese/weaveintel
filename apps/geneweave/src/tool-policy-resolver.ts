@@ -30,9 +30,14 @@ export class DbToolPolicyResolver implements ToolPolicyResolver {
   constructor(private readonly db: DatabaseAdapter) {}
 
   async resolve(toolName: string, ctx?: PolicyResolutionContext): Promise<EffectiveToolPolicy> {
-    // Try the skill-scoped policy first, then fall back to 'default'.
+    // If the tool is explicitly enabled at the chat level, bypass the skill
+    // policy so a wrongly-matched skill cannot block tools the operator
+    // intentionally granted. Fall straight through to 'default'.
+    const isExplicitlyEnabled = ctx?.explicitEnabledTools?.includes(toolName) ?? false;
+
+    // Try the skill-scoped policy first (unless bypassed), then fall back to 'default'.
     const candidateKeys = [
-      ctx?.skillPolicyKey,
+      isExplicitlyEnabled ? undefined : ctx?.skillPolicyKey,
       'default',
     ].filter(Boolean) as string[];
 

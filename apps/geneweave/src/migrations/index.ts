@@ -26,6 +26,8 @@ import { applyM43ConversationFlags } from './m43-conversation-flags.js';
 import { applyM44AuthHardening } from './m44-auth-hardening.js';
 import { applyM45KaggleRoleCapabilities } from './m45-kaggle-role-capabilities.js';
 import { applyM46AgendaNotes } from './m46-agenda-notes.js';
+import { applyM47VoiceAgents } from './m47-voice-agents.js';
+import { applyM48VoicePipelineMode } from './m48-voice-pipeline-mode.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -60,6 +62,8 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm44-auth-hardening', description: 'Auth hardening: users.email_verified, email_verifications table, user_invitations table', run: applyM44AuthHardening },
   { id: 'm45-kaggle-role-capabilities', description: 'Kaggle role capability matrix: DB-configurable defaults table seeded from KAGGLE_CAPABILITY_MATRIX', run: applyM45KaggleRoleCapabilities },
   { id: 'm46-agenda-notes', description: 'WC1-WC9: agenda_categories, agenda_items, notes, note_links, note_databases, note_db_rows; persona-seeded categories + note templates', run: applyM46AgendaNotes },
+  { id: 'm47-voice-agents', description: 'Voice agents: voice_configs, voice_sessions, voice_session_events; text_to_speech + voice_agent task types', run: applyM47VoiceAgents },
+  { id: 'm48-voice-pipeline-mode', description: 'Voice pipeline mode: pipeline_mode + realtime_model columns on voice_configs', run: applyM48VoicePipelineMode },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

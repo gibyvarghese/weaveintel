@@ -8789,6 +8789,167 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async deleteNoteDbRow(id: string, databaseId: string): Promise<void> {
     this.d.prepare('DELETE FROM note_db_rows WHERE id = ? AND database_id = ?').run(id, databaseId);
   }
+
+  // ─── Voice configs ────────────────────────────────────────────────────────
+
+  async getVoiceConfig(userId: string): Promise<import('./db-types/adapter-voice.js').VoiceConfigRow | null> {
+    return (this.d.prepare('SELECT * FROM voice_configs WHERE user_id = ?').get(userId) as import('./db-types/adapter-voice.js').VoiceConfigRow) ?? null;
+  }
+
+  async upsertVoiceConfig(create: import('./db-types/adapter-voice.js').VoiceConfigCreate): Promise<import('./db-types/adapter-voice.js').VoiceConfigRow> {
+    const id = newUUIDv7();
+    this.d.prepare(`
+      INSERT INTO voice_configs
+        (id, user_id, tenant_id, stt_provider, stt_model, stt_language,
+         tts_provider, tts_model, tts_voice, tts_speed, tts_format,
+         enabled_tools, mode, guardrail_policy, cost_policy,
+         pipeline_mode, realtime_model)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(user_id) DO UPDATE SET
+        stt_provider = excluded.stt_provider,
+        stt_model    = excluded.stt_model,
+        stt_language = excluded.stt_language,
+        tts_provider = excluded.tts_provider,
+        tts_model    = excluded.tts_model,
+        tts_voice    = excluded.tts_voice,
+        tts_speed    = excluded.tts_speed,
+        tts_format   = excluded.tts_format,
+        enabled_tools = excluded.enabled_tools,
+        mode         = excluded.mode,
+        guardrail_policy = excluded.guardrail_policy,
+        cost_policy  = excluded.cost_policy,
+        pipeline_mode = excluded.pipeline_mode,
+        realtime_model = excluded.realtime_model,
+        updated_at   = datetime('now')
+    `).run(
+      id,
+      create.userId,
+      create.tenantId ?? null,
+      create.sttProvider ?? 'openai',
+      create.sttModel ?? 'whisper-1',
+      create.sttLanguage ?? null,
+      create.ttsProvider ?? 'openai',
+      create.ttsModel ?? 'tts-1',
+      create.ttsVoice ?? 'alloy',
+      create.ttsSpeed ?? 1.0,
+      create.ttsFormat ?? 'mp3',
+      create.enabledTools ? JSON.stringify(create.enabledTools) : null,
+      create.mode ?? 'agent',
+      create.guardrailPolicy ?? null,
+      create.costPolicy ?? null,
+      create.pipelineMode ?? 'chained',
+      create.realtimeModel ?? 'gpt-realtime-2',
+    );
+    return (this.d.prepare('SELECT * FROM voice_configs WHERE user_id = ?').get(create.userId) as import('./db-types/adapter-voice.js').VoiceConfigRow)!;
+  }
+
+  async updateVoiceConfig(userId: string, update: import('./db-types/adapter-voice.js').VoiceConfigUpdate): Promise<import('./db-types/adapter-voice.js').VoiceConfigRow | null> {
+    const sets: string[] = ['updated_at = datetime(\'now\')'];
+    const vals: unknown[] = [];
+    if (update.sttProvider !== undefined) { sets.push('stt_provider = ?'); vals.push(update.sttProvider); }
+    if (update.sttModel !== undefined)    { sets.push('stt_model = ?');    vals.push(update.sttModel); }
+    if (update.sttLanguage !== undefined) { sets.push('stt_language = ?'); vals.push(update.sttLanguage); }
+    if (update.ttsProvider !== undefined) { sets.push('tts_provider = ?'); vals.push(update.ttsProvider); }
+    if (update.ttsModel !== undefined)    { sets.push('tts_model = ?');    vals.push(update.ttsModel); }
+    if (update.ttsVoice !== undefined)    { sets.push('tts_voice = ?');    vals.push(update.ttsVoice); }
+    if (update.ttsSpeed !== undefined)    { sets.push('tts_speed = ?');    vals.push(update.ttsSpeed); }
+    if (update.ttsFormat !== undefined)   { sets.push('tts_format = ?');   vals.push(update.ttsFormat); }
+    if (update.enabledTools !== undefined){ sets.push('enabled_tools = ?'); vals.push(update.enabledTools ? JSON.stringify(update.enabledTools) : null); }
+    if (update.mode !== undefined)        { sets.push('mode = ?');         vals.push(update.mode); }
+    if (update.guardrailPolicy !== undefined) { sets.push('guardrail_policy = ?'); vals.push(update.guardrailPolicy); }
+    if (update.costPolicy !== undefined)  { sets.push('cost_policy = ?');  vals.push(update.costPolicy); }
+    if (update.pipelineMode !== undefined){ sets.push('pipeline_mode = ?'); vals.push(update.pipelineMode); }
+    if (update.realtimeModel !== undefined){ sets.push('realtime_model = ?'); vals.push(update.realtimeModel); }
+    if (sets.length === 1) return this.getVoiceConfig(userId);
+    vals.push(userId);
+    this.d.prepare(`UPDATE voice_configs SET ${sets.join(', ')} WHERE user_id = ?`).run(...vals);
+    return this.getVoiceConfig(userId);
+  }
+
+  // ─── Voice sessions ───────────────────────────────────────────────────────
+
+  async createVoiceSession(create: import('./db-types/adapter-voice.js').VoiceSessionCreate): Promise<import('./db-types/adapter-voice.js').VoiceSessionRow> {
+    this.d.prepare(`
+      INSERT INTO voice_sessions (id, user_id, tenant_id, chat_id, config_snapshot)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(create.id, create.userId, create.tenantId ?? null, create.chatId, create.configSnapshot);
+    return (this.d.prepare('SELECT * FROM voice_sessions WHERE id = ?').get(create.id) as import('./db-types/adapter-voice.js').VoiceSessionRow)!;
+  }
+
+  async getVoiceSession(id: string, userId: string): Promise<import('./db-types/adapter-voice.js').VoiceSessionRow | null> {
+    return (this.d.prepare('SELECT * FROM voice_sessions WHERE id = ? AND user_id = ?').get(id, userId) as import('./db-types/adapter-voice.js').VoiceSessionRow) ?? null;
+  }
+
+  async listVoiceSessions(userId: string, filter?: import('./db-types/adapter-voice.js').VoiceSessionListFilter): Promise<import('./db-types/adapter-voice.js').VoiceSessionRow[]> {
+    const where: string[] = ['user_id = ?'];
+    const vals: unknown[] = [userId];
+    if (filter?.status) { where.push('status = ?'); vals.push(filter.status); }
+    const limit = filter?.limit ?? 50;
+    const sql = `SELECT * FROM voice_sessions WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT ${limit}`;
+    return this.d.prepare(sql).all(...vals) as import('./db-types/adapter-voice.js').VoiceSessionRow[];
+  }
+
+  async updateVoiceSessionStatus(id: string, userId: string, status: import('./db-types/adapter-voice.js').VoiceSessionStatus, endedAt?: string | null): Promise<void> {
+    this.d.prepare(`
+      UPDATE voice_sessions SET status = ?, ended_at = ?, updated_at = datetime('now')
+      WHERE id = ? AND user_id = ?
+    `).run(status, endedAt ?? null, id, userId);
+  }
+
+  async updateVoiceSessionStats(id: string, userId: string, delta: {
+    turns?: number; sttMs?: number; ttsMs?: number; llmMs?: number;
+    costUsd?: number; audioBytes?: number; lastActiveAt?: string; wsConnected?: boolean;
+  }): Promise<void> {
+    const sets: string[] = ['updated_at = datetime(\'now\')'];
+    const vals: unknown[] = [];
+    if (delta.turns !== undefined)       { sets.push('total_turns = total_turns + ?');             vals.push(delta.turns); }
+    if (delta.sttMs !== undefined)       { sets.push('total_stt_ms = total_stt_ms + ?');           vals.push(delta.sttMs); }
+    if (delta.ttsMs !== undefined)       { sets.push('total_tts_ms = total_tts_ms + ?');           vals.push(delta.ttsMs); }
+    if (delta.llmMs !== undefined)       { sets.push('total_llm_ms = total_llm_ms + ?');           vals.push(delta.llmMs); }
+    if (delta.costUsd !== undefined)     { sets.push('total_cost_usd = total_cost_usd + ?');       vals.push(delta.costUsd); }
+    if (delta.audioBytes !== undefined)  { sets.push('total_audio_bytes = total_audio_bytes + ?'); vals.push(delta.audioBytes); }
+    if (delta.lastActiveAt !== undefined){ sets.push('last_active_at = ?');                        vals.push(delta.lastActiveAt); }
+    if (delta.wsConnected !== undefined) { sets.push('ws_connected = ?');                          vals.push(delta.wsConnected ? 1 : 0); }
+    vals.push(id, userId);
+    this.d.prepare(`UPDATE voice_sessions SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`).run(...vals);
+  }
+
+  async endVoiceSession(id: string, userId: string): Promise<void> {
+    this.d.prepare(`
+      UPDATE voice_sessions
+      SET status = 'ended', ended_at = datetime('now'), ws_connected = 0, updated_at = datetime('now')
+      WHERE id = ? AND user_id = ?
+    `).run(id, userId);
+  }
+
+  // ─── Voice session events ─────────────────────────────────────────────────
+
+  async insertVoiceSessionEvent(event: import('./db-types/adapter-voice.js').VoiceSessionEventCreate): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO voice_session_events
+        (id, session_id, user_id, turn_index, event_type, input_text, output_text,
+         audio_bytes_in, audio_bytes_out, stt_provider, stt_model, tts_provider,
+         tts_model, tts_voice, llm_provider, llm_model, prompt_tokens,
+         completion_tokens, duration_ms, cost_usd, error, guardrail_decision, trace_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      event.id, event.sessionId, event.userId, event.turnIndex, event.eventType,
+      event.inputText ?? null, event.outputText ?? null,
+      event.audioBytesIn ?? null, event.audioBytesOut ?? null,
+      event.sttProvider ?? null, event.sttModel ?? null,
+      event.ttsProvider ?? null, event.ttsModel ?? null, event.ttsVoice ?? null,
+      event.llmProvider ?? null, event.llmModel ?? null,
+      event.promptTokens ?? null, event.completionTokens ?? null,
+      event.durationMs ?? null, event.costUsd ?? null,
+      event.error ?? null, event.guardrailDecision ?? null, event.traceId ?? null,
+    );
+  }
+
+  async listVoiceSessionEvents(sessionId: string, userId: string, limit = 100): Promise<import('./db-types/adapter-voice.js').VoiceSessionEventRow[]> {
+    return this.d.prepare(
+      'SELECT * FROM voice_session_events WHERE session_id = ? AND user_id = ? ORDER BY turn_index ASC, created_at ASC LIMIT ?',
+    ).all(sessionId, userId, limit) as import('./db-types/adapter-voice.js').VoiceSessionEventRow[];
+  }
 }
 
 // ─── Factory ─────────────────────────────────────────────────

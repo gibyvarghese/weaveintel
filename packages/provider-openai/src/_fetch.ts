@@ -24,7 +24,7 @@ export interface OpenAIFetchOptions {
 
 const client = createHardenedFetch({
   errorTag: 'provider-openai',
-  timeoutMs: 60_000,
+  timeoutMs: 120_000,
   maxBytes: 50 * 1024 * 1024,
 });
 

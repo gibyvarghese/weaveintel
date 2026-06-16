@@ -12,3 +12,4 @@ export { registerMeConversationsRoutes } from './me-conversations.js';
 export { registerMeMemoryRoutes } from './me-memories.js';
 export { registerMeAgendaRoutes } from './me-agenda.js';
 export { registerMeNotesRoutes } from './me-notes.js';
+export { registerVoiceRoutes } from './voice.js';

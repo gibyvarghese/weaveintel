@@ -44,6 +44,13 @@ export interface PolicyResolutionContext {
   chatId?: string;
   /** User ID for per-user audit records. */
   userId?: string;
+  /**
+   * Tools explicitly enabled at the chat level (from settings.enabledTools).
+   * When a tool appears here, the skill-level policy override is bypassed so
+   * that skills cannot accidentally block tools the operator intentionally
+   * granted. The 'default' policy is applied instead.
+   */
+  explicitEnabledTools?: string[];
 }
 
 // ─── ToolPolicyResolver ──────────────────────────────────────

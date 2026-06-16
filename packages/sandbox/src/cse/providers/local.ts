@@ -60,6 +60,54 @@ function dockerExecEnvArgs(env: Record<string, string>): string[] {
 
 // ─── Helpers ──────────────────────────────────────────────────
 
+/**
+ * Python runs as a script (`python code.py`), not a REPL — bare expressions
+ * like `mean_value` produce no stdout. When the last non-empty, non-comment
+ * line looks like a bare expression (not an assignment, not already a print/
+ * return/raise/del/assert/pass/break/continue), wrap it in print() so the
+ * model always gets visible output back.
+ *
+ * Only applied to Python; other languages produce output via their own
+ * mechanisms (console.log, echo, etc.).
+ */
+function wrapPythonLastExpr(code: string): string {
+  const lines = code.split('\n');
+  // Find last non-empty, non-comment, non-decorator line
+  let lastIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const t = lines[i]?.trimStart() ?? '';
+    if (t && !t.startsWith('#') && !t.startsWith('@')) {
+      lastIdx = i;
+      break;
+    }
+  }
+  if (lastIdx < 0) return code;
+
+  const lastLine = lines[lastIdx] ?? '';
+  const trimmed = lastLine.trimStart();
+  const indent = lastLine.slice(0, lastLine.length - trimmed.length);
+
+  // Skip if the last line is already a statement keyword or already prints
+  const STMT_STARTS = /^(print\s*\(|import\s|from\s|def\s|class\s|for\s|while\s|if\s|elif\s|else\s*:|try\s*:|except|finally\s*:|with\s|return\s|raise\s|del\s|assert\s|pass\b|break\b|continue\b|yield\s|async\s|await\s)/;
+  if (STMT_STARTS.test(trimmed)) return code;
+
+  // Check for simple variable assignment (`varname = expr` or augmented `varname += expr`).
+  // For subscript/attribute assignments we skip to avoid complexity.
+  const simpleAssign = /^([A-Za-z_][A-Za-z0-9_]*)\s*[+\-*/%&|^]?=(?!=)/.exec(trimmed);
+  const complexAssign = /^[A-Za-z_][A-Za-z0-9_]*\s*[.\[]/.test(trimmed) && /=(?!=)/.test(trimmed);
+  if (simpleAssign && !complexAssign) {
+    // Append print(varname) on the next line so the result is visible
+    lines.splice(lastIdx + 1, 0, `${indent}print(${simpleAssign[1]})`);
+    return lines.join('\n');
+  }
+  if (complexAssign) return code;
+
+  // Looks like a bare expression — wrap in print()
+  const newLine = `${indent}print(${trimmed})`;
+  lines[lastIdx] = newLine;
+  return lines.join('\n');
+}
+
 function run(
   cmd: string,
   args: string[],
@@ -184,8 +232,10 @@ export class LocalDockerProvider implements ContainerProvider {
       await mkdir(workDir, { recursive: true });
       await mkdir(outputDir, { recursive: true });
 
-      // Write code
-      await writeFile(codeFile, request.code, 'utf8');
+      // Write code — for Python, auto-wrap bare last expressions in print() so
+      // the model always gets visible output even if it forgets to print().
+      const codeToWrite = lang === 'python' ? wrapPythonLastExpr(request.code) : request.code;
+      await writeFile(codeFile, codeToWrite, 'utf8');
 
       // Write injected files
       if (request.files) {
@@ -363,11 +413,13 @@ export class LocalDockerProvider implements ContainerProvider {
       PATH: '/workspace/.pyuser/bin:/usr/local/bin:/usr/bin:/bin',
     });
 
-    // Write code file into the running container via stdin pipe
+    // Write code file into the running container via stdin pipe.
+    // For Python, auto-wrap bare last expressions in print() for visible output.
+    const codeForSession = lang === 'python' ? wrapPythonLastExpr(request.code) : request.code;
     const writeResult = await run('docker', [
       'exec', '-i', ...execEnvArgs, session.handle,
       'sh', '-c', `cat > ${remoteCode}`,
-    ], { stdin: request.code });
+    ], { stdin: codeForSession });
 
     if (writeResult.exitCode !== 0) {
       return {

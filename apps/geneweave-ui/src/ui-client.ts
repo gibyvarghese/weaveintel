@@ -123,6 +123,7 @@ import {
   renderChatView as renderChatViewShell,
   renderSettingsDropdown as renderSettingsDropdownView,
 } from './ui/chat-view.js';
+import { loadVoiceConfig as loadVoiceConfigSettings } from './ui/voice-agent.js';
 import type { Message, Chat } from './ui/types.js';
 import {
   renderSVSubmitView,
@@ -1183,12 +1184,18 @@ function renderHomeWorkspace() {
         };
       }
       state.showSettings = !state.showSettings;
+      // Load voice config so the Voice Pipeline section in settings is populated
+      if (state.showSettings && !state.voiceConfig) {
+        void loadVoiceConfigSettings();
+      }
       render();
     },
   }, '⚙');
   settingsAnchor.appendChild(settingsBtn);
 
   if (state.showSettings && state.chatSettings) {
+    // Remove any stale dropdown from a previous render before creating the fresh one
+    document.querySelectorAll('.settings-dd').forEach((el) => el.remove());
     const dd = renderSettingsDropdown();
     document.body.appendChild(dd);
     requestAnimationFrame(() => {

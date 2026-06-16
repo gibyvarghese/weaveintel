@@ -179,8 +179,28 @@ export const state: any = {
   chatSearchLoading: false,
   _chatSearchTimer: null as any,
 
-  // Audio recording
+  // Audio recording (browser SpeechRecognition)
   audioRecording: false,
+
+  // Voice agent session
+  voiceAgentActive: false,
+  voiceSessionId: null as string | null,
+  voiceStatus: 'idle' as 'idle' | 'listening' | 'recording' | 'processing' | 'playing' | 'paused',
+  voiceRecording: false,
+  voiceLastTranscript: '' as string,
+  voiceLastResponse: '' as string,
+  voiceError: '' as string,
+  // Voice settings panel
+  voiceSettingsOpen: false,
+  voiceConfig: null as {
+    pipelineMode: 'chained' | 'realtime';
+    realtimeModel: string;
+    ttsVoice: string;
+    ttsSpeed: number;
+    sttLanguage: string | null;
+    ttsModel: string;
+    sttModel: string;
+  } | null,
 
   // Handoff
   handoffRequest: null as any,

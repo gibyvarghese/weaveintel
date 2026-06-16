@@ -342,6 +342,55 @@ input{font-family:inherit;outline:none}
 .mic-btn.active{background:transparent;border-color:var(--fg2);color:var(--fg);filter:none;animation:mic-pulse 1.4s ease-in-out infinite}
 .mic-btn.active svg{opacity:1}
 @keyframes mic-pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,255,255,0)}50%{box-shadow:0 0 0 4px rgba(255,255,255,.08)}}
+.voice-agent-btn{position:relative}
+.voice-agent-btn.active{background:var(--accent-dim);border-color:var(--accent);color:var(--accent)}
+.voice-agent-btn circle{display:none}
+.voice-agent-btn.active circle{display:block}
+/* ── Voice agent bar ─────────────────────────────── */
+.voice-bar{background:var(--bg3);border:1px solid var(--accent);border-radius:var(--radius);padding:10px 14px;display:flex;flex-direction:column;gap:8px;margin-bottom:4px}
+.voice-bar-top{display:flex;align-items:center;gap:8px}
+.voice-status-indicator{width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--fg3)}
+.voice-status-indicator.voice-status-idle{background:var(--fg3)}
+.voice-status-indicator.voice-status-listening{background:var(--success);animation:va-pulse 2s ease-in-out infinite}
+.voice-status-indicator.voice-status-recording{background:var(--danger);animation:va-pulse 0.8s ease-in-out infinite}
+.voice-status-indicator.voice-status-processing{background:var(--warn);animation:va-pulse 1.1s ease-in-out infinite}
+.voice-status-indicator.voice-status-playing{background:var(--accent);animation:va-pulse 0.55s ease-in-out infinite}
+.voice-status-indicator.voice-status-paused{background:var(--fg3)}
+@keyframes va-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
+.voice-status-label{font-size:12px;font-weight:600;color:var(--fg2);flex:1}
+.voice-pause-btn{display:flex;align-items:center;gap:4px;font-size:11px;font-weight:600;color:var(--fg3);padding:3px 10px;border-radius:6px;border:1px solid var(--bg4);background:var(--bg2);white-space:nowrap}
+.voice-pause-btn:hover{color:var(--fg);border-color:var(--fg3)}
+.voice-pause-btn.resume{color:var(--success);border-color:var(--success)}
+.voice-pause-btn.resume:hover{background:rgba(22,163,74,.08)}
+.voice-end-btn{font-size:13px;font-weight:600;color:var(--fg3);padding:3px 8px;border-radius:6px;border:1px solid var(--bg4);background:var(--bg2)}
+.voice-end-btn:hover{color:var(--danger);border-color:var(--danger)}
+.voice-settings-btn{font-size:14px;color:var(--fg3);padding:3px 7px;border-radius:6px;border:1px solid var(--bg4);background:var(--bg2);line-height:1}
+.voice-settings-btn:hover{color:var(--fg);border-color:var(--fg3)}
+.voice-settings-btn.active{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
+/* ── Voice settings panel ──────────────────────────── */
+.va-settings-panel{display:flex;flex-direction:column;gap:6px;padding:10px 12px;background:var(--bg2);border-radius:8px;border:1px solid var(--bg4)}
+.vs-row{display:flex;align-items:center;gap:8px;min-height:28px}
+.vs-label{font-size:11px;font-weight:600;color:var(--fg3);width:72px;flex-shrink:0;text-transform:uppercase;letter-spacing:.04em}
+.vs-select{font-size:12px;color:var(--fg);background:var(--bg3);border:1px solid var(--bg4);border-radius:6px;padding:2px 6px;flex:1}
+.vs-select:focus{outline:none;border-color:var(--accent)}
+.vs-mode-toggle{display:flex;gap:4px;flex:1}
+.vs-mode-btn{font-size:11px;font-weight:600;color:var(--fg3);padding:3px 8px;border-radius:6px;border:1px solid var(--bg4);background:var(--bg3);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.vs-mode-btn:hover{color:var(--fg);border-color:var(--fg3)}
+.vs-mode-btn.active{color:var(--accent);border-color:var(--accent);background:var(--accent-dim)}
+.vs-speed-wrap{display:flex;align-items:center;gap:6px;flex:1}
+.vs-speed-range{flex:1;accent-color:var(--accent)}
+.vs-speed-val{font-size:11px;color:var(--fg2);min-width:36px;text-align:right}
+.vs-note{font-size:10px;color:var(--fg3);font-style:italic;padding:2px 0}
+/* ── Waveform ──────────────────────────────────────── */
+.va-waveform{display:flex;align-items:center;justify-content:center;gap:3px;height:44px;background:var(--bg2);border-radius:8px;padding:0 8px}
+.va-wave-bar{width:3px;height:4px;border-radius:999px;background:var(--accent);transition:height 0.05s ease;will-change:height;flex-shrink:0}
+.va-waveform.paused .va-wave-bar{background:var(--fg3)!important;height:4px!important}
+/* ── Exchange ──────────────────────────────────────── */
+.voice-exchange{display:flex;flex-direction:column;gap:3px;font-size:12px;line-height:1.5;max-height:72px;overflow-y:auto;padding:2px 0}
+.voice-you{color:var(--fg)}
+.voice-agent-line{color:var(--fg2)}
+.voice-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--fg3);margin-right:4px}
+.voice-error{font-size:11px;color:var(--danger);padding:4px 8px;background:rgba(220,38,38,.08);border-radius:6px}
 .composer-wrap{flex:1;display:flex;flex-direction:column;gap:8px}
 .attach-strip{display:flex;flex-wrap:wrap;gap:8px}
 .attach-chip{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg3);border:1px solid var(--bg4);border-radius:999px;font-size:12px;color:var(--fg2);max-width:340px}

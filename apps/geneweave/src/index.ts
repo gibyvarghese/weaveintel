@@ -598,10 +598,18 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     console.error('[geneweave] Failed to start generic supervisor:', err instanceof Error ? err.message : String(err));
   }
 
-  // 5. HTTP server
+  // 5a. Voice engine (requires OpenAI for Whisper STT + tts-1 TTS)
+  const { createVoiceEngine } = await import('./voice-engine.js');
+  const voiceEngine = await createVoiceEngine(db, chatEngine, activeProviders);
+  if (voiceEngine) {
+    console.log('  Voice agent: enabled (OpenAI Whisper STT + tts-1 TTS)');
+  }
+
+  // 5b. HTTP server
   const server = createGeneWeaveServer({
     db,
     chatEngine,
+    voiceEngine: voiceEngine ?? undefined,
     jwtSecret: config.jwtSecret,
     corsOrigin: config.corsOrigin,
     providers: activeProviders,
