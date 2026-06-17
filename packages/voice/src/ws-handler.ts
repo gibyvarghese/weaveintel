@@ -8,6 +8,17 @@
  *   • Pause / resume / end control messages
  *   • Graceful teardown on socket close / error
  *
+ * Phase 6: Uses `VoicePipeline.processTurnStreaming()` so TTS audio chunks
+ * are sent to the client as they arrive from the provider, rather than
+ * waiting for the full synthesis to complete.  The `transcript` and
+ * `llm_text` events are emitted as soon as the LLM responds — before TTS
+ * even starts.
+ *
+ * Phase 7: `{ type: 'pause' }` during active TTS streaming fires an
+ * AbortSignal into `processTurnStreaming()`, cutting the HTTP stream
+ * immediately.  The partial turn is NOT persisted.  The client should
+ * follow up with `{ type: 'resume' }` then a new audio message.
+ *
  * The handler is designed to plug into any Node.js `http.Server` that
  * delegates `upgrade` events to it.  GeneWeave wires this in server.ts
  * for the path `/api/voice/sessions/:id/ws`.
@@ -15,7 +26,8 @@
 
 import { EventEmitter } from 'node:events';
 import type { WebSocket as WsSocket } from 'ws';
-import type { VoiceSession, VoiceConfig, VoiceWsClientMessage, VoiceWsServerMessage } from './types.js';
+import type { VoiceSession, VoiceWsClientMessage, VoiceWsServerMessage } from './types.js';
+import { ttsFormatToMime } from './types.js';
 import type { VoicePipeline } from './pipeline.js';
 
 // ─── Callbacks the caller must supply ────────────────────────
@@ -66,12 +78,13 @@ export class VoiceWsHandler extends EventEmitter {
   private readonly ws: WsSocket;
   private readonly pipeline: VoicePipeline;
   private readonly callbacks: VoiceWsHandlerCallbacks;
-  private readonly config: VoiceConfig;
 
   private turnIndex = 0;
   private paused = false;
   private ended = false;
   private processing = false;
+  /** Non-null only while a `processTurnStreaming` call is in the TTS phase. */
+  private abortController: AbortController | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private readonly heartbeatIntervalMs: number;
 
@@ -81,7 +94,6 @@ export class VoiceWsHandler extends EventEmitter {
     this.ws = opts.ws;
     this.pipeline = opts.pipeline;
     this.callbacks = opts.callbacks ?? {};
-    this.config = opts.session.config;
     this.heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 25_000;
   }
 
@@ -90,7 +102,7 @@ export class VoiceWsHandler extends EventEmitter {
   async start(): Promise<void> {
     await this.callbacks.onConnectionChange?.(this.session.id, true);
 
-    this.send({ type: 'session_ready', sessionId: this.session.id, chatId: this.session.chatId, config: this.config });
+    this.send({ type: 'session_ready', sessionId: this.session.id, chatId: this.session.chatId, config: this.session.config });
 
     this.ws.on('message', (data) => void this.handleMessage(data));
     this.ws.on('close', () => void this.handleClose());
@@ -125,7 +137,14 @@ export class VoiceWsHandler extends EventEmitter {
         await this.handleAudio(Buffer.alloc(0), undefined, msg.text);
         break;
       case 'pause':
-        this.paused = true;
+        if (this.processing && this.abortController) {
+          // Mid-TTS barge-in: abort the streaming turn immediately.
+          // State returns to LISTENING (not paused) once abort cleanup finishes.
+          this.abortController.abort();
+        } else {
+          // Idle pause: block new turns until the client sends resume.
+          this.paused = true;
+        }
         this.send({ type: 'paused' });
         break;
       case 'resume':
@@ -143,7 +162,7 @@ export class VoiceWsHandler extends EventEmitter {
     }
   }
 
-  private async handleAudio(audio: Buffer, mimeType?: string, textOverride?: string): Promise<void> {
+  private async handleAudio(audio: Buffer, inputMime?: string, textOverride?: string): Promise<void> {
     if (this.paused) {
       this.send({ type: 'error', code: 'SESSION_PAUSED', message: 'Session is paused — resume before sending audio', retryable: true });
       return;
@@ -157,18 +176,59 @@ export class VoiceWsHandler extends EventEmitter {
     const idx = this.turnIndex++;
     const t0 = Date.now();
 
+    // Phase 7: one AbortController per turn — fired on mid-TTS 'pause' message
+    const ac = new AbortController();
+    this.abortController = ac;
+
+    // Derive TTS output MIME type upfront for streaming audio frames
+    const outMimeType = ttsFormatToMime(this.session.config.ttsFormat);
+    let audioBytesOut = 0;
+    let guardrailDenied = false;
+
     try {
-      const result = await this.pipeline.processTurn(
+      const result = await this.pipeline.processTurnStreaming(
         this.session.id,
         idx,
         this.session.userId,
         this.session.chatId,
-        this.config,
-        { audio, mimeType, textOverride },
+        this.session.config,
+        { audio, mimeType: inputMime, textOverride },
+        {
+          onLlmComplete: (transcript, responseText, decision) => {
+            // Skip if already cancelled — avoids sending events after paused
+            if (ac.signal.aborted) return;
+            if (decision === 'deny') {
+              guardrailDenied = true;
+              this.send({ type: 'guardrail_denied', turnIndex: idx, reason: responseText.slice(0, 200), phase: 'input' });
+            } else {
+              // Emit transcript and LLM text immediately — before TTS starts
+              this.send({ type: 'transcript', turnIndex: idx, text: transcript });
+              this.send({ type: 'llm_text', turnIndex: idx, text: responseText });
+            }
+          },
+          onAudioChunk: (chunk, done) => {
+            // Skip if cancelled — paused event is already on its way
+            if (ac.signal.aborted) return;
+            if (done) {
+              // Terminal done frame — always emitted so the client knows the stream ended.
+              // Serves as a silence marker when audioBytesOut is 0 (e.g. guardrail warn).
+              if (!guardrailDenied) {
+                this.send({ type: 'audio', turnIndex: idx, payload: '', mimeType: outMimeType, done: true });
+              }
+            } else {
+              audioBytesOut += chunk.length;
+              this.send({ type: 'audio', turnIndex: idx, payload: chunk.toString('base64'), mimeType: outMimeType, done: false });
+            }
+          },
+        },
+        undefined,   // ctx — use pipeline default
+        ac.signal,   // Phase 7: cancellation signal
       );
 
-      if (result.guardrailDecision === 'deny') {
-        this.send({ type: 'guardrail_denied', turnIndex: idx, reason: result.responseText.slice(0, 200) });
+      // processTurnStreaming throws on abort — this guard is a safety net
+      if (ac.signal.aborted) return;
+
+      if (guardrailDenied) {
         await this.callbacks.onTurnComplete?.(this.session.id, {
           turnIndex: idx,
           transcript: result.transcript,
@@ -189,29 +249,6 @@ export class VoiceWsHandler extends EventEmitter {
         return;
       }
 
-      // Emit transcript and LLM text before audio (so client can display subtitles)
-      this.send({ type: 'transcript', turnIndex: idx, text: result.transcript });
-      this.send({ type: 'llm_text', turnIndex: idx, text: result.responseText });
-
-      // Emit audio in chunks (max 64 KB per frame to stay within WS frame budget)
-      const CHUNK = 64 * 1024;
-      const buf = result.responseAudio;
-      for (let offset = 0; offset < buf.length; offset += CHUNK) {
-        const slice = buf.subarray(offset, offset + CHUNK);
-        const done = offset + CHUNK >= buf.length;
-        this.send({
-          type: 'audio',
-          turnIndex: idx,
-          payload: slice.toString('base64'),
-          mimeType: result.responseAudioMimeType,
-          done,
-        });
-      }
-      if (buf.length === 0) {
-        // TTS returned empty (guardrail warn but still allowed — send silence marker)
-        this.send({ type: 'audio', turnIndex: idx, payload: '', mimeType: result.responseAudioMimeType, done: true });
-      }
-
       const durationMs = Date.now() - t0;
       this.send({ type: 'turn_complete', turnIndex: idx, costUsd: result.costUsd, durationMs });
 
@@ -227,12 +264,17 @@ export class VoiceWsHandler extends EventEmitter {
         ttsMs: result.ttsMs,
         costUsd: result.costUsd,
         audioBytesIn: audio.length,
-        audioBytesOut: buf.length,
+        audioBytesOut,
         traceId: result.traceId,
         llmProvider: result.llmProvider,
         llmModel: result.llmModel,
       });
     } catch (err) {
+      if (ac.signal.aborted) {
+        // Deliberate mid-TTS cancellation — 'paused' was already sent to client.
+        // Partial turn is NOT persisted (no onTurnComplete call).
+        return;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       const retryable = msg.includes('429') || msg.includes('timeout') || msg.includes('ECONNRESET');
       this.send({ type: 'error', code: 'TURN_FAILED', message: msg.slice(0, 300), retryable });
@@ -255,6 +297,7 @@ export class VoiceWsHandler extends EventEmitter {
         llmModel: '',
       });
     } finally {
+      this.abortController = null;
       this.processing = false;
     }
   }

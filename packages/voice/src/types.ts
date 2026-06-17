@@ -42,6 +42,38 @@ export interface VoiceConfig {
   pipelineMode?: 'chained' | 'realtime';
   /** OpenAI Realtime model (default: 'gpt-realtime-2') — realtime mode only */
   realtimeModel?: string;
+  /**
+   * Number of turns after which the realtime upstream WebSocket is transparently
+   * rotated to prevent context-window latency drift.  0 = disabled.  Default: 8.
+   */
+  realtimeSessionRotateAfterTurns?: number;
+  /**
+   * Max wall-clock time (ms) per tool call before the proxy returns a timeout
+   * error to the model.  0 = unlimited.  Default: 800.
+   */
+  realtimeToolBudgetMs?: number;
+  /**
+   * Highest tool risk level that may be invoked automatically in a realtime
+   * session.  Tools above this level are silently excluded from the session
+   * (pending a future approval-gate UI).  Default: 'low'.
+   *
+   * Maps to ToolRiskLevel: 'low' → 'read-only', 'medium' → 'write' and below,
+   * 'high' → all tools.
+   */
+  realtimeMaxAutoToolRisk?: 'low' | 'medium' | 'high';
+  /**
+   * Whether to run input guardrails on user transcripts in the realtime
+   * pipeline.  Default: true.  Set to false to skip guardrail checks (e.g.
+   * for trusted internal sessions or when latency is critical).
+   */
+  realtimeInputGuardrails?: boolean;
+  /**
+   * Whether to run output guardrails on agent response transcripts in the
+   * realtime pipeline.  Default: true.  Output guardrails are checked after
+   * the audio has streamed — deny truncates the response from model context
+   * and notifies the client.
+   */
+  realtimeOutputGuardrails?: boolean;
 }
 
 export interface VoiceSession {
@@ -111,30 +143,63 @@ export interface VoiceTurnResult {
 
 /**
  * Messages sent CLIENT → SERVER over the voice WebSocket.
+ *
+ * barge_in — realtime pipeline only.  Client sends this immediately after
+ * receiving a server `barge_in` event, reporting exactly how many ms of
+ * audio were played before the user started speaking.  The proxy uses
+ * audioPlayedMs in the `conversation.item.truncate` it sends to OpenAI so
+ * transcript alignment is accurate.
+ *
+ * tool_approved / tool_denied — realtime pipeline only.  Sent when a high-risk
+ * tool call triggered a `tool_approval_required` prompt and the user approved
+ * or denied it.
  */
 export type VoiceWsClientMessage =
-  | { type: 'audio'; payload: string; mimeType?: string }   // base64-encoded audio chunk
-  | { type: 'text'; text: string }                           // text-only turn (skips STT)
+  | { type: 'audio'; payload: string; mimeType?: string }
+  | { type: 'text'; text: string }
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'end' }
-  | { type: 'ping' };
+  | { type: 'ping' }
+  | { type: 'barge_in'; itemId: string; audioPlayedMs: number }
+  | { type: 'tool_approved'; callId: string }
+  | { type: 'tool_denied'; callId: string; reason?: string };
 
 /**
  * Messages sent SERVER → CLIENT over the voice WebSocket.
+ *
+ * Realtime-specific additions:
+ *   realtime_ready    — proxy connected to OpenAI; session configured
+ *   speech_started    — VAD detected user speech (normal turn, agent was silent)
+ *   speech_stopped    — VAD silence: user finished speaking
+ *   barge_in          — user spoke WHILE agent was generating audio; client
+ *                       must stop playback immediately and reply with a
+ *                       client-side `barge_in` message (audioPlayedMs)
+ *   barge_in_ack      — proxy sent conversation.item.truncate to OpenAI;
+ *                       audioEndMs is what was committed (for telemetry)
  */
 export type VoiceWsServerMessage =
   | { type: 'session_ready'; sessionId: string; chatId: string; config: VoiceConfig }
   | { type: 'transcript'; turnIndex: number; text: string }
   | { type: 'llm_text'; turnIndex: number; text: string }
-  | { type: 'audio'; turnIndex: number; payload: string; mimeType: string; done: boolean }
+  | { type: 'audio'; turnIndex: number; payload: string; mimeType: string; done: boolean; itemId?: string }
   | { type: 'turn_complete'; turnIndex: number; costUsd: number; durationMs: number }
-  | { type: 'guardrail_denied'; turnIndex: number; reason: string }
-  | { type: 'error'; code: string; message: string; retryable: boolean }
+  | { type: 'guardrail_denied'; turnIndex: number; reason: string; phase: 'input' | 'output' }
+  | { type: 'error'; code: string; message: string; retryable: boolean; fallbackToChained?: boolean }
   | { type: 'paused' }
   | { type: 'resumed' }
   | { type: 'session_ended'; totalTurns: number; totalCostUsd: number }
-  | { type: 'pong' };
+  | { type: 'pong' }
+  | { type: 'realtime_ready' }
+  | { type: 'speech_started' }
+  | { type: 'speech_stopped' }
+  | { type: 'barge_in'; itemId: string }
+  | { type: 'barge_in_ack'; audioEndMs: number }
+  | { type: 'session_rotating' }
+  | { type: 'tool_executing'; callId: string; toolName: string }
+  | { type: 'tool_complete'; callId: string; durationMs: number }
+  | { type: 'tool_approval_required'; callId: string; toolName: string; args: unknown }
+  | { type: 'cost_update'; turnIndex: number; costUsd: number; totalCostUsd: number };
 
 // ─── Cost estimate ────────────────────────────────────────────
 

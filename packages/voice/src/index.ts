@@ -23,11 +23,21 @@ export {
   VOICE_FALLBACK_PRICING,
 } from './types.js';
 
-export type { VoiceTurnSender, VoicePipelineOptions } from './pipeline.js';
+export type { VoiceTurnSender, VoicePipelineOptions, TurnStreamCallbacks } from './pipeline.js';
 export { VoicePipeline } from './pipeline.js';
 
 export type { VoiceWsHandlerCallbacks, VoiceWsHandlerOptions } from './ws-handler.js';
 export { VoiceWsHandler } from './ws-handler.js';
 
-export type { RealtimeProxyOptions, RealtimeProxyCallbacks } from './realtime-proxy.js';
-export { VoiceRealtimeProxy } from './realtime-proxy.js';
+export type {
+  RealtimeProxyOptions,
+  RealtimeProxyCallbacks,
+  RealtimeTool,
+  RealtimeToolCall,
+  RealtimeUsage,
+} from './realtime-proxy.js';
+export {
+  VoiceRealtimeProxy,
+  computeRealtimeCostUsd,
+  REALTIME_PRICING,
+} from './realtime-proxy.js';

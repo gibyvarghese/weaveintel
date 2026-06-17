@@ -19,7 +19,7 @@ import {
   normalizeError,
   WeaveIntelError,
 } from '@weaveintel/core';
-import { openaiFetch } from './_fetch.js';
+import { openaiFetch, openaiFetchStream } from './_fetch.js';
 import {
   type OpenAIProviderOptions,
   DEFAULT_BASE_URL,
@@ -47,7 +47,7 @@ export function weaveOpenAIAudioModel(
     ...caps,
 
     async speak(ctx: ExecutionContext, request: SpeechRequest): Promise<Buffer> {
-      const body = {
+      const reqBody = {
         model: 'tts-1',
         input: request.input,
         voice: request.voice ?? 'alloy',
@@ -55,13 +55,17 @@ export function weaveOpenAIAudioModel(
         ...(request.responseFormat ? { response_format: request.responseFormat } : {}),
       };
 
-      const signal = deadlineSignal(ctx);
+      const deadlineSig = deadlineSignal(ctx);
+      const reqSig = request.signal;
+      const signal = (deadlineSig && reqSig)
+        ? AbortSignal.any([deadlineSig, reqSig])
+        : (deadlineSig ?? reqSig);
       const url = `${baseUrl}/audio/speech`;
       try {
         const res = await openaiFetch(url, {
           method: 'POST',
           headers: jsonHeaders,
-          body: JSON.stringify(body),
+          body: JSON.stringify(reqBody),
           signal,
         });
 
@@ -77,6 +81,57 @@ export function weaveOpenAIAudioModel(
 
         const arrayBuffer = await res.arrayBuffer();
         return Buffer.from(arrayBuffer);
+      } catch (err) {
+        throw normalizeError(err, 'openai');
+      }
+    },
+
+    async *speakStream(ctx: ExecutionContext, request: SpeechRequest): AsyncIterable<Buffer> {
+      const reqBody = {
+        model: 'tts-1',
+        input: request.input,
+        voice: request.voice ?? 'alloy',
+        ...(request.speed ? { speed: request.speed } : {}),
+        ...(request.responseFormat ? { response_format: request.responseFormat } : {}),
+      };
+
+      const deadlineSig = deadlineSignal(ctx);
+      const reqSig = request.signal;
+      const signal = (deadlineSig && reqSig)
+        ? AbortSignal.any([deadlineSig, reqSig])
+        : (deadlineSig ?? reqSig);
+      const url = `${baseUrl}/audio/speech`;
+
+      let res: Response;
+      try {
+        // openaiFetchStream: SSRF-guarded, no outer timeout (suitable for streaming)
+        res = await openaiFetchStream(url, {
+          method: 'POST',
+          headers: jsonHeaders,
+          body: JSON.stringify(reqBody),
+          signal,
+        });
+      } catch (err) {
+        throw normalizeError(err, 'openai');
+      }
+
+      if (!res.ok) {
+        const errorBody = await res.text().catch(() => '');
+        throw new WeaveIntelError({
+          code: 'PROVIDER_ERROR',
+          message: `OpenAI TTS stream error (${res.status}): ${errorBody}`,
+          provider: 'openai',
+          retryable: res.status >= 500,
+        });
+      }
+
+      if (!res.body) return;
+
+      try {
+        // Node.js 18+ Web ReadableStream supports async iteration
+        for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+          yield Buffer.from(chunk);
+        }
       } catch (err) {
         throw normalizeError(err, 'openai');
       }

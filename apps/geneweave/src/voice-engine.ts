@@ -31,19 +31,53 @@
  */
 
 import { newUUIDv7, weaveContext } from '@weaveintel/core';
-import type { AudioModel } from '@weaveintel/core';
+import type { AudioModel, ToolRiskLevel } from '@weaveintel/core';
 import type { IncomingMessage } from 'node:http';
 import type { WebSocket as WsSocket } from 'ws';
 import {
   VoicePipeline,
   VoiceWsHandler,
   VoiceRealtimeProxy,
+  computeRealtimeCostUsd,
   type VoiceConfig,
   type VoiceTurnResult,
+  type RealtimeTool,
 } from '@weaveintel/voice';
 import type { DatabaseAdapter, VoiceConfigCreate } from './db.js';
 import type { VoiceSessionStatus } from './db-types/adapter-voice.js';
+import { getOrCreateModel, settingsFromRow } from './chat.js';
+import type { ToolRegistryOptions } from './tools.js';
 import type { ChatEngine } from './chat.js';
+import { resolveSystemPrompt } from './chat-system-prompt-utils.js';
+import { buildMemoryContext, saveToMemory } from './chat-memory-utils.js';
+import { createToolRegistry } from './tools.js';
+import { DbToolPolicyResolver, DbToolRateLimiter } from './tool-policy-resolver.js';
+import { DbToolAuditEmitter } from './tool-audit-emitter.js';
+import { createTemporalStore } from './temporal-store.js';
+import { evaluateGuardrails } from './chat-guardrail-eval-utils.js';
+
+// ─── Risk-level gate ──────────────────────────────────────────
+
+/** Ordered from least to most risky. */
+const RISK_ORDER: ToolRiskLevel[] = [
+  'read-only', 'write', 'external-side-effect', 'financial', 'destructive', 'privileged',
+];
+
+/**
+ * Return true when toolRisk is at or below the max allowed level.
+ * 'low'  → read-only only
+ * 'medium' → write and below (excludes financial, destructive, privileged)
+ * 'high'   → all tools
+ */
+function isAllowedRisk(toolRisk: string, maxAllowed: 'low' | 'medium' | 'high'): boolean {
+  if (maxAllowed === 'high') return true;
+  const toolIdx = RISK_ORDER.indexOf(toolRisk as ToolRiskLevel);
+  const ceiling = maxAllowed === 'low'
+    ? RISK_ORDER.indexOf('read-only')
+    : RISK_ORDER.indexOf('write');
+  if (toolIdx === -1) return true; // unknown risk passes through
+  return toolIdx <= ceiling;
+}
 
 // ─── Config ───────────────────────────────────────────────────
 
@@ -424,9 +458,12 @@ export class VoiceEngine {
    * Accept a WebSocket upgrade for the OpenAI Realtime API proxy.
    * Path: /api/voice/sessions/:sessionId/realtime
    *
-   * The proxy opens a connection to the OpenAI Realtime API on behalf of the
-   * client (so the API key never reaches the browser), configures server VAD
-   * and voice settings from the session config, then relays audio bidirectionally.
+   * Phase 2 additions:
+   *   • Resolves the real system prompt from chat settings (not a hard-coded generic)
+   *   • Injects long-term memory context into the system prompt at session start
+   *   • Saves each completed turn to memory (episodic + semantic extraction)
+   *   • Rotates the upstream OpenAI session every N turns (default 8) with a
+   *     freshly rebuilt system prompt so context-window latency doesn't drift
    */
   async handleRealtimeWebSocket(opts: {
     sessionId: string;
@@ -443,33 +480,124 @@ export class VoiceEngine {
       return;
     }
 
-    const config = JSON.parse(row.config_snapshot) as import('@weaveintel/voice').VoiceConfig;
-    const model  = config.realtimeModel ?? 'gpt-realtime-2';
-    const voice  = config.ttsVoice ?? 'alloy';
+    const config = JSON.parse(row.config_snapshot) as VoiceConfig;
+    const realtimeModel = config.realtimeModel ?? 'gpt-realtime-2';
+    const voice         = config.ttsVoice ?? 'alloy';
+    const chatId        = row.chat_id;
+    const userId        = opts.userId;
+    const rotateAfter             = config.realtimeSessionRotateAfterTurns ?? 8;
+    const toolBudgetMs            = config.realtimeToolBudgetMs ?? 800;
+    const maxToolRisk             = config.realtimeMaxAutoToolRisk ?? 'low';
+    const inputGuardrailsEnabled  = config.realtimeInputGuardrails  ?? true;
+    const outputGuardrailsEnabled = config.realtimeOutputGuardrails ?? true;
 
-    // Fetch the system prompt from chat settings / agent config if available
-    const systemPrompt = `You are a helpful voice assistant. Keep responses concise and conversational.`;
+    // ── Resolve system prompt + memory context ────────────────
+
+    const buildSystemPromptWithMemory = async (queryHint: string): Promise<string> => {
+      // 1. Resolve system prompt from chat settings (same path as text agents)
+      const chatSettings = settingsFromRow(await this.db.getChatSettings(chatId));
+      const resolved     = await resolveSystemPrompt(this.db, chatSettings);
+
+      const basePrompt = resolved.content
+        ?? 'You are a helpful voice assistant. Keep responses concise and conversational. Speak naturally — avoid markdown, bullet points, and code blocks since the user hears your response as audio.';
+
+      // 2. Build memory context (entity facts + semantic memories)
+      let memoryBlock: string | null = null;
+      try {
+        const cfg = this.chatEngine.modelConfig;
+        const defaultProvider = cfg.defaultProvider;
+        const providerCfg     = cfg.providers[defaultProvider];
+        if (providerCfg) {
+          const memModel = await getOrCreateModel(defaultProvider, cfg.defaultModel, providerCfg);
+          const memCtx   = weaveContext({ deadline: Date.now() + 10_000 });
+          memoryBlock = await buildMemoryContext(this.db, memCtx, memModel, userId, queryHint);
+        }
+      } catch (err) {
+        console.warn('[voice-realtime] memory context build failed — proceeding without memory', err);
+      }
+
+      if (memoryBlock) {
+        return `${basePrompt}\n\n${memoryBlock}`;
+      }
+      return basePrompt;
+    };
+
+    const systemPrompt = await buildSystemPromptWithMemory(
+      'voice conversation context preferences user background',
+    );
+    console.log(`[voice-realtime] session ${opts.sessionId} — systemPrompt ${systemPrompt.length}ch, memoryInjected=${systemPrompt.includes('\n\n')}, rotateAfter=${rotateAfter}`);
+
+    // ── Build voice tool registry (Phase 3) ───────────────────
+    //
+    // Tools are filtered by realtimeMaxAutoToolRisk (default 'low' = read-only).
+    // Only tools that pass the risk gate are exposed to the OpenAI session.
+    // The full policy-enforced registry is used for invocation so audit,
+    // rate-limiting, and approval gates still apply even in voice sessions.
+
+    const chatSettings = settingsFromRow(await this.db.getChatSettings(chatId));
+    const enabledToolNames: string[] = chatSettings.enabledTools ?? [];
+
+    const voiceToolOptions: ToolRegistryOptions = {
+      temporalStore:    createTemporalStore(this.db),
+      policyResolver:   new DbToolPolicyResolver(this.db),
+      rateLimiter:      new DbToolRateLimiter(this.db),
+      auditEmitter:     new DbToolAuditEmitter(this.db),
+      currentUserId:    userId,
+      currentChatId:    chatId,
+      actorPersona:     'agent',
+      explicitEnabledTools: enabledToolNames.length > 0 ? enabledToolNames : undefined,
+      credentialResolver: (id: string) => this.db.getToolCredential(id),
+    };
+
+    // Build registry from the enabled tool names (empty = no tools).
+    const voiceToolRegistry = enabledToolNames.length > 0
+      ? await createToolRegistry(enabledToolNames, undefined, voiceToolOptions)
+      : null;
+
+    // Convert to RealtimeTool format, filtering by risk level.
+    const realtimeTools: RealtimeTool[] = voiceToolRegistry
+      ? voiceToolRegistry.list()
+          .filter((tool) => isAllowedRisk(tool.schema.riskLevel ?? 'read-only', maxToolRisk))
+          .map((tool) => ({
+            name:        tool.schema.name,
+            description: tool.schema.description,
+            parameters:  tool.schema.parameters as Record<string, unknown>,
+          }))
+      : [];
+
+    console.log(`[voice-realtime] session ${opts.sessionId} — tools=${realtimeTools.length} (risk≤${maxToolRisk}, budget=${toolBudgetMs}ms): ${realtimeTools.map((t) => t.name).join(', ') || 'none'}`);
+    console.log(`[voice-realtime] session ${opts.sessionId} — guardrails: input=${inputGuardrailsEnabled}, output=${outputGuardrailsEnabled}`);
 
     await this.db.updateVoiceSessionStats(opts.sessionId, opts.userId, {
       wsConnected: true,
       lastActiveAt: new Date().toISOString(),
     });
 
-    let turnIndex = row.total_turns;
+    // ── Per-turn state (captured in callbacks) ────────────────
+
+    let turnIndex     = row.total_turns;
+    let lastTranscript   = '';
+    let lastResponseText = '';
+
     const proxy = new VoiceRealtimeProxy();
 
     proxy.start({
       clientWs: opts.ws,
-      apiKey: this.openaiApiKey,
-      model,
+      apiKey:   this.openaiApiKey,
+      model:    realtimeModel,
       voice,
       systemPrompt,
+      tools:        realtimeTools.length > 0 ? realtimeTools : undefined,
+      toolBudgetMs,
+      rotateAfterTurns: rotateAfter,
       callbacks: {
+
         onTranscript: (text) => {
+          lastTranscript = text;
           void this.db.insertVoiceSessionEvent({
             id: newUUIDv7(),
             sessionId: opts.sessionId,
-            userId: opts.userId,
+            userId,
             turnIndex,
             eventType: 'stt',
             inputText: text.slice(0, 4000),
@@ -477,29 +605,174 @@ export class VoiceEngine {
             sttModel: 'whisper-1',
           });
         },
+
         onResponseText: (text) => {
+          lastResponseText = text;
           void this.db.insertVoiceSessionEvent({
             id: newUUIDv7(),
             sessionId: opts.sessionId,
-            userId: opts.userId,
+            userId,
             turnIndex,
             eventType: 'llm',
             outputText: text.slice(0, 4000),
             llmProvider: 'openai',
-            llmModel: model,
+            llmModel: realtimeModel,
           });
           turnIndex++;
         },
-        onTurnComplete: (durationMs) => {
-          void this.db.updateVoiceSessionStats(opts.sessionId, opts.userId, {
+
+        onTurnComplete: (durationMs, usage) => {
+          // Phase 5: use the shared computeRealtimeCostUsd helper which
+          // correctly handles cached vs uncached audio tokens, text I/O, etc.
+          const costUsd = usage ? computeRealtimeCostUsd(usage) : 0;
+
+          void this.db.updateVoiceSessionStats(opts.sessionId, userId, {
             turns: 1,
             lastActiveAt: new Date().toISOString(),
             llmMs: durationMs,
+            costUsd,
           });
+
+          // Save this turn to memory (episodic + entity + semantic extraction)
+          if (lastTranscript || lastResponseText) {
+            const capturedTranscript   = lastTranscript;
+            const capturedResponseText = lastResponseText;
+            lastTranscript   = '';
+            lastResponseText = '';
+
+            const cfg = this.chatEngine.modelConfig;
+            const defaultProvider = cfg.defaultProvider;
+            const providerCfg     = cfg.providers[defaultProvider];
+            if (providerCfg) {
+              void getOrCreateModel(defaultProvider, cfg.defaultModel, providerCfg).then((memModel) => {
+                const memCtx = weaveContext({ deadline: Date.now() + 30_000 });
+                return saveToMemory(
+                  this.db, memCtx, memModel,
+                  userId, chatId,
+                  capturedTranscript, capturedResponseText,
+                  row.tenant_id ?? undefined,
+                );
+              }).catch((err) => {
+                console.warn('[voice-realtime] saveToMemory failed (non-critical)', err);
+              });
+            }
+          }
         },
+
         onEnd: () => {
-          void this.db.updateVoiceSessionStats(opts.sessionId, opts.userId, { wsConnected: false });
+          void this.db.updateVoiceSessionStats(opts.sessionId, userId, { wsConnected: false });
         },
+
+        onRotateSession: async (turnCount, lastTurnTranscript) => {
+          console.log(`[voice-realtime] rotating session at turn ${turnCount} for session ${opts.sessionId}`);
+          const query = lastTurnTranscript.trim()
+            ? lastTurnTranscript.slice(0, 300)
+            : 'voice conversation context preferences user background';
+          const newPrompt = await buildSystemPromptWithMemory(query);
+          // Pass the same tool list into the rotated session.
+          return { systemPrompt: newPrompt, tools: realtimeTools.length > 0 ? realtimeTools : undefined };
+        },
+
+        // ── Phase 4: Guardrails ──────────────────────────────────
+        //
+        // Input guardrail: fired on user speech transcript.  Fast checks
+        // (regex, embedding) run synchronously before the model generates
+        // audio; slow model-graded checks may fire after audio starts (the
+        // proxy cancels the in-flight response on deny).
+        //
+        // Output guardrail: fired after the full response transcript is
+        // available.  Audio has already streamed — deny removes the response
+        // from model context and notifies the client.  Fail open on errors.
+        onInputGuardrail: inputGuardrailsEnabled
+          ? async (transcript) => {
+              try {
+                const gr = await evaluateGuardrails(
+                  this.db,
+                  chatId,
+                  null,
+                  transcript,
+                  'pre-execution',
+                  { userInput: transcript },
+                  {
+                    chatMode: 'direct',
+                    turnNumber: turnIndex,
+                    budgetMs: 3_000, // cap guardrail evaluation to 3s
+                  },
+                );
+                return { decision: gr.decision, reason: gr.reason };
+              } catch (err) {
+                console.warn('[voice-realtime] input guardrail error — failing open', err);
+                return { decision: 'allow' as const };
+              }
+            }
+          : undefined,
+
+        onOutputGuardrail: outputGuardrailsEnabled
+          ? async (transcript) => {
+              try {
+                const gr = await evaluateGuardrails(
+                  this.db,
+                  chatId,
+                  null,
+                  transcript,
+                  'post-execution',
+                  { userInput: lastTranscript, assistantOutput: transcript },
+                  {
+                    chatMode: 'direct',
+                    turnNumber: turnIndex,
+                    budgetMs: 3_000,
+                  },
+                );
+                return { decision: gr.decision, reason: gr.reason };
+              } catch (err) {
+                console.warn('[voice-realtime] output guardrail error — failing open', err);
+                return { decision: 'allow' as const };
+              }
+            }
+          : undefined,
+
+        // ── Phase 3: Tool execution ──────────────────────────────
+        onToolCall: voiceToolRegistry
+          ? async (call) => {
+              const tool = voiceToolRegistry.get(call.name);
+              if (!tool) {
+                return JSON.stringify({ error: `Tool '${call.name}' is not available in this voice session.` });
+              }
+
+              let args: Record<string, unknown>;
+              try {
+                args = JSON.parse(call.arguments) as Record<string, unknown>;
+              } catch {
+                return JSON.stringify({ error: `Invalid arguments for tool '${call.name}' — not valid JSON.` });
+              }
+
+              const ctx = weaveContext({ deadline: Date.now() + (toolBudgetMs > 0 ? toolBudgetMs * 2 : 30_000) });
+              let result: import('@weaveintel/core').ToolOutput;
+              try {
+                result = await tool.invoke(ctx, { name: call.name, arguments: args });
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : 'Unknown tool error.';
+                console.warn(`[voice-realtime] tool '${call.name}' threw: ${msg}`);
+                result = { content: JSON.stringify({ error: msg }), isError: true };
+              }
+
+              // Persist tool call as a voice session event (non-blocking).
+              // Use 'llm' eventType (closest semantic fit in the current schema).
+              void this.db.insertVoiceSessionEvent({
+                id:        newUUIDv7(),
+                sessionId: opts.sessionId,
+                userId,
+                turnIndex,
+                eventType:  'llm',
+                inputText:  `[tool:${call.name}] ${call.arguments.slice(0, 900)}`,
+                outputText: result.content.slice(0, 2000),
+              });
+
+              return result.isError
+                ? JSON.stringify({ error: result.content })
+                : result.content;
+            }
+          : undefined,
       },
     });
   }

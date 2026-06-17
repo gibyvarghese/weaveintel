@@ -244,6 +244,8 @@ export interface SpeechRequest {
   readonly voice?: string;
   readonly speed?: number;
   readonly responseFormat?: string;
+  /** Optional cancellation signal (Phase 7: chained pipeline barge-in). */
+  readonly signal?: AbortSignal;
 }
 
 export interface TranscriptionRequest {
@@ -255,5 +257,11 @@ export interface TranscriptionRequest {
 export interface AudioModel extends HasCapabilities {
   readonly info: ModelInfo;
   speak?(ctx: ExecutionContext, request: SpeechRequest): Promise<Buffer>;
+  /**
+   * Streaming TTS — yields audio chunks as the provider generates them.
+   * Callers should begin playback on the first chunk rather than waiting
+   * for the full buffer.  Falls back to `speak()` if not implemented.
+   */
+  speakStream?(ctx: ExecutionContext, request: SpeechRequest): AsyncIterable<Buffer>;
   transcribe?(ctx: ExecutionContext, request: TranscriptionRequest): Promise<string>;
 }

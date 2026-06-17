@@ -49,6 +49,8 @@ let pcmWorkletNode: AudioWorkletNode | null = null;
 let pcmWorkletSource: MediaStreamAudioSourceNode | null = null;
 let pcmWorkletLoaded = false;   // AudioWorklet processors register once per AudioContext
 let pcmPlayer: Pcm16Player | null = null;
+// item_id of the assistant audio currently being played (set from server audio messages)
+let realtimeCurrentItemId: string | null = null;
 
 // ── VAD state (chained mode) ─────────────────────────────────
 let aboveThreshold = false;
@@ -633,31 +635,73 @@ function startRealtimeSession(): void {
         state.voiceLastResponse = (state.voiceLastResponse ?? '') + ((msg['text'] as string) ?? '');
         updateVoiceBar();
         break;
-      case 'audio':
+      case 'audio': {
+        // Track which item is currently playing (needed for barge-in)
+        const incomingItemId = msg['itemId'] as string | undefined;
+        if (incomingItemId) realtimeCurrentItemId = incomingItemId;
+
         if (msg['payload'] && !msg['done']) {
           pcmPlayer?.push(msg['payload'] as string);
           if (state.voiceStatus !== 'playing') setStatus('playing');
         }
         if (msg['done']) {
+          realtimeCurrentItemId = null;
           pcmPlayer?.onDone(() => {
             if (loopActive && state.voiceAgentActive) setStatus('listening');
           });
         }
         break;
+      }
+
+      // ── Barge-in: server detected user speech while agent was speaking ──
+      // The proxy sends this to tell us to stop audio NOW and report playedMs.
+      case 'barge_in': {
+        const serverItemId = (msg['itemId'] as string) ?? realtimeCurrentItemId ?? '';
+
+        // Flush all queued audio immediately and capture how much was heard
+        const playedMs = pcmPlayer?.flush() ?? 0;
+        // Create a fresh player for the upcoming agent response
+        pcmPlayer = new Pcm16Player(getCtx());
+        realtimeCurrentItemId = null;
+
+        // Clear partial response display
+        state.voiceLastResponse = '';
+        updateVoiceBar();
+
+        // Report exact playback position back to the server so it can send
+        // conversation.item.truncate with the right audio_end_ms value.
+        if (realtimeWs?.readyState === WebSocket.OPEN) {
+          realtimeWs.send(JSON.stringify({
+            type: 'barge_in',
+            itemId: serverItemId,
+            audioPlayedMs: Math.round(playedMs),
+          }));
+        }
+
+        setStatus('recording');
+        break;
+      }
+
+      // Server confirmed it sent conversation.item.truncate to OpenAI.
+      case 'barge_in_ack':
+        // State already updated in the barge_in handler above.
+        break;
+
       case 'turn_complete':
         state.voiceLastResponse = state.voiceLastResponse ?? '';
         updateVoiceBar();
         break;
+
       case 'error':
         state.voiceError = (msg['message'] as string) ?? 'Realtime error';
         updateVoiceBar();
         if (msg['fallbackToChained']) {
-          // OpenAI Realtime API unavailable — switch to chained mode for this session
           pipelineMode = 'chained';
           stopRealtimeSession();
           enterListening();
         }
         break;
+
       case 'session_ended':
         if (state.voiceAgentActive) void endVoiceSession();
         break;
@@ -685,11 +729,13 @@ function startRealtimeSession(): void {
 function stopRealtimeSession(): void {
   stopPcmStreaming();
   stopWaveformLoop();
+  realtimeCurrentItemId = null;
   if (realtimeWs) {
     realtimeWs.onclose = null;
     try { realtimeWs.close(1000, 'session ended'); } catch { /* no-op */ }
     realtimeWs = null;
   }
+  pcmPlayer?.flush();
   pcmPlayer = null;
 }
 
@@ -760,12 +806,22 @@ function startWaveformLoop(): void {
 function stopWaveformLoop(): void { stopVAD(); }
 
 // ─── PCM16 streaming audio player ────────────────────────────
+//
+// Plays back streamed PCM16/24kHz audio chunks via Web Audio API.
+// Exposes flush() for immediate barge-in stoppage and getPlayedMs()
+// so the proxy can send an accurate audio_end_ms to OpenAI.
 
 class Pcm16Player {
   private ctx: AudioContext;
   private nextPlayTime = 0;
   private doneCallback: (() => void) | null = null;
-  private lastSource: AudioBufferSourceNode | null = null;
+
+  // All currently scheduled (or playing) sources — needed for flush()
+  private activeSources: AudioBufferSourceNode[] = [];
+
+  // Playback position tracking for barge-in accuracy
+  private startWallMs: number | null = null;   // performance.now() of first push
+  private totalScheduledMs = 0;                // sum of all chunk durations queued
 
   constructor(ctx: AudioContext) { this.ctx = ctx; }
 
@@ -781,30 +837,69 @@ class Pcm16Player {
 
       const buffer = this.ctx.createBuffer(1, float32.length, REALTIME_SAMPLE_RATE);
       buffer.copyToChannel(float32, 0);
+
       const src = this.ctx.createBufferSource();
       src.buffer = buffer;
       src.connect(this.ctx.destination);
+
+      // Schedule: add 20ms lookahead to avoid under-runs; queue after previous chunk.
       const startAt = Math.max(this.ctx.currentTime + 0.02, this.nextPlayTime);
       src.start(startAt);
       this.nextPlayTime = startAt + buffer.duration;
-      this.lastSource = src;
+
+      // Track wall-clock start for getPlayedMs()
+      if (this.startWallMs === null) this.startWallMs = performance.now();
+      const chunkMs = (float32.length / REALTIME_SAMPLE_RATE) * 1000;
+      this.totalScheduledMs += chunkMs;
+
+      this.activeSources.push(src);
+      src.onended = () => {
+        const idx = this.activeSources.indexOf(src);
+        if (idx >= 0) this.activeSources.splice(idx, 1);
+        // Fire done callback when the last source finishes
+        if (this.activeSources.length === 0 && this.doneCallback) {
+          const cb = this.doneCallback;
+          this.doneCallback = null;
+          cb();
+        }
+      };
     } catch { /* ignore decode errors */ }
   }
 
-  onDone(cb: () => void): void {
-    this.doneCallback = cb;
-    if (this.lastSource) {
-      this.lastSource.onended = () => { this.doneCallback?.(); this.doneCallback = null; };
-    } else {
-      cb();
-    }
+  /**
+   * Returns how many ms of audio the user has actually heard.
+   * Uses wall-clock elapsed time clamped to total scheduled duration.
+   */
+  getPlayedMs(): number {
+    if (this.startWallMs === null) return 0;
+    const elapsed = performance.now() - this.startWallMs;
+    return Math.min(elapsed, this.totalScheduledMs);
   }
 
-  stop(): void {
-    this.nextPlayTime = 0;
-    this.doneCallback = null;
-    this.lastSource = null;
+  onDone(cb: () => void): void {
+    if (this.activeSources.length === 0) { cb(); return; }
+    this.doneCallback = cb;
   }
+
+  /**
+   * Stop all queued audio immediately (barge-in).
+   * Returns the ms that had been played at the moment of flush.
+   */
+  flush(): number {
+    const playedMs = this.getPlayedMs();
+    this.doneCallback = null;
+    for (const src of this.activeSources) {
+      try { src.stop(); } catch { /* already stopped */ }
+    }
+    this.activeSources = [];
+    this.nextPlayTime = 0;
+    this.startWallMs = null;
+    this.totalScheduledMs = 0;
+    return playedMs;
+  }
+
+  /** Alias for backward compat */
+  stop(): void { this.flush(); }
 }
 
 // ─── PCM16 conversion helpers ─────────────────────────────────
