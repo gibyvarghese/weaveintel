@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 export type { LiveAgentsDb, SingleAgentReaderDb } from './db-types.js';
 export {
   weaveDbModelResolver,

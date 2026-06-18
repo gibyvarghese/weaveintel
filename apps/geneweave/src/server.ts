@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/geneweave — HTTP server + routes
  *
@@ -7,7 +8,9 @@
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { randomBytes } from 'node:crypto';
-import { newUUIDv7 } from '@weaveintel/core';
+import { newUUIDv7, createLogger } from '@weaveintel/core';
+
+const logger = createLogger('geneweave-server');
 import { readFile as fsReadFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join, dirname, resolve, extname, sep } from 'node:path';
@@ -16,7 +19,7 @@ import type { DatabaseAdapter } from './db.js';
 import type { ChatEngine } from './chat.js';
 import type { VoiceEngine } from './voice-engine.js';
 import { DashboardService } from './dashboard.js';
-import { getHTML } from './ui-server.js';
+import { SPA_HTML, STYLES_CSP_HASH, SCRIPT_CSP_HASHES } from './ui-server.js';
 import { getDocsHTML } from './docs-html.js';
 import { authenticateRequest, verifyCSRF } from './auth.js';
 import { createNotificationsHub } from './notifications-wiring.js';
@@ -25,16 +28,21 @@ import { createChatPipelineMeRunAgent } from './me-run-agent.js';
 import { type TriggerDispatcherHandle } from './admin/api/triggers.js';
 import { type LoadedGatewayConfig } from './mcp-gateway.js';
 import { type OAuthProviderName } from '@weaveintel/oauth';
+import { createHealthChecker, createIdempotencyStore } from '@weaveintel/reliability';
 import {
   Router,
   json,
   html,
+  readClientIp,
+  initHttpRateLimiter,
+  checkEdgeRateLimit,
   SERVER_REQUEST_TIMEOUT_MS,
   SERVER_HEADERS_TIMEOUT_MS,
   SERVER_KEEP_ALIVE_TIMEOUT_MS,
   SERVER_MAX_HEADERS_COUNT,
   SERVER_MAX_REQUESTS_PER_SOCKET,
 } from './server-core.js';
+import { createHttpRateLimiter } from './http-rate-limiter.js';
 import {
   registerAuthRoutes,
   registerModelRoutes,
@@ -50,6 +58,7 @@ import {
   registerMeMemoryRoutes,
   registerMeAgendaRoutes,
   registerMeNotesRoutes,
+  registerMeComplianceRoutes,
   registerVoiceRoutes,
 } from './routes/index.js';
 
@@ -92,8 +101,47 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   const { db, chatEngine, voiceEngine, jwtSecret, corsOrigin, providers, publicBaseUrl, gatewayConfig, workflowEngine, triggerDispatcher } = config;
   const dashboard = new DashboardService(db);
   const router = new Router();
-  const uiHtml = getHTML();
+  const uiHtml = SPA_HTML;
   const docsHtml = getDocsHTML();
+
+  // Idempotency store for write endpoints. Keyed by `userId:idempotency-key`.
+  // TTL of 24 hours matches typical payment-processor expectations; max 10k
+  // entries prevents unbounded memory growth on a single instance.
+  const idempotencyStore = createIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000, maxEntries: 10_000 });
+
+  // Initialize HTTP rate limiter — Redis when REDIS_URL is set, in-process otherwise.
+  // Fire-and-forget: the lazy fallback in checkRateLimit handles any requests that
+  // arrive before the async connect completes.
+  void createHttpRateLimiter(process.env['REDIS_URL']).then(initHttpRateLimiter);
+
+  // POST routes where idempotency is meaningful (state-mutating, non-streaming).
+  // Paths are matched as prefix strings so parameterised variants are covered.
+  const IDEMPOTENT_POST_PREFIXES = new Set([
+    '/api/me/agenda',
+    '/api/me/notes',
+    '/api/chat',
+    '/api/me/conversations',
+    '/api/voice/sessions',
+    '/api/me/memories',
+  ]);
+
+  // Readiness probe — checks that all critical subsystems are operational before
+  // accepting traffic. Used by k8s readinessProbe / ECS health checks.
+  const healthChecker = createHealthChecker('geneweave');
+  healthChecker.addCheck('database', async () => {
+    try {
+      await db.getUserById('__healthcheck__');
+      return { ok: true };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // getUserById throwing for an unknown id is expected and means DB is up.
+      // Any other error indicates a connectivity problem.
+      if (msg.includes('not found') || msg.includes('undefined') || msg === '') {
+        return { ok: true };
+      }
+      return { ok: false, message: msg };
+    }
+  });
 
   async function setOAuthState(state: string, value: { userId: string | null; provider: OAuthProviderName; expiresAt: number }): Promise<void> {
     await db.createOAuthFlowState({
@@ -183,6 +231,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerMeMemoryRoutes(router, db);
   registerMeAgendaRoutes(router, db);
   registerMeNotesRoutes(router, db);
+  registerMeComplianceRoutes(router, db, config.runtime);
 
   // Voice agent routes — registered only when audio provider is configured
   if (voiceEngine) {
@@ -244,15 +293,23 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-    // CSP: allow same-origin scripts/styles, Google Fonts CDN, and inline styles
-    // (the SPA uses a CSS-in-HTML <style> block). Tighten further if a nonce is added.
+    // HSTS — only meaningful when the connection is already TLS. In production
+    // the ingress (nginx / CloudFront / ALB) terminates TLS and sets this header
+    // for the public-facing connection; setting it here also covers direct-TLS
+    // deployments. max-age=31536000 (1 year) is the recommended value for preload.
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    // CSP — H2: use sha256 hashes for inline <style> and <script> blocks instead
+    // of 'unsafe-inline'. Hashes are computed once at server startup from the
+    // exact byte content embedded in SPA_HTML (see ui-server.ts).
     res.setHeader(
       'Content-Security-Policy',
       [
         "default-src 'self'",
-        "script-src 'self'",
-        // Inline styles are used by the SPA theme block; fonts.googleapis.com loads the font CSS
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        // SHA-256 hashes for the two inline <script> blocks (admin schema + ESM bootstrap).
+        // cdn.sheetjs.com serves xlsx for admin data export.
+        `script-src 'self' ${SCRIPT_CSP_HASHES.join(' ')} https://cdn.sheetjs.com`,
+        // SHA-256 hash for the inline <style> block; fonts.googleapis.com serves font CSS.
+        `style-src 'self' ${STYLES_CSP_HASH} https://fonts.googleapis.com`,
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data: https:",
         "connect-src 'self' ws: wss:",
@@ -273,6 +330,15 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       }
     }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+    // Global edge rate limit — 600 req/min per IP (configurable via GENEWEAVE_EDGE_IP_LIMIT).
+    // Fails open if the rate limiter is unavailable so requests are never blocked by infrastructure.
+    const edgeCheck = await checkEdgeRateLimit(req);
+    if (edgeCheck.limited) {
+      res.setHeader('Retry-After', String(Math.ceil(edgeCheck.retryAfterMs / 1_000)));
+      json(res, 429, { error: 'Too many requests' });
+      return;
+    }
 
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
     const pathname = url.pathname;
@@ -353,7 +419,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
         try {
           await mcpGatewayHandle.handle(req, res);
         } catch (err) {
-          console.error('[geneWeave][mcp-gateway] handler error:', err);
+          logger.error('mcp-gateway handler error', { err });
           if (!res.headersSent) {
             json(res, 500, { error: 'MCP gateway error' });
           }
@@ -361,6 +427,65 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       } else {
         json(res, 503, { error: 'MCP gateway not configured' });
       }
+      return;
+    }
+
+    // Idempotency check — honour the `Idempotency-Key` header on POST requests
+    // to state-mutating /api/me/* and /api/chat/* routes. A repeated request
+    // with the same key returns the cached response without re-executing the
+    // handler. The key is scoped to the authenticated user so one user cannot
+    // replay another's requests.
+    if (method === 'POST') {
+      const rawKey = req.headers['idempotency-key'];
+      const iKey = Array.isArray(rawKey) ? rawKey[0] : rawKey;
+      if (iKey && [...IDEMPOTENT_POST_PREFIXES].some((p) => pathname.startsWith(p))) {
+        const authForIdempotency = await authenticateRequest(req, db, jwtSecret).catch(() => null);
+        if (authForIdempotency) {
+          const storeKey = `${authForIdempotency.userId}:${iKey.slice(0, 256)}`;
+          const { isDuplicate, previousResult } = idempotencyStore.check(storeKey);
+          if (isDuplicate && previousResult !== undefined) {
+            const cached = previousResult as { status: number; body: unknown };
+            json(res, cached.status, cached.body);
+            return;
+          }
+          // Wrap the handler so we can record the response for future replays.
+          // We intercept writeHead to capture the status code.
+          const originalWriteHead = res.writeHead.bind(res);
+          let capturedStatus = 200;
+          res.writeHead = (statusCode: number, ...args: unknown[]) => {
+            capturedStatus = statusCode;
+            return (originalWriteHead as (...a: unknown[]) => ServerResponse)(statusCode, ...args);
+          };
+          const originalEnd = res.end.bind(res);
+          res.end = (...args: unknown[]) => {
+            // Only cache 2xx responses to avoid caching errors
+            if (capturedStatus >= 200 && capturedStatus < 300) {
+              try {
+                const body = args[0] ? JSON.parse(String(args[0])) : null;
+                idempotencyStore.record(storeKey, { status: capturedStatus, body });
+              } catch { /* non-JSON or empty body — skip caching */ }
+            }
+            return (originalEnd as (...a: unknown[]) => ServerResponse)(...args);
+          };
+        }
+      }
+    }
+
+    // GET /api/openapi.json — machine-readable API contract
+    if (method === 'GET' && pathname === '/api/openapi.json') {
+      const { buildOpenApiSpec } = await import('./openapi.js');
+      json(res, 200, buildOpenApiSpec());
+      return;
+    }
+
+    // Readiness / liveness probes — must not require auth so orchestrators can poll.
+    if (method === 'GET' && pathname === '/healthz') {
+      json(res, 200, { status: 'ok' });
+      return;
+    }
+    if (method === 'GET' && pathname === '/readyz') {
+      const status = await healthChecker.run();
+      json(res, status.healthy ? 200 : 503, status);
       return;
     }
 
@@ -386,7 +511,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Internal server error';
         const correlationId = newUUIDv7();
-        console.error(`[geneWeave][${correlationId}] Error handling ${method} ${pathname}:`, err);
+        logger.error(`Error handling ${method} ${pathname}`, { correlationId, err });
         if (!res.headersSent) {
           if (msg === 'Request body too large') {
             json(res, 413, { error: 'Request body too large' });
@@ -551,11 +676,11 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            console.error(`[voice-ws][${sessionId}] Error:`, msg);
+            logger.error(`voice-ws session error`, { sessionId, msg });
           }
         });
       } catch (err) {
-        console.error('[voice-ws] Failed to handle upgrade:', err);
+        logger.error('voice-ws failed to handle upgrade', { err });
         socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
         socket.destroy();
       }

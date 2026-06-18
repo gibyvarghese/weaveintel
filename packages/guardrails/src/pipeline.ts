@@ -42,6 +42,20 @@ export interface PipelineOptions {
    */
   budgetMs?: number;
   /**
+   * M-8: Controls how budget-exhausted (skipped) guardrail results are
+   * treated by `hasSkipped()` and downstream callers.
+   *
+   * - `'allow'` (default): a skipped guardrail is not counted as a denial —
+   *   permissive pipelines accept this trade-off for latency reasons.
+   * - `'deny'`: a skipped guardrail is treated as a denial — use for security-
+   *   sensitive pipelines where running out of budget must block the response.
+   *
+   * Note: the `decision` field in the `GuardrailResult` is always `'skipped'`
+   * regardless of this policy; `budgetExhaustedPolicy` only affects the
+   * `hasSkippedViolation()` helper and any caller that inspects it.
+   */
+  budgetExhaustedPolicy?: 'allow' | 'deny';
+  /**
    * Condition context for conditional trigger evaluation (Phase 1/2).
    * When provided, each guardrail's triggerConditions tree is evaluated against
    * this context before invocation. A guardrail whose condition is not met is
@@ -97,11 +111,16 @@ export class DefaultGuardrailPipeline implements IPipeline {
         }
       }
 
-      // W9: skip model-graded guardrails when the pipeline budget is exceeded.
+      // M-8: skip model-graded guardrails when the pipeline budget is exceeded.
+      // Decision is 'skipped' (not 'allow') so callers and audit logs can
+      // distinguish "actively evaluated and passed" from "never ran". Whether
+      // a skipped result counts as a violation depends on budgetExhaustedPolicy
+      // (checked by hasSkippedViolation below). Default policy is 'allow' to
+      // preserve existing behaviour; set to 'deny' for security-sensitive pipelines.
       const elapsed = Date.now() - pipelineStart;
       if (this.opts.budgetMs !== undefined && elapsed >= this.opts.budgetMs && guardrail.type === 'model-graded') {
         results.push({
-          decision: 'allow',
+          decision: 'skipped',
           guardrailId: guardrail.id,
           explanation: `Skipped: pipeline budget of ${this.opts.budgetMs}ms exceeded (elapsed ${elapsed}ms)`,
           metadata: { skipped: 'budget_exceeded', durationMs: 0 },
@@ -162,4 +181,25 @@ export function hasWarning(results: GuardrailResult[]): boolean {
 
 export function getDenyReason(results: GuardrailResult[]): string | undefined {
   return results.find(r => r.decision === 'deny')?.explanation;
+}
+
+/**
+ * M-8: Returns true when any result has `decision: 'skipped'` AND the
+ * pipeline's `budgetExhaustedPolicy` is `'deny'`.
+ *
+ * Use this alongside `hasDeny` when the caller must enforce a strict posture
+ * (no unevaluated guardrails allowed):
+ *
+ *   if (hasDeny(results) || hasSkippedViolation(results, pipeline.opts)) { ... }
+ *
+ * @param results  The array returned by `pipeline.evaluate()`.
+ * @param policy   The `budgetExhaustedPolicy` value from `PipelineOptions`.
+ *                 Defaults to `'allow'` when absent (backward-compatible).
+ */
+export function hasSkippedViolation(
+  results: GuardrailResult[],
+  policy: PipelineOptions['budgetExhaustedPolicy'] = 'allow',
+): boolean {
+  if (policy !== 'deny') return false;
+  return results.some(r => r.decision === 'skipped');
 }

@@ -21,6 +21,6 @@
     "playwright-core": "^1.52.0"
   },
   "devDependencies": {
-    "vitest": "^3.0.0"
+    "vitest": "^3.2.6"
   }
 }

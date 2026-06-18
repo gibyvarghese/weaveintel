@@ -35,8 +35,10 @@ import {
   type ApnsChannelOptions,
   type FcmChannelOptions,
 } from '@weaveintel/notifications';
-import { newUUIDv7, weaveContext } from '@weaveintel/core';
+import { newUUIDv7, createLogger, weaveContext } from '@weaveintel/core';
 import type { NotificationMessage } from '@weaveintel/core';
+
+const logger = createLogger('notifications-wiring');
 import type { DatabaseAdapter } from './db-types.js';
 import type { UserRunRow, NotificationPrefsRow, UserDeviceRow } from './db-types/adapter-me.js';
 
@@ -105,7 +107,7 @@ export function createPrefsSuppressionPolicy(
         }
         return false;
       } catch (err) {
-        console.warn('[notifications] suppression resolution failed — suppressing (fail-closed)', {
+        logger.warn('suppression resolution failed — suppressing (fail-closed)', {
           principalId: sc.principalId, err,
         });
         return true;
@@ -144,7 +146,7 @@ export function createDeviceTargetStore(db: Pick<DatabaseAdapter, 'listDevices' 
         updatedAt: d.created_at,
       }));
     },
-    async remove(id) { console.warn(`[device-target-store] remove(${id}) called — device registrations are managed via DELETE /api/me/devices/:deviceId, not through the target store`); },
+    async remove(id) { logger.warn(`remove(${id}) called — device registrations are managed via DELETE /api/me/devices/:deviceId, not through the target store`); },
   };
 }
 

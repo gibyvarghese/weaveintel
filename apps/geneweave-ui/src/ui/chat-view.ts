@@ -33,9 +33,13 @@ export function renderSettingsDropdown(options: { render: () => void; saveChatSe
   const modeCards = modes.map((mode) =>
     h('div', {
       className: 'mode-card' + (settings.mode === mode.id ? ' selected' : ''),
+      role: 'radio',
+      'aria-checked': settings.mode === mode.id ? 'true' : 'false',
+      tabindex: settings.mode === mode.id ? '0' : '-1',
       onClick: () => { settings.mode = mode.id; save(); },
+      onKeydown: (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); settings.mode = mode.id; save(); } },
     },
-      h('div', { className: 'mc-icon' }, mode.icon),
+      h('div', { className: 'mc-icon', 'aria-hidden': 'true' }, mode.icon),
       h('div', null,
         h('div', { className: 'mc-title' }, mode.title),
         h('div', { className: 'mc-desc' }, mode.desc),
@@ -43,14 +47,24 @@ export function renderSettingsDropdown(options: { render: () => void; saveChatSe
     )
   );
 
-  const settingRow = (icon: string, label: string, desc: string, enabled: boolean, onToggle: () => void) =>
-    h('div', { className: 'setting-row', onClick: () => { onToggle(); save(); } },
-      h('div', { style: 'flex:1' },
+  const settingRow = (icon: string, label: string, desc: string, enabled: boolean, onToggle: () => void) => {
+    const id = 'toggle-' + label.toLowerCase().replace(/\s+/g, '-');
+    return h('div', {
+      className: 'setting-row',
+      role: 'switch',
+      'aria-checked': enabled ? 'true' : 'false',
+      'aria-labelledby': id,
+      tabindex: '0',
+      onClick: () => { onToggle(); save(); },
+      onKeydown: (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); save(); } },
+    },
+      h('div', { style: 'flex:1', id },
         h('div', { className: 'setting-row-label' }, icon + ' ' + label),
         h('div', { className: 'setting-row-desc' }, desc),
       ),
-      h('div', { className: 'toggle-switch' + (enabled ? ' on' : '') })
+      h('div', { className: 'toggle-switch' + (enabled ? ' on' : ''), 'aria-hidden': 'true' })
     );
+  };
 
   const numInput = (label: string, value: number, min: number, max: number, step: number, onChange: (v: number) => void) =>
     h('div', { className: 'setting-sub' },
@@ -76,7 +90,7 @@ export function renderSettingsDropdown(options: { render: () => void; saveChatSe
   const rows: HTMLElement[] = [];
 
   rows.push(sectionLabel('AI Mode'));
-  rows.push(h('div', { className: 'mode-grid' }, ...modeCards));
+  rows.push(h('div', { className: 'mode-grid', role: 'radiogroup', 'aria-label': 'AI mode' }, ...modeCards));
 
   if (isAdvanced) {
     rows.push(sep());
@@ -292,7 +306,7 @@ export function renderChatView(options: {
     view.appendChild(banner);
   }
 
-  const textarea = h('textarea', { placeholder: 'Type a message...', rows: '1' }) as HTMLTextAreaElement;
+  const textarea = h('textarea', { placeholder: 'Type a message...', rows: '1', 'aria-label': 'Message input', 'aria-multiline': 'true' }) as HTMLTextAreaElement;
   textarea.addEventListener('keydown', (e: KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -306,7 +320,7 @@ export function renderChatView(options: {
     textarea.style.height = Math.min(textarea.scrollHeight, 160) + 'px';
   });
 
-  const messageContainer = h('div', { className: 'messages' });
+  const messageContainer = h('div', { className: 'messages', role: 'log', 'aria-live': 'polite', 'aria-label': 'Conversation messages', 'aria-relevant': 'additions' });
   view.appendChild(messageContainer);
 
   const fileInput = h('input', { type: 'file', multiple: true, style: 'display:none' }) as HTMLInputElement;
@@ -336,20 +350,27 @@ export function renderChatView(options: {
   const voiceBar = state.voiceAgentActive
     ? h('div', { className: 'voice-bar' },
         h('div', { className: 'voice-bar-top' },
-          h('div', { id: 'va-dot', className: 'voice-status-indicator voice-status-' + state.voiceStatus }),
-          h('span', { id: 'va-label', className: 'voice-status-label' }, STATUS_LABEL[state.voiceStatus] || 'Ready'),
+          h('div', { id: 'va-dot', className: 'voice-status-indicator voice-status-' + state.voiceStatus, 'aria-hidden': 'true' }),
+          h('span', { id: 'va-label', className: 'voice-status-label', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' }, STATUS_LABEL[state.voiceStatus] || 'Ready'),
           h('div', { style: 'flex:1' }),
           h('button', {
+            type: 'button',
             id: 'va-pause-btn',
             className: 'voice-pause-btn',
             title: 'Pause conversation',
+            'aria-label': 'Pause conversation',
+            'aria-pressed': 'false',
             innerHTML: '&#9646;&#9646; Pause',
             onClick: () => { togglePause(); },
           }),
           h('button', {
+            type: 'button',
             id: 'va-settings-btn',
             className: 'voice-settings-btn' + (state.voiceSettingsOpen ? ' active' : ''),
             title: 'Voice settings',
+            'aria-label': 'Voice settings',
+            'aria-expanded': state.voiceSettingsOpen ? 'true' : 'false',
+            'aria-controls': 'va-settings',
             innerHTML: '&#9881;',
             onClick: () => {
               toggleVoiceSettings();
@@ -357,12 +378,14 @@ export function renderChatView(options: {
             },
           }),
           h('button', {
+            type: 'button',
             className: 'voice-end-btn',
             title: 'End voice session',
+            'aria-label': 'End voice session',
             onClick: () => { void endVoiceSession(); },
           }, '✕'),
         ),
-        h('div', { id: 'va-waveform', className: 'va-waveform' }, ...waveBars),
+        h('div', { id: 'va-waveform', className: 'va-waveform', 'aria-hidden': 'true' }, ...waveBars),
         // Exchange + error: always in DOM, shown/hidden directly by voice-agent.ts
         h('div', { id: 'va-exchange', className: 'voice-exchange', style: 'display:none' },
           h('div', { id: 'va-you', className: 'voice-you', style: 'display:none' },
@@ -387,7 +410,7 @@ export function renderChatView(options: {
   view.appendChild(h('div', { className: 'input-bar' },
     fileInput,
     h('div', { className: 'input-tools' },
-      h('button', { className: 'tool-btn', title: 'Attach files', onClick: () => fileInput.click() }, '📎'),
+      h('button', { type: 'button', className: 'tool-btn', title: 'Attach files', 'aria-label': 'Attach files', onClick: () => fileInput.click() }, h('span', { 'aria-hidden': 'true' }, '📎')),
       h('button', {
         className: 'tool-btn mic-btn' + (state.audioRecording ? ' active' : ''),
         title: state.audioRecording ? 'Stop voice input' : 'Voice input (transcribed to text)',
@@ -442,7 +465,10 @@ export function renderChatView(options: {
       textarea
     ),
     h('button', {
+      type: 'button',
       className: 'send-btn',
+      'aria-label': state.streaming ? 'Sending message…' : 'Send message',
+      'aria-disabled': state.streaming ? 'true' : 'false',
       onClick: () => {
         void options.sendMessage(textarea.value);
         textarea.value = '';

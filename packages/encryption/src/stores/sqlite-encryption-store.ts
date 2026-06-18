@@ -218,6 +218,8 @@ export function weaveSqliteEncryptionStore(opts: WeaveSqliteEncryptionStoreOptio
     'INSERT INTO tenant_keks (id, tenant_id, version, status, wrapped, created_at, rotated_at, revoked_at) VALUES (?,?,?,?,?,?,?,?)',
   );
   const listKeksStmt = db.prepare('SELECT * FROM tenant_keks WHERE tenant_id = ? ORDER BY version ASC, id ASC');
+  // H-13: prepared statements for O(1) point lookups.
+  const getKekByIdStmt = db.prepare('SELECT * FROM tenant_keks WHERE tenant_id = ? AND id = ?');
   const updateKekStatusStmt = db.prepare(
     "UPDATE tenant_keks SET status = ?, rotated_at = CASE WHEN ? = 'previous' THEN ? ELSE rotated_at END, revoked_at = CASE WHEN ? = 'revoked' THEN ? ELSE revoked_at END WHERE id = ?",
   );
@@ -226,6 +228,8 @@ export function weaveSqliteEncryptionStore(opts: WeaveSqliteEncryptionStoreOptio
     'INSERT INTO tenant_deks (id, tenant_id, kek_id, epoch, status, wrapped, created_at, rotated_at, revoked_at) VALUES (?,?,?,?,?,?,?,?,?)',
   );
   const listDeksStmt = db.prepare('SELECT * FROM tenant_deks WHERE tenant_id = ? ORDER BY epoch ASC, id ASC');
+  const getDekByIdStmt = db.prepare('SELECT * FROM tenant_deks WHERE tenant_id = ? AND id = ?');
+  const getMaxDekEpochStmt = db.prepare(`SELECT MAX(epoch) AS max_epoch FROM tenant_deks WHERE tenant_id = ? AND status = 'active'`);
   const updateDekStatusStmt = db.prepare(
     "UPDATE tenant_deks SET status = ?, rotated_at = CASE WHEN ? = 'previous' THEN ? ELSE rotated_at END, revoked_at = CASE WHEN ? = 'revoked' THEN ? ELSE revoked_at END WHERE id = ?",
   );
@@ -266,6 +270,10 @@ export function weaveSqliteEncryptionStore(opts: WeaveSqliteEncryptionStoreOptio
     async listKeks(tenantId) {
       return (listKeksStmt.all(tenantId) as KekRow[]).map(rowToKek);
     },
+    async getKekById(tenantId, kekId) {
+      const row = getKekByIdStmt.get(tenantId, kekId) as KekRow | undefined;
+      return row ? rowToKek(row) : null;
+    },
     async insertKek(k) {
       insertKekStmt.run(k.id, k.tenantId, k.version, k.status, JSON.stringify(k.wrapped), k.createdAt, k.rotatedAt, k.revokedAt);
     },
@@ -274,6 +282,14 @@ export function weaveSqliteEncryptionStore(opts: WeaveSqliteEncryptionStoreOptio
     },
     async listDeks(tenantId) {
       return (listDeksStmt.all(tenantId) as DekRow[]).map(rowToDek);
+    },
+    async getDekById(tenantId, dekId) {
+      const row = getDekByIdStmt.get(tenantId, dekId) as DekRow | undefined;
+      return row ? rowToDek(row) : null;
+    },
+    async getMaxDekEpoch(tenantId) {
+      const row = getMaxDekEpochStmt.get(tenantId) as { max_epoch: number | null } | undefined;
+      return row?.max_epoch ?? null;
     },
     async insertDek(d) {
       insertDekStmt.run(d.id, d.tenantId, d.kekId, d.epoch, d.status, JSON.stringify(d.wrapped), d.createdAt, d.rotatedAt, d.revokedAt);

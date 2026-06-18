@@ -4,7 +4,10 @@ import {
   validateContract,
   type ContractValidationResult,
 } from '@weaveintel/prompts';
+import { createLogger } from '@weaveintel/core';
 import type { DatabaseAdapter } from './db.js';
+
+const logger = createLogger('chat-prompt-contracts');
 
 interface PromptContractCheckResult {
   key: string;
@@ -100,7 +103,7 @@ export async function validatePromptContractsAgainstDb(
     return { summary, results };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error('[chat-prompt-contracts] validation pipeline error', err);
+    logger.error('validation pipeline error', { err });
     return {
       summary: { total: 0, passed: 0, failed: 0, error: 0, warning: 0, info: 0 },
       results: [],

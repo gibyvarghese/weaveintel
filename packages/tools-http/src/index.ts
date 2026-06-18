@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/tools-http — HTTP endpoint tooling with auth, retry, rate limiting
  */

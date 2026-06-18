@@ -11,7 +11,9 @@ import type {
   PermissionDescriptor,
   AccessDecision,
   AccessDecisionResult,
+  ExecutionContext,
 } from '@weaveintel/core';
+import { weaveAudit } from '@weaveintel/core';
 
 /** An access rule used by the evaluator. */
 export interface AccessRule {
@@ -30,6 +32,14 @@ export function evaluateAccess(
   ctx: IdentityContext,
   permission: PermissionDescriptor,
   rules: AccessRule[],
+  /**
+   * H-6: Optional execution context for audit emission. When provided,
+   * a `weaveAudit` event is fired whenever the wildcard `'*'` permission
+   * grants access so that unexpectedly-privileged identities are
+   * observable in the audit log. Without this parameter (existing callers)
+   * the function falls back to a `console.warn`.
+   */
+  execCtx?: ExecutionContext,
 ): AccessDecision {
   const now = new Date().toISOString();
   const identity = ctx.identity;
@@ -47,8 +57,34 @@ export function evaluateAccess(
 
   // Check explicit permissions first
   const permKey = `${permission.resource}:${permission.action}`;
-  if (ctx.effectivePermissions.includes(permKey) || ctx.effectivePermissions.includes('*')) {
+  if (ctx.effectivePermissions.includes(permKey)) {
     return { result: 'allow', permission, identity, reason: 'Explicit permission', evaluatedAt: now };
+  }
+  if (ctx.effectivePermissions.includes('*')) {
+    // H-6: Wildcard grants unconditional access and bypasses all rule
+    // evaluation. This is intentional for super-admin / bootstrap identities
+    // but must be audited so accidental wildcard assignments are visible.
+    const wildcardDecision: AccessDecision = {
+      result: 'allow', permission, identity,
+      reason: 'Wildcard permission (*) — all resources and actions permitted',
+      evaluatedAt: now,
+    };
+    if (execCtx) {
+      void weaveAudit(execCtx, {
+        action: 'identity.access.wildcard',
+        outcome: 'success',
+        resource: permKey,
+        details: { identityId: identity.id, reason: 'wildcard_permission' },
+      });
+    } else {
+      // Fallback when no execution context is available — at minimum make
+      // the wildcard grant visible to operators via the process log.
+      console.warn(
+        `[identity] wildcard permission (*) fired for identity "${identity.id}" on "${permKey}" — ` +
+          'pass an ExecutionContext to evaluateAccess() to emit a proper audit event',
+      );
+    }
+    return wildcardDecision;
   }
 
   // Evaluate rules in order — first match wins

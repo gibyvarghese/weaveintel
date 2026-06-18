@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 export { weaveMCPClient, weaveMCPTools } from './client.js';
 export {
 	createMCPStreamableHttpTransport,

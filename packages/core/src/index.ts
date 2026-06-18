@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // @weaveintel/core — Public API
 // The core package exports all contracts, types, and runtime utilities.
 // It has ZERO vendor dependencies. Provider packages depend on core, never the reverse.

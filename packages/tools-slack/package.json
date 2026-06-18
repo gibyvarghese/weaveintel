@@ -7,6 +7,6 @@
   "types": "./dist/index.d.ts",
   "scripts": { "build": "tsc -b", "test": "vitest run", "typecheck": "tsc --noEmit", "clean": "rm -rf dist *.tsbuildinfo" },
   "dependencies": { "@weaveintel/core": "*", "@weaveintel/mcp-server": "*", "@weaveintel/tools": "*" },
-  "devDependencies": { "@weaveintel/testing": "*", "typescript": "^5.7.0", "vitest": "^3.0.0" },
+  "devDependencies": { "@weaveintel/testing": "*", "typescript": "^5.7.0", "vitest": "^3.2.6" },
   "license": "MIT"
 }

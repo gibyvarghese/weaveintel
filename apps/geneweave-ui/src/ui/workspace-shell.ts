@@ -39,8 +39,11 @@ export function renderWorkspaceNav(options: {
     state.sidebarCollapsed = false;
   }
 
-  const nav = h('aside', { className: state.sidebarCollapsed ? 'workspace-nav collapsed' : 'workspace-nav' });
-  const navScroll = h('div', { className: 'workspace-nav-scroll' });
+  const nav = h('aside', {
+    className: state.sidebarCollapsed ? 'workspace-nav collapsed' : 'workspace-nav',
+    'aria-label': 'Application navigation',
+  });
+  const navScroll = h('div', { className: 'workspace-nav-scroll', id: 'workspace-nav-scroll' });
   navScroll.addEventListener('scroll', () => { state.sidebarScrollTop = navScroll.scrollTop; }, { passive: true });
   const scrollSidebarBy = (delta: number) => {
     navScroll.scrollBy({ top: delta, behavior: 'smooth' });
@@ -50,8 +53,12 @@ export function renderWorkspaceNav(options: {
       h('span', { className: 'brand-mark' }, '✦'),
       h('span', { className: 'word' }, 'geneWeave'),
       h('button', {
+        type: 'button',
         className: 'sidebar-collapse-btn',
         title: state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar',
+        'aria-label': state.sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar',
+        'aria-expanded': state.sidebarCollapsed ? 'false' : 'true',
+        'aria-controls': 'workspace-nav-scroll',
         onClick: (e: Event) => {
           e.stopPropagation();
           state.sidebarCollapsed = !state.sidebarCollapsed;
@@ -107,48 +114,56 @@ export function renderWorkspaceNav(options: {
     }
   });
 
-  const menu = h('div', { className: 'workspace-menu' });
-  menu.appendChild(h('button', { className: state.view === 'chat' ? 'active' : '', title: 'Home', onClick: () => { state.view = 'chat'; options.render(); } },
-    renderSidebarIcon('home'),
-    h('span', { className: 'nav-label' }, 'Home')
-  ));
-  menu.appendChild(h('button', { className: state.view === 'calendar' ? 'active' : '', title: 'Calendar', onClick: () => { state.view = 'calendar'; options.render(); } },
-    renderSidebarIcon('calendar'),
-    h('span', { className: 'nav-label' }, 'Calendar')
-  ));
-  menu.appendChild(h('button', { className: state.view === 'notes' ? 'active' : '', title: 'Notes', onClick: () => { state.view = 'notes'; options.render(); } },
-    renderSidebarIcon('notes'),
-    h('span', { className: 'nav-label' }, 'Notes')
-  ));
-  menu.appendChild(h('button', { className: state.view === 'dashboard' ? 'active' : '', title: 'Dashboard', onClick: () => { state.view = 'dashboard'; void options.loadDashboard(); } },
-    renderSidebarIcon('dashboard'),
-    h('span', { className: 'nav-label' }, 'Dashboard')
-  ));
-  menu.appendChild(h('button', { className: state.view === 'connectors' ? 'active' : '', title: 'Connectors', onClick: () => { options.openConnectorsView(); } },
-    renderSidebarIcon('connectors'),
-    h('span', { className: 'nav-label' }, 'Connectors')
-  ));
+  const navBtn = (view: string, label: string, icon: HTMLElement, action: () => void) => {
+    const isActive = state.view === view;
+    return h('button', {
+      type: 'button',
+      className: isActive ? 'active' : '',
+      title: label,
+      'aria-label': label,
+      'aria-current': isActive ? 'page' : null,
+      onClick: action,
+    }, icon, h('span', { className: 'nav-label' }, label));
+  };
+
+  const menu = h('div', { className: 'workspace-menu', role: 'navigation', 'aria-label': 'Main menu' });
+  menu.appendChild(navBtn('chat', 'Home', renderSidebarIcon('home'), () => { state.view = 'chat'; options.render(); }));
+  menu.appendChild(navBtn('calendar', 'Calendar', renderSidebarIcon('calendar'), () => { state.view = 'calendar'; options.render(); }));
+  menu.appendChild(navBtn('notes', 'Notes', renderSidebarIcon('notes'), () => { state.view = 'notes'; options.render(); }));
+  menu.appendChild(navBtn('dashboard', 'Dashboard', renderSidebarIcon('dashboard'), () => { state.view = 'dashboard'; void options.loadDashboard(); }));
+  menu.appendChild(navBtn('connectors', 'Connectors', renderSidebarIcon('connectors'), () => { options.openConnectorsView(); }));
   menu.appendChild(h('button', {
+    type: 'button',
     className: state.view === 'scientific-validation' ? 'active' : '',
     title: 'Scientific Validation',
+    'aria-label': 'Scientific Validation',
+    'aria-current': state.view === 'scientific-validation' ? 'page' : null,
     onClick: () => { state.view = 'scientific-validation'; options.render(); },
   },
-    h('span', { className: 'side-icon', style: 'font-size:15px' }, '🔬'),
+    h('span', { className: 'side-icon', style: 'font-size:15px', 'aria-hidden': 'true' }, '🔬'),
     h('span', { className: 'nav-label' }, 'Validation')
   ));
   menu.appendChild(h('button', {
+    type: 'button',
     className: state.view === 'kaggle-competition' ? 'active' : '',
     title: 'Kaggle Competition',
+    'aria-label': 'Kaggle Competition',
+    'aria-current': state.view === 'kaggle-competition' ? 'page' : null,
     onClick: () => { state.view = 'kaggle-competition'; options.render(); },
   },
-    h('span', { className: 'side-icon', style: 'font-size:15px' }, '🏆'),
+    h('span', { className: 'side-icon', style: 'font-size:15px', 'aria-hidden': 'true' }, '🏆'),
     h('span', { className: 'nav-label' }, 'Kaggle')
   ));
 
   const adminNode = h('div', { className: 'admin-nav-tree' });
   const adminActive = state.view === 'admin';
   adminNode.appendChild(h('button', {
+    type: 'button',
     className: adminActive ? 'active admin-parent' : 'admin-parent',
+    'aria-label': 'Admin',
+    'aria-current': adminActive ? 'page' : null,
+    'aria-expanded': state.adminMenuExpanded ? 'true' : 'false',
+    'aria-haspopup': 'true',
     onClick: () => {
       state.view = 'admin';
       state.adminMenuExpanded = !state.adminMenuExpanded;
@@ -158,7 +173,7 @@ export function renderWorkspaceNav(options: {
       options.render();
       void options.loadAdmin();
     },
-  }, renderSidebarIcon('admin'), h('span', { className: 'nav-label' }, 'Admin'), h('span', { className: `admin-caret${state.adminMenuExpanded ? ' open' : ''}` }, '▾')));
+  }, renderSidebarIcon('admin'), h('span', { className: 'nav-label' }, 'Admin'), h('span', { className: `admin-caret${state.adminMenuExpanded ? ' open' : ''}`, 'aria-hidden': 'true' }, '▾')));
 
   if (state.adminMenuExpanded && !state.sidebarCollapsed) {
     const sub = h('div', { className: 'admin-nav-sub' });

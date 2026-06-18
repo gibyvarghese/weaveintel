@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/tools-browser — Web fetching, extraction, scraping, and browser automation tools
  */

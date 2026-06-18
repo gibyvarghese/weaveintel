@@ -43,6 +43,10 @@ export interface SerializedWrappedKey {
   authTag?: string; // base64
 }
 
+/**
+ * Encode a WrappedKey as a JSON-safe object for storage in EncryptionStore backends.
+ * @internal Used by EncryptionStore implementations — not part of the stable public API.
+ */
 export function serializeWrappedKey(w: WrappedKey): SerializedWrappedKey {
   const out: SerializedWrappedKey = {
     rootKeyId: w.rootKeyId,
@@ -54,6 +58,10 @@ export function serializeWrappedKey(w: WrappedKey): SerializedWrappedKey {
   return out;
 }
 
+/**
+ * Decode a stored JSON-safe SerializedWrappedKey back to a WrappedKey with Buffer fields.
+ * @internal Used by EncryptionStore implementations — not part of the stable public API.
+ */
 export function deserializeWrappedKey(s: SerializedWrappedKey): WrappedKey {
   const w: WrappedKey = {
     rootKeyId: s.rootKeyId,

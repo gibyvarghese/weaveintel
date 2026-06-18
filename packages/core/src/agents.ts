@@ -40,7 +40,13 @@ export interface AgentResult {
   readonly messages: readonly Message[];
   readonly steps: readonly AgentStep[];
   readonly usage: AgentUsage;
-  readonly status: 'completed' | 'failed' | 'cancelled' | 'budget_exceeded' | 'needs_approval';
+  /**
+   * M-21: `'guardrail_denied'` is a distinct terminal status returned when the
+   * output guardrail blocks the agent's final response. Callers that previously
+   * treated `'completed'` as the only success state must now also handle
+   * `'guardrail_denied'` to distinguish a policy-blocked output.
+   */
+  readonly status: 'completed' | 'failed' | 'cancelled' | 'budget_exceeded' | 'needs_approval' | 'guardrail_denied';
   readonly metadata?: Record<string, unknown>;
 }
 
@@ -56,6 +62,11 @@ export interface AgentStep {
 
 export interface AgentUsage {
   readonly totalSteps: number;
+  /** Input (prompt) tokens billed across all LLM calls in this agent run. */
+  readonly promptTokens: number;
+  /** Output (completion) tokens billed across all LLM calls in this agent run. */
+  readonly completionTokens: number;
+  /** promptTokens + completionTokens — kept for backwards compatibility. */
   readonly totalTokens: number;
   readonly totalDurationMs: number;
   readonly toolCalls: number;
@@ -74,7 +85,16 @@ export interface Agent {
 }
 
 export interface AgentStepEvent {
-  readonly type: 'step_start' | 'step_end' | 'text_chunk' | 'tool_start' | 'tool_end' | 'done';
+  /**
+   * M-31: `'verify_failed'` and `'reflect_revised'` are distinct event types
+   * emitted when the W2 verify-loop and W1 reflect-loop decide to regenerate
+   * instead of accepting the draft. Previously both used `'tool_start'`, which
+   * made them indistinguishable from tool calls in traces and stream consumers.
+   * Consumers that relied on `'tool_start'` as a catch-all still work because
+   * real tool calls continue to emit `'tool_start'`; new code should branch on
+   * `'verify_failed'` / `'reflect_revised'` for quality-loop awareness.
+   */
+  readonly type: 'step_start' | 'step_end' | 'text_chunk' | 'tool_start' | 'tool_end' | 'verify_failed' | 'reflect_revised' | 'done';
   readonly step?: AgentStep;
   readonly text?: string;
   readonly result?: AgentResult;

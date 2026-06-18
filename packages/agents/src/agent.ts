@@ -332,7 +332,9 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
                 tokenUsage: { prompt: response.usage.promptTokens, completion: response.usage.completionTokens },
               };
               steps.push(deniedStep);
-              return buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'completed');
+              // M-21: return 'guardrail_denied' so callers can distinguish a
+              // policy-blocked response from a legitimate completion.
+              return buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'guardrail_denied');
             }
             if (outputDecision.redactedText !== undefined) {
               finalContent = outputDecision.redactedText;
@@ -478,6 +480,9 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
       let streamRevisionCount = 0;
       let streamVerifyAttemptCount = 0;
       let streamResolvedCritic: Critic | undefined;
+      // M-21: track guardrail denial for stream path so the final 'done' event
+      // carries 'guardrail_denied' instead of 'completed'.
+      let streamGuardrailDenied = false;
 
       const messages: Message[] = [];
       if (config.instructions) {
@@ -555,72 +560,28 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             continue;
           }
 
-          // Terminal response via streaming — Phase 5: checkOutput guardrail
-          let streamFinalContent = accText;
-          const streamOutputGuardrails = ctx.runtime?.guardrails;
-          if (streamOutputGuardrails?.checkOutput) {
-            let outputDecision: { allow: boolean; redactedText?: string; reason?: string } = { allow: true };
-            try {
-              outputDecision = await streamOutputGuardrails.checkOutput(ctx, accText);
-            } catch (err) {
-              outputDecision = { allow: false, reason: `guardrails error: ${err instanceof Error ? err.message : String(err)}` };
-            }
-            if (!outputDecision.allow) {
-              void weaveAudit(ctx, { action: 'agent.output.denied', outcome: 'denied', resource: config.name, details: { reason: outputDecision.reason ?? 'guardrails' } });
-              streamFinalContent = `Response blocked by guardrails: ${outputDecision.reason ?? 'no reason'}`;
-            } else if (outputDecision.redactedText !== undefined) {
-              streamFinalContent = outputDecision.redactedText;
-            }
-          }
-          // ── W2: verify →regenerate (stream path) ─────────────────────────
-          if (opts.verify && !isExpired(ctx)) {
-            const maxAttempts = opts.verify.maxAttempts ?? 1;
-            if (streamVerifyAttemptCount < maxAttempts) {
-              let vr: { passed: boolean; reason?: string; score?: number };
-              try {
-                vr = await opts.verify.verifier.verify(ctx, streamFinalContent, { userInput: lastUserMessage(messages) });
-              } catch (err) {
-                vr = { passed: false, reason: `verifier error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              if (!vr.passed) {
-                streamVerifyAttemptCount++;
-                void weaveAudit(ctx, { action: 'agent.verify.failed', outcome: 'failure', resource: config.name, details: { attempt: streamVerifyAttemptCount, reason: vr.reason, score: vr.score } });
-                const vStep: AgentStep = { index: steps.length, type: 'thinking', content: `[verify:failed attempt=${streamVerifyAttemptCount}] ${vr.reason ?? 'did not pass'}`, durationMs: Date.now() - stepStart, tokenUsage: finalUsage };
-                steps.push(vStep);
-                yield { type: 'tool_start', step: vStep };
-                messages.push({ role: 'assistant', content: streamFinalContent });
-                messages.push({ role: 'user', content: `Your previous response did not pass verification (${vr.reason ?? 'quality check failed'}). Please regenerate a better response.` });
-                continue;
-              }
-            }
-          }
-          // ── W1: reflect →revise (stream path) ────────────────────────────
-          if (opts.reflect && !isExpired(ctx)) {
-            const maxRevisions = opts.reflect.maxRevisions ?? 1;
-            if (streamRevisionCount < maxRevisions) {
-              if (!streamResolvedCritic) {
-                streamResolvedCritic = opts.reflect.critic ?? await buildDefaultCritic(model, opts.reflect.criteria);
-              }
-              let cr: { accepted: boolean; feedback?: string; score?: number };
-              try {
-                cr = await streamResolvedCritic.critique(ctx, lastUserMessage(messages), streamFinalContent);
-              } catch (err) {
-                cr = { accepted: false, feedback: `critic error: ${err instanceof Error ? err.message : String(err)}` };
-              }
-              if (!cr.accepted) {
-                streamRevisionCount++;
-                void weaveAudit(ctx, { action: 'agent.reflect.revise', outcome: 'success', resource: config.name, details: { revision: streamRevisionCount, score: cr.score, feedback: cr.feedback } });
-                const rStep: AgentStep = { index: steps.length, type: 'thinking', content: `[reflect:revision=${streamRevisionCount}] ${cr.feedback ?? 'critique requested revision'}`, durationMs: Date.now() - stepStart, tokenUsage: finalUsage };
-                steps.push(rStep);
-                yield { type: 'tool_start', step: rStep };
-                messages.push({ role: 'assistant', content: streamFinalContent });
-                messages.push({ role: 'user', content: `Please revise your response based on this feedback: ${cr.feedback ?? 'Improve the quality of your answer.'}` });
-                continue;
-              }
-              void weaveAudit(ctx, { action: 'agent.reflect.accepted', outcome: 'success', resource: config.name, details: { revision: streamRevisionCount, score: cr.score } });
-            }
+          // Terminal response via streaming — H-18: delegate to shared post-processor.
+          const streamTerminal = await processTerminalResponse({
+            ctx, model, rawContent: accText, agentName: config.name,
+            messages, steps, stepStart, tokenUsage: finalUsage,
+            verifyOpts: opts.verify, reflectOpts: opts.reflect,
+            verifyAttemptCount: streamVerifyAttemptCount,
+            revisionCount: streamRevisionCount,
+            resolvedCritic: streamResolvedCritic,
+            guardrailDenied: streamGuardrailDenied,
+          });
+          streamVerifyAttemptCount = streamTerminal.verifyAttemptCount;
+          streamRevisionCount = streamTerminal.revisionCount;
+          streamResolvedCritic = streamTerminal.resolvedCritic;
+          streamGuardrailDenied = streamTerminal.guardrailDenied;
+
+          if (streamTerminal.result.action === 'continue') {
+            for (const ev of streamTerminal.result.events) yield ev;
+            messages.push(...streamTerminal.result.appendMessages);
+            continue;
           }
 
+          const { finalContent: streamFinalContent } = streamTerminal.result;
           const responseStep: AgentStep = {
             index: steps.length,
             type: 'response',
@@ -632,7 +593,8 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           yield { type: 'step_end', step: responseStep };
           yield {
             type: 'done',
-            result: buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'completed'),
+            // M-21: use guardrail_denied when output guardrail blocked the response
+            result: buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, streamGuardrailDenied ? 'guardrail_denied' : 'completed'),
           };
           return;
         }
@@ -668,55 +630,41 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           continue;
         }
 
-        // ── W2/W1: fallback terminal — share stream counters ───────────────
-        let fallbackFinal = response.content;
-        if (opts.verify && !isExpired(ctx)) {
-          const maxAttempts = opts.verify.maxAttempts ?? 1;
-          if (streamVerifyAttemptCount < maxAttempts) {
-            let vr: { passed: boolean; reason?: string; score?: number };
-            try {
-              vr = await opts.verify.verifier.verify(ctx, fallbackFinal, { userInput: lastUserMessage(messages) });
-            } catch (err) {
-              vr = { passed: false, reason: `verifier error: ${err instanceof Error ? err.message : String(err)}` };
-            }
-            if (!vr.passed) {
-              streamVerifyAttemptCount++;
-              void weaveAudit(ctx, { action: 'agent.verify.failed', outcome: 'failure', resource: config.name, details: { attempt: streamVerifyAttemptCount } });
-              messages.push({ role: 'assistant', content: fallbackFinal });
-              messages.push({ role: 'user', content: `Your previous response did not pass verification (${vr.reason ?? 'quality check failed'}). Please regenerate a better response.` });
-              continue;
-            }
-          }
-        }
-        if (opts.reflect && !isExpired(ctx)) {
-          const maxRevisions = opts.reflect.maxRevisions ?? 1;
-          if (streamRevisionCount < maxRevisions) {
-            if (!streamResolvedCritic) streamResolvedCritic = opts.reflect.critic ?? await buildDefaultCritic(model, opts.reflect.criteria);
-            let cr: { accepted: boolean; feedback?: string; score?: number };
-            try { cr = await streamResolvedCritic.critique(ctx, lastUserMessage(messages), fallbackFinal); }
-            catch (err) { cr = { accepted: false, feedback: `critic error: ${err instanceof Error ? err.message : String(err)}` }; }
-            if (!cr.accepted) {
-              streamRevisionCount++;
-              void weaveAudit(ctx, { action: 'agent.reflect.revise', outcome: 'success', resource: config.name, details: { revision: streamRevisionCount } });
-              messages.push({ role: 'assistant', content: fallbackFinal });
-              messages.push({ role: 'user', content: `Please revise your response: ${cr.feedback ?? 'Improve the quality.'}` });
-              continue;
-            }
-          }
+        // ── H-18: fallback terminal — same post-processor as streaming path ──
+        const fallbackUsage = { prompt: response.usage.promptTokens, completion: response.usage.completionTokens };
+        const fallbackTerminal = await processTerminalResponse({
+          ctx, model, rawContent: response.content, agentName: config.name,
+          messages, steps, stepStart, tokenUsage: fallbackUsage,
+          verifyOpts: opts.verify, reflectOpts: opts.reflect,
+          verifyAttemptCount: streamVerifyAttemptCount,
+          revisionCount: streamRevisionCount,
+          resolvedCritic: streamResolvedCritic,
+          guardrailDenied: streamGuardrailDenied,
+        });
+        streamVerifyAttemptCount = fallbackTerminal.verifyAttemptCount;
+        streamRevisionCount = fallbackTerminal.revisionCount;
+        streamResolvedCritic = fallbackTerminal.resolvedCritic;
+        streamGuardrailDenied = fallbackTerminal.guardrailDenied;
+
+        if (fallbackTerminal.result.action === 'continue') {
+          for (const ev of fallbackTerminal.result.events) yield ev;
+          messages.push(...fallbackTerminal.result.appendMessages);
+          continue;
         }
 
         const responseStep: AgentStep = {
           index: steps.length,
           type: 'response',
-          content: fallbackFinal,
+          content: fallbackTerminal.result.finalContent,
           durationMs: Date.now() - stepStart,
-          tokenUsage: { prompt: response.usage.promptTokens, completion: response.usage.completionTokens },
+          tokenUsage: fallbackUsage,
         };
         steps.push(responseStep);
         yield { type: 'step_end', step: responseStep };
         yield {
           type: 'done',
-          result: buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'completed'),
+          // M-21: propagate guardrail denial on the fallback path too
+          result: buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, streamGuardrailDenied ? 'guardrail_denied' : 'completed'),
         };
         return;
       }
@@ -727,6 +675,143 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         result: buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'failed'),
       };
     },
+  };
+}
+
+// ─── Terminal response post-processor (H-18) ─────────────────
+//
+// Shared by the streaming and non-streaming fallback paths inside runStream().
+// Both paths do: guardrail-check → W2-verify → W1-reflect → finalize.
+// The only difference is which AgentStepEvent type to yield back — the caller
+// iterates `events` and yields them, then acts on `action`.
+
+type TerminalResponseAction =
+  | {
+      /** Continue the step loop — verify or reflect requested a revision. */
+      action: 'continue';
+      /** Events to yield before looping (verify_failed / reflect_revised). */
+      events: AgentStepEvent[];
+      /** Messages to append before looping. */
+      appendMessages: Message[];
+    }
+  | {
+      /** Terminal: all checks passed (or were skipped). */
+      action: 'done';
+      finalContent: string;
+      guardrailDenied: boolean;
+    };
+
+async function processTerminalResponse(opts: {
+  ctx: ExecutionContext;
+  model: Model;
+  rawContent: string;
+  agentName: string;
+  messages: Message[];
+  steps: AgentStep[];
+  stepStart: number;
+  tokenUsage: { prompt: number; completion: number };
+  verifyOpts?: { verifier: { verify(ctx: ExecutionContext, content: string, meta: { userInput: string }): Promise<{ passed: boolean; reason?: string; score?: number }> }; maxAttempts?: number };
+  reflectOpts?: { critic?: Critic; maxRevisions?: number; criteria?: string };
+  verifyAttemptCount: number;
+  revisionCount: number;
+  resolvedCritic: Critic | undefined;
+  guardrailDenied: boolean;
+}): Promise<{
+  result: TerminalResponseAction;
+  verifyAttemptCount: number;
+  revisionCount: number;
+  resolvedCritic: Critic | undefined;
+  guardrailDenied: boolean;
+}> {
+  let { verifyAttemptCount, revisionCount, resolvedCritic, guardrailDenied } = opts;
+  const { ctx, agentName, messages, steps, stepStart, tokenUsage } = opts;
+
+  // ── Guardrail output check ────────────────────────────────────────────────
+  let finalContent = opts.rawContent;
+  const outputGuardrails = ctx.runtime?.guardrails;
+  if (outputGuardrails?.checkOutput) {
+    let decision: { allow: boolean; redactedText?: string; reason?: string } = { allow: true };
+    try {
+      decision = await outputGuardrails.checkOutput(ctx, opts.rawContent);
+    } catch (err) {
+      decision = { allow: false, reason: `guardrails error: ${err instanceof Error ? err.message : String(err)}` };
+    }
+    if (!decision.allow) {
+      void weaveAudit(ctx, { action: 'agent.output.denied', outcome: 'denied', resource: agentName, details: { reason: decision.reason ?? 'guardrails' } });
+      finalContent = `Response blocked by guardrails: ${decision.reason ?? 'no reason'}`;
+      guardrailDenied = true;
+    } else if (decision.redactedText !== undefined) {
+      finalContent = decision.redactedText;
+    }
+  }
+
+  // ── W2: verify → regenerate ───────────────────────────────────────────────
+  if (opts.verifyOpts && !isExpired(ctx)) {
+    const maxAttempts = opts.verifyOpts.maxAttempts ?? 1;
+    if (verifyAttemptCount < maxAttempts) {
+      let vr: { passed: boolean; reason?: string; score?: number };
+      try {
+        vr = await opts.verifyOpts.verifier.verify(ctx, finalContent, { userInput: lastUserMessage(messages) });
+      } catch (err) {
+        vr = { passed: false, reason: `verifier error: ${err instanceof Error ? err.message : String(err)}` };
+      }
+      if (!vr.passed) {
+        verifyAttemptCount++;
+        void weaveAudit(ctx, { action: 'agent.verify.failed', outcome: 'failure', resource: agentName, details: { attempt: verifyAttemptCount, reason: vr.reason, score: vr.score } });
+        const vStep: AgentStep = { index: steps.length, type: 'thinking', content: `[verify:failed attempt=${verifyAttemptCount}] ${vr.reason ?? 'did not pass'}`, durationMs: Date.now() - stepStart, tokenUsage };
+        steps.push(vStep);
+        return {
+          result: {
+            action: 'continue',
+            events: [{ type: 'verify_failed', step: vStep }],
+            appendMessages: [
+              { role: 'assistant', content: finalContent },
+              { role: 'user', content: `Your previous response did not pass verification (${vr.reason ?? 'quality check failed'}). Please regenerate a better response.` },
+            ],
+          },
+          verifyAttemptCount, revisionCount, resolvedCritic, guardrailDenied,
+        };
+      }
+    }
+  }
+
+  // ── W1: reflect → revise ─────────────────────────────────────────────────
+  if (opts.reflectOpts && !isExpired(ctx)) {
+    const maxRevisions = opts.reflectOpts.maxRevisions ?? 1;
+    if (revisionCount < maxRevisions) {
+      if (!resolvedCritic) {
+        resolvedCritic = opts.reflectOpts.critic ?? await buildDefaultCritic(opts.model, opts.reflectOpts.criteria);
+      }
+      let cr: { accepted: boolean; feedback?: string; score?: number };
+      try {
+        cr = await resolvedCritic.critique(ctx, lastUserMessage(messages), finalContent);
+      } catch (err) {
+        cr = { accepted: false, feedback: `critic error: ${err instanceof Error ? err.message : String(err)}` };
+      }
+      if (!cr.accepted) {
+        revisionCount++;
+        void weaveAudit(ctx, { action: 'agent.reflect.revise', outcome: 'success', resource: agentName, details: { revision: revisionCount, score: cr.score, feedback: cr.feedback } });
+        const rStep: AgentStep = { index: steps.length, type: 'thinking', content: `[reflect:revision=${revisionCount}] ${cr.feedback ?? 'critique requested revision'}`, durationMs: Date.now() - stepStart, tokenUsage };
+        steps.push(rStep);
+        return {
+          result: {
+            action: 'continue',
+            events: [{ type: 'reflect_revised', step: rStep }],
+            appendMessages: [
+              { role: 'assistant', content: finalContent },
+              { role: 'user', content: `Please revise your response based on this feedback: ${cr.feedback ?? 'Improve the quality of your answer.'}` },
+            ],
+          },
+          verifyAttemptCount, revisionCount, resolvedCritic, guardrailDenied,
+        };
+      }
+      void weaveAudit(ctx, { action: 'agent.reflect.accepted', outcome: 'success', resource: agentName, details: { revision: revisionCount, score: cr.score } });
+    }
+  }
+
+  return {
+    result: { action: 'done', finalContent, guardrailDenied },
+    verifyAttemptCount, revisionCount, resolvedCritic, guardrailDenied,
   };
 }
 
@@ -782,8 +867,28 @@ async function executeToolCall(
     }
 
     // Legacy per-agent policy hook — still honoured for backwards compat.
+    // H-11: use safeParseJson so a malformed arguments string from the model
+    // does not throw an unhandled exception that bypasses the denial logic.
+    // On parse failure, block the tool call and return an error result — it is
+    // safer to deny a call with unparseable arguments than to let it through.
     if (policy?.approveToolCall) {
-      const decision = await policy.approveToolCall(ctx, tool.schema, JSON.parse(tc.arguments));
+      let policyArgs: Record<string, unknown>;
+      try {
+        policyArgs = JSON.parse(tc.arguments) as Record<string, unknown>;
+      } catch (parseErr) {
+        // Arguments string is invalid JSON — block the call rather than crash.
+        const errMsg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+        resultContent = `Tool call blocked: could not parse tool arguments — ${errMsg}`;
+        eventBus?.emit(weaveEvent(EventTypes.ToolCallError, { tool: toolName, reason: 'invalid_arguments' }, ctx));
+        void weaveAudit(ctx, { action: 'agent.tool.invoke', outcome: 'denied', resource: toolName, details: { agent: agentName, reason: 'invalid_arguments', raw: tc.arguments.slice(0, 200) } });
+        return {
+          index: 0,
+          type: 'tool_call',
+          toolCall: { name: toolName, arguments: { _raw: tc.arguments }, result: resultContent },
+          durationMs: Date.now() - stepStart,
+        };
+      }
+      const decision = await policy.approveToolCall(ctx, tool.schema, policyArgs);
       if (!decision.approved) {
         resultContent = `Tool call denied by policy: ${decision.reason ?? 'no reason'}`;
         eventBus?.emit(weaveEvent(EventTypes.ToolCallError, { tool: toolName, reason: 'policy_denied' }, ctx));
@@ -791,7 +896,7 @@ async function executeToolCall(
         return {
           index: 0,
           type: 'tool_call',
-          toolCall: { name: toolName, arguments: JSON.parse(tc.arguments), result: resultContent },
+          toolCall: { name: toolName, arguments: policyArgs, result: resultContent },
           durationMs: Date.now() - stepStart,
         };
       }
@@ -847,6 +952,8 @@ function buildUsage(
 ): AgentUsage {
   return {
     totalSteps: steps.length,
+    promptTokens,
+    completionTokens,
     totalTokens: promptTokens + completionTokens,
     totalDurationMs: Date.now() - startTime,
     toolCalls: toolCallCount,

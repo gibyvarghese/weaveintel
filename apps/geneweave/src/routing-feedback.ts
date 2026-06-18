@@ -18,8 +18,11 @@
  * auto-disables capability rows on >20% drops.
  */
 
+import { createLogger } from '@weaveintel/core';
 import type { DatabaseAdapter, RoutingCapabilitySignalRow, ModelCapabilityScoreRow } from './db-types.js';
 import { newUUIDv7 } from './lib/uuid.js';
+
+const logger = createLogger('routing-feedback');
 
 export type SignalSource = 'eval' | 'chat' | 'cache' | 'production';
 
@@ -223,7 +226,7 @@ export async function runRoutingRegressionPass(db: DatabaseAdapter): Promise<Reg
 
   const rows = await db.listRoutingCapabilitySignals({ afterIso: cutoff30, limit: 5000 });
   if (rows.length >= 5000) {
-    console.warn('[routing-feedback] signal query returned 5000 rows (limit hit) — regression window may be operating on incomplete data. Consider raising the limit or purging old signals.');
+    logger.warn('signal query returned 5000 rows (limit hit) — regression window may be operating on incomplete data. Consider raising the limit or purging old signals.');
   }
   const groups = groupSignals(rows);
 

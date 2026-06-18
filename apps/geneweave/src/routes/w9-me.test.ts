@@ -185,6 +185,10 @@ function buildDb(): DatabaseAdapter & {
       idempotencyMap.set(rec.key, rec);
     },
 
+    // ── Temporal reminders — no-op stubs ────────────────────────────────────
+    async listTemporalRemindersByUserId(_userId: string) { return []; },
+    async deleteTemporalReminderById(_reminderId: string, _userId: string) { return false; },
+
     // ── Everything else is unused in these tests — no-op stubs ─────────────
   } as unknown as DatabaseAdapter & {
     _runs: Map<string, UserRunRow>;

@@ -259,8 +259,14 @@ export function withTenantEncryptedDb(
               rowId: id,
               plaintext: title,
             });
-          } catch {
-            // graceful pass-through — never block writes
+          } catch (encErr) {
+            // L-7: Log the encryption failure so operators can detect key
+            // misconfiguration or KMS unavailability before it causes a
+            // compliance gap (plaintext title written when encrypted was expected).
+            console.warn(
+              '[encryption] updateChatTitle encryption failed — writing plaintext fallback. Error:',
+              encErr instanceof Error ? encErr.message : String(encErr),
+            );
             toWrite = title;
           }
           return rawDb.updateChatTitle(id, userId, toWrite);

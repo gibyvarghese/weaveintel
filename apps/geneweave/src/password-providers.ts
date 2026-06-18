@@ -354,8 +354,22 @@ export class ChromeProvider implements PasswordManagerProvider {
       // Read URLs and usernames (passwords are encrypted — we extract raw entries)
       let query = "SELECT origin_url, username_value, date_created FROM logins WHERE blacklisted_by_user = 0";
       if (search) {
-        const escapedSearch = search.replace(/'/g, "''").slice(0, 128);
-        query += ` AND (origin_url LIKE '%${escapedSearch}%' OR username_value LIKE '%${escapedSearch}%')`;
+        // H-1: Escape SQL string delimiters AND LIKE special characters before
+        // interpolating into the query. Escaping single-quotes alone is not
+        // enough — LIKE treats `%` and `_` as wildcards, so an unescaped
+        // search term like `%` would match every row and `%_` would enable
+        // wildcard abuse. We also escape `\` because we use `\` as the ESCAPE
+        // character in the LIKE clause below.
+        //
+        // Escape order matters: backslash must be escaped first so we do not
+        // double-escape the backslashes we are about to introduce.
+        const escapedSearch = search
+          .slice(0, 128)          // hard length cap first
+          .replace(/'/g, "''")    // SQL string delimiter
+          .replace(/\\/g, '\\\\') // LIKE escape char (must come before % and _)
+          .replace(/%/g, '\\%')   // LIKE wildcard: any sequence
+          .replace(/_/g, '\\_');  // LIKE wildcard: any single character
+        query += ` AND (origin_url LIKE '%${escapedSearch}%' ESCAPE '\\' OR username_value LIKE '%${escapedSearch}%' ESCAPE '\\')`;
       }
       query += ' ORDER BY date_last_used DESC LIMIT 200';
 

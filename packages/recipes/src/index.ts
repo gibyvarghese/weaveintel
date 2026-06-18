@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // @weaveintel/recipes — Public API
 export { weaveWorkflowTool, type WorkflowToolOptions, type WorkflowToolResult } from './createWorkflowTool.js';
 export { createWorkflowAgent, type WorkflowAgentOptions } from './createWorkflowAgent.js';

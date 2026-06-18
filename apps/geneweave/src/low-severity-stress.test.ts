@@ -587,7 +587,8 @@ describe('S-11 — evaluateTaskPolicies logs on error', () => {
     const dir = dirname(fileURLToPath(import.meta.url));
     const src = readFileSync(join(dir, 'chat-guardrail-eval-utils.ts'), 'utf8');
     expect(src).toContain('evaluateTaskPolicies error — returning empty checks');
-    expect(src).toContain('console.error');
+    // R5: migrated from console.error to structured createLogger
+    expect(src).toContain('logger.error');
   });
 });
 

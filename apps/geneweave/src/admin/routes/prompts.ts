@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { newUUIDv7, weaveContext } from '@weaveintel/core';
 import {
@@ -22,6 +23,7 @@ import {
   validateDetailedDescription,
   clearDefaultPromptExcept,
   safeParsePromptVariables,
+  toDbUpdate,
 } from '../api/admin-route-helpers.js';
 import type { RouterLike } from '../api/types.js';
 
@@ -107,7 +109,7 @@ export function registerAdminPromptRoutes(
     if (body['metadata'] !== undefined) fields['metadata'] = normalizeJsonField(body['metadata']);
     if (body['is_default'] !== undefined) fields['is_default'] = body['is_default'] ? 1 : 0;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updatePrompt(params['id']!, fields as any);
+    await db.updatePrompt(params['id']!, toDbUpdate(fields));
     if (body['is_default']) await clearDefaultPromptExcept(db, params['id']!);
     const prompt = await db.getPrompt(params['id']!);
     json(res, 200, { prompt });
@@ -166,7 +168,7 @@ export function registerAdminPromptRoutes(
     if (body['sections'] !== undefined) fields['sections'] = typeof body['sections'] === 'string' ? body['sections'] : JSON.stringify(body['sections']);
     if (body['section_separator'] !== undefined) fields['section_separator'] = body['section_separator'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updatePromptFramework(params['id']!, fields as any);
+    await db.updatePromptFramework(params['id']!, toDbUpdate(fields));
     const framework = await db.getPromptFramework(params['id']!);
     json(res, 200, { framework });
   }, { auth: true, csrf: true });
@@ -232,7 +234,7 @@ export function registerAdminPromptRoutes(
     if (body['tags'] !== undefined) fields['tags'] = typeof body['tags'] === 'string' ? body['tags'] : JSON.stringify(body['tags']);
     if (body['version'] !== undefined) fields['version'] = body['version'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updatePromptFragment(params['id']!, fields as any);
+    await db.updatePromptFragment(params['id']!, toDbUpdate(fields));
     const fragment = await db.getPromptFragment(params['id']!);
     json(res, 200, { fragment });
   }, { auth: true, csrf: true });
@@ -294,7 +296,7 @@ export function registerAdminPromptRoutes(
     if (body['schema'] !== undefined) fields['schema'] = typeof body['schema'] === 'string' ? body['schema'] : JSON.stringify(body['schema']);
     if (body['config'] !== undefined) fields['config'] = typeof body['config'] === 'string' ? body['config'] : JSON.stringify(body['config']);
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updatePromptContract(params['id']!, fields as any);
+    await db.updatePromptContract(params['id']!, toDbUpdate(fields));
     const contract = await db.getPromptContract(params['id']!);
     json(res, 200, { contract });
   }, { auth: true, csrf: true });
@@ -367,7 +369,7 @@ export function registerAdminPromptRoutes(
     if (body['config'] !== undefined) fields['config'] = normalizeJsonField(body['config']) ?? '{}';
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
 
-    await db.updatePromptStrategy(params['id']!, fields as any);
+    await db.updatePromptStrategy(params['id']!, toDbUpdate(fields));
     const strategy = await db.getPromptStrategy(params['id']!);
     json(res, 200, { strategy });
   }, { auth: true, csrf: true });
@@ -440,7 +442,7 @@ export function registerAdminPromptRoutes(
     if (body['metadata'] !== undefined) fields['metadata'] = normalizeJsonField(body['metadata']);
     if (body['is_active'] !== undefined) fields['is_active'] = body['is_active'] ? 1 : 0;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updatePromptVersion(params['id']!, fields as any);
+    await db.updatePromptVersion(params['id']!, toDbUpdate(fields));
     const version = await db.getPromptVersion(params['id']!);
     json(res, 200, { version });
   }, { auth: true, csrf: true });
@@ -505,7 +507,7 @@ export function registerAdminPromptRoutes(
     if (body['variants_json'] !== undefined) fields['variants_json'] = typeof body['variants_json'] === 'string' ? body['variants_json'] : JSON.stringify(body['variants_json']);
     if (body['assignment_key_template'] !== undefined) fields['assignment_key_template'] = body['assignment_key_template'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updatePromptExperiment(params['id']!, fields as any);
+    await db.updatePromptExperiment(params['id']!, toDbUpdate(fields));
     const experiment = await db.getPromptExperiment(params['id']!);
     json(res, 200, { experiment });
   }, { auth: true, csrf: true });
@@ -578,7 +580,7 @@ export function registerAdminPromptRoutes(
     if (body['metadata'] !== undefined) fields['metadata'] = normalizeJsonField(body['metadata']);
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
 
-    await db.updatePromptEvalDataset(params['id']!, fields as any);
+    await db.updatePromptEvalDataset(params['id']!, toDbUpdate(fields));
     const dataset = await db.getPromptEvalDataset(params['id']!);
     json(res, 200, { dataset });
   }, { auth: true, csrf: true });
@@ -700,7 +702,7 @@ export function registerAdminPromptRoutes(
     if (body['config'] !== undefined) fields['config'] = normalizeJsonField(body['config']) ?? '{}';
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
 
-    await db.updatePromptOptimizer(params['id']!, fields as any);
+    await db.updatePromptOptimizer(params['id']!, toDbUpdate(fields));
     const optimizer = await db.getPromptOptimizer(params['id']!);
     json(res, 200, { optimizer });
   }, { auth: true, csrf: true });
@@ -804,7 +806,7 @@ export function registerAdminPromptRoutes(
       rubric: dataset.rubric_json ? parseJsonValue(dataset.rubric_json, [] as Array<Record<string, unknown>>) : undefined,
     };
 
-    const result = await evaluatePromptDatasetForRecord(resolved.record, evalDataset as any, {
+    const result = await evaluatePromptDatasetForRecord(resolved.record, evalDataset as unknown as Parameters<typeof evaluatePromptDatasetForRecord>[1], {
       passThreshold: typeof body['pass_threshold'] === 'number'
         ? body['pass_threshold'] as number
         : dataset.pass_threshold,
@@ -904,7 +906,7 @@ export function registerAdminPromptRoutes(
         const comparison = await comparePromptDatasetResults({
           baselineRecord: resolved.record,
           candidateRecord,
-          dataset: datasetObj as any,
+          dataset: datasetObj as unknown as Parameters<typeof comparePromptDatasetResults>[0]['dataset'],
           options: { passThreshold: dataset.pass_threshold },
         });
         evalBaselineJson = JSON.stringify(comparison.baseline);

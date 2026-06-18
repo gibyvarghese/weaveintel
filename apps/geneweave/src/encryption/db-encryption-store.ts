@@ -113,6 +113,11 @@ export function createDbEncryptionStore(db: DatabaseAdapter): EncryptionStore {
     async listKeks(tenantId) {
       return (await db.listTenantKeks(tenantId)).map(rowToKek);
     },
+    // H-13: Point lookup — avoids O(n) list scan on every encrypt/decrypt.
+    async getKekById(tenantId, kekId) {
+      const r = await db.getTenantKekById(tenantId, kekId);
+      return r ? rowToKek(r) : null;
+    },
     async insertKek(k) {
       await db.insertTenantKek({
         id: k.id,
@@ -130,6 +135,15 @@ export function createDbEncryptionStore(db: DatabaseAdapter): EncryptionStore {
     },
     async listDeks(tenantId) {
       return (await db.listTenantDeks(tenantId)).map(rowToDek);
+    },
+    // H-13: Point lookup — avoids O(n) list scan on every decrypt.
+    async getDekById(tenantId, dekId) {
+      const r = await db.getTenantDekById(tenantId, dekId);
+      return r ? rowToDek(r) : null;
+    },
+    // H-13: Returns the highest active DEK epoch — used by rotation path.
+    async getMaxDekEpoch(tenantId) {
+      return db.getMaxTenantDekEpoch(tenantId);
     },
     async insertDek(d) {
       await db.insertTenantDek({

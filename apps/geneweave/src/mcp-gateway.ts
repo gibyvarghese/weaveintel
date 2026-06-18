@@ -107,13 +107,18 @@ export interface MCPGatewayOptions {
    */
   touchClient?: (clientId: string) => Promise<void>;
   /**
-   * Phase 7 — per-client tumbling 1-minute rate limit. When the matched
-   * client row carries a non-null `rate_limit_per_minute`, the gateway
-   * calls this hook before serving the request; a `false` return blocks
-   * the request with HTTP 429. The hook owns atomicity (typically a
-   * SQLite transaction in `checkAndIncrementGatewayRateLimit`).
+   * A-9 + Phase 7 — per-client tumbling 1-minute rate limit scoped to a
+   * `(tenantId, clientId)` tuple. When the matched client row carries a
+   * non-null `rate_limit_per_minute`, the gateway calls this hook before
+   * serving the request; a `false` return blocks with HTTP 429. The hook
+   * owns atomicity (typically a SQLite transaction in
+   * `checkAndIncrementGatewayRateLimit`).
+   *
+   * `tenantId` matches `MCPGatewayClientRow.tenant_id` — pass `null` for
+   * single-tenant deployments. The DB implementation normalises it to '' so
+   * the unique index constraint never has a nullable key component.
    */
-  gatewayRateLimiter?: (clientId: string, windowStartIso: string, limitPerMinute: number) => Promise<boolean>;
+  gatewayRateLimiter?: (tenantId: string | null, clientId: string, windowStartIso: string, limitPerMinute: number) => Promise<boolean>;
   /**
    * Phase 8 — append-only request logger. Invoked once per terminal
    * outcome (ok / rate_limited / unauthorized / disabled / error). The
@@ -452,7 +457,9 @@ export function createMCPGateway(opts: MCPGatewayOptions): MCPGatewayHandle {
         )).toISOString();
         let allowed = true;
         try {
+          // A-9: pass tenantId so the rate bucket is keyed on (tenantId, clientId).
           allowed = await gatewayRateLimiter(
+            authResult.client.tenant_id ?? null,
             authResult.client.id,
             windowStart,
             authResult.client.rate_limit_per_minute,

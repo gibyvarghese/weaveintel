@@ -1,5 +1,7 @@
-import { newUUIDv7 } from '@weaveintel/core';
+import { newUUIDv7, createLogger } from '@weaveintel/core';
 import type { ExecutionContext, Model, ModelRequest } from '@weaveintel/core';
+
+const logger = createLogger('chat-memory');
 import { runHybridMemoryExtraction, weaveGovernancePolicy, type ExtractedEntity, type MemoryExtractionRule, type GovernanceRule } from '@weaveintel/memory';
 import type { DatabaseAdapter } from './db.js';
 import { getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
@@ -333,7 +335,7 @@ export async function buildMemoryContext(
     }
     return parts.join('\n');
   } catch (err) {
-    console.warn('[chat-memory] buildMemoryContext failed — skipping memory context', err);
+    logger.warn('buildMemoryContext failed — skipping memory context', { err });
     return null;
   }
 }
@@ -611,7 +613,7 @@ export async function buildWorkingMemoryContext(
     const preview = JSON.stringify(parsed, null, 2).slice(0, 1200);
     return `[Working memory — agent scratch state from previous step]\nSnapshot ID: ${snapshot.id}\nSaved: ${snapshot.created_at}\n${preview}`;
   } catch (err) {
-    console.warn('[chat-memory] buildWorkingMemoryContext failed — skipping', err);
+    logger.warn('buildWorkingMemoryContext failed — skipping', { err });
     return null;
   }
 }
@@ -631,7 +633,7 @@ export async function loadProceduralInstructions(
     const deltas = entries.map((e) => `• ${e.instruction_delta}`).join('\n');
     return `[Personalised agent instructions for this user]\n${deltas}`;
   } catch (err) {
-    console.warn('[chat-memory] loadProceduralInstructions failed — skipping', err);
+    logger.warn('loadProceduralInstructions failed — skipping', { err });
     return null;
   }
 }
@@ -656,7 +658,7 @@ export async function buildEpisodicContext(
     });
     return `[Recent conversation history]\n${lines.join('\n')}`;
   } catch (err) {
-    console.warn('[chat-memory] buildEpisodicContext failed — skipping', err);
+    logger.warn('buildEpisodicContext failed — skipping', { err });
     return null;
   }
 }

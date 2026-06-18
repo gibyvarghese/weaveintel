@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/identity — Public API
  */
@@ -5,6 +6,7 @@
 export {
   createIdentity,
   createIdentityContext,
+  createBootstrapIdentityContext,
   systemIdentity,
   agentIdentity,
 } from './context.js';
@@ -15,6 +17,7 @@ export {
   isDelegationExpired,
   isDelegationAuthorised,
   validateDelegationChain,
+  assertDelegationValid,
 } from './delegation.js';
 
 export {
@@ -36,6 +39,9 @@ export type {
 } from './rbac.js';
 
 export { weaveInMemoryTokenResolver } from './secrets.js';
+
+// Domain error classes (L-27+A-6)
+export { DelegationExpiredError } from './errors.js';
 
 export { createSurfaceCatalogResolver } from './surface-catalog-resolver.js';
 export type { CatalogSource, AccessCheck, CatalogCache, SurfaceCatalogResolverOptions } from './surface-catalog-resolver.js';

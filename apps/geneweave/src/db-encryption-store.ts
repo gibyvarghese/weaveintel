@@ -91,6 +91,13 @@ export class SqliteEncryptionStore {
     return this.db.prepare('SELECT * FROM tenant_keks WHERE tenant_id = ? ORDER BY version ASC').all(tenantId) as TenantKekRow[];
   }
 
+  // H-13: Point lookup — O(1) vs O(n) from listTenantKeks().find().
+  // Used by key-manager's #getKekRow() to avoid full KEK list scans on
+  // every encrypt/decrypt operation.
+  async getTenantKekById(tenantId: string, kekId: string): Promise<TenantKekRow | null> {
+    return (this.db.prepare('SELECT * FROM tenant_keks WHERE tenant_id = ? AND id = ?').get(tenantId, kekId) as TenantKekRow | undefined) ?? null;
+  }
+
   async updateTenantKekStatus(id: string, status: string, ts: number): Promise<void> {
     const col = status === 'rotated' ? 'rotated_at' : status === 'revoked' ? 'revoked_at' : null;
     if (col) {
@@ -108,6 +115,20 @@ export class SqliteEncryptionStore {
 
   async listTenantDeks(tenantId: string): Promise<TenantDekRow[]> {
     return this.db.prepare('SELECT * FROM tenant_deks WHERE tenant_id = ? ORDER BY epoch ASC').all(tenantId) as TenantDekRow[];
+  }
+
+  // H-13: Point lookup by ID — avoids O(n) list scan for every decrypt.
+  async getTenantDekById(tenantId: string, dekId: string): Promise<TenantDekRow | null> {
+    return (this.db.prepare('SELECT * FROM tenant_deks WHERE tenant_id = ? AND id = ?').get(tenantId, dekId) as TenantDekRow | undefined) ?? null;
+  }
+
+  // H-13: Returns the highest epoch among active DEKs for a tenant.
+  // Used by the rotation path to determine the next epoch without listing all DEKs.
+  async getMaxTenantDekEpoch(tenantId: string): Promise<number | null> {
+    const row = this.db.prepare(
+      `SELECT MAX(epoch) AS max_epoch FROM tenant_deks WHERE tenant_id = ? AND status = 'active'`,
+    ).get(tenantId) as { max_epoch: number | null } | undefined;
+    return row?.max_epoch ?? null;
   }
 
   async updateTenantDekStatus(id: string, status: string, ts: number): Promise<void> {

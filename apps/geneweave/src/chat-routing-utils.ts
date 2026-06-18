@@ -4,7 +4,10 @@
  * Extracted from ChatEngine to keep chat.ts focused on orchestration.
  */
 
+import { createLogger } from '@weaveintel/core';
 import type { CachePolicy, ModelHealth, OutputModality, RoutingToolDescriptor as ToolDescriptor } from '@weaveintel/core';
+
+const logger = createLogger('chat-routing');
 import { SmartModelRouter } from '@weaveintel/routing';
 import type { ModelCostInfo, ModelQualityInfo } from '@weaveintel/routing';
 import type { ModelCapabilityRow, TaskTypeInferenceHints } from '@weaveintel/core';
@@ -220,7 +223,7 @@ export async function routeModel(
       inferenceSource: decision.taskMeta?.inferenceSource,
     };
   } catch (err) {
-    console.error('[chat-routing] model routing failed, falling back to null', err);
+    logger.error('model routing failed, falling back to null', { err });
     return null;
   }
 }

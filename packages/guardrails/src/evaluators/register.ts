@@ -14,9 +14,11 @@ import { createLlmJudgeEvaluator } from './llm-judge.js';
 import { createInjectionEvaluator } from './injection.js';
 import { createSycophancyEvaluator } from './sycophancy.js';
 import { createSemanticGroundingEvaluator } from './semantic-grounding.js';
+import { createSystemPromptLeakageEvaluator } from './system-prompt-leakage.js';
 
 defaultRegistry.register('moderation', createModerationEvaluator());
 defaultRegistry.register('llm-judge', createLlmJudgeEvaluator());
 defaultRegistry.register('injection-classifier', createInjectionEvaluator());
 defaultRegistry.register('sycophancy-judge', createSycophancyEvaluator());
 defaultRegistry.register('semantic-grounding', createSemanticGroundingEvaluator());
+defaultRegistry.register('system-prompt-leakage', createSystemPromptLeakageEvaluator());

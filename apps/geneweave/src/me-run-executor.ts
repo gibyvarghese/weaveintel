@@ -24,8 +24,10 @@
  * Vocabulary: no "chat", "conversation", "message" (HTTP sense), "turn".
  */
 
-import { newUUIDv7, weaveContext } from '@weaveintel/core';
+import { newUUIDv7, createLogger, weaveContext } from '@weaveintel/core';
 import type { ExecutionContext } from '@weaveintel/core';
+
+const logger = createLogger('me-run-executor');
 import type { ServerResponse } from 'node:http';
 import type { DatabaseAdapter } from './db-types.js';
 
@@ -257,7 +259,7 @@ export class MeRunExecutor {
     const run = prev.then(fn, fn);
     this.#locks.set(runId, run.then(
       () => {},
-      (err) => { console.error(`[me-run-executor] lock chain error for run ${runId}`, err); },
+      (err) => { logger.error(`lock chain error for run ${runId}`, { err }); },
     ));
     return run;
   }
@@ -308,7 +310,7 @@ export class MeRunExecutor {
       // between dispatch and execution in the background queue.
       const ownedRun = await this.#db.getUserRun(runId, userId);
       if (!ownedRun) {
-        console.error(`[me-run-executor] run ${runId} not found for user ${userId} — aborting`);
+        logger.error(`run ${runId} not found for user ${userId} — aborting`);
         return;
       }
       await this.#db.updateUserRunStatus(runId, userId, 'running');

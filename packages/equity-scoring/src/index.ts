@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 export { buildPeerSet, computeFactor, scoreSymbol, scoreUniverse, explainScore } from './scorer.js';
 export { strategies } from './strategies.js';
 export { detectFlags } from './flags.js';

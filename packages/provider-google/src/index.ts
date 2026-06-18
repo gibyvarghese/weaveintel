@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/provider-google — Google Gemini chat models for weaveIntel.
  *

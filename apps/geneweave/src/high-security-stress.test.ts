@@ -48,6 +48,8 @@ class InMemStore implements EncryptionStore {
   async upsertPolicy(p: TenantPolicyRecord) { this.policy = p; }
   async listKeks(_tenantId: string) { return [...this.keks]; }
   async insertKek(k: KekRecord) { this.keks.push(k); }
+  // H-13: point-lookup impls for the in-memory test store.
+  async getKekById(_tenantId: string, kekId: string) { return this.keks.find((k) => k.id === kekId) ?? null; }
   async updateKekStatus(id: string, s: KeyStatus, ts: number) {
     this.keks = this.keks.map((k) =>
       k.id === id ? { ...k, status: s, rotatedAt: s === 'previous' ? ts : k.rotatedAt, revokedAt: s === 'revoked' ? ts : k.revokedAt } : k,
@@ -55,6 +57,12 @@ class InMemStore implements EncryptionStore {
   }
   async listDeks(_tenantId: string) { return [...this.deks]; }
   async insertDek(d: DekRecord) { this.deks.push(d); }
+  // H-13: point-lookup and max-epoch for DEKs.
+  async getDekById(_tenantId: string, dekId: string) { return this.deks.find((d) => d.id === dekId) ?? null; }
+  async getMaxDekEpoch(_tenantId: string) {
+    const active = this.deks.filter((d) => d.status === 'active');
+    return active.length ? Math.max(...active.map((d) => d.epoch)) : null;
+  }
   async updateDekStatus(id: string, s: KeyStatus, ts: number) {
     this.deks = this.deks.map((d) =>
       d.id === id ? { ...d, status: s, rotatedAt: s === 'previous' ? ts : d.rotatedAt, revokedAt: s === 'revoked' ? ts : d.revokedAt } : d,

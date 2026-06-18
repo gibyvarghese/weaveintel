@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Core chat model (Messages API — chat, tool use, vision, PDF, thinking, caching, citations, streaming)
 export {
   weaveAnthropicModel,

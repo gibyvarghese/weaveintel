@@ -73,6 +73,11 @@ export function weaveDynamoDbEncryptionStore(
     async listKeks(tenantId) {
       return queryByTenant<KekRecord>(kekTable, tenantId, 'version');
     },
+    async getKekById(tenantId, kekId) {
+      // DynamoDB GetItem by primary key; falls back to list+find if schema uses tenantId as PK.
+      const all = await queryByTenant<KekRecord>(kekTable, tenantId, 'version');
+      return all.find((k) => k.id === kekId) ?? null;
+    },
     async insertKek(k) {
       await client.send(new PutCommand({ TableName: kekTable, Item: k as unknown as Record<string, unknown> }));
     },
@@ -99,6 +104,15 @@ export function weaveDynamoDbEncryptionStore(
     },
     async listDeks(tenantId) {
       return queryByTenant<DekRecord>(dekTable, tenantId, 'epoch');
+    },
+    async getDekById(tenantId, dekId) {
+      const all = await queryByTenant<DekRecord>(dekTable, tenantId, 'epoch');
+      return all.find((d) => d.id === dekId) ?? null;
+    },
+    async getMaxDekEpoch(tenantId) {
+      const all = await queryByTenant<DekRecord>(dekTable, tenantId, 'epoch');
+      const active = all.filter((d) => d.status === 'active');
+      return active.length ? Math.max(...active.map((d) => d.epoch)) : null;
     },
     async insertDek(d) {
       await client.send(new PutCommand({ TableName: dekTable, Item: d as unknown as Record<string, unknown> }));

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // @weaveintel/graph — Public API
 export {
   type EntityNode,

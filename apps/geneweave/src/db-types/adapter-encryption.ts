@@ -8,9 +8,15 @@ export interface IEncryptionStore {
   deleteTenantEncryptionPolicy(tenantId: string): Promise<void>;
   insertTenantKek(k: Omit<TenantKekRow, never>): Promise<void>;
   listTenantKeks(tenantId: string): Promise<TenantKekRow[]>;
+  /** H-13: Point lookup — avoids O(n) list scan on every encrypt/decrypt. */
+  getTenantKekById(tenantId: string, kekId: string): Promise<TenantKekRow | null>;
   updateTenantKekStatus(id: string, status: string, ts: number): Promise<void>;
   insertTenantDek(d: Omit<TenantDekRow, never>): Promise<void>;
   listTenantDeks(tenantId: string): Promise<TenantDekRow[]>;
+  /** H-13: Point lookup — avoids O(n) list scan on every decrypt. */
+  getTenantDekById(tenantId: string, dekId: string): Promise<TenantDekRow | null>;
+  /** H-13: Max active DEK epoch — used by rotation path without a full list scan. */
+  getMaxTenantDekEpoch(tenantId: string): Promise<number | null>;
   updateTenantDekStatus(id: string, status: string, ts: number): Promise<void>;
   insertTenantBik(b: Omit<TenantBikRow, never>): Promise<void>;
   listTenantBiks(tenantId: string): Promise<TenantBikRow[]>;

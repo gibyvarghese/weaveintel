@@ -17,6 +17,10 @@ export interface UserRow {
    * has `blind_index_enabled=true`. Lookup path: `WHERE email_bidx = ?`.
    */
   email_bidx?: string | null;
+  /** 4.17: 1 = TOTP MFA enrolled and confirmed; 0 = not enrolled. */
+  mfa_enabled?: number;
+  /** 4.17: Vault-encrypted (or plaintext) base32 TOTP secret. NULL = not yet set up. */
+  mfa_totp_secret?: string | null;
 }
 
 export interface SessionRow {
@@ -25,6 +29,8 @@ export interface SessionRow {
   csrf_token: string;
   expires_at: string;
   created_at: string;
+  /** 4.17: ISO timestamp of the most recent step-up MFA challenge. NULL = not yet verified. */
+  mfa_verified_at?: string | null;
 }
 
 export interface OAuthLinkedAccountRow {

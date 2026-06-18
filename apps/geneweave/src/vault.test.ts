@@ -1,6 +1,6 @@
 import { createCipheriv, randomBytes, scryptSync } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
-import { decryptCredential, encryptCredential } from './vault.js';
+import { decryptCredential, encryptCredential, clearVaultKeyCache } from './vault.js';
 
 const ALGO = 'aes-256-gcm';
 const LEGACY_IV_LEN = 16;
@@ -10,6 +10,10 @@ const LEGACY_KEY_LEN = 32;
 const ORIGINAL_VAULT_KEY = process.env['VAULT_KEY'];
 
 afterEach(() => {
+  // Clear the module-level key cache so each test starts with a clean slate
+  // (see L-5: the cache persists across calls; without clearing it the
+  // "VAULT_KEY missing" test would see the previous test's cached key).
+  clearVaultKeyCache();
   process.env['VAULT_KEY'] = ORIGINAL_VAULT_KEY;
 });
 

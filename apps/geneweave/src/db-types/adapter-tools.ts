@@ -18,6 +18,8 @@ export interface IToolStore {
   updateToolPolicy(id: string, fields: Partial<Omit<ToolPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteToolPolicy(id: string): Promise<void>;
   checkAndIncrementRateLimit(toolName: string, scopeKey: string, windowStartIso: string, limitPerMinute: number): Promise<boolean>;
+  /** M-10: Returns how many calls have been made in the current window bucket. */
+  getToolRateLimitCount(toolName: string, scopeKey: string, windowStartIso: string): Promise<number>;
 
   // Tool audit events
   insertToolAuditEvent(event: Omit<ToolAuditEventRow, 'created_at'>): Promise<void>;
@@ -53,7 +55,10 @@ export interface IToolStore {
   touchMCPGatewayClient(id: string): Promise<void>;
   revokeMCPGatewayClient(id: string): Promise<void>;
   deleteMCPGatewayClient(id: string): Promise<void>;
-  checkAndIncrementGatewayRateLimit(clientId: string, windowStartIso: string, limitPerMinute: number): Promise<boolean>;
+  /** A-9: Rate bucket is keyed on `(tenantId, clientId)` so tenants cannot
+   *  consume each other's quota. Pass `null` for `tenantId` on single-tenant
+   *  deployments — the implementation treats it as an empty string. */
+  checkAndIncrementGatewayRateLimit(tenantId: string | null, clientId: string, windowStartIso: string, limitPerMinute: number): Promise<boolean>;
   insertMCPGatewayRequestLog(row: Omit<MCPGatewayRequestLogRow, 'created_at'>): Promise<void>;
   listMCPGatewayRequestLog(opts: { clientId?: string; outcome?: MCPGatewayRequestOutcome; limit?: number; offset?: number }): Promise<MCPGatewayRequestLogRow[]>;
   summarizeMCPGatewayActivity(opts: { sinceIso: string }): Promise<MCPGatewayActivitySummary[]>;

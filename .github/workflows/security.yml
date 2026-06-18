@@ -1,0 +1,195 @@
+name: Security
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run weekly on Mondays at 02:00 UTC
+    - cron: '0 2 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  # ── CodeQL static analysis ─────────────────────────────────────────────────
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}
+
+  # ── npm audit gate ─────────────────────────────────────────────────────────
+  npm-audit:
+    name: npm Audit (Critical/High)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      # Hard gate: server runtime only. --omit=dev excludes test-tool vulns
+      # (vitest, vite). Mobile build-chain (Expo) is audited separately below
+      # as informational — those packages are upstream-unfixed build tools, not
+      # server runtime, and must not block server deploys.
+      - name: Audit server workspace (fail on high/critical)
+        run: |
+          npm audit --workspace=apps/geneweave --omit=dev --audit-level=high \
+            --json | tee audit-server.json
+          npm audit --workspace=apps/geneweave --omit=dev --audit-level=high
+
+      # Informational: mobile build-chain (Expo packages have upstream unfixed
+      # highs in @xmldom/xmldom, cacache, tar etc). Report only — do not block.
+      - name: Audit mobile workspace (informational)
+        continue-on-error: true
+        run: |
+          npm audit --workspace=clients/mobile --omit=dev \
+            --json | tee audit-mobile.json || true
+          echo "Mobile workspace audit complete (non-blocking)"
+
+      - name: Upload audit results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-results
+          path: |
+            audit-server.json
+            audit-mobile.json
+          retention-days: 14
+
+  # ── Secret scanning (gitleaks) ─────────────────────────────────────────────
+  gitleaks:
+    name: Secret Scanning (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+
+  # ── Container / dependency vulnerability scan (Trivy) ─────────────────────
+  trivy:
+    name: Trivy Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'
+
+      - name: Upload Trivy SARIF results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: Fail on CRITICAL vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL
+          exit-code: '1'
+          format: table
+
+  # ── SBOM generation (CycloneDX) ────────────────────────────────────────────
+  sbom:
+    name: Generate SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install CycloneDX npm plugin
+        run: npm install --no-save @cyclonedx/cyclonedx-npm
+
+      - name: Generate SBOM
+        run: npx @cyclonedx/cyclonedx-npm --output-format JSON --output-file sbom.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.json
+          retention-days: 90
+
+  # ── SPDX header coverage check ────────────────────────────────────────────
+  spdx-check:
+    name: SPDX License Header Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check SPDX headers on package entry points
+        run: |
+          MISSING=$(find packages -name 'index.ts' -not -path '*/node_modules/*' \
+            | xargs grep -rL 'SPDX-License-Identifier' 2>/dev/null || true)
+          if [ -n "$MISSING" ]; then
+            echo "❌ Files missing SPDX-License-Identifier header:"
+            echo "$MISSING"
+            exit 1
+          fi
+          echo "✅ All package entry points have SPDX headers"
+
+      - name: Check SPDX headers on key app files
+        run: |
+          MISSING=$(grep -rL 'SPDX-License-Identifier' \
+            apps/geneweave/src/server.ts \
+            apps/geneweave/src/server-core.ts \
+            apps/geneweave/src/auth.ts \
+            apps/geneweave/src/ui-server.ts \
+            2>/dev/null || true)
+          if [ -n "$MISSING" ]; then
+            echo "❌ Key app files missing SPDX-License-Identifier header:"
+            echo "$MISSING"
+            exit 1
+          fi
+          echo "✅ Key app files have SPDX headers"

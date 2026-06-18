@@ -82,25 +82,55 @@ export function weaveRedactor(policy: RedactionPolicy): Redactor {
         return { redacted: text, detections: [], wasModified: false };
       }
 
-      // Sort detections by position (reverse) to replace from end to start
-      const sorted = [...detections].sort((a, b) => b.start - a.start);
+      // H-8: Standard interval-merge algorithm for overlapping spans.
+      //
+      // The previous approach sorted descending and tried to detect overlap
+      // with `d.end <= last.start`, which is the wrong comparison direction —
+      // after a descending sort `d.end` is always less than the previous
+      // span's `start` for non-overlapping spans, so overlapping spans were
+      // both kept, causing the downstream replacement loop to double-replace
+      // the overlapping region and produce garbled output.
+      //
+      // Correct approach (same as "merge intervals" LeetCode / CLRS):
+      //   1. Sort spans by `start` ascending.
+      //   2. Walk left→right: if the current span's `start` falls inside the
+      //      previous span's [start, end) range, extend the previous span's
+      //      `end` to max(prevEnd, curEnd) and keep whichever token we prefer
+      //      (the longer match, i.e. the one with the higher end value).
+      //   3. After merging, reverse for right-to-left replacement so earlier
+      //      indices are not invalidated by replacements at later indices.
 
-      // Deduplicate overlapping detections (keep the longest)
-      const deduped: Detection[] = [];
-      for (const d of sorted) {
-        if (deduped.length === 0 || d.end <= deduped[deduped.length - 1]!.start) {
-          deduped.push(d);
+      const ascSorted = [...detections].sort((a, b) => a.start - b.start);
+      const merged: Detection[] = [];
+
+      for (const d of ascSorted) {
+        const prev = merged[merged.length - 1];
+        if (prev && d.start < prev.end) {
+          // Overlapping span — extend the merge window; keep the token from
+          // whichever detection covers a larger region (the longer match).
+          if (d.end > prev.end) {
+            merged[merged.length - 1] = {
+              ...d,
+              start: prev.start,
+              end: d.end,
+            };
+          }
+          // else: current span is entirely inside prev — discard it.
+        } else {
+          merged.push(d);
         }
       }
 
-      // Apply replacements
+      // Apply replacements right-to-left so earlier offsets remain valid.
+      const deduped = [...merged].reverse();
       for (const d of deduped) {
         redacted = redacted.slice(0, d.start) + (d.token ?? '[REDACTED]') + redacted.slice(d.end);
       }
 
       return {
         redacted,
-        detections: deduped.reverse(),
+        // Return in document order (ascending start) for callers that iterate.
+        detections: merged,
         wasModified: true,
       };
     },
@@ -110,11 +140,23 @@ export function weaveRedactor(policy: RedactionPolicy): Redactor {
         throw new Error('Redaction is not reversible — policy.reversible is false');
       }
       let restored = text;
-      // Replace tokens with originals, in reverse order
+      // L-10: Use split().join() instead of String.replace() for global
+      // replacement. `String.prototype.replace(string, string)` only replaces
+      // the FIRST occurrence of the needle — if the same token (e.g. [EMAIL])
+      // was emitted multiple times (same PII value repeated in the input text),
+      // only the first instance would be restored and the rest would remain as
+      // placeholder tokens in the output, leaking the redaction artefact.
+      //
+      // Reverse order ensures that right-to-left position-based replacements
+      // do not invalidate the remaining token start/end offsets. (Even though
+      // we are now doing string-value replacement rather than index-based, the
+      // reverse order also ensures that if two different redacted values share a
+      // prefix — e.g. [EMAIL_1] and [EMAIL_10] — the longer one is restored
+      // first, preventing partial token collisions.)
       const sorted = [...tokens].sort((a, b) => b.start - a.start);
       for (const t of sorted) {
         if (t.original && t.token) {
-          restored = restored.replace(t.token, t.original);
+          restored = restored.split(t.token).join(t.original);
         }
       }
       return restored;

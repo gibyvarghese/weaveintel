@@ -280,6 +280,8 @@ export function weaveEnsemble(opts: EnsembleOptions): {
         steps: allSteps,
         usage: {
           totalSteps: allSteps.length,
+          promptTokens: agentResults.reduce((acc, r) => acc + r.usage.promptTokens, 0),
+          completionTokens: agentResults.reduce((acc, r) => acc + r.usage.completionTokens, 0),
           totalTokens,
           totalDurationMs,
           toolCalls: agentResults.reduce((acc, r) => acc + r.usage.toolCalls, 0),

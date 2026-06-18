@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 export { weaveEvalRunner, type CreateEvalRunnerOptions } from './runner.js';
 export {
 	weightedRubricScore,

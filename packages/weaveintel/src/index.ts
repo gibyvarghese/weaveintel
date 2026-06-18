@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/weaveintel — curated entry point (Phase 3).
  *

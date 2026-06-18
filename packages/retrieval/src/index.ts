@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 export { weaveChunker } from './chunker.js';
 export {
   weaveEmbeddingPipeline,

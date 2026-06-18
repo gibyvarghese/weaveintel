@@ -91,6 +91,25 @@ export interface GeneWeaveConfig {
   corsOrigin?: string;
   /** Absolute public origin used for OAuth callbacks when behind a proxy */
   publicBaseUrl?: string;
+  /**
+   * Custom runtime KV persistence slot. When omitted, geneWeave auto-selects
+   * SQLite KV (co-located with the app DB) for SQLite deployments, or
+   * in-memory KV for custom database adapters.
+   *
+   * Pass a Postgres-backed slot here when running with a custom Postgres
+   * DatabaseAdapter to make compliance records, OAuth state, and workflow
+   * checkpoints durable across replicas and restarts.
+   *
+   * @example
+   * ```ts
+   * import { weavePgPersistence } from '@weaveintel/persistence';
+   * await createGeneWeave({
+   *   database: { type: 'custom', adapter: myPgAdapter },
+   *   persistence: weavePgPersistence({ connectionString: process.env.DATABASE_URL }),
+   * });
+   * ```
+   */
+  persistence?: import('@weaveintel/core').RuntimePersistenceSlot;
 }
 
 // ─── App handle ──────────────────────────────────────────────
@@ -207,9 +226,10 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // adapters (Postgres / Mongo / etc.) we fall back to the in-memory slot
   // — adopters can override by supplying their own runtime in future.
   const dbConfig = config.database ?? { type: 'sqlite' as const, path: './geneweave.db' };
-  const persistenceSlot: RuntimePersistenceSlot = dbConfig.type === 'sqlite'
-    ? weaveSqlitePersistence({ path: dbConfig.path ?? './geneweave.db' })
-    : weaveInMemoryPersistence();
+  const persistenceSlot: RuntimePersistenceSlot = config.persistence
+    ?? (dbConfig.type === 'sqlite'
+      ? weaveSqlitePersistence({ path: dbConfig.path ?? './geneweave.db' })
+      : weaveInMemoryPersistence());
 
   // Phase A: default redactor with built-in PII patterns. Wired into the
   // runtime so the auto-attached durable audit logger redacts entries
@@ -693,3 +713,4 @@ export {
   type MeRunExecutorOptions,
 } from './me-run-executor.js';
 export { createDefaultMeRunAgent } from './me-run-agent.js';
+export { createLogger } from '@weaveintel/core';

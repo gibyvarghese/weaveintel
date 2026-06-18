@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 export * from './grants.js';
 export * from './accounts.js';
 export * from './messaging.js';

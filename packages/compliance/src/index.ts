@@ -1,4 +1,12 @@
+// SPDX-License-Identifier: MIT
 // @weaveintel/compliance — Public API
+
+// Domain error classes (L-27+A-6)
+export {
+  LegalHoldActiveError,
+  ConsentExpiredError,
+  ResidencyViolationError,
+} from './errors.js';
 export {
   type RetentionAction,
   type RetentionRule,
@@ -48,6 +56,7 @@ export {
   type DurableConsentManager,
   createDurableConsentManager,
   type DurableResidencyEngine,
+  type DurableResidencyEngineOpts,
   createDurableResidencyEngine,
   type DurableRetentionEngine,
   createDurableRetentionEngine,

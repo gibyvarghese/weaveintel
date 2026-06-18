@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import type { MCPServer, MCPTransport } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import { createMCPStdioServerTransport, weaveMCPServer } from '@weaveintel/mcp-server';

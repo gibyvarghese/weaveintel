@@ -1,7 +1,7 @@
 {
   "name": "@weaveintel/a2a",
   "version": "0.0.1",
-  "description": "A2A protocol \u2014 agent-to-agent communication client and server",
+  "description": "A2A protocol — agent-to-agent communication client and server",
   "type": "module",
   "exports": {
     ".": {
@@ -23,6 +23,6 @@
   },
   "devDependencies": {
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.2.6"
   }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 export * from './pipeline.js';
 export * from './result.js';
 export * from './stages/metadata.js';

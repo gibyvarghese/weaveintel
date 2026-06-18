@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/provider-llamacpp — Local GGUF models via the llama.cpp HTTP server.
  *

@@ -229,82 +229,112 @@ export class TenantKeyManager {
       return existing;
     }
 
+    // CR-6: All plaintext key material (KEK, DEK, BIK) must be zeroed in a
+    // try/finally block so that if any intermediate step throws, the plaintext
+    // bytes are overwritten before the exception propagates. Node.js Buffer
+    // objects from randomBytes() are heap-allocated and not deterministically
+    // GC'd or zeroed — without an explicit fill(0), they can persist in memory
+    // for seconds or minutes, making them visible to heap dumps / core files.
+    //
+    // The finally block runs regardless of success or failure. On success the
+    // cached copy of the plaintext has already been stored in #kekCache/#dekCache
+    // before we reach the finally block, so zeroing the local Buffer does not
+    // affect the in-process key cache (the cache holds a separate Buffer reference
+    // pointing to the same underlying bytes — we intentionally zero the local
+    // variable only, not the cached copy, so encryption keeps working normally).
+
     // Create KEK.
     const kms = await this.#resolveKms(opts.tenantId);
     const rootKeyId = await kms.rootKeyId(opts.tenantId);
     const kekPlain = randomBytes(32);
-    const wrappedKek = await kms.wrap(rootKeyId, kekPlain);
-    const kekId = newUUIDv7();
-    const now = this.#now();
-    const kek: KekRecord = {
-      id: kekId,
-      tenantId: opts.tenantId,
-      version: 1,
-      status: 'active',
-      wrapped: serializeWrappedKey(wrappedKek),
-      createdAt: now,
-      rotatedAt: null,
-      revokedAt: null,
-    };
-    await this.#store.insertKek(kek);
-    await this.#emit(opts.tenantId, 'kek_create', opts.actor ?? null, { kekId, version: 1 });
+    let dekPlain: Buffer | null = null;
+    let bikPlain: Buffer | null = null;
 
-    // Create DEK wrapped under KEK (we use the KEK as the wrap key).
-    const dekPlain = randomBytes(32);
-    const wrappedDek = await this.#wrapUnderKek(kekPlain, dekPlain, opts.tenantId);
-    const dekId = newUUIDv7();
-    const dek: DekRecord = {
-      id: dekId,
-      tenantId: opts.tenantId,
-      kekId,
-      epoch: 1,
-      status: 'active',
-      wrapped: wrappedDek,
-      createdAt: now,
-      rotatedAt: null,
-      revokedAt: null,
-    };
-    await this.#store.insertDek(dek);
-    await this.#emit(opts.tenantId, 'dek_create', opts.actor ?? null, { dekId, epoch: 1 });
+    try {
+      const wrappedKek = await kms.wrap(rootKeyId, kekPlain);
+      const kekId = newUUIDv7();
+      const now = this.#now();
+      const kek: KekRecord = {
+        id: kekId,
+        tenantId: opts.tenantId,
+        version: 1,
+        status: 'active',
+        wrapped: serializeWrappedKey(wrappedKek),
+        createdAt: now,
+        rotatedAt: null,
+        revokedAt: null,
+      };
+      await this.#store.insertKek(kek);
+      await this.#emit(opts.tenantId, 'kek_create', opts.actor ?? null, { kekId, version: 1 });
 
-    // Create BIK (forward-compat — not consumed in Phase 1).
-    const bikPlain = randomBytes(32);
-    const wrappedBik = await this.#wrapUnderKek(kekPlain, bikPlain, opts.tenantId);
-    const bikId = newUUIDv7();
-    const bik: BikRecord = {
-      id: bikId,
-      tenantId: opts.tenantId,
-      epoch: 1,
-      status: 'active',
-      wrapped: wrappedBik,
-      createdAt: now,
-      revokedAt: null,
-      kekId,
-    };
-    await this.#store.insertBik(bik);
-    await this.#emit(opts.tenantId, 'bik_create', opts.actor ?? null, { bikId });
+      // Create DEK wrapped under KEK (we use the KEK as the wrap key).
+      dekPlain = randomBytes(32);
+      const wrappedDek = await this.#wrapUnderKek(kekPlain, dekPlain, opts.tenantId);
+      const dekId = newUUIDv7();
+      const dek: DekRecord = {
+        id: dekId,
+        tenantId: opts.tenantId,
+        kekId,
+        epoch: 1,
+        status: 'active',
+        wrapped: wrappedDek,
+        createdAt: now,
+        rotatedAt: null,
+        revokedAt: null,
+      };
+      await this.#store.insertDek(dek);
+      await this.#emit(opts.tenantId, 'dek_create', opts.actor ?? null, { dekId, epoch: 1 });
 
-    // Cache freshly minted plaintexts.
-    this.#kekCache.set(kekId, { key: kekPlain, expiresAt: now + this.#ttl });
-    this.#dekCache.set(dekId, { key: dekPlain, expiresAt: now + this.#ttl });
+      // Create BIK (forward-compat — not consumed in Phase 1).
+      bikPlain = randomBytes(32);
+      const wrappedBik = await this.#wrapUnderKek(kekPlain, bikPlain, opts.tenantId);
+      const bikId = newUUIDv7();
+      const bik: BikRecord = {
+        id: bikId,
+        tenantId: opts.tenantId,
+        epoch: 1,
+        status: 'active',
+        wrapped: wrappedBik,
+        createdAt: now,
+        revokedAt: null,
+        kekId,
+      };
+      await this.#store.insertBik(bik);
+      await this.#emit(opts.tenantId, 'bik_create', opts.actor ?? null, { bikId });
 
-    const policy: TenantPolicyRecord = {
-      tenantId: opts.tenantId,
-      enabled: enable,
-      kmsProviderId: existing?.kmsProviderId ?? kms.id,
-      kmsConfig: existing?.kmsConfig ?? null,
-      activeKekId: kekId,
-      activeDekId: dekId,
-      activeBikId: bikId,
-      rotationSchedule: existing?.rotationSchedule ?? '90d',
-      blindIndexEnabled: existing?.blindIndexEnabled ?? false,
-      fieldPolicy: mergeFieldPolicy(existing?.fieldPolicy ?? null),
-      shredRequestedAt: null,
-      shredCompletedAt: null,
-    };
-    await this.#store.upsertPolicy(policy);
-    await this.#emit(opts.tenantId, 'tenant_bootstrap', opts.actor ?? null, { kekId, dekId, bikId });
-    return policy;
+      // Cache freshly minted plaintexts. Store Buffer *copies* so the finally
+      // block's fill(0) on the local variables does not zero the cached bytes.
+      // Buffer.from(buf) copies the underlying ArrayBuffer, so the cache entry
+      // is an independent allocation that survives the local-variable zeroing.
+      this.#kekCache.set(kekId, { key: Buffer.from(kekPlain), expiresAt: now + this.#ttl });
+      this.#dekCache.set(dekId, { key: Buffer.from(dekPlain!), expiresAt: now + this.#ttl });
+
+      const policy: TenantPolicyRecord = {
+        tenantId: opts.tenantId,
+        enabled: enable,
+        kmsProviderId: existing?.kmsProviderId ?? kms.id,
+        kmsConfig: existing?.kmsConfig ?? null,
+        activeKekId: kekId,
+        activeDekId: dekId,
+        activeBikId: bikId,
+        rotationSchedule: existing?.rotationSchedule ?? '90d',
+        blindIndexEnabled: existing?.blindIndexEnabled ?? false,
+        fieldPolicy: mergeFieldPolicy(existing?.fieldPolicy ?? null),
+        shredRequestedAt: null,
+        shredCompletedAt: null,
+      };
+      await this.#store.upsertPolicy(policy);
+      await this.#emit(opts.tenantId, 'tenant_bootstrap', opts.actor ?? null, { kekId, dekId, bikId });
+      return policy;
+    } finally {
+      // Zero all local plaintext key Buffers so they do not linger on the heap.
+      // This runs on BOTH the success path and any exception path. The in-process
+      // key cache retains its own Buffer references (populated above) and is
+      // unaffected by zeroing these local variables.
+      kekPlain.fill(0);
+      dekPlain?.fill(0);
+      bikPlain?.fill(0);
+    }
   }
 
   /** Mint a new DEK (epoch+1), mark previous as `previous`. Existing ciphertext stays readable. */
@@ -631,20 +661,25 @@ export class TenantKeyManager {
   }
 
   async #getKekRow(tenantId: string, kekId: string): Promise<KekRecord> {
-    const all = await this.#store.listKeks(tenantId);
-    const row = all.find((k) => k.id === kekId);
+    // H-13: Use the point-lookup method instead of listing all KEKs and
+    // doing a linear `.find()`. For Postgres-backed stores, `listKeks` issues
+    // a full tenant-scoped table scan on every encrypt/decrypt call — this
+    // reduces it to a single indexed primary-key lookup.
+    const row = await this.#store.getKekById(tenantId, kekId);
     if (!row) throw new KeyNotFoundError(`KEK ${kekId} not found for tenant ${tenantId}`);
     return row;
   }
 
   async #getDekRow(tenantId: string, dekId: string): Promise<DekRecord> {
-    const all = await this.#store.listDeks(tenantId);
-    const row = all.find((d) => d.id === dekId);
+    // H-13: Same rationale as #getKekRow — point lookup instead of list scan.
+    const row = await this.#store.getDekById(tenantId, dekId);
     if (!row) throw new KeyNotFoundError(`DEK ${dekId} not found for tenant ${tenantId}`);
     return row;
   }
 
   async #findDekByEpoch(tenantId: string, epoch: number): Promise<DekRecord> {
+    // No direct point-lookup by epoch exists on the interface; this path is
+    // only used during key rotation (infrequent) so a full list scan is acceptable.
     const all = await this.#store.listDeks(tenantId);
     const row = all.find((d) => d.epoch === epoch);
     if (!row) throw new KeyNotFoundError(`no DEK at epoch ${epoch} for tenant ${tenantId}`);

@@ -28,6 +28,14 @@ import { applyM45KaggleRoleCapabilities } from './m45-kaggle-role-capabilities.j
 import { applyM46AgendaNotes } from './m46-agenda-notes.js';
 import { applyM47VoiceAgents } from './m47-voice-agents.js';
 import { applyM48VoicePipelineMode } from './m48-voice-pipeline-mode.js';
+import { applyM49EncryptExternalCredentials } from './m49-encrypt-external-credentials.js';
+import { applyM50CriticalIndexes } from './m50-critical-indexes.js';
+import { applyM51EvalSchemaFixes } from './m51-eval-schema-fixes.js';
+import { applyM52VaultV1Migration } from './m52-vault-v1-migration.js';
+import { applyM53McpGatewayTenantRateLimit } from './m53-mcp-gateway-tenant-rate-limit.js';
+import { applyM54AuditRetentionTiers } from './m54-audit-retention-tiers.js';
+import { applyM55StepUpMfa } from './m55-step-up-mfa.js';
+import { applyM56PasskeyCredentials } from './m56-passkey-credentials.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -64,6 +72,14 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm46-agenda-notes', description: 'WC1-WC9: agenda_categories, agenda_items, notes, note_links, note_databases, note_db_rows; persona-seeded categories + note templates', run: applyM46AgendaNotes },
   { id: 'm47-voice-agents', description: 'Voice agents: voice_configs, voice_sessions, voice_session_events; text_to_speech + voice_agent task types', run: applyM47VoiceAgents },
   { id: 'm48-voice-pipeline-mode', description: 'Voice pipeline mode: pipeline_mode + realtime_model columns on voice_configs', run: applyM48VoicePipelineMode },
+  { id: 'm49-encrypt-external-credentials', description: 'H-2: Add credentials_encrypted flag + *_enc shadow columns to search_providers, social_accounts, enterprise_connectors for vault encryption at rest', run: applyM49EncryptExternalCredentials },
+  { id: 'm50-critical-indexes', description: 'H-3: Critical composite indexes on messages, chats, sessions, traces, metrics, eval_results, tool_rate_limit_buckets', run: applyM50CriticalIndexes },
+  { id: 'm51-eval-schema-fixes', description: 'L-15 + M-19: prompt_eval_runs status index + eval_results.settings_snapshot_at column', run: applyM51EvalSchemaFixes },
+  { id: 'm52-vault-v1-migration', description: 'H-5: Re-encrypt legacy website_credentials rows to per-record-salt v1 vault format (AES-256-GCM + HKDF)', run: applyM52VaultV1Migration },
+  { id: 'm53-mcp-gateway-tenant-rate-limit', description: 'A-9: Add tenant_id to mcp_gateway_clients + recreate mcp_gateway_rate_buckets with (tenant_id, client_id, window_start) composite unique key', run: applyM53McpGatewayTenantRateLimit },
+  { id: 'm54-audit-retention-tiers', description: 'EU AI Act Art 12: add retention_tier to tool_audit_events + mcp_gateway_request_log; seed audit_log_retention_tiers table (90-day operational / 7-year compliance)', run: applyM54AuditRetentionTiers },
+  { id: 'm55-step-up-mfa', description: '4.17: Add mfa_enabled + mfa_totp_secret to users; mfa_verified_at to sessions for TOTP step-up MFA on admin routes', run: applyM55StepUpMfa },
+  { id: 'm56-passkey-credentials', description: '4.1: FIDO2/WebAuthn passkey_credentials + webauthn_challenges tables', run: applyM56PasskeyCredentials },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

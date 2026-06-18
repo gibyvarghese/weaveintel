@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // @weaveintel/tools — Public API
 export {
   type ExtendedToolDescriptor,

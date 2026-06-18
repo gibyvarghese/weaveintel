@@ -69,6 +69,12 @@ export async function weaveMongoDbEncryptionStore(
         return { id: _id, ...rest } as KekRecord;
       });
     },
+    async getKekById(tenantId, kekId) {
+      const doc = await keks.findOne({ _id: kekId, tenantId } as Record<string, unknown>);
+      if (!doc) return null;
+      const { _id, ...rest } = doc;
+      return { id: _id, ...rest } as KekRecord;
+    },
     async insertKek(k) {
       const { id, ...rest } = k;
       await keks.insertOne({ _id: id, ...rest } as KekDoc);
@@ -85,6 +91,16 @@ export async function weaveMongoDbEncryptionStore(
         const { _id, ...rest } = d;
         return { id: _id, ...rest } as DekRecord;
       });
+    },
+    async getDekById(tenantId, dekId) {
+      const doc = await deks.findOne({ _id: dekId, tenantId } as Record<string, unknown>);
+      if (!doc) return null;
+      const { _id, ...rest } = doc;
+      return { id: _id, ...rest } as DekRecord;
+    },
+    async getMaxDekEpoch(tenantId) {
+      const docs = await deks.find({ tenantId, status: 'active' }).sort({ epoch: -1 }).limit(1).toArray();
+      return docs[0] ? (docs[0] as unknown as DekRecord).epoch : null;
     },
     async insertDek(d) {
       const { id, ...rest } = d;

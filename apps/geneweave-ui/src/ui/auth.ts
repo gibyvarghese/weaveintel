@@ -168,35 +168,23 @@ async function loadChatsAfterAuth() {
 
 export function renderAuth(): HTMLElement {
   const isLogin = state.authMode === 'login';
+  const formLabel = isLogin ? 'Sign in' : 'Create account';
   const card = h('div', { className: 'auth-wrap' },
     h('div', { className: 'auth-card' },
       h('h1', null,
         Object.assign(document.createElement('span'), {
           innerHTML:
-            '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8A8A8A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/></svg>',
+            '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8A8A8A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:6px" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h.01"/><path d="M12 10h.01"/><path d="M16 10h.01"/></svg>',
         }),
         ' ',
         h('span', null, 'gene'),
         'Weave'
       ),
       h('p', { className: 'sub' }, isLogin ? 'Sign in to your account' : 'Create a new account'),
-      !isLogin
-        ? h('div', { className: 'field' },
-            h('label', null, 'Name'),
-            h('input', { type: 'text', id: 'auth-name', placeholder: 'Your name' })
-          )
-        : null,
-      h('div', { className: 'field' },
-        h('label', null, 'Email'),
-        h('input', { type: 'email', id: 'auth-email', placeholder: 'you@example.com' })
-      ),
-      h('div', { className: 'field' },
-        h('label', null, 'Password'),
-        h('input', { type: 'password', id: 'auth-pass', placeholder: '••••••••' })
-      ),
-      h('button', {
-        className: 'btn',
-        onClick: () => {
+      h('form', {
+        'aria-label': formLabel,
+        onSubmit: (e: Event) => {
+          e.preventDefault();
           const email = (document.getElementById('auth-email') as HTMLInputElement)?.value;
           const pass = (document.getElementById('auth-pass') as HTMLInputElement)?.value;
           if (isLogin) {
@@ -206,27 +194,53 @@ export function renderAuth(): HTMLElement {
             doRegister(name, email, pass);
           }
         },
-      }, isLogin ? 'Sign In' : 'Create Account'),
-      h('div', { className: 'divider' },
+      },
+        !isLogin
+          ? h('div', { className: 'field' },
+              h('label', { for: 'auth-name' }, 'Name'),
+              h('input', { type: 'text', id: 'auth-name', name: 'name', placeholder: 'Your name', 'aria-required': 'true', autocomplete: 'name' })
+            )
+          : null,
+        h('div', { className: 'field' },
+          h('label', { for: 'auth-email' }, 'Email'),
+          h('input', { type: 'email', id: 'auth-email', name: 'email', placeholder: 'you@example.com', 'aria-required': 'true', autocomplete: isLogin ? 'username' : 'email' })
+        ),
+        h('div', { className: 'field' },
+          h('label', { for: 'auth-pass' }, 'Password'),
+          h('input', { type: 'password', id: 'auth-pass', name: 'password', placeholder: '••••••••', 'aria-required': 'true', autocomplete: isLogin ? 'current-password' : 'new-password' })
+        ),
+        h('button', { type: 'submit', className: 'btn' }, isLogin ? 'Sign In' : 'Create Account'),
+      ),
+      h('div', { className: 'divider', 'aria-hidden': 'true' },
         h('div', { className: 'line' }),
         h('span', null, 'or'),
         h('div', { className: 'line' })
       ),
-      h('div', { className: 'oauth-btns' },
-        h('button', { className: 'oauth-btn', onClick: () => initiateOAuthFlow('google'), title: 'Sign in with Google' }, h('span', null, '🔷'), 'Google'),
-        h('button', { className: 'oauth-btn', onClick: () => initiateOAuthFlow('github'), title: 'Sign in with GitHub' }, h('span', null, '⬛'), 'GitHub'),
-        h('button', { className: 'oauth-btn', onClick: () => initiateOAuthFlow('microsoft'), title: 'Sign in with Microsoft' }, h('span', null, '🟦'), 'Microsoft'),
-        h('button', { className: 'oauth-btn', onClick: () => initiateOAuthFlow('apple'), title: 'Sign in with Apple' }, h('span', null, '🍎'), 'Apple'),
-        h('button', { className: 'oauth-btn', onClick: () => initiateOAuthFlow('facebook'), title: 'Sign in with Facebook' }, h('span', null, '📘'), 'Facebook')
+      h('div', { className: 'oauth-btns', 'aria-label': 'Sign in with a third-party provider' },
+        h('button', { type: 'button', className: 'oauth-btn', onClick: () => initiateOAuthFlow('google'), 'aria-label': 'Sign in with Google' }, h('span', { 'aria-hidden': 'true' }, '🔷'), 'Google'),
+        h('button', { type: 'button', className: 'oauth-btn', onClick: () => initiateOAuthFlow('github'), 'aria-label': 'Sign in with GitHub' }, h('span', { 'aria-hidden': 'true' }, '⬛'), 'GitHub'),
+        h('button', { type: 'button', className: 'oauth-btn', onClick: () => initiateOAuthFlow('microsoft'), 'aria-label': 'Sign in with Microsoft' }, h('span', { 'aria-hidden': 'true' }, '🟦'), 'Microsoft'),
+        h('button', { type: 'button', className: 'oauth-btn', onClick: () => initiateOAuthFlow('apple'), 'aria-label': 'Sign in with Apple' }, h('span', { 'aria-hidden': 'true' }, '🍎'), 'Apple'),
+        h('button', { type: 'button', className: 'oauth-btn', onClick: () => initiateOAuthFlow('facebook'), 'aria-label': 'Sign in with Facebook' }, h('span', { 'aria-hidden': 'true' }, '📘'), 'Facebook')
       ),
-      h('div', { className: 'err' }, state.authError),
+      h('div', { className: 'err', role: 'alert', 'aria-live': 'polite', 'aria-atomic': 'true' }, state.authError),
       h('div', { className: 'toggle' },
         isLogin ? 'No account? ' : 'Already have an account? ',
         h('a', {
+          role: 'button',
+          tabindex: '0',
           onClick: () => {
             state.authMode = isLogin ? 'register' : 'login';
             state.authError = '';
             triggerRender();
+          },
+          onKeydown: (e: KeyboardEvent) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              state.authMode = isLogin ? 'register' : 'login';
+              state.authError = '';
+              triggerRender();
+            }
           },
         }, isLogin ? 'Register' : 'Sign In')
       )

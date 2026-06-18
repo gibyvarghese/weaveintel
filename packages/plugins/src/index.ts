@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // @weaveintel/plugins — Public API
 export {
   type PluginTrustLevel,

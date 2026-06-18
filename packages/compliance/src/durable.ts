@@ -9,6 +9,7 @@
  * Six in-memory stores in this package cannot be the production posture for
  * any regulated deployment — these are the durable forms.
  */
+import { randomBytes } from 'node:crypto';
 import {
   weaveInMemoryPersistence,
   type RuntimeKvStore,
@@ -38,7 +39,35 @@ async function loadAll<T>(kv: RuntimeKvStore, ns: string): Promise<T[]> {
   const entries = await kv.list(`${ns}:`);
   const out: T[] = [];
   for (const e of entries) {
-    try { out.push(JSON.parse(e.value) as T); } catch { /* skip malformed */ }
+    // H-10: empty catch replaced with a structured warn so silently-dropped
+    // compliance records are observable in logs (previously a corrupt legal-hold
+    // or consent record could be silently skipped, causing un-enforced holds or
+    // assumed consent). The outer try catches JSON.parse failures.
+    try {
+      const parsed: unknown = JSON.parse(e.value);
+      // M-25: validate the record is a non-null plain object and has an `id`
+      // field before accepting it. A corrupt or migrated record with missing
+      // required fields silently becomes unusable — better to skip it loudly.
+      if (
+        parsed === null ||
+        typeof parsed !== 'object' ||
+        Array.isArray(parsed) ||
+        typeof (parsed as Record<string, unknown>)['id'] !== 'string'
+      ) {
+        console.warn(
+          `[compliance] loadAll(${ns}): skipping record at key "${e.key}" — not a valid object or missing 'id'`,
+        );
+        continue;
+      }
+      out.push(parsed as T);
+    } catch (err) {
+      // H-10: structured log — operators can grep for [compliance] to find
+      // corrupt KV records and repair or delete them.
+      console.warn(
+        `[compliance] loadAll(${ns}): failed to parse record at key "${e.key}":`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   }
   return out;
 }
@@ -155,9 +184,29 @@ export interface DurableResidencyEngine {
   getAllowedRegions(dataCategory: string): Promise<readonly string[]>;
 }
 
-export function createDurableResidencyEngine(opts: DurableOpts = {}): DurableResidencyEngine {
+/**
+ * L-9: Extended options for the durable residency engine.
+ *
+ * `defaultDeny` controls what `isAllowed()` returns when no constraint
+ * matches the requested (dataCategory, targetRegion) pair:
+ *
+ *  - `false` (default): fall-back to `true` (allow) — preserves the historic
+ *    behaviour where an unconfigured system lets everything through.
+ *  - `true`: fall-back to `false` (deny) — fail-closed. Recommended for
+ *    regulated deployments where only explicitly approved regions should
+ *    ever be used, and an absence of a constraint should block rather than
+ *    allow. For example, a EU GDPR controller that has not yet entered a
+ *    constraint for a new data category should not silently allow data
+ *    to flow to arbitrary regions.
+ */
+export interface DurableResidencyEngineOpts extends DurableOpts {
+  defaultDeny?: boolean;
+}
+
+export function createDurableResidencyEngine(opts: DurableResidencyEngineOpts = {}): DurableResidencyEngine {
   const kv = resolveKv(opts.runtime);
   const ns = opts.namespace ?? 'residency';
+  const defaultDeny = opts.defaultDeny ?? false;
 
   return {
     async addConstraint(c) { await saveOne(kv, ns, c.id, c); },
@@ -166,12 +215,18 @@ export function createDurableResidencyEngine(opts: DurableOpts = {}): DurableRes
     async removeConstraint(id) { return kv.delete(`${ns}:${id}`); },
     async isAllowed(dataCategory, targetRegion) {
       const all = await loadAll<ResidencyConstraint>(kv, ns);
+      // Track whether any constraint was applicable to this data category.
+      let anyApplicable = false;
       for (const c of all) {
         if (!c.enabled) continue;
         if (!c.dataCategories.includes(dataCategory) && !c.dataCategories.includes('*')) continue;
+        anyApplicable = true;
         if (c.deniedRegions.includes(targetRegion)) return false;
         if (c.allowedRegions.length > 0 && !c.allowedRegions.includes(targetRegion)) return false;
       }
+      // L-9: when defaultDeny is true and no constraint covered this category,
+      // return false (fail-closed) rather than silently permitting the request.
+      if (!anyApplicable && defaultDeny) return false;
       return true;
     },
     async getAllowedRegions(dataCategory) {
@@ -215,7 +270,13 @@ export function createDurableRetentionEngine(opts: DurableOpts = {}): DurableRet
     async evaluate(dataCategory, createdAt) {
       const all = await loadAll<RetentionRule>(kv, ns);
       const now = Date.now();
-      for (const rule of all) {
+
+      // H-7: Same priority-based sort as the in-memory engine: higher priority
+      // (category-specific) rules are checked before lower priority (wildcard)
+      // defaults to prevent broad rules from shadowing specific ones.
+      const sorted = [...all].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+
+      for (const rule of sorted) {
         if (!rule.enabled) continue;
         if (rule.dataCategory !== dataCategory && rule.dataCategory !== '*') continue;
         const ageMs = now - createdAt;
@@ -242,8 +303,14 @@ export function createDurableAuditExportManager(opts: DurableOpts = {}): Durable
   const kv = resolveKv(opts.runtime);
   const ns = opts.namespace ?? 'audit-export';
 
+  /**
+   * Generate a CSPRNG-backed ID for audit export records.
+   * CR-3: Compliance records (audit exports, deletion requests, legal holds) must
+   * use cryptographically random IDs — Math.random() is predictable and allows
+   * enumeration of audit export IDs, which could leak tenant activity metadata.
+   */
   function nextId(): string {
-    return `exp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return `exp-${randomBytes(8).toString('hex')}`;
   }
 
   return {
@@ -296,8 +363,13 @@ export function createDurableDeletionManager(opts: DurableOpts = {}): DurableDel
   const kv = resolveKv(opts.runtime);
   const ns = opts.namespace ?? 'deletion';
 
+  /**
+   * CR-3: Deletion requests are GDPR-mandated compliance artefacts — their IDs
+   * must be provably unique and non-enumerable. Math.random() is predictable;
+   * using randomBytes ensures an attacker cannot guess or enumerate request IDs.
+   */
   function nextId(): string {
-    return `del-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return `del-${randomBytes(8).toString('hex')}`;
   }
 
   async function patch(id: string, p: Partial<DeletionRequest>): Promise<DeletionRequest | undefined> {

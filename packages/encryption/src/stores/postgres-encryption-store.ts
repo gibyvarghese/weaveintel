@@ -243,6 +243,10 @@ export async function weavePostgresEncryptionStore(
       );
       return res.rows.map(rowToKek);
     },
+    async getKekById(tenantId, kekId) {
+      const res = await pool.query<KekRow>('SELECT * FROM tenant_keks WHERE tenant_id = $1 AND id = $2', [tenantId, kekId]);
+      return res.rows[0] ? rowToKek(res.rows[0]) : null;
+    },
     async insertKek(k) {
       await pool.query(
         `INSERT INTO tenant_keks (id, tenant_id, version, status, wrapped, created_at, rotated_at, revoked_at)
@@ -265,6 +269,17 @@ export async function weavePostgresEncryptionStore(
         [tenantId],
       );
       return res.rows.map(rowToDek);
+    },
+    async getDekById(tenantId, dekId) {
+      const res = await pool.query<DekRow>('SELECT * FROM tenant_deks WHERE tenant_id = $1 AND id = $2', [tenantId, dekId]);
+      return res.rows[0] ? rowToDek(res.rows[0]) : null;
+    },
+    async getMaxDekEpoch(tenantId) {
+      const res = await pool.query<{ max_epoch: number | null }>(
+        `SELECT MAX(epoch) AS max_epoch FROM tenant_deks WHERE tenant_id = $1 AND status = 'active'`,
+        [tenantId],
+      );
+      return res.rows[0]?.max_epoch ?? null;
     },
     async insertDek(d) {
       await pool.query(

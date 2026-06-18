@@ -6,12 +6,12 @@
  * Two modes:
  *
  * 1. Direct model call (pre-execution / injection classifier)
- *    getGuardrailJudgeModel() → Model
+ *    registry.getJudgeModel() → Model
  *    Used directly in the llm-judge evaluator. Zero overhead, synchronous.
  *    Right choice for blocking pre-execution checks where the user is waiting.
  *
  * 2. weaveAgent wrapper (post-execution checks)
- *    createGuardrailJudgeAgent() → Agent
+ *    registry.getJudgeAgent() → Agent
  *    Wraps the same model in a single-step agent for audit trail + observability.
  *    Each post-execution check gets its own agent identity and span.
  *    maxSteps:1 means it's identical latency to a direct call but goes through
@@ -23,12 +23,13 @@
  *      (claude-haiku-4-5 > gpt-4o-mini > gemini-flash > the default model)
  *   3. Falls back to the app's defaultProvider / defaultModel
  *
- * Why not a supervisor?
- *   A guardrail supervisor dispatching sub-agents would add 200-500 ms of
- *   orchestration overhead per chat turn. For synchronous blocking checks that
- *   is too much. The parallel pipeline already achieves the same throughput.
- *   A supervisor IS the right pattern for async/offline audit replay — that
- *   can be layered on top of the existing guardrail_evals table later.
+ * A-4: Module-level mutable singletons have been replaced by a
+ * `GuardrailJudgeRegistry` class, instanced per ChatEngine, which eliminates
+ * cross-test contamination and enables multiple ChatEngine instances to coexist
+ * in the same process with independent judge models.
+ *
+ * Backward-compatible module-level functions delegate to a default registry
+ * instance (`defaultRegistry`) so existing callers are unaffected.
  */
 import type { Agent, EmbeddingModel, Model, ModerationModel } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
@@ -57,7 +58,6 @@ export interface GuardrailJudgeConfig {
 export async function getGuardrailJudgeModel(
   config: GuardrailJudgeConfig,
 ): Promise<Model | undefined> {
-  // Explicit env override takes priority.
   const envProvider = process.env['GUARDRAIL_JUDGE_PROVIDER'];
   const envModel = process.env['GUARDRAIL_JUDGE_MODEL'];
 
@@ -72,7 +72,6 @@ export async function getGuardrailJudgeModel(
     }
   }
 
-  // Walk preference list — use the first configured provider.
   for (const [provider, preferredModel] of Object.entries(JUDGE_MODEL_PREFERENCE)) {
     const providerCfg = config.providers[provider];
     if (!providerCfg?.apiKey?.trim()) continue;
@@ -84,7 +83,6 @@ export async function getGuardrailJudgeModel(
     }
   }
 
-  // Last resort: use the app default model/provider.
   const defaultCfg = config.providers[config.defaultProvider];
   if (defaultCfg) {
     try {
@@ -97,7 +95,13 @@ export async function getGuardrailJudgeModel(
   return undefined;
 }
 
-// ── Single-step weaveAgent wrapper ─────────────────────────────────────────
+// ── GuardrailJudgeRegistry ─────────────────────────────────────────────────
+//
+// A-4: Encapsulates the four previously module-level mutable singletons
+// (_judgeAgent, _activeJudgeModel, _activeModerationModel, _activeEmbeddingModel)
+// into an instance so multiple ChatEngine instances can coexist in the same
+// process without cross-contaminating each other's guardrail state.
+// Tests can create a fresh registry per suite rather than resetting globals.
 
 const AGENT_SYSTEM_PROMPT = `You are a guardrail evaluation agent. You receive a piece of text and must evaluate it according to the rubric provided.
 
@@ -108,60 +112,107 @@ Always respond with a single JSON object containing exactly these fields:
 
 Respond ONLY with the JSON object. No markdown, no explanation outside the JSON.`;
 
-let _judgeAgent: Agent | undefined;
+export class GuardrailJudgeRegistry {
+  private _judgeAgent: Agent | undefined;
+  private _judgeModel: Model | undefined;
+  private _moderationModel: ModerationModel | undefined;
+  private _embeddingModel: EmbeddingModel | undefined;
+
+  // ── Judge model ─────────────────────────────────────────────
+
+  setJudgeModel(model: Model | undefined): void {
+    this._judgeModel = model;
+    this._judgeAgent = undefined; // rebuild agent on next access
+  }
+
+  getJudgeModel(): Model | undefined {
+    return this._judgeModel;
+  }
+
+  /** Returns a cached single-step weaveAgent for post-execution guardrail checks. */
+  getJudgeAgent(): Agent | undefined {
+    if (!this._judgeModel) return undefined;
+    if (!this._judgeAgent) {
+      this._judgeAgent = weaveAgent({
+        name: 'guardrail-judge',
+        model: this._judgeModel,
+        systemPrompt: AGENT_SYSTEM_PROMPT,
+        maxSteps: 1,
+      });
+    }
+    return this._judgeAgent;
+  }
+
+  // ── Moderation model ────────────────────────────────────────
+
+  setModerationModel(model: ModerationModel | undefined): void {
+    this._moderationModel = model;
+  }
+
+  getModerationModel(): ModerationModel | undefined {
+    return this._moderationModel;
+  }
+
+  // ── Embedding model ─────────────────────────────────────────
+
+  setEmbeddingModel(model: EmbeddingModel | undefined): void {
+    this._embeddingModel = model;
+  }
+
+  getEmbeddingModel(): EmbeddingModel | undefined {
+    return this._embeddingModel;
+  }
+}
+
+// ── Default registry (process-wide singleton) ─────────────────────────────
+// Kept for backward compatibility. All module-level functions below delegate
+// to this instance so existing call sites in guardrail-eval-utils, chat.ts,
+// and the guardrails slot continue to work without threading a registry
+// reference through every caller.
+
+const defaultRegistry = new GuardrailJudgeRegistry();
+
+// ── Single-step weaveAgent wrapper ─────────────────────────────────────────
 
 /**
  * Returns a cached single-step weaveAgent used for post-execution guardrail checks.
- * maxSteps:1 means it runs as a single model call but with full agent observability.
+ * Delegates to `defaultRegistry`.
+ * @deprecated Prefer using a `GuardrailJudgeRegistry` instance directly (A-4).
  */
 export function createGuardrailJudgeAgent(model: Model): Agent {
-  if (_judgeAgent) return _judgeAgent;
-  _judgeAgent = weaveAgent({
-    name: 'guardrail-judge',
-    model,
-    systemPrompt: AGENT_SYSTEM_PROMPT,
-    maxSteps: 1,
-  });
-  return _judgeAgent;
+  defaultRegistry.setJudgeModel(model);
+  return defaultRegistry.getJudgeAgent()!;
 }
 
 /** Reset cached agent (call when model changes at runtime). */
 export function resetGuardrailJudgeAgent(): void {
-  _judgeAgent = undefined;
+  defaultRegistry.setJudgeModel(defaultRegistry.getJudgeModel());
 }
 
-// ── Module-level active judge model ────────────────────────────────────────
-// Set once at boot by createGeneWeave(); consumed by chat-guardrail-eval-utils
-// and the guardrails-slot without threading through every deps chain.
-
-let _activeJudgeModel: Model | undefined;
+// ── Active judge model (module-level compat layer) ─────────────────────────
 
 export function setActiveGuardrailJudgeModel(model: Model | undefined): void {
-  _activeJudgeModel = model;
-  resetGuardrailJudgeAgent(); // rebuild agent with new model
+  defaultRegistry.setJudgeModel(model);
 }
 
 export function getActiveGuardrailJudgeModel(): Model | undefined {
-  return _activeJudgeModel;
+  return defaultRegistry.getJudgeModel();
 }
 
-// ── Moderation model (R2) ──────────────────────────────────────────────────
-// Uses OpenAI omni-moderation-latest; requires OPENAI_API_KEY.
-
-let _activeModerationModel: ModerationModel | undefined;
+// ── Moderation model (R2 compat layer) ──────────────────────────────────────
 
 export async function getGuardrailModerationModel(
   providers: Record<string, ProviderConfig>,
 ): Promise<ModerationModel | undefined> {
   const apiKey = process.env['GUARDRAIL_MODERATION_API_KEY']
     ?? providers['openai']?.apiKey;
-  if (!apiKey?.startsWith('sk-')) return undefined;
+  // M-26: use non-empty check instead of brittle 'sk-' prefix check
+  if (!apiKey?.trim().length) return undefined;
   try {
     const mod = await import('@weaveintel/provider-openai');
     const fn = (mod as unknown as Record<string, unknown>)['weaveOpenAIModerationModel']
       ?? (mod as unknown as Record<string, unknown>)['weaveOpenAIModeration'];
     if (typeof fn !== 'function') return undefined;
-    // First arg is modelId (string), second is provider options — pass them separately.
     return fn('omni-moderation-latest', { apiKey }) as ModerationModel;
   } catch {
     return undefined;
@@ -169,27 +220,29 @@ export async function getGuardrailModerationModel(
 }
 
 export function setActiveGuardrailModerationModel(m: ModerationModel | undefined): void {
-  _activeModerationModel = m;
+  defaultRegistry.setModerationModel(m);
 }
 
 export function getActiveGuardrailModerationModel(): ModerationModel | undefined {
-  return _activeModerationModel;
+  return defaultRegistry.getModerationModel();
 }
 
-// ── Embedding model (R3) ───────────────────────────────────────────────────
-// Uses text-embedding-3-small for semantic grounding; requires OPENAI_API_KEY.
+// ── Embedding model (R3 compat layer) ──────────────────────────────────────
 
-let _activeEmbeddingModel: EmbeddingModel | undefined;
+// L-22: DEFAULT_EMBEDDING_MODEL promoted to a named export constant so callers
+// can reference it without hardcoding the string.
+export const DEFAULT_GUARDRAIL_EMBEDDING_MODEL = 'text-embedding-3-small';
 
 export async function getGuardrailEmbeddingModel(
   providers: Record<string, ProviderConfig>,
 ): Promise<EmbeddingModel | undefined> {
   const envProvider = process.env['GUARDRAIL_EMBEDDING_PROVIDER'];
-  const envModel = process.env['GUARDRAIL_EMBEDDING_MODEL'] ?? 'text-embedding-3-small';
+  const envModel = process.env['GUARDRAIL_EMBEDDING_MODEL'] ?? DEFAULT_GUARDRAIL_EMBEDDING_MODEL;
   const apiKey = process.env['GUARDRAIL_EMBEDDING_API_KEY']
     ?? providers[envProvider ?? 'openai']?.apiKey
     ?? providers['openai']?.apiKey;
-  if (!apiKey?.startsWith('sk-')) return undefined;
+  // M-26: non-empty check
+  if (!apiKey?.trim().length) return undefined;
   try {
     const mod = await import('@weaveintel/provider-openai');
     const fn = (mod as unknown as Record<string, unknown>)['weaveOpenAIEmbeddingModel']
@@ -202,9 +255,9 @@ export async function getGuardrailEmbeddingModel(
 }
 
 export function setActiveGuardrailEmbeddingModel(m: EmbeddingModel | undefined): void {
-  _activeEmbeddingModel = m;
+  defaultRegistry.setEmbeddingModel(m);
 }
 
 export function getActiveGuardrailEmbeddingModel(): EmbeddingModel | undefined {
-  return _activeEmbeddingModel;
+  return defaultRegistry.getEmbeddingModel();
 }

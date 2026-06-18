@@ -40,6 +40,18 @@ export interface IUserStore {
   getSession(id: string): Promise<SessionRow | null>;
   deleteSession(id: string): Promise<void>;
   deleteExpiredSessions(): Promise<void>;
+  /** 4.17: Stamp the session with the ISO timestamp of a successful step-up MFA challenge. */
+  setSessionMfaVerifiedAt(sessionId: string, verifiedAt: string): Promise<void>;
+
+  // User MFA (4.17)
+  /** 4.17: Return 1 if the user has MFA enabled, 0 if not. */
+  getUserMfaEnabled(userId: string): Promise<boolean>;
+  /** 4.17: Enable or disable MFA for a user. */
+  setUserMfaEnabled(userId: string, enabled: boolean): Promise<void>;
+  /** 4.17: Read the raw (possibly encrypted) TOTP secret for a user. */
+  getUserMfaSecret(userId: string): Promise<string | null>;
+  /** 4.17: Write (or clear) the raw TOTP secret for a user. */
+  setUserMfaSecret(userId: string, secret: string | null): Promise<void>;
 
   // Idempotency records
   createIdempotencyRecord(record: Omit<IdempotencyRecordRow, 'created_at'>): Promise<void>;
@@ -77,4 +89,38 @@ export interface IUserStore {
   markInvitationUsed(invitationId: string, usedBy: string): Promise<void>;
   listInvitations(opts?: { limit?: number }): Promise<UserInvitationRow[]>;
   deleteExpiredInvitations(nowIso?: string): Promise<void>;
+
+  // WebAuthn passkeys (4.1)
+  createPasskeyCredential(c: { id: string; userId: string; credentialId: string; publicKeyCose: string; aaguid: string; counter: number; transports: string | null }): Promise<void>;
+  getPasskeyCredentialById(credentialId: string): Promise<PasskeyCredentialRow | null>;
+  listPasskeyCredentials(userId: string): Promise<PasskeyCredentialRow[]>;
+  deletePasskeyCredential(id: string): Promise<void>;
+  updatePasskeyCounter(id: string, counter: number): Promise<void>;
+
+  createWebAuthnChallenge(c: { id: string; userId: string | null; challenge: string; type: string; expiresAt: string }): Promise<void>;
+  consumeWebAuthnChallenge(userId: string, type: 'registration' | 'authentication'): Promise<WebAuthnChallengeRow | null>;
+  consumeWebAuthnChallengeById(id: string): Promise<WebAuthnChallengeRow | null>;
+  deleteExpiredWebAuthnChallenges(nowIso?: string): Promise<void>;
+}
+
+export interface PasskeyCredentialRow {
+  id: string;
+  user_id: string;
+  credential_id: string;
+  public_key_cose: string;
+  aaguid: string;
+  counter: number;
+  transports: string | null;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface WebAuthnChallengeRow {
+  id: string;
+  user_id: string | null;
+  challenge: string;
+  type: string;
+  used: number;
+  expires_at: string;
+  created_at: string;
 }

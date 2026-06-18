@@ -216,8 +216,12 @@ async function simulateExecution(code: string): Promise<{ output: unknown; cpuMs
   // Simulate async work
   await new Promise((r) => setTimeout(r, Math.min(cpuMs, 50)));
 
+  // CR-7: This is a simulation only — code is never actually executed. Returning
+  // `evaluated: true` was a lie that callers could not distinguish from real
+  // execution. `simulated: true, evaluated: false` makes the distinction explicit
+  // so higher-level orchestration can skip trust decisions that require real runs.
   return {
-    output: { evaluated: true, codeLength: codeLen },
+    output: { simulated: true, evaluated: false, codeLength: codeLen },
     cpuMs,
     memoryMb,
   };

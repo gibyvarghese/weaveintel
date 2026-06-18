@@ -181,6 +181,12 @@ export class SmartModelRouter implements IModelRouter {
     }
 
     // 3. Strategy-specific selection
+    // Compute scores once for all eligible models (M-29: avoid a second scorer call).
+    // For fallback/round-robin paths the score array still drives the decision scoreMap.
+    const allScores = eligible.length > 0
+      ? this.scorer.score(eligible, healthList, this.costs, this.qualities, policy, taskCapabilities)
+      : [];
+
     let selected: ModelCandidate | null = null;
     let reason = '';
 
@@ -194,15 +200,11 @@ export class SmartModelRouter implements IModelRouter {
       selected = roundRobinSelect(eligible);
       reason = 'Round-robin selection';
     } else {
-      // Score and pick best
-      const scores = this.scorer.score(eligible, healthList, this.costs, this.qualities, policy, taskCapabilities);
-      const best = scores[0]!;
+      // Pick highest-scoring candidate from the already-computed scores array.
+      const best = allScores[0]!;
       selected = { modelId: best.modelId, providerId: best.providerId };
       reason = `Strategy "${policy.strategy}" — best score ${best.overallScore}`;
     }
-
-    // Build decision
-    const allScores = this.scorer.score(eligible, healthList, this.costs, this.qualities, policy, taskCapabilities);
     const scoreMap: Record<string, number> = {};
     for (const s of allScores) scoreMap[`${s.providerId}:${s.modelId}`] = s.overallScore;
 

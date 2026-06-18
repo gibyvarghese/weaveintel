@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Phase 3 — Unified Trigger Dispatcher (canonical surface). New code
 // should use `createTriggerDispatcher`, `Trigger`, `SourceAdapter`,
 // `TargetAdapter`, and `TriggerStore` from `./dispatcher.js`.

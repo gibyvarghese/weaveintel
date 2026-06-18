@@ -1,8 +1,10 @@
+// SPDX-License-Identifier: MIT
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { DatabaseAdapter } from './db.js';
 import { canPersonaAccess, normalizePersona } from './rbac.js';
 import { authenticateRequest, verifyCSRF, type AuthContext } from './auth.js';
 import { OAuthClient, createOAuthProvider, type OAuthProviderName } from '@weaveintel/oauth';
+import type { HttpRateLimiter } from './http-rate-limiter.js';
 
 export type Handler = (
   req: IncomingMessage,
@@ -115,11 +117,6 @@ export function json(res: ServerResponse, status: number, data: unknown): void {
   res.end(body);
 }
 
-interface AuthRateState {
-  count: number;
-  windowStart: number;
-}
-
 interface LoginFailureState {
   failures: number;
   blockedUntil: number;
@@ -138,6 +135,8 @@ const REGISTER_EMAIL_LIMIT = envInt('GENEWEAVE_REGISTER_EMAIL_LIMIT', IS_TEST_EN
 const LOGIN_IP_LIMIT = envInt('GENEWEAVE_LOGIN_IP_LIMIT', IS_TEST_ENV ? 2_000 : 10);
 const LOGIN_EMAIL_LIMIT = envInt('GENEWEAVE_LOGIN_EMAIL_LIMIT', IS_TEST_ENV ? 1_000 : 10);
 const LOGIN_MAX_BACKOFF_MS = envInt('GENEWEAVE_LOGIN_MAX_BACKOFF_MS', IS_TEST_ENV ? 0 : 5 * 60_000);
+const EDGE_WINDOW_MS = envInt('GENEWEAVE_EDGE_RATE_WINDOW_MS', 60_000);
+const EDGE_IP_LIMIT = envInt('GENEWEAVE_EDGE_IP_LIMIT', IS_TEST_ENV ? 100_000 : 600);
 const DEFAULT_REQUEST_BODY_BYTES = envInt('GENEWEAVE_DEFAULT_REQUEST_BODY_BYTES', IS_TEST_ENV ? 20 * 1024 * 1024 : 2 * 1024 * 1024);
 const MAX_CONCURRENT_BODY_READS = envInt('GENEWEAVE_MAX_CONCURRENT_BODY_READS', IS_TEST_ENV ? 200 : 24);
 const MAX_QUEUED_BODY_READS = envInt('GENEWEAVE_MAX_QUEUED_BODY_READS', IS_TEST_ENV ? 5_000 : 512);
@@ -148,15 +147,15 @@ export const SERVER_KEEP_ALIVE_TIMEOUT_MS = envInt('GENEWEAVE_SERVER_KEEPALIVE_T
 export const SERVER_MAX_HEADERS_COUNT = envInt('GENEWEAVE_SERVER_MAX_HEADERS_COUNT', 100);
 export const SERVER_MAX_REQUESTS_PER_SOCKET = envInt('GENEWEAVE_SERVER_MAX_REQUESTS_PER_SOCKET', 100);
 
-// Auth rate-limiting state is in-process only — not shared across cluster
-// workers or multiple Node.js processes. If running behind a load-balancer
-// with multiple processes, consider moving to a Redis-backed limiter so
-// limits are enforced globally rather than per-process.
-if (!IS_TEST_ENV && (process.env['CLUSTER_WORKERS'] || process.env['WEB_CONCURRENCY'])) {
-  console.warn('[auth-rate-limit] in-process rate limiter detected in a multi-worker environment — each worker enforces limits independently. Set CLUSTER_WORKERS/WEB_CONCURRENCY=1 or migrate to a shared-store limiter.');
-}
-const authRateStates = new Map<string, AuthRateState>();
+// Auth rate limiter — replaced with an injectable HttpRateLimiter at startup.
+// Defaults to in-process; swapped to Redis when REDIS_URL is set via
+// initHttpRateLimiter() called from server.ts before the first request.
+let _httpRateLimiter: HttpRateLimiter | null = null;
 const loginFailureStates = new Map<string, LoginFailureState>();
+
+export function initHttpRateLimiter(limiter: HttpRateLimiter): void {
+  _httpRateLimiter = limiter;
+}
 let activeBodyReads = 0;
 const bodyReadWaiters: Array<() => void> = [];
 
@@ -181,12 +180,7 @@ async function acquireBodyReadSlot(): Promise<() => void> {
   return releaseBodyReadSlot;
 }
 
-function cleanupAuthRateState(now: number): void {
-  for (const [key, state] of authRateStates.entries()) {
-    if (now - state.windowStart > AUTH_WINDOW_MS) {
-      authRateStates.delete(key);
-    }
-  }
+function cleanupLoginFailureState(now: number): void {
   for (const [key, state] of loginFailureStates.entries()) {
     if (state.blockedUntil + AUTH_WINDOW_MS < now) {
       loginFailureStates.delete(key);
@@ -254,32 +248,29 @@ export function readClientIp(req: IncomingMessage): string {
   return remote || 'unknown';
 }
 
-function checkRateLimit(key: string, limit: number, windowMs: number): { limited: boolean; retryAfterMs: number } {
-  const now = Date.now();
-  cleanupAuthRateState(now);
-  const current = authRateStates.get(key);
-  if (!current || now - current.windowStart >= windowMs) {
-    authRateStates.set(key, { count: 1, windowStart: now });
-    return { limited: false, retryAfterMs: 0 };
-  }
-  if (current.count >= limit) {
-    const retryAfterMs = Math.max(1_000, windowMs - (now - current.windowStart));
-    return { limited: true, retryAfterMs };
-  }
-  current.count += 1;
-  return { limited: false, retryAfterMs: 0 };
+async function checkRateLimit(key: string, limit: number, windowMs: number): Promise<{ limited: boolean; retryAfterMs: number }> {
+  if (_httpRateLimiter) return _httpRateLimiter.check(key, limit, windowMs);
+  // Lazy in-process fallback before limiter is initialised (e.g. in tests).
+  const { createHttpRateLimiter } = await import('./http-rate-limiter.js');
+  _httpRateLimiter = await createHttpRateLimiter();
+  return _httpRateLimiter.check(key, limit, windowMs);
 }
 
-export function checkAuthRateLimits(kind: 'login' | 'register', req: IncomingMessage, email?: string): { limited: boolean; retryAfterMs: number } {
+export async function checkEdgeRateLimit(req: IncomingMessage): Promise<{ limited: boolean; retryAfterMs: number }> {
+  const ip = readClientIp(req);
+  return checkRateLimit(`edge:ip:${ip}`, EDGE_IP_LIMIT, EDGE_WINDOW_MS);
+}
+
+export async function checkAuthRateLimits(kind: 'login' | 'register', req: IncomingMessage, email?: string): Promise<{ limited: boolean; retryAfterMs: number }> {
   const ip = readClientIp(req);
   const ipLimit = kind === 'login' ? LOGIN_IP_LIMIT : REGISTER_IP_LIMIT;
   const emailLimit = kind === 'login' ? LOGIN_EMAIL_LIMIT : REGISTER_EMAIL_LIMIT;
 
-  const ipCheck = checkRateLimit(`${kind}:ip:${ip}`, ipLimit, AUTH_WINDOW_MS);
+  const ipCheck = await checkRateLimit(`${kind}:ip:${ip}`, ipLimit, AUTH_WINDOW_MS);
   if (ipCheck.limited) return ipCheck;
 
   if (email) {
-    const emailCheck = checkRateLimit(`${kind}:email:${email.toLowerCase()}`, emailLimit, AUTH_WINDOW_MS);
+    const emailCheck = await checkRateLimit(`${kind}:email:${email.toLowerCase()}`, emailLimit, AUTH_WINDOW_MS);
     if (emailCheck.limited) return emailCheck;
   }
 
@@ -292,7 +283,7 @@ export function getFailureKey(ip: string, email: string): string {
 
 export function getLoginBackoffMs(ip: string, email: string): number {
   const now = Date.now();
-  cleanupAuthRateState(now);
+  cleanupLoginFailureState(now);
   const key = getFailureKey(ip, email);
   const current = loginFailureStates.get(key);
   if (!current) return 0;
@@ -382,12 +373,42 @@ export function normalizePublicOrigin(value: string): string {
   return parsed.origin;
 }
 
-export function resolveRequestOrigin(req: IncomingMessage): string {
+/**
+ * M-4: Resolve the request origin from the Host header. Before constructing a
+ * redirect URI (used in OAuth callbacks), the Host value is validated against the
+ * server's allowed-origins set so a request with a forged `Host: evil.com` header
+ * cannot redirect tokens to an attacker-controlled domain.
+ *
+ * Validation is opt-in: when `allowedOrigins` is absent (the common internal
+ * use case — e.g., `postMessage` target) the host is trusted as-is. When the
+ * result will be used as an OAuth redirect URI, pass `resolveAllowedOAuthOrigins`
+ * as `allowedOrigins` so the Host is checked before it reaches the OAuth provider.
+ *
+ * @param allowedOrigins - When provided, the resolved origin MUST be in this set.
+ *                         Pass `resolveAllowedOAuthOrigins(publicBaseUrl)` here.
+ * @throws {Error} When the Host header is missing or (with allowedOrigins) not
+ *                 in the allowed set.
+ */
+export function resolveRequestOrigin(
+  req: IncomingMessage,
+  allowedOrigins?: Set<string>,
+): string {
   const hostHeader = req.headers['host'];
   const host = Array.isArray(hostHeader) ? hostHeader[0] : hostHeader;
   if (!host) throw new Error('Missing Host header');
-  const protocol = host.startsWith('localhost') || host.startsWith('127.0.0.1') ? 'http' : 'https';
-  return normalizePublicOrigin(`${protocol}://${host}`);
+  // Strip any trailing dot (normalisation) and null bytes (header injection guard).
+  const cleanHost = host.replace(/\0/g, '').replace(/\.$/, '').trim();
+  const protocol = cleanHost.startsWith('localhost') || cleanHost.startsWith('127.0.0.1') || cleanHost.startsWith('[::1]') ? 'http' : 'https';
+  const origin = normalizePublicOrigin(`${protocol}://${cleanHost}`);
+
+  if (allowedOrigins && !allowedOrigins.has(origin)) {
+    throw new Error(
+      `Host header "${cleanHost}" resolves to origin "${origin}" which is not in the allowed origins list. ` +
+        `Allowed: ${[...allowedOrigins].join(', ')}`,
+    );
+  }
+
+  return origin;
 }
 
 export function resolveAllowedOAuthOrigins(publicBaseUrl: string): Set<string> {
@@ -419,6 +440,19 @@ export function listConfiguredOAuthProviders(env: NodeJS.ProcessEnv = process.en
   });
 }
 
+/**
+ * M-4: Build an OAuth provider config from the request.
+ *
+ * The Host header validation is now applied whenever a `publicBaseUrl` is
+ * configured (previously only in production). This closes an SSRF / open-redirect
+ * gap in staging/dev environments where an attacker with network access could
+ * forge the Host header to redirect OAuth tokens to an arbitrary domain.
+ *
+ * Validation path:
+ *  1. `publicBaseUrl` present → validate Host against resolveAllowedOAuthOrigins.
+ *  2. `publicBaseUrl` absent  → derive origin from Host (dev convenience only;
+ *     blocks if Host is missing, but no allowlist enforced).
+ */
 export function buildOAuthProviderFromRequest(provider: OAuthProviderName, req: IncomingMessage, publicBaseUrl?: string) {
   const isProduction = process.env['NODE_ENV'] === 'production';
   if (isProduction && !publicBaseUrl) {
@@ -428,13 +462,15 @@ export function buildOAuthProviderFromRequest(provider: OAuthProviderName, req: 
   let baseUrl: string;
   if (publicBaseUrl) {
     baseUrl = normalizePublicOrigin(publicBaseUrl);
-    if (isProduction) {
-      const requestOrigin = resolveRequestOrigin(req);
-      const allowed = resolveAllowedOAuthOrigins(publicBaseUrl);
-      if (!allowed.has(requestOrigin)) {
-        throw new Error(`OAuth request origin not allowed: ${requestOrigin}`);
-      }
-    }
+    // M-4: Validate the Host header against allowed origins in ALL environments
+    // (not just production) when publicBaseUrl is configured — a forged Host in
+    // staging causes the same open-redirect risk as in production.
+    const allowed = resolveAllowedOAuthOrigins(publicBaseUrl);
+    const requestOrigin = resolveRequestOrigin(req, allowed);
+    // resolveRequestOrigin throws if the Host is not in `allowed`; on success
+    // we always use the canonical `baseUrl` (not the request origin) to build
+    // the redirect URI so Host header manipulation cannot alter the callback URL.
+    void requestOrigin; // validated; use publicBaseUrl-derived baseUrl
   } else {
     baseUrl = resolveRequestOrigin(req);
   }

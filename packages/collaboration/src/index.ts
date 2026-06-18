@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // @weaveintel/collaboration — Public API
 export {
   type SessionParticipant,

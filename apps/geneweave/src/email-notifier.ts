@@ -34,6 +34,9 @@ export interface EmailNotifier {
 
 // ── Console implementation (dev / fallback) ──────────────────────────────────
 
+import { createLogger } from '@weaveintel/core';
+const emailLogger = createLogger('email-notifier');
+
 export class ConsoleEmailNotifier implements EmailNotifier {
   async sendVerificationEmail(opts: {
     to: string;
@@ -41,7 +44,7 @@ export class ConsoleEmailNotifier implements EmailNotifier {
     verificationUrl: string;
     expiresInHours: number;
   }): Promise<void> {
-    console.log([
+    emailLogger.info([
       '',
       '╔══════════════════════════════════════════════════════════════╗',
       '║  [EMAIL] Verify your email address                           ║',
@@ -64,7 +67,7 @@ export class ConsoleEmailNotifier implements EmailNotifier {
     persona: string;
     expiresInHours: number;
   }): Promise<void> {
-    console.log([
+    emailLogger.info([
       '',
       '╔══════════════════════════════════════════════════════════════╗',
       '║  [EMAIL] You have been invited to WeaveIntel                 ║',

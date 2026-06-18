@@ -1,0 +1,41 @@
+version: 2
+
+updates:
+  # ── npm (monorepo root) ───────────────────────────────────────────────────
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '03:00'
+      timezone: UTC
+    open-pull-requests-limit: 10
+    groups:
+      # Batch minor/patch updates for low-risk packages
+      minor-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Skip major version bumps for core framework packages until reviewed
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      - dependency-name: vite
+        update-types: ['version-update:semver-major']
+    labels:
+      - dependencies
+      - automated
+
+  # ── GitHub Actions ────────────────────────────────────────────────────────
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '03:00'
+      timezone: UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions
+      - automated

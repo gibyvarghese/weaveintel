@@ -39,6 +39,8 @@ class InMemoryStore implements EncryptionStore {
       k.id === id ? { ...k, status: s, rotatedAt: s === 'previous' ? ts : k.rotatedAt, revokedAt: s === 'revoked' ? ts : k.revokedAt } : k,
     );
   }
+
+  async getKekById(_t: string, id: string) { return this.keks.find((k) => k.id === id) ?? null; }
   async listDeks(t: string) {
     return this.deks.filter((d) => d.tenantId === t);
   }
@@ -49,6 +51,12 @@ class InMemoryStore implements EncryptionStore {
     this.deks = this.deks.map((d) =>
       d.id === id ? { ...d, status: s, rotatedAt: s === 'previous' ? ts : d.rotatedAt, revokedAt: s === 'revoked' ? ts : d.revokedAt } : d,
     );
+  }
+
+  async getDekById(_t: string, id: string) { return this.deks.find((d) => d.id === id) ?? null; }
+  async getMaxDekEpoch(_t: string) {
+    const active = this.deks.filter((d) => d.status === 'active');
+    return active.length ? Math.max(...active.map((d) => d.epoch)) : null;
   }
   async listBiks(t: string) {
     return this.biks.filter((b) => b.tenantId === t);

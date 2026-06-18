@@ -22,7 +22,10 @@
  * cycle at most.
  */
 
+import { createLogger } from '@weaveintel/core';
 import type { DatabaseAdapter } from './db.js';
+
+const logger = createLogger('tenant-theme');
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -207,7 +210,7 @@ export async function resolveTenantThemeTokens(
   } catch (err) {
     // Never let a theme lookup break a request — degrade to the base theme.
     // Do NOT cache the error state: let the next request retry the DB.
-    console.error('[tenant-theme] DB lookup failed, returning base theme', err);
+    logger.error('DB lookup failed, returning base theme', { err });
     return null;
   }
 }

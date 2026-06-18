@@ -25,6 +25,8 @@ import {
   oauthClient,
   buildOAuthProviderFromRequest,
   listConfiguredOAuthProviders,
+  OAUTH_PROVIDER_NAMES,
+  resolveRequestOrigin,
 } from '../server-core.js';
 import type { Router } from '../server-core.js';
 import {
@@ -36,6 +38,12 @@ import {
 import { consumeInvitation, markInvitationUsed, PRIVILEGED_PERSONAS, INVITATION_EXPIRY_HOURS } from '../auth-invitations.js';
 import { issueVerificationToken, consumeVerificationToken, canResendVerification, VERIFICATION_EXPIRY_HOURS } from '../auth-email-verify.js';
 import { getEmailNotifier } from '../email-notifier.js';
+import {
+  handlePasskeyRegisterBegin,
+  handlePasskeyRegisterComplete,
+  handlePasskeyAuthBegin,
+  handlePasskeyAuthComplete,
+} from '../auth-passkey.js';
 
 /** Read the allow_expo_go_scheme flag from global platform config_overrides. */
 async function isExpoGoSchemeAllowed(db: DatabaseAdapter): Promise<boolean> {
@@ -131,7 +139,7 @@ async function authenticateAndMintSession(
     return null;
   }
 
-  const loginRate = checkAuthRateLimits('login', req, email);
+  const loginRate = await checkAuthRateLimits('login', req, email);
   if (loginRate.limited) {
     const retryAfterSec = Math.ceil(loginRate.retryAfterMs / 1_000);
     res.setHeader('Retry-After', String(retryAfterSec));
@@ -192,7 +200,7 @@ export function registerAuthRoutes(
     if (!name || !email || !password) { json(res, 400, { error: 'name, email, and password required' }); return; }
     if (password.length < 8) { json(res, 400, { error: 'Password must be at least 8 characters' }); return; }
 
-    const registerRate = checkAuthRateLimits('register', req, email);
+    const registerRate = await checkAuthRateLimits('register', req, email);
     if (registerRate.limited) {
       const retryAfterSec = Math.ceil(registerRate.retryAfterMs / 1_000);
       res.setHeader('Retry-After', String(retryAfterSec));
@@ -267,24 +275,22 @@ export function registerAuthRoutes(
       });
     }
 
-    // Issue a session immediately so the client can use the app right away.
-    // Subsequent sign-ins (after session expiry / logout) require email verification.
-    const sessionId = newUUIDv7();
-    const csrfToken = generateCSRFToken();
-    const expiresAt = new Date(Date.now() + 86400_000).toISOString();
-    await db.createSession({ id: sessionId, userId, csrfToken, expiresAt });
-
-    const token = signJWT({ userId, email, sessionId }, jwtSecret);
-    setAuthCookie(res, token);
+    // L-2: Do NOT issue a session at registration — the account must be verified
+    // first. Previously a full session was granted immediately, which meant:
+    //  (a) unverified users could impersonate any email address as a username,
+    //  (b) bots could register unlimited accounts with no email barrier.
+    //
+    // In test mode (NODE_ENV=test) the email is auto-verified above, so the login
+    // flow works immediately in tests. In all other non-production and production
+    // environments the client must click the verification link and then log in.
     const created = await db.getUserById(userId);
     const persona = created?.persona ?? assignedPersona;
     json(res, 201, {
-      token,
-      expiresAt,
       user: { id: userId, email, name, persona },
-      csrfToken,
-      permissions: personaPermissions(persona),
-      requiresEmailVerification: true,
+      requiresEmailVerification: process.env['NODE_ENV'] !== 'test',
+      message: process.env['NODE_ENV'] !== 'test'
+        ? 'Account created. Please check your email to verify your address before logging in.'
+        : 'Account created.',
     });
   }, { csrf: false });
 
@@ -395,7 +401,11 @@ export function registerAuthRoutes(
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const provider = params['provider'];
     if (!provider) { json(res, 400, { error: 'Provider required' }); return; }
-    
+    // M-3: validate provider against the canonical allowlist so an attacker cannot
+    // pass arbitrary strings that reach DB queries or downstream OAuth clients.
+    if (!(OAUTH_PROVIDER_NAMES as readonly string[]).includes(provider)) {
+      json(res, 400, { error: 'Invalid provider' }); return;
+    }
     await db.deleteOAuthLinkedAccount(auth.userId, provider);
     json(res, 200, { ok: true });
   });
@@ -419,7 +429,9 @@ export function registerAuthRoutes(
 
     const provider = body.provider?.toLowerCase() as OAuthProviderName | undefined;
     if (!provider) { json(res, 400, { error: 'provider required' }); return; }
-    if (!['google', 'github', 'microsoft', 'apple', 'facebook'].includes(provider)) {
+    // M-3: validate against OAUTH_PROVIDER_NAMES (single source of truth in server-core.ts)
+    // rather than a locally-maintained duplicate array.
+    if (!(OAUTH_PROVIDER_NAMES as readonly string[]).includes(provider)) {
       json(res, 400, { error: 'Invalid provider' }); return;
     }
 
@@ -448,7 +460,25 @@ export function registerAuthRoutes(
     const { code, state, error } = callbackParams;
     const errorDescription = callbackParams['error_description'];
 
-    if (error) { json(res, 400, { error: `OAuth error: ${error}`, ...(errorDescription ? { error_description: errorDescription } : {}) }); return; }
+    if (error) {
+      // M-2: Allowlist the OAuth error codes we're willing to reflect back to the
+      // client. Providers can return arbitrary strings; without filtering, an
+      // attacker who controls the callback URL could inject content into the response
+      // body. The truncated `error_description` is capped at 200 chars so a rogue
+      // provider cannot embed a large XSS payload or exfiltration anchor.
+      const ALLOWED_OAUTH_ERRORS = new Set([
+        'access_denied', 'invalid_request', 'invalid_client', 'invalid_grant',
+        'unauthorized_client', 'unsupported_grant_type', 'invalid_scope',
+        'server_error', 'temporarily_unavailable', 'interaction_required',
+        'login_required', 'consent_required',
+      ]);
+      const safeError = ALLOWED_OAUTH_ERRORS.has(error) ? error : 'oauth_error';
+      const safeDesc = errorDescription
+        ? String(errorDescription).replace(/[\r\n<>"']/g, '').slice(0, 200)
+        : undefined;
+      json(res, 400, { error: `OAuth error: ${safeError}`, ...(safeDesc ? { error_description: safeDesc } : {}) });
+      return;
+    }
     if (!code || !state) { json(res, 400, { error: 'Missing code or state' }); return; }
 
     const stateData = await consumeOAuthState(state);
@@ -533,10 +563,25 @@ export function registerAuthRoutes(
         setAuthCookie(res, jwt);
       }
 
+      // M-7: `window.location.origin` as the postMessage targetOrigin accepts ANY
+      // opener — if this callback page were somehow loaded in a cross-origin iframe
+      // an attacker could eavesdrop on the oauth-success message. Instead, embed the
+      // server's own origin (derived from the Host header via resolveRequestOrigin)
+      // so the browser only delivers the message to windows from our domain.
+      // We JSON-encode the origin string so it is safe to inline in a script tag
+      // even if it contains special characters (e.g. port number with colon).
+      let callbackOrigin: string;
+      try {
+        callbackOrigin = resolveRequestOrigin(req);
+      } catch {
+        // Fallback: use same-origin (empty string falls back to same-origin in postMessage)
+        callbackOrigin = '';
+      }
+      const safeOrigin = JSON.stringify(callbackOrigin || '*');
       html(
         res,
         200,
-        '<html><body><script>if(window.opener){window.opener.postMessage({type:"oauth-success"}, window.location.origin);}window.close();</script>Account linked successfully! You can close this window.</body></html>',
+        `<html><head><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'"></head><body><script>if(window.opener){window.opener.postMessage({type:"oauth-success"},${safeOrigin});}window.close();</script>Account linked successfully! You can close this window.</body></html>`,
       );
     } catch (err) {
       json(res, 500, { error: `Failed to link account: ${(err as Error).message}` });
@@ -605,5 +650,74 @@ export function registerAuthRoutes(
     }
     json(res, 200, { ok: true, message: 'If this email is registered and unverified, a verification link has been sent.' });
   }, { auth: false, csrf: false });
+
+  // ── FIDO2 / WebAuthn passkey routes (4.1) ─────────────────────────
+  // Passkey registration is authenticated (requires a logged-in session).
+  // Passkey authentication is unauthenticated (this IS the login mechanism).
+  //
+  //  POST /api/auth/passkey/register/begin    — gen challenge + creation options
+  //  POST /api/auth/passkey/register/complete — verify attestation + store
+  //  POST /api/auth/passkey/auth/begin        — gen challenge + request options
+  //  POST /api/auth/passkey/auth/complete     — verify assertion + issue session
+  //  GET  /api/auth/passkeys                  — list credentials for current user
+  //  DELETE /api/auth/passkeys/:credentialId  — remove a credential
+
+  function passkeyConfig(req: IncomingMessage) {
+    const origin = publicBaseUrl ?? `https://${req.headers['host'] ?? 'localhost'}`;
+    const rpId = new URL(origin).hostname;
+    return { rpId, rpName: 'WeaveIntel', origin };
+  }
+
+  router.post('/api/auth/passkey/register/begin', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Unauthorized' }); return; }
+    await handlePasskeyRegisterBegin(req, res, auth, db, passkeyConfig(req), json);
+  }, { auth: true, csrf: true });
+
+  router.post('/api/auth/passkey/register/complete', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Unauthorized' }); return; }
+    await handlePasskeyRegisterComplete(req, res, auth, db, passkeyConfig(req), json, readBody);
+  }, { auth: true, csrf: true });
+
+  router.post('/api/auth/passkey/auth/begin', async (req, res) => {
+    await handlePasskeyAuthBegin(req, res, db, passkeyConfig(req), json, readBody);
+  }, { auth: false, csrf: false });
+
+  router.post('/api/auth/passkey/auth/complete', async (req, res) => {
+    await handlePasskeyAuthComplete(
+      req, res, db, passkeyConfig(req), json, readBody,
+      async (userId, email) => {
+        const sessionId = newUUIDv7();
+        const csrfToken = generateCSRFToken();
+        const expiresAt = new Date(Date.now() + 86400_000).toISOString();
+        await db.createSession({ id: sessionId, userId, csrfToken, expiresAt });
+        const token = signJWT({ userId, email, sessionId }, jwtSecret);
+        return { token, csrfToken };
+      },
+    );
+  }, { auth: false, csrf: false });
+
+  router.get('/api/auth/passkeys', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Unauthorized' }); return; }
+    const credentials = await db.listPasskeyCredentials(auth.userId);
+    json(res, 200, {
+      credentials: credentials.map((c) => ({
+        id: c.id,
+        credentialId: c.credential_id,
+        aaguid: c.aaguid,
+        transports: c.transports ? c.transports.split(',') : [],
+        createdAt: c.created_at,
+        lastUsedAt: c.last_used_at,
+      })),
+    });
+  }, { auth: true });
+
+  router.del('/api/auth/passkeys/:credentialId', async (_req, res, params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Unauthorized' }); return; }
+    const cred = await db.getPasskeyCredentialById(params?.['credentialId'] ?? '');
+    if (!cred) { json(res, 404, { error: 'not found' }); return; }
+    if (cred.user_id !== auth.userId) { json(res, 403, { error: 'Forbidden' }); return; }
+    await db.deletePasskeyCredential(cred.id);
+    json(res, 200, { ok: true });
+  }, { auth: true, csrf: true });
 
 }

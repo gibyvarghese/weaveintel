@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/guardrails — Public API
  */
@@ -12,6 +13,7 @@ export {
   hasDeny,
   hasWarning,
   getDenyReason,
+  hasSkippedViolation,
   type PipelineOptions,
 } from './pipeline.js';
 

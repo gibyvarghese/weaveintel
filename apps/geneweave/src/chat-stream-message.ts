@@ -1,9 +1,11 @@
-import { newUUIDv7 } from '@weaveintel/core';
+import { newUUIDv7, createLogger } from '@weaveintel/core';
+
+const logger = createLogger('chat-stream-message');
 import type { ServerResponse } from 'node:http';
 import type { ExecutionContext, Message, AgentStep, ModelRequest, ModelHealth } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import { applySkillsToPrompt } from '@weaveintel/skills';
-import type { DatabaseAdapter, MessageRow } from './db.js';
+import type { DatabaseAdapter } from './db.js';
 import { normalizePersona } from './rbac.js';
 import {
   calculateCost,
@@ -26,6 +28,7 @@ import {
 } from './chat-prompt-contract-utils.js';
 import { discoverSkillsForInput } from './chat-skills-utils.js';
 import { applyRedaction, runPostEval, SUPERVISOR_INTERNAL_TOOLS } from './chat-eval-utils.js';
+import { historyToMessages, extractToolEvidence } from './chat-message-utils.js';
 import { recordTraceSpans, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
 import { evaluateGuardrails, evaluateTaskPolicies } from './chat-guardrail-eval-utils.js';
 import { resolveSystemPrompt, buildCapabilityTelemetrySnapshots } from './chat-system-prompt-utils.js';
@@ -311,7 +314,10 @@ export async function streamMessageImpl(
         attachments: attachments.length > 0 ? attachments : undefined,
       })
     : undefined;
-  await deps.db.addMessage({ id: userMsgId, chatId, role: 'user', content, metadata: userMetadata });
+  // CR-1: Always persist the post-redaction form of the message. The raw `content`
+  // (which may contain PII) is used only for in-memory processing above this point
+  // and must never be written to the database when redaction is active.
+  await deps.db.addMessage({ id: userMsgId, chatId, role: 'user', content: processedContent, metadata: userMetadata });
 
   // Load history now so turn number is available for condition context.
   const history = await deps.db.getMessages(chatId);
@@ -450,7 +456,13 @@ export async function streamMessageImpl(
     if (settings.mode === 'agent' || settings.mode === 'supervisor' || settings.mode === 'ensemble') {
       streamTelemetry = await deps.streamAgent(res, ctx, model, userId, chatId, userPersona, messages, processedContent, streamMemorySettings, attachments, tenantId);
       fullText = streamTelemetry.result.output ?? '';
-      finalUsage = { promptTokens: streamTelemetry.result.usage.totalTokens, completionTokens: 0, totalTokens: streamTelemetry.result.usage.totalTokens };
+      // H-4: Use the actual prompt/completion split from AgentResult.usage so
+      // the cost ledger records the correct per-direction token counts.
+      finalUsage = {
+        promptTokens: streamTelemetry.result.usage.promptTokens,
+        completionTokens: streamTelemetry.result.usage.completionTokens,
+        totalTokens: streamTelemetry.result.usage.totalTokens,
+      };
       steps = [...streamTelemetry.result.steps];
       toolCallEvents = streamTelemetry.toolCallEvents;
       // Extract ensemble-specific fields when present
@@ -523,6 +535,26 @@ export async function streamMessageImpl(
   }
 
   if (clientDisconnected) {
+    // M-27: The user disconnected before the stream completed, leaving `userMsgId`
+    // in the database without a corresponding assistant turn. A bare user message
+    // with no reply is an "orphaned half-turn" that confuses history UIs and any
+    // memory system that expects alternating user/assistant pairs.
+    //
+    // Because there is no `deleteMessage` API, we close the turn by writing a
+    // synthetic `[Stream cancelled]` assistant message. This keeps the chat
+    // history internally consistent and makes the cancellation visible to the
+    // user if they reload before the full response arrives in a later attempt.
+    try {
+      await deps.db.addMessage({
+        id: newUUIDv7(),
+        chatId,
+        role: 'assistant',
+        content: '[Stream cancelled] The connection was closed before the response was complete.',
+        metadata: JSON.stringify({ streamCancelled: true, latencyMs: Date.now() - startMs }),
+      });
+    } catch {
+      // Best-effort — if the DB write fails we still return cleanly.
+    }
     return;
   }
 
@@ -589,17 +621,8 @@ export async function streamMessageImpl(
     await deps.writeSseEvent(res, { type: 'text', text: fullText });
   }
 
-  const streamToolEvidence = steps
-    ?.filter(s => {
-      if (s.type !== 'tool_call' && s.type !== 'delegation') return false;
-      const result = (s.toolCall?.result ?? s.delegation?.result ?? '') as string;
-      if (!result || result === '(Worker returned no output)') return false;
-      if (/^\[(PLANNING|REASONING|SYNTHESIS|REFLECTION)\]/.test(result)) return false;
-      if (s.type === 'tool_call' && SUPERVISOR_INTERNAL_TOOLS.has(s.toolCall?.name ?? '')) return false;
-      return true;
-    })
-    .map(s => (s.toolCall?.result ?? s.delegation?.result ?? '') as string)
-    .join(' ') || undefined;
+  // M-18: extracted to chat-message-utils.extractToolEvidence — shared with send path
+  const streamToolEvidence = extractToolEvidence(steps);
   const postGuardrail = await evaluateGuardrails(deps.db, chatId, null, fullText, 'post-execution',
     { userInput: processedContent, assistantOutput: fullText, toolEvidence: streamToolEvidence },
     {
@@ -697,8 +720,10 @@ export async function streamMessageImpl(
   try {
     await saveToMemory(deps.db, ctx, model, userId, chatId, processedContent, fullText, tenantId ?? undefined);
     triggerConsolidationForUser(userId, chatId);
-  } catch {
-    // Keep chat success path resilient when memory persistence fails.
+  } catch (memErr) {
+    // L-16: Log memory save / consolidation failures so operators can detect
+    // memory backend outages without impacting the stream success path.
+    logger.warn('memory save / consolidation failed (stream)', { err: memErr instanceof Error ? memErr.message : String(memErr) });
   }
 
   await deps.db.recordMetric({
@@ -730,9 +755,4 @@ export async function streamMessageImpl(
   deps.endSse(res);
 }
 
-function historyToMessages(rows: MessageRow[]): Message[] {
-  return rows.map((r) => ({
-    role: r.role as Message['role'],
-    content: r.content,
-  }));
-}
+// H-15: historyToMessages moved to chat-message-utils.ts — imported above

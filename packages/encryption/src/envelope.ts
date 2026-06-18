@@ -50,6 +50,10 @@ export interface ParsedSentinel {
   readonly ctWithTag: Buffer;
 }
 
+/**
+ * Serialize AAD parts into the canonical `tenant|table|column|rowId|epoch` buffer.
+ * @internal Not part of the public API — used by encryptValue/decryptValue internally.
+ */
 export function buildAad(parts: EnvelopeAadParts): Buffer {
   return Buffer.from(
     `${parts.tenantId}|${parts.table}|${parts.column}|${parts.rowId}|${parts.epoch}`,
@@ -61,6 +65,10 @@ export function isEncrypted(value: unknown): value is string {
   return typeof value === 'string' && value.startsWith(SENTINEL_PREFIX);
 }
 
+/**
+ * Parse a sentinel-prefixed ciphertext string into its component parts.
+ * @internal Not part of the public API — used by decryptValue and the rewrite scheduler.
+ */
 export function parseSentinel(s: string): ParsedSentinel {
   if (!s.startsWith(SENTINEL_PREFIX)) {
     throw new CiphertextFormatError('not a sentinel-prefixed ciphertext');

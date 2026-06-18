@@ -68,9 +68,30 @@ export interface EncryptionStore {
   insertKek(k: KekRecord): Promise<void>;
   updateKekStatus(id: string, status: KeyStatus, ts: number): Promise<void>;
 
+  /**
+   * H-13: Point lookup by ID. Avoids the O(n) `listKeks(tenantId).find(…)`
+   * pattern — critical when the store is backed by Postgres, where
+   * `listKeks` issues a full table scan per tenant on every encrypt/decrypt.
+   * Returns `null` if the record is not found.
+   */
+  getKekById(tenantId: string, kekId: string): Promise<KekRecord | null>;
+
   listDeks(tenantId: string): Promise<DekRecord[]>;
   insertDek(d: DekRecord): Promise<void>;
   updateDekStatus(id: string, status: KeyStatus, ts: number): Promise<void>;
+
+  /**
+   * H-13: Point lookup by ID. Same rationale as `getKekById`.
+   * Returns `null` if the record is not found.
+   */
+  getDekById(tenantId: string, dekId: string): Promise<DekRecord | null>;
+
+  /**
+   * H-13: Returns the highest active DEK epoch for `tenantId`, or `null` if no
+   * active DEK exists. Used by the rotation path to determine the next epoch
+   * number without a full list scan.
+   */
+  getMaxDekEpoch(tenantId: string): Promise<number | null>;
 
   listBiks(tenantId: string): Promise<BikRecord[]>;
   insertBik(b: BikRecord): Promise<void>;

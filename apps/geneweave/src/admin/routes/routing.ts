@@ -1,7 +1,8 @@
+// SPDX-License-Identifier: MIT
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { hardenedFetch, newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../../db.js';
-import { validateDetailedDescription } from '../api/admin-route-helpers.js';
+import { validateDetailedDescription, toDbUpdate } from '../api/admin-route-helpers.js';
 import {
   registerToolRoutes,
   registerToolPolicyRoutes,
@@ -313,7 +314,7 @@ export function registerAdminRoutingRoutes(
     if (body['bypass_patterns'] !== undefined) fields['bypass_patterns'] = typeof body['bypass_patterns'] === 'string' ? body['bypass_patterns'] : JSON.stringify(body['bypass_patterns']);
     if (body['invalidate_on'] !== undefined) fields['invalidate_on'] = typeof body['invalidate_on'] === 'string' ? body['invalidate_on'] : JSON.stringify(body['invalidate_on']);
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateCachePolicy(params['id']!, fields as any);
+    await db.updateCachePolicy(params['id']!, toDbUpdate(fields));
     const item = await db.getCachePolicy(params['id']!);
     json(res, 200, { 'cache-policy': item });
   }, { auth: true, csrf: true });
@@ -388,7 +389,7 @@ export function registerAdminRoutingRoutes(
     }
     if (body['priority'] !== undefined) fields['priority'] = body['priority'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateMemoryExtractionRule(params['id']!, fields as any);
+    await db.updateMemoryExtractionRule(params['id']!, toDbUpdate(fields));
     const item = await db.getMemoryExtractionRule(params['id']!);
     json(res, 200, { 'memory-extraction-rule': item });
   }, { auth: true, csrf: true });
@@ -450,7 +451,7 @@ export function registerAdminRoutingRoutes(
     if (body['priority'] !== undefined) fields['priority'] = body['priority'];
     if (body['options'] !== undefined) fields['options'] = typeof body['options'] === 'string' ? body['options'] : JSON.stringify(body['options']);
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateSearchProvider(params['id']!, fields as any);
+    await db.updateSearchProvider(params['id']!, toDbUpdate(fields));
     const item = await db.getSearchProvider(params['id']!);
     json(res, 200, { 'search-provider': item });
   }, { auth: true, csrf: true });
@@ -519,7 +520,7 @@ export function registerAdminRoutingRoutes(
     if (body['retry_count'] !== undefined) fields['retry_count'] = body['retry_count'];
     if (body['rate_limit_rpm'] !== undefined) fields['rate_limit_rpm'] = body['rate_limit_rpm'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateHttpEndpoint(params['id']!, fields as any);
+    await db.updateHttpEndpoint(params['id']!, toDbUpdate(fields));
     const item = await db.getHttpEndpoint(params['id']!);
     json(res, 200, { 'http-endpoint': item });
   }, { auth: true, csrf: true });
@@ -582,7 +583,7 @@ export function registerAdminRoutingRoutes(
     if (body['base_url'] !== undefined) fields['base_url'] = body['base_url'];
     if (body['options'] !== undefined) fields['options'] = typeof body['options'] === 'string' ? body['options'] : JSON.stringify(body['options']);
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateSocialAccount(params['id']!, fields as any);
+    await db.updateSocialAccount(params['id']!, toDbUpdate(fields));
     const item = await db.getSocialAccount(params['id']!);
     json(res, 200, { 'social-account': item });
   }, { auth: true, csrf: true });
@@ -649,7 +650,7 @@ export function registerAdminRoutingRoutes(
     if (body['refresh_token'] !== undefined) fields['refresh_token'] = body['refresh_token'];
     if (body['token_expires_at'] !== undefined) fields['token_expires_at'] = body['token_expires_at'];
     if (body['status'] !== undefined) fields['status'] = body['status'];
-    await db.updateEnterpriseConnector(params['id']!, fields as any);
+    await db.updateEnterpriseConnector(params['id']!, toDbUpdate(fields));
     const item = await db.getEnterpriseConnector(params['id']!);
     json(res, 200, { 'enterprise-connector': item });
   }, { auth: true, csrf: true });
@@ -717,7 +718,7 @@ export function registerAdminRoutingRoutes(
     if (body['max_execution_ms'] !== undefined) fields['max_execution_ms'] = body['max_execution_ms'];
     if (body['rate_limit_per_min'] !== undefined) fields['rate_limit_per_min'] = body['rate_limit_per_min'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateToolRegistryEntry(params['id']!, fields as any);
+    await db.updateToolRegistryEntry(params['id']!, toDbUpdate(fields));
     const item = await db.getToolRegistryEntry(params['id']!);
     json(res, 200, { 'tool-registry-entry': item });
   }, { auth: true, csrf: true });
@@ -779,7 +780,7 @@ export function registerAdminRoutingRoutes(
     if (body['tags'] !== undefined) fields['tags'] = typeof body['tags'] === 'string' ? body['tags'] : JSON.stringify(body['tags']);
     if (body['acceptance_criteria'] !== undefined) fields['acceptance_criteria'] = typeof body['acceptance_criteria'] === 'string' ? body['acceptance_criteria'] : JSON.stringify(body['acceptance_criteria']);
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateReplayScenario(params['id']!, fields as any);
+    await db.updateReplayScenario(params['id']!, toDbUpdate(fields));
     const item = await db.getReplayScenario(params['id']!);
     json(res, 200, { 'replay-scenario': item });
   }, { auth: true, csrf: true });
@@ -842,7 +843,7 @@ export function registerAdminRoutingRoutes(
     if (body['target_workflow'] !== undefined) fields['target_workflow'] = body['target_workflow'];
     if (body['status'] !== undefined) fields['status'] = body['status'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateTriggerDefinition(params['id']!, fields as any);
+    await db.updateTriggerDefinition(params['id']!, toDbUpdate(fields));
     const item = await db.getTriggerDefinition(params['id']!);
     json(res, 200, { 'trigger-definition': item });
   }, { auth: true, csrf: true });
@@ -916,7 +917,7 @@ export function registerAdminRoutingRoutes(
     if (body['features'] !== undefined) fields['features'] = typeof body['features'] === 'string' ? body['features'] : JSON.stringify(body['features']);
     if (body['config_overrides'] !== undefined) fields['config_overrides'] = typeof body['config_overrides'] === 'string' ? body['config_overrides'] : JSON.stringify(body['config_overrides']);
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateTenantConfig(params['id']!, fields as any);
+    await db.updateTenantConfig(params['id']!, toDbUpdate(fields));
     const item = await db.getTenantConfig(params['id']!);
     json(res, 200, { 'tenant-config': item });
   }, { auth: true, csrf: true });
@@ -984,7 +985,7 @@ export function registerAdminRoutingRoutes(
     if (body['network_access'] !== undefined) fields['network_access'] = body['network_access'] ? 1 : 0;
     if (body['filesystem_access'] !== undefined) fields['filesystem_access'] = body['filesystem_access'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateSandboxPolicy(params['id']!, fields as any);
+    await db.updateSandboxPolicy(params['id']!, toDbUpdate(fields));
     const item = await db.getSandboxPolicy(params['id']!);
     json(res, 200, { 'sandbox-policy': item });
   }, { auth: true, csrf: true });
@@ -1042,7 +1043,7 @@ export function registerAdminRoutingRoutes(
     if (body['input_mime_types'] !== undefined) fields['input_mime_types'] = typeof body['input_mime_types'] === 'string' ? body['input_mime_types'] : JSON.stringify(body['input_mime_types']);
     if (body['max_input_size_bytes'] !== undefined) fields['max_input_size_bytes'] = body['max_input_size_bytes'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateExtractionPipeline(params['id']!, fields as any);
+    await db.updateExtractionPipeline(params['id']!, toDbUpdate(fields));
     const item = await db.getExtractionPipeline(params['id']!);
     json(res, 200, { 'extraction-pipeline': item });
   }, { auth: true, csrf: true });
@@ -1102,7 +1103,7 @@ export function registerAdminRoutingRoutes(
     if (body['retention_days'] !== undefined) fields['retention_days'] = body['retention_days'];
     if (body['require_versioning'] !== undefined) fields['require_versioning'] = body['require_versioning'] ? 1 : 0;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateArtifactPolicy(params['id']!, fields as any);
+    await db.updateArtifactPolicy(params['id']!, toDbUpdate(fields));
     const item = await db.getArtifactPolicy(params['id']!);
     json(res, 200, { 'artifact-policy': item });
   }, { auth: true, csrf: true });
@@ -1172,7 +1173,7 @@ export function registerAdminRoutingRoutes(
     if (body['strategy'] !== undefined) fields['strategy'] = body['strategy'];
     if (body['ttl_ms'] !== undefined) fields['ttl_ms'] = body['ttl_ms'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateReliabilityPolicy(params['id']!, fields as any);
+    await db.updateReliabilityPolicy(params['id']!, toDbUpdate(fields));
     const item = await db.getReliabilityPolicy(params['id']!);
     json(res, 200, { 'reliability-policy': item });
   }, { auth: true, csrf: true });
@@ -1234,7 +1235,7 @@ export function registerAdminRoutingRoutes(
     if (body['auto_close_idle_ms'] !== undefined) fields['auto_close_idle_ms'] = body['auto_close_idle_ms'];
     if (body['handoff_enabled'] !== undefined) fields['handoff_enabled'] = body['handoff_enabled'] ? 1 : 0;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateCollaborationSession(params['id']!, fields as any);
+    await db.updateCollaborationSession(params['id']!, toDbUpdate(fields));
     const item = await db.getCollaborationSession(params['id']!);
     json(res, 200, { 'collaboration-session': item });
   }, { auth: true, csrf: true });
@@ -1298,7 +1299,7 @@ export function registerAdminRoutingRoutes(
     if (body['auto_link'] !== undefined) fields['auto_link'] = body['auto_link'] ? 1 : 0;
     if (body['scoring_weights'] !== undefined) fields['scoring_weights'] = body['scoring_weights'] != null ? (typeof body['scoring_weights'] === 'string' ? body['scoring_weights'] : JSON.stringify(body['scoring_weights'])) : null;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateGraphConfig(params['id']!, fields as any);
+    await db.updateGraphConfig(params['id']!, toDbUpdate(fields));
     const item = await db.getGraphConfig(params['id']!);
     json(res, 200, { 'graph-config': item });
   }, { auth: true, csrf: true });
@@ -1364,7 +1365,7 @@ export function registerAdminRoutingRoutes(
     if (body['auto_update'] !== undefined) fields['auto_update'] = body['auto_update'] ? 1 : 0;
     if (body['config'] !== undefined) fields['config'] = body['config'] != null ? (typeof body['config'] === 'string' ? body['config'] : JSON.stringify(body['config'])) : null;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updatePluginConfig(params['id']!, fields as any);
+    await db.updatePluginConfig(params['id']!, toDbUpdate(fields));
     const item = await db.getPluginConfig(params['id']!);
     json(res, 200, { 'plugin-config': item });
   }, { auth: true, csrf: true });
@@ -1428,7 +1429,7 @@ export function registerAdminRoutingRoutes(
     if (body['variables'] !== undefined) fields['variables'] = body['variables'] != null ? (typeof body['variables'] === 'string' ? body['variables'] : JSON.stringify(body['variables'])) : null;
     if (body['post_install'] !== undefined) fields['post_install'] = body['post_install'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateScaffoldTemplate(params['id']!, fields as any);
+    await db.updateScaffoldTemplate(params['id']!, toDbUpdate(fields));
     const item = await db.getScaffoldTemplate(params['id']!);
     json(res, 200, { 'scaffold-template': item });
   }, { auth: true, csrf: true });
@@ -1496,7 +1497,7 @@ export function registerAdminRoutingRoutes(
     if (body['max_steps'] !== undefined) fields['max_steps'] = Number(body['max_steps']);
     if (body['options'] !== undefined) fields['options'] = body['options'] != null ? (typeof body['options'] === 'string' ? body['options'] : JSON.stringify(body['options'])) : null;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateRecipeConfig(params['id']!, fields as any);
+    await db.updateRecipeConfig(params['id']!, toDbUpdate(fields));
     const item = await db.getRecipeConfig(params['id']!);
     json(res, 200, { 'recipe-config': item });
   }, { auth: true, csrf: true });
@@ -1558,7 +1559,7 @@ export function registerAdminRoutingRoutes(
     if (body['max_data_points'] !== undefined) fields['max_data_points'] = body['max_data_points'] != null ? Number(body['max_data_points']) : null;
     if (body['refresh_interval_ms'] !== undefined) fields['refresh_interval_ms'] = body['refresh_interval_ms'] != null ? Number(body['refresh_interval_ms']) : null;
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateWidgetConfig(params['id']!, fields as any);
+    await db.updateWidgetConfig(params['id']!, toDbUpdate(fields));
     const item = await db.getWidgetConfig(params['id']!);
     json(res, 200, { 'widget-config': item });
   }, { auth: true, csrf: true });
@@ -1620,7 +1621,7 @@ export function registerAdminRoutingRoutes(
     if (body['severity'] !== undefined) fields['severity'] = body['severity'];
     if (body['message'] !== undefined) fields['message'] = body['message'];
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
-    await db.updateValidationRule(params['id']!, fields as any);
+    await db.updateValidationRule(params['id']!, toDbUpdate(fields));
     const item = await db.getValidationRule(params['id']!);
     json(res, 200, { 'validation-rule': item });
   }, { auth: true, csrf: true });

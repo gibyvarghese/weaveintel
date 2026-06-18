@@ -6,7 +6,15 @@ import type { ModerationModel } from './moderation.js';
 
 // ─── Guardrail ───────────────────────────────────────────────
 
-export type GuardrailDecision = 'allow' | 'deny' | 'warn';
+/**
+ * M-8: `'skipped'` is a distinct outcome for guardrails that were bypassed
+ * (budget exhausted, condition not met) rather than actively evaluated.
+ * Callers with a strict security posture should treat `'skipped'` as `'deny'`
+ * via the `budgetExhaustedPolicy` pipeline option; lenient callers can treat it
+ * as `'allow'`. Never conflate `'skipped'` with `'allow'` in audit logs — the
+ * guardrail did not actually pass, it was never run.
+ */
+export type GuardrailDecision = 'allow' | 'deny' | 'warn' | 'skipped';
 export type GuardrailStage = 'pre-execution' | 'mid-execution' | 'post-execution';
 export type GuardrailType = 'regex' | 'blocklist' | 'length' | 'schema' | 'model-graded' | 'custom';
 

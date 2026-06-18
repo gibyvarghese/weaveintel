@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // @weaveintel/ui-primitives — Public API
 export {
   createUiEvent,

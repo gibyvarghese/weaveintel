@@ -30,8 +30,10 @@
  *   ◈ REST turn endpoint (for non-WS clients) — voice-specific
  */
 
-import { newUUIDv7, weaveContext } from '@weaveintel/core';
+import { newUUIDv7, createLogger, weaveContext } from '@weaveintel/core';
 import type { AudioModel, ToolRiskLevel } from '@weaveintel/core';
+
+const logger = createLogger('voice-engine');
 import type { IncomingMessage } from 'node:http';
 import type { WebSocket as WsSocket } from 'ws';
 import {
@@ -513,7 +515,7 @@ export class VoiceEngine {
           memoryBlock = await buildMemoryContext(this.db, memCtx, memModel, userId, queryHint);
         }
       } catch (err) {
-        console.warn('[voice-realtime] memory context build failed — proceeding without memory', err);
+        logger.warn('memory context build failed — proceeding without memory', { err });
       }
 
       if (memoryBlock) {
@@ -525,7 +527,7 @@ export class VoiceEngine {
     const systemPrompt = await buildSystemPromptWithMemory(
       'voice conversation context preferences user background',
     );
-    console.log(`[voice-realtime] session ${opts.sessionId} — systemPrompt ${systemPrompt.length}ch, memoryInjected=${systemPrompt.includes('\n\n')}, rotateAfter=${rotateAfter}`);
+    logger.info('voice-realtime session started', { sessionId: opts.sessionId, promptLen: systemPrompt.length, memoryInjected: systemPrompt.includes('\n\n'), rotateAfter });
 
     // ── Build voice tool registry (Phase 3) ───────────────────
     //
@@ -565,8 +567,8 @@ export class VoiceEngine {
           }))
       : [];
 
-    console.log(`[voice-realtime] session ${opts.sessionId} — tools=${realtimeTools.length} (risk≤${maxToolRisk}, budget=${toolBudgetMs}ms): ${realtimeTools.map((t) => t.name).join(', ') || 'none'}`);
-    console.log(`[voice-realtime] session ${opts.sessionId} — guardrails: input=${inputGuardrailsEnabled}, output=${outputGuardrailsEnabled}`);
+    logger.info('voice-realtime tools configured', { sessionId: opts.sessionId, toolCount: realtimeTools.length, maxToolRisk, toolBudgetMs, tools: realtimeTools.map((t) => t.name).join(', ') || 'none' });
+    logger.info('voice-realtime guardrails', { sessionId: opts.sessionId, inputGuardrailsEnabled, outputGuardrailsEnabled });
 
     await this.db.updateVoiceSessionStats(opts.sessionId, opts.userId, {
       wsConnected: true,
@@ -653,7 +655,7 @@ export class VoiceEngine {
                   row.tenant_id ?? undefined,
                 );
               }).catch((err) => {
-                console.warn('[voice-realtime] saveToMemory failed (non-critical)', err);
+                logger.warn('saveToMemory failed (non-critical)', { err });
               });
             }
           }
@@ -664,7 +666,7 @@ export class VoiceEngine {
         },
 
         onRotateSession: async (turnCount, lastTurnTranscript) => {
-          console.log(`[voice-realtime] rotating session at turn ${turnCount} for session ${opts.sessionId}`);
+          logger.info('rotating voice-realtime session', { turnCount, sessionId: opts.sessionId });
           const query = lastTurnTranscript.trim()
             ? lastTurnTranscript.slice(0, 300)
             : 'voice conversation context preferences user background';
@@ -701,7 +703,7 @@ export class VoiceEngine {
                 );
                 return { decision: gr.decision, reason: gr.reason };
               } catch (err) {
-                console.warn('[voice-realtime] input guardrail error — failing open', err);
+                logger.warn('input guardrail error — failing open', { err });
                 return { decision: 'allow' as const };
               }
             }
@@ -725,7 +727,7 @@ export class VoiceEngine {
                 );
                 return { decision: gr.decision, reason: gr.reason };
               } catch (err) {
-                console.warn('[voice-realtime] output guardrail error — failing open', err);
+                logger.warn('output guardrail error — failing open', { err });
                 return { decision: 'allow' as const };
               }
             }
@@ -752,7 +754,7 @@ export class VoiceEngine {
                 result = await tool.invoke(ctx, { name: call.name, arguments: args });
               } catch (err) {
                 const msg = err instanceof Error ? err.message : 'Unknown tool error.';
-                console.warn(`[voice-realtime] tool '${call.name}' threw: ${msg}`);
+                logger.warn(`tool '${call.name}' threw`, { msg });
                 result = { content: JSON.stringify({ error: msg }), isError: true };
               }
 
@@ -822,7 +824,7 @@ export async function createVoiceEngine(
 ): Promise<VoiceEngine | null> {
   const openaiKey = providers['openai']?.apiKey;
   if (!openaiKey) {
-    console.warn('[voice] OpenAI API key not configured — voice agent disabled. Set OPENAI_API_KEY to enable.');
+    logger.warn('OpenAI API key not configured — voice agent disabled. Set OPENAI_API_KEY to enable.');
     return null;
   }
 

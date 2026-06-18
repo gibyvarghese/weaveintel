@@ -4,7 +4,10 @@
  * Extracted from ChatEngine to keep chat.ts focused on orchestration.
  */
 
+import { createLogger } from '@weaveintel/core';
 import type { CapabilityTelemetrySummary } from '@weaveintel/core';
+
+const logger = createLogger('chat-system-prompt');
 import {
   createPromptVersionFromRecord,
   executePromptRecord,
@@ -168,7 +171,7 @@ export async function resolveSystemPrompt(
       };
     }
   } catch (err) {
-    console.warn('[chat] resolveSystemPrompt error — falling back to raw systemPrompt string', err);
+    logger.warn('resolveSystemPrompt error — falling back to raw systemPrompt string', { err });
   }
 
   return { content: settings.systemPrompt };

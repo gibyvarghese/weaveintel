@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // @weaveintel/devtools — Public API
 export {
   scaffold,

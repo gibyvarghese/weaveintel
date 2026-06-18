@@ -1,11 +1,13 @@
-import { newUUIDv7 } from '@weaveintel/core';
+import { newUUIDv7, createLogger } from '@weaveintel/core';
+
+const logger = createLogger('chat-send-message');
 import type { ExecutionContext, Message, AgentStep, ModelRequest } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import type { GuardrailCategorySummary } from '@weaveintel/guardrails';
 import { applySkillsToPrompt } from '@weaveintel/skills';
 import { shouldBypass } from '@weaveintel/cache';
 import { ModelHealthTracker } from '@weaveintel/routing';
-import type { DatabaseAdapter, MessageRow } from './db.js';
+import type { DatabaseAdapter } from './db.js';
 import { normalizePersona } from './rbac.js';
 import {
   calculateCost,
@@ -34,6 +36,7 @@ import {
 import { shouldForceWorkerDataAnalysis } from './chat-intent-utils.js';
 import { discoverSkillsForInput } from './chat-skills-utils.js';
 import { applyRedaction, runPostEval, SUPERVISOR_INTERNAL_TOOLS } from './chat-eval-utils.js';
+import { historyToMessages, extractToolEvidence } from './chat-message-utils.js';
 import { recordTraceSpans, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
 import { evaluateGuardrails, evaluateTaskPolicies } from './chat-guardrail-eval-utils.js';
 import {
@@ -53,6 +56,16 @@ import {
 import { triggerConsolidationForUser } from './memory-consolidation.js';
 
 export type CognitiveCheckSummary = GuardrailCategorySummary;
+
+/**
+ * M-16: Shape of values written to / read from the response cache.
+ * Defined explicitly so the cache hit path is type-checked instead of
+ * using `as any`, which would silently accept a malformed cache entry.
+ */
+export interface CachedResponse {
+  content: string;
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
+}
 
 export type SendMessageResult = {
   assistantContent: string;
@@ -223,7 +236,11 @@ export async function sendMessageImpl(
         attachments: attachments.length > 0 ? attachments : undefined,
       })
     : undefined;
-  await deps.db.addMessage({ id: userMsgId, chatId, role: 'user', content, metadata: userMetadata });
+  // CR-1: Always persist the post-redaction form of the message so PII that was
+  // scrubbed from `processedContent` is never written to the messages table.
+  // `content` (the raw input) is used only for in-memory processing above this
+  // point and must not reach the database when redaction is enabled.
+  await deps.db.addMessage({ id: userMsgId, chatId, role: 'user', content: processedContent, metadata: userMetadata });
 
   // Load history now so turn number is available for condition context.
   // (This is the same query made later for model context; moved up to avoid drift.)
@@ -339,8 +356,12 @@ export async function sendMessageImpl(
   if (cachePolicy && !shouldBypass(cachePolicy, processedContent)) {
     const cached = await deps.responseCache.get(cacheKey);
     if (cached) {
-      assistantContent = (cached as any).content ?? '';
-      usage = (cached as any).usage ?? usage;
+      // M-16: cast through CachedResponse so the fields are validated at
+      // the type level. If the cache returns an unexpected shape the
+      // fallback (empty string / zero usage) prevents a runtime crash.
+      const cachedTyped = cached as CachedResponse;
+      assistantContent = typeof cachedTyped.content === 'string' ? cachedTyped.content : '';
+      usage = cachedTyped.usage ?? usage;
       cacheHit = true;
     }
   }
@@ -349,9 +370,13 @@ export async function sendMessageImpl(
     if (settings.mode === 'agent' || settings.mode === 'supervisor') {
       telemetry = await deps.runAgent(ctx, model, userId, chatId, userPersona, messages, processedContent, memorySettings, attachments, tenantId);
       assistantContent = telemetry.result.output ?? '';
+      // H-4: Propagate the true prompt/completion split from AgentResult.usage.
+      // Previously both were set to totalTokens (i.e. completionTokens = 0),
+      // which causes the cost dashboard to calculate cost using only the input
+      // token rate and under-reports actual spend on agent/supervisor calls.
       usage = {
-        promptTokens: telemetry.result.usage.totalTokens,
-        completionTokens: 0,
+        promptTokens: telemetry.result.usage.promptTokens,
+        completionTokens: telemetry.result.usage.completionTokens,
         totalTokens: telemetry.result.usage.totalTokens,
       };
       steps = [...telemetry.result.steps];
@@ -391,17 +416,8 @@ export async function sendMessageImpl(
       : 'I could not produce a response text for this request. Please retry.';
   }
 
-  const toolEvidence = steps
-    ?.filter(s => {
-      if (s.type !== 'tool_call' && s.type !== 'delegation') return false;
-      const result = (s.toolCall?.result ?? s.delegation?.result ?? '') as string;
-      if (!result || result === '(Worker returned no output)') return false;
-      if (/^\[(PLANNING|REASONING|SYNTHESIS|REFLECTION)\]/.test(result)) return false;
-      if (s.type === 'tool_call' && SUPERVISOR_INTERNAL_TOOLS.has(s.toolCall?.name ?? '')) return false;
-      return true;
-    })
-    .map(s => (s.toolCall?.result ?? s.delegation?.result ?? '') as string)
-    .join(' ') || undefined;
+  // M-18: extracted to chat-message-utils.extractToolEvidence — shared with stream path
+  const toolEvidence = extractToolEvidence(steps);
   const postGuardrail = await evaluateGuardrails(deps.db, chatId, null, assistantContent, 'post-execution',
     { userInput: processedContent, assistantOutput: assistantContent, toolEvidence },
     {
@@ -465,8 +481,10 @@ export async function sendMessageImpl(
   try {
     await saveToMemory(deps.db, ctx, model, userId, chatId, processedContent, assistantContent, tenantId ?? undefined);
     triggerConsolidationForUser(userId, chatId);
-  } catch {
-    // Keep chat success path resilient when memory persistence fails.
+  } catch (memErr) {
+    // L-16: Log memory save / consolidation failures so operators can detect
+    // memory backend outages without impacting the chat success path.
+    logger.warn('memory save / consolidation failed', { err: memErr instanceof Error ? memErr.message : String(memErr) });
   }
 
   await deps.db.recordMetric({
@@ -518,9 +536,4 @@ export async function sendMessageImpl(
   };
 }
 
-function historyToMessages(rows: MessageRow[]): Message[] {
-  return rows.map((r) => ({
-    role: r.role as Message['role'],
-    content: r.content,
-  }));
-}
+// H-15: historyToMessages moved to chat-message-utils.ts — imported above

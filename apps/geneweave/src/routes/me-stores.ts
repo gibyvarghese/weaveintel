@@ -11,14 +11,16 @@
  * @weaveintel/persistence (durable human-task repository + trigger store).
  */
 
-import { JsonFileHumanTaskRepository } from '@weaveintel/human-tasks';
+import { JsonFileHumanTaskRepository, InMemoryHumanTaskRepository } from '@weaveintel/human-tasks';
 import { InMemoryTriggerStore } from '@weaveintel/triggers';
 import { join } from 'node:path';
 
-/** Shared action-item / human-task repository for the /api/me surface. */
-export const meTaskRepo = new JsonFileHumanTaskRepository(
-  join(process.cwd(), 'geneweave-tasks.json'),
-);
+/** Shared action-item / human-task repository for the /api/me surface.
+ *  Uses in-memory storage in test environments to prevent disk I/O races
+ *  between parallel workers and stale task accumulation across runs. */
+export const meTaskRepo = process.env['VITEST']
+  ? new InMemoryHumanTaskRepository()
+  : new JsonFileHumanTaskRepository(join(process.cwd(), 'geneweave-tasks.json'));
 
 /** Shared reminder/trigger store for the /api/me surface. */
 export const meTriggerStore = new InMemoryTriggerStore();

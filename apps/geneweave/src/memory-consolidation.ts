@@ -18,6 +18,7 @@
  * (pgvector when PGVECTOR_URL is set, SQLite otherwise).
  */
 
+import { createLogger } from '@weaveintel/core';
 import type {
   ExecutionContext,
   MemoryStore,
@@ -25,6 +26,8 @@ import type {
   MemoryQuery,
   MemoryFilter,
 } from '@weaveintel/core';
+
+const logger = createLogger('memory-consolidation');
 import { weaveMemoryConsolidator, type MemoryConsolidatorOptions } from '@weaveintel/memory';
 import type { DatabaseAdapter } from './db.js';
 import { getActiveSemanticMemoryBackend } from './memory-pgvector.js';
@@ -72,7 +75,7 @@ function createEpisodicStore(db: DatabaseAdapter): MemoryStore {
               });
             }
           } catch (err) {
-            console.error(`[memory-consolidation] failed to persist consolidated entry ${entry.id}`, err);
+            logger.error(`failed to persist consolidated entry ${entry.id}`, { err });
           }
         }
       }
@@ -98,7 +101,7 @@ function createEpisodicStore(db: DatabaseAdapter): MemoryStore {
     async delete(_ctx: ExecutionContext, ids: string[]): Promise<void> {
       const userId = _ctx.userId ?? 'unknown';
       await Promise.all(ids.map((id) => db.deleteSemanticMemory(id, userId).catch((err) => {
-        console.error(`[memory-consolidation] episodic delete failed for ${id}`, err);
+        logger.error(`episodic delete failed for ${id}`, { err });
       })));
     },
     async clear(_ctx: ExecutionContext, filter?: MemoryFilter): Promise<void> {
@@ -106,7 +109,7 @@ function createEpisodicStore(db: DatabaseAdapter): MemoryStore {
       const rows = await db.listSemanticMemory(userId, 10_000);
       const episodic = rows.filter((r) => r.source === 'user' || r.memory_type === 'episodic');
       await Promise.all(episodic.map((r) => db.deleteSemanticMemory(r.id, userId).catch((err) => {
-        console.error(`[memory-consolidation] episodic clear failed for ${r.id}`, err);
+        logger.error(`episodic clear failed for ${r.id}`, { err });
       })));
     },
   };
@@ -156,7 +159,7 @@ function createSemanticStore(): MemoryStore {
           const fallbackDb = _consolidatorDb;
           if (fallbackDb) await fallbackDb.deleteSemanticMemory(id, userId);
         } catch (err) {
-          console.error(`[memory-consolidation] semantic delete failed for ${id}`, err);
+          logger.error(`semantic delete failed for ${id}`, { err });
         }
       }));
     },
@@ -166,7 +169,7 @@ function createSemanticStore(): MemoryStore {
       if (!fallbackDb) return;
       const rows = await fallbackDb.listSemanticMemory(userId, 10_000);
       await Promise.all(rows.map((r) => fallbackDb.deleteSemanticMemory(r.id, userId).catch((err) => {
-        console.error(`[memory-consolidation] semantic clear failed for ${r.id}`, err);
+        logger.error(`semantic clear failed for ${r.id}`, { err });
       })));
     },
   };
@@ -187,7 +190,7 @@ export function initMemoryConsolidation(opts: {
 }): void {
   if (_consolidatorDb) {
     if (_consolidatorDb !== opts.db) {
-      console.warn('[memory-consolidation] initMemoryConsolidation called with a different DatabaseAdapter — re-initialisation is ignored. Call resetMemoryConsolidation() first if you need to swap the DB instance.');
+      logger.warn('initMemoryConsolidation called with a different DatabaseAdapter — re-initialisation is ignored. Call resetMemoryConsolidation() first if you need to swap the DB instance.');
     }
     return;
   }
@@ -212,15 +215,15 @@ export function initMemoryConsolidation(opts: {
     try {
       const result = await consolidator.consolidate(ctx, { userId, sessionId, batchSize: 50 });
       if (result.factsWritten > 0 || result.errors.length > 0) {
-        console.log(
-          `[consolidation] user=${userId ?? '-'} session=${sessionId ?? '-'} ` +
-          `read=${result.episodicRead} extracted=${result.factsExtracted} ` +
-          `deduped=${result.factsDeduped} written=${result.factsWritten}` +
-          (result.errors.length ? ` errors=${result.errors.join('; ')}` : ''),
-        );
+        logger.info('consolidation run', {
+          userId: userId ?? '-', sessionId: sessionId ?? '-',
+          read: result.episodicRead, extracted: result.factsExtracted,
+          deduped: result.factsDeduped, written: result.factsWritten,
+          errors: result.errors.length ? result.errors.join('; ') : undefined,
+        });
       }
     } catch (err) {
-      console.warn('[consolidation] run failed:', String(err));
+      logger.warn('consolidation run failed', { err: String(err) });
     }
   };
 
@@ -230,10 +233,10 @@ export function initMemoryConsolidation(opts: {
     setInterval(() => {
       void _runConsolidation?.(undefined, undefined);
     }, intervalMs);
-    console.log(`[consolidation] cron sweep active — interval ${intervalMs / 1000}s`);
+    logger.info(`cron sweep active — interval ${intervalMs / 1000}s`);
   }
 
-  console.log('[consolidation] memory consolidation initialised');
+  logger.info('memory consolidation initialised');
 }
 
 /**

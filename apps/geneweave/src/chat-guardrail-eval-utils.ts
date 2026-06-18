@@ -10,8 +10,10 @@
  *     pipeline run, and persists the EscalationResult alongside the eval row.
  */
 
-import { newUUIDv7 } from '@weaveintel/core';
+import { newUUIDv7, createLogger } from '@weaveintel/core';
 import type { AgentStep, EscalationPolicy, Guardrail, GuardrailResult, GuardrailStage, Model } from '@weaveintel/core';
+
+const logger = createLogger('chat-guardrail-eval');
 
 // ── Tool-category extraction ────────────────────────────────────────────────
 // Maps tool call names → the canonical category string used in condition trees.
@@ -285,7 +287,7 @@ export async function evaluateTaskPolicies(
 
     return checks;
   } catch (err) {
-    console.error('[chat-guardrail-eval] evaluateTaskPolicies error — returning empty checks', err);
+    logger.error('evaluateTaskPolicies error — returning empty checks', { err });
     return [];
   }
 }

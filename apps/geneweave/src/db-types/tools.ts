@@ -202,6 +202,16 @@ export interface MCPGatewayClientRow {
   /** Audit chat_id stamped on every tool_audit_events row from this client.
    *  When null, defaults to `mcp-gateway:<name>`. */
   audit_chat_id: string | null;
+  /**
+   * A-9: Tenant scope for rate limiting. When set, the rate-limit bucket is
+   * keyed on `(tenant_id, id)` rather than `id` alone — a client's quota
+   * cannot be consumed by another tenant's traffic even if IDs were somehow
+   * reused, and per-tenant quota roll-ups become possible in the future.
+   * NULL = "global" / single-tenant deployment (no tenant partitioning).
+   * Optional for backwards compatibility — existing row objects without this
+   * field are treated as NULL (global) by the rate limiter.
+   */
+  tenant_id?: string | null;
   enabled: number;
   last_used_at: string | null;
   /** ISO timestamp set when the operator revokes this client. NULL = active. */

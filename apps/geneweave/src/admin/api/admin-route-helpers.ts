@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 import { normalizeCallableDescription, validateCallableDescription } from '@weaveintel/core';
 import { stringifyPromptVariables } from '@weaveintel/prompts';
 import type { DatabaseAdapter } from '../../db.js';
@@ -73,4 +74,8 @@ export function safeParsePromptVariables(raw: string | null): unknown[] {
   } catch {
     return [];
   }
+}
+
+export function toDbUpdate<T>(fields: Record<string, unknown>): T {
+  return fields as unknown as T;
 }

@@ -1,4 +1,5 @@
 // @weaveintel/compliance — Right-to-delete requests
+import { randomBytes } from 'node:crypto';
 
 export type DeletionStatus = 'pending' | 'in-progress' | 'completed' | 'failed' | 'blocked';
 
@@ -27,8 +28,15 @@ export interface DeletionManager {
 export function createDeletionManager(): DeletionManager {
   const requests = new Map<string, DeletionRequest>();
 
+  /**
+   * Generate a collision-resistant, CSPRNG-backed ID for each deletion request.
+   * CR-3: GDPR deletion records are legally defensible compliance artefacts — their
+   * IDs must be generated with a CSPRNG (crypto.randomBytes) so they are provably
+   * unique and non-enumerable. Math.random() is NOT a CSPRNG and must never be
+   * used to generate IDs that appear in compliance audit trails.
+   */
   function nextId(): string {
-    return `del-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    return `del-${randomBytes(8).toString('hex')}`;
   }
 
   function update(id: string, patch: Partial<DeletionRequest>): DeletionRequest | undefined {

@@ -159,7 +159,9 @@ describe('pipeline with async evaluator', () => {
     };
     const pipeline = createGuardrailPipeline([g], { budgetMs: 0, registry: reg });
     const results = await pipeline.evaluate('test', 'pre-execution');
+    // M-8: budget-exceeded guardrails now emit 'skipped' (not 'allow') so
+    // audit logs can distinguish "actively evaluated and passed" from "never ran".
     expect(results[0]?.metadata?.['skipped']).toBe('budget_exceeded');
-    expect(results[0]?.decision).toBe('allow');
+    expect(results[0]?.decision).toBe('skipped');
   });
 });

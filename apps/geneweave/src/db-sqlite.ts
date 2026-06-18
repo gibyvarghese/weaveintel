@@ -215,6 +215,28 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
   }
 
+  async setSessionMfaVerifiedAt(sessionId: string, verifiedAt: string): Promise<void> {
+    this.d.prepare('UPDATE sessions SET mfa_verified_at = ? WHERE id = ?').run(verifiedAt, sessionId);
+  }
+
+  async getUserMfaEnabled(userId: string): Promise<boolean> {
+    const row = this.d.prepare('SELECT mfa_enabled FROM users WHERE id = ?').get(userId) as { mfa_enabled?: number } | undefined;
+    return (row?.mfa_enabled ?? 0) === 1;
+  }
+
+  async setUserMfaEnabled(userId: string, enabled: boolean): Promise<void> {
+    this.d.prepare('UPDATE users SET mfa_enabled = ? WHERE id = ?').run(enabled ? 1 : 0, userId);
+  }
+
+  async getUserMfaSecret(userId: string): Promise<string | null> {
+    const row = this.d.prepare('SELECT mfa_totp_secret FROM users WHERE id = ?').get(userId) as { mfa_totp_secret?: string | null } | undefined;
+    return row?.mfa_totp_secret ?? null;
+  }
+
+  async setUserMfaSecret(userId: string, secret: string | null): Promise<void> {
+    this.d.prepare('UPDATE users SET mfa_totp_secret = ? WHERE id = ?').run(secret, userId);
+  }
+
   async createIdempotencyRecord(record: Omit<IdempotencyRecordRow, 'created_at'>): Promise<void> {
     this.d.prepare(
       `INSERT INTO idempotency_records (id, key, result_json, expires_at)
@@ -380,6 +402,60 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async deleteExpiredInvitations(nowIso?: string): Promise<void> {
     const cutoff = nowIso ?? new Date().toISOString();
     this.d.prepare("DELETE FROM user_invitations WHERE expires_at < ? AND used_at IS NULL").run(cutoff);
+  }
+
+  // ── WebAuthn passkeys (4.1) ────────────────────────────────
+
+  async createPasskeyCredential(c: { id: string; userId: string; credentialId: string; publicKeyCose: string; aaguid: string; counter: number; transports: string | null }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO passkey_credentials (id, user_id, credential_id, public_key_cose, aaguid, counter, transports)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run(c.id, c.userId, c.credentialId, c.publicKeyCose, c.aaguid, c.counter, c.transports);
+  }
+
+  async getPasskeyCredentialById(credentialId: string): Promise<import('./db-types/adapter-users.js').PasskeyCredentialRow | null> {
+    return (this.d.prepare('SELECT * FROM passkey_credentials WHERE credential_id = ?').get(credentialId) as import('./db-types/adapter-users.js').PasskeyCredentialRow | undefined) ?? null;
+  }
+
+  async listPasskeyCredentials(userId: string): Promise<import('./db-types/adapter-users.js').PasskeyCredentialRow[]> {
+    return this.d.prepare('SELECT * FROM passkey_credentials WHERE user_id = ? ORDER BY created_at DESC').all(userId) as import('./db-types/adapter-users.js').PasskeyCredentialRow[];
+  }
+
+  async deletePasskeyCredential(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM passkey_credentials WHERE id = ?').run(id);
+  }
+
+  async updatePasskeyCounter(id: string, counter: number): Promise<void> {
+    this.d.prepare("UPDATE passkey_credentials SET counter = ?, last_used_at = datetime('now') WHERE id = ?").run(counter, id);
+  }
+
+  async createWebAuthnChallenge(c: { id: string; userId: string | null; challenge: string; type: string; expiresAt: string }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO webauthn_challenges (id, user_id, challenge, type, expires_at) VALUES (?, ?, ?, ?, ?)`,
+    ).run(c.id, c.userId, c.challenge, c.type, c.expiresAt);
+  }
+
+  async consumeWebAuthnChallenge(userId: string, type: 'registration' | 'authentication'): Promise<import('./db-types/adapter-users.js').WebAuthnChallengeRow | null> {
+    const row = this.d.prepare(
+      `SELECT * FROM webauthn_challenges WHERE user_id = ? AND type = ? AND used = 0 ORDER BY created_at DESC LIMIT 1`,
+    ).get(userId, type) as import('./db-types/adapter-users.js').WebAuthnChallengeRow | undefined;
+    if (!row) return null;
+    this.d.prepare('UPDATE webauthn_challenges SET used = 1 WHERE id = ?').run(row.id);
+    return row;
+  }
+
+  async consumeWebAuthnChallengeById(id: string): Promise<import('./db-types/adapter-users.js').WebAuthnChallengeRow | null> {
+    const row = this.d.prepare(
+      `SELECT * FROM webauthn_challenges WHERE id = ? AND used = 0`,
+    ).get(id) as import('./db-types/adapter-users.js').WebAuthnChallengeRow | undefined;
+    if (!row) return null;
+    this.d.prepare('UPDATE webauthn_challenges SET used = 1 WHERE id = ?').run(id);
+    return row;
+  }
+
+  async deleteExpiredWebAuthnChallenges(nowIso?: string): Promise<void> {
+    const cutoff = nowIso ?? new Date().toISOString();
+    this.d.prepare("DELETE FROM webauthn_challenges WHERE expires_at < ?").run(cutoff);
   }
 
   // ── Chats ──────────────────────────────────────────────────
@@ -2197,6 +2273,15 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM tool_policies WHERE id = ?').run(id);
   }
 
+  async getToolRateLimitCount(toolName: string, scopeKey: string, windowStartIso: string): Promise<number> {
+    // M-10: Read the current bucket count without modifying it, so the
+    // `remaining()` helper can return an accurate value without a side-effect.
+    const row = this.d.prepare(
+      'SELECT count FROM tool_rate_limit_buckets WHERE tool_name = ? AND scope_key = ? AND window_start = ?',
+    ).get(toolName, scopeKey, windowStartIso) as { count: number } | undefined;
+    return row?.count ?? 0;
+  }
+
   async checkAndIncrementRateLimit(
     toolName: string,
     scopeKey: string,
@@ -2535,26 +2620,30 @@ export class SQLiteAdapter implements DatabaseAdapter {
     `).all(nowIso, cutoffIso) as import('./db-types.js').MCPGatewayClientRow[];
   }
 
-  /** Phase 7: per-client gateway rate-limit. Atomic upsert + check inside
-   *  one transaction so concurrent requests cannot both squeak past the
-   *  cap. Mirrors `checkAndIncrementRateLimit` for tools. */
+  /** A-9 + Phase 7: per-client gateway rate-limit keyed on
+   *  `(tenantId, clientId, windowStart)`. The tenantId dimension prevents
+   *  cross-tenant quota consumption (even hypothetically with UUID reuse)
+   *  and enables future per-tenant roll-up queries. NULL tenantId is
+   *  normalised to '' so the unique index stays non-nullable. */
   async checkAndIncrementGatewayRateLimit(
+    tenantId: string | null,
     clientId: string,
     windowStartIso: string,
     limitPerMinute: number,
   ): Promise<boolean> {
+    const tid = tenantId ?? '';
     this.d.prepare(`
-      INSERT INTO mcp_gateway_rate_buckets (id, client_id, window_start, count)
-      VALUES (?, ?, ?, 0)
-      ON CONFLICT(client_id, window_start) DO NOTHING
-    `).run(newUUIDv7(), clientId, windowStartIso);
+      INSERT INTO mcp_gateway_rate_buckets (id, tenant_id, client_id, window_start, count)
+      VALUES (?, ?, ?, ?, 0)
+      ON CONFLICT(tenant_id, client_id, window_start) DO NOTHING
+    `).run(newUUIDv7(), tid, clientId, windowStartIso);
     const row = this.d.prepare(
-      'SELECT count FROM mcp_gateway_rate_buckets WHERE client_id = ? AND window_start = ?',
-    ).get(clientId, windowStartIso) as { count: number } | undefined;
+      'SELECT count FROM mcp_gateway_rate_buckets WHERE tenant_id = ? AND client_id = ? AND window_start = ?',
+    ).get(tid, clientId, windowStartIso) as { count: number } | undefined;
     if (!row || row.count >= limitPerMinute) return false;
     this.d.prepare(
-      'UPDATE mcp_gateway_rate_buckets SET count = count + 1 WHERE client_id = ? AND window_start = ?',
-    ).run(clientId, windowStartIso);
+      'UPDATE mcp_gateway_rate_buckets SET count = count + 1 WHERE tenant_id = ? AND client_id = ? AND window_start = ?',
+    ).run(tid, clientId, windowStartIso);
     return true;
   }
 
@@ -3066,9 +3155,13 @@ export class SQLiteAdapter implements DatabaseAdapter {
   async upsertTenantEncryptionPolicy(p: Omit<TenantEncryptionPolicyRow, 'created_at' | 'updated_at'>) { return this.encStore.upsertTenantEncryptionPolicy(p); }
   async insertTenantKek(k: TenantKekRow) { return this.encStore.insertTenantKek(k); }
   async listTenantKeks(t: string) { return this.encStore.listTenantKeks(t); }
+  // H-13: point lookups delegated to the store to avoid O(n) list scans.
+  async getTenantKekById(tenantId: string, kekId: string) { return this.encStore.getTenantKekById(tenantId, kekId); }
   async updateTenantKekStatus(id: string, status: string, ts: number) { return this.encStore.updateTenantKekStatus(id, status, ts); }
   async insertTenantDek(d: TenantDekRow) { return this.encStore.insertTenantDek(d); }
   async listTenantDeks(t: string) { return this.encStore.listTenantDeks(t); }
+  async getTenantDekById(tenantId: string, dekId: string) { return this.encStore.getTenantDekById(tenantId, dekId); }
+  async getMaxTenantDekEpoch(tenantId: string) { return this.encStore.getMaxTenantDekEpoch(tenantId); }
   async updateTenantDekStatus(id: string, status: string, ts: number) { return this.encStore.updateTenantDekStatus(id, status, ts); }
   async insertTenantBik(b: TenantBikRow) { return this.encStore.insertTenantBik(b); }
   async listTenantBiks(t: string) { return this.encStore.listTenantBiks(t); }
@@ -3442,6 +3535,12 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   // ─── Admin: Search Providers ───────────────────────────────
+  // H-2 TODO (Phase 2 of m49): Encrypt `api_key` with the tenant DEK before
+  // INSERT/UPDATE (write to `api_key_enc`, null the plaintext `api_key` column,
+  // set `credentials_encrypted = 1`). On SELECT, decrypt `api_key_enc` when
+  // `credentials_encrypted = 1`, return plaintext `api_key` otherwise (legacy rows).
+  // Until Phase 2 is wired, `api_key` is stored plaintext — m49 adds the shadow
+  // columns so Phase 2 can be deployed without a second schema migration.
 
   async createSearchProvider(p: Omit<SearchProviderRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
@@ -3508,6 +3607,9 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   // ─── Admin: Social Accounts ────────────────────────────────
+  // H-2 TODO (Phase 2 of m49): Encrypt `api_key`, `api_secret`, `access_token`,
+  // `refresh_token` with the tenant DEK on write; decrypt on read when
+  // `credentials_encrypted = 1`. Shadow columns (`api_key_enc` etc.) exist after m49.
 
   async createSocialAccount(a: Omit<SocialAccountRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
@@ -3541,6 +3643,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   // ─── Admin: Enterprise Connectors ──────────────────────────
+  // H-2 TODO (Phase 2 of m49): Encrypt `access_token`, `refresh_token`, `auth_config`
+  // with the tenant DEK on write; decrypt on read when `credentials_encrypted = 1`.
+  // Shadow columns exist after m49. `auth_config` is especially sensitive — it
+  // frequently carries client_secret, service-account keys, or mTLS certificates.
 
   async createEnterpriseConnector(c: Omit<EnterpriseConnectorRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(

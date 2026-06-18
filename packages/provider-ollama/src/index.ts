@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/provider-ollama — Local LLMs via Ollama for weaveIntel.
  *

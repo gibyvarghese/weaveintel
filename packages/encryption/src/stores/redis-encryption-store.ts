@@ -56,6 +56,12 @@ export function weaveRedisEncryptionStore(opts: WeaveRedisEncryptionStoreOptions
       }
       return out;
     },
+    async getKekById(_tenantId, kekId) {
+      // Redis stores KEKs by individual key — direct O(1) lookup.
+      const raw = await client.get(k(`kek:${kekId}`));
+      if (!raw) return null;
+      return { id: kekId, ...(JSON.parse(raw) as Omit<KekRecord, 'id'>) };
+    },
     async insertKek(rec) {
       const { id, ...rest } = rec;
       await client.set(k(`kek:${id}`), JSON.stringify(rest));
@@ -84,6 +90,20 @@ export function weaveRedisEncryptionStore(opts: WeaveRedisEncryptionStoreOptions
         out.push({ id: ids[i]!, ...(JSON.parse(raw) as Omit<DekRecord, 'id'>) });
       }
       return out;
+    },
+    async getDekById(_tenantId, dekId) {
+      const raw = await client.get(k(`dek:${dekId}`));
+      if (!raw) return null;
+      return { id: dekId, ...(JSON.parse(raw) as Omit<DekRecord, 'id'>) };
+    },
+    async getMaxDekEpoch(tenantId) {
+      // The sorted set is ordered by epoch score — the last element is the highest.
+      const ids = await client.zRange(k(`deks:${tenantId}`), -1, -1);
+      if (ids.length === 0) return null;
+      const raw = await client.get(k(`dek:${ids[0]!}`));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Omit<DekRecord, 'id'>;
+      return parsed.status === 'active' ? parsed.epoch : null;
     },
     async insertDek(rec) {
       const { id, ...rest } = rec;

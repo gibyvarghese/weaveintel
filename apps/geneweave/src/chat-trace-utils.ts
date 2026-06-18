@@ -120,6 +120,16 @@ export async function recordTraceSpans(
     if (steps) {
       let offset = startMs;
       for (const step of steps) {
+        // 4.18: Redact ReAct scratchpad / chain-of-thought content before
+        // persisting to trace storage. The `thinking` step type carries the
+        // model's internal reasoning in `step.content`. This content may
+        // include fragments of the system prompt, in-flight tool results, or
+        // intermediate plans that should not be retained in the audit log.
+        // Tool call arguments and results (step.toolCall) are kept because
+        // they are needed for tool-level audit; only the free-form CoT text
+        // is redacted. Other step types (tool_call, delegation, response)
+        // do not carry scratchpad content and are stored verbatim.
+        const isScratchpad = step.type === 'thinking';
         await db.saveTrace({
           id: newUUIDv7(), userId, chatId, messageId,
           traceId, spanId: newUUIDv7(), parentSpanId: rootSpanId,
@@ -129,6 +139,9 @@ export async function recordTraceSpans(
           attributes: JSON.stringify({
             stepIndex: step.index,
             type: step.type,
+            // Scratchpad content replaced with a tombstone so trace consumers
+            // know a thinking step occurred without seeing its contents.
+            ...(isScratchpad ? { contentRedacted: true } : {}),
             toolCall: step.toolCall,
             delegation: step.delegation,
             tokenUsage: step.tokenUsage,

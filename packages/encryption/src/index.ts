@@ -1,5 +1,24 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/encryption — public barrel.
+ *
+ * ## Stable public API
+ * The following exports form the stable API surface for consumers:
+ *   - Error classes: `EncryptionError`, `AeadError`, `CiphertextFormatError`, `KeyNotFoundError`
+ *   - Core crypto: `encryptValue`, `decryptValue`, `isEncrypted`, `SENTINEL_PREFIX`
+ *   - Key manager: `TenantKeyManager`, `createTenantKeyManager`
+ *   - KMS providers: `LocalKmsProvider`, `AwsKmsProvider`, `AzureKeyVaultProvider`, `GcpKmsProvider`, `VaultTransitProvider`
+ *   - BYOK: `ByokPemKmsProvider`, `LocalByokKeystore`, `approveBreakGlass`, etc.
+ *   - Schedulers: `weaveRewriteScheduler`, `weavePurgeScheduler`
+ *   - Store/audit/metrics interfaces and implementations
+ *
+ * ## Internal helpers (@internal)
+ * The following exports are implementation details; they appear in this barrel
+ * for test access within the package but should NOT be depended on by
+ * application code — they may change in minor versions:
+ *   - `buildAad`, `parseSentinel` (envelope internals)
+ *   - `serializeWrappedKey`, `deserializeWrappedKey` (kms store helpers)
+ *   - `EnvelopeAadParts`, `ParsedSentinel`, `EncryptArgs`, `DecryptArgs` (low-level types)
  */
 
 export * from './errors.js';

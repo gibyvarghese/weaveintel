@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/live-agents — LLM loop scaffold (Phase 2.5).
  *

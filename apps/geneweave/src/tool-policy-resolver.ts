@@ -7,7 +7,10 @@
  */
 
 import type { EffectiveToolPolicy, ToolAuditEvent } from '@weaveintel/core';
+import { createLogger } from '@weaveintel/core';
 import type { ToolInput } from '@weaveintel/core';
+
+const logger = createLogger('tool-audit');
 import type {
   ToolPolicyResolver,
   PolicyResolutionContext,
@@ -58,6 +61,33 @@ export class DbToolPolicyResolver implements ToolPolicyResolver {
         continue;
       }
 
+      // M-9: Enforce the active_hours_utc time window.
+      // The column is stored as JSON `{ "start": "HH:MM", "end": "HH:MM" }` in
+      // UTC. If the current UTC time falls outside the window, treat the policy
+      // as if it does not exist (fall through to the next candidate key).
+      // This allows operators to restrict tools to business hours, maintenance
+      // windows, etc. without creating separate policies per time-of-day.
+      if (row.active_hours_utc) {
+        let window: { start?: string; end?: string } | null = null;
+        try { window = JSON.parse(row.active_hours_utc) as { start?: string; end?: string }; } catch { window = null; }
+        if (window?.start && window?.end) {
+          const now = new Date();
+          // Convert HH:MM strings to fractional hours for comparison.
+          const toFrac = (hhmm: string): number => {
+            const [h, m] = hhmm.split(':').map(Number);
+            return (h ?? 0) + (m ?? 0) / 60;
+          };
+          const nowFrac = now.getUTCHours() + now.getUTCMinutes() / 60;
+          const startFrac = toFrac(window.start);
+          const endFrac = toFrac(window.end);
+          // Handle windows that span midnight (e.g. start=22:00, end=06:00).
+          const inWindow = startFrac <= endFrac
+            ? nowFrac >= startFrac && nowFrac < endFrac
+            : nowFrac >= startFrac || nowFrac < endFrac;
+          if (!inWindow) continue;
+        }
+      }
+
       const allowedRiskLevels = row.allowed_risk_levels
         ? JSON.parse(row.allowed_risk_levels)
         : DEFAULT_TOOL_POLICY.allowedRiskLevels;
@@ -104,9 +134,13 @@ export class DbToolRateLimiter implements ToolRateLimiter {
     );
   }
 
-  async remaining(toolName: string, _scopeKey: string, limitPerMinute: number): Promise<number> {
-    // Simplified: just return the full limit (real remaining would require a SELECT)
-    return limitPerMinute;
+  async remaining(toolName: string, scopeKey: string, limitPerMinute: number): Promise<number> {
+    // M-10: Query the actual bucket count for the current 1-minute window so
+    // callers get an accurate remaining-capacity value rather than always seeing
+    // the full limit. This is read-only — it does NOT increment the counter.
+    const windowStart = this.currentWindowStart();
+    const used = await this.db.getToolRateLimitCount(toolName, scopeKey, windowStart);
+    return Math.max(0, limitPerMinute - used);
   }
 }
 
@@ -118,7 +152,7 @@ export class DbToolRateLimiter implements ToolRateLimiter {
 export const consoleAuditEmitter: ToolAuditEmitter = {
   async emit(event: ToolAuditEvent): Promise<void> {
     if (event.outcome !== 'success') {
-      console.warn(`[tool-audit] ${event.toolName} → ${event.outcome}`, {
+      logger.warn(`${event.toolName} → ${event.outcome}`, {
         chatId: event.chatId,
         violationReason: event.violationReason,
         policyId: event.policyId,

@@ -18,7 +18,7 @@ import type {
   ToolRiskLevel,
   ExecutionContext,
 } from '@weaveintel/core';
-import { weaveToolRegistry, weaveResolveTracer } from '@weaveintel/core';
+import { weaveToolRegistry, weaveResolveTracer, withTimeoutSignal } from '@weaveintel/core';
 import type {
   EffectiveToolPolicy,
   ToolAuditEvent,
@@ -64,14 +64,29 @@ export interface ToolPolicyResolver {
   resolve(toolName: string, context?: PolicyResolutionContext): Promise<EffectiveToolPolicy>;
 }
 
-/** Default pass-through policy (no restrictions). */
+/**
+ * M-30: Default policy changed from allow-all to allow read-only only.
+ *
+ * The previous default (`allowedRiskLevels` = all six levels) meant that any
+ * deployment that did not configure a ToolPolicyResolver silently allowed
+ * destructive, privileged, and financial-risk tools — a privilege-escalation
+ * vector in multi-tenant deployments where callers may supply arbitrary tool
+ * names. The principle of least privilege requires the unconfigured default to
+ * be restrictive; operators must explicitly widen `allowedRiskLevels` in their
+ * policy configuration to allow higher-risk levels.
+ *
+ * Existing deployments that relied on the permissive default will now see
+ * write/destructive/privileged/financial/external-side-effect tools blocked
+ * until a policy resolver is wired up. The `InMemoryToolPolicyResolver` can
+ * be seeded with a wildcard override to restore the old behaviour in dev.
+ */
 export const DEFAULT_TOOL_POLICY: EffectiveToolPolicy = {
   enabled: true,
   riskLevel: 'read-only',
   requiresApproval: false,
   requireDryRun: false,
   logInputOutput: false,
-  allowedRiskLevels: ['read-only', 'write', 'destructive', 'privileged', 'financial', 'external-side-effect'],
+  allowedRiskLevels: ['read-only'],
   source: 'default',
 };
 
@@ -338,6 +353,30 @@ export function createPolicyEnforcedTool(
     // 6. Execute with optional timeout
     const startMs = Date.now();
     let timedOut = false;
+    const timeoutMs = policy.timeoutMs;
+
+    // M-28: When a timeout is configured, create a scoped AbortSignal and pass
+    // it to the tool via a child context. Previously, Promise.race left the tool
+    // running as a "ghost" after timeout because nothing signalled it to stop.
+    // Tools that accept ctx.signal (e.g. HTTP fetch, subprocess) will now
+    // cancel cooperatively when the timeout fires, freeing resources immediately.
+    //
+    // The AbortController is shared: the timeout handler aborts it, which fires
+    // the signal on ctx, which the tool observes. The reject also fires so the
+    // Promise.race short-circuits as before.
+    let toolCtx: ExecutionContext = ctx;
+    let timeoutAbortController: AbortController | undefined;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+    if (timeoutMs && timeoutMs > 0) {
+      timeoutAbortController = new AbortController();
+      // Compose the tool-timeout signal with any existing caller signal so
+      // pre-existing cancellation (e.g. request abort) still propagates.
+      const composedSignal = withTimeoutSignal(ctx.signal, timeoutMs);
+      // Spread ctx and explicitly replace `signal` — childContext does not
+      // thread signal through its overrides, so a direct spread is needed.
+      toolCtx = { ...ctx, signal: composedSignal };
+    }
 
     // When resilience is enabled, route through the per-tool resilient
     // callable so circuit/rate-limit/retry state and signals are shared
@@ -346,38 +385,42 @@ export function createPolicyEnforcedTool(
     // `withOverrides` so each callsite can choose its retry posture.
     const callOverrides = opts.resilience?.callOverrides;
     const baseInvoke = (): Promise<ToolOutput> => {
-      if (!resilientInvoke) return tool.invoke(ctx, input);
-      if (callOverrides) return resilientInvoke.withOverrides(callOverrides)(ctx, input);
-      return resilientInvoke(ctx, input);
+      if (!resilientInvoke) return tool.invoke(toolCtx, input);
+      if (callOverrides) return resilientInvoke.withOverrides(callOverrides)(toolCtx, input);
+      return resilientInvoke(toolCtx, input);
     };
 
     const tracer = weaveResolveTracer(ctx);
     const invokePromise = tracer
       ? tracer.withSpan(
-        ctx,
+        toolCtx,
         'tools.policy.invoke',
         () => baseInvoke(),
         { toolName: tool.schema.name },
       )
-      : tool.invoke(ctx, input);
-    const timeoutMs = policy.timeoutMs;
+      : baseInvoke();
 
     let result: ToolOutput;
     try {
       if (timeoutMs && timeoutMs > 0) {
         result = await Promise.race([
           invokePromise,
-          new Promise<never>((_res, rej) =>
-            setTimeout(() => {
+          new Promise<never>((_res, rej) => {
+            timeoutHandle = setTimeout(() => {
               timedOut = true;
+              // Abort the tool's context signal so cooperative tools stop immediately.
+              timeoutAbortController?.abort(`Tool '${tool.schema.name}' timed out after ${timeoutMs}ms`);
               rej(new Error(`Tool '${tool.schema.name}' timed out after ${timeoutMs}ms`));
-            }, timeoutMs),
-          ),
+            }, timeoutMs);
+          }),
         ]);
+        // Successful completion — clear the timeout so the abort never fires late.
+        clearTimeout(timeoutHandle);
       } else {
         result = await invokePromise;
       }
     } catch (err: unknown) {
+      clearTimeout(timeoutHandle);
       const durationMs = Date.now() - startMs;
       opts.healthTracker?.record(tool.schema.name, durationMs, true);
       if (timedOut) {

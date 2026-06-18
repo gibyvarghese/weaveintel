@@ -44,7 +44,49 @@ export function weaveA2AClient(): A2AClient {
           message: `A2A discovery failed at ${wellKnown}: ${response.status}`,
         });
       }
-      return response.json() as Promise<AgentCard>;
+      const card = await response.json() as AgentCard;
+
+      // H-14: Validate the fetched agent card so a malicious or misconfigured
+      // server cannot inject an arbitrary agent card that silently redirects
+      // subsequent task calls to a different origin.
+      //
+      // Checks:
+      //  1. `name` is a non-empty string (primary identifier in the A2A spec).
+      //  2. `url` is a non-empty string (used to route all subsequent requests).
+      //  3. `card.url` shares the same origin as the discovery URL — prevents a
+      //     card fetched from host-A from claiming its tasks endpoint is on host-B.
+      if (!card || typeof card.name !== 'string' || !card.name) {
+        throw new WeaveIntelError({
+          code: 'PROTOCOL_ERROR',
+          message: `A2A agent card from ${wellKnown} is missing a valid "name" field`,
+        });
+      }
+      if (typeof card.url !== 'string' || !card.url) {
+        throw new WeaveIntelError({
+          code: 'PROTOCOL_ERROR',
+          message: `A2A agent card from ${wellKnown} is missing a valid "url" field`,
+        });
+      }
+      // Origin check: parse both URLs and compare scheme + host + port.
+      try {
+        const requestedOrigin = new URL(wellKnown).origin;
+        const cardOrigin = new URL(card.url).origin;
+        if (cardOrigin !== requestedOrigin) {
+          throw new WeaveIntelError({
+            code: 'PROTOCOL_ERROR',
+            message: `A2A agent card URL origin mismatch: card claims "${cardOrigin}" but was fetched from "${requestedOrigin}". Possible open-redirect or SSRF.`,
+          });
+        }
+      } catch (err) {
+        // Re-throw WeaveIntelError as-is; URL parse errors also become a protocol error.
+        if (err instanceof WeaveIntelError) throw err;
+        throw new WeaveIntelError({
+          code: 'PROTOCOL_ERROR',
+          message: `A2A agent card url is not a valid URL: ${card.url}`,
+        });
+      }
+
+      return card;
     },
 
     async sendTask(ctx: ExecutionContext, agentUrl: string, task: A2ATask): Promise<A2ATaskResult> {
@@ -120,12 +162,22 @@ export function weaveA2AClient(): A2AClient {
 
     async cancelTask(ctx: ExecutionContext, agentUrl: string, taskId: string): Promise<void> {
       const url = agentUrl.replace(/\/$/, '') + `/tasks/${encodeURIComponent(taskId)}/cancel`;
-      await withObservedSpan(
+      // L-13: Previously the response status was ignored — a 404 or 500 from
+      // the remote would be silently swallowed as a successful cancellation.
+      // Now we check response.ok and throw on non-2xx so callers know when
+      // the cancellation was not honoured by the remote agent.
+      const response = await withObservedSpan(
         ctx,
         'a2a.client.cancel_task',
         { agentUrl, taskId },
-        () => a2aFetch(url, { method: 'POST', signal: ctx.signal }).then(() => undefined),
+        () => a2aFetch(url, { method: 'POST', signal: ctx.signal }),
       );
+      if (!response.ok) {
+        throw new WeaveIntelError({
+          code: 'PROTOCOL_ERROR',
+          message: `A2A cancelTask failed for task "${taskId}": ${response.status} ${response.statusText}`,
+        });
+      }
     },
 
     async getTaskStatus(ctx: ExecutionContext, agentUrl: string, taskId: string): Promise<A2ATaskResult> {

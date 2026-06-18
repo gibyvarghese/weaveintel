@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/geneweave — Authentication module
  *
@@ -197,14 +198,39 @@ export function generateCSRFToken(): string {
 
 // ─── Cookie helpers ──────────────────────────────────────────
 
+/**
+ * L-1: In production we use the `__Host-` prefix which browsers enforce at
+ * the protocol level:
+ *  - MUST be transmitted over HTTPS (Secure flag mandatory).
+ *  - MUST have Path=/ (full-site binding — no path narrowing).
+ *  - MUST NOT carry a Domain attribute (prevents subdomain forging).
+ *
+ * In non-production (localhost / HTTP dev server) the prefix is dropped and
+ * Secure is omitted so the cookie travels over plain HTTP without breaking
+ * local development. parseCookies / getAuthCookieValue reads both names
+ * transparently, so dev ↔ prod deployments work without client changes.
+ */
+const AUTH_COOKIE_PROD = '__Host-gw_token';
+const AUTH_COOKIE_DEV = 'gw_token';
+
+/** Return the canonical cookie name for the current runtime environment. */
+export function authCookieName(): string {
+  return process.env['NODE_ENV'] === 'production' ? AUTH_COOKIE_PROD : AUTH_COOKIE_DEV;
+}
+
 export function setAuthCookie(res: ServerResponse, token: string, maxAge = 86400): void {
-  const secure = process.env['NODE_ENV'] === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `gw_token=${token}; HttpOnly${secure}; SameSite=Strict; Path=/; Max-Age=${maxAge}`);
+  const isProduction = process.env['NODE_ENV'] === 'production';
+  // __Host- prefix requires Secure; never emit Domain (the prefix forbids it).
+  const name = isProduction ? AUTH_COOKIE_PROD : AUTH_COOKIE_DEV;
+  const secure = isProduction ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${name}=${token}; HttpOnly${secure}; SameSite=Strict; Path=/; Max-Age=${maxAge}`);
 }
 
 export function clearAuthCookie(res: ServerResponse): void {
-  const secure = process.env['NODE_ENV'] === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `gw_token=; HttpOnly${secure}; SameSite=Strict; Path=/; Max-Age=0`);
+  const isProduction = process.env['NODE_ENV'] === 'production';
+  const name = isProduction ? AUTH_COOKIE_PROD : AUTH_COOKIE_DEV;
+  const secure = isProduction ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${name}=; HttpOnly${secure}; SameSite=Strict; Path=/; Max-Age=0`);
 }
 
 export function parseCookies(req: IncomingMessage): Record<string, string> {
@@ -234,6 +260,9 @@ export interface AuthContext {
   csrfToken: string;
   persona: string;
   tenantId: string | null;
+  /** 4.17: ISO timestamp of the last step-up MFA challenge. Null = not yet verified.
+   *  Optional for backwards compatibility with existing code that constructs AuthContext directly. */
+  mfaVerifiedAt?: string | null;
 }
 
 export interface AuthenticatedRequest extends IncomingMessage {
@@ -254,7 +283,9 @@ export async function authenticateRequest(
   // Accept cookie-based JWT (browser) or Bearer token (A2A / machine-to-machine).
   const bearerHeader = req.headers['authorization'] ?? '';
   const bearerToken = bearerHeader.startsWith('Bearer ') ? bearerHeader.slice(7).trim() : undefined;
-  const token = cookies['gw_token'] ?? bearerToken;
+  // L-1: Read both the __Host-prefixed name (production HTTPS) and the plain
+  // name (development HTTP) so that the same code works in all environments.
+  const token = cookies[AUTH_COOKIE_PROD] ?? cookies[AUTH_COOKIE_DEV] ?? bearerToken;
   if (!token) return null;
 
   const payload = verifyJWT(token, jwtSecret);
@@ -273,6 +304,7 @@ export async function authenticateRequest(
     csrfToken: session.csrf_token,
     persona: user.persona,
     tenantId: user.tenant_id,
+    mfaVerifiedAt: session.mfa_verified_at ?? null,
   };
 }
 

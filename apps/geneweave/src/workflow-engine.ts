@@ -16,7 +16,9 @@
  * workflow runs from DB definitions.
  */
 
-import { newUUIDv7, type WeaveRuntime } from '@weaveintel/core';
+import { newUUIDv7, createLogger, type WeaveRuntime } from '@weaveintel/core';
+
+const logger = createLogger('workflow-engine');
 import {
   DefaultWorkflowEngine,
   HandlerResolverRegistry,
@@ -270,8 +272,7 @@ export async function syncWorkflowHandlerKindsToDb(
         source: 'builtin',
       });
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn(`[workflow-handler-kinds] failed to sync kind '${k.kind}':`, err);
+      logger.warn(`failed to sync kind '${k.kind}'`, { err });
     }
   }
 }

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 /**
  * @weaveintel/live-agents-trace-tools — domain-agnostic, run-scoped trace
  * retrieval for any DB-driven live agent.

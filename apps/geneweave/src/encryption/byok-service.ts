@@ -19,7 +19,7 @@
  * their own adapter without copying any cryptographic logic.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   approveBreakGlass,
   buildAndSignAttestation,
@@ -118,13 +118,30 @@ export async function upsertByokConfig(
   const fp = fingerprintPublicKey(pub);
   const mode: 'byok' | 'hyok' = input.mode ?? (input.hyokEndpoint ? 'hyok' : 'byok');
 
-  // Production guard: only emit a warning — DEV use is explicit and
-  // operator-controlled. The bootstrap log surfaces this prominently.
-  if (input.privateKeyPemDev && process.env['NODE_ENV'] === 'production') {
+  // CR-5: In production, reject the call entirely if a dev private key was supplied.
+  // The earlier code only warned but still persisted the key — that is not safe.
+  // We throw before any database write so operators see the error immediately at
+  // registration time, not silently in an audit log later.
+  if (input.privateKeyPemDev) {
+    if (process.env['NODE_ENV'] === 'production') {
+      throw new Error(
+        `[byok] tenant ${input.tenantId}: privateKeyPemDev must not be set in production. ` +
+        `Use hyokEndpoint + hyokBearerSecretId for production HYOK key unwrapping.`,
+      );
+    }
+    // In non-production, log clearly that a dev-only path is active so it is
+    // visible in local/staging logs and not silently depended on.
     console.warn(
-      `[byok] tenant ${input.tenantId}: privateKeyPemDev is set in production — refusing to mirror; populate hyokEndpoint instead`,
+      `[byok] DEV ONLY — tenant ${input.tenantId}: privateKeyPemDev is active. ` +
+      `This path must not be used in staging environments that handle real customer data.`,
     );
   }
+
+  // CR-5: Strip the dev private key in production (belt-and-suspenders — the throw
+  // above should already prevent reaching this line, but strip it unconditionally
+  // so that any future refactor cannot accidentally persist it).
+  const safePrivateKeyPemDev =
+    process.env['NODE_ENV'] === 'production' ? null : (input.privateKeyPemDev ?? null);
 
   await db.upsertTenantByokConfig({
     tenant_id: input.tenantId,
@@ -134,12 +151,19 @@ export async function upsertByokConfig(
     hyok_endpoint: input.hyokEndpoint ?? null,
     hyok_bearer_secret_id: input.hyokBearerSecretId ?? null,
     hyok_timeout_ms: input.hyokTimeoutMs ?? null,
-    private_key_pem_dev: input.privateKeyPemDev ?? null,
+    private_key_pem_dev: safePrivateKeyPemDev,
     status: 'active',
     created_by: input.createdBy ?? null,
   });
 
   // Mirror into the encryption policy so the existing resolver path picks it up.
+  // CR-2: The kms_config JSON stored in the DB must NEVER contain the resolved
+  // bearer token value. Only the secret *reference* (env-var name) is stored here.
+  // The actual token is resolved at call time by the HYOK proxy delegate, which
+  // reads process.env[hyokBearerSecretId] on every unwrap request — not at
+  // registration time. This ensures that:
+  //   - DB backups / SQL dumps do not contain live KMS credentials.
+  //   - Token rotation only requires updating the env var, not the DB row.
   const kmsConfig: Record<string, unknown> = {
     tenantId: input.tenantId,
     publicKeyPem: input.publicKeyPem,
@@ -148,14 +172,11 @@ export async function upsertByokConfig(
   if (input.hyokEndpoint) {
     kmsConfig['hyokEndpoint'] = input.hyokEndpoint;
     if (input.hyokTimeoutMs) kmsConfig['hyokTimeoutMs'] = input.hyokTimeoutMs;
-    if (input.hyokBearerSecretId) {
-      // Resolve the bearer token from process env at config time. The actual
-      // secret never lives in the DB.
-      const tok = process.env[input.hyokBearerSecretId];
-      if (tok) kmsConfig['hyokBearerToken'] = tok;
-    }
-  } else if (input.privateKeyPemDev && process.env['NODE_ENV'] !== 'production') {
-    kmsConfig['privateKeyPemForLocalDev'] = input.privateKeyPemDev;
+    // Store only the secret ID (env-var name), never the resolved token value.
+    if (input.hyokBearerSecretId) kmsConfig['hyokBearerSecretId'] = input.hyokBearerSecretId;
+  } else if (safePrivateKeyPemDev) {
+    // Non-production only: embed the dev PEM so the local KMS provider can unwrap.
+    kmsConfig['privateKeyPemForLocalDev'] = safePrivateKeyPemDev;
   }
   let mirrored = false;
   try {
@@ -474,11 +495,18 @@ function sanitisePublicConfig(raw: string | null | undefined): Record<string, un
   return out;
 }
 
+/**
+ * Generate a cryptographically random, prefix-tagged ID suitable for use in
+ * security-sensitive contexts such as attestation logs, break-glass requests,
+ * and audit rows. Uses `crypto.randomBytes` (a CSPRNG) — not Math.random(),
+ * which is NOT cryptographically secure and would allow an attacker to
+ * predict or enumerate ID values.
+ *
+ * CR-3: All IDs used in encryption audit trails, BYOK attestations, and
+ * break-glass approval flows must be generated with a CSPRNG.
+ */
 function cryptoRandomId(prefix: string): string {
-  // Avoid bringing in another helper; use a 16-byte random + prefix.
-  const buf = Buffer.alloc(16);
-  for (let i = 0; i < buf.length; i++) buf[i] = Math.floor(Math.random() * 256);
-  return `${prefix}_${buf.toString('hex')}`;
+  return `${prefix}_${randomBytes(16).toString('hex')}`;
 }
 
 /** Visible for tests. */

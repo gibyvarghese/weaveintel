@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 export {
   registerModelProvider as weaveRegisterModel,
   getModelProvider as weaveGetModel,

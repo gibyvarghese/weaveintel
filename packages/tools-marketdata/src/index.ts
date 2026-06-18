@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 export { createMarketDataMCPServer, type MarketDataMCPServerOptions } from './marketdata.js';
 export { type MarketDataAdapter, type OHLCVParams } from './adapter.js';
 export { fixtureMarketDataAdapter } from './adapters/fixture.js';

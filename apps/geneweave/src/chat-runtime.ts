@@ -1,4 +1,7 @@
+import { createLogger } from '@weaveintel/core';
 import type { Model, WeaveRuntime } from '@weaveintel/core';
+
+const logger = createLogger('chat-runtime');
 import type { ChatSettingsRow } from './db.js';
 import { normalizePersona } from './rbac.js';
 import { getDefaultToolsByMode } from './chat-policies.js';
@@ -57,6 +60,32 @@ export interface ChatEngineConfig {
   runtime?: WeaveRuntime;
 }
 
+// ── M-15: Typed provider module interfaces ───────────────────────────────────
+//
+// Each provider package exposes a single factory function. Previously these
+// were called via `(mod as any).weaveXxxModel(...)` which silently breaks when
+// a provider is renamed. Defining a minimal interface per module means a
+// rename produces a TypeScript error at build time rather than a runtime crash.
+
+interface AnthropicProviderModule {
+  weaveAnthropicModel(modelId: string, opts: { apiKey?: string }): Model;
+}
+interface OpenAIProviderModule {
+  weaveOpenAIModel(modelId: string, opts: { apiKey?: string }): Model;
+}
+interface GoogleProviderModule {
+  weaveGoogleModel(modelId: string, opts: { apiKey?: string }): Model;
+}
+interface OllamaProviderModule {
+  weaveOllamaModel(modelId: string, opts: { apiKey?: string; baseUrl?: string }): Model;
+}
+interface LlamaCppProviderModule {
+  weaveLlamaCppModel(modelId: string, opts: { apiKey?: string; baseUrl?: string }): Model;
+}
+interface DevtoolsProviderModule {
+  createMockModel(opts: { name: string; responses?: string[]; latencyMs?: number }): Model;
+}
+
 const modelCache = new Map<string, Model>();
 
 export async function getOrCreateModel(
@@ -72,24 +101,24 @@ export async function getOrCreateModel(
   let model: Model;
   switch (provider) {
     case 'anthropic': {
-      const mod = await import('@weaveintel/provider-anthropic');
-      model = (mod as any).weaveAnthropicModel(bareModel, { apiKey: providerConfig.apiKey });
+      const mod = await import('@weaveintel/provider-anthropic') as AnthropicProviderModule;
+      model = mod.weaveAnthropicModel(bareModel, { apiKey: providerConfig.apiKey });
       break;
     }
     case 'openai': {
-      const mod = await import('@weaveintel/provider-openai');
-      model = (mod as any).weaveOpenAIModel(bareModel, { apiKey: providerConfig.apiKey });
+      const mod = await import('@weaveintel/provider-openai') as OpenAIProviderModule;
+      model = mod.weaveOpenAIModel(bareModel, { apiKey: providerConfig.apiKey });
       break;
     }
     case 'google':
     case 'gemini': {
-      const mod = await import('@weaveintel/provider-google');
-      model = (mod as any).weaveGoogleModel(bareModel, { apiKey: providerConfig.apiKey });
+      const mod = await import('@weaveintel/provider-google') as GoogleProviderModule;
+      model = mod.weaveGoogleModel(bareModel, { apiKey: providerConfig.apiKey });
       break;
     }
     case 'ollama': {
-      const mod = await import('@weaveintel/provider-ollama');
-      model = (mod as any).weaveOllamaModel(bareModel, {
+      const mod = await import('@weaveintel/provider-ollama') as OllamaProviderModule;
+      model = mod.weaveOllamaModel(bareModel, {
         apiKey: providerConfig.apiKey,
         baseUrl: providerConfig.baseUrl,
       });
@@ -97,16 +126,16 @@ export async function getOrCreateModel(
     }
     case 'llamacpp':
     case 'llama-cpp': {
-      const mod = await import('@weaveintel/provider-llamacpp');
-      model = (mod as any).weaveLlamaCppModel(bareModel, {
+      const mod = await import('@weaveintel/provider-llamacpp') as LlamaCppProviderModule;
+      model = mod.weaveLlamaCppModel(bareModel, {
         apiKey: providerConfig.apiKey,
         baseUrl: providerConfig.baseUrl,
       });
       break;
     }
     case 'mock': {
-      const mod = await import('@weaveintel/devtools');
-      model = (mod as any).createMockModel({
+      const mod = await import('@weaveintel/devtools') as DevtoolsProviderModule;
+      model = mod.createMockModel({
         name: bareModel || 'mock-model',
         responses: providerConfig.mockResponses,
         latencyMs: providerConfig.latencyMs ?? 25,
@@ -172,10 +201,22 @@ const DEFAULT_SETTINGS: ChatSettings = {
 export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
   if (!row) return { ...DEFAULT_SETTINGS };
 
+  // M-12: All JSON.parse calls on admin-configurable TEXT columns are wrapped
+  // in try/catch so a single corrupt cell cannot crash an entire chat turn.
+  // Each field falls back to its safe default on parse failure and logs a
+  // warning so operators can identify and repair the corrupt row.
+  function safeJsonParse<T>(raw: string | null | undefined, fallback: T, fieldName: string): T {
+    if (!raw) return fallback;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      logger.warn(`Failed to parse chat_settings.${fieldName} — using default`, { raw: raw.slice(0, 80) });
+      return fallback;
+    }
+  }
+
   const mode = (row.mode as ChatSettings['mode']) || 'direct';
-  const enabledTools = row.enabled_tools
-    ? JSON.parse(row.enabled_tools)
-    : getDefaultToolsByMode(mode);
+  const enabledTools = safeJsonParse<string[]>(row.enabled_tools, getDefaultToolsByMode(mode), 'enabled_tools');
 
   return {
     mode,
@@ -183,14 +224,12 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
     timezone: row.timezone ?? undefined,
     enabledTools,
     redactionEnabled: !!row.redaction_enabled,
-    redactionPatterns: row.redaction_patterns ? JSON.parse(row.redaction_patterns) : DEFAULT_SETTINGS.redactionPatterns,
-    workers: row.workers
-      ? (JSON.parse(row.workers) as WorkerDef[]).map((worker) => ({
-          ...worker,
-          tools: worker.tools ?? [],
-          persona: normalizePersona(worker.persona, 'agent'),
-        }))
-      : [],
+    redactionPatterns: safeJsonParse<string[]>(row.redaction_patterns, DEFAULT_SETTINGS.redactionPatterns, 'redaction_patterns'),
+    workers: safeJsonParse<WorkerDef[]>(row.workers, [], 'workers').map((worker) => ({
+      ...worker,
+      tools: worker.tools ?? [],
+      persona: normalizePersona(worker.persona, 'agent'),
+    })),
     // W1 — Reflection
     reflectEnabled: row.reflect_enabled ? !!row.reflect_enabled : undefined,
     reflectMaxRevisions: row.reflect_max_revisions || undefined,
@@ -203,7 +242,7 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
     supervisorReplanOnFailure: row.supervisor_replan_on_failure ? !!row.supervisor_replan_on_failure : undefined,
     supervisorParallelDelegation: row.supervisor_parallel_delegation ? !!row.supervisor_parallel_delegation : undefined,
     // W5 — Ensemble
-    ensembleAgents: row.ensemble_agents ? JSON.parse(row.ensemble_agents) : undefined,
+    ensembleAgents: safeJsonParse<ChatSettings['ensembleAgents']>(row.ensemble_agents, undefined, 'ensemble_agents'),
     ensembleResolver: (row.ensemble_resolver as ChatSettings['ensembleResolver']) ?? undefined,
   };
 }

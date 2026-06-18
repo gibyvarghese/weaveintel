@@ -477,7 +477,8 @@ describe('Phase 5 — multi-tenant MCP gateway clients', () => {
       auditEmitter,
       clientResolver: (hash) => db.getMCPGatewayClientByTokenHash(hash),
       touchClient: (id) => db.touchMCPGatewayClient(id),
-      gatewayRateLimiter: (clientId, ws, limit) => db.checkAndIncrementGatewayRateLimit(clientId, ws, limit),
+      // A-9: pass tenantId as first argument.
+      gatewayRateLimiter: (tenantId, clientId, ws, limit) => db.checkAndIncrementGatewayRateLimit(tenantId, clientId, ws, limit),
       requestLogger: async (entry) => {
         const { randomUUID } = await import('node:crypto');
         await db.insertMCPGatewayRequestLog({

@@ -18,6 +18,7 @@
 import { privateDecrypt, createPrivateKey, constants as cryptoConstants, type KeyObject } from 'node:crypto';
 import { KmsUnavailableError } from '../errors.js';
 import type { ByokUnwrapDelegate, ByokUnwrapRequest } from './byok-pem-provider.js';
+import { assertSafeForEgress } from '@weaveintel/core';
 
 // ── LocalByokKeystore ────────────────────────────────────────
 
@@ -111,9 +112,31 @@ export function createHttpHyokProxyDelegate(opts: HttpHyokProxyOptions): ByokUnw
   if (!opts.endpoint || !/^https:\/\//.test(opts.endpoint)) {
     throw new KmsUnavailableError('HYOK proxy endpoint must be an HTTPS URL');
   }
+
   const fetchImpl = opts.fetchImpl ?? fetch;
   const timeoutMs = opts.timeoutMs ?? 5000;
+
+  // H-9 / CR-SSRF: Pre-resolve the SSRF check result at construction time so
+  // any misconfigured endpoint is caught as early as possible. We store the
+  // rejected-promise here and re-await it on the first unwrap call; after that
+  // it resolves instantly from the cached promise value. This keeps the factory
+  // function synchronous while still surfacing SSRF errors before production
+  // traffic reaches the unwrap path.
+  //
+  // assertSafeForEgress blocks cloud metadata IPs (169.254.x.x, fd00::/8, etc.),
+  // loopback addresses, RFC-1918 private ranges, and other SSRF-prone targets.
+  // assertSafeForEgress requires a HardenedFetchDefaults object; we pass a
+  // minimal defaults set with a descriptive errorTag for diagnostics.
+  const ssrfCheck = assertSafeForEgress(opts.endpoint, { errorTag: 'hyok-proxy' });
+
   return async (req: ByokUnwrapRequest) => {
+    // Re-await the pre-computed SSRF check. Throws KmsUnavailableError if the
+    // endpoint resolves to a forbidden address; succeeds instantly on the
+    // happy path because the Promise is already settled.
+    await ssrfCheck.catch((err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new KmsUnavailableError(`HYOK proxy endpoint failed SSRF safety check: ${msg}`);
+    });
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
