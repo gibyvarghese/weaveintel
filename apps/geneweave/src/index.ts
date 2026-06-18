@@ -24,7 +24,9 @@
  */
 
 import type { Server } from 'node:http';
-import { weaveSetDefaultTracer, weaveRuntime, envSecretResolver, weaveInMemoryPersistence, type WeaveRuntime, type RuntimePersistenceSlot } from '@weaveintel/core';
+import { weaveSetDefaultTracer, weaveRuntime, envSecretResolver, weaveInMemoryPersistence, createLogger, type WeaveRuntime, type RuntimePersistenceSlot } from '@weaveintel/core';
+
+const log = createLogger('geneweave');
 import { weaveConsoleTracer } from '@weaveintel/observability';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 import { weaveRedactor } from '@weaveintel/redaction';
@@ -172,11 +174,24 @@ export let geneweaveEncryptionMetrics: (MetricsEmitter & { snapshot?: InMemoryMe
  *  5. Returns a GeneWeaveApp handle with stop() for graceful shutdown
  */
 export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeaveApp> {
+  // A-5: Collect background handles so we can stop them on startup failure.
+  // Each handle added here is torn down in the rollback() path when a later
+  // init step throws — prevents orphaned timers/connections from leaking.
+  const startedHandles: Array<{ stop(): Promise<void> | void }> = [];
+
+  async function rollback(err: unknown): Promise<never> {
+    log.error('Startup failed — rolling back started services', { reason: err instanceof Error ? err.message : String(err) });
+    for (const handle of startedHandles.reverse()) {
+      try { await handle.stop(); } catch { /* best-effort */ }
+    }
+    throw err;
+  }
+
   // Validate critical env vars at boot; throws on fatal misconfigurations.
   const { validateEnv } = await import('./env-validation.js');
   const envResult = validateEnv({ jwtSecret: config.jwtSecret });
   for (const warning of envResult.warnings) {
-    console.warn(warning);
+    log.warn(warning);
   }
 
   // Construct exactly one ambient runtime for this app. Every feature that
@@ -214,7 +229,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // rows from the `guardrails` table on each call, so operator edits
   // take effect without restart. Encryption wrapper still uses the
   // module-level live binding (assigned later in this function).
-  const rawDb = await createDatabaseAdapter(config.database ?? { type: 'sqlite', path: './geneweave.db' });
+  const rawDb = await createDatabaseAdapter(config.database ?? { type: 'sqlite', path: './geneweave.db' }).catch(rollback);
   const db = withTenantEncryptedMessages(rawDb, () => geneweaveEncryptionManager);
 
   // Resolve the guardrail judge model once at boot. Uses a cheap/fast model
@@ -229,35 +244,35 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   }).catch(() => undefined);
   setActiveGuardrailJudgeModel(guardrailJudgeModel);
   if (guardrailJudgeModel) {
-    console.log(`[guardrails] judge model ready — ${guardrailJudgeModel.info.provider}:${guardrailJudgeModel.info.modelId}`);
+    log.info('judge model ready', { provider: guardrailJudgeModel.info.provider, modelId: guardrailJudgeModel.info.modelId });
   } else {
-    console.log('[guardrails] no judge model available — model-graded checks will skip (set ANTHROPIC_API_KEY or OPENAI_API_KEY)');
+    log.warn('no judge model available — model-graded checks will skip (set ANTHROPIC_API_KEY or OPENAI_API_KEY)');
   }
 
   // R2: Moderation model — OpenAI omni-moderation-latest
   const guardrailModerationModel = await getGuardrailModerationModel(config.providers).catch(() => undefined);
   setActiveGuardrailModerationModel(guardrailModerationModel);
   if (guardrailModerationModel) {
-    console.log('[guardrails] moderation model ready — openai:omni-moderation-latest');
+    log.info('moderation model ready', { modelId: 'openai:omni-moderation-latest' });
   } else {
-    console.log('[guardrails] no moderation model — content moderation check will skip (set OPENAI_API_KEY)');
+    log.warn('no moderation model — content moderation check will skip (set OPENAI_API_KEY)');
   }
 
   // R3: Embedding model — OpenAI text-embedding-3-small for semantic grounding
   const guardrailEmbeddingModel = await getGuardrailEmbeddingModel(config.providers).catch(() => undefined);
   setActiveGuardrailEmbeddingModel(guardrailEmbeddingModel);
   if (guardrailEmbeddingModel) {
-    console.log('[guardrails] embedding model ready — openai:text-embedding-3-small (semantic grounding active)');
+    log.info('embedding model ready', { modelId: 'openai:text-embedding-3-small', mode: 'semantic' });
   } else {
-    console.log('[guardrails] no embedding model — semantic grounding will use lexical fallback (set OPENAI_API_KEY)');
+    log.warn('no embedding model — semantic grounding will use lexical fallback (set OPENAI_API_KEY)');
   }
 
   // Semantic memory backend — pgvector when PGVECTOR_URL is set, SQLite otherwise
   const pgVectorActive = initPgVectorSemanticMemory(db);
   if (pgVectorActive) {
-    console.log(`[memory] pgvector backend active — table: geneweave_memory_vec (${process.env['PGVECTOR_DIMENSIONS'] ?? 1536}d)`);
+    log.info('pgvector backend active', { table: 'geneweave_memory_vec', dimensions: Number(process.env['PGVECTOR_DIMENSIONS'] ?? 1536) });
   } else {
-    console.log('[memory] SQLite semantic memory backend active (set PGVECTOR_URL to use pgvector)');
+    log.info('SQLite semantic memory backend active (set PGVECTOR_URL to use pgvector)');
   }
 
   // Memory consolidation — cold-path pipeline: episodic → semantic
@@ -290,10 +305,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // process default; explicit call here documents intent for readers.
   weaveSetDefaultTracer(consoleTracer);
 
-  console.log(
-    '[runtime] weaveRuntime ready — capabilities:',
-    Array.from(runtime.capabilities).join(', '),
-  );
+  log.info('weaveRuntime ready', { capabilities: Array.from(runtime.capabilities) });
 
   // Phase G — swap the module-level OAuth client for one backed by the
   // durable state store so pending authorization-code exchanges survive a
@@ -375,20 +387,20 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
         const { bootstrapSystemTenant } = await import('./encryption/system-tenant.js');
         await bootstrapSystemTenant(db, result.manager);
       } catch (err) {
-        console.error('[encryption] system-tenant bootstrap failed (non-fatal)', err);
+        log.error('system-tenant bootstrap failed (non-fatal)', { reason: String(err) });
       }
       // Phase 9: seed default fleet-wide alert rules so the operator dashboard
       // has data on first boot. Idempotent — preserves operator edits.
       try {
         const { seedDefaultAlertRules } = await import('./encryption/alert-store.js');
         const seeded = await seedDefaultAlertRules(db, { tenantId: null });
-        console.log('[encryption] alert rules seeded', seeded);
+        log.info('alert rules seeded', { count: seeded });
       } catch (err) {
-        console.error('[encryption] alert seed failed (non-fatal)', err);
+        log.error('alert seed failed (non-fatal)', { reason: String(err) });
       }
     }
   } catch (err) {
-    console.error('[encryption] bootstrap failed (non-fatal)', err);
+    log.error('encryption bootstrap failed (non-fatal)', { reason: String(err) });
   }
 
   // 5-EN-RS. Phase 5 (Tenant Encryption): start automated DEK rotation
@@ -405,7 +417,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
       getManager: () => geneweaveEncryptionManager,
     });
   } catch (err) {
-    console.error('[encryption] rotation scheduler startup failed (non-fatal)', err);
+    log.error('rotation scheduler startup failed (non-fatal)', { reason: String(err) });
   }
 
   // 5-EN-PS. Phase 6 (Tenant Encryption): start the GDPR purge scheduler.
@@ -430,7 +442,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
       },
     });
   } catch (err) {
-    console.error('[encryption] purge scheduler startup failed (non-fatal)', err);
+    log.error('purge scheduler startup failed (non-fatal)', { reason: String(err) });
   }
 
   // 5-IR. Phase 8 (Cost Governor — Intent-RAG): warm tool description
@@ -445,10 +457,10 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     await warmToolEmbeddings({
       embedder,
       store,
-      log: (msg, meta) => console.log(msg, meta ?? ''),
+      log: (msg, meta) => log.info(msg, meta ? { meta } : undefined),
     });
   } catch (err) {
-    console.warn('cost.intent-rag: warmer hook failed (non-fatal)', String(err));
+    log.warn('cost.intent-rag: warmer hook failed (non-fatal)', { reason: String(err) });
   }
 
   // 5-WF. Workflow Platform Phase 1: construct the singleton DB-driven
@@ -515,7 +527,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   });  try {
     await syncWorkflowHandlerKindsToDb(db, workflowEngineHandle.registry);
   } catch (err) {
-    console.warn('[workflow-engine] failed to sync handler kinds:', err);
+    log.warn('failed to sync workflow handler kinds', { reason: String(err) });
   }
   // Wire the `workflow_run` built-in tool so any agent / chat session can
   // start a workflow run by id or name. Tool definition lives in
@@ -556,8 +568,9 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   });
   try {
     await triggerDispatcher.start();
+    startedHandles.push(triggerDispatcher);
   } catch (err) {
-    console.warn('[triggers] failed to start dispatcher:', err);
+    log.warn('failed to start trigger dispatcher', { reason: String(err) });
   }
 
   // 5a. Resilience Phase 4: subscribe to the process-wide signal bus and
@@ -579,8 +592,9 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
       defaultProvider: config.defaultProvider,
       defaultModel: config.defaultModel,
     });
+    if (kaggleHeartbeat) startedHandles.push(kaggleHeartbeat);
   } catch (err) {
-    console.error('[geneweave] Failed to start Kaggle heartbeat:', err instanceof Error ? err.message : String(err));
+    log.error('Failed to start Kaggle heartbeat', { reason: err instanceof Error ? err.message : String(err) });
   }
 
   // 5d. Phase 5: optional generic supervisor (mesh-agnostic). Off by default;
@@ -594,15 +608,16 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
       defaultProvider: config.defaultProvider,
       defaultModel: config.defaultModel,
     });
+    if (genericSupervisor) startedHandles.push(genericSupervisor);
   } catch (err) {
-    console.error('[geneweave] Failed to start generic supervisor:', err instanceof Error ? err.message : String(err));
+    log.error('Failed to start generic supervisor', { reason: err instanceof Error ? err.message : String(err) });
   }
 
   // 5a. Voice engine (requires OpenAI for Whisper STT + tts-1 TTS)
   const { createVoiceEngine } = await import('./voice-engine.js');
   const voiceEngine = await createVoiceEngine(db, chatEngine, activeProviders);
   if (voiceEngine) {
-    console.log('  Voice agent: enabled (OpenAI Whisper STT + tts-1 TTS)');
+    log.info('Voice agent: enabled', { stt: 'openai:whisper', tts: 'openai:tts-1' });
   }
 
   // 5b. HTTP server
@@ -620,13 +635,15 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     runtime, // thread real runtime so admin weaveAudit writes to durable KV
   });
 
-  // 5. Listen
-  await new Promise<void>((resolve) => {
+  // 5. Listen — on port binding failure, roll back all started services.
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
     server.listen(port, host, () => {
-      console.log(`\n  🧬 geneWeave running → http://${host === '0.0.0.0' ? 'localhost' : host}:${port}\n`);
+      server.off('error', reject);
+      log.info(`geneWeave running → http://${host === '0.0.0.0' ? 'localhost' : host}:${port}`);
       resolve();
     });
-  });
+  }).catch(rollback);
 
   return {
     port,
@@ -650,7 +667,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
         server.close((err) => (err ? reject(err) : resolve()));
       });
       await db.close();
-      console.log('  🧬 geneWeave stopped');
+      log.info('geneWeave stopped');
     },
   };
 }

@@ -7,6 +7,15 @@
 // for new ID minting in package-level code.
 export { newUUIDv7 } from './uuid.js';
 
+// Structured logger (A-8). Replace bare console.* with WeaveLogger for level
+// filtering, structured fields, and request correlation.
+export {
+  type WeaveLogger,
+  defaultLogger,
+  setDefaultLogger,
+  createLogger,
+} from './logger.js';
+
 // Outbound-network safety guard. Every package that calls fetch() must validate
 // destinations against SSRF (cloud metadata, RFC1918, DNS rebinding) and follow
 // redirects manually so each hop is re-validated.

@@ -4,6 +4,7 @@ export {
   weaveConversationMemory,
   createConfiguredConversationMemory,
   createConfiguredMemoryStore,
+  createConfiguredMemoryStoreAsync,
   weavePostgresMemoryStore,
   weavePgVectorMemoryStore,
   weaveRedisMemoryStore,

@@ -22,11 +22,13 @@
  *   @weaveintel/cache         — weaveInMemoryCacheStore, semantic cache for responses
  */
 
-import { newUUIDv7 } from '@weaveintel/core';
+import { newUUIDv7, createLogger } from '@weaveintel/core';
+
+const log = createLogger('chat');
 import type { ServerResponse } from 'node:http';
 import type {
   Model, ModelRequest, ModelResponse, StreamChunk, ExecutionContext, Message,
-  ToolRegistry, AgentStepEvent, AgentStep, AgentResult, EventBus, Agent,
+  Tool, ToolRegistry, AgentStepEvent, AgentStep, AgentResult, EventBus, Agent,
 } from '@weaveintel/core';
 import { weaveContext, weaveEventBus, EventTypes } from '@weaveintel/core';
 import { weaveAgent, weaveEnsemble, createVoteResolver, createArbiterResolver } from '@weaveintel/agents';
@@ -170,7 +172,7 @@ export async function buildSupervisorAdditionalTools(
   try {
     return await createToolRegistry(toolNames, undefined, { ...toolOptions, actorPersona: 'agent_supervisor' });
   } catch (err) {
-    console.warn('[chat] buildSupervisorAdditionalTools failed; supervisor will use defaults only', err);
+    log.warn('buildSupervisorAdditionalTools failed; supervisor will use defaults only', { err: String(err) });
     return undefined;
   }
 }
@@ -413,7 +415,7 @@ export class ChatEngine {
     try {
       return await this.db.resolveSupervisorAgent({ category });
     } catch (err) {
-      console.warn('[chat] resolveSupervisorAgent failed; using package defaults', err);
+      log.warn('resolveSupervisorAgent failed; using package defaults', { err: String(err) });
       return null;
     }
   }
@@ -516,7 +518,7 @@ export class ChatEngine {
     let entityError = false;
     let deletedEntities = 0;
     try { deletedEntities = await this.db.deleteEntity(userId, entityName); }
-    catch (err) { console.warn('[memory] memory_forget entity delete failed:', String(err)); entityError = true; }
+    catch (err) { log.warn('memory_forget entity delete failed', { err: String(err) }); entityError = true; }
     let semanticError = false;
     let deletedSemantic = 0;
     try {
@@ -535,7 +537,7 @@ export class ChatEngine {
         }
       }
     } catch (err) {
-      console.warn('[memory] memory_forget semantic delete failed:', String(err));
+      log.warn('memory_forget semantic delete failed', { err: String(err) });
       semanticError = true;
     }
     return { ok: !(entityError && semanticError), deletedEntities, deletedSemantic };
@@ -607,45 +609,61 @@ export class ChatEngine {
 
   // ── Enterprise tools loader ─────────────────────────────────
 
-  // ── Shared tool options builder (R-2: deduplicates runAgent / streamAgent) ──
+  // ── Memory query helper (M-17) ──────────────────────────────────────────────
+  // Shared by memoryRecall and memorySearch callbacks — differs only in return shape.
 
-  private buildAgentToolOptions(
+  private async executeMemoryQuery(
     ctx: ExecutionContext,
     userId: string,
-    chatId: string,
-    userPersona: string,
-    settings: ChatSettings,
-    attachments: ChatAttachment[] | undefined,
-    disabledToolKeys: ReadonlySet<string>,
-    catalogEntries: import('./db-types.js').ToolCatalogRow[],
-  ): ToolRegistryOptions {
+    query: string,
+    limit: number | undefined,
+    callerLabel: string,
+  ): Promise<{
+    semantic: Array<{ content: string; source: string; memory_type?: string }>;
+    entities: Array<{ entity_type: string; entity_name: string; facts: string }>;
+  }> {
+    const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
+    const memBackend = getActiveSemanticMemoryBackend();
+    let queryEmbedding: number[] | undefined;
+    try {
+      const embModel = getActiveGuardrailEmbeddingModel();
+      if (embModel) {
+        const embRes = await embModel.embed(ctx, { input: [query.slice(0, 2000)] });
+        queryEmbedding = embRes.embeddings[0] as number[] | undefined;
+      }
+    } catch (embErr) {
+      // L-17: log embedding failures so operators can diagnose model outages;
+      // best-effort fallback to text-only search is correct here.
+      log.warn(`${callerLabel} embedding failed`, { err: embErr instanceof Error ? embErr.message : String(embErr) });
+    }
+    const [semantic, entityRows] = await Promise.all([
+      memBackend
+        ? memBackend.search(ctx, { userId, query, limit: boundedLimit, queryEmbedding })
+        : this.db.searchSemanticMemory({ userId, query, limit: boundedLimit, queryEmbedding }),
+      this.db.searchEntities(userId, query),
+    ]);
     return {
-      ...this.toolOptions,
-      defaultTimezone: settings.timezone,
-      currentUserId: userId,
-      currentChatId: chatId,
-      currentAttachments: attachments,
-      actorPersona: userPersona,
+      semantic: semantic.map((m) => ({ content: m.content, source: m.source, memory_type: m.memory_type })),
+      entities: entityRows,
+    };
+  }
+
+  // ── Memory tool callbacks (5.4) ───────────────────────────────────────────
+  // Extracted from buildAgentToolOptions so each concern lives in one place.
+
+  private buildMemoryToolCallbacks(ctx: ExecutionContext): Pick<ToolRegistryOptions,
+    'memoryRecall' | 'memorySearch' | 'memoryRemember' | 'memoryForget' |
+    'memoryListEntities' | 'memoryListEpisodes' | 'memoryGetProfile' |
+    'memorySaveSnapshot' | 'memoryLoadSnapshot' | 'memoryProposeInstruction'
+  > {
+    return {
       memoryRecall: async ({ userId: recallUserId, query, limit }) => {
-        const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
-        const memBackend = getActiveSemanticMemoryBackend();
-        let queryEmbedding: number[] | undefined;
-        try {
-          const embModel = getActiveGuardrailEmbeddingModel();
-          if (embModel) {
-            const embRes = await embModel.embed(ctx, { input: [query.slice(0, 2000)] });
-            queryEmbedding = embRes.embeddings[0] as number[] | undefined;
-          }
-        } catch { /* embedding is best-effort */ }
-        const [semantic, entityRows] = await Promise.all([
-          memBackend
-            ? memBackend.search(ctx, { userId: recallUserId, query, limit: boundedLimit, queryEmbedding })
-            : this.db.searchSemanticMemory({ userId: recallUserId, query, limit: boundedLimit, queryEmbedding }),
-          this.db.searchEntities(recallUserId, query),
-        ]);
+        // M-17: delegates to executeMemoryQuery() — avoids duplicating the
+        // embedding + dual-store search logic that memorySearch shares.
+        const { semantic, entities } = await this.executeMemoryQuery(ctx, recallUserId, query, limit, 'memoryRecall');
         return {
           semantic: semantic.map((m) => ({ content: m.content, source: m.source })),
-          entities: entityRows.map((e) => ({
+          entities: entities.map((e) => ({
             entityType: e.entity_type,
             entityName: e.entity_name,
             facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
@@ -653,25 +671,11 @@ export class ChatEngine {
         };
       },
       memorySearch: async ({ userId: searchUserId, query, limit }) => {
-        const boundedLimit = Math.max(1, Math.min(20, limit ?? 5));
-        const memBackend = getActiveSemanticMemoryBackend();
-        let queryEmbedding: number[] | undefined;
-        try {
-          const embModel = getActiveGuardrailEmbeddingModel();
-          if (embModel) {
-            const embRes = await embModel.embed(ctx, { input: [query.slice(0, 2000)] });
-            queryEmbedding = embRes.embeddings[0] as number[] | undefined;
-          }
-        } catch { /* embedding is best-effort */ }
-        const [semantic, entityRows] = await Promise.all([
-          memBackend
-            ? memBackend.search(ctx, { userId: searchUserId, query, limit: boundedLimit, queryEmbedding })
-            : this.db.searchSemanticMemory({ userId: searchUserId, query, limit: boundedLimit, queryEmbedding }),
-          this.db.searchEntities(searchUserId, query),
-        ]);
+        // M-17: delegates to executeMemoryQuery(); returns memoryType which recall omits.
+        const { semantic, entities } = await this.executeMemoryQuery(ctx, searchUserId, query, limit, 'memorySearch');
         return {
-          semantic: semantic.map((m) => ({ content: m.content, source: m.source, memoryType: m.memory_type })),
-          entities: entityRows.map((e) => ({
+          semantic: semantic.map((m) => ({ content: m.content, source: m.source, memoryType: m.memory_type ?? '' })),
+          entities: entities.map((e) => ({
             entityType: e.entity_type,
             entityName: e.entity_name,
             facts: (this.safeParseJson(e.facts) as Record<string, unknown>) ?? {},
@@ -697,7 +701,7 @@ export class ChatEngine {
             if (embedding.length === 0) embedding = undefined;
           }
         } catch (embErr) {
-          console.warn('[memory] memory_remember embedding failed:', String(embErr));
+          log.warn('memory_remember embedding failed', { err: String(embErr) });
         }
         const saveOpts = { id, userId: rememberUserId, content: safeContent, memoryType: memoryType ?? 'user_fact', source: source ?? 'user_requested', embedding };
         await (memBackend ? memBackend.save(ctx, saveOpts) : this.db.saveSemanticMemory(saveOpts));
@@ -777,6 +781,15 @@ export class ChatEngine {
         });
         return { id };
       },
+    };
+  }
+
+  // ── Agenda tool callbacks (5.4) ───────────────────────────────────────────
+
+  private buildAgendaToolCallbacks(): Pick<ToolRegistryOptions,
+    'agendaList' | 'agendaFindSimilar' | 'agendaCreate' | 'agendaUpdate' | 'agendaDelete'
+  > {
+    return {
       agendaList: async ({ userId: agendaUserId, startAt, endAt, kind, limit, search }) => {
         const items = await this.db.listAgendaItems(agendaUserId, {
           startAt,
@@ -846,11 +859,200 @@ export class ChatEngine {
         const deleted = await this.db.deleteAgendaItem(id, agendaUserId);
         return { deleted: !!deleted };
       },
+    };
+  }
+
+  // ── Shared tool options builder (R-2: deduplicates runAgent / streamAgent) ──
+
+  private buildAgentToolOptions(
+    ctx: ExecutionContext,
+    userId: string,
+    chatId: string,
+    userPersona: string,
+    settings: ChatSettings,
+    attachments: ChatAttachment[] | undefined,
+    disabledToolKeys: ReadonlySet<string>,
+    catalogEntries: import('./db-types.js').ToolCatalogRow[],
+  ): ToolRegistryOptions {
+    return {
+      ...this.toolOptions,
+      defaultTimezone: settings.timezone,
+      currentUserId: userId,
+      currentChatId: chatId,
+      currentAttachments: attachments,
+      actorPersona: userPersona,
+      ...this.buildMemoryToolCallbacks(ctx),
+      ...this.buildAgendaToolCallbacks(),
       disabledToolKeys,
       catalogEntries,
       skillPolicyKey: settings.skillPolicyKey,
       explicitEnabledTools: settings.enabledTools,
     };
+  }
+
+  // ── Shared agent instance builder (H-12) ─────────────────────────────────
+  // Extracted from the ~250-line duplicated block that existed verbatim in both
+  // runAgent() and streamAgent(). Both callers now share one code path for:
+  //   - forceWorkerDataAnalysis / skill contract detection
+  //   - effectiveGoal / routedGoal construction
+  //   - dbWorkerRows loading
+  //   - supervisor / ensemble / single-agent construction
+  // The agentBus is passed in because streamAgent wires screenshot events on it
+  // before calling this method.
+
+  private async buildAgentInstance(opts: {
+    ctx: ExecutionContext;
+    model: Model;
+    userContent: string;
+    settings: ChatSettings;
+    attachments: ChatAttachment[] | undefined;
+    limits: Awaited<ReturnType<typeof resolveLimits>>;
+    tools: ToolRegistry | undefined;
+    customTools: Tool[] | undefined;
+    enterpriseToolGroups: EnterpriseToolGroup[];
+    toolOptions: ReturnType<ChatEngine['buildAgentToolOptions']>;
+    agentBus: EventBus;
+    hasEnterprise: boolean;
+  }): Promise<{
+    agent: Agent;
+    systemPromptSha256: string;
+    routedGoal: string;
+    forceWorkerDataAnalysis: boolean;
+    skillExecutionContracts: ResolvedSkillExecutionContract[];
+  }> {
+    const { ctx, model, userContent, settings, attachments, limits, tools, customTools, enterpriseToolGroups, toolOptions, agentBus, hasEnterprise } = opts;
+
+    const forceWorkerDataAnalysis = shouldForceWorkerDataAnalysis(userContent, attachments);
+    const skillExecutionContracts = extractSkillExecutionContractsFromPrompt(settings.systemPrompt);
+    const hasActiveMandatorySkillPlan = skillExecutionContracts.length > 0;
+    const forceWorkerRequirement = await this.getPolicyPromptTemplate(
+      POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
+      FORCED_WORKER_REQUIREMENT,
+    );
+    const effectiveGoal = forceWorkerDataAnalysis && !hasActiveMandatorySkillPlan
+      ? `${userContent}\n\n${forceWorkerRequirement}`
+      : userContent;
+    const dbWorkerRows = (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise))
+      ? await this.db.listEnabledWorkerAgents()
+      : [];
+    const routedGoal = effectiveGoal;
+
+    let agent: Agent;
+    let systemPromptSha256 = '';
+
+    if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
+      const baseWorkers = settings.workers.length > 0
+        ? await Promise.all(settings.workers.map(async (w) => ({
+            name: w.name,
+            description: w.description,
+            systemPrompt: applyTemporalToolPolicy({
+              basePrompt: undefined,
+              toolNames: w.tools,
+              temporalToolPolicy: TEMPORAL_TOOL_POLICY,
+            }),
+            model,
+            tools: w.tools.length
+              ? await createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
+              : customTools?.length
+                ? await createToolRegistry([], customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
+                : undefined,
+          })))
+        : await this.buildWorkersFromDb(dbWorkerRows, model, toolOptions, customTools);
+      const enterpriseWorkers = await Promise.all(enterpriseToolGroups.map(async (g) => {
+        const registry = await createToolRegistry([], g.tools, { ...toolOptions, actorPersona: 'agent_researcher' });
+        return {
+          name: g.name,
+          description: g.description,
+          systemPrompt: await this.renderPolicyPromptTemplate(
+            POLICY_PROMPT_ENTERPRISE_WORKER_SYSTEM,
+            ENTERPRISE_WORKER_SYSTEM_PROMPT,
+            { description: g.description },
+          ),
+          model,
+          tools: registry,
+        };
+      }));
+      const allWorkers = [...baseWorkers, ...enterpriseWorkers];
+      log.info('supervisor ready', { workers: allWorkers.length, baseWorkers: baseWorkers.length, enterpriseWorkers: enterpriseWorkers.length });
+
+      const resolvedSupervisor = await this.resolveSupervisorContext('general');
+      const supervisorBasePrompt = [
+        resolvedSupervisor?.agent.system_prompt,
+        settings.systemPrompt,
+      ].filter((value): value is string => Boolean(value && value.trim())).join('\n\n');
+      const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
+      const supervisorAdditionalTools = (await buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions)) ?? tools;
+      systemPromptSha256 = computePromptFingerprint(supervisorInstructions);
+
+      agent = weaveAgent({
+        model,
+        workers: allWorkers,
+        maxSteps: limits.chat_max_steps,
+        name: resolvedSupervisor?.agent.name ?? 'geneweave-supervisor',
+        systemPrompt: supervisorInstructions,
+        defaultTimezone: resolvedSupervisor?.agent.default_timezone ?? settings.timezone,
+        includeUtilityTools: resolvedSupervisor ? resolvedSupervisor.agent.include_utility_tools !== 0 : true,
+        additionalTools: supervisorAdditionalTools,
+        bus: agentBus,
+        replanOnFailure: settings.supervisorReplanOnFailure,
+        parallelDelegation: settings.supervisorParallelDelegation,
+        ...(settings.reflectEnabled && {
+          reflect: {
+            maxRevisions: settings.reflectMaxRevisions,
+            criteria: settings.reflectCriteria,
+          },
+        }),
+      });
+    } else {
+      const policyPrompt = await this.withResponseCardFormatPolicy(applyTemporalToolPolicy({
+        basePrompt: settings.systemPrompt,
+        toolNames: settings.enabledTools,
+        temporalToolPolicy: TEMPORAL_TOOL_POLICY,
+      }));
+      systemPromptSha256 = computePromptFingerprint(policyPrompt);
+      if (settings.mode === 'ensemble' && settings.ensembleAgents?.length) {
+        const ensembleAgents = await Promise.all(
+          settings.ensembleAgents.map(async (def) => {
+            const agentModel = def.model
+              ? await getOrCreateModel(
+                  this.config.defaultProvider,
+                  def.model,
+                  this.config.providers[this.config.defaultProvider] ?? {},
+                )
+              : model;
+            return weaveAgent({
+              model: agentModel,
+              tools,
+              systemPrompt: def.systemPrompt ?? policyPrompt,
+              maxSteps: limits.chat_max_steps,
+              name: def.name,
+              bus: agentBus,
+            });
+          }),
+        );
+        const resolver = settings.ensembleResolver === 'arbiter'
+          ? createArbiterResolver({ model })
+          : createVoteResolver();
+        agent = weaveEnsemble({ agents: ensembleAgents, resolver, parallel: true }) as unknown as Agent;
+      } else {
+        agent = weaveAgent({
+          model,
+          tools,
+          systemPrompt: policyPrompt,
+          maxSteps: limits.chat_max_steps,
+          name: 'geneweave-agent',
+          bus: agentBus,
+          ...(settings.reflectEnabled && {
+            reflect: {
+              maxRevisions: settings.reflectMaxRevisions,
+              criteria: settings.reflectCriteria,
+            },
+          }),
+        });
+      }
+    }
+
+    return { agent, systemPromptSha256, routedGoal, forceWorkerDataAnalysis, skillExecutionContracts };
   }
 
   // ── Agent execution (non-streaming) ─────────────────────────
@@ -886,153 +1088,12 @@ export class ChatEngine {
     const toolCallObserver = observeToolCallEvents(agentBus);
 
     try {
-      const forceWorkerDataAnalysis = shouldForceWorkerDataAnalysis(userContent, attachments);
-      // Skill execution contracts are extracted from the rendered supervisor
-      // system prompt (each active skill that defines one emits a marker line
-      // via @weaveintel/skills). When at least one contract is present, skip
-      // the generic "code_executor then analyst" requirement so we don't
-      // double-prescribe execution shape.
-      const skillExecutionContracts = extractSkillExecutionContractsFromPrompt(settings.systemPrompt);
-      const hasActiveMandatorySkillPlan = skillExecutionContracts.length > 0;
-      const forceWorkerRequirement = await this.getPolicyPromptTemplate(
-        POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
-        FORCED_WORKER_REQUIREMENT,
-      );
-      const effectiveGoal = forceWorkerDataAnalysis && !hasActiveMandatorySkillPlan
-        ? `${userContent}\n\n${forceWorkerRequirement}`
-        : userContent;
-
-      // Load DB-driven worker agents for supervisor mode
-      const dbWorkerRows = (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise))
-        ? await this.db.listEnabledWorkerAgents()
-        : [];
-
-      const routedGoal = effectiveGoal;
-
-      // Auto-upgrade to supervisor when enterprise tools are available
-      let agent: Agent;
-      let systemPromptSha256: string = '';
-
-      if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
-        const baseWorkers = settings.workers.length > 0
-          ? await Promise.all(settings.workers.map(async (w) => ({
-              name: w.name,
-              description: w.description,
-              systemPrompt: applyTemporalToolPolicy({
-                basePrompt: undefined,
-                toolNames: w.tools,
-                temporalToolPolicy: TEMPORAL_TOOL_POLICY,
-              }),
-              model,
-              tools: w.tools.length
-                ? await createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
-                : customTools?.length
-                  ? await createToolRegistry([], customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
-                  : undefined,
-            })))
-          : await this.buildWorkersFromDb(dbWorkerRows, model, toolOptions, customTools);
-        // Build enterprise domain workers from tool groups
-        const enterpriseWorkers = await Promise.all(enterpriseToolGroups.map(async (g) => {
-          const registry = await createToolRegistry([], g.tools, { ...toolOptions, actorPersona: 'agent_researcher' });
-          return {
-            name: g.name,
-            description: g.description,
-            systemPrompt: await this.renderPolicyPromptTemplate(
-              POLICY_PROMPT_ENTERPRISE_WORKER_SYSTEM,
-              ENTERPRISE_WORKER_SYSTEM_PROMPT,
-              { description: g.description },
-            ),
-            model,
-            tools: registry,
-          };
-        }));
-        const allWorkers = [...baseWorkers, ...enterpriseWorkers];
-        console.log(`[chat] Supervisor with ${allWorkers.length} workers (${baseWorkers.length} base + ${enterpriseWorkers.length} enterprise)`);
-        // Supervisor's direct toolset is now package-managed: think, plan,
-        // delegate_to_worker, plus the utility tools (datetime, math_eval,
-        // unit_convert) provided by @weaveintel/agents. CSE tools live on
-        // the `code_executor` worker; the supervisor must delegate to it.
-        // (Retain `skillContributedTools` plumbing — it is still consulted
-        // by skill activation code paths elsewhere.)
-
-        const resolvedSupervisor = await this.resolveSupervisorContext('general');
-        const supervisorBasePrompt = [
-          resolvedSupervisor?.agent.system_prompt,
-          settings.systemPrompt,
-        ].filter((value): value is string => Boolean(value && value.trim())).join('\n\n');
-        const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
-        // Fall back to the enabledTools registry so tools like agenda_list reach the supervisor
-        // when no DB-configured supervisor agent_tools are present.
-        const supervisorAdditionalTools = (await buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions)) ?? tools;
-        systemPromptSha256 = computePromptFingerprint(supervisorInstructions);
-
-        agent = weaveAgent({
-          model,
-          workers: allWorkers,
-          maxSteps: limits.chat_max_steps,
-          name: resolvedSupervisor?.agent.name ?? 'geneweave-supervisor',
-          systemPrompt: supervisorInstructions,
-          defaultTimezone: resolvedSupervisor?.agent.default_timezone ?? settings.timezone,
-          includeUtilityTools: resolvedSupervisor ? resolvedSupervisor.agent.include_utility_tools !== 0 : true,
-          additionalTools: supervisorAdditionalTools,
-          bus: agentBus,
-          replanOnFailure: settings.supervisorReplanOnFailure,
-          parallelDelegation: settings.supervisorParallelDelegation,
-          ...(settings.reflectEnabled && {
-            reflect: {
-              maxRevisions: settings.reflectMaxRevisions,
-              criteria: settings.reflectCriteria,
-            },
-          }),
+      // H-12: delegate shared agent construction to buildAgentInstance().
+      const { agent, systemPromptSha256, routedGoal, forceWorkerDataAnalysis, skillExecutionContracts } =
+        await this.buildAgentInstance({
+          ctx, model, userContent, settings, attachments, limits, tools, customTools,
+          enterpriseToolGroups, toolOptions, agentBus, hasEnterprise,
         });
-      } else {
-        const policyPrompt = await this.withResponseCardFormatPolicy(applyTemporalToolPolicy({
-          basePrompt: settings.systemPrompt,
-          toolNames: settings.enabledTools,
-          temporalToolPolicy: TEMPORAL_TOOL_POLICY,
-        }));
-        systemPromptSha256 = computePromptFingerprint(policyPrompt);
-        if (settings.mode === 'ensemble' && settings.ensembleAgents?.length) {
-          const ensembleAgents = await Promise.all(
-            settings.ensembleAgents.map(async (def) => {
-              const agentModel = def.model
-                ? await getOrCreateModel(
-                    this.config.defaultProvider,
-                    def.model,
-                    this.config.providers[this.config.defaultProvider] ?? {},
-                  )
-                : model;
-              return weaveAgent({
-                model: agentModel,
-                tools,
-                systemPrompt: def.systemPrompt ?? policyPrompt,
-                maxSteps: limits.chat_max_steps,
-                name: def.name,
-                bus: agentBus,
-              });
-            }),
-          );
-          const resolver = settings.ensembleResolver === 'arbiter'
-            ? createArbiterResolver({ model })
-            : createVoteResolver();
-          agent = weaveEnsemble({ agents: ensembleAgents, resolver, parallel: true }) as unknown as Agent;
-        } else {
-          agent = weaveAgent({
-            model,
-            tools,
-            systemPrompt: policyPrompt,
-            maxSteps: limits.chat_max_steps,
-            name: 'geneweave-agent',
-            bus: agentBus,
-            ...(settings.reflectEnabled && {
-              reflect: {
-                maxRevisions: settings.reflectMaxRevisions,
-                criteria: settings.reflectCriteria,
-              },
-            }),
-          });
-        }
-      }
 
       const result = await this.runWithCseSuccessGuard(
         agent,
@@ -1095,132 +1156,12 @@ export class ChatEngine {
     });
 
     try {
-      const forceWorkerDataAnalysis = shouldForceWorkerDataAnalysis(userContent, attachments);
-      const skillExecutionContractsStream = extractSkillExecutionContractsFromPrompt(settings.systemPrompt);
-      const hasActiveMandatorySkillPlanStream = skillExecutionContractsStream.length > 0;
-      const forceWorkerRequirement = await this.getPolicyPromptTemplate(
-        POLICY_PROMPT_FORCED_WORKER_REQUIREMENT,
-        FORCED_WORKER_REQUIREMENT,
-      );
-      const effectiveGoal = forceWorkerDataAnalysis && !hasActiveMandatorySkillPlanStream
-        ? `${userContent}\n\n${forceWorkerRequirement}`
-        : userContent;
-      const dbWorkerRows = (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise))
-        ? await this.db.listEnabledWorkerAgents()
-        : [];
-      const routedGoal = effectiveGoal;
-      let agent: Agent;
-      if (settings.mode === 'supervisor' || (settings.mode === 'agent' && hasEnterprise)) {
-        const baseWorkers = settings.workers.length > 0
-          ? await Promise.all(settings.workers.map(async (w) => ({
-              name: w.name,
-              description: w.description,
-              systemPrompt: applyTemporalToolPolicy({
-                basePrompt: undefined,
-                toolNames: w.tools,
-                temporalToolPolicy: TEMPORAL_TOOL_POLICY,
-              }),
-              model,
-              tools: w.tools.length
-                ? await createToolRegistry(w.tools, customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
-                : customTools?.length
-                  ? await createToolRegistry([], customTools, { ...toolOptions, actorPersona: normalizePersona(w.persona, 'agent') })
-                  : undefined,
-            })))
-          : await this.buildWorkersFromDb(dbWorkerRows, model, toolOptions, customTools);
-        const enterpriseWorkers = await Promise.all(enterpriseToolGroups.map(async (g) => {
-          const registry = await createToolRegistry([], g.tools, { ...toolOptions, actorPersona: 'agent_researcher' });
-          return {
-            name: g.name,
-            description: g.description,
-            systemPrompt: await this.renderPolicyPromptTemplate(
-              POLICY_PROMPT_ENTERPRISE_WORKER_SYSTEM,
-              ENTERPRISE_WORKER_SYSTEM_PROMPT,
-              { description: g.description },
-            ),
-            model,
-            tools: registry,
-          };
-        }));
-        const allWorkers = [...baseWorkers, ...enterpriseWorkers];
-        // Streaming path: same supervisor tool contract as the non-streaming
-        // path — supervisor gets package defaults (think/plan/datetime/
-        // math_eval/unit_convert/delegate_to_worker) and nothing else. CSE
-        // belongs to the `code_executor` worker.
-
-        const resolvedSupervisor = await this.resolveSupervisorContext('general');
-        const supervisorBasePrompt = [
-          resolvedSupervisor?.agent.system_prompt,
-          settings.systemPrompt,
-        ].filter((value): value is string => Boolean(value && value.trim())).join('\n\n');
-        const supervisorInstructions = await this.buildSupervisorInstructions(supervisorBasePrompt, forceWorkerDataAnalysis, dbWorkerRows);
-        const supervisorAdditionalTools = (await buildSupervisorAdditionalTools(resolvedSupervisor, toolOptions)) ?? tools;
-        agent = weaveAgent({
-          model,
-          workers: allWorkers,
-          maxSteps: limits.chat_max_steps,
-          name: resolvedSupervisor?.agent.name ?? 'geneweave-supervisor',
-          systemPrompt: supervisorInstructions,
-          defaultTimezone: resolvedSupervisor?.agent.default_timezone ?? settings.timezone,
-          includeUtilityTools: resolvedSupervisor ? resolvedSupervisor.agent.include_utility_tools !== 0 : true,
-          additionalTools: supervisorAdditionalTools,
-          bus: agentBus,
-          replanOnFailure: settings.supervisorReplanOnFailure,
-          parallelDelegation: settings.supervisorParallelDelegation,
-          ...(settings.reflectEnabled && {
-            reflect: {
-              maxRevisions: settings.reflectMaxRevisions,
-              criteria: settings.reflectCriteria,
-            },
-          }),
+      // H-12: delegate shared agent construction to buildAgentInstance().
+      const { agent, systemPromptSha256, routedGoal, forceWorkerDataAnalysis, skillExecutionContracts: skillExecutionContractsStream } =
+        await this.buildAgentInstance({
+          ctx, model, userContent, settings, attachments, limits, tools, customTools,
+          enterpriseToolGroups, toolOptions, agentBus, hasEnterprise,
         });
-      } else {
-        const policyPrompt = await this.withResponseCardFormatPolicy(applyTemporalToolPolicy({
-          basePrompt: settings.systemPrompt,
-          toolNames: settings.enabledTools,
-          temporalToolPolicy: TEMPORAL_TOOL_POLICY,
-        }));
-        if (settings.mode === 'ensemble' && settings.ensembleAgents?.length) {
-          const ensembleAgents = await Promise.all(
-            settings.ensembleAgents.map(async (def) => {
-              const agentModel = def.model
-                ? await getOrCreateModel(
-                    this.config.defaultProvider,
-                    def.model,
-                    this.config.providers[this.config.defaultProvider] ?? {},
-                  )
-                : model;
-              return weaveAgent({
-                model: agentModel,
-                tools,
-                systemPrompt: def.systemPrompt ?? policyPrompt,
-                maxSteps: limits.chat_max_steps,
-                name: def.name,
-                bus: agentBus,
-              });
-            }),
-          );
-          const resolver = settings.ensembleResolver === 'arbiter'
-            ? createArbiterResolver({ model })
-            : createVoteResolver();
-          agent = weaveEnsemble({ agents: ensembleAgents, resolver, parallel: true }) as unknown as Agent;
-        } else {
-          agent = weaveAgent({
-            model,
-            tools,
-            systemPrompt: policyPrompt,
-            maxSteps: limits.chat_max_steps,
-            name: 'geneweave-agent',
-            bus: agentBus,
-            ...(settings.reflectEnabled && {
-              reflect: {
-                maxRevisions: settings.reflectMaxRevisions,
-                criteria: settings.reflectCriteria,
-              },
-            }),
-          });
-        }
-      }
 
     if (forceWorkerDataAnalysis) {
       const guarded = await this.runWithCseSuccessGuard(agent, ctx, messages, routedGoal, true, skillExecutionContractsStream);
@@ -1232,7 +1173,7 @@ export class ChatEngine {
           phase: 'step_end',
         });
       }
-      return { result: guarded, toolCallEvents: toolCallObserver.events };
+      return { result: guarded, toolCallEvents: toolCallObserver.events, systemPromptSha256 };
     }
 
     // Try streaming mode first
@@ -1292,7 +1233,7 @@ export class ChatEngine {
       if (finalResult) return { result: finalResult, toolCallEvents: toolCallObserver.events };
       // Stream ended without a 'done' event — log and fall through to the
       // non-streaming path rather than silently returning undefined output.
-      console.warn('[chat] stream agent ended without done event, falling back to agent.run()');
+      log.warn('stream agent ended without done event, falling back to agent.run()');
     }
 
     // Fallback: non-streaming agent run, send result as single text event
