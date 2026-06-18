@@ -24,6 +24,7 @@ import type { VoiceEngine } from '../voice-engine.js';
 import type { DatabaseAdapter } from '../db.js';
 import { json, readBody } from '../server-core.js';
 import type { Router } from '../server-core.js';
+import { safePageInt } from './index.js';
 
 const VOICE_MAX_AUDIO_BYTES = 25 * 1024 * 1024; // 25 MB (OpenAI Whisper limit)
 
@@ -103,7 +104,7 @@ export function registerVoiceRoutes(
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
     const status = url.searchParams.get('status') as 'active' | 'ended' | null;
-    const limit = Math.min(Number(url.searchParams.get('limit') ?? '20'), 100);
+    const limit = safePageInt(url.searchParams.get('limit'), 20, 1, 100);
     const sessions = await voiceEngine.listSessions(auth.userId, { status: status ?? undefined, limit });
     json(res, 200, { sessions });
   });
@@ -208,7 +209,7 @@ export function registerVoiceRoutes(
     const session = await voiceEngine.getSession(params['sessionId']!, auth.userId);
     if (!session) { json(res, 404, { error: 'Session not found' }); return; }
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-    const limit = Math.min(Number(url.searchParams.get('limit') ?? '100'), 500);
+    const limit = safePageInt(url.searchParams.get('limit'), 100, 1, 500);
     const events = await (voiceEngine as any).db.listVoiceSessionEvents(params['sessionId']!, auth.userId, limit);
     json(res, 200, { events });
   });

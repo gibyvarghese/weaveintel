@@ -50,6 +50,14 @@ import {
 } from '../tenant-theme.js';
 import { createInvitation, INVITATION_EXPIRY_HOURS } from '../auth-invitations.js';
 import { getEmailNotifier } from '../email-notifier.js';
+import {
+  requireStepUpMfa,
+  handleMfaSetup,
+  handleMfaSetupConfirm,
+  handleMfaVerify,
+  handleMfaDisable,
+} from '../auth-mfa.js';
+import { safePageInt } from './index.js';
 
 export function registerAdminWiringRoutes(
   router: Router,
@@ -83,6 +91,9 @@ export function registerAdminWiringRoutes(
       router.post(path, async (req, res, params, auth) => {
         const gate = ensurePermission(auth, permissionForAdminRoute(path, 'POST'));
         if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
+        // 4.17: step-up MFA gate for admin mutations.
+        const mfaGate = await requireStepUpMfa(auth!, db);
+        if (!mfaGate.ok) { json(res, mfaGate.status, { error: mfaGate.error }); return; }
         await handler(req, res, params, auth);
       }, opts);
     },
@@ -90,6 +101,9 @@ export function registerAdminWiringRoutes(
       router.put(path, async (req, res, params, auth) => {
         const gate = ensurePermission(auth, permissionForAdminRoute(path, 'PUT'));
         if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
+        // 4.17: step-up MFA gate for admin mutations.
+        const mfaGate = await requireStepUpMfa(auth!, db);
+        if (!mfaGate.ok) { json(res, mfaGate.status, { error: mfaGate.error }); return; }
         await handler(req, res, params, auth);
       }, opts);
     },
@@ -97,6 +111,9 @@ export function registerAdminWiringRoutes(
       router.del(path, async (req, res, params, auth) => {
         const gate = ensurePermission(auth, permissionForAdminRoute(path, 'DELETE'));
         if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
+        // 4.17: step-up MFA gate for admin mutations.
+        const mfaGate = await requireStepUpMfa(auth!, db);
+        if (!mfaGate.ok) { json(res, mfaGate.status, { error: mfaGate.error }); return; }
         await handler(req, res, params, auth);
       }, opts);
     },
@@ -271,8 +288,8 @@ export function registerAdminWiringRoutes(
 
   adminRouter.get('/api/admin/invitations', async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://_');
-    const limit = Number(url.searchParams.get('limit') ?? '50');
-    const invitations = await db.listInvitations({ limit: Number.isFinite(limit) ? limit : 50 });
+    const limit = safePageInt(url.searchParams.get('limit'), 50, 1, 200);
+    const invitations = await db.listInvitations({ limit });
     // Strip token_hash from the response (never expose the stored hash externally)
     const sanitized = invitations.map(({ token_hash: _th, ...rest }) => rest);
     json(res, 200, { invitations: sanitized });
@@ -791,6 +808,43 @@ export function registerAdminWiringRoutes(
     json(res, 200, { status: 'ok', service: 'geneweave', timestamp: new Date().toISOString() });
   });
 
+  // ── Step-up MFA routes (4.17) ─────────────────────────────────
+  // MFA setup and challenge endpoints. These are NOT gated by the
+  // adminRouter's step-up gate (they ARE the gate — the user can't
+  // verify before they have a route to verify through).
+  //
+  //  GET  /api/admin/mfa/status  — returns { mfaEnabled, mfaVerifiedAt }
+  //  POST /api/admin/mfa/setup   — generate TOTP secret (pending until confirm)
+  //  POST /api/admin/mfa/setup/confirm — confirm first TOTP code and enable MFA
+  //  POST /api/admin/mfa/verify  — complete step-up challenge; stamps session
+  //  DELETE /api/admin/mfa       — disable MFA (requires TOTP confirmation)
+
+  router.get('/api/admin/mfa/status', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Unauthorized' }); return; }
+    const mfaEnabled = await db.getUserMfaEnabled(auth.userId);
+    json(res, 200, { mfaEnabled, mfaVerifiedAt: auth.mfaVerifiedAt ?? null });
+  }, { auth: true });
+
+  router.post('/api/admin/mfa/setup', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Unauthorized' }); return; }
+    await handleMfaSetup(req, res, auth, db, json);
+  }, { auth: true, csrf: true });
+
+  router.post('/api/admin/mfa/setup/confirm', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Unauthorized' }); return; }
+    await handleMfaSetupConfirm(req, res, auth, db, json, readBody);
+  }, { auth: true, csrf: true });
+
+  router.post('/api/admin/mfa/verify', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Unauthorized' }); return; }
+    await handleMfaVerify(req, res, auth, db, json, readBody);
+  }, { auth: true, csrf: true });
+
+  router.del('/api/admin/mfa', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Unauthorized' }); return; }
+    await handleMfaDisable(req, res, auth, db, json, readBody);
+  }, { auth: true, csrf: true });
+
   // ── Internal MCP Gateway (Phase 1D) ────────────────────────
   // Exposes builtin tools whose allocation_class is in the operator-edited
   // tool_catalog `config.exposed_classes` (defaulting to web/social/search/
@@ -833,8 +887,9 @@ export function registerAdminWiringRoutes(
             return row;
           },
           touchClient: (id: string) => db.touchMCPGatewayClient(id),
-          gatewayRateLimiter: (clientId: string, windowStartIso: string, limit: number) =>
-            db.checkAndIncrementGatewayRateLimit(clientId, windowStartIso, limit),
+          // A-9: rate bucket keyed on (tenantId, clientId) tuple.
+          gatewayRateLimiter: (tenantId: string | null, clientId: string, windowStartIso: string, limit: number) =>
+            db.checkAndIncrementGatewayRateLimit(tenantId, clientId, windowStartIso, limit),
           requestLogger: async (entry) => {
             // Phase 8: persist every terminal outcome to mcp_gateway_request_log.
             // Best-effort: errors are swallowed by the gateway hook caller.

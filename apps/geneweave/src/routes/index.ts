@@ -1,3 +1,12 @@
+/**
+ * Safe integer parser for query parameters.
+ * Handles NaN, Infinity, floats, negatives — never lets a raw Number() reach SQLite.
+ */
+export function safePageInt(value: string | null | undefined, defaultVal: number, min = 0, max = 10_000): number {
+  const n = parseInt(value ?? '', 10);
+  return isFinite(n) ? Math.max(min, Math.min(max, n)) : defaultVal;
+}
+
 export { registerAuthRoutes } from './auth.js';
 export { registerModelRoutes } from './model.js';
 export { registerSettingsRoutes } from './settings.js';

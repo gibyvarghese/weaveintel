@@ -35,6 +35,7 @@ import type { DatabaseAdapter } from '../db-types.js';
 import type { NoteSensitivity, NoteLinkTargetKind } from '../db-types/adapter-agenda-notes.js';
 import { meTaskRepo as taskRepo } from './me-stores.js';
 import { createActionItem } from '@weaveintel/human-tasks';
+import { safePageInt } from './index.js';
 
 // ── To-do ⇄ task extraction ─────────────────────────────────────────────────
 // Walks the Tiptap doc JSON looking for taskList/taskItem nodes, and for each
@@ -78,7 +79,7 @@ export function registerMeNotesRoutes(router: Router, db: DatabaseAdapter): void
       parentNoteId,
       favorite: url.searchParams.get('favorite') === '1',
       search: url.searchParams.get('search') ?? undefined,
-      limit: url.searchParams.get('limit') ? Number(url.searchParams.get('limit')) : undefined,
+      limit: safePageInt(url.searchParams.get('limit'), 50, 1, 500),
     });
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ notes }));

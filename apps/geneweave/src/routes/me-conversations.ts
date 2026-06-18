@@ -26,6 +26,7 @@ import type {
   ConversationListFilter,
 } from '../db-types.js';
 import { meTaskRepo, OPEN_TASK_STATUSES } from './me-stores.js';
+import { safePageInt } from './index.js';
 
 const SNIPPET_MAX = 140;
 const TITLE_MAX = 200;
@@ -98,8 +99,8 @@ export function registerMeConversationsRoutes(
     const query = url.searchParams.get('query') ?? undefined;
     const rawFilter = url.searchParams.get('filter') ?? 'active';
     const filter = (VALID_FILTERS.has(rawFilter) ? rawFilter : 'active') as ConversationListFilter;
-    const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? '50') || 50, 1), 200);
-    const offset = Math.max(Number(url.searchParams.get('offset') ?? '0') || 0, 0);
+    const limit = safePageInt(url.searchParams.get('limit'), 50, 1, 200);
+    const offset = safePageInt(url.searchParams.get('offset'), 0, 0, 1_000_000);
 
     const rows = await db.listUserConversations(auth.userId, {
       ...(query ? { query } : {}),
@@ -162,7 +163,7 @@ export function registerMeConversationsRoutes(
     if (!conversation) { json(res, 404, { error: 'Not found' }); return; }
 
     const url = new URL(req.url ?? '', 'http://localhost');
-    const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? '500') || 500, 1), 1000);
+    const limit = safePageInt(url.searchParams.get('limit'), 500, 1, 1000);
 
     const rows = await db.getMessages(id);
     // Only user/assistant turns are part of the visible transcript; system and

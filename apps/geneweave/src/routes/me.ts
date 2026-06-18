@@ -53,6 +53,7 @@ import { resolveTenantThemeTokens } from '../tenant-theme.js';
 import type { SurfaceCatalogResolver } from '@weaveintel/core';
 import type { NotificationsHub } from '../notifications-wiring.js';
 import { meTaskRepo as taskRepo, meTriggerStore as triggerStore } from './me-stores.js';
+import { safePageInt } from './index.js';
 import { MeRunExecutor, isTerminalRunStatus } from '../me-run-executor.js';
 
 /**
@@ -153,8 +154,8 @@ export function registerMeRoutes(
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const url = new URL(req.url ?? '/', 'http://x');
     const statusParam = url.searchParams.get('status');
-    const limit = Math.min(Number(url.searchParams.get('limit') ?? '50'), 200);
-    const offset = Number(url.searchParams.get('offset') ?? '0');
+    const limit = safePageInt(url.searchParams.get('limit'), 50, 1, 200);
+    const offset = safePageInt(url.searchParams.get('offset'), 0, 0, 1_000_000);
     type RunStatus = 'pending'|'running'|'completed'|'failed'|'cancelled';
     const validStatuses: RunStatus[] = ['pending','running','completed','failed','cancelled'];
     const status = validStatuses.includes(statusParam as RunStatus) ? statusParam as RunStatus : undefined;
@@ -178,7 +179,7 @@ export function registerMeRoutes(
     if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
 
     const url = new URL(req.url ?? '/', 'http://x');
-    const afterSeq = Number(url.searchParams.get('after') ?? '-1');
+    const afterSeq = safePageInt(url.searchParams.get('after'), -1, -1, Number.MAX_SAFE_INTEGER);
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',

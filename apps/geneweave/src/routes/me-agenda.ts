@@ -24,6 +24,7 @@ import type { Router } from '../server-core.js';
 import { readBody } from '../server-core.js';
 import type { DatabaseAdapter } from '../db-types.js';
 import type { AgendaItemKind, AgendaItemStatus, AgendaItemSensitivity } from '../db-types/adapter-agenda-notes.js';
+import { safePageInt } from './index.js';
 
 // ── NL quick-parse heuristic ───────────────────────────────────────────────────
 // Lightweight heuristic: extracts an ISO date/time from free text. Good enough
@@ -181,7 +182,7 @@ export function registerMeAgendaRoutes(router: Router, db: DatabaseAdapter): voi
       kind: (url.searchParams.get('kind') ?? undefined) as AgendaItemKind | undefined,
       status: (url.searchParams.get('status') ?? undefined) as AgendaItemStatus | undefined,
       categoryId: url.searchParams.get('category') ?? undefined,
-      limit: url.searchParams.get('limit') ? Number(url.searchParams.get('limit')) : undefined,
+      limit: safePageInt(url.searchParams.get('limit'), 50, 1, 500),
     };
     const items = await db.listAgendaItems(auth.userId, filter);
     res.writeHead(200, { 'Content-Type': 'application/json' });
