@@ -6,6 +6,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
+import { randomBytes } from 'node:crypto';
 import { newUUIDv7 } from '@weaveintel/core';
 import { readFile as fsReadFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
@@ -121,6 +122,45 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   }, 60_000);
   oauthStateCleanupTimer.unref?.();
 
+  // ── WS ticket store (L-6) ──────────────────────────────────
+  // Short-lived opaque tokens used to authenticate WebSocket upgrades without
+  // embedding a full JWT in the query string (where it appears in server logs
+  // and browser history). Each ticket is 32 random bytes (256-bit), one-time-
+  // use, and expires after 60 seconds.
+  interface WsTicket {
+    readonly userId: string;
+    readonly sessionId: string;
+    readonly expiresAt: number;
+  }
+  const wsTickets = new Map<string, WsTicket>();
+  const WS_TICKET_TTL_MS = 60_000;
+
+  /** Issue a new WS ticket for an authenticated user. */
+  function issueWsTicket(userId: string, sessionId: string): string {
+    const ticket = randomBytes(32).toString('hex');
+    wsTickets.set(ticket, { userId, sessionId, expiresAt: Date.now() + WS_TICKET_TTL_MS });
+    return ticket;
+  }
+
+  /** Consume a WS ticket — returns the associated auth info or null if invalid/expired. */
+  function consumeWsTicket(ticket: string): WsTicket | null {
+    const entry = wsTickets.get(ticket);
+    wsTickets.delete(ticket); // one-time use regardless of validity
+    if (!entry) return null;
+    if (Date.now() > entry.expiresAt) return null;
+    return entry;
+  }
+
+  // Periodic cleanup of expired tickets (they're consumed on use, but leaked tickets
+  // that were never presented accumulate without this cleanup).
+  const wsTicketCleanupTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [k, v] of wsTickets) {
+      if (now > v.expiresAt) wsTickets.delete(k);
+    }
+  }, 30_000);
+  wsTicketCleanupTimer.unref?.();
+
   // ── Route registration ─────────────────────────────────────
 
   registerAuthRoutes(router, db, { jwtSecret, corsOrigin, publicBaseUrl, setOAuthState, consumeOAuthState });
@@ -148,6 +188,16 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   if (voiceEngine) {
     registerVoiceRoutes(router, db, voiceEngine);
   }
+
+  // L-6: WS ticket endpoint — issues a short-lived opaque ticket that the WS
+  // client presents in the query string (?ticket=...) instead of a full JWT.
+  // This keeps the JWT out of server access logs and browser history entries.
+  // The ticket is one-time-use and expires in 60 seconds.
+  router.post('/api/ws-ticket', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const ticket = issueWsTicket(auth.userId, auth.sessionId);
+    json(res, 200, { ticket, expiresInMs: WS_TICKET_TTL_MS });
+  });
 
   // ── Avatar static files ────────────────────────────────────
 
@@ -184,12 +234,43 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   // ── HTTP server ────────────────────────────────────────────
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    // CORS
+    // M-1: CORS — strip CRLF from the origin before reflecting it into a header
+    // (CRLF in header values enables HTTP response splitting / header injection).
+    // Never send `Access-Control-Allow-Credentials: true` with a wildcard origin
+    // (`*`) — browsers reject it and it indicates a misconfiguration; instead
+    // silently drop the Credentials header when the operator sets corsOrigin='*'.
+    // F002: Security hardening headers on every response.
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    // CSP: allow same-origin scripts/styles, Google Fonts CDN, and inline styles
+    // (the SPA uses a CSS-in-HTML <style> block). Tighten further if a nonce is added.
+    res.setHeader(
+      'Content-Security-Policy',
+      [
+        "default-src 'self'",
+        "script-src 'self'",
+        // Inline styles are used by the SPA theme block; fonts.googleapis.com loads the font CSS
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+        "font-src 'self' https://fonts.gstatic.com",
+        "img-src 'self' data: https:",
+        "connect-src 'self' ws: wss:",
+        "frame-ancestors 'none'",
+      ].join('; '),
+    );
+
     if (corsOrigin) {
-      res.setHeader('Access-Control-Allow-Origin', corsOrigin);
+      // Remove CR/LF characters that could inject extra headers.
+      const safeOrigin = corsOrigin.replace(/[\r\n]/g, '');
+      res.setHeader('Access-Control-Allow-Origin', safeOrigin);
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-CSRF-Token');
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      // Credentials + wildcard is a browser-rejected combination and a security
+      // red flag.  Only emit the Credentials header for explicit single-origin configs.
+      if (safeOrigin !== '*') {
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+      }
     }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
@@ -360,6 +441,26 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       return;
     }
 
+    // Explicitly block common sensitive probe paths — return 404 so scanners
+    // and attackers get no signal about whether these files/endpoints exist.
+    // These never match legitimate app routes; blocking them here prevents the
+    // SPA catch-all from responding with 200 HTML (which scanners misread as
+    // "exposed data"). F005–F021 from the pentest were all SPA HTML false-positives
+    // caused by this catch-all firing before the explicit 404 below.
+    const BLOCKED_PATHS = /^\/?(\.env|\.git|\.gitignore|\.DS_Store|wp-admin|phpmyadmin|actuator)/i;
+    if (method === 'GET' && BLOCKED_PATHS.test(pathname)) {
+      json(res, 404, { error: 'Not found' });
+      return;
+    }
+
+    // Unmatched /api/* paths return 404 JSON — never serve the SPA for API routes.
+    // This prevents scanners from getting HTTP 200 for probe URLs like /api/config,
+    // /api/debug, /api/swagger.json, etc. and classifying them as "exposed endpoints."
+    if (pathname.startsWith('/api/')) {
+      json(res, 404, { error: 'Not found' });
+      return;
+    }
+
     // Serve UI for all non-API routes (SPA)
     if (method === 'GET') {
       html(res, 200, uiHtml);
@@ -389,15 +490,48 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
       }
       const sessionId = wsMatch[1]!;
 
-      // Authenticate from the query-string token (WS clients can't set headers easily)
+      // L-6: Authenticate via an opaque short-lived ticket (preferred) or a
+      // Bearer JWT (legacy fallback for clients not yet updated). The ticket path
+      // keeps the JWT out of access logs and browser URL history; a ticket
+      // presented via `?ticket=<hex>` is consumed atomically so it cannot be
+      // replayed. The legacy `?token=<jwt>` path is still accepted for
+      // backward-compatibility but new clients should use the ticket endpoint.
       const qs = new URL(url, 'http://localhost').searchParams;
+      const ticketParam = qs.get('ticket');
       const tokenParam = qs.get('token');
-      if (tokenParam) {
-        // Inject as Authorization header so authenticateRequest picks it up
-        (req.headers as Record<string, string>)['authorization'] = `Bearer ${tokenParam}`;
+
+      let auth: Awaited<ReturnType<typeof authenticateRequest>> = null;
+      if (ticketParam) {
+        // Ticket path: consume the ticket and derive auth from the stored userId.
+        const ticketData = consumeWsTicket(ticketParam);
+        if (!ticketData) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+        const user = await db.getUserById(ticketData.userId);
+        const session = await db.getSession(ticketData.sessionId);
+        if (!user || !session) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+        auth = {
+          userId: ticketData.userId,
+          email: user.email,
+          sessionId: ticketData.sessionId,
+          csrfToken: session.csrf_token,
+          persona: user.persona,
+          tenantId: user.tenant_id,
+        };
+      } else {
+        if (tokenParam) {
+          // Legacy JWT-in-query-string path: inject as Authorization header.
+          (req.headers as Record<string, string>)['authorization'] = `Bearer ${tokenParam}`;
+        }
+        auth = await authenticateRequest(req, db, jwtSecret);
       }
 
-      const auth = await authenticateRequest(req, db, jwtSecret);
       if (!auth) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
