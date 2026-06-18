@@ -42,3 +42,10 @@ data/arc-prize-2026/
 examples/arc-agi-3/runs/
 __pycache__/
 kaggle-artifacts/
+
+# Runtime task store (JsonFileHumanTaskRepository dev data)
+geneweave-tasks.json
+
+# Generated test output / reports
+test-results/
+apps/geneweave/test-results/
