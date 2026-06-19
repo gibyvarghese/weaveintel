@@ -193,7 +193,7 @@ export interface WorkerDef {
 const DEFAULT_SETTINGS: ChatSettings = {
   mode: 'direct',
   enabledTools: getDefaultToolsByMode('direct'),
-  redactionEnabled: false,
+  redactionEnabled: true,
   redactionPatterns: ['email', 'phone', 'ssn', 'credit_card'],
   workers: [],
 };

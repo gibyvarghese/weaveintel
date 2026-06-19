@@ -17,6 +17,25 @@ export interface HttpRateLimiter {
   readonly distributed: boolean;
 }
 
+// ── Login failure store ───────────────────────────────────────────────────────
+
+export interface LoginFailureState {
+  failures: number;
+  /** Unix ms timestamp after which the account is unblocked. */
+  blockedUntil: number;
+}
+
+/**
+ * Key-value store for per-(ip, email) login failure state with TTL.
+ * Implementations: in-process Map (dev/test) and Redis (production).
+ */
+export interface LoginFailureStore {
+  get(key: string): Promise<LoginFailureState | null>;
+  set(key: string, state: LoginFailureState, ttlMs: number): Promise<void>;
+  delete(key: string): Promise<void>;
+  readonly distributed: boolean;
+}
+
 // ── In-process fallback ──────────────────────────────────────────────────────
 
 function createInProcessRateLimiter(): HttpRateLimiter {
@@ -48,11 +67,32 @@ function createInProcessRateLimiter(): HttpRateLimiter {
   };
 }
 
+// ── In-process login failure store ───────────────────────────────────────────
+
+function createInProcessLoginFailureStore(): LoginFailureStore {
+  const map = new Map<string, { state: LoginFailureState; expiresAt: number }>();
+  return {
+    distributed: false,
+    async get(key) {
+      const entry = map.get(key);
+      if (!entry || Date.now() > entry.expiresAt) { map.delete(key); return null; }
+      return entry.state;
+    },
+    async set(key, state, ttlMs) {
+      map.set(key, { state, expiresAt: Date.now() + ttlMs });
+    },
+    async delete(key) { map.delete(key); },
+  };
+}
+
 // ── Redis-backed ─────────────────────────────────────────────────────────────
 
 type RedisClient = {
   incr(key: string): Promise<number>;
   expire(key: string, seconds: number): Promise<number>;
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string, options?: { PX?: number }): Promise<'OK'>;
+  del(key: string): Promise<number>;
 };
 
 function createRedisRateLimiter(client: RedisClient): HttpRateLimiter {
@@ -83,18 +123,50 @@ function createRedisRateLimiter(client: RedisClient): HttpRateLimiter {
   };
 }
 
-// ── Factory ──────────────────────────────────────────────────────────────────
+// ── Redis login failure store ─────────────────────────────────────────────────
 
-export async function createHttpRateLimiter(redisUrl?: string): Promise<HttpRateLimiter> {
-  if (!redisUrl) return createInProcessRateLimiter();
+function createRedisLoginFailureStore(client: RedisClient): LoginFailureStore {
+  return {
+    distributed: true,
+    async get(key) {
+      try {
+        const json = await client.get(`gw:lf:${key}`);
+        return json ? JSON.parse(json) as LoginFailureState : null;
+      } catch { return null; }
+    },
+    async set(key, state, ttlMs) {
+      try {
+        await client.set(`gw:lf:${key}`, JSON.stringify(state), { PX: ttlMs });
+      } catch { /* fail open — in-process path will catch on next read */ }
+    },
+    async delete(key) {
+      try { await client.del(`gw:lf:${key}`); } catch { /* fail open */ }
+    },
+  };
+}
 
+// ── Factories ─────────────────────────────────────────────────────────────────
+
+async function connectRedis(redisUrl: string): Promise<RedisClient | null> {
   try {
     const { createClient } = await import('redis');
     const client = createClient({ url: redisUrl });
-    client.on('error', () => { /* suppress — check() already fails open */ });
+    client.on('error', () => { /* suppress — callers fail open on Redis errors */ });
     await client.connect();
-    return createRedisRateLimiter(client as unknown as RedisClient);
+    return client as unknown as RedisClient;
   } catch {
-    return createInProcessRateLimiter();
+    return null;
   }
+}
+
+export async function createHttpRateLimiter(redisUrl?: string): Promise<HttpRateLimiter> {
+  if (!redisUrl) return createInProcessRateLimiter();
+  const client = await connectRedis(redisUrl);
+  return client ? createRedisRateLimiter(client) : createInProcessRateLimiter();
+}
+
+export async function createLoginFailureStore(redisUrl?: string): Promise<LoginFailureStore> {
+  if (!redisUrl) return createInProcessLoginFailureStore();
+  const client = await connectRedis(redisUrl);
+  return client ? createRedisLoginFailureStore(client) : createInProcessLoginFailureStore();
 }

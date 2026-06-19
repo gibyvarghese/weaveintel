@@ -1,73 +1,92 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
 import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../db.js';
 import { json, readBody } from '../server-core.js';
 import type { Router } from '../server-core.js';
 
-// In-memory run registry (process-scoped, non-durable).
-const liveAgentRuns = new Map<string, { userId: string; status: string; createdAt: string; agentId?: string; config?: unknown }>();
-
-export function registerLiveAgentRoutes(router: Router, _db: DatabaseAdapter): void {
+export function registerLiveAgentRoutes(router: Router, db: DatabaseAdapter): void {
 
   // ── Live-agent lifecycle ────────────────────────────────────────────────────
 
-  // Start a new live-agent run. Returns a runId that the client can poll.
+  // Start a new live-agent run. Persists to api_live_runs so stop signals
+  // survive process restarts and work across multiple replicas.
   router.post('/api/live-agents/runs', async (req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const raw = await readBody(req);
     let body: { agentId?: string; config?: unknown } = {};
     try { if (raw.trim()) body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
     const runId = newUUIDv7();
-    liveAgentRuns.set(runId, {
-      userId: auth.userId,
+    const run = await db.createApiLiveRun({
+      id: runId,
+      user_id: auth.userId,
+      tenant_id: auth.tenantId ?? null,
+      agent_id: body.agentId ?? null,
       status: 'running',
-      createdAt: new Date().toISOString(),
-      agentId: body.agentId,
-      config: body.config,
+      stop_requested: 0,
+      config_json: body.config ? JSON.stringify(body.config) : null,
     });
-    json(res, 200, { runId, status: 'running' });
+    json(res, 200, { runId: run.id, status: run.status, createdAt: run.created_at });
   }, { auth: true, csrf: true });
 
   // Get status of a live-agent run.
   router.get('/api/live-agents/runs/:runId', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const run = liveAgentRuns.get(params['runId']!);
-    if (!run || run.userId !== auth.userId) { json(res, 404, { error: 'Run not found' }); return; }
-    json(res, 200, { runId: params['runId'], ...run });
+    const run = await db.getApiLiveRun(params['runId']!);
+    if (!run || run.user_id !== auth.userId) { json(res, 404, { error: 'Run not found' }); return; }
+    json(res, 200, {
+      runId: run.id,
+      status: run.status,
+      stopRequested: run.stop_requested === 1,
+      agentId: run.agent_id,
+      createdAt: run.created_at,
+      updatedAt: run.updated_at,
+    });
   });
 
-  // Stop a live-agent run.
-  // NOTE: this updates the in-process status map only. A signal to the running agent
-  // loop is not yet wired (the loop must poll run.status or a channel). Cross-process
-  // or restart-safe stop requires the in-memory store to be replaced with a DB-backed one.
+  // Stop a live-agent run. Persists stop_requested=1 to DB so agent loops
+  // on any replica can detect the signal by calling isApiRunStopped().
   router.post('/api/live-agents/runs/:runId/stop', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const run = liveAgentRuns.get(params['runId']!);
-    if (!run || run.userId !== auth.userId) { json(res, 404, { error: 'Run not found' }); return; }
-    run.status = 'stopped';
-    console.warn(`[live-agents] stop requested for run ${params['runId']} — status updated in-process only; cross-process propagation requires a DB-backed store`);
-    json(res, 200, { runId: params['runId'], status: 'stopped' });
+    const run = await db.getApiLiveRun(params['runId']!);
+    if (!run || run.user_id !== auth.userId) { json(res, 404, { error: 'Run not found' }); return; }
+    await db.updateApiLiveRun(run.id, { status: 'stopped', stop_requested: 1 });
+    json(res, 200, { runId: run.id, status: 'stopped', stopRequested: true });
   }, { auth: true, csrf: true });
 
   // Resume a live-agent run (idempotent — running runs stay running).
-  // Same caveat as stop: in-process state only.
   router.post('/api/live-agents/runs/:runId/resume', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const run = liveAgentRuns.get(params['runId']!);
-    if (!run || run.userId !== auth.userId) { json(res, 404, { error: 'Run not found' }); return; }
-    if (run.status === 'stopped' || run.status === 'paused') {
-      run.status = 'running';
+    const run = await db.getApiLiveRun(params['runId']!);
+    if (!run || run.user_id !== auth.userId) { json(res, 404, { error: 'Run not found' }); return; }
+    if (run.status === 'stopped') {
+      await db.updateApiLiveRun(run.id, { status: 'running', stop_requested: 0 });
     }
-    json(res, 200, { runId: params['runId'], status: run.status });
+    const updated = await db.getApiLiveRun(run.id);
+    json(res, 200, { runId: run.id, status: updated?.status ?? run.status });
   }, { auth: true, csrf: true });
 
   // List all live-agent runs for the authenticated user.
   router.get('/api/live-agents/runs', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const runs = Array.from(liveAgentRuns.entries())
-      .filter(([, r]) => r.userId === auth.userId)
-      .map(([runId, r]) => ({ runId, ...r }));
-    json(res, 200, { runs });
+    const runs = await db.listUserApiLiveRuns(auth.userId, { limit: 50 });
+    json(res, 200, {
+      runs: runs.map(r => ({
+        runId: r.id,
+        status: r.status,
+        stopRequested: r.stop_requested === 1,
+        agentId: r.agent_id,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at,
+      })),
+    });
   });
 
+}
+
+/**
+ * Check whether a live-agent run has been stopped. Call at each agent step
+ * boundary — if this returns true the agent loop should halt cleanly.
+ */
+export async function isApiRunStopped(db: DatabaseAdapter, runId: string): Promise<boolean> {
+  const run = await db.getApiLiveRun(runId);
+  return run !== null && (run.stop_requested === 1 || run.status === 'stopped');
 }

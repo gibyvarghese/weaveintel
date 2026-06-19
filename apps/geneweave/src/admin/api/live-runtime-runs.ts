@@ -71,6 +71,7 @@ export function registerLiveRunRoutes(
       run_key: String(body['run_key']),
       label: strOrNull(body['label']),
       status: String(body['status'] ?? 'RUNNING'),
+      stop_requested: 0,
       started_at: String(body['started_at'] ?? new Date().toISOString()),
       completed_at: strOrNull(body['completed_at']),
       summary: strOrNull(body['summary']),

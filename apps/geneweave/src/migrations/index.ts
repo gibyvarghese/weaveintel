@@ -36,6 +36,9 @@ import { applyM53McpGatewayTenantRateLimit } from './m53-mcp-gateway-tenant-rate
 import { applyM54AuditRetentionTiers } from './m54-audit-retention-tiers.js';
 import { applyM55StepUpMfa } from './m55-step-up-mfa.js';
 import { applyM56PasskeyCredentials } from './m56-passkey-credentials.js';
+import { applyM57RedactionDefaultOn } from './m57-redaction-default-on.js';
+import { applyM58BackfillCredentialEncryption } from './m58-backfill-credential-encryption.js';
+import { applyM59LiveRunsStopRequested } from './m59-live-runs-stop-requested.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -80,6 +83,9 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm54-audit-retention-tiers', description: 'EU AI Act Art 12: add retention_tier to tool_audit_events + mcp_gateway_request_log; seed audit_log_retention_tiers table (90-day operational / 7-year compliance)', run: applyM54AuditRetentionTiers },
   { id: 'm55-step-up-mfa', description: '4.17: Add mfa_enabled + mfa_totp_secret to users; mfa_verified_at to sessions for TOTP step-up MFA on admin routes', run: applyM55StepUpMfa },
   { id: 'm56-passkey-credentials', description: '4.1: FIDO2/WebAuthn passkey_credentials + webauthn_challenges tables', run: applyM56PasskeyCredentials },
+  { id: 'm57-redaction-default-on', description: 'M4-5: Backfill chat_settings.redaction_enabled=1; clear guardrail_evals.input_preview to remove stored PII', run: applyM57RedactionDefaultOn },
+  { id: 'm58-backfill-credential-encryption', description: 'H-2 Phase 2: Encrypt existing plaintext credentials in search_providers, social_accounts, enterprise_connectors using vault AES-256-GCM', run: applyM58BackfillCredentialEncryption },
+  { id: 'm59-live-runs-stop-requested', description: 'M6-2: Add stop_requested column to live_runs; create api_live_runs table for durable, cross-process live-agent stop signals', run: applyM59LiveRunsStopRequested },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

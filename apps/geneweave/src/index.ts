@@ -208,7 +208,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
   // Validate critical env vars at boot; throws on fatal misconfigurations.
   const { validateEnv } = await import('./env-validation.js');
-  const envResult = validateEnv({ jwtSecret: config.jwtSecret });
+  const envResult = validateEnv({ jwtSecret: config.jwtSecret, redisUrl: process.env['REDIS_URL'] });
   for (const warning of envResult.warnings) {
     log.warn(warning);
   }
@@ -417,6 +417,20 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
         log.info('alert rules seeded', { count: seeded });
       } catch (err) {
         log.error('alert seed failed (non-fatal)', { reason: String(err) });
+      }
+      // H-2: Bootstrap DEK+KEK for every tenant so m58 backfill can encrypt
+      // existing credential rows. enable:false — creates keys without activating
+      // per-field encryption; the flag flips automatically when a new credential
+      // is written through db-sqlite.ts. Idempotent.
+      try {
+        const tenantRows = await db.listTenantConfigs();
+        const uniqueTenantIds = [...new Set(tenantRows.map(r => r.tenant_id).filter(Boolean))];
+        for (const tenantId of uniqueTenantIds) {
+          await result.manager.bootstrapTenant({ tenantId, enable: false });
+        }
+        log.info('tenant DEK bootstrap complete', { count: uniqueTenantIds.length });
+      } catch (err) {
+        log.error('tenant DEK bootstrap failed (non-fatal)', { reason: String(err) });
       }
     }
   } catch (err) {

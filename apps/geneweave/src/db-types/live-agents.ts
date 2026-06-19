@@ -194,10 +194,24 @@ export interface LiveRunRow {
   run_key: string;
   label: string | null;
   status: string;                              // 'RUNNING' | 'COMPLETED' | 'FAILED' | 'ABANDONED'
+  stop_requested: number;                      // 1 = stop signal set; agent loop should halt
   started_at: string;
   completed_at: string | null;
   summary: string | null;
   context_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Lightweight run started via the REST API — no mesh FK requirement. */
+export interface ApiLiveRunRow {
+  id: string;
+  user_id: string;
+  tenant_id: string | null;
+  agent_id: string | null;
+  status: string;              // 'running' | 'stopped' | 'completed' | 'failed'
+  stop_requested: number;      // 1 = stop signal persisted to DB; survives restarts
+  config_json: string | null;
   created_at: string;
   updated_at: string;
 }

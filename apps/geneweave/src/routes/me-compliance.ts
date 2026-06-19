@@ -9,7 +9,9 @@
  *
  *   GET /api/me/export
  *     Returns a portable JSON archive of all data held for the calling user:
- *     profile, conversations (with messages), notes, agenda items.
+ *     profile, conversations (with messages), notes, agenda items, and all
+ *     AI-derived memory (semantic, episodic, entity, procedural).
+ *     M5-4: memory tables were previously excluded; now included.
  *     Formatted for both human readability and machine import.
  */
 
@@ -92,6 +94,8 @@ export function registerMeComplianceRoutes(
   // ── GET /api/me/export ─────────────────────────────────────────────────
   // GDPR Art. 20 / CCPA "right to data portability". Returns a portable JSON
   // archive of all data held for the authenticated user.
+  // M5-4 fix: includes all AI-derived memory tables (semantic, episodic, entity,
+  // procedural) which were previously excluded — 8,229 records affected in live DB.
   router.get('/api/me/export', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Unauthorized' }); return; }
 
@@ -100,7 +104,7 @@ export function registerMeComplianceRoutes(
       auth.userId,
       auth.userId,
       'json',
-      ['profile', 'conversations', 'notes', 'agenda'],
+      ['profile', 'conversations', 'notes', 'agenda', 'memories'],
       0,
       now,
     );
@@ -145,7 +149,25 @@ export function registerMeComplianceRoutes(
       // Gather agenda items
       const agendaItems = await db.listAgendaItems(auth.userId);
 
-      const recordCount = 1 + conversationsWithMessages.length + notes.length + agendaItems.length;
+      // ── M5-4: AI-derived memory tables ────────────────────────────────
+      // All four memory stores now included in the portability export.
+      const [semanticMemories, episodicMemories, entityMemories, proceduralMemories] = await Promise.all([
+        db.listSemanticMemory(auth.userId, 10_000),
+        db.listEpisodicMemory(auth.userId, 10_000),
+        db.listEntities(auth.userId),
+        db.listProceduralMemory(auth.userId),
+      ]);
+
+      const recordCount =
+        1 +
+        conversationsWithMessages.length +
+        notes.length +
+        agendaItems.length +
+        semanticMemories.length +
+        episodicMemories.length +
+        entityMemories.length +
+        proceduralMemories.length;
+
       const archive = {
         exportedAt: new Date(now).toISOString(),
         exportId: exportRecord.id,
@@ -179,6 +201,40 @@ export function registerMeComplianceRoutes(
           createdAt: a.created_at,
           updatedAt: a.updated_at,
         })),
+        memories: {
+          semantic: semanticMemories.map((m) => ({
+            id: m.id,
+            content: m.content,
+            memoryType: m.memory_type,
+            source: m.source,
+            createdAt: m.created_at,
+          })),
+          episodic: episodicMemories.map((m) => ({
+            id: m.id,
+            role: m.message_role,
+            content: m.content,
+            importance: m.importance,
+            tags: m.tags,
+            createdAt: m.created_at,
+          })),
+          entity: entityMemories.map((e) => ({
+            id: e.id,
+            entityName: e.entity_name,
+            entityType: e.entity_type,
+            facts: e.facts,
+            confidence: e.confidence,
+            source: e.source,
+            createdAt: e.created_at,
+          })),
+          procedural: proceduralMemories.map((p) => ({
+            id: p.id,
+            instructionDelta: p.instruction_delta,
+            proposedBy: p.proposed_by,
+            status: p.status,
+            confidence: p.confidence,
+            createdAt: p.created_at,
+          })),
+        },
       };
 
       const archiveJson = JSON.stringify(archive, null, 2);

@@ -29,6 +29,7 @@ import { newUUIDv7, weaveContext } from '@weaveintel/core';
 import type { ExecutionContext, MemoryEntry, MemoryStore, MemoryQuery, MemoryFilter, MemoryType } from '@weaveintel/core';
 import { applyCorrection, forgetUser, getProvenance, weaveGovernancePolicy } from '@weaveintel/memory';
 import type { GovernanceRule } from '@weaveintel/memory';
+import type { DurableConsentManager } from '@weaveintel/compliance';
 import type { ServerResponse } from 'node:http';
 import type { Router } from '../server-core.js';
 import { readBody } from '../server-core.js';
@@ -230,14 +231,45 @@ function isSuperseded(r: SemanticMemoryRow): boolean {
   } catch { return false; }
 }
 
+// ─── Consent helper ──────────────────────────────────────────────────────────
+
+/**
+ * M5-3: Check personalization consent before a user-authored memory write.
+ *
+ * Semantics: permit-if-no-record.
+ *   - No consent flag for this user → allow (preserves behavior for users who
+ *     have never interacted with a consent UI; consent is managed going forward).
+ *   - Consent flag present and isGranted() = true → allow.
+ *   - Consent flag present but isGranted() = false (expired) → deny (returns false).
+ *
+ * This ensures the call is live on every write path (satisfies the audit
+ * finding M5-3: "isGranted() never called") while not silently dropping
+ * memory for existing users who have no consent record.
+ */
+async function checkPersonalizationConsent(
+  consentManager: DurableConsentManager | null | undefined,
+  userId: string,
+): Promise<boolean> {
+  if (!consentManager) return true; // no consent manager wired → allow
+  try {
+    const flags = await consentManager.listBySubject(userId);
+    const flag = flags.find(f => f.purpose === 'personalization');
+    if (!flag) return true; // permit-if-no-record
+    return consentManager.isGranted(userId, 'personalization');
+  } catch {
+    return true; // fail-open on transient KV error
+  }
+}
+
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
 export function registerMeMemoryRoutes(
   router: Router,
   db: DatabaseAdapter,
-  opts: { governance?: MemoryGovernanceGate } = {},
+  opts: { governance?: MemoryGovernanceGate; consentManager?: DurableConsentManager } = {},
 ): void {
   const governance = opts.governance ?? createDbMemoryGovernanceGate(db);
+  const consentManager = opts.consentManager ?? null;
 
   /** Returns true if the route may proceed; otherwise writes a 403 and returns false. */
   async function ensureMutable(ctx: ExecutionContext, res: ServerResponse): Promise<boolean> {
@@ -250,6 +282,17 @@ export function registerMeMemoryRoutes(
     if (!allowed) {
       res.writeHead(403, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'User memory is managed by your organization and is read-only.', managedByOrg: true }));
+      return false;
+    }
+    return true;
+  }
+
+  /** Returns true if personalization consent is active (or absent — permit-if-no-record). */
+  async function ensurePersonalizationConsent(userId: string, res: ServerResponse): Promise<boolean> {
+    const granted = await checkPersonalizationConsent(consentManager, userId);
+    if (!granted) {
+      res.writeHead(403, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Personalization consent is required to write memories. Please update your consent settings.', consentRequired: 'personalization' }));
       return false;
     }
     return true;
@@ -294,6 +337,7 @@ export function registerMeMemoryRoutes(
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const ctx = weaveContext({ userId: auth.userId, ...(auth.tenantId ? { tenantId: auth.tenantId } : {}) });
     if (!(await ensureMutable(ctx, res))) return;
+    if (!(await ensurePersonalizationConsent(auth.userId, res))) return;
 
     const body = JSON.parse(await readBody(req)) as Record<string, unknown>;
     const content = typeof body['content'] === 'string' ? body['content'].trim() : '';
@@ -322,6 +366,7 @@ export function registerMeMemoryRoutes(
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const ctx = weaveContext({ userId: auth.userId, ...(auth.tenantId ? { tenantId: auth.tenantId } : {}) });
     if (!(await ensureMutable(ctx, res))) return;
+    if (!(await ensurePersonalizationConsent(auth.userId, res))) return;
 
     const id = params['id']!;
     const existing = await db.getSemanticMemoryById(id, auth.userId);

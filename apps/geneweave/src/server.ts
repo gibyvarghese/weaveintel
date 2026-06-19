@@ -35,6 +35,7 @@ import {
   html,
   readClientIp,
   initHttpRateLimiter,
+  initLoginFailureStore,
   checkEdgeRateLimit,
   SERVER_REQUEST_TIMEOUT_MS,
   SERVER_HEADERS_TIMEOUT_MS,
@@ -42,7 +43,8 @@ import {
   SERVER_MAX_HEADERS_COUNT,
   SERVER_MAX_REQUESTS_PER_SOCKET,
 } from './server-core.js';
-import { createHttpRateLimiter } from './http-rate-limiter.js';
+import { createHttpRateLimiter, createLoginFailureStore } from './http-rate-limiter.js';
+import { createDurableConsentManager } from '@weaveintel/compliance';
 import {
   registerAuthRoutes,
   registerModelRoutes,
@@ -109,10 +111,10 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   // entries prevents unbounded memory growth on a single instance.
   const idempotencyStore = createIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000, maxEntries: 10_000 });
 
-  // Initialize HTTP rate limiter — Redis when REDIS_URL is set, in-process otherwise.
-  // Fire-and-forget: the lazy fallback in checkRateLimit handles any requests that
-  // arrive before the async connect completes.
+  // Initialize rate limiters — Redis when REDIS_URL is set, in-process otherwise.
+  // Fire-and-forget: lazy fallbacks in server-core handle early requests.
   void createHttpRateLimiter(process.env['REDIS_URL']).then(initHttpRateLimiter);
+  void createLoginFailureStore(process.env['REDIS_URL']).then(initLoginFailureStore);
 
   // POST routes where idempotency is meaningful (state-mutating, non-streaming).
   // Paths are matched as prefix strings so parameterised variants are covered.
@@ -228,7 +230,8 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
     }),
   });
   registerMeConversationsRoutes(router, db);
-  registerMeMemoryRoutes(router, db);
+  // M5-3: pass consent manager so isGranted() is called on every memory write path.
+  registerMeMemoryRoutes(router, db, { consentManager: config.runtime ? createDurableConsentManager({ runtime: config.runtime, namespace: 'consent' }) : undefined });
   registerMeAgendaRoutes(router, db);
   registerMeNotesRoutes(router, db);
   registerMeComplianceRoutes(router, db, config.runtime);

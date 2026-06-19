@@ -23,6 +23,7 @@
  */
 
 import { newUUIDv7, createLogger } from '@weaveintel/core';
+import { createDurableConsentManager, type DurableConsentManager } from '@weaveintel/compliance';
 
 const log = createLogger('chat');
 import type { ServerResponse } from 'node:http';
@@ -256,10 +257,18 @@ export class ChatEngine {
     }
   }
 
+  // M5-3: consent manager for gating AI-derived memory writes.
+  // Permit-if-no-record — only blocks when an explicit consent flag has expired.
+  private readonly consentManager: DurableConsentManager | null;
+
   constructor(
     private readonly config: ChatEngineConfig,
     private readonly db: DatabaseAdapter,
-  ) {    this.toolOptions = {
+  ) {
+    this.consentManager = config.runtime
+      ? createDurableConsentManager({ runtime: config.runtime, namespace: 'consent' })
+      : null;
+    this.toolOptions = {
       temporalStore: createTemporalStore(db),
       policyResolver: new DbToolPolicyResolver(db),
       rateLimiter: new DbToolRateLimiter(db),
@@ -271,6 +280,17 @@ export class ChatEngine {
       // Phase D: runtime propagation for capability requires assertion
       ...(config.runtime ? { runtime: config.runtime } : {}),
     };
+  }
+
+  /** Permit-if-no-record consent check. Returns true when writing is allowed. */
+  private async isPersonalizationAllowed(userId: string): Promise<boolean> {
+    if (!this.consentManager) return true;
+    try {
+      const flags = await this.consentManager.listBySubject(userId);
+      const flag = flags.find(f => f.purpose === 'personalization');
+      if (!flag) return true; // no record → allow
+      return this.consentManager.isGranted(userId, 'personalization');
+    } catch { return true; } // fail-open on transient KV error
   }
 
   /**
@@ -572,6 +592,7 @@ export class ChatEngine {
       recordModelOutcome: (modelIdArg, providerIdArg, latencyMsArg, successArg, errMsg) =>
         this.recordModelOutcome(modelIdArg, providerIdArg, latencyMsArg, successArg, errMsg),
       safeParseJson: (text) => this.safeParseJson(text),
+      consentManager: this.consentManager,
     };
 
     return sendMessageImpl(deps, userId, chatId, content, opts);
@@ -605,6 +626,7 @@ export class ChatEngine {
           this.recordModelOutcome(modelIdArg, providerIdArg, latencyMsArg, successArg),
         safeParseJson: (text) => this.safeParseJson(text),
         onPolicyChecks: this.onPolicyChecks,
+        consentManager: this.consentManager,
       },
       res,
       userId,
@@ -773,6 +795,10 @@ export class ChatEngine {
         return { snapshot: parsed, id: snapshot.id, savedAt: snapshot.created_at };
       },
       memoryProposeInstruction: async ({ userId: propUserId, agentId: propAgentId, instruction, reason, confidence }) => {
+        // M5-3: check personalization consent before AI-derived memory write.
+        if (!(await this.isPersonalizationAllowed(propUserId))) {
+          return { id: 'consent-denied' };
+        }
         const { newUUIDv7 } = await import('@weaveintel/core');
         const id = `proc-${newUUIDv7().slice(-8)}`;
         await this.db.createProceduralMemory({
@@ -823,6 +849,9 @@ export class ChatEngine {
         return similar.map(item => ({ id: item.id, title: item.title, kind: item.kind, start_at: item.start_at }));
       },
       agendaCreate: async ({ userId: agendaUserId, title, kind, startAt, endAt, allDay, location, description }) => {
+        if (!(await this.isPersonalizationAllowed(agendaUserId))) {
+          return { id: 'consent-denied', title, kind: kind ?? 'event', start_at: startAt ?? null };
+        }
         const { newUUIDv7 } = await import('@weaveintel/core');
         const id = newUUIDv7();
         await this.db.createAgendaItem({

@@ -5,6 +5,7 @@ import type { ServerResponse } from 'node:http';
 import type { ExecutionContext, Message, AgentStep, ModelRequest, ModelHealth } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import { applySkillsToPrompt } from '@weaveintel/skills';
+import type { DurableConsentManager } from '@weaveintel/compliance';
 import type { DatabaseAdapter } from './db.js';
 import { normalizePersona } from './rbac.js';
 import {
@@ -74,7 +75,18 @@ type StreamMessageDeps = {
   safeParseJson: (text: string) => unknown;
   /** Optional hook: called after policy checks are evaluated (best-effort, never blocks the stream). */
   onPolicyChecks?: (userId: string, checks: Array<{ tool: string; policy: string; taskType: string; priority: string }>) => Promise<void>;
+  consentManager?: DurableConsentManager | null;
 };
+
+async function isAnalyticsAllowed(consentManager: DurableConsentManager | null | undefined, userId: string): Promise<boolean> {
+  if (!consentManager) return true;
+  try {
+    const flags = await consentManager.listBySubject(userId);
+    const flag = flags.find(f => f.purpose === 'analytics');
+    if (!flag) return true;
+    return consentManager.isGranted(userId, 'analytics');
+  } catch { return true; }
+}
 
 /**
  * Fallback title from raw text — first non-empty line trimmed to ~60 chars.
@@ -483,10 +495,12 @@ export async function streamMessageImpl(
       latencyMs,
     });
 
-    await deps.db.recordMetric({
-      id: newUUIDv7(), userId, chatId, type: 'generation', provider: 'local', model: 'memory-recall',
-      promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0, latencyMs,
-    });
+    if (await isAnalyticsAllowed(deps.consentManager, userId)) {
+      await deps.db.recordMetric({
+        id: newUUIDv7(), userId, chatId, type: 'generation', provider: 'local', model: 'memory-recall',
+        promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0, latencyMs,
+      });
+    }
 
     deps.endSse(res);
     return;
@@ -843,11 +857,13 @@ export async function streamMessageImpl(
     logger.warn('memory save / consolidation failed (stream)', { err: memErr instanceof Error ? memErr.message : String(memErr) });
   }
 
-  await deps.db.recordMetric({
-    id: newUUIDv7(), userId, chatId, type: 'generation', provider, model: modelId,
-    promptTokens: finalUsage.promptTokens, completionTokens: finalUsage.completionTokens,
-    totalTokens: finalUsage.totalTokens, cost, latencyMs,
-  });
+  if (await isAnalyticsAllowed(deps.consentManager, userId)) {
+    await deps.db.recordMetric({
+      id: newUUIDv7(), userId, chatId, type: 'generation', provider, model: modelId,
+      promptTokens: finalUsage.promptTokens, completionTokens: finalUsage.completionTokens,
+      totalTokens: finalUsage.totalTokens, cost, latencyMs,
+    });
+  }
 
   await recordTraceSpans(
     deps.db,

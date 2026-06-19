@@ -7,6 +7,7 @@ import type { GuardrailCategorySummary } from '@weaveintel/guardrails';
 import { applySkillsToPrompt } from '@weaveintel/skills';
 import { shouldBypass } from '@weaveintel/cache';
 import { ModelHealthTracker } from '@weaveintel/routing';
+import type { DurableConsentManager } from '@weaveintel/compliance';
 import type { DatabaseAdapter } from './db.js';
 import { normalizePersona } from './rbac.js';
 import {
@@ -121,7 +122,18 @@ export type SendMessageDeps = {
   loadPricing: () => Promise<Map<string, ModelPricing>>;
   recordModelOutcome: (modelId: string, providerId: string, latencyMs: number, success: boolean, errorMessage?: string) => void;
   safeParseJson: (text: string) => unknown;
+  consentManager?: DurableConsentManager | null;
 };
+
+async function isAnalyticsAllowed(consentManager: DurableConsentManager | null | undefined, userId: string): Promise<boolean> {
+  if (!consentManager) return true;
+  try {
+    const flags = await consentManager.listBySubject(userId);
+    const flag = flags.find(f => f.purpose === 'analytics');
+    if (!flag) return true;
+    return consentManager.isGranted(userId, 'analytics');
+  } catch { return true; }
+}
 
 export async function sendMessageImpl(
   deps: SendMessageDeps,
@@ -302,10 +314,12 @@ export async function sendMessageImpl(
       latencyMs,
     });
 
-    await deps.db.recordMetric({
-      id: newUUIDv7(), userId, chatId, type: 'generation', provider: 'local', model: 'memory-recall',
-      promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0, latencyMs,
-    });
+    if (await isAnalyticsAllowed(deps.consentManager, userId)) {
+      await deps.db.recordMetric({
+        id: newUUIDv7(), userId, chatId, type: 'generation', provider: 'local', model: 'memory-recall',
+        promptTokens: 0, completionTokens: 0, totalTokens: 0, cost: 0, latencyMs,
+      });
+    }
 
     return {
       assistantContent: identityRecall,
@@ -487,11 +501,13 @@ export async function sendMessageImpl(
     logger.warn('memory save / consolidation failed', { err: memErr instanceof Error ? memErr.message : String(memErr) });
   }
 
-  await deps.db.recordMetric({
-    id: newUUIDv7(), userId, chatId, type: 'generation', provider, model: modelId,
-    promptTokens: usage.promptTokens, completionTokens: usage.completionTokens,
-    totalTokens: usage.totalTokens, cost, latencyMs,
-  });
+  if (await isAnalyticsAllowed(deps.consentManager, userId)) {
+    await deps.db.recordMetric({
+      id: newUUIDv7(), userId, chatId, type: 'generation', provider, model: modelId,
+      promptTokens: usage.promptTokens, completionTokens: usage.completionTokens,
+      totalTokens: usage.totalTokens, cost, latencyMs,
+    });
+  }
 
   await recordTraceSpans(
     deps.db,

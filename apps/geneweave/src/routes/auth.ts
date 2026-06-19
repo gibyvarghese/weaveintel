@@ -131,7 +131,7 @@ async function authenticateAndMintSession(
   if (!email || !password) { json(res, 400, { error: 'email and password required' }); return null; }
 
   const clientIp = readClientIp(req);
-  const lockedMs = getLoginBackoffMs(clientIp, email);
+  const lockedMs = await getLoginBackoffMs(clientIp, email);
   if (lockedMs > 0) {
     const retryAfterSec = Math.ceil(lockedMs / 1_000);
     res.setHeader('Retry-After', String(retryAfterSec));
@@ -152,12 +152,12 @@ async function authenticateAndMintSession(
     ? await verifyPasswordDetailed(password, user.password_hash)
     : { ok: false, needsRehash: false };
   if (!user || !verification.ok) {
-    recordLoginFailure(clientIp, email);
+    await recordLoginFailure(clientIp, email);
     json(res, 401, { error: 'Invalid credentials', correlationId: newUUIDv7() });
     return null;
   }
 
-  clearLoginFailures(clientIp, email);
+  await clearLoginFailures(clientIp, email);
 
   // Block sign-in until email is verified. email_verified is undefined for rows
   // that predate m44 — those are grandfathered (undefined !== 0 so they pass).

@@ -1,4 +1,4 @@
-import type { LiveMeshDefinitionRow, LiveAgentDefinitionRow, LiveMeshDelegationEdgeRow, LiveHandlerKindRow, LiveAttentionPolicyRow, LiveMeshRow, LiveAgentRow, LiveAgentHandlerBindingRow, LiveAgentToolBindingRow, LiveRunRow, LiveRunStepRow, LiveRunEventRow } from './live-agents.js';
+import type { LiveMeshDefinitionRow, LiveAgentDefinitionRow, LiveMeshDelegationEdgeRow, LiveHandlerKindRow, LiveAttentionPolicyRow, LiveMeshRow, LiveAgentRow, LiveAgentHandlerBindingRow, LiveAgentToolBindingRow, LiveRunRow, LiveRunStepRow, LiveRunEventRow, ApiLiveRunRow } from './live-agents.js';
 
 export interface ILiveAgentsStore {
   // Mesh definitions
@@ -85,4 +85,11 @@ export interface ILiveAgentsStore {
   listLiveRunEvents(opts?: { runId?: string; afterId?: string; limit?: number }): Promise<LiveRunEventRow[]>;
   getLiveRunEvent(id: string): Promise<LiveRunEventRow | null>;
   appendLiveRunEvent(row: Omit<LiveRunEventRow, 'created_at'>): Promise<LiveRunEventRow>;
+
+  // API-initiated runs (no mesh FK — user-scoped, stop_requested survives restarts)
+  createApiLiveRun(row: Omit<ApiLiveRunRow, 'created_at' | 'updated_at'>): Promise<ApiLiveRunRow>;
+  getApiLiveRun(id: string): Promise<ApiLiveRunRow | null>;
+  listUserApiLiveRuns(userId: string, opts?: { status?: string; limit?: number }): Promise<ApiLiveRunRow[]>;
+  updateApiLiveRun(id: string, patch: Partial<Omit<ApiLiveRunRow, 'id' | 'user_id' | 'created_at'>>): Promise<void>;
+  deleteApiLiveRun(id: string): Promise<void>;
 }

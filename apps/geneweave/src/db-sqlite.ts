@@ -7,6 +7,21 @@
 import { newUUIDv7 } from '@weaveintel/core';
 import { getModelCapabilityFlags } from '@weaveintel/routing';
 import { SqliteEncryptionStore } from './db-encryption-store.js';
+import { encryptCredential, decryptCredential } from './vault.js';
+
+// ── Vault helpers for m49 shadow-column encryption ───────────────────────────
+// Fail-open: if VAULT_KEY is absent the server still boots; callers store
+// plaintext with credentials_encrypted = 0 until a key is provisioned.
+
+function vaultEncryptField(value: string | null): string | null {
+  if (!value || !process.env['VAULT_KEY']) return null;
+  try { return encryptCredential(value).encrypted; } catch { return null; }
+}
+
+function vaultDecryptField(ciphertext: string | null): string | null {
+  if (!ciphertext) return null;
+  try { return decryptCredential<string>(ciphertext); } catch { return null; }
+}
 import { SCHEMA_SQL } from './db-schema.js';
 import { applySQLiteBootstrapMigrations } from './db-sqlite-migrations.js';
 import { stringifyPromptVariables } from '@weaveintel/prompts';
@@ -51,7 +66,7 @@ import type {
   LiveMeshDefinitionRow, LiveAgentDefinitionRow, LiveMeshDelegationEdgeRow,
   LiveHandlerKindRow, LiveAttentionPolicyRow, LiveMeshRow, LiveAgentRow,
   LiveAgentHandlerBindingRow, LiveAgentToolBindingRow,
-  LiveRunRow, LiveRunStepRow, LiveRunEventRow,
+  LiveRunRow, LiveRunStepRow, LiveRunEventRow, ApiLiveRunRow,
   ProviderToolAdapterRow,
   TaskTypeDefinitionRow,
   ModelCapabilityScoreRow,
@@ -3101,9 +3116,11 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   async updateCostPolicy(id: string, fields: Partial<Omit<CostPolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const allowed = new Set(['key', 'tier', 'levers_json', 'description', 'enabled']);
     const sets: string[] = [];
     const vals: unknown[] = [];
     for (const [k, v] of Object.entries(fields)) {
+      if (!allowed.has(k)) continue;
       sets.push(`${k} = ?`);
       vals.push(v);
     }
@@ -3535,33 +3552,46 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   // ─── Admin: Search Providers ───────────────────────────────
-  // H-2 TODO (Phase 2 of m49): Encrypt `api_key` with the tenant DEK before
-  // INSERT/UPDATE (write to `api_key_enc`, null the plaintext `api_key` column,
-  // set `credentials_encrypted = 1`). On SELECT, decrypt `api_key_enc` when
-  // `credentials_encrypted = 1`, return plaintext `api_key` otherwise (legacy rows).
-  // Until Phase 2 is wired, `api_key` is stored plaintext — m49 adds the shadow
-  // columns so Phase 2 can be deployed without a second schema migration.
 
   async createSearchProvider(p: Omit<SearchProviderRow, 'created_at' | 'updated_at'>): Promise<void> {
+    const enc = vaultEncryptField(p.api_key ?? null);
+    const credFlag = enc !== null ? 1 : 0;
     this.d.prepare(
-      `INSERT INTO search_providers (id, name, description, provider_type, api_key, base_url, priority, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(p.id, p.name, p.description ?? null, p.provider_type, p.api_key ?? null, p.base_url ?? null, p.priority, p.options ?? null, p.enabled);
+      `INSERT INTO search_providers (id, name, description, provider_type, api_key, api_key_enc, credentials_encrypted, base_url, priority, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.name, p.description ?? null, p.provider_type, credFlag ? null : (p.api_key ?? null), enc, credFlag, p.base_url ?? null, p.priority, p.options ?? null, p.enabled);
   }
 
   async getSearchProvider(id: string): Promise<SearchProviderRow | null> {
-    return (this.d.prepare('SELECT * FROM search_providers WHERE id = ?').get(id) as SearchProviderRow) ?? null;
+    type Raw = SearchProviderRow & { api_key_enc?: string | null; credentials_encrypted?: number };
+    const raw = this.d.prepare('SELECT * FROM search_providers WHERE id = ?').get(id) as Raw | undefined;
+    if (!raw) return null;
+    return raw.credentials_encrypted === 1 ? { ...raw, api_key: vaultDecryptField(raw.api_key_enc ?? null) } : raw;
   }
 
   async listSearchProviders(): Promise<SearchProviderRow[]> {
-    return this.d.prepare('SELECT * FROM search_providers ORDER BY priority DESC, name ASC').all() as SearchProviderRow[];
+    type Raw = SearchProviderRow & { api_key_enc?: string | null; credentials_encrypted?: number };
+    return (this.d.prepare('SELECT * FROM search_providers ORDER BY priority DESC, name ASC').all() as Raw[]).map(
+      r => r.credentials_encrypted === 1 ? { ...r, api_key: vaultDecryptField(r.api_key_enc ?? null) } : r,
+    );
   }
 
   async updateSearchProvider(id: string, fields: Partial<Omit<SearchProviderRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const ALLOWED = new Set(['name', 'description', 'provider_type', 'base_url', 'priority', 'options', 'enabled']);
     const sets: string[] = [];
     const vals: unknown[] = [];
     for (const [k, v] of Object.entries(fields)) {
-      sets.push(`${k} = ?`);
-      vals.push(v);
+      if (k === 'api_key') {
+        const enc = vaultEncryptField(typeof v === 'string' ? v : null);
+        if (enc !== null) {
+          sets.push('api_key = ?'); vals.push(null);
+          sets.push('api_key_enc = ?'); vals.push(enc);
+          sets.push('credentials_encrypted = 1');
+        } else {
+          sets.push('api_key = ?'); vals.push(v ?? null);
+        }
+      } else if (ALLOWED.has(k)) {
+        sets.push(`${k} = ?`); vals.push(v);
+      }
     }
     if (sets.length === 0) return;
     sets.push("updated_at = datetime('now')");
@@ -3607,31 +3637,63 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   // ─── Admin: Social Accounts ────────────────────────────────
-  // H-2 TODO (Phase 2 of m49): Encrypt `api_key`, `api_secret`, `access_token`,
-  // `refresh_token` with the tenant DEK on write; decrypt on read when
-  // `credentials_encrypted = 1`. Shadow columns (`api_key_enc` etc.) exist after m49.
 
   async createSocialAccount(a: Omit<SocialAccountRow, 'created_at' | 'updated_at'>): Promise<void> {
+    const encKey    = vaultEncryptField(a.api_key ?? null);
+    const encSecret = vaultEncryptField(a.api_secret ?? null);
+    const encAccess = vaultEncryptField(a.access_token ?? null);
+    const encRefresh = vaultEncryptField(a.refresh_token ?? null);
+    const credFlag  = (encKey ?? encSecret ?? encAccess ?? encRefresh) !== null ? 1 : 0;
     this.d.prepare(
-      `INSERT INTO social_accounts (id, name, description, platform, api_key, api_secret, access_token, refresh_token, token_expires_at, oauth_state, status, base_url, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(a.id, a.name, a.description ?? null, a.platform, a.api_key ?? null, a.api_secret ?? null, a.access_token ?? null, a.refresh_token ?? null, a.token_expires_at ?? null, a.oauth_state ?? null, a.status ?? 'disconnected', a.base_url ?? null, a.options ?? null, a.enabled);
+      `INSERT INTO social_accounts (id, name, description, platform, api_key, api_key_enc, api_secret, api_secret_enc, access_token, access_token_enc, refresh_token, refresh_token_enc, credentials_encrypted, token_expires_at, oauth_state, status, base_url, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      a.id, a.name, a.description ?? null, a.platform,
+      credFlag ? null : (a.api_key ?? null),    encKey,
+      credFlag ? null : (a.api_secret ?? null),  encSecret,
+      credFlag ? null : (a.access_token ?? null), encAccess,
+      credFlag ? null : (a.refresh_token ?? null), encRefresh,
+      credFlag,
+      a.token_expires_at ?? null, a.oauth_state ?? null, a.status ?? 'disconnected', a.base_url ?? null, a.options ?? null, a.enabled,
+    );
   }
 
   async getSocialAccount(id: string): Promise<SocialAccountRow | null> {
-    return (this.d.prepare('SELECT * FROM social_accounts WHERE id = ?').get(id) as SocialAccountRow) ?? null;
+    type Raw = SocialAccountRow & { api_key_enc?: string|null; api_secret_enc?: string|null; access_token_enc?: string|null; refresh_token_enc?: string|null; credentials_encrypted?: number };
+    const r = this.d.prepare('SELECT * FROM social_accounts WHERE id = ?').get(id) as Raw | undefined;
+    if (!r) return null;
+    if (r.credentials_encrypted !== 1) return r;
+    return { ...r, api_key: vaultDecryptField(r.api_key_enc ?? null), api_secret: vaultDecryptField(r.api_secret_enc ?? null), access_token: vaultDecryptField(r.access_token_enc ?? null), refresh_token: vaultDecryptField(r.refresh_token_enc ?? null) };
   }
 
   async listSocialAccounts(): Promise<SocialAccountRow[]> {
-    return this.d.prepare('SELECT * FROM social_accounts ORDER BY name ASC').all() as SocialAccountRow[];
+    type Raw = SocialAccountRow & { api_key_enc?: string|null; api_secret_enc?: string|null; access_token_enc?: string|null; refresh_token_enc?: string|null; credentials_encrypted?: number };
+    return (this.d.prepare('SELECT * FROM social_accounts ORDER BY name ASC').all() as Raw[]).map(r =>
+      r.credentials_encrypted !== 1 ? r : { ...r, api_key: vaultDecryptField(r.api_key_enc ?? null), api_secret: vaultDecryptField(r.api_secret_enc ?? null), access_token: vaultDecryptField(r.access_token_enc ?? null), refresh_token: vaultDecryptField(r.refresh_token_enc ?? null) },
+    );
   }
 
   async updateSocialAccount(id: string, fields: Partial<Omit<SocialAccountRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const SENSITIVE = new Set(['api_key', 'api_secret', 'access_token', 'refresh_token']);
+    const SENSITIVE_MAP: Record<string, string> = { api_key: 'api_key_enc', api_secret: 'api_secret_enc', access_token: 'access_token_enc', refresh_token: 'refresh_token_enc' };
+    const ALLOWED = new Set(['name', 'description', 'platform', 'token_expires_at', 'oauth_state', 'status', 'base_url', 'options', 'enabled']);
     const sets: string[] = [];
     const vals: unknown[] = [];
+    let anyEncrypted = false;
     for (const [k, v] of Object.entries(fields)) {
-      sets.push(`${k} = ?`);
-      vals.push(v);
+      if (SENSITIVE.has(k)) {
+        const enc = vaultEncryptField(typeof v === 'string' ? v : null);
+        if (enc !== null) {
+          sets.push(`${k} = ?`); vals.push(null);
+          sets.push(`${SENSITIVE_MAP[k]} = ?`); vals.push(enc);
+          anyEncrypted = true;
+        } else {
+          sets.push(`${k} = ?`); vals.push(v ?? null);
+        }
+      } else if (ALLOWED.has(k)) {
+        sets.push(`${k} = ?`); vals.push(v);
+      }
     }
+    if (anyEncrypted) { sets.push('credentials_encrypted = 1'); }
     if (sets.length === 0) return;
     sets.push("updated_at = datetime('now')");
     vals.push(id);
@@ -3643,32 +3705,60 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   // ─── Admin: Enterprise Connectors ──────────────────────────
-  // H-2 TODO (Phase 2 of m49): Encrypt `access_token`, `refresh_token`, `auth_config`
-  // with the tenant DEK on write; decrypt on read when `credentials_encrypted = 1`.
-  // Shadow columns exist after m49. `auth_config` is especially sensitive — it
-  // frequently carries client_secret, service-account keys, or mTLS certificates.
 
   async createEnterpriseConnector(c: Omit<EnterpriseConnectorRow, 'created_at' | 'updated_at'>): Promise<void> {
+    const encAccess  = vaultEncryptField(c.access_token ?? null);
+    const encRefresh = vaultEncryptField(c.refresh_token ?? null);
+    const encAuth    = vaultEncryptField(c.auth_config ?? null);
+    const credFlag   = (encAccess ?? encRefresh ?? encAuth) !== null ? 1 : 0;
     this.d.prepare(
-      `INSERT INTO enterprise_connectors (id, name, description, connector_type, base_url, auth_type, auth_config, access_token, refresh_token, token_expires_at, oauth_state, status, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(c.id, c.name, c.description ?? null, c.connector_type, c.base_url ?? null, c.auth_type ?? null, c.auth_config ?? null, c.access_token ?? null, c.refresh_token ?? null, c.token_expires_at ?? null, c.oauth_state ?? null, c.status ?? 'disconnected', c.options ?? null, c.enabled);
+      `INSERT INTO enterprise_connectors (id, name, description, connector_type, base_url, auth_type, auth_config, auth_config_enc, access_token, access_token_enc, refresh_token, refresh_token_enc, credentials_encrypted, token_expires_at, oauth_state, status, options, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      c.id, c.name, c.description ?? null, c.connector_type, c.base_url ?? null, c.auth_type ?? null,
+      credFlag ? null : (c.auth_config ?? null),    encAuth,
+      credFlag ? null : (c.access_token ?? null),   encAccess,
+      credFlag ? null : (c.refresh_token ?? null),  encRefresh,
+      credFlag,
+      c.token_expires_at ?? null, c.oauth_state ?? null, c.status ?? 'disconnected', c.options ?? null, c.enabled,
+    );
   }
 
   async getEnterpriseConnector(id: string): Promise<EnterpriseConnectorRow | null> {
-    return (this.d.prepare('SELECT * FROM enterprise_connectors WHERE id = ?').get(id) as EnterpriseConnectorRow) ?? null;
+    type Raw = EnterpriseConnectorRow & { access_token_enc?: string|null; refresh_token_enc?: string|null; auth_config_enc?: string|null; credentials_encrypted?: number };
+    const r = this.d.prepare('SELECT * FROM enterprise_connectors WHERE id = ?').get(id) as Raw | undefined;
+    if (!r) return null;
+    if (r.credentials_encrypted !== 1) return r;
+    return { ...r, access_token: vaultDecryptField(r.access_token_enc ?? null), refresh_token: vaultDecryptField(r.refresh_token_enc ?? null), auth_config: vaultDecryptField(r.auth_config_enc ?? null) };
   }
 
   async listEnterpriseConnectors(): Promise<EnterpriseConnectorRow[]> {
-    return this.d.prepare('SELECT * FROM enterprise_connectors ORDER BY name ASC').all() as EnterpriseConnectorRow[];
+    type Raw = EnterpriseConnectorRow & { access_token_enc?: string|null; refresh_token_enc?: string|null; auth_config_enc?: string|null; credentials_encrypted?: number };
+    return (this.d.prepare('SELECT * FROM enterprise_connectors ORDER BY name ASC').all() as Raw[]).map(r =>
+      r.credentials_encrypted !== 1 ? r : { ...r, access_token: vaultDecryptField(r.access_token_enc ?? null), refresh_token: vaultDecryptField(r.refresh_token_enc ?? null), auth_config: vaultDecryptField(r.auth_config_enc ?? null) },
+    );
   }
 
   async updateEnterpriseConnector(id: string, fields: Partial<Omit<EnterpriseConnectorRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const SENSITIVE_MAP: Record<string, string> = { access_token: 'access_token_enc', refresh_token: 'refresh_token_enc', auth_config: 'auth_config_enc' };
+    const ALLOWED = new Set(['name', 'description', 'connector_type', 'base_url', 'auth_type', 'token_expires_at', 'oauth_state', 'status', 'options', 'enabled']);
     const sets: string[] = [];
     const vals: unknown[] = [];
+    let anyEncrypted = false;
     for (const [k, v] of Object.entries(fields)) {
-      sets.push(`${k} = ?`);
-      vals.push(v);
+      if (k in SENSITIVE_MAP) {
+        const enc = vaultEncryptField(typeof v === 'string' ? v : null);
+        if (enc !== null) {
+          sets.push(`${k} = ?`); vals.push(null);
+          sets.push(`${SENSITIVE_MAP[k]} = ?`); vals.push(enc);
+          anyEncrypted = true;
+        } else {
+          sets.push(`${k} = ?`); vals.push(v ?? null);
+        }
+      } else if (ALLOWED.has(k)) {
+        sets.push(`${k} = ?`); vals.push(v);
+      }
     }
+    if (anyEncrypted) { sets.push('credentials_encrypted = 1'); }
     if (sets.length === 0) return;
     sets.push("updated_at = datetime('now')");
     vals.push(id);
@@ -8348,6 +8438,33 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
   async deleteLiveRun(id: string): Promise<void> {
     this.d.prepare('DELETE FROM live_runs WHERE id = ?').run(id);
+  }
+
+  // ── api_live_runs (user-scoped, no mesh FK, durable stop signal) ──
+  async createApiLiveRun(row: Omit<ApiLiveRunRow, 'created_at' | 'updated_at'>): Promise<ApiLiveRunRow> {
+    this.d.prepare(
+      `INSERT INTO api_live_runs (id, user_id, tenant_id, agent_id, status, stop_requested, config_json) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(row.id, row.user_id, row.tenant_id ?? null, row.agent_id ?? null, row.status, row.stop_requested ?? 0, row.config_json ?? null);
+    return this.d.prepare('SELECT * FROM api_live_runs WHERE id = ?').get(row.id) as ApiLiveRunRow;
+  }
+  async getApiLiveRun(id: string): Promise<ApiLiveRunRow | null> {
+    return (this.d.prepare('SELECT * FROM api_live_runs WHERE id = ?').get(id) as ApiLiveRunRow | undefined) ?? null;
+  }
+  async listUserApiLiveRuns(userId: string, opts: { status?: string; limit?: number } = {}): Promise<ApiLiveRunRow[]> {
+    const where: string[] = ['user_id = ?']; const params: unknown[] = [userId];
+    if (opts.status) { where.push('status = ?'); params.push(opts.status); }
+    const limitSql = opts.limit ? `LIMIT ${Number(opts.limit)}` : 'LIMIT 100';
+    return this.d.prepare(`SELECT * FROM api_live_runs WHERE ${where.join(' AND ')} ORDER BY created_at DESC ${limitSql}`).all(...params) as ApiLiveRunRow[];
+  }
+  async updateApiLiveRun(id: string, patch: Partial<Omit<ApiLiveRunRow, 'id' | 'user_id' | 'created_at'>>): Promise<void> {
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(patch)) { if (v === undefined) continue; sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = datetime('now')`); vals.push(id);
+    this.d.prepare(`UPDATE api_live_runs SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async deleteApiLiveRun(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM api_live_runs WHERE id = ?').run(id);
   }
 
   // ── live_run_steps ──

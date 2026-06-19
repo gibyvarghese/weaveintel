@@ -206,7 +206,10 @@ export interface DurableResidencyEngineOpts extends DurableOpts {
 export function createDurableResidencyEngine(opts: DurableResidencyEngineOpts = {}): DurableResidencyEngine {
   const kv = resolveKv(opts.runtime);
   const ns = opts.namespace ?? 'residency';
-  const defaultDeny = opts.defaultDeny ?? false;
+  // M5-2: fail-closed for regulated deployments. Explicit opts.defaultDeny takes priority;
+  // otherwise read COMPLIANCE_RESIDENCY_DEFAULT_DENY env var (set to 'true' in production
+  // regulated environments). Falls back to false to preserve existing behaviour.
+  const defaultDeny = opts.defaultDeny ?? (process.env['COMPLIANCE_RESIDENCY_DEFAULT_DENY'] === 'true');
 
   return {
     async addConstraint(c) { await saveOne(kv, ns, c.id, c); },

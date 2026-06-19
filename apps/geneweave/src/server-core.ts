@@ -4,7 +4,7 @@ import type { DatabaseAdapter } from './db.js';
 import { canPersonaAccess, normalizePersona } from './rbac.js';
 import { authenticateRequest, verifyCSRF, type AuthContext } from './auth.js';
 import { OAuthClient, createOAuthProvider, type OAuthProviderName } from '@weaveintel/oauth';
-import type { HttpRateLimiter } from './http-rate-limiter.js';
+import type { HttpRateLimiter, LoginFailureStore } from './http-rate-limiter.js';
 
 export type Handler = (
   req: IncomingMessage,
@@ -117,11 +117,6 @@ export function json(res: ServerResponse, status: number, data: unknown): void {
   res.end(body);
 }
 
-interface LoginFailureState {
-  failures: number;
-  blockedUntil: number;
-}
-
 const IS_TEST_ENV = process.env['NODE_ENV'] === 'test';
 
 function envInt(name: string, fallback: number): number {
@@ -153,10 +148,14 @@ export const SERVER_MAX_REQUESTS_PER_SOCKET = envInt('GENEWEAVE_SERVER_MAX_REQUE
 // Defaults to in-process; swapped to Redis when REDIS_URL is set via
 // initHttpRateLimiter() called from server.ts before the first request.
 let _httpRateLimiter: HttpRateLimiter | null = null;
-const loginFailureStates = new Map<string, LoginFailureState>();
+let _loginFailureStore: LoginFailureStore | null = null;
 
 export function initHttpRateLimiter(limiter: HttpRateLimiter): void {
   _httpRateLimiter = limiter;
+}
+
+export function initLoginFailureStore(store: LoginFailureStore): void {
+  _loginFailureStore = store;
 }
 let activeBodyReads = 0;
 const bodyReadWaiters: Array<() => void> = [];
@@ -182,12 +181,12 @@ async function acquireBodyReadSlot(): Promise<() => void> {
   return releaseBodyReadSlot;
 }
 
-function cleanupLoginFailureState(now: number): void {
-  for (const [key, state] of loginFailureStates.entries()) {
-    if (state.blockedUntil + AUTH_WINDOW_MS < now) {
-      loginFailureStates.delete(key);
-    }
-  }
+async function getLoginFailureStore(): Promise<LoginFailureStore> {
+  if (_loginFailureStore) return _loginFailureStore;
+  // Lazy fallback for tests and early startup requests (before server.ts fires).
+  const { createLoginFailureStore } = await import('./http-rate-limiter.js');
+  _loginFailureStore = await createLoginFailureStore();
+  return _loginFailureStore;
 }
 
 function normalizeIpAddress(value: string): string {
@@ -283,29 +282,25 @@ export function getFailureKey(ip: string, email: string): string {
   return `${ip}|${email.toLowerCase()}`;
 }
 
-export function getLoginBackoffMs(ip: string, email: string): number {
-  const now = Date.now();
-  cleanupLoginFailureState(now);
-  const key = getFailureKey(ip, email);
-  const current = loginFailureStates.get(key);
-  if (!current) return 0;
-  return Math.max(0, current.blockedUntil - now);
+export async function getLoginBackoffMs(ip: string, email: string): Promise<number> {
+  const store = await getLoginFailureStore();
+  const state = await store.get(getFailureKey(ip, email));
+  if (!state) return 0;
+  return Math.max(0, state.blockedUntil - Date.now());
 }
 
-export function recordLoginFailure(ip: string, email: string): void {
+export async function recordLoginFailure(ip: string, email: string): Promise<void> {
+  const store = await getLoginFailureStore();
   const key = getFailureKey(ip, email);
-  const now = Date.now();
-  const existing = loginFailureStates.get(key);
+  const existing = await store.get(key);
   const failures = (existing?.failures ?? 0) + 1;
   const backoffMs = Math.min(2 ** Math.min(failures, 8) * 1_000, LOGIN_MAX_BACKOFF_MS);
-  loginFailureStates.set(key, {
-    failures,
-    blockedUntil: now + backoffMs,
-  });
+  await store.set(key, { failures, blockedUntil: Date.now() + backoffMs }, AUTH_WINDOW_MS);
 }
 
-export function clearLoginFailures(ip: string, email: string): void {
-  loginFailureStates.delete(getFailureKey(ip, email));
+export async function clearLoginFailures(ip: string, email: string): Promise<void> {
+  const store = await getLoginFailureStore();
+  await store.delete(getFailureKey(ip, email));
 }
 
 export function html(res: ServerResponse, status: number, body: string): void {

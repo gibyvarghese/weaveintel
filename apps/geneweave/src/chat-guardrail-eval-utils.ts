@@ -33,6 +33,25 @@ export function extractToolCategories(steps: AgentStep[]): string[] {
   return [...cats];
 }
 
+// ── Preview PII scrubber ────────────────────────────────────────────────────
+// Applied to the first 100 chars stored in guardrail_evals.input_preview so
+// that PII never lands in the audit table even when per-chat redaction is off.
+// Uses the same four patterns as DEFAULT_SETTINGS.redactionPatterns.
+const PREVIEW_PII_PATTERNS: Array<[RegExp, string]> = [
+  [/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, '[EMAIL]'],
+  [/\b(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, '[PHONE]'],
+  [/\b\d{3}-\d{2}-\d{4}\b/g, '[SSN]'],
+  [/\b(?:\d{4}[-\s]?){3}\d{4}\b/g, '[CREDIT_CARD]'],
+];
+
+function scrubPreview(text: string): string {
+  let result = text;
+  for (const [pattern, token] of PREVIEW_PII_PATTERNS) {
+    result = result.replace(new RegExp(pattern.source, pattern.flags), token);
+  }
+  return result;
+}
+
 // ── Injection guardrail ID registry ────────────────────────────────────────
 // Used to detect prior injection warns without relying on fragile string matching
 // in explanations. Add new injection guardrail IDs here as they are seeded.
@@ -186,12 +205,15 @@ export async function evaluateGuardrails(
         : null,
     };
 
+    const hasInjectionGuardrails = guardrailRows.some(r => INJECTION_GUARDRAIL_IDS.has(r.id));
+
     const pipeline = createGuardrailPipeline(guardrails, {
       shortCircuitOnDeny: true,
       model: judgeModel,
       moderationModel: getActiveGuardrailModerationModel(),
       embeddingModel: getActiveGuardrailEmbeddingModel(),
       budgetMs: opts?.budgetMs,
+      budgetExhaustedPolicy: hasInjectionGuardrails ? 'deny' : 'allow',
       conditionContext,
     });
 
@@ -223,7 +245,7 @@ export async function evaluateGuardrails(
       chat_id: chatId,
       message_id: messageId,
       stage,
-      input_preview: input.slice(0, 100),
+      input_preview: scrubPreview(input.slice(0, 100)),
       results: JSON.stringify(results),
       overall_decision: decision,
       escalation: escalation.escalated ? JSON.stringify(escalation) : null,

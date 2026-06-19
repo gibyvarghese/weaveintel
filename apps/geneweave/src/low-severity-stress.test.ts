@@ -509,17 +509,20 @@ describe('L-18 — SqliteEncryptionStore has statement cache', () => {
   });
 });
 
-// ── S-1: live-agents stop/resume warn cross-process limitation ───────────────
+// ── S-1: live-agents stop signal uses DB persistence (M6-2 fix) ──────────────
 
-describe('S-1 — live-agents stop/resume log in-process limitation warning', () => {
-  it('stop endpoint logs cross-process warning', async () => {
+describe('S-1 — live-agents stop signal is DB-backed (M6-2)', () => {
+  it('stop endpoint calls updateApiLiveRun with stop_requested=1', async () => {
     const { readFileSync } = await import('node:fs');
     const { fileURLToPath } = await import('node:url');
     const { dirname, join } = await import('node:path');
     const dir = dirname(fileURLToPath(import.meta.url));
     const src = readFileSync(join(dir, 'routes/live-agents.ts'), 'utf8');
-    expect(src).toContain('cross-process propagation requires a DB-backed store');
-    expect(src).toContain('console.warn');
+    // Verify: stop signal is written to DB (not in-process Map)
+    expect(src).toContain('stop_requested: 1');
+    expect(src).toContain('updateApiLiveRun');
+    // Verify: isApiRunStopped exported for agent loop step-boundary checks
+    expect(src).toContain('isApiRunStopped');
   });
 });
 

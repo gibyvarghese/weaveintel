@@ -18,6 +18,8 @@ export interface GeneWeaveEnvValidationOptions {
   jwtSecret: string;
   /** process.env.NODE_ENV — only 'production' applies strict checks. */
   nodeEnv?: string;
+  /** Value of process.env.REDIS_URL — required in production for distributed rate limiting. */
+  redisUrl?: string;
 }
 
 export interface EnvValidationResult {
@@ -115,6 +117,19 @@ export function validateEnv(opts: GeneWeaveEnvValidationOptions): EnvValidationR
         );
       }
     }
+  }
+
+  // ── Redis ─────────────────────────────────────────────────────
+  // In production, brute-force lockout state must be shared across replicas.
+  // An in-process Map is silently bypassed by routing requests to a different
+  // instance — an attacker gets N×limit attempts where N = replica count.
+  const redisUrl = opts.redisUrl ?? process.env['REDIS_URL'];
+  if (isProduction && !redisUrl) {
+    throw new Error(
+      '[env] REDIS_URL is required in production. The in-process rate limiter is not ' +
+      'effective across multiple replicas — brute-force lockout can be bypassed by ' +
+      'routing requests to different instances. Provision a Redis instance and set REDIS_URL.',
+    );
   }
 
   // ── Numeric env vars ─────────────────────────────────────────
