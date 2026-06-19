@@ -35,6 +35,8 @@ export interface LatencyTracker {
   record(endpointId: string, latencyMs: number): void;
   /** Returns percentile snapshot, or undefined if fewer than minSamples exist. */
   getSnapshot(endpointId: string): LatencySnapshot | undefined;
+  /** Convenience: P50 or undefined if too few samples. */
+  getP50(endpointId: string): number | undefined;
   /** Convenience: P95 or undefined if too few samples. */
   getP95(endpointId: string): number | undefined;
   /** Convenience: P99 or undefined if too few samples. */
@@ -101,6 +103,10 @@ export function createLatencyTracker(opts?: LatencyTrackerOptions): LatencyTrack
         sampleCount: sorted.length,
         windowMs,
       };
+    },
+
+    getP50(endpointId) {
+      return this.getSnapshot(endpointId)?.p50;
     },
 
     getP95(endpointId) {
@@ -171,3 +177,111 @@ export const DYNAMIC_TIMEOUT_MULTIPLIER = 2;
 
 /** Floor for the dynamic timeout — providers won't be given less than 30 s regardless of P95. */
 export const MIN_DYNAMIC_TIMEOUT_MS = 30_000;
+
+// ─── Throughput tracker (Phase 5 — token-aware adaptive budget) ──────────────
+
+/**
+ * Tracks observed milliseconds-per-output-token per endpoint.
+ * Feeds `selectStreamBudget` with a P50 ms/token value so the context
+ * deadline can be tightened to `estimated_tokens × p50MsPerToken × 1.5`
+ * rather than always using the static 2/5/10 minute caps.
+ *
+ * Only successful completions with > 0 output tokens are recorded.
+ * Rate-limited or errored calls are excluded so the baseline reflects
+ * healthy throughput, not degraded-state throughput.
+ */
+export interface ThroughputTracker {
+  /** Record one successful completion: total duration and number of output tokens. */
+  record(endpointId: string, durationMs: number, outputTokens: number): void;
+  /** P50 milliseconds-per-output-token, or undefined if fewer than minSamples. */
+  getP50MsPerToken(endpointId: string): number | undefined;
+  /** Reset (test-only). */
+  _reset(endpointId?: string): void;
+}
+
+export interface ThroughputTrackerOptions {
+  /** Max samples per endpoint. Default: 100 */
+  windowSize?: number;
+  /** Discard samples older than this. Default: 60_000 ms */
+  windowMs?: number;
+  /** Minimum samples before returning a value. Default: 5 */
+  minSamples?: number;
+}
+
+export function createThroughputTracker(opts?: ThroughputTrackerOptions): ThroughputTracker {
+  const windowSize = opts?.windowSize ?? 100;
+  const windowMs   = opts?.windowMs   ?? 60_000;
+  const minSamples = opts?.minSamples ?? 5;
+
+  // Map<endpointId, [msPerToken, timestamp][]>
+  const store = new Map<string, Array<[number, number]>>();
+
+  function getOrCreate(endpointId: string): Array<[number, number]> {
+    let arr = store.get(endpointId);
+    if (!arr) { arr = []; store.set(endpointId, arr); }
+    return arr;
+  }
+
+  function trim(arr: Array<[number, number]>): void {
+    const cutoff = Date.now() - windowMs;
+    let start = 0;
+    while (start < arr.length && arr[start]![1] < cutoff) start++;
+    if (start > 0) arr.splice(0, start);
+    if (arr.length > windowSize) arr.splice(0, arr.length - windowSize);
+  }
+
+  return {
+    record(endpointId, durationMs, outputTokens) {
+      if (outputTokens <= 0) return;
+      const arr = getOrCreate(endpointId);
+      arr.push([durationMs / outputTokens, Date.now()]);
+      trim(arr);
+    },
+
+    getP50MsPerToken(endpointId) {
+      const arr = getOrCreate(endpointId);
+      trim(arr);
+      if (arr.length < minSamples) return undefined;
+      const sorted = arr.map(([ms]) => ms).sort((a, b) => a - b);
+      const idx = Math.min(Math.floor(sorted.length * 0.5), sorted.length - 1);
+      return sorted[idx];
+    },
+
+    _reset(endpointId) {
+      if (endpointId) store.delete(endpointId);
+      else store.clear();
+    },
+  };
+}
+
+// ─── Throughput process-global singleton ─────────────────────────────────────
+
+let _globalThroughput: ThroughputTracker | undefined;
+
+export function getGlobalThroughputTracker(): ThroughputTracker {
+  if (!_globalThroughput) _globalThroughput = createThroughputTracker();
+  return _globalThroughput;
+}
+
+/** Record one successful completion in the process-global tracker. */
+export function recordThroughput(endpointId: string, durationMs: number, outputTokens: number): void {
+  getGlobalThroughputTracker().record(endpointId, durationMs, outputTokens);
+}
+
+/** P50 ms/token for an endpoint from the global tracker, or undefined if cold. */
+export function getP50MsPerToken(endpointId: string): number | undefined {
+  return getGlobalThroughputTracker().getP50MsPerToken(endpointId);
+}
+
+/** Replace the global throughput tracker (test-only). */
+export function _setGlobalThroughputTracker(t: ThroughputTracker | undefined): void {
+  _globalThroughput = t;
+}
+
+// ─── Adaptive budget constants (Phase 5) ─────────────────────────────────────
+
+/** Safety multiplier applied on top of estimated_tokens × p50MsPerToken. */
+export const ADAPTIVE_BUDGET_SAFETY_FACTOR = 1.5;
+
+/** Never shrink the deadline below this floor regardless of token estimate. */
+export const ADAPTIVE_BUDGET_MIN_MS = 30_000;

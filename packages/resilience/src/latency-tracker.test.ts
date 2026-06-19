@@ -9,6 +9,12 @@ import {
   _setGlobalLatencyTracker,
   DEGRADATION_MULTIPLIER,
   MIN_DEGRADATION_LATENCY_MS,
+  createThroughputTracker,
+  getP50MsPerToken,
+  recordThroughput,
+  _setGlobalThroughputTracker,
+  ADAPTIVE_BUDGET_SAFETY_FACTOR,
+  ADAPTIVE_BUDGET_MIN_MS,
 } from './latency-tracker.js';
 
 describe('LatencyTracker — createLatencyTracker', () => {
@@ -142,5 +148,99 @@ describe('LatencyTracker — degradation constants', () => {
 
   it('MIN_DEGRADATION_LATENCY_MS is ≥ 10000', () => {
     expect(MIN_DEGRADATION_LATENCY_MS).toBeGreaterThanOrEqual(10_000);
+  });
+});
+
+// ─── ThroughputTracker ───────────────────────────────────────────────────────
+
+describe('ThroughputTracker — createThroughputTracker', () => {
+  it('returns undefined when fewer than minSamples exist', () => {
+    const t = createThroughputTracker({ minSamples: 5 });
+    // Only 4 samples
+    for (let i = 0; i < 4; i++) t.record('ep', 10_000, 200);
+    expect(t.getP50MsPerToken('ep')).toBeUndefined();
+  });
+
+  it('returns P50 ms/token once minSamples reached', () => {
+    const t = createThroughputTracker({ minSamples: 5 });
+    // 5 calls: each 10s / 200 tokens = 50 ms/token
+    for (let i = 0; i < 5; i++) t.record('ep', 10_000, 200);
+    const p50 = t.getP50MsPerToken('ep');
+    expect(p50).toBeCloseTo(50, 0);
+  });
+
+  it('ignores samples with 0 output tokens', () => {
+    const t = createThroughputTracker({ minSamples: 3 });
+    // 3 real samples + 2 zero-token samples
+    for (let i = 0; i < 3; i++) t.record('ep', 9_000, 300);
+    t.record('ep', 5_000, 0);
+    t.record('ep', 5_000, 0);
+    const p50 = t.getP50MsPerToken('ep');
+    expect(p50).toBeCloseTo(30, 0); // 9000/300 = 30 ms/token
+  });
+
+  it('computes correct P50 from mixed latencies', () => {
+    const t = createThroughputTracker({ minSamples: 5 });
+    // ms/token values: [10, 20, 30, 40, 50]
+    [[1000,100],[2000,100],[3000,100],[4000,100],[5000,100]].forEach(
+      ([dur, tok]) => t.record('ep', dur!, tok!)
+    );
+    const p50 = t.getP50MsPerToken('ep');
+    // P50 index = floor(5*0.5) = 2 → 30
+    expect(p50).toBeCloseTo(30, 0);
+  });
+
+  it('evicts old samples past windowMs', () => {
+    vi.useFakeTimers();
+    const t = createThroughputTracker({ minSamples: 3, windowMs: 1_000 });
+    for (let i = 0; i < 3; i++) t.record('ep', 5_000, 100);
+    expect(t.getP50MsPerToken('ep')).toBeDefined();
+    vi.advanceTimersByTime(2_000);
+    // All samples now older than 1s window → evicted
+    expect(t.getP50MsPerToken('ep')).toBeUndefined();
+    vi.useRealTimers();
+  });
+
+  it('_reset clears specific endpoint', () => {
+    const t = createThroughputTracker({ minSamples: 3 });
+    for (let i = 0; i < 3; i++) {
+      t.record('ep-a', 5_000, 100);
+      t.record('ep-b', 5_000, 100);
+    }
+    t._reset('ep-a');
+    expect(t.getP50MsPerToken('ep-a')).toBeUndefined();
+    expect(t.getP50MsPerToken('ep-b')).toBeDefined();
+  });
+
+  it('_reset with no arg clears all endpoints', () => {
+    const t = createThroughputTracker({ minSamples: 3 });
+    for (let i = 0; i < 3; i++) t.record('ep', 5_000, 100);
+    t._reset();
+    expect(t.getP50MsPerToken('ep')).toBeUndefined();
+  });
+});
+
+describe('ThroughputTracker — global singleton', () => {
+  beforeEach(() => { _setGlobalThroughputTracker(undefined); });
+  afterEach(() => { _setGlobalThroughputTracker(undefined); });
+
+  it('recordThroughput + getP50MsPerToken round-trip', () => {
+    for (let i = 0; i < 5; i++) recordThroughput('openai:rest', 6_000, 200);
+    const p50 = getP50MsPerToken('openai:rest');
+    expect(p50).toBeCloseTo(30, 0); // 6000/200 = 30
+  });
+
+  it('returns undefined for cold endpoint', () => {
+    expect(getP50MsPerToken('cold:ep')).toBeUndefined();
+  });
+});
+
+describe('Phase 5 — adaptive budget constants', () => {
+  it('ADAPTIVE_BUDGET_SAFETY_FACTOR is 1.5', () => {
+    expect(ADAPTIVE_BUDGET_SAFETY_FACTOR).toBe(1.5);
+  });
+
+  it('ADAPTIVE_BUDGET_MIN_MS is at least 30 s', () => {
+    expect(ADAPTIVE_BUDGET_MIN_MS).toBeGreaterThanOrEqual(30_000);
   });
 });

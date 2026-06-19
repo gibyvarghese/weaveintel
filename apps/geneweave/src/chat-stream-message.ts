@@ -33,6 +33,7 @@ import { recordTraceSpans, type ToolCallObservableEvent, type AgentRunTelemetry 
 import { evaluateGuardrails, evaluateTaskPolicies } from './chat-guardrail-eval-utils.js';
 import { resolveSystemPrompt, buildCapabilityTelemetrySnapshots } from './chat-system-prompt-utils.js';
 import { routeModel } from './chat-routing-utils.js';
+import { recordThroughput, getP50MsPerToken, ADAPTIVE_BUDGET_SAFETY_FACTOR, ADAPTIVE_BUDGET_MIN_MS } from '@weaveintel/resilience';
 import {
   buildMemoryContext,
   resolveIdentityRecallFromMemory,
@@ -207,25 +208,65 @@ function startSseHeartbeat(
 }
 
 // ─── Stream budget policy ────────────────────────────────────────────────────
-// Deadline and time-to-first-token budgets vary by request category.
-// Agent chains need more time; simple chat needs far less than 5 minutes.
+// Static category baselines — used as both the initial budget and the hard cap
+// for the Phase 5 adaptive budget.  The TTFT guard is never shrunk adaptively.
 const STREAM_BUDGETS = {
   agentChain:   { deadlineMs: 10 * 60_000, ttftMs: 45_000 },
   fileAnalysis: { deadlineMs:  5 * 60_000, ttftMs: 30_000 },
   simpleChat:   { deadlineMs:  2 * 60_000, ttftMs: 20_000 },
 } as const;
 
+/**
+ * Phase 5 — estimate how many output tokens a request is likely to produce.
+ * Used together with the observed P50 ms/token to derive an adaptive deadline.
+ * Pure heuristic: input token count × a mode-specific output ratio.
+ */
+function estimateOutputTokens(content: string, mode: string, hasAttachments: boolean): number {
+  const inputTokens = Math.ceil(content.length / 4);  // 1 token ≈ 4 chars
+  if (mode === 'agent' || mode === 'supervisor' || mode === 'ensemble') {
+    return Math.min(4096, Math.max(500, Math.floor(inputTokens * 0.8)));
+  }
+  if (hasAttachments) {
+    return Math.min(2000, Math.max(400, Math.floor(inputTokens * 0.4)));
+  }
+  return Math.min(1000, Math.max(300, Math.floor(inputTokens * 0.5)));
+}
+
+/**
+ * Select the streaming deadline and TTFT budget for this request.
+ *
+ * Phase 5 adaptive path (fires only when ≥ 5 throughput samples exist for
+ * the endpoint): `deadlineMs = clamp(estimated_tokens × p50MsPerToken × 1.5,
+ * ADAPTIVE_BUDGET_MIN_MS, static_baseline)`. When cold (< 5 samples) or when
+ * the adaptive value exceeds the static cap, falls back to the static baseline.
+ */
 function selectStreamBudget(
   mode: string,
   attachments: ChatAttachment[],
+  content?: string,
+  endpointId?: string,
 ): { deadlineMs: number; ttftMs: number } {
-  if (mode === 'agent' || mode === 'supervisor' || mode === 'ensemble') {
-    return STREAM_BUDGETS.agentChain;
+  const baseline = (() => {
+    if (mode === 'agent' || mode === 'supervisor' || mode === 'ensemble') {
+      return STREAM_BUDGETS.agentChain;
+    }
+    if (hasTabularDataAttachments(attachments) || attachments.length > 0) {
+      return STREAM_BUDGETS.fileAnalysis;
+    }
+    return STREAM_BUDGETS.simpleChat;
+  })();
+
+  if (content && endpointId) {
+    const p50MsPerToken = getP50MsPerToken(endpointId);
+    if (p50MsPerToken !== undefined) {
+      const estimated = estimateOutputTokens(content, mode, attachments.length > 0);
+      const adaptive = Math.round(estimated * p50MsPerToken * ADAPTIVE_BUDGET_SAFETY_FACTOR);
+      const deadlineMs = Math.max(ADAPTIVE_BUDGET_MIN_MS, Math.min(baseline.deadlineMs, adaptive));
+      return { deadlineMs, ttftMs: baseline.ttftMs };
+    }
   }
-  if (hasTabularDataAttachments(attachments) || attachments.length > 0) {
-    return STREAM_BUDGETS.fileAnalysis;
-  }
-  return STREAM_BUDGETS.simpleChat;
+
+  return baseline;
 }
 
 export async function streamMessageImpl(
@@ -275,7 +316,8 @@ export async function streamMessageImpl(
   const resolvedPrompt = await deps.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
   // Resolve attachments early so budget selection can inspect them.
   const attachments = normalizeAttachments(opts?.attachments);
-  const streamBudget = selectStreamBudget(settings.mode, attachments);
+  // Phase 5: pass content + resolved provider so adaptive budget can use P50 ms/token.
+  const streamBudget = selectStreamBudget(settings.mode, attachments, content, `${provider}:rest`);
   const traceId = newUUIDv7();
   const abortController = new AbortController();
   let clientDisconnected = false;
@@ -599,6 +641,11 @@ export async function streamMessageImpl(
   const cost = calculateCost(modelId, finalUsage.promptTokens, finalUsage.completionTokens, streamDbPricing.get(modelId));
 
   deps.recordModelOutcome(modelId, provider, latencyMs, !streamErrored && !clientDisconnected, streamErrored ? streamErrorMessage : undefined);
+  // Phase 5: feed token throughput into the adaptive budget tracker so future
+  // calls can tighten deadlines to estimated_tokens × p50MsPerToken × 1.5.
+  if (!streamErrored && !clientDisconnected && finalUsage.completionTokens > 0) {
+    recordThroughput(`${provider}:rest`, latencyMs, finalUsage.completionTokens);
+  }
   // Block the provider immediately on rate limit — account-level 429s apply to all models.
   if (streamErrored && streamErrorMessage && /rate.?limit|quota|too many requests|429/i.test(streamErrorMessage)) {
     deps.healthTracker.blockProvider(provider, 5 * 60_000);

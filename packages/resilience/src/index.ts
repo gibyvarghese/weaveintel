@@ -69,6 +69,15 @@ export {
   DEGRADATION_BLOCK_MS,
   DYNAMIC_TIMEOUT_MULTIPLIER,
   MIN_DYNAMIC_TIMEOUT_MS,
+  type ThroughputTracker,
+  type ThroughputTrackerOptions,
+  createThroughputTracker,
+  getGlobalThroughputTracker,
+  recordThroughput,
+  getP50MsPerToken,
+  _setGlobalThroughputTracker,
+  ADAPTIVE_BUDGET_SAFETY_FACTOR,
+  ADAPTIVE_BUDGET_MIN_MS,
 } from './latency-tracker.js';
 
 /**
