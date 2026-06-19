@@ -54,6 +54,7 @@ export {
   type RuntimeResilienceSlot,
   type RuntimeGuardrailsSlot,
   type RuntimeEncryptionSlot,
+  type RuntimeRoutingSlot,
   RuntimeCapabilities,
   weaveRuntime,
   assertRuntimeRequires,

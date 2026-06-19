@@ -237,6 +237,7 @@ describe('streamMessageImpl — socket timeout disabled for SSE', () => {
         listHealth: vi.fn().mockReturnValue([]),
         getBlockedProviders: vi.fn().mockReturnValue(new Set()),
         blockProvider: vi.fn(),
+        recordOutcome: vi.fn(),
       },
       getAvailableModels: vi.fn().mockResolvedValue([]),
       withResponseCardFormatPolicy: vi.fn().mockResolvedValue(undefined),

@@ -26,6 +26,7 @@
 import type { Server } from 'node:http';
 import { weaveSetDefaultTracer, weaveRuntime, envSecretResolver, weaveInMemoryPersistence, createLogger, type WeaveRuntime, type RuntimePersistenceSlot } from '@weaveintel/core';
 import { createResilienceSignalBus, setDefaultSignalBus, createRuntimeResilienceAdapter } from '@weaveintel/resilience';
+import { ModelHealthTracker, createRuntimeRoutingAdapter } from '@weaveintel/routing';
 
 const log = createLogger('geneweave');
 import { weaveConsoleTracer, createOtelTracer } from '@weaveintel/observability';
@@ -335,6 +336,13 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   setDefaultSignalBus(signalBus);
   const resilienceAdapter = createRuntimeResilienceAdapter(signalBus);
 
+  // Phase 2 (runtime): one shared ModelHealthTracker for the entire process.
+  // Both the chat path and the live-agent supervisor record outcomes into and
+  // route using the same in-memory health state — no more per-instance tracker
+  // drift where a rate-limit block in chat is invisible to the supervisor.
+  const sharedHealthTracker = new ModelHealthTracker();
+  const routingAdapter = createRuntimeRoutingAdapter(sharedHealthTracker);
+
   const runtime = weaveRuntime({
     tracer: consoleTracer,
     secrets: envSecretResolver(),
@@ -343,6 +351,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     guardrails: guardrailsSlot,
     encryption: encryptionSlot,
     resilience: resilienceAdapter,
+    routing: routingAdapter,
     installDefaultTracer: true,
   });
   // `installDefaultTracer: true` already wired the runtime's tracer as the

@@ -132,10 +132,12 @@ export async function startGenericSupervisorIfEnabled(
       return out;
     },
     routeModel: async (cands, hints) => {
-      const r = await routeModel(opts.db, cands, [], {
+      const healthList = opts.runtime?.routing?.listHealth() ?? [];
+      const blockedProviders = opts.runtime?.routing?.getBlockedProviders();
+      const r = await routeModel(opts.db, cands, healthList, {
         taskType: hints.taskType ?? 'reasoning',
         prompt: hints.prompt ?? 'generic-supervisor-planner',
-      });
+      }, blockedProviders);
       if (!r) return null;
       return {
         provider: r.provider,

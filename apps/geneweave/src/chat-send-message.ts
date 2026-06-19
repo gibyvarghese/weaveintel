@@ -6,7 +6,7 @@ import { weaveContext } from '@weaveintel/core';
 import type { GuardrailCategorySummary } from '@weaveintel/guardrails';
 import { applySkillsToPrompt } from '@weaveintel/skills';
 import { shouldBypass } from '@weaveintel/cache';
-import { ModelHealthTracker } from '@weaveintel/routing';
+import type { RuntimeRoutingSlot } from '@weaveintel/core';
 import type { DurableConsentManager } from '@weaveintel/compliance';
 import type { DatabaseAdapter } from './db.js';
 import { normalizePersona } from './rbac.js';
@@ -99,7 +99,7 @@ export type SendMessageResult = {
 export type SendMessageDeps = {
   config: ChatEngineConfig;
   db: DatabaseAdapter;
-  healthTracker: ModelHealthTracker;
+  healthTracker: RuntimeRoutingSlot;
   responseCache: {
     get: (key: string) => Promise<unknown>;
     set: (key: string, value: unknown, ttlMs: number) => Promise<void>;

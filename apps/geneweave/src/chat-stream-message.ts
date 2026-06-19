@@ -2,7 +2,7 @@ import { newUUIDv7, createLogger } from '@weaveintel/core';
 
 const logger = createLogger('chat-stream-message');
 import type { ServerResponse } from 'node:http';
-import type { ExecutionContext, Message, AgentStep, ModelRequest, ModelHealth } from '@weaveintel/core';
+import type { ExecutionContext, Message, AgentStep, ModelRequest, ModelHealth, RuntimeRoutingSlot } from '@weaveintel/core';
 import { weaveContext } from '@weaveintel/core';
 import { applySkillsToPrompt } from '@weaveintel/skills';
 import type { DurableConsentManager } from '@weaveintel/compliance';
@@ -48,11 +48,7 @@ import { triggerConsolidationForUser } from './memory-consolidation.js';
 type StreamMessageDeps = {
   config: ChatEngineConfig;
   db: DatabaseAdapter;
-  healthTracker: {
-    listHealth: () => ModelHealth[];
-    getBlockedProviders: () => Set<string>;
-    blockProvider: (providerId: string, durationMs?: number) => void;
-  };
+  healthTracker: RuntimeRoutingSlot;
   getAvailableModels: () => Promise<Array<{ id: string; provider: string }>>;
   withResponseCardFormatPolicy: (basePrompt: string | undefined) => Promise<string | undefined>;
   streamAgent: (

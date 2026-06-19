@@ -49,7 +49,8 @@ import {
   type SkillMatch,
 } from '@weaveintel/skills';
 import { createContract, DefaultCompletionValidator } from '@weaveintel/contracts';
-import { ModelHealthTracker } from '@weaveintel/routing';
+import { ModelHealthTracker, createRuntimeRoutingAdapter } from '@weaveintel/routing';
+import type { RuntimeRoutingSlot } from '@weaveintel/core';
 import {
   getP99Latency,
   getLatencySnapshot,
@@ -186,7 +187,7 @@ export async function buildSupervisorAdditionalTools(
 }
 
 export class ChatEngine {
-  private readonly healthTracker = new ModelHealthTracker();
+  private readonly healthTracker: RuntimeRoutingSlot;
   private readonly responseCache = weaveInMemoryCacheStore();
   private readonly cacheKeyBuilder = weaveCacheKeyBuilder({ namespace: 'gw-chat' });
   private pricingCache: PricingCache | null = null;
@@ -265,6 +266,11 @@ export class ChatEngine {
     private readonly config: ChatEngineConfig,
     private readonly db: DatabaseAdapter,
   ) {
+    // Phase 2: use the shared routing slot from the runtime when available so
+    // both the chat path and the live-agent supervisor observe the same health
+    // state. Fall back to a local tracker when no runtime is wired (tests, etc.).
+    this.healthTracker = config.runtime?.routing
+      ?? createRuntimeRoutingAdapter(new ModelHealthTracker());
     this.consentManager = config.runtime
       ? createDurableConsentManager({ runtime: config.runtime, namespace: 'consent' })
       : null;
@@ -1357,7 +1363,7 @@ export class ChatEngine {
    * provider unavailable so the next request routes away from it.
    */
   recordModelOutcome(modelId: string, providerId: string, latencyMs: number, success: boolean, errorMessage?: string): void {
-    this.healthTracker.record(modelId, providerId, { latencyMs, success });
+    this.healthTracker.recordOutcome(modelId, providerId, latencyMs, success);
 
     if (!success && errorMessage && isRateLimitError(errorMessage)) {
       this.healthTracker.blockProvider(providerId, 5 * 60_000);

@@ -36,6 +36,7 @@ import type { Span, Tracer } from './observability.js';
 import { envSecretResolver } from './secrets.js';
 import type { AuditEntry, AuditLogger, Redactor, SecretResolver } from './security.js';
 import { newUUIDv7 } from './uuid.js';
+import type { ModelHealth } from './routing.js';
 
 /**
  * Cross-cutting runtime capabilities. Used with `runtime.has(cap)` and
@@ -51,6 +52,7 @@ export const RuntimeCapabilities = {
   Resilience: capabilityId('runtime.resilience'),
   Encryption: capabilityId('runtime.encryption'),
   Guardrails: capabilityId('runtime.guardrails'),
+  Routing: capabilityId('runtime.routing'),
 } as const;
 
 /**
@@ -170,6 +172,27 @@ export interface RuntimeGuardrailsSlot {
   ): Promise<{ allow: boolean; redactedText?: string; reason?: string }>;
 }
 
+/**
+ * Structural slot for shared model-health tracking (Phase 2 — Shared Routing Slot).
+ *
+ * A single shared `ModelHealthTracker` is wired via `weaveRuntime` so the
+ * chat path and the live-agent supervisor both observe and react to the same
+ * real-time health state. Outcomes recorded from one subsystem are immediately
+ * visible to routing in the other — no more per-instance tracker drift.
+ *
+ * Concrete implementation: `@weaveintel/routing` `createRuntimeRoutingAdapter(tracker)`.
+ */
+export interface RuntimeRoutingSlot {
+  /** Record the latency and success/failure of one model call for health tracking. */
+  recordOutcome(modelId: string, providerId: string, latencyMs: number, success: boolean): void;
+  /** Block an entire provider for a window (rate-limit or degradation events). */
+  blockProvider(providerId: string, durationMs?: number): void;
+  /** Return the current health snapshot for all tracked model+provider pairs. */
+  listHealth(): ModelHealth[];
+  /** Return the set of providers currently under an active (un-expired) block. */
+  getBlockedProviders(): Set<string>;
+}
+
 /** Egress slot returned by `weaveRuntime` — the per-call `fetch` plus the
  *  `createFetch(...)` factory packages should use to build their own closure. */
 export interface RuntimeEgressSlot {
@@ -199,6 +222,7 @@ export interface WeaveRuntime {
   readonly resilience: RuntimeResilienceSlot | undefined;
   readonly guardrails: RuntimeGuardrailsSlot | undefined;
   readonly encryption: RuntimeEncryptionSlot | undefined;
+  readonly routing: RuntimeRoutingSlot | undefined;
   readonly metadata: Readonly<Record<string, unknown>>;
 
   has(cap: CapabilityId): boolean;
@@ -226,6 +250,7 @@ export interface WeaveRuntimeOptions {
   readonly resilience?: RuntimeResilienceSlot;
   readonly guardrails?: RuntimeGuardrailsSlot;
   readonly encryption?: RuntimeEncryptionSlot;
+  readonly routing?: RuntimeRoutingSlot;
   /**
    * Phase 5 — optional `Redactor`. When supplied, every audit entry's
    * `details` object is serialised → redacted → re-parsed before the entry
@@ -460,6 +485,7 @@ export function weaveRuntime(opts: WeaveRuntimeOptions = {}): WeaveRuntime {
   if (opts.resilience) caps.add(RuntimeCapabilities.Resilience);
   if (opts.guardrails) caps.add(RuntimeCapabilities.Guardrails);
   if (opts.encryption) caps.add(RuntimeCapabilities.Encryption);
+  if (opts.routing) caps.add(RuntimeCapabilities.Routing);
   for (const c of opts.extraCapabilities ?? []) caps.add(c);
 
   const rt: WeaveRuntime = {
@@ -472,6 +498,7 @@ export function weaveRuntime(opts: WeaveRuntimeOptions = {}): WeaveRuntime {
     resilience: opts.resilience,
     guardrails: opts.guardrails,
     encryption: opts.encryption,
+    routing: opts.routing,
     metadata: opts.metadata ?? {},
     has(cap) {
       return caps.has(cap);
