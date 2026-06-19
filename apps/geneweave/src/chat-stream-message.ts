@@ -198,6 +198,11 @@ export async function streamMessageImpl(
   content: string,
   opts?: { provider?: string; model?: string; maxTokens?: number; temperature?: number; attachments?: ChatAttachment[] },
 ): Promise<void> {
+  // SSE streams can legitimately run for minutes (large CSV analysis, long agent
+  // chains). Disable the server-level requestTimeout on this socket so the
+  // 30-second global limit doesn't kill streaming connections mid-response.
+  (res.socket ?? (res as any).connection)?.setTimeout(0);
+
   const requestStartMs = Date.now();
   let provider = opts?.provider ?? deps.config.defaultProvider;
   let modelId = opts?.model ?? deps.config.defaultModel;
