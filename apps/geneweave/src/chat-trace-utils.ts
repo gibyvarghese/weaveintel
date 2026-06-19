@@ -5,11 +5,12 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { AgentStep, CapabilityTelemetrySummary, EventBus } from '@weaveintel/core';
+import type { AgentStep, CapabilityTelemetrySummary, EventBus, ExecutionContext } from '@weaveintel/core';
 import { EventTypes, newUUIDv7 } from '@weaveintel/core';
 import {
   capabilityTelemetryToEvent,
   capabilityTelemetryToSpanAttributes,
+  GEN_AI,
 } from '@weaveintel/observability';
 import type { DatabaseAdapter } from './db.js';
 
@@ -241,4 +242,68 @@ export async function recordTraceSpans(
   } catch {
     // Trace recording is best-effort
   }
+}
+
+// ── Phase 1: OTel GenAI span helpers ────────────────────────────────────────
+
+export interface LLMSpanResult<T> {
+  result: T;
+  /** Span ID of the emitted OTel span — pass to weaveAudit({ spanId }) for trace joining. */
+  spanId: string;
+}
+
+/**
+ * Wrap an LLM generation call in an OTel GenAI span.
+ *
+ * Emits a span named `gen_ai.chat` (or the given `operation`) to the runtime
+ * tracer with the GenAI semantic convention attributes. Falls back to a no-op
+ * when `ctx.runtime?.tracer` is absent.
+ *
+ * @example
+ * ```ts
+ * const { result, spanId } = await withLLMSpan(ctx, {
+ *   provider: 'anthropic', modelId: 'claude-sonnet-4-6', operation: 'chat',
+ *   inputTokens: 120, maxTokens: 4096,
+ * }, async () => model.generate(ctx, request));
+ * ```
+ */
+export async function withLLMSpan<T>(
+  ctx: ExecutionContext,
+  opts: {
+    provider: string;
+    modelId: string;
+    operation?: string;
+    inputTokens?: number;
+    maxTokens?: number;
+    temperature?: number;
+  },
+  fn: () => Promise<T>,
+): Promise<LLMSpanResult<T>> {
+  const tracer = ctx.runtime?.tracer;
+  const spanName = `gen_ai.${opts.operation ?? 'chat'}`;
+
+  const initialAttrs: Record<string, unknown> = {
+    [GEN_AI.SYSTEM]: opts.provider,
+    [GEN_AI.REQUEST_MODEL]: opts.modelId,
+    [GEN_AI.OPERATION_NAME]: opts.operation ?? 'chat',
+  };
+  if (opts.maxTokens !== undefined) initialAttrs[GEN_AI.REQUEST_MAX_TOKENS] = opts.maxTokens;
+  if (opts.temperature !== undefined) initialAttrs[GEN_AI.REQUEST_TEMPERATURE] = opts.temperature;
+  if (opts.inputTokens !== undefined) initialAttrs[GEN_AI.USAGE_INPUT_TOKENS] = opts.inputTokens;
+
+  if (!tracer) {
+    // No tracer — execute without span (fail-open for observability)
+    const result = await fn();
+    return { result, spanId: '' };
+  }
+
+  let spanId = '';
+  const result = await tracer.withSpan(ctx, spanName, async (span) => {
+    spanId = span.spanId;
+    // Apply initial attributes
+    for (const [k, v] of Object.entries(initialAttrs)) span.setAttribute(k, v);
+    return fn();
+  }, initialAttrs);
+
+  return { result, spanId };
 }

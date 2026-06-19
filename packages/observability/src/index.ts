@@ -5,6 +5,14 @@ export {
   weaveUsageTracker,
 } from './tracer.js';
 export {
+  GEN_AI,
+  type GenAiAttributeKey,
+  type OtelTracerOptions,
+  type OtlpSinkOptions,
+  createOtelTracer,
+  weaveOtlpSink,
+} from './otel-tracer.js';
+export {
   capabilityTelemetryToSpanAttributes,
   capabilityTelemetryToEvent,
   annotateSpanWithCapabilityTelemetry,

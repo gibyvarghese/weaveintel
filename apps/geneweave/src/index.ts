@@ -28,7 +28,7 @@ import { weaveSetDefaultTracer, weaveRuntime, envSecretResolver, weaveInMemoryPe
 import { createResilienceSignalBus, setDefaultSignalBus, createRuntimeResilienceAdapter } from '@weaveintel/resilience';
 
 const log = createLogger('geneweave');
-import { weaveConsoleTracer } from '@weaveintel/observability';
+import { weaveConsoleTracer, createOtelTracer } from '@weaveintel/observability';
 import { weaveSqlitePersistence } from '@weaveintel/persistence';
 import { weaveRedactor } from '@weaveintel/redaction';
 import { createDatabaseAdapter, type DatabaseAdapter, type DatabaseConfig } from './db.js';
@@ -219,7 +219,20 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // call site reconstructs them. `weaveSetDefaultTracer` is kept for
   // back-compat with packages that read the process-wide default; the
   // runtime tracer is the same instance so the two never disagree.
-  const consoleTracer = weaveConsoleTracer();
+  //
+  // Phase 1 — OTel tracer: when OTEL_EXPORTER_OTLP_ENDPOINT is set, use the
+  // GenAI-semantic-convention OTel tracer that exports spans to the OTLP
+  // endpoint (Grafana Cloud, Honeycomb, Jaeger, etc.). Falls back to the
+  // console tracer so dev setups need no collector.
+  const otlpEndpoint = process.env['OTEL_EXPORTER_OTLP_ENDPOINT'];
+  const consoleTracer = otlpEndpoint
+    ? createOtelTracer({
+        endpoint: otlpEndpoint,
+        serviceName: process.env['OTEL_SERVICE_NAME'] ?? 'geneweave',
+        serviceVersion: process.env['OTEL_SERVICE_VERSION'],
+        apiKey: process.env['OTEL_EXPORTER_OTLP_HEADERS_AUTHORIZATION'],
+      })
+    : weaveConsoleTracer();
 
   // Phase A: durable persistence slot. When the configured database is
   // SQLite we share its path so the runtime KV table (`runtime_kv`) lives

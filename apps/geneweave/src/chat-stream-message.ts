@@ -30,7 +30,7 @@ import {
 import { discoverSkillsForInput } from './chat-skills-utils.js';
 import { applyRedaction, runPostEval, SUPERVISOR_INTERNAL_TOOLS } from './chat-eval-utils.js';
 import { historyToMessages, extractToolEvidence } from './chat-message-utils.js';
-import { recordTraceSpans, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
+import { recordTraceSpans, withLLMSpan, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
 import { evaluateGuardrails, evaluateTaskPolicies } from './chat-guardrail-eval-utils.js';
 import { resolveSystemPrompt, buildCapabilityTelemetrySnapshots } from './chat-system-prompt-utils.js';
 import { routeModel } from './chat-routing-utils.js';
@@ -613,6 +613,17 @@ export async function streamMessageImpl(
         stream: true,
       };
 
+      // Phase 1: OTel GenAI span covering the entire model interaction (streaming
+      // or fallback non-streaming). The span starts before the first token and
+      // ends when the last chunk arrives or an error is thrown.
+      const llmSpan = ctx.runtime?.tracer?.startSpan(ctx, 'gen_ai.chat', {
+        'gen_ai.system': provider,
+        'gen_ai.request.model': modelId,
+        'gen_ai.operation.name': 'chat',
+        'gen_ai.request.max_tokens': request.maxTokens,
+        ...(request.temperature !== undefined ? { 'gen_ai.request.temperature': request.temperature } : {}),
+      });
+
       if (model.stream) {
         // TTFT guard: if the provider doesn't emit any token within the budget,
         // abort and surface a clear "provider unresponsive" error rather than
@@ -649,15 +660,24 @@ export async function streamMessageImpl(
               }
             } else if (chunk.type === 'usage' && chunk.usage) {
               finalUsage = { promptTokens: chunk.usage.promptTokens, completionTokens: chunk.usage.completionTokens, totalTokens: chunk.usage.totalTokens };
+              // Attach token counts to the OTel span once we have them
+              llmSpan?.setAttribute('gen_ai.usage.input_tokens', finalUsage.promptTokens);
+              llmSpan?.setAttribute('gen_ai.usage.output_tokens', finalUsage.completionTokens);
             } else if (chunk.type === 'done') {
               break;
             }
           }
         } finally {
           clearTimeout(ttftTimer);
+          llmSpan?.end();
         }
       } else {
-        const response = await model.generate(ctx, request);
+        const { result: response } = await withLLMSpan(
+          ctx,
+          { provider, modelId, operation: 'chat', maxTokens: request.maxTokens, temperature: request.temperature },
+          () => model.generate(ctx, request),
+        );
+        llmSpan?.end(); // end the outer span too
         fullText = response.content;
         finalUsage = { ...response.usage };
         await deps.writeSseEvent(res, { type: 'text', text: response.content });

@@ -38,7 +38,7 @@ import { shouldForceWorkerDataAnalysis } from './chat-intent-utils.js';
 import { discoverSkillsForInput } from './chat-skills-utils.js';
 import { applyRedaction, runPostEval, SUPERVISOR_INTERNAL_TOOLS } from './chat-eval-utils.js';
 import { historyToMessages, extractToolEvidence } from './chat-message-utils.js';
-import { recordTraceSpans, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
+import { recordTraceSpans, withLLMSpan, type ToolCallObservableEvent, type AgentRunTelemetry } from './chat-trace-utils.js';
 import { evaluateGuardrails, evaluateTaskPolicies } from './chat-guardrail-eval-utils.js';
 import {
   resolveSystemPrompt,
@@ -428,7 +428,13 @@ export async function sendMessageImpl(
         maxTokens: opts?.maxTokens ?? 4096,
         temperature: opts?.temperature,
       };
-      const response = await model.generate(ctx, request);
+      // Phase 1: wrap in an OTel GenAI span so LLM calls are visible in
+      // any OTLP-compatible backend (Grafana Cloud, Honeycomb, Jaeger).
+      const { result: response } = await withLLMSpan(
+        ctx,
+        { provider, modelId, operation: 'chat', maxTokens: request.maxTokens, temperature: request.temperature },
+        () => model.generate(ctx, request),
+      );
       assistantContent = response.content ?? '';
       usage = { ...response.usage };
     }

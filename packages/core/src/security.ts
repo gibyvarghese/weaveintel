@@ -107,6 +107,12 @@ export interface AuditEntry {
   readonly resource?: string;
   readonly outcome: 'success' | 'failure' | 'denied';
   readonly details?: Record<string, unknown>;
+  /** OTel span ID of the active span at the time of the audit event.
+   *  Allows joining audit rows to OTel traces in observability platforms. */
+  readonly spanId?: string;
+  /** Caller-supplied correlation ID (e.g. HTTP request-id, traceId).
+   *  Propagate as X-Correlation-ID from the inbound request. */
+  readonly correlationId?: string;
 }
 
 export interface AuditLogger {

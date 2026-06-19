@@ -324,27 +324,43 @@ export function createRedactingAuditLogger(
 ): AuditLogger {
   return {
     async log(entry: AuditEntry): Promise<void> {
-      let finalEntry = entry;
-      if (entry.details !== undefined) {
-        try {
-          const detailsText = JSON.stringify(entry.details);
-          // Use a minimal stub context — redaction does not need a real span
-          const stubCtx: import('./context.js').ExecutionContext = {
-            executionId: entry.executionId,
-            metadata: {},
-            ...(entry.tenantId !== undefined ? { tenantId: entry.tenantId } : {}),
-            ...(entry.userId !== undefined ? { userId: entry.userId } : {}),
-          };
-          const { redacted } = await redactor.redact(stubCtx, detailsText);
-          finalEntry = {
-            ...entry,
-            details: JSON.parse(redacted) as Record<string, unknown>,
-          };
-        } catch {
-          /* redaction failure: forward the original entry rather than dropping it */
-        }
+      // Use a minimal stub context — redaction does not need a real span
+      const stubCtx: import('./context.js').ExecutionContext = {
+        executionId: entry.executionId,
+        metadata: {},
+        ...(entry.tenantId !== undefined ? { tenantId: entry.tenantId } : {}),
+        ...(entry.userId !== undefined ? { userId: entry.userId } : {}),
+      };
+
+      async function scrubString(s: string | undefined): Promise<string | undefined> {
+        if (!s) return s;
+        try { return (await redactor.redact(stubCtx, s)).redacted; } catch { return s; }
       }
-      await inner.log(finalEntry);
+
+      try {
+        const [redactedAction, redactedResource, redactedDetails] = await Promise.all([
+          scrubString(entry.action),
+          scrubString(entry.resource),
+          entry.details !== undefined
+            ? (async () => {
+                try {
+                  const t = JSON.stringify(entry.details);
+                  const { redacted } = await redactor.redact(stubCtx, t);
+                  return JSON.parse(redacted) as Record<string, unknown>;
+                } catch { return entry.details; }
+              })()
+            : Promise.resolve(undefined),
+        ]);
+        await inner.log({
+          ...entry,
+          action: redactedAction ?? entry.action,
+          ...(redactedResource !== undefined ? { resource: redactedResource } : {}),
+          ...(redactedDetails !== undefined ? { details: redactedDetails } : {}),
+        });
+      } catch {
+        /* redaction failure: forward the original entry rather than dropping it */
+        await inner.log(entry);
+      }
     },
   };
 }
@@ -520,6 +536,10 @@ export async function weaveAudit(
     outcome: 'success' | 'failure' | 'denied';
     resource?: string;
     details?: Record<string, unknown>;
+    /** OTel span ID for trace joining (Phase 1). */
+    spanId?: string;
+    /** Caller-supplied correlation ID, e.g. an HTTP request-id (Phase 1). */
+    correlationId?: string;
   },
 ): Promise<void> {
   const audit = ctx.runtime?.audit;
@@ -534,6 +554,8 @@ export async function weaveAudit(
       ...(entry.resource !== undefined ? { resource: entry.resource } : {}),
       outcome: entry.outcome,
       ...(entry.details !== undefined ? { details: entry.details } : {}),
+      ...(entry.spanId !== undefined ? { spanId: entry.spanId } : {}),
+      ...(entry.correlationId !== undefined ? { correlationId: entry.correlationId } : {}),
     });
   } catch {
     /* audit failures must never crash a run */
