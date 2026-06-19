@@ -49,6 +49,13 @@ import {
 } from '@weaveintel/skills';
 import { createContract, DefaultCompletionValidator } from '@weaveintel/contracts';
 import { ModelHealthTracker } from '@weaveintel/routing';
+import {
+  getP99Latency,
+  getLatencySnapshot,
+  DEGRADATION_MULTIPLIER,
+  MIN_DEGRADATION_LATENCY_MS,
+  DEGRADATION_BLOCK_MS,
+} from '@weaveintel/resilience';
 import { weaveInMemoryCacheStore } from '@weaveintel/cache';
 import { weaveCacheKeyBuilder } from '@weaveintel/cache';
 import { shouldBypass } from '@weaveintel/cache';
@@ -1322,8 +1329,31 @@ export class ChatEngine {
    */
   recordModelOutcome(modelId: string, providerId: string, latencyMs: number, success: boolean, errorMessage?: string): void {
     this.healthTracker.record(modelId, providerId, { latencyMs, success });
+
     if (!success && errorMessage && isRateLimitError(errorMessage)) {
       this.healthTracker.blockProvider(providerId, 5 * 60_000);
+      return;
+    }
+
+    // Phase 3: latency-percentile degradation detection.
+    // Trip a short soft block when a successful call takes ≥ P99×3 AND exceeds
+    // the minimum threshold. This catches a provider that is still responding
+    // but severely degraded, routing traffic away before users hit full timeouts.
+    // (Industry standard: P99 × 3 multiplier, 30-second soft block.)
+    if (success && latencyMs >= MIN_DEGRADATION_LATENCY_MS) {
+      const endpointId = `${providerId}:rest`;
+      const p99 = getP99Latency(endpointId);
+      if (p99 !== undefined && latencyMs > p99 * DEGRADATION_MULTIPLIER) {
+        log.warn('provider_degraded', {
+          providerId,
+          modelId,
+          latencyMs,
+          p99,
+          threshold: p99 * DEGRADATION_MULTIPLIER,
+          blockMs: DEGRADATION_BLOCK_MS,
+        });
+        this.healthTracker.blockProvider(providerId, DEGRADATION_BLOCK_MS);
+      }
     }
   }
 }

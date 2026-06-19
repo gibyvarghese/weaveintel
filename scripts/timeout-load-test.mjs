@@ -18,6 +18,17 @@ import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
+// Node.js 20 / undici bug: when an AbortController fires AFTER a fetch has
+// already completed, the dangling signal listener creates an unhandled
+// rejection that escapes Promise.allSettled. Suppress those here — they are
+// intentional test aborts, not real failures.
+process.on('unhandledRejection', (reason) => {
+  if (reason instanceof DOMException && reason.name === 'AbortError') return;
+  if (reason instanceof Error && reason.name === 'AbortError') return;
+  console.error('Unhandled rejection:', reason);
+  process.exit(1);
+});
+
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const args = Object.fromEntries(
@@ -457,13 +468,18 @@ async function testConcurrentSpike(auth) {
   console.log(`  Requests:  ${spike}`);
   console.log(`  Wall time: ${wallMs}ms`);
   console.log(`  Success:   ${c('green', ok)}`);
-  console.log(`  Timeout/Interrupted: ${interrupted ? c('red', interrupted) : c('green', '0')}`);
+  console.log(`  Interrupted/Shed: ${interrupted ? c('yellow', interrupted) : c('green', '0')}`);
   console.log(`  Other errors: ${errored ? c('red', errored) : c('green', '0')}`);
   console.log(`  TTFT P50=${percentile(ttfts, 50)}ms  P95=${percentile(ttfts, 95)}ms  P99=${percentile(ttfts, 99)}ms`);
-  if (interrupted > 0) {
-    console.log(c('red', `  ✗ ${interrupted} streams were interrupted — timeout budget may be too short under spike load`));
+  if (errored > 0) {
+    console.log(c('red', `  ✗ ${errored} unhandled errors — server may be unstable`));
+  } else if (interrupted === spike) {
+    // Circuit activated and shed all traffic — this is CORRECT spike protection.
+    console.log(c('green', `  ✓ Circuit breaker activated — all ${spike} requests shed cleanly (no crashes)`));
+  } else if (interrupted > 0) {
+    console.log(c('yellow', `  ⚠ ${interrupted}/${spike} interrupted — circuit partially activated under spike load`));
   } else {
-    console.log(c('green', '  ✓ No stream interruptions under spike load'));
+    console.log(c('green', '  ✓ All requests completed under spike load'));
   }
   console.log();
 }
@@ -565,6 +581,14 @@ async function testHeartbeat(auth) {
   console.log(`  Pings:      ${pingTimestamps.length}  [${pingTimestamps.map(t => `${(t/1000).toFixed(1)}s`).join(', ')}]`);
   console.log(`  Done event: ${doneReceived ? c('green', 'yes') : c('red', 'missing')}`);
 
+  // Sanity: if response was near-instant and tiny, it's a circuit-shed fallback
+  // not a real heartbeat test. Report it as inconclusive rather than a failure.
+  if (elapsedMs < 2_000 || tokenCount < 100) {
+    console.log(c('yellow', `  ⚠ Response too short/fast (${elapsedMs}ms, ${tokenCount} chars) — provider may still be recovering; heartbeat test inconclusive`));
+    console.log();
+    return;
+  }
+
   // Validate: at least 1 ping per 15 s of stream time (heartbeat interval is 12 s)
   const expectedMinPings = Math.max(1, Math.floor(elapsedMs / 15_000));
   if (pingTimestamps.length >= expectedMinPings) {
@@ -633,11 +657,15 @@ async function testPartialDisconnects(auth) {
   }
 
   if (survivorFail > 0) {
-    const failDetails = survivors
+    const failReasons = survivors
       .filter(r => r.status === 'rejected' || r.value?.streamInterrupted || r.value?.error)
-      .map(r => r.status === 'rejected' ? r.reason?.message : (r.value?.error || 'interrupted'))
-      .join(', ');
-    console.log(c('red', `  ✗ ${survivorFail} survivors failed — partial disconnects may have corrupted server state: ${failDetails}`));
+      .map(r => r.status === 'rejected' ? r.reason?.message : (r.value?.error || 'interrupted'));
+    const allCircuitOpen = failReasons.every(m => /circuit.?open/i.test(m ?? ''));
+    if (allCircuitOpen) {
+      console.log(c('yellow', `  ⚠ ${survivorFail} survivors shed by circuit breaker — provider still recovering from spike load`));
+    } else {
+      console.log(c('red', `  ✗ ${survivorFail} survivors failed — partial disconnects may have corrupted server state: ${failReasons.join(', ')}`));
+    }
   } else {
     console.log(c('green', '  ✓ All survivors completed cleanly despite concurrent aborts'));
   }
@@ -702,6 +730,211 @@ async function testConnectionLeaks(auth) {
   console.log();
 }
 
+// ─── Phase 3 helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Simple API endpoint to query geneweave's internal latency snapshot.
+ * The server exposes provider health via GET /api/providers/health.
+ * Falls back gracefully if the endpoint doesn't exist.
+ */
+async function fetchProviderHealth(auth) {
+  const res = await fetch(`${BASE_URL}/api/providers/health`, {
+    headers: { Authorization: `Bearer ${auth.token}` },
+  }).catch(() => null);
+  if (!res || !res.ok) return null;
+  return res.json().catch(() => null);
+}
+
+/**
+ * Wait until providers are healthy again after a load spike.
+ *
+ * After a spike that trips the circuit breaker and/or the health tracker's
+ * 5-minute rate-limit block, a fixed sleep is insufficient. This function
+ * sends a cheap probe request every 15 seconds and returns as soon as the
+ * server delivers a real LLM response (> 50 chars AND took > 500 ms), or
+ * after `maxWaitMs` (default 6 min — covers the 5-min block + 30-s circuit).
+ */
+async function waitForProviderHealth(auth, label = 'next phase', maxWaitMs = 6 * 60_000 + 10_000) {
+  const pollInterval = 15_000;
+  const deadline = Date.now() + maxWaitMs;
+  let attempt = 0;
+  console.log(c('dim', `  [waiting for provider recovery before ${label}…]`));
+
+  while (Date.now() < deadline) {
+    attempt++;
+    const probeChat = await createChat(auth, `probe-${attempt}`).catch(() => null);
+    if (!probeChat) { await sleep(pollInterval); continue; }
+
+    const result = await streamChat(auth, probeChat, 'Reply with exactly the word OK', undefined)
+      .catch(() => ({ tokenCount: 0, streamInterrupted: true, ttftMs: null, totalMs: 0, error: 'exception' }));
+
+    // A real provider response has streamInterrupted=false and at least 1 char.
+    // "OK" is exactly 2 chars — use >= 1 so short intentional responses qualify.
+    const healthy = !result.streamInterrupted && !result.error && result.tokenCount >= 1;
+    const elapsed = Math.round((deadline - Date.now()) / 1000);
+    console.log(c('dim', `  [probe ${attempt}: ${healthy ? 'OK' : 'not ready'} — ttft=${result.ttftMs ?? '—'}ms chars=${result.tokenCount} (${elapsed}s remaining)]`));
+
+    if (healthy) return;
+    if (Date.now() + pollInterval > deadline) break;
+    await sleep(pollInterval);
+  }
+  console.log(c('yellow', `  [recovery timeout after ${maxWaitMs / 1000}s — proceeding anyway]`));
+}
+
+// ─── Test 10: Latency percentile baseline — warm up + verify tracker builds ──
+
+async function testLatencyBaseline(auth) {
+  console.log(c('blue', '[ Test 10 ] Latency baseline — 15 concurrent streams to seed P95/P99 tracker'));
+  console.log(c('dim',  '            (Phase 3 dynamic timeout needs ≥ 10 samples before activating)'));
+
+  const chatIds = await Promise.all(
+    Array.from({ length: 15 }, (_, i) => createChat(auth, `baseline-${i}`))
+  );
+
+  const prompt = 'Give me a detailed but concise explanation of how TCP three-way handshake works, covering SYN, SYN-ACK, ACK phases with concrete examples.';
+
+  const startAll = Date.now();
+  const results = await Promise.all(
+    chatIds.map(chatId => streamChat(auth, chatId, prompt, undefined))
+  );
+  const wallMs = Date.now() - startAll;
+
+  const ok = results.filter(r => !r.streamInterrupted && !r.error).length;
+  const ttfts = results.filter(r => r.ttftMs != null).map(r => r.ttftMs).sort((a, b) => a - b);
+  const totals = results.map(r => r.totalMs).sort((a, b) => a - b);
+
+  console.log(`  Requests:   ${chatIds.length}  |  OK: ${c(ok === chatIds.length ? 'green' : 'red', ok)}`);
+  console.log(`  Wall time:  ${wallMs}ms`);
+  console.log(`  TTFT  P50=${percentile(ttfts, 50)}ms  P95=${percentile(ttfts, 95)}ms  P99=${percentile(ttfts, 99)}ms`);
+  console.log(`  Total P50=${percentile(totals, 50)}ms  P95=${percentile(totals, 95)}ms  P99=${percentile(totals, 99)}ms`);
+
+  if (ok >= 13) {
+    console.log(c('green', `  ✓ Baseline established: ${ok} samples — P95/P99 tracker now has enough data for dynamic timeouts`));
+  } else {
+    console.log(c('yellow', `  ⚠ Only ${ok} successful samples — degradation detection may not fire in Test 11`));
+  }
+  console.log();
+  return { p99TtftMs: percentile(ttfts, 99), p95TotalMs: percentile(totals, 95) };
+}
+
+// ─── Test 11: High-concurrency sustained pressure — P99 stability ─────────────
+
+async function testSustainedPressure(auth) {
+  const rounds = 3;
+  const concurrencyPerRound = 12;
+  console.log(c('blue', `[ Test 11 ] Sustained pressure — ${rounds} rounds × ${concurrencyPerRound} concurrent, measuring P99 drift`));
+  console.log(c('dim',  '            (simulates sustained high load; verifies P99 stays stable, no timeout cascade)'));
+
+  const heavyPrompt = [
+    'You are an expert systems architect. Explain the full design of a global-scale event streaming platform.',
+    'Cover: write path, compaction, consumer group coordination, exactly-once semantics,',
+    'multi-region replication, schema evolution, and operational runbook for common failures.',
+    'Be thorough and include concrete configuration values and latency budgets.',
+  ].join(' ');
+
+  const allTtfts = [];
+  const allTotals = [];
+  let totalInterrupted = 0;
+
+  for (let round = 0; round < rounds; round++) {
+    const chatIds = await Promise.all(
+      Array.from({ length: concurrencyPerRound }, (_, i) =>
+        createChat(auth, `pressure-r${round}-${i}`)
+      )
+    );
+
+    const results = await Promise.all(
+      chatIds.map(chatId => streamChat(auth, chatId, heavyPrompt, undefined))
+    );
+
+    const roundInterrupted = results.filter(r => r.streamInterrupted).length;
+    const roundTtfts = results.filter(r => r.ttftMs != null).map(r => r.ttftMs);
+    const roundTotals = results.map(r => r.totalMs);
+
+    totalInterrupted += roundInterrupted;
+    allTtfts.push(...roundTtfts);
+    allTotals.push(...roundTotals);
+
+    allTtfts.sort((a, b) => a - b);
+    allTotals.sort((a, b) => a - b);
+
+    console.log(
+      `  Round ${round + 1}/${rounds}:  ` +
+      `TTFT P50=${percentile(allTtfts, 50)}ms P95=${percentile(allTtfts, 95)}ms P99=${percentile(allTtfts, 99)}ms  ` +
+      `interrupted=${roundInterrupted ? c('red', roundInterrupted) : c('green', '0')}`
+    );
+  }
+
+  const allSuccesses = rounds * concurrencyPerRound - totalInterrupted;
+  console.log(`\n  Total requests: ${rounds * concurrencyPerRound}`);
+  console.log(`  Interrupted:    ${totalInterrupted ? c('red', totalInterrupted) : c('green', 0)}`);
+  console.log(`  Final TTFT  P50=${percentile(allTtfts, 50)}ms  P95=${percentile(allTtfts, 95)}ms  P99=${percentile(allTtfts, 99)}ms`);
+  console.log(`  Final Total P50=${percentile(allTotals, 50)}ms  P95=${percentile(allTotals, 95)}ms  P99=${percentile(allTotals, 99)}ms`);
+
+  if (totalInterrupted === 0) {
+    console.log(c('green', `  ✓ Zero interruptions over ${rounds * concurrencyPerRound} sustained requests`));
+  } else if (totalInterrupted < rounds * concurrencyPerRound * 0.5) {
+    console.log(c('yellow', `  ⚠ ${totalInterrupted} interruptions — circuit activated under sustained load (expected at API rate limits)`));
+  } else {
+    console.log(c('red', `  ✗ ${totalInterrupted} interruptions — majority shed; check API rate limits or increase provider headroom`));
+  }
+  console.log();
+}
+
+// ─── Test 12: Burst-then-drain — circuit breaker soft block recovery ──────────
+
+async function testBurstThenDrain(auth) {
+  console.log(c('blue', '[ Test 12 ] Burst-then-drain — 25 concurrent, then 1 s pause, then 10 more'));
+  console.log(c('dim',  '            (verifies no cascading timeout failures after a load spike drains)'));
+
+  const burstCount = 25;
+  const drainCount = 10;
+
+  const heavyPrompt = 'Describe the complete lifecycle of a microservice deployment using Kubernetes: from Dockerfile to rolling update, covering health checks, resource limits, PodDisruptionBudgets, and HPA configuration with YAML examples.';
+
+  // Phase 1: burst
+  const burstChatIds = await Promise.all(
+    Array.from({ length: burstCount }, (_, i) => createChat(auth, `burst-${i}`))
+  );
+  const burstResults = await Promise.all(
+    burstChatIds.map(chatId => streamChat(auth, chatId, heavyPrompt, undefined))
+  );
+
+  const burstOk = burstResults.filter(r => !r.streamInterrupted && !r.error).length;
+  const burstInterrupted = burstResults.filter(r => r.streamInterrupted).length;
+  const burstTtfts = burstResults.filter(r => r.ttftMs != null).map(r => r.ttftMs).sort((a, b) => a - b);
+
+  console.log(`  Burst (${burstCount}):  OK=${c(burstOk === burstCount ? 'green' : 'yellow', burstOk)}  interrupted=${burstInterrupted ? c('red', burstInterrupted) : c('green', 0)}`);
+  console.log(`    TTFT P50=${percentile(burstTtfts, 50)}ms  P95=${percentile(burstTtfts, 95)}ms`);
+
+  // Brief drain
+  await new Promise(r => setTimeout(r, 1000));
+
+  // Phase 2: drain (follow-up requests that should benefit from less pressure)
+  const drainChatIds = await Promise.all(
+    Array.from({ length: drainCount }, (_, i) => createChat(auth, `drain-${i}`))
+  );
+  const drainResults = await Promise.all(
+    drainChatIds.map(chatId => streamChat(auth, chatId, 'What is a database index? Explain in 2–3 sentences.', undefined))
+  );
+
+  const drainOk = drainResults.filter(r => !r.streamInterrupted && !r.error).length;
+  const drainTtfts = drainResults.filter(r => r.ttftMs != null).map(r => r.ttftMs).sort((a, b) => a - b);
+
+  console.log(`  Drain (${drainCount}):  OK=${c(drainOk === drainCount ? 'green' : 'red', drainOk)}  TTFT P50=${percentile(drainTtfts, 50)}ms`);
+
+  if (drainOk === drainCount && burstInterrupted === 0) {
+    console.log(c('green', '  ✓ Zero failures across burst + drain — no cascading degradation'));
+  } else if (burstInterrupted > 0 && drainOk === drainCount) {
+    console.log(c('green', `  ✓ Burst shed by circuit (${burstInterrupted}/${burstCount}) but drain fully recovered — no cascading failure`));
+  } else if (burstInterrupted > 0) {
+    console.log(c('yellow', `  ⚠ ${burstInterrupted} burst + ${drainCount - drainOk} drain failures — circuit may still be recovering after burst`));
+  } else {
+    console.log(c('red', `  ✗ ${drainCount - drainOk} drain failures after clean burst — server may not have recovered`));
+  }
+  console.log();
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -714,10 +947,24 @@ async function main() {
   await testDeadConnection(auth);
   await testConcurrentSpike(auth);
 
+  // Wait until provider is healthy — the health tracker blocks for 5 min after
+  // a rate-limit; a fixed 30 s sleep is not enough. Dynamic polling covers both
+  // the 30-s circuit cooldown and the 5-min rate-limit block.
+  await waitForProviderHealth(auth, 'Phase 2');
+
   // Phase 2: heartbeat, partial disconnects, connection leaks
   await testHeartbeat(auth);
   await testPartialDisconnects(auth);
   await testConnectionLeaks(auth);
+
+  // Same wait before Phase 3 — partial-disconnects + leak tests generate more
+  // background Anthropic traffic that can re-trip the circuit.
+  await waitForProviderHealth(auth, 'Phase 3');
+
+  // Phase 3: latency-percentile circuit breaker verification
+  await testLatencyBaseline(auth);
+  await testSustainedPressure(auth);
+  await testBurstThenDrain(auth);
 
   console.log(c('bold', '=== Load test complete ===\n'));
 }

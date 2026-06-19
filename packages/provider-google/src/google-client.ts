@@ -1,5 +1,9 @@
 import { WeaveIntelError, parseRetryAfterMs } from '@weaveintel/core';
-import { createResilientCallable, PROVIDER_RESILIENCE_DEFAULTS, type ResilientCallable } from '@weaveintel/resilience';
+import {
+  createResilientCallable,
+  PROVIDER_RESILIENCE_DEFAULTS,
+  type ResilientCallable,
+} from '@weaveintel/resilience';
 import type { GoogleProviderOptions } from './google-types.js';
 import { googleFetch, googleFetchStream } from './_fetch.js';
 
@@ -47,9 +51,6 @@ export function makeHeaders(options: GoogleProviderOptions): Record<string, stri
 }
 
 function composeRequestSignal(signal?: AbortSignal): AbortSignal {
-  // The caller's signal carries the context deadline — it is the authoritative
-  // budget. Pass it through directly. Only fall back to a provider-level timeout
-  // for background calls that have no request context (capability probes, etc.).
   if (signal) return signal;
   return AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS);
 }

@@ -10,7 +10,11 @@
  */
 
 import { WeaveIntelError, parseRetryAfterMs as coreParseRetryAfterMs } from '@weaveintel/core';
-import { createResilientCallable, PROVIDER_RESILIENCE_DEFAULTS, type ResilientCallable } from '@weaveintel/resilience';
+import {
+  createResilientCallable,
+  PROVIDER_RESILIENCE_DEFAULTS,
+  type ResilientCallable,
+} from '@weaveintel/resilience';
 import { openaiFetch, openaiFetchStream } from './_fetch.js';
 
 export interface OpenAIProviderOptions {
@@ -62,9 +66,10 @@ export function makeMultipartHeaders(options: OpenAIProviderOptions, apiKey: str
 export const parseRetryAfterMs = coreParseRetryAfterMs;
 
 function composeRequestSignal(signal?: AbortSignal): AbortSignal {
-  // The caller's signal carries the context deadline — it is the authoritative
-  // budget. Pass it through directly. Only fall back to a provider-level timeout
-  // for background calls that have no request context (capability probes, etc.).
+  // Caller's signal is the authoritative budget — pass it straight through.
+  // Streaming requests always provide a caller signal (context deadline), so
+  // this fallback is only reached by background non-streaming calls (titling,
+  // embeddings, etc.) — keep it static and generous for those callers.
   if (signal) return signal;
   return AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS);
 }

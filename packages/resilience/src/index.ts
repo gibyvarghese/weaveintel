@@ -53,6 +53,23 @@ export {
   createResilientCallable,
   runResilient,
 } from './pipeline.js';
+export {
+  type LatencySnapshot,
+  type LatencyTracker,
+  type LatencyTrackerOptions,
+  createLatencyTracker,
+  getGlobalLatencyTracker,
+  recordLatency,
+  getP95Latency,
+  getP99Latency,
+  getLatencySnapshot,
+  _setGlobalLatencyTracker,
+  DEGRADATION_MULTIPLIER,
+  MIN_DEGRADATION_LATENCY_MS,
+  DEGRADATION_BLOCK_MS,
+  DYNAMIC_TIMEOUT_MULTIPLIER,
+  MIN_DYNAMIC_TIMEOUT_MS,
+} from './latency-tracker.js';
 
 /**
  * Canonical provider-level resilience defaults (Phase 5 — consolidation).

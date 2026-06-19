@@ -24,6 +24,7 @@ import { getOrCreateEndpointState, type EndpointStateOptions } from './endpoint-
 import { createRetryPolicy, type RetryPolicy, type RetryPolicyOptions } from './retry-policy.js';
 import { getDefaultSignalBus, type ResilienceSignalBus } from './signal-bus.js';
 import type { CallOverrides } from './types.js';
+import { recordLatency } from './latency-tracker.js';
 
 export interface ResilienceOptions extends EndpointStateOptions {
   /** Endpoint id — the key everything is shared on. e.g. `'openai:chat:gpt-4o'`. */
@@ -117,9 +118,10 @@ export function createResilientCallable<Args extends unknown[], R>(
           opts.endpoint,
         );
         const durationMs = Date.now() - start;
-        // 7. circuit success
+        // 7. circuit success + latency tracking
         state.circuit?.recordSuccess();
         bus.emit({ kind: 'success', endpoint: opts.endpoint, attempt, durationMs, at: Date.now() });
+        recordLatency(opts.endpoint, durationMs);
         return result;
       } catch (err) {
         const durationMs = Date.now() - start;

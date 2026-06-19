@@ -77,10 +77,10 @@ function makeHeaders(options: LlamaCppProviderOptions): Record<string, string> {
 }
 
 function composeRequestSignal(signal?: AbortSignal): AbortSignal {
-  // The caller's signal carries the context deadline — it is the authoritative
-  // budget. Pass it through directly. Only fall back to a provider-level timeout
-  // for background calls that have no request context (capability probes, etc.).
   if (signal) return signal;
+  // Local models: static 10-min fallback. Dynamic P95 timeout (Phase 3) is not
+  // applied here — local hardware latency varies too widely to build a stable
+  // P95 baseline, and no hard upper bound is appropriate without knowing the model.
   return AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS);
 }
 
