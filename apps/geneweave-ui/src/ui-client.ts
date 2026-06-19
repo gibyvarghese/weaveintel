@@ -193,7 +193,9 @@ async function sendMessage(text: string) {
 
   const startedAtMs = Date.now();
   let assistantMsg: any = null;
-  
+  let idleTimer: ReturnType<typeof setInterval> | null = null;
+  let streamIdleTimedOut = false;
+
   try {
     const resp = await fetch(`/api/chats/${chatId}/messages`, {
       method: 'POST',
@@ -294,10 +296,19 @@ async function sendMessage(text: string) {
       }
     };
 
+    let lastChunkAt = Date.now();
+    idleTimer = setInterval(() => {
+      if (!streamIdleTimedOut && Date.now() - lastChunkAt > 45_000) {
+        streamIdleTimedOut = true;
+        reader.cancel('idle').catch(() => {});
+      }
+    }, 5_000);
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
+      lastChunkAt = Date.now();
       buf += decoder.decode(value, { stream: true });
       const lines = buf.split(/\r?\n/);
       buf = lines.pop() || '';
@@ -339,9 +350,17 @@ async function sendMessage(text: string) {
       state.messages.push(errMessage);
     }
   } finally {
+    if (idleTimer !== null) clearInterval(idleTimer);
     if (assistantMsg && assistantMsg.processState === 'running') {
-      assistantMsg.processState = assistantMsg.content ? 'completed' : 'error';
-      assistantMsg.latency_ms = assistantMsg.latency_ms || (Date.now() - startedAtMs);
+      if (streamIdleTimedOut) {
+        assistantMsg.content =
+          (assistantMsg.content ? assistantMsg.content + '\n\n' : '') +
+          '_No response received for 45 s — the connection went idle. Please try sending your message again._';
+        assistantMsg.processState = 'error';
+      } else {
+        assistantMsg.processState = assistantMsg.content ? 'completed' : 'error';
+        assistantMsg.latency_ms = assistantMsg.latency_ms || (Date.now() - startedAtMs);
+      }
     }
     state.streaming = false;
     render();

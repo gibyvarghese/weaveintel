@@ -1,0 +1,111 @@
+# geneWeave — Nginx reverse proxy configuration
+#
+# Key SSE requirements:
+#   - proxy_buffering off   : never buffer streaming responses to the client
+#   - proxy_read_timeout    : must exceed the longest expected LLM response (agent chains can take 10 min)
+#   - X-Accel-Buffering: no : the app sets this header; Nginx respects it per-route to disable buffering
+#   - proxy_http_version 1.1: required for upstream keepalive
+#
+# The app server emits ": ping\n\n" SSE heartbeat comments every 12 s, so
+# proxy_read_timeout 120s is sufficient even for the 10-min agent-chain budget.
+# If you lower proxy_read_timeout below 12 s, SSE connections will be killed.
+
+upstream geneweave {
+    server 127.0.0.1:3500;
+    keepalive 32;             # maintain idle connections to upstream
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name _;
+
+    # Redirect HTTP → HTTPS in production
+    # return 301 https://$host$request_uri;
+
+    # ── SSE / streaming endpoints ─────────────────────────────────────────
+    # Match all chat message routes that may stream.
+    location ~ ^/api/chats/[^/]+/messages {
+        proxy_pass         http://geneweave;
+        proxy_http_version 1.1;
+        proxy_set_header   Connection '';         # enable keepalive to upstream
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+
+        # SSE-critical settings
+        proxy_buffering    off;                   # never buffer — flush chunks immediately
+        proxy_cache        off;
+        proxy_read_timeout 120s;                  # heartbeat every 12 s keeps this alive for any stream
+        proxy_send_timeout 120s;
+
+        # Disable gzip on SSE — compressed streams don't flush correctly
+        gzip               off;
+    }
+
+    # ── Voice / TTS streaming ─────────────────────────────────────────────
+    location /api/voice/ {
+        proxy_pass         http://geneweave;
+        proxy_http_version 1.1;
+        proxy_set_header   Connection '';
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+        gzip               off;
+    }
+
+    # ── REST API (non-streaming) ──────────────────────────────────────────
+    location /api/ {
+        proxy_pass         http://geneweave;
+        proxy_http_version 1.1;
+        proxy_set_header   Connection '';
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout 90s;   # aligned with server 60 s + buffer
+        proxy_send_timeout 90s;
+
+        # Rate-limit headers pass-through
+        proxy_pass_header  X-RateLimit-Limit;
+        proxy_pass_header  X-RateLimit-Remaining;
+        proxy_pass_header  X-RateLimit-Reset;
+    }
+
+    # ── Static UI assets ─────────────────────────────────────────────────
+    location / {
+        proxy_pass         http://geneweave;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+
+        proxy_read_timeout 30s;
+
+        # Cache static assets at the proxy layer
+        proxy_cache_valid  200 1d;
+    }
+}
+
+# ── HTTPS server (enable in production) ──────────────────────────────────────
+# server {
+#     listen 443 ssl http2;
+#     listen [::]:443 ssl http2;
+#     server_name your-domain.com;
+#
+#     ssl_certificate     /etc/letsencrypt/live/your-domain.com/fullchain.pem;
+#     ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+#     ssl_protocols       TLSv1.2 TLSv1.3;
+#     ssl_ciphers         HIGH:!aNULL:!MD5;
+#
+#     # Include the location blocks from the server {} above.
+# }

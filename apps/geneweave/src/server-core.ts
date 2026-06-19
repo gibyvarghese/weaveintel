@@ -141,9 +141,9 @@ const DEFAULT_REQUEST_BODY_BYTES = envInt('GENEWEAVE_DEFAULT_REQUEST_BODY_BYTES'
 const MAX_CONCURRENT_BODY_READS = envInt('GENEWEAVE_MAX_CONCURRENT_BODY_READS', IS_TEST_ENV ? 200 : 24);
 const MAX_QUEUED_BODY_READS = envInt('GENEWEAVE_MAX_QUEUED_BODY_READS', IS_TEST_ENV ? 5_000 : 512);
 export const LARGE_REQUEST_BODY_BYTES = envInt('GENEWEAVE_LARGE_REQUEST_BODY_BYTES', 50 * 1024 * 1024);
-// 5-minute fallback for non-streaming requests; streaming handlers call
-// socket.setTimeout(0) themselves to remove the cap for long LLM responses.
-export const SERVER_REQUEST_TIMEOUT_MS = envInt('GENEWEAVE_SERVER_REQUEST_TIMEOUT_MS', 5 * 60_000);
+// 60 s for non-streaming REST requests. SSE handlers call socket.setTimeout(0)
+// and are protected by context deadlines + heartbeat instead of this timeout.
+export const SERVER_REQUEST_TIMEOUT_MS = envInt('GENEWEAVE_SERVER_REQUEST_TIMEOUT_MS', 60_000);
 export const SERVER_HEADERS_TIMEOUT_MS = envInt('GENEWEAVE_SERVER_HEADERS_TIMEOUT_MS', 10_000);
 export const SERVER_KEEP_ALIVE_TIMEOUT_MS = envInt('GENEWEAVE_SERVER_KEEPALIVE_TIMEOUT_MS', 5_000);
 export const SERVER_MAX_HEADERS_COUNT = envInt('GENEWEAVE_SERVER_MAX_HEADERS_COUNT', 100);

@@ -83,64 +83,70 @@ async function streamChat(auth, chatId, message, signal, extraBody = {}) {
   let streamInterrupted = false;
   let doneReceived = false;
 
-  const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
-      Accept: 'text/event-stream',
-    },
-    body: JSON.stringify({ content: message, stream: true, ...extraBody }),
-    signal,
-  });
+  // Outer try-catch ensures AbortErrors thrown by fetch() during connection
+  // setup (before the response body reader is open) are caught, not leaked.
+  try {
+    const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        ...(csrfToken ? { 'X-CSRF-Token': csrfToken } : {}),
+        Accept: 'text/event-stream',
+      },
+      body: JSON.stringify({ content: message, stream: true, ...extraBody }),
+      signal,
+    });
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    return { ttftMs: null, totalMs: Date.now() - startMs, tokenCount: 0, error: `HTTP ${res.status}: ${body}`, streamInterrupted: false };
-  }
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      return { ttftMs: null, totalMs: Date.now() - startMs, tokenCount: 0, error: `HTTP ${res.status}: ${body}`, streamInterrupted: false };
+    }
 
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-  function parseEvents(chunk) {
-    buffer += chunk;
-    // SSE events are delimited by double-newline
-    const parts = buffer.split(/\n\n|\r\n\r\n/);
-    buffer = parts.pop() ?? '';
-    for (const part of parts) {
-      for (const line of part.split(/\r?\n/)) {
-        if (!line.startsWith('data:')) continue;
-        const raw = line.slice(5).trimStart();
-        if (!raw) continue;
-        let evt;
-        try { evt = JSON.parse(raw); } catch { continue; }
-        if (evt.type === 'text' && typeof evt.text === 'string' && evt.text.length > 0) {
-          if (ttftMs === null) ttftMs = Date.now() - startMs;
-          tokenCount += evt.text.length;
-        }
-        if (evt.type === 'error') error = evt.error;
-        if (evt.type === 'done') {
-          streamInterrupted = evt.streamInterrupted ?? false;
-          doneReceived = true;
+    function parseEvents(chunk) {
+      buffer += chunk;
+      // SSE events are delimited by double-newline
+      const parts = buffer.split(/\n\n|\r\n\r\n/);
+      buffer = parts.pop() ?? '';
+      for (const part of parts) {
+        for (const line of part.split(/\r?\n/)) {
+          if (!line.startsWith('data:')) continue;
+          const raw = line.slice(5).trimStart();
+          if (!raw) continue;
+          let evt;
+          try { evt = JSON.parse(raw); } catch { continue; }
+          if (evt.type === 'text' && typeof evt.text === 'string' && evt.text.length > 0) {
+            if (ttftMs === null) ttftMs = Date.now() - startMs;
+            tokenCount += evt.text.length;
+          }
+          if (evt.type === 'error') error = evt.error;
+          if (evt.type === 'done') {
+            streamInterrupted = evt.streamInterrupted ?? false;
+            doneReceived = true;
+          }
         }
       }
     }
-  }
 
-  try {
-    while (!doneReceived) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      parseEvents(decoder.decode(value, { stream: true }));
+    try {
+      while (!doneReceived) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        parseEvents(decoder.decode(value, { stream: true }));
+      }
+      // Flush remaining buffer
+      if (buffer.trim()) parseEvents('');
+    } catch (e) {
+      error = e?.message ?? String(e);
+    } finally {
+      try { reader.cancel(); } catch {}
     }
-    // Flush remaining buffer
-    if (buffer.trim()) parseEvents('');
-  } catch (e) {
-    error = e?.message ?? String(e);
-  } finally {
-    try { reader.cancel(); } catch {}
+  } catch (outerErr) {
+    error = outerErr?.message ?? String(outerErr);
   }
 
   return { ttftMs, totalMs: Date.now() - startMs, tokenCount, error, streamInterrupted };
@@ -462,6 +468,240 @@ async function testConcurrentSpike(auth) {
   console.log();
 }
 
+// ─── Phase 2 helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Like streamChat but also captures raw SSE heartbeat (": ping") lines so
+ * we can verify the server emits them on schedule.
+ */
+async function streamChatWithHeartbeat(auth, chatId, prompt, signal) {
+  const controller = signal ? undefined : new AbortController();
+  const abortSignal = signal ?? controller.signal;
+
+  const res = await fetch(`${BASE_URL}/api/chats/${chatId}/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${auth.token}`,
+      'X-CSRF-Token': auth.csrfToken,
+    },
+    body: JSON.stringify({ content: prompt, stream: true }),
+    signal: abortSignal,
+  });
+
+  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let tokenCount = 0;
+  let ttftMs = null;
+  const startMs = Date.now();
+  const pingTimestamps = [];   // when each ": ping" arrived
+  let doneReceived = false;
+  let streamInterrupted = false;
+
+  const processChunk = (chunk) => {
+    buffer += chunk;
+    const parts = buffer.split(/\n\n|\r\n\r\n/);
+    buffer = parts.pop() ?? '';
+    for (const part of parts) {
+      for (const line of part.split(/\r?\n/)) {
+        if (line.startsWith(':')) {
+          // SSE comment — heartbeat ping
+          pingTimestamps.push(Date.now() - startMs);
+          continue;
+        }
+        if (!line.startsWith('data:')) continue;
+        const raw = line.slice(5).trimStart();
+        let evt;
+        try { evt = JSON.parse(raw); } catch { continue; }
+        if (evt.type === 'text' && typeof evt.text === 'string' && evt.text.length > 0) {
+          if (ttftMs === null) ttftMs = Date.now() - startMs;
+          tokenCount += evt.text.length;
+        }
+        if (evt.type === 'done') {
+          streamInterrupted = evt.streamInterrupted ?? false;
+          doneReceived = true;
+        }
+      }
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      processChunk(decoder.decode(value, { stream: true }));
+    }
+  } finally {
+    try { await reader.cancel(); } catch { /* ignore */ }
+    reader.releaseLock();
+  }
+
+  return { ttftMs, tokenCount, doneReceived, streamInterrupted, pingTimestamps, elapsedMs: Date.now() - startMs };
+}
+
+// ─── Test 7: Heartbeat interval verification ──────────────────────────────────
+
+async function testHeartbeat(auth) {
+  console.log(c('blue', '[ Test 7 ] Heartbeat — verify ": ping" comments arrive every ~12 s'));
+  console.log(c('dim',  '           (run a long prompt, watch for heartbeat SSE comments)'));
+
+  const chatId = await createChat(auth, 'heartbeat-test');
+  const prompt = [
+    'Write a detailed, step-by-step technical tutorial on building a full-stack web application',
+    'from scratch using Node.js, TypeScript, React, and PostgreSQL.',
+    'Include code examples for every step: project setup, database schema, backend routes,',
+    'authentication, frontend components, state management, testing, and deployment.',
+    'Be extremely verbose and comprehensive — this should be at least 3000 words.',
+  ].join(' ');
+
+  const { ttftMs, tokenCount, pingTimestamps, doneReceived, elapsedMs } = await streamChatWithHeartbeat(auth, chatId, prompt);
+
+  console.log(`  TTFT:       ${ttftMs ?? '—'}ms`);
+  console.log(`  Chars:      ${tokenCount}`);
+  console.log(`  Duration:   ${elapsedMs}ms`);
+  console.log(`  Pings:      ${pingTimestamps.length}  [${pingTimestamps.map(t => `${(t/1000).toFixed(1)}s`).join(', ')}]`);
+  console.log(`  Done event: ${doneReceived ? c('green', 'yes') : c('red', 'missing')}`);
+
+  // Validate: at least 1 ping per 15 s of stream time (heartbeat interval is 12 s)
+  const expectedMinPings = Math.max(1, Math.floor(elapsedMs / 15_000));
+  if (pingTimestamps.length >= expectedMinPings) {
+    console.log(c('green', `  ✓ Heartbeat verified: ${pingTimestamps.length} pings over ${(elapsedMs/1000).toFixed(1)}s`));
+  } else if (pingTimestamps.length > 0) {
+    console.log(c('yellow', `  ⚠ Only ${pingTimestamps.length} pings over ${(elapsedMs/1000).toFixed(1)}s — expected ≥${expectedMinPings}`));
+  } else {
+    console.log(c('red', '  ✗ No heartbeat pings received — server may not be sending heartbeats'));
+  }
+
+  // Check inter-ping intervals
+  if (pingTimestamps.length >= 2) {
+    const intervals = pingTimestamps.slice(1).map((t, i) => t - pingTimestamps[i]);
+    const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+    const maxInterval = Math.max(...intervals);
+    console.log(`  Avg interval: ${(avgInterval/1000).toFixed(1)}s  Max: ${(maxInterval/1000).toFixed(1)}s`);
+    if (maxInterval > 20_000) {
+      console.log(c('yellow', `  ⚠ Max ping gap ${(maxInterval/1000).toFixed(1)}s exceeds 20 s — may starve proxies with tight timeouts`));
+    } else {
+      console.log(c('green', `  ✓ Ping regularity OK (max gap ${(maxInterval/1000).toFixed(1)}s < 20 s)`));
+    }
+  }
+  console.log();
+}
+
+// ─── Test 8: Concurrent partial disconnects — survivor integrity ───────────────
+
+async function testPartialDisconnects(auth) {
+  const total = 16;
+  const abortCount = 8;
+  console.log(c('blue', `[ Test 8 ] Partial disconnects — ${abortCount}/${total} streams abort mid-stream; survivors must complete cleanly`));
+
+  const chatIds = await Promise.all(
+    Array.from({ length: total }, (_, i) => createChat(auth, `partial-${i}`))
+  );
+
+  const heavyPrompt = 'Write a comprehensive survey of modern distributed systems design patterns, covering consensus algorithms, replication strategies, CAP theorem trade-offs, and real-world case studies. Be very detailed.';
+
+  const controllers = Array.from({ length: total }, () => new AbortController());
+
+  // Abort the first `abortCount` streams after a random 1–4 s delay
+  controllers.slice(0, abortCount).forEach((ctrl, i) => {
+    const delay = 1000 + Math.random() * 3000;
+    setTimeout(() => ctrl.abort(), delay);
+  });
+
+  const results = await Promise.allSettled(
+    chatIds.map((chatId, i) => streamChat(auth, chatId, heavyPrompt, controllers[i].signal))
+  );
+
+  const aborted  = results.slice(0, abortCount);
+  const survivors = results.slice(abortCount);
+
+  const survivorOk = survivors.filter(r => r.status === 'fulfilled' && !r.value.streamInterrupted && !r.value.error).length;
+  const survivorFail = survivors.filter(r => r.status === 'rejected' || r.value?.streamInterrupted || r.value?.error).length;
+
+  const survivorTtfts = survivors
+    .filter(r => r.status === 'fulfilled' && r.value.ttftMs != null)
+    .map(r => r.value.ttftMs)
+    .sort((a, b) => a - b);
+
+  console.log(`  Intentional aborts: ${abortCount}/${total}`);
+  console.log(`  Survivors OK:       ${c(survivorOk === survivors.length ? 'green' : 'red', survivorOk)}/${survivors.length}`);
+  if (survivorTtfts.length > 0) {
+    console.log(`  Survivor TTFT P50:  ${percentile(survivorTtfts, 50)}ms  P95: ${percentile(survivorTtfts, 95)}ms`);
+  }
+
+  if (survivorFail > 0) {
+    const failDetails = survivors
+      .filter(r => r.status === 'rejected' || r.value?.streamInterrupted || r.value?.error)
+      .map(r => r.status === 'rejected' ? r.reason?.message : (r.value?.error || 'interrupted'))
+      .join(', ');
+    console.log(c('red', `  ✗ ${survivorFail} survivors failed — partial disconnects may have corrupted server state: ${failDetails}`));
+  } else {
+    console.log(c('green', '  ✓ All survivors completed cleanly despite concurrent aborts'));
+  }
+  console.log();
+}
+
+// ─── Test 9: Connection leak detection ───────────────────────────────────────
+
+async function testConnectionLeaks(auth) {
+  console.log(c('blue', '[ Test 9 ] Connection leak — 20 fast-abort streams; check lsof fd count after'));
+
+  // Capture open-fd count before (macOS/Linux)
+  let fdBefore = null;
+  let fdAfter  = null;
+  try {
+    const { execSync } = await import('node:child_process');
+    const pid = (await fetch(`${BASE_URL}/api/health`).catch(() => null))
+      ? undefined  // can't get server PID from outside — use lsof on port
+      : undefined;
+    fdBefore = parseInt(execSync(`lsof -i :3500 2>/dev/null | grep ESTABLISHED | wc -l`, { encoding: 'utf-8' }).trim(), 10);
+  } catch {
+    fdBefore = null;
+  }
+
+  const chatIds = await Promise.all(
+    Array.from({ length: 20 }, (_, i) => createChat(auth, `leak-${i}`))
+  );
+
+  const prompt = 'Write a very long story about dragons.';
+  const controllers = Array.from({ length: 20 }, () => new AbortController());
+
+  // Abort all after 300–800 ms
+  controllers.forEach((ctrl, i) => setTimeout(() => ctrl.abort(), 300 + i * 25));
+
+  await Promise.allSettled(
+    chatIds.map((chatId, i) =>
+      streamChat(auth, chatId, prompt, controllers[i].signal).catch(() => {})
+    )
+  );
+
+  // Give the server 2 s to clean up
+  await new Promise(r => setTimeout(r, 2000));
+
+  try {
+    const { execSync } = await import('node:child_process');
+    fdAfter = parseInt(execSync(`lsof -i :3500 2>/dev/null | grep ESTABLISHED | wc -l`, { encoding: 'utf-8' }).trim(), 10);
+  } catch {
+    fdAfter = null;
+  }
+
+  if (fdBefore !== null && fdAfter !== null) {
+    const leaked = fdAfter - fdBefore;
+    if (leaked <= 2) {
+      console.log(c('green', `  ✓ No connection leak: ${fdBefore} before → ${fdAfter} after (Δ${leaked})`));
+    } else {
+      console.log(c('yellow', `  ⚠ Possible leak: ${fdBefore} before → ${fdAfter} after (Δ${leaked} — may be background reconnects)`));
+    }
+  } else {
+    console.log(c('dim', '  — lsof check skipped (could not query open connections — run manually: lsof -i :3500 | grep ESTABLISHED | wc -l)'));
+    console.log(c('green', '  ✓ 20 fast-abort streams completed without process crash'));
+  }
+  console.log();
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -473,6 +713,11 @@ async function main() {
   await testFileAnalysis(auth);
   await testDeadConnection(auth);
   await testConcurrentSpike(auth);
+
+  // Phase 2: heartbeat, partial disconnects, connection leaks
+  await testHeartbeat(auth);
+  await testPartialDisconnects(auth);
+  await testConnectionLeaks(auth);
 
   console.log(c('bold', '=== Load test complete ===\n'));
 }

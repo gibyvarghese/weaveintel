@@ -190,6 +190,22 @@ async function maybeAutoTitleChat(
   }
 }
 
+// ─── SSE heartbeat ───────────────────────────────────────────────────────────
+// Emits SSE comment pings every intervalMs so reverse proxies (Nginx, ALB, etc.)
+// with aggressive idle-connection timeouts don't kill long-running streams.
+// SSE comment lines (": ...") are invisible to client EventSource listeners.
+function startSseHeartbeat(
+  res: ServerResponse,
+  intervalMs = 12_000,
+): { stop: () => void } {
+  const timer = setInterval(() => {
+    if (!res.writableEnded && !res.destroyed) {
+      res.write(': ping\n\n');
+    }
+  }, intervalMs);
+  return { stop: () => clearInterval(timer) };
+}
+
 // ─── Stream budget policy ────────────────────────────────────────────────────
 // Deadline and time-to-first-token budgets vary by request category.
 // Agent chains need more time; simple chat needs far less than 5 minutes.
@@ -464,6 +480,9 @@ export async function streamMessageImpl(
     'Connection': 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
+
+  const heartbeat = startSseHeartbeat(res);
+  res.once('close', () => heartbeat.stop());
 
   if (redactionInfo) {
     await deps.writeSseEvent(res, { type: 'redaction', ...redactionInfo });
