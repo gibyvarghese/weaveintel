@@ -21,6 +21,7 @@
  */
 
 import type BetterSqlite3 from 'better-sqlite3';
+import { scryptSync, hkdfSync, createDecipheriv, createCipheriv, randomBytes } from 'node:crypto';
 
 /** Matches the vault.ts constants exactly — keep in sync. */
 const VAULT_FORMAT_PREFIX = 'v1:';
@@ -40,12 +41,10 @@ function getMasterKey(): Buffer {
 }
 
 function deriveLegacyKey(masterKey: Buffer): Buffer {
-  const { scryptSync } = require('node:crypto') as typeof import('node:crypto');
   return scryptSync(masterKey, LEGACY_SALT, KEY_LEN);
 }
 
 function deriveV1Key(masterKey: Buffer, salt: Buffer): Buffer {
-  const { hkdfSync } = require('node:crypto') as typeof import('node:crypto');
   return Buffer.from(hkdfSync('sha256', masterKey, salt, HKDF_INFO, KEY_LEN));
 }
 
@@ -55,7 +54,6 @@ function deriveV1Key(masterKey: Buffer, salt: Buffer): Buffer {
  * (AES-256-GCM with scrypt-derived key)
  */
 function decryptLegacy(encrypted: string, legacyKey: Buffer): string {
-  const { createDecipheriv } = require('node:crypto') as typeof import('node:crypto');
   const buf = Buffer.from(encrypted, 'base64');
   if (buf.length <= LEGACY_IV_LEN + TAG_LEN) {
     throw new Error('Invalid legacy credential payload (too short)');
@@ -73,7 +71,6 @@ function decryptLegacy(encrypted: string, legacyKey: Buffer): string {
  * v1 format: `v1:` + base64(16-byte salt || 12-byte IV || ciphertext || 16-byte authTag)
  */
 function encryptV1(plainJson: string, masterKey: Buffer): { encrypted: string; iv: string } {
-  const { createCipheriv, randomBytes } = require('node:crypto') as typeof import('node:crypto');
   const salt = randomBytes(SALT_LEN);
   const key = deriveV1Key(masterKey, salt);
   const iv = randomBytes(IV_LEN);
