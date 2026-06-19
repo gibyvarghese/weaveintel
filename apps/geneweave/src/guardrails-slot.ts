@@ -158,6 +158,19 @@ export function geneweaveGuardrailsSlot(
   // ── Slot implementation ────────────────────────────────────────────────────
 
   return {
+    async checkInput(_ctx: ExecutionContext, input: string) {
+      // Run the pre-execution DB pipeline against inbound user content
+      // (after PII redaction). This is the pre-LLM gate that was previously
+      // missing from the slot. Fail-open on any error.
+      const guardrails = await loadEnabled('pre-execution');
+      if (guardrails.length === 0) return { allow: true };
+      const results = await evaluate(guardrails, input.slice(0, maxActionLen), 'pre-execution');
+      if (hasDeny(results)) {
+        return { allow: false, reason: getDenyReason(results) ?? 'input blocked by guardrail' };
+      }
+      return { allow: true };
+    },
+
     async checkToolCall(_ctx: ExecutionContext, schema, args) {
       let argStr = '';
       try { argStr = JSON.stringify(args); } catch { argStr = '[unserialisable]'; }

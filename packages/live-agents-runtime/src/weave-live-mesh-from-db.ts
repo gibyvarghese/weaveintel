@@ -57,7 +57,7 @@
  * for the canonical pattern.
  */
 
-import type { Model } from '@weaveintel/core';
+import type { Model, WeaveRuntime } from '@weaveintel/core';
 import type { StateStore } from '@weaveintel/live-agents';
 import type { LiveAgentPolicy, ModelResolver } from '@weaveintel/live-agents';
 
@@ -154,6 +154,14 @@ export interface WeaveLiveMeshFromDbOptions {
 
   /** Logger. */
   logger?: (msg: string) => void;
+
+  /**
+   * Phase 0 — ambient cross-cutting runtime. When supplied, every tick
+   * context inherits `ctx.runtime` so handlers can reach egress hardening,
+   * durable audit, resilience state, guardrails, and encryption through the
+   * DI chain rather than process-global singletons.
+   */
+  runtime?: WeaveRuntime;
 }
 
 export interface WeaveLiveMeshFromDbResult {
@@ -263,6 +271,7 @@ export async function weaveLiveMeshFromDb(
     ...(opts.intervalMs !== undefined ? { intervalMs: opts.intervalMs } : {}),
     ...(opts.refreshMs !== undefined ? { refreshMs: opts.refreshMs } : {}),
     ...(opts.workerIdPrefix ? { workerIdPrefix: opts.workerIdPrefix } : {}),
+    ...(opts.runtime !== undefined ? { runtime: opts.runtime } : {}),
     logger: (m: string) => log(`[supervisor] ${m}`),
   });
 

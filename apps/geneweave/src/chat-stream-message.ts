@@ -379,6 +379,29 @@ export async function streamMessageImpl(
     }
   }
 
+  // Phase 0: pre-LLM input guardrail gate on stream path. Mirrors the
+  // send-message gate — runs on post-redaction content, fail-open.
+  if (deps.config.runtime?.guardrails?.checkInput) {
+    try {
+      const inputCheck = await deps.config.runtime.guardrails.checkInput(ctx, processedContent);
+      if (!inputCheck.allow) {
+        const denyContent = inputCheck.reason ?? 'Your message was blocked by a content guardrail.';
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+        await deps.writeSseEvent(res, { type: 'text', text: denyContent });
+        await deps.writeSseEvent(res, { type: 'guardrail', decision: 'deny', reason: denyContent });
+        await deps.writeSseEvent(res, { type: 'done', usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, cost: 0, latencyMs: 0 });
+        deps.endSse(res);
+        await deps.db.addMessage({
+          id: newUUIDv7(), chatId, role: 'assistant', content: denyContent,
+          metadata: JSON.stringify({ guardrail: { decision: 'deny', reason: denyContent }, traceId }),
+        });
+        return;
+      }
+    } catch {
+      // fail-open on check error
+    }
+  }
+
   const streamSkillContext = await discoverSkillsForInput(
     deps.db,
     processedContent,

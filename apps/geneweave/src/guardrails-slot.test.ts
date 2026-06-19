@@ -211,4 +211,82 @@ describe('Phase E — geneweaveGuardrailsSlot ambient guardrails', () => {
       expect(r.allow).toBe(true);
     });
   });
+
+  // ── Phase 0 — checkInput (pre-LLM gate) ─────────────────────────────────
+
+  describe('checkInput (Phase 0 pre-LLM gate)', () => {
+    it('allows clean input when no pre-execution guardrails are configured', async () => {
+      const slot = geneweaveGuardrailsSlot(db);
+      const ctx = weaveContext({ runtime: weaveRuntime() });
+
+      const r = await slot.checkInput!(ctx, 'What is the weather today?');
+      expect(r.allow).toBe(true);
+    });
+
+    it('denies input that matches a pre-execution blocklist', async () => {
+      await db.createGuardrail({
+        id: newUUIDv7(),
+        name: 'block-pii-input',
+        description: 'Phase 0 checkInput test',
+        type: 'blocklist',
+        stage: 'pre-execution',
+        config: JSON.stringify({ words: ['credit_card_number'] }),
+        priority: 100,
+        enabled: 1,
+      });
+      const slot = geneweaveGuardrailsSlot(db);
+      const ctx = weaveContext({ runtime: weaveRuntime() });
+
+      const denied = await slot.checkInput!(ctx, 'Here is my credit_card_number 4111-1111-1111-1111');
+      expect(denied.allow).toBe(false);
+      expect(denied.reason).toBeTruthy();
+    });
+
+    it('allows input that does not match the blocklist', async () => {
+      await db.createGuardrail({
+        id: newUUIDv7(),
+        name: 'block-secret-input',
+        description: 'Phase 0 checkInput allow test',
+        type: 'blocklist',
+        stage: 'pre-execution',
+        config: JSON.stringify({ words: ['supersecret'] }),
+        priority: 100,
+        enabled: 1,
+      });
+      const slot = geneweaveGuardrailsSlot(db);
+      const ctx = weaveContext({ runtime: weaveRuntime() });
+
+      const r = await slot.checkInput!(ctx, 'Tell me about the weather in Paris');
+      expect(r.allow).toBe(true);
+    });
+
+    it('is fail-open — DB error returns allow:true', async () => {
+      // Close the DB to force a failure
+      const fakeDb = { ...db, listGuardrails: async () => { throw new Error('db gone'); } } as any;
+      const slot = geneweaveGuardrailsSlot(fakeDb);
+      const ctx = weaveContext({ runtime: weaveRuntime() });
+
+      const r = await slot.checkInput!(ctx, 'any input');
+      expect(r.allow).toBe(true);
+    });
+
+    it('post-execution guardrails do not affect checkInput', async () => {
+      await db.createGuardrail({
+        id: newUUIDv7(),
+        name: 'post-only',
+        description: 'Should not affect checkInput',
+        type: 'blocklist',
+        stage: 'post-execution',
+        config: JSON.stringify({ words: ['blocked_word'] }),
+        priority: 100,
+        enabled: 1,
+      });
+      const slot = geneweaveGuardrailsSlot(db);
+      const ctx = weaveContext({ runtime: weaveRuntime() });
+
+      // 'blocked_word' would trigger post-execution blocklist but not pre-execution
+      const r = await slot.checkInput!(ctx, 'user says blocked_word');
+      expect(r.allow).toBe(true);
+    });
+  });
 });

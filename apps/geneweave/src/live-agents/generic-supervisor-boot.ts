@@ -29,7 +29,7 @@ import {
   weaveDbModelResolver,
   type HeartbeatSupervisorHandle,
 } from '@weaveintel/live-agents-runtime';
-import type { Model } from '@weaveintel/core';
+import type { Model, WeaveRuntime } from '@weaveintel/core';
 import {
   resolveCostGovernorBundle,
   wrapModelWithCacheHints,
@@ -72,6 +72,13 @@ export interface StartGenericSupervisorOptions {
   /** DB attention policy key. Optional — when omitted the engine's standard
    *  policy is used. */
   attentionPolicyKey?: string;
+  /**
+   * Phase 0 — ambient cross-cutting runtime. When supplied, every tick
+   * context inherits `ctx.runtime` so handlers reach egress hardening,
+   * durable audit, resilience state, guardrails, and encryption through
+   * the DI chain rather than process-global singletons.
+   */
+  runtime?: WeaveRuntime;
 }
 
 /**
@@ -391,6 +398,7 @@ export async function startGenericSupervisorIfEnabled(
       },
     }),
     ...(opts.attentionPolicyKey ? { attentionPolicyKey: opts.attentionPolicyKey } : {}),
+    ...(opts.runtime !== undefined ? { runtime: opts.runtime } : {}),
     // Pre-schedule gate — consult `endpoint_health` once per pass and
     // skip scheduling when an LLM provider is circuit-open or 429
     // cooling-down. Mirrors the kaggle heartbeat behaviour so chat,

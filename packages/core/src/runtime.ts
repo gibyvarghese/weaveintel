@@ -85,9 +85,22 @@ export interface RuntimePersistenceSlot {
 }
 
 /** Structural slot for a resilience signal bus. Concrete instance comes from
- *  `@weaveintel/resilience` — only `emit` is structurally required. */
+ *  `@weaveintel/resilience` — only `emit` is structurally required.
+ *
+ *  Phase 0 additions: `getState`, `getLatencyP50`, `getLatencyP95` are optional
+ *  so existing implementations remain valid. Use them to make routing decisions
+ *  through the DI chain instead of reaching for process-global singletons. */
 export interface RuntimeResilienceSlot {
   emit(event: { readonly kind: string; readonly endpoint: string; readonly meta?: Readonly<Record<string, unknown>> }): void;
+  /** Current circuit-breaker state for the given endpoint key. Returns `'unknown'`
+   *  when no circuit has been registered for that endpoint. */
+  getState?(endpoint: string): 'closed' | 'open' | 'half_open' | 'unknown';
+  /** 50th-percentile latency in ms for the given endpoint, or `null` if no
+   *  samples have been recorded yet. */
+  getLatencyP50?(endpoint: string): number | null;
+  /** 95th-percentile latency in ms for the given endpoint, or `null` if no
+   *  samples have been recorded yet. */
+  getLatencyP95?(endpoint: string): number | null;
 }
 
 /**
@@ -111,6 +124,13 @@ export interface RuntimeEncryptionSlot {
    * completes — without changing the runtime object.
    */
   getManager(): unknown;
+  /**
+   * Returns `true` when field encryption is active — i.e. the master key is
+   * present and the key manager has completed bootstrap. Use this before
+   * performing any encrypt/decrypt operation rather than checking `getManager()
+   * !== null`, which is implementation-dependent.
+   */
+  isActive(): boolean;
 }
 
 /**
@@ -127,6 +147,16 @@ export interface RuntimeEncryptionSlot {
  * `@weaveintel/core` free of any specific guardrail library.
  */
 export interface RuntimeGuardrailsSlot {
+  /**
+   * Inspect inbound user content BEFORE it reaches the model (Phase 0 addition).
+   * Called after PII redaction, so `input` is the cleaned text. Return
+   * `{ allow: false }` to block the message entirely. Swallowed on throw
+   * (allow-through) — guardrails are never load-bearing.
+   */
+  checkInput?(
+    ctx: ExecutionContext,
+    input: string,
+  ): Promise<{ allow: boolean; reason?: string }>;
   /** Inspect a pending tool call. Return `{ allow: false }` to block. */
   checkToolCall?(
     ctx: ExecutionContext,

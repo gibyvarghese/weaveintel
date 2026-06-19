@@ -43,6 +43,46 @@ describe('Phase A — createGeneWeave runtime wiring', () => {
     expect(app.runtime.persistence?.kv).toBeDefined();
   });
 
+  // ── Phase 0 integration checks ───────────────────────────────────────────
+
+  it('Phase 0 — advertises Resilience capability and exposes getState', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'gw-phase0-resilience-'));
+    app = await bootApp(join(dir, 'gw.db'));
+
+    expect(app.runtime.has(RuntimeCapabilities.Resilience)).toBe(true);
+    expect(app.runtime.resilience).toBeDefined();
+    expect(typeof app.runtime.resilience?.emit).toBe('function');
+    expect(typeof app.runtime.resilience?.getState).toBe('function');
+    expect(typeof app.runtime.resilience?.getLatencyP50).toBe('function');
+    expect(typeof app.runtime.resilience?.getLatencyP95).toBe('function');
+  });
+
+  it('Phase 0 — getState returns "unknown" for an endpoint with no recorded events', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'gw-phase0-state-'));
+    app = await bootApp(join(dir, 'gw.db'));
+
+    expect(app.runtime.resilience?.getState?.('anthropic:rest')).toBe('unknown');
+  });
+
+  it('Phase 0 — guardrails slot exposes checkInput (pre-LLM gate)', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'gw-phase0-guardrails-'));
+    app = await bootApp(join(dir, 'gw.db'));
+
+    expect(app.runtime.has(RuntimeCapabilities.Guardrails)).toBe(true);
+    expect(typeof app.runtime.guardrails?.checkInput).toBe('function');
+  });
+
+  it('Phase 0 — encryption slot exposes isActive()', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'gw-phase0-encryption-'));
+    delete process.env['VAULT_KEY'];
+    app = await bootApp(join(dir, 'gw.db'));
+
+    expect(app.runtime.has(RuntimeCapabilities.Encryption)).toBe(true);
+    expect(typeof app.runtime.encryption?.isActive).toBe('function');
+    // No VAULT_KEY set, so isActive returns false
+    expect(app.runtime.encryption?.isActive()).toBe(false);
+  });
+
   it('audit entries are written to durable KV with PII redacted', async () => {
     dir = mkdtempSync(join(tmpdir(), 'gw-phaseA-redact-'));
     app = await bootApp(join(dir, 'gw.db'));

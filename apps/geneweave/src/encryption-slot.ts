@@ -32,6 +32,9 @@ export function geneweaveEncryptionSlot(
     getManager(): unknown {
       return manager;
     },
+    isActive(): boolean {
+      return manager !== null && !!process.env['VAULT_KEY'];
+    },
     getTenantKeyManager(): TenantKeyManager | null {
       return manager;
     },

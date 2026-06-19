@@ -25,6 +25,7 @@
 
 import type { Server } from 'node:http';
 import { weaveSetDefaultTracer, weaveRuntime, envSecretResolver, weaveInMemoryPersistence, createLogger, type WeaveRuntime, type RuntimePersistenceSlot } from '@weaveintel/core';
+import { createResilienceSignalBus, setDefaultSignalBus, createRuntimeResilienceAdapter } from '@weaveintel/resilience';
 
 const log = createLogger('geneweave');
 import { weaveConsoleTracer } from '@weaveintel/observability';
@@ -312,6 +313,15 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // Consumers retrieve the live manager via `ctx.runtime?.encryption?.getManager()`.
   const encryptionSlot: GeneweaveEncryptionSlot = geneweaveEncryptionSlot();
 
+  // Phase 0 (runtime): one shared signal bus for the entire process. Set as
+  // the framework default so every resilience pipeline that calls
+  // `getDefaultSignalBus()` emits here. The adapter exposes `getState()` and
+  // latency percentiles so any consumer can query circuit state through
+  // `ctx.runtime.resilience` without importing the global singleton.
+  const signalBus = createResilienceSignalBus();
+  setDefaultSignalBus(signalBus);
+  const resilienceAdapter = createRuntimeResilienceAdapter(signalBus);
+
   const runtime = weaveRuntime({
     tracer: consoleTracer,
     secrets: envSecretResolver(),
@@ -319,6 +329,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     redactor: defaultRedactor,
     guardrails: guardrailsSlot,
     encryption: encryptionSlot,
+    resilience: resilienceAdapter,
     installDefaultTracer: true,
   });
   // `installDefaultTracer: true` already wired the runtime's tracer as the
@@ -607,9 +618,11 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     log.warn('failed to start trigger dispatcher', { reason: String(err) });
   }
 
-  // 5a. Resilience Phase 4: subscribe to the process-wide signal bus and
+  // 5a. Resilience Phase 4: subscribe to the shared signal bus and
   // batch-write per-endpoint counters into `endpoint_health` every ~1s.
-  applyDbResilienceObserver(db);
+  // Pass the explicit bus so the observer and runtime.resilience share one
+  // event source rather than each holding an independent reference.
+  applyDbResilienceObserver(db, signalBus);
 
   // 5b. anyWeave Phase 5: daily regression detection on capability signals
   startRoutingRegressionJob(db);
@@ -641,6 +654,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
       providers: activeProviders,
       defaultProvider: config.defaultProvider,
       defaultModel: config.defaultModel,
+      runtime,
     });
     if (genericSupervisor) startedHandles.push(genericSupervisor);
   } catch (err) {

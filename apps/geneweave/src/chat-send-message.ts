@@ -213,6 +213,31 @@ export async function sendMessageImpl(
     }
   }
 
+  // Phase 0: pre-LLM input guardrail gate. Runs on the post-redaction content
+  // so PII-stripped text is evaluated. Fail-open: a missing slot or thrown
+  // check is treated as allow (guardrails are never load-bearing).
+  if (deps.config.runtime?.guardrails?.checkInput) {
+    try {
+      const inputCheck = await deps.config.runtime.guardrails.checkInput(ctx, processedContent);
+      if (!inputCheck.allow) {
+        const denyContent = inputCheck.reason ?? 'Your message was blocked by a content guardrail.';
+        const assistMsgId = newUUIDv7();
+        await deps.db.addMessage({
+          id: assistMsgId, chatId, role: 'assistant', content: denyContent,
+          metadata: JSON.stringify({ guardrail: { decision: 'deny', reason: denyContent }, traceId }),
+        });
+        return {
+          assistantContent: denyContent,
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          cost: 0, latencyMs: Date.now() - startMs,
+          guardrail: { decision: 'deny', reason: denyContent },
+        };
+      }
+    } catch {
+      // fail-open on check error
+    }
+  }
+
   const skillContext = await discoverSkillsForInput(
     deps.db,
     processedContent,

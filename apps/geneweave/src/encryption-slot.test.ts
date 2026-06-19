@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { RuntimeCapabilities } from '@weaveintel/core';
 import { createGeneWeave, type GeneWeaveApp } from './index.js';
 import type { TenantKeyManager } from '@weaveintel/encryption';
+import { geneweaveEncryptionSlot } from './encryption-slot.js';
 
 const PHASE_F_KEY = 'a'.repeat(64); // 32 bytes hex
 
@@ -53,5 +54,46 @@ describe('Phase F — encryption runtime slot', () => {
     expect(manager).not.toBeNull();
     expect(typeof manager?.encrypt).toBe('function');
     expect(typeof manager?.decrypt).toBe('function');
+  });
+});
+
+// ── Phase 0 — isActive() unit tests (no DB needed) ──────────────────────────
+
+describe('Phase 0 — geneweaveEncryptionSlot.isActive()', () => {
+  const prevKey = process.env['VAULT_KEY'];
+
+  afterEach(() => {
+    if (prevKey === undefined) delete process.env['VAULT_KEY'];
+    else process.env['VAULT_KEY'] = prevKey;
+  });
+
+  it('returns false when no manager is set', () => {
+    delete process.env['VAULT_KEY'];
+    const slot = geneweaveEncryptionSlot(null);
+    expect(slot.isActive()).toBe(false);
+  });
+
+  it('returns false when manager is set but VAULT_KEY env is absent', () => {
+    delete process.env['VAULT_KEY'];
+    // Create a minimal stub that satisfies TenantKeyManager structurally
+    const fakeManager = { encrypt: async () => '', decrypt: async () => '' } as unknown as TenantKeyManager;
+    const slot = geneweaveEncryptionSlot(fakeManager);
+    expect(slot.isActive()).toBe(false);
+  });
+
+  it('returns true when manager is set and VAULT_KEY is present', () => {
+    process.env['VAULT_KEY'] = 'test-vault-key';
+    const fakeManager = { encrypt: async () => '', decrypt: async () => '' } as unknown as TenantKeyManager;
+    const slot = geneweaveEncryptionSlot(fakeManager);
+    expect(slot.isActive()).toBe(true);
+  });
+
+  it('returns false after setManager(null) even when VAULT_KEY is present', () => {
+    process.env['VAULT_KEY'] = 'test-vault-key';
+    const fakeManager = { encrypt: async () => '', decrypt: async () => '' } as unknown as TenantKeyManager;
+    const slot = geneweaveEncryptionSlot(fakeManager);
+    expect(slot.isActive()).toBe(true);
+    slot.setManager(null);
+    expect(slot.isActive()).toBe(false);
   });
 });

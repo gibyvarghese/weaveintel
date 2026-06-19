@@ -80,6 +80,11 @@ export {
   ADAPTIVE_BUDGET_MIN_MS,
 } from './latency-tracker.js';
 
+export {
+  type RuntimeResilienceAdapter,
+  createRuntimeResilienceAdapter,
+} from './runtime-adapter.js';
+
 /**
  * Canonical provider-level resilience defaults (Phase 5 — consolidation).
  * All three built-in LLM providers (OpenAI, Anthropic, Google) use these

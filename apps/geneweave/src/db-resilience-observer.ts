@@ -9,7 +9,7 @@
  * SQLite handle can never break a model call or tool call upstream.
  */
 
-import { getDefaultSignalBus, type ResilienceSignal } from '@weaveintel/resilience';
+import { getDefaultSignalBus, type ResilienceSignal, type ResilienceSignalBus } from '@weaveintel/resilience';
 import type { DatabaseAdapter, EndpointHealthDelta } from './db-types.js';
 
 const FLUSH_INTERVAL_MS = 1000;
@@ -33,11 +33,17 @@ export interface DbResilienceObserverHandle {
   stop: () => void;
 }
 
-export function applyDbResilienceObserver(db: DatabaseAdapter): DbResilienceObserverHandle {
-  const bus = getDefaultSignalBus();
+/**
+ * @param bus - When supplied, subscribes to this bus directly. When omitted,
+ *   falls back to `getDefaultSignalBus()` for backward compatibility.
+ *   Pass the same bus that was given to `createRuntimeResilienceAdapter(bus)`
+ *   so the observer and the runtime share one event source.
+ */
+export function applyDbResilienceObserver(db: DatabaseAdapter, bus?: ResilienceSignalBus): DbResilienceObserverHandle {
+  const activeBus = bus ?? getDefaultSignalBus();
   const pending = new Map<string, MutableDelta>();
 
-  const off = bus.on((sig: ResilienceSignal) => {
+  const off = activeBus.on((sig: ResilienceSignal) => {
     try {
       const d = ensure(pending, sig.endpoint);
       d.last_signal_at = isoFrom(sig.at);
