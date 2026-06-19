@@ -247,7 +247,7 @@ export async function streamMessageImpl(
   const ctx = weaveContext({
     runtime: deps.config.runtime,
     userId,
-    deadline: Date.now() + 120_000,
+    deadline: Date.now() + 5 * 60_000,
     signal: abortController.signal,
     metadata: { traceId, chatId },
   });

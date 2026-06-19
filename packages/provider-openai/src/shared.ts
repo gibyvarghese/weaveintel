@@ -21,7 +21,7 @@ export interface OpenAIProviderOptions {
 }
 
 export const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
-const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 5 * 60_000;
 
 export function resolveApiKey(options?: OpenAIProviderOptions): string {
   const key = options?.apiKey ?? process.env['OPENAI_API_KEY'];
