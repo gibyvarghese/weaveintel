@@ -63,9 +63,11 @@ export function makeHeaders(
 export const parseRetryAfterMs = coreParseRetryAfterMs;
 
 function composeRequestSignal(signal?: AbortSignal): AbortSignal {
-  const timeoutSignal = AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS);
-  if (!signal) return timeoutSignal;
-  return AbortSignal.any([signal, timeoutSignal]);
+  // The caller's signal carries the context deadline — it is the authoritative
+  // budget. Pass it through directly. Only fall back to a provider-level timeout
+  // for background calls that have no request context (capability probes, etc.).
+  if (signal) return signal;
+  return AbortSignal.timeout(DEFAULT_REQUEST_TIMEOUT_MS);
 }
 
 // ─── Resilience pipeline (process-wide, endpoint-scoped) ────

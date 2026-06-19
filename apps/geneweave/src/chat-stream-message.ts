@@ -190,6 +190,28 @@ async function maybeAutoTitleChat(
   }
 }
 
+// ─── Stream budget policy ────────────────────────────────────────────────────
+// Deadline and time-to-first-token budgets vary by request category.
+// Agent chains need more time; simple chat needs far less than 5 minutes.
+const STREAM_BUDGETS = {
+  agentChain:   { deadlineMs: 10 * 60_000, ttftMs: 45_000 },
+  fileAnalysis: { deadlineMs:  5 * 60_000, ttftMs: 30_000 },
+  simpleChat:   { deadlineMs:  2 * 60_000, ttftMs: 20_000 },
+} as const;
+
+function selectStreamBudget(
+  mode: string,
+  attachments: ChatAttachment[],
+): { deadlineMs: number; ttftMs: number } {
+  if (mode === 'agent' || mode === 'supervisor' || mode === 'ensemble') {
+    return STREAM_BUDGETS.agentChain;
+  }
+  if (hasTabularDataAttachments(attachments) || attachments.length > 0) {
+    return STREAM_BUDGETS.fileAnalysis;
+  }
+  return STREAM_BUDGETS.simpleChat;
+}
+
 export async function streamMessageImpl(
   deps: StreamMessageDeps,
   res: ServerResponse,
@@ -235,6 +257,9 @@ export async function streamMessageImpl(
   const settings = settingsFromRow(await deps.db.getChatSettings(chatId));
   const resolvedSystemPrompt = await resolveSystemPrompt(deps.db, settings);
   const resolvedPrompt = await deps.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
+  // Resolve attachments early so budget selection can inspect them.
+  const attachments = normalizeAttachments(opts?.attachments);
+  const streamBudget = selectStreamBudget(settings.mode, attachments);
   const traceId = newUUIDv7();
   const abortController = new AbortController();
   let clientDisconnected = false;
@@ -247,12 +272,11 @@ export async function streamMessageImpl(
   const ctx = weaveContext({
     runtime: deps.config.runtime,
     userId,
-    deadline: Date.now() + 5 * 60_000,
+    deadline: Date.now() + streamBudget.deadlineMs,
     signal: abortController.signal,
     metadata: { traceId, chatId },
   });
 
-  const attachments = normalizeAttachments(opts?.attachments);
   const contentWithAttachments = composeUserInput(content, attachments);
 
   let processedContent = contentWithAttachments;
@@ -454,6 +478,7 @@ export async function streamMessageImpl(
   let streamErrored = false;
   let streamErrorMessage: string | undefined;
   let streamTelemetry: AgentRunTelemetry | undefined;
+  let ttftAborted = false;
 
   let ensembleMeta: { candidates: Array<{ agentName: string; output: string }>; rationale?: string; winner?: string } | undefined;
 
@@ -491,28 +516,47 @@ export async function streamMessageImpl(
       };
 
       if (model.stream) {
-        const stream = model.stream(ctx, request);
-        for await (const chunk of stream) {
-          if (chunk.type === 'text' && chunk.text) {
-            fullText += chunk.text;
-            const delivered = await deps.writeSseEvent(res, { type: 'text', text: chunk.text });
-            if (!delivered) {
-              clientDisconnected = true;
-              abortController.abort();
-              break;
-            }
-          } else if (chunk.type === 'reasoning' && chunk.reasoning) {
-            const delivered = await deps.writeSseEvent(res, { type: 'reasoning', text: chunk.reasoning });
-            if (!delivered) {
-              clientDisconnected = true;
-              abortController.abort();
-              break;
-            }
-          } else if (chunk.type === 'usage' && chunk.usage) {
-            finalUsage = { promptTokens: chunk.usage.promptTokens, completionTokens: chunk.usage.completionTokens, totalTokens: chunk.usage.totalTokens };
-          } else if (chunk.type === 'done') {
-            break;
+        // TTFT guard: if the provider doesn't emit any token within the budget,
+        // abort and surface a clear "provider unresponsive" error rather than
+        // silently waiting until the full deadline fires.
+        let firstTokenReceived = false;
+        const ttftTimer = setTimeout(() => {
+          if (!firstTokenReceived) {
+            ttftAborted = true;
+            abortController.abort();
           }
+        }, streamBudget.ttftMs);
+
+        const stream = model.stream(ctx, request);
+        try {
+          for await (const chunk of stream) {
+            if (!firstTokenReceived && (chunk.type === 'text' || chunk.type === 'reasoning')) {
+              firstTokenReceived = true;
+              clearTimeout(ttftTimer);
+            }
+            if (chunk.type === 'text' && chunk.text) {
+              fullText += chunk.text;
+              const delivered = await deps.writeSseEvent(res, { type: 'text', text: chunk.text });
+              if (!delivered) {
+                clientDisconnected = true;
+                abortController.abort();
+                break;
+              }
+            } else if (chunk.type === 'reasoning' && chunk.reasoning) {
+              const delivered = await deps.writeSseEvent(res, { type: 'reasoning', text: chunk.reasoning });
+              if (!delivered) {
+                clientDisconnected = true;
+                abortController.abort();
+                break;
+              }
+            } else if (chunk.type === 'usage' && chunk.usage) {
+              finalUsage = { promptTokens: chunk.usage.promptTokens, completionTokens: chunk.usage.completionTokens, totalTokens: chunk.usage.totalTokens };
+            } else if (chunk.type === 'done') {
+              break;
+            }
+          }
+        } finally {
+          clearTimeout(ttftTimer);
         }
       } else {
         const response = await model.generate(ctx, request);
@@ -523,7 +567,9 @@ export async function streamMessageImpl(
     }
   } catch (err: unknown) {
     streamErrored = true;
-    streamErrorMessage = err instanceof Error ? err.message : 'Stream error';
+    streamErrorMessage = ttftAborted
+      ? `Provider did not start responding within ${streamBudget.ttftMs / 1000}s (time-to-first-token exceeded). Please retry.`
+      : err instanceof Error ? err.message : 'Stream error';
     if (!clientDisconnected) {
       await deps.writeSseEvent(res, { type: 'error', error: streamErrorMessage });
     }
