@@ -2,18 +2,18 @@
  * Built-in handler kind: `a2a.inbound`.
  *
  * An A2A-aware variant of `agentic.react`. When an inbox message body is
- * valid JSON that conforms to the A2A `A2ATask` shape (has `id`, `input`,
- * and `input.parts` fields), the handler extracts the task text from the
- * parts array and passes it as the user goal to the ReAct loop. Non-A2A
- * messages fall through as plain `subject + body` text, identical to
- * `agentic.react` behaviour.
+ * valid JSON conforming to either:
+ *   - A2A v1.0 A2ATaskSendParams shape (`{ message: { parts: [...] } }`)
+ *   - A2A v0.3 legacy A2ATask shape (`{ id, input: { parts: [...] } }`)
+ *
+ * …the handler extracts text from the parts and passes it as the user goal to
+ * the ReAct loop. Non-A2A messages fall through as plain `subject + body` text,
+ * identical to `agentic.react` behaviour.
  *
  * --- When to use ---
  *
  * Register `a2a.inbound` on any agent that receives tasks dispatched from
- * another agent or from `POST /api/a2a/tasks` and needs to execute them
- * with LLM reasoning + tool calling. The binding config mirrors
- * `agentic.react`.
+ * another agent or from `POST /api/a2a/tasks` and needs LLM reasoning + tools.
  *
  * --- Config shape (live_agent_handler_bindings.config_json) ---
  *
@@ -25,7 +25,7 @@
  */
 
 import { weaveLiveAgent, type TaskHandler } from '@weaveintel/live-agents';
-import type { A2ATask } from '@weaveintel/core';
+import type { A2APart } from '@weaveintel/core';
 import type { HandlerContext, HandlerKindRegistration } from '../handler-registry.js';
 
 export interface A2AInboundConfig {
@@ -44,27 +44,54 @@ function readConfig(raw: Record<string, unknown>): A2AInboundConfig {
   return cfg;
 }
 
-/** Extract user-visible text from an A2A task. */
-function extractA2AGoal(task: A2ATask): string {
-  const textParts = task.input.parts
-    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-    .map((p) => p.text);
-  return textParts.join('\n').trim() || `A2A task id=${task.id}`;
+/** Extract text from v1.0 A2APart (field-presence, no `type` discriminator). */
+function partText(p: A2APart): string {
+  if (typeof p.text === 'string') return p.text;
+  if (p.data !== undefined) return JSON.stringify(p.data);
+  if (typeof p.url === 'string') return `[File: ${p.filename ?? p.url}]`;
+  return '';
 }
 
-/** Try to parse body as A2ATask. Returns null on any failure. */
-function tryParseA2ATask(body: string): A2ATask | null {
+/** Extract user-visible text from A2APart array. */
+function extractPartsGoal(parts: readonly A2APart[]): string {
+  return parts.map(partText).filter(Boolean).join('\n').trim();
+}
+
+/**
+ * Try to parse body as an A2A task — supports both v1.0 and v0.3 shapes.
+ * Returns extracted text goal, or null if not a recognised A2A shape.
+ */
+function tryExtractA2AGoal(body: string): { goal: string; taskId: string } | null {
   try {
-    const parsed = JSON.parse(body);
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    // v1.0 A2ATaskSendParams: { message: { role, parts: [...] } }
+    const msg = parsed['message'];
     if (
-      parsed &&
-      typeof parsed === 'object' &&
-      typeof parsed['id'] === 'string' &&
-      parsed['input'] &&
-      typeof parsed['input'] === 'object' &&
-      Array.isArray(parsed['input']['parts'])
+      msg &&
+      typeof msg === 'object' &&
+      Array.isArray((msg as Record<string, unknown>)['parts'])
     ) {
-      return parsed as A2ATask;
+      const parts = (msg as Record<string, unknown>)['parts'] as A2APart[];
+      const goal = extractPartsGoal(parts);
+      const taskId = (parsed['metadata'] as Record<string, unknown> | undefined)?.['taskId'] as string ?? 'unknown';
+      return goal ? { goal, taskId } : null;
+    }
+
+    // v0.3 legacy A2ATask: { id, input: { role, parts: [...] } }
+    const input = parsed['input'];
+    if (
+      typeof parsed['id'] === 'string' &&
+      input &&
+      typeof input === 'object' &&
+      Array.isArray((input as Record<string, unknown>)['parts'])
+    ) {
+      const parts = (input as Record<string, unknown>)['parts'] as A2APart[];
+      const goal = extractPartsGoal(parts);
+      const skill = parsed['skill'] as string | undefined;
+      const taskId = parsed['id'] as string;
+      return goal ? { goal: skill ? `[${skill}] ${goal}` : goal, taskId } : null;
     }
   } catch {
     // not JSON or wrong shape
@@ -100,10 +127,10 @@ function buildA2AInbound(ctx: HandlerContext): TaskHandler {
 
       let userGoal: string;
       if (inbound) {
-        const a2aTask = tryParseA2ATask(inbound.body);
-        if (a2aTask) {
-          userGoal = extractA2AGoal(a2aTask);
-          ctx.log(`a2a.inbound: parsed A2ATask id=${a2aTask.id} skill=${a2aTask.skill ?? '(none)'}`);
+        const a2aGoal = tryExtractA2AGoal(inbound.body);
+        if (a2aGoal) {
+          userGoal = a2aGoal.goal;
+          ctx.log(`a2a.inbound: parsed A2A task id=${a2aGoal.taskId}`);
         } else {
           userGoal = inbound.subject
             ? `Subject: ${inbound.subject}\n\n${inbound.body}`
@@ -126,8 +153,9 @@ function buildA2AInbound(ctx: HandlerContext): TaskHandler {
 export const a2aInboundHandler: HandlerKindRegistration = {
   kind: 'a2a.inbound',
   description:
-    'A2A-aware ReAct loop. Processes inbox messages formatted as A2A Tasks ' +
-    '(JSON with id + input.parts) as well as plain text messages. ' +
+    'A2A-aware ReAct loop. Processes inbox messages formatted as A2A v1.0 Tasks ' +
+    '(A2ATaskSendParams with message.parts) or v0.3 legacy tasks (id + input.parts). ' +
+    'Falls through to plain text for non-A2A messages. ' +
     'Use for agents that receive A2A protocol tasks from remote agents.',
   configSchema: {
     type: 'object',

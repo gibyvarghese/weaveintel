@@ -1,59 +1,49 @@
 /**
- * Example 06: Agent-to-Agent (A2A) Communication
+ * Example 06: Agent-to-Agent (A2A) Communication — v1.0
  *
- * Demonstrates the internal A2A bus for in-process agent delegation.
- * Two agents (summarizer and translator) communicate via the bus.
+ * Demonstrates the in-process A2A bus using A2A v1.0 types:
+ *   - A2ATaskSendParams (message.parts — field-presence, no type discriminator)
+ *   - A2ATask response (contextId, artifacts[], history[], status.state)
+ *   - AgentCard v1.0 (supportedInterfaces[], capabilities object, skills with id)
+ *   - handleMessage() as the primary handler (replaces handleTask)
  *
- * WeaveIntel packages used:
- *   @weaveintel/core    — ExecutionContext, EventBus, ToolRegistry, and A2A type definitions
- *                         (AgentCard, A2AServer, A2ATask, A2ATaskResult)
- *   @weaveintel/a2a     — weaveA2ABus() creates an in-process message bus that implements
- *                         Google's Agent-to-Agent protocol for agent discovery & delegation
- *   @weaveintel/agents  — weaveAgent() for creating the underlying ReAct agents
- *   @weaveintel/testing — weaveFakeModel() for deterministic responses
+ * Two agents (summarizer and translator) communicate via the in-process bus.
  *
- * A2A (Agent-to-Agent) is an open protocol for agent interoperability.
- * Each agent publishes an AgentCard describing its capabilities, and other
- * agents can discover and send tasks to it via the bus.
+ * Packages used:
+ *   @weaveintel/core    — A2A types, ExecutionContext
+ *   @weaveintel/a2a     — weaveA2ABus() in-process bus
+ *   @weaveintel/agents  — weaveAgent()
+ *   @weaveintel/testing — weaveFakeModel()
  */
 import {
   weaveContext,
   weaveEventBus,
   weaveSetDefaultTracer,
   weaveToolRegistry,
+  newUUIDv7,
 } from '@weaveintel/core';
-import type { AgentCard, A2AServer, A2ATask, A2ATaskResult, ExecutionContext } from '@weaveintel/core';
+import type {
+  AgentCard,
+  A2AServer,
+  A2ATask,
+  A2ATaskSendParams,
+  ExecutionContext,
+} from '@weaveintel/core';
+import { a2aTaskOutputText } from '@weaveintel/core';
 import { weaveA2ABus } from '@weaveintel/a2a';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveConsoleTracer } from '@weaveintel/observability';
 import { weaveFakeModel } from '@weaveintel/testing';
-
-/** Helper to extract text from an A2ATask input */
-function taskText(task: A2ATask): string {
-  return task.input.parts
-    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-    .map((p) => p.text)
-    .join('\n');
-}
 
 async function main() {
   weaveSetDefaultTracer(weaveConsoleTracer());
 
   const bus = weaveEventBus();
   const ctx = weaveContext({ userId: 'demo-user' });
-
-  // weaveA2ABus() creates the A2A message bus — a registry + dispatcher.
-  // Agents register as A2AServer instances with an AgentCard (name, description,
-  // capabilities, version). You can then discover agents via listAgents() and
-  // send tasks via send(). The bus handles routing, execution, and result delivery.
   const a2aBus = weaveA2ABus();
 
-  // --- Register Agent 1: Summarizer ---
-  // Each A2A agent wraps a weaveAgent with an A2AServer adapter.
-  // The A2AServer interface requires:
-  //   • card       — AgentCard with name, description, capabilities array, and URL
-  //   • handleTask — receives an A2ATask (with input parts) and returns an A2ATaskResult
-  //   • start/stop — lifecycle hooks (no-ops here since we're in-process)
+  // ── Register Agent 1: Summarizer ──────────────────────────────────────────
+
   const summarizerModel = weaveFakeModel({
     responses: [
       {
@@ -71,34 +61,49 @@ async function main() {
     maxSteps: 3,
   });
 
-  const summarizerServer: A2AServer = {
-    card: {
-      name: 'summarizer',
-      description: 'Summarizes text into concise bullet points',
-      url: 'a2a://internal/summarizer',
-      capabilities: ['text.summarize'],
-      version: '1.0.0',
+  const summarizerCard: AgentCard = {
+    name: 'summarizer',
+    description: 'Summarizes text into concise bullet points',
+    version: '1.0.0',
+    skills: [{ id: 'summarize', name: 'Summarize', description: 'Summarize text concisely' }],
+    capabilities: {
+      streaming: false,
+      pushNotifications: false,
+      extendedAgentCard: false,
+      stateTransitionHistory: false,
     },
-    async handleTask(taskCtx: ExecutionContext, task: A2ATask): Promise<A2ATaskResult> {
+    supportedInterfaces: [
+      { url: 'a2a://internal/summarizer', protocolBinding: 'JSONRPC', protocolVersion: '1.0' },
+    ],
+  };
+
+  const summarizerServer: A2AServer = {
+    card: summarizerCard,
+    async handleMessage(taskCtx: ExecutionContext, params: A2ATaskSendParams): Promise<A2ATask> {
+      const textParts = params.message.parts
+        .map((p) => (typeof p.text === 'string' ? p.text : ''))
+        .filter(Boolean);
       const result = await summarizerAgent.run(taskCtx, {
-        messages: [{ role: 'user', content: taskText(task) }],
+        messages: [{ role: 'user', content: textParts.join('\n') }],
       });
+      const taskId = newUUIDv7();
+      const contextId = params.message.contextId ?? taskId;
       return {
-        id: task.id,
-        status: 'completed',
-        output: { role: 'agent', parts: [{ type: 'text', text: result.output }] },
+        id: taskId,
+        contextId,
+        status: { state: 'TASK_STATE_COMPLETED', timestamp: new Date().toISOString() },
+        artifacts: [{ artifactId: `${taskId}-out`, name: 'summary', parts: [{ text: result.output }] }],
+        history: [params.message, { role: 'agent', parts: [{ text: result.output }], contextId }],
       };
     },
     async start() {},
     async stop() {},
   };
 
-  // a2aBus.register() adds the agent to the bus under a string key.
-  // Other agents (or the main program) can now discover it via listAgents()
-  // and send tasks to it via send(ctx, 'summarizer', task).
   a2aBus.register('summarizer', summarizerServer);
 
-  // --- Register Agent 2: Translator ---
+  // ── Register Agent 2: Translator ──────────────────────────────────────────
+
   const translatorModel = weaveFakeModel({
     responses: [
       {
@@ -116,22 +121,39 @@ async function main() {
     maxSteps: 3,
   });
 
-  const translatorServer: A2AServer = {
-    card: {
-      name: 'translator',
-      description: 'Translates text to other languages',
-      url: 'a2a://internal/translator',
-      capabilities: ['text.translate'],
-      version: '1.0.0',
+  const translatorCard: AgentCard = {
+    name: 'translator',
+    description: 'Translates text to other languages',
+    version: '1.0.0',
+    skills: [{ id: 'translate', name: 'Translate', description: 'Translate text to a target language' }],
+    capabilities: {
+      streaming: false,
+      pushNotifications: false,
+      extendedAgentCard: false,
+      stateTransitionHistory: false,
     },
-    async handleTask(taskCtx: ExecutionContext, task: A2ATask): Promise<A2ATaskResult> {
+    supportedInterfaces: [
+      { url: 'a2a://internal/translator', protocolBinding: 'JSONRPC', protocolVersion: '1.0' },
+    ],
+  };
+
+  const translatorServer: A2AServer = {
+    card: translatorCard,
+    async handleMessage(taskCtx: ExecutionContext, params: A2ATaskSendParams): Promise<A2ATask> {
+      const textParts = params.message.parts
+        .map((p) => (typeof p.text === 'string' ? p.text : ''))
+        .filter(Boolean);
       const result = await translatorAgent.run(taskCtx, {
-        messages: [{ role: 'user', content: taskText(task) }],
+        messages: [{ role: 'user', content: textParts.join('\n') }],
       });
+      const taskId = newUUIDv7();
+      const contextId = params.message.contextId ?? taskId;
       return {
-        id: task.id,
-        status: 'completed',
-        output: { role: 'agent', parts: [{ type: 'text', text: result.output }] },
+        id: taskId,
+        contextId,
+        status: { state: 'TASK_STATE_COMPLETED', timestamp: new Date().toISOString() },
+        artifacts: [{ artifactId: `${taskId}-out`, name: 'translation', parts: [{ text: result.output }] }],
+        history: [params.message, { role: 'agent', parts: [{ text: result.output }], contextId }],
       };
     },
     async start() {},
@@ -140,50 +162,52 @@ async function main() {
 
   a2aBus.register('translator', translatorServer);
 
-  // --- Use the bus ---
-  // listAgents() returns all registered AgentCards — useful for agent discovery.
-  // In a distributed setup, agents could be on different machines and discovered
-  // via HTTP; the in-process bus is a lightweight alternative for monolith apps.
+  // ── Discover agents via the bus ───────────────────────────────────────────
+
   console.log('=== Discover Agents ===');
   const agents = a2aBus.listAgents();
   for (const card of agents) {
-    console.log(`  ${card.name}: ${card.description} [${card.capabilities.join(', ')}]`);
+    const skillNames = card.skills.map((s) => s.id).join(', ');
+    console.log(`  ${card.name}: ${card.description} [skills: ${skillNames}]`);
+    console.log(`    streaming: ${card.capabilities.streaming}, endpoint: ${card.supportedInterfaces[0]?.url}`);
   }
 
-  // a2aBus.send() dispatches a task to a named agent and awaits its result.
-  // The task input uses A2A's multipart message format (role + parts array),
-  // supporting text, file, and data parts. The result follows the same format.
-  console.log('\n=== Summarize ===');
-  const summaryResult = await a2aBus.send(ctx, 'summarizer', {
-    id: 'task-1',
-    input: {
-      role: 'user',
-      parts: [{
-        type: 'text',
-        text: 'weaveIntel is a production-grade, protocol-first, capability-driven AI framework written in TypeScript. It supports multiple LLM types, vector stores, agents, MCP, A2A, memory, redaction, and observability.',
-      }],
-    },
-  });
-  const summaryText = summaryResult.output?.parts
-    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-    .map((p) => p.text)
-    .join('') ?? '';
-  console.log('Result:', summaryText);
+  // ── Send a task to summarizer ─────────────────────────────────────────────
 
-  // Send to translator
-  console.log('\n=== Translate ===');
-  const translateResult = await a2aBus.send(ctx, 'translator', {
-    id: 'task-2',
-    input: {
+  console.log('\n=== Summarize ===');
+  const sessionContextId = newUUIDv7();
+
+  // v1.0: A2ATaskSendParams with message.parts (no `type` field on parts)
+  const summaryResult = await a2aBus.send(ctx, 'summarizer', {
+    message: {
       role: 'user',
-      parts: [{ type: 'text', text: `Translate to French: ${summaryText}` }],
+      parts: [{ text: 'weaveIntel is a production-grade, protocol-first, capability-driven AI framework written in TypeScript. It supports multiple LLM types, vector stores, agents, MCP, A2A, memory, redaction, and observability.' }],
+      contextId: sessionContextId,
+      messageId: newUUIDv7(),
     },
   });
-  const translateText = translateResult.output?.parts
-    .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-    .map((p) => p.text)
-    .join('') ?? '';
-  console.log('Result:', translateText);
+
+  console.log('Task state:', summaryResult.status.state);
+  const summaryText = a2aTaskOutputText(summaryResult);
+  console.log('Summary:', summaryText);
+  console.log('Artifacts:', summaryResult.artifacts.length, '| History msgs:', summaryResult.history.length);
+
+  // ── Chain to translator using same contextId ──────────────────────────────
+
+  console.log('\n=== Translate (chained, same contextId) ===');
+  const translateResult = await a2aBus.send(ctx, 'translator', {
+    message: {
+      role: 'user',
+      parts: [{ text: `Translate to French: ${summaryText}` }],
+      contextId: sessionContextId,  // same session context
+      messageId: newUUIDv7(),
+      referenceTaskIds: [summaryResult.id],  // reference prior task
+    },
+  });
+
+  console.log('Task state:', translateResult.status.state);
+  console.log('Translation:', a2aTaskOutputText(translateResult));
+  console.log('ContextId consistent:', translateResult.contextId === sessionContextId);
 }
 
 main().catch(console.error);

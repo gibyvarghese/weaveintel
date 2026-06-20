@@ -274,33 +274,90 @@ export function buildOpenApiSpec(): object {
             lastUsedAt: { type: 'string', format: 'date-time', nullable: true },
           },
         },
-        A2ATask: {
+        A2APart: {
           type: 'object',
-          required: ['id', 'input'],
+          description: 'A2A v1.0 Part — field-presence polymorphism (no type discriminator)',
           properties: {
-            id: { type: 'string' },
-            input: {
+            text: { type: 'string' },
+            raw: { type: 'string', description: 'base64-encoded bytes' },
+            url: { type: 'string', description: 'Remote file reference' },
+            data: { description: 'Structured JSON value' },
+            mediaType: { type: 'string' },
+            filename: { type: 'string' },
+          },
+        },
+        A2AMessage: {
+          type: 'object',
+          required: ['role', 'parts'],
+          properties: {
+            role: { type: 'string', enum: ['user', 'agent'] },
+            parts: { type: 'array', items: { $ref: '#/components/schemas/A2APart' } },
+            messageId: { type: 'string' },
+            contextId: { type: 'string' },
+            taskId: { type: 'string' },
+          },
+        },
+        A2ATaskSendParams: {
+          type: 'object',
+          required: ['message'],
+          description: 'A2A v1.0 task submission params (what clients send)',
+          properties: {
+            message: { $ref: '#/components/schemas/A2AMessage' },
+            configuration: {
               type: 'object',
-              required: ['parts'],
               properties: {
-                parts: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      type: { type: 'string', enum: ['text', 'data'] },
-                      text: { type: 'string' },
-                      data: { type: 'object' },
-                    },
-                  },
-                },
+                acceptedOutputModes: { type: 'array', items: { type: 'string' } },
+                returnImmediately: { type: 'boolean' },
+                historyLength: { type: 'integer' },
               },
             },
             metadata: { type: 'object', nullable: true },
           },
         },
+        A2ATask: {
+          type: 'object',
+          required: ['id', 'contextId', 'status', 'artifacts', 'history'],
+          description: 'A2A v1.0 Task object (what the server returns)',
+          properties: {
+            id: { type: 'string' },
+            contextId: { type: 'string' },
+            status: {
+              type: 'object',
+              required: ['state', 'timestamp'],
+              properties: {
+                state: {
+                  type: 'string',
+                  enum: [
+                    'TASK_STATE_SUBMITTED', 'TASK_STATE_WORKING', 'TASK_STATE_COMPLETED',
+                    'TASK_STATE_FAILED', 'TASK_STATE_CANCELED', 'TASK_STATE_INPUT_REQUIRED',
+                    'TASK_STATE_AUTH_REQUIRED', 'TASK_STATE_REJECTED',
+                  ],
+                },
+                message: { $ref: '#/components/schemas/A2AMessage', nullable: true },
+                timestamp: { type: 'string', format: 'date-time' },
+              },
+            },
+            artifacts: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['artifactId', 'name', 'parts'],
+                properties: {
+                  artifactId: { type: 'string' },
+                  name: { type: 'string' },
+                  parts: { type: 'array', items: { $ref: '#/components/schemas/A2APart' } },
+                },
+              },
+            },
+            history: { type: 'array', items: { $ref: '#/components/schemas/A2AMessage' } },
+            metadata: { type: 'object', nullable: true },
+          },
+        },
+        // Deprecated — kept for OpenAPI clients on old schema
         A2ATaskResult: {
           type: 'object',
+          deprecated: true,
+          description: 'Deprecated: use A2ATask (v1.0)',
           required: ['id', 'status'],
           properties: {
             id: { type: 'string' },
@@ -1802,35 +1859,39 @@ export function buildOpenApiSpec(): object {
         },
       },
 
-      // ── A2A ─────────────────────────────────────────────────────────────────
-      '/.well-known/agent.json': {
-        get: {
-          operationId: 'getAgentCard',
-          summary: 'A2A Agent Card discovery (legacy path)',
-          tags: ['a2a'],
-          security: [],
-          responses: { 200: { description: 'Agent Card', content: { 'application/json': { schema: { type: 'object' } } } } },
-        },
-      },
+      // ── A2A (v1.0) ──────────────────────────────────────────────────────────
       '/.well-known/agent-card.json': {
         get: {
-          operationId: 'getAgentCardV2',
-          summary: 'A2A Agent Card discovery (current spec path)',
+          operationId: 'getAgentCard',
+          summary: 'A2A v1.0 Agent Card discovery',
           tags: ['a2a'],
           security: [],
-          responses: { 200: { description: 'Agent Card', content: { 'application/json': { schema: { type: 'object' } } } } },
+          responses: { 200: { description: 'A2A v1.0 AgentCard', content: { 'application/json': { schema: { type: 'object' } } } } },
+        },
+      },
+      '/.well-known/agent.json': {
+        get: {
+          operationId: 'getAgentCardLegacy',
+          summary: 'A2A Agent Card discovery (v0.3 legacy path)',
+          tags: ['a2a'],
+          security: [],
+          responses: { 200: { description: 'AgentCard (same as agent-card.json)', content: { 'application/json': { schema: { type: 'object' } } } } },
         },
       },
       '/api/a2a/tasks': {
         post: {
           operationId: 'submitA2ATask',
-          summary: 'Submit an A2A task (synchronous; result returned in the response)',
+          summary: 'Submit an A2A task (v1.0 A2ATaskSendParams; synchronous)',
+          description: 'Accepts A2ATaskSendParams (message.parts). Returns A2ATask with v1.0 state (TASK_STATE_COMPLETED / TASK_STATE_FAILED).',
           tags: ['a2a'],
           security: [{ bearerAuth: [] }],
-          requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/A2ATask' } } } },
+          requestBody: {
+            required: true,
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/A2ATaskSendParams' } } },
+          },
           responses: {
-            200: { description: 'Task result', content: { 'application/json': { schema: { $ref: '#/components/schemas/A2ATaskResult' } } } },
-            400: { description: 'Invalid task' },
+            200: { description: 'A2A Task (v1.0)', content: { 'application/json': { schema: { $ref: '#/components/schemas/A2ATask' } } } },
+            400: { description: 'Invalid params' },
             401: { description: 'Bearer token required' },
           },
         },
@@ -1838,12 +1899,16 @@ export function buildOpenApiSpec(): object {
       '/api/a2a/tasks/{taskId}': {
         get: {
           operationId: 'getA2ATask',
-          summary: 'Poll A2A task status (always completed for synchronous tasks)',
+          summary: 'Poll A2A task status',
+          description: 'Returns the A2ATask. For synchronous tasks the result was delivered in the POST response; this returns TASK_STATE_COMPLETED.',
           tags: ['a2a'],
           security: [{ bearerAuth: [] }],
-          parameters: [{ name: 'taskId', in: 'path', required: true, schema: { type: 'string' } }],
+          parameters: [
+            { name: 'taskId', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'historyLength', in: 'query', required: false, schema: { type: 'integer' } },
+          ],
           responses: {
-            200: { description: 'Task status', content: { 'application/json': { schema: { $ref: '#/components/schemas/A2ATaskResult' } } } },
+            200: { description: 'A2A Task (v1.0)', content: { 'application/json': { schema: { $ref: '#/components/schemas/A2ATask' } } } },
             401: { description: 'Bearer token required' },
           },
         },

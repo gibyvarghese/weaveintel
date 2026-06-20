@@ -1,28 +1,26 @@
 /**
- * @weaveintel/a2a — Agent-as-A2A-server adapter (W6)
+ * @weaveintel/a2a — Agent-as-A2A-server adapter (v1.0)
  *
- * `weaveAgentAsA2AServer` wraps a `weaveAgent` (or any `Agent`) as an `A2AServer`
- * value. Register the returned server on an `InternalA2ABus` for in-process
+ * `weaveAgentAsA2AServer` wraps any `Agent` as an `A2AServer` conforming to
+ * A2A v1.0. Register the returned server on an `InternalA2ABus` for in-process
  * discovery, or mount it behind HTTP routes for external A2A clients.
  *
- * The adapter:
- *   1. Maps inbound `A2ATask.input.parts` to `AgentInput.messages` (text parts
- *      become user messages; data parts are JSON-stringified).
- *   2. Calls `agent.run(ctx, input)` under the normal guardrails/budget/audit path.
- *   3. Maps `AgentResult.output` back to an `A2ATaskResult` with `status: 'completed'`.
- *   4. For failures, maps to `status: 'failed'` with the error in `result.error`.
- *
- * Transport and HTTP serving stay in the app layer (geneWeave registers these
- * as HTTP routes behind auth — see apps/geneweave/src/routes/a2a.ts).
+ * v1.0 changes vs v0.3:
+ *   - `handleMessage(ctx, params: A2ATaskSendParams)` is the primary handler
+ *   - Returns `A2ATask` (with contextId, artifacts[], history[]) not A2ATaskResult
+ *   - `handleStreamMessage` yields `A2AStreamEvent` (statusUpdate + artifactUpdate)
+ *   - `handleTask` / `handleStreamTask` kept as deprecated shims for old callers
  *
  * @example
  * const server = weaveAgentAsA2AServer({
  *   agent: weaveAgent({ model, tools }),
  *   card: {
  *     name: 'research-agent',
- *     description: 'Performs scientific literature research',
- *     url: 'https://api.example.com/a2a/research-agent',
- *     capabilities: ['web-search', 'pdf-reading'],
+ *     description: 'Performs research tasks',
+ *     version: '1.0.0',
+ *     skills: [{ id: 'research', name: 'Research', description: 'Web research' }],
+ *     capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false, stateTransitionHistory: false },
+ *     supportedInterfaces: [{ url: 'https://api.example.com/a2a', protocolBinding: 'JSONRPC', protocolVersion: '1.0' }],
  *   },
  * });
  * bus.register('research-agent', server);
@@ -34,58 +32,59 @@ import type {
   A2AServer,
   A2ATask,
   A2ATaskResult,
+  A2ATaskLegacy,
+  A2ATaskSendParams,
+  A2AStreamEvent,
+  TaskStatusUpdateEvent,
+  TaskArtifactUpdateEvent,
+  A2AArtifact,
   AgentCard,
   A2APart,
+  A2AMessage,
   ExecutionContext,
 } from '@weaveintel/core';
-import { weaveAudit } from '@weaveintel/core';
+import {
+  weaveAudit,
+  newUUIDv7,
+  a2aPartsText,
+  makeCompletedA2ATask,
+  makeFailedA2ATask,
+} from '@weaveintel/core';
 
 export interface AgentA2AServerOptions {
   /** The agent to wrap as an A2A server. */
   agent: Agent;
   /**
-   * Agent Card published at `/.well-known/agent.json`.
-   * Populate `url` with the public base URL if this agent is served externally.
+   * Agent Card published at `/.well-known/agent-card.json`.
+   * `supportedInterfaces[0].url` should be the public base URL of this agent.
    */
   card: AgentCard;
 }
 
-/**
- * Extract the text content from A2A task parts.
- * Text parts are concatenated; data parts are JSON-stringified.
- * File parts produce a placeholder (agents cannot process raw bytes here).
- */
+/** Extract text from v1.0 parts (field-presence, no `type` discriminator). */
 function partsToContent(parts: readonly A2APart[]): string {
   return parts
     .map((p) => {
-      if (p.type === 'text') return p.text;
-      if (p.type === 'data') return JSON.stringify(p.data);
-      if (p.type === 'file') return `[File attachment: ${p.mimeType}]`;
+      if (typeof p.text === 'string') return p.text;
+      if (p.data !== undefined) return JSON.stringify(p.data);
+      if (typeof p.url === 'string') return `[File: ${p.filename ?? p.url}]`;
+      if (typeof p.raw === 'string') return `[Binary: ${p.mediaType ?? 'application/octet-stream'}]`;
       return '';
     })
     .filter(Boolean)
     .join('\n');
 }
 
-function taskToAgentInput(task: A2ATask): AgentInput {
-  const content = partsToContent(task.input.parts);
+function sendParamsToAgentInput(params: A2ATaskSendParams): AgentInput {
+  const content = partsToContent(params.message.parts);
   return {
     messages: [{ role: 'user', content }],
-    goal: task.skill,
-    context: task.metadata as Record<string, unknown> | undefined,
+    context: params.metadata as Record<string, unknown> | undefined,
   };
 }
 
 /**
- * Wrap a `weaveAgent` as an `A2AServer` for in-process and HTTP dispatch.
- *
- * The returned server:
- * - Exposes `server.card` for discovery (Agent Card)
- * - Implements `server.handleTask(ctx, task)` for polling mode
- * - Implements `server.handleTaskStream(ctx, task)` for SSE streaming mode
- *
- * All execution runs under the agent's existing guardrails, budget, and
- * audit trail — no special permissions are granted by the A2A surface.
+ * Wrap a `weaveAgent` as an `A2AServer` for in-process bus and HTTP dispatch.
  */
 export function weaveAgentAsA2AServer(opts: AgentA2AServerOptions): A2AServer {
   const { agent, card } = opts;
@@ -93,54 +92,49 @@ export function weaveAgentAsA2AServer(opts: AgentA2AServerOptions): A2AServer {
   return {
     card,
 
-    async handleTask(ctx: ExecutionContext, task: A2ATask): Promise<A2ATaskResult> {
+    async handleMessage(ctx: ExecutionContext, params: A2ATaskSendParams): Promise<A2ATask> {
+      const taskId = newUUIDv7();
+      const contextId = params.message.contextId ?? taskId;
+      const history: A2AMessage[] = [params.message];
+
       void weaveAudit(ctx, {
         action: 'a2a.task.received',
         outcome: 'success',
         resource: agent.config.name,
-        details: { taskId: task.id, skill: task.skill },
+        details: { taskId, contextId },
       });
 
       let agentResult;
       try {
-        agentResult = await agent.run(ctx, taskToAgentInput(task));
+        agentResult = await agent.run(ctx, sendParamsToAgentInput(params));
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
         void weaveAudit(ctx, {
           action: 'a2a.task.error',
           outcome: 'failure',
           resource: agent.config.name,
-          details: { taskId: task.id, error },
+          details: { taskId, error },
         });
-        return {
-          id: task.id,
-          status: 'failed',
-          error,
-        };
+        return makeFailedA2ATask(taskId, contextId, error, history);
       }
 
       if (agentResult.status === 'failed' || agentResult.status === 'cancelled') {
-        return {
-          id: task.id,
-          status: agentResult.status === 'cancelled' ? 'cancelled' : 'failed',
-          error: agentResult.output || `Agent ended with status: ${agentResult.status}`,
-        };
+        const error = agentResult.output || `Agent ended with status: ${agentResult.status}`;
+        return makeFailedA2ATask(taskId, contextId, error, history);
       }
 
       void weaveAudit(ctx, {
         action: 'a2a.task.completed',
         outcome: 'success',
         resource: agent.config.name,
-        details: { taskId: task.id, steps: agentResult.usage.totalSteps },
+        details: { taskId, steps: agentResult.usage.totalSteps },
       });
 
+      const agentMessage: A2AMessage = { role: 'agent', parts: [{ text: agentResult.output }] };
+      history.push(agentMessage);
+
       return {
-        id: task.id,
-        status: 'completed',
-        output: {
-          role: 'agent',
-          parts: [{ type: 'text', text: agentResult.output }],
-        },
+        ...makeCompletedA2ATask(taskId, contextId, agentResult.output, history),
         metadata: {
           steps: agentResult.usage.totalSteps,
           tokens: agentResult.usage.totalTokens,
@@ -149,41 +143,55 @@ export function weaveAgentAsA2AServer(opts: AgentA2AServerOptions): A2AServer {
       };
     },
 
-    async *handleStreamTask(ctx: ExecutionContext, task: A2ATask): AsyncIterable<A2ATaskResult> {
+    async *handleStreamMessage(ctx: ExecutionContext, params: A2ATaskSendParams): AsyncIterable<A2AStreamEvent> {
+      const taskId = newUUIDv7();
+      const contextId = params.message.contextId ?? taskId;
+      const history: A2AMessage[] = [params.message];
+
       void weaveAudit(ctx, {
         action: 'a2a.task.stream.start',
         outcome: 'success',
         resource: agent.config.name,
-        details: { taskId: task.id, skill: task.skill },
+        details: { taskId, contextId },
       });
 
-      // Emit a working status immediately so the SSE client knows we started.
-      yield { id: task.id, status: 'working' };
+      // Initial WORKING status event
+      const workingEvent: TaskStatusUpdateEvent = {
+        taskId,
+        contextId,
+        status: { state: 'TASK_STATE_WORKING', timestamp: new Date().toISOString() },
+      };
+      yield { statusUpdate: workingEvent };
 
       if (!agent.runStream) {
-        // Agent doesn't support streaming — fall back to run() and yield the result.
-        const result = await this.handleTask(ctx, task);
-        yield result;
+        // Fallback to synchronous handleMessage
+        const result = await this.handleMessage(ctx, params);
+        yield { task: result };
         return;
       }
 
       let lastOutput = '';
       let streamError: string | undefined;
+      let chunkIndex = 0;
 
       try {
-        for await (const event of agent.runStream(ctx, taskToAgentInput(task))) {
+        for await (const event of agent.runStream(ctx, sendParamsToAgentInput(params))) {
           if (event.type === 'text_chunk' && event.text) {
             lastOutput += event.text;
-            // Emit incremental text chunks as working+partial results.
-            yield {
-              id: task.id,
-              status: 'working',
-              output: {
-                role: 'agent',
-                parts: [{ type: 'text', text: event.text }],
+
+            const artifactUpdate: TaskArtifactUpdateEvent = {
+              taskId,
+              contextId,
+              artifact: {
+                artifactId: `${taskId}-output`,
+                name: 'output',
+                parts: [{ text: event.text }],
               },
-              metadata: { partial: true },
+              append: chunkIndex > 0,
+              lastChunk: false,
             };
+            yield { artifactUpdate };
+            chunkIndex++;
           }
           if (event.type === 'done' && event.result) {
             lastOutput = event.result.output || lastOutput;
@@ -194,25 +202,108 @@ export function weaveAgentAsA2AServer(opts: AgentA2AServerOptions): A2AServer {
       }
 
       if (streamError) {
-        void weaveAudit(ctx, { action: 'a2a.task.stream.error', outcome: 'failure', resource: agent.config.name, details: { taskId: task.id, error: streamError } });
-        yield { id: task.id, status: 'failed', error: streamError };
+        void weaveAudit(ctx, {
+          action: 'a2a.task.stream.error',
+          outcome: 'failure',
+          resource: agent.config.name,
+          details: { taskId, error: streamError },
+        });
+        const failedTask = makeFailedA2ATask(taskId, contextId, streamError, history);
+        yield { task: failedTask };
         return;
       }
 
-      void weaveAudit(ctx, { action: 'a2a.task.stream.completed', outcome: 'success', resource: agent.config.name, details: { taskId: task.id } });
-      yield {
+      // Final lastChunk artifact event
+      if (chunkIndex > 0) {
+        const finalArtifact: A2AArtifact = {
+          artifactId: `${taskId}-output`,
+          name: 'output',
+          parts: [{ text: lastOutput }],
+        };
+        const lastChunkEvent: TaskArtifactUpdateEvent = {
+          taskId,
+          contextId,
+          artifact: finalArtifact,
+          append: false,
+          lastChunk: true,
+        };
+        yield { artifactUpdate: lastChunkEvent };
+      }
+
+      void weaveAudit(ctx, {
+        action: 'a2a.task.stream.completed',
+        outcome: 'success',
+        resource: agent.config.name,
+        details: { taskId },
+      });
+
+      const agentMessage: A2AMessage = { role: 'agent', parts: [{ text: lastOutput }] };
+      history.push(agentMessage);
+
+      const completedTask = makeCompletedA2ATask(taskId, contextId, lastOutput, history);
+      yield { task: completedTask };
+    },
+
+    // ── Deprecated shims ─────────────────────────────────────────────────────
+
+    /** @deprecated Use handleMessage(). Kept for callers using the old A2ATask shape. */
+    async handleTask(ctx: ExecutionContext, task: A2ATaskLegacy): Promise<A2ATaskResult> {
+      const params: A2ATaskSendParams = {
+        message: task.input,
+        metadata: task.metadata,
+      };
+      const result = await this.handleMessage(ctx, params);
+      // Convert A2ATask → deprecated A2ATaskResult
+      const outputText = a2aPartsText(result.artifacts[0]?.parts ?? []);
+      return {
         id: task.id,
-        status: 'completed',
-        output: {
-          role: 'agent',
-          parts: [{ type: 'text', text: lastOutput }],
-        },
+        status: result.status.state === 'TASK_STATE_COMPLETED' ? 'completed' : 'failed',
+        output: outputText ? { role: 'agent', parts: [{ text: outputText }] } : undefined,
+        error: result.status.state !== 'TASK_STATE_COMPLETED'
+          ? a2aPartsText(result.status.message?.parts ?? []) || undefined
+          : undefined,
+        metadata: result.metadata,
       };
     },
 
+    /** @deprecated Use handleStreamMessage(). */
+    async *handleStreamTask(ctx: ExecutionContext, task: A2ATaskLegacy): AsyncIterable<A2ATaskResult> {
+      const params: A2ATaskSendParams = { message: task.input, metadata: task.metadata };
+      for await (const event of this.handleStreamMessage!(ctx, params)) {
+        if ('statusUpdate' in event) {
+          yield {
+            id: task.id,
+            status: event.statusUpdate.status.state === 'TASK_STATE_COMPLETED' ? 'completed' : 'working',
+          };
+        } else if ('artifactUpdate' in event) {
+          const text = event.artifactUpdate.artifact.parts
+            .map((p) => (typeof p.text === 'string' ? p.text : ''))
+            .join('');
+          if (text) {
+            yield {
+              id: task.id,
+              status: 'working',
+              output: { role: 'agent', parts: [{ text }] },
+              metadata: { partial: true },
+            };
+          }
+        } else if ('task' in event) {
+          const t = event.task;
+          const outputText = a2aPartsText(t.artifacts[0]?.parts ?? []);
+          yield {
+            id: task.id,
+            status: t.status.state === 'TASK_STATE_COMPLETED' ? 'completed' : 'failed',
+            output: outputText ? { role: 'agent', parts: [{ text: outputText }] } : undefined,
+            error: t.status.state !== 'TASK_STATE_COMPLETED'
+              ? a2aPartsText(t.status.message?.parts ?? []) || undefined
+              : undefined,
+          };
+        }
+      }
+    },
+
     async start(_port: number): Promise<void> {
-      // HTTP serving is handled by the host application (geneWeave routes).
-      // This no-op satisfies the A2AServer contract for in-process bus usage.
+      // HTTP serving handled by host app (geneWeave registers routes).
     },
 
     async stop(): Promise<void> {

@@ -30,6 +30,19 @@ function makeExecCtx(inboxMessage?: unknown): ActionExecutionContext {
 
 const mockCtx = {} as unknown as ExecutionContext;
 
+/** Build a v1.0 A2ATask response as the mock server would return. */
+function makeA2ATaskResponse(state: 'TASK_STATE_COMPLETED' | 'TASK_STATE_FAILED' = 'TASK_STATE_COMPLETED') {
+  return {
+    id: 'task-1',
+    contextId: 'ctx-1',
+    status: { state, timestamp: new Date().toISOString() },
+    artifacts: state === 'TASK_STATE_COMPLETED'
+      ? [{ artifactId: 'task-1-output', name: 'output', parts: [{ text: 'done' }] }]
+      : [],
+    history: [],
+  };
+}
+
 describe('a2a.outbound handler', () => {
   it('has the correct kind', () => {
     expect(a2aOutboundHandler.kind).toBe('a2a.outbound');
@@ -37,7 +50,6 @@ describe('a2a.outbound handler', () => {
 
   it('factory throws when targetUrl is missing', () => {
     const ctx = makeCtx();
-    // Override to remove targetUrl
     ctx.binding.config = {};
     expect(() => a2aOutboundHandler.factory(ctx)).toThrow('config.targetUrl is required');
   });
@@ -51,7 +63,7 @@ describe('a2a.outbound handler', () => {
   it('returns completed: true with no-op summary when inbox is empty', async () => {
     const ctx = makeCtx();
     const handler = a2aOutboundHandler.factory(ctx);
-    const execCtx = makeExecCtx(); // empty inbox
+    const execCtx = makeExecCtx();
     const result = await handler({ type: 'StartTask' } as Parameters<typeof handler>[0], execCtx, mockCtx);
     expect(result?.completed).toBe(true);
     expect(result?.summaryProse).toMatch(/no-op/i);
@@ -65,15 +77,11 @@ describe('a2a.outbound handler', () => {
       vi.unstubAllGlobals();
     });
 
-    it('POSTs to targetUrl/api/a2a/tasks with A2ATask shape', async () => {
+    it('POSTs to targetUrl/api/a2a/tasks with v1.0 A2ATaskSendParams shape', async () => {
       const mockFetch = vi.mocked(fetch);
       mockFetch.mockResolvedValue({
         ok: true,
-        json: async () => ({
-          id: 'task-1',
-          status: 'completed',
-          output: { role: 'agent', parts: [{ type: 'text', text: 'done' }] },
-        }),
+        json: async () => makeA2ATaskResponse(),
       } as unknown as Response);
 
       const inboxMsg = {
@@ -91,9 +99,35 @@ describe('a2a.outbound handler', () => {
       const [url, opts] = mockFetch.mock.calls[0]!;
       expect(url).toBe('http://remote.test/api/a2a/tasks');
       expect(opts?.method).toBe('POST');
+
+      // v1.0: body is A2ATaskSendParams with message.parts (no type discriminator)
       const body = JSON.parse(opts?.body as string);
-      expect(body.input.parts[0].text).toContain('Do research');
+      expect(body.message).toBeDefined();
+      expect(Array.isArray(body.message.parts)).toBe(true);
+      expect(body.message.parts[0].text).toContain('Do research');
+      // No `type` field on v1.0 parts
+      expect(body.message.parts[0].type).toBeUndefined();
+
       expect(result?.completed).toBe(true);
+    });
+
+    it('sends A2A-Version: 1.0 header', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => makeA2ATaskResponse(),
+      } as unknown as Response);
+
+      const inboxMsg = {
+        id: 'msg-1', kind: 'TASK', status: 'PENDING',
+        subject: 'Task', body: 'body',
+        fromType: 'HUMAN', fromId: 'h1', toType: 'AGENT', toId: 'a1',
+      };
+      const ctx = makeCtx();
+      const handler = a2aOutboundHandler.factory(ctx);
+      await handler({ type: 'StartTask' } as Parameters<typeof handler>[0], makeExecCtx(inboxMsg), mockCtx);
+
+      const opts = vi.mocked(fetch).mock.calls[0]![1];
+      expect((opts?.headers as Record<string, string>)?.['A2A-Version']).toBe('1.0');
     });
 
     it('returns completed: false when fetch throws', async () => {
@@ -113,10 +147,10 @@ describe('a2a.outbound handler', () => {
       expect(result?.completed).toBe(false);
     });
 
-    it('includes skill in the A2ATask when config.skill is set', async () => {
+    it('includes skill in metadata when config.skill is set', async () => {
       vi.mocked(fetch).mockResolvedValue({
         ok: true,
-        json: async () => ({ id: 't1', status: 'completed' }),
+        json: async () => makeA2ATaskResponse(),
       } as unknown as Response);
 
       const inboxMsg = {
@@ -129,7 +163,27 @@ describe('a2a.outbound handler', () => {
       await handler({ type: 'StartTask' } as Parameters<typeof handler>[0], makeExecCtx(inboxMsg), mockCtx);
 
       const body = JSON.parse(vi.mocked(fetch).mock.calls[0]![1]?.body as string);
-      expect(body.skill).toBe('code-review');
+      // In v1.0, skill is in metadata (not a top-level field)
+      expect(body.metadata?.skill).toBe('code-review');
+    });
+
+    it('returns completed: false when remote returns TASK_STATE_FAILED', async () => {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        json: async () => makeA2ATaskResponse('TASK_STATE_FAILED'),
+      } as unknown as Response);
+
+      const inboxMsg = {
+        id: 'msg-1', kind: 'TASK', status: 'PENDING',
+        subject: 'Task', body: 'body',
+        fromType: 'HUMAN', fromId: 'h1', toType: 'AGENT', toId: 'a1',
+      };
+      const result = await a2aOutboundHandler.factory(makeCtx())(
+        { type: 'StartTask' } as Parameters<ReturnType<typeof a2aOutboundHandler.factory>>[0],
+        makeExecCtx(inboxMsg),
+        mockCtx,
+      );
+      expect(result?.completed).toBe(false);
     });
   });
 

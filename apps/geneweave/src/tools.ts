@@ -938,17 +938,26 @@ function buildA2ATool(toolKey: string, description: string, agentUrl: string): i
     },
     execute: async (args: { task: string; context?: Record<string, unknown> }) => {
       const client = weaveA2AClient();
-      const result = await client.sendTask(
+      const result = await client.sendMessage(
         { executionId: newUUIDv7(), metadata: args.context ?? {} },
         agentUrl,
-        { id: newUUIDv7(), input: { role: 'user', parts: [{ type: 'text', text: args.task }] } },
+        {
+          message: {
+            role: 'user',
+            parts: [{ text: args.task }],
+            messageId: newUUIDv7(),
+          },
+          metadata: args.context,
+        },
       );
-      if (result.error) return { content: `A2A error: ${result.error}`, isError: true };
-      const textParts = (result.output?.parts ?? [])
-        .filter((p): p is { type: 'text'; text: string } => p.type === 'text')
-        .map((p) => p.text)
+      if (result.status.state === 'TASK_STATE_FAILED') {
+        const errText = result.status.message?.parts[0]?.text ?? 'Unknown error';
+        return { content: `A2A error: ${errText}`, isError: true };
+      }
+      const outputText = (result.artifacts[0]?.parts ?? [])
+        .map((p) => (typeof p.text === 'string' ? p.text : ''))
         .join('\n');
-      return textParts || JSON.stringify(result);
+      return outputText || JSON.stringify(result);
     },
     tags: ['a2a', 'external'],
   });

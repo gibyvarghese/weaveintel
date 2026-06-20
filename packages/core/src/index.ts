@@ -383,19 +383,44 @@ export {
   type MCPPromptHandler,
 } from './mcp.js';
 
-// A2A contracts
+// A2A contracts (v1.0)
 export {
-  type AgentCard,
-  type AgentSkill,
-  type AgentAuthentication,
-  type A2ATask,
-  type A2AMessage,
+  // Types — current
+  type A2ATaskState,
   type A2APart,
-  type A2ATaskStatus,
-  type A2ATaskResult,
+  type A2AArtifact,
+  type A2AMessage,
+  type A2ATaskStatusObj,
+  type A2ATask,
+  type A2ATaskSendParams,
+  type A2ASendConfiguration,
+  type TaskStatusUpdateEvent,
+  type TaskArtifactUpdateEvent,
+  type A2AStreamEvent,
+  type A2APushNotificationConfig,
+  type AgentInterface,
+  type AgentCapabilityExtension,
+  type AgentCapabilities,
+  type AgentSecurityScheme,
+  type AgentCardSignature,
+  type AgentSkill,
+  type AgentCard,
+  type A2AListTasksFilter,
+  type A2ATaskPage,
   type A2AClient,
   type A2AServer,
   type InternalA2ABus,
+  // Helpers
+  a2aPartText,
+  a2aPartsText,
+  a2aTaskOutputText,
+  makeCompletedA2ATask,
+  makeFailedA2ATask,
+  // Deprecated — kept for backward compat
+  type A2ATaskStatus,
+  type AgentAuthentication,
+  type A2ATaskLegacy,
+  type A2ATaskResult,
 } from './a2a.js';
 
 // Eval contracts
