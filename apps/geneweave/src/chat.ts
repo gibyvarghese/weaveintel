@@ -32,7 +32,8 @@ import type {
   Tool, ToolRegistry, AgentStepEvent, AgentStep, AgentResult, EventBus, Agent,
 } from '@weaveintel/core';
 import { weaveContext, weaveEventBus, EventTypes } from '@weaveintel/core';
-import { weaveAgent, weaveEnsemble, createVoteResolver, createArbiterResolver } from '@weaveintel/agents';
+import { weaveAgent, weaveEnsemble, createVoteResolver, createArbiterResolver, createHumanTaskInterruptHandler } from '@weaveintel/agents';
+import { InMemoryTaskQueue } from '@weaveintel/human-tasks';
 import {
   weaveInMemoryTracer,
   weaveUsageTracker,
@@ -69,12 +70,16 @@ import {
   isIdentityRecallQuery,
   resolveIdentityRecallFromMemory,
   buildMemoryContext,
+  buildEpisodicContext,
   saveToMemory,
   applyGovernanceCheck,
 } from './chat-memory-utils.js';
 import { getActiveSemanticMemoryBackend } from './memory-pgvector.js';
 import { getActiveGuardrailEmbeddingModel } from './guardrail-judge.js';
 import { triggerConsolidationForUser } from './memory-consolidation.js';
+import { createSQLiteGraphMemoryStore } from './chat-graph-store.js';
+import { SQLiteAdapter } from './db-sqlite.js';
+import { createGraphMemoryStore } from '@weaveintel/graph';
 import { normalizePersona } from './rbac.js';
 import {
   TEMPORAL_TOOL_POLICY,
@@ -935,6 +940,17 @@ export class ChatEngine {
     disabledToolKeys: ReadonlySet<string>,
     catalogEntries: import('./db-types.js').ToolCatalogRow[],
   ): ToolRegistryOptions {
+    // P4-3: Build graph store when graph tools are enabled.
+    // Use SQLite-backed store when persist is enabled and raw DB is accessible.
+    let graphStore: import('@weaveintel/graph').GraphMemoryStore | undefined;
+    if (settings.graphEnabled) {
+      if (settings.graphPersistEnabled && this.db instanceof SQLiteAdapter) {
+        graphStore = createSQLiteGraphMemoryStore(this.db.rawDb, chatId, userId);
+      } else {
+        graphStore = createGraphMemoryStore();
+      }
+    }
+
     return {
       ...this.toolOptions,
       defaultTimezone: settings.timezone,
@@ -948,6 +964,8 @@ export class ChatEngine {
       catalogEntries,
       skillPolicyKey: settings.skillPolicyKey,
       explicitEnabledTools: settings.enabledTools,
+      // P4-3: Knowledge graph store (undefined when graph is disabled)
+      ...(graphStore && { graphStore }),
     };
   }
 
@@ -1057,10 +1075,52 @@ export class ChatEngine {
         bus: agentBus,
         replanOnFailure: settings.supervisorReplanOnFailure,
         parallelDelegation: settings.supervisorParallelDelegation,
+        // P2-1: parallel tool calls
+        parallelToolCalls: settings.parallelToolCalls,
+        // P2-3: context management
+        ...(settings.contextStrategy && {
+          contextManagement: {
+            strategy: settings.contextStrategy,
+            maxTokens: settings.contextMaxTokens,
+            slidingWindowSize: settings.contextWindowSize,
+          },
+        }),
+        // P2-4: tool retry
+        ...(settings.toolRetryMaxAttempts && {
+          toolRetry: {
+            maxAttempts: settings.toolRetryMaxAttempts,
+            backoffMs: settings.toolRetryBackoffMs,
+            maxBackoffMs: settings.toolRetryMaxBackoffMs,
+          },
+        }),
+        // P3-1: HITL interrupt — uses an in-process queue backed by geneWeave's
+        // hitl_interrupt_requests table (via the shared human task queue).
+        ...(settings.hitlEnabled && {
+          onInterrupt: createHumanTaskInterruptHandler(new InMemoryTaskQueue(), {
+            timeoutMs: settings.hitlTimeoutMs,
+          }),
+          requireApproval: settings.hitlRequireAll,
+        }),
         ...(settings.reflectEnabled && {
           reflect: {
             maxRevisions: settings.reflectMaxRevisions,
             criteria: settings.reflectCriteria,
+          },
+        }),
+        // P4-2: Proactive memory context injection — retrieves semantic + episodic
+        // context before each model.generate() call and prepends it ephemerally.
+        ...(settings.memoryContextEnabled && {
+          memoryContext: {
+            retrieve: async (agentCtx: import('@weaveintel/core').ExecutionContext, userText: string) => {
+              const uid = toolOptions.currentUserId ?? '';
+              const [semantic, episodic] = await Promise.all([
+                buildMemoryContext(this.db, agentCtx, model, uid, userText).catch(() => null),
+                buildEpisodicContext(this.db, uid, 4).catch(() => null),
+              ]);
+              const parts = [semantic, episodic].filter(Boolean);
+              return parts.length > 0 ? parts.join('\n\n') : null;
+            },
+            maxChars: settings.memoryContextMaxChars,
           },
         }),
       });
@@ -1094,7 +1154,7 @@ export class ChatEngine {
         const resolver = settings.ensembleResolver === 'arbiter'
           ? createArbiterResolver({ model })
           : createVoteResolver();
-        agent = weaveEnsemble({ agents: ensembleAgents, resolver, parallel: true }) as unknown as Agent;
+        agent = weaveEnsemble({ agents: ensembleAgents, resolver, parallel: true, name: 'geneweave-ensemble' });
       } else {
         agent = weaveAgent({
           model,
@@ -1103,10 +1163,50 @@ export class ChatEngine {
           maxSteps: limits.chat_max_steps,
           name: 'geneweave-agent',
           bus: agentBus,
+          // P2-1: parallel tool calls
+          parallelToolCalls: settings.parallelToolCalls,
+          // P2-3: context management
+          ...(settings.contextStrategy && {
+            contextManagement: {
+              strategy: settings.contextStrategy,
+              maxTokens: settings.contextMaxTokens,
+              slidingWindowSize: settings.contextWindowSize,
+            },
+          }),
+          // P2-4: tool retry
+          ...(settings.toolRetryMaxAttempts && {
+            toolRetry: {
+              maxAttempts: settings.toolRetryMaxAttempts,
+              backoffMs: settings.toolRetryBackoffMs,
+              maxBackoffMs: settings.toolRetryMaxBackoffMs,
+            },
+          }),
+          // P3-1: HITL interrupt
+          ...(settings.hitlEnabled && {
+            onInterrupt: createHumanTaskInterruptHandler(new InMemoryTaskQueue(), {
+              timeoutMs: settings.hitlTimeoutMs,
+            }),
+            requireApproval: settings.hitlRequireAll,
+          }),
           ...(settings.reflectEnabled && {
             reflect: {
               maxRevisions: settings.reflectMaxRevisions,
               criteria: settings.reflectCriteria,
+            },
+          }),
+          // P4-2: Proactive memory context injection
+          ...(settings.memoryContextEnabled && {
+            memoryContext: {
+              retrieve: async (agentCtx: import('@weaveintel/core').ExecutionContext, userText: string) => {
+                const uid = toolOptions.currentUserId ?? '';
+                const [semantic, episodic] = await Promise.all([
+                  buildMemoryContext(this.db, agentCtx, model, uid, userText).catch(() => null),
+                  buildEpisodicContext(this.db, uid, 4).catch(() => null),
+                ]);
+                const parts = [semantic, episodic].filter(Boolean);
+                return parts.length > 0 ? parts.join('\n\n') : null;
+              },
+              maxChars: settings.memoryContextMaxChars,
             },
           }),
         });

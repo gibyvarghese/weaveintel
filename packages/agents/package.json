@@ -22,7 +22,10 @@
     "@weaveintel/core": "*",
     "@weaveintel/models": "*",
     "@weaveintel/evals": "*",
-    "@weaveintel/prompts": "*"
+    "@weaveintel/prompts": "*",
+    "@weaveintel/human-tasks": "*",
+    "@weaveintel/a2a": "*",
+    "@weaveintel/graph": "*"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

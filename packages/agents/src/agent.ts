@@ -29,6 +29,7 @@ import type {
   ExecutionContext,
   EventBus,
   SupervisorConfig,
+  ResponseFormat,
 } from '@weaveintel/core';
 import {
   WeaveIntelError,
@@ -41,6 +42,14 @@ import {
   weaveAudit,
 } from '@weaveintel/core';
 import { buildSupervisorRuntime, type WorkerDefinition } from './supervisor-runtime.js';
+import { applyContextManagement, type ContextManagementOptions } from './context-manager.js';
+import {
+  buildHandoffTools,
+  HandoffSignal,
+  type HandoffDefinition,
+  type HandoffMetadata,
+} from './handoff.js';
+import type { InterruptHandler, InterruptEvent } from './interrupt.js';
 
 async function withObservedSpan<T>(
   ctx: ExecutionContext,
@@ -147,6 +156,99 @@ export interface ToolCallingAgentOptions {
     /** Maximum regeneration attempts. Default 1. */
     maxAttempts?: number;
   };
+  /**
+   * P1-2 — Approval gate: when true, every `run()` call checks that
+   * `policy.approveToolCall` is wired. If no gate is provided the agent
+   * immediately returns `status: 'needs_approval'` instead of running. Wire
+   * an `AgentPolicy` with `approveToolCall` to handle the approval flow.
+   */
+  requireApproval?: boolean;
+  /**
+   * P2-1 — Parallel tool execution: when true (default), all tool calls
+   * returned in a single model response are executed concurrently via
+   * Promise.all. Set to false to restore the original sequential behaviour.
+   */
+  parallelToolCalls?: boolean;
+  /**
+   * P2-2 — Structured output: when set, the model is instructed to respond
+   * with JSON conforming to this schema.  At each terminal response the agent
+   * validates the JSON; on failure it retries by appending a nudge message.
+   * The parsed object is stored in `AgentResult.metadata.structuredOutput`.
+   */
+  outputSchema?: ResponseFormat;
+  /**
+   * P2-2 — Maximum number of times the agent will retry a terminal response
+   * that fails JSON validation.  Default: 1.
+   */
+  structuredOutputRetries?: number;
+  /**
+   * P2-3 — Context window management: when set, the agent trims or
+   * summarises older conversation turns before each model call so the context
+   * stays within the chosen token budget.
+   */
+  contextManagement?: ContextManagementOptions;
+  /**
+   * P2-4 — Tool retry with exponential back-off: when set, transient errors
+   * from tool.invoke() are retried up to `maxAttempts` times before the
+   * error result is surfaced to the model.
+   */
+  toolRetry?: {
+    /** Total invocation attempts including the first try. Default: 3. */
+    maxAttempts?: number;
+    /** Base delay in ms for the first back-off interval. Default: 200. */
+    backoffMs?: number;
+    /** Upper cap on jittered back-off delay in ms. Default: 10 000. */
+    maxBackoffMs?: number;
+  };
+  /**
+   * P3-1 — HITL interrupt handler: when provided, the agent will call this
+   * function before executing any tool call whose tool schema has
+   * `requireApproval: true`, OR when `requireApproval` is set on the agent
+   * config (apply to ALL tool calls).
+   *
+   * The handler suspends the agent loop until the returned promise resolves
+   * with an `InterruptResolution` (approve / reject / modify).
+   *
+   * Use `createHumanTaskInterruptHandler(queue)` to back this with a
+   * `@weaveintel/human-tasks` queue for DB-persistent approvals.
+   */
+  onInterrupt?: InterruptHandler;
+  /**
+   * P3-2 — Agent handoffs: a list of peer agents this agent may transfer
+   * control to mid-task.  For each entry a `transfer_to_<name>` tool is
+   * auto-registered.  When the LLM calls one, the current agent terminates
+   * and the target agent runs with the provided context.
+   * The final result carries `metadata.handoff` describing the transfer.
+   */
+  handoffs?: HandoffDefinition[];
+
+  /**
+   * P4-2 — Proactive memory context injection.
+   *
+   * When provided, `retrieve()` is called before each `model.generate()`
+   * with the most recent user message as the query.  The returned string
+   * (if non-null) is prepended to the system prompt for that specific
+   * generate call so the model can ground its response in long-term context.
+   *
+   * The augmentation is ephemeral: it is NOT appended to the permanent
+   * conversation history, so memory context does not accumulate across steps.
+   *
+   * Mirrors the `buildMemoryContext` + augmented-system-prompt pattern from
+   * geneWeave's `chat-send-message.ts`, made portable for standalone agents.
+   */
+  memoryContext?: {
+    /**
+     * Called with the latest user message text before each model generation.
+     * Return a non-empty string to inject it as extra system content, or
+     * `null` / empty string to skip injection for this step.
+     */
+    retrieve(ctx: ExecutionContext, latestUserMessage: string): Promise<string | null>;
+    /**
+     * Approximate maximum character length to trim the retrieved context to.
+     * Roughly maps to `maxTokens * 4` characters.  Defaults to no limit.
+     */
+    maxChars?: number;
+  };
 }
 
 // ─── Reflection / verify shared helper ───────────────────────
@@ -158,6 +260,120 @@ export interface ToolCallingAgentOptions {
 async function buildDefaultCritic(model: Model, criteria?: string): Promise<Critic> {
   const { createSelfCritic } = await import('./reflect.js');
   return createSelfCritic({ model, criteria });
+}
+
+// ─── P2-2: Structured output validation ──────────────────────
+
+function validateStructuredOutput(
+  content: string,
+  schema: ResponseFormat,
+): { valid: boolean; parsed?: unknown } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return { valid: false };
+  }
+  // For json_schema with a `required` array, verify each key is present.
+  if (schema.type === 'json_schema' && schema.schema) {
+    const s = schema.schema as { required?: string[] };
+    if (Array.isArray(s.required)) {
+      const obj = parsed as Record<string, unknown>;
+      for (const key of s.required) {
+        if (!(key in obj)) return { valid: false };
+      }
+    }
+  }
+  return { valid: true, parsed };
+}
+
+// ─── P2-4: Tool retry helpers ─────────────────────────────────
+
+function isTransientError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    msg.includes('429') ||
+    msg.includes('rate limit') ||
+    msg.includes('Rate limit') ||
+    msg.includes('timeout') ||
+    msg.includes('Timeout') ||
+    msg.includes('ECONNREFUSED') ||
+    msg.includes('ENOTFOUND') ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('ETIMEDOUT') ||
+    msg.includes('502') ||
+    msg.includes('503') ||
+    msg.includes('network error') ||
+    msg.includes('socket hang up') ||
+    msg.includes('connection reset')
+  );
+}
+
+/** Full-jitter exponential back-off: delay ∈ [0, min(cap, base * 2^attempt)] */
+async function backoffDelay(
+  attempt: number,
+  backoffMs: number,
+  maxBackoffMs: number,
+): Promise<void> {
+  const cap = Math.min(maxBackoffMs, backoffMs * Math.pow(2, attempt));
+  const delay = Math.random() * cap;
+  await new Promise<void>((r) => setTimeout(r, delay));
+}
+
+// ─── P4-2: Memory context injection helpers ───────────────────
+
+/**
+ * Find the last user-role message content string in a messages array.
+ * Returns an empty string when no user message is found.
+ */
+function lastUserMessageText(messages: readonly Message[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i]!;
+    if (m.role === 'user') {
+      return typeof m.content === 'string' ? m.content : '';
+    }
+  }
+  return '';
+}
+
+/**
+ * Build a messages array for a single `generate()` call that has the
+ * retrieved memory context prepended to the system message (or inserted as a
+ * new system message when none exists).  The original `messages` array is
+ * never mutated.
+ */
+function buildMessagesWithMemoryContext(
+  messages: readonly Message[],
+  memoryCtx: string,
+  maxChars?: number,
+): Message[] {
+  let trimmed = memoryCtx;
+  if (maxChars && trimmed.length > maxChars) {
+    trimmed = trimmed.slice(0, maxChars) + '\n[memory context trimmed]';
+  }
+
+  const withMem = trimmed
+    ? `${trimmed}\n\n`
+    : '';
+
+  if (withMem === '') return [...messages];
+
+  // If there's an existing system message, augment it.
+  if (messages.length > 0 && messages[0]!.role === 'system') {
+    const existing = typeof messages[0]!.content === 'string'
+      ? messages[0]!.content
+      : '';
+    return [
+      { ...messages[0]!, content: `${withMem}${existing}` },
+      ...messages.slice(1),
+    ];
+  }
+
+  // Otherwise prepend a new system message.
+  return [
+    { role: 'system', content: trimmed },
+    ...messages,
+  ];
 }
 
 export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
@@ -190,6 +406,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
     name: opts.name ?? (isSupervisor ? 'supervisor' : 'tool-agent'),
     instructions: supervisorRuntime?.systemPrompt ?? opts.systemPrompt,
     maxSteps: opts.maxSteps ?? (isSupervisor ? 30 : 20),
+    ...(opts.requireApproval !== undefined && { requireApproval: opts.requireApproval }),
   };
   const config: AgentConfig | SupervisorConfig = supervisorRuntime
     ? {
@@ -201,12 +418,28 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
   const { model, memory, policy } = opts;
   const eventBus = opts.bus;
   const maxSteps = config.maxSteps ?? 20;
-  const toolReg = supervisorRuntime?.tools ?? opts.tools ?? weaveToolRegistry();
+
+  // P3-2: Build and merge handoff tools into the tool registry.
+  const baseToolReg = supervisorRuntime?.tools ?? opts.tools ?? weaveToolRegistry();
+  let toolReg = baseToolReg;
+  if (opts.handoffs && opts.handoffs.length > 0) {
+    const handoffTools = buildHandoffTools(opts.handoffs, null);
+    if (handoffTools.length > 0) {
+      const merged = weaveToolRegistry();
+      for (const t of baseToolReg.list()) merged.register(t);
+      for (const t of handoffTools) merged.register(t);
+      toolReg = merged;
+    }
+  }
 
   return {
     config,
 
     async run(ctx: ExecutionContext, input: AgentInput): Promise<AgentResult> {
+      // P1-1: reset per-run supervisor state so delegation counts and thinking
+      // logs from a previous invocation don't bleed into this one.
+      supervisorRuntime?.reset();
+
       const startTime = Date.now();
       const steps: AgentStep[] = [];
       let totalPromptTokens = 0;
@@ -217,6 +450,31 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
       let verifyAttemptCount = 0;
       // Lazily resolved default critic (only when reflect is used without explicit critic)
       let resolvedCritic: Critic | undefined;
+      // P2-2 — structured output state
+      let structuredOutputRetryCount = 0;
+      let structuredOutputParsed: unknown;
+      // P2-4 — tool retry options (resolved once, used in executeToolCall)
+      const toolRetryOpts = opts.toolRetry;
+      // P2-1 — parallel tool execution (default true)
+      const parallel = opts.parallelToolCalls !== false;
+      // P3-1 — HITL interrupt handler
+      const interruptOpts = opts.onInterrupt
+        ? { handler: opts.onInterrupt, requireAll: config.requireApproval ?? false }
+        : undefined;
+      // P3-2 — handoff feedback messages to inject after a modification
+      const pendingHandoffFeedback: string[] = [];
+
+      // P1-2 / P3-1: if requireApproval is set but neither a policy gate nor an
+      // onInterrupt handler is wired, surface needs_approval immediately.
+      if (config.requireApproval && !opts.policy?.approveToolCall && !opts.onInterrupt) {
+        void weaveAudit(ctx, {
+          action: 'agent.approval.required',
+          outcome: 'denied',
+          resource: config.name,
+          details: { reason: 'requireApproval is set but no approval gate (policy.approveToolCall or onInterrupt) is wired' },
+        });
+        return buildResult([], 0, 0, 0, Date.now(), 'needs_approval');
+      }
 
       eventBus?.emit(weaveEvent(EventTypes.AgentRunStart, { agent: config.name, goal: input.goal }, ctx));
       void weaveAudit(ctx, { action: 'agent.run.start', outcome: 'success', resource: config.name, details: { goal: input.goal } });
@@ -261,15 +519,39 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           const stepStart = Date.now();
           eventBus?.emit(weaveEvent(EventTypes.AgentStepStart, { agent: config.name, stepIndex: stepIdx }, ctx));
 
-          // Call model
+          // P3-1: Inject any HITL modification feedback before model call.
+          while (pendingHandoffFeedback.length > 0) {
+            messages.push({ role: 'user', content: pendingHandoffFeedback.shift()! });
+          }
+
+          // P2-3: Apply context management before the model call.
+          if (opts.contextManagement) {
+            const trimmed = await applyContextManagement(messages, opts.contextManagement, memory, ctx);
+            if (trimmed !== messages) messages.splice(0, messages.length, ...trimmed);
+          }
+
+          // P4-2: Proactive memory context injection (ephemeral — not stored in history).
+          let generateMessages: Message[] = messages;
+          if (opts.memoryContext) {
+            const userText = lastUserMessageText(messages);
+            if (userText) {
+              const retrieved = await opts.memoryContext.retrieve(ctx, userText).catch(() => null);
+              if (retrieved) {
+                generateMessages = buildMessagesWithMemoryContext(messages, retrieved, opts.memoryContext.maxChars);
+              }
+            }
+          }
+
+          // Call model (P2-2: pass responseFormat when outputSchema is configured)
           const response = await withObservedSpan(
             ctx,
             'agents.model.generate',
             { agent: config.name, stepIndex: stepIdx, mode: 'run' },
             () => model.generate(ctx, {
-              messages,
+              messages: generateMessages,
               tools: toolDefs.length > 0 ? toolDefs : undefined,
               toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
+              ...(opts.outputSchema && { responseFormat: opts.outputSchema }),
             }),
           );
 
@@ -285,19 +567,40 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
               toolCalls: response.toolCalls,
             });
 
-            for (const tc of response.toolCalls) {
-              const toolStep = await executeToolCall(
-                ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart,
+            // P2-1: Execute tools — parallel (default) or sequential.
+            // P3-1/3-2: Each call also handles HITL interrupt checks and
+            // propagates HandoffSignal for lateral transfer detection below.
+            if (parallel) {
+              const toolResults = await Promise.all(
+                response.toolCalls.map((tc) =>
+                  executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, toolRetryOpts, interruptOpts, pendingHandoffFeedback),
+                ),
               );
-              steps.push(toolStep);
-              toolCallCount++;
-
-              // Append tool result to conversation
-              messages.push({
-                role: 'tool',
-                content: toolStep.toolCall?.result ?? '',
-                toolCallId: tc.id,
-              });
+              for (const toolStep of toolResults) {
+                steps.push(toolStep);
+                toolCallCount++;
+              }
+              // Batch-append ALL tool results in original call order.
+              for (let i = 0; i < response.toolCalls.length; i++) {
+                messages.push({
+                  role: 'tool',
+                  content: toolResults[i]!.toolCall?.result ?? '',
+                  toolCallId: response.toolCalls[i]!.id,
+                });
+              }
+            } else {
+              for (const tc of response.toolCalls) {
+                const toolStep = await executeToolCall(
+                  ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, toolRetryOpts, interruptOpts, pendingHandoffFeedback,
+                );
+                steps.push(toolStep);
+                toolCallCount++;
+                messages.push({
+                  role: 'tool',
+                  content: toolStep.toolCall?.result ?? '',
+                  toolCallId: tc.id,
+                });
+              }
             }
 
             eventBus?.emit(weaveEvent(EventTypes.AgentStepEnd, {
@@ -338,6 +641,28 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             }
             if (outputDecision.redactedText !== undefined) {
               finalContent = outputDecision.redactedText;
+            }
+          }
+
+          // ── P2-2: Validate structured output ─────────────────────────────
+          if (opts.outputSchema && !isExpired(ctx)) {
+            const soResult = validateStructuredOutput(finalContent, opts.outputSchema);
+            if (soResult.valid) {
+              structuredOutputParsed = soResult.parsed;
+            } else if (structuredOutputRetryCount < (opts.structuredOutputRetries ?? 1)) {
+              structuredOutputRetryCount++;
+              void weaveAudit(ctx, {
+                action: 'agent.structured_output.retry',
+                outcome: 'failure',
+                resource: config.name,
+                details: { attempt: structuredOutputRetryCount },
+              });
+              messages.push({ role: 'assistant', content: finalContent });
+              messages.push({
+                role: 'user',
+                content: `Your response must be valid JSON${opts.outputSchema.name ? ` conforming to schema "${opts.outputSchema.name}"` : ''}. Please respond with valid JSON only and no surrounding text.`,
+              });
+              continue;
             }
           }
 
@@ -454,12 +779,43 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           }, ctx));
           void weaveAudit(ctx, { action: 'agent.run.end', outcome: 'success', resource: config.name, details: { steps: steps.length, status: 'completed' } });
 
-          return buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'completed');
+          return buildResult(
+            steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'completed',
+            structuredOutputParsed !== undefined ? { structuredOutput: structuredOutputParsed } : undefined,
+          );
         }
 
         // Max steps exceeded
         return buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'failed');
       } catch (err) {
+        // P3-2: HandoffSignal from a transfer_to_<name> tool — execute the
+        // target agent and return its result as our own result.
+        if (err instanceof HandoffSignal) {
+          void weaveAudit(ctx, {
+            action: 'agent.handoff',
+            outcome: 'success',
+            resource: config.name,
+            details: { from: config.name, to: err.targetName },
+          });
+          eventBus?.emit(weaveEvent(EventTypes.AgentDelegation, {
+            from: config.name,
+            to: err.targetName,
+            type: 'handoff',
+          }, ctx));
+          const handoffResult = await err.targetAgent.run(ctx, err.transferInput);
+          const handoffMeta: HandoffMetadata = {
+            from: config.name,
+            to: err.targetName,
+            transferInput: err.transferInput.goal,
+          };
+          return {
+            ...handoffResult,
+            metadata: {
+              ...handoffResult.metadata,
+              handoff: handoffMeta,
+            },
+          };
+        }
         eventBus?.emit(weaveEvent(EventTypes.AgentRunEnd, {
           agent: config.name,
           status: 'failed',
@@ -471,6 +827,9 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
     },
 
     async *runStream(ctx: ExecutionContext, input: AgentInput): AsyncIterable<AgentStepEvent> {
+      // P1-1: same reset as run() — supervisor state must not carry over.
+      supervisorRuntime?.reset();
+
       const startTime = Date.now();
       const steps: AgentStep[] = [];
       let totalPromptTokens = 0;
@@ -483,6 +842,19 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
       // M-21: track guardrail denial for stream path so the final 'done' event
       // carries 'guardrail_denied' instead of 'completed'.
       let streamGuardrailDenied = false;
+      // P2-2 — structured output for the stream path
+      let streamStructuredOutputRetryCount = 0;
+      let streamStructuredOutputParsed: unknown;
+      // P2-1 — parallel tool execution (default true)
+      const streamParallel = opts.parallelToolCalls !== false;
+      // P2-4 — tool retry options
+      const streamToolRetryOpts = opts.toolRetry;
+      // P3-1 — HITL interrupt handler
+      const streamInterruptOpts = opts.onInterrupt
+        ? { handler: opts.onInterrupt, requireAll: config.requireApproval ?? false }
+        : undefined;
+      // P3-2 — handoff feedback messages to inject after a modification
+      const streamPendingHandoffFeedback: string[] = [];
 
       const messages: Message[] = [];
       if (config.instructions) {
@@ -496,6 +868,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
 
       const toolDefs = toolReg.toDefinitions();
 
+      try {
       for (let stepIdx = 0; stepIdx < maxSteps; stepIdx++) {
         if (isExpired(ctx)) break;
 
@@ -503,6 +876,29 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
 
         const stepStart = Date.now();
         yield { type: 'step_start', step: { index: stepIdx, type: 'thinking', durationMs: 0 } };
+
+        // P3-1: Inject any HITL modification feedback before model call.
+        while (streamPendingHandoffFeedback.length > 0) {
+          messages.push({ role: 'user', content: streamPendingHandoffFeedback.shift()! });
+        }
+
+        // P2-3: Apply context management before each model call.
+        if (opts.contextManagement) {
+          const trimmed = await applyContextManagement(messages, opts.contextManagement, memory, ctx);
+          if (trimmed !== messages) messages.splice(0, messages.length, ...trimmed);
+        }
+
+        // P4-2: Proactive memory context injection (ephemeral — not stored in history).
+        let streamGenerateMessages: Message[] = messages;
+        if (opts.memoryContext) {
+          const userText = lastUserMessageText(messages);
+          if (userText) {
+            const retrieved = await opts.memoryContext.retrieve(ctx, userText).catch(() => null);
+            if (retrieved) {
+              streamGenerateMessages = buildMessagesWithMemoryContext(messages, retrieved, opts.memoryContext.maxChars);
+            }
+          }
+        }
 
         // Check if model supports streaming
         if (model.stream) {
@@ -515,9 +911,10 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             'agents.model.stream',
             { agent: config.name, stepIndex: stepIdx, mode: 'stream' },
             () => Promise.resolve(model.stream!(ctx, {
-              messages,
+              messages: streamGenerateMessages,
               tools: toolDefs.length > 0 ? toolDefs : undefined,
               toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
+              ...(opts.outputSchema && { responseFormat: opts.outputSchema }),
             })),
           )) {
             if (chunk.type === 'text' && chunk.text) {
@@ -527,10 +924,8 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             if (chunk.type === 'tool_call' && chunk.toolCall) {
               const tc = chunk.toolCall as ToolCall;
               if (tc.id && tc.name) {
-                // New tool call start
                 accToolCalls.push({ id: tc.id, name: tc.name, arguments: tc.arguments || '' });
               } else if (tc.arguments && accToolCalls.length > 0) {
-                // Incremental arguments delta — append to last tool call
                 const last = accToolCalls[accToolCalls.length - 1]!;
                 (last as { id: string; name: string; arguments: string }).arguments += tc.arguments;
               }
@@ -546,18 +941,49 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           if (accToolCalls.length > 0) {
             messages.push({ role: 'assistant', content: accText || '', toolCalls: accToolCalls });
 
-            for (const tc of accToolCalls) {
-              yield { type: 'tool_start', step: { index: steps.length, type: 'tool_call', content: tc.name, durationMs: 0 } };
-
-              const toolStep = await executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart);
-              steps.push(toolStep);
-              toolCallCount++;
-
-              messages.push({ role: 'tool', content: toolStep.toolCall?.result ?? '', toolCallId: tc.id });
-
-              yield { type: 'tool_end', step: toolStep };
+            // P2-1: Parallel tool execution in streaming path.
+            if (streamParallel) {
+              for (const tc of accToolCalls) {
+                yield { type: 'tool_start', step: { index: steps.length, type: 'tool_call', content: tc.name, durationMs: 0 } };
+              }
+              const toolResults = await Promise.all(
+                accToolCalls.map((tc) =>
+                  executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, streamToolRetryOpts, streamInterruptOpts, streamPendingHandoffFeedback),
+                ),
+              );
+              for (let i = 0; i < accToolCalls.length; i++) {
+                steps.push(toolResults[i]!);
+                toolCallCount++;
+                messages.push({ role: 'tool', content: toolResults[i]!.toolCall?.result ?? '', toolCallId: accToolCalls[i]!.id });
+                yield { type: 'tool_end', step: toolResults[i]! };
+              }
+            } else {
+              for (const tc of accToolCalls) {
+                yield { type: 'tool_start', step: { index: steps.length, type: 'tool_call', content: tc.name, durationMs: 0 } };
+                const toolStep = await executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, streamToolRetryOpts, streamInterruptOpts, streamPendingHandoffFeedback);
+                steps.push(toolStep);
+                toolCallCount++;
+                messages.push({ role: 'tool', content: toolStep.toolCall?.result ?? '', toolCallId: tc.id });
+                yield { type: 'tool_end', step: toolStep };
+              }
             }
             continue;
+          }
+
+          // P2-2: Validate structured output before handing off to post-processor.
+          if (opts.outputSchema && !isExpired(ctx)) {
+            const soResult = validateStructuredOutput(accText, opts.outputSchema);
+            if (soResult.valid) {
+              streamStructuredOutputParsed = soResult.parsed;
+            } else if (streamStructuredOutputRetryCount < (opts.structuredOutputRetries ?? 1)) {
+              streamStructuredOutputRetryCount++;
+              messages.push({ role: 'assistant', content: accText });
+              messages.push({
+                role: 'user',
+                content: `Your response must be valid JSON${opts.outputSchema.name ? ` conforming to schema "${opts.outputSchema.name}"` : ''}. Please respond with valid JSON only and no surrounding text.`,
+              });
+              continue;
+            }
           }
 
           // Terminal response via streaming — H-18: delegate to shared post-processor.
@@ -593,8 +1019,11 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           yield { type: 'step_end', step: responseStep };
           yield {
             type: 'done',
-            // M-21: use guardrail_denied when output guardrail blocked the response
-            result: buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, streamGuardrailDenied ? 'guardrail_denied' : 'completed'),
+            result: buildResult(
+              steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime,
+              streamGuardrailDenied ? 'guardrail_denied' : 'completed',
+              streamStructuredOutputParsed !== undefined ? { structuredOutput: streamStructuredOutputParsed } : undefined,
+            ),
           };
           return;
         }
@@ -605,9 +1034,10 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           'agents.model.generate',
           { agent: config.name, stepIndex: stepIdx, mode: 'stream-fallback' },
           () => model.generate(ctx, {
-            messages,
+            messages: streamGenerateMessages,
             tools: toolDefs.length > 0 ? toolDefs : undefined,
             toolChoice: toolDefs.length > 0 ? 'auto' : undefined,
+            ...(opts.outputSchema && { responseFormat: opts.outputSchema }),
           }),
         );
 
@@ -617,17 +1047,49 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         if (response.toolCalls && response.toolCalls.length > 0) {
           messages.push({ role: 'assistant', content: response.content || '', toolCalls: response.toolCalls });
 
-          for (const tc of response.toolCalls) {
-            yield { type: 'tool_start', step: { index: steps.length, type: 'tool_call', content: tc.name, durationMs: 0 } };
-
-            const toolStep = await executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart);
-            steps.push(toolStep);
-            toolCallCount++;
-
-            messages.push({ role: 'tool', content: toolStep.toolCall?.result ?? '', toolCallId: tc.id });
-            yield { type: 'tool_end', step: toolStep };
+          // P2-1: Parallel tool execution in fallback path.
+          if (streamParallel) {
+            for (const tc of response.toolCalls) {
+              yield { type: 'tool_start', step: { index: steps.length, type: 'tool_call', content: tc.name, durationMs: 0 } };
+            }
+            const toolResults = await Promise.all(
+              response.toolCalls.map((tc) =>
+                executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, streamToolRetryOpts, streamInterruptOpts, streamPendingHandoffFeedback),
+              ),
+            );
+            for (let i = 0; i < response.toolCalls.length; i++) {
+              steps.push(toolResults[i]!);
+              toolCallCount++;
+              messages.push({ role: 'tool', content: toolResults[i]!.toolCall?.result ?? '', toolCallId: response.toolCalls[i]!.id });
+              yield { type: 'tool_end', step: toolResults[i]! };
+            }
+          } else {
+            for (const tc of response.toolCalls) {
+              yield { type: 'tool_start', step: { index: steps.length, type: 'tool_call', content: tc.name, durationMs: 0 } };
+              const toolStep = await executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, streamToolRetryOpts, streamInterruptOpts, streamPendingHandoffFeedback);
+              steps.push(toolStep);
+              toolCallCount++;
+              messages.push({ role: 'tool', content: toolStep.toolCall?.result ?? '', toolCallId: tc.id });
+              yield { type: 'tool_end', step: toolStep };
+            }
           }
           continue;
+        }
+
+        // P2-2: Validate structured output before post-processing in fallback path.
+        if (opts.outputSchema && !isExpired(ctx)) {
+          const soResult = validateStructuredOutput(response.content, opts.outputSchema);
+          if (soResult.valid) {
+            streamStructuredOutputParsed = soResult.parsed;
+          } else if (streamStructuredOutputRetryCount < (opts.structuredOutputRetries ?? 1)) {
+            streamStructuredOutputRetryCount++;
+            messages.push({ role: 'assistant', content: response.content });
+            messages.push({
+              role: 'user',
+              content: `Your response must be valid JSON${opts.outputSchema.name ? ` conforming to schema "${opts.outputSchema.name}"` : ''}. Please respond with valid JSON only and no surrounding text.`,
+            });
+            continue;
+          }
         }
 
         // ── H-18: fallback terminal — same post-processor as streaming path ──
@@ -663,8 +1125,11 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         yield { type: 'step_end', step: responseStep };
         yield {
           type: 'done',
-          // M-21: propagate guardrail denial on the fallback path too
-          result: buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, streamGuardrailDenied ? 'guardrail_denied' : 'completed'),
+          result: buildResult(
+            steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime,
+            streamGuardrailDenied ? 'guardrail_denied' : 'completed',
+            streamStructuredOutputParsed !== undefined ? { structuredOutput: streamStructuredOutputParsed } : undefined,
+          ),
         };
         return;
       }
@@ -674,8 +1139,47 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         type: 'done',
         result: buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'failed'),
       };
+      } catch (err) {
+        // P3-2: HandoffSignal — execute target agent and yield its result.
+        if (err instanceof HandoffSignal) {
+          void weaveAudit(ctx, {
+            action: 'agent.handoff',
+            outcome: 'success',
+            resource: config.name,
+            details: { from: config.name, to: err.targetName },
+          });
+          eventBus?.emit(weaveEvent(EventTypes.AgentDelegation, {
+            from: config.name,
+            to: err.targetName,
+            type: 'handoff',
+          }, ctx));
+          const handoffResult = await err.targetAgent.run(ctx, err.transferInput);
+          const handoffMeta: HandoffMetadata = {
+            from: config.name,
+            to: err.targetName,
+            transferInput: err.transferInput.goal,
+          };
+          yield {
+            type: 'done',
+            result: {
+              ...handoffResult,
+              metadata: { ...handoffResult.metadata, handoff: handoffMeta },
+            },
+          };
+          return;
+        }
+        throw err;
+      }
     },
   };
+}
+
+// ─── Interrupt options type (internal, passed to executeToolCall) ─
+
+interface InterruptCallOpts {
+  handler: InterruptHandler;
+  /** When true every tool call triggers the interrupt, not just requireApproval tools. */
+  requireAll: boolean;
 }
 
 // ─── Terminal response post-processor (H-18) ─────────────────
@@ -824,8 +1328,11 @@ async function executeToolCall(
   policy: AgentPolicy | undefined,
   eventBus: EventBus | undefined,
   agentName: string,
-  _stepIdx: number,
+  stepIdx: number,
   stepStart: number,
+  retryOpts?: { maxAttempts?: number; backoffMs?: number; maxBackoffMs?: number },
+  interruptOpts?: InterruptCallOpts,
+  pendingFeedback?: string[],
 ): Promise<AgentStep> {
   const tool = toolReg.get(tc.name);
   const toolName = tc.name;
@@ -902,22 +1409,116 @@ async function executeToolCall(
       }
     }
 
+    // P3-1: HITL interrupt check — fires when:
+    //   a) onInterrupt is configured AND
+    //   b) either requireAll is true (every tool) OR the tool schema has requireApproval
+    // The check happens after guardrails (automated policy) and before execution.
+    const toolRequiresApproval =
+      interruptOpts &&
+      (interruptOpts.requireAll ||
+        (tool.schema as { requireApproval?: boolean }).requireApproval === true);
+
+    if (toolRequiresApproval && interruptOpts) {
+      let interruptArgs: Record<string, unknown> = {};
+      try { interruptArgs = JSON.parse(tc.arguments) as Record<string, unknown>; } catch { /* keep empty */ }
+
+      const interruptEvent: InterruptEvent = {
+        type: 'tool_approval',
+        toolName,
+        toolArgs: interruptArgs,
+        reason: `Tool "${toolName}" requires human approval before execution.`,
+        agentStep: stepIdx,
+        agentName,
+      };
+
+      let resolution;
+      try {
+        resolution = await interruptOpts.handler(ctx, interruptEvent);
+      } catch (err) {
+        // Handler threw — fail closed
+        resolution = {
+          action: 'reject' as const,
+          feedback: `Interrupt handler error: ${err instanceof Error ? err.message : String(err)}`,
+        };
+      }
+
+      void weaveAudit(ctx, {
+        action: 'agent.interrupt.decision',
+        outcome: resolution.action === 'approve' ? 'success' : 'failure',
+        resource: toolName,
+        details: { agentName, action: resolution.action },
+      });
+
+      if (resolution.action === 'reject') {
+        resultContent = `Tool call rejected by human reviewer: ${resolution.feedback ?? 'no reason given'}`;
+        eventBus?.emit(weaveEvent(EventTypes.ToolCallError, { tool: toolName, reason: 'hitl_rejected' }, ctx));
+        void weaveAudit(ctx, { action: 'agent.tool.invoke', outcome: 'denied', resource: toolName, details: { agent: agentName, reason: 'hitl_rejected' } });
+        if (resolution.feedback && pendingFeedback) {
+          pendingFeedback.push(`[HITL feedback for ${toolName}]: ${resolution.feedback}`);
+        }
+        return {
+          index: 0,
+          type: 'tool_call',
+          toolCall: { name: toolName, arguments: interruptArgs, result: resultContent },
+          durationMs: Date.now() - stepStart,
+        };
+      }
+
+      if (resolution.action === 'modify' && resolution.modifiedArgs) {
+        // Merge modified args back into tc.arguments so the tool receives them.
+        tc = { ...tc, arguments: JSON.stringify({ ...interruptArgs, ...resolution.modifiedArgs }) };
+        if (resolution.feedback && pendingFeedback) {
+          pendingFeedback.push(`[HITL modification for ${toolName}]: ${resolution.feedback}`);
+        }
+      } else if (resolution.feedback && pendingFeedback) {
+        pendingFeedback.push(`[HITL approval feedback for ${toolName}]: ${resolution.feedback}`);
+      }
+    }
+
     try {
       const args = JSON.parse(tc.arguments);
-      const output = await withObservedSpan(
-        ctx,
-        'agents.tool.invoke',
-        { agent: agentName, tool: toolName },
-        () => tool.invoke(ctx, { name: toolName, arguments: args }),
-      );
-      resultContent = output.isError ? `Error: ${output.content}` : output.content;
+      const maxAttempts = retryOpts?.maxAttempts ?? 1;
+      const backoffMs = retryOpts?.backoffMs ?? 200;
+      const maxBackoffMs = retryOpts?.maxBackoffMs ?? 10_000;
+      let lastErr: unknown;
+      let output: { content: string; isError?: boolean } | undefined;
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0) {
+          await backoffDelay(attempt, backoffMs, maxBackoffMs);
+        }
+        try {
+          output = await withObservedSpan(
+            ctx,
+            'agents.tool.invoke',
+            { agent: agentName, tool: toolName, attempt },
+            () => tool.invoke(ctx, { name: toolName, arguments: args }),
+          );
+          lastErr = undefined;
+          break; // success
+        } catch (err) {
+          lastErr = err;
+          // P3-2: HandoffSignal must always propagate — never retry or swallow it.
+          if (err instanceof HandoffSignal) throw err;
+          // Only retry on transient errors; propagate non-transient immediately.
+          if (!isTransientError(err)) throw err;
+        }
+      }
+
+      if (lastErr !== undefined) {
+        throw lastErr;
+      }
+
+      resultContent = output!.isError ? `Error: ${output!.content}` : output!.content;
       void weaveAudit(ctx, {
         action: 'agent.tool.invoke',
-        outcome: output.isError ? 'failure' : 'success',
+        outcome: output!.isError ? 'failure' : 'success',
         resource: toolName,
         details: { agent: agentName },
       });
     } catch (err) {
+      // P3-2: HandoffSignal must propagate to the agent loop — never swallow it.
+      if (err instanceof HandoffSignal) throw err;
       resultContent = `Tool error: ${err instanceof Error ? err.message : String(err)}`;
       void weaveAudit(ctx, { action: 'agent.tool.invoke', outcome: 'failure', resource: toolName, details: { agent: agentName, error: err instanceof Error ? err.message : String(err) } });
     }
@@ -968,6 +1569,7 @@ function buildResult(
   toolCallCount: number,
   startTime: number,
   status: AgentResult['status'],
+  metadata?: Record<string, unknown>,
 ): AgentResult {
   const lastResponse = [...steps].reverse().find((s) => s.type === 'response');
   return {
@@ -976,6 +1578,7 @@ function buildResult(
     steps,
     usage: buildUsage(steps, promptTokens, completionTokens, toolCallCount, startTime),
     status,
+    ...(metadata !== undefined && { metadata }),
   };
 }
 

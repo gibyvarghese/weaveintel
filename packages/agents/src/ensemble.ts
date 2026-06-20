@@ -18,8 +18,10 @@ import type {
   ConflictResolver,
   EnsembleCandidate,
   Agent,
+  AgentConfig,
   AgentInput,
   AgentResult,
+  AgentStepEvent,
   ExecutionContext,
 } from '@weaveintel/core';
 import { weaveAudit, weaveResolveTracer } from '@weaveintel/core';
@@ -199,6 +201,8 @@ export interface EnsembleOptions {
    * Parallel mode is faster but uses more concurrent tokens.
    */
   parallel?: boolean;
+  /** Display name for the ensemble. Defaults to "ensemble". */
+  name?: string;
 }
 
 export interface EnsembleResult extends AgentResult {
@@ -212,86 +216,115 @@ export interface EnsembleResult extends AgentResult {
 
 /**
  * Run N agents on the same input and resolve disagreements via a
- * `ConflictResolver`. Returns an `EnsembleResult` that extends `AgentResult`
- * with full candidate provenance.
+ * `ConflictResolver`. Returns a full `Agent` implementor so the ensemble can
+ * be used anywhere an `Agent` is expected — including as a supervisor worker
+ * or as a drop-in replacement for a single agent.
  *
  * @example
- * const result = await weaveEnsemble({
+ * const ensemble = weaveEnsemble({
  *   agents: [agentA, agentB, agentC],
  *   resolver: createJudgeResolver({ adapter: myAdapter, criteria }),
  *   parallel: true,
- * }).run(ctx, { messages: [{ role: 'user', content: 'What is the capital of France?' }] });
+ * });
+ *
+ * // Use directly
+ * const result = await ensemble.run(ctx, { messages: [...] });
+ * console.log(result.winner, result.candidates);
+ *
+ * // Use as a supervisor worker or wherever Agent is expected
+ * const supervisor = weaveAgent({ model, workers: [{ ...ensemble.config, model }] });
  */
-export function weaveEnsemble(opts: EnsembleOptions): {
+export function weaveEnsemble(opts: EnsembleOptions): Agent & {
   run(ctx: ExecutionContext, input: AgentInput): Promise<EnsembleResult>;
 } {
   const { agents, resolver, parallel = false } = opts;
 
-  return {
-    async run(ctx: ExecutionContext, input: AgentInput): Promise<EnsembleResult> {
-      const runStart = Date.now();
+  const config: AgentConfig = {
+    name: opts.name ?? 'ensemble',
+    description: `Ensemble of ${agents.length} agent(s) with ${parallel ? 'parallel' : 'sequential'} execution`,
+    maxSteps: Math.max(...agents.map((a) => a.config.maxSteps ?? 20)),
+  };
 
-      void weaveAudit(ctx, {
-        action: 'ensemble.run.start',
-        outcome: 'success',
-        resource: 'ensemble',
-        details: { agentCount: agents.length, parallel },
-      });
+  async function runEnsemble(ctx: ExecutionContext, input: AgentInput): Promise<EnsembleResult> {
+    const runStart = Date.now();
 
-      let agentResults: AgentResult[];
-      if (parallel) {
-        agentResults = await Promise.all(agents.map((a) => a.run(ctx, input)));
-      } else {
-        agentResults = [];
-        for (const agent of agents) {
-          agentResults.push(await agent.run(ctx, input));
-        }
+    void weaveAudit(ctx, {
+      action: 'ensemble.run.start',
+      outcome: 'success',
+      resource: config.name,
+      details: { agentCount: agents.length, parallel },
+    });
+
+    let agentResults: AgentResult[];
+    if (parallel) {
+      agentResults = await Promise.all(agents.map((a) => a.run(ctx, input)));
+    } else {
+      agentResults = [];
+      for (const agent of agents) {
+        agentResults.push(await agent.run(ctx, input));
       }
+    }
 
-      const candidates: EnsembleCandidate[] = agentResults.map((result, i) => ({
-        agentName: agents[i]!.config.name,
-        output: result.output,
-        result,
-      }));
+    const candidates: EnsembleCandidate[] = agentResults.map((result, i) => ({
+      agentName: agents[i]!.config.name,
+      output: result.output,
+      result,
+    }));
 
-      const resolution = await resolver.resolve(ctx, candidates);
+    const resolution = await resolver.resolve(ctx, candidates);
 
-      void weaveAudit(ctx, {
-        action: 'ensemble.run.end',
-        outcome: 'success',
-        resource: 'ensemble',
-        details: {
-          winner: resolution.winner,
-          candidateCount: candidates.length,
-          durationMs: Date.now() - runStart,
-        },
-      });
-
-      // Aggregate steps and usage across all agents
-      const allSteps = agentResults.flatMap((r, i) =>
-        r.steps.map((s) => ({ ...s, content: `[${agents[i]!.config.name}] ${s.content ?? ''}` })),
-      );
-      const totalTokens = agentResults.reduce((acc, r) => acc + r.usage.totalTokens, 0);
-      const totalDurationMs = Date.now() - runStart;
-
-      return {
-        output: resolution.output,
-        messages: [],
-        steps: allSteps,
-        usage: {
-          totalSteps: allSteps.length,
-          promptTokens: agentResults.reduce((acc, r) => acc + r.usage.promptTokens, 0),
-          completionTokens: agentResults.reduce((acc, r) => acc + r.usage.completionTokens, 0),
-          totalTokens,
-          totalDurationMs,
-          toolCalls: agentResults.reduce((acc, r) => acc + r.usage.toolCalls, 0),
-          delegations: agentResults.reduce((acc, r) => acc + r.usage.delegations, 0),
-        },
-        status: 'completed',
-        candidates,
-        rationale: resolution.rationale,
+    void weaveAudit(ctx, {
+      action: 'ensemble.run.end',
+      outcome: 'success',
+      resource: config.name,
+      details: {
         winner: resolution.winner,
-      };
+        candidateCount: candidates.length,
+        durationMs: Date.now() - runStart,
+      },
+    });
+
+    const allSteps = agentResults.flatMap((r, i) =>
+      r.steps.map((s) => ({ ...s, content: `[${agents[i]!.config.name}] ${s.content ?? ''}` })),
+    );
+    const totalDurationMs = Date.now() - runStart;
+
+    return {
+      output: resolution.output,
+      messages: [],
+      steps: allSteps,
+      usage: {
+        totalSteps: allSteps.length,
+        promptTokens: agentResults.reduce((acc, r) => acc + r.usage.promptTokens, 0),
+        completionTokens: agentResults.reduce((acc, r) => acc + r.usage.completionTokens, 0),
+        totalTokens: agentResults.reduce((acc, r) => acc + r.usage.totalTokens, 0),
+        totalDurationMs,
+        toolCalls: agentResults.reduce((acc, r) => acc + r.usage.toolCalls, 0),
+        delegations: agentResults.reduce((acc, r) => acc + r.usage.delegations, 0),
+      },
+      status: 'completed',
+      candidates,
+      rationale: resolution.rationale,
+      winner: resolution.winner,
+    };
+  }
+
+  return {
+    config,
+
+    async run(ctx: ExecutionContext, input: AgentInput): Promise<EnsembleResult> {
+      return runEnsemble(ctx, input);
+    },
+
+    async *runStream(ctx: ExecutionContext, input: AgentInput): AsyncIterable<AgentStepEvent> {
+      yield { type: 'step_start', step: { index: 0, type: 'thinking', durationMs: 0, content: `Running ${agents.length} ensemble agents` } };
+      const result = await runEnsemble(ctx, input);
+      // Yield text in chunks to mirror the streaming contract
+      const chunkSize = 80;
+      for (let i = 0; i < result.output.length; i += chunkSize) {
+        yield { type: 'text_chunk', text: result.output.slice(i, i + chunkSize) };
+      }
+      yield { type: 'done', result };
     },
   };
 }

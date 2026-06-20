@@ -150,6 +150,29 @@ export interface ChatSettingsRow {
   // W5 — Ensemble (m40)
   ensemble_agents: string | null;
   ensemble_resolver: string | null;
+  // P2-1 — Parallel tool execution (m63)
+  parallel_tool_calls: number;
+  // P2-3 — Context window management (m63)
+  context_strategy: string | null;
+  context_max_tokens: number | null;
+  context_window_size: number;
+  // P2-4 — Tool retry (m63)
+  tool_retry_max_attempts: number;
+  tool_retry_backoff_ms: number;
+  tool_retry_max_backoff_ms: number;
+  // P3-1 — HITL interrupt (m64)
+  hitl_enabled: number;
+  hitl_require_all: number;
+  hitl_timeout_ms: number;
+  // P3-2 — Agent handoff (m64)
+  handoffs_enabled: number;
+  // P4-3 — Knowledge graph memory (m65)
+  graph_enabled: number;
+  graph_max_nodes: number;
+  graph_persist_enabled: number;
+  // P4-2 — Proactive memory context injection (m65)
+  memory_context_enabled: number;
+  memory_context_max_chars: number;
 }
 
 export interface TraceRow {

@@ -23,6 +23,8 @@ import {
   weaveMCPTools,
 } from '@weaveintel/mcp-client';
 import { weaveA2AClient } from '@weaveintel/a2a';
+import { createGraphMemoryToolSet } from '@weaveintel/agents';
+import type { GraphMemoryStore } from '@weaveintel/graph';
 import { createSVToolMap } from './features/scientific-validation/tools/index.js';
 import { createKaggleToolMap } from './live-agents/kaggle/kaggle-tools.js';
 
@@ -886,6 +888,12 @@ export interface ToolRegistryOptions {
    * registry falls back to invocation-time `runtime.require(...)` checks.
    */
   runtime?: WeaveRuntime;
+  /**
+   * P4-3 — Caller-supplied knowledge graph store for graph memory tools.
+   * When set, the four graph_* tools are available for registration.
+   * Use createGraphMemoryStore() (in-memory) or a SQLite-backed adapter.
+   */
+  graphStore?: GraphMemoryStore;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1423,6 +1431,8 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     agenda_create: agendaCreateTool,
     agenda_update: agendaUpdateTool,
     agenda_delete: agendaDeleteTool,
+    // P4-3: Knowledge graph tools — only available when graphStore is provided
+    ...(opts?.graphStore ? Object.fromEntries(createGraphMemoryToolSet(opts.graphStore).map((t: Tool) => [t.schema.name, t])) : {}),
   };
   for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {
     // Skip tools disabled in the operator-managed tool catalog

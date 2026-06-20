@@ -42,6 +42,9 @@ import { applyM59LiveRunsStopRequested } from './m59-live-runs-stop-requested.js
 import { applyM60A2ASkills } from './m60-a2a-skills.js';
 import { applyM61A2ASkillsAgentConfig } from './m61-a2a-skills-agent-config.js';
 import { applyM62A2ATasks } from './m62-a2a-tasks.js';
+import { applyM63AgentPhase2 } from './m63-agent-phase2.js';
+import { applyM64AgentPhase3 } from './m64-agent-phase3.js';
+import { applyM65AgentPhase4 } from './m65-agent-phase4.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -92,6 +95,9 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm60-a2a-skills', description: 'A2A Skills: a2a_skills table seeded with the 3 default capability skills (general-chat, supervisor-orchestration, ensemble-reasoning); replaces hardcoded constant in routes/a2a.ts', run: applyM60A2ASkills },
   { id: 'm61-a2a-skills-agent-config', description: 'A2A Skills agent config: agent_tools + agent_workers columns on a2a_skills; seeds code_executor+analyst workers for supervisor-orchestration', run: applyM61A2ASkillsAgentConfig },
   { id: 'm62-a2a-tasks', description: 'A2A Tasks: persistent SQLite-backed a2a_tasks table; replaces in-memory store so task state survives server restarts', run: applyM62A2ATasks },
+  { id: 'm63-agent-phase2', description: 'Agent Phase 2: parallel_tool_calls, context management (strategy/max_tokens/window_size), tool retry columns on chat_settings + agent_strategy_settings; agent_output_schemas + agent_structured_outputs tables', run: applyM63AgentPhase2 },
+  { id: 'm64-agent-phase3', description: 'Agent Phase 3: HITL interrupt (hitl_interrupt_requests table, chat_settings HITL/handoff toggles) + agent handoff audit log (agent_handoff_log table)', run: applyM64AgentPhase3 },
+  { id: 'm65-agent-phase4', description: 'Agent Phase 4: portable memory tools, proactive context injection (chat_settings columns), knowledge graph (agent_graph_nodes + agent_graph_edges tables), graph tool catalog seeds', run: applyM65AgentPhase4 },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

@@ -85,6 +85,14 @@ export interface SupervisorRuntime {
   tools: ToolRegistry;
   systemPrompt: string;
   workersConfig: Record<string, AgentConfig>;
+  /**
+   * Reset per-run mutable state so that a single supervisor instance can be
+   * invoked across multiple `run()` calls without carrying over delegation
+   * counts or thinking logs from a previous invocation.
+   *
+   * Must be called at the start of every `weaveAgent.run()` / `runStream()`.
+   */
+  reset(): void;
 }
 
 /**
@@ -417,7 +425,15 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
     workers.map((w) => [w.name, { name: w.name, instructions: w.systemPrompt }]),
   );
 
-  return { tools, systemPrompt, workersConfig };
+  return {
+    tools,
+    systemPrompt,
+    workersConfig,
+    reset() {
+      delegationResults.length = 0;
+      thinkingLog.length = 0;
+    },
+  };
 }
 
 /** Optional helper kept for back-compat with packages that referenced the type. */

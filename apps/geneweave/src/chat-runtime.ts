@@ -181,6 +181,29 @@ export interface ChatSettings {
   // W5 — Ensemble mode
   ensembleAgents?: Array<{ name: string; model?: string; systemPrompt?: string }>;
   ensembleResolver?: 'vote' | 'judge' | 'arbiter';
+  // P2-1 — Parallel tool execution
+  parallelToolCalls?: boolean;
+  // P2-3 — Context window management
+  contextStrategy?: 'trim_oldest' | 'sliding_window' | 'summarize';
+  contextMaxTokens?: number;
+  contextWindowSize?: number;
+  // P2-4 — Tool retry
+  toolRetryMaxAttempts?: number;
+  toolRetryBackoffMs?: number;
+  toolRetryMaxBackoffMs?: number;
+  // P3-1 — HITL interrupt
+  hitlEnabled?: boolean;
+  hitlRequireAll?: boolean;
+  hitlTimeoutMs?: number;
+  // P3-2 — Agent handoff
+  handoffsEnabled?: boolean;
+  // P4-3 — Knowledge graph memory
+  graphEnabled?: boolean;
+  graphMaxNodes?: number;
+  graphPersistEnabled?: boolean;
+  // P4-2 — Proactive memory context injection
+  memoryContextEnabled?: boolean;
+  memoryContextMaxChars?: number;
 }
 
 export interface WorkerDef {
@@ -244,5 +267,28 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
     // W5 — Ensemble
     ensembleAgents: safeJsonParse<ChatSettings['ensembleAgents']>(row.ensemble_agents, undefined, 'ensemble_agents'),
     ensembleResolver: (row.ensemble_resolver as ChatSettings['ensembleResolver']) ?? undefined,
+    // P2-1 — Parallel tool execution (default true: 0=false, 1=true, NULL=true)
+    parallelToolCalls: row.parallel_tool_calls !== 0,
+    // P2-3 — Context management
+    contextStrategy: (row.context_strategy as ChatSettings['contextStrategy']) ?? undefined,
+    contextMaxTokens: row.context_max_tokens ?? undefined,
+    contextWindowSize: row.context_window_size || 20,
+    // P2-4 — Tool retry (0 = disabled)
+    toolRetryMaxAttempts: row.tool_retry_max_attempts || undefined,
+    toolRetryBackoffMs: row.tool_retry_backoff_ms || 200,
+    toolRetryMaxBackoffMs: row.tool_retry_max_backoff_ms || 10_000,
+    // P3-1 — HITL interrupt (default: disabled)
+    hitlEnabled: row.hitl_enabled !== 0,
+    hitlRequireAll: row.hitl_require_all !== 0,
+    hitlTimeoutMs: row.hitl_timeout_ms || 300_000,
+    // P3-2 — Agent handoff (default: disabled)
+    handoffsEnabled: row.handoffs_enabled !== 0,
+    // P4-3 — Knowledge graph memory (default: disabled)
+    graphEnabled: row.graph_enabled !== 0,
+    graphMaxNodes: row.graph_max_nodes || 500,
+    graphPersistEnabled: row.graph_persist_enabled !== 0,
+    // P4-2 — Proactive memory context injection (default: disabled)
+    memoryContextEnabled: row.memory_context_enabled !== 0,
+    memoryContextMaxChars: row.memory_context_max_chars || 4000,
   };
 }
