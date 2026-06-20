@@ -398,6 +398,7 @@ export {
   type TaskArtifactUpdateEvent,
   type A2AStreamEvent,
   type A2APushNotificationConfig,
+  type A2APushNotificationConfigEntry,
   type AgentInterface,
   type AgentCapabilityExtension,
   type AgentCapabilities,

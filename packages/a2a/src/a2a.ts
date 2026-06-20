@@ -24,6 +24,8 @@ import type {
   A2ATaskPage,
   A2ATaskResult,
   A2ATaskLegacy,
+  A2APushNotificationConfig,
+  A2APushNotificationConfigEntry,
   AgentCard,
   InternalA2ABus,
   ExecutionContext,
@@ -248,6 +250,53 @@ export function weaveA2AClient(): A2AClient {
       }
 
       yield* parseSseStream<A2AStreamEvent>(response.body);
+    },
+
+    // ── Push Notifications (A2A v1.0) ─────────────────────────────────────────
+
+    async createPushConfig(
+      ctx: ExecutionContext,
+      agentUrl: string,
+      taskId: string,
+      config: A2APushNotificationConfig,
+    ): Promise<A2APushNotificationConfigEntry> {
+      return rpcPost<A2APushNotificationConfigEntry>(
+        ctx, agentUrl, A2A_METHODS.CREATE_PUSH_CONFIG, { taskId, config },
+      );
+    },
+
+    async getPushConfig(
+      ctx: ExecutionContext,
+      agentUrl: string,
+      taskId: string,
+      configId: string,
+    ): Promise<A2APushNotificationConfigEntry> {
+      return rpcPost<A2APushNotificationConfigEntry>(
+        ctx, agentUrl, A2A_METHODS.GET_PUSH_CONFIG, { taskId, pushConfigId: configId },
+      );
+    },
+
+    async listPushConfigs(
+      ctx: ExecutionContext,
+      agentUrl: string,
+      taskId: string,
+    ): Promise<readonly A2APushNotificationConfigEntry[]> {
+      const res = await rpcPost<{ configs: A2APushNotificationConfigEntry[] }>(
+        ctx, agentUrl, A2A_METHODS.LIST_PUSH_CONFIGS, { taskId },
+      );
+      return res.configs ?? [];
+    },
+
+    async deletePushConfig(
+      ctx: ExecutionContext,
+      agentUrl: string,
+      taskId: string,
+      configId: string,
+    ): Promise<boolean> {
+      await rpcPost<unknown>(
+        ctx, agentUrl, A2A_METHODS.DELETE_PUSH_CONFIG, { taskId, pushConfigId: configId },
+      );
+      return true;
     },
 
     // ── Deprecated v0.3 compat ────────────────────────────────────────────────

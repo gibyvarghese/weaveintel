@@ -1,25 +1,18 @@
 /**
- * geneWeave — A2A (Agent-to-Agent) routes (v1.0, Phase 3)
+ * geneWeave — A2A (Agent-to-Agent) routes (v1.0, Phase 5)
  *
- * Phase 3: Task store + full state machine + SubscribeToTask.
+ * Phase 5: Push notifications, extended agent card, JWT validation.
  *
  * Endpoints:
  *   GET  /.well-known/agent-card.json  — v1.0 Agent Card (public)
  *   GET  /.well-known/agent.json       — legacy alias (backward compat)
  *   POST /api/a2a                      — JSON-RPC 2.0 dispatcher (v1.0 primary)
  *
- * Backward-compat REST endpoints still available:
- *   POST /api/a2a/tasks                — submit a task (A2ATaskSendParams body)
- *   GET  /api/a2a/tasks/:taskId        — fetch task from store (real, not a stub)
- *
  * A2A v1.0 methods accepted at POST /api/a2a:
- *   SendMessage, SendStreamingMessage, GetTask, ListTasks, CancelTask, SubscribeToTask
- *
- * Streaming:
- *   SendStreamingMessage returns text/event-stream with A2AStreamEvent JSON per line.
- *   SubscribeToTask reconnects to in-progress/pending tasks via the task store.
- *
- * Auth: Bearer token validated via the same JWT mechanism as the chat API.
+ *   SendMessage, SendStreamingMessage, GetTask, ListTasks, CancelTask,
+ *   SubscribeToTask, GetExtendedAgentCard,
+ *   CreateTaskPushNotificationConfig, GetTaskPushNotificationConfig,
+ *   ListTaskPushNotificationConfigs, DeleteTaskPushNotificationConfig
  */
 
 import { newUUIDv7, weaveContext } from '@weaveintel/core';
@@ -31,10 +24,11 @@ import type {
 import {
   createA2ADispatcher,
   createInMemoryA2ATaskStore,
+  createInMemoryPushNotificationStore,
   streamToSse,
   SSE_KEEPALIVE,
 } from '@weaveintel/a2a';
-import type { A2ATaskStore } from '@weaveintel/a2a';
+import type { A2ATaskStore, A2APushNotificationStore } from '@weaveintel/a2a';
 import type { DatabaseAdapter } from '../db.js';
 import type { ChatEngine } from '../chat.js';
 import { json, readBody } from '../server-core.js';
@@ -66,8 +60,8 @@ function buildAgentCard(baseUrl: string): AgentCard {
     ],
     capabilities: {
       streaming: true,
-      pushNotifications: false,
-      extendedAgentCard: false,
+      pushNotifications: true,
+      extendedAgentCard: true,
       stateTransitionHistory: true,
     },
     supportedInterfaces: [
@@ -119,9 +113,10 @@ export function registerA2ARoutes(
   });
 
   // ── Task store (Phase 3) ─────────────────────────────────────────────────────
-  // One in-memory store per server instance. Swap for createDurableA2ATaskStore(kv)
-  // once a persistence slot is wired (Phase 4).
   const taskStore: A2ATaskStore = createInMemoryA2ATaskStore();
+
+  // ── Push notification store (Phase 5) ─────────────────────────────────────────
+  const pushStore: A2APushNotificationStore = createInMemoryPushNotificationStore();
 
   // ── Build the JSON-RPC 2.0 dispatcher (lazily, so chatEngine is fully wired) ─
 
@@ -129,8 +124,8 @@ export function registerA2ARoutes(
 
   function getDispatcher() {
     if (_dispatcher) return _dispatcher;
-    const a2aImpl = buildGeneWeaveA2AServer(db, chatEngine, taskStore);
-    _dispatcher = createA2ADispatcher(a2aImpl, taskStore);
+    const a2aImpl = buildGeneWeaveA2AServer(db, chatEngine, taskStore, pushStore);
+    _dispatcher = createA2ADispatcher(a2aImpl, taskStore, pushStore);
     return _dispatcher;
   }
 
@@ -256,19 +251,18 @@ function buildGeneWeaveA2AServer(
   db: DatabaseAdapter,
   chatEngine: ChatEngine,
   store: A2ATaskStore,
+  pushStore: A2APushNotificationStore,
 ): A2AServer {
-  const card = (() => {
-    const baseUrl = process.env['GENEWEAVE_BASE_URL'] ?? 'http://localhost:3000';
-    const agentUrl = `${baseUrl}/api/a2a`;
-    return {
-      name: 'geneweave',
-      description: 'geneWeave — Intelligent AI orchestration assistant powered by weaveIntel',
-      version: AGENT_VERSION,
-      skills: [{ id: 'general-chat', name: 'General Chat', description: 'Conversational AI with tool-calling' }],
-      capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false, stateTransitionHistory: true },
-      supportedInterfaces: [{ url: agentUrl, protocolBinding: 'JSONRPC' as const, protocolVersion: '1.0' }],
-    };
-  })();
+  const baseUrl = process.env['GENEWEAVE_BASE_URL'] ?? 'http://localhost:3000';
+  const agentUrl = `${baseUrl}/api/a2a`;
+  const card = {
+    name: 'geneweave',
+    description: 'geneWeave — Intelligent AI orchestration assistant powered by weaveIntel',
+    version: AGENT_VERSION,
+    skills: [{ id: 'general-chat', name: 'General Chat', description: 'Conversational AI with tool-calling' }],
+    capabilities: { streaming: true, pushNotifications: true, extendedAgentCard: true, stateTransitionHistory: true },
+    supportedInterfaces: [{ url: agentUrl, protocolBinding: 'JSONRPC' as const, protocolVersion: '1.0' }],
+  };
 
   return {
     card,
@@ -396,6 +390,45 @@ function buildGeneWeaveA2AServer(
       await store.update(taskId, {
         status: { state: 'TASK_STATE_CANCELED', timestamp: new Date().toISOString() },
       });
+    },
+
+    async getExtendedCard(_ctx) {
+      // Extended card includes full skill metadata, doc URL, and icon
+      return {
+        ...card,
+        skills: [
+          {
+            id: 'general-chat',
+            name: 'General Chat',
+            description: 'Conversational AI with tool-calling, supervisor, and ensemble agent modes',
+            tags: ['chat', 'tool-calling', 'orchestration', 'supervisor'],
+            examples: [
+              'Analyse this dataset and plot key trends',
+              'Search the web for the latest news on renewable energy',
+              'Review my code and suggest improvements',
+            ],
+            inputModes: ['text/plain'],
+            outputModes: ['text/plain'],
+          },
+        ],
+        documentationUrl: `${baseUrl}/docs/a2a`,
+      };
+    },
+
+    async createPushConfig(_ctx, taskId, config) {
+      return pushStore.create(taskId, config);
+    },
+
+    async getPushConfig(_ctx, taskId, configId) {
+      return pushStore.get(taskId, configId);
+    },
+
+    async listPushConfigs(_ctx, taskId) {
+      return pushStore.list(taskId);
+    },
+
+    async deletePushConfig(_ctx, taskId, configId) {
+      return pushStore.delete(taskId, configId);
     },
 
     async start() {},

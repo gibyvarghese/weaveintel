@@ -157,6 +157,13 @@ export interface A2APushNotificationConfig {
   };
 }
 
+/** Server-assigned push notification config entry (extends config with id + audit fields). */
+export interface A2APushNotificationConfigEntry extends A2APushNotificationConfig {
+  readonly pushConfigId: string;
+  readonly taskId: string;
+  readonly createdAt: string;
+}
+
 // ─── Agent Card ──────────────────────────────────────────────
 
 /** A2A v1.0: replaces the flat `url` field. */
@@ -273,6 +280,16 @@ export interface A2AClient {
   /** Reconnect SSE stream to an in-progress task. */
   subscribeToTask(ctx: ExecutionContext, agentUrl: string, taskId: string): AsyncIterable<A2AStreamEvent>;
 
+  // ── Push Notifications (A2A v1.0) ──────────────────────────────────────────
+  /** Register a webhook for push notifications on a task. */
+  createPushConfig(ctx: ExecutionContext, agentUrl: string, taskId: string, config: A2APushNotificationConfig): Promise<A2APushNotificationConfigEntry>;
+  /** Retrieve a push notification config by ID. */
+  getPushConfig(ctx: ExecutionContext, agentUrl: string, taskId: string, configId: string): Promise<A2APushNotificationConfigEntry>;
+  /** List all push notification configs for a task. */
+  listPushConfigs(ctx: ExecutionContext, agentUrl: string, taskId: string): Promise<readonly A2APushNotificationConfigEntry[]>;
+  /** Delete a push notification config. */
+  deletePushConfig(ctx: ExecutionContext, agentUrl: string, taskId: string, configId: string): Promise<boolean>;
+
   // ── Deprecated v0.3 compat ─────────────────────────────────────────────────
   /** @deprecated Use sendMessage(). */
   sendTask?(ctx: ExecutionContext, agentUrl: string, task: A2ATaskLegacy): Promise<A2ATaskResult>;
@@ -301,6 +318,19 @@ export interface A2AServer {
 
   /** Optional: cancel an in-progress task. */
   cancelTask?(ctx: ExecutionContext, taskId: string): Promise<void>;
+
+  /** Optional: return the extended agent card with additional metadata. */
+  getExtendedCard?(ctx: ExecutionContext): Promise<AgentCard>;
+
+  // ── Push Notifications (A2A v1.0) ──────────────────────────────────────────
+  /** Optional: register a push notification webhook for a task. */
+  createPushConfig?(ctx: ExecutionContext, taskId: string, config: A2APushNotificationConfig): Promise<A2APushNotificationConfigEntry>;
+  /** Optional: retrieve a push notification config. */
+  getPushConfig?(ctx: ExecutionContext, taskId: string, configId: string): Promise<A2APushNotificationConfigEntry | null>;
+  /** Optional: list push notification configs for a task. */
+  listPushConfigs?(ctx: ExecutionContext, taskId: string): Promise<readonly A2APushNotificationConfigEntry[]>;
+  /** Optional: delete a push notification config. */
+  deletePushConfig?(ctx: ExecutionContext, taskId: string, configId: string): Promise<boolean>;
 
   /** Lifecycle — HTTP serving is handled by the host app; no-op for in-process adapters. */
   start(port: number): Promise<void>;

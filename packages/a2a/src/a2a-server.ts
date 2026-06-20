@@ -29,6 +29,7 @@ import type {
   A2AServer,
   A2ATask,
   A2ATaskSendParams,
+  A2APushNotificationConfig,
   A2AListTasksFilter,
   A2AStreamEvent,
   ExecutionContext,
@@ -46,6 +47,9 @@ import {
 import { sseData, sseComment } from './sse-parser.js';
 import type { A2ATaskStore } from './task-store.js';
 import { isTerminalA2AState } from './task-store.js';
+import type { A2APushNotificationStore } from './push-notification-store.js';
+import type { JwtValidatorFn } from './jwt-validator.js';
+import { deliverPushNotificationsForTask } from './push-notification-delivery.js';
 
 // ─── Request / Response shapes ────────────────────────────────────────────────
 
@@ -64,13 +68,18 @@ export type A2ADispatchResult =
 
 /**
  * Create a JSON-RPC 2.0 dispatcher for an `A2AServer` implementation.
- * Returns a function that accepts a framework-agnostic request and produces
- * either a JSON response or an SSE stream result.
  *
- * @param impl   - The A2AServer to dispatch to.
- * @param store  - Optional task store; enables SubscribeToTask SSE streaming (Phase 3).
+ * @param impl         - The A2AServer to dispatch to.
+ * @param store        - Optional task store; enables GetTask, ListTasks, SubscribeToTask.
+ * @param pushStore    - Optional push store; enables push notification CRUD methods.
+ * @param jwtValidator - Optional JWT validator; enforces Bearer token auth on all requests.
  */
-export function createA2ADispatcher(impl: A2AServer, store?: A2ATaskStore): (
+export function createA2ADispatcher(
+  impl: A2AServer,
+  store?: A2ATaskStore,
+  pushStore?: A2APushNotificationStore,
+  jwtValidator?: JwtValidatorFn,
+): (
   ctx: ExecutionContext,
   req: A2ADispatchRequest,
 ) => Promise<A2ADispatchResult> {
@@ -105,11 +114,29 @@ export function createA2ADispatcher(impl: A2AServer, store?: A2ATaskStore): (
 
     const { id, method, params } = rpcReq;
 
+    // JWT validation — run before dispatch when validator is configured
+    if (jwtValidator) {
+      const authHeader = resolveHeader(req.headers, 'authorization') ?? '';
+      const skillId = extractSkillId(params);
+      const payload = await jwtValidator(authHeader, { skillId });
+      if (!payload) {
+        return {
+          kind: 'json',
+          status: 401,
+          data: makeRpcError(id, A2A_ERROR_CODES.UNAUTHORIZED, 'Unauthorized: missing or invalid bearer token'),
+        };
+      }
+    }
+
     try {
       switch (method) {
         case A2A_METHODS.SEND_MESSAGE: {
           const sendParams = coerceTaskSendParams(params, id);
           const task = await impl.handleMessage(ctx, sendParams);
+          // Trigger push delivery after task completes
+          if (pushStore && isTerminalA2AState(task.status.state)) {
+            void deliverPushNotificationsForTask(pushStore, task).catch(() => {});
+          }
           return { kind: 'json', status: 200, data: makeRpcSuccess(id, task) };
         }
 
@@ -211,14 +238,76 @@ export function createA2ADispatcher(impl: A2AServer, store?: A2ATaskStore): (
           return { kind: 'json', status: 200, data: makeRpcSuccess(id, card) };
         }
 
-        case A2A_METHODS.CREATE_PUSH_CONFIG:
-        case A2A_METHODS.GET_PUSH_CONFIG:
-        case A2A_METHODS.LIST_PUSH_CONFIGS:
+        case A2A_METHODS.CREATE_PUSH_CONFIG: {
+          if (!pushStore) {
+            throw new A2AJsonRpcError(
+              A2A_ERROR_CODES.PUSH_NOTIFICATION_NOT_SUPPORTED,
+              'Push notifications are not configured on this agent',
+            );
+          }
+          const p = (params ?? {}) as Record<string, unknown>;
+          const taskId = stringParam(p, 'taskId', id);
+          const rawConfig = p['config'] as A2APushNotificationConfig | undefined;
+          if (!rawConfig || typeof rawConfig.url !== 'string') {
+            throw new A2AJsonRpcError(A2A_ERROR_CODES.INVALID_PARAMS, 'CreateTaskPushNotificationConfig: params.config.url is required');
+          }
+          const entry = impl.createPushConfig
+            ? await impl.createPushConfig(ctx, taskId, rawConfig)
+            : await pushStore.create(taskId, rawConfig);
+          return { kind: 'json', status: 200, data: makeRpcSuccess(id, entry) };
+        }
+
+        case A2A_METHODS.GET_PUSH_CONFIG: {
+          if (!pushStore) {
+            throw new A2AJsonRpcError(
+              A2A_ERROR_CODES.PUSH_NOTIFICATION_NOT_SUPPORTED,
+              'Push notifications are not configured on this agent',
+            );
+          }
+          const p = (params ?? {}) as Record<string, unknown>;
+          const taskId = stringParam(p, 'taskId', id);
+          const configId = stringParam(p, 'pushConfigId', id);
+          const entry = impl.getPushConfig
+            ? await impl.getPushConfig(ctx, taskId, configId)
+            : await pushStore.get(taskId, configId);
+          if (!entry) {
+            throw new A2AJsonRpcError(A2A_ERROR_CODES.TASK_NOT_FOUND, `Push config not found: ${configId}`);
+          }
+          return { kind: 'json', status: 200, data: makeRpcSuccess(id, entry) };
+        }
+
+        case A2A_METHODS.LIST_PUSH_CONFIGS: {
+          if (!pushStore) {
+            throw new A2AJsonRpcError(
+              A2A_ERROR_CODES.PUSH_NOTIFICATION_NOT_SUPPORTED,
+              'Push notifications are not configured on this agent',
+            );
+          }
+          const p = (params ?? {}) as Record<string, unknown>;
+          const taskId = stringParam(p, 'taskId', id);
+          const configs = impl.listPushConfigs
+            ? await impl.listPushConfigs(ctx, taskId)
+            : await pushStore.list(taskId);
+          return { kind: 'json', status: 200, data: makeRpcSuccess(id, { configs }) };
+        }
+
         case A2A_METHODS.DELETE_PUSH_CONFIG: {
-          throw new A2AJsonRpcError(
-            A2A_ERROR_CODES.PUSH_NOTIFICATION_NOT_SUPPORTED,
-            'Push notification configuration is not yet supported (Phase 5)',
-          );
+          if (!pushStore) {
+            throw new A2AJsonRpcError(
+              A2A_ERROR_CODES.PUSH_NOTIFICATION_NOT_SUPPORTED,
+              'Push notifications are not configured on this agent',
+            );
+          }
+          const p = (params ?? {}) as Record<string, unknown>;
+          const taskId = stringParam(p, 'taskId', id);
+          const configId = stringParam(p, 'pushConfigId', id);
+          const deleted = impl.deletePushConfig
+            ? await impl.deletePushConfig(ctx, taskId, configId)
+            : await pushStore.delete(taskId, configId);
+          if (!deleted) {
+            throw new A2AJsonRpcError(A2A_ERROR_CODES.TASK_NOT_FOUND, `Push config not found: ${configId}`);
+          }
+          return { kind: 'json', status: 200, data: makeRpcSuccess(id, { deleted: true }) };
         }
 
         default: {
@@ -234,6 +323,7 @@ export function createA2ADispatcher(impl: A2AServer, store?: A2ATaskStore): (
           : err.code === A2A_ERROR_CODES.METHOD_NOT_FOUND ? 404
           : err.code === A2A_ERROR_CODES.PARSE_ERROR ? 400
           : err.code === A2A_ERROR_CODES.INVALID_REQUEST ? 400
+          : err.code === A2A_ERROR_CODES.UNAUTHORIZED ? 401
           : 500;
         return { kind: 'json', status, data: makeRpcError(id, err.code, err.message, err.data) };
       }
@@ -319,6 +409,17 @@ function stringParam(params: Record<string, unknown>, key: string, rpcId: string
     );
   }
   return val;
+}
+
+function extractSkillId(params: unknown): string | undefined {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return undefined;
+  const p = params as Record<string, unknown>;
+  const msg = p['message'];
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return undefined;
+  const meta = (msg as Record<string, unknown>)['metadata'];
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return undefined;
+  const skillId = (meta as Record<string, unknown>)['skillId'];
+  return typeof skillId === 'string' ? skillId : undefined;
 }
 
 function coerceTaskSendParams(params: unknown, rpcId: string): A2ATaskSendParams {

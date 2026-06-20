@@ -47,5 +47,37 @@ export {
 // ── SSE parser ─────────────────────────────────────────────────────────────────
 export { parseSseStream, sseData, sseComment } from './sse-parser.js';
 
+// ── Push Notifications (Phase 5) ───────────────────────────────────────────────
+export {
+  createInMemoryPushNotificationStore,
+  createDurablePushNotificationStore,
+  type A2APushNotificationStore,
+  type A2APushNotificationConfigEntry,
+} from './push-notification-store.js';
+
+export {
+  deliverToWebhook,
+  deliverPushNotificationsForTask,
+  type PushDeliveryPayload,
+} from './push-notification-delivery.js';
+
+// ── Card Signer (Phase 5) ──────────────────────────────────────────────────────
+export {
+  signAgentCard,
+  verifyAgentCard,
+  generateCardSigningKeyPair,
+  type CardVerificationResult,
+} from './card-signer.js';
+
+// ── JWT Validator (Phase 5) ────────────────────────────────────────────────────
+export {
+  createJwtValidator,
+  createJtiCache,
+  type JwtPayload,
+  type JwtValidatorOptions,
+  type JwtValidatorFn,
+  type JtiCache,
+} from './jwt-validator.js';
+
 // ── Fetch options ──────────────────────────────────────────────────────────────
 export type { A2AFetchOptions } from './_fetch.js';

@@ -7,7 +7,8 @@ import type { LiveAgent } from '@weaveintel/live-agents';
 
 function makeCtx(config: Record<string, unknown> = {}): HandlerContext {
   return {
-    binding: { id: 'b1', agentId: 'a1', handlerKind: 'a2a.outbound', config: { targetUrl: 'http://remote.test', ...config } },
+    // Use 127.0.0.1 loopback URL to pass the SSRF guard (Phase 5 hardened-fetch)
+    binding: { id: 'b1', agentId: 'a1', handlerKind: 'a2a.outbound', config: { targetUrl: 'http://127.0.0.1:8080', ...config } },
     agent: { id: 'a1', meshId: 'm1', roleKey: 'delegator', name: 'Delegator' },
     log: () => {},
   };
@@ -30,8 +31,8 @@ function makeExecCtx(inboxMessage?: unknown): ActionExecutionContext {
 
 const mockCtx = {} as unknown as ExecutionContext;
 
-/** Build a v1.0 A2ATask response as the mock server would return. */
-function makeA2ATaskResponse(state: 'TASK_STATE_COMPLETED' | 'TASK_STATE_FAILED' = 'TASK_STATE_COMPLETED') {
+/** Build a v1.0 A2ATask as the task payload. */
+function makeA2ATask(state: 'TASK_STATE_COMPLETED' | 'TASK_STATE_FAILED' = 'TASK_STATE_COMPLETED') {
   return {
     id: 'task-1',
     contextId: 'ctx-1',
@@ -41,6 +42,11 @@ function makeA2ATaskResponse(state: 'TASK_STATE_COMPLETED' | 'TASK_STATE_FAILED'
       : [],
     history: [],
   };
+}
+
+/** Wrap a task in a JSON-RPC 2.0 success response (Phase 4: SendMessage returns JSON-RPC). */
+function makeRpcTaskResponse(state: 'TASK_STATE_COMPLETED' | 'TASK_STATE_FAILED' = 'TASK_STATE_COMPLETED') {
+  return { jsonrpc: '2.0', id: '1', result: makeA2ATask(state) };
 }
 
 describe('a2a.outbound handler', () => {
@@ -77,12 +83,13 @@ describe('a2a.outbound handler', () => {
       vi.unstubAllGlobals();
     });
 
-    it('POSTs to targetUrl/api/a2a/tasks with v1.0 A2ATaskSendParams shape', async () => {
+    it('POSTs to targetUrl/api/a2a (JSON-RPC 2.0 SendMessage) with v1.0 A2ATaskSendParams shape', async () => {
       const mockFetch = vi.mocked(fetch);
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: async () => makeA2ATaskResponse(),
-      } as unknown as Response);
+      // Return a real Response so hardened-fetch can wrap it with size-cap ReadableStream
+      mockFetch.mockResolvedValue(new Response(JSON.stringify(makeRpcTaskResponse()), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
 
       const inboxMsg = {
         id: 'msg-1', kind: 'TASK', status: 'PENDING',
@@ -97,25 +104,27 @@ describe('a2a.outbound handler', () => {
 
       expect(mockFetch).toHaveBeenCalledOnce();
       const [url, opts] = mockFetch.mock.calls[0]!;
-      expect(url).toBe('http://remote.test/api/a2a/tasks');
+      // Phase 4: uses JSON-RPC 2.0 endpoint (/api/a2a), not REST (/api/a2a/tasks)
+      expect(url).toBe('http://127.0.0.1:8080/api/a2a');
       expect(opts?.method).toBe('POST');
 
-      // v1.0: body is A2ATaskSendParams with message.parts (no type discriminator)
+      // Phase 4: body is JSON-RPC 2.0 SendMessage envelope
       const body = JSON.parse(opts?.body as string);
-      expect(body.message).toBeDefined();
-      expect(Array.isArray(body.message.parts)).toBe(true);
-      expect(body.message.parts[0].text).toContain('Do research');
+      expect(body.jsonrpc).toBe('2.0');
+      expect(body.method).toBe('SendMessage');
+      expect(body.params.message).toBeDefined();
+      expect(Array.isArray(body.params.message.parts)).toBe(true);
+      expect(body.params.message.parts[0].text).toContain('Do research');
       // No `type` field on v1.0 parts
-      expect(body.message.parts[0].type).toBeUndefined();
+      expect(body.params.message.parts[0].type).toBeUndefined();
 
       expect(result?.completed).toBe(true);
     });
 
     it('sends A2A-Version: 1.0 header', async () => {
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        json: async () => makeA2ATaskResponse(),
-      } as unknown as Response);
+      vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(makeRpcTaskResponse()), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }));
 
       const inboxMsg = {
         id: 'msg-1', kind: 'TASK', status: 'PENDING',
@@ -130,7 +139,7 @@ describe('a2a.outbound handler', () => {
       expect((opts?.headers as Record<string, string>)?.['A2A-Version']).toBe('1.0');
     });
 
-    it('returns completed: false when fetch throws', async () => {
+    it('returns completed: false when fetch throws (network error)', async () => {
       vi.mocked(fetch).mockRejectedValue(new Error('network error'));
       const inboxMsg = {
         id: 'msg-1', kind: 'TASK', status: 'PENDING',
@@ -148,10 +157,9 @@ describe('a2a.outbound handler', () => {
     });
 
     it('includes skill in metadata when config.skill is set', async () => {
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        json: async () => makeA2ATaskResponse(),
-      } as unknown as Response);
+      vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(makeRpcTaskResponse()), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }));
 
       const inboxMsg = {
         id: 'msg-1', kind: 'TASK', status: 'PENDING',
@@ -163,15 +171,14 @@ describe('a2a.outbound handler', () => {
       await handler({ type: 'StartTask' } as Parameters<typeof handler>[0], makeExecCtx(inboxMsg), mockCtx);
 
       const body = JSON.parse(vi.mocked(fetch).mock.calls[0]![1]?.body as string);
-      // In v1.0, skill is in metadata (not a top-level field)
-      expect(body.metadata?.skill).toBe('code-review');
+      // In v1.0 JSON-RPC 2.0: skill is in params.metadata (not top-level)
+      expect(body.params?.metadata?.skill).toBe('code-review');
     });
 
     it('returns completed: false when remote returns TASK_STATE_FAILED', async () => {
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        json: async () => makeA2ATaskResponse('TASK_STATE_FAILED'),
-      } as unknown as Response);
+      vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify(makeRpcTaskResponse('TASK_STATE_FAILED')), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      }));
 
       const inboxMsg = {
         id: 'msg-1', kind: 'TASK', status: 'PENDING',
