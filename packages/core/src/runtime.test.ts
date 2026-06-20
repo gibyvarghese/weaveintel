@@ -248,3 +248,99 @@ describe('Phase 5 — RuntimeMemorySlot + Memory capability', () => {
       .toThrow(/runtime\.memory/);
   });
 });
+
+// ─── Phase 6 — Compliance + Identity capability detection ─────────────────────
+
+function makeComplianceSlot(): import('./runtime.js').RuntimeComplianceSlot {
+  return {
+    consent: {
+      async isGranted() { return false; },
+      async grant() { return {}; },
+      async revoke() { return false; },
+      async listBySubject() { return []; },
+    },
+    residency: {
+      async isAllowed() { return true; },
+      async getAllowedRegions() { return []; },
+    },
+    deletion: {
+      async create() { return { id: 'del-1', status: 'pending' }; },
+      async process() { return {}; },
+      async complete() { return {}; },
+      async fail() { return {}; },
+    },
+    auditExport: {
+      async create() { return { id: 'exp-1', status: 'pending', format: 'json' }; },
+      async markReady() { return {}; },
+      async markFailed() { return {}; },
+    },
+    async isAllowed() { return true; },
+    async canProcess() { return true; },
+    async requestErasure() { return { id: 'del-2', status: 'pending', dataCategories: ['all'] }; },
+    async requestExport() { return { id: 'exp-2', status: 'pending', format: 'json' }; },
+  };
+}
+
+function makeIdentitySlot(): import('./runtime.js').RuntimeIdentitySlot {
+  return {
+    resolve(userId) {
+      return { identity: { type: 'user', id: userId, roles: [], scopes: [], metadata: {} }, effectivePermissions: [], sessionId: undefined, delegatedFrom: undefined };
+    },
+    evaluate() { return { result: 'deny', permission: { resource: 'x', action: 'y' }, identity: { type: 'user', id: 'u', roles: [], scopes: [], metadata: {} }, evaluatedAt: new Date().toISOString() }; },
+    validateDelegation() { return { valid: true }; },
+  };
+}
+
+describe('weaveRuntime — Phase 6 Compliance slot', () => {
+  it('Compliance capability is NOT advertised when slot is omitted', () => {
+    const rt = weaveRuntime({ installDefaultTracer: false });
+    expect(rt.has(RuntimeCapabilities.Compliance)).toBe(false);
+  });
+
+  it('Compliance capability IS advertised when slot is provided', () => {
+    const slot = makeComplianceSlot();
+    const rt = weaveRuntime({ installDefaultTracer: false, compliance: slot });
+    expect(rt.has(RuntimeCapabilities.Compliance)).toBe(true);
+    expect(rt.compliance).toBe(slot);
+  });
+
+  it('compliance slot convenience methods are callable', async () => {
+    const slot = makeComplianceSlot();
+    const rt = weaveRuntime({ installDefaultTracer: false, compliance: slot });
+    await expect(rt.compliance!.isAllowed('u', 'analytics')).resolves.toBe(true);
+    await expect(rt.compliance!.canProcess('t', 'pii', 'eu')).resolves.toBe(true);
+  });
+
+  it('require(Compliance) throws when slot is absent', () => {
+    const rt = weaveRuntime({ installDefaultTracer: false });
+    expect(() => rt.require(RuntimeCapabilities.Compliance))
+      .toThrow(/runtime\.compliance/);
+  });
+});
+
+describe('weaveRuntime — Phase 6 Identity slot', () => {
+  it('Identity capability is NOT advertised when slot is omitted', () => {
+    const rt = weaveRuntime({ installDefaultTracer: false });
+    expect(rt.has(RuntimeCapabilities.Identity)).toBe(false);
+  });
+
+  it('Identity capability IS advertised when slot is provided', () => {
+    const slot = makeIdentitySlot();
+    const rt = weaveRuntime({ installDefaultTracer: false, identity: slot });
+    expect(rt.has(RuntimeCapabilities.Identity)).toBe(true);
+    expect(rt.identity).toBe(slot);
+  });
+
+  it('identity.resolve returns a context with the supplied userId', () => {
+    const slot = makeIdentitySlot();
+    const rt = weaveRuntime({ installDefaultTracer: false, identity: slot });
+    const ctx = rt.identity!.resolve('user-42', null);
+    expect(ctx.identity.id).toBe('user-42');
+  });
+
+  it('require(Identity) throws when slot is absent', () => {
+    const rt = weaveRuntime({ installDefaultTracer: false });
+    expect(() => rt.require(RuntimeCapabilities.Identity))
+      .toThrow(/runtime\.identity/);
+  });
+});

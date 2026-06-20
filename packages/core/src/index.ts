@@ -57,6 +57,8 @@ export {
   type RuntimeRoutingSlot,
   type RuntimeCostSlot,
   type RuntimeMemorySlot,
+  type RuntimeComplianceSlot,
+  type RuntimeIdentitySlot,
   RuntimeCapabilities,
   weaveRuntime,
   assertRuntimeRequires,

@@ -29,10 +29,12 @@ export function registerMeComplianceRoutes(
   db: DatabaseAdapter,
   runtime?: WeaveRuntime,
 ): void {
-  // Durable managers backed by runtime KV (SQLite or Postgres). Falls back to
-  // in-memory KV automatically when runtime is not provided (test / embedded).
-  const deletionManager = createDurableDeletionManager({ runtime, namespace: 'gdpr-deletion' });
-  const exportManager = createDurableAuditExportManager({ runtime, namespace: 'gdpr-export' });
+  // Phase 6: prefer the runtime compliance slot (shared KV, no duplicate managers).
+  // Fall back to per-route durable managers when the slot is absent (tests, legacy).
+  const deletionManager = runtime?.compliance?.deletion
+    ?? createDurableDeletionManager({ runtime, namespace: 'gdpr-deletion' });
+  const exportManager = runtime?.compliance?.auditExport
+    ?? createDurableAuditExportManager({ runtime, namespace: 'gdpr-export' });
 
   // ── DELETE /api/me/account ─────────────────────────────────────────────
   // GDPR Art. 17 / CCPA "right to delete". Requires the caller to supply their

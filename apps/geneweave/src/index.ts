@@ -174,6 +174,8 @@ import { initPgVectorSemanticMemory } from './memory-pgvector.js';
 import { initMemoryConsolidation } from './memory-consolidation.js';
 import { createGeneWeaveMemoryStore, createKeywordSemanticMemory } from './memory-store-adapter.js';
 import { weaveSemanticMemory, weaveWorkingMemory, createRuntimeMemoryAdapter } from '@weaveintel/memory';
+import { createRuntimeComplianceAdapter } from '@weaveintel/compliance';
+import { createRuntimeIdentityAdapter } from '@weaveintel/identity';
 import { geneweaveEncryptionSlot, type GeneweaveEncryptionSlot } from './encryption-slot.js';
 export let geneweaveEncryptionManager: TenantKeyManager | null = null;
 /** Phase 7: KMS provider registry exposed for admin endpoints (list/health-check). */
@@ -376,6 +378,19 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     : null;
   const costAdapter = createRuntimeCostAdapter({ ledger: runtimeCostLedger, globalLimitUsd: globalCostLimitUsd });
 
+  // Phase 6 (runtime): compliance slot — all six durable managers wired via the
+  // same persistence slot as the rest of the runtime. Consent, residency, deletion,
+  // and GDPR helpers are now available at `ctx.runtime?.compliance` without
+  // constructing per-chat or per-route manager instances.
+  const complianceAdapter = createRuntimeComplianceAdapter({
+    runtime: { persistence: persistenceSlot } as any,
+  });
+
+  // Phase 6 (runtime): identity slot — RBAC evaluation and delegation chain
+  // validation available at `ctx.runtime?.identity` for auth middleware and
+  // live-agent handlers.
+  const identityAdapter = createRuntimeIdentityAdapter();
+
   const runtime = weaveRuntime({
     tracer: consoleTracer,
     secrets: envSecretResolver(),
@@ -387,6 +402,8 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     routing: routingAdapter,
     cost: costAdapter,
     memory: memoryAdapter,
+    compliance: complianceAdapter,
+    identity: identityAdapter,
     installDefaultTracer: true,
   });
   // `installDefaultTracer: true` already wired the runtime's tracer as the

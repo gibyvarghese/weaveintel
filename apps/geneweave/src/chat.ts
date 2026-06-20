@@ -23,7 +23,7 @@
  */
 
 import { newUUIDv7, createLogger } from '@weaveintel/core';
-import { createDurableConsentManager, type DurableConsentManager } from '@weaveintel/compliance';
+import type { DurableConsentManager } from '@weaveintel/compliance';
 
 const log = createLogger('chat');
 import type { ServerResponse } from 'node:http';
@@ -271,9 +271,10 @@ export class ChatEngine {
     // state. Fall back to a local tracker when no runtime is wired (tests, etc.).
     this.healthTracker = config.runtime?.routing
       ?? createRuntimeRoutingAdapter(new ModelHealthTracker());
-    this.consentManager = config.runtime
-      ? createDurableConsentManager({ runtime: config.runtime, namespace: 'consent' })
-      : null;
+    // Phase 6: pull from the runtime compliance slot (shared across all chat engines)
+    // rather than creating a per-engine manager. Structurally compatible with
+    // DurableConsentManager — cast is safe at runtime.
+    this.consentManager = (config.runtime?.compliance?.consent ?? null) as DurableConsentManager | null;
     this.toolOptions = {
       temporalStore: createTemporalStore(db),
       policyResolver: new DbToolPolicyResolver(db),

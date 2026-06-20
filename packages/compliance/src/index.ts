@@ -49,6 +49,12 @@ export {
   createAuditExportManager,
 } from './audit-export.js';
 
+// Phase 6 — RuntimeComplianceSlot adapter for weaveRuntime({ compliance }).
+export {
+  createRuntimeComplianceAdapter,
+  type RuntimeComplianceAdapterOptions,
+} from './runtime-compliance-adapter.js';
+
 // Phase 4 — durable variants backed by `runtime.persistence.kv`.
 export {
   type DurableLegalHoldManager,

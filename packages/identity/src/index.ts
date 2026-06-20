@@ -45,3 +45,7 @@ export { DelegationExpiredError } from './errors.js';
 
 export { createSurfaceCatalogResolver } from './surface-catalog-resolver.js';
 export type { CatalogSource, AccessCheck, CatalogCache, SurfaceCatalogResolverOptions } from './surface-catalog-resolver.js';
+
+// Phase 6 — RuntimeIdentitySlot adapter for weaveRuntime({ identity }).
+export { createRuntimeIdentityAdapter } from './runtime-identity-adapter.js';
+export type { RuntimeIdentityAdapterOptions } from './runtime-identity-adapter.js';

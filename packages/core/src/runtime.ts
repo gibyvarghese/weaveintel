@@ -38,6 +38,7 @@ import type { AuditEntry, AuditLogger, Redactor, SecretResolver } from './securi
 import { newUUIDv7 } from './uuid.js';
 import type { ModelHealth } from './routing.js';
 import type { SemanticMemory, WorkingMemory, MemoryStore } from './memory.js';
+import type { IdentityContext, DelegationContext, AccessDecision, PermissionDescriptor } from './identity.js';
 
 /**
  * Cross-cutting runtime capabilities. Used with `runtime.has(cap)` and
@@ -56,7 +57,126 @@ export const RuntimeCapabilities = {
   Routing: capabilityId('runtime.routing'),
   Cost: capabilityId('runtime.cost'),
   Memory: capabilityId('runtime.memory'),
+  Compliance: capabilityId('runtime.compliance'),
+  Identity: capabilityId('runtime.identity'),
 } as const;
+
+/**
+ * Structural slot for aggregated compliance management (Phase 6).
+ *
+ * Bundles all GDPR / data-governance primitives into a single ambient slot
+ * so every call site can reach them through `ctx.runtime?.compliance` without
+ * constructing per-route or per-chat manager instances.
+ *
+ * Concrete adapters live in `@weaveintel/compliance`;
+ * `createRuntimeComplianceAdapter(opts)` builds one from the durable managers.
+ *
+ * `consent`   — grant / revoke / query per-user consent flags.
+ * `residency` — data-flow compliance (which regions are allowed).
+ * `deletion`  — GDPR Art. 17 right-to-delete lifecycle.
+ * `isAllowed` — convenience consent check (most common call site).
+ * `canProcess` — convenience residency check.
+ * `requestErasure` — convenience GDPR erasure trigger.
+ * `requestExport`  — convenience GDPR export trigger.
+ */
+export interface RuntimeComplianceSlot {
+  /** Consent manager — grant / revoke / query per-user consent flags. */
+  readonly consent: {
+    isGranted(subjectId: string, purpose: string): Promise<boolean>;
+    grant(subjectId: string, purpose: string, source: string, expiresAt?: number): Promise<unknown>;
+    revoke(subjectId: string, purpose: string): Promise<boolean>;
+    listBySubject(subjectId: string): Promise<readonly unknown[]>;
+  };
+  /** Residency engine — validate data-flow compliance. */
+  readonly residency: {
+    isAllowed(dataCategory: string, targetRegion: string): Promise<boolean>;
+    getAllowedRegions(dataCategory: string): Promise<readonly string[]>;
+  };
+  /** Deletion manager — GDPR Art. 17 right-to-delete lifecycle. */
+  readonly deletion: {
+    create(subjectId: string, requestedBy: string, reason: string, dataCategories: string[]): Promise<{ id: string; status: string }>;
+    process(id: string): Promise<unknown>;
+    complete(id: string): Promise<unknown>;
+    fail(id: string, reason: string): Promise<unknown>;
+  };
+  /** Audit-export manager — GDPR Art. 20 data portability. */
+  readonly auditExport: {
+    create(tenantId: string, requestedBy: string, format: string, categories: string[], fromDate: number, toDate: number): Promise<{ id: string; status: string; format: string }>;
+    markReady(id: string, recordCount: number, sizeBytes: number): Promise<unknown>;
+    markFailed(id: string): Promise<unknown>;
+  };
+  /**
+   * Convenience: check if userId has granted consent for the given purpose.
+   * Prefer this over `consent.isGranted` at call sites that don't need the
+   * full manager; it is swallowed on error and returns `true` (permit-if-no-record).
+   */
+  isAllowed(userId: string, purpose: string): Promise<boolean>;
+  /**
+   * Convenience: check whether data for `dataCategory` can flow to `targetRegion`.
+   * Returns `true` when no residency constraint matches (fail-open by default;
+   * set `COMPLIANCE_RESIDENCY_DEFAULT_DENY=true` for regulated environments).
+   */
+  canProcess(tenantId: string, dataCategory: string, targetRegion: string): Promise<boolean>;
+  /**
+   * Initiate a GDPR Art. 17 erasure request for `userId`.
+   * Returns a minimal { id, status } handle so callers can track the request.
+   */
+  requestErasure(
+    userId: string,
+    requestedBy?: string,
+    reason?: string,
+    dataCategories?: string[],
+  ): Promise<{ id: string; status: string; dataCategories: readonly string[] }>;
+  /**
+   * Initiate a GDPR Art. 20 data export for `userId`.
+   * Returns a minimal { id, status, format } handle.
+   */
+  requestExport(
+    userId: string,
+    tenantId: string,
+    format?: string,
+  ): Promise<{ id: string; status: string; format: string }>;
+}
+
+/**
+ * Structural slot for typed identity evaluation (Phase 6).
+ *
+ * Surfaces the `@weaveintel/identity` RBAC engine through the DI chain so
+ * auth middleware, tool guards, and live-agent handlers can evaluate access
+ * decisions without importing the identity package directly.
+ *
+ * `resolve`            — build a typed `IdentityContext` from raw user ids.
+ * `evaluate`           — evaluate a resource + action against the RBAC policy.
+ * `validateDelegation` — check a delegation chain for cycles and expiry.
+ */
+export interface RuntimeIdentitySlot {
+  /**
+   * Build a typed `IdentityContext` from a userId and optional tenantId.
+   * Assigns effective permissions based on the configured RBAC policy and
+   * any caller-supplied role overrides.
+   */
+  resolve(
+    userId: string,
+    tenantId: string | null,
+    opts?: { roles?: string[]; scopes?: string[]; persona?: string },
+  ): IdentityContext;
+  /**
+   * Evaluate whether the identity has permission for `resource` + `action`.
+   * Returns a structured `AccessDecision` — never throws; callers must check
+   * `.result === 'allow'` before proceeding.
+   */
+  evaluate(
+    ctx: IdentityContext,
+    resource: string,
+    action: string,
+    conditions?: Record<string, unknown>,
+  ): AccessDecision;
+  /**
+   * Validate a delegation chain for cycles, expiry, and scope validity.
+   * Returns `{ valid: true }` or `{ valid: false, reason }`.
+   */
+  validateDelegation(delegation: DelegationContext): { valid: boolean; reason?: string };
+}
 
 /**
  * Structural slot for cross-cutting agent memory (Phase 5).
@@ -299,6 +419,8 @@ export interface WeaveRuntime {
   readonly routing: RuntimeRoutingSlot | undefined;
   readonly cost: RuntimeCostSlot | undefined;
   readonly memory: RuntimeMemorySlot | undefined;
+  readonly compliance: RuntimeComplianceSlot | undefined;
+  readonly identity: RuntimeIdentitySlot | undefined;
   readonly metadata: Readonly<Record<string, unknown>>;
 
   has(cap: CapabilityId): boolean;
@@ -334,6 +456,18 @@ export interface WeaveRuntimeOptions {
    * When present, `RuntimeCapabilities.Memory` is advertised automatically.
    */
   readonly memory?: RuntimeMemorySlot;
+  /**
+   * Phase 6 — compliance slot (consent, residency, deletion, GDPR helpers).
+   * Pass a `createRuntimeComplianceAdapter(opts)` instance from `@weaveintel/compliance`.
+   * When present, `RuntimeCapabilities.Compliance` is advertised automatically.
+   */
+  readonly compliance?: RuntimeComplianceSlot;
+  /**
+   * Phase 6 — identity slot (resolve, evaluate, validateDelegation).
+   * Pass a `createRuntimeIdentityAdapter(opts)` instance from `@weaveintel/identity`.
+   * When present, `RuntimeCapabilities.Identity` is advertised automatically.
+   */
+  readonly identity?: RuntimeIdentitySlot;
   /**
    * Phase 5 — optional `Redactor`. When supplied, every audit entry's
    * `details` object is serialised → redacted → re-parsed before the entry
@@ -571,6 +705,8 @@ export function weaveRuntime(opts: WeaveRuntimeOptions = {}): WeaveRuntime {
   if (opts.routing) caps.add(RuntimeCapabilities.Routing);
   if (opts.cost) caps.add(RuntimeCapabilities.Cost);
   if (opts.memory) caps.add(RuntimeCapabilities.Memory);
+  if (opts.compliance) caps.add(RuntimeCapabilities.Compliance);
+  if (opts.identity) caps.add(RuntimeCapabilities.Identity);
   for (const c of opts.extraCapabilities ?? []) caps.add(c);
 
   const rt: WeaveRuntime = {
@@ -586,6 +722,8 @@ export function weaveRuntime(opts: WeaveRuntimeOptions = {}): WeaveRuntime {
     routing: opts.routing,
     cost: opts.cost,
     memory: opts.memory,
+    compliance: opts.compliance,
+    identity: opts.identity,
     metadata: opts.metadata ?? {},
     has(cap) {
       return caps.has(cap);
