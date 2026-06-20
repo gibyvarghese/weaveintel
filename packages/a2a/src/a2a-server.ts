@@ -1,10 +1,10 @@
 /**
- * @weaveintel/a2a — JSON-RPC 2.0 server dispatcher (Phase 2)
+ * @weaveintel/a2a — JSON-RPC 2.0 server dispatcher (Phase 3)
  *
  * `createA2ADispatcher` wraps an `A2AServer` implementation and exposes a
  * framework-agnostic dispatch function. Wire it into any HTTP server:
  *
- *   const dispatcher = createA2ADispatcher(myServer);
+ *   const dispatcher = createA2ADispatcher(myServer, store);
  *   const result = await dispatcher(ctx, { method, body, headers });
  *   // result is { kind: 'json', status, data } or { kind: 'stream', events, taskId, contextId }
  *
@@ -17,7 +17,7 @@
  *   GetTask                           → getTask()
  *   ListTasks                         → listTasks()
  *   CancelTask                        → cancelTask()
- *   SubscribeToTask                   → handleStreamMessage() on existing task (SSE)
+ *   SubscribeToTask                   → store.subscribe() SSE stream (Phase 3)
  *   GetExtendedAgentCard              → getExtendedCard() (optional)
  *   CreateTaskPushNotificationConfig  → UnsupportedOperation (Phase 5)
  *   GetTaskPushNotificationConfig     → UnsupportedOperation (Phase 5)
@@ -44,6 +44,8 @@ import {
   type JsonRpcSuccess,
 } from './jsonrpc.js';
 import { sseData, sseComment } from './sse-parser.js';
+import type { A2ATaskStore } from './task-store.js';
+import { isTerminalA2AState } from './task-store.js';
 
 // ─── Request / Response shapes ────────────────────────────────────────────────
 
@@ -64,8 +66,11 @@ export type A2ADispatchResult =
  * Create a JSON-RPC 2.0 dispatcher for an `A2AServer` implementation.
  * Returns a function that accepts a framework-agnostic request and produces
  * either a JSON response or an SSE stream result.
+ *
+ * @param impl   - The A2AServer to dispatch to.
+ * @param store  - Optional task store; enables SubscribeToTask SSE streaming (Phase 3).
  */
-export function createA2ADispatcher(impl: A2AServer): (
+export function createA2ADispatcher(impl: A2AServer, store?: A2ATaskStore): (
   ctx: ExecutionContext,
   req: A2ADispatchRequest,
 ) => Promise<A2ADispatchResult> {
@@ -169,22 +174,29 @@ export function createA2ADispatcher(impl: A2AServer): (
           const p = (params ?? {}) as Record<string, unknown>;
           const taskId = stringParam(p, 'id', id);
           await impl.cancelTask(ctx, taskId);
-          // A2A spec: return the updated task (CANCELED state) or an empty result
-          // We return empty result since we don't have a task store in Phase 2
-          return { kind: 'json', status: 200, data: makeRpcSuccess(id, { canceled: true }) };
+          // A2A spec: return the updated (CANCELED) task. Load from store if available.
+          const canceledTask = store ? await store.load(taskId) : null;
+          return { kind: 'json', status: 200, data: makeRpcSuccess(id, canceledTask ?? { canceled: true, id: taskId }) };
         }
 
         case A2A_METHODS.SUBSCRIBE_TO_TASK: {
-          if (!impl.handleStreamMessage) {
-            throw new A2AJsonRpcError(A2A_ERROR_CODES.UNSUPPORTED_OPERATION, 'Streaming is not supported by this agent');
-          }
           const p = (params ?? {}) as Record<string, unknown>;
           const taskId = stringParam(p, 'id', id);
-          // Phase 2: re-subscribe by rerunning a "resume" task — Phase 3 will add real task store
-          throw new A2AJsonRpcError(
-            A2A_ERROR_CODES.UNSUPPORTED_OPERATION,
-            `SubscribeToTask requires a task store (Phase 3). Task: ${taskId}`,
-          );
+
+          if (!store?.subscribe) {
+            throw new A2AJsonRpcError(
+              A2A_ERROR_CODES.UNSUPPORTED_OPERATION,
+              `SubscribeToTask requires a task store with subscribe support. Task: ${taskId}`,
+            );
+          }
+
+          const taskStream = store.subscribe(taskId);
+          return {
+            kind: 'stream',
+            events: taskUpdatesToStreamEvents(taskStream),
+            taskId,
+            contextId: taskId, // contextId resolved from first task event
+          };
         }
 
         case A2A_METHODS.GET_EXTENDED_AGENT_CARD: {
@@ -243,6 +255,29 @@ export const weaveA2AServer = createA2ADispatcher;
 /** Yields a single terminal `{ task }` event (for non-streaming fallback). */
 async function* singleTaskStream(task: A2ATask): AsyncIterable<A2AStreamEvent> {
   yield { task };
+}
+
+/**
+ * Convert a task-store subscription (AsyncIterable<A2ATask>) into A2AStreamEvents
+ * for SubscribeToTask. Non-terminal states emit { statusUpdate }; terminal states
+ * emit { task } and then close.
+ */
+async function* taskUpdatesToStreamEvents(
+  taskUpdates: AsyncIterable<A2ATask>,
+): AsyncIterable<A2AStreamEvent> {
+  for await (const task of taskUpdates) {
+    if (isTerminalA2AState(task.status.state)) {
+      yield { task };
+      return;
+    }
+    yield {
+      statusUpdate: {
+        taskId: task.id,
+        contextId: task.contextId,
+        status: task.status,
+      },
+    };
+  }
 }
 
 /**

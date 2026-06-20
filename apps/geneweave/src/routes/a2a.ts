@@ -1,22 +1,23 @@
 /**
- * geneWeave — A2A (Agent-to-Agent) routes (v1.0, Phase 2)
+ * geneWeave — A2A (Agent-to-Agent) routes (v1.0, Phase 3)
  *
- * Phase 2: JSON-RPC 2.0 transport.
+ * Phase 3: Task store + full state machine + SubscribeToTask.
  *
  * Endpoints:
  *   GET  /.well-known/agent-card.json  — v1.0 Agent Card (public)
  *   GET  /.well-known/agent.json       — legacy alias (backward compat)
  *   POST /api/a2a                      — JSON-RPC 2.0 dispatcher (v1.0 primary)
  *
- * Backward-compat REST endpoints (Phase 1) still available for older clients:
+ * Backward-compat REST endpoints still available:
  *   POST /api/a2a/tasks                — submit a task (A2ATaskSendParams body)
- *   GET  /api/a2a/tasks/:taskId        — returns COMPLETED stub (no task store yet)
+ *   GET  /api/a2a/tasks/:taskId        — fetch task from store (real, not a stub)
  *
  * A2A v1.0 methods accepted at POST /api/a2a:
- *   SendMessage, SendStreamingMessage, GetTask, ListTasks, CancelTask
+ *   SendMessage, SendStreamingMessage, GetTask, ListTasks, CancelTask, SubscribeToTask
  *
  * Streaming:
  *   SendStreamingMessage returns text/event-stream with A2AStreamEvent JSON per line.
+ *   SubscribeToTask reconnects to in-progress/pending tasks via the task store.
  *
  * Auth: Bearer token validated via the same JWT mechanism as the chat API.
  */
@@ -28,11 +29,12 @@ import type {
   AgentCard,
 } from '@weaveintel/core';
 import {
-  weaveAgentAsA2AServer,
   createA2ADispatcher,
+  createInMemoryA2ATaskStore,
   streamToSse,
   SSE_KEEPALIVE,
 } from '@weaveintel/a2a';
+import type { A2ATaskStore } from '@weaveintel/a2a';
 import type { DatabaseAdapter } from '../db.js';
 import type { ChatEngine } from '../chat.js';
 import { json, readBody } from '../server-core.js';
@@ -66,7 +68,7 @@ function buildAgentCard(baseUrl: string): AgentCard {
       streaming: true,
       pushNotifications: false,
       extendedAgentCard: false,
-      stateTransitionHistory: false,
+      stateTransitionHistory: true,
     },
     supportedInterfaces: [
       {
@@ -116,19 +118,19 @@ export function registerA2ARoutes(
     json(res, 200, buildAgentCard(baseUrl));
   });
 
+  // ── Task store (Phase 3) ─────────────────────────────────────────────────────
+  // One in-memory store per server instance. Swap for createDurableA2ATaskStore(kv)
+  // once a persistence slot is wired (Phase 4).
+  const taskStore: A2ATaskStore = createInMemoryA2ATaskStore();
+
   // ── Build the JSON-RPC 2.0 dispatcher (lazily, so chatEngine is fully wired) ─
 
   let _dispatcher: ReturnType<typeof createA2ADispatcher> | null = null;
 
   function getDispatcher() {
     if (_dispatcher) return _dispatcher;
-
-    // Wrap geneWeave's chat engine as an A2A v1.0 server
-    // For Phase 2, we use a local A2AServer implementation that delegates
-    // to the chat engine. Phase 3 will use weaveAgentAsA2AServer with a full
-    // agent + task store.
-    const a2aImpl = buildGeneWeaveA2AServer(db, chatEngine);
-    _dispatcher = createA2ADispatcher(a2aImpl);
+    const a2aImpl = buildGeneWeaveA2AServer(db, chatEngine, taskStore);
+    _dispatcher = createA2ADispatcher(a2aImpl, taskStore);
     return _dispatcher;
   }
 
@@ -228,39 +230,33 @@ export function registerA2ARoutes(
     json(res, 200, task);
   }, { csrf: false });
 
-  // ── GET /api/a2a/tasks/:taskId — REST backward-compat (returns stub) ────────
+  // ── GET /api/a2a/tasks/:taskId — REST backward-compat (real task store) ─────
 
   router.get('/api/a2a/tasks/:taskId', async (_req, res, params, auth) => {
     if (!auth) {
       json(res, 401, { error: 'Bearer token required' });
       return;
     }
-    // Phase 2: no task store — return a stub noting tasks are synchronous.
-    // Phase 3 will wire a real task store.
     const taskId = params['taskId'] ?? 'unknown';
-    const stub: A2ATask = {
-      id: taskId,
-      contextId: taskId,
-      status: {
-        state: 'TASK_STATE_COMPLETED',
-        timestamp: new Date().toISOString(),
-      },
-      artifacts: [],
-      history: [],
-      metadata: {
-        note: 'geneWeave A2A tasks are synchronous in Phase 2. Use POST /api/a2a (JSON-RPC 2.0) for real task state.',
-      },
-    };
-    json(res, 200, stub);
+    const task = await taskStore.load(taskId);
+    if (!task) {
+      json(res, 404, { error: `Task not found: ${taskId}` });
+      return;
+    }
+    json(res, 200, task);
   });
 }
 
 // ─── A2A server impl wrapping chat engine ────────────────────────────────────
 
-import type { A2AServer, A2AStreamEvent, A2AMessage } from '@weaveintel/core';
+import type { A2AServer, A2AStreamEvent, A2AMessage, A2AListTasksFilter } from '@weaveintel/core';
 import { makeCompletedA2ATask, makeFailedA2ATask, weaveAudit } from '@weaveintel/core';
 
-function buildGeneWeaveA2AServer(db: DatabaseAdapter, chatEngine: ChatEngine): A2AServer {
+function buildGeneWeaveA2AServer(
+  db: DatabaseAdapter,
+  chatEngine: ChatEngine,
+  store: A2ATaskStore,
+): A2AServer {
   const card = (() => {
     const baseUrl = process.env['GENEWEAVE_BASE_URL'] ?? 'http://localhost:3000';
     const agentUrl = `${baseUrl}/api/a2a`;
@@ -269,7 +265,7 @@ function buildGeneWeaveA2AServer(db: DatabaseAdapter, chatEngine: ChatEngine): A
       description: 'geneWeave — Intelligent AI orchestration assistant powered by weaveIntel',
       version: AGENT_VERSION,
       skills: [{ id: 'general-chat', name: 'General Chat', description: 'Conversational AI with tool-calling' }],
-      capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false, stateTransitionHistory: false },
+      capabilities: { streaming: true, pushNotifications: false, extendedAgentCard: false, stateTransitionHistory: true },
       supportedInterfaces: [{ url: agentUrl, protocolBinding: 'JSONRPC' as const, protocolVersion: '1.0' }],
     };
   })();
@@ -278,8 +274,37 @@ function buildGeneWeaveA2AServer(db: DatabaseAdapter, chatEngine: ChatEngine): A
     card,
 
     async handleMessage(ctx, params) {
-      const userContent = extractPartsText(params.message.parts);
-      return runAgentTask(db, chatEngine, ctx.userId ?? 'a2a-anon', params, userContent);
+      const taskId = newUUIDv7();
+      const contextId = params.message.contextId ?? taskId;
+      const history: A2AMessage[] = [params.message];
+      const submittedAt = new Date().toISOString();
+
+      // Persist SUBMITTED state
+      await store.save({
+        id: taskId, contextId,
+        status: { state: 'TASK_STATE_SUBMITTED', timestamp: submittedAt },
+        artifacts: [], history,
+        metadata: { submittedAt },
+      });
+
+      // Transition to WORKING
+      await store.update(taskId, {
+        status: { state: 'TASK_STATE_WORKING', timestamp: new Date().toISOString() },
+      });
+
+      void weaveAudit(ctx, { action: 'a2a.task.received', outcome: 'success', resource: 'geneweave', details: { taskId, contextId } });
+
+      let task: A2ATask;
+      try {
+        const userContent = extractPartsText(params.message.parts);
+        task = await runAgentTask(db, chatEngine, ctx.userId ?? 'a2a-anon', params, userContent, taskId, contextId);
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        task = makeFailedA2ATask(taskId, contextId, error, history);
+      }
+
+      await store.save(task);
+      return task;
     },
 
     async *handleStreamMessage(ctx, params): AsyncIterable<A2AStreamEvent> {
@@ -287,40 +312,66 @@ function buildGeneWeaveA2AServer(db: DatabaseAdapter, chatEngine: ChatEngine): A
       const contextId = params.message.contextId ?? taskId;
       const history: A2AMessage[] = [params.message];
 
+      await store.save({
+        id: taskId, contextId,
+        status: { state: 'TASK_STATE_SUBMITTED', timestamp: new Date().toISOString() },
+        artifacts: [], history,
+      });
+
       // Emit WORKING status immediately
+      const workingTs = new Date().toISOString();
+      await store.update(taskId, { status: { state: 'TASK_STATE_WORKING', timestamp: workingTs } });
       yield {
         statusUpdate: {
           taskId,
           contextId,
-          status: { state: 'TASK_STATE_WORKING', timestamp: new Date().toISOString() },
+          status: { state: 'TASK_STATE_WORKING', timestamp: workingTs },
         },
       };
 
       void weaveAudit(ctx, { action: 'a2a.task.stream.start', outcome: 'success', resource: 'geneweave', details: { taskId } });
 
+      let task: A2ATask;
       try {
         const userContent = extractPartsText(params.message.parts);
-        const task = await runAgentTask(db, chatEngine, ctx.userId ?? 'a2a-anon', params, userContent, taskId, contextId);
-
-        // Emit artifact update
-        if (task.artifacts.length > 0) {
-          yield {
-            artifactUpdate: {
-              taskId,
-              contextId,
-              artifact: task.artifacts[0]!,
-              append: false,
-              lastChunk: true,
-            },
-          };
-        }
-
-        history.push({ role: 'agent', parts: task.artifacts[0]?.parts ?? [], contextId });
-        yield { task: { ...task, history } };
+        task = await runAgentTask(db, chatEngine, ctx.userId ?? 'a2a-anon', params, userContent, taskId, contextId);
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err);
-        yield { task: makeFailedA2ATask(taskId, contextId, error, history) };
+        task = makeFailedA2ATask(taskId, contextId, error, history);
       }
+
+      await store.save(task);
+
+      // Emit artifact update
+      if (task.artifacts.length > 0) {
+        yield {
+          artifactUpdate: {
+            taskId,
+            contextId,
+            artifact: task.artifacts[0]!,
+            append: false,
+            lastChunk: true,
+          },
+        };
+      }
+
+      yield { task };
+    },
+
+    async getTask(_ctx, taskId) {
+      return store.load(taskId);
+    },
+
+    async listTasks(_ctx, filter?: A2AListTasksFilter) {
+      return store.list(filter);
+    },
+
+    async cancelTask(_ctx, taskId) {
+      const existing = await store.load(taskId);
+      if (!existing) return;
+      await store.update(taskId, {
+        status: { state: 'TASK_STATE_CANCELED', timestamp: new Date().toISOString() },
+      });
     },
 
     async start() {},

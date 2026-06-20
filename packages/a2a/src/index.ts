@@ -3,6 +3,15 @@
 // ── Client + bus ───────────────────────────────────────────────────────────────
 export { weaveA2AClient, weaveA2ABus } from './a2a.js';
 
+// ── Task store (Phase 3) ───────────────────────────────────────────────────────
+export {
+  createInMemoryA2ATaskStore,
+  createDurableA2ATaskStore,
+  isTerminalA2AState,
+  type A2ATaskStore,
+  type A2ATaskStorePatch,
+} from './task-store.js';
+
 // ── Agent-as-server adapter ────────────────────────────────────────────────────
 export { weaveAgentAsA2AServer, type AgentA2AServerOptions } from './agent-server.js';
 
