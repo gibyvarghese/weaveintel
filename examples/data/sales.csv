@@ -1,0 +1,93 @@
+date,region,product,category,units,unit_price,revenue,cost,profit,sales_rep
+2025-01-03,North,Widget Pro,Hardware,42,149.99,6299.58,3149.79,3149.79,Alice Chen
+2025-01-07,South,DataSync,Software,18,299.00,5382.00,1076.40,4305.60,Bob Torres
+2025-01-10,East,Widget Pro,Hardware,31,149.99,4649.69,2324.85,2324.85,Carol Smith
+2025-01-14,West,CloudStore,Software,55,99.00,5445.00,1089.00,4356.00,David Lee
+2025-01-17,North,NanoSensor,Hardware,12,599.00,7188.00,4312.80,2875.20,Alice Chen
+2025-01-21,South,Widget Pro,Hardware,67,149.99,10049.33,5024.67,5024.67,Eve Nakamura
+2025-01-24,East,DataSync,Software,22,299.00,6578.00,1315.60,5262.40,Bob Torres
+2025-01-28,West,NanoSensor,Hardware,8,599.00,4792.00,2875.20,1916.80,Frank Kim
+2025-02-04,North,CloudStore,Software,44,99.00,4356.00,871.20,3484.80,Carol Smith
+2025-02-07,South,NanoSensor,Hardware,15,599.00,8985.00,5391.00,3594.00,David Lee
+2025-02-11,East,Widget Pro,Hardware,58,149.99,8699.42,4349.71,4349.71,Alice Chen
+2025-02-14,West,DataSync,Software,30,299.00,8970.00,1794.00,7176.00,Eve Nakamura
+2025-02-18,North,Widget Pro,Hardware,49,149.99,7349.51,3674.76,3674.76,Frank Kim
+2025-02-21,South,CloudStore,Software,72,99.00,7128.00,1425.60,5702.40,Bob Torres
+2025-02-25,East,NanoSensor,Hardware,10,599.00,5990.00,3594.00,2396.00,Carol Smith
+2025-03-04,West,Widget Pro,Hardware,83,149.99,12449.17,6224.59,6224.59,David Lee
+2025-03-07,North,DataSync,Software,25,299.00,7475.00,1495.00,5980.00,Alice Chen
+2025-03-11,South,Widget Pro,Hardware,61,149.99,9149.39,4574.70,4574.70,Eve Nakamura
+2025-03-14,East,CloudStore,Software,90,99.00,8910.00,1782.00,7128.00,Frank Kim
+2025-03-18,West,NanoSensor,Hardware,20,599.00,11980.00,7188.00,4792.00,Bob Torres
+2025-03-21,North,Widget Pro,Hardware,55,149.99,8249.45,4124.73,4124.73,Carol Smith
+2025-03-25,South,DataSync,Software,38,299.00,11362.00,2272.40,9089.60,David Lee
+2025-03-28,East,Widget Pro,Hardware,44,149.99,6599.56,3299.78,3299.78,Alice Chen
+2025-04-03,West,CloudStore,Software,66,99.00,6534.00,1306.80,5227.20,Eve Nakamura
+2025-04-08,North,NanoSensor,Hardware,18,599.00,10782.00,6469.20,4312.80,Frank Kim
+2025-04-11,South,Widget Pro,Hardware,75,149.99,11249.25,5624.63,5624.63,Bob Torres
+2025-04-15,East,DataSync,Software,42,299.00,12558.00,2511.60,10046.40,Carol Smith
+2025-04-18,West,Widget Pro,Hardware,50,149.99,7499.50,3749.75,3749.75,David Lee
+2025-04-22,North,CloudStore,Software,88,99.00,8712.00,1742.40,6969.60,Alice Chen
+2025-04-25,South,NanoSensor,Hardware,22,599.00,13178.00,7906.80,5271.20,Eve Nakamura
+2025-05-02,East,Widget Pro,Hardware,39,149.99,5849.61,2924.81,2924.81,Frank Kim
+2025-05-06,West,DataSync,Software,55,299.00,16445.00,3289.00,13156.00,Bob Torres
+2025-05-09,North,Widget Pro,Hardware,62,149.99,9299.38,4649.69,4649.69,Carol Smith
+2025-05-13,South,CloudStore,Software,78,99.00,7722.00,1544.40,6177.60,David Lee
+2025-05-16,East,NanoSensor,Hardware,14,599.00,8386.00,5031.60,3354.40,Alice Chen
+2025-05-20,West,Widget Pro,Hardware,91,149.99,13649.09,6824.55,6824.55,Eve Nakamura
+2025-05-23,North,DataSync,Software,29,299.00,8671.00,1734.20,6936.80,Frank Kim
+2025-05-27,South,Widget Pro,Hardware,54,149.99,8099.46,4049.73,4049.73,Bob Torres
+2025-06-03,East,CloudStore,Software,95,99.00,9405.00,1881.00,7524.00,Carol Smith
+2025-06-06,West,NanoSensor,Hardware,25,599.00,14975.00,8985.00,5990.00,David Lee
+2025-06-10,North,Widget Pro,Hardware,70,149.99,10499.30,5249.65,5249.65,Alice Chen
+2025-06-13,South,DataSync,Software,48,299.00,14352.00,2870.40,11481.60,Eve Nakamura
+2025-06-17,East,Widget Pro,Hardware,36,149.99,5399.64,2699.82,2699.82,Frank Kim
+2025-06-20,West,CloudStore,Software,102,99.00,10098.00,2019.60,8078.40,Bob Torres
+2025-06-24,North,NanoSensor,Hardware,11,599.00,6589.00,3953.40,2635.60,Carol Smith
+2025-06-27,South,Widget Pro,Hardware,88,149.99,13199.12,6599.56,6599.56,David Lee
+2025-07-04,East,DataSync,Software,60,299.00,17940.00,3588.00,14352.00,Alice Chen
+2025-07-08,West,Widget Pro,Hardware,47,149.99,7049.53,3524.77,3524.77,Eve Nakamura
+2025-07-11,North,CloudStore,Software,110,99.00,10890.00,2178.00,8712.00,Frank Kim
+2025-07-15,South,NanoSensor,Hardware,28,599.00,16772.00,10063.20,6708.80,Bob Torres
+2025-07-18,East,Widget Pro,Hardware,53,149.99,7949.47,3974.74,3974.74,Carol Smith
+2025-07-22,West,DataSync,Software,35,299.00,10465.00,2093.00,8372.00,David Lee
+2025-07-25,North,Widget Pro,Hardware,79,149.99,11849.21,5924.61,5924.61,Alice Chen
+2025-08-01,South,CloudStore,Software,88,99.00,8712.00,1742.40,6969.60,Eve Nakamura
+2025-08-05,East,NanoSensor,Hardware,17,599.00,10183.00,6109.80,4073.20,Frank Kim
+2025-08-08,West,Widget Pro,Hardware,60,149.99,8999.40,4499.70,4499.70,Bob Torres
+2025-08-12,North,DataSync,Software,45,299.00,13455.00,2691.00,10764.00,Carol Smith
+2025-08-15,South,Widget Pro,Hardware,71,149.99,10649.29,5324.65,5324.65,David Lee
+2025-08-19,East,CloudStore,Software,115,99.00,11385.00,2277.00,9108.00,Alice Chen
+2025-08-22,West,NanoSensor,Hardware,30,599.00,17970.00,10782.00,7188.00,Eve Nakamura
+2025-09-02,North,Widget Pro,Hardware,66,149.99,9899.34,4949.67,4949.67,Frank Kim
+2025-09-05,South,DataSync,Software,52,299.00,15548.00,3109.60,12438.40,Bob Torres
+2025-09-09,East,Widget Pro,Hardware,41,149.99,6149.59,3074.80,3074.80,Carol Smith
+2025-09-12,West,CloudStore,Software,120,99.00,11880.00,2376.00,9504.00,David Lee
+2025-09-16,North,NanoSensor,Hardware,19,599.00,11381.00,6828.60,4552.40,Alice Chen
+2025-09-19,South,Widget Pro,Hardware,95,149.99,14249.05,7124.53,7124.53,Eve Nakamura
+2025-09-23,East,DataSync,Software,58,299.00,17342.00,3468.40,13873.60,Frank Kim
+2025-09-26,West,Widget Pro,Hardware,73,149.99,10949.27,5474.64,5474.64,Bob Torres
+2025-10-03,North,CloudStore,Software,130,99.00,12870.00,2574.00,10296.00,Carol Smith
+2025-10-07,South,NanoSensor,Hardware,33,599.00,19767.00,11860.20,7906.80,David Lee
+2025-10-10,East,Widget Pro,Hardware,48,149.99,7199.52,3599.76,3599.76,Alice Chen
+2025-10-14,West,DataSync,Software,62,299.00,18538.00,3707.60,14830.40,Eve Nakamura
+2025-10-17,North,Widget Pro,Hardware,85,149.99,12749.15,6374.58,6374.58,Frank Kim
+2025-10-21,South,CloudStore,Software,105,99.00,10395.00,2079.00,8316.00,Bob Torres
+2025-10-24,East,NanoSensor,Hardware,22,599.00,13178.00,7906.80,5271.20,Carol Smith
+2025-10-28,West,Widget Pro,Hardware,66,149.99,9899.34,4949.67,4949.67,David Lee
+2025-11-04,North,DataSync,Software,70,299.00,20930.00,4186.00,16744.00,Alice Chen
+2025-11-07,South,Widget Pro,Hardware,102,149.99,15299.02,7649.51,7649.51,Eve Nakamura
+2025-11-11,East,CloudStore,Software,140,99.00,13860.00,2772.00,11088.00,Frank Kim
+2025-11-14,West,NanoSensor,Hardware,35,599.00,20965.00,12579.00,8386.00,Bob Torres
+2025-11-18,North,Widget Pro,Hardware,91,149.99,13649.09,6824.55,6824.55,Carol Smith
+2025-11-21,South,DataSync,Software,65,299.00,19435.00,3887.00,15548.00,David Lee
+2025-11-25,East,Widget Pro,Hardware,55,149.99,8249.45,4124.73,4124.73,Alice Chen
+2025-11-28,West,CloudStore,Software,125,99.00,12375.00,2475.00,9900.00,Eve Nakamura
+2025-12-02,North,NanoSensor,Hardware,24,599.00,14376.00,8625.60,5750.40,Frank Kim
+2025-12-05,South,Widget Pro,Hardware,115,149.99,17248.85,8624.43,8624.43,Bob Torres
+2025-12-09,East,DataSync,Software,78,299.00,23322.00,4664.40,18657.60,Carol Smith
+2025-12-12,West,Widget Pro,Hardware,88,149.99,13199.12,6599.56,6599.56,David Lee
+2025-12-16,North,CloudStore,Software,148,99.00,14652.00,2930.40,11721.60,Alice Chen
+2025-12-19,South,NanoSensor,Hardware,40,599.00,23960.00,14376.00,9584.00,Eve Nakamura
+2025-12-23,East,Widget Pro,Hardware,62,149.99,9299.38,4649.69,4649.69,Frank Kim
+2025-12-26,West,DataSync,Software,82,299.00,24518.00,4903.60,19614.40,Bob Torres
