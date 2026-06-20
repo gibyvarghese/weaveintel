@@ -25,7 +25,9 @@
     "@weaveintel/prompts": "*",
     "@weaveintel/human-tasks": "*",
     "@weaveintel/a2a": "*",
-    "@weaveintel/graph": "*"
+    "@weaveintel/graph": "*",
+    "@weaveintel/cost-governor": "*",
+    "@weaveintel/compliance": "*"
   },
   "devDependencies": {
     "typescript": "^5.7.0",

@@ -204,6 +204,25 @@ export interface ChatSettings {
   // P4-2 — Proactive memory context injection
   memoryContextEnabled?: boolean;
   memoryContextMaxChars?: number;
+  // P5-1 — Agent checkpoint / resume
+  checkpointEnabled?: boolean;
+  checkpointIntervalSteps?: number;
+  // P5-2 — Dynamic worker registry
+  dynamicWorkersEnabled?: boolean;
+  maxDynamicWorkers?: number;
+  // P6-1 — Multi-tier eval pipeline
+  evalPipelineEnabled?: boolean;
+  evalPipelineStages?: string;
+  evalPipelineFailFast?: boolean;
+  // P6-3 — Cost governor
+  costGovernorEnabled?: boolean;
+  costGovernorPolicy?: string;
+  // P6-4 — Compliance-aware tool execution
+  complianceEnabled?: boolean;
+  complianceSubjectIdField?: string;
+  complianceEnforceConsent?: boolean;
+  // P6-5 — Vision loop browser agent
+  visionLoopEnabled?: boolean;
 }
 
 export interface WorkerDef {
@@ -290,5 +309,24 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
     // P4-2 — Proactive memory context injection (default: disabled)
     memoryContextEnabled: row.memory_context_enabled !== 0,
     memoryContextMaxChars: row.memory_context_max_chars || 4000,
+    // P5-1 — Agent checkpoint / resume (default: disabled)
+    checkpointEnabled: row.checkpoint_enabled !== 0,
+    checkpointIntervalSteps: row.checkpoint_interval_steps || 1,
+    // P5-2 — Dynamic worker registry (default: disabled)
+    dynamicWorkersEnabled: row.dynamic_workers_enabled !== 0,
+    maxDynamicWorkers: row.max_dynamic_workers || 20,
+    // P6-1 — Multi-tier eval pipeline (default: disabled)
+    evalPipelineEnabled: row.eval_pipeline_enabled !== 0,
+    evalPipelineStages: row.eval_pipeline_stages ?? undefined,
+    evalPipelineFailFast: row.eval_pipeline_fail_fast !== 0,
+    // P6-3 — Cost governor (default: disabled)
+    costGovernorEnabled: row.cost_governor_enabled !== 0,
+    costGovernorPolicy: row.cost_governor_policy ?? undefined,
+    // P6-4 — Compliance (default: disabled)
+    complianceEnabled: row.compliance_enabled !== 0,
+    complianceSubjectIdField: row.compliance_subject_id_field ?? undefined,
+    complianceEnforceConsent: row.compliance_enforce_consent !== 0,
+    // P6-5 — Vision loop (default: disabled)
+    visionLoopEnabled: row.vision_loop_enabled !== 0,
   };
 }

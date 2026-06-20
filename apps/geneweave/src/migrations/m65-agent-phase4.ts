@@ -90,6 +90,10 @@ export function applyM65AgentPhase4(db: BetterSqlite3.Database): void {
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_graph_edges_unique ON agent_graph_edges(chat_id, source_entity_id, target_entity_id, relationship_type)');
   } catch { /* ok if index exists */ }
 
+  // ── tool catalog: extend schema for graph tool metadata ─────────────────
+  safe(db, 'ALTER TABLE tool_catalog ADD COLUMN display_name TEXT');
+  safe(db, 'ALTER TABLE tool_catalog ADD COLUMN requires_capabilities TEXT NOT NULL DEFAULT \'[]\'');
+
   // ── tool catalog: seed graph memory tools ───────────────────────────────
   const seedTools = db.prepare(`
     INSERT OR IGNORE INTO tool_catalog (id, name, display_name, description, category, enabled, requires_capabilities)

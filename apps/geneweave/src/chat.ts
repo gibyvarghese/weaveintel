@@ -32,7 +32,11 @@ import type {
   Tool, ToolRegistry, AgentStepEvent, AgentStep, AgentResult, EventBus, Agent,
 } from '@weaveintel/core';
 import { weaveContext, weaveEventBus, EventTypes } from '@weaveintel/core';
-import { weaveAgent, weaveEnsemble, createVoteResolver, createArbiterResolver, createHumanTaskInterruptHandler } from '@weaveintel/agents';
+import { weaveAgent, weaveEnsemble, createVoteResolver, createArbiterResolver, createHumanTaskInterruptHandler, createWorkerRegistry } from '@weaveintel/agents';
+import type { EvalStageConfig } from '@weaveintel/agents';
+import { weaveCostGovernor, createInMemoryCostLedger } from '@weaveintel/cost-governor';
+import type { CostPolicy } from '@weaveintel/cost-governor';
+import { createSQLiteCheckpointStoreForChat } from './checkpoint-store.js';
 import { InMemoryTaskQueue } from '@weaveintel/human-tasks';
 import {
   weaveInMemoryTracer,
@@ -982,6 +986,8 @@ export class ChatEngine {
   private async buildAgentInstance(opts: {
     ctx: ExecutionContext;
     model: Model;
+    userId: string;
+    chatId: string;
     userContent: string;
     settings: ChatSettings;
     attachments: ChatAttachment[] | undefined;
@@ -999,7 +1005,7 @@ export class ChatEngine {
     forceWorkerDataAnalysis: boolean;
     skillExecutionContracts: ResolvedSkillExecutionContract[];
   }> {
-    const { ctx, model, userContent, settings, attachments, limits, tools, customTools, enterpriseToolGroups, toolOptions, agentBus, hasEnterprise } = opts;
+    const { ctx, model, userId, chatId, userContent, settings, attachments, limits, tools, customTools, enterpriseToolGroups, toolOptions, agentBus, hasEnterprise } = opts;
 
     const forceWorkerDataAnalysis = shouldForceWorkerDataAnalysis(userContent, attachments);
     const skillExecutionContracts = extractSkillExecutionContractsFromPrompt(settings.systemPrompt);
@@ -1123,6 +1129,18 @@ export class ChatEngine {
             maxChars: settings.memoryContextMaxChars,
           },
         }),
+        // P5-1: Agent checkpoint — persist run state every N steps.
+        ...(settings.checkpointEnabled && this.db instanceof SQLiteAdapter && {
+          checkpoint: {
+            store: createSQLiteCheckpointStoreForChat(this.db.rawDb, chatId, userId),
+            intervalSteps: settings.checkpointIntervalSteps,
+          },
+        }),
+        // P5-2: Dynamic worker registry — builds a mutable WorkerRegistry so
+        // operators can add/remove workers at runtime via the admin API.
+        ...(settings.dynamicWorkersEnabled && {
+          workerRegistry: createWorkerRegistry(allWorkers),
+        }),
       });
     } else {
       const policyPrompt = await this.withResponseCardFormatPolicy(applyTemporalToolPolicy({
@@ -1209,6 +1227,40 @@ export class ChatEngine {
               maxChars: settings.memoryContextMaxChars,
             },
           }),
+          // P5-1: Agent checkpoint — persist run state every N steps.
+          ...(settings.checkpointEnabled && this.db instanceof SQLiteAdapter && {
+            checkpoint: {
+              store: createSQLiteCheckpointStoreForChat(this.db.rawDb, chatId, userId),
+              intervalSteps: settings.checkpointIntervalSteps,
+            },
+          }),
+          // P6-1: Multi-tier eval pipeline — schema-check → rubric critic → verifier → ensemble.
+          ...(settings.evalPipelineEnabled && settings.evalPipelineStages && (() => {
+            try {
+              const stages = JSON.parse(settings.evalPipelineStages!) as EvalStageConfig[];
+              return { evalPipeline: { stages, failFast: settings.evalPipelineFailFast !== false } };
+            } catch { return {}; }
+          })()),
+          // P6-3: Cost governor — history compaction + budget gate.
+          ...(settings.costGovernorEnabled && (() => {
+            const policy = (() => {
+              try { return settings.costGovernorPolicy ? JSON.parse(settings.costGovernorPolicy) as CostPolicy : { tier: 'balanced' as const }; }
+              catch { return { tier: 'balanced' as const }; }
+            })();
+            const ledger = createInMemoryCostLedger();
+            const bundle = weaveCostGovernor(policy);
+            return { costGovernor: { bundle, ledger } };
+          })()),
+          // P6-4: Compliance-aware tool execution — consent check at tool call time.
+          ...(settings.complianceEnabled && {
+            complianceTools: {
+              subjectId: settings.complianceSubjectIdField,
+              purpose: 'geneweave.agent',
+              enforceConsent: settings.complianceEnforceConsent,
+            },
+          }),
+          // P6-5: Vision loop — detect screenshot tool outputs and inject as ImageContent.
+          visionLoop: settings.visionLoopEnabled,
         });
       }
     }
@@ -1252,7 +1304,7 @@ export class ChatEngine {
       // H-12: delegate shared agent construction to buildAgentInstance().
       const { agent, systemPromptSha256, routedGoal, forceWorkerDataAnalysis, skillExecutionContracts } =
         await this.buildAgentInstance({
-          ctx, model, userContent, settings, attachments, limits, tools, customTools,
+          ctx, model, userId, chatId, userContent, settings, attachments, limits, tools, customTools,
           enterpriseToolGroups, toolOptions, agentBus, hasEnterprise,
         });
 
@@ -1320,7 +1372,7 @@ export class ChatEngine {
       // H-12: delegate shared agent construction to buildAgentInstance().
       const { agent, systemPromptSha256, routedGoal, forceWorkerDataAnalysis, skillExecutionContracts: skillExecutionContractsStream } =
         await this.buildAgentInstance({
-          ctx, model, userContent, settings, attachments, limits, tools, customTools,
+          ctx, model, userId, chatId, userContent, settings, attachments, limits, tools, customTools,
           enterpriseToolGroups, toolOptions, agentBus, hasEnterprise,
         });
 

@@ -1,5 +1,19 @@
 // SPDX-License-Identifier: MIT
-export { weaveAgent, type ToolCallingAgentOptions } from './agent.js';
+export { weaveAgent, resumeFromCheckpoint, type ToolCallingAgentOptions } from './agent.js';
+// P5-1: Checkpoint / resume
+export {
+  InMemoryCheckpointStore,
+  createSQLiteCheckpointStore,
+  generateRunId,
+  type AgentCheckpoint,
+  type CheckpointStore,
+  type ResumeOptions,
+} from './checkpoint.js';
+// P5-2: Dynamic worker registry
+export {
+  createWorkerRegistry,
+  type WorkerRegistry,
+} from './worker-registry.js';
 // P4-1: Portable memory tool set factory
 export {
   createMemoryToolSet,
@@ -62,3 +76,30 @@ export {
   type JudgeResolverOptions,
   type ArbiterResolverOptions,
 } from './ensemble.js';
+// P6-1: Multi-tier evaluation pipeline
+export {
+  runEvalPipeline,
+  type EvalPipelineOptions,
+  type EvalPipelineReport,
+  type EvalStageConfig,
+  type EvalStageResult,
+  type EvalSchemaStage,
+  type EvalReflectStage,
+  type EvalVerifyStage,
+  type EvalEnsembleStage,
+  type EvalSchemaStageResult,
+  type EvalReflectStageResult,
+  type EvalVerifyStageResult,
+  type EvalEnsembleStageResult,
+  type RunPipelineInput,
+  type RunPipelineOutput,
+} from './eval-pipeline.js';
+// P6-2: A2A-native supervisor
+export {
+  weaveA2ASupervisor,
+  createInMemoryA2ATaskStore,
+  createA2ATaskStore,
+  type WeaveA2ASupervisorOptions,
+  type WeaveA2ASupervisor,
+  type A2ATaskStore,
+} from './a2a-supervisor.js';

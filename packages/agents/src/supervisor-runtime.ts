@@ -26,6 +26,9 @@ import {
   weaveToolRegistry,
 } from '@weaveintel/core';
 import { buildSupervisorUtilityTools } from './supervisor-tools.js';
+import type { WorkerRegistry } from './worker-registry.js';
+
+export type { WorkerRegistry };
 
 export interface WorkerDefinition {
   name: string;
@@ -40,8 +43,19 @@ export interface SupervisorRuntimeOptions {
   supervisorName: string;
   /** Optional system instructions authored by the caller (prepended). */
   baseInstructions?: string;
-  /** Worker agents the supervisor can delegate to. Required. */
+  /**
+   * Static list of workers built at construction time.
+   * Use `workerRegistry` instead when workers need to change at runtime.
+   */
   workers: WorkerDefinition[];
+  /**
+   * P5-2 — Dynamic worker registry.
+   * When provided, the `delegate_to_worker` tool queries this registry at call
+   * time so workers can be registered/unregistered without rebuilding the
+   * supervisor. Replaces `workers` for runtime lookups; `workers` is still
+   * used only to compose the initial system prompt.
+   */
+  workerRegistry?: WorkerRegistry;
   /**
    * Function used to build a worker as a `weaveAgent`. Passed in to avoid a
    * circular import with `agent.ts`.
@@ -114,10 +128,26 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
   } = opts;
   const cseCodeToolNames = opts.cseCodeToolNames ?? ['cse_run_code', 'cse.run_code'];
 
-  // Build worker agents up-front
-  const workersMap = new Map<string, Agent>();
-  for (const w of workers) {
-    workersMap.set(w.name, buildWorkerAgent(w, bus));
+  // P5-2: Dynamic registry takes precedence for runtime lookups; static map
+  // is built from the initial workers list only when no registry is provided.
+  const workerRegistry = opts.workerRegistry;
+
+  // Agent instance cache — built lazily so runtime-registered workers can
+  // also be discovered on first delegation without recreating the supervisor.
+  const agentCache = new Map<string, Agent>();
+
+  function resolveAgent(def: WorkerDefinition): Agent {
+    if (!agentCache.has(def.name)) {
+      agentCache.set(def.name, buildWorkerAgent(def, bus));
+    }
+    return agentCache.get(def.name)!;
+  }
+
+  // Build static worker agents up-front (only when no dynamic registry).
+  if (!workerRegistry) {
+    for (const w of workers) {
+      agentCache.set(w.name, buildWorkerAgent(w, bus));
+    }
   }
 
   const delegationResults: DelegationResult[] = [];
@@ -189,23 +219,37 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
     }
   }
 
+  // P5-2: For dynamic registries, omit the fixed `enum` so the tool description
+  // stays valid even as workers change. The description lists current workers
+  // at construction time but delegates look up the live list at call time.
+  const initialWorkerNames = workerRegistry
+    ? workerRegistry.list().map((w) => w.name)
+    : workers.map((w) => w.name);
+  const workerEnumProps: Record<string, unknown> = initialWorkerNames.length > 0 && !workerRegistry
+    ? { enum: initialWorkerNames }
+    : {};
+
   // delegate_to_worker — the core supervisor capability
   tools.register(weaveTool<{ worker: string; goal: string }>({
     name: 'delegate_to_worker',
-    description: `Delegate a task to a worker agent. Available workers: ${[...workersMap.keys()].join(', ')}. Each worker has specialized capabilities. Describe the goal clearly. IMPORTANT: Do NOT use this for tasks that can be handled by an available tool (including MCP-wrapped tools like cse_run_code).`,
+    description: `Delegate a task to a worker agent. Available workers: ${initialWorkerNames.join(', ')}. Each worker has specialized capabilities. Describe the goal clearly. IMPORTANT: Do NOT use this for tasks that can be handled by an available tool (including MCP-wrapped tools like cse_run_code).`,
     parameters: {
       type: 'object',
       properties: {
         worker: {
           type: 'string',
-          description: `Name of the worker to delegate to. One of: ${[...workersMap.keys()].join(', ')}`,
-          enum: [...workersMap.keys()],
+          description: `Name of the worker to delegate to. Currently registered workers: ${initialWorkerNames.join(', ')}`,
+          ...workerEnumProps,
         },
         goal: { type: 'string', description: 'Clear description of what the worker should accomplish' },
       },
       required: ['worker', 'goal'],
     },
     async execute(args, ctx) {
+      // P5-2: Resolve worker from registry (dynamic) or static cache.
+      const currentWorkers = workerRegistry ? workerRegistry.list() : workers;
+      const currentWorkerNames = currentWorkers.map((w) => w.name);
+
       // Auto-redirect code execution goals to a CSE tool when one is available.
       const cseRunCode = additionalTools?.list().find((t) => cseCodeToolNames.includes(t.schema.name));
       if (cseRunCode) {
@@ -223,10 +267,15 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
         }
       }
 
-      const worker = workersMap.get(args.worker);
-      if (!worker) {
-        return `Error: Worker "${args.worker}" not found. Available: ${[...workersMap.keys()].join(', ')}`;
+      const workerDef = workerRegistry
+        ? workerRegistry.get(args.worker)
+        : workers.find((w) => w.name === args.worker);
+
+      if (!workerDef) {
+        return `Error: Worker "${args.worker}" not found. Available: ${currentWorkerNames.join(', ')}`;
       }
+
+      const worker = resolveAgent(workerDef);
 
       if (delegationResults.length >= maxDelegations) {
         return 'Error: Maximum number of delegations reached.';
@@ -304,7 +353,7 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
   if (opts.parallelDelegation) {
     tools.register(weaveTool<{ tasks: Array<{ worker: string; goal: string }> }>({
       name: 'delegate_to_workers_parallel',
-      description: `Dispatch multiple independent sub-tasks to workers concurrently. All tasks run in parallel via Promise.all and results are returned together. Use this when tasks are independent and can be done simultaneously. Available workers: ${[...workersMap.keys()].join(', ')}.`,
+      description: `Dispatch multiple independent sub-tasks to workers concurrently. All tasks run in parallel via Promise.all and results are returned together. Use this when tasks are independent and can be done simultaneously. Available workers: ${initialWorkerNames.join(', ')}.`,
       parameters: {
         type: 'object',
         properties: {
@@ -314,7 +363,7 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
             items: {
               type: 'object',
               properties: {
-                worker: { type: 'string', enum: [...workersMap.keys()], description: 'Worker name' },
+                worker: { type: 'string', ...workerEnumProps, description: 'Worker name' },
                 goal: { type: 'string', description: 'Task description for this worker' },
               },
               required: ['worker', 'goal'],
@@ -332,8 +381,15 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
         }
 
         const results = await Promise.all(args.tasks.map(async (task) => {
-          const w = workersMap.get(task.worker);
-          if (!w) return { worker: task.worker, goal: task.goal, output: `Error: Worker "${task.worker}" not found.`, status: 'failed' };
+          // P5-2: Live registry lookup for parallel delegation too.
+          const def = workerRegistry
+            ? workerRegistry.get(task.worker)
+            : workers.find((w) => w.name === task.worker);
+          if (!def) {
+            const avail = (workerRegistry ? workerRegistry.list() : workers).map((w) => w.name).join(', ');
+            return { worker: task.worker, goal: task.goal, output: `Error: Worker "${task.worker}" not found. Available: ${avail}`, status: 'failed' };
+          }
+          const w = resolveAgent(def);
           const childCtx = weaveChildContext(ctx, { metadata: { delegatedBy: supervisorName, delegatedTo: task.worker, parallel: true } });
           const delegateStart = Date.now();
           bus?.emit(weaveEvent(EventTypes.AgentDelegation, { supervisor: supervisorName, worker: task.worker, goal: task.goal, parallel: true }, ctx));
@@ -379,7 +435,8 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
       ].join('\n')
     : '';
 
-  const workerDescriptions = workers
+  const initialWorkerList = workerRegistry ? workerRegistry.list() : workers;
+  const workerDescriptions = initialWorkerList
     .map((w) => `- **${w.name}**: ${w.description ?? 'No description'}`)
     .join('\n');
 
@@ -422,7 +479,7 @@ export function buildSupervisorRuntime(opts: SupervisorRuntimeOptions): Supervis
   ].join('\n');
 
   const workersConfig: Record<string, AgentConfig> = Object.fromEntries(
-    workers.map((w) => [w.name, { name: w.name, instructions: w.systemPrompt }]),
+    initialWorkerList.map((w) => [w.name, { name: w.name, instructions: w.systemPrompt }]),
   );
 
   return {

@@ -173,6 +173,25 @@ export interface ChatSettingsRow {
   // P4-2 — Proactive memory context injection (m65)
   memory_context_enabled: number;
   memory_context_max_chars: number;
+  // P5-1 — Agent checkpoint / resume (m66)
+  checkpoint_enabled: number;
+  checkpoint_interval_steps: number;
+  // P5-2 — Dynamic worker registry (m66)
+  dynamic_workers_enabled: number;
+  max_dynamic_workers: number;
+  // P6-1 — Multi-tier eval pipeline (m67)
+  eval_pipeline_enabled: number;
+  eval_pipeline_stages: string | null;
+  eval_pipeline_fail_fast: number;
+  // P6-3 — Cost governor (m67)
+  cost_governor_enabled: number;
+  cost_governor_policy: string | null;
+  // P6-4 — Compliance-aware tool execution (m67)
+  compliance_enabled: number;
+  compliance_subject_id_field: string | null;
+  compliance_enforce_consent: number;
+  // P6-5 — Vision loop (m67)
+  vision_loop_enabled: number;
 }
 
 export interface TraceRow {

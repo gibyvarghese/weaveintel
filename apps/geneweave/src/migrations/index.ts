@@ -45,6 +45,8 @@ import { applyM62A2ATasks } from './m62-a2a-tasks.js';
 import { applyM63AgentPhase2 } from './m63-agent-phase2.js';
 import { applyM64AgentPhase3 } from './m64-agent-phase3.js';
 import { applyM65AgentPhase4 } from './m65-agent-phase4.js';
+import { applyM66AgentPhase5 } from './m66-agent-phase5.js';
+import { applyM67AgentPhase6 } from './m67-agent-phase6.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -98,6 +100,8 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm63-agent-phase2', description: 'Agent Phase 2: parallel_tool_calls, context management (strategy/max_tokens/window_size), tool retry columns on chat_settings + agent_strategy_settings; agent_output_schemas + agent_structured_outputs tables', run: applyM63AgentPhase2 },
   { id: 'm64-agent-phase3', description: 'Agent Phase 3: HITL interrupt (hitl_interrupt_requests table, chat_settings HITL/handoff toggles) + agent handoff audit log (agent_handoff_log table)', run: applyM64AgentPhase3 },
   { id: 'm65-agent-phase4', description: 'Agent Phase 4: portable memory tools, proactive context injection (chat_settings columns), knowledge graph (agent_graph_nodes + agent_graph_edges tables), graph tool catalog seeds', run: applyM65AgentPhase4 },
+  { id: 'm66-agent-phase5', description: 'Agent Phase 5: checkpoint/resume (agent_checkpoints table, chat_settings columns) + dynamic worker registry (chat_settings columns)', run: applyM66AgentPhase5 },
+  { id: 'm67-agent-phase6', description: 'Agent Phase 6: eval pipeline, cost governor, compliance, vision loop (chat_settings columns + agent_eval_pipeline_runs, agent_cost_ledger, agent_compliance_audit tables)', run: applyM67AgentPhase6 },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

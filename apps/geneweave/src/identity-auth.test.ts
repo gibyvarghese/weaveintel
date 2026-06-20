@@ -97,6 +97,21 @@ describe('GeneWeave identity/persona auth for agents + tools', () => {
       graph_persist_enabled: 1,
       memory_context_enabled: 0,
       memory_context_max_chars: 4000,
+      // P5 columns (m66)
+      checkpoint_enabled: 0,
+      checkpoint_interval_steps: 1,
+      dynamic_workers_enabled: 0,
+      max_dynamic_workers: 20,
+      // P6 columns (m67)
+      eval_pipeline_enabled: 0,
+      eval_pipeline_stages: null,
+      eval_pipeline_fail_fast: 1,
+      cost_governor_enabled: 0,
+      cost_governor_policy: null,
+      compliance_enabled: 0,
+      compliance_subject_id_field: null,
+      compliance_enforce_consent: 1,
+      vision_loop_enabled: 0,
     };
 
     const settings = settingsFromRow(row);

@@ -42,6 +42,7 @@ import {
   weaveAudit,
 } from '@weaveintel/core';
 import { buildSupervisorRuntime, type WorkerDefinition } from './supervisor-runtime.js';
+import type { WorkerRegistry } from './worker-registry.js';
 import { applyContextManagement, type ContextManagementOptions } from './context-manager.js';
 import {
   buildHandoffTools,
@@ -50,6 +51,21 @@ import {
   type HandoffMetadata,
 } from './handoff.js';
 import type { InterruptHandler, InterruptEvent } from './interrupt.js';
+import {
+  generateRunId,
+  type AgentCheckpoint,
+  type CheckpointStore,
+} from './checkpoint.js';
+import type { EvalPipelineOptions, EvalPipelineReport } from './eval-pipeline.js';
+import type {
+  CostGovernorBundle,
+  CostLedger,
+  CostLedgerSink,
+  CostLedgerEntry,
+  PricingResolver,
+} from '@weaveintel/cost-governor';
+import { wrapModelWithCostLedger } from '@weaveintel/cost-governor';
+import type { ContentPart, ImageContent } from '@weaveintel/core';
 
 async function withObservedSpan<T>(
   ctx: ExecutionContext,
@@ -223,6 +239,47 @@ export interface ToolCallingAgentOptions {
   handoffs?: HandoffDefinition[];
 
   /**
+   * P5-1 — Agent checkpoint / resume.
+   *
+   * When set, the agent saves an `AgentCheckpoint` snapshot after every
+   * `intervalSteps` steps (default: every step) and again on any terminal
+   * outcome (completed / failed / cancelled / budget_exceeded).
+   *
+   * The `runId` uniquely identifies this run; if omitted it is auto-generated
+   * as `<agentName>:<epoch-ms>:<random>` and available in the checkpoint.
+   *
+   * To resume: load the checkpoint with `store.load(runId)`, then call
+   * `resumeFromCheckpoint(checkpoint, agentOpts)` to build an agent whose
+   * `run()` pre-seeds the checkpoint's conversation history.
+   */
+  checkpoint?: {
+    /** Backing store for checkpoint snapshots. */
+    store: CheckpointStore;
+    /**
+     * Save a snapshot every N tool-call steps. Default: every step.
+     * Terminal checkpoints (completed/failed) are always saved regardless
+     * of this setting.
+     */
+    intervalSteps?: number;
+    /**
+     * Caller-supplied run ID. If omitted, an ID is auto-generated and
+     * available in each saved checkpoint's `runId` field.
+     */
+    runId?: string;
+  };
+  /**
+   * P5-2 — Dynamic worker registry.
+   *
+   * Alternative to the static `workers` array. When provided, the supervisor's
+   * `delegate_to_worker` tool resolves workers from the registry at call time
+   * so you can add or remove workers without recreating the supervisor.
+   *
+   * Can be used alongside `workers` (which then only sets the initial system
+   * prompt description). Or use it without `workers` for a fully dynamic setup.
+   */
+  workerRegistry?: WorkerRegistry;
+
+  /**
    * P4-2 — Proactive memory context injection.
    *
    * When provided, `retrieve()` is called before each `model.generate()`
@@ -249,6 +306,99 @@ export interface ToolCallingAgentOptions {
      */
     maxChars?: number;
   };
+
+  // ── P6-1: Multi-tier evaluation pipeline ─────────────────────
+
+  /**
+   * P6-1 — Multi-tier evaluation pipeline.
+   *
+   * Chains: schema-check → rubric critic → verifier → ensemble arbiter as a
+   * single configurable pipeline run AFTER the main response is produced.
+   * Each stage is optional; `failFast: true` (default) short-circuits on first
+   * rejection. When a stage rejects, feedback is fed back into the run loop as
+   * a new user turn so the agent can regenerate within its remaining step budget.
+   *
+   * The full per-stage report is stored in `AgentResult.metadata.evalPipeline`.
+   */
+  evalPipeline?: EvalPipelineOptions;
+
+  // ── P6-3: Cost-aware routing ──────────────────────────────────
+
+  /**
+   * P6-3 — Cost-aware agent routing.
+   *
+   * When provided, the agent's model is wrapped with a cost ledger interceptor
+   * so every `generate()` call records token usage and estimated USD cost.
+   * The `bundle` levers (historyCompactor, toolOutputTruncator) are applied
+   * inside the run loop to control context size and output verbosity.
+   *
+   * `AgentResult.metadata.costBreakdown` is populated at termination when a
+   * `ledger` with `breakdown()` support is provided.
+   */
+  costGovernor?: {
+    /** Pre-built governor bundle (from `weaveCostGovernor(policy)`). */
+    bundle: CostGovernorBundle;
+    /** Full ledger with breakdown support (e.g. `createInMemoryCostLedger()`). */
+    ledger?: CostLedger;
+    /** Pricing resolver used to compute USD per token. */
+    pricing?: PricingResolver;
+    /**
+     * Run ID used to scope ledger entries. If omitted, the checkpoint runId
+     * or an auto-generated ID is used.
+     */
+    runId?: string;
+  };
+
+  // ── P6-4: Compliance-aware tool execution ─────────────────────
+
+  /**
+   * P6-4 — Compliance-aware tool execution.
+   *
+   * When provided, each tool call is preceded by a consent check against
+   * `ctx.runtime?.compliance`. Tool calls are blocked when consent has not
+   * been granted for the required purpose. All tool invocations are tagged
+   * with their data classification in the audit trail.
+   *
+   * Requires `ctx.runtime.compliance` to be wired (e.g. via
+   * `createRuntimeComplianceAdapter()` from `@weaveintel/compliance`).
+   */
+  complianceTools?: {
+    /**
+     * Subject ID (e.g. user ID) for consent and residency checks.
+     * When omitted, compliance checks are skipped (fail-open).
+     */
+    subjectId?: string;
+    /**
+     * Required consent purpose for ALL tool calls.
+     * Default: `'agent.tool.execute'`.
+     */
+    purpose?: string;
+    /**
+     * Per-tool data classification tags included in audit events.
+     * Key: tool name, Value: data category (e.g. `'PII'`, `'PHI'`, `'FINANCIAL'`).
+     */
+    dataClassifications?: Record<string, string>;
+    /**
+     * When true (default), block tool calls when consent is denied.
+     * When false, log the denial but allow execution (audit-only mode).
+     */
+    enforceConsent?: boolean;
+  };
+
+  // ── P6-5: Vision-loop browser agent ──────────────────────────
+
+  /**
+   * P6-5 — Vision-loop browser agent.
+   *
+   * When true, tool outputs that match the screenshot JSON pattern
+   * `{ "format": "png", "base64": "<data>" }` (or `{ "type": "image", ... }`)
+   * are automatically converted to `ImageContent` parts and injected into the
+   * next model call as visual input. This lets vision-capable models (Claude,
+   * GPT-4o) "see" browser screenshots rather than receiving raw base64 strings.
+   *
+   * Requires a vision-capable model (`Capabilities.Vision`).
+   */
+  visionLoop?: boolean;
 }
 
 // ─── Reflection / verify shared helper ───────────────────────
@@ -336,6 +486,47 @@ function lastUserMessageText(messages: readonly Message[]): string {
   return '';
 }
 
+// ─── P6-5: Vision-loop screenshot detection ──────────────────
+
+/**
+ * Try to extract an `ImageContent` part from a tool result string.
+ * Detects two patterns:
+ *   1. JSON: `{ "format": "png", "base64": "<data>" }` (browser_screenshot output)
+ *   2. JSON: `{ "type": "image", "base64": "<data>", "mimeType": "image/png" }`
+ *
+ * Returns null when the string doesn't match either pattern (fast path for
+ * non-screenshot tool results).
+ */
+function tryExtractScreenshot(result: string): ImageContent | null {
+  if (!result.startsWith('{')) return null;
+  try {
+    const obj = JSON.parse(result) as Record<string, unknown>;
+    // Pattern 1: { format: 'png', base64: '...' }
+    if (typeof obj['base64'] === 'string' && (obj['format'] === 'png' || obj['format'] === 'jpeg' || obj['format'] === 'webp')) {
+      return {
+        type: 'image',
+        base64: obj['base64'],
+        mimeType: `image/${String(obj['format'])}`,
+      } as ImageContent;
+    }
+    // Pattern 2: { type: 'image', base64: '...', mimeType: '...' }
+    if (obj['type'] === 'image' && typeof obj['base64'] === 'string') {
+      return {
+        type: 'image',
+        base64: obj['base64'],
+        ...(typeof obj['mimeType'] === 'string' ? { mimeType: obj['mimeType'] } : { mimeType: 'image/png' }),
+      } as ImageContent;
+    }
+    // Pattern 3: { url: '...', type: 'image' }
+    if (obj['type'] === 'image' && typeof obj['url'] === 'string') {
+      return { type: 'image', url: obj['url'] } as ImageContent;
+    }
+  } catch {
+    /* not JSON — return null */
+  }
+  return null;
+}
+
 /**
  * Build a messages array for a single `generate()` call that has the
  * retrieved memory context prepended to the system message (or inserted as a
@@ -377,12 +568,16 @@ function buildMessagesWithMemoryContext(
 }
 
 export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
-  const isSupervisor = Array.isArray(opts.workers) && opts.workers.length > 0;
+  // P5-2: supervisor mode is activated by workers[], workerRegistry, or both.
+  const isSupervisor =
+    (Array.isArray(opts.workers) && opts.workers.length > 0) ||
+    (opts.workerRegistry !== undefined && opts.workerRegistry.size > 0);
   const supervisorRuntime = isSupervisor
     ? buildSupervisorRuntime({
         supervisorName: opts.name ?? 'supervisor',
         baseInstructions: opts.systemPrompt,
-        workers: opts.workers!,
+        workers: opts.workers ?? [],
+        workerRegistry: opts.workerRegistry,
         buildWorkerAgent: (w, bus) => weaveAgent({
           name: w.name,
           model: w.model,
@@ -415,9 +610,27 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         maxDelegations: opts.maxDelegations ?? opts.maxSteps ?? 10,
       } as SupervisorConfig
     : baseConfig;
-  const { model, memory, policy } = opts;
+  const { model: baseModel, memory, policy } = opts;
   const eventBus = opts.bus;
   const maxSteps = config.maxSteps ?? 20;
+
+  // P6-3: Optionally wrap model with cost ledger interceptor.
+  // The sink adapts CostLedger.record → CostLedgerSink.append interface.
+  const cgOpts = opts.costGovernor;
+  const cgRunId = cgOpts?.runId ?? generateRunId(config.name);
+  let model = baseModel;
+  if (cgOpts?.ledger) {
+    const ledger = cgOpts.ledger;
+    const sink: CostLedgerSink = { append: (e: CostLedgerEntry) => ledger.record(e) };
+    const pricing: PricingResolver = cgOpts.pricing ?? { resolve: () => null };
+    model = wrapModelWithCostLedger(baseModel, {
+      sink,
+      pricing,
+      newId: () => Math.random().toString(36).slice(2),
+      resolveContext: () => ({ runId: cgRunId, agentId: config.name }),
+      source: 'agentic.react',
+    });
+  }
 
   // P3-2: Build and merge handoff tools into the tool registry.
   const baseToolReg = supervisorRuntime?.tools ?? opts.tools ?? weaveToolRegistry();
@@ -463,6 +676,38 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         : undefined;
       // P3-2 — handoff feedback messages to inject after a modification
       const pendingHandoffFeedback: string[] = [];
+      // P5-1 — checkpoint state
+      const checkpointOpts = opts.checkpoint;
+      const activeRunId = checkpointOpts?.runId ?? generateRunId(config.name);
+      const checkpointInterval = checkpointOpts?.intervalSteps ?? 1;
+
+      // Helper: persist checkpoint; errors are swallowed (never crash the agent run).
+      const saveCheckpoint = async (
+        currentMessages: Message[],
+        currentSteps: AgentStep[],
+        currentStepIdx: number,
+        terminalStatus?: AgentResult['status'],
+      ): Promise<void> => {
+        if (!checkpointOpts) return;
+        const cp: AgentCheckpoint = {
+          runId: activeRunId,
+          agentName: config.name,
+          stepIndex: currentStepIdx,
+          messages: currentMessages.map((m) => ({ ...m })),
+          steps: currentSteps.map((s) => ({ ...s })),
+          tokenCounts: { prompt: totalPromptTokens, completion: totalCompletionTokens },
+          revisionCount,
+          verifyAttemptCount,
+          structuredOutputRetryCount,
+          toolCallCount,
+          createdAt: new Date().toISOString(),
+          ...(terminalStatus && {
+            completedAt: new Date().toISOString(),
+            status: terminalStatus,
+          }),
+        };
+        await checkpointOpts.store.save(activeRunId, cp).catch(() => {});
+      };
 
       // P1-2 / P3-1: if requireApproval is set but neither a policy gate nor an
       // onInterrupt handler is wired, surface needs_approval immediately.
@@ -499,11 +744,13 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
         for (let stepIdx = 0; stepIdx < maxSteps; stepIdx++) {
           // Context checks
           if (isExpired(ctx)) {
+            await saveCheckpoint(messages, steps, stepIdx, 'cancelled');
             return buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'cancelled');
           }
 
           // Budget check
           if (config.maxTokenBudget && (totalPromptTokens + totalCompletionTokens) >= config.maxTokenBudget) {
+            await saveCheckpoint(messages, steps, stepIdx, 'budget_exceeded');
             return buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'budget_exceeded');
           }
 
@@ -512,6 +759,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             const usage = buildUsage(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime);
             const decision = await policy.shouldContinue(ctx, steps, usage);
             if (!decision.continue) {
+              await saveCheckpoint(messages, steps, stepIdx, 'cancelled');
               return buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'cancelled');
             }
           }
@@ -539,6 +787,17 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
               if (retrieved) {
                 generateMessages = buildMessagesWithMemoryContext(messages, retrieved, opts.memoryContext.maxChars);
               }
+            }
+          }
+
+          // P6-3: History compaction — trim old turns before model call.
+          if (cgOpts?.bundle) {
+            const compacted = await cgOpts.bundle.historyCompactor(
+              generateMessages as Array<{ role: string; content: string }>,
+              { runId: cgRunId, agentId: config.name },
+            );
+            if (compacted !== generateMessages) {
+              generateMessages = compacted as Message[];
             }
           }
 
@@ -573,7 +832,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             if (parallel) {
               const toolResults = await Promise.all(
                 response.toolCalls.map((tc) =>
-                  executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, toolRetryOpts, interruptOpts, pendingHandoffFeedback),
+                  executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, toolRetryOpts, interruptOpts, pendingHandoffFeedback, opts.complianceTools),
                 ),
               );
               for (const toolStep of toolResults) {
@@ -591,7 +850,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             } else {
               for (const tc of response.toolCalls) {
                 const toolStep = await executeToolCall(
-                  ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, toolRetryOpts, interruptOpts, pendingHandoffFeedback,
+                  ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, toolRetryOpts, interruptOpts, pendingHandoffFeedback, opts.complianceTools,
                 );
                 steps.push(toolStep);
                 toolCallCount++;
@@ -603,11 +862,31 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
               }
             }
 
+            // P6-5: Vision loop — detect screenshot tool outputs and inject ImageContent.
+            if (opts.visionLoop) {
+              const visionMessages: Message[] = [];
+              for (let mi = messages.length - response.toolCalls.length; mi < messages.length; mi++) {
+                const toolMsg = messages[mi];
+                if (toolMsg && toolMsg.role === 'tool') {
+                  const imgContent = tryExtractScreenshot(typeof toolMsg.content === 'string' ? toolMsg.content : '');
+                  if (imgContent) {
+                    visionMessages.push({ role: 'user', content: [imgContent] as ContentPart[] });
+                  }
+                }
+              }
+              for (const vm of visionMessages) messages.push(vm);
+            }
+
             eventBus?.emit(weaveEvent(EventTypes.AgentStepEnd, {
               agent: config.name,
               stepIndex: stepIdx,
               type: 'tool_call',
             }, ctx));
+
+            // P5-1: Periodic checkpoint after tool-call steps.
+            if (checkpointOpts && stepIdx % checkpointInterval === 0) {
+              await saveCheckpoint(messages, steps, stepIdx + 1);
+            }
             continue;
           }
 
@@ -779,13 +1058,47 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
           }, ctx));
           void weaveAudit(ctx, { action: 'agent.run.end', outcome: 'success', resource: config.name, details: { steps: steps.length, status: 'completed' } });
 
+          // P5-1: Final checkpoint on successful completion.
+          await saveCheckpoint(messages, steps, steps.length, 'completed');
+
+          // P6-1: Multi-tier evaluation pipeline (run after the main loop).
+          let evalPipelineReport: EvalPipelineReport | undefined;
+          if (opts.evalPipeline && finalContent) {
+            const { runEvalPipeline } = await import('./eval-pipeline.js');
+            const pipelineOut = await runEvalPipeline(opts.evalPipeline, {
+              ctx,
+              content: finalContent,
+              agentModel: model,
+              agentName: config.name,
+              conversationHistory: messages as Array<{ role: string; content: string }>,
+            });
+            evalPipelineReport = pipelineOut.report;
+            // Use revised content if pipeline produced one (e.g. ensemble winner)
+            if (pipelineOut.content !== finalContent) {
+              finalContent = pipelineOut.content;
+            }
+          }
+
+          // P6-3: Collect cost breakdown if ledger supports it.
+          let costBreakdown: Awaited<ReturnType<CostLedger['breakdown']>> | undefined;
+          if (cgOpts?.ledger) {
+            costBreakdown = await cgOpts.ledger.breakdown(cgRunId).catch(() => undefined);
+          }
+
+          const completedMeta: Record<string, unknown> = {
+            ...(structuredOutputParsed !== undefined ? { structuredOutput: structuredOutputParsed } : {}),
+            ...(evalPipelineReport !== undefined ? { evalPipeline: evalPipelineReport } : {}),
+            ...(costBreakdown !== undefined ? { costBreakdown } : {}),
+          };
+
           return buildResult(
             steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'completed',
-            structuredOutputParsed !== undefined ? { structuredOutput: structuredOutputParsed } : undefined,
+            Object.keys(completedMeta).length > 0 ? completedMeta : undefined,
           );
         }
 
-        // Max steps exceeded
+        // Max steps exceeded — P5-1: save terminal failure checkpoint.
+        await saveCheckpoint(messages, steps, steps.length, 'failed');
         return buildResult(steps, totalPromptTokens, totalCompletionTokens, toolCallCount, startTime, 'failed');
       } catch (err) {
         // P3-2: HandoffSignal from a transfer_to_<name> tool — execute the
@@ -948,7 +1261,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
               }
               const toolResults = await Promise.all(
                 accToolCalls.map((tc) =>
-                  executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, streamToolRetryOpts, streamInterruptOpts, streamPendingHandoffFeedback),
+                  executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, streamToolRetryOpts, streamInterruptOpts, streamPendingHandoffFeedback, opts.complianceTools),
                 ),
               );
               for (let i = 0; i < accToolCalls.length; i++) {
@@ -960,7 +1273,7 @@ export function weaveAgent(opts: ToolCallingAgentOptions): Agent {
             } else {
               for (const tc of accToolCalls) {
                 yield { type: 'tool_start', step: { index: steps.length, type: 'tool_call', content: tc.name, durationMs: 0 } };
-                const toolStep = await executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, streamToolRetryOpts, streamInterruptOpts, streamPendingHandoffFeedback);
+                const toolStep = await executeToolCall(ctx, tc, toolReg, policy, eventBus, config.name, stepIdx, stepStart, streamToolRetryOpts, streamInterruptOpts, streamPendingHandoffFeedback, opts.complianceTools);
                 steps.push(toolStep);
                 toolCallCount++;
                 messages.push({ role: 'tool', content: toolStep.toolCall?.result ?? '', toolCallId: tc.id });
@@ -1333,6 +1646,7 @@ async function executeToolCall(
   retryOpts?: { maxAttempts?: number; backoffMs?: number; maxBackoffMs?: number },
   interruptOpts?: InterruptCallOpts,
   pendingFeedback?: string[],
+  complianceOpts?: ToolCallingAgentOptions['complianceTools'],
 ): Promise<AgentStep> {
   const tool = toolReg.get(tc.name);
   const toolName = tc.name;
@@ -1370,6 +1684,47 @@ async function executeToolCall(
           toolCall: { name: toolName, arguments: parsed, result: resultContent },
           durationMs: Date.now() - stepStart,
         };
+      }
+    }
+
+    // P6-4: Compliance gate — check consent before tool execution.
+    if (complianceOpts && ctx.runtime?.compliance) {
+      const subjectId = complianceOpts.subjectId;
+      const purpose = complianceOpts.purpose ?? 'agent.tool.execute';
+      const dataClass = complianceOpts.dataClassifications?.[toolName];
+      const enforce = complianceOpts.enforceConsent !== false;
+
+      if (subjectId) {
+        let consentGranted = true;
+        try {
+          consentGranted = await ctx.runtime.compliance.isAllowed(subjectId, purpose);
+        } catch {
+          consentGranted = !enforce; // fail-open unless enforcing
+        }
+
+        void weaveAudit(ctx, {
+          action: 'agent.tool.compliance',
+          outcome: consentGranted ? 'success' : 'denied',
+          resource: toolName,
+          details: {
+            agent: agentName,
+            subjectId,
+            purpose,
+            ...(dataClass ? { dataClassification: dataClass } : {}),
+            consent: consentGranted,
+          },
+        });
+
+        if (!consentGranted && enforce) {
+          resultContent = `Tool call denied: consent not granted for purpose "${purpose}" (subject: ${subjectId})`;
+          eventBus?.emit(weaveEvent(EventTypes.ToolCallError, { tool: toolName, reason: 'compliance_denied' }, ctx));
+          return {
+            index: 0,
+            type: 'tool_call',
+            toolCall: { name: toolName, arguments: {}, result: resultContent },
+            durationMs: Date.now() - stepStart,
+          };
+        }
       }
     }
 
@@ -1588,4 +1943,74 @@ function lastUserMessage(messages: Message[]): string {
     if (messages[i]!.role === 'user') return String(messages[i]!.content);
   }
   return '';
+}
+
+// ─── P5-1: Resume from checkpoint ────────────────────────────
+
+/**
+ * Build an `Agent` that resumes from a previously saved `AgentCheckpoint`.
+ *
+ * The checkpoint's full conversation history is injected before the caller's
+ * new `input.messages`, so the agent continues the ReAct loop from exactly
+ * where it left off. The system message is stripped from the checkpoint
+ * history (to avoid duplication) when `agentOpts.systemPrompt` is set.
+ *
+ * The resumed agent carries the same `ToolCallingAgentOptions` as the
+ * original, including any checkpoint store — so it will keep saving
+ * incremental checkpoints under the same `runId`.
+ *
+ * @param checkpoint  Loaded from `CheckpointStore.load(runId)`.
+ * @param agentOpts   Same options used to create the original agent.
+ */
+export function resumeFromCheckpoint(
+  checkpoint: AgentCheckpoint,
+  agentOpts: ToolCallingAgentOptions,
+): Agent {
+  // Strip the first message if it's a system message AND the new agent will
+  // add its own system prompt — avoids duplicate system blocks.
+  const hasSystemPrompt = Boolean(
+    agentOpts.systemPrompt ||
+    agentOpts.workers?.length ||
+    agentOpts.workerRegistry,
+  );
+  const resumeHistory = hasSystemPrompt && checkpoint.messages[0]?.role === 'system'
+    ? checkpoint.messages.slice(1)
+    : checkpoint.messages;
+
+  // Always resume under the same runId so all checkpoints share one lineage.
+  const resumeOpts: ToolCallingAgentOptions = {
+    ...agentOpts,
+    checkpoint: agentOpts.checkpoint
+      ? { ...agentOpts.checkpoint, runId: checkpoint.runId }
+      : undefined,
+  };
+
+  const inner = weaveAgent(resumeOpts);
+
+  return {
+    config: inner.config,
+    async run(ctx, input) {
+      const mergedInput: AgentInput = {
+        ...input,
+        messages: [...resumeHistory, ...input.messages],
+      };
+      return inner.run(ctx, mergedInput);
+    },
+    async *runStream(ctx, input) {
+      const mergedInput: AgentInput = {
+        ...input,
+        messages: [...resumeHistory, ...input.messages],
+      };
+      if (inner.runStream) {
+        yield* inner.runStream(ctx, mergedInput);
+      } else {
+        // Non-streaming fallback: run and emit a single text_chunk.
+        const result = await inner.run(ctx, mergedInput);
+        if (result.output) {
+          yield { type: 'text_chunk', text: result.output };
+        }
+        yield { type: 'done', result };
+      }
+    },
+  };
 }

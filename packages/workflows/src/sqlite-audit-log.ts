@@ -52,13 +52,13 @@ export function weaveSqliteAuditLog(opts: WeaveSqliteAuditLogOptions = {}): Work
     'INSERT INTO wf_audit_events (id, run_id, workflow_id, type, timestamp, payload_json) VALUES (?, ?, ?, ?, ?, ?)',
   );
   const listRun = db.prepare(
-    'SELECT * FROM wf_audit_events WHERE run_id = ? ORDER BY timestamp ASC, id ASC',
+    'SELECT * FROM wf_audit_events WHERE run_id = ? ORDER BY timestamp ASC, rowid ASC',
   );
   const listWf = db.prepare(
-    'SELECT * FROM wf_audit_events WHERE workflow_id = ? ORDER BY timestamp ASC, id ASC',
+    'SELECT * FROM wf_audit_events WHERE workflow_id = ? ORDER BY timestamp ASC, rowid ASC',
   );
   const listAllStmt = db.prepare(
-    'SELECT * FROM wf_audit_events ORDER BY timestamp ASC, id ASC',
+    'SELECT * FROM wf_audit_events ORDER BY timestamp ASC, rowid ASC',
   );
 
   return {
