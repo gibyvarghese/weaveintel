@@ -279,20 +279,44 @@ function buildGeneWeaveA2AServer(
       const history: A2AMessage[] = [params.message];
       const submittedAt = new Date().toISOString();
 
-      // Persist SUBMITTED state
-      await store.save({
+      const submittedTask: A2ATask = {
         id: taskId, contextId,
         status: { state: 'TASK_STATE_SUBMITTED', timestamp: submittedAt },
         artifacts: [], history,
         metadata: { submittedAt },
-      });
+      };
 
-      // Transition to WORKING
+      // Persist SUBMITTED state
+      await store.save(submittedTask);
+
+      void weaveAudit(ctx, { action: 'a2a.task.received', outcome: 'success', resource: 'geneweave', details: { taskId, contextId } });
+
+      // returnImmediately: return SUBMITTED task immediately, run agent in background.
+      // Callers poll GetTask or subscribe via SubscribeToTask for completion.
+      if (params.configuration?.returnImmediately) {
+        void (async () => {
+          try {
+            await store.update(taskId, {
+              status: { state: 'TASK_STATE_WORKING', timestamp: new Date().toISOString() },
+            });
+            const userContent = extractPartsText(params.message.parts);
+            const task = await runAgentTask(db, chatEngine, ctx.userId ?? 'a2a-anon', params, userContent, taskId, contextId);
+            await store.save(task);
+          } catch (err) {
+            const error = err instanceof Error ? err.message : String(err);
+            void store.update(taskId, {
+              status: { state: 'TASK_STATE_FAILED', timestamp: new Date().toISOString() },
+            }).catch(() => {});
+            void weaveAudit(ctx, { action: 'a2a.task.background.error', outcome: 'failure', resource: 'geneweave', details: { taskId, error } });
+          }
+        })();
+        return submittedTask;
+      }
+
+      // Synchronous path: transition to WORKING, run, persist terminal state
       await store.update(taskId, {
         status: { state: 'TASK_STATE_WORKING', timestamp: new Date().toISOString() },
       });
-
-      void weaveAudit(ctx, { action: 'a2a.task.received', outcome: 'success', resource: 'geneweave', details: { taskId, contextId } });
 
       let task: A2ATask;
       try {

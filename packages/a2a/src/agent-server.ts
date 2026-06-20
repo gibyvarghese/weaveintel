@@ -382,6 +382,29 @@ export function weaveAgentAsA2AServer(opts: AgentA2AServerOptions): A2AServer {
         details: { taskId, contextId },
       });
 
+      // returnImmediately: save SUBMITTED, run agent in background, return immediately.
+      // Callers poll GetTask or subscribe via SubscribeToTask for completion.
+      // Requires a store — without one, fall through to synchronous processing.
+      if (params.configuration?.returnImmediately && store) {
+        void runAgentWithStateTransitions(
+          agent, ctx, taskId, contextId,
+          sendParamsToAgentInput(params), history, store,
+        ).catch((err: unknown) => {
+          const error = err instanceof Error ? err.message : String(err);
+          void weaveAudit(ctx, {
+            action: 'a2a.task.background.error',
+            outcome: 'failure',
+            resource: agent.config.name,
+            details: { taskId, error },
+          });
+          // Best-effort FAILED update if background processing crashes
+          void store.update(taskId, {
+            status: { state: 'TASK_STATE_FAILED', timestamp: new Date().toISOString() },
+          }).catch(() => {});
+        });
+        return submittedTask;
+      }
+
       return runAgentWithStateTransitions(
         agent,
         ctx,

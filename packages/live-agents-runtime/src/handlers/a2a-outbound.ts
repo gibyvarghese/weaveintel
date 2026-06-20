@@ -2,13 +2,12 @@
  * Built-in handler kind: `a2a.outbound`.
  *
  * Reads the most-recent inbound TASK from the agent's inbox, wraps its
- * content as an A2A v1.0 `A2ATaskSendParams`, POSTs it to a configured remote
- * agent URL, and returns the `A2ATask` result as an outbound message.
- * No LLM call — pure protocol bridge.
+ * content as an A2A v1.0 `A2ATaskSendParams`, posts it to a configured remote
+ * agent URL via JSON-RPC 2.0, and returns the `A2ATask` result as an outbound
+ * message. No LLM call — pure protocol bridge.
  *
- * Wire format: REST POST to `{targetUrl}/api/a2a/tasks` (Phase 1).
- * Request body: A2ATaskSendParams (v1.0 — message.parts, no type discriminator).
- * Response body: A2ATask (v1.0 — contextId, status.state, artifacts[]).
+ * Wire format: JSON-RPC 2.0 POST to `{targetUrl}/api/a2a` (Phase 4).
+ * Uses `weaveA2AClient().sendMessage()` — proper A2A v1.0 client.
  *
  * --- When to use ---
  *
@@ -19,7 +18,7 @@
  * --- Config shape (live_agent_handler_bindings.config_json) ---
  *
  *   {
- *     "targetUrl": "https://remote.example.com",  // required
+ *     "targetUrl": "https://remote.example.com",  // required — base URL
  *     "skill": "code-review",                     // optional
  *     "timeoutMs": 30000                          // optional, default 30 s
  *   }
@@ -34,7 +33,9 @@ import type {
 } from '@weaveintel/live-agents';
 import { loadLatestInboundTask } from '@weaveintel/live-agents';
 import type { A2ATask, A2ATaskSendParams, ExecutionContext } from '@weaveintel/core';
-import { newUUIDv7 } from '@weaveintel/core';
+import { newUUIDv7, weaveChildContext, withTimeoutSignal } from '@weaveintel/core';
+import { WeaveIntelError } from '@weaveintel/core';
+import { weaveA2AClient } from '@weaveintel/a2a';
 import type { HandlerContext, HandlerKindRegistration } from '../handler-registry.js';
 
 export interface A2AOutboundConfig {
@@ -103,12 +104,14 @@ function buildOutboundResultMessage(
 function buildA2AOutbound(ctx: HandlerContext): TaskHandler {
   const cfg = readConfig(ctx.binding.config);
   const timeoutMs = cfg.timeoutMs ?? 30_000;
-  const tasksUrl = `${cfg.targetUrl.replace(/\/$/, '')}/api/a2a/tasks`;
+  // JSON-RPC 2.0 endpoint (Phase 4 — replaces REST /api/a2a/tasks)
+  const a2aUrl = `${cfg.targetUrl.replace(/\/$/, '')}/api/a2a`;
+  const client = weaveA2AClient();
 
   return async (
     _action: AttentionAction & { type: 'StartTask' | 'ContinueTask' },
     execCtx: ActionExecutionContext,
-    _ctx: ExecutionContext,
+    execContext: ExecutionContext,
   ): Promise<TaskHandlerResult> => {
     const inbound = await loadLatestInboundTask(execCtx);
     if (!inbound) {
@@ -130,61 +133,22 @@ function buildA2AOutbound(ctx: HandlerContext): TaskHandler {
       ...(cfg.skill ? { metadata: { skill: cfg.skill } } : {}),
     };
 
-    ctx.log(`a2a.outbound: posting task to ${tasksUrl} (contextId=${contextId})`);
+    ctx.log(`a2a.outbound: posting task to ${a2aUrl} (contextId=${contextId})`);
+
+    // Create a child context with combined timeout + parent signal
+    const callCtx = weaveChildContext(execContext, {
+      signal: withTimeoutSignal(execContext.signal, timeoutMs),
+    });
 
     let task: A2ATask;
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      let response: Response;
-      try {
-        response = await fetch(tasksUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'A2A-Version': '1.0',
-          },
-          body: JSON.stringify(sendParams),
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timer);
-      }
-
-      if (!response.ok) {
-        const errBody = await response.text().catch(() => response.statusText);
-        ctx.log(`a2a.outbound: remote returned HTTP ${response.status}: ${errBody}`);
-        task = {
-          id: contextId,
-          contextId,
-          status: {
-            state: 'TASK_STATE_FAILED',
-            message: { role: 'agent', parts: [{ text: `HTTP ${response.status}: ${errBody.slice(0, 200)}` }] },
-            timestamp: new Date().toISOString(),
-          },
-          artifacts: [],
-          history: [sendParams.message],
-        };
-      } else {
-        const json = await response.json() as unknown;
-        if (json && typeof json === 'object' && 'contextId' in (json as object)) {
-          // v1.0 A2ATask response
-          task = json as A2ATask;
-        } else {
-          // Unexpected response shape — wrap as completed
-          task = {
-            id: contextId,
-            contextId,
-            status: { state: 'TASK_STATE_COMPLETED', timestamp: new Date().toISOString() },
-            artifacts: [{ artifactId: `${contextId}-out`, name: 'output', parts: [{ text: JSON.stringify(json) }] }],
-            history: [sendParams.message],
-          };
-        }
-      }
+      task = await client.sendMessage(callCtx, a2aUrl, sendParams);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      ctx.log(`a2a.outbound: fetch failed: ${msg}`);
-      return { completed: false, summaryProse: `fetch error: ${msg}` };
+      const msg = err instanceof WeaveIntelError ? err.message
+        : err instanceof Error ? err.message
+        : String(err);
+      ctx.log(`a2a.outbound: sendMessage failed: ${msg}`);
+      return { completed: false, summaryProse: `a2a error: ${msg}` };
     }
 
     const outbound = buildOutboundResultMessage(ctx, execCtx, task);
@@ -204,7 +168,7 @@ function buildA2AOutbound(ctx: HandlerContext): TaskHandler {
 export const a2aOutboundHandler: HandlerKindRegistration = {
   kind: 'a2a.outbound',
   description:
-    'Delegate inbound TASK to a remote A2A agent (v1.0 A2ATaskSendParams via POST). ' +
+    'Delegate inbound TASK to a remote A2A agent (v1.0 JSON-RPC 2.0 via weaveA2AClient). ' +
     'No LLM call. Use for delegator agents that hand off work to specialist remote agents.',
   configSchema: {
     type: 'object',
@@ -212,7 +176,7 @@ export const a2aOutboundHandler: HandlerKindRegistration = {
     properties: {
       targetUrl: { type: 'string', description: 'Base URL of the remote A2A agent.' },
       skill: { type: 'string', description: 'Optional skill name to tag in the request metadata.' },
-      timeoutMs: { type: 'integer', minimum: 1000, default: 30000, description: 'Fetch timeout in milliseconds.' },
+      timeoutMs: { type: 'integer', minimum: 1000, default: 30000, description: 'Request timeout in milliseconds.' },
     },
   },
   factory: buildA2AOutbound,
