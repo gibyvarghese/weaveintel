@@ -41,7 +41,7 @@ import {
   type HandlerContext,
 } from './handler-registry.js';
 import { resolveAttentionPolicyFromDb } from './attention-factory.js';
-import { bridgeRunState, type RunBridgeDb } from './run-bridge.js';
+import { bridgeRunState, type RunBridgeDb, type LiveRunEventRowLike } from './run-bridge.js';
 import {
   parsePrepareConfig,
   type PrepareResolutionDeps,
@@ -182,10 +182,24 @@ export interface HeartbeatSupervisorOptions {
    * Omitting this field is safe — audit is best-effort and gracefully absent.
    */
   runtime?: WeaveRuntime;
+  /**
+   * Phase 4 — Real-time event callback. Forwarded to `bridgeRunState` so
+   * SSE subscribers receive step_started / step_completed events without
+   * polling the DB. Fire-and-forget — exceptions inside the callback are
+   * swallowed by the bridge.
+   */
+  onEvent?: (runId: string, event: LiveRunEventRowLike) => void;
 }
 
 export interface HeartbeatSupervisorHandle {
   stop(): Promise<void>;
+  /**
+   * Phase 4 — Cancel a live run in-process. Adds `runId` to the
+   * supervisor's internal cancelled set so the next scheduling pass skips
+   * tick queuing for agents in that run's mesh. Works alongside the
+   * existing DB-polled `stop_requested` mechanism for immediate effect.
+   */
+  cancelRun(runId: string): void;
 }
 
 const NOOP_MODEL: Model = {
@@ -298,6 +312,8 @@ export async function createHeartbeatSupervisor(
   let registeredRoles = new Set<string>();
   let stopped = false;
   let scheduleInFlight = false;
+  // Phase 4: set of live_run IDs that have been cancelled in-process.
+  const cancelledRunIds = new Set<string>();
 
   /** Build (or rebuild) workers when the active role set changes. */
   const rebuildWorkers = async (roles: Set<string>): Promise<void> => {
@@ -366,10 +382,20 @@ export async function createHeartbeatSupervisor(
     }
     const meshes = await opts.db.listLiveMeshes({ status: 'ACTIVE' });
     for (const m of meshes) {
+      // Phase 4: skip scheduling for agents in a cancelled run.
+      let meshIsCancelled = false;
+      if (cancelledRunIds.size > 0) {
+        try {
+          const runs = await opts.db.listLiveRuns({ meshId: m.id, status: 'RUNNING', limit: 10 });
+          meshIsCancelled = runs.some((r) => cancelledRunIds.has(r.id));
+        } catch {
+          /* best-effort */
+        }
+      }
       const agents = await opts.db.listLiveAgents({ meshId: m.id, status: 'ACTIVE' });
       for (const a of agents) {
-        if (gate?.defer) {
-          if (gate.emitForAgent) {
+        if (gate?.defer || meshIsCancelled) {
+          if (gate?.emitForAgent && !meshIsCancelled) {
             try {
               await gate.emitForAgent({ id: m.id }, { id: a.id, role_key: a.role_key });
             } catch {
@@ -393,7 +419,10 @@ export async function createHeartbeatSupervisor(
     scheduleInFlight = true;
     try {
       await scheduleDueTicks();
-      await bridgeRunState(opts.db, opts.store, { logger: (m) => log(`[bridge] ${m}`) });
+      await bridgeRunState(opts.db, opts.store, {
+        logger: (m) => log(`[bridge] ${m}`),
+        ...(opts.onEvent ? { onEvent: opts.onEvent } : {}),
+      });
     } catch (err) {
       log(`schedule/bridge cycle failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -468,6 +497,9 @@ export async function createHeartbeatSupervisor(
       clearInterval(ticker);
       clearInterval(refresher);
       await Promise.all(workers.map((w) => w.heartbeat.stop()));
+    },
+    cancelRun(runId: string) {
+      cancelledRunIds.add(runId);
     },
   };
 }

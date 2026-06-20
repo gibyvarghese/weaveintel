@@ -66,6 +66,7 @@ import {
   type HeartbeatSupervisorHandle,
   type HeartbeatSupervisorOptions,
 } from './heartbeat-supervisor.js';
+import type { LiveRunEventRowLike } from './run-bridge.js';
 import {
   HandlerRegistry,
   type HandlerKindRegistration,
@@ -162,6 +163,13 @@ export interface WeaveLiveMeshFromDbOptions {
    * DI chain rather than process-global singletons.
    */
   runtime?: WeaveRuntime;
+  /**
+   * Phase 4 — Real-time event callback. Called after every
+   * `step_started` / `step_completed` event is written to the DB so SSE
+   * subscribers receive updates without polling. Fire-and-forget — exceptions
+   * inside the callback are swallowed by the bridge.
+   */
+  onEvent?: (runId: string, event: LiveRunEventRowLike) => void;
 }
 
 export interface WeaveLiveMeshFromDbResult {
@@ -272,6 +280,7 @@ export async function weaveLiveMeshFromDb(
     ...(opts.refreshMs !== undefined ? { refreshMs: opts.refreshMs } : {}),
     ...(opts.workerIdPrefix ? { workerIdPrefix: opts.workerIdPrefix } : {}),
     ...(opts.runtime !== undefined ? { runtime: opts.runtime } : {}),
+    ...(opts.onEvent ? { onEvent: opts.onEvent } : {}),
     logger: (m: string) => log(`[supervisor] ${m}`),
   });
 

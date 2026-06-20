@@ -2,6 +2,8 @@ import { newUUIDv7 } from '@weaveintel/core';
 import type { DatabaseAdapter } from '../db.js';
 import { json, readBody } from '../server-core.js';
 import type { Router } from '../server-core.js';
+import { getCancellationBus } from '../live-agents/cancellation-bus.js';
+import { getGenericSupervisorHandle } from '../live-agents/generic-supervisor-boot.js';
 
 export function registerLiveAgentRoutes(router: Router, db: DatabaseAdapter): void {
 
@@ -44,11 +46,17 @@ export function registerLiveAgentRoutes(router: Router, db: DatabaseAdapter): vo
 
   // Stop a live-agent run. Persists stop_requested=1 to DB so agent loops
   // on any replica can detect the signal by calling isApiRunStopped().
+  // Phase 4: also fires the in-process RunCancellationBus and calls
+  // cancelRun on the generic supervisor so the next tick is skipped
+  // immediately without waiting for the next DB poll cycle.
   router.post('/api/live-agents/runs/:runId/stop', async (_req, res, params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const run = await db.getApiLiveRun(params['runId']!);
     if (!run || run.user_id !== auth.userId) { json(res, 404, { error: 'Run not found' }); return; }
     await db.updateApiLiveRun(run.id, { status: 'stopped', stop_requested: 1 });
+    // Phase 4 — in-process cancellation (best-effort, never throws to caller).
+    try { getCancellationBus().cancel(run.id); } catch { /* noop */ }
+    try { getGenericSupervisorHandle()?.cancelRun(run.id); } catch { /* noop */ }
     json(res, 200, { runId: run.id, status: 'stopped', stopRequested: true });
   }, { auth: true, csrf: true });
 

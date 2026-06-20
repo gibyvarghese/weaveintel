@@ -46,6 +46,13 @@ export {
   type ApprovalIdGenerator,
 } from './handlers/human-approval.js';
 
+// Phase 4 — A2A handler kinds
+export { a2aInboundHandler, type A2AInboundConfig } from './handlers/a2a-inbound.js';
+export { a2aOutboundHandler, type A2AOutboundConfig } from './handlers/a2a-outbound.js';
+
+// Phase 4 — In-process run cancellation bus
+export { RunCancellationBus } from './run-cancellation.js';
+
 // Phase 3 — Tool binder. Resolves an agent's tool surface from the DB.
 export {
   resolveAgentToolCatalog,
@@ -124,16 +131,20 @@ import { agenticReactHandler } from './handlers/agentic-react.js';
 import { deterministicForwardHandler } from './handlers/deterministic-forward.js';
 import { deterministicTemplateHandler } from './handlers/deterministic-template.js';
 import { humanApprovalHandler } from './handlers/human-approval.js';
+import { a2aInboundHandler } from './handlers/a2a-inbound.js';
+import { a2aOutboundHandler } from './handlers/a2a-outbound.js';
 
 /**
  * Convenience: create a registry pre-populated with the built-in handler
  * kinds. Apps can add more after construction.
  *
- * Built-ins (Phase 6):
+ * Built-ins (Phase 4+):
  *   - agentic.react           — LLM ReAct loop over inbox
  *   - deterministic.forward   — pure router / fan-out
  *   - deterministic.template  — render DB fragment + emit
  *   - human.approval          — dual-control gate via tool_approval_requests
+ *   - a2a.inbound             — A2A-aware ReAct loop (parses A2ATask from inbox)
+ *   - a2a.outbound            — delegate to remote A2A agent via HTTP
  */
 export function createDefaultHandlerRegistry(): HandlerRegistry {
   const reg = createHandlerRegistry();
@@ -141,6 +152,8 @@ export function createDefaultHandlerRegistry(): HandlerRegistry {
   reg.register(deterministicForwardHandler);
   reg.register(deterministicTemplateHandler);
   reg.register(humanApprovalHandler);
+  reg.register(a2aInboundHandler);
+  reg.register(a2aOutboundHandler);
   return reg;
 }
 

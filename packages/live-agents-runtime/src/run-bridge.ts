@@ -87,6 +87,12 @@ export interface BridgeRunStateOptions {
   newId?: () => string;
   /** Override `now()` for deterministic tests. */
   nowIso?: string;
+  /**
+   * Phase 4 — Real-time event callback. Called after every
+   * `db.appendLiveRunEvent` so SSE subscribers receive events immediately
+   * rather than polling the DB. Fire-and-forget — exceptions are swallowed.
+   */
+  onEvent?: (runId: string, event: LiveRunEventRowLike) => void;
 }
 
 const defaultIdGen = (): string => {
@@ -115,7 +121,7 @@ export async function bridgeRunState(
 
   for (const run of runs) {
     try {
-      await bridgeOneRun(db, store, run, newId, nowIso, log);
+      await bridgeOneRun(db, store, run, newId, nowIso, log, opts.onEvent);
     } catch (err) {
       log(`run ${run.id} bridge failed: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -129,6 +135,7 @@ async function bridgeOneRun(
   newId: () => string,
   nowIso: string,
   log: (m: string) => void,
+  onEvent?: (runId: string, event: LiveRunEventRowLike) => void,
 ): Promise<void> {
   const [agents, steps] = await Promise.all([
     db.listLiveAgents({ meshId: run.mesh_id, status: 'ACTIVE' }),
@@ -168,7 +175,7 @@ async function bridgeOneRun(
         started_at: nowIso,
         agent_id: agent.id,
       });
-      await db.appendLiveRunEvent({
+      const startedEvent: LiveRunEventRowLike = {
         id: newId(),
         run_id: run.id,
         step_id: step.id,
@@ -177,7 +184,9 @@ async function bridgeOneRun(
         tool_key: null,
         summary: `${step.role_key} agent picked up work.`,
         payload_json: null,
-      });
+      };
+      await db.appendLiveRunEvent(startedEvent);
+      try { onEvent?.(run.id, startedEvent); } catch { /* best-effort */ }
       log(`run ${run.id} step ${step.role_key} → RUNNING`);
       continue;
     }
@@ -201,7 +210,7 @@ async function bridgeOneRun(
         summary,
         agent_id: agent.id,
       });
-      await db.appendLiveRunEvent({
+      const completedEvent: LiveRunEventRowLike = {
         id: newId(),
         run_id: run.id,
         step_id: step.id,
@@ -210,7 +219,9 @@ async function bridgeOneRun(
         tool_key: null,
         summary,
         payload_json: null,
-      });
+      };
+      await db.appendLiveRunEvent(completedEvent);
+      try { onEvent?.(run.id, completedEvent); } catch { /* best-effort */ }
       log(`run ${run.id} step ${step.role_key} → COMPLETED`);
     }
   }

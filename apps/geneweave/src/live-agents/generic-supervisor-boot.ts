@@ -29,6 +29,7 @@ import {
   weaveDbModelResolver,
   type HeartbeatSupervisorHandle,
 } from '@weaveintel/live-agents-runtime';
+import { emitLiveRunEvent } from './live-run-event-bus.js';
 import type { Model, WeaveRuntime } from '@weaveintel/core';
 import {
   resolveCostGovernorBundle,
@@ -63,6 +64,14 @@ import {
 // Module-level dedupe: emit one deferral event per agent per state
 // crossing, not on every 5 s schedule pass.
 const lastDeferredKey = new Map<string, string>();
+
+// Phase 4 — expose supervisor handle so routes can call cancelRun().
+let activeSupervisorHandle: HeartbeatSupervisorHandle | null = null;
+
+/** Returns the active supervisor handle, or null when the generic runtime is disabled. */
+export function getGenericSupervisorHandle(): HeartbeatSupervisorHandle | null {
+  return activeSupervisorHandle;
+}
 
 export interface StartGenericSupervisorOptions {
   db: DatabaseAdapter;
@@ -454,8 +463,17 @@ export async function startGenericSupervisorIfEnabled(
       };
     },
     logger: (msg) => console.log('[live-supervisor]', msg),
+    // Phase 4 — fan-out live run events to in-process SSE subscribers.
+    onEvent: (runId, event) => {
+      try {
+        emitLiveRunEvent(runId, event);
+      } catch {
+        /* best-effort */
+      }
+    },
   });
 
+  activeSupervisorHandle = meshHandle.supervisor;
   console.log('[live-supervisor] generic runtime enabled (LIVE_AGENTS_GENERIC_RUNTIME=1)');
   return meshHandle.supervisor;
 }

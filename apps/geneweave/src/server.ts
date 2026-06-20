@@ -55,6 +55,7 @@ import {
   registerA2ARoutes,
   registerMemoryRoutes,
   registerLiveAgentRoutes,
+  registerAdminLiveRunStreamRoute,
   registerMeRoutes,
   registerMeConversationsRoutes,
   registerMeMemoryRoutes,
@@ -222,6 +223,7 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerA2ARoutes(router, db, chatEngine, { baseUrl: publicBaseUrl ?? 'http://localhost:3000' });
   registerMemoryRoutes(router, db);
   registerLiveAgentRoutes(router, db);
+  registerAdminLiveRunStreamRoute(router, db);
   registerMeRoutes(router, db, {
     notifications: createNotificationsHub({ db }),
     runExecutor: new MeRunExecutor({
