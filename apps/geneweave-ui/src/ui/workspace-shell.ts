@@ -143,17 +143,6 @@ export function renderWorkspaceNav(options: {
     h('span', { className: 'side-icon', style: 'font-size:15px', 'aria-hidden': 'true' }, '🔬'),
     h('span', { className: 'nav-label' }, 'Validation')
   ));
-  menu.appendChild(h('button', {
-    type: 'button',
-    className: state.view === 'kaggle-competition' ? 'active' : '',
-    title: 'Kaggle Competition',
-    'aria-label': 'Kaggle Competition',
-    'aria-current': state.view === 'kaggle-competition' ? 'page' : null,
-    onClick: () => { state.view = 'kaggle-competition'; options.render(); },
-  },
-    h('span', { className: 'side-icon', style: 'font-size:15px', 'aria-hidden': 'true' }, '🏆'),
-    h('span', { className: 'nav-label' }, 'Kaggle')
-  ));
 
   const adminNode = h('div', { className: 'admin-nav-tree' });
   const adminActive = state.view === 'admin';
