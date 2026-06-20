@@ -29,6 +29,7 @@ import type {
   AgentCard,
   InternalA2ABus,
   ExecutionContext,
+  Span,
 } from '@weaveintel/core';
 import { WeaveIntelError, weaveResolveTracer, newUUIDv7 } from '@weaveintel/core';
 import { a2aFetch, a2aFetchStream } from './_fetch.js';
@@ -78,11 +79,11 @@ async function withSpan<T>(
   ctx: ExecutionContext,
   name: string,
   attributes: Record<string, unknown>,
-  fn: () => Promise<T>,
+  fn: (span?: Span) => Promise<T>,
 ): Promise<T> {
   const tracer = weaveResolveTracer(ctx);
   if (!tracer) return fn();
-  return tracer.withSpan(ctx, name, () => fn(), attributes);
+  return tracer.withSpan(ctx, name, (span) => fn(span), attributes);
 }
 
 // ─── JSON-RPC POST helper ─────────────────────────────────────────────────────
@@ -92,34 +93,40 @@ async function rpcPost<T>(
   agentUrl: string,
   method: string,
   params: unknown,
+  enrichSpan?: (span: Span, result: T) => void,
 ): Promise<T> {
   const body = JSON.stringify(makeRpcRequest(method, params));
-  const response = await withSpan(ctx, `a2a.client.${method}`, { agentUrl, method }, () =>
-    a2aFetch(agentUrl, {
+
+  const execute = async (span?: Span): Promise<T> => {
+    const response = await a2aFetch(agentUrl, {
       method: 'POST',
       headers: rpcHeaders(ctx),
       body,
       signal: ctx.signal,
-    }),
-  );
-  if (!response.ok) {
-    throw new WeaveIntelError({
-      code: 'PROTOCOL_ERROR',
-      message: `A2A ${method} failed: HTTP ${response.status} ${response.statusText}`,
     });
-  }
-  const json = await response.json();
-  try {
-    return parseRpcResponse<T>(json);
-  } catch (err) {
-    if (err instanceof A2AJsonRpcError) {
+    if (!response.ok) {
       throw new WeaveIntelError({
-        code: err.code === A2A_ERROR_CODES.TASK_NOT_FOUND ? 'NOT_FOUND' : 'PROTOCOL_ERROR',
-        message: `A2A ${method} error ${err.code}: ${err.message}`,
+        code: 'PROTOCOL_ERROR',
+        message: `A2A ${method} failed: HTTP ${response.status} ${response.statusText}`,
       });
     }
-    throw err;
-  }
+    const json = await response.json();
+    try {
+      const result = parseRpcResponse<T>(json);
+      if (span && enrichSpan) enrichSpan(span, result);
+      return result;
+    } catch (err) {
+      if (err instanceof A2AJsonRpcError) {
+        throw new WeaveIntelError({
+          code: err.code === A2A_ERROR_CODES.TASK_NOT_FOUND ? 'NOT_FOUND' : 'PROTOCOL_ERROR',
+          message: `A2A ${method} error ${err.code}: ${err.message}`,
+        });
+      }
+      throw err;
+    }
+  };
+
+  return withSpan(ctx, `a2a.client.${method}`, { 'a2a.method': method, 'a2a.agentUrl': agentUrl }, execute);
 }
 
 // ─── HTTP-based A2A client (JSON-RPC 2.0) ────────────────────────────────────
@@ -185,14 +192,18 @@ export function weaveA2AClient(): A2AClient {
     // ── v1.0 methods (JSON-RPC 2.0) ─────────────────────────────────────────────
 
     async sendMessage(ctx: ExecutionContext, agentUrl: string, params: A2ATaskSendParams): Promise<A2ATask> {
-      return rpcPost<A2ATask>(ctx, agentUrl, A2A_METHODS.SEND_MESSAGE, params);
+      return rpcPost<A2ATask>(ctx, agentUrl, A2A_METHODS.SEND_MESSAGE, params, (span, task) => {
+        span.setAttribute('a2a.taskId', task.id);
+        span.setAttribute('a2a.contextId', task.contextId);
+        span.setAttribute('a2a.taskState', task.status.state);
+      });
     },
 
     async *streamMessage(ctx: ExecutionContext, agentUrl: string, params: A2ATaskSendParams): AsyncIterable<A2AStreamEvent> {
       const rpcReq = makeRpcRequest(A2A_METHODS.SEND_STREAMING_MESSAGE, params);
       const body = JSON.stringify(rpcReq);
 
-      const response = await withSpan(ctx, 'a2a.client.SendStreamingMessage', { agentUrl }, () =>
+      const response = await withSpan(ctx, 'a2a.client.SendStreamingMessage', { 'a2a.method': 'SendStreamingMessage', 'a2a.agentUrl': agentUrl }, () =>
         a2aFetchStream(agentUrl, {
           method: 'POST',
           headers: rpcHeaders(ctx, { Accept: 'text/event-stream' }),
@@ -214,7 +225,11 @@ export function weaveA2AClient(): A2AClient {
     async getTask(ctx: ExecutionContext, agentUrl: string, taskId: string, historyLength?: number): Promise<A2ATask> {
       const params: Record<string, unknown> = { id: taskId };
       if (historyLength !== undefined) params['historyLength'] = historyLength;
-      return rpcPost<A2ATask>(ctx, agentUrl, A2A_METHODS.GET_TASK, params);
+      return rpcPost<A2ATask>(ctx, agentUrl, A2A_METHODS.GET_TASK, params, (span, task) => {
+        span.setAttribute('a2a.taskId', task.id);
+        span.setAttribute('a2a.contextId', task.contextId);
+        span.setAttribute('a2a.taskState', task.status.state);
+      });
     },
 
     async listTasks(ctx: ExecutionContext, agentUrl: string, filter?: A2AListTasksFilter): Promise<A2ATaskPage> {
@@ -233,7 +248,7 @@ export function weaveA2AClient(): A2AClient {
 
     async *subscribeToTask(ctx: ExecutionContext, agentUrl: string, taskId: string): AsyncIterable<A2AStreamEvent> {
       const rpcReq = makeRpcRequest(A2A_METHODS.SUBSCRIBE_TO_TASK, { id: taskId });
-      const response = await withSpan(ctx, 'a2a.client.SubscribeToTask', { agentUrl, taskId }, () =>
+      const response = await withSpan(ctx, 'a2a.client.SubscribeToTask', { 'a2a.method': 'SubscribeToTask', 'a2a.agentUrl': agentUrl, 'a2a.taskId': taskId }, () =>
         a2aFetchStream(agentUrl, {
           method: 'POST',
           headers: rpcHeaders(ctx, { Accept: 'text/event-stream' }),

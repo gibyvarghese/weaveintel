@@ -554,7 +554,7 @@ describe('[DISPATCHER] push notification CRUD', () => {
       body: rpcBody(A2A_METHODS.CREATE_PUSH_CONFIG, { taskId: 'task-1', config: { token: 'only-token' } }),
     });
     if (res.kind !== 'json') return;
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
     expect((res.data as { error: { code: number } }).error.code).toBe(A2A_ERROR_CODES.INVALID_PARAMS);
   });
 
@@ -566,7 +566,7 @@ describe('[DISPATCHER] push notification CRUD', () => {
       body: rpcBody(A2A_METHODS.GET_PUSH_CONFIG, { taskId: 'task-1' }),
     });
     if (res.kind !== 'json') return;
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(400);
     expect((res.data as { error: { code: number } }).error.code).toBe(A2A_ERROR_CODES.INVALID_PARAMS);
   });
 

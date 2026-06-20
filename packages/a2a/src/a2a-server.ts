@@ -323,6 +323,7 @@ export function createA2ADispatcher(
           : err.code === A2A_ERROR_CODES.METHOD_NOT_FOUND ? 404
           : err.code === A2A_ERROR_CODES.PARSE_ERROR ? 400
           : err.code === A2A_ERROR_CODES.INVALID_REQUEST ? 400
+          : err.code === A2A_ERROR_CODES.INVALID_PARAMS ? 400
           : err.code === A2A_ERROR_CODES.UNAUTHORIZED ? 401
           : 500;
         return { kind: 'json', status, data: makeRpcError(id, err.code, err.message, err.data) };

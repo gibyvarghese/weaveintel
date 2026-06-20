@@ -3287,74 +3287,115 @@ function sA2A(): string {
   return `
 <div class="pkg-hdr">
   <div class="pkg-badge-wrap"><span class="pkg-badge">@weaveintel/a2a</span></div>
-  <h1 class="pkg-title">A2A — Agent-to-Agent Protocol</h1>
-  <p class="pkg-desc">Structured message passing between agents — in-process via an in-memory bus, or distributed via HTTP transport. Agents declare capabilities, discover each other by role, and communicate through typed message envelopes. All communication is audited and traceable.</p>
+  <h1 class="pkg-title">A2A — Agent-to-Agent Protocol v1.0</h1>
+  <p class="pkg-desc">Structured message passing between agents — in-process via an in-memory bus, or distributed via HTTP using JSON-RPC 2.0. Agents declare capabilities via signed agent cards, discover each other, and communicate through typed A2A v1.0 envelopes. All communication is audited, traceable, and supports push notifications via HMAC-signed webhooks.</p>
 </div>
 
 ${callout('info', '🔄', 'When to use A2A.', 'Use A2A when two agents run in <em>separate processes</em> or on separate machines, or when you need typed, versioned message contracts between agents. For single-process multi-agent patterns, the <strong>Supervisor</strong> mode in <code>@weaveintel/agents</code> is simpler.')}
 
-${section('a2a-local', 'In-Process A2A', `
-${code('typescript', `import { createA2ABus, createA2AAgent, A2AMessage } from '@weaveintel/a2a';
-import { weaveAgent } from '@weaveintel/agents';
+${section('a2a-local', 'In-Process A2A Bus', `
+${code('typescript', `import { weaveA2ABus } from '@weaveintel/a2a';
 import { weaveContext } from '@weaveintel/core';
+import type { A2AServer, A2ATask } from '@weaveintel/core';
 
-// One shared in-process bus
-const bus = createA2ABus();
+// Shared in-process bus — one per application
+const bus = weaveA2ABus();
 
-// Researcher agent
-const researcher = createA2AAgent({
-  bus,
-  role: 'researcher',
-  capabilities: ['web_search', 'summarise'],
-  agent: weaveAgent({ model: fastModel, tools: searchTools }),
-});
-
-// Writer agent
-const writer = createA2AAgent({
-  bus,
-  role: 'writer',
-  capabilities: ['draft', 'format_markdown'],
-  agent: weaveAgent({ model: smartModel, tools: writingTools }),
-});
-
-const ctx = weaveContext();
-
-// Send a task to the researcher
-const msg: A2AMessage = {
-  type:    'task.request',
-  from:    'orchestrator',
-  to:      'researcher',
-  payload: { query: 'Latest advances in quantum computing 2025' },
+// Build and register an agent server
+const researchServer: A2AServer = {
+  card: {
+    name: 'researcher',
+    description: 'Researches topics via web search',
+    version: '1.0.0',
+    skills: [{ id: 'web-search', name: 'Web Search', description: 'Search and summarise' }],
+    capabilities: { streaming: true },
+    supportedInterfaces: [{ url: 'http://localhost/api/a2a', protocolBinding: 'JSONRPC', protocolVersion: '1.0' }],
+  },
+  async handleMessage(ctx, params): Promise<A2ATask> {
+    const query = params.message.parts.map((p) => p.text ?? '').join(' ');
+    // … run research logic …
+    return {
+      id: 'task-1',
+      contextId: params.message.contextId ?? 'ctx-1',
+      status: { state: 'TASK_STATE_COMPLETED', timestamp: new Date().toISOString() },
+      artifacts: [{ artifactId: 'out', name: 'result', parts: [{ text: \`Research on: \${query}\` }] }],
+      history: [params.message],
+    };
+  },
+  async start() {},
+  async stop() {},
 };
-const response = await bus.send(ctx, msg);
-console.log(response.payload.summary);`, ['@weaveintel/a2a', '@weaveintel/agents', '@weaveintel/core'])}
+
+bus.register('researcher', researchServer);
+
+const ctx = weaveContext({ userId: 'u1' });
+
+// Send a task in-process (no HTTP)
+const task = await bus.send(ctx, 'researcher', {
+  message: {
+    role: 'user',
+    parts: [{ text: 'Latest advances in quantum computing 2025' }],
+    messageId: 'msg-1',
+    contextId: 'ctx-1',
+  },
+});
+console.log(task.artifacts[0]?.parts[0]?.text);
+
+// Discover / list agents
+const card = bus.discover('researcher');
+const all  = bus.listAgents();`, ['@weaveintel/a2a', '@weaveintel/core'])}
 `)}
 
-${section('a2a-http', 'Distributed A2A over HTTP', `
-${code('typescript', `import { createA2AHttpServer, createA2AHttpClient } from '@weaveintel/a2a';
+${section('a2a-http', 'Distributed A2A over HTTP (JSON-RPC 2.0)', `
+${code('typescript', `import { weaveA2AClient, createA2ADispatcher, createInMemoryA2ATaskStore, createInMemoryPushNotificationStore } from '@weaveintel/a2a';
+import { weaveContext } from '@weaveintel/core';
 
-// Server side — expose the agent over HTTP
-const server = createA2AHttpServer({
-  agent:    researchAgent,
-  port:     3001,
-  basePath: '/a2a',
-  auth:     { type: 'bearer', token: process.env['A2A_SECRET']! },
+// ── Server side: wire a JSON-RPC 2.0 dispatcher ─────────────────────────────
+const taskStore = createInMemoryA2ATaskStore();
+const pushStore = createInMemoryPushNotificationStore();
+const dispatcher = createA2ADispatcher(myA2AServer, taskStore, pushStore);
+
+// In your HTTP handler (e.g. POST /api/a2a):
+const result = await dispatcher(ctx, { method: 'POST', body: rawBody, headers });
+if (result.kind === 'json') {
+  res.writeHead(result.status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(result.data));
+} else {
+  // SSE streaming response
+  for await (const chunk of streamToSse(result.events)) res.write(chunk);
+  res.end();
+}
+
+// ── Client side: connect to any A2A v1.0 agent ──────────────────────────────
+const client = weaveA2AClient();
+const ctx    = weaveContext({ userId: 'u1' });
+
+// Discover and send a message
+const card    = await client.discover('https://research-agent.example.com');
+const agentUrl = card.supportedInterfaces?.[0]?.url ?? card.url!;
+
+const task = await client.sendMessage(ctx, agentUrl, {
+  message: {
+    role: 'user',
+    parts: [{ text: 'Summarise recent SEC filings for AAPL' }],
+    messageId: 'msg-1',
+    contextId: 'ctx-1',
+  },
 });
-await server.start();
+console.log(task.status.state); // 'TASK_STATE_COMPLETED'
 
-// Client side — call a remote agent as if it were local
-const client = createA2AHttpClient({
-  baseUrl: 'https://research-agent.internal:3001/a2a',
-  auth:    { type: 'bearer', token: process.env['A2A_SECRET']! },
+// Stream events
+for await (const event of client.streamMessage(ctx, agentUrl, { message: { role: 'user', parts: [{ text: 'Explain quantum' }], messageId: 'msg-2', contextId: 'ctx-1' } })) {
+  if ('artifactUpdate' in event) process.stdout.write(event.artifactUpdate.artifact.parts[0]?.text ?? '');
+  if ('task' in event) console.log('\\nDone:', event.task.status.state);
+}
+
+// Push notifications — register a webhook
+const config = await client.createPushConfig(ctx, agentUrl, task.id, {
+  url: 'https://my-server.example.com/webhooks/a2a',
+  token: 'hmac-signing-secret',
 });
-
-const ctx = weaveContext();
-const result = await client.send(ctx, {
-  type:    'task.request',
-  from:    'orchestrator',
-  to:      'researcher',
-  payload: { query: 'Summarise recent SEC filings for AAPL' },
-});`, ['@weaveintel/a2a', '@weaveintel/core'])}
+console.log('Push config created:', config.pushConfigId);`, ['@weaveintel/a2a', '@weaveintel/core'])}
 `)}`;
 }
 
