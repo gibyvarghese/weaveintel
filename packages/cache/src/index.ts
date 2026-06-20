@@ -4,6 +4,8 @@
  */
 
 export { weaveInMemoryCacheStore } from './store.js';
+// Phase 7 — RuntimeCacheSlot adapter for weaveRuntime({ cache }).
+export { createRuntimeCacheAdapter } from './runtime-cache-adapter.js';
 export { weaveSemanticCache } from './semantic.js';
 export type { SemanticCacheOptions } from './semantic.js';
 export { createCachePolicy, shouldBypass, resolvePolicy } from './policy.js';

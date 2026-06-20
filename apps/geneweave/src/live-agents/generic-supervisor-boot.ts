@@ -27,7 +27,9 @@ import {
   weaveLiveMeshFromDb,
   weaveDbLiveAgentPolicy,
   weaveDbModelResolver,
+  createDurableLiveAgentCheckpointStore,
   type HeartbeatSupervisorHandle,
+  type LiveAgentCheckpointStore,
 } from '@weaveintel/live-agents-runtime';
 import { emitLiveRunEvent } from './live-run-event-bus.js';
 import type { Model, WeaveRuntime } from '@weaveintel/core';
@@ -309,6 +311,16 @@ export async function startGenericSupervisorIfEnabled(
     },
   };
 
+  // ─── Phase 7 — Durable checkpoint store ─────────────────────
+  // One store per supervisor, keyed by agent ID. When the runtime's
+  // persistence slot is available we use a durable KV backend so
+  // checkpoints survive process restarts. Falls back to null when no
+  // persistence is wired (tests, edge deployments without KV).
+  const checkpointStore: LiveAgentCheckpointStore | null =
+    opts.runtime?.persistence?.kv
+      ? createDurableLiveAgentCheckpointStore(opts.runtime.persistence.kv)
+      : null;
+
   // ─── Phase 7 (live-agents capability parity) ────────────────
   // Single-call mesh hydration via `weaveLiveMeshFromDb` — replaces the
   // direct `createHeartbeatSupervisor` call. Same primitives, one entry
@@ -399,6 +411,12 @@ export async function startGenericSupervisorIfEnabled(
       // 2 lever resolvers are no-op stubs so behavior is unchanged;
       // the wiring is in place for Phases 3-7 to hang real levers off.
       costPolicyResolver: cachedCostPolicyResolver,
+      // ─── Phase 7 — durable checkpoint store ────────────────────────
+      // Agents that set `config_json.checkpoint: true` on an `agentic.react`
+      // binding will have their tick state saved to KV after each run and
+      // loaded at the start of the next. The same store instance is shared
+      // across all agents in this supervisor (each agent uses its own key).
+      ...(checkpointStore ? { checkpoint: checkpointStore } : {}),
       resolveAgentByRole: async (roleKey: string) => {
         const peers = await opts.db.listLiveAgents({
           meshId: agent.meshId,

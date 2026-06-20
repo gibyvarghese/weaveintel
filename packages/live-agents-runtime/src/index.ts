@@ -53,6 +53,14 @@ export { a2aOutboundHandler, type A2AOutboundConfig } from './handlers/a2a-outbo
 // Phase 4 — In-process run cancellation bus
 export { RunCancellationBus } from './run-cancellation.js';
 
+// Phase 7 — Durable checkpoint store for live-agent tick continuity.
+export {
+  createDurableLiveAgentCheckpointStore,
+  createInMemoryLiveAgentCheckpointStore,
+  type LiveAgentCheckpointStore,
+  type AgentCheckpointState,
+} from './checkpoint-store.js';
+
 // Phase 3 — Tool binder. Resolves an agent's tool surface from the DB.
 export {
   resolveAgentToolCatalog,

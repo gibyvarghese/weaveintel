@@ -39,6 +39,7 @@ import { newUUIDv7 } from './uuid.js';
 import type { ModelHealth } from './routing.js';
 import type { SemanticMemory, WorkingMemory, MemoryStore } from './memory.js';
 import type { IdentityContext, DelegationContext, AccessDecision, PermissionDescriptor } from './identity.js';
+import type { CacheStore, SemanticCache } from './cache.js';
 
 /**
  * Cross-cutting runtime capabilities. Used with `runtime.has(cap)` and
@@ -59,6 +60,7 @@ export const RuntimeCapabilities = {
   Memory: capabilityId('runtime.memory'),
   Compliance: capabilityId('runtime.compliance'),
   Identity: capabilityId('runtime.identity'),
+  Cache: capabilityId('runtime.cache'),
 } as const;
 
 /**
@@ -176,6 +178,47 @@ export interface RuntimeIdentitySlot {
    * Returns `{ valid: true }` or `{ valid: false, reason }`.
    */
   validateDelegation(delegation: DelegationContext): { valid: boolean; reason?: string };
+}
+
+/**
+ * Structural slot for shared response caching (Phase 7).
+ *
+ * A single shared `CacheStore` wired via `weaveRuntime` so the chat path,
+ * live-agent handlers, and tools all share the same cache without each
+ * constructing a private `weaveInMemoryCacheStore()` instance. In-process
+ * caches from different subsystems never benefit each other; sharing through
+ * the DI chain means a warm response in the chat path can serve a live-agent
+ * tool that asks the same question in the same process.
+ *
+ * `get` / `set` / `invalidate` mirror the `CacheStore` interface with the
+ * minimal surface that call sites need. The raw `store` accessor is provided
+ * for consumers that need the full `CacheStore` API (e.g. `has`, `clear`).
+ *
+ * `semanticGet` is optional — present only when a `SemanticCache` is wired.
+ * It returns a cached response for the most semantically-similar past query
+ * above `threshold`; useful for deduplicating near-identical LLM calls.
+ *
+ * Concrete adapter: `createRuntimeCacheAdapter(store, semanticCache?)` from
+ * `@weaveintel/cache`.
+ */
+export interface RuntimeCacheSlot {
+  /** Retrieve a cached value by exact key. Returns `null` on miss or expiry. */
+  get(key: string): Promise<unknown>;
+  /** Store a value under `key` with an optional TTL in milliseconds. */
+  set(key: string, value: unknown, ttlMs?: number): Promise<void>;
+  /** Delete a single cache entry by key. */
+  invalidate(key: string): Promise<void>;
+  /**
+   * Semantic similarity lookup. When a `SemanticCache` is wired, returns the
+   * cached response whose stored query embedding is within `threshold` cosine
+   * similarity of `embedding`. Returns `null` when no match exceeds the
+   * threshold or when no semantic cache is configured.
+   */
+  semanticGet?(embedding: number[], threshold?: number): Promise<unknown>;
+  /** Raw `CacheStore` for consumers that need the full API (`has`, `clear`, `size`). */
+  readonly store: CacheStore;
+  /** Raw `SemanticCache` for consumers that need `store` / `invalidate` control. */
+  readonly semanticStore?: SemanticCache;
 }
 
 /**
@@ -337,6 +380,13 @@ export interface RuntimeRoutingSlot {
   listHealth(): ModelHealth[];
   /** Return the set of providers currently under an active (un-expired) block. */
   getBlockedProviders(): Set<string>;
+  /**
+   * Phase 7 — Multi-modal capability check. Returns `true` when at least one
+   * healthy model in the routing pool supports vision / image input. Call this
+   * before routing an `ImageContent` or `AudioContent` part so handlers can
+   * skip or warn rather than fail silently.
+   */
+  supportsMultiModal?(): boolean;
 }
 
 /**
@@ -421,6 +471,7 @@ export interface WeaveRuntime {
   readonly memory: RuntimeMemorySlot | undefined;
   readonly compliance: RuntimeComplianceSlot | undefined;
   readonly identity: RuntimeIdentitySlot | undefined;
+  readonly cache: RuntimeCacheSlot | undefined;
   readonly metadata: Readonly<Record<string, unknown>>;
 
   has(cap: CapabilityId): boolean;
@@ -468,6 +519,14 @@ export interface WeaveRuntimeOptions {
    * When present, `RuntimeCapabilities.Identity` is advertised automatically.
    */
   readonly identity?: RuntimeIdentitySlot;
+  /**
+   * Phase 7 — shared response cache (get, set, invalidate, optional semanticGet).
+   * Pass a `createRuntimeCacheAdapter(store, semanticCache?)` instance from
+   * `@weaveintel/cache`. When present, `RuntimeCapabilities.Cache` is advertised
+   * automatically. Wiring a shared cache here means chat, live-agents, and tools
+   * all benefit from the same warm cache within the same process.
+   */
+  readonly cache?: RuntimeCacheSlot;
   /**
    * Phase 5 — optional `Redactor`. When supplied, every audit entry's
    * `details` object is serialised → redacted → re-parsed before the entry
@@ -707,6 +766,7 @@ export function weaveRuntime(opts: WeaveRuntimeOptions = {}): WeaveRuntime {
   if (opts.memory) caps.add(RuntimeCapabilities.Memory);
   if (opts.compliance) caps.add(RuntimeCapabilities.Compliance);
   if (opts.identity) caps.add(RuntimeCapabilities.Identity);
+  if (opts.cache) caps.add(RuntimeCapabilities.Cache);
   for (const c of opts.extraCapabilities ?? []) caps.add(c);
 
   const rt: WeaveRuntime = {
@@ -724,6 +784,7 @@ export function weaveRuntime(opts: WeaveRuntimeOptions = {}): WeaveRuntime {
     memory: opts.memory,
     compliance: opts.compliance,
     identity: opts.identity,
+    cache: opts.cache,
     metadata: opts.metadata ?? {},
     has(cap) {
       return caps.has(cap);

@@ -188,7 +188,7 @@ export async function buildSupervisorAdditionalTools(
 
 export class ChatEngine {
   private readonly healthTracker: RuntimeRoutingSlot;
-  private readonly responseCache = weaveInMemoryCacheStore();
+  private readonly responseCache: ReturnType<typeof weaveInMemoryCacheStore>;
   private readonly cacheKeyBuilder = weaveCacheKeyBuilder({ namespace: 'gw-chat' });
   private pricingCache: PricingCache | null = null;
   private policyPromptCache: PolicyPromptCache | null = null;
@@ -275,6 +275,9 @@ export class ChatEngine {
     // rather than creating a per-engine manager. Structurally compatible with
     // DurableConsentManager — cast is safe at runtime.
     this.consentManager = (config.runtime?.compliance?.consent ?? null) as DurableConsentManager | null;
+    // Phase 7: share the runtime's warm response cache so all subsystems
+    // (live-agent handlers, tools, chat path) benefit from the same entries.
+    this.responseCache = config.runtime?.cache?.store ?? weaveInMemoryCacheStore();
     this.toolOptions = {
       temporalStore: createTemporalStore(db),
       policyResolver: new DbToolPolicyResolver(db),

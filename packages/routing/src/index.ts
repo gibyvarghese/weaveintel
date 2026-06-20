@@ -39,7 +39,7 @@ export { getModelCapabilityFlags } from './model-capability-flags.js';
 export type { ModelCapabilityFlags } from './model-capability-flags.js';
 
 // Runtime routing adapter (Phase 2 — Shared Routing Slot)
-export { createRuntimeRoutingAdapter } from './runtime-routing-adapter.js';
+export { createRuntimeRoutingAdapter, type RuntimeRoutingAdapterOptions } from './runtime-routing-adapter.js';
 
 // Seed utilities
 export {

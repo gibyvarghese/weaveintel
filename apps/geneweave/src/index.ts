@@ -176,6 +176,7 @@ import { createGeneWeaveMemoryStore, createKeywordSemanticMemory } from './memor
 import { weaveSemanticMemory, weaveWorkingMemory, createRuntimeMemoryAdapter } from '@weaveintel/memory';
 import { createRuntimeComplianceAdapter } from '@weaveintel/compliance';
 import { createRuntimeIdentityAdapter } from '@weaveintel/identity';
+import { weaveInMemoryCacheStore, createRuntimeCacheAdapter } from '@weaveintel/cache';
 import { geneweaveEncryptionSlot, type GeneweaveEncryptionSlot } from './encryption-slot.js';
 export let geneweaveEncryptionManager: TenantKeyManager | null = null;
 /** Phase 7: KMS provider registry exposed for admin endpoints (list/health-check). */
@@ -363,7 +364,10 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // route using the same in-memory health state — no more per-instance tracker
   // drift where a rate-limit block in chat is invisible to the supervisor.
   const sharedHealthTracker = new ModelHealthTracker();
-  const routingAdapter = createRuntimeRoutingAdapter(sharedHealthTracker);
+  // Phase 7 — pass multiModal: true since geneWeave's model pool includes
+  // vision-capable models (GPT-4o, Claude 3.x). Handlers check
+  // `runtime.routing.supportsMultiModal()` before logging routing hints.
+  const routingAdapter = createRuntimeRoutingAdapter(sharedHealthTracker, { multiModal: true });
 
   // Phase 3 (runtime): per-user/tenant budget enforcement via shared cost ledger.
   // The ledger is backed by the same persistence slot so spend counters survive
@@ -391,6 +395,13 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // live-agent handlers.
   const identityAdapter = createRuntimeIdentityAdapter();
 
+  // Phase 7 (runtime): shared response cache — a single in-process
+  // `CacheStore` shared across the chat path, live-agent handlers, and tools
+  // via `ctx.runtime?.cache`. This means a warm response in one subsystem
+  // benefits all others in the same process without importing the singleton.
+  const sharedCacheStore = weaveInMemoryCacheStore();
+  const cacheAdapter = createRuntimeCacheAdapter(sharedCacheStore);
+
   const runtime = weaveRuntime({
     tracer: consoleTracer,
     secrets: envSecretResolver(),
@@ -404,6 +415,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     memory: memoryAdapter,
     compliance: complianceAdapter,
     identity: identityAdapter,
+    cache: cacheAdapter,
     installDefaultTracer: true,
   });
   // `installDefaultTracer: true` already wired the runtime's tracer as the

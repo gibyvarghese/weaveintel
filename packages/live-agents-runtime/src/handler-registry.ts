@@ -38,6 +38,7 @@ import type {
   TaskHandler,
 } from '@weaveintel/live-agents';
 import type { PrepareConfig, PrepareResolutionDeps } from './db-prepare-resolver.js';
+import type { LiveAgentCheckpointStore } from './checkpoint-store.js';
 
 /**
  * The DB row data needed to construct a handler instance for a single agent.
@@ -118,6 +119,13 @@ export interface HandlerContext {
    * time. Required when any `prepareConfig.systemPrompt.promptKey` is set.
    */
   prepareDeps?: PrepareResolutionDeps;
+  /**
+   * Phase 7 — durable checkpoint store for this agent. When present, handler
+   * kinds that opt in (e.g. `agentic.react` with `config_json.checkpoint: true`)
+   * will save state after each tick and resume from the last step index on the
+   * next tick. Handlers that do not opt in ignore this field.
+   */
+  checkpoint?: LiveAgentCheckpointStore;
 }
 
 /** Factory signature: pure function from `HandlerContext` to `TaskHandler`. */

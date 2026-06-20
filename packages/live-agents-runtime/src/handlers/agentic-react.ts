@@ -30,6 +30,7 @@
 
 import { weaveLiveAgent, type TaskHandler } from '@weaveintel/live-agents';
 import type { HandlerContext, HandlerKindRegistration } from '../handler-registry.js';
+import type { LiveAgentCheckpointStore } from '../checkpoint-store.js';
 import { dbPrepareFromConfig } from '../db-prepare-resolver.js';
 
 export interface AgenticReactConfig {
@@ -39,6 +40,12 @@ export interface AgenticReactConfig {
   /** Optional template for the user goal. Supports `{{subject}}` and
    *  `{{body}}` substitutions. Defaults to `"Subject: {{subject}}\n\n{{body}}"`. */
   userGoalTemplate?: string;
+  /**
+   * Phase 7 — enable durable checkpointing for this handler. When `true` and
+   * `ctx.checkpoint` is supplied, state is saved after each tick and the step
+   * index is logged at the start of the next one. Opt-in per binding.
+   */
+  checkpoint?: boolean;
 }
 
 const DEFAULT_USER_GOAL_TEMPLATE = 'Subject: {{subject}}\n\n{{body}}';
@@ -50,7 +57,18 @@ function readConfig(raw: Record<string, unknown>): AgenticReactConfig {
   if (typeof raw['fallbackPrompt'] === 'string') cfg.fallbackPrompt = raw['fallbackPrompt'];
   if (typeof raw['maxSteps'] === 'number') cfg.maxSteps = raw['maxSteps'];
   if (typeof raw['userGoalTemplate'] === 'string') cfg.userGoalTemplate = raw['userGoalTemplate'];
+  if (raw['checkpoint'] === true) cfg.checkpoint = true;
   return cfg;
+}
+
+function hasMultiModalMarkers(text: string): boolean {
+  return (
+    text.includes('data:image/') ||
+    text.includes('data:audio/') ||
+    text.includes('[IMAGE]') ||
+    text.includes('[AUDIO]') ||
+    text.includes('[FILE]')
+  );
 }
 
 function interpolate(tmpl: string, vars: Record<string, string>): string {
@@ -121,8 +139,62 @@ function buildAgenticReact(ctx: HandlerContext): TaskHandler {
     },
   };
 
-  const { handler } = weaveLiveAgent(handlerOpts);
-  return handler;
+  const { handler: innerHandler } = weaveLiveAgent(handlerOpts);
+
+  const checkpointStore: LiveAgentCheckpointStore | undefined =
+    cfg.checkpoint ? ctx.checkpoint : undefined;
+  const agentId = ctx.agent.id;
+  const log = ctx.log;
+
+  if (!checkpointStore) {
+    // No checkpointing requested — return the inner handler as-is.
+    // Multi-modal detection still runs per tick to log routing hints.
+    return async (action, context, execCtx) => {
+      const supportsMultiModal = execCtx.runtime?.routing?.supportsMultiModal?.() ?? false;
+      if (supportsMultiModal) {
+        // Best-effort: check if the action carries multi-modal markers.
+        // The attention action subject/bodySeed is text-only; richer
+        // ContentPart arrays appear in the agent's inbox messages which
+        // `loadLatestInboundTask` reads internally. We check what we can.
+        const body = 'bodySeed' in action ? String(action['bodySeed'] ?? '') : '';
+        const subject = 'subject' in action ? String(action['subject'] ?? '') : '';
+        if (hasMultiModalMarkers(body) || hasMultiModalMarkers(subject)) {
+          log(`[agentic.react] multi-modal content detected (agent=${agentId}); routing slot supports multi-modal`);
+        }
+      }
+      return innerHandler(action, context, execCtx);
+    };
+  }
+
+  // Checkpointing wrapper: load → run → save.
+  return async (action, context, execCtx) => {
+    // Announce resume point so operators can trace tick continuity.
+    const prior = await checkpointStore.load(agentId).catch(() => null);
+    if (prior) {
+      log(`[agentic.react] resuming from checkpoint step=${prior.stepIndex} savedAt=${new Date(prior.savedAt).toISOString()} (agent=${agentId})`);
+    }
+
+    const supportsMultiModal = execCtx.runtime?.routing?.supportsMultiModal?.() ?? false;
+    if (supportsMultiModal) {
+      const body = 'bodySeed' in action ? String(action['bodySeed'] ?? '') : '';
+      const subject = 'subject' in action ? String(action['subject'] ?? '') : '';
+      if (hasMultiModalMarkers(body) || hasMultiModalMarkers(subject)) {
+        log(`[agentic.react] multi-modal content detected (agent=${agentId}); routing slot supports multi-modal`);
+      }
+    }
+
+    const result = await innerHandler(action, context, execCtx);
+
+    const nextStep = (prior?.stepIndex ?? 0) + 1;
+    await checkpointStore.save(agentId, nextStep, {
+      lastActionType: action.type,
+      completedAt: Date.now(),
+    }).catch((err: unknown) => {
+      log(`[agentic.react] checkpoint save failed (agent=${agentId}): ${String(err)}`);
+    });
+
+    return result;
+  };
 }
 
 /** Registry entry. Pass to `HandlerRegistry.register(...)`. */
@@ -146,6 +218,10 @@ export const agenticReactHandler: HandlerKindRegistration = {
       userGoalTemplate: {
         type: 'string',
         description: 'Template for the user-turn goal. Supports {{subject}} and {{body}} substitutions.',
+      },
+      checkpoint: {
+        type: 'boolean',
+        description: 'Phase 7: enable durable checkpointing. Requires ctx.checkpoint to be wired in the supervisor.',
       },
     },
   },

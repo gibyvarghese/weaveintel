@@ -59,6 +59,7 @@ export {
   type RuntimeMemorySlot,
   type RuntimeComplianceSlot,
   type RuntimeIdentitySlot,
+  type RuntimeCacheSlot,
   RuntimeCapabilities,
   weaveRuntime,
   assertRuntimeRequires,

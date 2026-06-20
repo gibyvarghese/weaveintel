@@ -344,3 +344,93 @@ describe('weaveRuntime — Phase 6 Identity slot', () => {
       .toThrow(/runtime\.identity/);
   });
 });
+
+// ─── Phase 7 — Cache slot + supportsMultiModal ─────────────────────────────
+
+function makeCacheSlot() {
+  const map = new Map<string, unknown>();
+  const store = {
+    async get<T = unknown>(k: string): Promise<T | null> {
+      const v = map.get(k);
+      return (v === undefined ? null : v) as T | null;
+    },
+    async set<T = unknown>(k: string, v: T): Promise<void> { map.set(k, v as unknown); },
+    async delete(k: string): Promise<void> { map.delete(k); },
+    async has(k: string): Promise<boolean> { return map.has(k); },
+    async clear(): Promise<void> { map.clear(); },
+    async size(): Promise<number> { return map.size; },
+  };
+  return {
+    async get(key: string): Promise<unknown> {
+      const v = map.get(key);
+      return v === undefined ? undefined : v;
+    },
+    async set(key: string, value: unknown): Promise<void> { map.set(key, value); },
+    async invalidate(key: string): Promise<void> { map.delete(key); },
+    store,
+  };
+}
+
+describe('weaveRuntime — Phase 7 Cache slot', () => {
+  it('Cache capability is NOT advertised when slot is omitted', () => {
+    const rt = weaveRuntime({ installDefaultTracer: false });
+    expect(rt.has(RuntimeCapabilities.Cache)).toBe(false);
+  });
+
+  it('Cache capability IS advertised when slot is provided', () => {
+    const rt = weaveRuntime({ installDefaultTracer: false, cache: makeCacheSlot() });
+    expect(rt.has(RuntimeCapabilities.Cache)).toBe(true);
+  });
+
+  it('runtime.cache is undefined when slot is omitted', () => {
+    const rt = weaveRuntime({ installDefaultTracer: false });
+    expect(rt.cache).toBeUndefined();
+  });
+
+  it('runtime.cache exposes get/set/invalidate', async () => {
+    const slot = makeCacheSlot();
+    const rt = weaveRuntime({ installDefaultTracer: false, cache: slot });
+    await rt.cache!.set('hello', 42);
+    expect(await rt.cache!.get('hello')).toBe(42);
+    await rt.cache!.invalidate('hello');
+    expect(await rt.cache!.get('hello')).toBeUndefined();
+  });
+
+  it('runtime.cache.store references the raw store', () => {
+    const slot = makeCacheSlot();
+    const rt = weaveRuntime({ installDefaultTracer: false, cache: slot });
+    expect(rt.cache!.store).toBe(slot.store);
+  });
+
+  it('require(Cache) throws when slot is absent', () => {
+    const rt = weaveRuntime({ installDefaultTracer: false });
+    expect(() => rt.require(RuntimeCapabilities.Cache))
+      .toThrow(/runtime\.cache/);
+  });
+});
+
+describe('weaveRuntime — Phase 7 supportsMultiModal on routing slot', () => {
+  it('supportsMultiModal() returns false by default on routing slot', () => {
+    const routingSlot = {
+      recordOutcome: () => {},
+      blockProvider: () => {},
+      listHealth: () => [],
+      getBlockedProviders: () => new Set<string>(),
+      // No supportsMultiModal
+    };
+    const rt = weaveRuntime({ installDefaultTracer: false, routing: routingSlot });
+    expect(rt.routing?.supportsMultiModal?.()).toBeUndefined();
+  });
+
+  it('supportsMultiModal() returns what the slot provides', () => {
+    const routingSlot = {
+      recordOutcome: () => {},
+      blockProvider: () => {},
+      listHealth: () => [],
+      getBlockedProviders: () => new Set<string>(),
+      supportsMultiModal: () => true,
+    };
+    const rt = weaveRuntime({ installDefaultTracer: false, routing: routingSlot });
+    expect(rt.routing?.supportsMultiModal?.()).toBe(true);
+  });
+});
