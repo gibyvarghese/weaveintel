@@ -37,6 +37,7 @@ import { envSecretResolver } from './secrets.js';
 import type { AuditEntry, AuditLogger, Redactor, SecretResolver } from './security.js';
 import { newUUIDv7 } from './uuid.js';
 import type { ModelHealth } from './routing.js';
+import type { SemanticMemory, WorkingMemory, MemoryStore } from './memory.js';
 
 /**
  * Cross-cutting runtime capabilities. Used with `runtime.has(cap)` and
@@ -54,7 +55,31 @@ export const RuntimeCapabilities = {
   Guardrails: capabilityId('runtime.guardrails'),
   Routing: capabilityId('runtime.routing'),
   Cost: capabilityId('runtime.cost'),
+  Memory: capabilityId('runtime.memory'),
 } as const;
+
+/**
+ * Structural slot for cross-cutting agent memory (Phase 5).
+ *
+ * A single shared slot that every agent, tool, and live-agent handler can
+ * access via `ctx.runtime?.memory` without instantiating private memory
+ * objects per call site. Concrete adapters live in `@weaveintel/memory`;
+ * `createRuntimeMemoryAdapter(opts)` builds one from any `MemoryStore`
+ * backend (SQLite, pgvector, Postgres, Redis, …).
+ *
+ * `semantic`  — embedding-based vector recall. Requires an embedding model.
+ * `working`   — per-agent scratch state (patch / checkpoint / restore).
+ * `store`     — raw `MemoryStore` for lower-level multi-type queries (useful
+ *               for `fusedMemorySearch` across semantic + episodic + entity).
+ * `consolidate` — trigger the cold-path pipeline that distils episodic entries
+ *               into durable semantic facts for a given user.
+ */
+export interface RuntimeMemorySlot {
+  readonly semantic: SemanticMemory;
+  readonly working: WorkingMemory;
+  readonly store: MemoryStore;
+  consolidate(userId: string): Promise<void>;
+}
 
 /**
  * Minimal structural key-value store that every durable subsystem
@@ -273,6 +298,7 @@ export interface WeaveRuntime {
   readonly encryption: RuntimeEncryptionSlot | undefined;
   readonly routing: RuntimeRoutingSlot | undefined;
   readonly cost: RuntimeCostSlot | undefined;
+  readonly memory: RuntimeMemorySlot | undefined;
   readonly metadata: Readonly<Record<string, unknown>>;
 
   has(cap: CapabilityId): boolean;
@@ -302,6 +328,12 @@ export interface WeaveRuntimeOptions {
   readonly encryption?: RuntimeEncryptionSlot;
   readonly routing?: RuntimeRoutingSlot;
   readonly cost?: RuntimeCostSlot;
+  /**
+   * Phase 5 — unified memory slot (semantic, working, store, consolidate).
+   * Pass a `createRuntimeMemoryAdapter(opts)` instance from `@weaveintel/memory`.
+   * When present, `RuntimeCapabilities.Memory` is advertised automatically.
+   */
+  readonly memory?: RuntimeMemorySlot;
   /**
    * Phase 5 — optional `Redactor`. When supplied, every audit entry's
    * `details` object is serialised → redacted → re-parsed before the entry
@@ -538,6 +570,7 @@ export function weaveRuntime(opts: WeaveRuntimeOptions = {}): WeaveRuntime {
   if (opts.encryption) caps.add(RuntimeCapabilities.Encryption);
   if (opts.routing) caps.add(RuntimeCapabilities.Routing);
   if (opts.cost) caps.add(RuntimeCapabilities.Cost);
+  if (opts.memory) caps.add(RuntimeCapabilities.Memory);
   for (const c of opts.extraCapabilities ?? []) caps.add(c);
 
   const rt: WeaveRuntime = {
@@ -552,6 +585,7 @@ export function weaveRuntime(opts: WeaveRuntimeOptions = {}): WeaveRuntime {
     encryption: opts.encryption,
     routing: opts.routing,
     cost: opts.cost,
+    memory: opts.memory,
     metadata: opts.metadata ?? {},
     has(cap) {
       return caps.has(cap);

@@ -70,6 +70,12 @@ export type {
 export { weaveMemoryConsolidator } from './consolidation.js';
 export type { MemoryConsolidatorOptions } from './consolidation.js';
 
+export { createRuntimeMemoryAdapter } from './runtime-memory-adapter.js';
+export type { RuntimeMemoryAdapterOptions } from './runtime-memory-adapter.js';
+
+export { fusedMemorySearch } from './retrieval.js';
+export type { FusedMemorySearchOpts, FusedMemoryResult } from './retrieval.js';
+
 export {
   createProceduralEntry,
   isProceduralEntry,

@@ -1,5 +1,6 @@
 import { newUUIDv7, createLogger } from '@weaveintel/core';
-import type { ExecutionContext, Model, ModelRequest } from '@weaveintel/core';
+import type { ExecutionContext, Model, ModelRequest, RuntimeMemorySlot } from '@weaveintel/core';
+import { fusedMemorySearch } from '@weaveintel/memory';
 
 const logger = createLogger('chat-memory');
 import { runHybridMemoryExtraction, weaveGovernancePolicy, type ExtractedEntity, type MemoryExtractionRule, type GovernanceRule } from '@weaveintel/memory';
@@ -635,6 +636,72 @@ export async function loadProceduralInstructions(
   } catch (err) {
     logger.warn('loadProceduralInstructions failed — skipping', { err });
     return null;
+  }
+}
+
+/**
+ * Phase 5 — Multi-signal memory retrieval using `fusedMemorySearch`.
+ *
+ * When `runtime.memory` is present (Phase 5 wired), runs a three-signal
+ * fused search (semantic + keyword + entity) over the store and formats the
+ * results for system-prompt injection. Falls back gracefully to the existing
+ * `buildMemoryContext` when the slot is not wired.
+ *
+ * Use this in place of `buildMemoryContext` when you want richer retrieval:
+ *
+ *   const ctx = buildCtx({ runtime });
+ *   const memCtx = await buildFusedMemoryContext(db, ctx, model, userId, query, runtime.memory);
+ */
+export async function buildFusedMemoryContext(
+  db: DatabaseAdapter,
+  ctx: ExecutionContext,
+  model: Model,
+  userId: string,
+  query: string,
+  memorySlot?: RuntimeMemorySlot | null,
+): Promise<string | null> {
+  if (!memorySlot) {
+    return buildMemoryContext(db, ctx, model, userId, query);
+  }
+
+  try {
+    // Generate a query embedding when the store was created with an embedding model
+    const embeddingModel = getActiveGuardrailEmbeddingModel();
+    let queryEmbedding: number[] | undefined;
+    if (embeddingModel) {
+      try {
+        const res = await embeddingModel.embed(ctx, { input: [query.slice(0, 2000)] });
+        queryEmbedding = res.embeddings[0] as number[] | undefined;
+      } catch { /* fall through */ }
+    }
+
+    const results = await fusedMemorySearch(memorySlot.store, ctx, {
+      query,
+      embedding: queryEmbedding,
+      topK: 8,
+      userId,
+    });
+
+    if (results.length === 0) return null;
+
+    const parts: string[] = ['[Long-term memory from past conversations]'];
+    for (const { entry, signals } of results) {
+      const signalTag = [
+        signals.semantic !== undefined ? 'vec' : null,
+        signals.keyword !== undefined ? 'kw' : null,
+        signals.entity !== undefined ? 'ent' : null,
+      ].filter(Boolean).join('+');
+      const label = entry.type === 'entity'
+        ? `Entity "${entry.content}"`
+        : entry.type === 'episodic'
+          ? 'Episode'
+          : 'Memory';
+      parts.push(`  • [${label}${signalTag ? ' (' + signalTag + ')' : ''}] ${entry.content.slice(0, 200)}${entry.content.length > 200 ? '…' : ''}`);
+    }
+    return parts.join('\n');
+  } catch (err) {
+    logger.warn('buildFusedMemoryContext failed — falling back to buildMemoryContext', { err });
+    return buildMemoryContext(db, ctx, model, userId, query);
   }
 }
 

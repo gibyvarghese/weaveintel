@@ -183,3 +183,68 @@ describe('Phase 3 — guardrails slot + ambient audit helpers', () => {
     expect(entries[0]?.details).toMatchObject({ reason: 'opted-out', component: 'demo' });
   });
 });
+
+describe('Phase 5 — RuntimeMemorySlot + Memory capability', () => {
+  function makeMemorySlot() {
+    const recalled: string[] = [];
+    const stored: string[] = [];
+    return {
+      slot: {
+        semantic: {
+          async store(_ctx: import('./context.js').ExecutionContext, content: string) { stored.push(content); },
+          async recall(_ctx: import('./context.js').ExecutionContext, query: string) { recalled.push(query); return []; },
+        },
+        working: {
+          async patch() { return { id: 'wm-1', agentId: 'a', content: {}, createdAt: new Date().toISOString() }; },
+          async checkpoint() { return { id: 'wm-1', agentId: 'a', content: {}, createdAt: new Date().toISOString() }; },
+          async restore() { return null; },
+          async getCurrent() { return null; },
+        },
+        store: {
+          async write() { /* noop */ },
+          async query() { return []; },
+          async delete() { /* noop */ },
+          async clear() { /* noop */ },
+        },
+        async consolidate() { /* noop */ },
+      } satisfies import('./runtime.js').RuntimeMemorySlot,
+      recalled,
+      stored,
+    };
+  }
+
+  it('Memory capability is NOT advertised without a slot', () => {
+    const rt = weaveRuntime({ installDefaultTracer: false });
+    expect(rt.has(RuntimeCapabilities.Memory)).toBe(false);
+    expect(rt.memory).toBeUndefined();
+  });
+
+  it('Memory capability IS advertised when a slot is provided', () => {
+    const { slot } = makeMemorySlot();
+    const rt = weaveRuntime({ installDefaultTracer: false, memory: slot });
+    expect(rt.has(RuntimeCapabilities.Memory)).toBe(true);
+    expect(rt.memory).toBe(slot);
+  });
+
+  it('runtime.memory exposes semantic.store and semantic.recall', async () => {
+    const { slot, stored, recalled } = makeMemorySlot();
+    const rt = weaveRuntime({ installDefaultTracer: false, memory: slot });
+    const ctx = weaveContext({ runtime: rt });
+    await rt.memory!.semantic.store(ctx, 'hello world');
+    expect(stored).toContain('hello world');
+    await rt.memory!.semantic.recall(ctx, 'test query');
+    expect(recalled).toContain('test query');
+  });
+
+  it('runtime.memory.consolidate is a no-op when no consolidate fn was given', async () => {
+    const { slot } = makeMemorySlot();
+    const rt = weaveRuntime({ installDefaultTracer: false, memory: slot });
+    await expect(rt.memory!.consolidate('user-123')).resolves.toBeUndefined();
+  });
+
+  it('require(Memory) throws when slot is absent', () => {
+    const rt = weaveRuntime({ installDefaultTracer: false });
+    expect(() => rt.require(RuntimeCapabilities.Memory))
+      .toThrow(/runtime\.memory/);
+  });
+});

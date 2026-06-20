@@ -172,6 +172,8 @@ import {
 } from './guardrail-judge.js';
 import { initPgVectorSemanticMemory } from './memory-pgvector.js';
 import { initMemoryConsolidation } from './memory-consolidation.js';
+import { createGeneWeaveMemoryStore, createKeywordSemanticMemory } from './memory-store-adapter.js';
+import { weaveSemanticMemory, weaveWorkingMemory, createRuntimeMemoryAdapter } from '@weaveintel/memory';
 import { geneweaveEncryptionSlot, type GeneweaveEncryptionSlot } from './encryption-slot.js';
 export let geneweaveEncryptionManager: TenantKeyManager | null = null;
 /** Phase 7: KMS provider registry exposed for admin endpoints (list/health-check). */
@@ -314,6 +316,23 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // Memory consolidation — cold-path pipeline: episodic → semantic
   initMemoryConsolidation({ db });
 
+  // Phase 5: runtime memory slot — bridge the existing geneWeave DB schema to
+  // the core MemoryStore / SemanticMemory interfaces so runtime.memory is
+  // backed by the same data the chat pipeline writes. Live agents and tools
+  // can now call ctx.runtime.memory.semantic.recall(ctx, query) and
+  // ctx.runtime.memory.store (for fusedMemorySearch) without touching the DB
+  // adapter directly.
+  const runtimeMemoryStore = createGeneWeaveMemoryStore(db);
+  const semanticMem = guardrailEmbeddingModel
+    ? weaveSemanticMemory(guardrailEmbeddingModel, runtimeMemoryStore)
+    : createKeywordSemanticMemory(runtimeMemoryStore);
+  const workingMem = weaveWorkingMemory();
+  const memoryAdapter = createRuntimeMemoryAdapter({
+    semantic: semanticMem,
+    working: workingMem,
+    store: runtimeMemoryStore,
+  });
+
   const startupLimits = await resolveLimits(db);
   const guardrailsSlot = geneweaveGuardrailsSlot(db, {
     getModel: () => guardrailJudgeModel,
@@ -367,6 +386,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     resilience: resilienceAdapter,
     routing: routingAdapter,
     cost: costAdapter,
+    memory: memoryAdapter,
     installDefaultTracer: true,
   });
   // `installDefaultTracer: true` already wired the runtime's tracer as the
