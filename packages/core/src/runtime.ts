@@ -53,6 +53,7 @@ export const RuntimeCapabilities = {
   Encryption: capabilityId('runtime.encryption'),
   Guardrails: capabilityId('runtime.guardrails'),
   Routing: capabilityId('runtime.routing'),
+  Cost: capabilityId('runtime.cost'),
 } as const;
 
 /**
@@ -193,6 +194,54 @@ export interface RuntimeRoutingSlot {
   getBlockedProviders(): Set<string>;
 }
 
+/**
+ * Structural slot for per-user/tenant budget enforcement (Phase 3 — Shared Cost Slot).
+ *
+ * A single shared cost ledger is wired via `weaveRuntime` so the chat path and
+ * the live-agent supervisor both check and record against the same runtime
+ * spend counter. This prevents a user from exhausting their budget via one
+ * surface while the other surface remains unaware.
+ *
+ * Concrete implementation: `@weaveintel/cost-governor` `createRuntimeCostAdapter(opts)`.
+ */
+export interface RuntimeCostSlot {
+  /**
+   * Pre-flight budget check. Returns `{ allowed: false, reason }` when the
+   * entity (user or tenant) has exceeded their spending limit. Fail-open:
+   * a thrown check is treated as `{ allowed: true }` — cost gates are
+   * never load-bearing.
+   */
+  gate(opts: {
+    userId: string;
+    tenantId: string | null;
+    estimatedCostUsd?: number;
+  }): Promise<{ allowed: boolean; reason?: string }>;
+
+  /**
+   * Append an observed model cost to the running ledger. Best-effort —
+   * KV write failures are swallowed and never crash the hot path.
+   */
+  record(opts: {
+    userId: string;
+    tenantId: string | null;
+    model: string;
+    provider: string;
+    promptTokens: number;
+    completionTokens: number;
+    costUsd: number;
+  }): Promise<void>;
+
+  /**
+   * Return the current spend and limit for the given entity id.
+   * `period` describes the accumulation window (e.g. `'lifetime'`, `'30d'`).
+   */
+  getBudgetStatus(entityId: string): Promise<{
+    used: number;
+    limit: number | null;
+    period: string;
+  }>;
+}
+
 /** Egress slot returned by `weaveRuntime` — the per-call `fetch` plus the
  *  `createFetch(...)` factory packages should use to build their own closure. */
 export interface RuntimeEgressSlot {
@@ -223,6 +272,7 @@ export interface WeaveRuntime {
   readonly guardrails: RuntimeGuardrailsSlot | undefined;
   readonly encryption: RuntimeEncryptionSlot | undefined;
   readonly routing: RuntimeRoutingSlot | undefined;
+  readonly cost: RuntimeCostSlot | undefined;
   readonly metadata: Readonly<Record<string, unknown>>;
 
   has(cap: CapabilityId): boolean;
@@ -251,6 +301,7 @@ export interface WeaveRuntimeOptions {
   readonly guardrails?: RuntimeGuardrailsSlot;
   readonly encryption?: RuntimeEncryptionSlot;
   readonly routing?: RuntimeRoutingSlot;
+  readonly cost?: RuntimeCostSlot;
   /**
    * Phase 5 — optional `Redactor`. When supplied, every audit entry's
    * `details` object is serialised → redacted → re-parsed before the entry
@@ -486,6 +537,7 @@ export function weaveRuntime(opts: WeaveRuntimeOptions = {}): WeaveRuntime {
   if (opts.guardrails) caps.add(RuntimeCapabilities.Guardrails);
   if (opts.encryption) caps.add(RuntimeCapabilities.Encryption);
   if (opts.routing) caps.add(RuntimeCapabilities.Routing);
+  if (opts.cost) caps.add(RuntimeCapabilities.Cost);
   for (const c of opts.extraCapabilities ?? []) caps.add(c);
 
   const rt: WeaveRuntime = {
@@ -499,6 +551,7 @@ export function weaveRuntime(opts: WeaveRuntimeOptions = {}): WeaveRuntime {
     guardrails: opts.guardrails,
     encryption: opts.encryption,
     routing: opts.routing,
+    cost: opts.cost,
     metadata: opts.metadata ?? {},
     has(cap) {
       return caps.has(cap);

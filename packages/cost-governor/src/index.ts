@@ -198,6 +198,10 @@ export type {
 // Seed utilities
 export { DEFAULT_COST_POLICIES, type CostPolicySeedRow } from './seed.js';
 
+// Phase 3 — Shared Cost Slot (RuntimeCostSlot adapter)
+export { createRuntimeCostAdapter } from './runtime-cost-adapter.js';
+export type { RuntimeCostAdapterOptions } from './runtime-cost-adapter.js';
+
 // Phase 4 — durable variants backed by `runtime.persistence.kv`.
 export {
   createDurableCostLedger,

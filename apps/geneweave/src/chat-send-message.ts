@@ -238,6 +238,30 @@ export async function sendMessageImpl(
     }
   }
 
+  // Phase 3: per-user/tenant budget gate. Checked after guardrails so we skip
+  // the ledger read for messages that would be blocked anyway. Fail-open.
+  if (deps.config.runtime?.cost) {
+    try {
+      const budgetCheck = await deps.config.runtime.cost.gate({ userId, tenantId });
+      if (!budgetCheck.allowed) {
+        const denyContent = budgetCheck.reason ?? 'Your spending limit has been reached.';
+        const assistMsgId = newUUIDv7();
+        await deps.db.addMessage({
+          id: assistMsgId, chatId, role: 'assistant', content: denyContent,
+          metadata: JSON.stringify({ guardrail: { decision: 'deny', reason: denyContent }, traceId }),
+        });
+        return {
+          assistantContent: denyContent,
+          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          cost: 0, latencyMs: Date.now() - startMs,
+          guardrail: { decision: 'deny', reason: denyContent },
+        };
+      }
+    } catch {
+      // fail-open on gate error
+    }
+  }
+
   const skillContext = await discoverSkillsForInput(
     deps.db,
     processedContent,
@@ -451,6 +475,16 @@ export async function sendMessageImpl(
   const cost = calculateCost(modelId, usage.promptTokens, usage.completionTokens, dbPricing.get(modelId));
 
   deps.recordModelOutcome(modelId, provider, latencyMs, true);
+
+  // Phase 3: record observed cost into the runtime ledger for future budget checks.
+  if (deps.config.runtime?.cost && cost > 0) {
+    deps.config.runtime.cost.record({
+      userId, tenantId,
+      model: modelId, provider,
+      promptTokens: usage.promptTokens, completionTokens: usage.completionTokens,
+      costUsd: cost,
+    }).catch(() => {});
+  }
 
   const policyChecks = steps ? await evaluateTaskPolicies(deps.db, steps) : undefined;
 

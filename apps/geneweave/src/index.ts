@@ -27,6 +27,7 @@ import type { Server } from 'node:http';
 import { weaveSetDefaultTracer, weaveRuntime, envSecretResolver, weaveInMemoryPersistence, createLogger, type WeaveRuntime, type RuntimePersistenceSlot } from '@weaveintel/core';
 import { createResilienceSignalBus, setDefaultSignalBus, createRuntimeResilienceAdapter } from '@weaveintel/resilience';
 import { ModelHealthTracker, createRuntimeRoutingAdapter } from '@weaveintel/routing';
+import { createDurableCostLedger, createRuntimeCostAdapter } from '@weaveintel/cost-governor';
 
 const log = createLogger('geneweave');
 import { weaveConsoleTracer, createOtelTracer } from '@weaveintel/observability';
@@ -343,6 +344,19 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   const sharedHealthTracker = new ModelHealthTracker();
   const routingAdapter = createRuntimeRoutingAdapter(sharedHealthTracker);
 
+  // Phase 3 (runtime): per-user/tenant budget enforcement via shared cost ledger.
+  // The ledger is backed by the same persistence slot so spend counters survive
+  // restarts when a durable slot is configured. WEAVE_COST_LIMIT_USD sets the
+  // global ceiling in USD; unset means no limit (gate always allows).
+  const runtimeCostLedger = createDurableCostLedger({
+    runtime: { persistence: persistenceSlot } as any,
+    namespace: 'runtime-cost',
+  });
+  const globalCostLimitUsd = process.env['WEAVE_COST_LIMIT_USD']
+    ? parseFloat(process.env['WEAVE_COST_LIMIT_USD'])
+    : null;
+  const costAdapter = createRuntimeCostAdapter({ ledger: runtimeCostLedger, globalLimitUsd: globalCostLimitUsd });
+
   const runtime = weaveRuntime({
     tracer: consoleTracer,
     secrets: envSecretResolver(),
@@ -352,6 +366,7 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     encryption: encryptionSlot,
     resilience: resilienceAdapter,
     routing: routingAdapter,
+    cost: costAdapter,
     installDefaultTracer: true,
   });
   // `installDefaultTracer: true` already wired the runtime's tracer as the

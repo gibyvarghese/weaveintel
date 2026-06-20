@@ -398,6 +398,28 @@ export async function streamMessageImpl(
     }
   }
 
+  // Phase 3: per-user/tenant budget gate on stream path. Mirrors send-message gate.
+  if (deps.config.runtime?.cost) {
+    try {
+      const budgetCheck = await deps.config.runtime.cost.gate({ userId, tenantId });
+      if (!budgetCheck.allowed) {
+        const denyContent = budgetCheck.reason ?? 'Your spending limit has been reached.';
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+        await deps.writeSseEvent(res, { type: 'text', text: denyContent });
+        await deps.writeSseEvent(res, { type: 'guardrail', decision: 'deny', reason: denyContent });
+        await deps.writeSseEvent(res, { type: 'done', usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 }, cost: 0, latencyMs: 0 });
+        deps.endSse(res);
+        await deps.db.addMessage({
+          id: newUUIDv7(), chatId, role: 'assistant', content: denyContent,
+          metadata: JSON.stringify({ guardrail: { decision: 'deny', reason: denyContent }, traceId }),
+        });
+        return;
+      }
+    } catch {
+      // fail-open on gate error
+    }
+  }
+
   const streamSkillContext = await discoverSkillsForInput(
     deps.db,
     processedContent,
@@ -694,6 +716,17 @@ export async function streamMessageImpl(
   const cost = calculateCost(modelId, finalUsage.promptTokens, finalUsage.completionTokens, streamDbPricing.get(modelId));
 
   deps.recordModelOutcome(modelId, provider, latencyMs, !streamErrored && !clientDisconnected, streamErrored ? streamErrorMessage : undefined);
+
+  // Phase 3: record observed cost into the runtime ledger for future budget checks.
+  if (deps.config.runtime?.cost && cost > 0 && !streamErrored && !clientDisconnected) {
+    deps.config.runtime.cost.record({
+      userId, tenantId,
+      model: modelId, provider,
+      promptTokens: finalUsage.promptTokens, completionTokens: finalUsage.completionTokens,
+      costUsd: cost,
+    }).catch(() => {});
+  }
+
   // Phase 5: feed token throughput into the adaptive budget tracker so future
   // calls can tighten deadlines to estimated_tokens × p50MsPerToken × 1.5.
   if (!streamErrored && !clientDisconnected && finalUsage.completionTokens > 0) {
