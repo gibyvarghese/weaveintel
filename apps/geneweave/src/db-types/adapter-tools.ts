@@ -1,4 +1,4 @@
-import type { ToolCatalogRow, ToolPolicyRow, ToolAuditEventRow, ToolHealthSnapshotRow, EndpointHealthRow, EndpointHealthDelta, ToolHealthSummary, ToolCredentialRow, MCPGatewayClientRow, MCPGatewayRequestOutcome, MCPGatewayRequestLogRow, MCPGatewayActivitySummary, SkillRow, ToolApprovalRequestRow } from './tools.js';
+import type { ToolCatalogRow, ToolPolicyRow, ToolAuditEventRow, ToolHealthSnapshotRow, EndpointHealthRow, EndpointHealthDelta, ToolHealthSummary, ToolCredentialRow, MCPGatewayClientRow, MCPGatewayRequestOutcome, MCPGatewayRequestLogRow, MCPGatewayActivitySummary, SkillRow, ToolApprovalRequestRow, A2ASkillRow } from './tools.js';
 
 export interface IToolStore {
   // Tool catalog
@@ -79,4 +79,12 @@ export interface IToolStore {
   getPendingToolRequest(toolName: string, chatId: string): Promise<ToolApprovalRequestRow | null>;
   listToolApprovalRequests(opts?: { status?: string; chatId?: string; toolName?: string; limit?: number; offset?: number }): Promise<ToolApprovalRequestRow[]>;
   resolveToolApprovalRequest(id: string, fields: { status: string; resolved_by?: string; resolution_note?: string }): Promise<void>;
+
+  // A2A Skills (DB-backed, replaces hardcoded A2A_SKILLS constant)
+  createA2ASkill(s: Omit<A2ASkillRow, 'created_at' | 'updated_at'>): Promise<void>;
+  getA2ASkill(id: string): Promise<A2ASkillRow | null>;
+  listA2ASkills(): Promise<A2ASkillRow[]>;
+  listEnabledA2ASkills(): Promise<A2ASkillRow[]>;
+  updateA2ASkill(id: string, fields: Partial<Omit<A2ASkillRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+  deleteA2ASkill(id: string): Promise<void>;
 }

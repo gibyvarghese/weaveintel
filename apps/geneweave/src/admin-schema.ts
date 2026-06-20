@@ -19,6 +19,7 @@ import {
   KAGGLE_ADMIN_TABS,
   LIVE_MESH_ADMIN_TABS,
   LIVE_RUNTIME_ADMIN_TABS,
+  A2A_ADMIN_TABS,
 } from './admin/schema/index.js';
 
 // ─── Tab groups (sidebar navigation) ─────────────────────────
@@ -90,6 +91,9 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'memory-extraction-events', label: 'Extraction Events' },
     { key: 'compliance-rules', label: 'Compliance' },
     { key: 'tenant-encryption-policies', label: 'Tenant Encryption' },
+  ]},
+  { label: 'A2A Protocol', icon: '\uD83E\uDD16\uD83E\uDD1D', tabs: [
+    { key: 'a2a-skills', label: 'A2A Skills' },
   ]},
   { label: 'Integrations', icon: '\uD83D\uDD0C', tabs: [
     { key: 'enterprise-connectors', label: 'Enterprise' },
@@ -167,4 +171,5 @@ export const ADMIN_TABS = normalizeAdminTabsForModelDiscovery({
   ...KAGGLE_ADMIN_TABS,
   ...LIVE_MESH_ADMIN_TABS,
   ...LIVE_RUNTIME_ADMIN_TABS,
+  ...A2A_ADMIN_TABS,
 });

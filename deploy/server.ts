@@ -83,7 +83,7 @@ async function main() {
               : 'llamacpp');
   const defaultModel = process.env['DEFAULT_MODEL']
     ?? (defaultProvider === 'anthropic'
-      ? 'claude-sonnet-4-20250514'
+      ? 'claude-sonnet-4-6'
       : defaultProvider === 'mock'
         ? 'mock-model'
         : defaultProvider === 'google'

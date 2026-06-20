@@ -254,11 +254,15 @@ export async function buildMemoryContext(
   userId: string,
   query: string,
 ): Promise<string | null> {
+  // SQLite LIKE/GLOB pattern complexity is bounded by the length of the operand.
+  // Truncate at 2000 chars before any DB search to avoid 'pattern too complex' errors
+  // on very large inputs (e.g. 100K-char stress tests or document uploads).
+  const queryForSearch = query.length > 2000 ? query.slice(0, 2000) : query;
   try {
-    const identityQuery = await classifyIdentityRecallIntent(ctx, model, query);
+    const identityQuery = await classifyIdentityRecallIntent(ctx, model, queryForSearch);
     const entityPromise = identityQuery
       ? db.listEntities(userId).then((rows) => rows.slice(0, 10))
-      : db.searchEntities(userId, query);
+      : db.searchEntities(userId, queryForSearch);
     // Generate a query embedding for vector-aware semantic search when available
     const embeddingModel = getActiveGuardrailEmbeddingModel();
     let queryEmbedding: number[] | undefined;
@@ -271,8 +275,8 @@ export async function buildMemoryContext(
 
     const memoryBackend = getActiveSemanticMemoryBackend();
     const semanticSearchP = memoryBackend
-      ? memoryBackend.search(ctx, { userId, query, limit: 5, queryEmbedding })
-      : db.searchSemanticMemory({ userId, query, limit: 5, queryEmbedding });
+      ? memoryBackend.search(ctx, { userId, query: queryForSearch, limit: 5, queryEmbedding })
+      : db.searchSemanticMemory({ userId, query: queryForSearch, limit: 5, queryEmbedding });
     const recentSemanticP = identityQuery
       ? (memoryBackend ? memoryBackend.list(userId, 12) : db.listSemanticMemory(userId, 12))
       : Promise.resolve([] as Array<{ content: string; memory_type: string; source: string }>);

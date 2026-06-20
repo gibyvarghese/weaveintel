@@ -5,3 +5,4 @@ export { ROUTING_ADMIN_TABS } from './routing-tabs.js';
 export { KAGGLE_ADMIN_TABS } from './kaggle-tabs.js';
 export { LIVE_MESH_ADMIN_TABS } from './live-mesh-tabs.js';
 export { LIVE_RUNTIME_ADMIN_TABS } from './live-runtime-tabs.js';
+export { A2A_ADMIN_TABS } from './a2a-tabs.js';

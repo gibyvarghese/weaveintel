@@ -24,6 +24,7 @@ export type { IPromptStore } from './adapter-prompts.js';
 export type { IRoutingStore } from './adapter-routing.js';
 export type { IWorkflowStore } from './adapter-workflows.js';
 export type { IToolStore } from './adapter-tools.js';
+export type { A2ASkillRow } from './tools.js';
 export type { IAgentStore } from './adapter-agents.js';
 export type { ICostStore } from './adapter-cost.js';
 export type { IEncryptionStore } from './adapter-encryption.js';

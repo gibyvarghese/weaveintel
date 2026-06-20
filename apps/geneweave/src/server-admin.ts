@@ -14,6 +14,7 @@ import {
   registerAdminRoutingRoutes,
   registerAdminConnectorRoutes,
   registerAdminCatalogRoutes,
+  registerAdminA2ASkillRoutes,
 } from './admin/routes/index.js';
 import type { RouterLike } from './admin/api/types.js';
 
@@ -51,4 +52,5 @@ export function registerAdminRoutes(
   registerAdminRoutingRoutes(router, db, json, readBody, providers, extras?.guardrailRevisionStore, extras?.runtime);
   registerAdminConnectorRoutes(router, db, json, readBody, providers, html);
   registerAdminCatalogRoutes(router, db, json, readBody);
+  registerAdminA2ASkillRoutes(router, db, json, readBody);
 }

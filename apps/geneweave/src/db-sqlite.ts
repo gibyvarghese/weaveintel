@@ -117,6 +117,11 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.db;
   }
 
+  /** Exposed for createSqliteA2ATaskStore() in server.ts — do not use elsewhere. */
+  get rawDb(): import('better-sqlite3').Database {
+    return this.d;
+  }
+
   /** Expose the underlying better-sqlite3 instance for stores that need direct DB access (e.g. weaveSqliteTriggerStore). */
   getRawDb(): import('better-sqlite3').Database {
     return this.d;
@@ -2776,6 +2781,50 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteSkill(id: string): Promise<void> {
     this.d.prepare('DELETE FROM skills WHERE id = ?').run(id);
+  }
+
+  // ─── A2A Skills ───────────────────────────────────────────
+
+  async createA2ASkill(s: Omit<import('./db-types.js').A2ASkillRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO a2a_skills (id, name, description, tags, examples, input_modes, output_modes, security_scopes, mode, required_permission, sort_order, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      s.id, s.name, s.description,
+      s.tags ?? null, s.examples ?? null,
+      s.input_modes ?? null, s.output_modes ?? null,
+      s.security_scopes, s.mode, s.required_permission ?? null,
+      s.sort_order, s.enabled,
+    );
+  }
+
+  async getA2ASkill(id: string): Promise<import('./db-types.js').A2ASkillRow | null> {
+    return (this.d.prepare('SELECT * FROM a2a_skills WHERE id = ?').get(id) as import('./db-types.js').A2ASkillRow | undefined) ?? null;
+  }
+
+  async listA2ASkills(): Promise<import('./db-types.js').A2ASkillRow[]> {
+    return this.d.prepare('SELECT * FROM a2a_skills ORDER BY sort_order ASC, name ASC').all() as import('./db-types.js').A2ASkillRow[];
+  }
+
+  async listEnabledA2ASkills(): Promise<import('./db-types.js').A2ASkillRow[]> {
+    return this.d.prepare('SELECT * FROM a2a_skills WHERE enabled = 1 ORDER BY sort_order ASC, name ASC').all() as import('./db-types.js').A2ASkillRow[];
+  }
+
+  async updateA2ASkill(id: string, fields: Partial<Omit<import('./db-types.js').A2ASkillRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    vals.push(id);
+    this.d.prepare(`UPDATE a2a_skills SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+
+  async deleteA2ASkill(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM a2a_skills WHERE id = ?').run(id);
   }
 
   // ─── Phase 6: Tool Approval Requests ────────────────────

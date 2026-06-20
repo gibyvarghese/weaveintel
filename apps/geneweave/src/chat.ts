@@ -515,7 +515,7 @@ export class ChatEngine {
     const secondPassesExecutionGuard =
       hasSuccessfulCseExecution(second)
       && (enforceContracts || hasCodeExecutorDelegation(second))
-      && hasRenderableAttachmentAnalysisOutput(second, retryGoal);
+      && hasRenderableAttachmentAnalysisOutput(second, goal); // use original goal — retryGoal contains policy text with "chart"/"visualization" that would falsely require chart JSON
     const secondContractEval = enforceContracts
       ? evaluateSkillExecutionContracts(second, skillExecutionContracts)
       : { ok: true, failures: [] };
@@ -586,7 +586,22 @@ export class ChatEngine {
     userId: string,
     chatId: string,
     content: string,
-    opts?: { provider?: string; model?: string; maxTokens?: number; temperature?: number; attachments?: ChatAttachment[] },
+    opts?: {
+      provider?: string;
+      model?: string;
+      maxTokens?: number;
+      temperature?: number;
+      attachments?: ChatAttachment[];
+      /** Override the agent execution mode regardless of DB settings.
+       *  Used by A2A and programmatic callers. Never 'direct'. */
+      modeOverride?: 'agent' | 'supervisor' | 'ensemble';
+      /** Explicit tool list from A2A skill config (a2a_skills.agent_tools).
+       *  Replaces mode-policy defaults when set. */
+      toolsOverride?: string[];
+      /** Explicit worker topology from A2A skill config (a2a_skills.agent_workers).
+       *  Injected into supervisor/ensemble tasks without a chat_settings row. */
+      workersOverride?: WorkerDef[];
+    },
   ): Promise<SendMessageResult> {
     const deps: SendMessageDeps = {
       config: this.config,

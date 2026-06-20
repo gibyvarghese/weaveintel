@@ -17,7 +17,9 @@ import {
   type ChatAttachment,
   type ChatEngineConfig,
   type ChatSettings,
+  type WorkerDef,
 } from './chat-runtime.js';
+import { getDefaultToolsByMode } from './chat-policies.js';
 import type { ModelPricing } from './chat-pricing-utils.js';
 import {
   composeUserInput,
@@ -140,7 +142,28 @@ export async function sendMessageImpl(
   userId: string,
   chatId: string,
   content: string,
-  opts?: { provider?: string; model?: string; maxTokens?: number; temperature?: number; attachments?: ChatAttachment[] },
+  opts?: {
+    provider?: string;
+    model?: string;
+    maxTokens?: number;
+    temperature?: number;
+    attachments?: ChatAttachment[];
+    /** A2A / programmatic callers can override the agent mode after settings are loaded from DB.
+     *  Never 'direct' — that mode bypasses the agent loop and must not be available remotely. */
+    modeOverride?: 'agent' | 'supervisor' | 'ensemble';
+    /**
+     * Explicit tool list — overrides the mode-default tools and any chat_settings.enabled_tools.
+     * Used by A2A to apply the per-skill agent_tools config from a2a_skills.
+     * When absent the mode-policy defaults are used (or the DB settings row if one exists).
+     */
+    toolsOverride?: string[];
+    /**
+     * Explicit worker definitions — overrides chat_settings.workers.
+     * Used by A2A supervisor-mode skills to inject code_executor + analyst workers
+     * without requiring a saved chat_settings row on the synthetic A2A chat.
+     */
+    workersOverride?: WorkerDef[];
+  },
 ): Promise<SendMessageResult> {
   let provider = opts?.provider ?? deps.config.defaultProvider;
   let modelId = opts?.model ?? deps.config.defaultModel;
@@ -171,7 +194,24 @@ export async function sendMessageImpl(
   const actor = await deps.db.getUserById(userId);
   const userPersona = normalizePersona(actor?.persona, 'user');
   const tenantId = actor?.tenant_id ?? null;
-  const settings = settingsFromRow(await deps.db.getChatSettings(chatId));
+  const chatSettingsRow = await deps.db.getChatSettings(chatId);
+  const settings = settingsFromRow(chatSettingsRow);
+  // Programmatic callers (A2A, automation) can override the mode after settings are
+  // loaded, bypassing whatever the DB row says. 'direct' is never allowed remotely.
+  if (opts?.modeOverride) {
+    settings.mode = opts.modeOverride;
+    // Layer 1: when there is no saved chat_settings row the mode defaulted to 'direct'
+    // with empty tools. Bootstrap enabledTools from the overridden mode's policy so
+    // A2A / programmatic callers get the full default tool set (CSE, web search, memory,
+    // etc.) without needing a pre-created chat_settings row.
+    if (!chatSettingsRow) settings.enabledTools = getDefaultToolsByMode(opts.modeOverride);
+  }
+  // Layer 2: apply explicit per-skill overrides supplied by A2A (from a2a_skills rows).
+  // toolsOverride replaces the mode defaults when the skill defines a specific tool list.
+  // workersOverride injects the skill's worker topology (code_executor, analyst, etc.)
+  // into supervisor/ensemble tasks without requiring a saved chat_settings row.
+  if (opts?.toolsOverride) settings.enabledTools = opts.toolsOverride;
+  if (opts?.workersOverride) settings.workers = opts.workersOverride;
   const resolvedSystemPrompt = await resolveSystemPrompt(deps.db, settings);
   const resolvedPrompt = await deps.withResponseCardFormatPolicy(resolvedSystemPrompt.content);
   const traceId = newUUIDv7();

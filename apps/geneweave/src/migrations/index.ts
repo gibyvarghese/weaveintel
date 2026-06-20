@@ -39,6 +39,9 @@ import { applyM56PasskeyCredentials } from './m56-passkey-credentials.js';
 import { applyM57RedactionDefaultOn } from './m57-redaction-default-on.js';
 import { applyM58BackfillCredentialEncryption } from './m58-backfill-credential-encryption.js';
 import { applyM59LiveRunsStopRequested } from './m59-live-runs-stop-requested.js';
+import { applyM60A2ASkills } from './m60-a2a-skills.js';
+import { applyM61A2ASkillsAgentConfig } from './m61-a2a-skills-agent-config.js';
+import { applyM62A2ATasks } from './m62-a2a-tasks.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -86,6 +89,9 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm57-redaction-default-on', description: 'M4-5: Backfill chat_settings.redaction_enabled=1; clear guardrail_evals.input_preview to remove stored PII', run: applyM57RedactionDefaultOn },
   { id: 'm58-backfill-credential-encryption', description: 'H-2 Phase 2: Encrypt existing plaintext credentials in search_providers, social_accounts, enterprise_connectors using vault AES-256-GCM', run: applyM58BackfillCredentialEncryption },
   { id: 'm59-live-runs-stop-requested', description: 'M6-2: Add stop_requested column to live_runs; create api_live_runs table for durable, cross-process live-agent stop signals', run: applyM59LiveRunsStopRequested },
+  { id: 'm60-a2a-skills', description: 'A2A Skills: a2a_skills table seeded with the 3 default capability skills (general-chat, supervisor-orchestration, ensemble-reasoning); replaces hardcoded constant in routes/a2a.ts', run: applyM60A2ASkills },
+  { id: 'm61-a2a-skills-agent-config', description: 'A2A Skills agent config: agent_tools + agent_workers columns on a2a_skills; seeds code_executor+analyst workers for supervisor-orchestration', run: applyM61A2ASkillsAgentConfig },
+  { id: 'm62-a2a-tasks', description: 'A2A Tasks: persistent SQLite-backed a2a_tasks table; replaces in-memory store so task state survives server restarts', run: applyM62A2ATasks },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

@@ -16,6 +16,8 @@ import { existsSync } from 'node:fs';
 import { join, dirname, resolve, extname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DatabaseAdapter } from './db.js';
+import { SQLiteAdapter } from './db-sqlite.js';
+import { createSqliteA2ATaskStore } from '@weaveintel/a2a';
 import type { ChatEngine } from './chat.js';
 import type { VoiceEngine } from './voice-engine.js';
 import { DashboardService } from './dashboard.js';
@@ -220,7 +222,8 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerTraceRoutes(router, db, dashboard);
   registerChatRoutes(router, db, chatEngine, dashboard, workflowEngine as { getStatus?: () => unknown } | undefined);
   registerAdminWiringRoutes(router, db, { providers, publicBaseUrl, gatewayConfig, workflowEngine, triggerDispatcher, chatEngine, runtime: config.runtime });
-  registerA2ARoutes(router, db, chatEngine, { baseUrl: publicBaseUrl ?? 'http://localhost:3000' });
+  const a2aTaskStore = db instanceof SQLiteAdapter ? createSqliteA2ATaskStore(db.rawDb) : undefined;
+  registerA2ARoutes(router, db, chatEngine, { baseUrl: publicBaseUrl ?? 'http://localhost:3000', taskStore: a2aTaskStore });
   registerMemoryRoutes(router, db);
   registerLiveAgentRoutes(router, db);
   registerAdminLiveRunStreamRoute(router, db);

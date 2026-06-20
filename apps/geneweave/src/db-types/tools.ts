@@ -340,6 +340,51 @@ export interface ToolRegistryRow {
   updated_at: string;
 }
 
+// ─── A2A Skills ───────────────────────────────────────────────────────────
+// DB-backed A2A capability skills published on the Agent Card.
+// Replaces the hardcoded A2A_SKILLS constant in routes/a2a.ts.
+
+export interface A2ASkillRow {
+  /** Kebab-case unique ID — used as skill id in Agent Cards and JWT scope claims. */
+  id: string;
+  /** Human-readable label shown in Agent Card and admin UI. */
+  name: string;
+  /** Model-facing capability description. */
+  description: string;
+  /** JSON string[] — discovery tags. */
+  tags: string | null;
+  /** JSON string[] — example prompts for A2A clients. */
+  examples: string | null;
+  /** JSON string[] — accepted MIME types (text/plain, audio/*, image/*, etc.). */
+  input_modes: string | null;
+  /** JSON string[] — produced MIME types. */
+  output_modes: string | null;
+  /** JSON string[] — OAuth2 scope tokens required, e.g. ['a2a:chat']. */
+  security_scopes: string;
+  /** Execution mode this skill maps to: 'agent' | 'supervisor' | 'ensemble'. */
+  mode: string;
+  /** RBAC permission required, e.g. 'agents:delegate'. null = any authenticated user. */
+  required_permission: string | null;
+  /** Display/listing order (ascending). */
+  sort_order: number;
+  /** 1 = published in Agent Card; 0 = hidden. */
+  enabled: number;
+  /**
+   * JSON string[] — explicit tool list for the agent that handles this skill.
+   * null = use getDefaultToolsByMode(mode) (recommended for most skills).
+   * Set to a specific list to restrict or expand beyond the mode defaults.
+   */
+  agent_tools: string | null;
+  /**
+   * JSON WorkerDef[] — worker topology for supervisor/ensemble mode skills.
+   * null = use the supervisor's default workers from DB.
+   * Required for supervisor skills that need a code_executor or specialist worker.
+   */
+  agent_workers: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ─── Cost Governor Phase 8: Tool Embeddings (Intent-RAG) ──────────────────
 // Pre-computed embeddings for every tool's model-facing description.
 // Used by the intent-rag strategy of the L3 toolSubset lever. UUID PK.

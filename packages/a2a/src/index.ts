@@ -12,6 +12,13 @@ export {
   type A2ATaskStorePatch,
 } from './task-store.js';
 
+export {
+  createSqliteA2ATaskStore,
+  A2A_TASKS_DDL,
+  type SqliteDb,
+  type SqliteStatement,
+} from './task-store-sqlite.js';
+
 // ── Agent-as-server adapter ────────────────────────────────────────────────────
 export { weaveAgentAsA2AServer, type AgentA2AServerOptions } from './agent-server.js';
 
