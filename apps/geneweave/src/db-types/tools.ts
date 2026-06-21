@@ -25,6 +25,8 @@ export interface ToolCatalogRow {
    * declared requirements.
    */
   requires?: string | null;
+  /** Scope this tool belongs to — matches agent_scopes.id. Added in m76. */
+  agentic_scope?: string | null;
   created_at: string;
   updated_at: string;
 }

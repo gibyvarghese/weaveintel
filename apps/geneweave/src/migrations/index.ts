@@ -55,6 +55,7 @@ import { applyM72SvToolsV2 } from './m72-sv-tools-v2.js';
 import { applyM73KaggleMeshV2 } from './m73-kaggle-mesh-v2.js';
 import { applyM74AgentStrategyDefaults2026 } from './m74-agent-strategy-defaults-2026.js';
 import { applyM75AgenticScopes } from './m75-agentic-scopes.js';
+import { applyM76ScopeCoverage } from './m76-scope-coverage.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -118,6 +119,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm73-kaggle-mesh-v2', description: 'Kaggle Mesh & Playbook Modernization (mid-2026 Phase 6): UPDATE kaggle_role_capabilities — add KAGGLE_READ_LEADERBOARD to strategist + submitter, KAGGLE_LOCAL_COMPUTE to implementer; new playbooks (NLP/Vision/TimeSeries) + updated GENERIC_ML_SOLVER/DISCOVERY/ARC content wired via bumped seedKaggleArcPlaybook; new mesh agents (leaderboard_monitor, parallel_implementer, debrief) + edges wired via updated seedLiveMeshDefinitions', run: applyM73KaggleMeshV2 },
   { id: 'm74-agent-strategy-defaults-2026', description: 'Agent Strategy Defaults 2026 (mid-2026 Phase 7): ADD hitl_threshold + max_agent_hops + tool_confirmation_level + memory_policy columns to agent_strategy_settings; UPDATE global row: a2a_enabled=1, supervisor_parallel_delegation=1, reflect_enabled=1; INSERT web/operator + api/headless mode_labels rows', run: applyM74AgentStrategyDefaults2026 },
   { id: 'm75-agentic-scopes', description: 'Agentic Scope Isolation (mid-2026): agent_scopes + scope_cross_policies + scope_skill_assignments + scope_live_agent_assignments + scope_access_log tables; agentic_scope column on a2a_skills; seeds 7 default scopes + 13 policies + skill→scope mapping for all 15 A2A skills', run: applyM75AgenticScopes },
+  { id: 'm76-scope-coverage', description: 'Scope Coverage Expansion (mid-2026): agentic_scope column on worker_agents + tool_catalog; UPDATE all 15 worker agents + all 121 tool catalog rows with correct scope; INSERT 22 internal skill→scope assignments (6 analytics + 16 kaggle)', run: applyM76ScopeCoverage },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

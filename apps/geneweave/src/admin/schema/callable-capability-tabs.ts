@@ -7,12 +7,13 @@ import type { AdminTabDef } from '@weaveintel/core';
 export const CALLABLE_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
   'tool-catalog': {
     singular: 'Tool', apiPath: 'admin/tool-catalog', listKey: 'tools',
-    cols: ['name', 'tool_key', 'category', 'risk_level', 'source', 'enabled'],
+    cols: ['name', 'tool_key', 'category', 'agentic_scope', 'risk_level', 'source', 'enabled'],
     fields: [
       { key: 'name', label: 'Name' },
       { key: 'description', label: 'Detailed Description (model-facing)' },
       { key: 'tool_key', label: 'Tool Key (unique, read-only for builtins)' },
       { key: 'category', label: 'Category' },
+      { key: 'agentic_scope', label: 'Agentic Scope', options: ['system', 'analytics', 'kaggle', 'code', 'browser', 'voice', 'memory'], default: 'system' },
       { key: 'risk_level', label: 'Risk Level', options: ['read-only', 'write', 'destructive', 'privileged', 'financial', 'external-side-effect'], default: 'read-only' },
       { key: 'side_effects', label: 'Has Side Effects', type: 'checkbox', save: 'bool' },
       { key: 'requires_approval', label: 'Requires Approval', type: 'checkbox', save: 'bool' },
@@ -154,11 +155,12 @@ export const CALLABLE_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
   },
   'worker-agents': {
     singular: 'Worker Agent', apiPath: 'admin/worker-agents', listKey: 'workerAgents',
-    cols: ['display_name', 'job_profile', 'persona', 'priority', 'enabled'],
+    cols: ['display_name', 'job_profile', 'agentic_scope', 'persona', 'priority', 'enabled'],
     fields: [
       { key: 'name', label: 'Identifier Name' },
       { key: 'display_name', label: 'Display Name' },
       { key: 'job_profile', label: 'Job Profile' },
+      { key: 'agentic_scope', label: 'Agentic Scope', options: ['system', 'analytics', 'kaggle', 'code', 'browser', 'voice', 'memory'], default: 'system' },
       { key: 'description', label: 'Detailed Description (model-facing)' },
       { key: 'system_prompt', label: 'System Prompt', textarea: true, rows: 6 },
       { key: 'tool_names', label: 'Tool Names (JSON array)', textarea: true, rows: 3, save: 'json' },

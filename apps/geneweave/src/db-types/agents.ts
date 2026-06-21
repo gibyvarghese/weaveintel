@@ -15,6 +15,8 @@ export interface WorkerAgentRow {
   priority: number;
   /** Feature grouping: 'general' | 'hypothesis-validation' | other domain categories. */
   category: string;
+  /** Scope this worker operates in — matches agent_scopes.id. Added in m76. Defaults to 'system'. */
+  agentic_scope?: string;
   enabled: number;
   created_at: string;
   updated_at: string;
