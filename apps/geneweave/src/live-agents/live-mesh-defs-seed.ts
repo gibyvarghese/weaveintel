@@ -76,7 +76,6 @@ const KAGGLE_SEED: SeedMesh = {
       objectives: 'For each picked competition, propose distinct approaches with expected metric and rationale.',
       success_indicators: 'Each approach cites at least one source kernel and an expected metric range.',
       ordering: 20,
-      // Agentic strategist drives the ReAct loop and consumes kaggle_* tools.
       default_handler_kind: 'kaggle.strategist.agentic',
       default_tool_catalog_keys: [
         'kaggle_list_competitions',
@@ -100,6 +99,21 @@ const KAGGLE_SEED: SeedMesh = {
       default_handler_kind: 'kaggle.implementer.deterministic',
       default_tool_catalog_keys: ['kaggle_push_kernel', 'kaggle_get_kernel_status', 'kaggle_get_kernel_output'],
     },
+    // Phase 6: parallel_implementer — pool that tries multiple approaches simultaneously.
+    // Strategist delegates to this instead of (or alongside) single implementer when
+    // exploring 2–3 distinct modeling strategies in parallel.
+    {
+      role_key: 'parallel_implementer',
+      name: 'Kaggle Parallel Implementer',
+      role_label: 'Multi-Approach Kernel Author',
+      persona: 'Runs up to 3 competing kernel approaches simultaneously, returning the best-CV result to the validator.',
+      objectives: 'For each strategist-approved approach batch, push up to max_parallel kernels in parallel; poll all; return the kernel ref with the best cv_score.',
+      success_indicators: 'At least one parallel kernel surpasses the single-implementer baseline cv_score on ≥70% of runs.',
+      ordering: 32,
+      default_handler_kind: 'kaggle.implementer.deterministic',
+      default_handler_config_json: JSON.stringify({ max_parallel: 3 }),
+      default_tool_catalog_keys: ['kaggle_push_kernel', 'kaggle_get_kernel_status', 'kaggle_get_kernel_output'],
+    },
     {
       role_key: 'validator',
       name: 'Kaggle Validator',
@@ -120,8 +134,6 @@ const KAGGLE_SEED: SeedMesh = {
       success_indicators: 'No more than 4 submissions per competition per UTC day; every submission has a paired Promotion.',
       ordering: 50,
       default_handler_kind: 'kaggle.submitter',
-      // Submitter operates through the kernel-push path today; once a
-      // kaggle_competitions_submit tool ships, add it here.
       default_tool_catalog_keys: ['kaggle_get_kernel_output'],
     },
     {
@@ -135,13 +147,46 @@ const KAGGLE_SEED: SeedMesh = {
       default_handler_kind: 'kaggle.observer.agentic',
       default_tool_catalog_keys: ['kaggle_get_competition'],
     },
+    // Phase 6: leaderboard_monitor — dedicated hourly score poller separate from the
+    // general observer. Routes public-score deltas back to strategist so it can
+    // dynamically adjust the modeling approach mid-competition.
+    {
+      role_key: 'leaderboard_monitor',
+      name: 'Kaggle Leaderboard Monitor',
+      role_label: 'Score Tracker',
+      persona: 'Polls the public leaderboard hourly; computes CV-vs-LB delta; surfaces score changes and rank movements to the strategist.',
+      objectives: 'After each submission, poll every 60 min; detect score improvements or regressions >0.5% and route a structured signal to the strategist.',
+      success_indicators: 'Strategist receives score signal within 2 min of leaderboard update; CV-LB delta is logged for calibration.',
+      ordering: 62,
+      default_handler_kind: 'kaggle.observer.agentic',
+      default_tool_catalog_keys: ['kaggle_get_competition'],
+    },
+    // Phase 6: debrief — retrospective agent that fires after the run ends.
+    // Summarises what worked vs failed and writes a structured post-mortem
+    // to the approach DB row for future competition runs.
+    {
+      role_key: 'debrief',
+      name: 'Kaggle Debrief',
+      role_label: 'Run Retrospective',
+      persona: 'Analyses the completed competition run — kernel history, CV scores, LB scores, and CV-LB deltas — and writes a structured post-mortem.',
+      objectives: 'Produce a structured post-mortem with: best approach, why it won, what the runner-up approach lacked, and 3 actionable improvements for the next competition in the same domain.',
+      success_indicators: 'Post-mortem is written to the run artifact within 5 min of submitter completing; it references BEST.kernelRef and includes cv_lb_delta.',
+      ordering: 70,
+      default_handler_kind: 'deterministic.template',
+      default_tool_catalog_keys: [],
+    },
   ],
   edges: [
-    { from_role_key: 'discoverer',  to_role_key: 'strategist',  relationship: 'DIRECTS',           prose: 'Discoverer hands picked competitions to the strategist.',   ordering: 10 },
-    { from_role_key: 'strategist',  to_role_key: 'implementer', relationship: 'DIRECTS',           prose: 'Strategist hands approved approaches to the implementer.', ordering: 20 },
-    { from_role_key: 'implementer', to_role_key: 'validator',   relationship: 'DIRECTS',           prose: 'Implementer hands kernel outputs to the validator.',       ordering: 30 },
-    { from_role_key: 'validator',   to_role_key: 'submitter',   relationship: 'DIRECTS',           prose: 'Validator hands passing submissions to the submitter.',    ordering: 40 },
-    { from_role_key: 'observer',    to_role_key: 'strategist',  relationship: 'COLLABORATES_WITH', prose: 'Observer surfaces leaderboard signal to the strategist.',  ordering: 50 },
+    { from_role_key: 'discoverer',           to_role_key: 'strategist',          relationship: 'DIRECTS',           prose: 'Discoverer hands picked competitions to the strategist.',                        ordering: 10 },
+    { from_role_key: 'strategist',           to_role_key: 'implementer',         relationship: 'DIRECTS',           prose: 'Strategist hands approved approaches to the implementer.',                      ordering: 20 },
+    { from_role_key: 'strategist',           to_role_key: 'parallel_implementer',relationship: 'DIRECTS',           prose: 'Strategist delegates multi-approach batches to the parallel implementer pool.', ordering: 22 },
+    { from_role_key: 'implementer',          to_role_key: 'validator',           relationship: 'DIRECTS',           prose: 'Implementer hands kernel outputs to the validator.',                            ordering: 30 },
+    { from_role_key: 'parallel_implementer', to_role_key: 'validator',           relationship: 'DIRECTS',           prose: 'Best parallel implementation is handed to the validator.',                      ordering: 35 },
+    { from_role_key: 'validator',            to_role_key: 'submitter',           relationship: 'DIRECTS',           prose: 'Validator hands passing submissions to the submitter.',                         ordering: 40 },
+    { from_role_key: 'observer',             to_role_key: 'strategist',          relationship: 'COLLABORATES_WITH', prose: 'Observer surfaces leaderboard signal to the strategist.',                       ordering: 50 },
+    { from_role_key: 'leaderboard_monitor',  to_role_key: 'strategist',          relationship: 'COLLABORATES_WITH', prose: 'Leaderboard monitor routes hourly score changes to the strategist.',            ordering: 55 },
+    { from_role_key: 'submitter',            to_role_key: 'debrief',             relationship: 'DIRECTS',           prose: 'Submitter hands completed run results to debrief for post-mortem.',             ordering: 60 },
+    { from_role_key: 'observer',             to_role_key: 'debrief',             relationship: 'COLLABORATES_WITH', prose: 'Observer provides final leaderboard context for the debrief post-mortem.',      ordering: 65 },
   ],
 };
 
@@ -156,12 +201,12 @@ export async function seedLiveMeshDefinitions(db: DatabaseAdapter): Promise<void
 async function seedOneMesh(db: DatabaseAdapter, seed: SeedMesh): Promise<void> {
   const existing = await db.getLiveMeshDefinitionByKey(seed.mesh_key);
   if (existing) {
-    // Phase B backfill: existing pre-Phase-B rows have NULL handler kinds
-    // and NULL tool catalog keys. Patch them in once so weaveLiveMeshFromDb
-    // provisioning can pick up the right runtime wiring without operator
-    // intervention. We only fill NULLs — operator edits (non-null values)
-    // are preserved.
+    // Phase B backfill: fill NULL handler kinds / tool catalog keys on existing rows.
+    // Phase 6 extension: also CREATE agents/edges that are in the seed but missing
+    // from the DB (e.g. leaderboard_monitor, parallel_implementer, debrief were
+    // added in Phase 6 and won't exist on pre-Phase-6 installs).
     await backfillAgentDefaults(db, existing.id, seed.agents);
+    await backfillMissingEdges(db, existing.id, seed.edges);
     return;
   }
 
@@ -219,6 +264,10 @@ async function seedOneMesh(db: DatabaseAdapter, seed: SeedMesh): Promise<void> {
  * kind / handler config / tool catalog keys / attention policy key fields
  * on existing agent definition rows. Operator edits (non-NULL values) are
  * never overwritten. Unknown role_keys in the DB are ignored.
+ *
+ * Phase 6 extension: also CREATE agents that are in the seed but do not yet
+ * exist in the DB. This handles the leaderboard_monitor, parallel_implementer,
+ * and debrief roles added in Phase 6 for pre-Phase-6 installs.
  */
 async function backfillAgentDefaults(
   db: DatabaseAdapter,
@@ -226,11 +275,37 @@ async function backfillAgentDefaults(
   seedAgents: SeedAgent[],
 ): Promise<void> {
   const existingAgents = await db.listLiveAgentDefinitions({ meshDefId });
-  const seedByRole = new Map(seedAgents.map((a) => [a.role_key, a] as const));
+  const existingByRole = new Map(existingAgents.map((a) => [a.role_key, a] as const));
 
-  for (const row of existingAgents) {
-    const seed = seedByRole.get(row.role_key);
-    if (!seed) continue;
+  for (const seed of seedAgents) {
+    const row = existingByRole.get(seed.role_key);
+    if (!row) {
+      // Agent is new in this seed version — create it.
+      await db.createLiveAgentDefinition({
+        id: newUUIDv7(),
+        mesh_def_id: meshDefId,
+        role_key: seed.role_key,
+        name: seed.name,
+        role_label: seed.role_label,
+        persona: seed.persona,
+        objectives: seed.objectives,
+        success_indicators: seed.success_indicators,
+        ordering: seed.ordering,
+        enabled: 1,
+        ...(seed.default_handler_kind ? { default_handler_kind: seed.default_handler_kind } : {}),
+        ...(seed.default_handler_config_json
+          ? { default_handler_config_json: seed.default_handler_config_json }
+          : {}),
+        ...(seed.default_tool_catalog_keys && seed.default_tool_catalog_keys.length > 0
+          ? { default_tool_catalog_keys: JSON.stringify(seed.default_tool_catalog_keys) }
+          : {}),
+        ...(seed.default_attention_policy_key
+          ? { default_attention_policy_key: seed.default_attention_policy_key }
+          : {}),
+      });
+      continue;
+    }
+    // Agent exists — only backfill NULL fields (preserve operator edits).
     const patch: Record<string, string> = {};
     if (!row.default_handler_kind && seed.default_handler_kind) {
       patch['default_handler_kind'] = seed.default_handler_kind;
@@ -251,5 +326,36 @@ async function backfillAgentDefaults(
     if (Object.keys(patch).length > 0) {
       await db.updateLiveAgentDefinition(row.id, patch);
     }
+  }
+}
+
+/**
+ * Phase 6: for an already-seeded mesh, add any delegation edges present in the
+ * seed that do not yet exist in the DB (matched by from_role_key + to_role_key).
+ * Existing edges are never modified to preserve operator edits.
+ */
+async function backfillMissingEdges(
+  db: DatabaseAdapter,
+  meshDefId: string,
+  seedEdges: SeedEdge[],
+): Promise<void> {
+  const existingEdges = await db.listLiveMeshDelegationEdges({ meshDefId });
+  const existingPairs = new Set(
+    existingEdges.map((e) => `${e.from_role_key}→${e.to_role_key}`),
+  );
+
+  for (const e of seedEdges) {
+    const key = `${e.from_role_key}→${e.to_role_key}`;
+    if (existingPairs.has(key)) continue;
+    await db.createLiveMeshDelegationEdge({
+      id: newUUIDv7(),
+      mesh_def_id: meshDefId,
+      from_role_key: e.from_role_key,
+      to_role_key: e.to_role_key,
+      relationship: e.relationship,
+      prose: e.prose,
+      ordering: e.ordering,
+      enabled: 1,
+    });
   }
 }

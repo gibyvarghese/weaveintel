@@ -155,7 +155,7 @@ export const DEFAULT_HANDLER_KINDS: HandlerKindSeedRow[] = [
       },
     }),
     source:  'builtin',
-    enabled: 0, // enabled when CUA tool infra is wired
+    enabled: 1, // enabled — bash+file tools work without display; GUI actions need Xvfb
   },
   {
     id:          'hk0000000-0000-4000-8000-000000000009',

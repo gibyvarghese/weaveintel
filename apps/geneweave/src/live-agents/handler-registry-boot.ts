@@ -25,6 +25,11 @@ import {
   createDefaultHandlerRegistry,
   type HandlerKindRegistration,
 } from '@weaveintel/live-agents-runtime';
+import {
+  geneweaveComputerUseHandler,
+  geneweaveBrowserHandler,
+  geneweaveCodeInterpreterHandler,
+} from './handlers/index.js';
 import type { DatabaseAdapter } from '../db.js';
 import { newUUIDv7 } from '../lib/uuid.js';
 
@@ -32,7 +37,16 @@ let _registry: HandlerRegistry | null = null;
 
 /** Initialise (or reset) the process-wide handler registry. Idempotent. */
 export function initHandlerRegistry(): HandlerRegistry {
-  if (!_registry) _registry = createDefaultHandlerRegistry();
+  if (!_registry) {
+    _registry = createDefaultHandlerRegistry();
+    // Override the three handler kinds that need geneweave-specific wiring:
+    //   • agentic.computer-use     — CUA model wrapping + auto-inject CUA tools
+    //   • agentic.browser          — domain allowlist guard + headless validation
+    //   • agentic.code-interpreter — CSE sandbox validation + runtime banner
+    _registry.registerOrReplace(geneweaveComputerUseHandler);
+    _registry.registerOrReplace(geneweaveBrowserHandler);
+    _registry.registerOrReplace(geneweaveCodeInterpreterHandler);
+  }
   return _registry;
 }
 

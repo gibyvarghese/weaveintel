@@ -348,11 +348,11 @@ describe('[Phase 3] Handler Kinds — Positive: package seed parity', () => {
     }
   });
 
-  it('computer-use and browser are disabled=0 in DEFAULT_HANDLER_KINDS', () => {
+  it('computer-use is enabled=1 (headless bash+file path wired); browser is disabled=0 (needs Playwright container)', () => {
     const cu = DEFAULT_HANDLER_KINDS.find(k => k.kind === 'agentic.computer-use');
     const br = DEFAULT_HANDLER_KINDS.find(k => k.kind === 'agentic.browser');
-    expect(cu!.enabled).toBe(0);
-    expect(br!.enabled).toBe(0);
+    expect(cu!.enabled).toBe(1); // enabled: headless bash+file tools work without a display
+    expect(br!.enabled).toBe(0); // disabled: requires Playwright container
   });
 
   it('file-watcher and db-change are disabled=0 in DEFAULT_ATTENTION_POLICIES', () => {
@@ -712,10 +712,9 @@ describe('[Phase 3] Handler Kinds — Stress: concurrent DB reads', () => {
   });
 
   it('20 concurrent getLiveAttentionPolicyByKey calls return correct results', async () => {
-    const keys = Array.from({ length: 20 }, (_, i) =>
-      ['heuristic.inbox-first', 'cron.rest-only', 'model.adaptive',
-       'event.webhook-trigger', 'event.file-watcher', 'event.db-change', 'model.llm-relevance'][i % 7],
-    );
+    const KEYS = ['heuristic.inbox-first', 'cron.rest-only', 'model.adaptive',
+      'event.webhook-trigger', 'event.file-watcher', 'event.db-change', 'model.llm-relevance'] as const;
+    const keys = Array.from({ length: 20 }, (_, i) => KEYS[i % KEYS.length]!);
     const results = await Promise.all(keys.map(k => db.getLiveAttentionPolicyByKey(k)));
     for (const row of results) {
       expect(row).not.toBeNull();
@@ -726,7 +725,7 @@ describe('[Phase 3] Handler Kinds — Stress: concurrent DB reads', () => {
     const counts = await Promise.all(
       Array.from({ length: 10 }, () => db.listLiveHandlerKinds()),
     );
-    const expected = counts[0].length;
+    const expected = counts[0]!.length;
     for (const result of counts) {
       expect(result.length).toBe(expected);
     }

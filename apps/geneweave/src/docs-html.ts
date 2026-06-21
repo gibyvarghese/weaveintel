@@ -438,6 +438,70 @@ bus.on(EventTypes.MODEL_CALL, (event) => {
 });
 
 const agent = weaveAgent({ model, tools, bus });`)}
+`)}
+
+${section('agent-strategy', 'Agent Strategy Settings', `
+<p>Think of <strong>Agent Strategy Settings</strong> as the global dial board for how all agents behave by default. Rather than hardcoding values like "how confident must an agent be before acting?" in every agent definition, you set them once in the database and every agent picks them up automatically.</p>
+
+${callout('info', '⚙️', 'One row to rule them all.', 'A single <code>global</code> row in the <code>agent_strategy_settings</code> table sets the defaults for all agents. You can also create <em>tenant-scoped</em> rows that override the global defaults for specific tenants — useful when enterprise customers need stricter policies than your general user base.')}
+
+<p>Four new controls were added in mid-2026 (Phase 7) to cover human-in-the-loop approval, delegation depth, tool confirmation, and memory lifecycle. Three other key behaviours are now <em>on by default</em>: <code>a2a_enabled</code>, <code>reflect_enabled</code>, and <code>supervisor_parallel_delegation</code>.</p>
+
+${featureCards([
+  ['Human-in-the-loop (HITL)', 'The <code>hitl_threshold</code> field (0–1) is a risk score cutoff. When an agent\'s risk assessment exceeds this score, the system pauses and asks a human to approve before proceeding. Default: 0.75 — meaning anything riskier than 75% triggers approval.'],
+  ['Agent hop limit', '<code>max_agent_hops</code> caps how deep the chain of AI-to-AI delegation can go. If agent A asks agent B, who asks agent C, that is 2 hops. Limiting this prevents runaway delegation chains that burn tokens without useful output. Default: 5.'],
+  ['Tool confirmation level', '<code>tool_confirmation_level</code> controls which tool calls require explicit user confirmation before running. <code>\'none\'</code> — never ask; <code>\'medium\'</code> — ask for write operations; <code>\'high-risk-only\'</code> — ask only for destructive or privileged tools. Default: <code>\'high-risk-only\'</code>.'],
+  ['Memory policy', '<code>memory_policy</code> decides how the agent\'s working memory is handled across turns. <code>\'none\'</code> — start fresh every turn (great for privacy-sensitive deployments); <code>\'session\'</code> — remember within a session, forget when it ends; <code>\'persistent\'</code> — remember across sessions indefinitely. Default: <code>\'session\'</code>.'],
+])}
+
+${code('typescript', `import { SQLiteAdapter } from '@weaveintel/persistence';
+
+const db = new SQLiteAdapter('./app.db');
+await db.initialize();
+
+// Read the global defaults
+const settings = await db.getAgentStrategySettings('global');
+console.log(settings?.hitl_threshold);          // 0.75
+console.log(settings?.max_agent_hops);          // 5
+console.log(settings?.tool_confirmation_level); // 'high-risk-only'
+console.log(settings?.memory_policy);           // 'session'
+
+// These three flags are ON by default as of mid-2026
+console.log(settings?.a2a_enabled);                   // 1 — agents may delegate to other agents
+console.log(settings?.supervisor_parallel_delegation); // 1 — supervisor calls workers in parallel
+console.log(settings?.reflect_enabled);               // 1 — agents self-review their answers
+
+// Tighten settings for a high-stakes deployment
+await db.updateAgentStrategySettings('global', {
+  hitl_threshold:         0.85,       // require human approval for anything risky
+  tool_confirmation_level: 'medium',  // also confirm write operations
+});
+
+// Create a per-tenant override (tenant row wins over global)
+// Insert via your DB adapter or migration — same table, scope='tenant'
+
+// List all rows (global + any tenant-scoped overrides)
+const all = await db.listAgentStrategySettings();
+console.log(all.map(s => \`\${s.id} (\${s.scope})\`));
+// e.g. ['global (global)', 'acme-corp (tenant)']`)}
+
+<h4>Full field reference</h4>
+${params([
+  ['hitl_threshold', 'number (0–1)', 'Phase 7', 'Risk score at which human approval is required before the agent acts. 0 = always ask a human; 1 = never ask; 0.75 = ask when risk is high. Default: 0.75.'],
+  ['max_agent_hops', 'number', 'Phase 7', 'Maximum length of an agent delegation chain (A→B→C = 2 hops). Exceeding this hard-stops the run to prevent loops. Default: 5.'],
+  ['tool_confirmation_level', 'string', 'Phase 7', 'When to confirm before calling a tool. <code>\'none\'</code> | <code>\'medium\'</code> | <code>\'high-risk-only\'</code>. Default: <code>\'high-risk-only\'</code>.'],
+  ['memory_policy', 'string', 'Phase 7', 'Cross-turn memory retention. <code>\'none\'</code> | <code>\'session\'</code> | <code>\'persistent\'</code>. Default: <code>\'session\'</code>.'],
+  ['a2a_enabled', 'number (0|1)', 'Core', 'Whether agents may delegate tasks to other agents via the A2A bus. Default: 1 (enabled since mid-2026).'],
+  ['reflect_enabled', 'number (0|1)', 'Core', 'Whether agents review and optionally revise their own answer before returning it. Default: 1 (enabled since mid-2026).'],
+  ['reflect_max_revisions', 'number', 'Core', 'Maximum self-revision rounds per response. Default: 1.'],
+  ['verify_enabled', 'number (0|1)', 'Core', 'Whether a separate verification step scores the agent\'s answer before returning. Default: 0 (opt-in).'],
+  ['supervisor_parallel_delegation', 'number (0|1)', 'Core', 'Whether a supervisor may dispatch multiple worker tasks simultaneously. Default: 1 (enabled since mid-2026).'],
+  ['parallel_tool_calls', 'number (0|1)', 'Core', 'Whether the agent may call multiple tools in a single model turn. Default: 1.'],
+  ['context_strategy', 'string | null', 'Core', 'How long histories are compressed: <code>\'sliding-window\'</code> | <code>\'summarise\'</code> | <code>\'hierarchical\'</code> | null (no compression).'],
+  ['tool_retry_max_attempts', 'number', 'Core', 'How many times to retry a failed tool call before giving up. Default: 3.'],
+])}
+
+${callout('tip', '💡', 'Tenant overrides.', 'Create a row with <code>scope=\'tenant\'</code> and the relevant <code>tenant_id</code> to override defaults for one customer. The agent runtime merges global defaults with tenant rows — the tenant value wins on any field that is set. This lets you give enterprise customers stricter HITL thresholds or a different memory policy without touching the global defaults.')}
 `)}`;
 }
 
@@ -903,13 +967,25 @@ const model = router.select({ requiredCapabilities: ['text', 'tool_calling'], ma
 `)}
 
 ${section('models-providers', 'Provider Reference', `
-<table class="ptable"><thead><tr><th>Package</th><th>Factory</th><th>Key Models</th></tr></thead><tbody>
-<tr><td><code>@weaveintel/provider-anthropic</code></td><td><code>weaveAnthropicModel(id)</code></td><td>claude-haiku-4-5-20251001, claude-sonnet-4-6, claude-opus-4-8</td></tr>
-<tr><td><code>@weaveintel/provider-openai</code></td><td><code>weaveOpenAIModel(id)</code></td><td>gpt-4o, gpt-4o-mini, gpt-4.1, o3, o4-mini, text-embedding-3-*</td></tr>
-<tr><td><code>@weaveintel/provider-google</code></td><td><code>weaveGoogleModel(id)</code></td><td>gemini-2.0-flash, gemini-1.5-pro, text-embedding-004</td></tr>
-<tr><td><code>@weaveintel/provider-ollama</code></td><td><code>weaveOllamaModel(id)</code></td><td>Any model served by Ollama (llama3.2, mistral, phi3, etc.)</td></tr>
+<table class="ptable"><thead><tr><th>Package</th><th>Factory</th><th>Current Models</th></tr></thead><tbody>
+<tr><td><code>@weaveintel/provider-anthropic</code></td><td><code>weaveAnthropicModel(id)</code></td><td>claude-haiku-4-5-20251001, claude-sonnet-4-6, claude-opus-4-8, claude-fable-5</td></tr>
+<tr><td><code>@weaveintel/provider-openai</code></td><td><code>weaveOpenAIModel(id)</code></td><td>gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, gpt-4.1-nano, o3, o4-mini, text-embedding-3-*</td></tr>
+<tr><td><code>@weaveintel/provider-google</code></td><td><code>weaveGoogleModel(id)</code></td><td>gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite, gemini-2.0-flash, text-embedding-004</td></tr>
+<tr><td><code>@weaveintel/provider-ollama</code></td><td><code>weaveOllamaModel(id)</code></td><td>Any model served by Ollama (llama3.3, llama4-scout, qwen3:30b-a3b, phi4, gemma3:27b, codestral:22b, deepseek-r1, mistral-nemo, etc.)</td></tr>
 <tr><td><code>@weaveintel/provider-llamacpp</code></td><td><code>weaveLlamacppModel(id)</code></td><td>Local GGUF models via llama.cpp server</td></tr>
 </tbody></table>
+
+${callout('warn', '⚠️', 'Deprecated model IDs.', 'The following model IDs are <strong>disabled</strong> in the model registry as of mid-2026 — they still exist in the DB but are not routed to. Replace them before using: <code>gemini-1.5-pro</code>, <code>gemini-1.5-flash</code> (succeeded by Gemini 2.5 series); <code>llama3</code>, <code>phi3</code>, <code>gemma2</code>, <code>qwen2.5</code> (succeeded by newer Ollama builds). Using a deprecated ID returns a <code>ModelNotRoutableError</code>.')}
+
+<h4>Model capability flags</h4>
+<p>Each model row carries boolean capability flags used by the smart router to select the right model for a task. Key flags:</p>
+${typeTable([
+  ['supports_vision', 'Model can interpret images. All current Anthropic, OpenAI, and Google models have this set.'],
+  ['supports_thinking', 'Model supports extended chain-of-thought reasoning (o3, o4-mini, claude-opus-4-8, gemini-2.5-*).'],
+  ['supports_json_mode', 'Model reliably emits valid JSON when instructed. All GPT-4 and Claude 3.5+ models have this set.'],
+  ['supports_computer_use', 'Model can interpret screenshots and emit pointer/keyboard actions (Anthropic claude-* series with computer use enabled).'],
+  ['supports_long_context', 'Model reliably handles >200K token contexts (gemini-2.5-pro at 1M tokens, gpt-4.1 at 1M tokens, claude-* at 200K tokens).'],
+])}
 `)}`;
 }
 
@@ -1666,6 +1742,49 @@ ${params([
   ['SycophancyDetector', 'Check', 'optional', 'Detects sycophantic patterns (excessive agreement, flattery) in post-execution responses.'],
   ['GroundingGuard', 'Check', 'optional', 'Checks that factual claims in the response are grounded in provided evidence (tool results, RAG context).'],
 ])}
+`)}
+
+${section('guardrails-2026', 'Mid-2026 Guardrail Expansion', `
+<p>As AI systems became more capable and regulations tightened, weaveIntel's guardrail library expanded in mid-2026 to cover four new areas: EU AI Act compliance, AI-generated content detection, agent-specific safety controls, and intellectual property protection. These are stored in the <code>guardrail_rules</code> DB table and evaluated by the same pipeline as all other guardrails.</p>
+
+<h4>EU AI Act Compliance (4 checks)</h4>
+<p>The EU AI Act (effective 2025–2026) imposes transparency and safety obligations on AI systems. These checks help meet them:</p>
+${typeTable([
+  ['euaia-transparency-disclosure', 'Ensures AI-generated responses include a disclosure that the content was produced by an AI system. Required for "high-risk" AI use cases under Article 13.'],
+  ['euaia-human-oversight-gate', 'Flags responses in high-stakes domains (medical, legal, financial) and requires a human reviewer before delivery. Supports Article 14 human-oversight requirements.'],
+  ['euaia-prohibited-manipulation', 'Detects and blocks manipulative language patterns — techniques designed to exploit a user\'s emotions or beliefs against their own interests. Enforces Article 5 prohibited practices.'],
+  ['euaia-bias-fairness-flag', 'Scores responses for demographic bias across protected characteristics (age, gender, nationality). Outputs above the bias threshold are flagged for review under Article 10 data-quality requirements.'],
+])}
+
+<h4>AI-Generated Content Detection (4 checks)</h4>
+<p>These checks detect when AI-generated content could cause problems — either because it is being passed off as human-written where disclosure is required, or because it contains hallucinated facts:</p>
+${typeTable([
+  ['aigc-watermark-check', 'Verifies that AI-generated media (images, audio, documents) carries a C2PA-compatible watermark or provenance record before it is returned to users or stored.'],
+  ['aigc-hallucination-detector', 'Cross-references factual claims in the response against the retrieved context (RAG chunks, tool results). Claims without supporting evidence are flagged as potential hallucinations.'],
+  ['aigc-deepfake-audio-block', 'Blocks generation of realistic synthetic voice audio that mimics an identified real person unless the person\'s consent is on record.'],
+  ['aigc-synthetic-media-disclosure', 'Automatically appends a disclosure notice to any response that includes AI-generated images, video, or audio — even if the user did not ask for one.'],
+])}
+
+<h4>Agent Safety Controls (5 checks)</h4>
+<p>As agents become capable of taking real actions in the world (sending emails, running code, calling APIs), new safety controls are needed to prevent unintended or harmful actions:</p>
+${typeTable([
+  ['agent-tool-scope-enforcement', 'Compares the tool call\'s target (URL, file path, database, external service) against an allowlist for the current session scope. Calls outside the allowlist are blocked before execution.'],
+  ['agent-irreversibility-gate', 'Detects "irreversible" tool calls (delete, publish, send to all users, overwrite production) and requires explicit human confirmation before allowing them to proceed.'],
+  ['agent-pii-output-redaction', 'Scans agent responses and tool outputs for PII (names, emails, phone numbers, national IDs, credit card numbers) and redacts or masks them before they leave the system.'],
+  ['agent-prompt-injection-shield', 'Detects prompt-injection patterns in external content the agent has retrieved (web pages, documents, tool results) — content that tries to override the agent\'s instructions. Strips or quarantines injections before they reach the model.'],
+  ['agent-recursive-delegation-limit', 'Enforces <code>max_agent_hops</code> from the agent strategy settings. Terminates runs where the chain of A2A delegation exceeds the configured limit, preventing runaway loops.'],
+])}
+
+<h4>Intellectual Property & Data Residency (5 checks)</h4>
+${typeTable([
+  ['ip-copyright-content-filter', 'Pattern-matches responses against a registry of known copyrighted text fragments (book excerpts, song lyrics, source code). Matches above a similarity threshold are blocked or replaced with a citation.'],
+  ['ip-trademark-usage-flag', 'Detects use of registered trademarks in a way that could imply endorsement or cause brand confusion. Flags responses containing registered marks in promotional contexts.'],
+  ['data-residency-eu', 'Blocks data from EU-based user sessions from being processed by models or stored in infrastructure outside the EU/EEA. Requires <code>data_region</code> metadata in the execution context.'],
+  ['data-residency-us-gov', 'Restricts US Government tenant data to FedRAMP-authorised model endpoints and US-based storage only.'],
+  ['data-residency-au-nz', 'Restricts Australian and New Zealand regulated-industry data to Australia-region infrastructure in compliance with the Australian Privacy Act.'],
+])}
+
+${callout('info', '🗄️', 'Database-backed rules.', 'All 18 mid-2026 guardrail rules are seeded into the <code>guardrail_rules</code> table and evaluated by the same pipeline as the original built-in checks. You can enable or disable individual rules per tenant via the <code>tenant_guardrail_overrides</code> table, or add your own custom rules using <code>DefaultRiskClassifier</code> with project-specific patterns.')}
 `)}
 
 ${section('guardrails-runtime', 'Runtime Slot — Ambient Guardrails (Recommended)', `
@@ -3396,6 +3515,74 @@ const config = await client.createPushConfig(ctx, agentUrl, task.id, {
   token: 'hmac-signing-secret',
 });
 console.log('Push config created:', config.pushConfigId);`, ['@weaveintel/a2a', '@weaveintel/core'])}
+`)}
+
+${section('a2a-skills', 'A2A Skills Taxonomy', `
+<p>Every A2A agent publishes an <em>Agent Card</em> that lists its skills — the specific capabilities it can perform when another agent sends it a task. Skills are how agents describe themselves so that a supervisor, a discovery service, or a human operator can decide which agent to call.</p>
+
+${callout('info', '📋', 'What is a skill?', 'A skill has an <code>id</code>, a human-readable name, a description, and optional <code>tags</code>. When you register an agent on the A2A bus, its skills are visible to everyone on the bus. The supervisor model reads skill descriptions to decide which agent to delegate to — so clear, specific descriptions matter.')}
+
+<p>The weaveIntel DB seeds 15 standard skills covering the main categories of AI agent work in mid-2026:</p>
+
+${featureCards([
+  ['Agentic (chat & reasoning)', '<code>general-chat</code> — everyday conversation and Q&A. <code>ensemble-reasoning</code> — multiple models vote on the best answer. <code>research-synthesis</code> — deep literature search and evidence synthesis. <code>code-review</code> — pull-request review, security scanning, refactoring advice.'],
+  ['Supervisor / orchestration', '<code>supervisor-orchestration</code> — decomposes a goal into sub-tasks and delegates to specialist workers. <code>workflow-orchestration</code> — runs complex multi-step durable workflows. <code>hypothesis-validation</code> — scientific method pipeline for testing claims with evidence.'],
+  ['Document & data', '<code>document-intelligence</code> — PDF/DOCX/XLSX extraction, summarisation, and Q&A. <code>data-pipeline</code> — ETL, data transformation, pandas/SQL/dbt jobs. <code>memory-retrieval</code> — vector-search knowledge base retrieval and RAG pipelines.'],
+  ['Multimodal & computer', '<code>image-analysis</code> — multi-image reasoning, OCR, chart interpretation. <code>image-generation</code> — DALL-E / Imagen image creation. <code>voice-interaction</code> — real-time audio transcription and text-to-speech. <code>computer-use</code> — GUI automation via screenshots (Anthropic computer use). <code>browser-automation</code> — live web browsing, scraping, form interaction. <code>code-execution</code> — sandboxed Python/JS interpreter for data analysis.'],
+])}
+
+${code('typescript', `import type { AgentCard } from '@weaveintel/core';
+
+// Register an agent with multiple skills
+const documentAgent: AgentCard = {
+  name: 'document-processor',
+  description: 'Processes and extracts information from documents',
+  version: '2.0.0',
+  skills: [
+    {
+      id: 'document-intelligence',
+      name: 'Document Intelligence',
+      description: 'Extract, summarise, and answer questions from PDF, Word, and Excel files',
+      tags: ['document', 'extraction', 'pdf', 'qa'],
+    },
+    {
+      id: 'data-pipeline',
+      name: 'Data Pipeline',
+      description: 'Transform, clean, and analyse structured data from CSV, JSON, and databases',
+      tags: ['etl', 'pandas', 'sql', 'transform'],
+    },
+  ],
+  capabilities: { streaming: true, pushNotifications: false },
+  supportedInterfaces: [
+    { url: 'https://agents.example.com/doc-processor', protocolBinding: 'JSONRPC', protocolVersion: '1.0' },
+  ],
+};`, ['@weaveintel/core'])}
+
+<p>When a supervisor agent needs to pick which worker to call, it reads the skill list and matches by <code>id</code> or by the text in <code>description</code> and <code>tags</code>. Keep skill IDs consistent with the canonical list above so supervisors across different meshes can recognise each other's capabilities.</p>
+`)}
+
+${section('a2a-handler-kinds', 'Handler Kinds for Live Agents', `
+<p>When a live agent receives an A2A message, the <strong>handler kind</strong> in its DB row decides how it processes it. Handler kinds separate the <em>shape of execution</em> from the agent's specific logic, making it easy to swap from an LLM-driven loop to a deterministic function or a human-approval gate without changing the rest of the system.</p>
+
+${featureCards([
+  ['agentic.react', 'The standard LLM reasoning loop (ReAct). The agent thinks, calls tools, observes results, and loops until it has a final answer. Best for open-ended tasks where the path is not known in advance.'],
+  ['agentic.scripted', 'A fixed LLM pipeline with predefined stages. Less flexible than ReAct, but more predictable and auditable. Good for document processing or classification tasks with a known shape.'],
+  ['deterministic.template', 'Renders a Mustache template with the incoming data. No LLM involved — pure text substitution. Fast, free, and fully auditable. Good for notification formatting or report assembly.'],
+  ['deterministic.forward', 'Puts the incoming message directly into a queue or sends it to another system. The agent acts as a router, not a processor. Good for fan-out, buffering, or bridging to external queues.'],
+  ['deterministic.observer', 'Records the incoming message to the audit log and takes no other action. Used for compliance monitoring or debugging — a tap on the wire.'],
+  ['human.approval', 'Pauses the agent and creates a pending approval task in the human-task queue. The agent waits until an operator approves or rejects before continuing. Good for high-stakes decisions.'],
+  ['external.webhook', 'Calls an external HTTP endpoint with the message payload. The response becomes the agent\'s output. Good for integrating third-party services or legacy systems into the mesh.'],
+])}
+
+${params([
+  ['agentic.react', 'HandlerKind', '', 'Full ReAct loop with tool calls. Configured per agent via the <code>live_agent_handler_bindings</code> DB row.'],
+  ['agentic.scripted', 'HandlerKind', '', 'Scripted LLM pipeline. Steps are defined in the handler config JSON.'],
+  ['deterministic.template', 'HandlerKind', '', 'Mustache template render. Template body stored in handler config.'],
+  ['deterministic.forward', 'HandlerKind', '', 'Queue/system forward. Destination URL or queue name in handler config.'],
+  ['deterministic.observer', 'HandlerKind', '', 'Audit-only tap. No config required.'],
+  ['human.approval', 'HandlerKind', '', 'Pause for human decision. Timeout and escalation path in handler config.'],
+  ['external.webhook', 'HandlerKind', '', 'HTTP POST to external URL. URL, headers, and retry policy in handler config.'],
+])}
 `)}`;
 }
 
@@ -3622,6 +3809,41 @@ process.on('SIGTERM', async () => {
 });
 
 console.log('Live agent mesh running. Ctrl+C to stop.');`, ['@weaveintel/live-agents-runtime', '@weaveintel/live-agents', '@weaveintel/core', '@weaveintel/persistence', '@weaveintel/provider-anthropic'])}
+`)}
+
+${section('la-kaggle-mesh', 'Kaggle Competition Mesh', `
+<p>The Kaggle Competition Mesh is a <strong>built-in reference mesh</strong> in geneWeave that shows how to wire a team of nine specialised agents to tackle a machine-learning competition from end to end — automatically. It is not a toy demo; the same mesh runs against real Kaggle competitions.</p>
+
+${callout('info', '🏆', 'Why nine agents?', 'A Kaggle competition involves many distinct activities that can run in parallel: discovering what the competition is about, building a strategy, implementing models, validating submissions, watching the leaderboard, and writing up findings. Splitting these across specialist agents lets the mesh work on multiple fronts simultaneously — faster than a single agent doing everything sequentially.')}
+
+<h4>The nine agents and what they do</h4>
+${typeTable([
+  ['discoverer', 'Reads the competition description, downloads the dataset, and writes a structured brief for the other agents. Entry point — everything starts here.'],
+  ['strategist', 'Takes the brief and proposes an overall approach: which model families to try, what feature engineering makes sense, how to structure the validation. Called by both the observer and the leaderboard monitor when strategy needs revisiting.'],
+  ['implementer', 'Builds and trains one model at a time following the strategy. Sequential — one experiment at a time.'],
+  ['parallel_implementer', 'Same role as implementer but runs multiple experiments in parallel lanes. Activated for competitions where many independent approaches need comparing quickly.'],
+  ['validator', 'Scores the models from implementer / parallel_implementer using cross-validation, OOF scores, and leaderboard probes. Gates submissions.'],
+  ['submitter', 'Prepares the winning model\'s predictions in the format Kaggle expects and makes the submission. Also triggers the debrief after each submission.'],
+  ['observer', 'Watches the overall competition — time remaining, score trends, discussion forum activity — and nudges the strategist when it detects a course-correction opportunity.'],
+  ['leaderboard_monitor', 'Specifically tracks public leaderboard movements, spots score gaps, and surfaces public kernel approaches. Feeds intelligence back to the strategist.'],
+  ['debrief', 'Writes up what was tried, what worked, and what to do differently next time. Called after each submission and at competition end.'],
+])}
+
+<h4>Playbooks — pre-defined competition strategies</h4>
+<p>The mesh ships with three playbooks that activate different tool configurations and agent behaviours depending on the competition type:</p>
+${typeTable([
+  ['NLP Classification Playbook', 'Activates transformer fine-tuning tools, text feature tools, and a no-baselines constraint (no bag-of-words TF-IDF as the final submission). Targets competitions with text classification tasks.'],
+  ['Computer Vision Playbook', 'Activates image augmentation tools, CNN backbone tools, and an ensemble-required constraint. Enforces pre-trained backbone use (no from-scratch networks). Targets image classification and detection competitions.'],
+  ['Time Series Playbook', 'Activates lag/rolling feature tools, gradient boosting tools, and a no-naive-baseline constraint (no mean/last-value baseline as the final entry). Targets forecasting competitions.'],
+])}
+
+${exlinks([
+  ['76-kaggle-discover-and-ideate.ts', 'Example 76 — Kaggle: Discover + Strategise'],
+  ['77-kaggle-submit-with-approval.ts', 'Example 77 — Kaggle: Validate + Submit with HITL Approval'],
+  ['78-kaggle-replay-roundtrip.ts', 'Example 78 — Kaggle: Replay Round-Trip'],
+  ['79-kaggle-live-agents-e2e.ts', 'Example 79 — Kaggle: Live Agents End-to-End'],
+  ['96-live-agents-phase6-mesh-from-db.ts', 'Example 96 — Load Kaggle Mesh from DB'],
+])}
 `)}`;
 }
 
@@ -6056,8 +6278,18 @@ var SEARCH_IDX = [
   // Live Agents (expanded)
   {s:'live-agents', t:'DB-Backed Boot',                 k:'live agent db boot weaveLiveMeshFromDb weaveLiveAgentFromDb production', sub:'la-db-boot'},
   {s:'live-agents', t:'Full Production Setup',          k:'live agent full production mesh supervisor runtime boot', sub:'la-e2e'},
+  {s:'live-agents', t:'Kaggle Competition Mesh',        k:'kaggle competition mesh nine agents playbook nlp vision time series discoverer strategist implementer parallel validator submitter observer leaderboard debrief', sub:'la-kaggle-mesh'},
+  // Agents (expanded)
+  {s:'agents', t:'Agent Strategy Settings',             k:'agent strategy settings hitl threshold max hops tool confirmation memory policy global tenant scope a2a reflect parallel', sub:'agent-strategy'},
+  // A2A (expanded)
+  {s:'a2a', t:'A2A Skills Taxonomy',                   k:'a2a skills taxonomy general chat supervisor computer use browser code execution document intelligence image voice data pipeline memory workflow research review hypothesis', sub:'a2a-skills'},
+  {s:'a2a', t:'Handler Kinds for Live Agents',          k:'handler kind agentic react scripted deterministic template forward observer human approval external webhook', sub:'a2a-handler-kinds'},
   // Guardrails (expanded)
   {s:'guardrails', t:'Runtime Slot — Ambient Guardrails', k:'guardrails runtime slot ambient weaveruntime automatic every agent', sub:'guardrails-runtime'},
+  {s:'guardrails', t:'EU AI Act Compliance Checks',    k:'eu ai act euaia transparency human oversight manipulation bias fairness article compliance', sub:'guardrails-2026'},
+  {s:'guardrails', t:'AI Content & Agent Safety Checks', k:'guardrails aigc deepfake watermark hallucination agent safety pii injection hop limit irreversible tool scope ip data residency', sub:'guardrails-2026'},
+  // Models (expanded)
+  {s:'models', t:'Model Capability Flags',              k:'model capability supports thinking vision json computer use long context deprecated gemini 1.5 llama phi', sub:'models-providers'},
   // Core (expanded)
   {s:'core',      t:'weaveRuntime — The Composition Root', k:'weaveruntime runtime composition root options tracer secrets persistence', sub:'core-runtime'},
   {s:'core',      t:'RuntimeCapabilities Reference',    k:'runtime capabilities net egress audit persistence guardrails encryption', sub:'core-capabilities'},

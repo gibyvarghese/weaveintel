@@ -25,6 +25,9 @@ import {
   KAGGLE_GENERIC_ML_SOLVER,
   KAGGLE_ORBIT_WARS_WORKFLOW,
   KAGGLE_ORBIT_WARS_SOLVER_TEMPLATE,
+  KAGGLE_NLP_SEQUENCE,
+  KAGGLE_VISION_CNN,
+  KAGGLE_TIME_SERIES,
 } from './playbook-seed-content.js';
 import { KAGGLE_PLAYBOOK_CATEGORY } from './playbook-resolver.js';
 
@@ -41,9 +44,21 @@ const FRAGMENT_KEY_ORBIT_WARS_WORKFLOW = 'kaggle.workflow.orbit_wars';
 const FRAGMENT_ID_ORBIT_WARS_SOLVER = 'frag-kaggle-solver-template-orbit-wars';
 const FRAGMENT_KEY_ORBIT_WARS_SOLVER = 'kaggle.solver_template.orbit_wars';
 
+// Phase 6 — NLP, Vision, Time Series playbooks
+const FRAGMENT_ID_NLP_SEQUENCE = 'frag-kaggle-workflow-nlp-sequence';
+const FRAGMENT_KEY_NLP_SEQUENCE = 'kaggle.workflow.nlp_sequence';
+const FRAGMENT_ID_VISION_CNN = 'frag-kaggle-workflow-vision-cnn';
+const FRAGMENT_KEY_VISION_CNN = 'kaggle.workflow.vision_cnn';
+const FRAGMENT_ID_TIME_SERIES = 'frag-kaggle-workflow-time-series';
+const FRAGMENT_KEY_TIME_SERIES = 'kaggle.workflow.time_series';
+
 const SKILL_ID_DEFAULT = 'kaggle-playbook-default';
 const SKILL_ID_ARC = 'kaggle-playbook-arc-agi-3';
 const SKILL_ID_ORBIT_WARS = 'kaggle-playbook-orbit-wars';
+// Phase 6
+const SKILL_ID_NLP = 'kaggle-playbook-nlp-sequence';
+const SKILL_ID_VISION = 'kaggle-playbook-vision-cnn';
+const SKILL_ID_TIME_SERIES = 'kaggle-playbook-time-series';
 
 const DEFAULT_PLAYBOOK_INSTRUCTIONS = `{{>${FRAGMENT_KEY_DEFAULT_DISCOVERY}}}`;
 const ARC_PLAYBOOK_INSTRUCTIONS = `{{>${FRAGMENT_KEY_ARC_WORKFLOW}}}`;
@@ -57,7 +72,10 @@ async function ensureFragment(
   category: string,
   content: string,
 ): Promise<'inserted' | 'exists'> {
-  const CURRENT_VERSION = '1.7.0';
+  // Phase 6 (mid-2026): bumped from 1.7.0 to 1.8.0 to trigger refresh of
+  // updated GENERIC_ML_SOLVER (LightGBM tier), DEFAULT_DISCOVERY (GPU probe),
+  // and ARC_AGI_3_WORKFLOW (ARC-AGI-4 awareness note).
+  const CURRENT_VERSION = '1.8.0';
   const existing = await db.getPromptFragment(id).catch(() => null);
   const byKey = existing ?? (await db.getPromptFragmentByKey(key).catch(() => null));
   if (byKey) {
@@ -103,7 +121,10 @@ async function ensureSkill(
     priority: number;
   },
 ): Promise<'inserted' | 'exists'> {
-  const CURRENT_SKILL_VERSION = '1.2.0';
+  // Phase 6 (mid-2026): bumped from 1.2.0 to 1.3.0 to refresh existing
+  // skills (default, arc-agi-3, orbit-wars) with updated content + add 3 new
+  // competition-type skills (nlp-sequence, vision-cnn, time-series).
+  const CURRENT_SKILL_VERSION = '1.3.0';
   const existing = await db.getSkill(row.id).catch(() => null);
   if (existing) {
     // Refresh examples + instructions when the bundled seed has bumped its
@@ -378,6 +399,120 @@ export async function seedKaggleArcPlaybook(
         'Final agent MUST be a learned policy (BC over a teacher, RL fine-tune, or self-play). Heuristic-only submissions are rejected at validation time.',
     },
     priority: 200,
+  });
+
+  // ── Phase 6: NLP Sequence playbook ──────────────────────────────────────
+  fragments[FRAGMENT_KEY_NLP_SEQUENCE] = await ensureFragment(
+    db,
+    FRAGMENT_ID_NLP_SEQUENCE,
+    FRAGMENT_KEY_NLP_SEQUENCE,
+    'Kaggle NLP sequence / text classification workflow',
+    'kaggle',
+    KAGGLE_NLP_SEQUENCE,
+  );
+  skills[SKILL_ID_NLP] = await ensureSkill(db, {
+    id: SKILL_ID_NLP,
+    name: 'Kaggle Playbook — NLP Sequence',
+    description:
+      'HuggingFace transformer-backed playbook for NLP text classification, NER, and seq2seq (summarisation, translation, QA) competitions. Backbone cascade: MiniLM-LM6 (CPU) → RoBERTa-base (T4) → DeBERTa-v3-large (T4x2). Heuristic or TF-IDF baselines are NOT acceptable as the final entry.',
+    triggerPatterns: ['*nlp*', '*text-class*', '*sentiment*', '*toxic*', '*spam*', '*qa*', '*summariz*', '*translation*', '*ner*'],
+    instructions: `{{>${FRAGMENT_KEY_NLP_SEQUENCE}}}`,
+    toolNames: [
+      'kaggle_get_competition',
+      'kaggle_list_competition_files',
+      'kaggle_get_competition_file',
+      'kaggle_list_kernels',
+      'kaggle_get_kernel_source',
+      'kaggle_push_kernel',
+      'kaggle_get_kernel_status',
+      'kaggle_get_kernel_output',
+    ],
+    examples: {
+      shape: 'static_file',
+      submissionFormat: 'csv',
+      modelTierCascade: ['minilm-lgbm', 'roberta-base', 'deberta-v3-large'],
+      gpuRequired: false,
+      maxIterations: 8,
+      pollIntervalSec: 15,
+      kernelWaitMaxTimeoutSec: 600,
+    },
+    priority: 150,
+  });
+
+  // ── Phase 6: Vision CNN playbook ─────────────────────────────────────────
+  fragments[FRAGMENT_KEY_VISION_CNN] = await ensureFragment(
+    db,
+    FRAGMENT_ID_VISION_CNN,
+    FRAGMENT_KEY_VISION_CNN,
+    'Kaggle computer vision CNN / ViT workflow',
+    'kaggle',
+    KAGGLE_VISION_CNN,
+  );
+  skills[SKILL_ID_VISION] = await ensureSkill(db, {
+    id: SKILL_ID_VISION,
+    name: 'Kaggle Playbook — Vision CNN',
+    description:
+      'timm/PyTorch pretrained backbone playbook for image classification, object detection, and segmentation competitions. Backbone cascade: EfficientNet-B3 (T4) → B4/ViT-B16 (P100) → B7/ViT-L16 (T4x2). Requires GPU session. From-scratch networks are NOT acceptable.',
+    triggerPatterns: ['*image*', '*vision*', '*photo*', '*classify*', '*detection*', '*segmentation*', '*chest-xray*', '*satellite*', '*dermoscopy*'],
+    instructions: `{{>${FRAGMENT_KEY_VISION_CNN}}}`,
+    toolNames: [
+      'kaggle_get_competition',
+      'kaggle_list_competition_files',
+      'kaggle_get_competition_file',
+      'kaggle_list_kernels',
+      'kaggle_get_kernel_source',
+      'kaggle_push_kernel',
+      'kaggle_get_kernel_status',
+      'kaggle_get_kernel_output',
+    ],
+    examples: {
+      shape: 'static_file',
+      submissionFormat: 'csv',
+      modelTierCascade: ['efficientnet-b3', 'efficientnet-b4', 'vit-l16'],
+      gpuRequired: true,
+      maxIterations: 8,
+      pollIntervalSec: 20,
+      kernelWaitMaxTimeoutSec: 900,
+    },
+    priority: 160,
+  });
+
+  // ── Phase 6: Time Series playbook ────────────────────────────────────────
+  fragments[FRAGMENT_KEY_TIME_SERIES] = await ensureFragment(
+    db,
+    FRAGMENT_ID_TIME_SERIES,
+    FRAGMENT_KEY_TIME_SERIES,
+    'Kaggle time series forecasting workflow',
+    'kaggle',
+    KAGGLE_TIME_SERIES,
+  );
+  skills[SKILL_ID_TIME_SERIES] = await ensureSkill(db, {
+    id: SKILL_ID_TIME_SERIES,
+    name: 'Kaggle Playbook — Time Series',
+    description:
+      'LightGBM + lag-feature and statsmodels ETS playbook for univariate and panel time series forecasting competitions. Always uses TimeSeriesSplit — never random KFold. Naive mean/last-value baselines are NOT acceptable as the final entry.',
+    triggerPatterns: ['*forecast*', '*time-series*', '*timeseries*', '*demand*', '*energy*', '*sales-predict*', '*store-sales*', '*m5*'],
+    instructions: `{{>${FRAGMENT_KEY_TIME_SERIES}}}`,
+    toolNames: [
+      'kaggle_get_competition',
+      'kaggle_list_competition_files',
+      'kaggle_get_competition_file',
+      'kaggle_list_kernels',
+      'kaggle_get_kernel_source',
+      'kaggle_push_kernel',
+      'kaggle_get_kernel_status',
+      'kaggle_get_kernel_output',
+    ],
+    examples: {
+      shape: 'static_file',
+      submissionFormat: 'csv',
+      primaryStrategy: 'lgbm_lag_features',
+      fallbackStrategy: 'ets_blend',
+      maxIterations: 6,
+      pollIntervalSec: 10,
+      kernelWaitMaxTimeoutSec: 600,
+    },
+    priority: 140,
   });
 
   return { fragments, skills };

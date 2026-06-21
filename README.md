@@ -18,9 +18,10 @@ weaveIntel gives you composable, vendor-neutral building blocks for everything f
   - [1. Talk to a model](#1-talk-to-a-model)
   - [2. Add tools (`weaveAgent`)](#2-add-tools-weaveagent)
   - [3. Long-running agents (`weaveLiveAgent`)](#3-long-running-agents-weaveliveagent)
+  - [3b. Agent strategy settings](#3b-agent-strategy-settings)
   - [4. Connect to external systems (MCP)](#4-connect-to-external-systems-mcp)
   - [5. Multi-agent communication (A2A)](#5-multi-agent-communication-a2a)
-  - [6. Governance: policy, approval, audit](#6-governance-policy-approval-audit)
+  - [6. Governance: policy, approval, audit, and guardrails](#6-governance-policy-approval-audit-and-guardrails)
   - [7. Resilience: rate limits, circuit breakers, retries](#7-resilience-rate-limits-circuit-breakers-retries)
   - [8. Memory, RAG, and knowledge graphs](#8-memory-rag-and-knowledge-graphs)
   - [9. Observability and replay](#9-observability-and-replay)
@@ -266,6 +267,36 @@ That single call composes: provisioner → handler registry → model resolver �
 
 ---
 
+#### Kaggle Competition Mesh
+
+The live-agents system ships a production-ready Kaggle mesh with nine specialist agents: `discoverer`, `strategist`, `implementer`, `parallel_implementer`, `validator`, `submitter`, `observer`, `leaderboard_monitor`, and `debrief`. Three pre-built playbooks wire the right tools and constraints for NLP classification, computer vision, and time-series competitions.
+
+> **Run it:** [`examples/76-kaggle-discover-and-ideate.ts`](examples/76-kaggle-discover-and-ideate.ts), [`examples/79-kaggle-live-agents-e2e.ts`](examples/79-kaggle-live-agents-e2e.ts), [`examples/96-live-agents-phase6-mesh-from-db.ts`](examples/96-live-agents-phase6-mesh-from-db.ts)
+
+---
+
+### 3b. Agent strategy settings
+
+Global and per-tenant defaults for how agents behave are stored in the `agent_strategy_settings` DB table. Set them once; all agents inherit them automatically.
+
+```typescript
+const settings = await db.getAgentStrategySettings('global');
+// Phase 7 fields (mid-2026):
+settings.hitl_threshold;          // 0.75 — risk score above which HITL approval fires
+settings.max_agent_hops;          // 5    — max A2A delegation chain depth
+settings.tool_confirmation_level; // 'high-risk-only' — when to confirm tool calls
+settings.memory_policy;           // 'session' — cross-turn memory retention scope
+
+// Tighten for a high-stakes deployment
+await db.updateAgentStrategySettings('global', { hitl_threshold: 0.85, tool_confirmation_level: 'medium' });
+```
+
+As of mid-2026, three behaviours are **on by default**: `a2a_enabled`, `reflect_enabled`, and `supervisor_parallel_delegation`. Tenant-scoped rows override global defaults on a per-field basis.
+
+> **Run it:** [`examples/168-agent-strategy-settings.ts`](examples/168-agent-strategy-settings.ts)
+
+---
+
 ### 4. Connect to external systems (MCP)
 
 The Model Context Protocol lets you expose tools/resources/prompts over a transport that any MCP client can call.
@@ -316,11 +347,13 @@ const summary = await bus.send('summarizer', { text: longDoc });
 const fr = await bus.send('translator', { text: summary.summary, lang: 'fr' });
 ```
 
-> **Run it:** [`examples/06-a2a-communication.ts`](examples/06-a2a-communication.ts)
+Each agent publishes an **Agent Card** listing its skills. weaveIntel seeds 15 standard A2A skills covering the main categories of AI work: general chat, supervisor orchestration, ensemble reasoning, computer use, browser automation, code execution, document intelligence, image analysis, image generation, voice interaction, data pipelines, memory retrieval, workflow orchestration, research synthesis, code review, and hypothesis validation.
+
+> **Run it:** [`examples/06-a2a-communication.ts`](examples/06-a2a-communication.ts), [`examples/164-a2a-supervisor.ts`](examples/164-a2a-supervisor.ts) (A2A-native supervisor with task store + streaming)
 
 ---
 
-### 6. Governance: policy, approval, audit
+### 6. Governance: policy, approval, audit, and guardrails
 
 Every tool that flows through `createPolicyEnforcedRegistry` is wrapped in a five-step pipeline:
 
@@ -333,6 +366,7 @@ enabled check → circuit breaker → risk-level gate → approval gate → rate
 - **Approval workflow:** tools with `requireApproval: true` create a `tool_approval_requests` row; operators resolve via `/api/admin/tool-approval-requests`.
 - **Audit trail:** every invocation persists to `tool_audit_events` with input/output preview, duration, and policy id.
 - **Health snapshots:** a background job rolls up success rate, p95 latency, and error rate every 15 minutes into `tool_health_snapshots`.
+- **Guardrails (mid-2026 expansion):** the `@weaveintel/guardrails` library now ships 18 additional rules beyond the built-in checks — covering EU AI Act compliance (transparency, human oversight, manipulation detection, bias flagging), AI-generated content detection (watermarks, hallucination, deepfake audio, synthetic media disclosure), agent safety controls (tool scope enforcement, irreversibility gate, PII output redaction, prompt-injection shield, delegation chain limits), and data-residency rules (EU, US-Gov, AU/NZ). All rules are stored in the `guardrail_rules` DB table and can be enabled/disabled per tenant.
 
 ```typescript
 import { createToolRegistry } from '@weaveintel/tools';
@@ -608,7 +642,8 @@ What's in it:
 - **Skills** — reusable behavior packs that bind a `toolPolicyKey` so the activation auto-scopes every tool call in the session.
 - **Scientific Validation** — multi-agent hypothesis pipeline (literature, statistical, mechanistic, simulation, synthesis, critique) with SSE event streams and a verdict bundle.
 - **MCP gateway** — exposes the tool catalog as an MCP server with per-client allocation classes.
-- **Live agents** — generic supervisor + Kaggle competition supervisor demonstrating long-running mesh execution.
+- **Live agents** — generic supervisor + Kaggle competition mesh (9 agents, 3 playbooks for NLP/Vision/TimeSeries) demonstrating long-running mesh execution.
+- **Agent strategy settings** — global and per-tenant defaults (HITL threshold, max agent hops, tool confirmation level, memory policy) readable and writable via the DB adapter.
 
 Run it locally with [`scripts/start-geneweave.sh`](scripts/start-geneweave.sh) (see [Quick Start](#quick-start)).
 
@@ -618,7 +653,7 @@ The full local DB is `./geneweave.db`. Reset with `rm geneweave.db` and restart 
 
 ## Examples
 
-110+ runnable demos under [`examples/`](examples). See [`examples/README.md`](examples/README.md) for the full index organized by tier.
+170+ runnable demos under [`examples/`](examples). See [`examples/README.md`](examples/README.md) for the full index organized by tier.
 
 ### Example tiers
 
@@ -762,6 +797,8 @@ Run any file with `npx tsx examples/<path>/<file>.ts`.
 | 116 | [Plugins](examples/116-plugins.ts) | `@weaveintel/plugins` — manifest validation, registry, lifecycle hooks, compatibility, installer | none |
 | 117 | [Tools-time](examples/117-tools-time.ts) | `@weaveintel/tools-time` — time snapshot, formatting, timer/stopwatch state machines, tool schemas | none |
 | 119 | [SQLite E2E](examples/119-sqlite-e2e.ts) | SQLite-backed conversation persistence + `@weaveintel/skills` + `@weaveintel/memory` | none |
+| 120–167 | Live-agents, A2A, checkpoints, cost-governor, compliance, vision | Phase 2–6 feature examples covering A2A supervisor, eval pipelines, dynamic workers, compliance tools, vision loops | none |
+| 168 | [Agent strategy settings](examples/168-agent-strategy-settings.ts) | Read, patch, and interpret the global/tenant `agent_strategy_settings` row (Phase 7: hitl_threshold, max_agent_hops, tool_confirmation_level, memory_policy) | none |
 
 > **All examples runnable from a fresh clone** after `npm install && npm run build`. Examples that need an API key say so in the table.
 
@@ -779,7 +816,7 @@ Run any file with `npx tsx examples/<path>/<file>.ts`.
 | [`@weaveintel/models`](packages/models) | Unified model router with fallback, streaming, capability selection |
 | [`@weaveintel/provider-openai`](packages/provider-openai) | OpenAI adapter |
 | [`@weaveintel/provider-anthropic`](packages/provider-anthropic) | Anthropic adapter (chat, streaming, tools, thinking, vision, batches, computer use) |
-| [`@weaveintel/provider-google`](packages/provider-google) | Google Gemini adapter (1.5 / 2.5 / 3.x) |
+| [`@weaveintel/provider-google`](packages/provider-google) | Google Gemini adapter (2.0 / 2.5 series; Gemini 1.5 deprecated) |
 | [`@weaveintel/provider-ollama`](packages/provider-ollama) | Local LLMs via Ollama |
 | [`@weaveintel/provider-llamacpp`](packages/provider-llamacpp) | Local GGUF via llama.cpp HTTP server |
 | [`@weaveintel/testing`](packages/testing) | Fake models / embeddings / vector stores / MCP transports |

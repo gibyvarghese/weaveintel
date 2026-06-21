@@ -137,7 +137,7 @@ const HANDLER_KINDS: SeedHandlerKind[] = [
         fallbackPrompt:       { type: 'string' },
       },
     }),
-    enabled: 0, // enabled when CUA sandbox is provisioned
+    enabled: 1, // enabled — uses bash + file tools without a display; GUI actions require Xvfb
   },
   {
     kind:        'agentic.browser',

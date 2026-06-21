@@ -158,6 +158,16 @@ export class HandlerRegistry {
     this.map.set(reg.kind, reg);
   }
 
+  /**
+   * Register or replace a handler kind. Unlike `register()`, this does NOT
+   * throw when the kind already exists — it silently replaces the existing
+   * registration. Use this for app-layer overrides of built-in handler kinds
+   * (e.g. wrapping `agentic.computer-use` with CUA-model injection in geneweave).
+   */
+  registerOrReplace(reg: HandlerKindRegistration): void {
+    this.map.set(reg.kind, reg);
+  }
+
   /** Look up a registration. Returns `null` if no kind matches. */
   resolve(kind: string): HandlerKindRegistration | null {
     return this.map.get(kind) ?? null;

@@ -50,6 +50,10 @@ import { applyM67AgentPhase6 } from './m67-agent-phase6.js';
 import { applyM68ModelRegistryRefresh } from './m68-model-registry-refresh.js';
 import { applyM69A2ASkillsV2 } from './m69-a2a-skills-v2.js';
 import { applyM70HandlerKindsV2 } from './m70-handler-kinds-v2.js';
+import { applyM71Guardrails2026 } from './m71-guardrails-2026.js';
+import { applyM72SvToolsV2 } from './m72-sv-tools-v2.js';
+import { applyM73KaggleMeshV2 } from './m73-kaggle-mesh-v2.js';
+import { applyM74AgentStrategyDefaults2026 } from './m74-agent-strategy-defaults-2026.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -108,6 +112,10 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm68-model-registry-refresh', description: 'Model Registry Refresh (mid-2026): context_window_k + max_output_tokens_k on model_pricing; supports_computer_use + supports_long_context + supports_realtime_audio on model_capability_scores; disable Gemini 1.5 / llama3 / phi3 / gemma2; quality-score corrections', run: applyM68ModelRegistryRefresh },
   { id: 'm69-a2a-skills-v2', description: 'A2A Skills Taxonomy Expansion (mid-2026): 12 new a2a_skills (computer-use, browser-automation, code-execution, document-intelligence, image-analysis, image-generation, voice-interaction, data-pipeline, memory-retrieval, workflow-orchestration, research-synthesis, hypothesis-validation); update supervisor-orchestration workers; add video/*/html/openxmlformats MIME types to existing skills', run: applyM69A2ASkillsV2 },
   { id: 'm70-handler-kinds-v2', description: 'Handler Kinds & Attention Policies Taxonomy Expansion (mid-2026): 8 new live_handler_kinds (agentic.computer-use, agentic.browser, agentic.code-interpreter, agentic.voice-realtime, agentic.multimodal, deterministic.mapreduce, multi-agent.swarm, external.mcp-tool); 4 new live_attention_policies (event.webhook-trigger, event.file-watcher, event.db-change, model.llm-relevance)', run: applyM70HandlerKindsV2 },
+  { id: 'm71-guardrails-2026', description: 'Guardrails Modernization (mid-2026 Phase 4): ADD judge_model + compliance_framework columns; raise sycophancy_judge priority 59→72; stamp judge_model on existing model-graded rows; INSERT 18 new guardrail rows (EU AI Act ×4, AI-Content ×4, Agent-Safety ×5, IP ×2, Residency ×3)', run: applyM71Guardrails2026 },
+  { id: 'm72-sv-tools-v2', description: 'Scientific Validation Enhancement (mid-2026 Phase 5): enable 3 SymPy tools; INSERT 12 new SV tool catalog entries (7 literature, 3 statistical, 2 simulation); UPDATE standard/premium budgets; INSERT express + research budget envelopes; INSERT 3 new SV specialist agents (Rex/Dana/Bianca); enable sv-supervisor', run: applyM72SvToolsV2 },
+  { id: 'm73-kaggle-mesh-v2', description: 'Kaggle Mesh & Playbook Modernization (mid-2026 Phase 6): UPDATE kaggle_role_capabilities — add KAGGLE_READ_LEADERBOARD to strategist + submitter, KAGGLE_LOCAL_COMPUTE to implementer; new playbooks (NLP/Vision/TimeSeries) + updated GENERIC_ML_SOLVER/DISCOVERY/ARC content wired via bumped seedKaggleArcPlaybook; new mesh agents (leaderboard_monitor, parallel_implementer, debrief) + edges wired via updated seedLiveMeshDefinitions', run: applyM73KaggleMeshV2 },
+  { id: 'm74-agent-strategy-defaults-2026', description: 'Agent Strategy Defaults 2026 (mid-2026 Phase 7): ADD hitl_threshold + max_agent_hops + tool_confirmation_level + memory_policy columns to agent_strategy_settings; UPDATE global row: a2a_enabled=1, supervisor_parallel_delegation=1, reflect_enabled=1; INSERT web/operator + api/headless mode_labels rows', run: applyM74AgentStrategyDefaults2026 },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

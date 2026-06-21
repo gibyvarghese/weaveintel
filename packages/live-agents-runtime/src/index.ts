@@ -60,6 +60,16 @@ export { deterministicMapReduceHandler, type DeterministicMapReduceConfig } from
 export { multiAgentSwarmHandler, type MultiAgentSwarmConfig } from './handlers/multi-agent-swarm.js';
 export { externalMcpToolHandler, type ExternalMcpToolConfig } from './handlers/external-mcp-tool.js';
 
+// Computer Use — weaveAgent bridge + tool registry
+export {
+  createCuaToolRegistry,
+  type CuaToolRegistryOptions,
+  wrapModelForCua,
+  type WrapModelForCuaOptions,
+  createCuaWeaveAgent,
+  type CuaWeaveAgentConfig,
+} from './computer-use/index.js';
+
 // Phase 4 — In-process run cancellation bus
 export { RunCancellationBus } from './run-cancellation.js';
 

@@ -3143,6 +3143,24 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare('DELETE FROM capability_policy_bindings WHERE id = ?').run(id);
   }
 
+  // ─── Agent Strategy Settings (Phase 7 / m74) ───────────────
+
+  async getAgentStrategySettings(id: string): Promise<import('./db-types/agents.js').AgentStrategySettingsRow | null> {
+    return (this.d.prepare('SELECT * FROM agent_strategy_settings WHERE id = ?').get(id) as import('./db-types/agents.js').AgentStrategySettingsRow | undefined) ?? null;
+  }
+
+  async listAgentStrategySettings(): Promise<import('./db-types/agents.js').AgentStrategySettingsRow[]> {
+    return this.d.prepare('SELECT * FROM agent_strategy_settings ORDER BY scope ASC, id ASC').all() as import('./db-types/agents.js').AgentStrategySettingsRow[];
+  }
+
+  async updateAgentStrategySettings(id: string, patch: Partial<Omit<import('./db-types/agents.js').AgentStrategySettingsRow, 'id' | 'updated_at'>>): Promise<void> {
+    const fields = Object.keys(patch) as Array<keyof typeof patch>;
+    if (fields.length === 0) return;
+    const setClauses = fields.map(f => `${f} = ?`).join(', ');
+    const values = fields.map(f => patch[f] ?? null);
+    this.d.prepare(`UPDATE agent_strategy_settings SET ${setClauses}, updated_at = datetime('now') WHERE id = ?`).run(...values, id);
+  }
+
   // ─── Cost Governor Phase 2: Cost Policies ──────────────────
 
   async createCostPolicy(p: Omit<CostPolicyRow, 'created_at' | 'updated_at'>): Promise<void> {
@@ -6927,7 +6945,10 @@ export class SQLiteAdapter implements DatabaseAdapter {
     }
 
     // ── Hypothesis Validation seed data ──────────────────────
-    if (cnt('hv_budget_envelope') === 0) {
+    // Check for the specific seed ID rather than "table is empty" so that
+    // bootstrap migrations that pre-insert SV budget envelopes (e.g. m72) do
+    // not suppress creation of the system default envelopes.
+    if (!(this.d.prepare(`SELECT 1 FROM hv_budget_envelope WHERE id = '019500000-0000-7000-8000-000000000001'`).get())) {
       await this.createBudgetEnvelope({
         id: '019500000-0000-7000-8000-000000000001',
         tenant_id: 'system',

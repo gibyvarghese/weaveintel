@@ -28,6 +28,10 @@ export type GuardrailSeedRow = {
   config: string;
   priority: number;
   enabled: 0 | 1;
+  /** Phase 4: which model should grade this guardrail (e.g. claude-haiku-4-5-20251001). */
+  judge_model?: string;
+  /** Phase 4: regulatory/compliance framework this guardrail enforces. */
+  compliance_framework?: string;
 };
 
 export const DEFAULT_GUARDRAILS: GuardrailSeedRow[] = [

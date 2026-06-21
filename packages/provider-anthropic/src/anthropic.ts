@@ -49,6 +49,7 @@ import {
   getContextWindow,
   getMaxOutputTokens,
 } from './anthropic-models.js';
+import { COMPUTER_USE_BETA } from './anthropic-computer-use.js';
 
 // Re-export provider options from shared
 export type { AnthropicProviderOptions } from './shared.js';
@@ -102,7 +103,9 @@ export function weaveAnthropicModel(
     async generate(ctx: ExecutionContext, request: ModelRequest): Promise<ModelResponse> {
       const apiKey = resolveApiKey(opts);
       const meta = (request.metadata ?? {}) as AnthropicRequestOptions;
-      const headers = makeHeaders(opts, apiKey, meta.betaFeatures);
+      const cuaTools = meta.computerUseTools ?? [];
+      const extraBeta = cuaTools.length > 0 ? [COMPUTER_USE_BETA] : [];
+      const headers = makeHeaders(opts, apiKey, [...(meta.betaFeatures ?? []), ...extraBeta]);
       const { system, messages } = buildAnthropicMessages(request.messages);
 
       const body: Record<string, unknown> = {
@@ -114,7 +117,10 @@ export function weaveAnthropicModel(
       const systemPrompt = meta.systemPrompt ?? system;
       if (systemPrompt) body['system'] = systemPrompt;
 
-      if (request.tools) body['tools'] = buildAnthropicTools(request.tools);
+      // Merge standard function-calling tools with CUA native tools
+      const standardTools = buildAnthropicTools(request.tools) ?? [];
+      const allTools = [...standardTools, ...cuaTools];
+      if (allTools.length > 0) body['tools'] = allTools;
       const tc = buildToolChoice(request.toolChoice);
       if (tc) body['tool_choice'] = tc;
 
@@ -157,7 +163,9 @@ export function weaveAnthropicModel(
     stream(ctx: ExecutionContext, request: ModelRequest): ModelStream {
       const apiKey = resolveApiKey(opts);
       const meta = (request.metadata ?? {}) as AnthropicRequestOptions;
-      const headers = makeHeaders(opts, apiKey, meta.betaFeatures);
+      const cuaToolsStream = meta.computerUseTools ?? [];
+      const extraBetaStream = cuaToolsStream.length > 0 ? [COMPUTER_USE_BETA] : [];
+      const headers = makeHeaders(opts, apiKey, [...(meta.betaFeatures ?? []), ...extraBetaStream]);
       const { system, messages } = buildAnthropicMessages(request.messages);
 
       const body: Record<string, unknown> = {
@@ -169,7 +177,9 @@ export function weaveAnthropicModel(
 
       const systemPrompt = meta.systemPrompt ?? system;
       if (systemPrompt) body['system'] = systemPrompt;
-      if (request.tools) body['tools'] = buildAnthropicTools(request.tools);
+      const standardToolsStream = buildAnthropicTools(request.tools) ?? [];
+      const allToolsStream = [...standardToolsStream, ...cuaToolsStream];
+      if (allToolsStream.length > 0) body['tools'] = allToolsStream;
       const tc = buildToolChoice(request.toolChoice);
       if (tc) body['tool_choice'] = tc;
       if (request.temperature != null) body['temperature'] = request.temperature;

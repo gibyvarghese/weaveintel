@@ -22,6 +22,10 @@ export interface GuardrailRow {
   enabled: number;
   trigger_conditions?: string | null;     // JSON ConditionNode — null/absent = always run
   trigger_description?: string | null;    // human-readable summary of the condition
+  /** Phase 4: model ID used as LLM judge for this guardrail (e.g. claude-haiku-4-5-20251001). */
+  judge_model?: string | null;
+  /** Phase 4: regulatory/compliance framework this guardrail enforces (e.g. EU_AI_ACT_ART_5). */
+  compliance_framework?: string | null;
   created_at: string;
   updated_at: string;
 }

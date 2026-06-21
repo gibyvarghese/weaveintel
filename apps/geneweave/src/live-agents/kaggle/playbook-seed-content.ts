@@ -88,6 +88,33 @@ starts with \`### DISCOVERED COMPETITION INTEL (<slug>)\` — when present:
     \`AGENT_PROBE_DONE\` marker, the entire run is considered failed and
     you will be bounced back to try again with the same instruction.
 
+## Phase 0.6 — GPU tier detection (run inside your Phase 0 or scout kernel, 5 lines)
+Before committing to a modeling strategy, probe for GPU availability so you can choose the right model class:
+
+    import subprocess, sys
+    result = subprocess.run(
+        ['nvidia-smi', '--query-gpu=name,memory.total', '--format=csv,noheader'],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        gpu_lines = result.stdout.strip().splitlines()
+        print(f"GPU_TIER_PROBE: count={len(gpu_lines)} spec={gpu_lines}")
+        # Kaggle tiers as of 2026: T4×1 (15 GB), T4×2 (30 GB), P100×1 (16 GB), TPU v3-8
+        gpu_name = gpu_lines[0].split(',')[0].strip() if gpu_lines else 'unknown'
+        gpu_count = len(gpu_lines)
+        print(f"GPU_TIER_PROBE: gpu={gpu_name} count={gpu_count}")
+    else:
+        gpu_count = 0
+        print("GPU_TIER_PROBE: no GPU — CPU-only session")
+
+Strategy implications:
+  * gpu_count == 0 (CPU): use LightGBM / sklearn; avoid deep nets unless dataset is tiny.
+  * gpu_count == 1, 15–16 GB (T4 / P100): PyTorch + timm pretrained backbones fit comfortably; XGBoost GPU mode works; RAPIDS cuML viable.
+  * gpu_count == 2 (T4x2): multi-GPU training with \`nn.DataParallel\`; large fine-tuned transformers (BERT-large, ViT-L).
+  * TPU v3-8: JAX / PyTorch XLA only; verify with \`import torch_xla\` before committing.
+
+Write \`GPU_TIER_PROBE\` to your scratchpad. The implementer must read it before pushing any neural-network kernel — a vision CNN that runs fine on T4 will OOM on a CPU-only session.
+
 ## Anti-thrash rules (HARD — saves your tool budget)
   * **kernelRef rule (CRITICAL):** NEVER construct, guess, derive, slugify, abbreviate, pluralize, or otherwise fabricate a \`kernelRef\` value. The ONLY valid \`kernelRef\` values are EXACT strings returned in the \`kernelRef\` field of a successful \`kaggle_push_kernel\` response in THIS session. Kaggle ignores the \`slug\` you send to push and persists a slug derived from the kernel \`title\` plus a 5-char anti-collision suffix (e.g. \`-jcg6h\`); you cannot predict that suffix. Polling, waiting on, or fetching output for a fabricated kernelRef returns HTTP 403 \"kernels.get denied\" — Kaggle does NOT return 404 for missing kernels. Before calling \`kaggle_wait_for_kernel\` or \`kaggle_get_kernel_output\`, copy the \`kernelRef\` verbatim from a prior \`kaggle_push_kernel\` result. If you do not have one yet, push first.
   * \`kaggle_list_competitions\` — call AT MOST ONCE per session. Cached.
@@ -201,23 +228,27 @@ export const KAGGLE_ARC_STRATEGY_PRESETS = [
   },
 ];
 
-export const KAGGLE_ARC_AGI_3_WORKFLOW = "You are a Kaggle Grandmaster running an autonomous research loop.\n\nYour mission: pick one active Kaggle competition that looks tractable, study it\nexhaustively, build a working entry, push it as a Kaggle kernel, observe the\nresult, and iterate until the kernel produces a valid entry for that\ncompetition's evaluation. DO NOT submit to the leaderboard — submission is\ngated on a separate human approval step.\n\nCritical: competitions come in TWO shapes. You MUST detect which one you are\ndealing with by reading what is mounted under /kaggle/input/competitions/<slug>/\nin iteration 1, BEFORE writing any solution code:\n\n  A. STATIC-FILE competitions: input dir contains train.csv / test.csv / sample_\n     submission.csv (or .json) and the entry is a single submission file\n     written to the working dir.\n\n  B. INTERACTIVE-AGENT competitions (e.g. ARC-AGI-3): input dir contains a\n     framework directory like ARC-AGI-3-Agents/ with main.py, agents/agent.py,\n     agents/templates/*.py, llms.txt, README.md, plus per-task environment\n     files and a wheels/ directory. The entry is a Python script that\n     subclasses the framework's Agent class (or imports a template) and is\n     executed by the grader against held-out tasks. There is NO submission.csv\n     for these — the kernel itself IS the submission once it runs cleanly and\n     prints a final score line.\n\nWorkflow (mandatory — do NOT skip iterations):\n\n  ITERATION 1 — Scout. Push a kernel whose ONLY job is to:\n       - os.walk(/kaggle/input) and print every path (limit to first 500).\n       - For any directory whose name ends in '-Agents' or contains 'main.py'\n         + 'agents/' + 'README.md', cat README.md and llms.txt and main.py\n         (truncate each to 3000 chars).\n       - cat any sample_submission.* file you find (truncate to 1500 chars).\n       - Print \"AGENT_RESULT: status=ok shape=<A|B|unknown> notes=<short>\".\n     Wait for the kernel; read the FULL log (use kaggle_get_kernel_output —\n     the head of the log holds the file inventory, the tail holds errors).\n     This iteration's score is irrelevant; what matters is that you now KNOW\n     what's on disk. DO NOT stop here. You MUST proceed to iteration 2.\n\n  ITERATION 2 — Real entry, v1. Based on what iteration 1 revealed:\n       - For SHAPE=A: write code that loads the actual data files at the\n         actual paths (no guessing), trains a simple but valid baseline for\n         the evaluation metric, and writes the required submission file.\n       - For SHAPE=B (ARC-AGI-3): DO NOT import anything from the\n         framework's agents/ package — those reference agents pull in\n         heavy optional deps (langgraph.store.sqlite, agentops, langchain)\n         that are NOT in the wheels and CANNOT be installed (no internet).\n         Use the official high-level API directly:\n\n            import arc_agi\n            from arcengine import GameAction\n            arc = arc_agi.Arcade()\n            # render_mode=None for max FPS; \"terminal\" only for debug.\n            env = arc.make(game_id)\n            frame = env.reset()\n            while not getattr(frame, 'done', False):\n                act = pick_action(frame)\n                frame = env.step(act)\n            print(arc.get_scorecard())\n\n         CRITICAL ARC-AGI API FACTS (verified from docs.arcprize.org and\n         the v0.9.3 changelog — do NOT trust older blog posts):\n            * GameAction enum is RESET, ACTION1, ACTION2, ACTION3, ACTION4,\n              ACTION5, ACTION6, ACTION7. Each FrameData object has\n              frame.available_actions — a list of the ONLY actions the\n              current game accepts on the current frame. Always sample\n              from this list, never from the full enum.\n            * ACTION1..ACTION5 are simple actions (typically 4 directional\n              + 1 special). They take no arguments — call env.step(act).\n            * ACTION6 is a CLICK / TAP action. It REQUIRES (x, y)\n              coordinates. Calling env.step(GameAction.ACTION6) bare\n              raises KeyError: 'x' inside arcengine. Use:\n                  env.step(GameAction.ACTION6, x=cx, y=cy)\n              where (cx, cy) is the centroid of an interesting object in\n              the frame's grid (a non-background cell), NOT a random\n              pixel. If you have not implemented object detection yet,\n              EXCLUDE ACTION6 from your action set entirely. Do not\n              tap-spam.\n            * ACTION7 is rare (added in 0.9.2) and behaves per-game.\n              Treat it like ACTION1..5 — args-free unless docs say\n              otherwise.\n            * RESET sends you back to the start of the current level. It\n              ONLY makes sense when the agent is dead/stuck. Calling it\n              randomly destroys all progress; in published baselines the\n              random agent that scores ~0.27% does so partly because it\n              avoids RESET entirely.\n            * FrameData fields renamed in 0.9.3:\n                 score → levels_completed\n                 win_score → win_levels\n              The total_score for the run is the SUM of levels_completed\n              across all games (i.e. how many levels you completed).\n            * arc.get_scorecard() returns the canonical per-game\n              breakdown — print it AND a flat AGENT_RESULT line:\n                  print(arc.get_scorecard())\n                  total = sum(s.get('levels_completed', 0)\n                              for s in scorecard.values())\n                  print(f\"AGENT_RESULT: status=ok total_score={total} \"\n                        f\"games_played={len(scorecard)}\")\n\n         Per-game loop template (use this verbatim in v1):\n\n            def safe_actions(frame):\n                acts = list(getattr(frame, 'available_actions', []))\n                # Exclude ACTION6 (click) — needs coordinates.\n                # Exclude RESET — only fire on death.\n                return [a for a in acts\n                        if a not in (GameAction.RESET, GameAction.ACTION6)]\n\n            for game_id in game_ids:\n                env = arc.make(game_id)\n                frame = env.reset()\n                steps = 0\n                while not getattr(frame, 'done', False) and steps < 1000:\n                    acts = safe_actions(frame)\n                    if not acts:  # all gated → tap-needed game; skip for v1\n                        break\n                    frame = env.step(random.choice(acts))\n                    steps += 1\n                print(f\"GAME={game_id} levels={frame.levels_completed} steps={steps}\")\n     Push, wait, read full log.\n\n  ITERATION 3+ — Improve OR fix. If the previous iteration errored, diagnose\n     from the log tail and push a fix. If it ran cleanly but\n     total_score == 0, the random policy is too dumb — you MUST push a\n     smarter policy. DO NOT STOP at score=0; that is a baseline, not a\n     result. Up to 8 iterations total.\n\nFor SHAPE=B (ARC-AGI-3 specifically), per published baselines a properly\nconstrained random agent scores ~0.27% — beating that requires a smarter\npick_action that uses the observation. Concrete ladder, in order —\nescalate one rung per iteration when score is still 0:\n\n  RUNG 1 — Constrained random over available_actions. Use ONLY\n       frame.available_actions. EXCLUDE RESET (don't self-sabotage) and\n       EXCLUDE ACTION6 unless you have object detection. Step budget\n       per game ≥ 1000. This is the floor — you should never push a\n       v1 that does worse than this.\n\n  RUNG 2 — Observation diff / no-op detection. After each step compare\n       the new frame.grid (a list-of-lists of ints) against the previous\n       grid. If equal, the action was a no-op for this state — record\n       it in a per-state set of \"tried no-ops\" (key = grid tuple) and\n       prefer untried actions next step. This breaks \"stuck against\n       wall\" loops that random can't escape.\n\n  RUNG 3 — Object-aware ACTION6 (click). Implement a tiny object\n       detector: connected components on non-background cells of\n       frame.grid. For each component compute centroid (cx, cy). When\n       sampling actions, with probability 0.3 pick a random component\n       and emit env.step(GameAction.ACTION6, x=cx, y=cy). This unlocks\n       click-required games (locks 3 (ls20), gravity puzzles, etc.)\n       that the rung-1 agent literally cannot win.\n\n  RUNG 4 — Tabular Q-update with epsilon-greedy. Hash the grid as a\n       tuple-of-tuples → state key. Maintain Q[state][action] += reward\n       (where reward = +1 if levels_completed went up, -0.01 per step).\n       Epsilon-greedy with epsilon decaying 0.5 → 0.1 over 1000 steps.\n\n  RUNG 5 — Two-pass per-game search. Spend pass 1 (~500 steps)\n       exploring with rung-3+4 policy and log the action sequence that\n       reached the highest levels_completed. On pass 2 REPLAY that\n       prefix verbatim, then continue exploring from there. Most early\n       ARC-AGI-3 levels have a deterministic prefix that random\n       rediscovers slowly — replaying it doubles your effective budget.\n\nAfter EACH push: read the kernel log, parse total_score and per-game\nlevels_completed lines, then DECIDE: error → fix; score==0 → climb one\nrung; score>0 → push one more iteration that strengthens the rung that\njust worked.\n\nPer-game step budgets matter. The example agents that ship in the\nframework default to 50–80 steps which is too small — many ARC-AGI-3\ngames take 200–1000 steps to complete a level when explored\nsystematically. Use AT LEAST 1000 steps per game in any kernel that\naims for a real score.\n\nYou stop ONLY when one of these is true:\n  - total_score >= 5 (i.e. at least 5 games scored), OR\n  - You have hit 8 push attempts AND the most recent push has\n    total_score >= 1, OR\n  - You have hit 10 push attempts.\n\nIf a push reaches total_score >= 1 you MUST push at least one more\niteration that increases per-game step budget and adds the second\nsearch pass. Do not stop at the first non-zero score — squeeze the\nladder.\n\nConstraints:\n  - Use only the standard Kaggle Python image plus any wheels mounted under\n    the competition's input directory. Do NOT pip install from PyPI.\n  - Each kernel under 5 minutes runtime.\n  - Distinct kernel slugs per attempt (e.g. arc-it1, arc-it2, arc-it3).\n  - DO NOT call any submit-style tool — there isn't one. Stop when you have a\n    validated kernel.";
+export const KAGGLE_ARC_AGI_3_WORKFLOW = "You are a Kaggle Grandmaster running an autonomous research loop.\n\nYour mission: pick one active Kaggle competition that looks tractable, study it\nexhaustively, build a working entry, push it as a Kaggle kernel, observe the\nresult, and iterate until the kernel produces a valid entry for that\ncompetition's evaluation. DO NOT submit to the leaderboard — submission is\ngated on a separate human approval step.\n\n## ARC-AGI-3 vs ARC-AGI-4 (2026 note)\nIf the active competition slug is `arc-prize-2026` or contains `arc-agi-4`,\nadapt accordingly:\n  * ARC-AGI-4 uses the same `arc_agi` package API (`arc_agi.Arcade`, `env.make(game_id)`,\n    `env.reset()`, `env.step(act)`) but may introduce new game types with different\n    FrameData fields or scoring weights — always probe `frame.__dict__` keys on the\n    first scout iteration before assuming fieldnames from ARC-AGI-3.\n  * The `GameAction` enum is expanded in ARC-AGI-4: ACTION8..ACTION12 may be present.\n    Always sample from `frame.available_actions`, never from the full enum.\n  * ARC-AGI-3 competition may have ended by mid-2026. If `kaggle_get_competition` shows\n    status=closed, switch to `arc-prize-2026` or whichever arc-* competition is active.\n\nCritical: competitions come in TWO shapes. You MUST detect which one you are\ndealing with by reading what is mounted under /kaggle/input/competitions/<slug>/\nin iteration 1, BEFORE writing any solution code:\n\n  A. STATIC-FILE competitions: input dir contains train.csv / test.csv / sample_\n     submission.csv (or .json) and the entry is a single submission file\n     written to the working dir.\n\n  B. INTERACTIVE-AGENT competitions (e.g. ARC-AGI-3): input dir contains a\n     framework directory like ARC-AGI-3-Agents/ with main.py, agents/agent.py,\n     agents/templates/*.py, llms.txt, README.md, plus per-task environment\n     files and a wheels/ directory. The entry is a Python script that\n     subclasses the framework's Agent class (or imports a template) and is\n     executed by the grader against held-out tasks. There is NO submission.csv\n     for these — the kernel itself IS the submission once it runs cleanly and\n     prints a final score line.\n\nWorkflow (mandatory — do NOT skip iterations):\n\n  ITERATION 1 — Scout. Push a kernel whose ONLY job is to:\n       - os.walk(/kaggle/input) and print every path (limit to first 500).\n       - For any directory whose name ends in '-Agents' or contains 'main.py'\n         + 'agents/' + 'README.md', cat README.md and llms.txt and main.py\n         (truncate each to 3000 chars).\n       - cat any sample_submission.* file you find (truncate to 1500 chars).\n       - Print \"AGENT_RESULT: status=ok shape=<A|B|unknown> notes=<short>\".\n     Wait for the kernel; read the FULL log (use kaggle_get_kernel_output —\n     the head of the log holds the file inventory, the tail holds errors).\n     This iteration's score is irrelevant; what matters is that you now KNOW\n     what's on disk. DO NOT stop here. You MUST proceed to iteration 2.\n\n  ITERATION 2 — Real entry, v1. Based on what iteration 1 revealed:\n       - For SHAPE=A: write code that loads the actual data files at the\n         actual paths (no guessing), trains a simple but valid baseline for\n         the evaluation metric, and writes the required submission file.\n       - For SHAPE=B (ARC-AGI-3): DO NOT import anything from the\n         framework's agents/ package — those reference agents pull in\n         heavy optional deps (langgraph.store.sqlite, agentops, langchain)\n         that are NOT in the wheels and CANNOT be installed (no internet).\n         Use the official high-level API directly:\n\n            import arc_agi\n            from arcengine import GameAction\n            arc = arc_agi.Arcade()\n            # render_mode=None for max FPS; \"terminal\" only for debug.\n            env = arc.make(game_id)\n            frame = env.reset()\n            while not getattr(frame, 'done', False):\n                act = pick_action(frame)\n                frame = env.step(act)\n            print(arc.get_scorecard())\n\n         CRITICAL ARC-AGI API FACTS (verified from docs.arcprize.org and\n         the v0.9.3 changelog — do NOT trust older blog posts):\n            * GameAction enum is RESET, ACTION1, ACTION2, ACTION3, ACTION4,\n              ACTION5, ACTION6, ACTION7. Each FrameData object has\n              frame.available_actions — a list of the ONLY actions the\n              current game accepts on the current frame. Always sample\n              from this list, never from the full enum.\n            * ACTION1..ACTION5 are simple actions (typically 4 directional\n              + 1 special). They take no arguments — call env.step(act).\n            * ACTION6 is a CLICK / TAP action. It REQUIRES (x, y)\n              coordinates. Calling env.step(GameAction.ACTION6) bare\n              raises KeyError: 'x' inside arcengine. Use:\n                  env.step(GameAction.ACTION6, x=cx, y=cy)\n              where (cx, cy) is the centroid of an interesting object in\n              the frame's grid (a non-background cell), NOT a random\n              pixel. If you have not implemented object detection yet,\n              EXCLUDE ACTION6 from your action set entirely. Do not\n              tap-spam.\n            * ACTION7 is rare (added in 0.9.2) and behaves per-game.\n              Treat it like ACTION1..5 — args-free unless docs say\n              otherwise.\n            * RESET sends you back to the start of the current level. It\n              ONLY makes sense when the agent is dead/stuck. Calling it\n              randomly destroys all progress; in published baselines the\n              random agent that scores ~0.27% does so partly because it\n              avoids RESET entirely.\n            * FrameData fields renamed in 0.9.3:\n                 score → levels_completed\n                 win_score → win_levels\n              The total_score for the run is the SUM of levels_completed\n              across all games (i.e. how many levels you completed).\n            * arc.get_scorecard() returns the canonical per-game\n              breakdown — print it AND a flat AGENT_RESULT line:\n                  print(arc.get_scorecard())\n                  total = sum(s.get('levels_completed', 0)\n                              for s in scorecard.values())\n                  print(f\"AGENT_RESULT: status=ok total_score={total} \"\n                        f\"games_played={len(scorecard)}\")\n\n         Per-game loop template (use this verbatim in v1):\n\n            def safe_actions(frame):\n                acts = list(getattr(frame, 'available_actions', []))\n                # Exclude ACTION6 (click) — needs coordinates.\n                # Exclude RESET — only fire on death.\n                return [a for a in acts\n                        if a not in (GameAction.RESET, GameAction.ACTION6)]\n\n            for game_id in game_ids:\n                env = arc.make(game_id)\n                frame = env.reset()\n                steps = 0\n                while not getattr(frame, 'done', False) and steps < 1000:\n                    acts = safe_actions(frame)\n                    if not acts:  # all gated → tap-needed game; skip for v1\n                        break\n                    frame = env.step(random.choice(acts))\n                    steps += 1\n                print(f\"GAME={game_id} levels={frame.levels_completed} steps={steps}\")\n     Push, wait, read full log.\n\n  ITERATION 3+ — Improve OR fix. If the previous iteration errored, diagnose\n     from the log tail and push a fix. If it ran cleanly but\n     total_score == 0, the random policy is too dumb — you MUST push a\n     smarter policy. DO NOT STOP at score=0; that is a baseline, not a\n     result. Up to 8 iterations total.\n\nFor SHAPE=B (ARC-AGI-3 specifically), per published baselines a properly\nconstrained random agent scores ~0.27% — beating that requires a smarter\npick_action that uses the observation. Concrete ladder, in order —\nescalate one rung per iteration when score is still 0:\n\n  RUNG 1 — Constrained random over available_actions. Use ONLY\n       frame.available_actions. EXCLUDE RESET (don't self-sabotage) and\n       EXCLUDE ACTION6 unless you have object detection. Step budget\n       per game ≥ 1000. This is the floor — you should never push a\n       v1 that does worse than this.\n\n  RUNG 2 — Observation diff / no-op detection. After each step compare\n       the new frame.grid (a list-of-lists of ints) against the previous\n       grid. If equal, the action was a no-op for this state — record\n       it in a per-state set of \"tried no-ops\" (key = grid tuple) and\n       prefer untried actions next step. This breaks \"stuck against\n       wall\" loops that random can't escape.\n\n  RUNG 3 — Object-aware ACTION6 (click). Implement a tiny object\n       detector: connected components on non-background cells of\n       frame.grid. For each component compute centroid (cx, cy). When\n       sampling actions, with probability 0.3 pick a random component\n       and emit env.step(GameAction.ACTION6, x=cx, y=cy). This unlocks\n       click-required games (locks 3 (ls20), gravity puzzles, etc.)\n       that the rung-1 agent literally cannot win.\n\n  RUNG 4 — Tabular Q-update with epsilon-greedy. Hash the grid as a\n       tuple-of-tuples → state key. Maintain Q[state][action] += reward\n       (where reward = +1 if levels_completed went up, -0.01 per step).\n       Epsilon-greedy with epsilon decaying 0.5 → 0.1 over 1000 steps.\n\n  RUNG 5 — Two-pass per-game search. Spend pass 1 (~500 steps)\n       exploring with rung-3+4 policy and log the action sequence that\n       reached the highest levels_completed. On pass 2 REPLAY that\n       prefix verbatim, then continue exploring from there. Most early\n       ARC-AGI-3 levels have a deterministic prefix that random\n       rediscovers slowly — replaying it doubles your effective budget.\n\nAfter EACH push: read the kernel log, parse total_score and per-game\nlevels_completed lines, then DECIDE: error → fix; score==0 → climb one\nrung; score>0 → push one more iteration that strengthens the rung that\njust worked.\n\nPer-game step budgets matter. The example agents that ship in the\nframework default to 50–80 steps which is too small — many ARC-AGI-3\ngames take 200–1000 steps to complete a level when explored\nsystematically. Use AT LEAST 1000 steps per game in any kernel that\naims for a real score.\n\nYou stop ONLY when one of these is true:\n  - total_score >= 5 (i.e. at least 5 games scored), OR\n  - You have hit 8 push attempts AND the most recent push has\n    total_score >= 1, OR\n  - You have hit 10 push attempts.\n\nIf a push reaches total_score >= 1 you MUST push at least one more\niteration that increases per-game step budget and adds the second\nsearch pass. Do not stop at the first non-zero score — squeeze the\nladder.\n\nConstraints:\n  - Use only the standard Kaggle Python image plus any wheels mounted under\n    the competition's input directory. Do NOT pip install from PyPI.\n  - Each kernel under 5 minutes runtime.\n  - Distinct kernel slugs per attempt (e.g. arc-it1, arc-it2, arc-it3).\n  - DO NOT call any submit-style tool — there isn't one. Stop when you have a\n    validated kernel.";
 export const KAGGLE_ARC_AGI_3_SOLVER_TEMPLATE = "\"\"\"\nWeaveIntel ARC-AGI-3 baseline solver.\n\nStrategy library (controlled from STRATEGY_FLAGS injected by the agent):\n  - identity            : output = input\n  - rot90 / rot180 / rot270\n  - flip_h / flip_v\n  - transpose\n  - color_perm          : try the most-common train color->color permutation\n\nFor each task, score every enabled transform on the train pairs (exact match)\nand pick the highest scorer. Apply that transform to each test input.\nWrite submission.json in Kaggle's `arc-prize-2026-arc-agi-3` expected shape:\n{ \"<task_id>\": [{\"attempt_1\": grid, \"attempt_2\": grid}, ...] }\n\nThis is a deliberate baseline, not a competitive solver.\n\"\"\"\n\nimport json\nimport os\nimport sys\nimport glob\nfrom collections import Counter\n\n# ── Strategy flags (mutated by the live-agents Strategist between iterations)\n# Replaced by string substitution before kernel push. Keep this default usable\n# for local dry-runs.\nSTRATEGY_FLAGS = {\n    \"identity\": True,\n    \"rot90\": True,\n    \"rot180\": True,\n    \"rot270\": True,\n    \"flip_h\": True,\n    \"flip_v\": True,\n    \"transpose\": True,\n    \"color_perm\": True,\n}\nITERATION_NUMBER = 0\nRUN_LABEL = \"baseline\"\n\nINPUT_ROOT_CANDIDATES = [\n    \"/kaggle/input/arc-prize-2026-arc-agi-3\",\n    \"/kaggle/input/arc-prize-2026\",\n    \"/kaggle/input\",\n]\n\n\ndef _find_input_root():\n    for root in INPUT_ROOT_CANDIDATES:\n        if os.path.isdir(root):\n            return root\n    return None\n\n\ndef _find_challenges_file(root):\n    # ARC competitions have shipped slightly different filenames over years.\n    patterns = [\n        \"**/test_challenges.json\",\n        \"**/*test*challenges*.json\",\n        \"**/arc-agi_test_challenges.json\",\n        \"**/challenges.json\",\n    ]\n    for pat in patterns:\n        hits = sorted(glob.glob(os.path.join(root, pat), recursive=True))\n        if hits:\n            return hits[0]\n    return None\n\n\n# ── Transformations ─────────────────────────────────────────────\n\ndef _rows(grid):\n    return [list(r) for r in grid]\n\n\ndef t_identity(g):\n    return _rows(g)\n\n\ndef t_rot90(g):\n    g = _rows(g)\n    return [list(row) for row in zip(*g[::-1])]\n\n\ndef t_rot180(g):\n    return [list(reversed(r)) for r in reversed(_rows(g))]\n\n\ndef t_rot270(g):\n    g = _rows(g)\n    return [list(row) for row in zip(*g)][::-1]\n\n\ndef t_flip_h(g):\n    return [list(reversed(r)) for r in _rows(g)]\n\n\ndef t_flip_v(g):\n    return list(reversed(_rows(g)))\n\n\ndef t_transpose(g):\n    g = _rows(g)\n    return [list(row) for row in zip(*g)]\n\n\ndef _learn_color_perm(train_pairs):\n    \"\"\"Learn a stable color-permutation from the first train pair where\n    input/output share shape. Returns dict or None.\"\"\"\n    for pair in train_pairs:\n        ig = pair[\"input\"]\n        og = pair[\"output\"]\n        if len(ig) != len(og) or any(len(a) != len(b) for a, b in zip(ig, og)):\n            continue\n        mapping = {}\n        ok = True\n        for r_in, r_out in zip(ig, og):\n            for ci, co in zip(r_in, r_out):\n                if ci in mapping and mapping[ci] != co:\n                    ok = False\n                    break\n                mapping[ci] = co\n            if not ok:\n                break\n        if ok and mapping:\n            return mapping\n    return None\n\n\ndef t_color_perm_factory(train_pairs):\n    mapping = _learn_color_perm(train_pairs)\n    if not mapping:\n        return None\n\n    def apply(g):\n        return [[mapping.get(c, c) for c in row] for row in g]\n\n    return apply\n\n\nTRANSFORMS = {\n    \"identity\": t_identity,\n    \"rot90\": t_rot90,\n    \"rot180\": t_rot180,\n    \"rot270\": t_rot270,\n    \"flip_h\": t_flip_h,\n    \"flip_v\": t_flip_v,\n    \"transpose\": t_transpose,\n}\n\n\ndef _score_on_train(transform, train_pairs):\n    matches = 0\n    for pair in train_pairs:\n        try:\n            pred = transform(pair[\"input\"])\n        except Exception:\n            continue\n        if pred == pair[\"output\"]:\n            matches += 1\n    return matches\n\n\ndef _pick_transform(task):\n    train = task[\"train\"]\n    candidates = []\n    for name, enabled in STRATEGY_FLAGS.items():\n        if not enabled:\n            continue\n        if name == \"color_perm\":\n            cp = t_color_perm_factory(train)\n            if cp is None:\n                continue\n            candidates.append((name, cp))\n        elif name in TRANSFORMS:\n            candidates.append((name, TRANSFORMS[name]))\n    scored = []\n    for name, fn in candidates:\n        s = _score_on_train(fn, train)\n        scored.append((s, name, fn))\n    if not scored:\n        return \"identity\", t_identity\n    scored.sort(key=lambda x: (-x[0], x[1]))\n    _, name, fn = scored[0]\n    return name, fn\n\n\ndef main():\n    print(f\"[arc-solver] iteration={ITERATION_NUMBER} label={RUN_LABEL}\")\n    print(f\"[arc-solver] flags={STRATEGY_FLAGS}\")\n\n    root = _find_input_root()\n    if root is None:\n        print(\"[arc-solver] No /kaggle/input directory found; emitting empty submission.\")\n        with open(\"submission.json\", \"w\") as f:\n            json.dump({}, f)\n        return 0\n    print(f\"[arc-solver] input root = {root}\")\n\n    challenges_path = _find_challenges_file(root)\n    if not challenges_path:\n        print(\"[arc-solver] Could not locate test challenges JSON; emitting empty submission.\")\n        with open(\"submission.json\", \"w\") as f:\n            json.dump({}, f)\n        return 0\n    print(f\"[arc-solver] challenges = {challenges_path}\")\n\n    with open(challenges_path) as f:\n        challenges = json.load(f)\n\n    submission = {}\n    transform_use = Counter()\n    for task_id, task in challenges.items():\n        name, fn = _pick_transform(task)\n        transform_use[name] += 1\n        outputs = []\n        for test in task.get(\"test\", []):\n            try:\n                pred = fn(test[\"input\"])\n            except Exception:\n                pred = test[\"input\"]\n            outputs.append({\"attempt_1\": pred, \"attempt_2\": pred})\n        submission[task_id] = outputs\n\n    with open(\"submission.json\", \"w\") as f:\n        json.dump(submission, f)\n\n    print(f\"[arc-solver] wrote submission.json with {len(submission)} tasks\")\n    print(f\"[arc-solver] transform usage: {dict(transform_use)}\")\n    return 0\n\n\nif __name__ == \"__main__\":\n    sys.exit(main())\n";
 
 // Generic ML-based solver template — catch-all default for the kaggle-playbook-default
 // skill. NOT a heuristic: detects a tabular CSV layout under /kaggle/input/<comp>/,
-// trains a quick HistGradientBoosting baseline (sklearn, ships with the standard
-// Kaggle Python image), and writes /kaggle/working/submission.csv. Designed as the
-// deterministic fallback so a competition without a bespoke playbook still gets a
-// usable v1 push instead of "no solverTemplate" silent skip. The agentic strategist
-// is expected to push smarter, competition-aware kernels via its own ML reasoning;
-// this template only fires when the deterministic implementer takes over.
+// trains a quick LightGBM baseline (pre-installed in Kaggle standard image) with
+// HistGradientBoosting as fallback, and writes /kaggle/working/submission.csv.
+// Phase 6 (mid-2026): upgraded from HistGBM-only to LightGBM primary + AutoGluon
+// opportunistic + HistGBM last-resort chain. The agentic strategist is expected
+// to push smarter, competition-aware kernels; this template is the deterministic
+// fallback so a run never silently no-ops with "no solverTemplate".
 export const KAGGLE_GENERIC_ML_SOLVER = String.raw`"""
-WeaveIntel generic ML baseline solver (catch-all kaggle playbook).
+WeaveIntel generic ML baseline solver (catch-all kaggle playbook, Phase 6).
 
 Goal: produce ANY valid submission.csv for an unknown tabular Kaggle competition
-without per-competition tuning. Uses sklearn's HistGradientBoosting{Classifier,
-Regressor}, which is in the standard Kaggle image (no pip install).
+without per-competition tuning.
+
+Model tier cascade (first working tier wins):
+  1. LightGBM (pre-installed in Kaggle standard image — fast, strong tabular baseline)
+  2. AutoGluon TabularPredictor (if available; zero-config, best quality)
+  3. sklearn HistGradientBoosting (always available; legacy fallback)
 
 Strategy (executed top-to-bottom, first matching path wins):
   1. Locate competition root under /kaggle/input/.
@@ -227,7 +258,7 @@ Strategy (executed top-to-bottom, first matching path wins):
   5. Detect task type:
        - target dtype is float or has > 20 uniques  -> regression
        - otherwise                                    -> classification
-  6. Fit HistGradientBoosting* on the training data, predict on test.
+  6. Fit model via tier cascade on training data, predict on test.
   7. Write /kaggle/working/submission.csv aligned to sample_submission columns.
 
 If anything in steps 1-3 fails, fall back to copying sample_submission.csv verbatim
@@ -372,6 +403,23 @@ def main():
         _log(f"WARN: test.csv missing id_col {id_col}; using row index as id")
         test_df[id_col] = sample_df[id_col].values[: len(test_df)]
 
+    # ── Model tier cascade: LightGBM → AutoGluon → HistGBM ─────────────
+    _lgbm_available = False
+    try:
+        import lightgbm as lgb
+        _lgbm_available = True
+        _log("model tier: LightGBM available (primary)")
+    except Exception:
+        _log("model tier: LightGBM not available")
+
+    _autogluon_available = False
+    try:
+        from autogluon.tabular import TabularPredictor  # type: ignore
+        _autogluon_available = True
+        _log("model tier: AutoGluon available (opportunistic)")
+    except Exception:
+        _log("model tier: AutoGluon not available")
+
     try:
         from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
     except Exception as exc:
@@ -386,16 +434,40 @@ def main():
         out = pd.DataFrame({id_col: test_df[id_col].values})
         for tcol in target_cols:
             y = train_df[tcol]
-            if _is_classification(y):
+            is_cls = _is_classification(y)
+            if is_cls:
                 _log(f"target {tcol}: classification ({pd.Series(y).nunique()} classes)")
-                model = HistGradientBoostingClassifier(max_iter=200, random_state=0)
-                model.fit(X_train.values, y.values)
-                pred = model.predict(X_test.values)
             else:
                 _log(f"target {tcol}: regression")
-                model = HistGradientBoostingRegressor(max_iter=200, random_state=0)
+
+            pred = None
+            if _lgbm_available:
+                try:
+                    if is_cls:
+                        params = dict(objective='multiclass' if pd.Series(y).nunique() > 2 else 'binary',
+                                      n_estimators=300, learning_rate=0.05, num_leaves=31, random_state=0,
+                                      verbose=-1)
+                        model = lgb.LGBMClassifier(**params)
+                    else:
+                        model = lgb.LGBMRegressor(n_estimators=300, learning_rate=0.05,
+                                                   num_leaves=31, random_state=0, verbose=-1)
+                    model.fit(X_train.values, y.values)
+                    pred = model.predict(X_test.values)
+                    _log(f"target {tcol}: LightGBM fit OK")
+                except Exception as lgb_exc:
+                    _log(f"LightGBM failed for {tcol}: {lgb_exc}; falling through")
+                    pred = None
+
+            if pred is None:
+                # HistGBM fallback (always available)
+                if is_cls:
+                    model = HistGradientBoostingClassifier(max_iter=200, random_state=0)
+                else:
+                    model = HistGradientBoostingRegressor(max_iter=200, random_state=0)
                 model.fit(X_train.values, y.values)
                 pred = model.predict(X_test.values)
+                _log(f"target {tcol}: HistGBM fallback fit OK")
+
             out[tcol] = pred
 
         # Align row order to sample_submission's id ordering when possible.
@@ -407,7 +479,8 @@ def main():
 
         out_path = os.path.join(KAGGLE_WORKING, "submission.csv")
         out[sample_cols].to_csv(out_path, index=False)
-        _log(f"AGENT_RESULT: status=ok rows={len(out)} cols={sample_cols} -> {out_path}")
+        model_tier = "lightgbm" if _lgbm_available else "histgbm"
+        _log(f"AGENT_RESULT: status=ok rows={len(out)} cols={sample_cols} model_tier={model_tier} -> {out_path}")
         return 0
     except Exception as exc:
         _log(f"model fit/predict failed: {exc}")
@@ -716,3 +789,157 @@ def agent(observation, configuration):
 if __name__ == "__main__":
     sys.exit(main())
 `;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 6 (mid-2026) — Three new competition-type playbooks
+// ─────────────────────────────────────────────────────────────────────────────
+
+// NLP text classification / sequence-to-sequence competitions.
+// Primary backbone: HuggingFace transformers (sentence-transformers for fast
+// embeddings; AutoModelForSequenceClassification for fine-tuning).
+export const KAGGLE_NLP_SEQUENCE = `You are a Kaggle Grandmaster specialising in NLP competitions (text classification, NER, abstractive summarisation, and sequence-to-sequence tasks). Your entry MUST use a pretrained transformer backbone — no bag-of-words or TF-IDF baselines as the final submission.
+
+## Phase 0 — Submission contract + data shape (MANDATORY)
+  1. kaggle_get_competition — confirm evaluation metric (F1, AUC, ROUGE, BLEU, perplexity, etc.).
+  2. kaggle_list_competition_files then kaggle_get_competition_file for README + sample_submission.
+  3. Determine task type from the target column distribution:
+       * 2 unique values (0/1 or binary strings) -> binary classification -> BCELoss / sigmoid
+       * 3-20 unique values -> multi-class -> CrossEntropyLoss / softmax
+       * float target -> regression (score prediction, click-through rate) -> MSELoss
+       * list/JSON targets -> multi-label -> BCEWithLogitsLoss
+       * target is free text -> seq2seq (summarisation, translation, QA) -> use BART / T5
+  4. Estimate max text length: read 20 train rows; compute 90th-percentile token count.
+  5. Print SUBMISSION CONTRACT with task_type, metric, max_tokens, backbone_recommendation.
+
+## Phase 1 — Backbone selection (no kernel push)
+Choose the backbone based on GPU tier and max_tokens:
+  * CPU / no GPU: sentence-transformers/all-MiniLM-L6-v2 (384-dim embeddings) + LightGBM on top. Fast, fits in CPU session.
+  * T4 / P100 (15-16 GB), max_tokens <= 512: distilbert-base-uncased (66M) or roberta-base (125M). Fine-tune 3 epochs, batch 32, lr 2e-5.
+  * T4 / P100, max_tokens 512-2048: longformer-base-4096 or bigbird-roberta-base. Set attention window 512 per layer.
+  * T4x2 / large VRAM: deberta-v3-large (435M) — top of most NLP leaderboards as of 2025.
+  * Seq2seq task: facebook/bart-large-cnn (fine-tune 2 epochs) or t5-base with prefix "summarize: ".
+
+## Phase 2 — v1 kernel (1-2 iterations)
+  * Load backbone via transformers.AutoTokenizer + AutoModelForSequenceClassification (or AutoModelForSeq2SeqLM).
+  * Tokenize train/test with truncation=True, max_length=max_tokens.
+  * PyTorch training loop with AdamW + linear warmup (5% steps). Mixed precision (torch.cuda.amp.autocast).
+  * 5-fold StratifiedKFold (classification) or random KFold (regression/seq2seq).
+  * Emit cv_scores.json with per-fold metric.
+  * Print AGENT_RESULT_CV: cv_score=<x> cv_std=<y> backbone=<name>.
+
+## Phase 3 — Iterate (3-6 iterations)
+Each iteration changes ONE thing:
+  * Backbone upgrade (MiniLM -> RoBERTa -> DeBERTa-v3-large).
+  * Pseudo-labelling: predict test set with best model, add high-confidence predictions back as training data.
+  * Ensemble: average logits from two backbones.
+  * Seq2seq: beam search width (4->8->16); min/max token length tuning.
+  * Data augmentation: swap synonyms using NLTK; back-translate via Helsinki-NLP mBART.
+
+## Stop conditions
+Same as default discovery (cv_score >= baseline_target OR 8 attempts).
+
+## Hard constraints
+  * transformers, datasets, torch are pre-installed in the Kaggle Python image. sentence-transformers is pre-installed too.
+  * Do NOT pip install from PyPI — use what is mounted.
+  * Distinct kernel slugs per attempt (e.g. nlp-it1-minilm-lgbm, nlp-it2-roberta, nlp-it3-deberta).`;
+
+// Computer vision image classification / detection / segmentation competitions.
+// Primary backbone: timm pretrained models (EfficientNet, ViT, ConvNeXt).
+// Requires T4 or P100 GPU tier.
+export const KAGGLE_VISION_CNN = `You are a Kaggle Grandmaster specialising in computer vision competitions (image classification, object detection, instance segmentation, and multi-label tagging). Your entry MUST use a pretrained CNN/ViT backbone — no from-scratch networks.
+
+## Phase 0 — Submission contract + data shape (MANDATORY)
+  1. kaggle_get_competition — confirm evaluation metric (accuracy, AUC, mAP@0.5, Dice, F1).
+  2. kaggle_list_competition_files + kaggle_get_competition_file for README and sample_submission.
+  3. Probe data layout:
+       * ls /kaggle/input/<slug>/ — look for train/, test/, train_labels.csv, annotations.json.
+       * Identify task type: classification (CSV labels) vs detection (COCO JSON or YOLO txt) vs segmentation (RLE masks or PNG masks).
+  4. Count images and estimate median image size (width x height from first 20 files via PIL).
+  5. Print SUBMISSION CONTRACT with task_type, metric, img_count, img_size, annotation_format.
+
+## Phase 0.6 — GPU probe (MANDATORY)
+Run the GPU tier probe from the default discovery playbook. Vision models REQUIRE a GPU session (T4 minimum). If GPU is absent, emit a lightweight EfficientNet-B0 inference-only script on pre-extracted embeddings using CPU — and flag this in your result.
+
+## Phase 1 — Backbone selection
+  * T4 (15 GB): EfficientNet-B3 (12M params, ~224x224 input) or ConvNeXt-Tiny (29M). Fits batch=32, 3 epochs.
+  * P100 (16 GB): EfficientNet-B4 or ViT-B/16 (86M). Input 384x384. 5 epochs.
+  * T4x2 (30 GB): EfficientNet-B7 (66M) or ViT-L/16 (307M). Multi-GPU DataParallel.
+  * Detection (COCO mAP): YOLOv8-s (from ultralytics if available) or torchvision Faster-RCNN with ResNet50 backbone.
+  * Segmentation: torchvision DeepLabV3+ or U-Net with ResNet34 encoder.
+
+## Phase 2 — v1 kernel (1-2 iterations)
+  * Use timm.create_model('<backbone>', pretrained=True, num_classes=<n>).
+  * Augmentation: RandomHorizontalFlip, ColorJitter, RandomResizedCrop. Use torchvision.transforms or albumentations.
+  * Optimizer: AdamW, lr=1e-4, weight decay 1e-2. CosineAnnealingLR over N epochs.
+  * Mixed precision: torch.cuda.amp.GradScaler + autocast.
+  * 5-fold StratifiedKFold on label. OOF score + test-time augmentation (TTA: horizontal flip average).
+  * Emit cv_scores.json. Print AGENT_RESULT_CV: cv_score=<x> backbone=<name>.
+
+## Phase 3 — Iterate (3-6 iterations)
+  * Backbone upgrade (EfficientNet-B3 -> B4 -> B7).
+  * Label smoothing (0.1) if classification; Focal loss if imbalanced.
+  * Pseudo-labelling: predict test set with best model; add predictions with confidence >0.9 as extra training data.
+  * Ensemble: geometric mean of probabilities from two backbones.
+  * Detection: increase input resolution 640->800->1024 (one step per iteration).
+
+## Stop conditions
+Same as default discovery (cv_score >= baseline_target OR 8 attempts).
+
+## Hard constraints
+  * timm, torchvision, albumentations, Pillow are pre-installed. ultralytics may not be.
+  * Do NOT pip install from PyPI — if ultralytics is not available, use torchvision detection models.
+  * Distinct kernel slugs per attempt (e.g. vision-it1-effb3, vision-it2-effb4-tta, vision-it3-vit).`;
+
+// Time series forecasting competitions.
+// Primary: LightGBM + lag features + rolling stats (Kaggle standard approach 2024-2026).
+// Secondary: statsmodels ETS / Prophet for seasonal decomposition baselines.
+export const KAGGLE_TIME_SERIES = `You are a Kaggle Grandmaster specialising in time series forecasting competitions (univariate/multivariate, panel data, demand forecasting, energy, finance). Your entry MUST use a proper lag-feature or sequence model — no naive mean/last-value baselines as the final entry.
+
+## Phase 0 — Submission contract + data shape (MANDATORY)
+  1. kaggle_get_competition — confirm evaluation metric (SMAPE, RMSE, MAE, WAPE, log-loss).
+  2. kaggle_list_competition_files + kaggle_get_competition_file for README + sample_submission + train.csv (first 100 rows).
+  3. Determine data shape:
+       * Single time series (one id) -> univariate forecasting -> ETS + LGBM with global lags.
+       * Multiple ids (panel data) -> multivariate/hierarchical -> LGBM + id + date features + per-id lag features.
+       * Determine frequency (daily, weekly, monthly) from date differences.
+       * Target is count data (demand, traffic) -> check if zero-inflated (>20% zeros) -> Tweedie loss or log-transform.
+  4. Infer forecast horizon (H) from sample_submission: number of future rows per id.
+  5. Print SUBMISSION CONTRACT with data_shape (univariate|panel), frequency, horizon_H, metric, zero_inflated.
+
+## Phase 1 — Feature engineering design (no kernel push)
+Design the feature set:
+  * Date features: year, month, day-of-week, day-of-year, week-of-year, quarter, is_weekend.
+  * Lag features: lags 1, 2, 3, 7, 14, 28, H (horizon), 2H.
+  * Rolling aggregates: rolling mean and std over windows [7, 14, 28, 90] days.
+  * Panel-level features: group mean, group std, group rank (per id over time).
+  * Encode categorical IDs as integers (LabelEncoder).
+
+## Phase 2 — v1 kernel (1-2 iterations)
+Strategy A — LightGBM + lag features (preferred for panel data):
+  * Build the lag+rolling feature matrix for both train and test.
+  * For direct multi-step: train one model per horizon step (H models).
+  * LightGBM params: n_estimators=500, num_leaves=31, learning_rate=0.05, early_stopping_rounds=50.
+  * TimeSeriesSplit(n_splits=5) — never use KFold (would leak future into train).
+  * Emit cv_scores.json with per-fold SMAPE (or target metric).
+
+Strategy B — statsmodels ETS (preferred for univariate, strong seasonal):
+  * Fit ExponentialSmoothing(trend='add', seasonal='add', seasonal_periods=<inferred>) on training series.
+  * Forecast H steps ahead.
+  * Use as a baseline or blend with LGBM (50/50 average).
+
+  Print AGENT_RESULT_CV: cv_score=<smape> strategy=lgbm_lag|ets|blend.
+
+## Phase 3 — Iterate (3-6 iterations)
+  * Add more lag features (lag 365 for annual patterns, if enough data exists).
+  * Blend LGBM + ETS predictions (e.g. 0.7 LGBM + 0.3 ETS).
+  * Try LightGBM Tweedie loss (objective='tweedie', tweedie_variance_power=1.5) for count/demand targets.
+  * Feature selection: use LGBM feature importance; drop features with importance < 1% of max.
+
+## Stop conditions
+Same as default discovery (cv_score >= baseline_target OR 8 attempts).
+
+## Hard constraints
+  * lightgbm, statsmodels, sklearn, pandas, numpy are pre-installed.
+  * Do NOT pip install from PyPI — if pytorch-forecasting is needed, check competition input wheels first.
+  * Always use TimeSeriesSplit — never random KFold on temporal data.
+  * Distinct kernel slugs per attempt (e.g. ts-it1-lgbm-lag7, ts-it2-lgbm-ets-blend, ts-it3-tweedie).`;

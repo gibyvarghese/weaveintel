@@ -24,30 +24,41 @@ import type { PromptRow, WorkerAgentRow } from '../../db-types.js';
 // ── Stable UUIDs for SV prompts ──────────────────────────────────────────────
 // Generated once; never change — they are the idempotency key for re-seeding.
 const SV_PROMPT_IDS = {
-  supervisor:  'a1000001-5300-7000-b000-000000000001',
-  decomposer:  'a1000001-5300-7000-b000-000000000002',
-  literature:  'a1000001-5300-7000-b000-000000000003',
-  statistical: 'a1000001-5300-7000-b000-000000000004',
+  supervisor:   'a1000001-5300-7000-b000-000000000001',
+  decomposer:   'a1000001-5300-7000-b000-000000000002',
+  literature:   'a1000001-5300-7000-b000-000000000003',
+  statistical:  'a1000001-5300-7000-b000-000000000004',
   mathematical: 'a1000001-5300-7000-b000-000000000005',
-  simulation:  'a1000001-5300-7000-b000-000000000006',
-  adversarial: 'a1000001-5300-7000-b000-000000000007',
+  simulation:   'a1000001-5300-7000-b000-000000000006',
+  adversarial:  'a1000001-5300-7000-b000-000000000007',
+  // Phase 5
+  replication:   'a1000001-5300-7000-b000-000000000008',
+  data_quality:  'a1000001-5300-7000-b000-000000000009',
+  bias_detector: 'a1000001-5300-7000-b000-000000000010',
 } as const;
 
 // ── Stable UUIDs for default budget envelopes ───────────────────────────────
 const SV_BUDGET_IDS = {
   standard: 'c3000001-5300-7000-b000-000000000001',
   premium:  'c3000001-5300-7000-b000-000000000002',
+  // Phase 5
+  express:  'c3000001-5300-7000-b000-000000000003',
+  research: 'c3000001-5300-7000-b000-000000000004',
 } as const;
 
 // ── Stable UUIDs for SV worker agents ───────────────────────────────────────
 const SV_AGENT_IDS = {
-  supervisor:  'b2000001-5300-7000-b000-000000000001',
-  decomposer:  'b2000001-5300-7000-b000-000000000002',
-  literature:  'b2000001-5300-7000-b000-000000000003',
-  statistical: 'b2000001-5300-7000-b000-000000000004',
+  supervisor:   'b2000001-5300-7000-b000-000000000001',
+  decomposer:   'b2000001-5300-7000-b000-000000000002',
+  literature:   'b2000001-5300-7000-b000-000000000003',
+  statistical:  'b2000001-5300-7000-b000-000000000004',
   mathematical: 'b2000001-5300-7000-b000-000000000005',
-  simulation:  'b2000001-5300-7000-b000-000000000006',
-  adversarial: 'b2000001-5300-7000-b000-000000000007',
+  simulation:   'b2000001-5300-7000-b000-000000000006',
+  adversarial:  'b2000001-5300-7000-b000-000000000007',
+  // Phase 5
+  replication:   'b2000001-5300-7000-b000-000000000008',
+  data_quality:  'b2000001-5300-7000-b000-000000000009',
+  bias_detector: 'b2000001-5300-7000-b000-000000000010',
 } as const;
 
 // ── System prompt templates ───────────────────────────────────────────────────
@@ -71,12 +82,15 @@ If BOTH conditions are true, you MUST immediately output the full verdict JSON w
 Do NOT output {"converged": false, ...} in this case. Skip steps 2–4 entirely.
 
 **STEP 2 — GRADE evidence quality assessment (empirical claims only)**
+Apply the GRADE Working Group 2025 criteria (updated from 2013 baseline to reflect living systematic review methodology and network meta-analysis advances).
 Assign an overall quality level — HIGH | MODERATE | LOW | VERY_LOW — based on these downgrading factors:
 - Risk of bias: non-randomised or unblinded study designs → downgrade 1–2 levels
 - Inconsistency: heterogeneity across studies (I² > 50% or Cochran Q p < 0.10) → downgrade 1 level
 - Indirectness: population, intervention, or outcome differs from hypothesis → downgrade 1 level
 - Imprecision: wide confidence intervals, n < 100, or power < 0.80 → downgrade 1 level
 - Publication bias: funnel asymmetry (Egger p < 0.10) or Rosenthal fail-safe N < 5k+10 → downgrade 1 level
+- Replication crisis domain: if sv-replication flagged crisisField=true (social priming, nutritional epidemiology, underpowered fMRI, single-lab cancer biology) → downgrade 1 level
+- AI-generated paper suspicion: if sv-bias-detector flagged aiGeneratedPaperSuspicion='likely' for a key citation → downgrade 1 level and flag verdict as provisional
 GRADE quality directly constrains confidence: HIGH → max 0.92; MODERATE → max 0.80; LOW → max 0.65; VERY_LOW → max 0.50.
 
 **STEP 3 — Convergence rule (applies only when Step 1 does NOT apply)**
@@ -181,15 +195,24 @@ You conduct a systematic, PRISMA-aligned literature review to retrieve prior wor
 - openalex_search — OpenAlex for open-access full-text
 - crossref_resolve — resolves a DOI to full metadata
 - europepmc_search — Europe PMC for life-science literature
+- preprint_search — searches bioRxiv, medRxiv, chemRxiv (essential for rapidly evolving fields; ~40% of COVID-era evidence started as preprints)
+- dimensions_search — Dimensions.ai (now larger than Semantic Scholar for biomedical; includes grant and patent cross-links)
+- lens_search — The Lens (aggregates PubMed, Crossref, CORE; strong open-access coverage)
+- cochrane_search — Cochrane Library (gold standard for medical systematic reviews; search here first for clinical hypotheses)
+- clinicaltrials_search — ClinicalTrials.gov (registered trials; critical for intervention hypotheses)
+- retraction_watch — Retraction Watch database (check every key citation for retractions)
+- unpaywall_fetch — retrieve open-access full-text by DOI (use after crossref_resolve to get article body)
 
 **PRISMA-aligned search protocol:**
 1. For each sub-claim, construct search strings from the PICO elements (Population + Intervention + Outcome as MeSH-style terms).
 2. Search at least THREE independent databases (e.g. pubmed_search + semanticscholar_search + openalex_search).
-3. For clinical/biological claims, also search europepmc_search and crossref_resolve any promising DOIs.
-4. Prefer: systematic reviews and meta-analyses > RCTs > observational studies > preprints.
-5. Screen title and abstract against the sub-claim's PICO — only include on-topic results.
-6. Extract for each included study: effect_estimate, confidence_interval, sample_size, study_design, risk_of_bias_indicator.
-7. Note any signs of publication bias: unusually small study sizes, all-positive results, grey literature gaps.
+3. For clinical/biological claims, also search cochrane_search, clinicaltrials_search, and europepmc_search.
+4. For rapidly evolving fields (AI/ML, genomics, pandemic response), also search preprint_search and dimensions_search.
+5. For every key citation, call retraction_watch to verify the paper has not been retracted.
+6. Prefer: Cochrane systematic reviews > peer-reviewed meta-analyses > RCTs > observational studies > preprints. Flag preprints explicitly.
+7. Screen title and abstract against the sub-claim's PICO — only include on-topic results.
+8. Extract for each included study: effect_estimate, confidence_interval, sample_size, study_design, risk_of_bias_indicator.
+9. Note any signs of publication bias: unusually small study sizes, all-positive results, grey literature gaps.
 
 **GRADE risk-of-bias screening (per study):**
 - RCT with allocation concealment and blinding → low bias
@@ -231,13 +254,16 @@ You conduct a systematic, PRISMA-aligned literature review to retrieve prior wor
 - Flag publicationBiasFlag = true if: all results favour the hypothesis, funnel asymmetry is suspected, or Rosenthal fail-safe N appears small.`;
 
 const STATISTICAL_TEMPLATE = `You are the Statistical agent in a rigorous hypothesis validation pipeline.
-You perform quantitative analyses following GRADE statistical standards: meta-analysis with heterogeneity assessment, power audits, Bayesian estimation, and publication-bias detection.
+You perform quantitative analyses following GRADE statistical standards: meta-analysis with heterogeneity assessment, power audits, Bayesian estimation, causal inference, and publication-bias detection.
 
 **Available tools:**
 - scipy_stats_test — runs a statistical test (t-test, chi-square, Mann-Whitney, etc.)
 - statsmodels_meta — fixed/random-effects meta-analysis with Cochran Q and I²
 - scipy_power — statistical power calculation
-- pymc_mcmc — Bayesian posterior inference via MCMC
+- pymc5_bayes — Bayesian posterior inference via PyMC 5.x (preferred; JAX backend for speed)
+- pymc_mcmc — Bayesian inference via PyMC 4.x (legacy; use pymc5_bayes for new analyses)
+- arviz_diagnostics — MCMC convergence diagnostics (R-hat, ESS, MCSE) via ArviZ 0.18+
+- causalml_estimate — Causal effect estimation (DoWhy identification + EconML DML/IV/DRIV)
 - r_metafor — R metafor package for meta-analytic forest plots and Egger's test
 - cse_run_code — execute arbitrary Python code in an isolated sandbox; fallback for any analysis
 
@@ -246,7 +272,10 @@ You perform quantitative analyses following GRADE statistical standards: meta-an
    - Continuous outcomes with ≥2 groups → t-test or Mann-Whitney via scipy_stats_test
    - ≥2 studies with compatible effect sizes → meta-analysis via statsmodels_meta or r_metafor
    - Before/after or dose-response → paired test or regression
-   - Bayesian update when prior probability is available → pymc_mcmc
+   - Bayesian update when prior probability is available → pymc5_bayes (preferred over pymc_mcmc)
+   - After Bayesian sampling → run arviz_diagnostics to confirm R-hat < 1.01 and ESS > 400
+   - RCT or quasi-experimental design with confounders → causalml_estimate (DoWhy + EconML DML)
+   - Observational data with instrument variable → causalml_estimate with IV/DRIV estimator
 2. **Meta-analysis heterogeneity (GRADE inconsistency criterion):**
    - Always report Cochran Q and I² when combining ≥2 effect sizes.
    - I² > 75% → substantial heterogeneity → downgrade GRADE by 1 level; report τ² (between-study variance).
@@ -387,9 +416,19 @@ Your task is to apply every rigorous counter-argument strategy: contradictory ev
 
 5. **HARKing detection:** Look for signs the hypothesis was Hypothesised After Results Known — unusual specificity of outcomes, no pre-registration, cherry-picked time windows or subgroups.
 
-6. **Mathematical boundary violations (symbolic claims):** Use cse_run_code to check edge cases, units, dimensional analysis, or counter-examples. A single counter-example refutes the claim.
+6. **AI-generated paper detection (2026-critical):** For every key supporting citation, check for red flags indicating LLM-fabricated or AI-assisted-without-disclosure papers:
+   - Generic formulaic abstract language with no concrete experimental detail
+   - Implausible author affiliations or unverifiable institutional emails
+   - DOI resolves to a predatory journal with < 1 week review time
+   - References contain plausible-sounding DOIs that return 404 or resolve to unrelated papers
+   - Methods section lacks specific software versions, hardware specs, or dataset names
+   - Data/code availability statement is present but URL returns placeholder page
+   - Paper retracted within 6 months of publication
+   If ANY red flags present: flag as "ai_generated_suspect" with strength 0.6–0.9 depending on count.
 
-7. **Scope narrowing:** If the claim is true in a very restricted scope but the hypothesis is stated broadly, this is a counter-argument requiring scope narrowing.
+7. **Mathematical boundary violations (symbolic claims):** Use cse_run_code to check edge cases, units, dimensional analysis, or counter-examples. A single counter-example refutes the claim.
+
+8. **Scope narrowing:** If the claim is true in a very restricted scope but the hypothesis is stated broadly, this is a counter-argument requiring scope narrowing.
 
 **Output format — append one JSON block after your falsification analysis:**
 {
@@ -414,6 +453,167 @@ Your task is to apply every rigorous counter-argument strategy: contradictory ev
 - Do not fabricate studies. Every citationId must come from a real tool call.
 - Be specific: "possible confounders exist" is a weak critique. Name the confounder and explain the mechanism.
 - A Popperian refutation requires only ONE strong counter-example or contradictory study.`;
+
+// ── Phase 5 specialist templates ──────────────────────────────────────────────
+
+const REPLICATION_TEMPLATE = `You are Rex, the Replication Validator in a rigorous hypothesis validation pipeline.
+You specialise in assessing whether the claimed methodology can be independently replicated and whether prior replication attempts have succeeded or failed.
+
+**Available tools:**
+- pubmed_search — search for replication studies and meta-science audits
+- semanticscholar_search — search for replication studies and citation-sorted critiques
+- arxiv_search — preprint replication attempts and meta-science
+- retraction_watch — check retraction status of key papers
+
+**Replication risk factors to assess:**
+- Sample size (n < 50 per group) → high replication risk
+- Flexible researcher degrees of freedom (many DVs, optional covariates, unclear stopping rule)
+- No pre-registration (HARKing risk elevated)
+- Single-lab study with no independent replication
+- Effect size appears implausibly large (d > 1.0 in social/psych)
+- Field's documented base replication rate < 50%
+
+**Known Replication Crisis Domains (set crisisField=true; GRADE downgrade 1 level):**
+- Social priming effects (replication rate ~15–30%)
+- Ego depletion (replications mostly failed)
+- Power posing (significant replication failures)
+- Growth mindset interventions (smaller effects than claimed)
+- Nutritional epidemiology single observational studies
+- Underpowered fMRI neuroimaging studies (n < 20)
+- Cancer biology (Reproducibility Project: Cancer Biology — ~50% failed)
+
+**Output format — append one JSON block after your analysis:**
+{
+  "replicationResults": [
+    {
+      "subClaimIndex": <int>,
+      "preRegistered": <boolean or null>,
+      "knownReplicationAttempts": <int>,
+      "replicationSuccessCount": <int>,
+      "replicationFailureCount": <int>,
+      "replicationRisk": "low|moderate|high|very_high",
+      "crisisField": <boolean>,
+      "crisisFieldReason": "<string or null>",
+      "methodologySufficiency": "full|partial|insufficient",
+      "recommendation": "<one sentence>",
+      "replicationStudyCitations": ["<doi or url>"]
+    }
+  ]
+}
+
+**Rules:**
+- Never fabricate replication studies. Every citation must come from a real tool call.
+- If no replication data exists, set knownReplicationAttempts=0 and replicationRisk="moderate".
+- A single failed replication of a landmark study is a very_high risk flag.
+- Flag replication crisis domains explicitly — the supervisor weights this in GRADE downgrading.`;
+
+const DATA_QUALITY_TEMPLATE = `You are Dana, the Data Quality Agent in a rigorous hypothesis validation pipeline.
+You assess the integrity, completeness, and preprocessing quality of the data underlying the sub-claims.
+
+**Available tools:**
+- semanticscholar_search — search for data quality assessments and dataset papers
+- arxiv_search — search for methodological critiques of datasets
+- cse_run_code — Python code to assess data quality properties numerically
+
+**Data Quality Framework:**
+
+COMPLETENESS:
+- > 95% → high; 80–95% → moderate (flag MCAR/MAR/MNAR); < 80% → low (likely biased if MNAR)
+
+MEASUREMENT VALIDITY:
+- Gold standard validated instrument → high
+- Proxy measure → moderate (flag construct validity)
+- Self-report without validation → low (social desirability, recall bias)
+
+SELECTION BIAS:
+- Random sampling → low
+- WEIRD convenience sample (Western, Educated, Industrialised, Rich, Democratic) → high
+- Volunteer / opt-in → high
+
+TEMPORAL VALIDITY:
+- < 5 years → current; 5–15 years → flag for drift; > 15 years → likely outdated
+
+**Grade mapping:** A=high on all; B=one moderate; C=one low or two moderate; D=any major failure.
+
+**Output format — append one JSON block after your analysis:**
+{
+  "dataQualityResults": [
+    {
+      "subClaimIndex": <int>,
+      "completeness": "high|moderate|low|unknown",
+      "measurementValidity": "high|moderate|low|unknown",
+      "selectionBias": "low|moderate|high|unknown",
+      "temporalValidity": "current|dated|outdated|unknown",
+      "dataSource": "<name>",
+      "knownIssues": ["<issue>"],
+      "overallDataQuality": "A|B|C|D",
+      "recommendation": "<one sentence>",
+      "citations": ["<doi or url>"]
+    }
+  ]
+}
+
+**Rules:**
+- Unknown data quality is NOT the same as high quality — flag it explicitly.
+- For AI/ML claims, assess training data and test data quality separately.
+- Data quality issues are GRADE downgrade factors independent of study design.`;
+
+const BIAS_DETECTOR_TEMPLATE = `You are Bianca, the Bias & Fairness Agent in a rigorous hypothesis validation pipeline.
+You detect p-hacking, HARKing, AI-generated paper fabrication, and fairness/representation bias in the evidence base.
+
+**Available tools:**
+- pubmed_search — search for critiques, retractions, methodological audits
+- semanticscholar_search — search for bias analyses of cited papers
+- arxiv_search — search for bias studies and AI paper detection methodology
+- cse_run_code — compute p-value z-score distribution, funnel plots
+
+**P-Hacking Detection:**
+1. Count outcome variables in the primary supporting study — > 3 DVs → p-hacking risk.
+2. Check whether the study's primary outcome matches the metric used in the hypothesis. Mismatch → HARKing risk.
+3. Look for "marginally significant" (p = 0.05–0.10) reported as positive.
+4. Compute z-score distribution: a spike at z ≈ 1.96 is a p-hacking signature.
+
+**AI-Generated Paper Detection (2026-critical):**
+Red flags for LLM-generated or undisclosed AI-assisted papers:
+- Formulaic abstract ("In this paper, we present a novel approach to...")
+- Impossible affiliations or unverifiable emails
+- DOI resolves to predatory journal (< 1 week review time)
+- Reference DOIs return 404 or unrelated papers
+- Methods lack specific software versions, hardware, dataset names
+- Data/code link returns placeholder page
+- Retracted within 6 months
+Flag with strength 0.6–0.9 based on how many red flags are present.
+
+**Fairness Bias Framework:**
+- Representation bias: marginalised groups included?
+- Measurement bias: instruments validated across demographics?
+- Aggregation bias: does aggregate mask within-group heterogeneity?
+- Label bias: for AI claims, human bias embedded in labels?
+- Deployment gap: generalises beyond study population?
+
+**Output format — append one JSON block after your bias analysis:**
+{
+  "biasResults": [
+    {
+      "subClaimIndex": <int>,
+      "pHackingRisk": "low|moderate|high",
+      "harkingRisk": "low|moderate|high",
+      "publicationBiasSeverity": "low|moderate|high",
+      "aiGeneratedPaperSuspicion": "none|possible|likely",
+      "aiGeneratedPaperEvidence": "<string or null>",
+      "fairnessBiasFlags": ["<bias type>"],
+      "overallBiasScore": <0.0–1.0>,
+      "recommendation": "accept|accept_with_caveats|reject_pending_audit|reject",
+      "citations": ["<doi or url>"]
+    }
+  ],
+  "overallBiasAssessment": "<one paragraph>"
+}
+
+**Rules:**
+- AI paper suspicion must be evidence-based (name specific red flags, not general suspicion).
+- High bias score (> 0.7) → explicit statement in overallBiasAssessment.
+- Publication bias and p-hacking are cumulative GRADE downgrade factors.`;
 
 // ── Seed prompts ──────────────────────────────────────────────────────────────
 
@@ -544,7 +744,7 @@ const SV_PROMPTS: PromptSeed[] = [
     id: SV_PROMPT_IDS.adversarial,
     key: 'sv.adversarial',
     name: 'HV: Adversarial — Popperian falsification and counter-evidence',
-    description: 'Actively seeks to falsify sub-claims by searching for contradictory studies, confounders, publication bias, and mathematical boundary violations.',
+    description: 'Actively seeks to falsify sub-claims by searching for contradictory studies, confounders, publication bias, AI-generated paper detection, and mathematical boundary violations.',
     category: 'hypothesis-validation',
     prompt_type: 'system',
     owner: 'system',
@@ -552,11 +752,72 @@ const SV_PROMPTS: PromptSeed[] = [
     tags: JSON.stringify(['hypothesis-validation', 'adversarial', 'falsification']),
     template: ADVERSARIAL_TEMPLATE,
     variables: null,
+    version: '2.0',
+    model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
+    execution_defaults: JSON.stringify({ strategy: 'agentic', maxSteps: 10 }),
+    framework: null,
+    metadata: JSON.stringify({ feature: 'hypothesis-validation', agentRole: 'adversarial' }),
+    is_default: 0,
+    enabled: 1,
+  },
+  // ── Phase 5 specialists ──────────────────────────────────────────────────
+  {
+    id: SV_PROMPT_IDS.replication,
+    key: 'sv.replication',
+    name: 'HV: Replication Validator (Rex) — assess replication risk and crisis domains',
+    description: 'Checks prior replication attempts, pre-registration status, and crisis-domain membership. Flags fields with documented low base replication rates.',
+    category: 'hypothesis-validation',
+    prompt_type: 'system',
+    owner: 'system',
+    status: 'published',
+    tags: JSON.stringify(['hypothesis-validation', 'replication', 'meta-science']),
+    template: REPLICATION_TEMPLATE,
+    variables: null,
+    version: '1.0',
+    model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
+    execution_defaults: JSON.stringify({ strategy: 'agentic', maxSteps: 6 }),
+    framework: null,
+    metadata: JSON.stringify({ feature: 'hypothesis-validation', agentRole: 'replication' }),
+    is_default: 0,
+    enabled: 1,
+  },
+  {
+    id: SV_PROMPT_IDS.data_quality,
+    key: 'sv.data-quality',
+    name: 'HV: Data Quality Agent (Dana) — dataset integrity and preprocessing audit',
+    description: 'Evaluates completeness, measurement validity, selection bias, and temporal validity of data underlying sub-claims. Grades data quality A–D.',
+    category: 'hypothesis-validation',
+    prompt_type: 'system',
+    owner: 'system',
+    status: 'published',
+    tags: JSON.stringify(['hypothesis-validation', 'data-quality', 'bias']),
+    template: DATA_QUALITY_TEMPLATE,
+    variables: null,
+    version: '1.0',
+    model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
+    execution_defaults: JSON.stringify({ strategy: 'agentic', maxSteps: 6 }),
+    framework: null,
+    metadata: JSON.stringify({ feature: 'hypothesis-validation', agentRole: 'data-quality' }),
+    is_default: 0,
+    enabled: 1,
+  },
+  {
+    id: SV_PROMPT_IDS.bias_detector,
+    key: 'sv.bias-detector',
+    name: 'HV: Bias & Fairness Agent (Bianca) — p-hacking, HARKing, AI paper detection',
+    description: 'Detects p-hacking, HARKing, publication bias, AI-generated paper fabrication, and fairness bias. Computes z-score landscape for p-value clustering.',
+    category: 'hypothesis-validation',
+    prompt_type: 'system',
+    owner: 'system',
+    status: 'published',
+    tags: JSON.stringify(['hypothesis-validation', 'bias', 'p-hacking', 'ai-detection']),
+    template: BIAS_DETECTOR_TEMPLATE,
+    variables: null,
     version: '1.0',
     model_compatibility: JSON.stringify({ providers: ['openai', 'anthropic'] }),
     execution_defaults: JSON.stringify({ strategy: 'agentic', maxSteps: 8 }),
     framework: null,
-    metadata: JSON.stringify({ feature: 'hypothesis-validation', agentRole: 'adversarial' }),
+    metadata: JSON.stringify({ feature: 'hypothesis-validation', agentRole: 'bias-detector' }),
     is_default: 0,
     enabled: 1,
   },
@@ -572,7 +833,7 @@ const SV_WORKERS: WorkerSeed[] = [
     name: 'sv-supervisor',
     display_name: 'geneWeave',
     job_profile: 'Hypothesis Validation Supervisor',
-    description: 'Hypothesis Validation: synthesises all specialist-agent evidence and emits the final structured verdict. (Disabled — chat’s own supervisor performs this role for SV runs.)',
+    description: 'Hypothesis Validation: synthesises all specialist-agent evidence and emits the final structured verdict. Enabled for standalone A2A skill usage.',
     system_prompt: '',  // loaded from prompts table at runtime via key sv.supervisor
     tool_names: JSON.stringify([]),
     persona: 'agent_worker',
@@ -581,7 +842,7 @@ const SV_WORKERS: WorkerSeed[] = [
     max_retries: 0,
     priority: 0,
     category: 'hypothesis-validation',
-    enabled: 0,
+    enabled: 1,
   },
   {
     id: SV_AGENT_IDS.decomposer,
@@ -668,9 +929,58 @@ const SV_WORKERS: WorkerSeed[] = [
     name: 'sv-adversarial',
     display_name: 'Ada',
     job_profile: 'Adversarial Validator',
-    description: 'USE LATE in hypothesis validation — actively tries to falsify a sub-claim by searching for contradicting evidence, finding heterogeneity in meta-analyses, and looking for symbolic counter-examples via cse_run_code. Surfaces weakest-link failure modes before the verdict is emitted.',
+    description: 'USE LATE in hypothesis validation — actively tries to falsify a sub-claim by searching for contradicting evidence, finding heterogeneity in meta-analyses, detecting AI-generated papers, and looking for symbolic counter-examples via cse_run_code. Surfaces weakest-link failure modes before the verdict is emitted.',
     system_prompt: '',
-    tool_names: JSON.stringify(['arxiv_search', 'pubmed_search', 'semanticscholar_search', 'openalex_search', 'europepmc_search', 'scipy_stats_test', 'statsmodels_meta', 'cse_run_code']),
+    tool_names: JSON.stringify(['arxiv_search', 'pubmed_search', 'semanticscholar_search', 'openalex_search', 'europepmc_search', 'retraction_watch', 'scipy_stats_test', 'statsmodels_meta', 'cse_run_code']),
+    persona: 'agent_worker',
+    trigger_patterns: null,
+    task_contract_id: null,
+    max_retries: 0,
+    priority: 0,
+    category: 'general',
+    enabled: 1,
+  },
+  // ── Phase 5 specialists ──────────────────────────────────────────────────
+  {
+    id: SV_AGENT_IDS.replication,
+    name: 'sv-replication',
+    display_name: 'Rex',
+    job_profile: 'Replication Validator',
+    description: 'USE FOR hypothesis validation — assesses whether supporting studies have been independently replicated, checks pre-registration, flags claims from replication-crisis domains. Returns structured replication risk assessment with crisis field flags.',
+    system_prompt: '',
+    tool_names: JSON.stringify(['pubmed_search', 'semanticscholar_search', 'arxiv_search', 'retraction_watch']),
+    persona: 'agent_worker',
+    trigger_patterns: null,
+    task_contract_id: null,
+    max_retries: 0,
+    priority: 0,
+    category: 'general',
+    enabled: 1,
+  },
+  {
+    id: SV_AGENT_IDS.data_quality,
+    name: 'sv-data-quality',
+    display_name: 'Dana',
+    job_profile: 'Data Quality Agent',
+    description: 'USE FOR hypothesis validation — evaluates completeness, measurement validity, selection bias, and temporal validity of data underlying sub-claims. Applies WEIRD and MCAR/MAR/MNAR frameworks. Grades data quality A–D.',
+    system_prompt: '',
+    tool_names: JSON.stringify(['semanticscholar_search', 'arxiv_search', 'cse_run_code']),
+    persona: 'agent_worker',
+    trigger_patterns: null,
+    task_contract_id: null,
+    max_retries: 0,
+    priority: 0,
+    category: 'general',
+    enabled: 1,
+  },
+  {
+    id: SV_AGENT_IDS.bias_detector,
+    name: 'sv-bias-detector',
+    display_name: 'Bianca',
+    job_profile: 'Bias & Fairness Agent',
+    description: 'USE LATE in hypothesis validation — detects p-hacking, HARKing, AI-generated paper fabrication, and fairness bias. Computes z-score landscape for p-value clustering. Returns structured bias assessment with aiGeneratedPaperSuspicion flags.',
+    system_prompt: '',
+    tool_names: JSON.stringify(['pubmed_search', 'semanticscholar_search', 'arxiv_search', 'retraction_watch', 'cse_run_code']),
     persona: 'agent_worker',
     trigger_patterns: null,
     task_contract_id: null,
@@ -748,13 +1058,17 @@ export async function seedSVData(db: DatabaseAdapter): Promise<void> {
   // Update pass: patch existing SV prompts whose templates have changed.
   // Keyed by prompt key; only patches if the stored template differs.
   const _PROMPT_UPDATES: Record<string, string> = {
-    'sv.supervisor':   SUPERVISOR_TEMPLATE,
-    'sv.decomposer':   DECOMPOSER_TEMPLATE,
-    'sv.literature':   LITERATURE_TEMPLATE,
-    'sv.statistical':  STATISTICAL_TEMPLATE,
-    'sv.mathematical': MATHEMATICAL_TEMPLATE,
-    'sv.simulation':   SIMULATION_TEMPLATE,
-    'sv.adversarial':  ADVERSARIAL_TEMPLATE,
+    'sv.supervisor':    SUPERVISOR_TEMPLATE,
+    'sv.decomposer':    DECOMPOSER_TEMPLATE,
+    'sv.literature':    LITERATURE_TEMPLATE,
+    'sv.statistical':   STATISTICAL_TEMPLATE,
+    'sv.mathematical':  MATHEMATICAL_TEMPLATE,
+    'sv.simulation':    SIMULATION_TEMPLATE,
+    'sv.adversarial':   ADVERSARIAL_TEMPLATE,
+    // Phase 5
+    'sv.replication':   REPLICATION_TEMPLATE,
+    'sv.data-quality':  DATA_QUALITY_TEMPLATE,
+    'sv.bias-detector': BIAS_DETECTOR_TEMPLATE,
   };
   for (const [key, newTemplate] of Object.entries(_PROMPT_UPDATES)) {
     try {
@@ -787,9 +1101,8 @@ export async function seedSVData(db: DatabaseAdapter): Promise<void> {
   }
 
   // Migration pass: re-categorise pre-existing SV specialist rows from legacy
-  // non-general buckets into 'general' so chat.ts's
-  // supervisor picks them up automatically. sv-supervisor stays in the
-  // 'hypothesis-validation' bucket and is disabled.
+  // non-general buckets into 'general' so chat.ts's supervisor picks them up
+  // automatically. sv-supervisor is now enabled=1 (Phase 5) for A2A skill usage.
   for (const w of SV_WORKERS) {
     try {
       const existing = await db.getWorkerAgent(w.id);
@@ -822,14 +1135,15 @@ export async function seedSVData(db: DatabaseAdapter): Promise<void> {
 }
 
 async function _seedDefaultBudgetEnvelopes(db: DatabaseAdapter): Promise<void> {
+  // Phase 5 raised limits: standard 50→100¢/300→600s, premium 200→500¢/900→1800s.
   const envelopes: Array<import('../../db-types.js').SvBudgetEnvelopeRow & { created_at?: string }> = [
     {
       id: SV_BUDGET_IDS.standard,
       tenant_id: 'system',
       name: 'Standard (Default)',
-      max_llm_cents: 50,
+      max_llm_cents: 100,
       max_sandbox_cents: 20,
-      max_wall_seconds: 300,
+      max_wall_seconds: 600,
       max_rounds: 3,
       diminishing_returns_epsilon: 0.05,
       created_at: new Date().toISOString(),
@@ -838,11 +1152,34 @@ async function _seedDefaultBudgetEnvelopes(db: DatabaseAdapter): Promise<void> {
       id: SV_BUDGET_IDS.premium,
       tenant_id: 'system',
       name: 'Premium (Extended)',
-      max_llm_cents: 200,
+      max_llm_cents: 500,
       max_sandbox_cents: 100,
-      max_wall_seconds: 900,
+      max_wall_seconds: 1800,
       max_rounds: 5,
       diminishing_returns_epsilon: 0.02,
+      created_at: new Date().toISOString(),
+    },
+    // Phase 5 new tiers
+    {
+      id: SV_BUDGET_IDS.express,
+      tenant_id: 'system',
+      name: 'Express (Quick Feasibility)',
+      max_llm_cents: 15,
+      max_sandbox_cents: 5,
+      max_wall_seconds: 90,
+      max_rounds: 2,
+      diminishing_returns_epsilon: 0.10,
+      created_at: new Date().toISOString(),
+    },
+    {
+      id: SV_BUDGET_IDS.research,
+      tenant_id: 'system',
+      name: 'Research (Deep Analysis)',
+      max_llm_cents: 2000,
+      max_sandbox_cents: 500,
+      max_wall_seconds: 7200,
+      max_rounds: 10,
+      diminishing_returns_epsilon: 0.01,
       created_at: new Date().toISOString(),
     },
   ];
@@ -858,13 +1195,17 @@ async function _seedDefaultBudgetEnvelopes(db: DatabaseAdapter): Promise<void> {
 
 /** Maps agent name → prompt key for runtime lookup. */
 export const SV_PROMPT_KEY: Record<string, string> = {
-  supervisor:  'sv.supervisor',
-  decomposer:  'sv.decomposer',
-  literature:  'sv.literature',
-  statistical: 'sv.statistical',
-  mathematical: 'sv.mathematical',
-  simulation:  'sv.simulation',
-  adversarial: 'sv.adversarial',
+  supervisor:    'sv.supervisor',
+  decomposer:    'sv.decomposer',
+  literature:    'sv.literature',
+  statistical:   'sv.statistical',
+  mathematical:  'sv.mathematical',
+  simulation:    'sv.simulation',
+  adversarial:   'sv.adversarial',
+  // Phase 5
+  replication:   'sv.replication',
+  'data-quality': 'sv.data-quality',
+  'bias-detector': 'sv.bias-detector',
 };
 
 // ─── Hypothesis-validation skill ─────────────────────────────────────────────
@@ -965,6 +1306,21 @@ const SV_TOOL_CATALOG: SVToolCatalogEntry[] = [
   { toolKey: 'openalex_search',        name: 'OpenAlex Search',        description: 'Search OpenAlex open scholarly graph.',                  category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'openalex', 'external'] },
   { toolKey: 'crossref_resolve',       name: 'Crossref Resolve',       description: 'Resolve a DOI to canonical metadata via Crossref.',      category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'crossref', 'external'] },
   { toolKey: 'europepmc_search',       name: 'Europe PMC Search',      description: 'Search Europe PMC for biomedical and life-sciences literature.', category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'europepmc', 'external'] },
+  // Phase 5 — Literature (7 new)
+  { toolKey: 'preprint_search',        name: 'Preprint Search (bioRxiv / medRxiv / chemRxiv)', description: 'Search bioRxiv, medRxiv, and chemRxiv for recent preprints not yet indexed in peer-reviewed databases.', category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'biorxiv', 'medrxiv', 'preprint', 'external'] },
+  { toolKey: 'unpaywall_fetch',        name: 'Unpaywall Full-Text Fetch', description: 'Retrieve open-access full-text articles via Unpaywall by DOI.', category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'unpaywall', 'full-text', 'open-access', 'external'] },
+  { toolKey: 'retraction_watch',       name: 'Retraction Watch Lookup', description: 'Check whether a paper has been retracted using the Retraction Watch database (~50k retraction records).', category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'retraction', 'quality-check', 'integrity', 'external'] },
+  { toolKey: 'clinicaltrials_search',  name: 'ClinicalTrials.gov Search', description: 'Search ClinicalTrials.gov for registered clinical trials relevant to medical or intervention hypotheses.', category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'clinical-trials', 'medical', 'rct', 'external'] },
+  { toolKey: 'cochrane_search',        name: 'Cochrane Library Search', description: 'Search the Cochrane Library for systematic reviews and meta-analyses — gold standard for medical evidence synthesis.', category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'cochrane', 'systematic-review', 'meta-analysis', 'external'] },
+  { toolKey: 'dimensions_search',      name: 'Dimensions.ai Search', description: 'Search Dimensions.ai (larger than Semantic Scholar for biomedical) with grant and patent cross-links.', category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'dimensions', 'biomedical', 'cross-database', 'external'] },
+  { toolKey: 'lens_search',            name: 'The Lens Scholarly Search', description: 'Search The Lens open scholarly database aggregating PubMed, Crossref, CORE, and Microsoft Academic.', category: 'literature', riskLevel: 'external-side-effect', sideEffects: 0, tags: ['literature', 'lens', 'open-access', 'aggregator', 'external'] },
+  // Phase 5 — Statistical (3 new)
+  { toolKey: 'pymc5_bayes',            name: 'PyMC 5.x Bayesian Inference', description: 'Bayesian posterior inference via PyMC 5.x (breaking API change from PyMC 4; JAX backend). Preferred over pymc_mcmc for new analyses.', category: 'statistical', riskLevel: 'read-only', sideEffects: 0, tags: ['statistics', 'bayesian', 'mcmc', 'pymc5', 'sandbox'] },
+  { toolKey: 'arviz_diagnostics',      name: 'ArviZ 0.18+ MCMC Diagnostics', description: 'MCMC convergence diagnostics (R-hat, ESS, MCSE) and posterior predictive checks via ArviZ 0.18+.', category: 'statistical', riskLevel: 'read-only', sideEffects: 0, tags: ['statistics', 'bayesian', 'diagnostics', 'arviz', 'sandbox'] },
+  { toolKey: 'causalml_estimate',      name: 'Causal ML Estimation (DoWhy / EconML)', description: 'Causal effect estimation using DoWhy identification and EconML estimation (DML, IV, DRIV).', category: 'statistical', riskLevel: 'read-only', sideEffects: 0, tags: ['statistics', 'causal-inference', 'dowhy', 'econml', 'sandbox'] },
+  // Phase 5 — Simulation (2 new)
+  { toolKey: 'mesa_abm',               name: 'Mesa Agent-Based Model', description: 'Agent-based models using Mesa 3.x for simulating emergent social, ecological, or economic phenomena.', category: 'simulation', riskLevel: 'read-only', sideEffects: 0, tags: ['simulation', 'agent-based', 'mesa', 'emergence', 'sandbox'] },
+  { toolKey: 'rapids_cuml',            name: 'RAPIDS cuML (GPU ML)', description: 'GPU-accelerated ML via RAPIDS cuML. Disabled pending GPU sandbox availability.', category: 'simulation', riskLevel: 'read-only', sideEffects: 0, tags: ['simulation', 'gpu', 'rapids', 'cuml', 'sandbox', 'disabled'] },
 ];
 
 async function _seedSVToolCatalog(db: DatabaseAdapter): Promise<void> {
@@ -972,6 +1328,8 @@ async function _seedSVToolCatalog(db: DatabaseAdapter): Promise<void> {
     try {
       const existing = await db.getToolCatalogByKey(t.toolKey);
       if (existing) continue;
+      // rapids_cuml is disabled at seed time (GPU sandbox not ready)
+      const seedEnabled = t.toolKey === 'rapids_cuml' ? 0 : 1;
       await db.createToolConfig({
         id: newUUIDv7(),
         name: t.name,
@@ -981,7 +1339,7 @@ async function _seedSVToolCatalog(db: DatabaseAdapter): Promise<void> {
         requires_approval: 0,
         max_execution_ms: 60000,
         rate_limit_per_min: 30,
-        enabled: 1,
+        enabled: seedEnabled,
         tool_key: t.toolKey,
         version: '1.0',
         side_effects: t.sideEffects,
@@ -992,13 +1350,10 @@ async function _seedSVToolCatalog(db: DatabaseAdapter): Promise<void> {
     } catch { /* non-fatal */ }
   }
 
-  // Disable tools that have no working infrastructure in this deployment so
-  // the supervisor never tries them. Math work is routed through cse_run_code
-  // (which boots SymPy via pip in the chat sandbox).
-  //   - sympy_*: require pre-built sandbox-sym container image (digests.json
-  //     currently holds placeholder zeros → docker pull exits 125).
+  // Disable tools that have no working infrastructure in this deployment.
   //   - wolfram_query: requires WOLFRAM_APP_ID env var; not configured.
-  const _BROKEN_TOOLS = ['sympy_simplify', 'sympy_solve', 'sympy_integrate', 'wolfram_query'];
+  //   (sympy_* tools were previously disabled but are now enabled: CSE sandbox is live)
+  const _BROKEN_TOOLS = ['wolfram_query', 'rapids_cuml'];
   for (const key of _BROKEN_TOOLS) {
     try {
       const row = await db.getToolCatalogByKey(key);
@@ -1018,23 +1373,26 @@ async function _seedSVWorkflowDef(db: DatabaseAdapter): Promise<void> {
     const existing = await db.getWorkflowDef(SV_WORKFLOW_ID).catch(() => null);
     if (existing) return;
     const steps = [
-      { id: 'decompose',   agent: 'sv-decomposer',  next: ['parallel'] },
-      { id: 'parallel',    parallel: ['literature', 'statistical', 'mathematical', 'simulation'], next: ['adversarial'] },
-      { id: 'literature',  agent: 'sv-literature',  next: ['adversarial'] },
-      { id: 'statistical', agent: 'sv-statistical', next: ['adversarial'] },
-      { id: 'mathematical', agent: 'sv-mathematical', next: ['adversarial'] },
-      { id: 'simulation',  agent: 'sv-simulation',  next: ['adversarial'] },
-      { id: 'adversarial', agent: 'sv-adversarial', next: ['supervisor'] },
-      { id: 'supervisor',  agent: 'chat-supervisor', terminal: true },
+      { id: 'decompose',    agent: 'sv-decomposer',     next: ['parallel'] },
+      { id: 'parallel',     parallel: ['literature', 'statistical', 'mathematical', 'simulation', 'replication', 'data-quality'], next: ['adversarial', 'bias-detector'] },
+      { id: 'literature',   agent: 'sv-literature',     next: ['adversarial'] },
+      { id: 'statistical',  agent: 'sv-statistical',    next: ['adversarial'] },
+      { id: 'mathematical', agent: 'sv-mathematical',   next: ['adversarial'] },
+      { id: 'simulation',   agent: 'sv-simulation',     next: ['adversarial'] },
+      { id: 'replication',  agent: 'sv-replication',    next: ['adversarial'] },
+      { id: 'data-quality', agent: 'sv-data-quality',   next: ['adversarial'] },
+      { id: 'adversarial',  agent: 'sv-adversarial',    next: ['bias-detector'] },
+      { id: 'bias-detector', agent: 'sv-bias-detector', next: ['supervisor'] },
+      { id: 'supervisor',   agent: 'sv-supervisor',     terminal: true },
     ];
     await db.createWorkflowDef({
       id: SV_WORKFLOW_ID,
       name: 'Hypothesis Validation Deliberation',
-      description: 'Decompose → parallel specialist evidence (literature, statistical, mathematical, simulation) → adversarial falsification → supervisor verdict. Documented for ops visibility; runtime orchestration is performed by chat.ts via the SVChatBridge.',
-      version: '1.0',
+      description: 'Decompose → parallel specialist evidence (literature, statistical, mathematical, simulation, replication, data-quality) → adversarial falsification → bias detection → supervisor verdict. Phase 5: 10 specialists, sv-supervisor now enabled. Documented for ops; runtime orchestration via SVChatBridge.',
+      version: '2.0',
       steps: JSON.stringify(steps),
       entry_step_id: 'decompose',
-      metadata: JSON.stringify({ owner: 'hypothesis-validation', triggers: ['hypothesis_validation skill'] }),
+      metadata: JSON.stringify({ owner: 'hypothesis-validation', triggers: ['hypothesis_validation skill'], phase: 5 }),
       enabled: 1,
     });
   } catch { /* non-fatal */ }

@@ -1,4 +1,4 @@
-import type { WorkerAgentRow, SupervisorAgentRow, AgentToolRow, ResolvedSupervisorAgent } from './agents.js';
+import type { WorkerAgentRow, SupervisorAgentRow, AgentToolRow, ResolvedSupervisorAgent, AgentStrategySettingsRow } from './agents.js';
 import type { WorkflowRunRow, WorkflowCheckpointRow, CapabilityPolicyBindingRow } from './workflows.js';
 
 export interface IAgentStore {
@@ -39,4 +39,9 @@ export interface IAgentStore {
   listCapabilityPolicyBindings(opts?: { bindingKind?: string; bindingRef?: string; policyKind?: string; enabledOnly?: boolean }): Promise<CapabilityPolicyBindingRow[]>;
   updateCapabilityPolicyBinding(id: string, fields: Partial<Omit<CapabilityPolicyBindingRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
   deleteCapabilityPolicyBinding(id: string): Promise<void>;
+
+  // Agent strategy settings (global / per-tenant defaults)
+  getAgentStrategySettings(id: string): Promise<AgentStrategySettingsRow | null>;
+  updateAgentStrategySettings(id: string, patch: Partial<Omit<AgentStrategySettingsRow, 'id' | 'updated_at'>>): Promise<void>;
+  listAgentStrategySettings(): Promise<AgentStrategySettingsRow[]>;
 }

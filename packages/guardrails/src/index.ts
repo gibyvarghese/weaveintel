@@ -113,6 +113,27 @@ export {
 
 // Seed utilities
 export { DEFAULT_GUARDRAILS, type GuardrailSeedRow } from './seed.js';
+export { GUARDRAILS_2026 } from './seed-2026.js';
+
+// Phase 4 — evaluator factories (for custom override / re-registration)
+export {
+  createEuAiActHighRiskEvaluator,
+  createEuAiActManipulationEvaluator,
+  createEuAiActTransparencyEvaluator,
+  createDataResidencyEvaluator,
+  createGdprConsentEvaluator,
+} from './evaluators/eu-ai-act.js';
+export {
+  createAiPaperDetectionEvaluator,
+  createSyntheticDataFlagEvaluator,
+  createIpVerbatimReproductionEvaluator,
+  createIpLicenseCheckEvaluator,
+} from './evaluators/ai-content-detection.js';
+export {
+  createMemoryPoisoningEvaluator,
+  createGoalHijackingEvaluator,
+  createDelegationCheckEvaluator,
+} from './evaluators/agent-safety.js';
 
 // Conditional trigger system (Phase 1)
 export {

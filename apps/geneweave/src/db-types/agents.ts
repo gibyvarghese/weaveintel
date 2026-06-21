@@ -92,3 +92,62 @@ export interface OAuthFlowStateRow {
   expires_at: string;
   created_at: string;
 }
+
+/**
+ * Global / per-tenant agent strategy settings (agent_strategy_settings table).
+ *
+ * A single 'global' row is seeded by m40 and updated by subsequent migrations
+ * (m63, m74). Tenant-scoped rows may also exist (scope='tenant', tenant_id set).
+ * Chat-level settings in chat_settings take precedence over these defaults.
+ *
+ * Phase 7 (m74) adds:
+ *   hitl_threshold, max_agent_hops, tool_confirmation_level, memory_policy
+ * and flips the global defaults for a2a_enabled, supervisor_parallel_delegation,
+ * and reflect_enabled from 0 → 1.
+ */
+export interface AgentStrategySettingsRow {
+  id: string;
+  scope: string;                         // 'global' | 'tenant'
+  tenant_id: string | null;
+
+  // W1 — Reflection
+  reflect_enabled: number;
+  reflect_max_revisions: number;
+  reflect_criteria: string | null;
+
+  // W2 — Verify/regenerate
+  verify_enabled: number;
+  verify_min_score: number;
+  verify_max_attempts: number;
+
+  // W3 — Supervisor
+  supervisor_replan_on_failure: number;
+  supervisor_parallel_delegation: number;
+
+  // W5 — Ensemble
+  ensemble_resolver: string | null;
+
+  // A2A
+  a2a_enabled: number;
+
+  // P2 — Parallel tool execution + context management + tool retry (m63)
+  parallel_tool_calls: number;
+  context_strategy: string | null;
+  context_max_tokens: number | null;
+  context_window_size: number;
+  tool_retry_max_attempts: number;
+  tool_retry_backoff_ms: number;
+  tool_retry_max_backoff_ms: number;
+
+  // Phase 7 (m74) — 2026 safety + agentic governance
+  /** Risk score threshold [0,1] at which HITL approval is required. */
+  hitl_threshold: number;
+  /** Maximum A2A delegation chain depth before the run is forcibly terminated. */
+  max_agent_hops: number;
+  /** 'none' | 'medium' | 'high-risk-only' — tool-level confirmation gate. */
+  tool_confirmation_level: string;
+  /** 'none' | 'session' | 'persistent' — controls cross-turn memory persistence. */
+  memory_policy: string;
+
+  updated_at: string;
+}

@@ -12,6 +12,16 @@ function parseTriggerFields(row: GuardrailRow): { triggerConditions?: ConditionN
   };
 }
 
+/** Merges Phase 4 column values (judge_model, compliance_framework) into the config object. */
+function injectPhase4Fields(config: Record<string, unknown>, row: GuardrailRow): Record<string, unknown> {
+  if (!row.judge_model && !row.compliance_framework) return config;
+  return {
+    ...config,
+    ...(row.judge_model ? { judge_model: row.judge_model } : {}),
+    ...(row.compliance_framework ? { compliance_framework: row.compliance_framework } : {}),
+  };
+}
+
 export function parseGuardrailConfig(raw: string | null): Record<string, unknown> {
   if (!raw) return {};
   try {
@@ -63,7 +73,7 @@ export function patternConfigFromNames(patterns: unknown): Record<string, unknow
 }
 
 export function normalizeGuardrail(row: GuardrailRow, stage: GuardrailStage): Guardrail {
-  const config = parseGuardrailConfig(row.config);
+  const config = injectPhase4Fields(parseGuardrailConfig(row.config), row);
   const normalizedStage = normalizeGuardrailStage(row.stage, stage);
 
   if (row.type === 'cognitive' || row.type === 'cognitive_check') {
