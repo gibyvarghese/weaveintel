@@ -16,3 +16,13 @@ export { createSkillRegistry } from './registry.js';
 
 // Seed utilities
 export { mapSkillToRow, type SkillSeedRow } from './seed.js';
+
+// A2A Skill catalog (mid-2026 taxonomy)
+export {
+  A2A_SKILL_CATALOG,
+  A2A_NEW_SKILLS_V2,
+  SUPERVISOR_V2_WORKERS,
+  M69_NEW_INPUT_MIME_TYPES,
+  mapA2ASkillToRow,
+} from './a2a-skill-catalog.js';
+export type { A2ASkillDef, A2ASkillMode, A2AWorkerDef } from './a2a-skill-catalog.js';

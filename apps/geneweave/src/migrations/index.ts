@@ -48,6 +48,7 @@ import { applyM65AgentPhase4 } from './m65-agent-phase4.js';
 import { applyM66AgentPhase5 } from './m66-agent-phase5.js';
 import { applyM67AgentPhase6 } from './m67-agent-phase6.js';
 import { applyM68ModelRegistryRefresh } from './m68-model-registry-refresh.js';
+import { applyM69A2ASkillsV2 } from './m69-a2a-skills-v2.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -104,6 +105,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm66-agent-phase5', description: 'Agent Phase 5: checkpoint/resume (agent_checkpoints table, chat_settings columns) + dynamic worker registry (chat_settings columns)', run: applyM66AgentPhase5 },
   { id: 'm67-agent-phase6', description: 'Agent Phase 6: eval pipeline, cost governor, compliance, vision loop (chat_settings columns + agent_eval_pipeline_runs, agent_cost_ledger, agent_compliance_audit tables)', run: applyM67AgentPhase6 },
   { id: 'm68-model-registry-refresh', description: 'Model Registry Refresh (mid-2026): context_window_k + max_output_tokens_k on model_pricing; supports_computer_use + supports_long_context + supports_realtime_audio on model_capability_scores; disable Gemini 1.5 / llama3 / phi3 / gemma2; quality-score corrections', run: applyM68ModelRegistryRefresh },
+  { id: 'm69-a2a-skills-v2', description: 'A2A Skills Taxonomy Expansion (mid-2026): 12 new a2a_skills (computer-use, browser-automation, code-execution, document-intelligence, image-analysis, image-generation, voice-interaction, data-pipeline, memory-retrieval, workflow-orchestration, research-synthesis, hypothesis-validation); update supervisor-orchestration workers; add video/*/html/openxmlformats MIME types to existing skills', run: applyM69A2ASkillsV2 },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {
