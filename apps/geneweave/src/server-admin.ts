@@ -16,6 +16,7 @@ import {
   registerAdminCatalogRoutes,
   registerAdminA2ASkillRoutes,
 } from './admin/routes/index.js';
+import { registerScopeRoutes } from './admin/api/scope.js';
 import type { RouterLike } from './admin/api/types.js';
 
 export interface AdminRouteExtras {
@@ -53,4 +54,10 @@ export function registerAdminRoutes(
   registerAdminConnectorRoutes(router, db, json, readBody, providers, html);
   registerAdminCatalogRoutes(router, db, json, readBody);
   registerAdminA2ASkillRoutes(router, db, json, readBody);
+  // Scope isolation admin routes — requireDetailedDescription is not needed for scope tables
+  registerScopeRoutes(router, db, {
+    json,
+    readBody,
+    requireDetailedDescription: () => null,  // unused in scope routes
+  });
 }

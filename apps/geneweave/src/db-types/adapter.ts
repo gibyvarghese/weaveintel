@@ -41,8 +41,8 @@ export type {
   NoteRow, NoteLinkRow, NoteLinkTargetKind, NoteDatabaseRow, NoteDbRowRow, NoteDatabaseSource, NoteDatabaseViewType,
   NoteSensitivity, NoteListFilter,
 } from './adapter-agenda-notes.js';
-export type { ScopesAdapterMethods } from './adapter-scopes.js';
-export type { AgentScopeRow, ScopeCrossPolicyRow, ScopeAccessLogRow } from './scopes.js';
+export type { ScopesAdapterMethods, ScopeSkillAssignmentAdminRow, ScopeLiveAgentAssignmentAdminRow } from './adapter-scopes.js';
+export type { AgentScopeRow, ScopeCrossPolicyRow, ScopeSkillAssignmentRow, ScopeLiveAgentAssignmentRow, ScopeAccessLogRow } from './scopes.js';
 export type {
   IVoiceStore,
   VoiceConfigRow, VoiceConfigCreate, VoiceConfigUpdate,

@@ -9305,6 +9305,112 @@ export class SQLiteAdapter implements DatabaseAdapter {
     ).get() as { n: number };
     return row.n;
   }
+
+  // ── Admin CRUD — agent_scopes ────────────────────────────────────────────
+
+  async adminListScopes(): Promise<import('./db-types/scopes.js').AgentScopeRow[]> {
+    return this.d.prepare(`SELECT * FROM agent_scopes ORDER BY id`).all() as import('./db-types/scopes.js').AgentScopeRow[];
+  }
+
+  async adminCreateScope(scope: Omit<import('./db-types/scopes.js').AgentScopeRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO agent_scopes (id, display_name, description, sandboxed, max_delegation_depth, audit_level, enabled)
+      VALUES (@id, @display_name, @description, @sandboxed, @max_delegation_depth, @audit_level, @enabled)
+    `).run(scope);
+  }
+
+  async adminUpdateScope(id: string, patch: Partial<Omit<import('./db-types/scopes.js').AgentScopeRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const cols = Object.keys(patch);
+    if (cols.length === 0) return;
+    const setClauses = [...cols.map((c) => `${c} = @${c}`), `updated_at = datetime('now')`].join(', ');
+    this.d.prepare(`UPDATE agent_scopes SET ${setClauses} WHERE id = @id`).run({ ...patch, id });
+  }
+
+  async adminDeleteScope(id: string): Promise<void> {
+    this.d.prepare(`DELETE FROM agent_scopes WHERE id = ?`).run(id);
+  }
+
+  // ── Admin CRUD — scope_cross_policies ────────────────────────────────────
+
+  async adminListScopePolicies(): Promise<import('./db-types/scopes.js').ScopeCrossPolicyRow[]> {
+    return this.d.prepare(`SELECT * FROM scope_cross_policies ORDER BY from_scope, to_scope`).all() as import('./db-types/scopes.js').ScopeCrossPolicyRow[];
+  }
+
+  async adminGetScopePolicy(id: string): Promise<import('./db-types/scopes.js').ScopeCrossPolicyRow | null> {
+    return (this.d.prepare(`SELECT * FROM scope_cross_policies WHERE id = ?`).get(id) as import('./db-types/scopes.js').ScopeCrossPolicyRow | undefined) ?? null;
+  }
+
+  async adminCreateScopePolicy(policy: Omit<import('./db-types/scopes.js').ScopeCrossPolicyRow, 'created_at'>): Promise<void> {
+    this.d.prepare(`
+      INSERT INTO scope_cross_policies
+        (id, from_scope, to_scope, allowed, requires_a2a, max_delegation_depth, conditions_json, audit_level, enabled)
+      VALUES
+        (@id, @from_scope, @to_scope, @allowed, @requires_a2a, @max_delegation_depth, @conditions_json, @audit_level, @enabled)
+    `).run(policy);
+  }
+
+  async adminUpdateScopePolicy(id: string, patch: Partial<Omit<import('./db-types/scopes.js').ScopeCrossPolicyRow, 'id' | 'created_at'>>): Promise<void> {
+    const cols = Object.keys(patch);
+    if (cols.length === 0) return;
+    const setClauses = cols.map((c) => `${c} = @${c}`).join(', ');
+    this.d.prepare(`UPDATE scope_cross_policies SET ${setClauses} WHERE id = @id`).run({ ...patch, id });
+  }
+
+  async adminDeleteScopePolicy(id: string): Promise<void> {
+    this.d.prepare(`DELETE FROM scope_cross_policies WHERE id = ?`).run(id);
+  }
+
+  // ── Admin CRUD — scope_skill_assignments ─────────────────────────────────
+
+  async adminListScopeSkillAssignments(): Promise<import('./db-types/adapter-scopes.js').ScopeSkillAssignmentAdminRow[]> {
+    const rows = this.d.prepare(`
+      SELECT scope_id, skill_id FROM scope_skill_assignments ORDER BY scope_id, skill_id
+    `).all() as import('./db-types/scopes.js').ScopeSkillAssignmentRow[];
+    // Add synthetic composite ID so the generic admin SPA can address individual rows.
+    return rows.map((r) => ({ ...r, id: `${r.scope_id}::${r.skill_id}` }));
+  }
+
+  async adminCreateScopeSkillAssignment(scope_id: string, skill_id: string): Promise<void> {
+    this.d.prepare(`
+      INSERT OR IGNORE INTO scope_skill_assignments (scope_id, skill_id) VALUES (?, ?)
+    `).run(scope_id, skill_id);
+  }
+
+  async adminDeleteScopeSkillAssignment(compositeId: string): Promise<void> {
+    // compositeId = "{scope_id}::{skill_id}"
+    const sep = compositeId.indexOf('::');
+    if (sep === -1) throw new Error(`Invalid compositeId: ${compositeId}`);
+    const scope_id = compositeId.slice(0, sep);
+    const skill_id = compositeId.slice(sep + 2);
+    this.d.prepare(`DELETE FROM scope_skill_assignments WHERE scope_id = ? AND skill_id = ?`).run(scope_id, skill_id);
+  }
+
+  // ── Admin CRUD — scope_live_agent_assignments ─────────────────────────────
+
+  async adminListScopeLiveAgentAssignments(): Promise<import('./db-types/adapter-scopes.js').ScopeLiveAgentAssignmentAdminRow[]> {
+    const rows = this.d.prepare(`
+      SELECT scope_id, mesh_key, role_key FROM scope_live_agent_assignments ORDER BY scope_id, mesh_key, role_key
+    `).all() as import('./db-types/scopes.js').ScopeLiveAgentAssignmentRow[];
+    return rows.map((r) => ({ ...r, id: `${r.scope_id}::${r.mesh_key}::${r.role_key}` }));
+  }
+
+  async adminCreateScopeLiveAgentAssignment(scope_id: string, mesh_key: string, role_key: string): Promise<void> {
+    this.d.prepare(`
+      INSERT OR IGNORE INTO scope_live_agent_assignments (scope_id, mesh_key, role_key) VALUES (?, ?, ?)
+    `).run(scope_id, mesh_key, role_key);
+  }
+
+  async adminDeleteScopeLiveAgentAssignment(compositeId: string): Promise<void> {
+    // compositeId = "{scope_id}::{mesh_key}::{role_key}" (role_key may be empty string)
+    const parts = compositeId.split('::');
+    if (parts.length < 3) throw new Error(`Invalid compositeId: ${compositeId}`);
+    // scope_id and mesh_key are first two, everything after is role_key (handles '::-style empty role key)
+    const [scope_id, mesh_key, ...rest] = parts;
+    const role_key = rest.join('::');
+    this.d.prepare(
+      `DELETE FROM scope_live_agent_assignments WHERE scope_id = ? AND mesh_key = ? AND role_key = ?`,
+    ).run(scope_id, mesh_key, role_key);
+  }
 }
 
 // ─── Factory ─────────────────────────────────────────────────

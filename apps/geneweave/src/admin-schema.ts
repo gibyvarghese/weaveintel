@@ -20,6 +20,7 @@ import {
   LIVE_MESH_ADMIN_TABS,
   LIVE_RUNTIME_ADMIN_TABS,
   A2A_ADMIN_TABS,
+  SCOPE_ADMIN_TABS,
 } from './admin/schema/index.js';
 
 // ─── Tab groups (sidebar navigation) ─────────────────────────
@@ -94,6 +95,13 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
   ]},
   { label: 'A2A Protocol', icon: '\uD83E\uDD16\uD83E\uDD1D', tabs: [
     { key: 'a2a-skills', label: 'A2A Skills' },
+  ]},
+  { label: 'Scope Isolation', icon: '\uD83D\uDD10', tabs: [
+    { key: 'agent-scopes', label: 'Scopes' },
+    { key: 'scope-cross-policies', label: 'Cross-Scope Policies' },
+    { key: 'scope-skill-assignments', label: 'Skill Assignments' },
+    { key: 'scope-live-agent-assignments', label: 'Mesh Assignments' },
+    { key: 'scope-access-log', label: 'Access Log' },
   ]},
   { label: 'Integrations', icon: '\uD83D\uDD0C', tabs: [
     { key: 'enterprise-connectors', label: 'Enterprise' },
@@ -172,4 +180,5 @@ export const ADMIN_TABS = normalizeAdminTabsForModelDiscovery({
   ...LIVE_MESH_ADMIN_TABS,
   ...LIVE_RUNTIME_ADMIN_TABS,
   ...A2A_ADMIN_TABS,
+  ...SCOPE_ADMIN_TABS,
 });

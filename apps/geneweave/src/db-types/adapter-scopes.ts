@@ -9,17 +9,26 @@ import type BetterSqlite3 from 'better-sqlite3';
 import type {
   AgentScopeRow,
   ScopeCrossPolicyRow,
+  ScopeSkillAssignmentRow,
+  ScopeLiveAgentAssignmentRow,
   ScopeAccessLogRow,
 } from './scopes.js';
 
+/** Assignment row augmented with a synthetic composite ID for admin CRUD. */
+export type ScopeSkillAssignmentAdminRow = ScopeSkillAssignmentRow & { id: string };
+/** Assignment row augmented with a synthetic composite ID for admin CRUD. */
+export type ScopeLiveAgentAssignmentAdminRow = ScopeLiveAgentAssignmentRow & { id: string };
+
 export interface ScopesAdapterMethods {
-  /** List all enabled scope definitions. */
+  // ── Runtime reads (enforcement path) ────────────────────────────────────
+
+  /** List all *enabled* scope definitions (runtime use). */
   listScopes(): Promise<AgentScopeRow[]>;
 
   /** Get a single scope by ID. Returns null if not found. */
   getScope(id: string): Promise<AgentScopeRow | null>;
 
-  /** List all enabled cross-scope policies. */
+  /** List all *enabled* cross-scope policies (runtime use). */
   listScopePolicies(): Promise<ScopeCrossPolicyRow[]>;
 
   /** Returns the scope ID for a given skill ID, or 'system' if not assigned. */
@@ -43,6 +52,66 @@ export interface ScopesAdapterMethods {
 
   /** Returns the count of scope violations in the last N hours. */
   countScopeViolations(withinHours?: number): Promise<number>;
+
+  // ── Admin CRUD — agent_scopes ────────────────────────────────────────────
+
+  /** List ALL scope definitions (including disabled) for admin UI. */
+  adminListScopes(): Promise<AgentScopeRow[]>;
+
+  /** Create a new scope definition. */
+  adminCreateScope(scope: Omit<AgentScopeRow, 'created_at' | 'updated_at'>): Promise<void>;
+
+  /** Update an existing scope definition. */
+  adminUpdateScope(id: string, patch: Partial<Omit<AgentScopeRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void>;
+
+  /** Delete a scope definition. */
+  adminDeleteScope(id: string): Promise<void>;
+
+  // ── Admin CRUD — scope_cross_policies ────────────────────────────────────
+
+  /** List ALL cross-scope policies (including disabled) for admin UI. */
+  adminListScopePolicies(): Promise<ScopeCrossPolicyRow[]>;
+
+  /** Get a single cross-scope policy by its UUID. */
+  adminGetScopePolicy(id: string): Promise<ScopeCrossPolicyRow | null>;
+
+  /** Create a new cross-scope policy. */
+  adminCreateScopePolicy(policy: Omit<ScopeCrossPolicyRow, 'created_at'>): Promise<void>;
+
+  /** Update an existing cross-scope policy. */
+  adminUpdateScopePolicy(id: string, patch: Partial<Omit<ScopeCrossPolicyRow, 'id' | 'created_at'>>): Promise<void>;
+
+  /** Delete a cross-scope policy. */
+  adminDeleteScopePolicy(id: string): Promise<void>;
+
+  // ── Admin CRUD — scope_skill_assignments ─────────────────────────────────
+
+  /**
+   * List all skill→scope assignments.
+   * Each row is augmented with a synthetic `id` = `{scope_id}::{skill_id}` so
+   * the generic admin SPA can treat it like a normal record.
+   */
+  adminListScopeSkillAssignments(): Promise<ScopeSkillAssignmentAdminRow[]>;
+
+  /** Assign a skill to a scope. Silently no-ops if already assigned. */
+  adminCreateScopeSkillAssignment(scope_id: string, skill_id: string): Promise<void>;
+
+  /** Remove a skill→scope assignment by its synthetic composite ID. */
+  adminDeleteScopeSkillAssignment(compositeId: string): Promise<void>;
+
+  // ── Admin CRUD — scope_live_agent_assignments ─────────────────────────────
+
+  /**
+   * List all live-mesh→scope assignments.
+   * Each row is augmented with a synthetic `id` = `{scope_id}::{mesh_key}::{role_key}`.
+   */
+  adminListScopeLiveAgentAssignments(): Promise<ScopeLiveAgentAssignmentAdminRow[]>;
+
+  /** Assign a live agent mesh+role to a scope. */
+  adminCreateScopeLiveAgentAssignment(scope_id: string, mesh_key: string, role_key: string): Promise<void>;
+
+  /** Remove a live-mesh→scope assignment by its synthetic composite ID. */
+  adminDeleteScopeLiveAgentAssignment(compositeId: string): Promise<void>;
 }
 
 /**
@@ -138,6 +207,106 @@ export function buildScopesAdapter(raw: BetterSqlite3.Database): ScopesAdapterMe
         WHERE allowed = 0 AND created_at >= ?
       `).get(since) as { n: number };
       return row.n;
+    },
+
+    // ── Admin CRUD — agent_scopes ──────────────────────────────────────────
+
+    async adminListScopes(): Promise<AgentScopeRow[]> {
+      return raw.prepare(`SELECT * FROM agent_scopes ORDER BY id`).all() as AgentScopeRow[];
+    },
+
+    async adminCreateScope(scope: Omit<AgentScopeRow, 'created_at' | 'updated_at'>): Promise<void> {
+      raw.prepare(`
+        INSERT INTO agent_scopes (id, display_name, description, sandboxed, max_delegation_depth, audit_level, enabled)
+        VALUES (@id, @display_name, @description, @sandboxed, @max_delegation_depth, @audit_level, @enabled)
+      `).run(scope);
+    },
+
+    async adminUpdateScope(id: string, patch: Partial<Omit<AgentScopeRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+      const cols = Object.keys(patch);
+      if (cols.length === 0) return;
+      const setClauses = [...cols.map((c) => `${c} = @${c}`), `updated_at = datetime('now')`].join(', ');
+      raw.prepare(`UPDATE agent_scopes SET ${setClauses} WHERE id = @id`).run({ ...patch, id });
+    },
+
+    async adminDeleteScope(id: string): Promise<void> {
+      raw.prepare(`DELETE FROM agent_scopes WHERE id = ?`).run(id);
+    },
+
+    // ── Admin CRUD — scope_cross_policies ──────────────────────────────────
+
+    async adminListScopePolicies(): Promise<ScopeCrossPolicyRow[]> {
+      return raw.prepare(`SELECT * FROM scope_cross_policies ORDER BY from_scope, to_scope`).all() as ScopeCrossPolicyRow[];
+    },
+
+    async adminGetScopePolicy(id: string): Promise<ScopeCrossPolicyRow | null> {
+      return (raw.prepare(`SELECT * FROM scope_cross_policies WHERE id = ?`).get(id) as ScopeCrossPolicyRow | undefined) ?? null;
+    },
+
+    async adminCreateScopePolicy(policy: Omit<ScopeCrossPolicyRow, 'created_at'>): Promise<void> {
+      raw.prepare(`
+        INSERT INTO scope_cross_policies
+          (id, from_scope, to_scope, allowed, requires_a2a, max_delegation_depth, conditions_json, audit_level, enabled)
+        VALUES
+          (@id, @from_scope, @to_scope, @allowed, @requires_a2a, @max_delegation_depth, @conditions_json, @audit_level, @enabled)
+      `).run(policy);
+    },
+
+    async adminUpdateScopePolicy(id: string, patch: Partial<Omit<ScopeCrossPolicyRow, 'id' | 'created_at'>>): Promise<void> {
+      const cols = Object.keys(patch);
+      if (cols.length === 0) return;
+      const setClauses = cols.map((c) => `${c} = @${c}`).join(', ');
+      raw.prepare(`UPDATE scope_cross_policies SET ${setClauses} WHERE id = @id`).run({ ...patch, id });
+    },
+
+    async adminDeleteScopePolicy(id: string): Promise<void> {
+      raw.prepare(`DELETE FROM scope_cross_policies WHERE id = ?`).run(id);
+    },
+
+    // ── Admin CRUD — scope_skill_assignments ───────────────────────────────
+
+    async adminListScopeSkillAssignments(): Promise<ScopeSkillAssignmentAdminRow[]> {
+      const rows = raw.prepare(`
+        SELECT scope_id, skill_id FROM scope_skill_assignments ORDER BY scope_id, skill_id
+      `).all() as import('./scopes.js').ScopeSkillAssignmentRow[];
+      return rows.map((r) => ({ ...r, id: `${r.scope_id}::${r.skill_id}` }));
+    },
+
+    async adminCreateScopeSkillAssignment(scope_id: string, skill_id: string): Promise<void> {
+      raw.prepare(`INSERT OR IGNORE INTO scope_skill_assignments (scope_id, skill_id) VALUES (?, ?)`).run(scope_id, skill_id);
+    },
+
+    async adminDeleteScopeSkillAssignment(compositeId: string): Promise<void> {
+      const sep = compositeId.indexOf('::');
+      if (sep === -1) throw new Error(`Invalid compositeId: ${compositeId}`);
+      const scope_id = compositeId.slice(0, sep);
+      const skill_id = compositeId.slice(sep + 2);
+      raw.prepare(`DELETE FROM scope_skill_assignments WHERE scope_id = ? AND skill_id = ?`).run(scope_id, skill_id);
+    },
+
+    // ── Admin CRUD — scope_live_agent_assignments ──────────────────────────
+
+    async adminListScopeLiveAgentAssignments(): Promise<ScopeLiveAgentAssignmentAdminRow[]> {
+      const rows = raw.prepare(`
+        SELECT scope_id, mesh_key, role_key FROM scope_live_agent_assignments ORDER BY scope_id, mesh_key, role_key
+      `).all() as import('./scopes.js').ScopeLiveAgentAssignmentRow[];
+      return rows.map((r) => ({ ...r, id: `${r.scope_id}::${r.mesh_key}::${r.role_key}` }));
+    },
+
+    async adminCreateScopeLiveAgentAssignment(scope_id: string, mesh_key: string, role_key: string): Promise<void> {
+      raw.prepare(
+        `INSERT OR IGNORE INTO scope_live_agent_assignments (scope_id, mesh_key, role_key) VALUES (?, ?, ?)`,
+      ).run(scope_id, mesh_key, role_key);
+    },
+
+    async adminDeleteScopeLiveAgentAssignment(compositeId: string): Promise<void> {
+      const parts = compositeId.split('::');
+      if (parts.length < 3) throw new Error(`Invalid compositeId: ${compositeId}`);
+      const [scope_id, mesh_key, ...rest] = parts;
+      const role_key = rest.join('::');
+      raw.prepare(
+        `DELETE FROM scope_live_agent_assignments WHERE scope_id = ? AND mesh_key = ? AND role_key = ?`,
+      ).run(scope_id, mesh_key, role_key);
     },
   };
 }

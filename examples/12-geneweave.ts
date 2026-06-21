@@ -109,8 +109,14 @@ async function main() {
       ...(process.env['ANTHROPIC_API_KEY'] ? { anthropic: { apiKey: process.env['ANTHROPIC_API_KEY'] } } : {}),
       ...(process.env['OPENAI_API_KEY'] ? { openai: { apiKey: process.env['OPENAI_API_KEY'] } } : {}),
     },
-    defaultProvider: process.env['ANTHROPIC_API_KEY'] ? 'anthropic' : 'openai',
-    defaultModel: process.env['ANTHROPIC_API_KEY'] ? 'claude-sonnet-4-6' : 'gpt-4o-mini',
+    // DEFAULT_PROVIDER / DEFAULT_MODEL env vars let you explicitly choose the
+    // active model without touching code (e.g. when one provider has no credits).
+    // When both keys are present and no override is set, OpenAI is preferred so
+    // that a depleted Anthropic account does not break the app silently.
+    defaultProvider: process.env['DEFAULT_PROVIDER']
+      ?? (process.env['OPENAI_API_KEY'] ? 'openai' : 'anthropic'),
+    defaultModel: process.env['DEFAULT_MODEL']
+      ?? (process.env['OPENAI_API_KEY'] ? 'gpt-4o-mini' : 'claude-sonnet-4-6'),
 
     // Google OAuth 2.0 — optional: enables "Sign in with Google" on the login screen.
     // The callback URL must be registered in your Google Cloud Console:

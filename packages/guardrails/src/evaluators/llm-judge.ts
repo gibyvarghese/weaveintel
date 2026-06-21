@@ -81,18 +81,29 @@ export function createLlmJudgeEvaluator(overrideRubric?: string) {
 
     const systemPrompt = criteria ? `${rubric}\n\nAdditional criteria: ${criteria}` : rubric;
 
-    const response = await ctx.model.generate(
-      {} as Parameters<typeof ctx.model.generate>[0],
-      {
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: input },
-        ],
-        responseFormat: { type: 'json_object' },
-        temperature: 0,
-        maxTokens: 256,
-      },
-    );
+    let response: Awaited<ReturnType<typeof ctx.model.generate>>;
+    try {
+      response = await ctx.model.generate(
+        {} as Parameters<typeof ctx.model.generate>[0],
+        {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: input },
+          ],
+          responseFormat: { type: 'json_object' },
+          temperature: 0,
+          maxTokens: 256,
+        },
+      );
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      return {
+        decision: onError,
+        guardrailId: guardrail.id,
+        explanation: `llm-judge model call failed (${onError}): ${errMsg.slice(0, 200)}`,
+        metadata: { callError: true, error: errMsg.slice(0, 500) },
+      };
+    }
 
     const verdict = parseVerdict(response.content);
 

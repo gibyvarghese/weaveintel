@@ -84,3 +84,6 @@ export { registerCapabilityPolicyBindingRoutes } from "./capability-policy-bindi
 
 // ── Phase 6 of DB-Driven Capability Plan: Capability packs ──
 export { registerCapabilityPackRoutes } from "./capability-packs.js";
+
+// ── m75: Agentic Scope Isolation ─────────────────────────────
+export { registerScopeRoutes } from './scope.js';
