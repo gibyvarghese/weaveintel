@@ -1,146 +1,263 @@
 /**
- * Hypothesis Validation — Submit View (v2)
+ * Hypothesis Validation — Submit View (v4)
  *
- * - api.get() for loadRecent (CSRF-safe)
- * - Interactive domain-tag chips
- * - Character counter on statement
- * - Budget selection from API
- * - Tips panel on what makes a good hypothesis
+ * Uses CSS classes exclusively (no inline styles) so the CSP hash on <style>
+ * is respected. All layout/colour lives in styles.ts under the .sv-* prefix.
  */
 import { h } from '../../../ui/dom.js';
 import { api } from '../../../ui/api.js';
 import { state } from '../../../ui/state.js';
+import { ensureSVStyles } from '../sv-css.js';
 
-const SUGGESTED_DOMAINS = [
-  'biology', 'chemistry', 'physics', 'mathematics', 'medicine',
-  'epidemiology', 'climate', 'economics', 'psychology', 'neuroscience',
-  'materials', 'engineering', 'nutrition', 'genetics', 'pharmacology',
+// ── Templates ─────────────────────────────────────────────────────────────────
+
+interface HypothesisTemplate {
+  id: string;
+  icon: string;
+  name: string;
+  category: string;
+  title: string;
+  statement: string;
+  tags: string[];
+}
+
+const TEMPLATES: HypothesisTemplate[] = [
+  {
+    id: 'blank',
+    icon: '✏️',
+    name: 'Blank',
+    category: 'General',
+    title: '',
+    statement: '',
+    tags: [],
+  },
+  {
+    id: 'clinical-rct',
+    icon: '🏥',
+    name: 'Clinical Trial',
+    category: 'Medicine',
+    title: 'Intervention effect in target population',
+    statement: 'In adults aged 40–70 with hypertension (P), daily administration of [intervention] (I) compared to placebo/standard-of-care (C) reduces systolic blood pressure by ≥10 mmHg at 12 weeks (O).',
+    tags: ['medicine', 'epidemiology', 'pharmacology'],
+  },
+  {
+    id: 'epidemiology',
+    icon: '📈',
+    name: 'Epidemiological',
+    category: 'Public Health',
+    title: 'Exposure–outcome association in population',
+    statement: 'In [population] (P), [exposure/risk factor] (I) compared to non-exposed controls (C) is associated with a ≥[X]% increase in [outcome] incidence over [time period] (O).',
+    tags: ['epidemiology', 'biology', 'medicine'],
+  },
+  {
+    id: 'mathematical',
+    icon: '∑',
+    name: 'Mathematical',
+    category: 'Mathematics',
+    title: 'Mathematical identity or closed-form result',
+    statement: 'The definite integral ∫[expression] dx from [a] to [b] equals [exact value]. Equivalently: [algebraic identity / series convergence / equation solution].',
+    tags: ['mathematics'],
+  },
+  {
+    id: 'ml-performance',
+    icon: '🤖',
+    name: 'ML / AI',
+    category: 'Computer Science',
+    title: 'Model architecture improvement on benchmark',
+    statement: 'A [model type] trained on [dataset] with [modification] (I) compared to the standard baseline (C) achieves ≥[X]% relative improvement on [benchmark metric] (O) across [N] independent runs.',
+    tags: ['engineering', 'mathematics', 'economics'],
+  },
+  {
+    id: 'materials',
+    icon: '⚗️',
+    name: 'Materials Science',
+    category: 'Chemistry',
+    title: 'Material property under synthesis conditions',
+    statement: 'Synthesising [material] using [method/conditions] (I) compared to the conventional synthesis route (C) yields a ≥[X]% improvement in [property: tensile strength/conductivity/etc.] as measured by [instrument/standard] (O).',
+    tags: ['chemistry', 'materials', 'engineering'],
+  },
+  {
+    id: 'economics',
+    icon: '💰',
+    name: 'Economic Effect',
+    category: 'Economics',
+    title: 'Policy or market intervention economic impact',
+    statement: 'Implementation of [policy/intervention] in [region/market] (I) compared to the pre-intervention baseline or control region (C) leads to a ≥[X]% change in [economic metric: GDP growth, unemployment, consumer spending] over [time horizon] (O).',
+    tags: ['economics', 'psychology'],
+  },
+  {
+    id: 'neuroscience',
+    icon: '🧠',
+    name: 'Neuroscience',
+    category: 'Biology',
+    title: 'Neural mechanism or cognitive effect',
+    statement: 'In [organism/population] (P), [intervention/condition] (I) compared to sham/control (C) produces a statistically significant change in [neural measure: BOLD activation/spike rate/LFP power] in [brain region] (O), as measured by [modality].',
+    tags: ['neuroscience', 'biology', 'medicine'],
+  },
 ];
 
 const STATEMENT_MAX = 1500;
 
+const DOMAINS = [
+  'biology','chemistry','physics','mathematics','medicine',
+  'epidemiology','climate','economics','psychology','neuroscience',
+  'materials','engineering','nutrition','genetics','pharmacology',
+];
+
+const STATUS_META: Record<string, { label: string; color: string }> = {
+  running:   { label: 'Running',   color: '#f59e0b' },
+  queued:    { label: 'Queued',    color: '#6366f1' },
+  verdict:   { label: 'Complete',  color: '#059669' },
+  abandoned: { label: 'Abandoned', color: '#6b7280' },
+};
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export function renderSVSubmitView(options: { render: () => void }): HTMLElement {
+  ensureSVStyles();
   const { render } = options;
 
   let submitting = false;
-  let error = '';
   const tags: string[] = [];
-  let budgetId = '';
+  let selectedId = 'blank';
 
-  // ── Inputs ───────────────────────────────────────────────────────────────
+  // ── Inputs ────────────────────────────────────────────────────────────────
   const titleInput = h('input', {
     type: 'text',
-    placeholder: 'e.g. "30 min daily exercise reduces cardiovascular risk by ≥15% in adults over 50"',
-    style: 'width:100%;padding:10px 13px;border-radius:9px;border:1.5px solid var(--bg4);background:var(--bg);color:var(--fg);font-size:14px;transition:border-color .18s',
-    onFocus: (e: Event) => { (e.target as HTMLInputElement).style.borderColor = 'var(--accent)'; },
-    onBlur: (e: Event) => { (e.target as HTMLInputElement).style.borderColor = 'var(--bg4)'; },
+    className: 'sv-field',
+    placeholder: 'Short, memorable title for this validation run…',
   }) as HTMLInputElement;
 
-  const charCountEl = h('div', { style: 'font-size:11px;color:var(--fg3);text-align:right;margin-top:3px' }, `0 / ${STATEMENT_MAX}`);
+  const charCount = h('div', { className: 'sv-char-count' }, `0 / ${STATEMENT_MAX}`);
+
   const statementArea = h('textarea', {
-    placeholder: 'State the hypothesis precisely. Include: population, intervention/condition, comparison, outcome metric and direction of effect.\n\nExample: "In adults aged 50–70 (P), 30 min of moderate-intensity aerobic exercise 5×/week (I) compared to sedentary lifestyle (C) reduces 10-year cardiovascular event risk by ≥15% (O)."',
-    rows: '6',
-    style: 'width:100%;padding:10px 13px;border-radius:9px;border:1.5px solid var(--bg4);background:var(--bg);color:var(--fg);font-size:13px;font-family:var(--font);resize:vertical;line-height:1.55;transition:border-color .18s',
-    onFocus: (e: Event) => { (e.target as HTMLTextAreaElement).style.borderColor = 'var(--accent)'; },
-    onBlur: (e: Event) => { (e.target as HTMLTextAreaElement).style.borderColor = 'var(--bg4)'; },
+    rows: '9',
+    className: 'sv-textarea',
+    placeholder: 'Write a falsifiable, precisely scoped statement.\n\nPICO format: "In [population] (P), [intervention] (I) compared to [comparison] (C) results in [outcome with measurable direction and magnitude] (O)."\n\nExample: "In adults aged 50–70 with no prior diagnosis, 150 min/week of moderate aerobic exercise compared to sedentary lifestyle reduces 10-year cardiovascular event risk by ≥15%."',
     onInput: () => {
-      const len = statementArea.value.length;
-      charCountEl.textContent = `${len} / ${STATEMENT_MAX}`;
-      charCountEl.style.color = len > STATEMENT_MAX * 0.9 ? 'var(--warn)' : 'var(--fg3)';
+      const n = statementArea.value.length;
+      charCount.textContent = `${n} / ${STATEMENT_MAX}`;
+      if (n > STATEMENT_MAX * 0.9) charCount.classList.add('sv-warn');
+      else charCount.classList.remove('sv-warn');
     },
   }) as HTMLTextAreaElement;
 
   // ── Tag chips ─────────────────────────────────────────────────────────────
-  const chipsEl = h('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;min-height:28px;margin-top:8px' });
-  const tagTextInput = h('input', {
+  const chipsRow = h('div', { className: 'sv-chips-row' });
+
+  function renderChips() {
+    while (chipsRow.firstChild) chipsRow.removeChild(chipsRow.firstChild);
+    tags.forEach(tag =>
+      chipsRow.appendChild(h('div', { className: 'sv-chip' },
+        h('span', null, tag),
+        h('button', {
+          className: 'sv-chip-remove',
+          onClick: () => { const i = tags.indexOf(tag); if (i >= 0) { tags.splice(i, 1); renderChips(); } },
+        }, '×'),
+      ))
+    );
+  }
+
+  const tagInput = h('input', {
     type: 'text',
-    placeholder: 'Add domain tag…',
-    style: 'flex:1;min-width:120px;padding:5px 10px;border-radius:999px;border:1.5px solid var(--bg4);background:var(--bg);color:var(--fg);font-size:12px',
+    className: 'sv-tag-input',
+    placeholder: 'Type a domain and press Enter…',
     onKeyDown: (e: KeyboardEvent) => {
-      if ((e.key === 'Enter' || e.key === ',') && tagTextInput.value.trim()) {
+      if ((e.key === 'Enter' || e.key === ',') && tagInput.value.trim()) {
         e.preventDefault();
-        addTag(tagTextInput.value.trim());
-        tagTextInput.value = '';
+        addTag(tagInput.value.trim());
+        tagInput.value = '';
       }
     },
   }) as HTMLInputElement;
 
-  function addTag(tag: string) {
-    const clean = tag.replace(/[^a-z0-9_-]/gi, '').toLowerCase().slice(0, 24);
-    if (!clean || tags.includes(clean)) return;
-    tags.push(clean);
+  function addTag(raw: string) {
+    const t = raw.replace(/[^a-z0-9_-]/gi, '').toLowerCase().slice(0, 24);
+    if (!t || tags.includes(t)) return;
+    tags.push(t);
     renderChips();
   }
 
-  function removeTag(tag: string) {
-    const idx = tags.indexOf(tag);
-    if (idx >= 0) tags.splice(idx, 1);
-    renderChips();
-  }
+  const suggRow = h('div', { className: 'sv-sugg-row' });
+  DOMAINS.forEach(d => {
+    const btn = h('button', { className: 'sv-sugg-btn', onClick: () => addTag(d) }, d);
+    suggRow.appendChild(btn);
+  });
 
-  function renderChips() {
-    while (chipsEl.firstChild) chipsEl.removeChild(chipsEl.firstChild);
-    tags.forEach(tag => {
-      chipsEl.appendChild(h('div', {
-        style: 'display:flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;background:var(--accent-dim);border:1px solid var(--accent);color:var(--accent);font-size:12px;font-weight:500',
+  // ── Template grid ─────────────────────────────────────────────────────────
+  const tplGrid = h('div', { className: 'sv-tpl-grid' });
+
+  function renderTplGrid() {
+    while (tplGrid.firstChild) tplGrid.removeChild(tplGrid.firstChild);
+    TEMPLATES.forEach(tpl => {
+      const active = tpl.id === selectedId;
+      const card = h('div', {
+        className: `sv-tpl-card${active ? ' sv-active' : ''}`,
+        onClick: () => applyTemplate(tpl),
       },
-        h('span', null, tag),
-        h('button', {
-          style: 'font-size:13px;line-height:1;color:var(--accent);padding:0 0 0 2px',
-          onClick: () => removeTag(tag),
-        }, '×'),
-      ));
+        h('div', { className: 'sv-tpl-head' },
+          h('span', { className: 'sv-tpl-icon' }, tpl.icon),
+          active ? h('span', { className: 'sv-tpl-badge' }, 'selected') : h('span', null, ''),
+        ),
+        h('div', { className: `sv-tpl-name${active ? ' sv-active' : ''}` }, tpl.name),
+        h('div', { className: 'sv-tpl-cat' }, tpl.category),
+      );
+      tplGrid.appendChild(card);
     });
   }
+  renderTplGrid();
 
-  // Suggested domain chips
-  const suggestionsEl = h('div', { style: 'display:flex;flex-wrap:wrap;gap:5px;margin-top:8px' },
-    ...SUGGESTED_DOMAINS.map(d => h('button', {
-      style: 'padding:3px 10px;border-radius:999px;border:1px solid var(--bg4);background:var(--bg3);color:var(--fg3);font-size:11px;cursor:pointer;transition:all .15s',
-      onMouseEnter: (e: Event) => { (e.target as HTMLButtonElement).style.borderColor = 'var(--accent)'; (e.target as HTMLButtonElement).style.color = 'var(--accent)'; },
-      onMouseLeave: (e: Event) => { (e.target as HTMLButtonElement).style.borderColor = 'var(--bg4)'; (e.target as HTMLButtonElement).style.color = 'var(--fg3)'; },
-      onClick: () => addTag(d),
-    }, d)),
-  );
+  function applyTemplate(tpl: HypothesisTemplate) {
+    selectedId = tpl.id;
+    titleInput.value = tpl.title;
+    statementArea.value = tpl.statement;
+    const n = tpl.statement.length;
+    charCount.textContent = `${n} / ${STATEMENT_MAX}`;
+    if (n > STATEMENT_MAX * 0.9) charCount.classList.add('sv-warn');
+    else charCount.classList.remove('sv-warn');
+    tags.length = 0;
+    tpl.tags.forEach(t => tags.push(t));
+    renderChips();
+    renderTplGrid();
+    setTimeout(() => (tpl.title ? statementArea.focus() : titleInput.focus()), 80);
+  }
 
   // ── Error / submit ────────────────────────────────────────────────────────
-  const errorEl = h('div', { style: 'color:var(--danger);font-size:13px;min-height:18px;margin-top:4px;border-radius:7px;padding:0' });
+  const errorEl = h('div', { className: 'sv-error' });
+
+  function showError(msg: string) { errorEl.textContent = msg; errorEl.classList.add('sv-show'); }
+  function clearError() { errorEl.textContent = ''; errorEl.classList.remove('sv-show'); }
 
   const submitBtn = h('button', {
-    className: 'nav-btn active',
-    style: 'padding:11px 32px;font-size:14px;font-weight:700;border-radius:999px;transition:opacity .18s',
+    className: 'sv-submit-btn',
     onClick: async () => {
       if (submitting) return;
-      const title = titleInput.value.trim();
+      clearError();
+      const title     = titleInput.value.trim();
       const statement = statementArea.value.trim();
-      error = '';
-      errorEl.textContent = '';
-
-      if (!title) { showError('Title is required.'); return; }
-      if (!statement) { showError('Hypothesis statement is required.'); return; }
-      if (statement.length > STATEMENT_MAX) { showError(`Statement is too long (${statement.length} / ${STATEMENT_MAX}).`); return; }
-      if (statement.split(/\s+/).length < 8) { showError('Statement is too short — include population, intervention, comparison, and outcome.'); return; }
+      if (!title) { showError('Please enter a title for this hypothesis.'); return; }
+      if (!statement) { showError('Please write the hypothesis statement.'); return; }
+      if (statement.split(/\s+/).length < 8) { showError('Statement is too brief — describe the population, intervention, comparison, and expected outcome.'); return; }
+      if (statement.length > STATEMENT_MAX) { showError(`Statement is too long (${statement.length} / ${STATEMENT_MAX} chars).`); return; }
 
       submitting = true;
       submitBtn.setAttribute('disabled', '');
       submitBtn.textContent = 'Submitting…';
 
       try {
-        const body: Record<string, unknown> = { title, statement, domainTags: tags };
-        if (budgetId) body['budgetId'] = budgetId;
-        const res = await api.post('/api/sv/hypotheses', body);
+        const res = await api.post('/api/sv/hypotheses', { title, statement, domainTags: tags });
         if (!res.ok) {
-          const body2 = await res.json() as { error?: string };
-          showError(body2.error ?? `Server error (${res.status})`);
+          const body = await res.json() as { error?: string };
+          showError(body.error ?? `Server error (${res.status})`);
           return;
         }
-        const created = await res.json() as { id: string; status: string };
+        const created = await res.json() as { id: string };
         (state as any).svHypothesisId = created.id;
-        (state as any).svHypothesis = { title, statement, domainTags: tags };
+        (state as any).svHypothesis = { title, statement, domainTags: [...tags] };
         (state as any).svView = 'live';
         render();
       } catch (err: unknown) {
-        showError(err instanceof Error ? err.message : 'Network error');
+        showError(err instanceof Error ? err.message : 'Network error — check your connection.');
       } finally {
         submitting = false;
         submitBtn.removeAttribute('disabled');
@@ -149,130 +266,133 @@ export function renderSVSubmitView(options: { render: () => void }): HTMLElement
     },
   }, 'Submit for Validation');
 
-  function showError(msg: string) {
-    error = msg;
-    errorEl.textContent = msg;
-    errorEl.style.padding = '8px 12px';
-    errorEl.style.background = 'rgba(220,38,38,.08)';
-  }
-
   // ── Recent hypotheses ─────────────────────────────────────────────────────
-  const recentEl = h('div', { style: 'display:none;margin-bottom:22px' });
-
-  const STATUS_STYLE: Record<string, { color: string; label: string }> = {
-    running: { color: '#f59e0b', label: 'Running' },
-    queued: { color: '#6366f1', label: 'Queued' },
-    verdict: { color: '#059669', label: 'Complete' },
-    abandoned: { color: '#6b7280', label: 'Abandoned' },
-  };
+  const recentPanel = h('div', { className: 'sv-hidden' });
 
   async function loadRecent() {
     try {
       const res = await api.get('/api/sv/hypotheses');
       if (!res.ok) return;
-      const data = await res.json() as { hypotheses: Array<{ id: string; title: string; status: string; createdAt: string }> };
+      const data = await res.json() as { hypotheses?: Array<{ id: string; title: string; status: string }> };
       if (!data.hypotheses?.length) return;
-      recentEl.style.display = 'block';
-      while (recentEl.firstChild) recentEl.removeChild(recentEl.firstChild);
 
-      recentEl.appendChild(h('div', {
-        style: 'background:var(--bg2);border:1px solid var(--bg4);border-radius:12px;padding:16px 18px',
-      },
-        h('div', { style: 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--fg3);margin-bottom:10px' }, 'Recent Validations'),
-        h('div', { style: 'display:flex;flex-direction:column;gap:6px' },
-          ...data.hypotheses.slice(0, 6).map(hyp => {
-            const st = STATUS_STYLE[hyp.status] ?? { color: '#6b7280', label: hyp.status };
-            const isActive = hyp.status === 'running' || hyp.status === 'queued';
-            const isComplete = hyp.status === 'verdict';
-            return h('div', {
-              style: `display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;background:var(--bg);border:1px solid var(--bg4);${isActive || isComplete ? 'cursor:pointer' : ''};transition:background .15s`,
-              onMouseEnter: (e: Event) => { if (isActive || isComplete) (e.currentTarget as HTMLElement).style.background = 'var(--bg3)'; },
-              onMouseLeave: (e: Event) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg)'; },
-              onClick: () => {
-                if (!isActive && !isComplete) return;
-                (state as any).svHypothesisId = hyp.id;
-                (state as any).svView = isComplete ? 'verdict' : 'live';
-                render();
-              },
-            },
-              h('span', { style: `width:8px;height:8px;border-radius:50%;background:${st.color};flex-shrink:0;display:inline-block` }),
-              h('span', { style: 'font-size:13px;color:var(--fg);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, hyp.title),
-              h('span', { style: `font-size:10px;font-weight:700;color:${st.color};text-transform:uppercase;letter-spacing:.04em;flex-shrink:0` }, st.label),
-            );
-          }),
-        ),
+      const list = h('div', { className: 'sv-recent-list' });
+      data.hypotheses.slice(0, 5).forEach(hyp => {
+        const st = STATUS_META[hyp.status] ?? { label: hyp.status, color: '#6b7280' };
+        const clickable = hyp.status === 'running' || hyp.status === 'queued' || hyp.status === 'verdict';
+        const statusKey = hyp.status in STATUS_META ? hyp.status : 'abandoned';
+        const dot = h('span', { className: `sv-recent-dot sv-dot-${statusKey}` });
+        const statusEl = h('span', { className: `sv-recent-status sv-status-${statusKey}` }, st.label);
+        const row = h('div', {
+          className: 'sv-recent-row',
+          onClick: () => {
+            if (!clickable) return;
+            (state as any).svHypothesisId = hyp.id;
+            (state as any).svView = hyp.status === 'verdict' ? 'verdict' : 'live';
+            render();
+          },
+        },
+          dot,
+          h('span', { className: 'sv-recent-title' }, hyp.title),
+          statusEl,
+          clickable ? h('span', { className: 'sv-recent-arr' }, '→') : h('span', null, ''),
+        );
+        list.appendChild(row);
+      });
+
+      while (recentPanel.firstChild) recentPanel.removeChild(recentPanel.firstChild);
+      recentPanel.appendChild(h('div', { className: 'sv-recent-wrap' },
+        h('div', { className: 'sv-recent-head' }, 'Recent Validations'),
+        list,
       ));
+      recentPanel.classList.remove('sv-hidden');
     } catch { /* ignore */ }
   }
-
   setTimeout(() => { void loadRecent(); }, 80);
 
-  // ── Tips panel ────────────────────────────────────────────────────────────
-  const tipsEl = h('div', {
-    style: 'background:var(--bg2);border:1px solid var(--bg4);border-radius:12px;padding:16px 18px;margin-bottom:20px',
-  },
-    h('div', { style: 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--fg3);margin-bottom:10px' }, 'What makes a strong hypothesis?'),
-    h('div', { style: 'display:flex;flex-direction:column;gap:8px' },
-      ...([
-        ['🎯 PICO', 'Specify Population, Intervention, Comparison, and Outcome with measurable metrics.'],
-        ['⚗️ Falsifiable', 'State it so that specific evidence could definitively disprove it (Popper criterion).'],
-        ['📐 Precise', 'Include direction and magnitude of effect — "reduces by ≥15%" not "improves".'],
-        ['🔬 Scoped', 'One testable claim. Complex multi-part claims should be separate submissions.'],
-      ] as [string, string][]).map(([title, desc]) =>
-        h('div', { style: 'display:flex;gap:10px;align-items:flex-start' },
-          h('span', { style: 'font-size:13px;flex-shrink:0' }, title),
-          h('span', { style: 'font-size:12px;color:var(--fg3);line-height:1.45' }, desc),
-        )
+  // ── Tips ─────────────────────────────────────────────────────────────────
+  const TIPS = [
+    { icon: '🎯', head: 'PICO',        body: 'Population · Intervention · Comparison · Outcome' },
+    { icon: '⚗️', head: 'Falsifiable', body: 'What evidence would definitively disprove it?' },
+    { icon: '📐', head: 'Precise',     body: 'Include direction and magnitude — "≥15% reduction"' },
+    { icon: '🔬', head: 'Scoped',      body: 'One testable claim per submission' },
+  ];
+
+  const tipsGrid = h('div', { className: 'sv-tips-grid' },
+    ...TIPS.map(t => h('div', { className: 'sv-tip-card' },
+      h('div', { className: 'sv-tip-head' },
+        h('span', { className: 'sv-tip-icon' }, t.icon),
+        h('span', { className: 'sv-tip-title' }, t.head),
       ),
-    ),
+      h('div', { className: 'sv-tip-body' }, t.body),
+    )),
   );
 
-  const field = (label: string, el: HTMLElement, hint?: string, after?: HTMLElement) =>
-    h('div', { style: 'margin-bottom:20px' },
-      h('label', { style: 'display:block;font-size:12px;color:var(--fg2);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.04em' }, label),
-      el,
-      after ?? null,
-      hint ? h('div', { style: 'font-size:11px;color:var(--fg3);margin-top:4px' }, hint) : null,
+  // ── Label helper ─────────────────────────────────────────────────────────
+  function label(text: string, hint?: string): HTMLElement {
+    return h('div', null,
+      h('div', { className: 'sv-label' }, text),
+      hint ? h('div', { className: 'sv-label-hint' }, hint) : h('span', null, ''),
     );
+  }
 
+  // ── Assemble ─────────────────────────────────────────────────────────────
   return h('div', { className: 'dash-view' },
-    h('div', { style: 'max-width:700px;margin:0 auto;padding-bottom:40px' },
+    h('div', { className: 'sv-page' },
 
       // Header
-      h('div', { style: 'display:flex;align-items:center;gap:14px;margin-bottom:28px' },
-        h('div', { style: 'width:44px;height:44px;border-radius:12px;background:var(--accent-dim);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0' }, '🔬'),
+      h('div', { className: 'sv-page-header' },
+        h('div', { className: 'sv-page-icon' }, '🔬'),
         h('div', null,
-          h('h2', { style: 'font-size:22px;font-weight:800;color:var(--fg);margin:0 0 3px' }, 'Validate a Hypothesis'),
-          h('p', { style: 'color:var(--fg3);font-size:13px;margin:0' }, 'Multi-agent evidence gathering, statistical analysis, simulation, and adversarial review.'),
+          h('h2', { className: 'sv-page-title' }, 'Validate a Hypothesis'),
+          h('p', { className: 'sv-page-sub' }, 'Multi-agent evidence gathering, statistical analysis, simulation, and adversarial review.'),
         ),
       ),
 
-      recentEl,
-      tipsEl,
+      // Recent runs
+      recentPanel,
+
+      // Tips
+      tipsGrid,
+
+      // Template selector
+      h('div', null,
+        h('div', { className: 'sv-section-title' }, 'Start from a template'),
+        tplGrid,
+      ),
 
       // Form card
-      h('div', { style: 'background:var(--bg2);border:1px solid var(--bg4);border-radius:14px;padding:26px 28px' },
-        h('div', { style: 'font-size:15px;font-weight:700;color:var(--fg);margin-bottom:20px' }, 'New Hypothesis'),
-
-        field('Title', titleInput, 'A short, memorable name for this validation run.'),
-        field('Statement', statementArea, 'Full falsifiable claim. The more precise, the better the evidence quality.', charCountEl),
-
-        // Domain tags
-        h('div', { style: 'margin-bottom:20px' },
-          h('label', { style: 'display:block;font-size:12px;color:var(--fg2);margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.04em' }, 'Domain Tags'),
-          h('div', {
-            style: 'padding:8px 10px;border-radius:9px;border:1.5px solid var(--bg4);background:var(--bg);display:flex;flex-wrap:wrap;gap:5px;min-height:44px;cursor:text',
-            onClick: () => tagTextInput.focus(),
-          },
-            chipsEl,
-            tagTextInput,
-          ),
-          h('div', { style: 'font-size:11px;color:var(--fg3);margin-top:6px;margin-bottom:6px' }, 'Quick-add:'),
-          suggestionsEl,
+      h('div', { className: 'sv-form-card' },
+        h('div', { className: 'sv-form-head' },
+          h('span', { className: 'sv-form-head-icon' }, '📝'),
+          'Hypothesis Details',
         ),
 
+        // Title
+        h('div', { className: 'sv-form-sec' },
+          label('Title', 'A concise, memorable name for this validation run.'),
+          titleInput,
+        ),
+
+        // Statement
+        h('div', { className: 'sv-form-sec' },
+          label('Statement', 'The full, falsifiable hypothesis claim. Use PICO format for empirical claims.'),
+          statementArea,
+          charCount,
+        ),
+
+        // Domain tags
+        h('div', { className: 'sv-form-sec' },
+          label('Domain Tags', 'Help route the hypothesis to the right specialist tools.'),
+          chipsRow,
+          tagInput,
+          h('div', { className: 'sv-sugg-label' }, 'Quick-add:'),
+          suggRow,
+        ),
+
+        // Error + submit
         errorEl,
-        h('div', { style: 'margin-top:20px;display:flex;justify-content:flex-end' }, submitBtn),
+        h('div', { className: 'sv-submit-row' }, submitBtn),
       ),
     ),
   );

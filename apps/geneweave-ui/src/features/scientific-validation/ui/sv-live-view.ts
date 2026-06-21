@@ -1,17 +1,11 @@
 /**
- * Hypothesis Validation — Live Deliberation View (v2)
- *
- * - api.post() for cancel (CSRF-safe)
- * - api.get() for status polling
- * - Hypothesis header (title, statement, domain tags)
- * - Agent activity tracker showing which agents have produced output
- * - Elapsed time counter
- * - Improved event and turn rendering
- * - Empty state with animated indicator
+ * Hypothesis Validation — Live Deliberation View (v3)
+ * Uses only CSS classes (no inline styles) — required by CSP hash on <style>.
  */
 import { h } from '../../../ui/dom.js';
 import { api } from '../../../ui/api.js';
 import { state } from '../../../ui/state.js';
+import { ensureSVStyles } from '../sv-css.js';
 
 interface EvidenceEvent {
   evidenceId: string;
@@ -38,204 +32,190 @@ interface VerdictEvent {
   confidenceHi: number;
 }
 
-const AGENT_META: Record<string, { emoji: string; name: string; color: string; role: string }> = {
-  decomposer:   { emoji: '🧩', name: 'Dylan',  color: '#6366f1', role: 'Decomposer' },
-  literature:   { emoji: '📚', name: 'Larry',  color: '#0ea5e9', role: 'Literature' },
-  statistical:  { emoji: '📊', name: 'Stella', color: '#8b5cf6', role: 'Statistical' },
-  mathematical: { emoji: '∑',  name: 'Max',    color: '#d97706', role: 'Mathematical' },
-  simulation:   { emoji: '🔬', name: 'Sima',   color: '#14b8a6', role: 'Simulation' },
-  adversarial:  { emoji: '⚔️', name: 'Ada',    color: '#ef4444', role: 'Adversarial' },
-  supervisor:   { emoji: '🧠', name: 'geneWeave', color: '#059669', role: 'Supervisor' },
+const AGENT_META: Record<string, { emoji: string; name: string; role: string }> = {
+  decomposer:   { emoji: '🧩', name: 'Dylan',     role: 'Decomposer'   },
+  literature:   { emoji: '📚', name: 'Larry',     role: 'Literature'   },
+  statistical:  { emoji: '📊', name: 'Stella',    role: 'Statistical'  },
+  mathematical: { emoji: '∑',  name: 'Max',       role: 'Mathematical' },
+  simulation:   { emoji: '🔬', name: 'Sima',      role: 'Simulation'   },
+  adversarial:  { emoji: '⚔️', name: 'Ada',       role: 'Adversarial'  },
+  supervisor:   { emoji: '🧠', name: 'geneWeave', role: 'Supervisor'   },
 };
+
+const KNOWN_AGENTS = Object.keys(AGENT_META);
+const KNOWN_KINDS  = ['tool-call','tool-error','model-inference','supports','refutes','neutral','inconclusive'];
 
 function agentKey(id: string): string {
   return id.replace(/^sv-/, '').replace(/-/g, '_');
 }
 
-function agentInfo(id: string) {
-  return AGENT_META[agentKey(id)] ?? { emoji: '🤖', name: id, color: '#6b7280', role: id };
+function agentMeta(id: string) {
+  return AGENT_META[agentKey(id)] ?? { emoji: '🤖', name: id, role: id };
 }
 
-const KIND_COLOR: Record<string, string> = {
-  tool_call: '#0ea5e9', tool_error: '#ef4444', model_inference: '#8b5cf6',
-  supports: '#059669', refutes: '#ef4444', neutral: '#6b7280', inconclusive: '#d97706',
-};
+function agentColorKey(id: string): string {
+  const k = agentKey(id);
+  return KNOWN_AGENTS.includes(k) ? k : 'unknown';
+}
 
-function kindPill(kind: string) {
-  const color = KIND_COLOR[kind] ?? '#6b7280';
-  return h('span', {
-    style: `font-size:10px;font-weight:700;color:white;background:${color};border-radius:4px;padding:2px 7px;letter-spacing:.04em;text-transform:uppercase;flex-shrink:0`,
-  }, kind.replace(/_/g, ' '));
+function kindClass(kind: string): string {
+  const k = kind.replace(/_/g, '-');
+  return `sv-kp sv-kp-${KNOWN_KINDS.includes(k) ? k : 'default'}`;
 }
 
 export function renderSVLiveView(options: { render: () => void }): HTMLElement {
+  ensureSVStyles();
   const { render } = options;
   const hypothesisId = (state as any).svHypothesisId as string | null;
-  const cachedHyp = (state as any).svHypothesis as { title?: string; statement?: string; domainTags?: string[] } | null;
+  const cachedHyp = (state as any).svHypothesis as {
+    title?: string; statement?: string; domainTags?: string[];
+  } | null;
 
   if (!hypothesisId) {
     return h('div', { className: 'dash-view' },
-      h('div', { style: 'max-width:860px;margin:0 auto;padding-top:40px;text-align:center' },
-        h('p', { style: 'color:var(--fg3)' }, 'No hypothesis selected.'),
+      h('div', { className: 'sv-live-pg' },
+        h('p', { className: 'sv-live-empty-text' }, 'No hypothesis selected.'),
         h('button', {
-          className: 'nav-btn active',
-          style: 'margin-top:12px',
+          className: 'nav-btn',
           onClick: () => { (state as any).svView = 'submit'; render(); },
         }, '← Back to Submit'),
       )
     );
   }
 
-  // ── Mutable state ─────────────────────────────────────────────────────────
+  // ── Mutable state ──────────────────────────────────────────────────────────
   let statusPoll: ReturnType<typeof setInterval> | null = null;
   let evidenceES: EventSource | null = null;
   let dialogueES: EventSource | null = null;
   let startTime = Date.now();
   let timerHandle: ReturnType<typeof setInterval> | null = null;
   let hypothesisData: { title: string; statement: string; domainTags: string[]; status: string } | null = null;
-  const activeAgents = new Set<string>();
   let eventCount = 0;
-  let turnCount = 0;
+  let turnCount  = 0;
 
-  // ── DOM nodes ─────────────────────────────────────────────────────────────
-  const eventsEl = h('div', { style: 'display:flex;flex-direction:column;gap:8px' });
-  const turnsEl  = h('div', { style: 'display:flex;flex-direction:column;gap:7px' });
-  const statusEl = h('span', { style: 'font-size:12px;color:var(--fg3)' }, 'Connecting…');
-  const elapsedEl = h('span', { style: 'font-size:12px;color:var(--fg3);font-variant-numeric:tabular-nums' }, '0:00');
-  const agentTrackerEl = h('div', { style: 'display:flex;flex-wrap:wrap;gap:6px;margin-top:6px' });
-  const eventCountEl = h('span', { style: 'font-size:11px;color:var(--fg3);margin-left:4px' }, '');
-  const turnCountEl  = h('span', { style: 'font-size:11px;color:var(--fg3);margin-left:4px' }, '');
+  // ── DOM nodes ──────────────────────────────────────────────────────────────
+  const statusEl  = h('span', { className: 'sv-live-status'  }, 'Connecting…');
+  const elapsedEl = h('span', { className: 'sv-live-elapsed' }, '0:00');
+  const pillsEl   = h('div',  { className: 'sv-live-pills'   });
+  const evCountEl = h('span', { className: 'sv-live-panel-count' }, '');
+  const tuCountEl = h('span', { className: 'sv-live-panel-count' }, '');
+  const eventsEl  = h('div',  { className: 'sv-live-panel-body' });
+  const turnsEl   = h('div',  { className: 'sv-live-panel-body' });
 
-  // Hypothesis header (populated once loaded)
-  const hypTitleEl = h('div', {
-    style: 'font-size:16px;font-weight:700;color:var(--fg);margin-bottom:4px',
-  }, cachedHyp?.title ?? 'Loading…');
-  const hypStatementEl = h('div', {
-    style: 'font-size:12px;color:var(--fg3);line-height:1.5;max-height:60px;overflow:hidden;text-overflow:ellipsis',
-  }, cachedHyp?.statement ?? '');
-  const hypTagsEl = h('div', { style: 'display:flex;flex-wrap:wrap;gap:5px;margin-top:6px' });
+  const hypTitleEl = h('div', { className: 'sv-live-hyp-title' }, cachedHyp?.title ?? 'Loading…');
+  const hypStmtEl  = h('div', { className: 'sv-live-hyp-stmt'  }, cachedHyp?.statement ?? '');
+  const hypTagsEl  = h('div', { className: 'sv-live-hyp-tags'  });
 
-  // ── Agent tracker ─────────────────────────────────────────────────────────
-  function refreshAgentTracker() {
-    while (agentTrackerEl.firstChild) agentTrackerEl.removeChild(agentTrackerEl.firstChild);
+  // ── Agent pills ────────────────────────────────────────────────────────────
+  const pillMap = new Map<string, HTMLElement>();
+
+  function buildAgentPills() {
+    while (pillsEl.firstChild) pillsEl.removeChild(pillsEl.firstChild);
+    pillMap.clear();
     Object.entries(AGENT_META).forEach(([key, meta]) => {
-      const active = activeAgents.has(key);
-      agentTrackerEl.appendChild(h('div', {
-        style: `display:flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;border:1px solid ${active ? meta.color : 'var(--bg4)'};background:${active ? `${meta.color}18` : 'transparent'};transition:all .3s`,
-      },
-        h('span', { style: 'font-size:12px' }, meta.emoji),
-        h('span', { style: `font-size:11px;font-weight:600;color:${active ? meta.color : 'var(--fg3)'}` }, meta.name),
-        active ? h('span', {
-          style: `width:6px;height:6px;border-radius:50%;background:${meta.color};animation:sv-pulse 1.2s ease-in-out infinite`,
-        }) : null,
-      ));
+      const dot  = h('span', { className: 'sv-live-pill-dot sv-hidden' });
+      const pill = h('div',  { className: 'sv-live-pill' },
+        h('span', { className: 'sv-live-pill-emoji' }, meta.emoji),
+        h('span', { className: 'sv-live-pill-name'  }, meta.name),
+        dot,
+      );
+      pillMap.set(key, pill);
+      pillsEl.appendChild(pill);
     });
   }
-  refreshAgentTracker();
+  buildAgentPills();
 
-  // ── Elapsed timer ─────────────────────────────────────────────────────────
+  function activatePill(key: string) {
+    const pill = pillMap.get(key);
+    if (!pill) return;
+    pill.classList.add('sv-active');
+    pill.querySelector('.sv-live-pill-dot')?.classList.remove('sv-hidden');
+  }
+
+  // ── Timer ──────────────────────────────────────────────────────────────────
   function startTimer() {
     startTime = Date.now();
     timerHandle = setInterval(() => {
       const sec = Math.floor((Date.now() - startTime) / 1000);
-      const m = Math.floor(sec / 60);
-      const s = String(sec % 60).padStart(2, '0');
-      elapsedEl.textContent = `${m}:${s}`;
+      elapsedEl.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
     }, 1000);
   }
 
-  // ── Evidence event rendering ──────────────────────────────────────────────
+  // ── Evidence event rendering ───────────────────────────────────────────────
   function appendEvidence(ev: EvidenceEvent) {
-    const info = agentInfo(ev.agentId);
-    activeAgents.add(agentKey(ev.agentId));
-    refreshAgentTracker();
+    const meta = agentMeta(ev.agentId);
+    const ac   = agentColorKey(ev.agentId);
+    activatePill(agentKey(ev.agentId));
     eventCount++;
-    eventCountEl.textContent = `(${eventCount})`;
+    evCountEl.textContent = `(${eventCount})`;
 
-    const item = h('div', {
-      style: 'display:flex;gap:10px;align-items:flex-start;background:var(--bg2);border:1px solid var(--bg4);border-radius:10px;padding:10px 13px;animation:sv-fadein .25s ease-out',
-    },
-      h('div', {
-        style: `width:32px;height:32px;border-radius:8px;background:${info.color}18;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0`,
-      }, info.emoji),
-      h('div', { style: 'flex:1;min-width:0' },
-        h('div', { style: 'display:flex;align-items:center;gap:7px;margin-bottom:4px;flex-wrap:wrap' },
-          h('span', { style: `font-size:12px;font-weight:700;color:${info.color}` }, info.name),
-          h('span', { style: 'font-size:10px;color:var(--fg3)' }, info.role),
-          kindPill(ev.kind),
-          ev.toolKey ? h('span', { style: 'font-size:10px;color:var(--fg3);font-family:var(--mono);background:var(--bg3);padding:1px 6px;border-radius:4px' }, ev.toolKey) : null,
+    const empty = eventsEl.querySelector('.sv-live-empty');
+    if (empty) eventsEl.removeChild(empty);
+
+    eventsEl.appendChild(h('div', { className: 'sv-live-ev' },
+      h('div', { className: `sv-live-ev-av sv-bg-${ac}` }, meta.emoji),
+      h('div', { className: 'sv-live-ev-body' },
+        h('div', { className: 'sv-live-ev-meta' },
+          h('span', { className: `sv-live-ev-name sv-color-${ac}` }, meta.name),
+          h('span', { className: 'sv-live-ev-role' }, meta.role),
+          h('span', { className: kindClass(ev.kind) }, ev.kind.replace(/_/g, ' ')),
+          ev.toolKey ? h('span', { className: 'sv-live-ev-tool' }, ev.toolKey) : h('span', null, ''),
         ),
-        h('div', { style: 'font-size:12px;color:var(--fg);line-height:1.5' }, ev.summary),
+        h('div', { className: 'sv-live-ev-text' }, ev.summary),
       ),
-    );
-    eventsEl.appendChild(item);
+    ));
     eventsEl.scrollTop = eventsEl.scrollHeight;
   }
 
-  // ── Dialogue turn rendering ───────────────────────────────────────────────
+  // ── Dialogue turn rendering ────────────────────────────────────────────────
   function appendTurn(turn: DialogueTurn) {
-    const info = agentInfo(turn.fromAgent);
-    activeAgents.add(agentKey(turn.fromAgent));
-    refreshAgentTracker();
+    const meta = agentMeta(turn.fromAgent);
+    const ac   = agentColorKey(turn.fromAgent);
+    activatePill(agentKey(turn.fromAgent));
     turnCount++;
-    turnCountEl.textContent = `(${turnCount})`;
+    tuCountEl.textContent = `(${turnCount})`;
+
+    const empty = turnsEl.querySelector('.sv-live-empty');
+    if (empty) turnsEl.removeChild(empty);
 
     const msg = turn.message.length > 400 ? turn.message.slice(0, 400) + '…' : turn.message;
-    const item = h('div', {
-      style: `display:flex;gap:9px;align-items:flex-start;background:${turn.dissent ? 'rgba(239,68,68,.06)' : 'var(--bg2)'};border:1px solid ${turn.dissent ? 'rgba(239,68,68,.25)' : 'var(--bg4)'};border-radius:10px;padding:9px 12px;animation:sv-fadein .25s ease-out`,
-    },
-      h('div', {
-        style: `width:28px;height:28px;border-radius:7px;background:${info.color}18;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0`,
-      }, info.emoji),
-      h('div', { style: 'flex:1;min-width:0' },
-        h('div', { style: 'display:flex;align-items:center;gap:6px;margin-bottom:3px' },
-          h('span', { style: `font-size:12px;font-weight:700;color:${info.color}` }, info.name),
-          turn.toAgent ? h('span', { style: 'font-size:10px;color:var(--fg3)' }, `→ ${agentInfo(turn.toAgent).name}`) : null,
-          h('span', { style: 'font-size:10px;color:var(--fg3)' }, `Round ${turn.roundIndex}`),
-          turn.dissent ? h('span', { style: 'font-size:10px;font-weight:700;color:var(--danger);background:rgba(239,68,68,.1);padding:1px 6px;border-radius:4px' }, 'DISSENT') : null,
+    turnsEl.appendChild(h('div', { className: `sv-live-turn${turn.dissent ? ' sv-dissent' : ''}` },
+      h('div', { className: `sv-live-turn-av sv-bg-${ac}` }, meta.emoji),
+      h('div', { className: 'sv-live-turn-body' },
+        h('div', { className: 'sv-live-turn-meta' },
+          h('span', { className: `sv-live-turn-name sv-color-${ac}` }, meta.name),
+          turn.toAgent
+            ? h('span', { className: 'sv-live-turn-to' }, `→ ${agentMeta(turn.toAgent).name}`)
+            : h('span', null, ''),
+          h('span', { className: 'sv-live-turn-round' }, `Round ${turn.roundIndex}`),
+          turn.dissent ? h('span', { className: 'sv-live-turn-dissent' }, 'DISSENT') : h('span', null, ''),
         ),
-        h('div', { style: 'font-size:12px;color:var(--fg);line-height:1.5;white-space:pre-wrap;word-break:break-word' }, msg),
+        h('div', { className: 'sv-live-turn-msg' }, msg),
       ),
-    );
-    turnsEl.appendChild(item);
+    ));
     turnsEl.scrollTop = turnsEl.scrollHeight;
   }
 
-  // ── Empty state ───────────────────────────────────────────────────────────
-  function emptyState(label: string) {
-    return h('div', {
-      style: 'display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 0;gap:10px;color:var(--fg3)',
-    },
-      h('div', {
-        style: 'width:36px;height:36px;border-radius:50%;border:3px solid var(--bg4);border-top-color:var(--accent);animation:sv-spin 1s linear infinite',
-      }),
-      h('div', { style: 'font-size:12px' }, label),
+  // ── Empty states ───────────────────────────────────────────────────────────
+  function makeEmpty(text: string): HTMLElement {
+    return h('div', { className: 'sv-live-empty' },
+      h('div', { className: 'sv-live-spinner' }),
+      h('div', { className: 'sv-live-empty-text' }, text),
     );
   }
+  eventsEl.appendChild(makeEmpty('Waiting for evidence…'));
+  turnsEl.appendChild(makeEmpty('Waiting for agent dialogue…'));
 
-  eventsEl.appendChild(emptyState('Waiting for evidence…'));
-  turnsEl.appendChild(emptyState('Waiting for agent dialogue…'));
-
-  // ── SSE streams ───────────────────────────────────────────────────────────
+  // ── SSE streams ────────────────────────────────────────────────────────────
   function startStreams() {
     evidenceES = new EventSource(`/api/sv/hypotheses/${hypothesisId}/events`, { withCredentials: true });
-    let firstEvent = true;
     evidenceES.addEventListener('evidence', (e: MessageEvent) => {
-      if (firstEvent) {
-        while (eventsEl.firstChild) eventsEl.removeChild(eventsEl.firstChild);
-        firstEvent = false;
-      }
       appendEvidence(JSON.parse(e.data) as EvidenceEvent);
     });
     evidenceES.onerror = () => { statusEl.textContent = 'Evidence stream closed'; };
 
     dialogueES = new EventSource(`/api/sv/hypotheses/${hypothesisId}/dialogue`, { withCredentials: true });
-    let firstTurn = true;
     dialogueES.addEventListener('turn', (e: MessageEvent) => {
-      if (firstTurn) {
-        while (turnsEl.firstChild) turnsEl.removeChild(turnsEl.firstChild);
-        firstTurn = false;
-      }
       appendTurn(JSON.parse(e.data) as DialogueTurn);
     });
     dialogueES.addEventListener('verdict', (e: MessageEvent) => {
@@ -255,37 +235,34 @@ export function renderSVLiveView(options: { render: () => void }): HTMLElement {
     if (dialogueES)  { dialogueES.close(); dialogueES = null; }
   }
 
-  // ── Status polling ────────────────────────────────────────────────────────
+  // ── Status polling ─────────────────────────────────────────────────────────
   async function pollStatus() {
     try {
       const r = await api.get(`/api/sv/hypotheses/${hypothesisId}`);
       if (!r.ok) return;
       const data = await r.json() as {
         hypothesis: { title: string; statement: string; domainTags: string[]; status: string };
-        verdict: { id?: string; verdict?: string } | null;
+        verdict: { id?: string } | null;
       };
       const hyp = data.hypothesis;
 
-      // Populate header once
       if (!hypothesisData) {
         hypothesisData = hyp;
         hypTitleEl.textContent = hyp.title;
-        hypStatementEl.textContent = hyp.statement;
+        hypStmtEl.textContent  = hyp.statement;
         while (hypTagsEl.firstChild) hypTagsEl.removeChild(hypTagsEl.firstChild);
         (hyp.domainTags ?? []).forEach(tag => {
-          hypTagsEl.appendChild(h('span', {
-            style: 'font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--accent-dim);color:var(--accent);border:1px solid var(--accent)',
-          }, tag));
+          hypTagsEl.appendChild(h('span', { className: 'sv-live-tag' }, tag));
         });
       }
 
-      const statusLabels: Record<string, string> = {
-        queued: 'Queued — waiting for agent pool…',
-        running: 'Deliberating…',
-        verdict: 'Verdict ready',
+      const labels: Record<string, string> = {
+        queued:    'Queued — waiting for agent pool…',
+        running:   'Deliberating…',
+        verdict:   'Verdict ready',
         abandoned: 'Abandoned',
       };
-      statusEl.textContent = statusLabels[hyp.status] ?? hyp.status;
+      statusEl.textContent = labels[hyp.status] ?? hyp.status;
 
       if (hyp.status === 'verdict' || hyp.status === 'abandoned') {
         (state as any).svHypothesis = hyp;
@@ -298,7 +275,7 @@ export function renderSVLiveView(options: { render: () => void }): HTMLElement {
     } catch { /* ignore */ }
   }
 
-  // ── Kick off ──────────────────────────────────────────────────────────────
+  // ── Kick off ───────────────────────────────────────────────────────────────
   setTimeout(() => {
     startStreams();
     startTimer();
@@ -306,38 +283,28 @@ export function renderSVLiveView(options: { render: () => void }): HTMLElement {
     void pollStatus();
   }, 100);
 
-  // ── Layout ────────────────────────────────────────────────────────────────
+  // ── Layout ─────────────────────────────────────────────────────────────────
   const view = h('div', { className: 'dash-view' },
-    // Inject animation keyframes once
-    h('style', null, `
-      @keyframes sv-pulse{0%,100%{opacity:.4;transform:scale(.9)}50%{opacity:1;transform:scale(1.1)}}
-      @keyframes sv-spin{to{transform:rotate(360deg)}}
-      @keyframes sv-fadein{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
-    `),
-    h('div', { style: 'max-width:920px;margin:0 auto;padding-bottom:40px' },
+    h('div', { className: 'sv-live-pg' },
 
-      // Page header
-      h('div', { style: 'display:flex;align-items:flex-start;gap:14px;margin-bottom:20px' },
-        h('div', { style: 'width:40px;height:40px;border-radius:10px;background:var(--accent-dim);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0' }, '🔬'),
-        h('div', { style: 'flex:1;min-width:0' },
+      h('div', { className: 'sv-live-header' },
+        h('div', { className: 'sv-live-icon' }, '🔬'),
+        h('div', { className: 'sv-live-hyp' },
           hypTitleEl,
-          hypStatementEl,
+          hypStmtEl,
           hypTagsEl,
         ),
-        h('div', { style: 'display:flex;flex-direction:column;align-items:flex-end;gap:8px;flex-shrink:0' },
-          h('div', { style: 'display:flex;align-items:center;gap:8px' },
+        h('div', { className: 'sv-live-ctrl' },
+          h('div', { className: 'sv-live-meta' },
             statusEl,
-            h('span', { style: 'color:var(--fg3);font-size:12px' }, '·'),
+            h('span', { className: 'sv-live-sep' }, '·'),
             elapsedEl,
           ),
-          h('div', { style: 'display:flex;gap:7px' },
+          h('div', { className: 'sv-live-btns' },
             h('button', {
-              className: 'nav-btn',
-              style: 'color:var(--danger)',
+              className: 'sv-live-cancel-btn',
               onClick: async () => {
-                try {
-                  await api.post(`/api/sv/hypotheses/${hypothesisId}/cancel`, {});
-                } catch { /* ignore */ }
+                try { await api.post(`/api/sv/hypotheses/${hypothesisId}/cancel`, {}); } catch { /* ignore */ }
                 (state as any).svView = 'submit';
                 (state as any).svHypothesisId = null;
                 cleanup();
@@ -345,7 +312,7 @@ export function renderSVLiveView(options: { render: () => void }): HTMLElement {
               },
             }, 'Cancel'),
             h('button', {
-              className: 'nav-btn',
+              className: 'sv-live-back-btn',
               onClick: () => {
                 (state as any).svView = 'submit';
                 (state as any).svHypothesisId = null;
@@ -357,50 +324,30 @@ export function renderSVLiveView(options: { render: () => void }): HTMLElement {
         ),
       ),
 
-      // Agent tracker
-      h('div', {
-        style: 'background:var(--bg2);border:1px solid var(--bg4);border-radius:12px;padding:12px 16px;margin-bottom:18px',
-      },
-        h('div', { style: 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--fg3);margin-bottom:8px' }, 'Agent Activity'),
-        agentTrackerEl,
+      h('div', { className: 'sv-live-agents' },
+        h('div', { className: 'sv-live-agents-title' }, 'Agent Activity'),
+        pillsEl,
       ),
 
-      // Two-column stream panels
-      h('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:16px' },
-        // Evidence panel
-        h('div', {
-          style: 'background:var(--bg2);border:1px solid var(--bg4);border-radius:12px;display:flex;flex-direction:column;overflow:hidden',
-        },
-          h('div', {
-            style: 'padding:10px 14px;border-bottom:1px solid var(--bg4);display:flex;align-items:center;justify-content:space-between',
-          },
-            h('div', { style: 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--fg3)' }, 'Evidence'),
-            eventCountEl,
+      h('div', { className: 'sv-live-cols' },
+        h('div', { className: 'sv-live-panel' },
+          h('div', { className: 'sv-live-panel-head' },
+            h('span', { className: 'sv-live-panel-label' }, 'Evidence'),
+            evCountEl,
           ),
-          h('div', {
-            style: 'flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;max-height:480px',
-          }, eventsEl),
+          eventsEl,
         ),
-
-        // Dialogue panel
-        h('div', {
-          style: 'background:var(--bg2);border:1px solid var(--bg4);border-radius:12px;display:flex;flex-direction:column;overflow:hidden',
-        },
-          h('div', {
-            style: 'padding:10px 14px;border-bottom:1px solid var(--bg4);display:flex;align-items:center;justify-content:space-between',
-          },
-            h('div', { style: 'font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--fg3)' }, 'Agent Dialogue'),
-            turnCountEl,
+        h('div', { className: 'sv-live-panel' },
+          h('div', { className: 'sv-live-panel-head' },
+            h('span', { className: 'sv-live-panel-label' }, 'Agent Dialogue'),
+            tuCountEl,
           ),
-          h('div', {
-            style: 'flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:7px;max-height:480px',
-          }, turnsEl),
+          turnsEl,
         ),
       ),
     ),
   );
 
-  // Cleanup when removed from DOM
   const obs = new MutationObserver(() => {
     if (!document.body.contains(view)) { cleanup(); obs.disconnect(); }
   });

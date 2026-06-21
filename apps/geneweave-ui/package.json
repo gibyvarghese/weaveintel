@@ -21,7 +21,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc -b && node scripts/bundle-notes-editor.mjs",
+    "build": "tsc -b && node scripts/bundle-notes-editor.mjs && node scripts/build-sv-css.mjs",
     "build:tsc": "tsc -b",
     "build:bundle": "node scripts/bundle-notes-editor.mjs",
     "typecheck": "tsc --noEmit",
