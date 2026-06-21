@@ -53,6 +53,13 @@ export interface ScopesAdapterMethods {
   /** Returns the count of scope violations in the last N hours. */
   countScopeViolations(withinHours?: number): Promise<number>;
 
+  /**
+   * Returns the agentic_scope for a tool looked up by name OR tool_key.
+   * Returns 'system' when no matching catalog entry is found (builtin utilities).
+   * Added in m76.
+   */
+  getScopeForTool(nameOrKey: string): Promise<string>;
+
   // ── Admin CRUD — agent_scopes ────────────────────────────────────────────
 
   /** List ALL scope definitions (including disabled) for admin UI. */
@@ -207,6 +214,13 @@ export function buildScopesAdapter(raw: BetterSqlite3.Database): ScopesAdapterMe
         WHERE allowed = 0 AND created_at >= ?
       `).get(since) as { n: number };
       return row.n;
+    },
+
+    async getScopeForTool(nameOrKey: string): Promise<string> {
+      const row = raw.prepare(
+        `SELECT agentic_scope FROM tool_catalog WHERE (tool_key = ? OR name = ?) AND enabled = 1 LIMIT 1`,
+      ).get(nameOrKey, nameOrKey) as { agentic_scope?: string } | undefined;
+      return row?.agentic_scope ?? 'system';
     },
 
     // ── Admin CRUD — agent_scopes ──────────────────────────────────────────

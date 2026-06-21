@@ -9273,6 +9273,13 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return row?.scope_id ?? 'system';
   }
 
+  async getScopeForTool(nameOrKey: string): Promise<string> {
+    const row = this.d.prepare(
+      `SELECT agentic_scope FROM tool_catalog WHERE (tool_key = ? OR name = ?) AND enabled = 1 LIMIT 1`,
+    ).get(nameOrKey, nameOrKey) as { agentic_scope?: string } | undefined;
+    return row?.agentic_scope ?? 'system';
+  }
+
   async logScopeEvent(event: Omit<import('./db-types/scopes.js').ScopeAccessLogRow, 'id' | 'created_at'>): Promise<void> {
     const { randomUUID } = await import('crypto');
     this.d.prepare(`

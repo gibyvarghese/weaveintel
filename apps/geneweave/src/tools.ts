@@ -894,6 +894,12 @@ export interface ToolRegistryOptions {
    * Use createGraphMemoryStore() (in-memory) or a SQLite-backed adapter.
    */
   graphStore?: GraphMemoryStore;
+  /**
+   * Scope isolation guard — wraps every tool execution with a cross-scope
+   * policy check. Set in ChatEngine.toolOptions; callerScope is overridden
+   * per-worker in buildWorkersFromDb() to the worker's agentic_scope value.
+   */
+  scopeGuard?: import('./scope-guard-registry.js').ScopeGuardCallbacks;
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1488,8 +1494,9 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
   }
 
   // Phase 2: wrap with policy enforcement when a resolver is provided.
+  let finalRegistry: ToolRegistry = registry;
   if (opts?.policyResolver) {
-    return createPolicyEnforcedRegistry(registry, {
+    finalRegistry = createPolicyEnforcedRegistry(finalRegistry, {
       resolver: opts.policyResolver,
       auditEmitter: opts.auditEmitter ?? noopAuditEmitter,
       rateLimiter: opts.rateLimiter,
@@ -1509,7 +1516,13 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     });
   }
 
-  return registry;
+  // Phase 4 (scope isolation): wrap with cross-scope access enforcement.
+  if (opts?.scopeGuard) {
+    const { wrapWithScopeGuard } = await import('./scope-guard-registry.js');
+    finalRegistry = wrapWithScopeGuard(finalRegistry, opts.scopeGuard);
+  }
+
+  return finalRegistry;
 }
 
 /** Info about all available built-in tools */

@@ -287,6 +287,35 @@ export class ChatEngine {
     // Phase 7: share the runtime's warm response cache so all subsystems
     // (live-agent handlers, tools, chat path) benefit from the same entries.
     this.responseCache = config.runtime?.cache?.store ?? weaveInMemoryCacheStore();
+    // Scope isolation: load policies once per ChatEngine instance and cache.
+    // callerScope is always overridden per-worker in buildWorkersFromDb();
+    // the 'system' default covers the supervisor and all non-DB-worker contexts.
+    let _cachedPolicies: import('./db-types/scopes.js').ScopeCrossPolicyRow[] | null = null;
+    let _cachedScopes: Map<string, import('./db-types/scopes.js').AgentScopeRow> | null = null;
+
+    const scopeGuard: import('./scope-guard-registry.js').ScopeGuardCallbacks = {
+      callerScope: 'system',
+      getToolScope: (toolName: string) => db.getScopeForTool(toolName),
+      checkPolicy: async (fromScope: string, toScope: string) => {
+        if (!_cachedPolicies) _cachedPolicies = await db.listScopePolicies();
+        if (!_cachedScopes) {
+          const scopes = await db.listScopes();
+          _cachedScopes = new Map(scopes.map(s => [s.id, s]));
+        }
+        const policy = _cachedPolicies.find(
+          p => p.from_scope === fromScope && (p.to_scope === toScope || p.to_scope === '*'),
+        );
+        if (!policy) return null;
+        const callerScopeRow = _cachedScopes.get(fromScope);
+        return {
+          allowed: policy.allowed === 1,
+          requiresA2a: policy.requires_a2a === 1,
+          sandboxed: callerScopeRow?.sandboxed === 1,
+        };
+      },
+      logEvent: (event) => db.logScopeEvent(event as Parameters<typeof db.logScopeEvent>[0]),
+    };
+
     this.toolOptions = {
       temporalStore: createTemporalStore(db),
       policyResolver: new DbToolPolicyResolver(db),
@@ -298,6 +327,8 @@ export class ChatEngine {
       credentialResolver: (id: string) => db.getToolCredential(id),
       // Phase D: runtime propagation for capability requires assertion
       ...(config.runtime ? { runtime: config.runtime } : {}),
+      // Scope isolation: enforce cross-scope tool access policies.
+      scopeGuard,
     };
   }
 
@@ -357,10 +388,20 @@ export class ChatEngine {
         temporalToolPolicy: TEMPORAL_TOOL_POLICY,
       });
       const persona = normalizePersona(row.persona ?? undefined, 'agent');
+      // Scope guard: each worker gets its own scope context derived from its
+      // agentic_scope column so the guard enforces per-domain tool access.
+      const workerScope = row.agentic_scope ?? 'system';
+      const workerToolOpts = {
+        ...toolOptions,
+        actorPersona: persona,
+        ...(toolOptions.scopeGuard && {
+          scopeGuard: { ...toolOptions.scopeGuard, callerScope: workerScope },
+        }),
+      };
       const tools = toolNames.length
-        ? await createToolRegistry(toolNames, customTools, { ...toolOptions, actorPersona: persona })
+        ? await createToolRegistry(toolNames, customTools, workerToolOpts)
         : customTools?.length
-          ? await createToolRegistry([], customTools, { ...toolOptions, actorPersona: persona })
+          ? await createToolRegistry([], customTools, workerToolOpts)
           : undefined;
 
       return {
@@ -970,6 +1011,10 @@ export class ChatEngine {
       explicitEnabledTools: settings.enabledTools,
       // P4-3: Knowledge graph store (undefined when graph is disabled)
       ...(graphStore && { graphStore }),
+      // Scope guard: stamp session + user context for log entries.
+      ...(this.toolOptions.scopeGuard && {
+        scopeGuard: { ...this.toolOptions.scopeGuard, sessionId: chatId, userId },
+      }),
     };
   }
 
