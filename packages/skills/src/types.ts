@@ -135,6 +135,13 @@ export interface SkillDefinition {
   /** Phase 6: key of the tool_policies row that governs tool calls while this skill is active */
   readonly toolPolicyKey?: string;
   /**
+   * The agentic scope this skill belongs to (m75).
+   * Used by ChatScopeGuard.filterSkillsByScope() to enforce domain boundaries.
+   * Values: 'system' | 'analytics' | 'kaggle' | 'code' | 'browser' | 'voice' | 'memory'
+   * Default (when absent): 'system' (most permissive — allowed from any scope).
+   */
+  readonly agenticScope?: string;
+  /**
    * Optional domain-scoped sub-playbooks. When set, each section is rendered
    * as an optional PromptSection candidate so query-aware cosine relevance
    * can keep only the domains matching the user's input (e.g. only the

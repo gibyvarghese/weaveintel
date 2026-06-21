@@ -54,6 +54,7 @@ import { applyM71Guardrails2026 } from './m71-guardrails-2026.js';
 import { applyM72SvToolsV2 } from './m72-sv-tools-v2.js';
 import { applyM73KaggleMeshV2 } from './m73-kaggle-mesh-v2.js';
 import { applyM74AgentStrategyDefaults2026 } from './m74-agent-strategy-defaults-2026.js';
+import { applyM75AgenticScopes } from './m75-agentic-scopes.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -116,6 +117,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm72-sv-tools-v2', description: 'Scientific Validation Enhancement (mid-2026 Phase 5): enable 3 SymPy tools; INSERT 12 new SV tool catalog entries (7 literature, 3 statistical, 2 simulation); UPDATE standard/premium budgets; INSERT express + research budget envelopes; INSERT 3 new SV specialist agents (Rex/Dana/Bianca); enable sv-supervisor', run: applyM72SvToolsV2 },
   { id: 'm73-kaggle-mesh-v2', description: 'Kaggle Mesh & Playbook Modernization (mid-2026 Phase 6): UPDATE kaggle_role_capabilities — add KAGGLE_READ_LEADERBOARD to strategist + submitter, KAGGLE_LOCAL_COMPUTE to implementer; new playbooks (NLP/Vision/TimeSeries) + updated GENERIC_ML_SOLVER/DISCOVERY/ARC content wired via bumped seedKaggleArcPlaybook; new mesh agents (leaderboard_monitor, parallel_implementer, debrief) + edges wired via updated seedLiveMeshDefinitions', run: applyM73KaggleMeshV2 },
   { id: 'm74-agent-strategy-defaults-2026', description: 'Agent Strategy Defaults 2026 (mid-2026 Phase 7): ADD hitl_threshold + max_agent_hops + tool_confirmation_level + memory_policy columns to agent_strategy_settings; UPDATE global row: a2a_enabled=1, supervisor_parallel_delegation=1, reflect_enabled=1; INSERT web/operator + api/headless mode_labels rows', run: applyM74AgentStrategyDefaults2026 },
+  { id: 'm75-agentic-scopes', description: 'Agentic Scope Isolation (mid-2026): agent_scopes + scope_cross_policies + scope_skill_assignments + scope_live_agent_assignments + scope_access_log tables; agentic_scope column on a2a_skills; seeds 7 default scopes + 13 policies + skill→scope mapping for all 15 A2A skills', run: applyM75AgenticScopes },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

@@ -17,6 +17,7 @@ import type { ILiveAgentsStore } from './adapter-live-agents.js';
 import type { IMeStore } from './adapter-me.js';
 import type { IAgendaNotesStore } from './adapter-agenda-notes.js';
 import type { IVoiceStore } from './adapter-voice.js';
+import type { ScopesAdapterMethods } from './adapter-scopes.js';
 
 export type { IUserStore } from './adapter-users.js';
 export type { IChatStore, ConversationListFilter, ConversationListOptions, ConversationFlags } from './adapter-chats.js';
@@ -40,6 +41,8 @@ export type {
   NoteRow, NoteLinkRow, NoteLinkTargetKind, NoteDatabaseRow, NoteDbRowRow, NoteDatabaseSource, NoteDatabaseViewType,
   NoteSensitivity, NoteListFilter,
 } from './adapter-agenda-notes.js';
+export type { ScopesAdapterMethods } from './adapter-scopes.js';
+export type { AgentScopeRow, ScopeCrossPolicyRow, ScopeAccessLogRow } from './scopes.js';
 export type {
   IVoiceStore,
   VoiceConfigRow, VoiceConfigCreate, VoiceConfigUpdate,
@@ -64,7 +67,8 @@ export interface DatabaseAdapter extends
   ILiveAgentsStore,
   IMeStore,
   IAgendaNotesStore,
-  IVoiceStore {
+  IVoiceStore,
+  ScopesAdapterMethods {
   initialize(): Promise<void>;
   close(): Promise<void>;
 }

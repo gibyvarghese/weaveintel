@@ -19,6 +19,7 @@
     { "path": "../../packages/cost-governor" },
     { "path": "../../packages/encryption" },
     { "path": "../../packages/guardrails" },
+    { "path": "../../packages/scope" },
     { "path": "../../packages/human-tasks" },
     { "path": "../../packages/notifications" },
     { "path": "../../packages/contracts" },

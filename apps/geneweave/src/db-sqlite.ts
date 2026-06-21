@@ -9243,6 +9243,68 @@ export class SQLiteAdapter implements DatabaseAdapter {
       'SELECT * FROM voice_session_events WHERE session_id = ? AND user_id = ? ORDER BY turn_index ASC, created_at ASC LIMIT ?',
     ).all(sessionId, userId, limit) as import('./db-types/adapter-voice.js').VoiceSessionEventRow[];
   }
+
+  // ─── Agentic Scope Isolation (m75) ───────────────────────────────────────
+
+  async listScopes(): Promise<import('./db-types/scopes.js').AgentScopeRow[]> {
+    return this.d.prepare(`SELECT * FROM agent_scopes WHERE enabled = 1 ORDER BY id`).all() as import('./db-types/scopes.js').AgentScopeRow[];
+  }
+
+  async getScope(id: string): Promise<import('./db-types/scopes.js').AgentScopeRow | null> {
+    return (this.d.prepare(`SELECT * FROM agent_scopes WHERE id = ?`).get(id) as import('./db-types/scopes.js').AgentScopeRow | undefined) ?? null;
+  }
+
+  async listScopePolicies(): Promise<import('./db-types/scopes.js').ScopeCrossPolicyRow[]> {
+    return this.d.prepare(`SELECT * FROM scope_cross_policies WHERE enabled = 1 ORDER BY from_scope, to_scope`).all() as import('./db-types/scopes.js').ScopeCrossPolicyRow[];
+  }
+
+  async getScopeForSkill(skillId: string): Promise<string> {
+    const row = this.d.prepare(`SELECT scope_id FROM scope_skill_assignments WHERE skill_id = ?`).get(skillId) as { scope_id: string } | undefined;
+    if (row) return row.scope_id;
+    const skillRow = this.d.prepare(`SELECT agentic_scope FROM a2a_skills WHERE id = ?`).get(skillId) as { agentic_scope: string } | undefined;
+    return skillRow?.agentic_scope ?? 'system';
+  }
+
+  async getScopeForMeshRole(meshKey: string, roleKey: string): Promise<string> {
+    // Try specific role first, then catch-all (empty string)
+    const row = this.d.prepare(
+      `SELECT scope_id FROM scope_live_agent_assignments WHERE mesh_key = ? AND role_key IN (?, '') ORDER BY CASE role_key WHEN ? THEN 0 ELSE 1 END LIMIT 1`,
+    ).get(meshKey, roleKey, roleKey) as { scope_id: string } | undefined;
+    return row?.scope_id ?? 'system';
+  }
+
+  async logScopeEvent(event: Omit<import('./db-types/scopes.js').ScopeAccessLogRow, 'id' | 'created_at'>): Promise<void> {
+    const { randomUUID } = await import('crypto');
+    this.d.prepare(`
+      INSERT INTO scope_access_log
+        (id, event_type, from_scope, to_scope, skill_id, tool_name, session_id, task_id, user_id, allowed, reason, delegation_chain_json)
+      VALUES
+        (@id, @event_type, @from_scope, @to_scope, @skill_id, @tool_name, @session_id, @task_id, @user_id, @allowed, @reason, @delegation_chain_json)
+    `).run({ id: randomUUID(), ...event });
+  }
+
+  async listScopeAccessLog(opts: { limit?: number; sessionId?: string; onlyViolations?: boolean } = {}): Promise<import('./db-types/scopes.js').ScopeAccessLogRow[]> {
+    const limit = opts.limit ?? 100;
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (opts.sessionId) { conditions.push('session_id = ?'); params.push(opts.sessionId); }
+    if (opts.onlyViolations) conditions.push('allowed = 0');
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit);
+    return this.d.prepare(`SELECT * FROM scope_access_log ${where} ORDER BY created_at DESC LIMIT ?`).all(...params) as import('./db-types/scopes.js').ScopeAccessLogRow[];
+  }
+
+  async countScopeViolations(withinHours = 24): Promise<number> {
+    // SQLite datetime('now') uses a space separator ('2026-06-21 08:00:00'),
+    // but JS .toISOString() uses 'T' ('2026-06-21T08:00:00.000Z').
+    // Since 'T'(84) > ' '(32) in ASCII, the T-format string always compares
+    // as greater than the space-format string, causing the query to return 0.
+    // Fix: use SQLite's datetime() arithmetic instead of a JS timestamp string.
+    const row = this.d.prepare(
+      `SELECT COUNT(*) as n FROM scope_access_log WHERE allowed = 0 AND created_at >= datetime('now', '-${Math.floor(withinHours)} hours')`,
+    ).get() as { n: number };
+    return row.n;
+  }
 }
 
 // ─── Factory ─────────────────────────────────────────────────

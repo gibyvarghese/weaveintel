@@ -41,6 +41,7 @@
     "@weaveintel/evals": "*",
     "@weaveintel/geneweave-ui": "*",
     "@weaveintel/guardrails": "*",
+    "@weaveintel/scope": "*",
     "@weaveintel/human-tasks": "*",
     "@weaveintel/identity": "*",
     "@weaveintel/live-agents": "*",

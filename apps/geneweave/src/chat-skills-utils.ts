@@ -13,6 +13,8 @@ import {
   type SkillMatch,
 } from '@weaveintel/skills';
 import type { DatabaseAdapter } from './db.js';
+import type { ChatScopeGuard } from './chat-scope-guard.js';
+import type { ScopeContext } from '@weaveintel/scope';
 
 // ── Private helper ──────────────────────────────────────────
 
@@ -198,6 +200,10 @@ export async function discoverSkillsForInput(
   mode: 'direct' | 'agent' | 'supervisor' | 'ensemble',
   parseJson: (text: string) => unknown,
   runtimeHints?: { hasTabularAttachment?: boolean },
+  // Optional scope enforcement: when provided, skills are filtered by the current scope context.
+  // When absent, all selected skills are returned (backwards-compatible behaviour).
+  scopeGuard?: ChatScopeGuard,
+  scopeCtx?: ScopeContext,
 ): Promise<{ matches: SkillMatch[]; toolNames: string[] }> {
   try {
     const rows = await db.listEnabledSkills();
@@ -281,6 +287,19 @@ export async function discoverSkillsForInput(
         ].filter(Boolean).join(' ');
         return semanticIntentScore(userContent, corpus) >= INTENT_MATCH_THRESHOLD;
       });
+    }
+
+    // ── Scope enforcement ────────────────────────────────────────────────
+    // When a scope guard and context are provided, filter out skills that the
+    // current scope cannot access. This is the primary enforcement point for
+    // the analytics→kaggle boundary (and others).
+    if (scopeGuard && scopeCtx) {
+      const { allowed, rejected } = await scopeGuard.filterSkillsByScope(matches, scopeCtx);
+      if (rejected.length > 0) {
+        const rejectedNames = rejected.map((r) => r.match.skill.id).join(', ');
+        console.info(`[scope] Filtered ${rejected.length} out-of-scope skill(s): ${rejectedNames}`);
+      }
+      matches = allowed;
     }
 
     const toolNames = collectSkillTools(matches);
