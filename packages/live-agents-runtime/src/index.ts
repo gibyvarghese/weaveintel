@@ -50,6 +50,16 @@ export {
 export { a2aInboundHandler, type A2AInboundConfig } from './handlers/a2a-inbound.js';
 export { a2aOutboundHandler, type A2AOutboundConfig } from './handlers/a2a-outbound.js';
 
+// Phase 3 (mid-2026) — Expanded handler kind catalog
+export { agenticComputerUseHandler, type AgenticComputerUseConfig } from './handlers/agentic-computer-use.js';
+export { agenticBrowserHandler, type AgenticBrowserConfig } from './handlers/agentic-browser.js';
+export { agenticCodeInterpreterHandler, type AgenticCodeInterpreterConfig } from './handlers/agentic-code-interpreter.js';
+export { agenticVoiceRealtimeHandler, type AgenticVoiceRealtimeConfig } from './handlers/agentic-voice-realtime.js';
+export { agenticMultimodalHandler, type AgenticMultimodalConfig } from './handlers/agentic-multimodal.js';
+export { deterministicMapReduceHandler, type DeterministicMapReduceConfig } from './handlers/deterministic-mapreduce.js';
+export { multiAgentSwarmHandler, type MultiAgentSwarmConfig } from './handlers/multi-agent-swarm.js';
+export { externalMcpToolHandler, type ExternalMcpToolConfig } from './handlers/external-mcp-tool.js';
+
 // Phase 4 — In-process run cancellation bus
 export { RunCancellationBus } from './run-cancellation.js';
 
@@ -141,6 +151,14 @@ import { deterministicTemplateHandler } from './handlers/deterministic-template.
 import { humanApprovalHandler } from './handlers/human-approval.js';
 import { a2aInboundHandler } from './handlers/a2a-inbound.js';
 import { a2aOutboundHandler } from './handlers/a2a-outbound.js';
+import { agenticComputerUseHandler } from './handlers/agentic-computer-use.js';
+import { agenticBrowserHandler } from './handlers/agentic-browser.js';
+import { agenticCodeInterpreterHandler } from './handlers/agentic-code-interpreter.js';
+import { agenticVoiceRealtimeHandler } from './handlers/agentic-voice-realtime.js';
+import { agenticMultimodalHandler } from './handlers/agentic-multimodal.js';
+import { deterministicMapReduceHandler } from './handlers/deterministic-mapreduce.js';
+import { multiAgentSwarmHandler } from './handlers/multi-agent-swarm.js';
+import { externalMcpToolHandler } from './handlers/external-mcp-tool.js';
 
 /**
  * Convenience: create a registry pre-populated with the built-in handler
@@ -153,15 +171,35 @@ import { a2aOutboundHandler } from './handlers/a2a-outbound.js';
  *   - human.approval          — dual-control gate via tool_approval_requests
  *   - a2a.inbound             — A2A-aware ReAct loop (parses A2ATask from inbox)
  *   - a2a.outbound            — delegate to remote A2A agent via HTTP
+ *
+ * Phase 3 additions (mid-2026):
+ *   - agentic.computer-use    — CUA screenshot→action loop (disabled by default)
+ *   - agentic.browser         — Playwright browser automation (disabled by default)
+ *   - agentic.code-interpreter — Python CSE sandbox execution
+ *   - agentic.voice-realtime  — WebRTC real-time speech I/O
+ *   - agentic.multimodal      — Vision-first ReAct loop
+ *   - deterministic.mapreduce — Fan-out to N workers + reduce
+ *   - multi-agent.swarm       — Peer-collaboration broadcast
+ *   - external.mcp-tool       — MCP JSON-RPC tool invocation
  */
 export function createDefaultHandlerRegistry(): HandlerRegistry {
   const reg = createHandlerRegistry();
+  // Phase 4 originals
   reg.register(agenticReactHandler);
   reg.register(deterministicForwardHandler);
   reg.register(deterministicTemplateHandler);
   reg.register(humanApprovalHandler);
   reg.register(a2aInboundHandler);
   reg.register(a2aOutboundHandler);
+  // Phase 3 additions (mid-2026)
+  reg.register(agenticComputerUseHandler);
+  reg.register(agenticBrowserHandler);
+  reg.register(agenticCodeInterpreterHandler);
+  reg.register(agenticVoiceRealtimeHandler);
+  reg.register(agenticMultimodalHandler);
+  reg.register(deterministicMapReduceHandler);
+  reg.register(multiAgentSwarmHandler);
+  reg.register(externalMcpToolHandler);
   return reg;
 }
 
