@@ -47,6 +47,7 @@ import { applyM64AgentPhase3 } from './m64-agent-phase3.js';
 import { applyM65AgentPhase4 } from './m65-agent-phase4.js';
 import { applyM66AgentPhase5 } from './m66-agent-phase5.js';
 import { applyM67AgentPhase6 } from './m67-agent-phase6.js';
+import { applyM68ModelRegistryRefresh } from './m68-model-registry-refresh.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -102,6 +103,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm65-agent-phase4', description: 'Agent Phase 4: portable memory tools, proactive context injection (chat_settings columns), knowledge graph (agent_graph_nodes + agent_graph_edges tables), graph tool catalog seeds', run: applyM65AgentPhase4 },
   { id: 'm66-agent-phase5', description: 'Agent Phase 5: checkpoint/resume (agent_checkpoints table, chat_settings columns) + dynamic worker registry (chat_settings columns)', run: applyM66AgentPhase5 },
   { id: 'm67-agent-phase6', description: 'Agent Phase 6: eval pipeline, cost governor, compliance, vision loop (chat_settings columns + agent_eval_pipeline_runs, agent_cost_ledger, agent_compliance_audit tables)', run: applyM67AgentPhase6 },
+  { id: 'm68-model-registry-refresh', description: 'Model Registry Refresh (mid-2026): context_window_k + max_output_tokens_k on model_pricing; supports_computer_use + supports_long_context + supports_realtime_audio on model_capability_scores; disable Gemini 1.5 / llama3 / phi3 / gemma2; quality-score corrections', run: applyM68ModelRegistryRefresh },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

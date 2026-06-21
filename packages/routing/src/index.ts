@@ -35,7 +35,11 @@ export { inferTaskType } from './inference.js';
 export type { InferTaskTypeInput, InferTaskTypeResult, TaskInferenceHintsMap } from './inference.js';
 
 // Model capability flags
-export { getModelCapabilityFlags } from './model-capability-flags.js';
+export {
+  getModelCapabilityFlags,
+  getModelContextWindowK,
+  getModelMaxOutputK,
+} from './model-capability-flags.js';
 export type { ModelCapabilityFlags } from './model-capability-flags.js';
 
 // Runtime routing adapter (Phase 2 — Shared Routing Slot)
