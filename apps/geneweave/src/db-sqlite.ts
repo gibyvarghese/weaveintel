@@ -153,7 +153,17 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return (this.d.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined) ?? null;
   }
 
-  async listUsers(): Promise<UserRow[]> {
+  async listUsers(filter?: { tenantId?: string | null }): Promise<UserRow[]> {
+    if (filter?.tenantId !== undefined) {
+      if (filter.tenantId === null) {
+        return this.d.prepare(
+          'SELECT id, email, name, persona, tenant_id, email_bidx, created_at FROM users WHERE tenant_id IS NULL ORDER BY created_at ASC',
+        ).all() as UserRow[];
+      }
+      return this.d.prepare(
+        'SELECT id, email, name, persona, tenant_id, email_bidx, created_at FROM users WHERE tenant_id = ? ORDER BY created_at ASC',
+      ).all(filter.tenantId) as UserRow[];
+    }
     return this.d.prepare(
       'SELECT id, email, name, persona, tenant_id, email_bidx, created_at FROM users ORDER BY created_at ASC',
     ).all() as UserRow[];
@@ -5927,6 +5937,18 @@ export class SQLiteAdapter implements DatabaseAdapter {
             '- If an analysis-library import fails inside `cse_run_data_analysis`, treat that as an environment issue and report it clearly.',
             '- If file path fails, probe workspace via code (e.g., os.listdir("."), os.listdir("/workspace")) and retry with corrected path.',
             '',
+            'Charting rules (MANDATORY — never deviate):',
+            '- ALWAYS use Plotly for all charts, graphs, and visualisations. Never use matplotlib or seaborn for output charts.',
+            '- Use plotly.graph_objects or plotly.express; call fig.to_html(full_html=False, include_plotlyjs=\'cdn\') to produce an embeddable HTML snippet.',
+            '- Never save charts as .png, .jpg, or any image file — file paths are not accessible outside the container.',
+            '- If the task requests an HTML dashboard, build the complete self-contained HTML (with inline Plotly CDN script) in Python and print it to stdout.',
+            '',
+            'Artifact saving (MANDATORY when HTML output is requested):',
+            '- After a successful CSE run that produces HTML, call `emit_artifact` yourself with the COMPLETE HTML string from stdout.',
+            '- Do NOT summarise or truncate the HTML — pass the full string verbatim as the `data` argument.',
+            '- Use type="html", name ending in ".html".',
+            '- Do not rely on the supervisor to relay the HTML; save it directly here so nothing is lost.',
+            '',
             'Quality bar before returning:',
             '- Code executed successfully (status success).',
             '- Output includes concrete computed values (not generic commentary).',
@@ -5939,7 +5961,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
             '- Verification notes (why output is correct)',
             '- If blocked: exact blocker + next best fallback',
           ].join('\n'),
-          tool_names: JSON.stringify(['cse_run_code', 'cse_run_data_analysis', 'cse_session_status', 'cse_end_session', 'calculator', 'text_analysis']),
+          tool_names: JSON.stringify(['cse_run_code', 'cse_run_data_analysis', 'cse_session_status', 'cse_end_session', 'calculator', 'text_analysis', 'emit_artifact']),
           persona: 'agent_worker', trigger_patterns: null, task_contract_id: null, max_retries: 0, priority: 50, category: 'general', enabled: 1,
         },
         {
@@ -9417,6 +9439,301 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare(
       `DELETE FROM scope_live_agent_assignments WHERE scope_id = ? AND mesh_key = ? AND role_key = ?`,
     ).run(scope_id, mesh_key, role_key);
+  }
+
+  // ─── Artifact storage (m77) ──────────────────────────────────────────────────
+
+  async saveArtifact(input: import('./db-types/artifacts.js').ArtifactSaveInput): Promise<import('./db-types/artifacts.js').ArtifactRow> {
+    const { newUUIDv7 } = await import('@weaveintel/core');
+    const id = newUUIDv7();
+    const now = new Date().toISOString();
+    const { serializeArtifactData, estimateArtifactSize } = await import('./lib/artifact-helpers.js');
+    const { data_text, data_blob } = serializeArtifactData(input.data);
+    const sizeBytes = input.sizeBytes ?? estimateArtifactSize(input.data);
+    this.d.prepare(`
+      INSERT INTO artifacts
+        (id, name, type, mime_type, data_text, data_blob, size_bytes, version,
+         session_id, user_id, agent_id, run_id, tags, metadata, policy_id, scope,
+         streaming_status, streaming_progress, created_at, tenant_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      id, input.name, input.type, input.mimeType,
+      data_text, data_blob, sizeBytes, 1,
+      input.sessionId ?? null, input.userId ?? null,
+      input.agentId ?? null, input.runId ?? null,
+      input.tags ? JSON.stringify(input.tags) : null,
+      input.metadata ? JSON.stringify(input.metadata) : null,
+      input.policyId ?? null,
+      input.scope ?? 'session',
+      input.streamingStatus ?? null,
+      input.streamingProgress ?? null,
+      now,
+      input.tenantId ?? null,
+    );
+    const verId = newUUIDv7();
+    this.d.prepare(`
+      INSERT INTO artifact_versions (id, artifact_id, version, data_text, data_blob, changelog, created_at)
+      VALUES (?,?,?,?,?,?,?)
+    `).run(verId, id, 1, data_text, data_blob, null, now);
+    return this.d.prepare(`SELECT * FROM artifacts WHERE id = ?`).get(id) as import('./db-types/artifacts.js').ArtifactRow;
+  }
+
+  async getArtifact(id: string): Promise<import('./db-types/artifacts.js').ArtifactRow | null> {
+    return (this.d.prepare(`SELECT * FROM artifacts WHERE id = ? LIMIT 1`).get(id) as import('./db-types/artifacts.js').ArtifactRow | undefined) ?? null;
+  }
+
+  async updateArtifact(
+    id: string,
+    patch: import('./db-types/artifacts.js').ArtifactUpdateInput,
+    changelog?: string,
+  ): Promise<import('./db-types/artifacts.js').ArtifactRow> {
+    const existing = await this.getArtifact(id);
+    if (!existing) throw new Error(`Artifact not found: ${id}`);
+    const { newUUIDv7 } = await import('@weaveintel/core');
+    const { serializeArtifactData, estimateArtifactSize } = await import('./lib/artifact-helpers.js');
+    const now = new Date().toISOString();
+    const nextVersion = existing.version + 1;
+    const newData = patch.data !== undefined ? patch.data : (existing.data_text !== null
+      ? (() => { try { return JSON.parse(existing.data_text!); } catch { return existing.data_text; } })()
+      : existing.data_blob);
+    const { data_text, data_blob } = serializeArtifactData(newData);
+    const sizeBytes = patch.data !== undefined ? estimateArtifactSize(newData) : existing.size_bytes;
+    // m79: streamingStatus=null clears the 'streaming' marker (artifact finalized)
+    const newStreamingStatus = 'streamingStatus' in patch
+      ? (patch.streamingStatus ?? null)
+      : existing.streaming_status;
+    const newStreamingProgress = 'streamingProgress' in patch
+      ? (patch.streamingProgress ?? null)
+      : existing.streaming_progress;
+    this.d.prepare(`
+      UPDATE artifacts SET
+        name=?, type=?, mime_type=?, data_text=?, data_blob=?, size_bytes=?,
+        version=?, tags=?, metadata=?, policy_id=?, scope=?,
+        streaming_status=?, streaming_progress=?, updated_at=?
+      WHERE id=?
+    `).run(
+      patch.name ?? existing.name,
+      patch.type ?? existing.type,
+      patch.mimeType ?? existing.mime_type,
+      data_text, data_blob, sizeBytes, nextVersion,
+      patch.tags !== undefined ? JSON.stringify(patch.tags) : existing.tags,
+      patch.metadata !== undefined ? JSON.stringify(patch.metadata) : existing.metadata,
+      patch.policyId !== undefined ? patch.policyId : existing.policy_id,
+      patch.scope ?? existing.scope,
+      newStreamingStatus,
+      newStreamingProgress,
+      now, id,
+    );
+    const verId = newUUIDv7();
+    this.d.prepare(`
+      INSERT INTO artifact_versions (id, artifact_id, version, data_text, data_blob, changelog, created_at)
+      VALUES (?,?,?,?,?,?,?)
+    `).run(verId, id, nextVersion, data_text, data_blob, changelog ?? null, now);
+    return this.d.prepare(`SELECT * FROM artifacts WHERE id = ?`).get(id) as import('./db-types/artifacts.js').ArtifactRow;
+  }
+
+  async listArtifacts(filter?: import('./db-types/artifacts.js').ArtifactListFilter): Promise<import('./db-types/artifacts.js').ArtifactRow[]> {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (filter?.type) {
+      const types = Array.isArray(filter.type) ? filter.type : [filter.type];
+      conditions.push(`type IN (${types.map(() => '?').join(',')})`);
+      params.push(...types);
+    }
+    if (filter?.sessionId) { conditions.push('session_id=?'); params.push(filter.sessionId); }
+    if (filter?.userId) { conditions.push('user_id=?'); params.push(filter.userId); }
+    if (filter?.agentId) { conditions.push('agent_id=?'); params.push(filter.agentId); }
+    if (filter?.runId) { conditions.push('run_id=?'); params.push(filter.runId); }
+    if (filter?.scope) { conditions.push('scope=?'); params.push(filter.scope); }
+    if (filter?.policyId) { conditions.push('policy_id=?'); params.push(filter.policyId); }
+    if (filter?.tenantId !== undefined) {
+      if (filter.tenantId === null) { conditions.push('tenant_id IS NULL'); }
+      else { conditions.push('tenant_id=?'); params.push(filter.tenantId); }
+    }
+    let sql = 'SELECT * FROM artifacts';
+    if (conditions.length) sql += ' WHERE ' + conditions.join(' AND ');
+    sql += ' ORDER BY created_at DESC';
+    if (filter?.limit) { sql += ' LIMIT ?'; params.push(filter.limit); }
+    if (filter?.offset) { sql += ' OFFSET ?'; params.push(filter.offset); }
+    let rows = this.d.prepare(sql).all(...params) as import('./db-types/artifacts.js').ArtifactRow[];
+    if (filter?.tags && filter.tags.length > 0) {
+      const required = filter.tags;
+      rows = rows.filter((r) => {
+        if (!r.tags) return false;
+        try {
+          const t = JSON.parse(r.tags) as string[];
+          return required.every((tag: string) => t.includes(tag));
+        } catch { return false; }
+      });
+    }
+    return rows;
+  }
+
+  async deleteArtifact(id: string): Promise<void> {
+    this.d.prepare(`DELETE FROM artifacts WHERE id = ?`).run(id);
+  }
+
+  async getArtifactVersions(artifactId: string): Promise<import('./db-types/artifacts.js').ArtifactVersionRow[]> {
+    return this.d.prepare(
+      `SELECT * FROM artifact_versions WHERE artifact_id = ? ORDER BY version ASC`,
+    ).all(artifactId) as import('./db-types/artifacts.js').ArtifactVersionRow[];
+  }
+
+  async getArtifactVersion(artifactId: string, version: number): Promise<import('./db-types/artifacts.js').ArtifactVersionRow | null> {
+    return (this.d.prepare(
+      `SELECT * FROM artifact_versions WHERE artifact_id = ? AND version = ? LIMIT 1`,
+    ).get(artifactId, version) as import('./db-types/artifacts.js').ArtifactVersionRow | undefined) ?? null;
+  }
+
+  async expireArtifacts(): Promise<number> {
+    // Joins artifacts with their policy to find rows past retention period.
+    // policy_id is nullable — rows without a policy are never expired.
+    const rows = this.d.prepare(`
+      SELECT a.id, p.retention_days
+      FROM artifacts a
+      JOIN artifact_policies p ON a.policy_id = p.id
+      WHERE p.retention_days IS NOT NULL
+        AND p.retention_days > 0
+        AND p.enabled = 1
+        AND datetime(a.created_at, '+' || p.retention_days || ' days') < datetime('now')
+    `).all() as Array<{ id: string; retention_days: number }>;
+    if (rows.length === 0) return 0;
+    const del = this.d.prepare(`DELETE FROM artifacts WHERE id = ?`);
+    const tx = this.d.transaction(() => {
+      for (const row of rows) del.run(row.id);
+    });
+    tx();
+    return rows.length;
+  }
+
+  // ─── Tenant artifact settings (m78) ──────────────────────────────────────────
+
+  async getTenantArtifactSettings(tenantId: string): Promise<import('./db-types/artifacts.js').TenantArtifactSettingsRow | null> {
+    try {
+      return (this.d.prepare(`SELECT * FROM tenant_artifact_settings WHERE tenant_id = ?`).get(tenantId) as import('./db-types/artifacts.js').TenantArtifactSettingsRow) ?? null;
+    } catch { return null; }
+  }
+
+  async getEffectiveTenantArtifactSettings(tenantId: string): Promise<import('./db-types/artifacts.js').TenantArtifactSettingsRow | null> {
+    // Try tenant-specific first, then fall back to 'default' global row.
+    try {
+      const row = this.d.prepare(`SELECT * FROM tenant_artifact_settings WHERE tenant_id = ?`).get(tenantId) as import('./db-types/artifacts.js').TenantArtifactSettingsRow | undefined;
+      if (row) return row;
+      return (this.d.prepare(`SELECT * FROM tenant_artifact_settings WHERE tenant_id = 'default'`).get() as import('./db-types/artifacts.js').TenantArtifactSettingsRow) ?? null;
+    } catch { return null; }
+  }
+
+  async upsertTenantArtifactSettings(
+    tenantId: string,
+    fields: Partial<Omit<import('./db-types/artifacts.js').TenantArtifactSettingsRow, 'id' | 'tenant_id' | 'created_at' | 'updated_at'>>,
+  ): Promise<import('./db-types/artifacts.js').TenantArtifactSettingsRow> {
+    const now = new Date().toISOString();
+    const existing = await this.getTenantArtifactSettings(tenantId);
+    if (existing) {
+      const sets: string[] = [];
+      const vals: unknown[] = [];
+      if (fields.allowed_types !== undefined) { sets.push('allowed_types = ?'); vals.push(fields.allowed_types); }
+      if (fields.max_size_bytes !== undefined) { sets.push('max_size_bytes = ?'); vals.push(fields.max_size_bytes); }
+      if (fields.require_policy !== undefined) { sets.push('require_policy = ?'); vals.push(fields.require_policy ? 1 : 0); }
+      if (fields.preview_enabled !== undefined) { sets.push('preview_enabled = ?'); vals.push(fields.preview_enabled ? 1 : 0); }
+      if (fields.sandbox_html !== undefined) { sets.push('sandbox_html = ?'); vals.push(fields.sandbox_html ? 1 : 0); }
+      if (fields.emit_enabled !== undefined) { sets.push('emit_enabled = ?'); vals.push(fields.emit_enabled ? 1 : 0); }
+      if (sets.length > 0) {
+        sets.push('updated_at = ?');
+        vals.push(now, tenantId);
+        this.d.prepare(`UPDATE tenant_artifact_settings SET ${sets.join(', ')} WHERE tenant_id = ?`).run(...vals);
+      }
+    } else {
+      const { newUUIDv7 } = await import('@weaveintel/core');
+      this.d.prepare(`
+        INSERT INTO tenant_artifact_settings
+          (id, tenant_id, allowed_types, max_size_bytes, require_policy, preview_enabled, sandbox_html, emit_enabled, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        newUUIDv7(), tenantId,
+        fields.allowed_types ?? null,
+        fields.max_size_bytes ?? null,
+        fields.require_policy ? 1 : 0,
+        fields.preview_enabled ?? 1,
+        fields.sandbox_html ?? 1,
+        fields.emit_enabled ?? 1,
+        now,
+      );
+    }
+    return (await this.getTenantArtifactSettings(tenantId))!;
+  }
+
+  async listTenantArtifactSettings(): Promise<import('./db-types/artifacts.js').TenantArtifactSettingsRow[]> {
+    try {
+      return this.d.prepare(`SELECT * FROM tenant_artifact_settings ORDER BY tenant_id ASC`).all() as import('./db-types/artifacts.js').TenantArtifactSettingsRow[];
+    } catch { return []; }
+  }
+
+  async deleteTenantArtifactSettings(tenantId: string): Promise<void> {
+    try { this.d.prepare(`DELETE FROM tenant_artifact_settings WHERE tenant_id = ?`).run(tenantId); } catch { /* ignore */ }
+  }
+
+  // ─── Live artifact configs (m80 / Phase 6) ────────────────────────────────────
+
+  async getLiveArtifactConfig(artifactId: string): Promise<import('./db-types/artifacts.js').LiveArtifactConfigRow | null> {
+    try {
+      return (this.d.prepare(`SELECT * FROM live_artifact_configs WHERE artifact_id = ?`).get(artifactId) as import('./db-types/artifacts.js').LiveArtifactConfigRow) ?? null;
+    } catch { return null; }
+  }
+
+  async saveLiveArtifactConfig(input: import('./db-types/artifacts.js').LiveArtifactConfigInput): Promise<import('./db-types/artifacts.js').LiveArtifactConfigRow> {
+    const { newUUIDv7 } = await import('@weaveintel/core');
+    const now = new Date().toISOString();
+    const id = newUUIDv7();
+    this.d.prepare(`
+      INSERT INTO live_artifact_configs
+        (id, artifact_id, mcp_server_key, refresh_tool, refresh_args,
+         refresh_interval_seconds, cache_ttl_seconds, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(artifact_id) DO UPDATE SET
+        mcp_server_key = excluded.mcp_server_key,
+        refresh_tool   = excluded.refresh_tool,
+        refresh_args   = excluded.refresh_args,
+        refresh_interval_seconds = excluded.refresh_interval_seconds,
+        cache_ttl_seconds        = excluded.cache_ttl_seconds,
+        updated_at = excluded.created_at
+    `).run(
+      id, input.artifactId,
+      input.mcpServerKey ?? null,
+      input.refreshTool ?? null,
+      input.refreshArgs ? JSON.stringify(input.refreshArgs) : null,
+      input.refreshIntervalSeconds ?? 0,
+      input.cacheTtlSeconds ?? 30,
+      now,
+    );
+    return (await this.getLiveArtifactConfig(input.artifactId))!;
+  }
+
+  async updateLiveArtifactConfig(artifactId: string, patch: import('./db-types/artifacts.js').LiveArtifactConfigUpdate): Promise<import('./db-types/artifacts.js').LiveArtifactConfigRow> {
+    const now = new Date().toISOString();
+    const sets: string[] = ['updated_at = ?'];
+    const vals: unknown[] = [now];
+    if (patch.mcpServerKey !== undefined) { sets.push('mcp_server_key = ?'); vals.push(patch.mcpServerKey); }
+    if (patch.refreshTool !== undefined) { sets.push('refresh_tool = ?'); vals.push(patch.refreshTool); }
+    if (patch.refreshArgs !== undefined) { sets.push('refresh_args = ?'); vals.push(patch.refreshArgs ? JSON.stringify(patch.refreshArgs) : null); }
+    if (patch.refreshIntervalSeconds !== undefined) { sets.push('refresh_interval_seconds = ?'); vals.push(patch.refreshIntervalSeconds); }
+    if (patch.cacheTtlSeconds !== undefined) { sets.push('cache_ttl_seconds = ?'); vals.push(patch.cacheTtlSeconds); }
+    vals.push(artifactId);
+    this.d.prepare(`UPDATE live_artifact_configs SET ${sets.join(', ')} WHERE artifact_id = ?`).run(...vals);
+    return (await this.getLiveArtifactConfig(artifactId))!;
+  }
+
+  async deleteLiveArtifactConfig(artifactId: string): Promise<void> {
+    try { this.d.prepare(`DELETE FROM live_artifact_configs WHERE artifact_id = ?`).run(artifactId); } catch { /* ignore */ }
+  }
+
+  async touchLiveArtifactRefresh(artifactId: string): Promise<void> {
+    const now = new Date().toISOString();
+    this.d.prepare(`
+      UPDATE live_artifact_configs
+         SET last_refreshed_at = ?, refresh_count = refresh_count + 1, updated_at = ?
+       WHERE artifact_id = ?
+    `).run(now, now, artifactId);
   }
 }
 

@@ -117,6 +117,15 @@ export function registerAdminWiringRoutes(
         await handler(req, res, params, auth);
       }, opts);
     },
+    patch: (path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }) => {
+      router.patch(path, async (req, res, params, auth) => {
+        const gate = ensurePermission(auth, permissionForAdminRoute(path, 'PATCH'));
+        if (!gate.ok) { json(res, gate.status, { error: gate.error }); return; }
+        const mfaGate = await requireStepUpMfa(auth!, db);
+        if (!mfaGate.ok) { json(res, mfaGate.status, { error: mfaGate.error }); return; }
+        await handler(req, res, params, auth);
+      }, opts);
+    },
   };
 
   const guardrailRevisionStore = createSqliteRevisionStore(db);
@@ -208,8 +217,11 @@ export function registerAdminWiringRoutes(
     });
   }, { auth: true });
 
-  adminRouter.get('/api/admin/rbac/users', async (_req, res) => {
-    const users = await db.listUsers();
+  adminRouter.get('/api/admin/rbac/users', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const isPlatformAdmin = auth.persona === 'platform_admin';
+    const filter = isPlatformAdmin ? undefined : { tenantId: auth.tenantId ?? null };
+    const users = await db.listUsers(filter);
     json(res, 200, {
       users: users.map((user) => ({
         id: user.id,

@@ -73,6 +73,7 @@ function buildRouter(db: DatabaseAdapter) {
     get: (path, handler) => routes.push({ method: 'GET', path, handler: handler as HandlerFn }),
     post: (path, handler) => routes.push({ method: 'POST', path, handler: handler as HandlerFn }),
     put: (path, handler) => routes.push({ method: 'PUT', path, handler: handler as HandlerFn }),
+    patch: (path, handler) => routes.push({ method: 'PATCH', path, handler: handler as HandlerFn }),
     del: (path, handler) => routes.push({ method: 'DELETE', path, handler: handler as HandlerFn }),
   };
   const { helpers, captured } = makeHelpers();

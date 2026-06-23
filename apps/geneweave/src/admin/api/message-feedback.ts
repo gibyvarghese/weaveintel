@@ -25,7 +25,13 @@ export function registerMessageFeedbackRoutes(
     const c = url.searchParams.get('chatId');    if (c) opts.chatId = c;
     const s = url.searchParams.get('signal');    if (s) opts.signal = s;
     const l = url.searchParams.get('limit');     if (l) opts.limit = Number(l);
-    const feedback = await db.listMessageFeedback(opts);
+    let feedback = await db.listMessageFeedback(opts);
+    // Tenant scoping: tenant_admin only sees feedback from users in their tenant
+    if (auth.persona !== 'platform_admin' && auth.tenantId) {
+      const tenantUsers = await db.listUsers({ tenantId: auth.tenantId });
+      const tenantUserIds = new Set(tenantUsers.map((u) => u.id));
+      feedback = feedback.filter((f) => f.user_id !== null && tenantUserIds.has(f.user_id));
+    }
     json(res, 200, { feedback });
   }, { auth: true });
 

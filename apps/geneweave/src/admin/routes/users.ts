@@ -24,7 +24,9 @@ export function registerAdminUserRoutes(
 
   router.get('/api/admin/users', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
-    const users = await db.listUsers();
+    const isPlatformAdmin = auth.persona === 'platform_admin';
+    const filter = isPlatformAdmin ? undefined : { tenantId: auth.tenantId ?? null };
+    const users = await db.listUsers(filter);
     json(res, 200, {
       users: users.map((u) => ({
         id: u.id,

@@ -50,6 +50,7 @@ function buildTestRouter(): RouterLike & { routes: RegisteredRoute[] } {
     get: register('GET'),
     post: register('POST'),
     put: register('PUT'),
+    patch: register('PATCH'),
     del: register('DELETE'),
   };
 }

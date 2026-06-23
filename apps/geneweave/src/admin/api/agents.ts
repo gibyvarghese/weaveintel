@@ -42,7 +42,11 @@ export function registerSupervisorAgentRoutes(
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
     const url = new URL(req.url ?? '/', 'http://x');
     const tenantParam = url.searchParams.get('tenant_id');
-    const tenantId = tenantParam === '' ? null : tenantParam ?? undefined;
+    // Tenant scoping: tenant_admin can only see their tenant's agents
+    const isPlatformAdmin = auth.persona === 'platform_admin';
+    const tenantId: string | null | undefined = isPlatformAdmin
+      ? (tenantParam === '' ? null : tenantParam ?? undefined)
+      : (auth.tenantId ?? null);
     const category = url.searchParams.get('category') ?? undefined;
     const enabledOnly = url.searchParams.get('enabledOnly') === '1';
     const rows = await db.listSupervisorAgents({ tenantId, category, enabledOnly });

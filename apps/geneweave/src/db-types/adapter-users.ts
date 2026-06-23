@@ -28,7 +28,7 @@ export interface IUserStore {
   getUserByEmail(email: string): Promise<UserRow | null>;
   getUserByEmailBidx(bidx: string): Promise<UserRow | null>;
   getUserById(id: string): Promise<UserRow | null>;
-  listUsers(): Promise<UserRow[]>;
+  listUsers(filter?: { tenantId?: string | null }): Promise<UserRow[]>;
   listUsersForBidxRebuild(limit: number, afterId: string | null): Promise<Array<{ id: string; email: string }>>;
   setUserEmailBidx(userId: string, bidx: string | null): Promise<void>;
   updateUser(userId: string, updates: { email?: string; name?: string; persona?: string; tenantId?: string | null; passwordHash?: string; emailBidx?: string | null }): Promise<void>;
