@@ -62,19 +62,19 @@ export function registerSettingsRoutes(
       json(res, 400, { error: 'mode must be "direct", "agent", "supervisor", or "ensemble"' }); return;
     }
 
-    // Apply tool policy: if enabledTools not provided, apply defaults for the mode
-    // This allows tools to be auto-selected based on the mode
+    // Apply tool policy: if enabledTools is a non-empty explicit array, use it.
+    // Empty array [] or null/undefined means "use mode defaults" — this handles the
+    // case where the UI auto-saves settings on chat creation before the user has
+    // configured anything (createChat in api.ts sends enabledTools:[] from defaults).
     const toolPolicy = (() => {
-      if (body['enabledTools'] !== undefined && body['enabledTools'] !== null) {
-        // User explicitly provided tools
-        return body['enabledTools'];
+      const explicit = body['enabledTools'];
+      if (Array.isArray(explicit) && explicit.length > 0) {
+        return explicit;
       }
-      // Auto-select based on mode - get from chat engine's tool policy
-      // For now, we replicate the policy here; ideally this would be imported
       const DEFAULT_TOOLS: Record<string, string[]> = {
         direct: [],
-        agent: ['datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'memory_recall', 'memory_search', 'memory_remember', 'memory_forget', 'memory_list_entities', 'memory_list_episodes', 'memory_get_profile', 'web_search', 'cse_run_code', 'cse_run_data_analysis', 'cse_session_status', 'cse_end_session', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume'],
-        supervisor: ['datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis'],
+        agent: ['emit_artifact', 'datetime', 'timezone_info', 'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list', 'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status', 'reminder_create', 'reminder_list', 'reminder_cancel', 'calculator', 'json_format', 'text_analysis', 'memory_recall', 'memory_search', 'memory_remember', 'memory_forget', 'memory_list_entities', 'memory_list_episodes', 'memory_get_profile', 'web_search', 'cse_run_code', 'cse_run_data_analysis', 'cse_session_status', 'cse_end_session', 'browser_open', 'browser_close', 'browser_navigate', 'browser_back', 'browser_forward', 'browser_snapshot', 'browser_screenshot', 'browser_click', 'browser_fill', 'browser_select', 'browser_type', 'browser_hover', 'browser_press', 'browser_scroll', 'browser_wait', 'browser_detect_auth', 'browser_login', 'browser_save_cookies', 'browser_handoff_request', 'browser_handoff_resume'],
+        supervisor: ['emit_artifact', 'datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis'],
       };
       return DEFAULT_TOOLS[mode] ?? [];
     })();

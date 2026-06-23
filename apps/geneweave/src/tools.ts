@@ -900,6 +900,32 @@ export interface ToolRegistryOptions {
    * per-worker in buildWorkersFromDb() to the worker's agentic_scope value.
    */
   scopeGuard?: import('./scope-guard-registry.js').ScopeGuardCallbacks;
+  /**
+   * Artifact persistence callback. When set, the `emit_artifact` built-in tool
+   * is available to all agents. Called with the artifact payload; returns the
+   * saved row's id and version.
+   */
+  artifactSave?: (input: import('./db-types/artifacts.js').ArtifactSaveInput) => Promise<{ id: string; version: number }>;
+  /**
+   * m79 / Phase 4: Artifact update callback for streaming mode.
+   * When set alongside `artifactSave`, `emit_artifact` can operate in
+   * streaming mode — saving an initial row, emitting SSE progress events,
+   * then writing the final data once complete.
+   */
+  artifactUpdate?: (id: string, patch: import('./db-types/artifacts.js').ArtifactUpdateInput, changelog?: string) => Promise<{ id: string; version: number }>;
+  /**
+   * m78: Pre-resolved effective tenant artifact settings for the current session.
+   * When set, the `emit_artifact` tool enforces emit_enabled, allowed_types, and
+   * max_size_bytes before persisting. Resolved from tenant_artifact_settings by
+   * getEffectiveTenantArtifactSettings() (falls back to "default" row).
+   */
+  resolvedArtifactSettings?: {
+    allowed_types: string[] | null;
+    max_size_bytes: number | null;
+    emit_enabled: boolean;
+    preview_enabled: boolean;
+    sandbox_html: boolean;
+  };
 }
 
 export function filterToolNamesByPersona(toolNames: string[], persona: string | null | undefined): string[] {
@@ -1439,6 +1465,123 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     agenda_delete: agendaDeleteTool,
     // P4-3: Knowledge graph tools — only available when graphStore is provided
     ...(opts?.graphStore ? Object.fromEntries(createGraphMemoryToolSet(opts.graphStore).map((t: Tool) => [t.schema.name, t])) : {}),
+    // m77: Artifact emission tool — available when artifactSave callback is set
+    ...(opts?.artifactSave ? {
+      emit_artifact: weaveTool({
+        name: 'emit_artifact',
+        description: 'Save a named, typed, versioned artifact (report, chart, code file, CSV, etc.) from the current agent session. Returns the artifact ID and version for reference. Pass streaming:true for large artifacts to enable real-time SSE progress updates.',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Human-readable artifact name (e.g. "Forecast Report Q3")' },
+            type: {
+              type: 'string',
+              description: 'Artifact type',
+              enum: ['text', 'markdown', 'csv', 'json', 'code', 'html', 'pdf', 'report', 'image', 'svg', 'diagram', 'mermaid', 'react', 'interactive', 'audio', 'video', 'spreadsheet', 'custom'],
+            },
+            data: { type: 'string', description: 'Artifact content (text, JSON-stringified object, or base64-encoded binary)' },
+            language: { type: 'string', description: 'Language hint for code artifacts (e.g. "python", "typescript", "sql")' },
+            tags: { type: 'array', items: { type: 'string' }, description: 'Optional tags for filtering (e.g. ["forecast", "q3"])' },
+            changelog: { type: 'string', description: 'What changed in this version (used for update operations)' },
+            streaming: { type: 'boolean', description: 'Set true for large artifacts to stream progress via SSE while saving. The artifact ID is returned immediately; clients can subscribe to /api/artifacts/{id}/stream.' },
+          },
+          required: ['name', 'type', 'data'],
+        },
+        execute: async (args: { name: string; type: string; data: string; language?: string; tags?: string[]; changelog?: string; streaming?: boolean }) => {
+          try {
+            // m78: Tenant artifact settings enforcement
+            const ts = opts.resolvedArtifactSettings;
+            if (ts && !ts.emit_enabled) {
+              return JSON.stringify({ ok: false, error: 'Artifact emission is disabled for this tenant.' });
+            }
+            if (ts?.allowed_types && !ts.allowed_types.includes(args.type)) {
+              return JSON.stringify({ ok: false, error: `Artifact type "${args.type}" is not permitted by tenant policy. Allowed: ${ts.allowed_types.join(', ')}.` });
+            }
+            if (ts?.max_size_bytes && args.data.length > ts.max_size_bytes) {
+              return JSON.stringify({ ok: false, error: `Artifact data (${args.data.length} bytes) exceeds tenant max size of ${ts.max_size_bytes} bytes.` });
+            }
+
+            const { inferMimeType } = await import('@weaveintel/artifacts');
+            const mimeType = inferMimeType(
+              args.type as import('@weaveintel/core').ArtifactType,
+              args.language ? { language: args.language } : undefined,
+            );
+            const baseMeta = args.language
+              ? { language: args.language, changelog: args.changelog }
+              : { changelog: args.changelog };
+
+            // m79 / Phase 4: Streaming mode — save initial row with streaming_status='streaming',
+            // emit SSE progress events in chunks, then finalize with the complete data.
+            if (args.streaming && opts.artifactUpdate) {
+              const { emitArtifactStreamEvent } = await import('./lib/artifact-stream-bus.js');
+
+              // Save initial row marked as streaming
+              const initial = await opts.artifactSave!({
+                name: args.name,
+                type: args.type,
+                mimeType,
+                data: '',
+                sessionId: opts.currentChatId,
+                userId: opts.currentUserId,
+                tags: args.tags,
+                metadata: { ...baseMeta, streamingStatus: 'streaming', streamingProgress: 0 },
+                scope: 'session',
+                streamingStatus: 'streaming',
+                streamingProgress: 0,
+              });
+              const artifactId = initial.id;
+
+              // Simulate streaming: split data into ~3 chunks and emit progress events.
+              // In production, the caller would feed actual LLM streaming chunks here.
+              const chunkSize = Math.max(1, Math.ceil(args.data.length / 3));
+              let accumulated = '';
+              for (let i = 0; i < 3; i++) {
+                const slice = args.data.slice(i * chunkSize, (i + 1) * chunkSize);
+                if (!slice) break;
+                accumulated += slice;
+                const progress = Math.min(0.9, (i + 1) / 3);
+                emitArtifactStreamEvent(artifactId, { kind: 'update', progress, data: accumulated });
+                // Small async yield so SSE listeners can flush
+                await new Promise<void>(r => setImmediate(r));
+              }
+
+              // Finalize: write complete data, clear streaming_status
+              const updated = await opts.artifactUpdate(artifactId, {
+                data: args.data,
+                metadata: { ...baseMeta, streamingStatus: 'complete', streamingProgress: 1 },
+                streamingStatus: null,
+                streamingProgress: null,
+              }, args.changelog);
+
+              emitArtifactStreamEvent(artifactId, { kind: 'complete', progress: 1, version: updated.version });
+
+              return JSON.stringify({
+                ok: true, artifactId, version: updated.version,
+                name: args.name, type: args.type, language: args.language ?? null,
+                streaming: true, streamUrl: `/api/artifacts/${artifactId}/stream`,
+              });
+            }
+
+            // Standard (non-streaming) save
+            const saved = await opts.artifactSave!({
+              name: args.name,
+              type: args.type,
+              mimeType,
+              data: args.data,
+              sessionId: opts.currentChatId,
+              userId: opts.currentUserId,
+              tags: args.tags,
+              metadata: baseMeta,
+              scope: 'session',
+            });
+            return JSON.stringify({ ok: true, artifactId: saved.id, version: saved.version, name: args.name, type: args.type, language: args.language ?? null });
+          } catch (e) {
+            return JSON.stringify({ ok: false, error: String(e) });
+          }
+        },
+        tags: ['artifacts', 'output'],
+      }),
+    } : {}),
   };
   for (const name of filterToolNamesByPersona(toolNames, actorPersona)) {
     // Skip tools disabled in the operator-managed tool catalog

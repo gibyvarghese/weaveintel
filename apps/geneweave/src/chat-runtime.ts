@@ -258,7 +258,10 @@ export function settingsFromRow(row: ChatSettingsRow | null): ChatSettings {
   }
 
   const mode = (row.mode as ChatSettings['mode']) || 'direct';
-  const enabledTools = safeJsonParse<string[]>(row.enabled_tools, getDefaultToolsByMode(mode), 'enabled_tools');
+  // Empty array [] means "use mode defaults" — this handles chats auto-saved by the
+  // UI before the user configures tools (createChat sends enabledTools:[] initially).
+  const rawTools = safeJsonParse<string[]>(row.enabled_tools, [], 'enabled_tools');
+  const enabledTools = rawTools.length > 0 ? rawTools : getDefaultToolsByMode(mode);
 
   return {
     mode,

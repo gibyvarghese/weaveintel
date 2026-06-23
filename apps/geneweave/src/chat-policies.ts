@@ -178,6 +178,7 @@ export type ChatMode = 'direct' | 'agent' | 'supervisor' | 'ensemble';
 const TOOL_POLICIES: Record<ChatMode, string[]> = {
   direct: [],
   agent: [
+    'emit_artifact',
     'datetime', 'timezone_info',
     'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
     'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',
@@ -188,11 +189,13 @@ const TOOL_POLICIES: Record<ChatMode, string[]> = {
     'cse_run_code', 'cse_session_status', 'cse_end_session',
   ],
   supervisor: [
+    'emit_artifact',
     'datetime', 'timezone_info', 'calculator', 'json_format', 'text_analysis',
     'agenda_list', 'agenda_create', 'agenda_update', 'agenda_delete',
   ],
   // Ensemble agents each use the same agent-mode tool policy.
   ensemble: [
+    'emit_artifact',
     'datetime', 'timezone_info',
     'timer_start', 'timer_pause', 'timer_resume', 'timer_stop', 'timer_status', 'timer_list',
     'stopwatch_start', 'stopwatch_lap', 'stopwatch_pause', 'stopwatch_resume', 'stopwatch_stop', 'stopwatch_status',

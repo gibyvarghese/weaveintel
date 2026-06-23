@@ -329,6 +329,20 @@ export class ChatEngine {
       ...(config.runtime ? { runtime: config.runtime } : {}),
       // Scope isolation: enforce cross-scope tool access policies.
       scopeGuard,
+      // m77: Wire artifact persistence so emit_artifact tool can persist outputs.
+      ...(db.saveArtifact ? {
+        artifactSave: async (input: import('./db-types/artifacts.js').ArtifactSaveInput) => {
+          const row = await db.saveArtifact!(input);
+          return { id: row.id, version: row.version };
+        },
+      } : {}),
+      // m79 / Phase 4: Wire artifact update for streaming mode.
+      ...(db.updateArtifact ? {
+        artifactUpdate: async (id: string, patch: import('./db-types/artifacts.js').ArtifactUpdateInput, changelog?: string) => {
+          const row = await db.updateArtifact!(id, patch, changelog);
+          return { id: row.id, version: row.version };
+        },
+      } : {}),
     };
   }
 
@@ -984,6 +998,7 @@ export class ChatEngine {
     attachments: ChatAttachment[] | undefined,
     disabledToolKeys: ReadonlySet<string>,
     catalogEntries: import('./db-types.js').ToolCatalogRow[],
+    tenantId?: string | null,
   ): ToolRegistryOptions {
     // P4-3: Build graph store when graph tools are enabled.
     // Use SQLite-backed store when persist is enabled and raw DB is accessible.
@@ -1014,6 +1029,11 @@ export class ChatEngine {
       // Scope guard: stamp session + user context for log entries.
       ...(this.toolOptions.scopeGuard && {
         scopeGuard: { ...this.toolOptions.scopeGuard, sessionId: chatId, userId },
+      }),
+      // m77/m81: Artifact persistence — stamp session + user + tenant on each save.
+      ...(this.toolOptions.artifactSave && {
+        artifactSave: (input: import('./db-types/artifacts.js').ArtifactSaveInput) =>
+          this.toolOptions.artifactSave!({ ...input, sessionId: chatId, userId, ...(tenantId != null ? { tenantId } : {}) }),
       }),
     };
   }
@@ -1336,7 +1356,23 @@ export class ChatEngine {
     ]);
     // Flat enterprise tools for backward compat (base tools only, no extended)
     const enterpriseTools = hasEnterprise ? await loadEnterpriseTools(this.db) : [];
-    const toolOptions = this.buildAgentToolOptions(ctx, userId, chatId, userPersona, settings, attachments, disabledToolKeys, catalogEntries);
+    const toolOptions = this.buildAgentToolOptions(ctx, userId, chatId, userPersona, settings, attachments, disabledToolKeys, catalogEntries, tenantId);
+    // m78: Resolve effective tenant artifact settings for emit_artifact type enforcement
+    if (tenantId && this.toolOptions.artifactSave) {
+      const dbEx = this.db as unknown as { getEffectiveTenantArtifactSettings?: (tid: string) => Promise<import('./db-types/artifacts.js').TenantArtifactSettingsRow | null> };
+      if (dbEx.getEffectiveTenantArtifactSettings) {
+        const row = await dbEx.getEffectiveTenantArtifactSettings(tenantId).catch(() => null);
+        if (row) {
+          toolOptions.resolvedArtifactSettings = {
+            allowed_types: row.allowed_types ? (JSON.parse(row.allowed_types) as string[]) : null,
+            max_size_bytes: row.max_size_bytes,
+            emit_enabled: Boolean(row.emit_enabled),
+            preview_enabled: Boolean(row.preview_enabled),
+            sandbox_html: Boolean(row.sandbox_html),
+          };
+        }
+      }
+    }
     const customTools = enterpriseTools.length > 0 ? enterpriseTools : undefined;
     const tools = settings.enabledTools.length
       ? await createToolRegistry(settings.enabledTools, customTools, toolOptions)
@@ -1390,7 +1426,23 @@ export class ChatEngine {
       this.getDisabledBuiltinToolKeys(),
       this.db.listEnabledToolCatalog(),
     ]);
-    const toolOptions = this.buildAgentToolOptions(ctx, userId, chatId, userPersona, settings, attachments, disabledToolKeys, catalogEntries);
+    const toolOptions = this.buildAgentToolOptions(ctx, userId, chatId, userPersona, settings, attachments, disabledToolKeys, catalogEntries, tenantId);
+    // m78: Resolve effective tenant artifact settings for emit_artifact type enforcement
+    if (tenantId && this.toolOptions.artifactSave) {
+      const dbEx = this.db as unknown as { getEffectiveTenantArtifactSettings?: (tid: string) => Promise<import('./db-types/artifacts.js').TenantArtifactSettingsRow | null> };
+      if (dbEx.getEffectiveTenantArtifactSettings) {
+        const row = await dbEx.getEffectiveTenantArtifactSettings(tenantId).catch(() => null);
+        if (row) {
+          toolOptions.resolvedArtifactSettings = {
+            allowed_types: row.allowed_types ? (JSON.parse(row.allowed_types) as string[]) : null,
+            max_size_bytes: row.max_size_bytes,
+            emit_enabled: Boolean(row.emit_enabled),
+            preview_enabled: Boolean(row.preview_enabled),
+            sandbox_html: Boolean(row.sandbox_html),
+          };
+        }
+      }
+    }
     const customTools = enterpriseTools.length > 0 ? enterpriseTools : undefined;
     const tools = settings.enabledTools.length
       ? await createToolRegistry(settings.enabledTools, customTools, toolOptions)

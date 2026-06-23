@@ -861,6 +861,26 @@ export async function streamMessageImpl(
 
   const autoTitle = await maybeAutoTitleChat(deps.db, userId, chatId, content, fullText, model, ctx);
 
+  // m77 Phase 1: Extract artifact references emitted during this turn so the UI
+  // can render artifact cards without re-parsing all tool call steps.
+  const artifactRefs: Array<{ artifactId: string; version: number; name: string; type: string; language?: string }> = [];
+  for (const s of steps) {
+    if (s.type === 'tool_call' && s.toolCall?.name === 'emit_artifact' && s.toolCall.result) {
+      try {
+        const r = JSON.parse(s.toolCall.result) as Record<string, unknown>;
+        if (r['ok'] === true && typeof r['artifactId'] === 'string') {
+          artifactRefs.push({
+            artifactId: r['artifactId'],
+            version: typeof r['version'] === 'number' ? r['version'] : 1,
+            name: typeof r['name'] === 'string' ? r['name'] : '',
+            type: typeof r['type'] === 'string' ? r['type'] : 'custom',
+            language: typeof r['language'] === 'string' ? r['language'] : undefined,
+          });
+        }
+      } catch { /* malformed result — skip */ }
+    }
+  }
+
   await deps.writeSseEvent(res, {
     type: 'done',
     usage: finalUsage,
@@ -885,6 +905,7 @@ export async function streamMessageImpl(
     traceId,
     ensembleCandidates: ensembleMeta?.candidates,
     ensembleWinner: ensembleMeta?.winner,
+    artifactRefs: artifactRefs.length ? artifactRefs : undefined,
   });
 
   const assistMsgId = newUUIDv7();
@@ -916,6 +937,7 @@ export async function streamMessageImpl(
       promptResolution: resolvedSystemPrompt.resolution,
       streamInterrupted: streamErrored || undefined,
       traceId,
+      artifactRefs: artifactRefs.length ? artifactRefs : undefined,
     }),
     tokensUsed: finalUsage.totalTokens, cost, latencyMs,
   });
