@@ -56,6 +56,11 @@ import { applyM73KaggleMeshV2 } from './m73-kaggle-mesh-v2.js';
 import { applyM74AgentStrategyDefaults2026 } from './m74-agent-strategy-defaults-2026.js';
 import { applyM75AgenticScopes } from './m75-agentic-scopes.js';
 import { applyM76ScopeCoverage } from './m76-scope-coverage.js';
+import { applyM77Artifacts } from './m77-artifacts.js';
+import { applyM78ArtifactTypeSettings } from './m78-artifact-type-settings.js';
+import { applyM79ArtifactStreaming } from './m79-artifact-streaming.js';
+import { applyM80LiveArtifacts } from './m80-live-artifacts.js';
+import { applyM81ArtifactTenant } from './m81-artifact-tenant.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -120,6 +125,11 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm74-agent-strategy-defaults-2026', description: 'Agent Strategy Defaults 2026 (mid-2026 Phase 7): ADD hitl_threshold + max_agent_hops + tool_confirmation_level + memory_policy columns to agent_strategy_settings; UPDATE global row: a2a_enabled=1, supervisor_parallel_delegation=1, reflect_enabled=1; INSERT web/operator + api/headless mode_labels rows', run: applyM74AgentStrategyDefaults2026 },
   { id: 'm75-agentic-scopes', description: 'Agentic Scope Isolation (mid-2026): agent_scopes + scope_cross_policies + scope_skill_assignments + scope_live_agent_assignments + scope_access_log tables; agentic_scope column on a2a_skills; seeds 7 default scopes + 13 policies + skill→scope mapping for all 15 A2A skills', run: applyM75AgenticScopes },
   { id: 'm76-scope-coverage', description: 'Scope Coverage Expansion (mid-2026): agentic_scope column on worker_agents + tool_catalog; UPDATE all 15 worker agents + all 121 tool catalog rows with correct scope; INSERT 22 internal skill→scope assignments (6 analytics + 16 kaggle)', run: applyM76ScopeCoverage },
+  { id: 'm77-artifacts', description: 'General-Purpose Artifact Storage (mid-2026): artifacts + artifact_versions tables with session/user scoping, version history, policy FK, and 10 indexes', run: applyM77Artifacts },
+  { id: 'm78-artifact-type-settings', description: 'Artifact Type Settings (Phase 2 Extended Type System): tenant_artifact_settings table for per-tenant type allowlist, size limits, preview/sandbox flags; seeds global default row with all 18 Phase 2 types; updates 3 seeded artifact_policies with full type lists', run: applyM78ArtifactTypeSettings },
+  { id: 'm79-artifact-streaming', description: 'Artifact Streaming Status (Phase 4): streaming_status + streaming_progress columns on artifacts; partial index idx_artifacts_streaming for active streams', run: applyM79ArtifactStreaming },
+  { id: 'm80-live-artifacts', description: 'Live Artifact Configs (Phase 6): live_artifact_configs table with MCP tool + refresh interval + cache TTL for auto-refreshing artifacts', run: applyM80LiveArtifacts },
+  { id: 'm81-artifact-tenant', description: 'Add tenant_id to artifacts table for multi-tenant isolation', run: applyM81ArtifactTenant },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

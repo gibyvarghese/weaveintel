@@ -14,23 +14,49 @@ export function createArtifactReference(
 /**
  * Resolve a reference to the actual Artifact. If the reference includes a
  * specific version, the returned artifact is patched with that version's data.
+ *
+ * Throws when:
+ *  - The artifact does not exist
+ *  - A specific version is requested but that version record does not exist
+ *    (avoids silently returning the latest data for a pinned reference)
  */
 export async function resolveReference(
   store: ArtifactStore,
   ref: ArtifactReference,
-): Promise<Artifact | null> {
+): Promise<Artifact> {
   const artifact = await store.get(ref.artifactId);
-  if (!artifact) return null;
+  if (!artifact) {
+    throw new Error(`Artifact not found: ${ref.artifactId}`);
+  }
 
   if (ref.version !== undefined) {
-    const versions = await store.getVersions(ref.artifactId);
-    const match = versions.find((v) => v.version === ref.version);
-    if (match) {
-      return { ...artifact, data: match.data, version: match.version };
+    const versionRecords = await store.getVersions(ref.artifactId);
+    const match = versionRecords.find((v) => v.version === ref.version);
+    if (!match) {
+      throw new Error(
+        `Artifact ${ref.artifactId} version ${ref.version} not found ` +
+        `(available: ${versionRecords.map((v) => v.version).join(', ') || 'none'})`,
+      );
     }
+    return { ...artifact, data: match.data, version: match.version };
   }
 
   return artifact;
+}
+
+/**
+ * Resolve a reference, returning null instead of throwing when not found.
+ * Useful for optional references where absence is a valid state.
+ */
+export async function tryResolveReference(
+  store: ArtifactStore,
+  ref: ArtifactReference,
+): Promise<Artifact | null> {
+  try {
+    return await resolveReference(store, ref);
+  } catch {
+    return null;
+  }
 }
 
 /**

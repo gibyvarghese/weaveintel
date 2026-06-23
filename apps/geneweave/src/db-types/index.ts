@@ -14,3 +14,4 @@ export * from './kaggle.js';
 export * from './live-agents.js';
 export * from './adapter-agenda-notes.js';
 export * from './adapter.js';
+export * from './artifacts.js';

@@ -499,6 +499,46 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
     ],
   },
+
+  'artifacts': {
+    singular: 'Artifact', apiPath: 'admin/artifacts', listKey: 'artifacts',
+    readOnly: true, customRecordView: 'readonly-detail',
+    cols: ['name', 'type', 'scope', 'size_bytes', 'version', 'session_id', 'created_at'],
+    fields: [
+      { key: 'id',         label: 'ID',          readonly: true },
+      { key: 'name',       label: 'Name',         readonly: true },
+      { key: 'type',       label: 'Type',         readonly: true },
+      { key: 'mime_type',  label: 'MIME Type',    readonly: true },
+      { key: 'scope',      label: 'Scope',        readonly: true },
+      { key: 'session_id', label: 'Session',      readonly: true },
+      { key: 'user_id',    label: 'User',         readonly: true },
+      { key: 'agent_id',   label: 'Agent',        readonly: true },
+      { key: 'run_id',     label: 'Run',          readonly: true },
+      { key: 'version',    label: 'Version',      readonly: true },
+      { key: 'size_bytes', label: 'Size (bytes)',  readonly: true },
+      { key: 'tags',       label: 'Tags (JSON)',   readonly: true, textarea: true, rows: 2 },
+      { key: 'policy_id',  label: 'Policy',       readonly: true },
+      { key: 'created_at', label: 'Created',      readonly: true },
+      { key: 'updated_at', label: 'Updated',      readonly: true },
+    ],
+  },
+
+  'tenant-artifact-settings': {
+    singular: 'Tenant Artifact Settings', apiPath: 'admin/tenant-artifact-settings', listKey: 'settings',
+    cols: ['tenant_id', 'emit_enabled', 'preview_enabled', 'sandbox_html'],
+    fields: [
+      { key: 'tenant_id',      label: 'Tenant ID (use "default" for global)',   readonly: false },
+      { key: 'allowed_types',  label: 'Allowed Types (JSON array or null for all)', textarea: true, rows: 4, save: 'jsonStr' },
+      { key: 'max_size_bytes', label: 'Max Size (bytes, null = inherit)',  type: 'number', save: 'int' },
+      { key: 'require_policy', label: 'Require Policy',    type: 'checkbox', save: 'bool' },
+      { key: 'preview_enabled',label: 'Preview Enabled',   type: 'checkbox', save: 'bool', default: true },
+      { key: 'sandbox_html',   label: 'Sandbox HTML/React Preview', type: 'checkbox', save: 'bool', default: true },
+      { key: 'emit_enabled',   label: 'Emit Enabled (agents can emit artifacts)', type: 'checkbox', save: 'bool', default: true },
+      { key: 'created_at',     label: 'Created',   readonly: true },
+      { key: 'updated_at',     label: 'Updated',   readonly: true },
+    ],
+  },
+
   'tenant-configs': {
     singular: 'Tenant Config', apiPath: 'admin/tenant-configs', listKey: 'tenant-configs',
     cols: ['name', 'tenant_id', 'scope', 'enabled'],

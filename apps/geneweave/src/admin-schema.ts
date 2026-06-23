@@ -111,7 +111,9 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
   ]},
   { label: 'Knowledge', icon: '\uD83D\uDCC2', tabs: [
     { key: 'extraction-pipelines', label: 'Extraction' },
-    { key: 'artifact-policies', label: 'Artifacts' },
+    { key: 'artifact-policies', label: 'Policies' },
+    { key: 'artifacts', label: 'Artifacts' },
+    { key: 'tenant-artifact-settings', label: 'Type Settings' },
     { key: 'graph-configs', label: 'Graph' },
     { key: 'plugin-configs', label: 'Plugins' },
     { key: 'collaboration-sessions', label: 'Collaboration' },

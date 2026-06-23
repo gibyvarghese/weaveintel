@@ -4980,66 +4980,286 @@ ${featureCards([
 ])}
 
 ${section('artifacts-store', 'Storing & Retrieving', `
-${code('typescript', `import { createArtifactStore } from '@weaveintel/artifacts';
-import { weaveContext } from '@weaveintel/core';
+${code('typescript', `import { createArtifactStore, inferMimeType } from '@weaveintel/artifacts';
 
-const store = createArtifactStore({
-  backend:  'local',
-  basePath: './data/artifacts',
-  // For S3: { backend: 's3', bucket: 'my-bucket', region: 'us-east-1' }
+// In-memory store (testing / development)
+const store = await createArtifactStore({ backend: 'memory' });
+
+// Filesystem store (production dev / single-server)
+// const store = await createArtifactStore({ backend: 'filesystem', path: './artifacts' });
+
+// SQLite store (embedded production — requires a better-sqlite3 Database instance)
+// import Database from 'better-sqlite3';
+// const rawDb = new Database('./geneweave.db');
+// const store = await createArtifactStore({ backend: 'sqlite', db: rawDb });
+
+// Save an artifact — scoped to a session
+const artifact = await store.save({
+  name:      'AAPL Price Chart Q3',
+  type:      'svg',
+  mimeType:  inferMimeType('svg'),
+  data:      svgMarkup,
+  sessionId: 'chat-abc',
+  userId:    'alice',
+  scope:     'session',
+  tags:      ['chart', 'equity', 'AAPL'],
+  metadata:  { ticker: 'AAPL', period: '2025-Q3' },
+  version:   1,
 });
-
-const ctx = weaveContext({ userId: 'alice', tenantId: 'acme' });
-
-// Store a generated chart
-const artifact = await store.put(ctx, {
-  slug:        'aapl-price-chart-2025-q1',
-  contentType: 'image/png',
-  data:        chartPngBuffer,
-  metadata:    { ticker: 'AAPL', period: '2025-Q1', generatedBy: 'equity-agent' },
-});
-console.log(artifact.id, artifact.version);  // "art_01JP..." v1
+console.log(artifact.id, artifact.version);  // "01JP..." v1
 
 // Retrieve by id
-const data = await store.get(ctx, artifact.id);
-// Retrieve latest version by slug
-const latest = await store.getBySlug(ctx, 'aapl-price-chart-2025-q1');
+const fetched = await store.get(artifact.id);
 
-// List all artifacts for the tenant
-const all = await store.list(ctx, { tenantId: 'acme', limit: 50 });`, ['@weaveintel/artifacts', '@weaveintel/core'])}
+// Update — creates version 2 with a changelog
+const updated = await store.update(artifact.id, { data: newSvgMarkup }, 'Refreshed with latest prices');
+
+// List all session artifacts for a user
+const all = await store.list({ sessionId: 'chat-abc', scope: 'session' });`, ['@weaveintel/artifacts', '@weaveintel/core'])}
 `)}
 
-${section('artifacts-agent', 'Agent Tool: generate and store', `
-${code('typescript', `import { createArtifactStore } from '@weaveintel/artifacts';
-import { weaveTool, weaveToolRegistry, weaveContext } from '@weaveintel/core';
+${section('artifacts-types', 'Phase 2: Extended Type System (18 Types)', `
+<p>Phase 2 expands the artifact type system to 18 types with smart MIME detection, code-language inference, image magic-byte detection, and per-tenant type allowlists.</p>
+
+<h4>All 18 Artifact Types</h4>
+${code('typescript', `import { inferMimeType, inferCodeMime, detectImageMime } from '@weaveintel/artifacts';
+
+// Text / document types
+inferMimeType('text')        // → 'text/plain'
+inferMimeType('markdown')    // → 'text/markdown'
+inferMimeType('csv')         // → 'text/csv'
+inferMimeType('json')        // → 'application/json'
+inferMimeType('pdf')         // → 'application/pdf'
+inferMimeType('report')      // → 'text/html'
+inferMimeType('spreadsheet') // → 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+// Code types — language-aware MIME inference
+inferMimeType('code')                            // → 'text/plain' (no language)
+inferMimeType('code', { language: 'python' })    // → 'text/x-python'
+inferMimeType('code', { language: 'typescript' })// → 'text/typescript'
+inferMimeType('code', { language: 'sql' })       // → 'application/sql'
+inferCodeMime('javascript')                      // → 'text/javascript'
+inferCodeMime('bash')                            // → 'text/x-sh'
+
+// Visual types
+inferMimeType('html')        // → 'text/html'
+inferMimeType('svg')         // → 'image/svg+xml'
+inferMimeType('diagram')     // → 'image/svg+xml'
+inferMimeType('mermaid')     // → 'text/x-mermaid'
+inferMimeType('react')       // → 'text/typescript'  (TSX source)
+inferMimeType('interactive') // → 'text/html'
+
+// Media types
+inferMimeType('image')       // → 'image/png' (base default)
+inferMimeType('audio')       // → 'audio/mpeg' (override via metadata.mimeType)
+inferMimeType('video')       // → 'video/mp4'  (override via metadata.mimeType)
+
+// Image magic-byte detection from binary data
+const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+detectImageMime(pngBytes)  // → 'image/png'
+
+const jpegBytes = Buffer.from([0xff, 0xd8, 0xff]);
+detectImageMime(jpegBytes) // → 'image/jpeg'
+
+// Custom (opaque binary/text blobs)
+inferMimeType('custom')      // → 'application/octet-stream'`, ['@weaveintel/artifacts'])}
+
+<h4>Tenant-Specific Type Configuration</h4>
+<p>Operators configure per-tenant allowlists via the Admin Panel → Knowledge → Type Settings.
+The <code>emit_artifact</code> tool enforces these constraints at runtime before persisting.</p>
+
+${code('typescript', `// Phase 2: Tenant artifact settings are resolved by the ChatEngine
+// and passed into createToolRegistry() as resolvedArtifactSettings.
+// You can pass them manually in custom agent setups:
+
+import { createToolRegistry } from '@weaveintel/geneweave';
+
+const registry = await createToolRegistry(['emit_artifact'], [], {
+  actorPersona: 'tenant_user',
+  artifactSave: async (input) => myStore.save(input),
+  resolvedArtifactSettings: {
+    allowed_types: ['text', 'json', 'csv', 'code', 'markdown'], // null = allow all 18
+    max_size_bytes: 5 * 1024 * 1024,   // 5 MB cap; null = unlimited
+    emit_enabled: true,                 // false blocks all artifact emission
+    preview_enabled: true,              // controls UI preview rendering
+    sandbox_html: true,                 // sandboxes HTML/React/Interactive iframes
+  },
+});
+
+// If emit_enabled=false, or the type is not in allowed_types, or the data
+// exceeds max_size_bytes, the tool returns { ok: false, error: "..." }
+// without writing to the database.`, ['@weaveintel/geneweave'])}
+
+<h4>Chat UI: Type-Aware Cards & Preview Panel</h4>
+<p>The geneWeave chat UI automatically renders type-aware artifact cards after each agent turn.
+Previewable types (<code>text, markdown, json, csv, code, html, svg, mermaid, react, interactive, image, audio, video</code>) show a 👁 button that opens a modal preview:</p>
+<ul>
+  <li><strong>SVG</strong> — inline SVG render (scripts stripped)</li>
+  <li><strong>HTML / React / Interactive</strong> — sandboxed <code>&lt;iframe sandbox="allow-scripts"&gt;</code></li>
+  <li><strong>Mermaid</strong> — iframe with mermaid.js CDN rendering</li>
+  <li><strong>Code / JSON / CSV</strong> — syntax-highlighted <code>&lt;pre&gt;</code> block</li>
+  <li><strong>Image</strong> — <code>&lt;img&gt;</code> tag with object URL</li>
+  <li><strong>Audio / Video</strong> — native HTML5 player</li>
+  <li><strong>Markdown</strong> — rendered HTML via mdToHtml()</li>
+</ul>
+<p>Code artifacts display a language badge (e.g. <code>python</code>) on the card when the <code>language</code> parameter was passed to <code>emit_artifact</code>.</p>
+`)}
+
+${section('artifacts-phase3', 'Phase 3: DB Persistence, Admin API & Versioning', `
+<p>Phase 3 wires artifact storage into the geneWeave database (SQLite, m77 migration), exposes a full admin REST API, and adds artifact version history. Every artifact emitted by an agent is persisted across server restarts, browsable in the admin panel, and downloadable on demand.</p>
+
+<h4>DB Adapter methods (m77)</h4>
+${code('typescript', `import { SQLiteAdapter } from '@weaveintel/geneweave';
+
+const db = new SQLiteAdapter('./geneweave.db');
+await db.initialize();  // runs all migrations including m77
+
+// Save an artifact — creates artifacts row + artifact_versions row (v1)
+const row = await db.saveArtifact!({
+  name: 'q3-forecast.md',
+  type: 'markdown',
+  mimeType: 'text/markdown',
+  data: '# Q3 Forecast\\n\\nAll segments on track.',
+  sessionId: 'chat-001',
+  userId: 'alice',
+  agentId: 'analyst-agent',
+  scope: 'session',           // 'session' | 'user' (user scope = cross-session)
+  tags: ['forecast', 'q3'],
+  metadata: { confidence: 0.92 },
+});
+// row.id = UUIDv7, row.version = 1
+
+// Create a new version (updateArtifact increments version + writes artifact_versions row)
+const v2 = await db.updateArtifact!(row.id, { data: '# Q3 Forecast (revised)\\n\\nRevised after board review.' }, 'Revised after board review');
+// v2.version = 2
+
+// List with filters
+const myArtifacts = await db.listArtifacts!({ userId: 'alice', scope: 'session' });
+const csvOnly     = await db.listArtifacts!({ type: 'csv' });
+const bySession   = await db.listArtifacts!({ sessionId: 'chat-001' });
+
+// Get single
+const artifact = await db.getArtifact!(row.id);
+
+// Version history
+const versions = await db.getArtifactVersions!(row.id);
+// versions = [{ version:1, ... }, { version:2, changelog:'Revised...', ... }]
+
+// Specific version
+const v1 = await db.getArtifactVersion!(row.id, 1);
+
+// Delete (cascades to artifact_versions via FK)
+await db.deleteArtifact!(row.id);
+
+// Run retention — deletes artifacts past their policy's retention_days
+const deletedCount = await db.expireArtifacts!();`, ['@weaveintel/geneweave'])}
+
+<h4>Admin REST API (/api/admin/artifacts)</h4>
+<p>All six admin endpoints are registered by <code>registerArtifactRoutes()</code> in <code>server-admin.ts</code>. Endpoints require authentication (<code>platform_admin</code> or <code>tenant_admin</code> persona).</p>
+${code('typescript', `// GET  /api/admin/artifacts                        — list with filters
+// GET  /api/admin/artifacts/:id                    — get single artifact
+// GET  /api/admin/artifacts/:id/versions           — full version history
+// GET  /api/admin/artifacts/:id/versions/:n        — specific version
+// GET  /api/admin/artifacts/:id/download           — download raw data
+// DELETE /api/admin/artifacts/:id                  — delete + cascade versions
+
+// Query parameters for list:
+//   type        e.g. ?type=markdown
+//   session_id  e.g. ?session_id=chat-001
+//   user_id     e.g. ?user_id=alice
+//   agent_id    e.g. ?agent_id=analyst-agent
+//   run_id      e.g. ?run_id=run-42
+//   scope       e.g. ?scope=user
+//   limit       e.g. ?limit=50  (max 500, default 100)
+//   offset      e.g. ?offset=50
+
+// Example response from GET /api/admin/artifacts
+{
+  "artifacts": [
+    { "id": "01JP...", "name": "q3-forecast.md", "type": "markdown",
+      "mime_type": "text/markdown", "size_bytes": 48, "version": 2,
+      "session_id": "chat-001", "user_id": "alice",
+      "agent_id": "analyst-agent", "scope": "session",
+      "tags": ["forecast","q3"], "created_at": "2026-06-20T..." }
+  ],
+  "total": 1, "limit": 100, "offset": 0
+}
+
+// Example response from GET /api/admin/artifacts/:id/versions
+{
+  "versions": [
+    { "id": "01JQ...", "artifact_id": "01JP...", "version": 1, "changelog": null, "created_at": "..." },
+    { "id": "01JR...", "artifact_id": "01JP...", "version": 2, "changelog": "Revised after board review", "created_at": "..." }
+  ]
+}`)}
+
+<h4>Artifact Retention Job</h4>
+${code('typescript', `import { startArtifactRetentionJob } from '@weaveintel/geneweave/artifact-retention-job';
+
+// Runs expireArtifacts() once on startup and then every retentionIntervalMs (default 24h).
+// Any artifact whose policy.retention_days has elapsed is deleted along with its versions.
+const handle = startArtifactRetentionJob(db, { retentionIntervalMs: 24 * 60 * 60 * 1000 });
+
+// Stop when server shuts down
+process.on('SIGTERM', () => handle.stop());`)}
+
+<h4>Admin UI browser (Knowledge → Artifacts)</h4>
+<p>The <strong>Artifacts</strong> tab in the geneWeave admin panel (under the <em>Knowledge</em> group) shows all persisted artifacts in a sortable table. Each artifact row has a <strong>Download</strong> button that streams the raw data with the correct <code>Content-Disposition</code> header and file extension.</p>
+<p>See also: <strong>Knowledge → Type Settings</strong> for the per-tenant allowlist configuration (m78).</p>
+`)}
+
+${section('artifacts-agent', 'Agent Tool: emit_artifact', `
+${code('typescript', `// In geneWeave, agents call emit_artifact to persist typed outputs.
+// The tool is automatically available when a chat session is active.
+// No extra setup is needed — the tool calls db.saveArtifact() internally.
+
+// Example agent system prompt excerpt:
+// "When you produce a complete analysis, call emit_artifact to persist it."
+
+// The agent would call:
+// emit_artifact({
+//   name: "Q3 Forecast Analysis",
+//   type: "report",
+//   data: "<html>...</html>",
+//   tags: ["forecast", "q3"]
+// })
+
+// To use @weaveintel/artifacts directly in your own agent:
+import { createArtifactStore, inferMimeType } from '@weaveintel/artifacts';
+import { weaveTool, weaveToolRegistry } from '@weaveintel/core';
 import { weaveAgent } from '@weaveintel/agents';
 import { weaveAnthropicModel } from '@weaveintel/provider-anthropic';
 
-const artifactStore = createArtifactStore({ backend: 'local', basePath: './artifacts' });
+// Switch backend for production:
+// const store = await createArtifactStore({ backend: 'filesystem', path: './artifacts' });
+const store = await createArtifactStore({ backend: 'memory' });
 
-const saveSvgTool = weaveTool({
+const saveChartTool = weaveTool({
   name: 'save_chart',
-  description: 'Save a generated SVG chart as a named artifact and return its URL.',
+  description: 'Save a generated SVG chart as a named artifact.',
   parameters: {
-    type: 'object', required: ['slug', 'svgContent'],
+    type: 'object', required: ['name', 'svgContent'],
     properties: {
-      slug:       { type: 'string', description: 'Human-readable artifact name.' },
+      name:       { type: 'string', description: 'Human-readable artifact name.' },
       svgContent: { type: 'string', description: 'Valid SVG markup.' },
     },
   },
   riskLevel: 'write',
-  execute: async ({ slug, svgContent }, ctx) => {
-    const artifact = await artifactStore.put(ctx, {
-      slug:        slug as string,
-      contentType: 'image/svg+xml',
-      data:        Buffer.from(svgContent as string),
+  execute: async ({ name, svgContent }) => {
+    const artifact = await store.save({
+      name: name as string,
+      type: 'svg',
+      mimeType: inferMimeType('svg'),
+      data: svgContent as string,
+      version: 1,
+      scope: 'session',
     });
     return JSON.stringify({ artifactId: artifact.id, version: artifact.version });
   },
 });
 
 const tools = weaveToolRegistry();
-tools.register(saveSvgTool);
+tools.register(saveChartTool);
 
 const agent = weaveAgent({
   model:        weaveAnthropicModel('claude-sonnet-4-6'),
@@ -5047,11 +5267,333 @@ const agent = weaveAgent({
   systemPrompt: 'Generate SVG charts for data analysis tasks and save them as artifacts.',
 });
 
-const ctx    = weaveContext({ userId: 'alice' });
-const result = await agent.run(ctx, {
+const result = await agent.run({ userId: 'alice' }, {
   messages: [{ role: 'user', content: 'Create a bar chart of FAANG stock returns in 2024.' }],
 });
-console.log(result.output);  // "Chart saved as artifact art_01JP..., version 1"`, ['@weaveintel/artifacts', '@weaveintel/core', '@weaveintel/agents', '@weaveintel/provider-anthropic'])}
+console.log(result.output);  // "Chart saved as artifact 01JP..., version 1"`, ['@weaveintel/artifacts', '@weaveintel/core', '@weaveintel/agents', '@weaveintel/provider-anthropic'])}
+`)}
+
+${section('artifacts-streaming', 'Phase 4: Streaming Lifecycle', `
+<p>Phase 4 adds real-time artifact generation with progressive SSE delivery. Large reports, live data feeds, or multi-step analysis can stream partial content to the client while the agent is still generating — providing instant feedback rather than a long wait before the full result appears.</p>
+
+<h4>Core concepts</h4>
+<ul>
+  <li><strong><code>streamArtifact(store, opts, streamOpts)</code></strong> — creates an artifact immediately (stable <code>id</code> assigned before generation starts) and returns an <code>ArtifactStreamHandle</code>.</li>
+  <li><strong><code>ArtifactStreamHandle</code></strong> — exposes <code>update(partial, progress)</code>, <code>complete(final, changelog)</code>, and <code>error(message)</code>. Only <code>complete()</code> writes a new version to the store.</li>
+  <li><strong><code>artifact-stream-bus</code></strong> — lightweight in-process event bus (<code>Map</code>-based, synchronous dispatch) that bridges the tool execution path to the SSE endpoint.</li>
+  <li><strong><code>GET /api/artifacts/:id/stream</code></strong> — SSE endpoint; auto-closes on <code>complete</code>/<code>error</code>; sends keepalive every 15 s.</li>
+  <li><strong>m79 migration</strong> — adds <code>streaming_status TEXT</code> and <code>streaming_progress REAL</code> columns; cleared to <code>NULL</code> when generation finalises.</li>
+</ul>
+
+<h4>streamArtifact() — standalone API</h4>
+${code('typescript', `import { streamArtifact, createArtifactStore } from '@weaveintel/artifacts';
+
+const store = await createArtifactStore({ backend: 'memory' });
+
+const handle = await streamArtifact<string>(
+  store,
+  { name: 'report.md', type: 'markdown', mimeType: 'text/markdown', data: '', scope: 'session' },
+  {
+    // Host pushes this event to SSE clients
+    onProgress: (ev) => sseClient.send(JSON.stringify(ev)),
+  },
+);
+
+// handle.id is stable from here — subscribe SSE clients before streaming begins
+console.log('artifact id:', handle.id);   // e.g. "019ef1cb-..."
+
+// Progressively build content
+for (let i = 0; i < chunks.length; i++) {
+  await handle.update(chunks.slice(0, i + 1).join(''), (i + 1) / chunks.length);
+}
+
+// Write final version to store (version bumps to 2+)
+const artifact = await handle.complete(fullContent, 'Generated analysis report');
+console.log('version:', artifact.version);   // 2
+console.log('status:', handle.status);       // 'complete'
+
+// On failure:
+// await handle.error('LLM quota exceeded');
+// console.log(handle.status);  // 'error'`, ['@weaveintel/artifacts'])}
+
+<h4>emit_artifact streaming mode</h4>
+<p>In geneWeave chat sessions the built-in <code>emit_artifact</code> tool supports a <code>streaming: true</code> flag. When set, the tool:</p>
+<ol>
+  <li>Saves an initial DB row with <code>streaming_status='streaming'</code> and returns the artifact id immediately.</li>
+  <li>Splits the data into chunks (with <code>setImmediate</code> yields) and emits <code>update</code> events via the in-process bus.</li>
+  <li>Calls <code>updateArtifact()</code> to write the final content and clears <code>streaming_status</code> to <code>NULL</code>.</li>
+  <li>Returns <code>{ ok: true, streaming: true, streamUrl: '/api/artifacts/{id}/stream', version: N }</code>.</li>
+</ol>
+${code('typescript', `// Inside a geneWeave agent session, the model calls:
+// emit_artifact({
+//   name: "q3-analysis.md",
+//   type: "markdown",
+//   data: longMarkdownContent,
+//   streaming: true,
+//   changelog: "Generated Q3 market analysis"
+// })
+//
+// The tool response includes:
+// { ok: true, artifactId: "019ef1cb-...", version: 2, streaming: true,
+//   streamUrl: "/api/artifacts/019ef1cb-.../stream" }
+
+// Wire artifactUpdate alongside artifactSave in createToolRegistry:
+const registry = await createToolRegistry(['emit_artifact'], [], {
+  actorPersona: 'tenant_user',
+  artifactSave: async (input) => {
+    const row = await db.saveArtifact!({ ...input, userId: session.userId });
+    return { id: row.id, version: row.version };
+  },
+  artifactUpdate: async (id, patch, changelog) => {
+    const row = await db.updateArtifact!(id, patch, changelog);
+    return { id: row.id, version: row.version };
+  },
+});`, ['@weaveintel/geneweave-api'])}
+
+<h4>SSE endpoint: GET /api/artifacts/:id/stream</h4>
+<p>Clients open this endpoint to receive live progress. The connection is kept open until the artifact finalises or the client disconnects.</p>
+${code('typescript', `// Server-Sent Events format:
+//
+//   event: update
+//   data: {"kind":"update","artifactId":"...","progress":0.33,"data":"partial content","timestamp":"..."}
+//
+//   event: complete
+//   data: {"kind":"complete","artifactId":"...","progress":1,"version":2,"timestamp":"..."}
+//
+//   event: error
+//   data: {"kind":"error","artifactId":"...","progress":0.5,"message":"LLM quota exceeded","timestamp":"..."}
+//
+//   : keepalive   ← sent every 15 s so proxies don't time out
+
+// Client-side (browser or Node.js):
+const evtSource = new EventSource(\`/api/artifacts/\${artifactId}/stream\`);
+
+evtSource.addEventListener('update', (e) => {
+  const ev = JSON.parse(e.data);
+  progressBar.style.width = \`\${ev.progress * 100}%\`;
+  previewPane.textContent = ev.data ?? '';
+});
+
+evtSource.addEventListener('complete', (e) => {
+  const ev = JSON.parse(e.data);
+  console.log('Done! Final version:', ev.version);
+  evtSource.close();
+});
+
+evtSource.addEventListener('error', (e) => {
+  console.error('Streaming failed:', JSON.parse(e.data).message);
+  evtSource.close();
+});
+
+// Already-complete artifacts return an immediate 'complete' event and close.
+// Artifacts that errored return an immediate 'error' event and close.`)}
+
+<h4>In-process event bus</h4>
+<p>The bus (<code>apps/geneweave/src/lib/artifact-stream-bus.ts</code>) is a thin <code>Map</code>-based dispatcher — no external dependency, no queuing, synchronous delivery. It follows the same pattern as <code>live-run-event-bus.ts</code>.</p>
+${code('typescript', `import {
+  emitArtifactStreamEvent,
+  onArtifactStreamEvent,
+  offArtifactStreamEvent,
+  hasArtifactStreamListeners,
+} from './lib/artifact-stream-bus.js';
+
+// Subscribe (SSE endpoint does this internally):
+onArtifactStreamEvent(artifactId, (event) => {
+  res.write(\`event: \${event.kind}\\ndata: \${JSON.stringify(event)}\\n\\n\`);
+  if (event.kind === 'complete' || event.kind === 'error') res.end();
+});
+
+// Emit (streaming tool does this internally):
+emitArtifactStreamEvent(artifactId, {
+  kind: 'update',
+  progress: 0.5,
+  data: 'Partial content accumulated so far...',
+});
+
+// Check before subscribing to avoid memory leaks on short-lived artifacts:
+if (!hasArtifactStreamListeners(artifactId)) {
+  // No active SSE clients — skip bus overhead
+}
+
+// Always unsubscribe when done:
+offArtifactStreamEvent(artifactId, listener);`)}
+
+<h4>m79 DB migration</h4>
+${code('sql', `-- Adds streaming lifecycle columns to the artifacts table.
+-- streaming_status is NULL when the artifact is at rest (not streaming / errored).
+ALTER TABLE artifacts ADD COLUMN streaming_status TEXT DEFAULT NULL
+  CHECK(streaming_status IN ('streaming', 'error', NULL));
+ALTER TABLE artifacts ADD COLUMN streaming_progress REAL DEFAULT NULL;
+
+-- Partial index for O(1) "find all in-flight artifacts" queries
+CREATE INDEX IF NOT EXISTS idx_artifacts_streaming
+  ON artifacts(streaming_status)
+  WHERE streaming_status IS NOT NULL;`)}
+
+<p>See <code>apps/geneweave/src/migrations/m79-artifact-streaming.ts</code> and the retention job (<code>artifact-retention-job.ts</code>) which expires orphaned <code>streaming_status='streaming'</code> rows left by crashed sessions.</p>
+`)}
+
+${section('artifacts-rendering', 'Phase 5: Sandboxed Rendering', `
+<p>Phase 5 adds a server-side <strong>sandboxed render endpoint</strong> that converts any stored artifact into a self-contained HTML document — optimized for each artifact type. The rendered HTML is served in an iframe with strict CSP headers, keeping arbitrary agent-generated content fully isolated from the host application.</p>
+
+<h4>GET /api/artifacts/:id/render</h4>
+<p>Returns a <code>text/html</code> document tailored to the artifact type. The response headers restrict the iframe from interacting with the parent:</p>
+${code('http', `GET /api/artifacts/019ef1cb-4d92-7c02-8f3a-d1e2b6c89f04/render HTTP/1.1
+Authorization: Bearer <session-token>
+
+HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline';
+  script-src 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com;
+  img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:
+X-Content-Type-Options: nosniff
+X-Frame-Options: SAMEORIGIN
+Cache-Control: private, max-age=3600`)}
+
+<h4>Type-specific rendering strategies</h4>
+<table>
+  <thead><tr><th>Type</th><th>Renderer</th><th>CDN</th></tr></thead>
+  <tbody>
+    <tr><td><code>markdown</code></td><td>marked.js parse → innerHTML</td><td>cdn.jsdelivr.net/npm/marked@9</td></tr>
+    <tr><td><code>code</code></td><td>highlight.js syntax highlighting, language class from metadata</td><td>cdnjs.cloudflare.com/highlight.js/11.9.0</td></tr>
+    <tr><td><code>json</code></td><td>Interactive collapsible tree-view (inline JS, no CDN)</td><td>—</td></tr>
+    <tr><td><code>csv</code></td><td>Sortable HTML table, max 2000 rows with overflow note</td><td>—</td></tr>
+    <tr><td><code>mermaid</code></td><td>Mermaid ESM module, dark theme</td><td>cdn.jsdelivr.net/npm/mermaid@10</td></tr>
+    <tr><td><code>react</code></td><td>Babel standalone + React/ReactDOM CDN, auto-mounts default export</td><td>cdnjs.cloudflare.com/react 18.2 + babel 7.23</td></tr>
+    <tr><td><code>html / report / interactive</code></td><td>Raw passthrough, CSP meta tag injected into <code>&lt;head&gt;</code></td><td>—</td></tr>
+    <tr><td><code>svg / diagram</code></td><td>Centred in dark-body page</td><td>—</td></tr>
+    <tr><td><code>text</code></td><td>Monospace pre-block with line numbers</td><td>—</td></tr>
+    <tr><td><code>image / audio / video</code></td><td>Self-referencing <code>/api/artifacts/:id/data</code> as src</td><td>—</td></tr>
+    <tr><td><code>pdf</code></td><td>Embedded <code>&lt;object&gt;</code> pointing to <code>/data</code></td><td>—</td></tr>
+    <tr><td><code>spreadsheet</code></td><td>CSV fallback table when data contains commas/newlines</td><td>—</td></tr>
+  </tbody>
+</table>
+
+<h4>Embedding in the chat UI</h4>
+${code('typescript', `// Replace any content-rendering logic with a single sandboxed iframe:
+const iframe = document.createElement('iframe');
+iframe.src = \`/api/artifacts/\${artifactId}/render\`;
+iframe.sandbox.add('allow-scripts', 'allow-same-origin');
+iframe.referrerPolicy = 'no-referrer';
+iframe.loading = 'lazy';
+iframe.className = 'artifact-render-frame';
+container.appendChild(iframe);
+
+// Fullscreen:
+window.open(\`/api/artifacts/\${artifactId}/render\`, '_blank');`)}
+
+<h4>Admin preview modal</h4>
+<p>The admin panel exposes the same endpoint at <code>GET /api/admin/artifacts/:id/render</code> (requires platform admin auth). Operators can open any stored artifact in a preview window without downloading the raw data:</p>
+${code('typescript', `// Admin artifact preview button:
+window.open(
+  \`/api/admin/artifacts/\${artifactId}/render\`,
+  'artifact-preview',
+  'width=960,height=700,resizable=yes',
+);`)}
+
+<h4>buildArtifactRenderHtml() — server-side helper</h4>
+<p>The <code>buildArtifactRenderHtml(type, data, mimeType, name, language?, artifactId?)</code> function in <code>apps/geneweave/src/routes/artifacts.ts</code> generates the type-specific HTML. It is exported so the admin API routes can reuse the same logic without duplication. Key XSS defense: all user-controlled strings inserted into HTML attribute or text nodes pass through <code>esc()</code> (HTML entity encoding).</p>
+
+<h4>Example 119</h4>
+<p>See <code>examples/119-artifact-sandbox-rendering.ts</code> for a self-contained demo covering all 9 types, CSP headers, auth guards, admin endpoint, and a live <code>weaveAgent</code> emit-then-render round-trip.</p>
+`)}
+
+${section('artifacts-live', 'Phase 6: Live Artifacts & MCP Connectivity', `
+<p>Phase 6 makes artifacts <strong>dynamic</strong>: any artifact can be backed by a <code>refreshFn</code> callback that re-fetches the underlying data on demand. The rendered iframe gets an injected LIVE toolbar with a Refresh button and an optional auto-refresh timer, and the live config is managed per-artifact via a dedicated admin CRUD API.</p>
+
+<h4>Architecture overview</h4>
+<table>
+  <thead><tr><th>Component</th><th>Location</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>m80 migration</td><td><code>migrations/m80-live-artifact-configs.ts</code></td><td>Adds <code>live_artifact_configs</code> table with <code>refresh_interval_seconds</code>, <code>cache_ttl_seconds</code>, <code>last_refreshed_at</code>, <code>refresh_count</code></td></tr>
+    <tr><td><code>refreshFn</code></td><td><code>RegisterArtifactRoutesOptions</code> interface</td><td>Optional async callback <code>(artifact, args) → { data }</code> called when the refresh endpoint is hit and the cache TTL has expired</td></tr>
+    <tr><td>Refresh endpoint</td><td><code>POST /api/artifacts/:id/refresh</code></td><td>Auth-gated; returns <code>fromCache: true</code> when within TTL, otherwise calls <code>refreshFn</code> and saves the new data</td></tr>
+    <tr><td>Live toolbar</td><td><code>injectLiveToolbar(html, live)</code></td><td>Injects a floating dark-themed toolbar before <code>&lt;/body&gt;&lt;/html&gt;</code> with LIVE badge, refresh counter, Refresh button, and auto-refresh toggle; sends <code>artifact-refreshed</code> postMessage to the parent iframe</td></tr>
+    <tr><td>Admin CRUD</td><td><code>GET/POST/PATCH/DELETE /api/admin/artifacts/:id/live-config</code></td><td>Operators create/update/remove live configs; <code>POST /live-refresh</code> triggers an immediate touch</td></tr>
+    <tr><td>UI live badge</td><td><code>geneweave-ui</code></td><td>Artifact cards show a pulsing LIVE badge when <code>isLive: true</code>; preview modal shows a Refresh button that calls the refresh endpoint and reloads the iframe</td></tr>
+  </tbody>
+</table>
+
+<h4>POST /api/artifacts/:id/refresh</h4>
+<p>The core live-refresh endpoint. Returns immediately from cache if within <code>cache_ttl_seconds</code>, otherwise delegates to the <code>refreshFn</code> registered at server startup:</p>
+${code('http', `POST /api/artifacts/019ef2a1-7b3c-8d04-9e5f-c2d3a4b5e6f7/refresh HTTP/1.1
+Authorization: Bearer <session-token>
+Content-Type: application/json
+
+{ "args": { "symbol": "NVDA" } }
+
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{
+  "artifactId": "019ef2a1-7b3c-8d04-9e5f-c2d3a4b5e6f7",
+  "fromCache": false,
+  "refreshedAt": "2026-06-23T14:22:01.000Z",
+  "refreshCount": 5,
+  "version": 6
+}`)}
+
+<h4>Registering a refreshFn</h4>
+${code('typescript', `import { registerArtifactRoutes } from './routes/artifacts.js';
+import type { ArtifactRow } from './db-types/artifacts.js';
+
+registerArtifactRoutes(router, db, {
+  refreshFn: async (artifact: ArtifactRow, args: Record<string, unknown>) => {
+    // Called when the artifact's cache TTL has expired.
+    // Fetch fresh data however you like:
+    const symbol = (args['symbol'] as string) ?? 'BTC';
+    const price = await fetchLivePrice(symbol);
+    return {
+      data: JSON.stringify({ symbol, price, ts: Date.now() }),
+    };
+  },
+});`)}
+
+<h4>injectLiveToolbar(html, live)</h4>
+<p>Injects a floating toolbar into any artifact render HTML just before <code>&lt;/body&gt;&lt;/html&gt;</code>. When a live config exists, the render endpoint calls this automatically and adds <code>connect-src 'self'</code> to the CSP so the Refresh button can call <code>fetch()</code> back to the server:</p>
+${code('typescript', `import { injectLiveToolbar } from './routes/artifacts.js';
+
+// Manually inject a toolbar (useful for admin preview or custom routes):
+const liveHtml = injectLiveToolbar(renderedHtml, {
+  artifactId: 'abc-123',
+  refreshIntervalSeconds: 30,
+  cacheTtlSeconds: 5,
+  refreshCount: 4,
+  lastRefreshedAt: '2026-06-23T14:00:00Z',
+});
+// → html with a dark toolbar: LIVE badge | Refreshed: 4× | [Refresh] | [Auto-refresh: 30s]`)}
+
+<h4>Admin CRUD API</h4>
+${code('http', `# Create live config
+POST   /api/admin/artifacts/:id/live-config
+{ "refreshIntervalSeconds": 30, "cacheTtlSeconds": 10 }
+→ 201  { liveConfig: { artifact_id, refresh_interval_seconds, cache_ttl_seconds, ... } }
+
+# Read live config
+GET    /api/admin/artifacts/:id/live-config
+→ 200  { liveConfig: { ... } }   or   404 { error: "No live config" }
+
+# Partial update (e.g. bump TTL only)
+PATCH  /api/admin/artifacts/:id/live-config
+{ "cacheTtlSeconds": 60 }
+→ 200  { liveConfig: { ... } }
+
+# Delete live config (artifact becomes static again)
+DELETE /api/admin/artifacts/:id/live-config
+→ 200  { ok: true }
+
+# Touch last_refreshed_at (admin-triggered refresh)
+POST   /api/admin/artifacts/:id/live-refresh
+→ 200  { ok: true }`)}
+
+<h4>Admin UI: Configure Live button</h4>
+<p>Clicking <strong>📡 Configure Live</strong> on an artifact detail panel toggles the live config via browser <code>prompt()</code>/<code>confirm()</code> dialogs — no separate form needed. If no config exists the operator is prompted for <code>refreshIntervalSeconds</code>; if one exists they can confirm deletion to revert to static.</p>
+
+<h4>UI cards: LIVE badge</h4>
+<p>Artifact cards in the chat panel show a pulsing blue LIVE badge when <code>ref.isLive === true</code>. The preview modal adds a <strong>Refresh</strong> button that calls <code>POST /api/artifacts/:id/refresh</code>, then reloads the iframe <code>src</code>. The iframe itself sends an <code>artifact-refreshed</code> postMessage to the parent after each auto-refresh cycle.</p>
+
+<h4>Example 120</h4>
+<p>See <code>examples/120-live-artifacts.ts</code> for a full end-to-end walkthrough: artifact creation, live config CRUD, toolbar injection, the <code>refreshFn</code> callback, cache TTL guard, admin touch endpoint, and a live <code>gpt-4o-mini</code> round-trip that emits a JSON artifact and then refreshes it.</p>
 `)}`;
 }
 
@@ -5514,7 +6056,7 @@ export function getDocsHTML(): string {
       subs: ['obs-tracer','obs-budget','obs-otel'] },
     // ── Operations
     { id: 'artifacts',    label: 'Artifacts',        icon: '📎', group: 'Operations',
-      subs: ['artifacts-store','artifacts-agent'] },
+      subs: ['artifacts-store','artifacts-types','artifacts-phase3','artifacts-agent','artifacts-streaming','artifacts-rendering','artifacts-live'] },
     { id: 'replay',       label: 'Replay',           icon: '⏮️', group: 'Operations',
       subs: ['replay-record','replay-replay'] },
     { id: 'tenancy',      label: 'Tenancy',          icon: '🏢', group: 'Operations',
@@ -5573,7 +6115,7 @@ export function getDocsHTML(): string {
     // Contracts
     'contracts-emit':'Emitting Contracts','contracts-query':'Querying Evidence',
     // Artifacts
-    'artifacts-store':'Storing & Retrieving','artifacts-agent':'Agent Tool',
+    'artifacts-store':'Storing & Retrieving','artifacts-types':'Phase 2: Extended Types','artifacts-phase3':'Phase 3: DB & Admin API','artifacts-agent':'Agent Tool','artifacts-streaming':'Phase 4: Streaming','artifacts-rendering':'Phase 5: Rendering','artifacts-live':'Phase 6: Live Artifacts',
     // Replay
     'replay-record':'Recording a Run','replay-replay':'Re-executing',
     // Redaction
@@ -6175,8 +6717,13 @@ var SEARCH_IDX = [
   {s:'contracts',  t:'Emitting Contracts from Workflows', k:'contract evidence ledger workflow output signed append', sub:'contracts-emit'},
   {s:'contracts',  t:'Querying the Evidence Ledger', k:'contract query ledger list verify chain integrity', sub:'contracts-query'},
   // Artifacts
-  {s:'artifacts',  t:'Storing & Retrieving Artifacts', k:'artifact file blob storage versioned s3 gcs local', sub:'artifacts-store'},
-  {s:'artifacts',  t:'Agent Artifact Tool',           k:'artifact agent tool save chart svg pdf generated output', sub:'artifacts-agent'},
+  {s:'artifacts',  t:'Storing & Retrieving Artifacts',             k:'artifact file blob storage versioned s3 gcs local', sub:'artifacts-store'},
+  {s:'artifacts',  t:'Phase 2: Extended Type System (18 Types)',  k:'artifact type mermaid react svg audio video spreadsheet interactive mime detect', sub:'artifacts-types'},
+  {s:'artifacts',  t:'Phase 3: DB Persistence, Admin API & Versioning', k:'artifact sqlite admin api version history retention expire download delete', sub:'artifacts-phase3'},
+  {s:'artifacts',  t:'Agent Artifact Tool',                       k:'artifact agent tool save chart svg pdf generated output emit', sub:'artifacts-agent'},
+  {s:'artifacts',  t:'Phase 4: Streaming Lifecycle (SSE)',        k:'artifact streaming sse progress handle streamArtifact update complete error bus m79 real-time', sub:'artifacts-streaming'},
+  {s:'artifacts',  t:'Phase 5: Sandboxed Rendering',             k:'artifact render iframe csp sandbox html markdown code json csv mermaid react svg admin preview buildArtifactRenderHtml xss', sub:'artifacts-rendering'},
+  {s:'artifacts',  t:'Phase 6: Live Artifacts & MCP Connectivity', k:'artifact live refresh toolbar injectLiveToolbar refreshFn cache ttl m80 live-artifact-configs badge auto-refresh postMessage connect-src csp mcp connectivity 120', sub:'artifacts-live'},
   // Replay
   {s:'replay',     t:'Recording a Run for Replay',   k:'replay record workflow run durable checkpoint reproducible', sub:'replay-record'},
   {s:'replay',     t:'Re-executing a Workflow Run',   k:'replay rerun from step override deterministic reproduce eval', sub:'replay-replay'},

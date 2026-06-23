@@ -22,6 +22,7 @@ import {
   registerKaggleRunRoutes,
   registerKglCompetitionRunAdminRoutes,
   registerKaggleRunArtifactRoutes,
+  registerArtifactRoutes,
   registerKaggleRubricRoutes,
   registerKaggleValidationResultRoutes,
   registerKaggleLeaderboardScoreRoutes,
@@ -138,6 +139,7 @@ export function registerAdminRoutingRoutes(
   registerKaggleApproachRoutes(router, db, adminHelpers);
   registerKaggleRunRoutes(router, db, adminHelpers);
   registerKaggleRunArtifactRoutes(router, db, adminHelpers);
+  registerArtifactRoutes(router, db, adminHelpers);
   registerKglCompetitionRunAdminRoutes(router, db, adminHelpers);
 
   // ── Phase K7d: Kaggle validator rubrics + validation results + leaderboard scores ──

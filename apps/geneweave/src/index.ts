@@ -45,6 +45,7 @@ import {
   type WorkflowEngineHandle,
 } from './workflow-engine.js';
 import { startToolHealthJob } from './tool-health-job.js';
+import { startArtifactRetentionJob } from './artifact-retention-job.js';
 import {
   createTriggerDispatcher,
   createDurableTriggerRateLimiter,
@@ -482,6 +483,9 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
 
   // 5. Start background tool health snapshot job (writes every 15 min)
   startToolHealthJob(db);
+
+  // m77 Phase 1: Start artifact retention job (runs at startup + every 6 h)
+  startArtifactRetentionJob(db);
 
   // 5-EN. Phase 1 (Tenant Encryption): bootstrap the per-tenant key
   // manager wired to SQLite-backed EncryptionStore + audit emitter.

@@ -44,6 +44,10 @@ export type {
 export type { ScopesAdapterMethods, ScopeSkillAssignmentAdminRow, ScopeLiveAgentAssignmentAdminRow } from './adapter-scopes.js';
 export type { AgentScopeRow, ScopeCrossPolicyRow, ScopeSkillAssignmentRow, ScopeLiveAgentAssignmentRow, ScopeAccessLogRow } from './scopes.js';
 export type {
+  ArtifactRow, ArtifactVersionRow, ArtifactSaveInput, ArtifactUpdateInput, ArtifactListFilter,
+  LiveArtifactConfigRow, LiveArtifactConfigInput, LiveArtifactConfigUpdate,
+} from './artifacts.js';
+export type {
   IVoiceStore,
   VoiceConfigRow, VoiceConfigCreate, VoiceConfigUpdate,
   VoiceSessionRow, VoiceSessionCreate, VoiceSessionListFilter,
@@ -71,6 +75,23 @@ export interface DatabaseAdapter extends
   ScopesAdapterMethods {
   initialize(): Promise<void>;
   close(): Promise<void>;
+
+  // ── Artifact storage (m77) ────────────────────────────────────────────────
+  saveArtifact?(input: import('./artifacts.js').ArtifactSaveInput): Promise<import('./artifacts.js').ArtifactRow>;
+  getArtifact?(id: string): Promise<import('./artifacts.js').ArtifactRow | null>;
+  updateArtifact?(id: string, patch: import('./artifacts.js').ArtifactUpdateInput, changelog?: string): Promise<import('./artifacts.js').ArtifactRow>;
+  listArtifacts?(filter?: import('./artifacts.js').ArtifactListFilter): Promise<import('./artifacts.js').ArtifactRow[]>;
+  deleteArtifact?(id: string): Promise<void>;
+  getArtifactVersions?(artifactId: string): Promise<import('./artifacts.js').ArtifactVersionRow[]>;
+  getArtifactVersion?(artifactId: string, version: number): Promise<import('./artifacts.js').ArtifactVersionRow | null>;
+  expireArtifacts?(): Promise<number>;
+
+  // ── Live artifact configs (m80 / Phase 6) ────────────────────────────────
+  getLiveArtifactConfig?(artifactId: string): Promise<import('./artifacts.js').LiveArtifactConfigRow | null>;
+  saveLiveArtifactConfig?(input: import('./artifacts.js').LiveArtifactConfigInput): Promise<import('./artifacts.js').LiveArtifactConfigRow>;
+  updateLiveArtifactConfig?(artifactId: string, patch: import('./artifacts.js').LiveArtifactConfigUpdate): Promise<import('./artifacts.js').LiveArtifactConfigRow>;
+  deleteLiveArtifactConfig?(artifactId: string): Promise<void>;
+  touchLiveArtifactRefresh?(artifactId: string): Promise<void>;
 }
 
 export interface DatabaseConfig {

@@ -87,3 +87,9 @@ export { registerCapabilityPackRoutes } from "./capability-packs.js";
 
 // ── m75: Agentic Scope Isolation ─────────────────────────────
 export { registerScopeRoutes } from './scope.js';
+
+// ── m77: Artifact Storage ─────────────────────────────────────
+export { registerArtifactRoutes } from './artifacts.js';
+
+// ── m78: Tenant Artifact Settings (Phase 2 Extended Type System) ──────────────
+export { registerTenantArtifactSettingsRoutes } from './tenant-artifact-settings.js';

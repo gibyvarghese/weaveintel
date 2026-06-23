@@ -12,6 +12,7 @@ export interface RouterLike {
   get(path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }): void;
   post(path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }): void;
   put(path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }): void;
+  patch(path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }): void;
   del(path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }): void;
 }
 

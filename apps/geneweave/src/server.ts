@@ -65,6 +65,8 @@ import {
   registerMeNotesRoutes,
   registerMeComplianceRoutes,
   registerVoiceRoutes,
+  registerArtifactRoutes,
+  registerShareRoutes,
 } from './routes/index.js';
 
 export interface ServerConfig {
@@ -240,6 +242,8 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerMeAgendaRoutes(router, db);
   registerMeNotesRoutes(router, db);
   registerMeComplianceRoutes(router, db, config.runtime);
+  registerArtifactRoutes(router, db, { jwtSecret, publicBaseUrl });
+  registerShareRoutes(router, db, { jwtSecret });
 
   // Voice agent routes — registered only when audio provider is configured
   if (voiceEngine) {

@@ -17,6 +17,8 @@ import {
   registerAdminA2ASkillRoutes,
 } from './admin/routes/index.js';
 import { registerScopeRoutes } from './admin/api/scope.js';
+import { registerArtifactRoutes as registerAdminArtifactRoutes } from './admin/api/artifacts.js';
+import { registerTenantArtifactSettingsRoutes } from './admin/api/tenant-artifact-settings.js';
 import type { RouterLike } from './admin/api/types.js';
 
 export interface AdminRouteExtras {
@@ -60,4 +62,8 @@ export function registerAdminRoutes(
     readBody,
     requireDetailedDescription: () => null,  // unused in scope routes
   });
+  // m77: Artifact admin browser (read + download + delete)
+  registerAdminArtifactRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
+  // m78: Tenant artifact type settings
+  registerTenantArtifactSettingsRoutes(router, db, { json, readBody, requireDetailedDescription: () => null });
 }

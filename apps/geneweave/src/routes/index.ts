@@ -24,3 +24,5 @@ export { registerMeAgendaRoutes } from './me-agenda.js';
 export { registerMeNotesRoutes } from './me-notes.js';
 export { registerMeComplianceRoutes } from './me-compliance.js';
 export { registerVoiceRoutes } from './voice.js';
+export { registerArtifactRoutes } from './artifacts.js';
+export { registerShareRoutes } from './share.js';

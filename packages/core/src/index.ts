@@ -791,8 +791,10 @@ export {
 // Artifact contracts
 export {
   type ArtifactType,
+  type ArtifactScope,
   type Artifact,
   type ArtifactVersion,
+  type ArtifactListFilter,
   type ArtifactStore,
   type ArtifactReference,
   type ArtifactPolicy,

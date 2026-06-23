@@ -56,6 +56,10 @@ export class Router {
     this.add('PUT', path, handler, { auth: opts?.auth, csrf: opts?.csrf ?? true });
   }
 
+  patch(path: string, handler: Handler, opts?: { auth?: boolean; csrf?: boolean }): void {
+    this.add('PATCH', path, handler, { auth: opts?.auth, csrf: opts?.csrf ?? true });
+  }
+
   match(method: string, pathname: string): { route: Route; params: Record<string, string> } | null {
     for (const route of this.routes) {
       if (route.method !== method) continue;
