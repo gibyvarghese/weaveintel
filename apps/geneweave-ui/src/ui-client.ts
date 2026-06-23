@@ -287,6 +287,14 @@ async function sendMessage(text: string) {
           if (Array.isArray(d.ensembleCandidates)) assistantMsg.ensembleCandidates = d.ensembleCandidates;
           if (d.ensembleRationale) assistantMsg.ensembleRationale = d.ensembleRationale;
           if (d.ensembleWinner) assistantMsg.ensembleWinner = d.ensembleWinner;
+          // m77 Phase 1: surface artifact refs from the done event into message metadata
+          if (Array.isArray(d.artifactRefs) && d.artifactRefs.length) {
+            const existingMeta = assistantMsg.metadata
+              ? (typeof assistantMsg.metadata === 'string' ? JSON.parse(assistantMsg.metadata) : assistantMsg.metadata)
+              : {};
+            existingMeta.artifactRefs = d.artifactRefs;
+            assistantMsg.metadata = existingMeta;
+          }
           assistantMsg.processState = 'completed';
           assistantMsg.processExpanded = false;
           touchChat(chatId, d.title || undefined);
@@ -921,6 +929,441 @@ function renderAssistantBubble(content: string): { element: HTMLElement; exportH
   };
 }
 
+// ── Phase 2-G/H: Type-aware artifact card + preview modal ─────────────────
+
+const SVG_ICON_ATTRS = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+const ARTIFACT_ICONS: Record<string, string> = {
+  text:        `<svg ${SVG_ICON_ATTRS}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>`,
+  markdown:    `<svg ${SVG_ICON_ATTRS}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>`,
+  csv:         `<svg ${SVG_ICON_ATTRS}><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>`,
+  json:        `<svg ${SVG_ICON_ATTRS}><path d="M8 3H7a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h1"/><path d="M16 3h1a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-1"/></svg>`,
+  code:        `<svg ${SVG_ICON_ATTRS}><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>`,
+  html:        `<svg ${SVG_ICON_ATTRS}><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
+  pdf:         `<svg ${SVG_ICON_ATTRS}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="12" y2="17"/></svg>`,
+  report:      `<svg ${SVG_ICON_ATTRS}><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/><line x1="9" y1="8" x2="11" y2="8"/></svg>`,
+  image:       `<svg ${SVG_ICON_ATTRS}><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`,
+  svg:         `<svg ${SVG_ICON_ATTRS}><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`,
+  diagram:     `<svg ${SVG_ICON_ATTRS}><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="9" y="15" width="6" height="6" rx="1"/><line x1="6" y1="9" x2="6" y2="12"/><line x1="18" y1="9" x2="18" y2="12"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="12" y1="12" x2="12" y2="15"/></svg>`,
+  mermaid:     `<svg ${SVG_ICON_ATTRS}><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="9" y="15" width="6" height="6" rx="1"/><line x1="6" y1="9" x2="6" y2="12"/><line x1="18" y1="9" x2="18" y2="12"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="12" y1="12" x2="12" y2="15"/></svg>`,
+  react:       `<svg ${SVG_ICON_ATTRS}><circle cx="12" cy="12" r="2"/><path d="M12 2C6.5 2 2 6.7 2 12s4.5 10 10 10 10-4.7 10-10S17.5 2 12 2z" stroke-dasharray="2 2"/><ellipse cx="12" cy="12" rx="10" ry="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)"/></svg>`,
+  interactive: `<svg ${SVG_ICON_ATTRS}><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><circle cx="15.5" cy="11.5" r="0.8" fill="currentColor"/><circle cx="17.5" cy="13.5" r="0.8" fill="currentColor"/><rect x="2" y="7" width="20" height="13" rx="3"/><path d="M11 2h2"/></svg>`,
+  audio:       `<svg ${SVG_ICON_ATTRS}><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>`,
+  video:       `<svg ${SVG_ICON_ATTRS}><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>`,
+  spreadsheet: `<svg ${SVG_ICON_ATTRS}><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/></svg>`,
+  custom:      `<svg ${SVG_ICON_ATTRS}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`,
+};
+
+const PREVIEWABLE_TYPES = new Set(['text', 'markdown', 'json', 'csv', 'code', 'html', 'svg', 'mermaid', 'react', 'interactive', 'image', 'audio', 'video']);
+
+type ArtifactRef = {
+  artifactId: string; version: number; name: string; type: string; language?: string;
+  streamingStatus?: 'streaming' | 'error' | null; streamingProgress?: number | null;
+  isLive?: boolean;
+};
+
+async function getCsrfToken(): Promise<string> {
+  try {
+    const r = await fetch('/api/auth/me');
+    if (r.ok) { const d = await r.json() as { csrfToken?: string }; return d.csrfToken ?? ''; }
+  } catch { /* ignore */ }
+  return '';
+}
+
+function showShareDialog(name: string, shareUrl: string, embedCode: string | null): void {
+  const overlay = document.createElement('div');
+  overlay.className = 'share-dialog-overlay';
+  const dialog = document.createElement('div');
+  dialog.className = 'share-dialog';
+  dialog.addEventListener('click', (e) => e.stopPropagation());
+
+  const title = document.createElement('div');
+  title.className = 'share-dialog-title';
+  title.textContent = embedCode ? 'Share & Embed' : 'Share Link';
+  const sub = document.createElement('div');
+  sub.className = 'share-dialog-sub';
+  sub.textContent = `"${name}" — anyone with the link can view this artifact`;
+
+  const row = document.createElement('div');
+  row.className = 'share-dialog-row';
+  const urlInput = document.createElement('input');
+  urlInput.type = 'text';
+  urlInput.className = 'share-dialog-url';
+  urlInput.value = shareUrl;
+  urlInput.readOnly = true;
+  urlInput.onclick = () => urlInput.select();
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'share-dialog-copy';
+  copyBtn.textContent = 'Copy Link';
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      copyBtn.textContent = '✓ Copied!';
+      copyBtn.classList.add('copied');
+      setTimeout(() => { copyBtn.textContent = 'Copy Link'; copyBtn.classList.remove('copied'); }, 2000);
+    }).catch(() => {
+      urlInput.select();
+      document.execCommand('copy');
+    });
+  };
+  row.appendChild(urlInput);
+  row.appendChild(copyBtn);
+
+  const actions = document.createElement('div');
+  actions.className = 'share-dialog-actions';
+
+  if (embedCode) {
+    const embedLabel = document.createElement('div');
+    embedLabel.className = 'share-dialog-sub';
+    embedLabel.style.marginTop = '4px';
+    embedLabel.textContent = 'Embed code (iframe):';
+    const embedTa = document.createElement('textarea');
+    embedTa.className = 'share-dialog-embed';
+    embedTa.rows = 3;
+    embedTa.readOnly = true;
+    embedTa.value = embedCode;
+    embedTa.onclick = () => embedTa.select();
+    const copyEmbedBtn = document.createElement('button');
+    copyEmbedBtn.className = 'share-dialog-copy';
+    copyEmbedBtn.textContent = 'Copy Embed';
+    copyEmbedBtn.onclick = () => {
+      navigator.clipboard.writeText(embedCode).then(() => {
+        copyEmbedBtn.textContent = '✓ Copied!';
+        copyEmbedBtn.classList.add('copied');
+        setTimeout(() => { copyEmbedBtn.textContent = 'Copy Embed'; copyEmbedBtn.classList.remove('copied'); }, 2000);
+      }).catch(() => { embedTa.select(); document.execCommand('copy'); });
+    };
+    dialog.appendChild(title);
+    dialog.appendChild(sub);
+    dialog.appendChild(row);
+    dialog.appendChild(embedLabel);
+    dialog.appendChild(embedTa);
+    const embedRow = document.createElement('div');
+    embedRow.className = 'share-dialog-row';
+    embedRow.style.marginBottom = '0';
+    embedRow.appendChild(copyEmbedBtn);
+    dialog.appendChild(embedRow);
+  } else {
+    dialog.appendChild(title);
+    dialog.appendChild(sub);
+    dialog.appendChild(row);
+  }
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'share-dialog-close';
+  closeBtn.textContent = 'Close';
+  closeBtn.onclick = () => overlay.remove();
+  actions.appendChild(closeBtn);
+  dialog.appendChild(actions);
+  overlay.appendChild(dialog);
+  overlay.onclick = () => overlay.remove();
+  document.body.appendChild(overlay);
+  const kh = (e: KeyboardEvent) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', kh); } };
+  document.addEventListener('keydown', kh);
+}
+
+async function showArtifactPreview(ref: ArtifactRef): Promise<void> {
+  // Remove any existing modal
+  document.getElementById('artifact-preview-overlay')?.remove();
+
+  const icon = ARTIFACT_ICONS[ref.type] ?? '📎';
+  const downloadUrl = `/api/artifacts/${ref.artifactId}/download`;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'artifact-preview-overlay';
+  overlay.id = 'artifact-preview-overlay';
+
+  const dialog = document.createElement('div');
+  dialog.className = 'artifact-preview-dialog';
+  dialog.addEventListener('click', (e) => e.stopPropagation());
+
+  const header = document.createElement('div');
+  header.className = 'apm-header';
+  header.innerHTML = `<span class="apm-icon" aria-hidden="true">${icon}</span><span class="apm-title">${ref.name}</span>`;
+  const typeBadge = document.createElement('span');
+  typeBadge.className = 'apm-type';
+  typeBadge.textContent = ref.language ? `${ref.type} · ${ref.language}` : `${ref.type} · v${ref.version}`;
+  header.appendChild(typeBadge);
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'apm-close';
+  closeBtn.textContent = '×';
+  closeBtn.title = 'Close';
+  closeBtn.onclick = () => overlay.remove();
+  header.appendChild(closeBtn);
+
+  const body = document.createElement('div');
+  body.className = 'apm-body';
+  body.innerHTML = '<div class="apm-loading">Loading…</div>';
+
+  const footer = document.createElement('div');
+  footer.className = 'apm-footer';
+  const dlBtn = document.createElement('a');
+  dlBtn.className = 'apm-dl-btn';
+  dlBtn.href = downloadUrl;
+  dlBtn.download = ref.name;
+  dlBtn.textContent = 'Download';
+  const fsBtn = document.createElement('button');
+  fsBtn.className = 'apm-fullscreen-btn';
+  fsBtn.title = 'Open in new tab';
+  fsBtn.textContent = '⊞ Full';
+  fsBtn.onclick = () => window.open(`/api/artifacts/${ref.artifactId}/render`, '_blank');
+  const adminLink = document.createElement('a');
+  adminLink.className = 'apm-admin-link';
+  adminLink.href = `#artifacts/${ref.artifactId}`;
+  adminLink.textContent = 'Open in admin →';
+  adminLink.onclick = () => overlay.remove();
+  footer.appendChild(dlBtn);
+  footer.appendChild(fsBtn);
+
+  // Phase 7: Share button
+  const shareBtn = document.createElement('button');
+  shareBtn.className = 'apm-share-btn';
+  shareBtn.title = 'Create a shareable link';
+  shareBtn.textContent = '🔗 Share';
+  shareBtn.onclick = async () => {
+    shareBtn.disabled = true;
+    shareBtn.textContent = '🔗 Sharing…';
+    try {
+      const csrf = await getCsrfToken();
+      const r = await fetch(`/api/artifacts/${ref.artifactId}/share`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+        body: JSON.stringify({}),
+      });
+      if (r.ok) {
+        const d = await r.json() as { url?: string };
+        if (d.url) showShareDialog(ref.name, d.url, null);
+      } else {
+        alert(`Failed to create share link: ${await r.text()}`);
+      }
+    } finally {
+      shareBtn.disabled = false;
+      shareBtn.textContent = '🔗 Share';
+    }
+  };
+  footer.appendChild(shareBtn);
+
+  // Phase 7: Embed Code button
+  const embedBtn = document.createElement('button');
+  embedBtn.className = 'apm-embed-btn';
+  embedBtn.title = 'Get embed code (iframe)';
+  embedBtn.textContent = '</> Embed';
+  embedBtn.onclick = async () => {
+    embedBtn.disabled = true;
+    embedBtn.textContent = '</> Loading…';
+    try {
+      const r = await fetch(`/api/artifacts/${ref.artifactId}/embed-code`);
+      if (r.ok) {
+        const d = await r.json() as { embedCode?: string; embedUrl?: string };
+        if (d.embedCode) {
+          const csrf = await getCsrfToken();
+          const shareR = await fetch(`/api/artifacts/${ref.artifactId}/share`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+            body: JSON.stringify({}),
+          });
+          const shareUrl = shareR.ok ? ((await shareR.json() as { url?: string }).url ?? d.embedUrl ?? '') : (d.embedUrl ?? '');
+          showShareDialog(ref.name, shareUrl, d.embedCode);
+        }
+      } else {
+        alert(`Failed to get embed code: ${await r.text()}`);
+      }
+    } finally {
+      embedBtn.disabled = false;
+      embedBtn.textContent = '</> Embed';
+    }
+  };
+  footer.appendChild(embedBtn);
+
+  // Phase 6: Refresh button for live artifacts
+  let refreshBtn: HTMLButtonElement | null = null;
+  if (ref.isLive) {
+    refreshBtn = document.createElement('button');
+    refreshBtn.className = 'apm-refresh-btn';
+    refreshBtn.title = 'Refresh live data';
+    refreshBtn.textContent = '⟳ Refresh';
+    refreshBtn.onclick = async () => {
+      if (!refreshBtn) return;
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = '⟳ Refreshing…';
+      try {
+        const csrf = await getCsrfToken();
+        const r = await fetch(`/api/artifacts/${ref.artifactId}/refresh`, {
+          method: 'POST',
+          headers: { 'x-csrf-token': csrf },
+        });
+        if (r.ok) {
+          const iframe2 = body.querySelector('iframe');
+          if (iframe2) { iframe2.src = iframe2.src; }
+        }
+      } finally {
+        refreshBtn!.disabled = false;
+        refreshBtn!.textContent = '⟳ Refresh';
+      }
+    };
+    footer.appendChild(refreshBtn);
+
+    // Listen for refresh messages from within the iframe toolbar
+    const msgHandler = (e: MessageEvent) => {
+      if (e.data?.type === 'artifact-refreshed' && e.data?.artifactId === ref.artifactId) {
+        const iframe2 = body.querySelector('iframe');
+        if (iframe2) { iframe2.src = iframe2.src; }
+      }
+    };
+    window.addEventListener('message', msgHandler);
+    overlay.addEventListener('remove', () => window.removeEventListener('message', msgHandler));
+  }
+
+  footer.appendChild(adminLink);
+
+  dialog.appendChild(header);
+  dialog.appendChild(body);
+  dialog.appendChild(footer);
+  overlay.appendChild(dialog);
+  overlay.onclick = () => overlay.remove();
+  document.body.appendChild(overlay);
+
+  // Keyboard close
+  const keyHandler = (e: KeyboardEvent) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', keyHandler); } };
+  document.addEventListener('keydown', keyHandler);
+  overlay.addEventListener('remove', () => document.removeEventListener('keydown', keyHandler));
+
+  // Phase 5: use server-side render endpoint — a single sandboxed iframe
+  // for all types. The server generates the correct HTML wrapper per type
+  // (Mermaid, React/Babel, highlight.js code, JSON tree, CSV table, etc.)
+  // and sets CSP headers. No blob URL memory management needed.
+  const renderUrl = `/api/artifacts/${ref.artifactId}/render`;
+
+  const iframe = document.createElement('iframe');
+  iframe.src = renderUrl;
+  iframe.className = 'apm-render-frame';
+  // allow-scripts: needed for CDN-loaded renderers (mermaid, hljs, babel)
+  // allow-same-origin: needed for CDN ESM imports to work
+  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+  iframe.setAttribute('loading', 'lazy');
+  iframe.setAttribute('referrerpolicy', 'no-referrer');
+  body.innerHTML = '';
+  body.appendChild(iframe);
+}
+
+function buildArtifactCards(refs: ArtifactRef[]): HTMLElement {
+  const cards = refs.map((ref) => {
+    const icon = ARTIFACT_ICONS[ref.type] ?? '📎';
+    const downloadUrl = `/api/artifacts/${ref.artifactId}/data`;
+    const isStreaming = ref.streamingStatus === 'streaming';
+    const isError = ref.streamingStatus === 'error';
+    const canPreview = !isStreaming && PREVIEWABLE_TYPES.has(ref.type);
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'ac-name';
+    nameEl.textContent = ref.name;
+
+    const metaEl = document.createElement('div');
+    metaEl.className = 'ac-meta';
+    metaEl.appendChild(document.createTextNode(`${ref.type} · v${ref.version}`));
+    if (ref.language) {
+      const langBadge = document.createElement('span');
+      langBadge.className = 'ac-badge lang';
+      langBadge.textContent = ref.language;
+      metaEl.appendChild(langBadge);
+    }
+    if (isStreaming) {
+      const streamBadge = document.createElement('span');
+      streamBadge.className = 'ac-badge streaming';
+      streamBadge.textContent = 'Generating…';
+      metaEl.appendChild(streamBadge);
+    } else if (isError) {
+      const errBadge = document.createElement('span');
+      errBadge.className = 'ac-badge';
+      errBadge.style.cssText = 'background:rgba(239,68,68,.12);color:#f87171;border-color:rgba(239,68,68,.2)';
+      errBadge.textContent = 'Error';
+      metaEl.appendChild(errBadge);
+    } else {
+      if (ref.isLive) {
+        const liveBadge = document.createElement('span');
+        liveBadge.className = 'ac-badge live';
+        liveBadge.textContent = 'Live';
+        metaEl.appendChild(liveBadge);
+      }
+      if (canPreview) {
+        const previewBadge = document.createElement('span');
+        previewBadge.className = 'ac-badge';
+        previewBadge.textContent = 'Preview';
+        metaEl.appendChild(previewBadge);
+      }
+    }
+
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'ac-body';
+    bodyEl.appendChild(nameEl);
+    bodyEl.appendChild(metaEl);
+
+    const iconEl = document.createElement('div');
+    iconEl.className = 'ac-icon';
+    iconEl.setAttribute('aria-hidden', 'true');
+    iconEl.innerHTML = isError
+      ? `<svg ${SVG_ICON_ATTRS}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`
+      : icon;
+
+    const actionsEl = document.createElement('div');
+    actionsEl.className = 'ac-actions';
+
+    if (canPreview) {
+      const previewBtn = document.createElement('button');
+      previewBtn.className = 'ac-preview';
+      previewBtn.innerHTML = `<svg ${SVG_ICON_ATTRS} width="12" height="12"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`;
+      previewBtn.title = 'Preview artifact';
+      previewBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void showArtifactPreview(ref);
+      };
+      actionsEl.appendChild(previewBtn);
+    }
+
+    if (!isStreaming) {
+      const dlLink = document.createElement('a');
+      dlLink.className = 'ac-dl';
+      dlLink.href = downloadUrl;
+      dlLink.download = ref.name;
+      dlLink.title = 'Download artifact';
+      dlLink.innerHTML = `<svg ${SVG_ICON_ATTRS} width="13" height="13"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+      dlLink.onclick = (e) => e.stopPropagation();
+      actionsEl.appendChild(dlLink);
+    }
+
+    const card = document.createElement('div');
+    card.className = isStreaming ? 'artifact-card streaming' : 'artifact-card';
+    card.title = `${ref.name} (${ref.type}, v${ref.version}) — click to ${canPreview ? 'preview' : 'open in admin'}`;
+    card.addEventListener('click', () => {
+      if (isStreaming) return; // don't open while generating
+      if (canPreview) {
+        void showArtifactPreview(ref);
+      } else {
+        window.location.hash = `#artifacts/${ref.artifactId}`;
+      }
+    });
+
+    card.appendChild(iconEl);
+    card.appendChild(bodyEl);
+    card.appendChild(actionsEl);
+
+    // Phase 4: streaming progress bar
+    if (isStreaming) {
+      const pct = Math.round((ref.streamingProgress ?? 0) * 100);
+      const bar = document.createElement('div');
+      bar.className = 'ac-stream-bar';
+      bar.style.width = `${pct}%`;
+      card.appendChild(bar);
+    }
+
+    return card;
+  });
+
+  const container = document.createElement('div');
+  container.className = 'artifact-cards';
+  cards.forEach(c => container.appendChild(c));
+  return container;
+}
+
 function renderMessages() {
   const container = document.querySelector('.messages');
   if (!container) return;
@@ -1009,6 +1452,15 @@ function renderMessages() {
       screenshotsEl = h('div', { className: 'screenshots' }, ...imgs);
     }
 
+    // Phase 2-G: Artifact cards — type-aware cards with preview support
+    let artifactCardsEl: HTMLElement | null = null;
+    if (!isUser) {
+      const artifactRefs: ArtifactRef[] = Array.isArray(meta?.artifactRefs) ? meta.artifactRefs : [];
+      if (artifactRefs.length > 0) {
+        artifactCardsEl = buildArtifactCards(artifactRefs);
+      }
+    }
+
     const toolbar = !isUser && m.content ? (() => {
       const bar = document.createElement('div');
       bar.className = 'response-toolbar';
@@ -1051,6 +1503,7 @@ function renderMessages() {
       bubbleEl,
       attachmentsEl,
       screenshotsEl,
+      artifactCardsEl,
       toolbar,
       metaBar,
       thinkingIndicator

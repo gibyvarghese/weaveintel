@@ -403,6 +403,81 @@ input{font-family:inherit;outline:none}
 .msg-attachment audio{width:100%;margin-top:6px}
 .msg-attachment pre{max-height:180px;overflow:auto;margin-top:6px;background:var(--bg2);border:1px solid var(--bg4);border-radius:8px;padding:8px}
 
+/* ── Artifact cards (m77 Phase 1 / Phase 2 type-aware) ───────── */
+.artifact-cards{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.artifact-card{display:flex;align-items:center;gap:8px;background:var(--bg2);border:1px solid var(--bg4);border-radius:10px;padding:8px 12px;font-size:12px;color:var(--fg);text-decoration:none;cursor:pointer;transition:border-color .15s,background .15s;max-width:340px;min-width:160px}
+.artifact-card:hover{border-color:var(--accent);background:var(--bg3)}
+.artifact-card .ac-icon{width:18px;height:18px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--fg3)}
+.artifact-card .ac-icon svg{width:18px;height:18px;display:block}
+.artifact-card .ac-body{min-width:0;flex:1}
+.artifact-card .ac-name{font-weight:600;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px}
+.artifact-card .ac-meta{color:var(--fg3);font-size:11px;margin-top:1px;display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.artifact-card .ac-badge{display:inline-block;padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;background:var(--accent-dim);color:var(--accent2);border:1px solid rgba(42,176,144,.2);line-height:1.4}
+.artifact-card .ac-badge.lang{background:rgba(100,100,255,.12);color:#8888ff;border-color:rgba(100,100,255,.2)}
+.artifact-card .ac-actions{display:flex;align-items:center;gap:4px;flex-shrink:0;margin-left:2px}
+.artifact-card .ac-dl{display:flex;align-items:center;justify-content:center;color:var(--accent);opacity:.8;padding:2px;line-height:1}
+.artifact-card .ac-dl svg{width:13px;height:13px;display:block}
+.artifact-card .ac-dl:hover{opacity:1}
+.artifact-card .ac-preview{display:flex;align-items:center;justify-content:center;padding:3px 6px;border-radius:5px;background:var(--accent-dim);color:var(--accent2);border:1px solid rgba(42,176,144,.25);cursor:pointer;transition:background .12s;line-height:1}
+.artifact-card .ac-preview svg{width:12px;height:12px;display:block}
+.artifact-card .ac-preview:hover{background:rgba(42,176,144,.2)}
+
+/* ── Artifact streaming progress (Phase 4 indicator on cards) ─── */
+.artifact-card.streaming{border-color:rgba(255,160,60,.5);background:rgba(255,140,30,.04)}
+.artifact-card .ac-stream-bar{position:absolute;bottom:0;left:0;height:2px;background:linear-gradient(90deg,var(--accent),#f97316);border-radius:0 0 10px 10px;transition:width .4s ease}
+.artifact-card{position:relative;overflow:hidden}
+.artifact-card .ac-badge.streaming{background:rgba(255,140,30,.15);color:#f97316;border-color:rgba(255,140,30,.3)}
+/* Phase 6: live artifact badge on cards */
+.artifact-card .ac-badge.live{background:rgba(29,109,222,.14);color:#4db6ff;border-color:rgba(77,182,255,.25);animation:live-pulse 2.5s ease-in-out infinite}
+@keyframes live-pulse{0%,100%{opacity:1}50%{opacity:.6}}
+
+/* ── Artifact preview modal (Phase 2-H + Phase 5 render frame) ─── */
+.artifact-preview-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9000;display:flex;align-items:center;justify-content:center;animation:fadein .15s}
+.artifact-preview-dialog{background:var(--bg1);border:1px solid var(--bg4);border-radius:14px;width:min(920px,96vw);max-height:92vh;display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.5);overflow:hidden}
+.apm-header{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--bg4);flex-shrink:0}
+.apm-icon{width:22px;height:22px;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--fg3)}
+.apm-icon svg{width:22px;height:22px;display:block}
+.apm-title{font-weight:700;font-size:15px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.apm-type{font-size:11px;color:var(--fg3);padding:2px 6px;border-radius:5px;background:var(--bg3);border:1px solid var(--bg4)}
+.apm-close{margin-left:auto;background:none;border:none;color:var(--fg2);font-size:22px;cursor:pointer;line-height:1;padding:0 4px;flex-shrink:0}
+.apm-close:hover{color:var(--fg)}
+.apm-body{flex:1;overflow:hidden;padding:0;position:relative;min-height:200px;display:flex;flex-direction:column}
+/* Phase 5: full-height render frame — server-side sandboxed HTML */
+.apm-render-frame{width:100%;flex:1;min-height:460px;border:none;display:block;background:#0e1117}
+.apm-body .apm-loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--fg3);font-size:13px}
+.apm-footer{padding:10px 18px;border-top:1px solid var(--bg4);display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap}
+.apm-footer .apm-dl-btn{padding:5px 14px;background:var(--accent-dim);color:var(--accent2);border:1px solid rgba(42,176,144,.3);border-radius:7px;font-size:12px;font-weight:600;text-decoration:none;cursor:pointer}
+.apm-footer .apm-dl-btn:hover{background:rgba(42,176,144,.2)}
+.apm-footer .apm-admin-link{color:var(--fg3);font-size:12px;text-decoration:none;margin-left:auto}
+.apm-footer .apm-admin-link:hover{color:var(--fg)}
+/* Fullscreen toggle for the preview */
+.apm-footer .apm-fullscreen-btn{padding:5px 10px;background:var(--bg3);color:var(--fg2);border:1px solid var(--bg4);border-radius:7px;font-size:11px;cursor:pointer}
+.apm-footer .apm-fullscreen-btn:hover{background:var(--bg4)}
+/* Phase 6: Refresh button for live artifact preview modal */
+.apm-footer .apm-refresh-btn{padding:5px 12px;background:rgba(29,109,222,.12);color:#4db6ff;border:1px solid rgba(77,182,255,.25);border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;transition:background .15s}
+.apm-footer .apm-refresh-btn:hover{background:rgba(29,109,222,.22)}
+.apm-footer .apm-refresh-btn:disabled{opacity:.5;cursor:default}
+.apm-footer .apm-share-btn{padding:5px 12px;background:rgba(168,85,247,.12);color:#c084fc;border:1px solid rgba(192,132,252,.25);border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;transition:background .15s}
+.apm-footer .apm-share-btn:hover{background:rgba(168,85,247,.22)}
+.apm-footer .apm-share-btn:disabled{opacity:.5;cursor:default}
+.apm-footer .apm-embed-btn{padding:5px 12px;background:rgba(251,146,60,.12);color:#fb923c;border:1px solid rgba(251,146,60,.25);border-radius:7px;font-size:12px;font-weight:600;cursor:pointer;transition:background .15s}
+.apm-footer .apm-embed-btn:hover{background:rgba(251,146,60,.22)}
+.apm-footer .apm-embed-btn:disabled{opacity:.5;cursor:default}
+/* ── Phase 7 Share Dialog ──────────────────────────────────── */
+.share-dialog-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:10001;backdrop-filter:blur(4px)}
+.share-dialog{background:var(--bg2);border:1px solid var(--bg4);border-radius:16px;padding:24px;width:min(480px,92vw);box-shadow:0 20px 60px rgba(0,0,0,.4);animation:sv-fadein .15s ease}
+.share-dialog-title{font-size:15px;font-weight:700;color:var(--fg);margin-bottom:4px}
+.share-dialog-sub{font-size:12px;color:var(--fg3);margin-bottom:16px}
+.share-dialog-row{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+.share-dialog-url{flex:1;padding:8px 10px;background:var(--bg);border:1px solid var(--bg4);border-radius:8px;color:var(--fg2);font-size:12px;font-family:var(--mono);outline:none;min-width:0}
+.share-dialog-copy{padding:7px 14px;background:var(--accent-dim);color:var(--accent2);border:1px solid rgba(42,176,144,.3);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.share-dialog-copy:hover{background:rgba(42,176,144,.2)}
+.share-dialog-copy.copied{background:rgba(5,150,105,.2);color:#10b981;border-color:#10b981}
+.share-dialog-embed{width:100%;padding:8px 10px;background:var(--bg);border:1px solid var(--bg4);border-radius:8px;color:var(--fg2);font-size:11px;font-family:var(--mono);resize:none;outline:none;margin-bottom:12px}
+.share-dialog-actions{display:flex;justify-content:flex-end;gap:8px}
+.share-dialog-close{padding:7px 16px;background:var(--bg3);color:var(--fg2);border:1px solid var(--bg4);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer}
+.share-dialog-close:hover{background:var(--bg4)}
+
 /* ── Agent steps & tool calls ───────────– */
 .step-card{background:var(--bg3);border:1px solid var(--bg4);border-radius:var(--radius);padding:12px 16px;margin:8px 0;font-size:13px}
 .step-card .step-hdr{display:flex;align-items:center;gap:6px;color:var(--accent);font-weight:600;margin-bottom:4px;font-size:12px;text-transform:uppercase;letter-spacing:.3px}

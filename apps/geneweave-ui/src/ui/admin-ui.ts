@@ -124,6 +124,76 @@ async function startKaggleCompetitionRun(
   }
 }
 
+  /** Phase 6: Toggle live artifact config from admin panel. */
+  async function configureLiveArtifact(artifactId: string | undefined): Promise<void> {
+    if (!artifactId) return;
+    // Check if live config already exists
+    const check = await fetch(`/api/admin/artifacts/${artifactId}/live-config`);
+    if (check.ok) {
+      // Already live — offer to remove
+      if (!confirm('This artifact is already configured as Live.\n\nRemove the live configuration (make it static)?')) return;
+      const del = await fetch(`/api/admin/artifacts/${artifactId}/live-config`, { method: 'DELETE' });
+      if (del.ok) { alert('Live configuration removed. The artifact is now static.'); }
+      else { alert(`Failed to remove live config: ${await del.text()}`); }
+      return;
+    }
+    // Not live — prompt for config
+    const intervalStr = prompt('Auto-refresh interval in seconds (0 = manual only):', '60');
+    if (intervalStr === null) return; // cancelled
+    const interval = parseInt(intervalStr, 10) || 0;
+    const ttlStr = prompt('Cache TTL in seconds (skip refresh if refreshed within this window):', '30');
+    if (ttlStr === null) return;
+    const ttl = parseInt(ttlStr, 10) || 30;
+    const res = await fetch(`/api/admin/artifacts/${artifactId}/live-config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshIntervalSeconds: interval, cacheTtlSeconds: ttl }),
+    });
+    if (res.ok) {
+      alert(`Artifact is now Live!\n\nAuto-refresh: ${interval > 0 ? interval + 's' : 'manual only'}\nCache TTL: ${ttl}s\n\nUse the render-live endpoint to see the refresh toolbar.`);
+    } else {
+      alert(`Failed to configure live artifact: ${await res.text()}`);
+    }
+  }
+
+  async function getAdminCsrfToken(): Promise<string> {
+    try {
+      const r = await fetch('/api/auth/me');
+      if (r.ok) { const d = await r.json() as { csrfToken?: string }; return d.csrfToken ?? ''; }
+    } catch { /* ignore */ }
+    return '';
+  }
+
+  async function shareArtifact(artifactId: string | undefined): Promise<void> {
+    if (!artifactId) return;
+    const csrf = await getAdminCsrfToken();
+    const r = await fetch(`/api/artifacts/${artifactId}/share`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+      body: JSON.stringify({}),
+    });
+    if (!r.ok) { alert(`Failed to create share link: ${await r.text()}`); return; }
+    const d = await r.json() as { url?: string };
+    if (d.url) {
+      const url = d.url;
+      prompt('Share link (copy it):', url);
+      if (navigator.clipboard) navigator.clipboard.writeText(url).catch(() => {});
+    }
+  }
+
+  async function getArtifactEmbedCode(artifactId: string | undefined): Promise<void> {
+    if (!artifactId) return;
+    const r = await fetch(`/api/artifacts/${artifactId}/embed-code`);
+    if (!r.ok) { alert(`Failed to get embed code: ${await r.text()}`); return; }
+    const d = await r.json() as { embedCode?: string };
+    if (d.embedCode) {
+      const copied = prompt('Embed code (copy the iframe):', d.embedCode);
+      if (copied !== null && navigator.clipboard) {
+        navigator.clipboard.writeText(d.embedCode).catch(() => {});
+      }
+    }
+  }
+
   function getVisibleCols(tab: string, schemaCols: string[]): string[] {
     const config: Record<string, string[]> = (state as any)._adminColConfig || {};
     const saved = config[tab];
@@ -631,6 +701,70 @@ export function renderAdminForm(
         : null,
       isEdit && !schema.readOnly && onDelete
         ? h('button', { className: 'admin-form-btn admin-form-btn-delete', onClick: onDelete }, 'Delete')
+        : null,
+      isEdit && tab === 'artifacts'
+        ? h('button', {
+            className: 'admin-form-btn admin-form-btn-save',
+            title: 'Preview artifact in sandboxed iframe (Phase 5)',
+            onClick: () => {
+              const id = (state.adminForm as any)?.['id'] as string | undefined;
+              if (!id) return;
+              // Open a centered preview window for the render endpoint
+              const w = Math.min(960, window.innerWidth - 80);
+              const h2 = Math.min(700, window.innerHeight - 80);
+              const left = Math.round((window.innerWidth - w) / 2);
+              const top2 = Math.round((window.innerHeight - h2) / 2);
+              window.open(
+                `/api/admin/artifacts/${id}/render`,
+                'artifact-preview',
+                `width=${w},height=${h2},left=${left},top=${top2},scrollbars=yes,resizable=yes`,
+              );
+            },
+          }, '👁 Preview')
+        : null,
+      isEdit && tab === 'artifacts'
+        ? h('button', {
+            className: 'admin-form-btn',
+            title: 'Phase 6: Toggle live data refresh configuration for this artifact',
+            onClick: () => {
+              const id = (state.adminForm as any)?.['id'] as string | undefined;
+              void configureLiveArtifact(id);
+            },
+          }, '📡 Configure Live')
+        : null,
+      isEdit && tab === 'artifacts'
+        ? h('button', {
+            className: 'admin-form-btn',
+            title: 'Phase 7: Download artifact file with proper MIME type',
+            onClick: () => {
+              const id = (state.adminForm as any)?.['id'] as string | undefined;
+              if (!id) return;
+              const a = document.createElement('a');
+              a.href = `/api/artifacts/${id}/download`;
+              a.download = '';
+              a.click();
+            },
+          }, '⬇ Download')
+        : null,
+      isEdit && tab === 'artifacts'
+        ? h('button', {
+            className: 'admin-form-btn',
+            title: 'Phase 7: Create a shareable public link for this artifact',
+            onClick: () => {
+              const id = (state.adminForm as any)?.['id'] as string | undefined;
+              void shareArtifact(id);
+            },
+          }, '🔗 Share')
+        : null,
+      isEdit && tab === 'artifacts'
+        ? h('button', {
+            className: 'admin-form-btn',
+            title: 'Phase 7: Get HTML iframe embed code for this artifact',
+            onClick: () => {
+              const id = (state.adminForm as any)?.['id'] as string | undefined;
+              void getArtifactEmbedCode(id);
+            },
+          }, '</> Embed')
         : null,
       isEdit && tab === 'kaggle-competitions'
         ? h('button', {
