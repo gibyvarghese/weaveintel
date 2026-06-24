@@ -239,3 +239,89 @@ describe('applyInvalidation', () => {
     expect(await store.has('chat:123')).toBe(false);
   });
 });
+
+// ─── Long & complex content ──────────────────────────────────
+// Exercises the store and key builder with the kind of large, structured payloads a real
+// LLM cache holds — long prompts, multi-KB responses, deeply nested objects — rather than
+// the toy 'hello world' values above.
+
+// A long, complicated prompt: prose + fenced code + embedded JSON.
+const LONG_PROMPT = [
+  'Given the service below, write a load-shedding middleware that rejects requests with a 429',
+  'once the in-flight count exceeds a budget, emitting structured logs and a Retry-After header.',
+  '```ts',
+  'app.use(async (req, res, next) => {',
+  '  if (inflight > BUDGET) return res.status(429).set("Retry-After", "1").end();',
+  '  inflight++; try { await next(); } finally { inflight--; }',
+  '});',
+  '```',
+  'Config: { "budget": 100, "window_ms": 1000, "burst": 20, "shed_strategy": "newest-first" }',
+  'Explain the trade-off between newest-first and oldest-first shedding under sustained overload.',
+].join('\n');
+
+describe('weaveInMemoryCacheStore — long & complex payloads', () => {
+  it('round-trips a multi-KB string value byte-for-byte', async () => {
+    const store = weaveInMemoryCacheStore();
+    const huge = `${LONG_PROMPT}\n`.repeat(2_000); // ~1 MB of text
+    await store.set('k', huge, 60_000);
+    const out = await store.get<string>('k');
+    expect(out).toBe(huge);
+    expect(out!.length).toBe(huge.length);
+  });
+
+  it('round-trips a deeply nested structured response intact', async () => {
+    const store = weaveInMemoryCacheStore();
+    const response = {
+      prompt: LONG_PROMPT,
+      choices: Array.from({ length: 50 }, (_, i) => ({
+        index: i,
+        message: { role: 'assistant', content: `answer chunk ${i} `.repeat(40) },
+        logprobs: Array.from({ length: 20 }, (_, j) => ({ token: `t${j}`, lp: -(i + j) / 100 })),
+      })),
+      usage: { prompt_tokens: 1234, completion_tokens: 5678, nested: { a: { b: { c: [1, 2, 3] } } } },
+    };
+    await store.set('resp', response, 60_000);
+    const out = await store.get<typeof response>('resp');
+    expect(out!.choices).toHaveLength(50);
+    expect(out!.choices[49]!.logprobs).toHaveLength(20);
+    expect(out!.usage.nested.a.b.c).toEqual([1, 2, 3]);
+    expect(out!.prompt).toBe(LONG_PROMPT);
+  });
+
+  it('stores many large entries without corrupting cross-key values', async () => {
+    const store = weaveInMemoryCacheStore();
+    for (let i = 0; i < 100; i++) {
+      await store.set(`k${i}`, { i, body: `${LONG_PROMPT} :: serial ${i}` }, 60_000);
+    }
+    // Every key retrieves its OWN value — no aliasing across large payloads.
+    for (let i = 0; i < 100; i++) {
+      expect((await store.get<{ i: number }>(`k${i}`))!.i).toBe(i);
+    }
+  });
+});
+
+describe('weaveCacheKeyBuilder — long & complex prompts (hashed)', () => {
+  const kb = weaveCacheKeyBuilder({ namespace: 'gw', hash: 'sha256', salt: 's3cr3t', version: 'v1' });
+
+  it('produces a bounded, fixed-length key regardless of prompt size', () => {
+    const small = kb.build({ model: 'gpt', prompt: 'hi' });
+    const large = kb.build({ model: 'gpt', prompt: `${LONG_PROMPT}\n`.repeat(5_000) });
+    // A 64-hex digest — a multi-MB prompt does not bloat the key.
+    expect(large).toMatch(/^gw:v1:[0-9a-f]{64}$/);
+    expect(large.length).toBe(small.length);
+  });
+
+  it('is deterministic for a long complex prompt and never embeds its content', () => {
+    const k1 = kb.build({ model: 'gpt', prompt: LONG_PROMPT });
+    const k2 = kb.build({ prompt: LONG_PROMPT, model: 'gpt' }); // different field order
+    expect(k1).toBe(k2);
+    expect(k1).not.toContain('load-shedding');
+    expect(k1).not.toContain('Retry-After');
+  });
+
+  it('flips the key when a single embedded config value changes (no over-caching)', () => {
+    const k1 = kb.build({ prompt: LONG_PROMPT });
+    const k2 = kb.build({ prompt: LONG_PROMPT.replace('"budget": 100', '"budget": 250') });
+    expect(k1).not.toBe(k2);
+  });
+});

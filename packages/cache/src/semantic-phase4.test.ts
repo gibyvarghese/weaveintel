@@ -151,3 +151,113 @@ describe('cosineSimilarity', () => {
     expect(cosineSimilarity([0, 0], [0, 0])).toBe(0); // no NaN
   });
 });
+
+// ─── Long & complex content ──────────────────────────────────
+// Caches in production rarely see "capital of France" — they see multi-paragraph prompts
+// with embedded code, JSON and logs. A higher-dimension TF embed keeps these robust (the
+// 96-dim bag-of-words above collides too much on long text to assert exact thresholds).
+
+function tfEmbed(text: string): number[] {
+  const dim = 1024;
+  const v = new Array(dim).fill(0);
+  for (const tok of text.toLowerCase().match(/[a-z0-9]+/g) ?? []) {
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < tok.length; i++) { h ^= tok.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    v[h % dim] += 1;
+  }
+  return v;
+}
+const tf = async (t: string) => tfEmbed(t);
+
+// A long, complicated prompt: prose + a fenced code block + an embedded JSON payload.
+const LONG_PROMPT = [
+  'Refactor the following ingestion handler so that it validates the incoming event against the',
+  'schema, deduplicates on event_id, and writes idempotently to the warehouse. Keep the retry and',
+  'backoff behaviour and preserve the existing structured logging. Here is the current code and a',
+  'representative payload that flows through it during the nightly backfill job:',
+  '```ts',
+  'async function ingest(evt: ClickEvent): Promise<void> {',
+  '  const ok = validate(evt);                 // throws on bad shape',
+  '  if (await seen(evt.event_id)) return;     // dedup',
+  '  await retry(() => warehouse.upsert(evt)); // exactly-once target',
+  '  log.info("ingested", { id: evt.event_id, type: evt.type });',
+  '}',
+  '```',
+  'A sample event:',
+  '{ "event_id": "e-9f3a21", "user_id": "u-4471", "ts": "2026-03-01T10:02:11Z",',
+  '  "type": "add_to_cart", "sku": "A-77", "qty": 2, "price_cents": 1899 }',
+  'Explain where idempotency is actually enforced and what happens on a duplicate redelivery.',
+].join('\n');
+
+describe('weaveSemanticCache — long & complex content', () => {
+  it('round-trips a long multi-paragraph prompt with embedded code/JSON verbatim', async () => {
+    const sc = weaveSemanticCache({ embed: tf, defaultThreshold: 0.95 });
+    const response = { plan: ['validate', 'dedup', 'upsert'], notes: 'idempotency at the upsert' };
+    await sc.store(LONG_PROMPT, response);
+    const hit = await sc.find(LONG_PROMPT); // identical text → cosine 1.0
+    expect(hit).toBeTruthy();
+    expect(hit!.similarity).toBeCloseTo(1, 5);
+    expect(hit!.response).toEqual(response);
+  });
+
+  it('returns a large structured response object intact', async () => {
+    const sc = weaveSemanticCache({ embed: tf, defaultThreshold: 0.9 });
+    // A big nested response — the kind a real model returns for a complex prompt.
+    const big = {
+      summary: 'x'.repeat(5_000),
+      steps: Array.from({ length: 200 }, (_, i) => ({ i, detail: `step ${i} `.repeat(20) })),
+      nested: { deep: { deeper: { value: Array.from({ length: 500 }, (_, i) => i) } } },
+    };
+    await sc.store(LONG_PROMPT, big);
+    const hit = await sc.find(LONG_PROMPT);
+    expect((hit!.response as typeof big).steps).toHaveLength(200);
+    expect((hit!.response as typeof big).nested.deep.deeper.value).toHaveLength(500);
+    expect((hit!.response as typeof big).summary.length).toBe(5_000);
+  });
+
+  it('matches a paraphrase of a long prompt above a moderate threshold', async () => {
+    const sc = weaveSemanticCache({ embed: tf, defaultThreshold: 0.6 });
+    await sc.store(LONG_PROMPT, { answer: 'idempotency lives at the warehouse upsert' });
+    // Same intent, reworded prose, identical embedded code/JSON anchors the similarity.
+    const paraphrase = LONG_PROMPT
+      .replace('Refactor the following ingestion handler', 'Please rework the ingestion handler below')
+      .replace('Explain where idempotency is actually enforced', 'Tell me where idempotency is really enforced');
+    const hit = await sc.find(paraphrase);
+    expect(hit).toBeTruthy();
+    expect((hit!.response as any).answer).toContain('idempotency');
+  });
+
+  it('does NOT collide two long prompts that differ only in a critical embedded id (strict gate)', async () => {
+    const sc = weaveSemanticCache({ embed: tf, defaultThreshold: 0.999 });
+    const userA = LONG_PROMPT; // event for u-4471
+    const userB = LONG_PROMPT.replace('u-4471', 'u-9988').replace('e-9f3a21', 'e-0012b34');
+    await sc.store(userA, { owner: 'u-4471' });
+    // A near-identical long prompt for a different user must not serve the first user's cached
+    // answer — a strict threshold guards against leaking across the one differing token.
+    const hit = await sc.find(userB);
+    expect(hit).toBeNull();
+  });
+
+  it('isolates a long prompt carrying a secret across tenant scopes', async () => {
+    const sc = weaveSemanticCache({ embed: tf, defaultThreshold: 0.5 });
+    const promptWithSecret = `${LONG_PROMPT}\nInternal note: db password is hunter2-prod-4471.`;
+    await sc.store(promptWithSecret, { secret: 'TENANT_A_ONLY' }, { scope: 't=A' });
+    expect(await sc.find(promptWithSecret, { scope: 't=B' })).toBeNull(); // no cross-tenant leak
+    expect((await sc.find(promptWithSecret, { scope: 't=A' }))!.response).toEqual({ secret: 'TENANT_A_ONLY' });
+  });
+
+  it('does not re-embed a repeated long prompt (embedding cache)', async () => {
+    const spy = vi.fn(async (t: string) => tfEmbed(t));
+    const sc = weaveSemanticCache({ embed: spy, defaultThreshold: 0.9 });
+    await sc.store(LONG_PROMPT, { v: 1 }); // embed #1
+    await sc.find(LONG_PROMPT);            // cached embed
+    await sc.find(LONG_PROMPT);            // cached embed
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays bounded under a flood of distinct long prompts', async () => {
+    const sc = weaveSemanticCache({ embed: tf, defaultThreshold: 0.99, maxEntries: 100 });
+    for (let i = 0; i < 1_000; i++) await sc.store(`${LONG_PROMPT}\nrequest serial number ${i}`, { i });
+    expect(await sc.size()).toBeLessThanOrEqual(100);
+  });
+});
