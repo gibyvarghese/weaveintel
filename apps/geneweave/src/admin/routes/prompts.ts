@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { newUUIDv7, weaveContext } from '@weaveintel/core';
+import { emitCacheEvent } from '../../cache-invalidator.js';
 import {
   renderPromptRecord,
   resolvePromptRecordForExecution,
@@ -111,6 +112,8 @@ export function registerAdminPromptRoutes(
     if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
     await db.updatePrompt(params['id']!, toDbUpdate(fields));
     if (body['is_default']) await clearDefaultPromptExcept(db, params['id']!);
+    // Phase 5: a prompt-template change invalidates cached responses (event-driven).
+    await emitCacheEvent('prompt_update', { promptId: params['id'] });
     const prompt = await db.getPrompt(params['id']!);
     json(res, 200, { prompt });
   }, { auth: true, csrf: true });

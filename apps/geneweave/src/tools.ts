@@ -901,6 +901,13 @@ export interface ToolRegistryOptions {
    */
   scopeGuard?: import('./scope-guard-registry.js').ScopeGuardCallbacks;
   /**
+   * Cache Phase 6 — opt-in tool-result caching. When set, each tool's result is
+   * cached per the DB-driven `tool_cache_policies` (per-tool TTL). Applied as the
+   * INNERMOST registry wrapper so authorization/scope/rate-limit checks still run
+   * on every call; only the underlying `invoke()` is skipped on a cache hit.
+   */
+  toolResultCache?: import('./tool-cache-registry.js').ToolResultCacheCallbacks;
+  /**
    * Artifact persistence callback. When set, the `emit_artifact` built-in tool
    * is available to all agents. Called with the artifact payload; returns the
    * saved row's id and version.
@@ -1636,8 +1643,17 @@ export async function createToolRegistry(toolNames: string[], customTools?: Tool
     }
   }
 
-  // Phase 2: wrap with policy enforcement when a resolver is provided.
   let finalRegistry: ToolRegistry = registry;
+
+  // Cache Phase 6: tool-result caching is the INNERMOST wrapper (closest to the
+  // real tool) so policy/scope/rate-limit checks below still run on every call;
+  // only the underlying invoke() is skipped on a hit.
+  if (opts?.toolResultCache) {
+    const { wrapWithToolResultCache } = await import('./tool-cache-registry.js');
+    finalRegistry = wrapWithToolResultCache(finalRegistry, opts.toolResultCache);
+  }
+
+  // Phase 2: wrap with policy enforcement when a resolver is provided.
   if (opts?.policyResolver) {
     finalRegistry = createPolicyEnforcedRegistry(finalRegistry, {
       resolver: opts.policyResolver,

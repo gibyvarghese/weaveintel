@@ -39,7 +39,7 @@ import { newUUIDv7 } from './uuid.js';
 import type { ModelHealth } from './routing.js';
 import type { SemanticMemory, WorkingMemory, MemoryStore } from './memory.js';
 import type { IdentityContext, DelegationContext, AccessDecision, PermissionDescriptor } from './identity.js';
-import type { CacheStore, SemanticCache } from './cache.js';
+import type { CacheStore, SemanticCache, CacheMetrics } from './cache.js';
 
 /**
  * Cross-cutting runtime capabilities. Used with `runtime.has(cap)` and
@@ -210,15 +210,23 @@ export interface RuntimeCacheSlot {
   invalidate(key: string): Promise<void>;
   /**
    * Semantic similarity lookup. When a `SemanticCache` is wired, returns the
-   * cached response whose stored query embedding is within `threshold` cosine
-   * similarity of `embedding`. Returns `null` when no match exceeds the
-   * threshold or when no semantic cache is configured.
+   * cached response for the most semantically-similar past `query` within
+   * `scope`, above `threshold`. Query-first (the previous embedding-first form
+   * could not match stored query embeddings). Returns `null` on no match or when
+   * no semantic cache is configured.
    */
-  semanticGet?(embedding: number[], threshold?: number): Promise<unknown>;
+  semanticGet?(query: string, opts?: { scope?: string; threshold?: number }): Promise<unknown>;
   /** Raw `CacheStore` for consumers that need the full API (`has`, `clear`, `size`). */
   readonly store: CacheStore;
   /** Raw `SemanticCache` for consumers that need `store` / `invalidate` control. */
   readonly semanticStore?: SemanticCache;
+  /**
+   * Phase 3 — live cache effectiveness metrics (response-cache hit rate +
+   * prompt-cache token/cost savings). Present when a metrics sink is wired via
+   * `createRuntimeCacheAdapter(store, semanticCache?, metrics?)`. Read a
+   * snapshot with `metrics.snapshot()`.
+   */
+  readonly metrics?: CacheMetrics;
 }
 
 /**

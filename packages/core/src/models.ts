@@ -108,6 +108,20 @@ export interface ModelRequest {
   readonly stop?: readonly string[];
   readonly stream?: boolean;
   readonly metadata?: Record<string, unknown>;
+  /**
+   * Provider-native prompt caching hint. When set, the provider caches the
+   * stable prefix (tools + system) so repeated requests sharing that prefix pay
+   * the discounted cache-read rate (~90% off input on Anthropic).
+   *
+   * - Anthropic: applies an explicit `cache_control: ephemeral` breakpoint to
+   *   the system block (covering tools + system in render order).
+   * - OpenAI / Gemini: caching is automatic/implicit, so this is a no-op hint —
+   *   the benefit comes from a stable, static-first prefix.
+   *
+   * `ttl` selects the cache lifetime where the provider supports it
+   * (`'5m'` default, `'1h'` extended).
+   */
+  readonly promptCache?: { readonly ttl?: '5m' | '1h' };
 }
 
 export interface ModelResponse {
@@ -126,6 +140,19 @@ export interface TokenUsage {
   readonly completionTokens: number;
   readonly totalTokens: number;
   readonly reasoningTokens?: number;
+  /**
+   * Input tokens served from the provider's prompt cache at the discounted
+   * read rate (Anthropic `cache_read_input_tokens`, OpenAI
+   * `prompt_tokens_details.cached_tokens`, Gemini `cachedContentTokenCount`).
+   * Present and > 0 indicates a prompt-cache hit. Included within `promptTokens`.
+   */
+  readonly cacheReadTokens?: number;
+  /**
+   * Input tokens written to the provider's prompt cache at the write rate on a
+   * cache miss (Anthropic `cache_creation_input_tokens`). Included within
+   * `promptTokens`.
+   */
+  readonly cacheWriteTokens?: number;
 }
 
 // ─── Streaming ───────────────────────────────────────────────

@@ -669,8 +669,15 @@ export {
 // Cache contracts
 export {
   type CacheStore,
+  type ScannableCacheStore,
+  type ClosableCacheStore,
+  type CacheMetrics,
+  type CacheStatsSnapshot,
+  isScannableCacheStore,
   type SemanticCache,
   type SemanticCacheHit,
+  type SemanticCacheFindOptions,
+  type SemanticCacheStoreOptions,
   type CacheScopeType,
   type CachePolicy,
   type CacheKeyBuilder,

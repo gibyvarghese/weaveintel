@@ -103,3 +103,14 @@ export {
   type WeaveA2ASupervisor,
   type A2ATaskStore,
 } from './a2a-supervisor.js';
+// Phase 8: Agentic Plan Caching (G-10) — reuse structured plan templates.
+export {
+  createAgentPlanCache,
+  createPlanCacheMetrics,
+  type AgentPlan,
+  type AgentPlanCache,
+  type AgentPlanCacheOptions,
+  type AgentPlanCacheMetrics,
+  type PlanScopeOptions,
+  type PlanStoreOptions,
+} from './plan-cache.js';

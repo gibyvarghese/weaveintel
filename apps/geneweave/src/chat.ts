@@ -30,6 +30,7 @@ import type { ServerResponse } from 'node:http';
 import type {
   Model, ModelRequest, ModelResponse, StreamChunk, ExecutionContext, Message,
   Tool, ToolRegistry, AgentStepEvent, AgentStep, AgentResult, EventBus, Agent,
+  CacheStore, CacheKeyBuilder,
 } from '@weaveintel/core';
 import { weaveContext, weaveEventBus, EventTypes } from '@weaveintel/core';
 import { weaveAgent, weaveEnsemble, createVoteResolver, createArbiterResolver, createHumanTaskInterruptHandler, createWorkerRegistry } from '@weaveintel/agents';
@@ -45,6 +46,9 @@ import {
 import type { GuardrailCategorySummary } from '@weaveintel/guardrails';
 import type { DatabaseAdapter, MessageRow, ChatSettingsRow, GuardrailRow, HumanTaskPolicyRow, PromptRow, RoutingPolicyRow } from './db.js';
 import { BUILTIN_TOOLS, createToolRegistry, type ToolRegistryOptions } from './tools.js';
+import { makeToolCachePolicyResolver } from './tool-cache-registry.js';
+import { getActiveSingleflight, loadStampedeConfig } from './cache-stampede.js';
+import { planCacheLookupGuidance, planCacheStoreFromResult } from './agent-plan-cache.js';
 import { DbToolPolicyResolver, DbToolRateLimiter, consoleAuditEmitter } from './tool-policy-resolver.js';
 import { DbToolAuditEmitter } from './tool-audit-emitter.js';
 import { DbToolApprovalGate } from './tool-approval-gate.js';
@@ -65,6 +69,10 @@ import {
 } from '@weaveintel/resilience';
 import { weaveInMemoryCacheStore } from '@weaveintel/cache';
 import { weaveCacheKeyBuilder } from '@weaveintel/cache';
+import { estimatePromptCacheSavingsUsd } from '@weaveintel/cache';
+import type { CacheTurnMetrics } from './chat-send-message.js';
+import { loadSemanticConfig } from './chat-semantic-utils.js';
+import { loadCacheKeyVersion } from './cache-invalidator.js';
 import { shouldBypass } from '@weaveintel/cache';
 import { loadEnterpriseTools, loadEnterpriseToolGroups, type EnterpriseToolGroup } from './chat-enterprise-tools-utils.js';
 import {
@@ -197,10 +205,20 @@ export async function buildSupervisorAdditionalTools(
 
 export class ChatEngine {
   private readonly healthTracker: RuntimeRoutingSlot;
-  private readonly responseCache: ReturnType<typeof weaveInMemoryCacheStore>;
-  private readonly cacheKeyBuilder = weaveCacheKeyBuilder({ namespace: 'gw-chat' });
+  // Phase 1: the shared store may be a tiered L1+L2 (Redis) store — typed as the
+  // base CacheStore since the chat path only needs get/set.
+  private readonly responseCache: CacheStore;
+  // Phase 0: salted SHA-256 keys so raw prompts (PII, unbounded length,
+  // delimiter-injection collisions) never appear in cache keys. The salt comes
+  // from GENEWEAVE_CACHE_KEY_SALT (falls back to JWT_SECRET, then a constant).
+  // Phase 1: the version segment is the DB-driven global_version_token
+  // (config.cacheKeyVersion) — bumping it invalidates every cache key at once.
+  private readonly cacheKeyBuilder: CacheKeyBuilder;
   private pricingCache: PricingCache | null = null;
   private policyPromptCache: PolicyPromptCache | null = null;
+  // Phase 3 — whether to write the durable cache_metrics rollup (admin-tunable
+  // via cache_settings.metrics_enabled; defaults on, refreshed at construction).
+  private metricsEnabled = true;
   private readonly toolOptions: ToolRegistryOptions;
 
   private async getPolicyPromptTemplates(): Promise<Map<string, string>> {
@@ -287,6 +305,14 @@ export class ChatEngine {
     // Phase 7: share the runtime's warm response cache so all subsystems
     // (live-agent handlers, tools, chat path) benefit from the same entries.
     this.responseCache = config.runtime?.cache?.store ?? weaveInMemoryCacheStore();
+    this.cacheKeyBuilder = weaveCacheKeyBuilder({
+      namespace: 'gw-chat',
+      hash: 'sha256',
+      salt: process.env['GENEWEAVE_CACHE_KEY_SALT'] ?? process.env['JWT_SECRET'] ?? 'gw-cache-v1',
+      version: config.cacheKeyVersion ?? process.env['GENEWEAVE_CACHE_KEY_VERSION'] ?? 'v1',
+    });
+    // Phase 3: refresh the metrics-enabled flag from cache_settings (best-effort).
+    this.db.getCacheSettings?.().then((s) => { if (s) this.metricsEnabled = s.metrics_enabled !== 0; }).catch(() => { /* default on */ });
     // Scope isolation: load policies once per ChatEngine instance and cache.
     // callerScope is always overridden per-worker in buildWorkersFromDb();
     // the 'system' default covers the supervisor and all non-DB-worker contexts.
@@ -329,6 +355,17 @@ export class ChatEngine {
       ...(config.runtime ? { runtime: config.runtime } : {}),
       // Scope isolation: enforce cross-scope tool access policies.
       scopeGuard,
+      // Cache Phase 6: opt-in tool-result caching driven by tool_cache_policies.
+      // Shares the response-cache store (unified invalidation) but a dedicated
+      // metrics sink. callerScope/version are stable for the engine's lifetime.
+      ...(config.toolCache ? {
+        toolResultCache: {
+          store: config.toolCache.store,
+          getPolicy: makeToolCachePolicyResolver(db),
+          ...(config.toolCache.version ? { keyPrefix: config.toolCache.version } : {}),
+          metrics: config.toolCache.metrics,
+        } as import('./tool-cache-registry.js').ToolResultCacheCallbacks,
+      } : {}),
       // m77: Wire artifact persistence so emit_artifact tool can persist outputs.
       ...(db.saveArtifact ? {
         artifactSave: async (input: import('./db-types/artifacts.js').ArtifactSaveInput) => {
@@ -606,6 +643,32 @@ export class ChatEngine {
   }
 
   /**
+   * Phase 3 — record a turn's cache effectiveness. Feeds the live, process-wide
+   * metrics sink (response hit/miss are counted automatically by `withMetrics`;
+   * here we add the prompt-cache token savings) and the durable per-window
+   * `cache_metrics` rollup that the admin dashboard reads. Best-effort.
+   */
+  private recordCacheMetrics(turn: CacheTurnMetrics): void {
+    const costSaved = estimatePromptCacheSavingsUsd(turn.provider, turn.promptCacheReadTokens, turn.inputCostPer1M);
+    try {
+      this.config.runtime?.cache?.metrics?.recordPromptCache({
+        readTokens: turn.promptCacheReadTokens,
+        writeTokens: turn.promptCacheWriteTokens,
+        costSavedUsd: costSaved,
+      });
+    } catch { /* live sink is best-effort */ }
+    if (this.metricsEnabled) {
+      this.db.recordCacheMetrics({
+        responseHits: turn.responseHit ? 1 : 0,
+        responseMisses: turn.responseEligible && !turn.responseHit ? 1 : 0,
+        promptCacheReadTokens: turn.promptCacheReadTokens,
+        promptCacheWriteTokens: turn.promptCacheWriteTokens,
+        costSavedUsd: costSaved,
+      }).catch(() => { /* durable rollup is best-effort — never block the turn */ });
+    }
+  }
+
+  /**
    * Shared implementation for the `memory_forget` tool callback.
    * Removes the named entity from entity memory AND any semantic memory
    * entry whose stored text contains `entityName` (case-insensitive
@@ -682,6 +745,13 @@ export class ChatEngine {
         this.recordModelOutcome(modelIdArg, providerIdArg, latencyMsArg, successArg, errMsg),
       safeParseJson: (text) => this.safeParseJson(text),
       consentManager: this.consentManager,
+      recordCacheMetrics: (turn) => this.recordCacheMetrics(turn),
+      semanticCache: this.config.runtime?.cache?.semanticStore,
+      loadSemanticConfig: () => loadSemanticConfig(this.db),
+      loadCacheVersion: () => loadCacheKeyVersion(this.db),
+      // Phase 7: stampede protection + DB-driven stampede/negative config.
+      singleflight: getActiveSingleflight(),
+      loadStampedeConfig: () => loadStampedeConfig(this.db),
     };
 
     return sendMessageImpl(deps, userId, chatId, content, opts);
@@ -704,6 +774,8 @@ export class ChatEngine {
         config: this.config,
         db: this.db,
         healthTracker: this.healthTracker,
+        responseCache: this.responseCache,
+        cacheKeyBuilder: this.cacheKeyBuilder,
         getAvailableModels: () => this.getAvailableModels(),
         withResponseCardFormatPolicy: (basePrompt) => this.withResponseCardFormatPolicy(basePrompt),
         streamAgent: (resArg, ctx, model, userIdArg, chatIdArg, userPersona, messages, userContent, settings, attachments, tenantIdArg) =>
@@ -716,6 +788,13 @@ export class ChatEngine {
         safeParseJson: (text) => this.safeParseJson(text),
         onPolicyChecks: this.onPolicyChecks,
         consentManager: this.consentManager,
+        recordCacheMetrics: (turn) => this.recordCacheMetrics(turn),
+        semanticCache: this.config.runtime?.cache?.semanticStore,
+        loadSemanticConfig: () => loadSemanticConfig(this.db),
+        loadCacheVersion: () => loadCacheKeyVersion(this.db),
+        // Phase 7: stampede protection + DB-driven stampede/negative config.
+        singleflight: getActiveSingleflight(),
+        loadStampedeConfig: () => loadStampedeConfig(this.db),
       },
       res,
       userId,
@@ -1381,6 +1460,10 @@ export class ChatEngine {
     const agentBus = weaveEventBus();
     const toolCallObserver = observeToolCallEvents(agentBus);
 
+    // Phase 8: Agentic Plan Caching — reuse a structured plan template from a
+    // semantically-similar past agent/supervisor task as planning guidance.
+    const planGuidance = await planCacheLookupGuidance(this.db, userContent, settings.mode, tenantId, userId);
+
     try {
       // H-12: delegate shared agent construction to buildAgentInstance().
       const { agent, systemPromptSha256, routedGoal, forceWorkerDataAnalysis, skillExecutionContracts } =
@@ -1389,14 +1472,17 @@ export class ChatEngine {
           enterpriseToolGroups, toolOptions, agentBus, hasEnterprise,
         });
 
+      const goalForRun = planGuidance ? `${planGuidance}\n\n${routedGoal}` : routedGoal;
       const result = await this.runWithCseSuccessGuard(
         agent,
         ctx,
         messages,
-        routedGoal,
+        goalForRun,
         forceWorkerDataAnalysis,
         skillExecutionContracts,
       );
+      // Phase 8: distill + store this run's plan for future similar tasks.
+      await planCacheStoreFromResult(this.db, userContent, result, settings.mode, tenantId, userId);
       return { result, toolCallEvents: toolCallObserver.events, systemPromptSha256 };
     } finally {
       toolCallObserver.dispose();
@@ -1465,6 +1551,10 @@ export class ChatEngine {
       }
     });
 
+    // Phase 8: Agentic Plan Caching — reuse a plan template from a similar past
+    // agent/supervisor task as planning guidance (both streaming + fallback).
+    const planGuidance = await planCacheLookupGuidance(this.db, userContent, settings.mode, tenantId, userId);
+
     try {
       // H-12: delegate shared agent construction to buildAgentInstance().
       const { agent, systemPromptSha256, routedGoal, forceWorkerDataAnalysis, skillExecutionContracts: skillExecutionContractsStream } =
@@ -1473,8 +1563,10 @@ export class ChatEngine {
           enterpriseToolGroups, toolOptions, agentBus, hasEnterprise,
         });
 
+    const goalForRun = planGuidance ? `${planGuidance}\n\n${routedGoal}` : routedGoal;
+
     if (forceWorkerDataAnalysis) {
-      const guarded = await this.runWithCseSuccessGuard(agent, ctx, messages, routedGoal, true, skillExecutionContractsStream);
+      const guarded = await this.runWithCseSuccessGuard(agent, ctx, messages, goalForRun, true, skillExecutionContractsStream);
       await this.writeSseEvent(res, { type: 'text', text: guarded.output });
       for (const step of guarded.steps) {
         await this.writeSseEvent(res, {
@@ -1483,12 +1575,13 @@ export class ChatEngine {
           phase: 'step_end',
         });
       }
+      await planCacheStoreFromResult(this.db, userContent, guarded, settings.mode, tenantId, userId);
       return { result: guarded, toolCallEvents: toolCallObserver.events, systemPromptSha256 };
     }
 
     // Try streaming mode first
     if (agent.runStream) {
-      const stream = agent.runStream(ctx, { messages, goal: routedGoal });
+      const stream = agent.runStream(ctx, { messages, goal: goalForRun });
       let finalResult: AgentResult | undefined;
 
       for await (const event of stream) {
@@ -1540,14 +1633,17 @@ export class ChatEngine {
         }
       }
 
-      if (finalResult) return { result: finalResult, toolCallEvents: toolCallObserver.events };
+      if (finalResult) {
+        await planCacheStoreFromResult(this.db, userContent, finalResult, settings.mode, tenantId, userId);
+        return { result: finalResult, toolCallEvents: toolCallObserver.events };
+      }
       // Stream ended without a 'done' event — log and fall through to the
       // non-streaming path rather than silently returning undefined output.
       log.warn('stream agent ended without done event, falling back to agent.run()');
     }
 
     // Fallback: non-streaming agent run, send result as single text event
-    const result = await agent.run(ctx, { messages, goal: routedGoal });
+    const result = await agent.run(ctx, { messages, goal: goalForRun });
     await this.writeSseEvent(res, { type: 'text', text: result.output });
 
     // Send step summaries
@@ -1559,6 +1655,7 @@ export class ChatEngine {
       });
     }
 
+    await planCacheStoreFromResult(this.db, userContent, result, settings.mode, tenantId, userId);
     return { result, toolCallEvents: toolCallObserver.events };
     } finally {
       screenshotUnsub?.();

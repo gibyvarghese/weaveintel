@@ -195,6 +195,14 @@ export function registerChatRoutes(
     const chat = await db.getChat(params['chatId']!, auth.userId);
     if (!chat) { json(res, 404, { error: 'Chat not found' }); return; }
     await db.deleteChat(params['chatId']!, auth.userId);
+    // Phase 5: session end → invalidate this user's cached entries (event-driven).
+    try {
+      const { emitCacheEvent } = await import('../cache-invalidator.js');
+      const { cacheScopeKeyString } = await import('@weaveintel/cache');
+      const actor = await db.getUserById(auth.userId);
+      const scopePrefix = cacheScopeKeyString({ tenantId: actor?.tenant_id ?? null, userId: auth.userId, scope: 'user' }) + '||';
+      await emitCacheEvent('session_end', { scopePrefix, userId: auth.userId });
+    } catch { /* best-effort */ }
     json(res, 200, { ok: true });
   }, { auth: true, csrf: true });
 

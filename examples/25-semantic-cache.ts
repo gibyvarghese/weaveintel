@@ -158,7 +158,7 @@ async function main() {
   await semanticCache.store(
     'What is the capital of France?',
     { answer: 'The capital of France is Paris.', model: 'gpt-4o-mini', tokens: 42 },
-    { category: 'geography', cachedBy: 'demo' },
+    { metadata: { category: 'geography', cachedBy: 'demo' } },
   );
   await semanticCache.store(
     'How does photosynthesis work?',
@@ -171,7 +171,7 @@ async function main() {
 
   // Simulate an incoming query — semantically similar to a cached entry
   const incomingQuery = 'Tell me about the capital city of France';
-  const hit = await semanticCache.find(incomingQuery, 0.85); // lower threshold for demo
+  const hit = await semanticCache.find(incomingQuery, { threshold: 0.85 }); // lower threshold for demo
 
   if (hit) {
     console.log(`Cache HIT for: "${incomingQuery}"`);
@@ -189,7 +189,7 @@ async function main() {
 
   // Test a clearly different query (expect miss)
   const missQuery = 'What is the weather like today in Auckland?';
-  const miss = await semanticCache.find(missQuery, 0.92);
+  const miss = await semanticCache.find(missQuery, { threshold: 0.92 });
   console.log(`\nCache ${miss ? 'HIT' : 'MISS'} for: "${missQuery}" (expected: MISS)`);
 
   // --- 5. Event-driven invalidation ---
@@ -233,13 +233,13 @@ async function main() {
   );
 
   console.log('\nBefore invalidation — looking up "French geography":');
-  const beforeInvalidate = await semanticCache.find('French geography', 0.75);
+  const beforeInvalidate = await semanticCache.find('French geography', { threshold: 0.75 });
   console.log(`  Cache hit: ${beforeInvalidate ? 'YES' : 'NO'}`);
 
   await semanticCache.invalidate('France geography');
 
   console.log('After invalidate("France geography") — looking up "French geography":');
-  const afterInvalidate = await semanticCache.find('French geography', 0.75);
+  const afterInvalidate = await semanticCache.find('French geography', { threshold: 0.75 });
   console.log(`  Cache hit: ${afterInvalidate ? 'YES' : 'NO (invalidated)'}`);
 
   // --- Summary ---

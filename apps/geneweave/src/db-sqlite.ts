@@ -1495,10 +1495,26 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   // ─── Admin: Model Pricing ──────────────────────────────────
 
+  /**
+   * Phase 2 — derive a provider-aware prompt-cache policy for a pricing row.
+   * Cloud providers that support provider-native prompt caching (Anthropic
+   * explicit, OpenAI/Gemini implicit) default to enabled; local providers
+   * (Ollama / llama.cpp) have no provider cache, so they default to disabled.
+   * An explicit value on the row always wins (admin / sync override).
+   */
+  private promptCacheCols(p: Omit<ModelPricingRow, 'created_at' | 'updated_at'>): [number, number, string] {
+    const supportsPromptCache = p.provider === 'anthropic' || p.provider === 'openai' || p.provider === 'google';
+    const enabled = p.prompt_cache_enabled != null ? p.prompt_cache_enabled : (supportsPromptCache ? 1 : 0);
+    const minTokens = p.prompt_cache_min_tokens ?? 1024;
+    const ttl = p.prompt_cache_ttl === '1h' ? '1h' : '5m';
+    return [enabled, minTokens, ttl];
+  }
+
   async createModelPricing(p: Omit<ModelPricingRow, 'created_at' | 'updated_at'>): Promise<void> {
+    const [pcEnabled, pcMin, pcTtl] = this.promptCacheCols(p);
     this.d.prepare(
-      `INSERT INTO model_pricing (id, model_id, provider, display_name, input_cost_per_1m, output_cost_per_1m, quality_score, source, last_synced_at, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(p.id, p.model_id, p.provider, p.display_name ?? null, p.input_cost_per_1m, p.output_cost_per_1m, p.quality_score, p.source, p.last_synced_at ?? null, p.enabled);
+      `INSERT INTO model_pricing (id, model_id, provider, display_name, input_cost_per_1m, output_cost_per_1m, quality_score, source, last_synced_at, enabled, prompt_cache_enabled, prompt_cache_min_tokens, prompt_cache_ttl) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(p.id, p.model_id, p.provider, p.display_name ?? null, p.input_cost_per_1m, p.output_cost_per_1m, p.quality_score, p.source, p.last_synced_at ?? null, p.enabled, pcEnabled, pcMin, pcTtl);
   }
 
   async getModelPricing(id: string): Promise<ModelPricingRow | null> {
@@ -1527,9 +1543,13 @@ export class SQLiteAdapter implements DatabaseAdapter {
   }
 
   async upsertModelPricing(p: Omit<ModelPricingRow, 'created_at' | 'updated_at'>): Promise<void> {
+    // On INSERT (new model from a sync), seed the provider-aware prompt-cache
+    // policy. On CONFLICT (existing model) we deliberately DO NOT overwrite the
+    // prompt_cache_* columns so an operator's tuning survives a pricing re-sync.
+    const [pcEnabled, pcMin, pcTtl] = this.promptCacheCols(p);
     this.d.prepare(
-      `INSERT INTO model_pricing (id, model_id, provider, display_name, input_cost_per_1m, output_cost_per_1m, quality_score, source, last_synced_at, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO model_pricing (id, model_id, provider, display_name, input_cost_per_1m, output_cost_per_1m, quality_score, source, last_synced_at, enabled, prompt_cache_enabled, prompt_cache_min_tokens, prompt_cache_ttl)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(model_id, provider) DO UPDATE SET
          display_name = excluded.display_name,
          input_cost_per_1m = excluded.input_cost_per_1m,
@@ -1538,7 +1558,7 @@ export class SQLiteAdapter implements DatabaseAdapter {
          source = excluded.source,
          last_synced_at = excluded.last_synced_at,
          updated_at = datetime('now')`,
-    ).run(p.id, p.model_id, p.provider, p.display_name ?? null, p.input_cost_per_1m, p.output_cost_per_1m, p.quality_score, p.source, p.last_synced_at ?? null, p.enabled);
+    ).run(p.id, p.model_id, p.provider, p.display_name ?? null, p.input_cost_per_1m, p.output_cost_per_1m, p.quality_score, p.source, p.last_synced_at ?? null, p.enabled, pcEnabled, pcMin, pcTtl);
   }
 
   // ─── Admin: Routing policies ───────────────────────────────
@@ -3485,8 +3505,14 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async createCachePolicy(p: Omit<CachePolicyRow, 'created_at' | 'updated_at'>): Promise<void> {
     this.d.prepare(
-      `INSERT INTO cache_policies (id, name, description, scope, ttl_ms, max_entries, bypass_patterns, invalidate_on, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(p.id, p.name, p.description ?? null, p.scope, p.ttl_ms, p.max_entries, p.bypass_patterns ?? null, p.invalidate_on ?? null, p.enabled);
+      `INSERT INTO cache_policies (id, name, description, scope, ttl_ms, max_entries, max_bytes, bypass_patterns, output_bypass_patterns, invalidate_on, key_hashing, tenant_isolation, cache_temperature_gate, swr_ms, negative_ttl_ms, eviction_policy, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      p.id, p.name, p.description ?? null, p.scope, p.ttl_ms, p.max_entries,
+      p.max_bytes ?? 0, p.bypass_patterns ?? null, p.output_bypass_patterns ?? null,
+      p.invalidate_on ?? null, p.key_hashing ?? 'sha256',
+      p.tenant_isolation ?? 1, p.cache_temperature_gate ?? 0,
+      p.swr_ms ?? 0, p.negative_ttl_ms ?? 0, p.eviction_policy ?? 'lru', p.enabled,
+    );
   }
 
   async getCachePolicy(id: string): Promise<CachePolicyRow | null> {
@@ -3512,6 +3538,150 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async deleteCachePolicy(id: string): Promise<void> {
     this.d.prepare('DELETE FROM cache_policies WHERE id = ?').run(id);
+  }
+
+  async getCacheSettings(): Promise<import('./db-types/admin.js').CacheSettingsRow | null> {
+    const row = this.d.prepare(`SELECT * FROM cache_settings WHERE id = 'global'`).get() as import('./db-types/admin.js').CacheSettingsRow | undefined;
+    return row ?? null;
+  }
+
+  // ─── Cache Invalidation Rules (Phase 5) ────────────────────
+  async createCacheInvalidationRule(r: Omit<import('./db-types/admin.js').CacheInvalidationRuleRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO cache_invalidation_rules (id, name, trigger, pattern, config, enabled) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(r.id, r.name, r.trigger, r.pattern ?? null, r.config ?? null, r.enabled);
+  }
+  async getCacheInvalidationRule(id: string): Promise<import('./db-types/admin.js').CacheInvalidationRuleRow | null> {
+    return (this.d.prepare('SELECT * FROM cache_invalidation_rules WHERE id = ?').get(id) as import('./db-types/admin.js').CacheInvalidationRuleRow) ?? null;
+  }
+  async listCacheInvalidationRules(): Promise<import('./db-types/admin.js').CacheInvalidationRuleRow[]> {
+    return this.d.prepare('SELECT * FROM cache_invalidation_rules ORDER BY trigger ASC, name ASC').all() as import('./db-types/admin.js').CacheInvalidationRuleRow[];
+  }
+  async updateCacheInvalidationRule(id: string, fields: Partial<Omit<import('./db-types/admin.js').CacheInvalidationRuleRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) { sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')"); vals.push(id);
+    this.d.prepare(`UPDATE cache_invalidation_rules SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async deleteCacheInvalidationRule(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM cache_invalidation_rules WHERE id = ?').run(id);
+  }
+
+  // ── Tool Cache Policies (Phase 6 opt-in tool-result caching) ──────────────
+  async createToolCachePolicy(r: Omit<import('./db-types/admin.js').ToolCachePolicyRow, 'created_at' | 'updated_at'>): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO tool_cache_policies (id, tool_name, cacheable, ttl_ms, enabled) VALUES (?, ?, ?, ?, ?)`,
+    ).run(r.id, r.tool_name, r.cacheable, r.ttl_ms, r.enabled);
+  }
+  async getToolCachePolicy(id: string): Promise<import('./db-types/admin.js').ToolCachePolicyRow | null> {
+    return (this.d.prepare('SELECT * FROM tool_cache_policies WHERE id = ?').get(id) as import('./db-types/admin.js').ToolCachePolicyRow) ?? null;
+  }
+  async listToolCachePolicies(): Promise<import('./db-types/admin.js').ToolCachePolicyRow[]> {
+    return this.d.prepare('SELECT * FROM tool_cache_policies ORDER BY tool_name ASC').all() as import('./db-types/admin.js').ToolCachePolicyRow[];
+  }
+  async updateToolCachePolicy(id: string, fields: Partial<Omit<import('./db-types/admin.js').ToolCachePolicyRow, 'id' | 'created_at' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = []; const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) { sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')"); vals.push(id);
+    this.d.prepare(`UPDATE tool_cache_policies SET ${sets.join(', ')} WHERE id = ?`).run(...vals);
+  }
+  async deleteToolCachePolicy(id: string): Promise<void> {
+    this.d.prepare('DELETE FROM tool_cache_policies WHERE id = ?').run(id);
+  }
+
+  async getSemanticCacheConfig(): Promise<import('./db-types/admin.js').SemanticCacheConfigRow | null> {
+    const row = this.d.prepare(`SELECT * FROM semantic_cache_config WHERE id = 'global'`).get() as import('./db-types/admin.js').SemanticCacheConfigRow | undefined;
+    return row ?? null;
+  }
+
+  async updateSemanticCacheConfig(fields: Partial<Omit<import('./db-types/admin.js').SemanticCacheConfigRow, 'id' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) { sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    this.d.prepare(`INSERT OR IGNORE INTO semantic_cache_config (id) VALUES ('global')`).run();
+    this.d.prepare(`UPDATE semantic_cache_config SET ${sets.join(', ')} WHERE id = 'global'`).run(...vals);
+  }
+
+  // ── Agent Plan Cache Config (Phase 8 single global row) ────────────────────
+  async getAgentPlanCacheConfig(): Promise<import('./db-types/admin.js').AgentPlanCacheConfigRow | null> {
+    const row = this.d.prepare(`SELECT * FROM agent_plan_cache_config WHERE id = 'global'`).get() as import('./db-types/admin.js').AgentPlanCacheConfigRow | undefined;
+    return row ?? null;
+  }
+  async updateAgentPlanCacheConfig(fields: Partial<Omit<import('./db-types/admin.js').AgentPlanCacheConfigRow, 'id' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) { sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    this.d.prepare(`INSERT OR IGNORE INTO agent_plan_cache_config (id) VALUES ('global')`).run();
+    this.d.prepare(`UPDATE agent_plan_cache_config SET ${sets.join(', ')} WHERE id = 'global'`).run(...vals);
+  }
+
+  /** Phase 3 — increment the current hourly cache_metrics rollup window. */
+  async recordCacheMetrics(delta: import('./db-types/admin.js').CacheMetricsDelta): Promise<void> {
+    const hits = Math.max(0, Math.trunc(delta.responseHits ?? 0));
+    const misses = Math.max(0, Math.trunc(delta.responseMisses ?? 0));
+    const readTok = Math.max(0, Math.trunc(delta.promptCacheReadTokens ?? 0));
+    const writeTok = Math.max(0, Math.trunc(delta.promptCacheWriteTokens ?? 0));
+    const saved = Math.max(0, Number(delta.costSavedUsd ?? 0)) || 0;
+    if (!hits && !misses && !readTok && !writeTok && !saved) return;
+    this.d.prepare(
+      `INSERT INTO cache_metrics (window_start, response_hits, response_misses, prompt_cache_read_tokens, prompt_cache_write_tokens, cost_saved_usd, updated_at)
+       VALUES (strftime('%Y-%m-%dT%H:00:00Z','now'), ?, ?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(window_start) DO UPDATE SET
+         response_hits = response_hits + excluded.response_hits,
+         response_misses = response_misses + excluded.response_misses,
+         prompt_cache_read_tokens = prompt_cache_read_tokens + excluded.prompt_cache_read_tokens,
+         prompt_cache_write_tokens = prompt_cache_write_tokens + excluded.prompt_cache_write_tokens,
+         cost_saved_usd = cost_saved_usd + excluded.cost_saved_usd,
+         updated_at = datetime('now')`,
+    ).run(hits, misses, readTok, writeTok, saved);
+  }
+
+  /** Phase 3 — aggregate cache metrics + recent windows for the admin dashboard. */
+  async getCacheMetrics(limit = 168): Promise<import('./db-types/admin.js').CacheMetricsSummary> {
+    const windows = this.d.prepare(
+      `SELECT * FROM cache_metrics ORDER BY window_start DESC LIMIT ?`,
+    ).all(Math.max(1, Math.min(1000, limit))) as import('./db-types/admin.js').CacheMetricsRow[];
+    const agg = this.d.prepare(
+      `SELECT
+         COALESCE(SUM(response_hits),0) AS h,
+         COALESCE(SUM(response_misses),0) AS m,
+         COALESCE(SUM(prompt_cache_read_tokens),0) AS rt,
+         COALESCE(SUM(prompt_cache_write_tokens),0) AS wt,
+         COALESCE(SUM(cost_saved_usd),0) AS cs
+       FROM cache_metrics`,
+    ).get() as { h: number; m: number; rt: number; wt: number; cs: number };
+    const lookups = agg.h + agg.m;
+    return {
+      totals: {
+        responseHits: agg.h,
+        responseMisses: agg.m,
+        hitRate: lookups > 0 ? agg.h / lookups : 0,
+        promptCacheReadTokens: agg.rt,
+        promptCacheWriteTokens: agg.wt,
+        costSavedUsd: agg.cs,
+      },
+      windows,
+    };
+  }
+
+  async updateCacheSettings(fields: Partial<Omit<import('./db-types/admin.js').CacheSettingsRow, 'id' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) {
+      sets.push(`${k} = ?`);
+      vals.push(v);
+    }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    // Upsert: ensure the single global row exists, then patch it.
+    this.d.prepare(`INSERT OR IGNORE INTO cache_settings (id) VALUES ('global')`).run();
+    this.d.prepare(`UPDATE cache_settings SET ${sets.join(', ')} WHERE id = 'global'`).run(...vals);
   }
 
   // ─── Admin: Identity Rules ─────────────────────────────────
@@ -6159,31 +6329,42 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
     // Cache Policies
     if (cnt('cache_policies') === 0) {
+    // Response-side secret bypass — applied to every policy (defence-in-depth)
+    // because policy resolution currently selects the highest-priority enabled
+    // policy regardless of request scope, so secrets must be screened whichever
+    // policy ends up active.
+    const SECRET_OUTPUT_PATTERNS = JSON.stringify(['sk-[A-Za-z0-9]{16,}', 'BEGIN [A-Z ]*PRIVATE KEY', 'AKIA[0-9A-Z]{16}']);
     const cachePolicies: Omit<CachePolicyRow, 'created_at' | 'updated_at'>[] = [
       {
         id: 'a747b721-8eff-46b2-a916-864ec0ac67cf', name: 'Global Default Cache', description: 'Default caching policy for all responses — 5 minute TTL',
-        scope: 'global', ttl_ms: 300000, max_entries: 1000,
+        scope: 'global', ttl_ms: 300000, max_entries: 1000, max_bytes: 0,
         bypass_patterns: JSON.stringify(['password', 'secret', 'token', 'key']),
+        output_bypass_patterns: SECRET_OUTPUT_PATTERNS,
         invalidate_on: JSON.stringify(['model_change', 'prompt_update']),
+        key_hashing: 'sha256', tenant_isolation: 1, cache_temperature_gate: 0,
         enabled: 1,
       },
       {
         id: '5820734a-3bea-4558-90ad-d382b7b76bb2', name: 'Session Short-Lived', description: 'Short TTL cache scoped to individual sessions',
-        scope: 'session', ttl_ms: 60000, max_entries: 100,
-        bypass_patterns: null, invalidate_on: JSON.stringify(['session_end']),
+        scope: 'session', ttl_ms: 60000, max_entries: 100, max_bytes: 0,
+        bypass_patterns: null, output_bypass_patterns: SECRET_OUTPUT_PATTERNS, invalidate_on: JSON.stringify(['session_end']),
+        key_hashing: 'sha256', tenant_isolation: 1, cache_temperature_gate: 0,
         enabled: 1,
       },
       {
         id: 'bd5cbbb5-c407-4016-9c43-5525f2789017', name: 'Semantic Query Cache', description: 'Cache semantically similar queries to avoid redundant LLM calls',
-        scope: 'global', ttl_ms: 600000, max_entries: 500,
+        scope: 'global', ttl_ms: 600000, max_entries: 500, max_bytes: 0,
         bypass_patterns: JSON.stringify(['real-time', 'current date', 'current time']),
+        output_bypass_patterns: SECRET_OUTPUT_PATTERNS,
         invalidate_on: JSON.stringify(['knowledge_update']),
+        key_hashing: 'sha256', tenant_isolation: 1, cache_temperature_gate: 0,
         enabled: 1,
       },
       {
         id: '50dd439b-1fec-4293-8ee2-ed24ae07c387', name: 'User Personalised Cache', description: 'Per-user cache that respects personalisation context',
-        scope: 'user', ttl_ms: 120000, max_entries: 200,
-        bypass_patterns: null, invalidate_on: JSON.stringify(['preference_change']),
+        scope: 'user', ttl_ms: 120000, max_entries: 200, max_bytes: 0,
+        bypass_patterns: null, output_bypass_patterns: SECRET_OUTPUT_PATTERNS, invalidate_on: JSON.stringify(['preference_change']),
+        key_hashing: 'sha256', tenant_isolation: 1, cache_temperature_gate: 0,
         enabled: 0,
       },
     ];

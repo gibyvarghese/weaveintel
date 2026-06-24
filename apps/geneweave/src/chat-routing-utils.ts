@@ -251,8 +251,18 @@ export async function resolveActiveCache(
       scope: (r.scope as CachePolicy['scope']) ?? 'global',
       ttlMs: r.ttl_ms ?? 300_000,
       maxEntries: r.max_entries ?? 1000,
+      maxBytes: r.max_bytes ?? 0,
       bypassPatterns: r.bypass_patterns ? JSON.parse(r.bypass_patterns) : [],
+      outputBypassPatterns: r.output_bypass_patterns ? JSON.parse(r.output_bypass_patterns) : [],
       invalidateOnEvents: r.invalidate_on ? JSON.parse(r.invalidate_on) : [],
+      // Phase 0 hardening — secure-by-default when columns are absent on legacy rows.
+      keyHashing: (r.key_hashing as 'none' | 'sha256') ?? 'sha256',
+      tenantIsolation: r.tenant_isolation == null ? true : !!r.tenant_isolation,
+      temperatureGate: r.cache_temperature_gate ?? 0,
+      // Phase 7 — stampede protection & cost-aware eviction knobs.
+      swrMs: r.swr_ms ?? 0,
+      negativeTtlMs: r.negative_ttl_ms ?? 0,
+      evictionPolicy: (r.eviction_policy as CachePolicy['evictionPolicy']) ?? 'lru',
       enabled: true,
     }));
     return resolvePolicy(policies, {}) ?? null;

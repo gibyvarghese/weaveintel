@@ -58,6 +58,25 @@ export interface ChatEngineConfig {
    * capabilities. Optional for back-compat.
    */
   runtime?: WeaveRuntime;
+  /**
+   * Phase 1 — cache key version segment, sourced from the `cache_settings`
+   * global_version_token. Bumping it invalidates every response-cache entry at
+   * once. Falls back to `'v1'` when unset.
+   */
+  cacheKeyVersion?: string;
+  /**
+   * Cache Phase 6 — tool-result caching wiring. `store` is the shared cache
+   * store (same underlying store as the response cache, so a global clear /
+   * version bump busts tool entries too); `metrics` is a DEDICATED sink kept
+   * separate from the response-cache counters; `version` is the key prefix.
+   * When set, the engine enables opt-in per-tool result caching driven by
+   * `tool_cache_policies`.
+   */
+  toolCache?: {
+    store: import('@weaveintel/core').CacheStore;
+    metrics: import('@weaveintel/core').CacheMetrics;
+    version?: string;
+  };
 }
 
 // ── M-15: Typed provider module interfaces ───────────────────────────────────

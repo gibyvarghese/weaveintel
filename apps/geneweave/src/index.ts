@@ -24,7 +24,7 @@
  */
 
 import type { Server } from 'node:http';
-import { weaveSetDefaultTracer, weaveRuntime, envSecretResolver, weaveInMemoryPersistence, createLogger, type WeaveRuntime, type RuntimePersistenceSlot } from '@weaveintel/core';
+import { weaveSetDefaultTracer, weaveRuntime, envSecretResolver, weaveInMemoryPersistence, createLogger, weaveContext, type WeaveRuntime, type RuntimePersistenceSlot } from '@weaveintel/core';
 import { createResilienceSignalBus, setDefaultSignalBus, createRuntimeResilienceAdapter } from '@weaveintel/resilience';
 import { ModelHealthTracker, createRuntimeRoutingAdapter } from '@weaveintel/routing';
 import { createDurableCostLedger, createRuntimeCostAdapter } from '@weaveintel/cost-governor';
@@ -177,7 +177,12 @@ import { createGeneWeaveMemoryStore, createKeywordSemanticMemory } from './memor
 import { weaveSemanticMemory, weaveWorkingMemory, createRuntimeMemoryAdapter } from '@weaveintel/memory';
 import { createRuntimeComplianceAdapter } from '@weaveintel/compliance';
 import { createRuntimeIdentityAdapter } from '@weaveintel/identity';
-import { weaveInMemoryCacheStore, createRuntimeCacheAdapter } from '@weaveintel/cache';
+import { weaveInMemoryCacheStore, weaveRedisCacheStore, weaveTieredCacheStore, createRuntimeCacheAdapter, createCacheMetrics, withMetrics, weaveSemanticCache, createCacheInvalidator, createSingleflight } from '@weaveintel/cache';
+import { setActiveCacheInvalidator, loadInvalidationRules } from './cache-invalidator.js';
+import { setActiveToolCache } from './tool-cache-registry.js';
+import { setActiveSingleflight } from './cache-stampede.js';
+import { createAgentPlanCache, createPlanCacheMetrics } from '@weaveintel/agents';
+import { setActivePlanCache } from './agent-plan-cache.js';
 import { geneweaveEncryptionSlot, type GeneweaveEncryptionSlot } from './encryption-slot.js';
 export let geneweaveEncryptionManager: TenantKeyManager | null = null;
 /** Phase 7: KMS provider registry exposed for admin endpoints (list/health-check). */
@@ -400,8 +405,152 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
   // `CacheStore` shared across the chat path, live-agent handlers, and tools
   // via `ctx.runtime?.cache`. This means a warm response in one subsystem
   // benefits all others in the same process without importing the singleton.
-  const sharedCacheStore = weaveInMemoryCacheStore();
-  const cacheAdapter = createRuntimeCacheAdapter(sharedCacheStore);
+  //
+  // Phase 0 hardening: the L1 store is bounded (it was previously unbounded —
+  // an in-memory leak / DoS surface). LRU eviction keeps hot entries.
+  //
+  // Phase 1: the cache topology is admin-tunable via the `cache_settings` row.
+  // When L2 is enabled (l2_provider='redis') and REDIS_URL is set, the shared
+  // store becomes a tiered L1+L2 (in-process + distributed Redis) so a warm
+  // response on one replica serves the same request on another. The
+  // global_version_token is threaded into the cache key version so an admin can
+  // invalidate every cache entry at once by bumping it.
+  let cacheSettings: import('./db-types/admin.js').CacheSettingsRow | null = null;
+  try { cacheSettings = await db.getCacheSettings(); } catch { /* table may not exist on a brand-new DB */ }
+
+  let cacheMaxEntries = Number(process.env['GENEWEAVE_CACHE_MAX_ENTRIES'] ?? 0) || cacheSettings?.l1_max_entries || 0;
+  let cacheMaxBytes = Number(process.env['GENEWEAVE_CACHE_MAX_BYTES'] ?? 0) || cacheSettings?.l1_max_bytes || 0;
+  try {
+    const cachePolicies = (await db.listCachePolicies()).filter((p) => p.enabled);
+    if (!cacheMaxEntries) cacheMaxEntries = cachePolicies.reduce((m, p) => Math.max(m, p.max_entries ?? 0), 0);
+    if (!cacheMaxBytes) cacheMaxBytes = cachePolicies.reduce((m, p) => Math.max(m, p.max_bytes ?? 0), 0);
+  } catch { /* table may not exist yet on a brand-new DB — fall back to defaults */ }
+  if (!cacheMaxEntries || cacheMaxEntries < 1) cacheMaxEntries = 5000;
+
+  // Phase 3: live, process-wide cache metrics sink. The in-memory L1 reports
+  // evictions into it; `withMetrics` (below) reports response-cache hits/misses
+  // and sets. The chat path also records prompt-cache token savings, and a
+  // durable per-turn rollup lives in the `cache_metrics` table.
+  const cacheMetrics = createCacheMetrics();
+
+  // Phase 7: eviction strategy is DB-tunable (cache_settings.l1_eviction_policy).
+  // For the cost-aware `gdsf` policy, weight each entry by its response token
+  // count so expensive answers are retained over cheap-to-recompute ones.
+  const evictionPolicy = (cacheSettings?.l1_eviction_policy ?? 'lru') as import('@weaveintel/cache').CacheEvictionPolicy;
+  const l1CacheStore = weaveInMemoryCacheStore({
+    maxEntries: cacheMaxEntries,
+    maxBytes: cacheMaxBytes,
+    evictionPolicy,
+    ...(evictionPolicy === 'gdsf' ? {
+      costOf: (v: unknown) => {
+        const u = (v as { usage?: { totalTokens?: number } })?.usage;
+        return u && typeof u.totalTokens === 'number' && u.totalTokens > 0 ? u.totalTokens : 1;
+      },
+    } : {}),
+    onEvict: () => cacheMetrics.onEvict(),
+  });
+
+  // Phase 1: optionally compose a distributed L2 (Redis) into a tiered store.
+  const redisUrl = process.env['REDIS_URL'];
+  const l2Enabled = !!cacheSettings?.l2_enabled && (cacheSettings?.l2_provider ?? 'none') === 'redis' && !!redisUrl;
+  let baseCacheStore: import('@weaveintel/core').CacheStore = l1CacheStore;
+  if (l2Enabled) {
+    try {
+      const l2 = weaveRedisCacheStore({ url: redisUrl!, keyPrefix: cacheSettings?.key_namespace ?? 'weave:cache' });
+      baseCacheStore = weaveTieredCacheStore(l1CacheStore, l2, { l1TtlMs: cacheSettings?.l1_ttl_ms ?? 30_000 });
+      console.log(`[cache] distributed L2 enabled (redis, prefix='${cacheSettings?.key_namespace}')`);
+    } catch (err) {
+      console.warn('[cache] failed to enable Redis L2 — falling back to in-memory L1 only:', (err as Error).message);
+      baseCacheStore = l1CacheStore;
+    }
+  }
+  // Phase 3: wrap the shared store so every response-cache lookup/write feeds the
+  // live metrics sink (preserves scannable/closable capabilities).
+  const sharedCacheStore = withMetrics(baseCacheStore, cacheMetrics);
+  const cacheKeyVersion = cacheSettings?.global_version_token
+    ?? process.env['GENEWEAVE_CACHE_KEY_VERSION'] ?? 'v1';
+
+  // Phase 4: embedding-similarity (semantic) cache. Activates only when enabled
+  // in semantic_cache_config AND an embedding model is available; otherwise
+  // stays absent and the chat path simply skips semantic lookups.
+  let semanticCache: import('@weaveintel/core').SemanticCache | undefined;
+  try {
+    const semCfg = await db.getSemanticCacheConfig();
+    if (semCfg?.enabled && guardrailEmbeddingModel) {
+      semanticCache = weaveSemanticCache({
+        embed: async (text: string) => {
+          const out = await guardrailEmbeddingModel.embed(
+            weaveContext({ deadline: Date.now() + 30_000 }),
+            { input: [text.slice(0, 4000)] },
+          );
+          return out.embeddings[0] ?? [];
+        },
+        defaultThreshold: semCfg.similarity_threshold ?? 0.92,
+        maxEntries: semCfg.max_entries ?? 1000,
+        ttlMs: semCfg.ttl_ms ?? 600_000,
+        invalidationRadius: semCfg.invalidation_radius ?? 0.95,
+      });
+      console.log(`[cache] semantic cache enabled (model=${semCfg.embedding_model}, threshold=${semCfg.similarity_threshold}, scope=${semCfg.scope})`);
+    }
+  } catch { /* config table may not exist on a brand-new DB */ }
+
+  const cacheAdapter = createRuntimeCacheAdapter(sharedCacheStore, semanticCache, cacheMetrics);
+
+  // Phase 8: Agentic Plan Caching. A DEDICATED plan semantic cache (separate
+  // partition from the response semantic cache) stores distilled plan templates;
+  // a similar future agent/supervisor task reuses the template as planning
+  // guidance. Activates only when enabled in agent_plan_cache_config AND an
+  // embedding model is available.
+  try {
+    const planCfg = await db.getAgentPlanCacheConfig();
+    if (planCfg?.enabled && guardrailEmbeddingModel) {
+      const planSemanticCache = weaveSemanticCache({
+        embed: async (text: string) => {
+          const out = await guardrailEmbeddingModel.embed(
+            weaveContext({ deadline: Date.now() + 30_000 }),
+            { input: [text.slice(0, 4000)] },
+          );
+          return out.embeddings[0] ?? [];
+        },
+        defaultThreshold: planCfg.similarity_threshold ?? 0.86,
+        maxEntries: planCfg.max_entries ?? 1000,
+        ttlMs: planCfg.ttl_ms ?? 86_400_000,
+      });
+      const planMetrics = createPlanCacheMetrics();
+      const planCache = createAgentPlanCache({
+        semanticCache: planSemanticCache,
+        threshold: planCfg.similarity_threshold ?? 0.86,
+        ttlMs: planCfg.ttl_ms ?? 86_400_000,
+        metrics: planMetrics,
+      });
+      setActivePlanCache(planCache, planMetrics);
+      console.log(`[cache] agent plan cache enabled (threshold=${planCfg.similarity_threshold}, scope=${planCfg.scope}, minSteps=${planCfg.min_steps})`);
+    }
+  } catch { /* config table may not exist on a brand-new DB */ }
+
+  // Phase 5: wire the (previously dead) invalidation engine into a live
+  // invalidator over the shared store + semantic cache, driven by DB rules.
+  // Real triggers (prompt/model/knowledge changes, session end) and the admin
+  // "Invalidate Now" action clear the right entries via this instance.
+  const cacheInvalidator = createCacheInvalidator({
+    store: sharedCacheStore,
+    semanticCache,
+    getRules: () => loadInvalidationRules(db),
+  });
+  setActiveCacheInvalidator(cacheInvalidator);
+
+  // Phase 6: tool-result caching. Reuses the SAME underlying store as the
+  // response cache (baseCacheStore — pre-metrics, so tool lookups don't pollute
+  // response-cache hit-rate, while a global clear / version bump still busts
+  // tool entries since it's the same store) with a DEDICATED metrics sink. The
+  // version token is folded into tool keys so a bump invalidates them too.
+  const toolCacheMetrics = createCacheMetrics();
+  setActiveToolCache({ store: baseCacheStore, metrics: toolCacheMetrics });
+
+  // Phase 7: process-wide singleflight so concurrent identical response-cache
+  // misses (across the send + stream chat paths) collapse to ONE model call.
+  const singleflight = createSingleflight();
+  setActiveSingleflight(singleflight);
 
   const runtime = weaveRuntime({
     tracer: consoleTracer,
@@ -454,6 +603,8 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
       defaultProvider: config.defaultProvider,
       defaultModel: config.defaultModel,
       runtime,
+      cacheKeyVersion,
+      toolCache: { store: baseCacheStore, metrics: toolCacheMetrics, version: cacheKeyVersion },
     },
     db,
   );

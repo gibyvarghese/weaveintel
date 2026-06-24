@@ -127,6 +127,33 @@ export function buildAnthropicTools(
   return translate(tools, anthropicAdapter);
 }
 
+/**
+ * Apply an `cache_control: ephemeral` breakpoint to the system prompt so that
+ * the stable prefix (tools + system, in Anthropic render order) is cached.
+ *
+ * Converts a string system prompt into a single content block carrying
+ * `cache_control`; for an existing block array, marks the LAST block. Returns
+ * the system unchanged when it is empty. Anthropic ignores a top-level
+ * `cache_control`, so the marker must live on a content block — this is the
+ * correct, effective placement.
+ */
+export function applySystemCacheControl(
+  system: string | AnthropicContentBlock[] | undefined,
+  ttl: '5m' | '1h' = '5m',
+): string | AnthropicContentBlock[] | undefined {
+  const cacheControl: AnthropicContentBlock['cache_control'] =
+    ttl === '1h' ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
+  if (system === undefined) return undefined;
+  if (typeof system === 'string') {
+    if (system.length === 0) return system;
+    return [{ type: 'text', text: system, cache_control: cacheControl }];
+  }
+  if (system.length === 0) return system;
+  const blocks = system.map((b) => ({ ...b }));
+  blocks[blocks.length - 1] = { ...blocks[blocks.length - 1]!, cache_control: cacheControl };
+  return blocks;
+}
+
 export function buildToolChoice(
   toolChoice: ModelRequest['toolChoice'],
 ): Record<string, unknown> | undefined {
@@ -193,6 +220,8 @@ export function parseResponse(raw: Record<string, unknown>): ModelResponse {
       promptTokens: inputTokens,
       completionTokens: usage?.['output_tokens'] ?? 0,
       totalTokens: inputTokens + (usage?.['output_tokens'] ?? 0),
+      cacheReadTokens: cacheRead,
+      cacheWriteTokens: cacheCreation,
     },
     model: String(raw['model'] ?? ''),
     reasoning: reasoning || undefined,
@@ -275,13 +304,18 @@ export function* parseStreamEvent(evt: AnthropicSSEEvent): Iterable<StreamChunk>
     case 'message_start': {
       const message = data['message'] as Record<string, unknown> | undefined;
       const usage = (message?.['usage'] ?? data['usage']) as Record<string, number> | undefined;
-      if (usage && usage['input_tokens']) {
+      if (usage && (usage['input_tokens'] || usage['cache_read_input_tokens'] || usage['cache_creation_input_tokens'])) {
+        const cacheRead = usage['cache_read_input_tokens'] ?? 0;
+        const cacheCreation = usage['cache_creation_input_tokens'] ?? 0;
+        const inputTokens = (usage['input_tokens'] ?? 0) + cacheRead + cacheCreation;
         yield {
           type: 'usage' as const,
           usage: {
-            promptTokens: usage['input_tokens'] ?? 0,
+            promptTokens: inputTokens,
             completionTokens: 0,
-            totalTokens: usage['input_tokens'] ?? 0,
+            totalTokens: inputTokens,
+            cacheReadTokens: cacheRead,
+            cacheWriteTokens: cacheCreation,
           },
         };
       }
