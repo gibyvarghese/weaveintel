@@ -400,6 +400,56 @@ export function registerAdminRoutingRoutes(
     await semanticConfigPut(req, res);
   }, { auth: true, csrf: true });
 
+  // ── Admin: Run Stream Config (Client Phase 0 single global row) ──
+
+  router.get('/api/admin/run-stream-config', async (_req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    const cfg = await db.getRunStreamConfig();
+    json(res, 200, { 'run-stream-config': cfg ? [cfg] : [], config: cfg });
+  });
+
+  const applyRunStreamConfigUpdate = async (body: Record<string, unknown>) => {
+    const fields: Record<string, unknown> = {};
+    if (body['enabled'] !== undefined) fields['enabled'] = body['enabled'] ? 1 : 0;
+    // heartbeat: clamp to a sane floor so a 0ms interval can't busy-loop the SSE keepalive.
+    if (body['heartbeat_ms'] !== undefined) fields['heartbeat_ms'] = Math.max(1000, Math.min(300_000, Math.trunc(Number(body['heartbeat_ms']))));
+    if (body['max_reconnects'] !== undefined) fields['max_reconnects'] = Math.max(0, Math.min(100, Math.trunc(Number(body['max_reconnects']))));
+    if (body['backoff_ms'] !== undefined) {
+      // Accept a JSON string or an array; validate it is a non-empty list of
+      // non-negative numbers before persisting (defence against malformed input).
+      let arr: unknown;
+      try { arr = typeof body['backoff_ms'] === 'string' ? JSON.parse(body['backoff_ms'] as string) : body['backoff_ms']; } catch { arr = undefined; }
+      if (Array.isArray(arr) && arr.length > 0 && arr.every((n) => typeof n === 'number' && n >= 0 && n <= 600_000)) {
+        fields['backoff_ms'] = JSON.stringify(arr.slice(0, 32));
+      }
+    }
+    if (body['stall_timeout_ms'] !== undefined) fields['stall_timeout_ms'] = Math.max(0, Math.min(600_000, Math.trunc(Number(body['stall_timeout_ms']))));
+    if (body['throttle_ms'] !== undefined) fields['throttle_ms'] = Math.max(0, Math.min(5000, Math.trunc(Number(body['throttle_ms']))));
+    if (body['journal_retention_hours'] !== undefined) fields['journal_retention_hours'] = Math.max(0, Math.min(8760, Math.trunc(Number(body['journal_retention_hours']))));
+    if (body['journal_max_events'] !== undefined) fields['journal_max_events'] = Math.max(0, Math.min(1_000_000, Math.trunc(Number(body['journal_max_events']))));
+    if (body['resume_window_seconds'] !== undefined) fields['resume_window_seconds'] = Math.max(0, Math.min(86_400, Math.trunc(Number(body['resume_window_seconds']))));
+    await db.updateRunStreamConfig(toDbUpdate(fields));
+    // Invalidate the 60s config cache so the SSE keepalive + served config update now.
+    try { const { _resetRunStreamConfigCache } = await import('../../chat-run-stream-utils.js'); _resetRunStreamConfigCache(); } catch { /* ignore */ }
+    return db.getRunStreamConfig();
+  };
+
+  const runStreamConfigPut = async (req: any, res: any) => {
+    const raw = await readBody(req);
+    let body: Record<string, unknown>;
+    try { body = JSON.parse(raw); } catch { json(res, 400, { error: 'Invalid JSON' }); return; }
+    const cfg = await applyRunStreamConfigUpdate(body);
+    json(res, 200, { 'run-stream-config': cfg });
+  };
+  router.put('/api/admin/run-stream-config', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await runStreamConfigPut(req, res);
+  }, { auth: true, csrf: true });
+  router.put('/api/admin/run-stream-config/:id', async (req, res, _params, auth) => {
+    if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }
+    await runStreamConfigPut(req, res);
+  }, { auth: true, csrf: true });
+
   // ── Admin: Agent Plan Cache Config (Phase 8 single global row) ──
   router.get('/api/admin/agent-plan-cache-config', async (_req, res, _params, auth) => {
     if (!auth) { json(res, 401, { error: 'Not authenticated' }); return; }

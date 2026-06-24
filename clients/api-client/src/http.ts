@@ -20,6 +20,7 @@
  * package stays testable without a network.
  */
 
+import { sseTransport } from '@weaveintel/client';
 import type { TokenStore, AuthTokens } from './token-store.js';
 
 /** A non-streaming HTTP response with parsed body and original status. */
@@ -130,85 +131,36 @@ export function createHttpTransport(opts: CreateHttpTransportOptions): Geneweave
     },
 
     openStream(input, handlers): void {
-      void (async () => {
-        let resp: Response;
-        try {
-          const tokens = await opts.tokenStore.get();
-          const headers: Record<string, string> = {
-            Accept: 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            ...opts.extraHeaders,
-          };
-          if (tokens?.token) headers['Authorization'] = `Bearer ${tokens.token}`;
-          const init: RequestInit = { headers };
-          if (input.signal) init.signal = input.signal;
-          resp = await doFetch(joinUrl(opts.host, input.path), init);
-        } catch (err) {
-          if (!input.signal?.aborted) handlers.onError?.(err instanceof Error ? err : new Error(String(err)));
-          handlers.onClose?.();
-          return;
-        }
-        if (!resp.ok || !resp.body) {
-          handlers.onError?.(new Error(`stream open failed → ${resp.status}`));
-          // M-13: Do NOT call onClose for permanent client errors (4xx) so that
-          // callers can distinguish transient failures (network drop → reconnect)
-          // from permanent ones (404 endpoint gone, 403 forbidden → stop retrying).
-          const isPermanent = resp.status >= 400 && resp.status < 500;
-          if (!isPermanent) handlers.onClose?.();
-          return;
-        }
-
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buf = '';
-        let dataLines: string[] = [];
-
-        // M-14: stall timeout — if no chunk arrives within this window, tear down
-        // the stream so the caller can reconnect rather than hanging forever.
-        const STALL_TIMEOUT_MS = 60_000;
-
-        const flush = () => {
-          if (dataLines.length === 0) return;
-          const data = dataLines.join('\n');
-          dataLines = [];
-          if (data === '' || data.startsWith(':')) return; // keepalive comment
-          try {
-            handlers.onEvent(JSON.parse(data));
-          } catch {
-            // Malformed event — skip, do not tear down the stream.
-          }
-        };
-
-        try {
-          while (!input.signal?.aborted) {
-            let timer: ReturnType<typeof setTimeout> | undefined;
-            const stall = new Promise<never>((_, reject) => {
-              timer = setTimeout(() => reject(new Error('SSE stream stalled — no data received within timeout')), STALL_TIMEOUT_MS);
-            });
-            let chunk: ReadableStreamReadResult<Uint8Array>;
+      // Phase 0: delegate the SSE reader to `@weaveintel/client`'s `sseTransport`
+      // — the single, hardened reader for the platform (lifecycle seam, stall
+      // timeout, permanent-vs-transient classification). This package no longer
+      // ships its own SSE parser; it only adds bearer auth + JSON/keepalive
+      // shaping on top. The prior M-13 (no onClose on permanent 4xx) and M-14
+      // (60s stall) behaviours are preserved by the base transport.
+      const base = sseTransport({
+        auth: async () => (await opts.tokenStore.get())?.token ?? '',
+        ...(opts.extraHeaders ? { extraHeaders: opts.extraHeaders } : {}),
+      });
+      base.openStream(
+        joinUrl(opts.host, input.path),
+        {
+          onEvent: (ev) => {
+            if (ev.data === '' || ev.data.startsWith(':')) return; // keepalive comment
             try {
-              chunk = await Promise.race([reader.read(), stall]);
-            } finally {
-              clearTimeout(timer);
+              handlers.onEvent(JSON.parse(ev.data));
+            } catch {
+              // Malformed event — skip, keep the stream open.
             }
-            if (chunk.done) break;
-            buf += decoder.decode(chunk.value, { stream: true });
-            const lines = buf.split('\n');
-            buf = lines.pop() ?? '';
-            for (const line of lines) {
-              if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
-              else if (line === '') flush();
-              // `event:` / `id:` / `:comment` lines are ignored for this surface.
-            }
-          }
-          flush();
-        } catch (err) {
-          if (!input.signal?.aborted) handlers.onError?.(err instanceof Error ? err : new Error(String(err)));
-        } finally {
-          try { await reader.cancel(); } catch { /* already closed */ }
-          handlers.onClose?.();
-        }
-      })();
+          },
+          ...(handlers.onError ? { onError: handlers.onError } : {}),
+          onClose: ({ permanent }) => {
+            // M-13: do NOT signal close on a permanent (4xx) open failure so the
+            // caller does not reconnect into a dead endpoint.
+            if (!permanent) handlers.onClose?.();
+          },
+        },
+        input.signal,
+      );
     },
   };
 }

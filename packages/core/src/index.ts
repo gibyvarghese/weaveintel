@@ -8,6 +8,23 @@
 // for new ID minting in package-level code.
 export { newUUIDv7 } from './uuid.js';
 
+// Run-event stream contract (Phase 0). Single source of truth for the run-event
+// wire envelope, the canonical event-kind taxonomy, and default stream tuning —
+// shared by the geneweave server executor and the @weaveintel/client reducer so
+// producer and consumer never drift. The DB `run_stream_config` seeds from these.
+export {
+  type RunEventEnvelope,
+  type RunEventKind,
+  type TerminalRunEventKind,
+  type RunStreamConfig,
+  RUN_EVENT_KINDS,
+  TERMINAL_RUN_EVENT_KINDS,
+  RUN_STREAM_CONFIG_DEFAULTS,
+  isTerminalRunEventKind,
+  isKnownRunEventKind,
+  reconnectBackoffMs,
+} from './run-events.js';
+
 // Structured logger (A-8). Replace bare console.* with WeaveLogger for level
 // filtering, structured fields, and request correlation.
 export {

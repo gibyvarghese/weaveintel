@@ -8,7 +8,16 @@
  */
 
 // Transport
-export type { AuthProvider, EventTransport, FetchJsonTransport, StreamEvent, StreamHandler } from './transport.js';
+export type {
+  AuthProvider,
+  EventTransport,
+  FetchJsonTransport,
+  StreamEvent,
+  StreamHandler,
+  StreamLifecycle,
+  StreamCloseInfo,
+  SseTransportOptions,
+} from './transport.js';
 export { sseTransport, fetchJsonTransport, mockSseTransport } from './transport.js';
 
 // Reducer / view model

@@ -706,6 +706,31 @@ export async function createGeneWeave(config: GeneWeaveConfig): Promise<GeneWeav
     log.error('rotation scheduler startup failed (non-fatal)', { reason: String(err) });
   }
 
+  // Client Phase 0 (run/stream): prune the `user_run_events` journal per the
+  // `run_stream_config` row (retention horizon + per-run cap). One sweep on
+  // boot + hourly thereafter; `.unref()` so it never blocks process exit. The
+  // journal previously grew unbounded.
+  try {
+    const { loadRunStreamConfig } = await import('./chat-run-stream-utils.js');
+    const sweepJournal = async () => {
+      try {
+        const cfg = await loadRunStreamConfig(db);
+        const removed = await db.pruneUserRunEvents({
+          olderThanHours: cfg.journalRetentionHours,
+          maxEventsPerRun: cfg.journalMaxEvents,
+        });
+        if (removed > 0) log.info('run-event journal pruned', { removed });
+      } catch (err) {
+        log.error('run-event journal prune failed (non-fatal)', { reason: String(err) });
+      }
+    };
+    void sweepJournal();
+    const journalTimer = setInterval(() => { void sweepJournal(); }, 60 * 60 * 1000);
+    if (typeof journalTimer.unref === 'function') journalTimer.unref();
+  } catch (err) {
+    log.error('journal prune scheduler startup failed (non-fatal)', { reason: String(err) });
+  }
+
   // 5-EN-PS. Phase 6 (Tenant Encryption): start the GDPR purge scheduler.
   // Polls `tenant_deletion_requests` for rows whose retention window has
   // expired and calls `manager.hardShred(tenantId)` for each. Per-tenant

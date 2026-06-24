@@ -15,6 +15,7 @@
 import type { EventTransport, FetchJsonTransport, AuthProvider } from './transport.js';
 import { sseTransport, fetchJsonTransport } from './transport.js';
 import type { RunEventEnvelope } from './reducer.js';
+import { RUN_STREAM_CONFIG_DEFAULTS, reconnectBackoffMs, isTerminalRunEventKind } from '@weaveintel/core';
 
 export type { RunEventEnvelope };
 export type { AuthProvider };
@@ -63,10 +64,16 @@ export interface AttachOptions {
   /** AbortSignal to detach. */
   signal?: AbortSignal;
   /**
-   * Max reconnect attempts before giving up (default: 8).
+   * Max reconnect attempts before giving up. Defaults to the client's
+   * configured value (server `run_stream_config.max_reconnects`, else 8).
    * Set to 0 to disable auto-reconnect.
    */
   maxReconnects?: number;
+  /**
+   * Reconnect backoff schedule (ms), indexed by attempt. Defaults to the
+   * client's configured value (server `run_stream_config.backoff_ms`).
+   */
+  backoffMs?: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -112,9 +119,25 @@ export interface CreateRunClientOptions {
    * Extra HTTP headers added to every request.
    */
   extraHeaders?: Record<string, string>;
+  /**
+   * Reconnect / stream tuning. Defaults to `RUN_STREAM_CONFIG_DEFAULTS`. Hosts
+   * should fetch the server's `GET /api/me/runs/config` (sourced from the
+   * `run_stream_config` DB row) and pass it here so DB changes drive client
+   * behaviour without a code change.
+   */
+  reconnect?: {
+    maxReconnects?: number;
+    backoffMs?: number[];
+    stallTimeoutMs?: number;
+  };
 }
 
 export function createRunClient(opts: CreateRunClientOptions): RunClient {
+  const reconnectCfg = {
+    maxReconnects: opts.reconnect?.maxReconnects ?? RUN_STREAM_CONFIG_DEFAULTS.maxReconnects,
+    backoffMs: opts.reconnect?.backoffMs ?? RUN_STREAM_CONFIG_DEFAULTS.backoffMs,
+    stallTimeoutMs: opts.reconnect?.stallTimeoutMs ?? RUN_STREAM_CONFIG_DEFAULTS.stallTimeoutMs,
+  };
   const json = opts.json ?? fetchJsonTransport({
     baseUrl: opts.baseUrl,
     auth: opts.auth,
@@ -123,6 +146,7 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
   const sse = opts.sse ?? sseTransport({
     auth: opts.auth,
     extraHeaders: opts.extraHeaders,
+    stallTimeoutMs: reconnectCfg.stallTimeoutMs,
   });
 
   return {
@@ -150,60 +174,68 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
 
     attach(runId, attachOpts) {
       const controller = new AbortController();
-      const { signal, onEvent, onError, onComplete, maxReconnects = 8 } = attachOpts;
+      const { signal, onEvent, onError, onComplete } = attachOpts;
+      const maxReconnects = attachOpts.maxReconnects ?? reconnectCfg.maxReconnects;
+      const backoff = attachOpts.backoffMs ?? reconnectCfg.backoffMs;
 
-      // Cascade external signal into our controller
+      // Cascade external signal into our controller.
       signal?.addEventListener('abort', () => controller.abort());
 
       let lastSeq = attachOpts.afterSequence ?? -1;
       let reconnectCount = 0;
-
-      const BACKOFF_MS = [250, 500, 1000, 2000, 4000, 8000, 16000, 30000];
+      let terminal = false;
 
       const connect = () => {
-        if (controller.signal.aborted) return;
+        if (controller.signal.aborted || terminal) return;
         const url = `${opts.baseUrl.replace(/\/$/, '')}/api/me/runs/${runId}/events?after=${lastSeq}`;
 
+        // Real reconnect (Phase 0): the transport's `onClose` drives the retry
+        // decision. We resume from `lastSeq` and dedup across reconnects so the
+        // replay→live handoff never double-delivers an event.
         sse.openStream(
           url,
-          (rawEvent) => {
-            if (controller.signal.aborted) return true; // stop
-            try {
-              const envelope = JSON.parse(rawEvent.data) as RunEventEnvelope;
-              lastSeq = Math.max(lastSeq, envelope.sequence);
-              onEvent(envelope);
-              // If terminal, close gracefully
-              if (['run.completed', 'run.failed', 'run.cancelled'].includes(envelope.kind)) {
-                controller.abort();
-                onComplete?.();
-                return true; // stop
+          {
+            onEvent: (rawEvent) => {
+              if (controller.signal.aborted) return true; // stop
+              try {
+                const envelope = JSON.parse(rawEvent.data) as RunEventEnvelope;
+                if (envelope.sequence <= lastSeq) return false; // dedup (resume overlap)
+                lastSeq = envelope.sequence;
+                reconnectCount = 0; // forward progress resets the backoff budget
+                onEvent(envelope);
+                if (isTerminalRunEventKind(envelope.kind)) {
+                  terminal = true;
+                  onComplete?.();
+                  controller.abort();
+                  return true; // stop
+                }
+              } catch {
+                // Malformed event — ignore, keep the stream open.
               }
-            } catch {
-              // Malformed event — ignore
-            }
-            return false;
+              return false;
+            },
+            onClose: ({ permanent }) => {
+              if (controller.signal.aborted || terminal) return; // intentional end
+              if (permanent) {
+                onError?.(new Error('Run stream closed permanently (non-retryable)'));
+                return;
+              }
+              if (maxReconnects <= 0) {
+                onError?.(new Error('Run stream disconnected (auto-reconnect disabled)'));
+                return;
+              }
+              if (reconnectCount >= maxReconnects) {
+                onError?.(new Error(`Run stream disconnected after ${maxReconnects} reconnects`));
+                return;
+              }
+              const delay = reconnectBackoffMs(reconnectCount, backoff);
+              reconnectCount++;
+              if (typeof setTimeout !== 'undefined') setTimeout(connect, delay);
+              else connect();
+            },
           },
           controller.signal,
         );
-
-        // Schedule reconnect attempt after stream closes (only if not aborted)
-        // We use a MutationObserver-free approach: schedule via setTimeout if available
-        if (typeof setTimeout !== 'undefined') {
-          const scheduleReconnect = () => {
-            if (controller.signal.aborted) return;
-            if (reconnectCount >= maxReconnects) {
-              onError?.(new Error(`Run stream disconnected after ${maxReconnects} reconnects`));
-              return;
-            }
-            const delay = BACKOFF_MS[Math.min(reconnectCount, BACKOFF_MS.length - 1)] ?? 30000;
-            reconnectCount++;
-            setTimeout(connect, delay);
-          };
-          // We can't know when openStream ends unless the transport calls back —
-          // a real implementation would wire this through the transport close signal.
-          // For now, we rely on the transport calling onError via `onEvent` side-effects.
-          void scheduleReconnect; // defer — see note above
-        }
       };
 
       connect();

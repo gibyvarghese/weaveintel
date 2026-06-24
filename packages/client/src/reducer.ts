@@ -6,6 +6,8 @@
  * that UI layers can render directly.
  */
 
+import type { RunEventEnvelope } from '@weaveintel/core';
+
 // ---------------------------------------------------------------------------
 // Run status mirrors @weaveintel/core RunStatus
 // ---------------------------------------------------------------------------
@@ -88,16 +90,13 @@ export function emptyRunViewModel(): RunViewModel {
 }
 
 // ---------------------------------------------------------------------------
-// Envelope shape — mirrors collaboration/run-journal
+// Envelope shape — canonical contract from @weaveintel/core (Phase 0).
+// Re-exported here so existing import sites (`from './reducer.js'`) keep working
+// while the producer (geneweave executor) and consumer (this reducer) share one
+// definition and can never drift.
 // ---------------------------------------------------------------------------
 
-export interface RunEventEnvelope {
-  runId: string;
-  sequence: number;
-  kind: string;
-  payload: Record<string, unknown>;
-  timestamp?: number;
-}
+export type { RunEventEnvelope };
 
 // ---------------------------------------------------------------------------
 // Pure reducer

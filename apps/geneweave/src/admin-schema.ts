@@ -126,6 +126,7 @@ export const ADMIN_TAB_GROUPS: AdminTabGroup[] = [
     { key: 'agent-plan-cache-config', label: 'Plan Cache' },
     { key: 'cache-invalidation-rules', label: 'Cache Invalidation' },
     { key: 'tool-cache-policies', label: 'Tool Cache' },
+    { key: 'run-stream-config', label: 'Run Stream' },
     { key: 'reliability-policies', label: 'Reliability' },
     { key: 'sandbox-policies', label: 'Sandbox' },
   ]},

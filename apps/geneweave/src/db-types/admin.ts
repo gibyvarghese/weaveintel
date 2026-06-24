@@ -123,6 +123,20 @@ export interface SemanticCacheConfigRow {
   updated_at: string;
 }
 
+export interface RunStreamConfigRow {
+  id: string;                      // always 'global'
+  enabled: number;
+  heartbeat_ms: number;            // SSE keepalive interval (server)
+  max_reconnects: number;          // client auto-reconnect budget
+  backoff_ms: string;              // JSON array of reconnect delays (ms)
+  stall_timeout_ms: number;        // tear-down window for a silent stream
+  throttle_ms: number;             // client UI-update throttle
+  journal_retention_hours: number; // user_run_events pruning horizon
+  journal_max_events: number;      // max persisted events per run
+  resume_window_seconds: number;   // refresh-proof resume window
+  updated_at: string;
+}
+
 export interface AgentPlanCacheConfigRow {
   id: string;                      // always 'global'
   enabled: number;

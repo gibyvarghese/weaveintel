@@ -516,6 +516,21 @@ export const PLATFORM_CAPABILITY_ADMIN_TABS: Record<string, AdminTabDef> = {
       { key: 'verified_bounds', label: 'Verified Bounds (vCache)', type: 'checkbox', save: 'bool', default: false },
     ],
   },
+  'run-stream-config': {
+    singular: 'Run Stream Config', apiPath: 'admin/run-stream-config', listKey: 'run-stream-config',
+    cols: ['enabled', 'heartbeat_ms', 'max_reconnects', 'stall_timeout_ms', 'journal_retention_hours', 'journal_max_events'],
+    fields: [
+      { key: 'enabled', label: 'Enabled', type: 'checkbox', save: 'bool', default: true },
+      { key: 'heartbeat_ms', label: 'SSE Keepalive (ms)', type: 'number', save: 'int', default: 15000 },
+      { key: 'max_reconnects', label: 'Max Client Reconnects', type: 'number', save: 'int', default: 8 },
+      { key: 'backoff_ms', label: 'Reconnect Backoff (JSON ms array)', textarea: true, save: 'json' },
+      { key: 'stall_timeout_ms', label: 'Stall Timeout (ms)', type: 'number', save: 'int', default: 60000 },
+      { key: 'throttle_ms', label: 'Client UI Throttle (ms)', type: 'number', save: 'int', default: 50 },
+      { key: 'journal_retention_hours', label: 'Journal Retention (hours)', type: 'number', save: 'int', default: 24 },
+      { key: 'journal_max_events', label: 'Journal Max Events / Run', type: 'number', save: 'int', default: 2000 },
+      { key: 'resume_window_seconds', label: 'Resume Window (seconds)', type: 'number', save: 'int', default: 900 },
+    ],
+  },
   'cache-metrics': {
     singular: 'Cache Metric', apiPath: 'admin/cache-metrics', listKey: 'cache-metrics',
     readOnly: true,

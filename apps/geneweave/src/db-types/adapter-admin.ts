@@ -1,4 +1,4 @@
-import type { HumanTaskPolicyRow, TaskContractRow, CachePolicyRow, CacheSettingsRow, CacheMetricsDelta, CacheMetricsSummary, SemanticCacheConfigRow, AgentPlanCacheConfigRow, CacheInvalidationRuleRow, ToolCachePolicyRow, IdentityRuleRow, MemoryGovernanceRow, MemoryExtractionRuleRow, SearchProviderRow, HttpEndpointRow, SocialAccountRow, EnterpriseConnectorRow, ReplayScenarioRow, TriggerDefinitionRow, TenantConfigRow, SandboxPolicyRow, ExtractionPipelineRow, ArtifactPolicyRow, ReliabilityPolicyRow, CollaborationSessionRow, ComplianceRuleRow, GraphConfigRow, PluginConfigRow } from './admin.js';
+import type { HumanTaskPolicyRow, TaskContractRow, CachePolicyRow, CacheSettingsRow, CacheMetricsDelta, CacheMetricsSummary, SemanticCacheConfigRow, RunStreamConfigRow, AgentPlanCacheConfigRow, CacheInvalidationRuleRow, ToolCachePolicyRow, IdentityRuleRow, MemoryGovernanceRow, MemoryExtractionRuleRow, SearchProviderRow, HttpEndpointRow, SocialAccountRow, EnterpriseConnectorRow, ReplayScenarioRow, TriggerDefinitionRow, TenantConfigRow, SandboxPolicyRow, ExtractionPipelineRow, ArtifactPolicyRow, ReliabilityPolicyRow, CollaborationSessionRow, ComplianceRuleRow, GraphConfigRow, PluginConfigRow } from './admin.js';
 import type { ScaffoldTemplateRow, RecipeConfigRow, WidgetConfigRow, ValidationRuleRow } from './dev-experience.js';
 
 export interface IAdminStore {
@@ -34,6 +34,10 @@ export interface IAdminStore {
   // Semantic Cache Config (Phase 4 single global row)
   getSemanticCacheConfig(): Promise<SemanticCacheConfigRow | null>;
   updateSemanticCacheConfig(fields: Partial<Omit<SemanticCacheConfigRow, 'id' | 'updated_at'>>): Promise<void>;
+
+  // Run Stream Config (Client Phase 0 single global row)
+  getRunStreamConfig(): Promise<RunStreamConfigRow | null>;
+  updateRunStreamConfig(fields: Partial<Omit<RunStreamConfigRow, 'id' | 'updated_at'>>): Promise<void>;
 
   // Agent Plan Cache Config (Phase 8 single global row)
   getAgentPlanCacheConfig(): Promise<AgentPlanCacheConfigRow | null>;

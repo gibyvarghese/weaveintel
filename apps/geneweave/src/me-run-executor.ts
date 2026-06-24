@@ -25,21 +25,17 @@
  */
 
 import { newUUIDv7, createLogger, weaveContext } from '@weaveintel/core';
-import type { ExecutionContext } from '@weaveintel/core';
+import type { ExecutionContext, RunEventEnvelope } from '@weaveintel/core';
 
 const logger = createLogger('me-run-executor');
 import type { ServerResponse } from 'node:http';
 import type { DatabaseAdapter } from './db-types.js';
 
-// ─── Envelope (mirrors @weaveintel/client RunEventEnvelope) ─────────────────
-
-export interface RunEventEnvelope {
-  runId: string;
-  sequence: number;
-  kind: string;
-  payload: Record<string, unknown>;
-  timestamp: number;
-}
+// ─── Envelope ───────────────────────────────────────────────────────────────
+// Canonical contract from @weaveintel/core (Client Phase 0) — the same type the
+// browser client reducer consumes, so producer and consumer can never drift.
+// Re-exported so existing `from './me-run-executor.js'` import sites keep working.
+export type { RunEventEnvelope };
 
 /** Event kinds that close a run. */
 const TERMINAL_EVENT_KINDS = new Set(['run.completed', 'run.failed', 'run.cancelled']);

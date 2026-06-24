@@ -70,6 +70,7 @@ import { applyM87CacheInvalidationRules } from './m87-cache-invalidation-rules.j
 import { applyM88ToolCachePolicies } from './m88-tool-cache-policies.js';
 import { applyM89CachePhase7 } from './m89-cache-phase7.js';
 import { applyM90AgentPlanCacheConfig } from './m90-agent-plan-cache-config.js';
+import { applyM91RunStreamConfig } from './m91-run-stream-config.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -148,6 +149,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm88-tool-cache-policies', description: 'Cache Phase 6: tool_cache_policies table (tool_name, cacheable, ttl_ms, enabled) — opt-in per-tool result caching tunable from the DB; seeds read-only tools (web_search/news_search/market_data/http_request/calculator/datetime/unit_convert)', run: applyM88ToolCachePolicies },
   { id: 'm89-cache-phase7', description: 'Cache Phase 7: ADD swr_ms/negative_ttl_ms/eviction_policy to cache_policies + l1_eviction_policy/l1_negative_ttl_ms to cache_settings (stampede protection, SWR, negative caching, cost-aware eviction); enables stampede_protection by default', run: applyM89CachePhase7 },
   { id: 'm90-agent-plan-cache-config', description: 'Cache Phase 8: agent_plan_cache_config single-row table (enabled, similarity_threshold, min_steps, max_entries, ttl_ms, scope) gating Agentic Plan Caching — reuse structured plan templates across similar agent/supervisor tasks; seeds enabled global row', run: applyM90AgentPlanCacheConfig },
+  { id: 'm91-run-stream-config', description: 'Client Phase 0: run_stream_config single-row table (heartbeat_ms, max_reconnects, backoff_ms, stall_timeout_ms, throttle_ms, journal_retention_hours, journal_max_events, resume_window_seconds) — moves run-event SSE streaming tuning + journal retention into the DB; seeds defaults from RUN_STREAM_CONFIG_DEFAULTS', run: applyM91RunStreamConfig },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

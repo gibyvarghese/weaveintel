@@ -3606,6 +3606,22 @@ export class SQLiteAdapter implements DatabaseAdapter {
     this.d.prepare(`UPDATE semantic_cache_config SET ${sets.join(', ')} WHERE id = 'global'`).run(...vals);
   }
 
+  // ── Run Stream Config (Client Phase 0 single global row) ───────────────────
+  async getRunStreamConfig(): Promise<import('./db-types/admin.js').RunStreamConfigRow | null> {
+    const row = this.d.prepare(`SELECT * FROM run_stream_config WHERE id = 'global'`).get() as import('./db-types/admin.js').RunStreamConfigRow | undefined;
+    return row ?? null;
+  }
+
+  async updateRunStreamConfig(fields: Partial<Omit<import('./db-types/admin.js').RunStreamConfigRow, 'id' | 'updated_at'>>): Promise<void> {
+    const sets: string[] = [];
+    const vals: unknown[] = [];
+    for (const [k, v] of Object.entries(fields)) { sets.push(`${k} = ?`); vals.push(v); }
+    if (sets.length === 0) return;
+    sets.push("updated_at = datetime('now')");
+    this.d.prepare(`INSERT OR IGNORE INTO run_stream_config (id) VALUES ('global')`).run();
+    this.d.prepare(`UPDATE run_stream_config SET ${sets.join(', ')} WHERE id = 'global'`).run(...vals);
+  }
+
   // ── Agent Plan Cache Config (Phase 8 single global row) ────────────────────
   async getAgentPlanCacheConfig(): Promise<import('./db-types/admin.js').AgentPlanCacheConfigRow | null> {
     const row = this.d.prepare(`SELECT * FROM agent_plan_cache_config WHERE id = 'global'`).get() as import('./db-types/admin.js').AgentPlanCacheConfigRow | undefined;
@@ -8821,6 +8837,36 @@ export class SQLiteAdapter implements DatabaseAdapter {
 
   async listUserRunEvents(runId: string, afterSequence = -1): Promise<import('./db-types/adapter-me.js').UserRunEventRow[]> {
     return this.d.prepare('SELECT * FROM user_run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence ASC').all(runId, afterSequence) as import('./db-types/adapter-me.js').UserRunEventRow[];
+  }
+
+  async pruneUserRunEvents(opts: { olderThanHours: number; maxEventsPerRun: number }): Promise<number> {
+    let deleted = 0;
+    // 1) Age-based: drop journal events for TERMINAL runs older than the horizon.
+    //    In-flight (pending/running) runs are never pruned — only settled ones.
+    if (opts.olderThanHours > 0) {
+      const r = this.d.prepare(
+        `DELETE FROM user_run_events
+           WHERE created_at < datetime('now', ?)
+             AND run_id IN (SELECT id FROM user_runs WHERE status IN ('completed','failed','cancelled'))`,
+      ).run(`-${Math.floor(opts.olderThanHours)} hours`);
+      deleted += r.changes;
+    }
+    // 2) Per-run cap: keep only the most recent N events per run (the terminal
+    //    event always has the highest sequence, so it is never dropped).
+    if (opts.maxEventsPerRun > 0) {
+      const over = this.d.prepare(
+        `SELECT run_id FROM user_run_events GROUP BY run_id HAVING COUNT(*) > ?`,
+      ).all(opts.maxEventsPerRun) as Array<{ run_id: string }>;
+      const trim = this.d.prepare(
+        `DELETE FROM user_run_events
+           WHERE run_id = ?
+             AND sequence NOT IN (SELECT sequence FROM user_run_events WHERE run_id = ? ORDER BY sequence DESC LIMIT ?)`,
+      );
+      for (const { run_id } of over) {
+        deleted += trim.run(run_id, run_id, opts.maxEventsPerRun).changes;
+      }
+    }
+    return deleted;
   }
 
   async registerDevice(device: { id: string; user_id: string; channel: 'web-push'|'apns'|'fcm'; token: string; tenant_id?: string; label?: string }): Promise<void> {
