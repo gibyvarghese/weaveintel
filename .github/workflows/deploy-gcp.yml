@@ -40,7 +40,7 @@ jobs:
           docker push gcr.io/${{ github.event.inputs.project_id }}/geneweave:${{ github.sha }}
 
       - name: Deploy to Cloud Run
-        uses: google-github-actions/deploy-cloudrun@v2
+        uses: google-github-actions/deploy-cloudrun@v3
         with:
           service: geneweave
           image: gcr.io/${{ github.event.inputs.project_id }}/geneweave:${{ github.sha }}
