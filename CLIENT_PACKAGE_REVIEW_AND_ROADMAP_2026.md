@@ -260,6 +260,32 @@ Phase 0 ─► Phase 1 ─► Phase 2 ─► Phase 3 ─► Phase 4
 
 ---
 
+## 11. Implementation status (delivered)
+
+| Phase / item | Commit | Status |
+|---|---|---|
+| Phase 0 — contracts + reconnect + `run_stream_config` | `019ae82` | ✅ |
+| Phase 1 — lossless chat→run bridge + reducer parity | `2247f82` | ✅ |
+| Phase 2 — typed `parts[]` + per-part streaming states | `1de5b58` | ✅ |
+| Reasoning request flag (m92) — Anthropic thinking / OpenAI effort, gated | `c4f5de9` | ✅ wired + unit-tested; reasoning *text* needs a producer (see follow-ups) |
+| Phase 3 — generative UI · citations · artifacts (run-scoped) | `800a08d` | ✅ |
+| Phase 4 — HITL tool approvals (pause → approve/deny → resume) | `ae207ca` | ✅ |
+
+## 12. Deferred follow-ups (scoped, with plans)
+
+These surfaced during the reasoning + Phase 3 work and are **standalone sub-projects**, not quick edits. The contracts/consumers are already in place (the reducer handles `reasoning.delta` and `widget.update`); each needs a *producer* change.
+
+### F1 — Stream OpenAI reasoning **text** (Responses adapter)
+**Why:** the reasoning flag (m92) is correctly wired — `reasoningEffort` reaches OpenAI — but geneweave routes OpenAI through the chat-completions adapter (`weaveOpenAIModel`), which makes o-series *think* but never streams reasoning summary text. Only the Responses adapter (`openai-responses.ts`, `response.reasoning.delta`) yields it.
+**Blocker:** `weaveOpenAIResponseModel` returns a different interface (`ResponseModel`/`streamResponse`/`ResponseStreamEvent`), and the request shape (`input`/`instructions`, flat function tools, `function_call_output` round-trip) differs — so it is **not** drop-in for `getOrCreateModel`, and has **no tool-call parity** with the agent pipeline.
+**Plan (smallest safe):** add a `Model`-shaped wrapper `weaveOpenAIReasoningModel(modelId, opts)` in `packages/provider-openai` that holds a `weaveOpenAIResponseModel`, translates `ModelRequest`→`ResponseRequest` (messages→input; set `reasoning:{ effort: metadata.reasoningEffort, summary:'auto' }` — `summary:'auto'` is mandatory or no text streams), and maps `ResponseStreamEvent`→`StreamChunk` (`response.output_text.delta`→text, `response.reasoning.delta`→`{type:'reasoning'}`, completed→usage+done). Wire it in `chat-runtime.ts:127` **only for OpenAI reasoning models on direct/non-tool turns** (the wrapper has no tool round-trip). Verify the live event name (some API versions emit `response.reasoning_summary_text.delta`). Anthropic thinking already works end-to-end (blocked here only by the CI account having no credits).
+
+### F2 — `emit_widget` tool (autonomous generative UI)
+**Why:** Phase 3 derives a widget from `web_search` results deterministically, but there is **no autonomous widget producer** — the model can't choose to render a table/chart.
+**Plan:** add an `emit_widget` tool mirroring `emit_artifact` (`tools.ts`): args `{ type:'table'|'chart'|…, title, data }`, validated + built via `@weaveintel/ui-primitives` (`tableWidget`/`chartWidget`), returning the `WidgetPayload`. In the bridge (`me-run-agent.ts` `#handleFrame` `tool_end`), detect `name==='emit_widget'` and `emit.widget(payload.id, payload, schemaVersion)`. Seed it into the tool catalog + the agent/supervisor default tool sets. Then a real run that calls `emit_widget` reconstructs a widget part end-to-end (no `web_search` dependency).
+
+---
+
 ### Appendix A — Canonical event kinds (target taxonomy)
 `run.started · run.completed · run.failed · run.cancelled` · `text.delta` · `reasoning.delta` · `tool.input.start · tool.input.delta · tool.invoked · tool.completed · tool.errored` · `step.update` · `widget.update` · `citation.add` · `artifact.update` · `approval.request` · `usage.update` · `file.part` · `progress.update` · `data.<name>`
 
