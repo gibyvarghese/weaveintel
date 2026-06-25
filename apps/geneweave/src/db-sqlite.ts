@@ -8858,6 +8858,51 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare('DELETE FROM user_run_events WHERE run_id = ?').run(runId).changes;
   }
 
+  // ── Presence (m94, Collaboration Phase 1) — current-state, heartbeat/TTL ─────
+  // Backs the collaboration PresenceManager SQL adapter. UPSERT on heartbeat,
+  // DELETE on leave/expiry. NEVER appended to the journal (ephemeral).
+  async upsertRunPresence(row: {
+    id: string; run_id: string; tenant_id?: string | null; user_id: string; display_name: string;
+    presence: string; peer_type: string; color?: string | null; cursor_json?: string | null;
+    last_heartbeat_at: number; expires_at: number;
+  }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO run_presence
+         (id, run_id, tenant_id, user_id, display_name, presence, peer_type, color, cursor_json, last_heartbeat_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(run_id, user_id) DO UPDATE SET
+         display_name = excluded.display_name, presence = excluded.presence, peer_type = excluded.peer_type,
+         color = excluded.color, cursor_json = excluded.cursor_json,
+         last_heartbeat_at = excluded.last_heartbeat_at, expires_at = excluded.expires_at`,
+    ).run(
+      row.id, row.run_id, row.tenant_id ?? null, row.user_id, row.display_name, row.presence, row.peer_type,
+      row.color ?? null, row.cursor_json ?? null, row.last_heartbeat_at, row.expires_at,
+    );
+  }
+
+  async listActiveRunPresence(runId: string, now: number): Promise<import('./db-types/adapter-me.js').RunPresenceRow[]> {
+    return this.d.prepare(
+      'SELECT * FROM run_presence WHERE run_id = ? AND expires_at > ? ORDER BY peer_type DESC, user_id ASC',
+    ).all(runId, now) as import('./db-types/adapter-me.js').RunPresenceRow[];
+  }
+
+  async deleteRunPresence(runId: string, userId: string): Promise<number> {
+    return this.d.prepare('DELETE FROM run_presence WHERE run_id = ? AND user_id = ?').run(runId, userId).changes;
+  }
+
+  /** Sweep expired presence; returns the distinct affected runs (for re-broadcast). */
+  async deleteExpiredRunPresence(now: number): Promise<Array<{ run_id: string; tenant_id: string | null }>> {
+    const affected = this.d.prepare(
+      'SELECT DISTINCT run_id, tenant_id FROM run_presence WHERE expires_at <= ?',
+    ).all(now) as Array<{ run_id: string; tenant_id: string | null }>;
+    this.d.prepare('DELETE FROM run_presence WHERE expires_at <= ?').run(now);
+    return affected;
+  }
+
+  async getCollaborationConfig(): Promise<import('./db-types/adapter-me.js').CollaborationConfigRow | null> {
+    return (this.d.prepare(`SELECT * FROM collaboration_config WHERE id = 'global'`).get() ?? null) as import('./db-types/adapter-me.js').CollaborationConfigRow | null;
+  }
+
   // ── HITL approvals (m64 table, m93 run-scoped) ─────────────────────────────
   async createHitlInterrupt(row: {
     id: string; chat_id: string; run_id?: string | null; agent_name: string; agent_step?: number;

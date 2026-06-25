@@ -27,6 +27,8 @@ export {
   type RunObjectDelta,
   type RunObjectComplete,
   type RunFilePart,
+  type RunPresenceParticipant,
+  type RunPresenceSnapshot,
   RUN_EVENT_KINDS,
   TERMINAL_RUN_EVENT_KINDS,
   RUN_STREAM_CONFIG_DEFAULTS,

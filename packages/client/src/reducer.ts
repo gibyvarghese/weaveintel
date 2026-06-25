@@ -6,8 +6,10 @@
  * that UI layers can render directly.
  */
 
-import type { RunEventEnvelope } from '@weaveintel/core';
+import type { RunEventEnvelope, RunPresenceParticipant } from '@weaveintel/core';
 import { parsePartialJson, extractJsonCandidate } from './partial-json.js';
+
+export type { RunPresenceParticipant };
 
 // ---------------------------------------------------------------------------
 // Run status mirrors @weaveintel/core RunStatus
@@ -255,6 +257,12 @@ export interface RunViewModel {
   object?: ObjectView;
   /** Phase 7 — multimodal file parts (image / document), in order. */
   files: FileView[];
+  /**
+   * Collaboration Phase 1 — who is currently present on this run (humans + the
+   * agent). A live SNAPSHOT replaced on every `presence.update`; ephemeral (not
+   * derived from the journal). Empty until the first presence event arrives.
+   */
+  presence: RunPresenceParticipant[];
   /** Phase 2 — ordered typed parts with per-part streaming state. */
   parts: RunPart[];
   /** All items in event order (for a linear render). */
@@ -277,6 +285,7 @@ export function emptyRunViewModel(): RunViewModel {
     diagnostics: [],
     approvals: [],
     files: [],
+    presence: [],
     parts: [],
     items: [],
   };
@@ -516,6 +525,16 @@ function lastIndex(parts: RunPart[], pred: (p: RunPart) => boolean): number {
  * Never mutates the input state.
  */
 export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): RunViewModel {
+  // Collaboration Phase 1 — `presence.update` is an EPHEMERAL snapshot, not a
+  // journaled event: it carries `sequence: -1` and must bypass the sequence
+  // dedup below. Replace the whole presence set (snapshots are idempotent and
+  // gap-safe) and leave `sequence`/parts/items untouched.
+  if (envelope.kind === 'presence.update') {
+    const raw = (envelope.payload as { participants?: unknown }).participants;
+    const participants = Array.isArray(raw) ? (raw as RunPresenceParticipant[]) : [];
+    return { ...state, presence: participants };
+  }
+
   // Skip already-seen or out-of-order events (idempotent)
   if (envelope.sequence <= state.sequence) return state;
 

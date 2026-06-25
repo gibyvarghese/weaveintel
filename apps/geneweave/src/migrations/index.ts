@@ -73,6 +73,7 @@ import { applyM90AgentPlanCacheConfig } from './m90-agent-plan-cache-config.js';
 import { applyM91RunStreamConfig } from './m91-run-stream-config.js';
 import { applyM92ReasoningSettings } from './m92-reasoning-settings.js';
 import { applyM93HitlRunScope } from './m93-hitl-run-scope.js';
+import { applyM94CollaborationPresence } from './m94-collaboration-presence.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -154,6 +155,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm91-run-stream-config', description: 'Client Phase 0: run_stream_config single-row table (heartbeat_ms, max_reconnects, backoff_ms, stall_timeout_ms, throttle_ms, journal_retention_hours, journal_max_events, resume_window_seconds) — moves run-event SSE streaming tuning + journal retention into the DB; seeds defaults from RUN_STREAM_CONFIG_DEFAULTS', run: applyM91RunStreamConfig },
   { id: 'm92-reasoning-settings', description: 'Reasoning request: chat_settings.reasoning_enabled/reasoning_effort/reasoning_budget_tokens — request provider reasoning (Anthropic thinking / OpenAI effort) for reasoning-capable models so reasoning frames surface', run: applyM92ReasoningSettings },
   { id: 'm93-hitl-run-scope', description: 'HITL Phase 4: add run_id to hitl_interrupt_requests so /api/me/runs approvals are run-scoped + persisted (survive restart)', run: applyM93HitlRunScope },
+  { id: 'm94-collaboration-presence', description: 'Collaboration Phase 1: run_presence current-state table (heartbeat-upsert, TTL-expiring; humans + agent peers; tenant-isolated; NOT journaled) + collaboration_config single-row (presence heartbeat/ttl/sweep cadence, DB-driven) for live "who is watching this run" presence', run: applyM94CollaborationPresence },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

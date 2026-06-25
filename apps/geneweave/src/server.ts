@@ -26,6 +26,7 @@ import { getDocsHTML } from './docs-html.js';
 import { authenticateRequest, verifyCSRF } from './auth.js';
 import { createNotificationsHub } from './notifications-wiring.js';
 import { MeRunExecutor } from './me-run-executor.js';
+import { startPresenceSweeper } from './presence-sql.js';
 import { createChatPipelineMeRunAgent } from './me-run-agent.js';
 import { type TriggerDispatcherHandle } from './admin/api/triggers.js';
 import { type LoadedGatewayConfig } from './mcp-gateway.js';
@@ -229,13 +230,18 @@ export function createGeneWeaveServer(config: ServerConfig): Server {
   registerMemoryRoutes(router, db);
   registerLiveAgentRoutes(router, db);
   registerAdminLiveRunStreamRoute(router, db);
+  const meRunExecutor = new MeRunExecutor({
+    db,
+    runAgent: createChatPipelineMeRunAgent(chatEngine, db),
+  });
   registerMeRoutes(router, db, {
     notifications: createNotificationsHub({ db }),
-    runExecutor: new MeRunExecutor({
-      db,
-      runAgent: createChatPipelineMeRunAgent(chatEngine, db),
-    }),
+    runExecutor: meRunExecutor,
   });
+  // Collaboration Phase 1: start the presence TTL sweeper (reaps participants
+  // who stopped heartbeating, e.g. closed a tab without a clean leave, and
+  // re-broadcasts the updated "who's watching" snapshot).
+  startPresenceSweeper(db, meRunExecutor);
   registerMeConversationsRoutes(router, db);
   // M5-3: pass consent manager so isGranted() is called on every memory write path.
   registerMeMemoryRoutes(router, db, { consentManager: config.runtime ? createDurableConsentManager({ runtime: config.runtime, namespace: 'consent' }) : undefined });

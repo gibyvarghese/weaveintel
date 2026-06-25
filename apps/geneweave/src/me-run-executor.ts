@@ -157,8 +157,14 @@ class SseSubscriber {
   }
 
   #emit(env: RunEventEnvelope): void {
-    if (env.sequence <= this.#lastSeq) return; // dedup / monotonic guard
-    this.#lastSeq = env.sequence;
+    // Ephemeral events (Collaboration Phase 1 presence) carry `sequence: -1` —
+    // they are not journaled and must bypass the monotonic dedup (which would
+    // always drop a negative sequence). Pass them through without advancing the
+    // resume cursor.
+    if (env.sequence >= 0) {
+      if (env.sequence <= this.#lastSeq) return; // dedup / monotonic guard
+      this.#lastSeq = env.sequence;
+    }
     try {
       if (!this.res.writableEnded) {
         this.res.write(`data: ${JSON.stringify(env)}\n\n`);
@@ -243,6 +249,18 @@ export class MeRunExecutor {
       if (sub.closed) set.delete(sub);
     }
     if (set.size === 0) this.#subscribers.delete(env.runId);
+  }
+
+  /**
+   * Broadcast an EPHEMERAL event to a run's live subscribers WITHOUT writing it
+   * to the journal (Collaboration Phase 1). Used for presence (`presence.update`),
+   * which is high-churn, last-write-wins, and disposable — it only ever means
+   * "current", so journaling it would bloat the durable log with zero replay
+   * value. Ephemeral events carry `sequence: -1` so the client reducer applies
+   * them without participating in the journal's sequence dedup.
+   */
+  broadcastEphemeral(runId: string, kind: string, payload: Record<string, unknown>): void {
+    this.#broadcast({ runId, sequence: -1, kind, payload, timestamp: Date.now() });
   }
 
   // ── Append + serialization ───────────────────────────────────────────────

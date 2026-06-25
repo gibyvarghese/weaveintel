@@ -56,6 +56,7 @@ export type {
   FilePart,
   ObjectView,
   FileView,
+  RunPresenceParticipant,
   RunEventEnvelope,
 } from './reducer.js';
 export { streamReducer, emptyRunViewModel } from './reducer.js';

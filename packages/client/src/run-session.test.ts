@@ -65,6 +65,7 @@ function harness(): Harness {
         return attachController;
       },
       async postEvent(runId, payload) { h.posted.push({ runId, payload }); },
+      async setPresence() { return { participants: [] }; },
     },
   };
   return h;

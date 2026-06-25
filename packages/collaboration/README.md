@@ -12,9 +12,33 @@ here"), live run subscriptions, and user handoff.
 
 | Primitive | What it does |
 |---|---|
-| `createSharedSessionManager()` | A shared "room": participants with roles (owner / collaborator / viewer) and a **presence** state (`online`, `idle`, `typing`, `away`, `offline`). |
+| `createInMemoryPresenceManager()` | **Presence** ("who else is here"): a heartbeat-driven, TTL-expiring set of participants watching a run. The PORT + an in-memory reference adapter; geneWeave provides a SQL adapter over `run_presence`. Both pass `presenceManagerContract`. |
+| `createSharedSessionManager()` | A shared "room": participants with roles (owner / collaborator / viewer) and a presence state. |
 | `createRunSubscriptionManager()` | Track who is **subscribed** to a run and broadcast status/progress changes to all of them. |
 | `createHandoffManager()` | The **handoff** lifecycle — request → accept / reject / cancel / complete — for passing a session from one user to another. |
+
+### Presence (Phase 1) — how it works
+
+> New to this? Presence is the little row of avatars showing who's viewing a
+> shared thing. Each viewer sends a tiny "still here" ping (a **heartbeat**) every
+> ~15s. If the pings stop for ~30s (closed tab, lost wifi), they're removed. That
+> ratio — **TTL = 2× heartbeat** — means one missed ping never makes someone
+> flicker out. AI **agents are first-class peers**: while a run is producing
+> output, the agent shows up as present with a `working` status.
+
+```ts
+import { createInMemoryPresenceManager } from '@weaveintel/collaboration';
+
+const presence = createInMemoryPresenceManager({ ttlMs: 30_000 });
+await presence.heartbeat({ runId, tenantId }, { userId: 'alice', displayName: 'Alice', presence: 'online' });
+const who = await presence.list({ runId, tenantId }); // [{ userId: 'alice', presence: 'online', peerType: 'human' }]
+```
+
+Design (mid-2026 research, anchored on the Yjs awareness protocol): **snapshot,
+not delta** (each `presence.update` is the full participant list — idempotent and
+gap-safe over SSE), **ephemeral** (a current-state table, never the durable run
+journal), and **server-derived identity** (the user id comes from auth, never the
+client — so presence can't be spoofed).
 
 ```ts
 import { createSharedSessionManager } from '@weaveintel/collaboration';
@@ -48,12 +72,13 @@ import { createKvRunRegistry, createKvRunJournal } from '@weaveintel/core';
 
 ## Status & roadmap
 
-The managers here are **in-memory prototypes** — single-process, not yet durable,
-no real-time transport wired. They are the foundation for the phased
-**`COLLABORATION_PACKAGE_REVIEW_AND_ROADMAP_2026.md`** plan, which adds the
-durable, DB-backed, real-time versions:
+**Presence is shipped (Phase 1)** — durable (`run_presence` table in geneWeave),
+heartbeat/TTL-driven, broadcast live over SSE as `presence.update`, reconstructed
+in `@weaveintel/client`'s `vm.presence`. The session/subscription/handoff managers
+are still **in-memory prototypes** that later phases make durable. See
+**`COLLABORATION_PACKAGE_REVIEW_AND_ROADMAP_2026.md`**:
 
-- **Phase 1** — Presence persisted (`run_presence` table) + broadcast over SSE.
+- **Phase 1 ✅** — Presence persisted (`run_presence`) + SSE broadcast + agent-as-peer.
 - **Phase 2** — Shared sessions + invite links (`shared_sessions`).
 - **Phase 3** — Durable subscriptions + offline notifications.
 - **Phase 4** — Collaborative run comments / annotations.

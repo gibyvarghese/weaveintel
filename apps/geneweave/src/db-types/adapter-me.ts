@@ -23,6 +23,34 @@ export interface UserRunEventRow {
   created_at: string;
 }
 
+/** m94 (Collaboration Phase 1) — a current presence row for a run participant. */
+export interface RunPresenceRow {
+  id: string;
+  run_id: string;
+  tenant_id: string | null;
+  user_id: string;
+  display_name: string;
+  presence: string;
+  peer_type: string;
+  color: string | null;
+  cursor_json: string | null;
+  last_heartbeat_at: number;
+  expires_at: number;
+  created_at: string;
+}
+
+/** m94 — single-row collaboration config (presence cadence, DB-driven). */
+export interface CollaborationConfigRow {
+  id: string;
+  enabled: number;
+  presence_heartbeat_ms: number;
+  presence_ttl_ms: number;
+  presence_sweep_ms: number;
+  max_participants_per_run: number;
+  show_agent_presence: number;
+  updated_at: string;
+}
+
 export interface UserDeviceRow {
   id: string;
   user_id: string;
@@ -85,6 +113,12 @@ export interface IMeStore {
   listUserRunEvents(runId: string, afterSequence?: number): Promise<UserRunEventRow[]>;
   /** Per-run journal purge (backs the core RunJournal port's `purgeRun`). */
   deleteUserRunEvents(runId: string): Promise<number>;
+  // ── Presence (m94, Collaboration Phase 1) ─────────────────────────────────
+  upsertRunPresence(row: Omit<RunPresenceRow, 'created_at' | 'tenant_id' | 'color' | 'cursor_json'> & { tenant_id?: string | null; color?: string | null; cursor_json?: string | null }): Promise<void>;
+  listActiveRunPresence(runId: string, now: number): Promise<RunPresenceRow[]>;
+  deleteRunPresence(runId: string, userId: string): Promise<number>;
+  deleteExpiredRunPresence(now: number): Promise<Array<{ run_id: string; tenant_id: string | null }>>;
+  getCollaborationConfig(): Promise<CollaborationConfigRow | null>;
   /**
    * Prune the run-event journal (Client Phase 0). Removes events for terminal
    * runs older than `olderThanHours`, and trims any run whose event count

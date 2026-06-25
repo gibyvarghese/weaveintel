@@ -96,6 +96,12 @@ export interface RunClient {
    * Post a client-originated event into a running run.
    */
   postEvent(runId: string, payload: Record<string, unknown>): Promise<void>;
+  /**
+   * Collaboration Phase 1 — send a presence heartbeat for a run ("I'm watching").
+   * Identity is server-derived from auth; `displayName` is a cosmetic label.
+   * Pass `{ leave: true }` to leave. Returns the current participant snapshot.
+   */
+  setPresence(runId: string, body: { presence?: string; displayName?: string; cursor?: Record<string, unknown>; leave?: boolean }): Promise<{ participants: unknown[] }>;
 }
 
 export interface CreateRunClientOptions {
@@ -203,6 +209,11 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
               if (controller.signal.aborted) return true; // stop
               try {
                 const envelope = JSON.parse(rawEvent.data) as RunEventEnvelope;
+                // Ephemeral events (Collaboration Phase 1 presence) carry
+                // `sequence: -1` — they are NOT journaled and must bypass the
+                // resume-overlap dedup (which would always drop a negative
+                // sequence). Deliver them without advancing the resume cursor.
+                if (envelope.sequence < 0) { reconnectCount = 0; onEvent(envelope); return false; }
                 if (envelope.sequence <= lastSeq) return false; // dedup (resume overlap)
                 lastSeq = envelope.sequence;
                 reconnectCount = 0; // forward progress resets the backoff budget
@@ -248,6 +259,10 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
 
     async postEvent(runId, payload) {
       await json.post<unknown>(`/api/me/runs/${runId}/events`, payload);
+    },
+
+    async setPresence(runId, body) {
+      return json.post<{ participants: unknown[] }>(`/api/me/runs/${runId}/presence`, body);
     },
   };
 }

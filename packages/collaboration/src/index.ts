@@ -36,3 +36,19 @@ export {
   type HandoffManager,
   createHandoffManager,
 } from './handoff.js';
+
+// Phase 1 — Presence ("who else is here"): the PORT + in-memory reference
+// adapter (geneWeave provides the SQL adapter over `run_presence`). Both pass
+// `presenceManagerContract`.
+export {
+  type PresenceScope,
+  type PresenceHeartbeat,
+  type PresenceManager,
+  type PresenceManagerOptions,
+  createInMemoryPresenceManager,
+} from './presence.js';
+export {
+  type ContractTestApi as PresenceContractTestApi,
+  type PresenceHarness,
+  presenceManagerContract,
+} from './presence-contract.js';

@@ -58,6 +58,8 @@ import { MeRunExecutor, isTerminalRunStatus } from '../me-run-executor.js';
 import { loadRunStreamConfig, clientStreamConfig } from '../chat-run-stream-utils.js';
 import { runApprovals } from '../me-run-approvals.js';
 import { createSqlRunJournal } from '../run-substrate-sql.js';
+import { createSqlPresenceManager, withAgentPeer } from '../presence-sql.js';
+import { loadCollaborationConfig, clientCollabConfig } from '../collab-config.js';
 
 /**
  * Register all /api/me routes on the provided router.
@@ -178,6 +180,15 @@ export function registerMeRoutes(
     res.end(JSON.stringify(clientStreamConfig(cfg)));
   }, { auth: true });
 
+  // Collaboration Phase 1: presence cadence (heartbeat/TTL), DB-driven. Clients
+  // fetch this and heartbeat at `presenceHeartbeatMs`.
+  router.get('/api/me/collab/config', async (_req, res, _params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const cfg = await loadCollaborationConfig(db);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(clientCollabConfig(cfg)));
+  }, { auth: true });
+
   router.get('/api/me/runs/:runId', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const run = await db.getUserRun(params['runId']!, auth.userId);
@@ -229,6 +240,21 @@ export function registerMeRoutes(
         timestamp: ev.timestamp ?? Date.now(),
       });
     }
+
+    // Collaboration Phase 1: send the CURRENT presence snapshot to the new
+    // subscriber so it immediately sees who else is watching (presence is
+    // ephemeral, so it is NOT in the journal above — it's read live here).
+    try {
+      const collabCfg = await loadCollaborationConfig(db);
+      if (collabCfg.enabled) {
+        const presence = createSqlPresenceManager(db, { ttlMs: collabCfg.presenceTtlMs });
+        const humans = await presence.list({ runId: run.id, tenantId: run.tenant_id ?? '__default__' });
+        const participants = withAgentPeer(humans, run.status, collabCfg.showAgentPresence);
+        if (participants.length > 0) {
+          subscriber.replay({ runId: run.id, sequence: -1, kind: 'presence.update', payload: { participants }, timestamp: Date.now() });
+        }
+      }
+    } catch { /* presence snapshot is best-effort — never break the stream */ }
 
     // For terminal runs with nothing more coming, close after replay.
     if (isTerminalRunStatus(run.status)) {
@@ -283,6 +309,59 @@ export function registerMeRoutes(
     const sequence = await runExecutor.appendEvent(run.id, kind, payload);
     res.writeHead(201, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ sequence }));
+  }, { auth: true });
+
+  // ── Presence (Collaboration Phase 1) — "who else is watching this run" ──────
+  // POST = heartbeat (or `{ leave: true }` to leave). Identity is ALWAYS the
+  // authenticated user (`auth.userId`) — never client-supplied — so presence
+  // cannot be spoofed. `displayName` is a cosmetic label (capped, no PII). Each
+  // heartbeat broadcasts the full participant snapshot to the run's live
+  // subscribers and returns it to the caller. Presence is ephemeral (its own
+  // `run_presence` table) and never journaled.
+  router.post('/api/me/runs/:runId/presence', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const run = await db.getUserRun(params['runId']!, auth.userId); // ownership + tenant isolation
+    if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+
+    const cfg = await loadCollaborationConfig(db);
+    if (!cfg.enabled) { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ participants: [] })); return; }
+    const presence = createSqlPresenceManager(db, { ttlMs: cfg.presenceTtlMs });
+    const scope = { runId: run.id, tenantId: run.tenant_id ?? '__default__' };
+
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* empty body = plain heartbeat */ }
+
+    let humans;
+    if (body['leave'] === true) {
+      humans = await presence.leave(scope, auth.userId);
+    } else {
+      const rawName = typeof body['displayName'] === 'string' ? body['displayName'] : `User ${auth.userId.slice(0, 8)}`;
+      const state = typeof body['presence'] === 'string' ? body['presence'] : 'online';
+      humans = await presence.heartbeat(scope, {
+        userId: auth.userId,                       // server-derived identity (anti-spoof)
+        displayName: rawName.slice(0, 64),         // cosmetic, length-capped, no PII
+        presence: state,
+        peerType: 'human',
+        ...(body['cursor'] && typeof body['cursor'] === 'object' ? { cursor: body['cursor'] as Record<string, unknown> } : {}),
+      });
+    }
+    const participants = withAgentPeer(humans, run.status, cfg.showAgentPresence);
+    // Push the new snapshot to everyone watching (ephemeral — not journaled).
+    runExecutor.broadcastEphemeral(run.id, 'presence.update', { participants });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ participants }));
+  }, { auth: true });
+
+  router.get('/api/me/runs/:runId/presence', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const run = await db.getUserRun(params['runId']!, auth.userId);
+    if (!run) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const cfg = await loadCollaborationConfig(db);
+    const presence = createSqlPresenceManager(db, { ttlMs: cfg.presenceTtlMs });
+    const humans = await presence.list({ runId: run.id, tenantId: run.tenant_id ?? '__default__' });
+    const participants = withAgentPeer(humans, run.status, cfg.showAgentPresence);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ participants }));
   }, { auth: true });
 
   router.post('/api/me/runs/:runId/cancel', async (_req, res, params, auth) => {

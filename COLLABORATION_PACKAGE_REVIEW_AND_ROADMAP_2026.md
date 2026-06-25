@@ -193,12 +193,21 @@ Each phase extends existing code (geneWeave SQL, `@weaveintel/client`, core `Eve
 - Fix the real bugs surfaced in §1 (registry `register` tenant assertion; journal tenant scoping + gap‑safe resume; subscription `updateStatus` correctness; handoff reject‑reason).
 - **Acceptance:** geneWeave's run pipeline runs through the **core** `RunRegistry`/`RunJournal` interfaces with **no behavioural change** (all Client Phase 0–7 e2e still green); `@weaveintel/collaboration` no longer contains run‑substrate code; the duplicate SSE parser is deleted; `run_stream_config`'s 24h/2000 are sourced from one place; the previously‑dead geneWeave dependency on `collaboration` is removed until Phase 1 re‑adds it for presence.
 
-### Phase 1 — Presence (highest‑value missing capability) · C4
+### Phase 1 — Presence (highest‑value missing capability) · C4  ✅ delivered
 **Goal:** "who else is here" on every run/chat — the multiplayer baseline weaveIntel completely lacks.
 - `run_presence` table (7.1) + `PresenceManager` (heartbeat upsert, TTL sweep). `POST /api/me/runs/:id/presence` (heartbeat) + a sweeper job; broadcast `presence.update` over the existing `SseSubscriber` fan‑out.
 - New run‑event kind `presence.update`; extend the **client reducer** with `vm.presence` (active participants + state), mirroring the Phase 7 `file.part`/`object.delta` additions. Surface in `createRunSession`.
 - Config from `collaboration_config` (heartbeat/ttl/sweep), DB‑driven like `run_stream_config`.
 - **Acceptance:** two browser sessions on the same run see each other's presence appear/expire (heartbeat+TTL) in real time via Playwright; presence reconstructs in `vm.presence`; survives one client disconnect (TTL reaps it). Tested across direct/agent/supervisor/ensemble.
+
+**What shipped (research‑anchored on the Yjs awareness protocol + Liveblocks AI‑presence):**
+- **core** — `presence.update` run‑event kind + `RunPresenceParticipant`/`RunPresenceSnapshot` payloads. Presence is a **snapshot** (full participant list, idempotent + gap‑safe over SSE), carries `sequence: -1`, and is **ephemeral** (never journaled).
+- **`@weaveintel/collaboration`** — `PresenceManager` PORT + in‑memory reference adapter + `presenceManagerContract` (its first durable‑pattern multiplayer primitive). Heartbeat 15s / TTL 30s (TTL = 2× heartbeat → one missed beat never drops a peer). 14 unit tests.
+- **geneWeave** — `m94` `run_presence` (current‑state, UPSERT/DELETE, FK to `user_runs`, tenant column) + `collaboration_config` (DB‑driven cadence). `SqlPresenceManager` passes the **same** `presenceManagerContract` as the in‑memory adapter (11 tests). `POST/GET /api/me/runs/:id/presence` (heartbeat/leave/list) + `GET /api/me/collab/config`. Ephemeral `broadcastEphemeral` (presence fans out without journaling); a presence **snapshot on subscribe**; a TTL **sweeper** (`startPresenceSweeper`, `unref`’d). **Agent‑as‑peer**: `withAgentPeer` synthesizes the agent as a `working` participant while the run is `running` — no extra writes, no lifecycle coupling. Identity is **server‑derived** (anti‑spoof); displayName length‑capped, no PII.
+- **`@weaveintel/client`** — `vm.presence` in the reducer (the `presence.update` snapshot bypasses the journal sequence dedup); `createRunSession.setPresence()` + `RunClient.setPresence()` heartbeat helpers. 6 unit tests.
+- **Real‑LLM e2e** (`run-presence-phase1.e2e.ts`): heartbeat makes the human (and the running agent) appear live in `vm.presence` across direct/agent/supervisor/ensemble; explicit leave removes them; presence is ownership/tenant isolated (a different user → 404); `/collab/config` serves the cadence; web‑UI regression.
+
+**Scope note:** Phase 1 runs are single‑owner, so genuine MULTI‑USER presence on one run (two different humans) arrives with **Phase 2** (shared sessions grant a second user access). Phase 1's "second participant" is the **agent peer**, which exercises the full multi‑participant snapshot/broadcast mechanism. TTL expiry + sweep are covered deterministically by the unit/contract tests (clock‑injected).
 
 ### Phase 2 — Shared sessions + invite links · C5
 **Goal:** multi‑user shared runs/chats with roles.

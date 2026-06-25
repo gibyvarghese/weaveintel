@@ -22,6 +22,7 @@ function mockClient(opts: {
     async cancelRun() { /* noop */ },
     attach() { return new AbortController(); },
     async postEvent(runId, payload) { opts.onPost?.(runId, payload); posts.push({ runId, payload }); },
+    async setPresence() { return { participants: [] }; },
   };
 }
 
