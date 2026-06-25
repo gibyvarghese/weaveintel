@@ -279,7 +279,7 @@ Phase 0 ─► Phase 1 ─► Phase 2 ─► Phase 3 ─► Phase 4
 | Reasoning request flag (m92) — Anthropic thinking / OpenAI effort, gated | `c4f5de9` | ✅ wired + unit-tested; reasoning *text* needs a producer (see follow-ups) |
 | Phase 3 — generative UI · citations · artifacts (run-scoped) | `800a08d` | ✅ |
 | Phase 4 — HITL tool approvals (pause → approve/deny → resume) | `ae207ca` | ✅ |
-| Phase 5 — UX primitives (`createRunSession`) + `@weaveintel/react-client` (`useRun`) + single `parseSseStream` | `a768133` | ✅ (G14 web‑UI convergence partial — raw‑ESM serving; see Phase 5 note) |
+| Phase 5 — UX primitives (`createRunSession`) + `@weaveintel/react-client` (`useRun`) + single `parseSseStream` | `62cd99a` | ✅ (G14 web‑UI convergence partial — raw‑ESM serving; see Phase 5 note) |
 
 ## 12. Deferred follow-ups (scoped, with plans)
 
