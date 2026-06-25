@@ -75,6 +75,15 @@ function harness(): Harness {
       async getSubscription() { return { subscribed: false, channels: [] }; },
       async listNotifications() { return { items: [], unreadCount: 0 }; },
       async markAllNotificationsRead() { return { read: 0 }; },
+      async addComment() { return { comment: {} }; },
+      async listComments() { return { comments: [], role: 'owner' }; },
+      async editComment() { return { comment: {} }; },
+      async deleteComment() { return { deleted: true }; },
+      async resolveThread() { return { resolved: true }; },
+      async reopenThread() { return { reopened: true }; },
+      async addAnnotation() { return { annotation: {} }; },
+      async listAnnotations() { return { annotations: [], summary: [] }; },
+      async createRunPublicShare() { return { id: 's', token: 't', url: '/share/runs/t', expiresAt: null }; },
     },
   };
   return h;

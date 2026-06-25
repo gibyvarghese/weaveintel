@@ -17,6 +17,8 @@ here"), live run subscriptions, and user handoff.
 | `createSharedSessionManager()` | (legacy in-memory prototype) a shared "room" with presence state. |
 | `createInMemorySubscriptionManager()` | **Durable subscriptions** (Phase 3): "notify me when this run finishes, even if I close the tab." The PORT + in-memory adapter; geneWeave's SQL adapter (over `run_subscriptions`) makes it survive restarts. Both pass `subscriptionManagerContract`. Delivery is `@weaveintel/notifications`' job — this only records WHO is interested and over WHICH channels. |
 | `createRunSubscriptionManager()` | (legacy in-memory prototype) live status/progress broadcast room — superseded by the durable `SubscriptionManager` above. |
+| `createInMemoryCommentManager()` | **Run comments** (Phase 4): threaded review comments ANCHORED to a stable run part (`tool-3`, `text-1`). The PORT + in-memory adapter; geneWeave's SQL adapter (over `run_comments`) + @mention notifications + a public read-only share layer on top. Both pass `commentManagerContract`. Markdown → safe HTML via `renderCommentMarkdown`. |
+| `createInMemoryAnnotationManager()` | **Run annotations** (Phase 4): structured human-feedback SCORES (`{name, value, source}`) on a run/part — the bridge to eval datasets. The PORT + in-memory adapter; geneWeave's SQL adapter over `run_annotations`. Both pass `annotationManagerContract`. |
 | `createHandoffManager()` | The **handoff** lifecycle — request → accept / reject / cancel / complete — for passing a session from one user to another. |
 
 ### Presence (Phase 1) — how it works
@@ -113,6 +115,50 @@ duplicate (effectively-once). Webhooks are HMAC-signed per Standard Webhooks
 only to **registered** endpoints over the SSRF-hardened fetch (private/link-local
 ranges blocked, validated at dial time).
 
+### Collaborative run timeline — comments + annotations (Phase 4) — how it works
+
+> New to this? It is Google-Docs comments, but pinned to one step of an AI run.
+> A reviewer highlights a tool call or a paragraph of the output and leaves a
+> note; replies form a thread; a thread can be marked resolved. They can also
+> drop a SCORE (👍, or "4 / 5 helpful") which becomes evaluation data. And the
+> owner can publish a read-only link so people without an account can see the
+> review.
+
+```ts
+import { createInMemoryCommentManager, createInMemoryAnnotationManager } from '@weaveintel/collaboration';
+
+const comments = createInMemoryCommentManager();
+const c = await comments.create({ id, runId, tenantId, authorId: 'alice', body: 'wrong **arg** here',
+  anchor: { partId: 'tool-3', createdAtSeq: 12 }, mentions: ['bob'] });
+await comments.resolveThread(c.threadId, 'owner');
+
+const scores = createInMemoryAnnotationManager();
+await scores.create({ id, runId, tenantId, authorId: 'alice', name: 'helpfulness', dataType: 'numeric', value: 4, partId: 'tool-3' });
+```
+
+Design (mid-2026 research — Notion block comments + W3C Web Annotation
+`TextQuoteSelector` + the cross-vendor LangSmith/Langfuse score schema):
+- **Anchor to the stable part id, never a character offset** — a streaming part
+  grows, so an offset captured early points at the wrong place later. We keep the
+  run `sequence` for staleness and an optional fuzzy quote+context sub-range, so a
+  comment is marked *stale* rather than silently lost or misplaced.
+- **Two-level threads** (root + flat replies), **thread-level resolve**, and
+  **soft-delete tombstones** (replies are never orphaned).
+- **@mentions are an explicit user-id list** (notify off THAT, never by scanning
+  the body), validated against run access (mentioning someone who cannot see the
+  run is dropped — fail closed). geneWeave delivers them via the Phase 3 in-app feed.
+- **Markdown is rendered to SAFE html server-side** (`renderCommentMarkdown`):
+  everything is escaped first, then a tiny allowlist of inline formatting is
+  applied — no raw HTML or `javascript:` URL can ever survive (CommonMark alone is
+  not safe).
+- **Annotations use a structured score schema** (`name`/`value`/`stringValue`/
+  `comment`/`source`/`dataType`); booleans normalise to 1/0 so thumbs aggregate;
+  `source` separates HUMAN review from auto-graders; `annotationsToEvalExamples`
+  is the bridge into an eval dataset.
+- **Public share** is a capability-URL token (256-bit, SHA-256-hashed, expirable/
+  revocable) rendering a REDACTED, read-only view (display names only — no emails/
+  ids/system prompts/tool args), `noindex` + `no-referrer`.
+
 ## What this package is NOT (read this first)
 
 It is **not** where runs are stored or streamed. In **Collaboration Phase 0** the
@@ -145,6 +191,7 @@ are still **in-memory prototypes** that later phases make durable. See
 - **Phase 1 ✅** — Presence persisted (`run_presence`) + SSE broadcast + agent-as-peer.
 - **Phase 2 ✅** — Shared sessions + invite links (`shared_sessions`/`session_participants`) + role-gated multi-user access.
 - **Phase 3 ✅** — Durable subscriptions (`run_subscriptions`) + offline notifications (transactional `notification_outbox` → in-app feed + signed webhooks), restart-safe. Plus the CVE-2026-53843 force-disconnect.
+- **Phase 4 ✅** — Collaborative run timeline: threaded part-anchored comments (`run_comments`) + structured annotation scores (`run_annotations`) + @mention notifications + a public read-only redacted share link.
 - **Phase 4** — Collaborative run comments / annotations.
 - **Phase 5** — Unified handoff (built on `@weaveintel/human-tasks` + `@weaveintel/a2a`).
 

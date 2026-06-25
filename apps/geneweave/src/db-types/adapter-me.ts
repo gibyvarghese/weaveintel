@@ -146,6 +146,58 @@ export interface WebhookEndpointRow {
   revoked_at: number | null;
 }
 
+/** m97 (Collaboration Phase 4) — a threaded, part-anchored review comment. */
+export interface RunCommentRow {
+  id: string;
+  run_id: string;
+  tenant_id: string | null;
+  thread_id: string;
+  parent_id: string | null;
+  author_id: string;
+  body: string;
+  body_html: string;
+  mentions_json: string;
+  anchor_part_id: string;
+  anchor_seq: number;
+  anchor_range_json: string | null;
+  created_at: number;
+  updated_at: number;
+  edited_at: number | null;
+  deleted_at: number | null;
+  deleted_by: string | null;
+  resolved_at: number | null;
+  resolved_by: string | null;
+}
+
+/** m97 — a structured human-feedback score (the evals bridge). */
+export interface RunAnnotationRow {
+  id: string;
+  run_id: string;
+  tenant_id: string | null;
+  part_id: string;
+  author_id: string;
+  name: string;
+  data_type: 'numeric' | 'categorical' | 'boolean' | 'text';
+  value: number | null;
+  string_value: string | null;
+  comment: string | null;
+  source: 'human' | 'llm_judge' | 'eval_code' | 'api' | 'end_user';
+  created_at: number;
+}
+
+/** m97 — a public read-only share token (capability URL, hashed at rest). */
+export interface RunPublicShareRow {
+  id: string;
+  run_id: string;
+  tenant_id: string | null;
+  token_hash: string;
+  token_prefix: string;
+  created_by: string;
+  created_at: number;
+  expires_at: number | null;
+  revoked_at: number | null;
+}
+
 export interface UserDeviceRow {
   id: string;
   user_id: string;
@@ -251,6 +303,22 @@ export interface IMeStore {
   hasNotificationOutboxForRun(runId: string): Promise<boolean>;
   /** Terminal runs that have at least one subscriber (the reconciler backfill scan). */
   listTerminalRunsWithSubscribers(limit: number): Promise<UserRunRow[]>;
+  // ── Run comments + annotations + public share (m97, Collaboration Phase 4) ──
+  createRunComment(row: RunCommentRow): Promise<void>;
+  getRunComment(id: string): Promise<RunCommentRow | null>;
+  listRunComments(runId: string): Promise<RunCommentRow[]>;
+  listRunCommentThread(threadId: string): Promise<RunCommentRow[]>;
+  updateRunCommentBody(id: string, body: string, bodyHtml: string, mentionsJson: string, editedAt: number, updatedAt: number): Promise<void>;
+  softDeleteRunComment(id: string, deletedBy: string, deletedAt: number): Promise<void>;
+  setRunThreadResolution(threadId: string, resolvedAt: number | null, resolvedBy: string | null, updatedAt: number): Promise<void>;
+  createRunAnnotation(row: RunAnnotationRow): Promise<void>;
+  getRunAnnotation(id: string): Promise<RunAnnotationRow | null>;
+  listRunAnnotations(runId: string): Promise<RunAnnotationRow[]>;
+  deleteRunAnnotation(id: string): Promise<number>;
+  createRunPublicShare(row: { id: string; run_id: string; tenant_id?: string | null; token_hash: string; token_prefix: string; created_by: string; created_at: number; expires_at?: number | null }): Promise<void>;
+  getRunPublicShareByHash(tokenHash: string): Promise<RunPublicShareRow | null>;
+  listRunPublicShares(runId: string): Promise<RunPublicShareRow[]>;
+  revokeRunPublicShare(id: string, runId: string, revokedAt: number): Promise<number>;
   // Registered outbound webhook endpoints
   createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void>;
   listWebhookEndpoints(userId: string): Promise<WebhookEndpointRow[]>;

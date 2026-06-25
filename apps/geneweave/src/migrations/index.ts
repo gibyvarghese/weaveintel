@@ -76,6 +76,7 @@ import { applyM93HitlRunScope } from './m93-hitl-run-scope.js';
 import { applyM94CollaborationPresence } from './m94-collaboration-presence.js';
 import { applyM95SharedSessions } from './m95-shared-sessions.js';
 import { applyM96RunSubscriptions } from './m96-run-subscriptions.js';
+import { applyM97RunComments } from './m97-run-comments.js';
 import { applyEncryption } from './encryption.js';
 import { createMigrationRunner } from './helpers.js';
 
@@ -160,6 +161,7 @@ const bootstrapRunner = createMigrationRunner([
   { id: 'm94-collaboration-presence', description: 'Collaboration Phase 1: run_presence current-state table (heartbeat-upsert, TTL-expiring; humans + agent peers; tenant-isolated; NOT journaled) + collaboration_config single-row (presence heartbeat/ttl/sweep cadence, DB-driven) for live "who is watching this run" presence', run: applyM94CollaborationPresence },
   { id: 'm95-shared-sessions', description: 'Collaboration Phase 2: shared_sessions + session_participants (durable membership, UNIQUE(session,user) idempotent join, owner/collaborator/viewer roles) + session_share_tokens (invite links: 256-bit token, SHA-256-hashed at rest, expiry/revocation) — turns a single-owner run into a multi-user one with server-side role enforcement', run: applyM95SharedSessions },
   { id: 'm96-run-subscriptions', description: 'Collaboration Phase 3: run_subscriptions (durable "notify me when this run finishes", UNIQUE(run,user) idempotent) + notification_feed (per-user in-app inbox, fan-out-on-write, dedupe) + notification_outbox (transactional outbox: leased, crash-safe at-least-once delivery on terminal run events) + webhook_endpoints (registered, per-endpoint signing secret, SSRF-validated) + collaboration_config relay cadence/retry columns', run: applyM96RunSubscriptions },
+  { id: 'm97-run-comments', description: 'Collaboration Phase 4: run_comments (threaded, part-anchored review comments — stable part-id anchor + staleness seq + fuzzy sub-range; raw markdown + sanitized body_html; soft-delete tombstones; thread-level resolve; @mention list) + run_annotations (structured human-feedback scores: name/value/string_value/comment/source/data_type, part- or run-level — the evals bridge) + run_public_shares (capability-URL token for a public read-only redacted view; 256-bit, SHA-256-hashed, expirable/revocable)', run: applyM97RunComments },
 ]);
 
 export function applySQLiteBootstrapMigrations(db: BetterSqlite3.Database): void {

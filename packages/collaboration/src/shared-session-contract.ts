@@ -14,6 +14,11 @@ export interface ContractTestApi {
     toBe(v: unknown): void;
     toEqual(v: unknown): void;
     toBeNull(): void;
+    toContain(v: unknown): void;
+    toBeGreaterThan(v: number): void;
+    toBeLessThan(v: number): void;
+    toMatchObject(v: unknown): void;
+    not: { toBe(v: unknown): void; toEqual(v: unknown): void; toBeNull(): void; toContain(v: unknown): void };
     rejects: { toThrow(matcher?: unknown): Promise<void> };
     [k: string]: unknown;
   };

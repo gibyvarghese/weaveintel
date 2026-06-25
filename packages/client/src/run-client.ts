@@ -130,6 +130,28 @@ export interface RunClient {
   listNotifications(opts?: { unreadOnly?: boolean; limit?: number }): Promise<{ items: unknown[]; unreadCount: number }>;
   /** Collaboration Phase 3 — mark every in-app notification read. */
   markAllNotificationsRead(): Promise<{ read: number }>;
+  /**
+   * Collaboration Phase 4 — add a review comment, anchored to a run part
+   * (`anchor.partId`, e.g. `tool-3`; '' = run-level). Optional `parentId` makes
+   * it a reply; `mentions` are user ids (validated + notified server-side).
+   */
+  addComment(runId: string, input: { body: string; anchor: { partId: string; createdAtSeq: number; subRange?: unknown }; parentId?: string; mentions?: string[] }): Promise<{ comment: unknown }>;
+  /** Collaboration Phase 4 — list all comments on a run (with viewer capabilities). */
+  listComments(runId: string): Promise<{ comments: unknown[]; role: string }>;
+  /** Collaboration Phase 4 — edit a comment (author only). */
+  editComment(runId: string, commentId: string, body: string, mentions?: string[]): Promise<{ comment: unknown }>;
+  /** Collaboration Phase 4 — soft-delete a comment (author; owner moderates). */
+  deleteComment(runId: string, commentId: string): Promise<{ deleted: boolean }>;
+  /** Collaboration Phase 4 — resolve a comment thread. */
+  resolveThread(runId: string, threadId: string): Promise<{ resolved: boolean }>;
+  /** Collaboration Phase 4 — reopen a resolved thread. */
+  reopenThread(runId: string, threadId: string): Promise<{ reopened: boolean }>;
+  /** Collaboration Phase 4 — add a structured score / annotation to a run or part. */
+  addAnnotation(runId: string, input: { name: string; dataType?: 'numeric' | 'categorical' | 'boolean' | 'text'; value?: number; stringValue?: string; comment?: string; partId?: string; source?: string }): Promise<{ annotation: unknown }>;
+  /** Collaboration Phase 4 — list annotations + a per-name summary. */
+  listAnnotations(runId: string): Promise<{ annotations: unknown[]; summary: unknown[] }>;
+  /** Collaboration Phase 4 — mint a public, read-only share link (owner only). */
+  createRunPublicShare(runId: string, opts?: { expiresInMs?: number }): Promise<{ id: string; token: string; url: string; expiresAt: number | null }>;
 }
 
 export interface CreateRunClientOptions {
@@ -341,6 +363,34 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
     },
     async markAllNotificationsRead() {
       return json.post('/api/me/notifications/read-all', {});
+    },
+
+    async addComment(runId, input) {
+      return json.post(`/api/me/runs/${runId}/comments`, input);
+    },
+    async listComments(runId) {
+      return (await json.get<{ comments: unknown[]; role: string }>(`/api/me/runs/${runId}/comments`)) ?? { comments: [], role: 'viewer' };
+    },
+    async editComment(runId, commentId, body, mentions) {
+      return json.post(`/api/me/runs/${runId}/comments/${commentId}/edit`, mentions ? { body, mentions } : { body });
+    },
+    async deleteComment(runId, commentId) {
+      return json.post(`/api/me/runs/${runId}/comments/${commentId}/delete`, {});
+    },
+    async resolveThread(runId, threadId) {
+      return json.post(`/api/me/runs/${runId}/threads/${threadId}/resolve`, {});
+    },
+    async reopenThread(runId, threadId) {
+      return json.post(`/api/me/runs/${runId}/threads/${threadId}/reopen`, {});
+    },
+    async addAnnotation(runId, input) {
+      return json.post(`/api/me/runs/${runId}/annotations`, input);
+    },
+    async listAnnotations(runId) {
+      return (await json.get<{ annotations: unknown[]; summary: unknown[] }>(`/api/me/runs/${runId}/annotations`)) ?? { annotations: [], summary: [] };
+    },
+    async createRunPublicShare(runId, shareOpts) {
+      return json.post(`/api/me/runs/${runId}/public-share`, shareOpts ?? {});
     },
   };
 }

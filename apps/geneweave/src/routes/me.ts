@@ -64,6 +64,8 @@ import { resolveRunAccess, createSqlSessionManager, mintShareToken, hashShareTok
 import { roleAtLeast, type SessionRole, type SubscriptionChannel } from '@weaveintel/collaboration';
 import { createSqlSubscriptionManager, createSqlFeedStore } from '../run-subscription-sql.js';
 import { enqueueRunTerminalNotifications, isSafeWebhookUrl } from '../run-notifications-outbox.js';
+import { createSqlCommentManager, createSqlAnnotationManager, mintPublicShareToken } from '../run-comment-sql.js';
+import { summarizeAnnotations, annotationsToEvalExamples, type CommentAnchor, type AnnotationDataType, type AnnotationSource } from '@weaveintel/collaboration';
 
 /**
  * Register all /api/me routes on the provided router.
@@ -675,6 +677,233 @@ export function registerMeRoutes(
   router.post('/api/me/webhooks/:id/revoke', async (_req, res, params, auth) => {
     if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
     const changed = await db.revokeWebhookEndpoint(params['id']!, auth.userId, Date.now());
+    res.writeHead(changed ? 200 : 404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ revoked: changed > 0 }));
+  }, { auth: true });
+
+  // ── Collaborative run timeline: comments + annotations (Phase 4) ─────────────
+  // Validate @mentions against run ACCESS (a mention of someone who cannot see the
+  // run is dropped — fail closed, no enumeration), cap the count (anti mention-
+  // bombing), then notify each mentioned user via the Phase 3 in-app feed.
+  const MENTION_CAP = 20;
+  async function validateAndNotifyMentions(run: { id: string; tenant_id?: string | null }, requested: string[], actorId: string): Promise<string[]> {
+    const unique = [...new Set(requested)].filter((u) => u && u !== actorId).slice(0, MENTION_CAP);
+    const valid: string[] = [];
+    for (const uid of unique) {
+      const acc = await resolveRunAccess(db, run.id, uid).catch(() => null);
+      if (acc) valid.push(uid);
+    }
+    if (valid.length) {
+      const feed = createSqlFeedStore(db);
+      const tenantId = run.tenant_id ?? '__global__';
+      for (const uid of valid) {
+        await feed.append({
+          id: newUUIDv7(), tenantId, principalId: uid, category: 'mention',
+          title: 'You were mentioned on a run', deepLink: `geneweave://run/${run.id}`,
+          priority: 'normal', createdAt: Date.now(), readAt: null,
+          dedupeKey: `mention:${run.id}:${newUUIDv7()}`, // each mention is its own notification
+        }).catch(() => { /* best-effort */ });
+      }
+    }
+    return valid;
+  }
+
+  // Create a comment (root or reply). ANY run participant may comment (a viewer is
+  // a reviewer). The comment is anchored to a stable part id; the body is stored
+  // raw + rendered to sanitized HTML by the SQL adapter.
+  router.post('/api/me/runs/:runId/comments', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const run = access.run;
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const text = typeof body['body'] === 'string' ? body['body'] : '';
+    if (!text.trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'Empty comment' })); return; }
+    const rawAnchor = (body['anchor'] && typeof body['anchor'] === 'object') ? body['anchor'] as Record<string, unknown> : {};
+    const anchor: CommentAnchor = {
+      partId: typeof rawAnchor['partId'] === 'string' ? (rawAnchor['partId'] as string).slice(0, 128) : '',
+      createdAtSeq: typeof rawAnchor['createdAtSeq'] === 'number' ? rawAnchor['createdAtSeq'] as number : 0,
+      ...(rawAnchor['subRange'] && typeof rawAnchor['subRange'] === 'object' ? { subRange: rawAnchor['subRange'] as CommentAnchor['subRange'] } : {}),
+    };
+    const parentId = typeof body['parentId'] === 'string' ? body['parentId'] : null;
+    // Object-level authz: a reply's parent must belong to THIS run.
+    if (parentId) {
+      const parent = await db.getRunComment(parentId);
+      if (!parent || parent.run_id !== run.id) { res.writeHead(404); res.end(JSON.stringify({ error: 'Parent comment not found' })); return; }
+    }
+    const requestedMentions = Array.isArray(body['mentions']) ? (body['mentions'] as unknown[]).filter((m): m is string => typeof m === 'string') : [];
+    const mentions = await validateAndNotifyMentions(run, requestedMentions, auth.userId);
+    const comments = createSqlCommentManager(db);
+    const comment = await comments.create({ id: newUUIDv7(), runId: run.id, tenantId: run.tenant_id ?? '__global__', authorId: auth.userId, body: text, anchor, mentions, ...(parentId ? { parentId } : {}) });
+    runExecutor.broadcastEphemeral(run.id, 'comment.added', { comment });
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ comment }));
+  }, { auth: true });
+
+  // List all comments on a run (with viewer capabilities computed server-side).
+  router.get('/api/me/runs/:runId/comments', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const comments = await createSqlCommentManager(db).listForRun(access.run.id);
+    const isOwner = access.role === 'owner';
+    const decorated = comments.map((c) => ({
+      ...c,
+      viewerCanEdit: c.authorId === auth.userId && !c.deletedAt,
+      viewerCanDelete: (c.authorId === auth.userId || isOwner) && !c.deletedAt,
+      viewerCanResolve: true, // any participant may resolve/reopen a thread
+    }));
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ comments: decorated, role: access.role }));
+  }, { auth: true });
+
+  // Edit a comment — AUTHOR ONLY (enforced in the adapter; re-validated here).
+  router.post('/api/me/runs/:runId/comments/:commentId/edit', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const existing = await db.getRunComment(params['commentId']!);
+    if (!existing || existing.run_id !== access.run.id) { res.writeHead(404); res.end(JSON.stringify({ error: 'Comment not found' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const text = typeof body['body'] === 'string' ? body['body'] : '';
+    if (!text.trim()) { res.writeHead(400); res.end(JSON.stringify({ error: 'Empty comment' })); return; }
+    const requestedMentions = Array.isArray(body['mentions']) ? (body['mentions'] as unknown[]).filter((m): m is string => typeof m === 'string') : undefined;
+    const mentions = requestedMentions ? await validateAndNotifyMentions(access.run, requestedMentions, auth.userId) : undefined;
+    try {
+      const comments = createSqlCommentManager(db);
+      const updated = await comments.edit(params['commentId']!, auth.userId, text, mentions);
+      runExecutor.broadcastEphemeral(access.run.id, 'comment.updated', { comment: updated });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ comment: updated }));
+    } catch (err) {
+      res.writeHead(403); res.end(JSON.stringify({ error: err instanceof Error ? err.message : 'Forbidden' }));
+    }
+  }, { auth: true });
+
+  // Delete a comment — author always; the run OWNER may moderate others'.
+  router.post('/api/me/runs/:runId/comments/:commentId/delete', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const existing = await db.getRunComment(params['commentId']!);
+    if (!existing || existing.run_id !== access.run.id) { res.writeHead(404); res.end(JSON.stringify({ error: 'Comment not found' })); return; }
+    try {
+      await createSqlCommentManager(db).softDelete(params['commentId']!, auth.userId, { force: access.role === 'owner' });
+      runExecutor.broadcastEphemeral(access.run.id, 'comment.deleted', { id: params['commentId'] });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ deleted: true }));
+    } catch (err) {
+      res.writeHead(403); res.end(JSON.stringify({ error: err instanceof Error ? err.message : 'Forbidden' }));
+    }
+  }, { auth: true });
+
+  // Resolve / reopen a thread (any participant).
+  for (const action of ['resolve', 'reopen'] as const) {
+    router.post(`/api/me/runs/:runId/threads/:threadId/${action}`, async (_req, res, params, auth) => {
+      if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+      const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+      if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+      const root = await db.getRunComment(params['threadId']!);
+      if (!root || root.run_id !== access.run.id) { res.writeHead(404); res.end(JSON.stringify({ error: 'Thread not found' })); return; }
+      const comments = createSqlCommentManager(db);
+      if (action === 'resolve') await comments.resolveThread(params['threadId']!, auth.userId);
+      else await comments.reopenThread(params['threadId']!, auth.userId);
+      runExecutor.broadcastEphemeral(access.run.id, `comment.${action}d`, { threadId: params['threadId'], by: auth.userId });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ [action === 'resolve' ? 'resolved' : 'reopened']: true }));
+    }, { auth: true });
+  }
+
+  // Create an annotation (structured score) on a run/part. Any participant.
+  router.post('/api/me/runs/:runId/annotations', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const name = typeof body['name'] === 'string' ? body['name'].slice(0, 128) : '';
+    if (!name) { res.writeHead(400); res.end(JSON.stringify({ error: 'Annotation name required' })); return; }
+    const dataTypes = ['numeric', 'categorical', 'boolean', 'text'];
+    const dataType = (typeof body['dataType'] === 'string' && dataTypes.includes(body['dataType'])) ? body['dataType'] as AnnotationDataType : 'numeric';
+    const sources = ['human', 'llm_judge', 'eval_code', 'api', 'end_user'];
+    const source = (typeof body['source'] === 'string' && sources.includes(body['source'])) ? body['source'] as AnnotationSource : 'human';
+    const annotations = createSqlAnnotationManager(db);
+    const ann = await annotations.create({
+      id: newUUIDv7(), runId: access.run.id, tenantId: access.run.tenant_id ?? '__global__', authorId: auth.userId,
+      name, dataType, source,
+      value: typeof body['value'] === 'number' ? body['value'] : null,
+      stringValue: typeof body['stringValue'] === 'string' ? (body['stringValue'] as string).slice(0, 512) : null,
+      comment: typeof body['comment'] === 'string' ? (body['comment'] as string).slice(0, 2000) : null,
+      partId: typeof body['partId'] === 'string' ? (body['partId'] as string).slice(0, 128) : '',
+    });
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ annotation: ann }));
+  }, { auth: true });
+
+  // List annotations + per-name summary (counts + numeric averages).
+  router.get('/api/me/runs/:runId/annotations', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const annotations = await createSqlAnnotationManager(db).listForRun(access.run.id);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ annotations, summary: summarizeAnnotations(annotations) }));
+  }, { auth: true });
+
+  // Delete an annotation (author; owner may moderate).
+  router.post('/api/me/runs/:runId/annotations/:id/delete', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const existing = await db.getRunAnnotation(params['id']!);
+    if (!existing || existing.run_id !== access.run.id) { res.writeHead(404); res.end(JSON.stringify({ error: 'Annotation not found' })); return; }
+    try {
+      await createSqlAnnotationManager(db).delete(params['id']!, auth.userId, { force: access.role === 'owner' });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ deleted: true }));
+    } catch (err) {
+      res.writeHead(403); res.end(JSON.stringify({ error: err instanceof Error ? err.message : 'Forbidden' }));
+    }
+  }, { auth: true });
+
+  // Export a run's annotations as eval-dataset examples (the "lands in a dataset" bridge).
+  router.get('/api/me/runs/:runId/annotations/export', async (_req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access) { res.writeHead(404); res.end(JSON.stringify({ error: 'Not found' })); return; }
+    const annotations = await createSqlAnnotationManager(db).listForRun(access.run.id);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ runId: access.run.id, examples: annotationsToEvalExamples(annotations) }));
+  }, { auth: true });
+
+  // Mint a PUBLIC read-only share link (OWNER only). The token is shown ONCE;
+  // only its SHA-256 hash is stored. The public route renders a redacted, no-write view.
+  router.post('/api/me/runs/:runId/public-share', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access || access.role !== 'owner') { res.writeHead(access ? 403 : 404); res.end(JSON.stringify({ error: access ? 'Forbidden: only the owner can publish a run' : 'Not found' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const { token, hash, prefix } = mintPublicShareToken();
+    const expiresAt = typeof body['expiresInMs'] === 'number' ? Date.now() + (body['expiresInMs'] as number) : null;
+    const id = newUUIDv7();
+    await db.createRunPublicShare({ id, run_id: access.run.id, tenant_id: access.run.tenant_id ?? null, token_hash: hash, token_prefix: prefix, created_by: auth.userId, created_at: Date.now(), ...(expiresAt ? { expires_at: expiresAt } : {}) });
+    res.writeHead(201, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ id, token, url: `/share/runs/${token}`, expiresAt })); // token shown once
+  }, { auth: true });
+
+  // Revoke a public share link (OWNER only).
+  router.post('/api/me/runs/:runId/public-share/revoke', async (req, res, params, auth) => {
+    if (!auth) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+    const access = await resolveRunAccess(db, params['runId']!, auth.userId);
+    if (!access || access.role !== 'owner') { res.writeHead(access ? 403 : 404); res.end(JSON.stringify({ error: access ? 'Forbidden' : 'Not found' })); return; }
+    let body: Record<string, unknown> = {};
+    try { body = JSON.parse(await readBody(req)) as Record<string, unknown>; } catch { /* */ }
+    const id = typeof body['id'] === 'string' ? body['id'] : '';
+    if (!id) { res.writeHead(400); res.end(JSON.stringify({ error: 'Missing id' })); return; }
+    const changed = await db.revokeRunPublicShare(id, access.run.id, Date.now());
     res.writeHead(changed ? 200 : 404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ revoked: changed > 0 }));
   }, { auth: true });

@@ -217,6 +217,23 @@ export interface FileView {
   direction?: 'input' | 'output';
 }
 
+/**
+ * Collaboration Phase 4 — a review comment as carried over the live wire and
+ * rendered anchored to a part. The server is the source of truth (body is
+ * pre-sanitized into `bodyHtml`); this is the minimal shape the UI needs.
+ */
+export interface RunCommentView {
+  id: string;
+  threadId: string;
+  parentId: string | null;
+  authorId: string;
+  bodyHtml: string;
+  anchor: { partId: string; createdAtSeq: number };
+  resolvedAt: number | null;
+  deletedAt: number | null;
+  createdAt: number;
+}
+
 // ---------------------------------------------------------------------------
 // The accumulated view model
 // ---------------------------------------------------------------------------
@@ -270,6 +287,14 @@ export interface RunViewModel {
    * show "you no longer have access" rather than silently retrying forever.
    */
   accessRevoked?: { reason: string };
+  /**
+   * Collaboration Phase 4 — review comments on this run, keyed by id and kept
+   * live via ephemeral `comment.added`/`comment.updated`/`comment.deleted`/
+   * `comment.resolvedd`/`comment.reopenedd` events (sequence -1). Each carries an
+   * `anchor.partId` so the UI can render the comment next to its part. Seeded by
+   * a one-shot `listComments()` fetch; updated live as collaborators comment.
+   */
+  comments: RunCommentView[];
   /** Phase 2 — ordered typed parts with per-part streaming state. */
   parts: RunPart[];
   /** All items in event order (for a linear render). */
@@ -293,6 +318,7 @@ export function emptyRunViewModel(): RunViewModel {
     approvals: [],
     files: [],
     presence: [],
+    comments: [],
     parts: [],
     items: [],
   };
@@ -550,6 +576,27 @@ export function streamReducer(state: RunViewModel, envelope: RunEventEnvelope): 
       ? (envelope.payload as { reason: string }).reason
       : 'access revoked';
     return { ...state, accessRevoked: { reason } };
+  }
+
+  // Collaboration Phase 4 — live review comments. All ephemeral (`sequence: -1`),
+  // so they bypass the journal dedup and update `comments` without touching
+  // run output. The UI renders each anchored to `anchor.partId`.
+  if (envelope.kind === 'comment.added' || envelope.kind === 'comment.updated') {
+    const incoming = (envelope.payload as { comment?: RunCommentView }).comment;
+    if (!incoming || typeof incoming.id !== 'string') return state;
+    const rest = state.comments.filter((c) => c.id !== incoming.id);
+    return { ...state, comments: [...rest, incoming].sort((a, b) => a.createdAt - b.createdAt) };
+  }
+  if (envelope.kind === 'comment.deleted') {
+    const id = (envelope.payload as { id?: string }).id;
+    return id ? { ...state, comments: state.comments.filter((c) => c.id !== id) } : state;
+  }
+  if (envelope.kind === 'comment.resolvedd' || envelope.kind === 'comment.reopenedd') {
+    // Note: kinds are `comment.${action}d` where action is resolve/reopen.
+    const threadId = (envelope.payload as { threadId?: string }).threadId;
+    if (!threadId) return state;
+    const resolvedAt = envelope.kind === 'comment.resolvedd' ? (envelope.timestamp ?? Date.now()) : null;
+    return { ...state, comments: state.comments.map((c) => c.threadId === threadId ? { ...c, resolvedAt } : c) };
   }
 
   // Skip already-seen or out-of-order events (idempotent)

@@ -91,3 +91,36 @@ export {
 export {
   subscriptionManagerContract,
 } from './run-subscription-contract.js';
+
+// Phase 4 — Collaborative run timeline: comments + annotations. The PORTS +
+// in-memory reference adapters; geneWeave provides SQL adapters over
+// `run_comments` / `run_annotations`. Both pass their contracts. Comments anchor
+// to a STABLE part id; markdown renders to SAFE html via `renderCommentMarkdown`.
+export {
+  type CommentAnchor,
+  type RunComment,
+  type CreateCommentInput,
+  type CommentManager,
+  type InMemoryCommentManagerOptions,
+  createInMemoryCommentManager,
+  renderCommentMarkdown,
+} from './run-comment.js';
+export {
+  commentManagerContract,
+} from './run-comment-contract.js';
+export {
+  type AnnotationDataType,
+  type AnnotationSource,
+  type RunAnnotation,
+  type CreateAnnotationInput,
+  type EvalExample,
+  type AnnotationManager,
+  type InMemoryAnnotationManagerOptions,
+  createInMemoryAnnotationManager,
+  normalizeAnnotationValue,
+  summarizeAnnotations,
+  annotationsToEvalExamples,
+} from './run-annotation.js';
+export {
+  annotationManagerContract,
+} from './run-annotation-contract.js';

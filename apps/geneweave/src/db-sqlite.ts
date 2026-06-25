@@ -9062,6 +9062,64 @@ export class SQLiteAdapter implements DatabaseAdapter {
     ).all(Math.max(1, Math.floor(limit))) as import('./db-types/adapter-me.js').UserRunRow[];
   }
 
+  // ── Run comments + annotations + public share (m97, Collaboration Phase 4) ──
+  async createRunComment(row: import('./db-types/adapter-me.js').RunCommentRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO run_comments (id, run_id, tenant_id, thread_id, parent_id, author_id, body, body_html, mentions_json, anchor_part_id, anchor_seq, anchor_range_json, created_at, updated_at, edited_at, deleted_at, deleted_by, resolved_at, resolved_by)
+       VALUES (@id, @run_id, @tenant_id, @thread_id, @parent_id, @author_id, @body, @body_html, @mentions_json, @anchor_part_id, @anchor_seq, @anchor_range_json, @created_at, @updated_at, @edited_at, @deleted_at, @deleted_by, @resolved_at, @resolved_by)`,
+    ).run(row);
+  }
+  async getRunComment(id: string): Promise<import('./db-types/adapter-me.js').RunCommentRow | null> {
+    return (this.d.prepare('SELECT * FROM run_comments WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').RunCommentRow | null;
+  }
+  async listRunComments(runId: string): Promise<import('./db-types/adapter-me.js').RunCommentRow[]> {
+    return this.d.prepare('SELECT * FROM run_comments WHERE run_id = ? ORDER BY created_at ASC').all(runId) as import('./db-types/adapter-me.js').RunCommentRow[];
+  }
+  async listRunCommentThread(threadId: string): Promise<import('./db-types/adapter-me.js').RunCommentRow[]> {
+    return this.d.prepare('SELECT * FROM run_comments WHERE thread_id = ? ORDER BY created_at ASC').all(threadId) as import('./db-types/adapter-me.js').RunCommentRow[];
+  }
+  async updateRunCommentBody(id: string, body: string, bodyHtml: string, mentionsJson: string, editedAt: number, updatedAt: number): Promise<void> {
+    this.d.prepare('UPDATE run_comments SET body = ?, body_html = ?, mentions_json = ?, edited_at = ?, updated_at = ? WHERE id = ?').run(body, bodyHtml, mentionsJson, editedAt, updatedAt, id);
+  }
+  async softDeleteRunComment(id: string, deletedBy: string, deletedAt: number): Promise<void> {
+    // Tombstone: scrub the body but keep the row so replies are not orphaned.
+    this.d.prepare(`UPDATE run_comments SET body = '', body_html = '', mentions_json = '[]', deleted_at = ?, deleted_by = ?, updated_at = ? WHERE id = ?`).run(deletedAt, deletedBy, deletedAt, id);
+  }
+  async setRunThreadResolution(threadId: string, resolvedAt: number | null, resolvedBy: string | null, updatedAt: number): Promise<void> {
+    // Resolution is recorded on the ROOT (id === thread_id); reads mirror it across the thread.
+    this.d.prepare('UPDATE run_comments SET resolved_at = ?, resolved_by = ?, updated_at = ? WHERE id = ?').run(resolvedAt, resolvedBy, updatedAt, threadId);
+  }
+  async createRunAnnotation(row: import('./db-types/adapter-me.js').RunAnnotationRow): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO run_annotations (id, run_id, tenant_id, part_id, author_id, name, data_type, value, string_value, comment, source, created_at)
+       VALUES (@id, @run_id, @tenant_id, @part_id, @author_id, @name, @data_type, @value, @string_value, @comment, @source, @created_at)`,
+    ).run(row);
+  }
+  async getRunAnnotation(id: string): Promise<import('./db-types/adapter-me.js').RunAnnotationRow | null> {
+    return (this.d.prepare('SELECT * FROM run_annotations WHERE id = ?').get(id) ?? null) as import('./db-types/adapter-me.js').RunAnnotationRow | null;
+  }
+  async listRunAnnotations(runId: string): Promise<import('./db-types/adapter-me.js').RunAnnotationRow[]> {
+    return this.d.prepare('SELECT * FROM run_annotations WHERE run_id = ? ORDER BY created_at ASC').all(runId) as import('./db-types/adapter-me.js').RunAnnotationRow[];
+  }
+  async deleteRunAnnotation(id: string): Promise<number> {
+    return this.d.prepare('DELETE FROM run_annotations WHERE id = ?').run(id).changes;
+  }
+  async createRunPublicShare(row: { id: string; run_id: string; tenant_id?: string | null; token_hash: string; token_prefix: string; created_by: string; created_at: number; expires_at?: number | null }): Promise<void> {
+    this.d.prepare(
+      `INSERT INTO run_public_shares (id, run_id, tenant_id, token_hash, token_prefix, created_by, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(row.id, row.run_id, row.tenant_id ?? null, row.token_hash, row.token_prefix, row.created_by, row.created_at, row.expires_at ?? null);
+  }
+  async getRunPublicShareByHash(tokenHash: string): Promise<import('./db-types/adapter-me.js').RunPublicShareRow | null> {
+    return (this.d.prepare('SELECT * FROM run_public_shares WHERE token_hash = ?').get(tokenHash) ?? null) as import('./db-types/adapter-me.js').RunPublicShareRow | null;
+  }
+  async listRunPublicShares(runId: string): Promise<import('./db-types/adapter-me.js').RunPublicShareRow[]> {
+    return this.d.prepare('SELECT * FROM run_public_shares WHERE run_id = ? AND revoked_at IS NULL ORDER BY created_at ASC').all(runId) as import('./db-types/adapter-me.js').RunPublicShareRow[];
+  }
+  async revokeRunPublicShare(id: string, runId: string, revokedAt: number): Promise<number> {
+    return this.d.prepare('UPDATE run_public_shares SET revoked_at = ? WHERE id = ? AND run_id = ?').run(revokedAt, id, runId).changes;
+  }
+
   // Registered outbound webhook endpoints.
   async createWebhookEndpoint(row: { id: string; tenant_id?: string | null; user_id: string; url: string; signing_secret: string; created_at: number }): Promise<void> {
     this.d.prepare(
