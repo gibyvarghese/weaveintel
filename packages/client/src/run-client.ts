@@ -165,7 +165,11 @@ export function createRunClient(opts: CreateRunClientOptions): RunClient {
       if (filter.offset !== undefined) params.set('offset', String(filter.offset));
       const qs = params.toString();
       const path = qs ? `/api/me/runs?${qs}` : '/api/me/runs';
-      return (await json.get<RunRecord[]>(path)) ?? [];
+      // The server returns `{ runs: [...] }`; tolerate a bare array too.
+      const body = await json.get<RunRecord[] | { runs?: RunRecord[] }>(path);
+      if (Array.isArray(body)) return body;
+      if (body && Array.isArray(body.runs)) return body.runs;
+      return [];
     },
 
     async cancelRun(id) {

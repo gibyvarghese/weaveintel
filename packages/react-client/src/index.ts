@@ -41,6 +41,8 @@ export interface UseRun extends RunSessionState {
   stop: () => Promise<void>;
   /** Re-run the last `start()` input as a fresh run. */
   regenerate: () => Promise<string>;
+  /** Re-attach to an existing run after a refresh (rebuilds the view model). */
+  resume: (runId: string) => Promise<string>;
   /** Resolve a HITL approval part by task id. */
   approve: (taskId: string) => Promise<void>;
   /** Reject a HITL approval part by task id. */
@@ -81,6 +83,7 @@ export function useRun(options: RunSessionOptions): UseRun {
   const start = useCallback((input?: RunSessionStartInput) => session.start(input), [session]);
   const stop = useCallback(() => session.stop(), [session]);
   const regenerate = useCallback(() => session.regenerate(), [session]);
+  const resume = useCallback((runId: string) => session.resume(runId), [session]);
   const approve = useCallback((taskId: string) => session.approve(taskId), [session]);
   const reject = useCallback((taskId: string) => session.reject(taskId), [session]);
   const sendEvent = useCallback((payload: Record<string, unknown>) => session.sendEvent(payload), [session]);
@@ -91,6 +94,7 @@ export function useRun(options: RunSessionOptions): UseRun {
     start,
     stop,
     regenerate,
+    resume,
     approve,
     reject,
     sendEvent,

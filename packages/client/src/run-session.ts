@@ -24,6 +24,15 @@ import {
   type RunViewModel,
   type RunEventEnvelope,
 } from './reducer.js';
+import { isCursorResumable, type RunCursorStore } from './cursor.js';
+
+/** Thrown by `resume()` when the persisted cursor is outside the resume window. */
+export class RunResumeExpiredError extends Error {
+  constructor(runId: string) {
+    super(`run ${runId} is outside the resume window — re-drive it instead`);
+    this.name = 'RunResumeExpiredError';
+  }
+}
 
 export const RUN_SESSION_SCHEMA_VERSION = 1 as const;
 
@@ -72,6 +81,20 @@ export interface RunSessionOptions {
   generateId?: () => string;
   /** Attach tuning forwarded to `RunClient.attach`. */
   attach?: { maxReconnects?: number; backoffMs?: number[]; afterSequence?: number };
+  /**
+   * Cursor store for refresh-proof resume. When set, the session persists
+   * `{ runId, lastSequence }` on every event and clears it on terminal/reset,
+   * so a fresh session can `resume(runId)` after a page refresh.
+   */
+  cursor?: RunCursorStore;
+  /**
+   * Resume window (ms) — `resume()` rejects a cursor older than this with
+   * {@link RunResumeExpiredError}. Source from `GET /api/me/runs/config`'s
+   * `resumeWindowSeconds * 1000`. 0 disables the check. Default 0.
+   */
+  resumeWindowMs?: number;
+  /** Clock injection (tests). Default `Date.now`. */
+  now?: () => number;
   /** Injectable timers (tests). Default to `setTimeout` / `clearTimeout`. */
   setTimer?: (fn: () => void, ms: number) => unknown;
   clearTimer?: (handle: unknown) => void;
@@ -88,6 +111,14 @@ export interface RunSession {
   stop(): Promise<void>;
   /** Re-run the last `start()` input as a fresh run. Rejects if never started. */
   regenerate(): Promise<string>;
+  /**
+   * Re-attach to an existing run after a refresh, rebuilding the view model from
+   * the server journal (full replay) and live-tailing to completion. Uses the
+   * persisted cursor to enforce the resume window. Rejects with
+   * {@link RunResumeExpiredError} when the cursor is too old, or a plain error
+   * when no cursor store / cursor exists. Resolves to the run id.
+   */
+  resume(runId: string): Promise<string>;
   /** Post a client event into the running run. */
   sendEvent(payload: Record<string, unknown>): Promise<void>;
   /** Resolve a HITL approval part by task id. */
@@ -113,6 +144,9 @@ export function createRunSession(opts: RunSessionOptions): RunSession {
   const surfaceDefault = opts.surface ?? 'web';
   const throttleMs = opts.throttleMs ?? 0;
   const generateId = opts.generateId ?? defaultGenerateId;
+  const now = opts.now ?? (() => Date.now());
+  const cursor = opts.cursor;
+  const resumeWindowMs = opts.resumeWindowMs ?? 0;
   const setTimer = opts.setTimer ?? ((fn, ms) => setTimeout(fn, ms));
   const clearTimer = opts.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>));
 
@@ -121,6 +155,7 @@ export function createRunSession(opts: RunSessionOptions): RunSession {
   let model: RunViewModel = emptyRunViewModel();
   let error: Error | null = null;
   let lastInput: RunSessionStartInput | null = null;
+  let currentSurface: string = surfaceDefault;
 
   let controller: AbortController | null = null;
   let disposed = false;
@@ -171,23 +206,36 @@ export function createRunSession(opts: RunSessionOptions): RunSession {
     }
   };
 
+  const persistCursor = (seq: number): void => {
+    if (!cursor || !runId) return;
+    void cursor.set({ runId, lastSequence: seq, surface: currentSurface, updatedAt: now() }).catch(() => { /* best effort */ });
+  };
+
+  const clearCursor = (): void => {
+    if (!cursor || !runId) return;
+    const id = runId;
+    void cursor.clear(id).catch(() => { /* best effort */ });
+  };
+
   const finalize = (next: RunSessionStatus, err?: Error): void => {
     status = next;
     if (err) error = err;
+    clearCursor(); // a terminal run is no longer resumable
     notify(true);
     settleDone();
   };
 
-  const beginAttach = (id: string): void => {
+  const beginAttach = (id: string, afterSequence: number): void => {
     terminalKind = null;
     const ctrl = client.attach(id, {
-      afterSequence: opts.attach?.afterSequence ?? -1,
+      afterSequence,
       ...(opts.attach?.maxReconnects !== undefined ? { maxReconnects: opts.attach.maxReconnects } : {}),
       ...(opts.attach?.backoffMs !== undefined ? { backoffMs: opts.attach.backoffMs } : {}),
       onEvent: (env: RunEventEnvelope) => {
         model = streamReducer(model, env);
         if (status === 'submitted') status = 'streaming';
         if (env.kind in TERMINAL_KIND_STATUS) terminalKind = env.kind;
+        persistCursor(env.sequence);
         notify(false);
       },
       onComplete: () => {
@@ -211,6 +259,7 @@ export function createRunSession(opts: RunSessionOptions): RunSession {
     error = null;
     runId = null;
     terminalKind = null;
+    currentSurface = input.surface ?? surfaceDefault;
     status = 'submitted';
     notify(true);
 
@@ -241,8 +290,35 @@ export function createRunSession(opts: RunSessionOptions): RunSession {
       return rec.id;
     }
     notify(true); // runId now known, still submitted
-    beginAttach(rec.id);
+    beginAttach(rec.id, opts.attach?.afterSequence ?? -1);
     return rec.id;
+  }
+
+  async function resume(targetRunId: string): Promise<string> {
+    if (disposed) throw new Error('run session disposed');
+    if (status === 'submitted' || status === 'streaming') {
+      throw new Error('a run is already in progress — stop() or await done() first');
+    }
+    if (!cursor) throw new Error('resume requires a cursor store (RunSessionOptions.cursor)');
+    const saved = await cursor.get(targetRunId);
+    if (!saved) throw new Error(`no persisted cursor for run ${targetRunId}`);
+    if (!isCursorResumable(saved, resumeWindowMs, now())) {
+      await cursor.clear(targetRunId).catch(() => { /* best effort */ });
+      throw new RunResumeExpiredError(targetRunId);
+    }
+
+    detach();
+    model = emptyRunViewModel();
+    error = null;
+    runId = targetRunId;
+    terminalKind = null;
+    currentSurface = saved.surface ?? surfaceDefault;
+    status = 'submitted';
+    notify(true);
+    // Full replay (-1) rebuilds the complete view model from the server journal,
+    // then live-tails any remaining events to a terminal state.
+    beginAttach(targetRunId, -1);
+    return targetRunId;
   }
 
   async function stop(): Promise<void> {
@@ -276,6 +352,7 @@ export function createRunSession(opts: RunSessionOptions): RunSession {
 
   function reset(): void {
     detach();
+    clearCursor();
     status = 'idle';
     model = emptyRunViewModel();
     runId = null;
@@ -309,6 +386,7 @@ export function createRunSession(opts: RunSessionOptions): RunSession {
     start,
     stop,
     regenerate,
+    resume,
     sendEvent,
     approve,
     reject,

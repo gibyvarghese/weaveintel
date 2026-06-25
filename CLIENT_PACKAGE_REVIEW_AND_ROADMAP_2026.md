@@ -236,12 +236,20 @@ Each phase is independently shippable, extends existing code, and ends with acce
 
 **G14 — partial / documented constraint:** `apps/geneweave-ui` is served as **raw ES modules** (no bundler, no import map; the bootstrap is CSP‑sha256‑hashed) and its browser source imports only relative `./` paths. A bare `@weaveintel/client` import would not resolve in the browser, and an import‑map/bundling step would have to map the whole `client→core` chain and re‑hash CSP — out of scope here. The single parser is therefore shared across every surface that *can* share a module graph; retiring geneweave‑ui's chat POST‑stream parser is tracked as a follow‑up requiring a UI build/bundle step. The web‑UI streaming path is covered by the regression test and is unchanged.
 
-### Phase 6 — Resumable‑stream hardening + Outbox v2 + observability
+### Phase 6 — Resumable‑stream hardening + Outbox v2 + observability  ✅ delivered
 **Goal:** refresh‑proof streams, robust offline, cost visibility.
 - Refresh‑proof resume: persist cursor client‑side; optional Redis‑backed resumable context reusing `@weaveintel/cache` Redis + `collaboration` journal; honor `resume_window_seconds`.
 - **Outbox v2:** buffer mid‑stream `postEvent`; add max‑attempts/backoff/dead‑letter (+ optional `run_dead_letter` table 7.6); `online`/`offline` listeners + Background‑Sync where available.
 - Stream usage/cost to client; surface a metrics rollup (mirror `packages/cache` metrics).
 - **Acceptance:** refresh mid‑run resumes from cursor; offline compose replays on reconnect; usage/cost visible in the view model and a metrics table.
+
+**What shipped:**
+- **Refresh‑proof resume** — `createRunCursorStore` (`packages/client/src/cursor.ts`) persists `{ runId, lastSequence, surface, updatedAt }` per run over the injectable `OutboxStorage` KV. `createRunSession` now persists the cursor on every event, clears it on terminal/stop/reset, and gains **`resume(runId)`**: it validates the cursor against the resume window (`isCursorResumable`), then re‑attaches with a full journal replay (`after=-1`) to rebuild the complete view model and live‑tail to terminal. `resumeWindowMs` is sourced from `GET /api/me/runs/config`'s `resumeWindowSeconds` (DB‑driven). Out‑of‑window → `RunResumeExpiredError` (host re‑drives). The server already replays via `?after=` + prunes by `journal_retention_hours` (Phase 0). 16 unit tests.
+- **Outbox v2** — `createRunOutbox` extended (back‑compatible): mid‑stream `enqueueEvent(runId, payload)` buffering (not just run starts), bounded retries (`maxAttempts` + `backoffMs` with per‑item `nextAttemptAt`), a **dead‑letter queue** (`deadLettered()` / `clearDeadLetter()` / `onDeadLetter`), and `attachAutoFlush` wiring `online`/`offline` events. 11 unit tests.
+- **Observability** — usage/cost already fold onto `vm.usage` (bridge emits `usage.update`); added **`createRunMetrics`** (`packages/client/src/metrics.ts`) mirroring `@weaveintel/cache`'s `createCacheMetrics` shape: run counts by outcome, error rate, token totals, USD cost, avg latency — `recordRun`/`recordSession`/`snapshot`/`reset`. 8 unit tests.
+- **SDK fix** — `RunClient.listRuns` now unwraps the server's `{ runs: [...] }` envelope (it previously always returned `[]`).
+- **App‑layer reuse** — `@geneweave/api-client` re‑exports `createRunCursorStore` / `createRunMetrics` / `createRunOutbox` + cursor/metrics types.
+- **Real‑LLM e2e** (`apps/geneweave/src/run-resume-phase6.e2e.ts`): a run streams, the tab "closes" mid‑stream, a **fresh** session `resume(runId)`s to `ready` (full model rebuilt) across **direct/agent/supervisor/ensemble**; usage/cost surfaces on the view model + folds into a metrics rollup; an outbox start enqueued offline replays on flush and reaches terminal; web‑UI streaming regression.
 
 ### Phase 7 — Structured object streaming · multimodal · wire interop (optional)
 **Goal:** round out the long tail.
@@ -280,6 +288,7 @@ Phase 0 ─► Phase 1 ─► Phase 2 ─► Phase 3 ─► Phase 4
 | Phase 3 — generative UI · citations · artifacts (run-scoped) | `800a08d` | ✅ |
 | Phase 4 — HITL tool approvals (pause → approve/deny → resume) | `ae207ca` | ✅ |
 | Phase 5 — UX primitives (`createRunSession`) + `@weaveintel/react-client` (`useRun`) + single `parseSseStream` | `62cd99a` | ✅ (G14 web‑UI convergence partial — raw‑ESM serving; see Phase 5 note) |
+| Phase 6 — refresh‑proof resume (cursor + `resume()`) + Outbox v2 (backoff/dead‑letter/online‑offline/events) + `createRunMetrics` | `PENDING6` | ✅ |
 
 ## 12. Deferred follow-ups (scoped, with plans)
 

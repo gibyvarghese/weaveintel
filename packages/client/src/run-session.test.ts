@@ -4,7 +4,9 @@
  * RunClient so we drive the SSE event stream by hand.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createRunSession, type RunSession, type RunSessionState } from './run-session.js';
+import { createRunSession, RunResumeExpiredError, type RunSession, type RunSessionState } from './run-session.js';
+import { createRunCursorStore } from './cursor.js';
+import { MemoryStorage } from './outbox.js';
 import type { RunClient, RunRecord, StartRunInput, AttachOptions } from './run-client.js';
 import type { RunEventEnvelope } from './reducer.js';
 
@@ -336,5 +338,112 @@ describe('createRunSession — subscribe / dispose / stress', () => {
     // The throw propagates out of notify synchronously; state is already updated.
     await expect(s.start({ input: { text: 'x' } })).rejects.toThrow('listener blew up');
     expect(s.getState().status).toBe('submitted');
+  });
+});
+
+describe('createRunSession — Phase 6 cursor persistence & resume', () => {
+  it('persists a cursor on each event and clears it on terminal', async () => {
+    const h = harness();
+    let t = 5000;
+    const cursor = createRunCursorStore({ now: () => t });
+    const s = createRunSession({ client: h.client, cursor, now: () => t });
+    await s.start({ input: { text: 'x' }, surface: 'web' });
+
+    h.push(textDelta(0, 'a'));
+    await Promise.resolve(); // let the fire-and-forget cursor write settle
+    let saved = await cursor.get('run-1');
+    expect(saved).toMatchObject({ runId: 'run-1', lastSequence: 0, surface: 'web', updatedAt: 5000 });
+
+    t = 6000;
+    h.push(textDelta(1, 'b'));
+    await Promise.resolve();
+    saved = await cursor.get('run-1');
+    expect(saved?.lastSequence).toBe(1);
+    expect(saved?.updatedAt).toBe(6000);
+
+    h.push({ kind: 'run.completed', sequence: 2 });
+    h.complete();
+    await Promise.resolve();
+    expect(await cursor.get('run-1')).toBeNull(); // terminal clears the cursor
+  });
+
+  it('resume() rebuilds the view model via full replay and settles', async () => {
+    const cursor = createRunCursorStore({ now: () => 1000 });
+    await cursor.set({ runId: 'run-1', lastSequence: 3, surface: 'web' });
+    const h = harness();
+    const s = createRunSession({ client: h.client, cursor, resumeWindowMs: 900_000, now: () => 1000 });
+
+    const id = await s.resume('run-1');
+    expect(id).toBe('run-1');
+    expect(s.getState().status).toBe('submitted');
+    // Resume always replays from the beginning to rebuild the full model.
+    expect(h.lastAttach()?.afterSequence).toBe(-1);
+
+    h.push(textDelta(0, 'Hello'));
+    h.push(textDelta(1, ' world'));
+    expect(s.getState().status).toBe('streaming');
+    h.push({ kind: 'run.completed', sequence: 2 });
+    h.complete();
+    expect(s.getState().status).toBe('ready');
+    expect(s.getState().model.fullText).toBe('Hello world');
+  });
+
+  it('resume() rejects (and clears) a cursor outside the resume window', async () => {
+    let t = 1000;
+    const cursor = createRunCursorStore({ now: () => t });
+    await cursor.set({ runId: 'run-1', lastSequence: 1 });
+    const h = harness();
+    const s = createRunSession({ client: h.client, cursor, resumeWindowMs: 60_000, now: () => t });
+
+    t = 1000 + 60_001; // just past the window
+    await expect(s.resume('run-1')).rejects.toBeInstanceOf(RunResumeExpiredError);
+    expect(await cursor.get('run-1')).toBeNull(); // expired cursor pruned
+    expect(s.getState().status).toBe('idle');
+  });
+
+  it('resume() without a cursor store rejects', async () => {
+    const h = harness();
+    const s = createRunSession({ client: h.client });
+    await expect(s.resume('run-1')).rejects.toThrow(/requires a cursor store/);
+  });
+
+  it('resume() with no persisted cursor for the run rejects', async () => {
+    const h = harness();
+    const s = createRunSession({ client: h.client, cursor: createRunCursorStore() });
+    await expect(s.resume('ghost')).rejects.toThrow(/no persisted cursor/);
+  });
+
+  it('resume() is refused while a run is already in progress', async () => {
+    const cursor = createRunCursorStore();
+    await cursor.set({ runId: 'run-1', lastSequence: 1 });
+    const h = harness();
+    const s = createRunSession({ client: h.client, cursor });
+    await s.start({ input: { text: 'x' } });
+    await expect(s.resume('run-1')).rejects.toThrow(/already in progress/);
+  });
+
+  it('shares one cursor store across a "refresh" (new session resumes the prior run)', async () => {
+    const storage = new MemoryStorage();
+    const h = harness();
+
+    // Session A starts and streams a couple of events, persisting the cursor.
+    const cursorA = createRunCursorStore({ storage, now: () => 1000 });
+    const a = createRunSession({ client: h.client, cursor: cursorA, now: () => 1000 });
+    await a.start({ input: { text: 'x' }, surface: 'web' });
+    h.push(textDelta(0, 'partial'));
+    await Promise.resolve();
+    a.dispose(); // simulate the tab closing mid-run (no terminal → cursor remains)
+
+    expect(await createRunCursorStore({ storage }).get('run-1')).not.toBeNull();
+
+    // Session B (fresh tab) resumes from the same storage and drives to ready.
+    const cursorB = createRunCursorStore({ storage, now: () => 1500 });
+    const b = createRunSession({ client: h.client, cursor: cursorB, resumeWindowMs: 900_000, now: () => 1500 });
+    await b.resume('run-1');
+    h.push(textDelta(0, 'partial'));
+    h.push({ kind: 'run.completed', sequence: 1 });
+    h.complete();
+    expect(b.getState().status).toBe('ready');
+    expect(b.getState().model.fullText).toBe('partial');
   });
 });

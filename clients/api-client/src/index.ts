@@ -81,11 +81,18 @@ export {
   // @weaveintel/react-client) configure them without importing @weaveintel/client.
   createRunSession,
   RUN_SESSION_SCHEMA_VERSION,
+  RunResumeExpiredError,
   parseSseStream,
   SseStallError,
+  // Phase 6 — refresh-proof resume, run metrics, outbox v2.
+  createRunCursorStore,
+  isCursorResumable,
+  createRunMetrics,
+  createRunOutbox,
   type OutboxStorage,
   type RunOutbox,
   type OutboxFlushResult,
+  type OutboxItem,
   type RunViewModel,
   type StreamItem,
   type ToolCallView,
@@ -96,6 +103,10 @@ export {
   type RunSessionStatus,
   type RunSessionStartInput,
   type SseEvent,
+  type RunCursor,
+  type RunCursorStore,
+  type RunMetrics,
+  type RunMetricsSnapshot,
 } from '@weaveintel/client';
 
 // Surface schemas + inferred types

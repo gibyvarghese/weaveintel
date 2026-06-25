@@ -67,7 +67,7 @@ export type {
 } from './run-client.js';
 export { createRunClient } from './run-client.js';
 
-// Run session (framework-agnostic UX controller — status / stop / regenerate / throttle)
+// Run session (framework-agnostic UX controller — status / stop / regenerate / resume / throttle)
 export type {
   RunSession,
   RunSessionOptions,
@@ -76,8 +76,24 @@ export type {
   RunSessionStartInput,
   RunSessionListener,
 } from './run-session.js';
-export { createRunSession, RUN_SESSION_SCHEMA_VERSION } from './run-session.js';
+export { createRunSession, RUN_SESSION_SCHEMA_VERSION, RunResumeExpiredError } from './run-session.js';
 
-// Outbox
-export type { OutboxStorage, OutboxFlushResult, RunOutbox } from './outbox.js';
+// Cursor store (Phase 6 — refresh-proof resume)
+export type { RunCursor, RunCursorStore } from './cursor.js';
+export { createRunCursorStore, isCursorResumable } from './cursor.js';
+
+// Run metrics rollup (Phase 6 — client observability)
+export type { RunMetrics, RunMetricsSnapshot, RunOutcome } from './metrics.js';
+export { createRunMetrics } from './metrics.js';
+
+// Outbox (v2 — backoff / dead-letter / online-offline / event buffering)
+export type {
+  OutboxStorage,
+  OutboxFlushResult,
+  RunOutbox,
+  OutboxItem,
+  OutboxItemKind,
+  AutoFlushOptions,
+  CreateRunOutboxOptions,
+} from './outbox.js';
 export { MemoryStorage, createRunOutbox } from './outbox.js';
