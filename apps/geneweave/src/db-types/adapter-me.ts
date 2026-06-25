@@ -83,6 +83,8 @@ export interface IMeStore {
   // Run events
   appendUserRunEvent(event: Pick<UserRunEventRow, 'id' | 'run_id' | 'sequence' | 'kind' | 'payload'>): Promise<void>;
   listUserRunEvents(runId: string, afterSequence?: number): Promise<UserRunEventRow[]>;
+  /** Per-run journal purge (backs the core RunJournal port's `purgeRun`). */
+  deleteUserRunEvents(runId: string): Promise<number>;
   /**
    * Prune the run-event journal (Client Phase 0). Removes events for terminal
    * runs older than `olderThanHours`, and trims any run whose event count

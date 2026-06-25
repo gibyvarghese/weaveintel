@@ -1,5 +1,19 @@
 // SPDX-License-Identifier: MIT
-// @weaveintel/collaboration — Public API
+/**
+ * @weaveintel/collaboration — Public API
+ *
+ * MULTIPLAYER collaboration primitives only. In Collaboration Phase 0 the
+ * run-lifecycle substrate (run registry, run journal) was relocated to
+ * `@weaveintel/core` (where `RunHandle`/`RunEventEnvelope` already live), and the
+ * dead `events.ts` helpers + dormant `durable.ts` KV variants were removed. This
+ * package is now scoped to its single, non-duplicative reason to exist:
+ * **shared sessions, presence, run subscriptions, and user handoff** — the
+ * mid-2026 "multiplayer for AI" layer (Phases 1–5 build the durable, DB-backed
+ * versions on top of these in-memory prototypes).
+ *
+ * For run registry / run journal, import from `@weaveintel/core`:
+ *   `createKvRunRegistry`, `createKvRunJournal`, `RunRegistry`, `RunJournal`.
+ */
 export {
   type SessionParticipant,
   type PresenceState,
@@ -8,14 +22,6 @@ export {
   type SharedSessionManager,
   createSharedSessionManager,
 } from './session.js';
-
-export {
-  type CollaborationEventType,
-  type CollaborationEvent,
-  createCollaborationEvent,
-  isPresenceEvent,
-  isHandoffEvent,
-} from './events.js';
 
 export {
   type RunStatus,
@@ -30,29 +36,3 @@ export {
   type HandoffManager,
   createHandoffManager,
 } from './handoff.js';
-
-// Phase 4 — durable variants backed by `runtime.persistence.kv`.
-export {
-  type DurableHandoffManager,
-  createDurableHandoffManager,
-  type DurableSharedSessionManager,
-  createDurableSharedSessionManager,
-  type DurableRunSubscriptionManager,
-  createDurableRunSubscriptionManager,
-} from './durable.js';
-
-// W3 — Durable run registry (persists RunHandle, tenant-isolated, lifecycle events).
-export {
-  createRunRegistry,
-  type RunRegistry,
-  type RunRegistryOptions,
-  type RunListFilter,
-} from './run-registry.js';
-
-// W3 — Run event journal (append-only, resumable via RunEventCursor).
-export {
-  createRunJournal,
-  type RunJournal,
-  type RunJournalOptions,
-} from './run-journal.js';
-

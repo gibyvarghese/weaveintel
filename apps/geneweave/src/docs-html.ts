@@ -192,7 +192,8 @@ ${code('text', `Applications (geneweave, your app)
                     @weaveintel/tools-* · @weaveintel/sandbox · @weaveintel/oauth
   └─ Platform       @weaveintel/security · @weaveintel/tenancy · @weaveintel/compliance
                     @weaveintel/encryption · @weaveintel/durability · @weaveintel/persistence
-  └─ Contracts      @weaveintel/core  (zero runtime dependencies)`)}`;
+  └─ Contracts      @weaveintel/core  (zero runtime dependencies)`)}
+${callout('info', '🔌', 'Where "run plumbing" lives (Collaboration Phase 0).', 'A <strong>run registry</strong> (what runs exist + their status) and a <strong>run journal</strong> (the numbered, append-only log of everything a run did, so a dropped connection can resume from "event 41") are now single <em>interfaces</em> in <code>@weaveintel/core</code>. geneWeave stores them in SQL; a key-value adapter ships in core — same interface, swappable storage, no duplicate code. The one Server-Sent-Events stream parser lives there too. New to this? Think of an interface as a power socket: anything that fits the socket (SQL, key-value) works, and nothing that plugs in needs to know what is behind the wall.')}`;
 }
 
 // ── Section: Agents ───────────────────────────────────────────────────────

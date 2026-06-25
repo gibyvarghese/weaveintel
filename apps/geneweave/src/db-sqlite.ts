@@ -8851,6 +8851,13 @@ export class SQLiteAdapter implements DatabaseAdapter {
     return this.d.prepare('SELECT * FROM user_run_events WHERE run_id = ? AND sequence > ? ORDER BY sequence ASC').all(runId, afterSequence) as import('./db-types/adapter-me.js').UserRunEventRow[];
   }
 
+  // Per-run journal purge (Collaboration Phase 0 — backs the core RunJournal
+  // port's `purgeRun`, e.g. after a run is archived). Distinct from the global
+  // `pruneUserRunEvents` retention sweep below.
+  async deleteUserRunEvents(runId: string): Promise<number> {
+    return this.d.prepare('DELETE FROM user_run_events WHERE run_id = ?').run(runId).changes;
+  }
+
   // ── HITL approvals (m64 table, m93 run-scoped) ─────────────────────────────
   async createHitlInterrupt(row: {
     id: string; chat_id: string; run_id?: string | null; agent_name: string; agent_step?: number;

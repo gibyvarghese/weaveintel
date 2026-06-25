@@ -31,7 +31,6 @@
     "@weaveintel/agents": "*",
     "@weaveintel/cache": "*",
     "@weaveintel/capability-packs": "*",
-    "@weaveintel/collaboration": "*",
     "@weaveintel/contracts": "*",
     "@weaveintel/core": "*",
     "@weaveintel/cost-governor": "*",

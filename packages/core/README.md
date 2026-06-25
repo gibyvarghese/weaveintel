@@ -61,6 +61,22 @@ Core contracts, types, and runtime primitives for the weaveIntel AI framework.
 - `normalizeAdminTabsForModelDiscovery()` — enforces model-facing description labels for LLM-callable entities (prompts, skills, tools, workers)
 - Used by GeneWeave admin schema composition to reduce app-local duplication and keep metadata quality consistent
 
+### Run substrate (Collaboration Phase 0)
+The canonical run-lifecycle contracts, relocated here from `@weaveintel/collaboration`
+so there is ONE registry/journal interface with interchangeable backends (a KV
+reference adapter here; a SQL adapter in geneWeave), each proven by the same
+shared conformance suite.
+- **Run registry** — `RunRegistry` (port), `createKvRunRegistry()` (KV adapter): durable run-handle store; tenant-isolated; idempotent status updates; lifecycle events.
+- **Run journal** — `RunJournal` (port), `createKvRunJournal()` (KV adapter): append-only, sequenced, resumable-by-cursor run-event log. `readAfter(N)` is **exclusive** (returns `sequence > N`) and **gap-safe** (throws `RunCursorTooOldError` if the cursor fell below the retained watermark). Defaults (`RUN_JOURNAL_DEFAULTS`) derive from `RUN_STREAM_CONFIG_DEFAULTS` — one source for retention/size.
+- **Conformance** — `runRegistryContract()` / `runJournalContract()`: shared test suites every adapter (KV here, SQL in geneWeave) must pass.
+
+### SSE parsing
+- `parseSseStream(stream, opts)` — the single, WHATWG-correct, browser-safe
+  Server-Sent-Events byte→event decoder (`SseEvent`, `ParseSseOptions`,
+  `SseStallError`). De-duplicated from `@weaveintel/client` + `@weaveintel/a2a`
+  (which now consume this one). Handles LF/CRLF, multi-line `data:`, comments,
+  UTF-8 chunk boundaries, an optional stall timeout, and abort/cancel.
+
 ### Protocol Contracts
 - **MCP:** `MCPClient`, `MCPServer`, `MCPToolDefinition`, `MCPResource`, `MCPPrompt`, `MCPTransport`
 - **A2A:** `A2AClient`, `A2AServer`, `A2ATask`, `AgentCard`, `AgentSkill`, `InternalA2ABus`

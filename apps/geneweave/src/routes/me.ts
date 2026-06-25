@@ -57,6 +57,7 @@ import { safePageInt } from './index.js';
 import { MeRunExecutor, isTerminalRunStatus } from '../me-run-executor.js';
 import { loadRunStreamConfig, clientStreamConfig } from '../chat-run-stream-utils.js';
 import { runApprovals } from '../me-run-approvals.js';
+import { createSqlRunJournal } from '../run-substrate-sql.js';
 
 /**
  * Register all /api/me routes on the provided router.
@@ -209,15 +210,23 @@ export function registerMeRoutes(
     // replay→live handoff is gap-free and duplicate-free.
     const { subscriber, detach } = runExecutor.subscribe(run.id, res, afterSeq);
 
-    // Replay all persisted events after the cursor.
-    const events = await db.listUserRunEvents(run.id, afterSeq);
+    // Replay all persisted events after the cursor — THROUGH the core RunJournal
+    // port (Collaboration Phase 0). `createSqlRunJournal` is the SQL adapter over
+    // `user_run_events`; reading via the port (instead of the raw db method) is
+    // what makes geneWeave's run pipeline run on the one canonical contract.
+    // `journalMaxEvents` bounds the journal, so it bounds the replay too.
+    const journal = createSqlRunJournal(db);
+    const events = await journal.readAfter(
+      { runId: run.id, afterSequence: afterSeq },
+      { limit: streamCfg.journalMaxEvents },
+    );
     for (const ev of events) {
       subscriber.replay({
         runId: run.id,
         sequence: ev.sequence,
         kind: ev.kind,
-        payload: JSON.parse(ev.payload),
-        timestamp: Date.parse(ev.created_at ?? '') || Date.now(),
+        payload: ev.payload,
+        timestamp: ev.timestamp ?? Date.now(),
       });
     }
 
