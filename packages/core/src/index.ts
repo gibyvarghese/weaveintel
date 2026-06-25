@@ -35,6 +35,15 @@ export {
   reconnectBackoffMs,
 } from './run-events.js';
 
+// Canonical SSE byte→event decoder (Collaboration Phase 0 — de-duplicated from
+// client + a2a + geneweave-ui into this one browser-safe primitive).
+export {
+  parseSseStream,
+  SseStallError,
+  type SseEvent,
+  type ParseSseOptions,
+} from './sse-parser.js';
+
 // Structured logger (A-8). Replace bare console.* with WeaveLogger for level
 // filtering, structured fields, and request correlation.
 export {
